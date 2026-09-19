@@ -236,9 +236,10 @@ namespace cs::features
 			a_sink
 				.Field("input_retirement_mode", mode)
 				.Field("input_retirement_source_queue",
-					std::string_view{ "application_present_queue" })
+					std::string_view{ "dedicated_retirement_queue" })
 				.Field("input_retirement_signal_point",
-					std::string_view{ "post_provider_completion" });
+					std::string_view{
+						"post_vendor_dependency_or_presenting_queue_bridge" });
 			for (const auto& field : kRetirementCounterFields) {
 				a_sink.Field(field.name, a_diagnostics.*field.value);
 			}

@@ -77,6 +77,12 @@ namespace
 		kWrongFence
 	};
 
+	enum class RetirementRouting
+	{
+		kDedicatedQueue,
+		kApplicationQueueRedControl
+	};
+
 	constexpr std::array kFormatCases{
 		FormatCase{
 			.name = "R8G8B8A8_UNORM",
@@ -177,6 +183,22 @@ namespace
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
 		return false;
+	}
+
+	bool WaitForFence(
+		ID3D12Fence* a_fence,
+		std::uint64_t a_value,
+		std::chrono::milliseconds a_timeout)
+	{
+		if (a_fence->GetCompletedValue() >= a_value) {
+			return true;
+		}
+		winrt::handle event{ CreateEventW(nullptr, FALSE, FALSE, nullptr) };
+		return event &&
+			SUCCEEDED(a_fence->SetEventOnCompletion(a_value, event.get())) &&
+			WaitForSingleObject(
+				event.get(), static_cast<DWORD>(a_timeout.count())) ==
+				WAIT_OBJECT_0;
 	}
 
 	bool OpenFence(
@@ -710,7 +732,8 @@ namespace
 		ID3D11DeviceContext4* a_context11,
 		ID3D12Device* a_device12,
 		ID3D12CommandQueue* a_presentingQueue,
-		CompletionStrategy a_strategy)
+		CompletionStrategy a_strategy,
+		RetirementRouting a_routing = RetirementRouting::kDedicatedQueue)
 	{
 		constexpr std::array<std::uint8_t, 4> oldPixel{
 			17, 31, 47, 255
@@ -798,6 +821,14 @@ namespace
 				"delayed retirement consumer")) {
 			return false;
 		}
+		winrt::com_ptr<ID3D12CommandQueue> retirementQueue;
+		if (!CheckHr(
+				a_device12->CreateCommandQueue(
+					&queueDesc, IID_PPV_ARGS(retirementQueue.put())),
+				"ID3D12Device::CreateCommandQueue",
+				"input retirement")) {
+			return false;
+		}
 		winrt::com_ptr<ID3D12Fence> blocker;
 		if (FAILED(a_device12->CreateFence(
 				0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(blocker.put())))) {
@@ -819,6 +850,20 @@ namespace
 				D3D12_FENCE_FLAG_NONE,
 				IID_PPV_ARGS(consumerCompletion.put())))) {
 			return Check(false, "could not create the consumer completion fence");
+		}
+		winrt::com_ptr<ID3D12Fence> presentingCompletion;
+		if (FAILED(a_device12->CreateFence(
+				0,
+				D3D12_FENCE_FLAG_NONE,
+				IID_PPV_ARGS(presentingCompletion.put())))) {
+			return Check(false, "could not create the presenting completion fence");
+		}
+		winrt::com_ptr<ID3D12Fence> appProgress;
+		if (FAILED(a_device12->CreateFence(
+				0,
+				D3D12_FENCE_FLAG_NONE,
+				IID_PPV_ARGS(appProgress.put())))) {
+			return Check(false, "could not create the application progress fence");
 		}
 		winrt::com_ptr<ID3D12Fence> wrongFence;
 		if (FAILED(a_device12->CreateFence(
@@ -847,8 +892,9 @@ namespace
 			return Check(false, "could not publish delayed consumer completion");
 		}
 
+		using cs::render::temporal::EnqueuePresentInputRetirement;
 		using cs::render::temporal::GpuCompletionDependency;
-		using cs::render::temporal::JoinPresentInputCompletion;
+		using cs::render::temporal::PresentInputRetirementOperation;
 		if (a_strategy == CompletionStrategy::kQueueOrdered) {
 			GpuCompletionDependency noDependency;
 			GpuCompletionDependency zeroVendorValue{
@@ -856,18 +902,32 @@ namespace
 			};
 			GpuCompletionDependency foreignPresentingQueue;
 			foreignPresentingQueue.orderedQueue.copy_from(a_presentingQueue);
+			const auto missing = EnqueuePresentInputRetirement(
+				a_presentingQueue, retirementQueue.get(),
+				presentingCompletion.get(), retirement12.get(), 2,
+				noDependency);
+			const auto zeroValue = EnqueuePresentInputRetirement(
+				a_presentingQueue, retirementQueue.get(),
+				presentingCompletion.get(), retirement12.get(), 2,
+				zeroVendorValue);
+			const auto wrongQueue = EnqueuePresentInputRetirement(
+				consumerQueue.get(), retirementQueue.get(),
+				presentingCompletion.get(), retirement12.get(), 2,
+				foreignPresentingQueue);
 			if (!Check(
-					JoinPresentInputCompletion(
-						a_presentingQueue, noDependency) == E_INVALIDARG,
+					missing.result == E_INVALIDARG &&
+						missing.operation ==
+							PresentInputRetirementOperation::kValidateDependency,
 					"missing input completion dependency was accepted") ||
 				!Check(
-					JoinPresentInputCompletion(
-						a_presentingQueue, zeroVendorValue) == E_INVALIDARG,
+					zeroValue.result == E_INVALIDARG &&
+						zeroValue.operation ==
+							PresentInputRetirementOperation::kValidateDependency,
 					"zero-valued vendor completion dependency was accepted") ||
 				!Check(
-					JoinPresentInputCompletion(
-						consumerQueue.get(), foreignPresentingQueue) ==
-						E_INVALIDARG,
+					wrongQueue.result == E_INVALIDARG &&
+						wrongQueue.operation ==
+							PresentInputRetirementOperation::kValidateDependency,
 					"queue-ordered dependency accepted the wrong presenting queue")) {
 				return false;
 			}
@@ -896,12 +956,40 @@ namespace
 				dependency.value = 2;
 				break;
 			}
-			if (FAILED(JoinPresentInputCompletion(
-					a_presentingQueue, dependency))) {
-				return Check(false, "could not join input completion");
+			if (a_routing == RetirementRouting::kApplicationQueueRedControl) {
+				if (a_strategy != CompletionStrategy::kVendorFence) {
+					return Check(false,
+						"application-queue red control requires a vendor fence");
+				}
+				if (FAILED(a_presentingQueue->Wait(
+						dependency.fence.get(), dependency.value)) ||
+					FAILED(a_presentingQueue->Signal(retirement12.get(), 2))) {
+					return Check(false,
+						"could not enqueue the application-queue red control");
+				}
+			} else {
+				const auto retirement = EnqueuePresentInputRetirement(
+					a_presentingQueue, retirementQueue.get(),
+					presentingCompletion.get(), retirement12.get(), 2,
+					dependency);
+				if (!retirement.Succeeded()) {
+					std::cerr << "FAIL: could not enqueue input retirement at " <<
+						cs::render::temporal::PresentInputRetirementOperationName(
+							retirement.operation) <<
+						" hr=0x" << std::hex << std::uppercase <<
+						static_cast<std::uint32_t>(retirement.result) <<
+						std::dec << '\n';
+					return false;
+				}
+				if (!Check(
+						retirement.operation ==
+							PresentInputRetirementOperation::kSignalSharedRetirement,
+						"successful retirement did not report the shared signal")) {
+					return false;
+				}
 			}
-			if (FAILED(a_presentingQueue->Signal(retirement12.get(), 2))) {
-				return Check(false, "could not signal input retirement");
+			if (FAILED(a_presentingQueue->Signal(appProgress.get(), 1))) {
+				return Check(false, "could not enqueue unrelated application work");
 			}
 			if (FAILED(a_context11->Wait(retirement11.get(), 2))) {
 				return Check(false, "could not queue the D3D11 producer wait");
@@ -909,6 +997,29 @@ namespace
 			a_context11->CopyResource(texture.texture11.get(), updateTexture.get());
 			a_context11->End(producerDone.get());
 			a_context11->Flush();
+			const bool applicationProgressed = WaitForFence(
+				appProgress.get(), 1,
+				std::chrono::milliseconds(
+					a_routing == RetirementRouting::kDedicatedQueue &&
+							a_strategy != CompletionStrategy::kQueueOrdered
+						? 5000
+						: 100));
+			const bool expectedApplicationProgress =
+				a_routing == RetirementRouting::kDedicatedQueue &&
+				a_strategy != CompletionStrategy::kQueueOrdered;
+			if (!Check(
+					applicationProgressed == expectedApplicationProgress,
+					expectedApplicationProgress
+						? "unrelated application work was serialized behind vendor retirement"
+						: "application queue unexpectedly bypassed its ordered dependency")) {
+				return false;
+			}
+			if (a_strategy == CompletionStrategy::kVendorFence) {
+				std::cout <<
+					(a_routing == RetirementRouting::kDedicatedQueue
+							? "PASS: dedicated retirement preserves application queue progress\n"
+							: "PASS: application-queue red control reproduces global serialization\n");
+			}
 			const bool shouldPreserveOldInput =
 				a_strategy != CompletionStrategy::kWrongFence;
 			const bool completedWhileConsumerBlocked = WaitForD3D11(
@@ -930,6 +1041,10 @@ namespace
 				1, consumerDone.get())) ||
 			WaitForSingleObject(consumerDone.get(), 5000) != WAIT_OBJECT_0) {
 			return Check(false, "consumer did not retire before readback and resource release");
+		}
+		if (!WaitForFence(appProgress.get(), 1, std::chrono::seconds(5))) {
+			return Check(false,
+				"application queue did not complete after consumer retirement");
 		}
 		if (!ordered) {
 			return false;
@@ -1301,6 +1416,13 @@ int main(int a_argc, char** a_argv)
 			devices.queue.get(),
 			formatCase);
 	}
+	ok &= RunRetirementScenario(
+		devices.device11.get(),
+		devices.context11.get(),
+		devices.device12.get(),
+		devices.queue.get(),
+		CompletionStrategy::kVendorFence,
+		RetirementRouting::kApplicationQueueRedControl);
 	ok &= RunRetirementScenario(
 		devices.device11.get(),
 		devices.context11.get(),

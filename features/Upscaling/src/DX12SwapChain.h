@@ -183,6 +183,7 @@ namespace cs::features
 			SubmissionRecord*& a_record) noexcept;
 		HRESULT WaitForSubmission(const SubmissionRecord& a_record) noexcept;
 		HRESULT WaitForGpu() noexcept;
+		HRESULT WaitForInputRetirementGpu() noexcept;
 		HRESULT PresentImpl(UINT a_syncInterval, UINT a_flags,
 			const DXGI_PRESENT_PARAMETERS* a_parameters,
 			bool a_usePresent1);
@@ -208,11 +209,13 @@ namespace cs::features
 		winrt::com_ptr<ID3D12Device> _device12;
 		winrt::com_ptr<ID3D12Device> _captureDevice12;
 		winrt::com_ptr<ID3D12CommandQueue> _queue;
+		winrt::com_ptr<ID3D12CommandQueue> _retirementQueue;
 		std::array<SubmissionRecord, 2> _srSubmissions;
 		std::array<SubmissionRecord, 2> _presentSubmissions;
 		winrt::com_ptr<ID3D12Resource> _backBuffers[2];
 		winrt::com_ptr<ID3D12Fence> _fence12;
 		winrt::com_ptr<ID3D11Fence> _fence11;
+		winrt::com_ptr<ID3D12Fence> _presentingCompletionFence;
 		winrt::com_ptr<ID3D12Fence> _inputRetirementFence12;
 		winrt::com_ptr<ID3D11Fence> _inputRetirementFence11;
 		winrt::com_ptr<IDXGISwapChain4> _swapChain;

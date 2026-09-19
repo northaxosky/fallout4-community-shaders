@@ -72,17 +72,103 @@ namespace cs::render::temporal
 			.observed = true };
 	}
 
-	[[nodiscard]] inline HRESULT JoinPresentInputCompletion(
-		ID3D12CommandQueue* a_queue,
+	enum class PresentInputRetirementOperation : std::uint8_t
+	{
+		kValidateDependency,
+		kSignalPresentingCompletion,
+		kWaitForPresentingCompletion,
+		kWaitForVendorCompletion,
+		kSignalSharedRetirement
+	};
+
+	[[nodiscard]] constexpr std::string_view
+	PresentInputRetirementOperationName(
+		PresentInputRetirementOperation a_operation) noexcept
+	{
+		switch (a_operation) {
+		case PresentInputRetirementOperation::kValidateDependency:
+			return "validate provider completion dependency";
+		case PresentInputRetirementOperation::kSignalPresentingCompletion:
+			return "signal presenting-queue completion";
+		case PresentInputRetirementOperation::kWaitForPresentingCompletion:
+			return "join presenting-queue completion";
+		case PresentInputRetirementOperation::kWaitForVendorCompletion:
+			return "join vendor completion";
+		case PresentInputRetirementOperation::kSignalSharedRetirement:
+			return "signal shared retirement fence";
+		}
+		return "enqueue input retirement";
+	}
+
+	struct PresentInputRetirementSubmission
+	{
+		HRESULT result = E_INVALIDARG;
+		PresentInputRetirementOperation operation =
+			PresentInputRetirementOperation::kValidateDependency;
+
+		[[nodiscard]] bool Succeeded() const noexcept
+		{
+			return SUCCEEDED(result);
+		}
+	};
+
+	[[nodiscard]] inline PresentInputRetirementSubmission
+	EnqueuePresentInputRetirement(
+		ID3D12CommandQueue* a_presentingQueue,
+		ID3D12CommandQueue* a_retirementQueue,
+		ID3D12Fence* a_presentingCompletionFence,
+		ID3D12Fence* a_sharedRetirementFence,
+		std::uint64_t a_value,
 		const GpuCompletionDependency& a_dependency) noexcept
 	{
-		if (!a_queue || !a_dependency.IsValid()) {
-			return E_INVALIDARG;
+		if (!a_presentingQueue || !a_retirementQueue ||
+			a_presentingQueue == a_retirementQueue ||
+			!a_presentingCompletionFence || !a_sharedRetirementFence ||
+			a_presentingCompletionFence == a_sharedRetirementFence ||
+			!a_value || !a_dependency.IsValid() ||
+			(a_dependency.orderedQueue &&
+				a_dependency.orderedQueue.get() != a_presentingQueue)) {
+			return {};
 		}
+
 		if (a_dependency.orderedQueue) {
-			return a_dependency.orderedQueue.get() == a_queue ? S_OK : E_INVALIDARG;
+			HRESULT result = a_presentingQueue->Signal(
+				a_presentingCompletionFence, a_value);
+			if (FAILED(result)) {
+				return {
+					.result = result,
+					.operation =
+						PresentInputRetirementOperation::kSignalPresentingCompletion
+				};
+			}
+			result = a_retirementQueue->Wait(
+				a_presentingCompletionFence, a_value);
+			if (FAILED(result)) {
+				return {
+					.result = result,
+					.operation =
+						PresentInputRetirementOperation::kWaitForPresentingCompletion
+				};
+			}
+		} else {
+			const HRESULT result = a_retirementQueue->Wait(
+				a_dependency.fence.get(), a_dependency.value);
+			if (FAILED(result)) {
+				return {
+					.result = result,
+					.operation =
+						PresentInputRetirementOperation::kWaitForVendorCompletion
+				};
+			}
 		}
-		return a_queue->Wait(a_dependency.fence.get(), a_dependency.value);
+
+		const HRESULT result =
+			a_retirementQueue->Signal(a_sharedRetirementFence, a_value);
+		return {
+			.result = result,
+			.operation =
+				PresentInputRetirementOperation::kSignalSharedRetirement
+		};
 	}
 
 	template <class Drain>

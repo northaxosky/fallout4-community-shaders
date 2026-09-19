@@ -143,6 +143,7 @@ namespace cs::features
 			retain(_context11.get());
 			retain(_device12.get());
 			retain(_queue.get());
+			retain(_retirementQueue.get());
 			for (const auto& submission : _srSubmissions) {
 				retain(submission.allocator.get());
 				retain(submission.commandList.get());
@@ -156,6 +157,7 @@ namespace cs::features
 			}
 			retain(_fence12.get());
 			retain(_fence11.get());
+			retain(_presentingCompletionFence.get());
 			retain(_inputRetirementFence12.get());
 			retain(_inputRetirementFence11.get());
 			retain(_swapChain.get());
@@ -206,6 +208,9 @@ namespace cs::features
 		_proxyDesc = a_desc;
 
 		HRESULT result = CreateDevices(a_adapter, a_device, a_context);
+		if (SUCCEEDED(result)) {
+			result = CreateInteropFence();
+		}
 		if (SUCCEEDED(result) && _streamline) {
 			const auto disableDlssG = _streamline->featureDLSSG
 				? _streamline->SetDLSSGPresentationActive(false)
@@ -248,9 +253,6 @@ namespace cs::features
 			if (SUCCEEDED(result)) {
 				result = CreateSwapChain(actualAdapter.get(), a_desc);
 			}
-		}
-		if (SUCCEEDED(result)) {
-			result = CreateInteropFence();
 		}
 		if (SUCCEEDED(result)) {
 			result = RecreateDisplayResources(_innerDesc.Width, _innerDesc.Height);
@@ -368,6 +370,7 @@ namespace cs::features
 		_swapChain = nullptr;
 		_inputRetirementFence11 = nullptr;
 		_inputRetirementFence12 = nullptr;
+		_presentingCompletionFence = nullptr;
 		_fence11 = nullptr;
 		_fence12 = nullptr;
 		for (auto& submission : _srSubmissions) {
@@ -377,6 +380,7 @@ namespace cs::features
 			submission = {};
 		}
 		_rcas.ResetD3D12();
+		_retirementQueue = nullptr;
 		_queue = nullptr;
 		_device12 = nullptr;
 		_deviceFactory = nullptr;
@@ -409,10 +413,21 @@ namespace cs::features
 		if (_quarantined) {
 			return DXGI_ERROR_DEVICE_REMOVED;
 		}
-		if (!_queue) {
+		if (!_queue && !_retirementQueue) {
 			return S_OK;
 		}
-		if (!_fence12 || !_fenceEvent) {
+		if (!_fenceEvent) {
+			return S_OK;
+		}
+		if (_retirementQueue && _inputRetirementFence12) {
+			const HRESULT retirementResult = WaitForInputRetirementGpu();
+			if (FAILED(retirementResult)) {
+				QuarantineTransport(
+					"The input-retirement queue did not reach its drain fence.");
+				return retirementResult;
+			}
+		}
+		if (!_queue || !_fence12) {
 			return S_OK;
 		}
 		if (_context11 && _fence11 && _fence12) {
@@ -538,6 +553,10 @@ namespace cs::features
 			_device12->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(_queue.put())));
 		cs::render::annotation::SetName(_queue.get(),
 			"Upscaling/FrameGeneration.CommandQueue");
+		DX::ThrowIfFailed(_device12->CreateCommandQueue(
+			&queueDesc, IID_PPV_ARGS(_retirementQueue.put())));
+		cs::render::annotation::SetName(_retirementQueue.get(),
+			"Upscaling/FrameGeneration.InputRetirementQueue");
 		const auto createSubmissions = [&](auto& a_submissions,
 										 std::string_view a_phase) {
 			for (UINT index = 0; index < a_submissions.size(); ++index) {
@@ -753,6 +772,12 @@ namespace cs::features
 		cs::render::annotation::SetName(_fence11.get(),
 			"Upscaling/FrameGeneration.Fence11");
 		DX::ThrowIfFailed(_device12->CreateFence(
+			0, D3D12_FENCE_FLAG_NONE,
+			IID_PPV_ARGS(_presentingCompletionFence.put())));
+		cs::render::annotation::SetName(
+			_presentingCompletionFence.get(),
+			"Upscaling/FrameGeneration.PresentingCompletionFence");
+		DX::ThrowIfFailed(_device12->CreateFence(
 			0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(_inputRetirementFence12.put())));
 		cs::render::annotation::SetName(
 			_inputRetirementFence12.get(),
@@ -957,9 +982,10 @@ namespace cs::features
 	bool DX12SwapChain::IsReady() const noexcept
 	{
 		return !_quarantined && _published && _swapChain && _proxyBuffer &&
-		       _context11 && _queue &&
+		       _context11 && _queue && _retirementQueue &&
 		       _fence11 && _fence12 && _inputRetirementFence11 &&
-		       _inputRetirementFence12 && _fenceEvent &&
+		       _inputRetirementFence12 && _presentingCompletionFence &&
+		       _fenceEvent &&
 		       _srSubmissions[0].allocator && _srSubmissions[1].allocator &&
 		       _srSubmissions[0].commandList &&
 		       _srSubmissions[1].commandList &&
@@ -994,7 +1020,8 @@ namespace cs::features
 		render::temporal::IFrameGenerationProvider* a_provider) const noexcept
 	{
 		if (_quarantined || !_published || !_adapter || !_device12 || !_queue ||
-			!_proxy || !_proxyBuffer) {
+			!_retirementQueue || !_presentingCompletionFence ||
+			!_inputRetirementFence12 || !_proxy || !_proxyBuffer) {
 			return {
 				.code = render::temporal::ProviderResultCode::kFailure,
 				.message =
@@ -1568,7 +1595,7 @@ namespace cs::features
 	bool DX12SwapChain::AcquireFrameGenerationInputWrite() noexcept
 	{
 		if (_frameGenerationDisabled || !_provider || !_inputRetirementFence12 ||
-			!_inputRetirementFence11 || !_context11 || !_queue) {
+			!_inputRetirementFence11 || !_context11 || !_retirementQueue) {
 			return false;
 		}
 		const auto completed = _inputRetirementFence12->GetCompletedValue();
@@ -1578,7 +1605,7 @@ namespace cs::features
 		const auto acquired = _inputReuseGate.Acquire(
 			_frameSlot, _inputResourceGeneration,
 			static_cast<std::uint64_t>(
-				reinterpret_cast<std::uintptr_t>(_queue.get())),
+				reinterpret_cast<std::uintptr_t>(_retirementQueue.get())),
 			completed,
 			[&](const render::temporal::PresentInputRetirementToken& a_token) {
 				if (!detailed) {
@@ -1707,6 +1734,27 @@ namespace cs::features
 			return result;
 		}
 		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
+	}
+
+	HRESULT DX12SwapChain::WaitForInputRetirementGpu() noexcept
+	{
+		if (!_retirementQueue || !_inputRetirementFence12 || !_fenceEvent) {
+			return E_FAIL;
+		}
+		const UINT64 value = _nextInputRetirementValue++;
+		HRESULT result =
+			_retirementQueue->Signal(_inputRetirementFence12.get(), value);
+		if (FAILED(result)) {
+			return result;
+		}
+		result =
+			_inputRetirementFence12->SetEventOnCompletion(value, _fenceEvent);
+		if (FAILED(result)) {
+			return result;
+		}
+		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0
+			? S_OK
+			: HRESULT_FROM_WIN32(GetLastError());
 	}
 
 	HRESULT DX12SwapChain::Present(UINT a_syncInterval, UINT a_flags) noexcept
@@ -2028,41 +2076,41 @@ namespace cs::features
 			retirementToken;
 		if (_vendorConsumptionPossible &&
 			presentResult != DXGI_ERROR_WAS_STILL_DRAWING) {
-			HRESULT retirementResult = S_OK;
-			const char* retirementOperation = "join provider completion";
 			std::optional<render::temporal::GpuCompletionDependency> dependency;
+			render::temporal::PresentInputRetirementSubmission retirement;
 			if (SUCCEEDED(presentResult)) {
 				dependency =
 					_provider->ConsumePresentInputCompletionDependency();
-				retirementResult = dependency
-					? render::temporal::JoinPresentInputCompletion(
-						  _queue.get(), *dependency)
-					: E_FAIL;
 			}
 			render::temporal::PresentInputRetirementToken token{
 				.value = _nextInputRetirementValue++,
 				.realFrame = _preparedRealFrame,
 				.resourceGeneration = _inputResourceGeneration,
 				.queueIdentity = static_cast<std::uint64_t>(
-					reinterpret_cast<std::uintptr_t>(_queue.get()))
+					reinterpret_cast<std::uintptr_t>(_retirementQueue.get()))
 			};
-			if (SUCCEEDED(retirementResult) && SUCCEEDED(presentResult)) {
-				retirementOperation = "signal shared retirement fence";
-				retirementResult =
-					_queue->Signal(_inputRetirementFence12.get(), token.value);
-				if (SUCCEEDED(retirementResult)) {
+			if (SUCCEEDED(presentResult)) {
+				retirement = render::temporal::EnqueuePresentInputRetirement(
+					_queue.get(), _retirementQueue.get(),
+					_presentingCompletionFence.get(),
+					_inputRetirementFence12.get(), token.value,
+					dependency.value_or(
+						render::temporal::GpuCompletionDependency{}));
+				if (retirement.Succeeded()) {
 					retirementToken = token;
 					_retirementDiagnostics.signals.fetch_add(
 						1, std::memory_order_relaxed);
 				}
 			}
-			if (FAILED(retirementResult)) {
+			if (SUCCEEDED(presentResult) && !retirement.Succeeded()) {
 				L->error(
 					"{} input retirement failed to {}: HRESULT {:#010x}, "
 					"dependency={}, queue-ordered={}, vendor fence value={}, "
 					"retirement value={}",
-					_provider->Name(), retirementOperation,
-					static_cast<std::uint32_t>(retirementResult),
+					_provider->Name(),
+					render::temporal::PresentInputRetirementOperationName(
+						retirement.operation),
+					static_cast<std::uint32_t>(retirement.result),
 					dependency.has_value(), dependency && dependency->orderedQueue,
 					dependency ? dependency->value : 0, token.value);
 				_retirementDiagnostics.signalFailures.fetch_add(
@@ -2073,7 +2121,7 @@ namespace cs::features
 					"Frame-generation input retirement dependency failed.");
 				DisableFrameGeneration(
 					"Frame-generation input retirement dependency failed");
-				return retirementResult;
+				return retirement.result;
 			}
 		}
 		if (disableProviderAfterRetirement) {
