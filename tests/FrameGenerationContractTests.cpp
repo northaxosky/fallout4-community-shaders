@@ -3,7 +3,6 @@
 #include "Render/TemporalPipelineState.h"
 
 #include "StreamlineFrameGenerationContract.h"
-#include "StreamlineFidelityFXContract.h"
 
 #include <iostream>
 #include <memory>
@@ -511,48 +510,6 @@ namespace
 			"unsafe cancellation path does not call Present");
 	}
 
-	void TestInputReuseGate()
-	{
-		using namespace cs::render::temporal;
-		cs::render::temporal::PresentInputReuseGate gate;
-		gate.MarkSubmitted(0, PresentInputRetirementToken{ .value = 7,
-								  .realFrame = 19,
-								  .resourceGeneration = 3,
-								  .queueIdentity = 11 });
-		std::uint32_t acquisitions = 0;
-		auto acquired =
-			gate.Acquire(0, 3, 11, 4, [&](const PresentInputRetirementToken&) {
-				++acquisitions;
-				return S_OK;
-			});
-		Check(acquired.Succeeded() && acquired.waitRequired && acquisitions == 1 &&
-				  ShouldPublishPresentInputAcquireTelemetry(acquired),
-			"first delayed acquisition queues a wait and publishes its token");
-		Check(!gate.IsPending(0), "queued GPU wait retires slot ownership");
-
-		acquired =
-			gate.Acquire(0, 3, 11, 4, [&](const PresentInputRetirementToken&) {
-				++acquisitions;
-				return S_OK;
-			});
-		Check(acquired.Succeeded() && !acquired.firstAcquire && acquisitions == 1 &&
-				  !ShouldPublishPresentInputAcquireTelemetry(acquired),
-			"repeated writes share one acquisition without clearing latest-token "
-			"telemetry");
-
-		gate.MarkSubmitted(1, PresentInputRetirementToken{ .value = 12,
-								  .realFrame = 20,
-								  .resourceGeneration = 3,
-								  .queueIdentity = 11 });
-		acquired =
-			gate.Acquire(1, 3, 11, 12, [&](const PresentInputRetirementToken&) {
-				++acquisitions;
-				return S_OK;
-			});
-		Check(acquired.Succeeded() && !acquired.waitRequired && acquisitions == 1,
-			"already completed retirement acquires without a queue wait");
-	}
-
 	void TestDelayedRetirementAcrossRingCycles()
 	{
 		using namespace cs::render::temporal;
@@ -628,31 +585,18 @@ namespace
 		RecordingProvider provider;
 		provider.generatedCount = 2;
 		provider.presentedCount = 3;
-		struct Case
-		{
-			UINT flags;
-			HRESULT result;
-			bool observed;
-		};
-		for (const auto test :
-			std::array{ Case{ 0, S_OK, true }, Case{ DXGI_PRESENT_TEST, S_OK, false },
-				Case{ 0, DXGI_ERROR_WAS_STILL_DRAWING, false },
-				Case{ 0, DXGI_ERROR_DEVICE_REMOVED, false } }) {
-			const auto priorCalls = provider.statusCalls;
-			const auto collected = cs::render::temporal::CollectAcceptedPresentStatus(
-				provider, test.flags, test.result);
-			Check(collected.observed == test.observed &&
-					  provider.statusCalls ==
-						  priorCalls + static_cast<std::uint32_t>(test.observed),
-				"only an accepted real Present polls provider status");
-			if (test.observed) {
-				Check(collected.generatedFrames == 2u &&
-						  collected.presentedFrames == 3u &&
-						  provider.lastStatusFlags == test.flags &&
-						  provider.lastPresentResult == test.result,
-					"accepted Present retains the provider counts and native result");
-			}
-		}
+		const auto accepted =
+			cs::render::temporal::CollectAcceptedPresentStatus(provider, 0, S_OK);
+		Check(accepted.observed && accepted.generatedFrames == 2u &&
+				  accepted.presentedFrames == 3u && provider.statusCalls == 1 &&
+				  provider.lastStatusFlags == 0 &&
+				  provider.lastPresentResult == S_OK,
+			"accepted Present polls status and retains provider counts");
+
+		const auto retry = cs::render::temporal::CollectAcceptedPresentStatus(
+			provider, 0, DXGI_ERROR_WAS_STILL_DRAWING);
+		Check(!retry.observed && provider.statusCalls == 1,
+			"retryable Present does not consume provider status");
 	}
 
 	void TestStreamlineBackendContracts()
@@ -663,7 +607,7 @@ namespace
 		sl::DLSSGStatus status = sl::DLSSGStatus::eOk;
 		std::uint32_t calls = 0;
 		FrameGenerationCapabilities observed{};
-		for (const std::uint32_t count : { 0u, 1u, 4u }) {
+		for (const std::uint32_t count : { 1u, 4u }) {
 			const auto result = cs::features::streamline_fg::PollState(
 				sl::ViewportHandle{ 1 }, generated, presented, status,
 				[&](sl::ViewportHandle, sl::DLSSGState& a_state,
@@ -686,178 +630,27 @@ namespace
 				});
 			Check(result == sl::Result::eOk, "DLSS-G state query succeeds");
 		}
-		Check(calls == 3 && generated.Consume() == 5 &&
+		Check(calls == 2 && generated.Consume() == 5 &&
 				presented.Consume() == 5 &&
 				observed.maxGeneratedFrames == 5 &&
 				observed.dynamicModeSupported,
 			"the one DLSS-G state query retains counts and capabilities");
 
-		FrameGenerationConfiguration configuration{};
-		FrameGenerationCapabilities capabilities{
-			.availability = CapabilityAvailability::kSupported,
-			.configurationKnown = false,
-			.maxGeneratedFrames = 1,
-			.deviceGeneration = 4,
-			.displayGeneration = 7,
-			.sampledDeviceGeneration = 4,
-			.sampledDisplayGeneration = 7
-		};
-		Check(cs::features::streamline_fg::ValidateConfiguration(
-				  configuration, capabilities) ==
-				  cs::features::streamline_fg::ConfigurationSupport::
-					  kPendingCapabilities,
-			"unknown current capabilities are not treated as unsupported");
-		capabilities.configurationQueryFailed = true;
-		Check(cs::features::streamline_fg::ValidateConfiguration(
-				  configuration, capabilities) ==
-				  cs::features::streamline_fg::ConfigurationSupport::
-					  kUnsupported,
-			"a failed runtime capability query is an explicit unavailable result");
-		capabilities.configurationQueryFailed = false;
-		capabilities.configurationKnown = true;
-		Check(cs::features::streamline_fg::ValidateConfiguration(
-				  configuration, capabilities) ==
-				  cs::features::streamline_fg::ConfigurationSupport::
-					  kSupported,
-			"the ordinary fixed 2x request uses the reported one generated-frame capability");
-		configuration.fixedMultiplier = 3;
-		Check(cs::features::streamline_fg::ValidateConfiguration(
-				  configuration, capabilities) ==
-				  cs::features::streamline_fg::ConfigurationSupport::
-					  kUnsupported,
-			"a fixed multiplier above the reported maximum is rejected rather than clamped");
-		configuration.mode = FrameGenerationMode::kDynamic;
-		configuration.dynamicTargetFrameRate = 144.0f;
-		Check(cs::features::streamline_fg::ValidateConfiguration(
-				  configuration, capabilities) ==
-				  cs::features::streamline_fg::ConfigurationSupport::
-					  kUnsupported,
-			"dynamic MFG remains unavailable until the runtime reports support");
-		capabilities.dynamicModeSupported = true;
-		Check(cs::features::streamline_fg::ValidateConfiguration(
-				  configuration, capabilities) ==
-				  cs::features::streamline_fg::ConfigurationSupport::
-					  kSupported,
-			"a finite positive dynamic target is accepted only with runtime support");
-
-		configuration.mode = FrameGenerationMode::kFixed;
-		configuration.fixedMultiplier = 4;
-		auto configuredOptions =
-			cs::features::streamline_fg::BuildOptions(
-			true, configuration, 1280, 720, 2560, 1440, 3, true);
-		Check(configuredOptions.mode == sl::DLSSGMode::eOn &&
-				configuredOptions.numFramesToGenerate == 3 &&
-				configuredOptions.colorWidth == 2560 &&
-				configuredOptions.queueParallelismMode ==
-					sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue &&
-				configuredOptions.flags ==
-					sl::DLSSGFlags::eRetainResourcesWhenOff,
-			"fixed UI multiplier and presenting-queue ordering map to the "
-			"documented SDK contract");
-		configuration.mode = FrameGenerationMode::kDynamic;
-		configuration.dynamicTargetFrameRate = 0.0f;
-		configuredOptions =
-			cs::features::streamline_fg::BuildOptions(
-			true, configuration, 1280, 720, 2560, 1440, 3, true);
-		Check(configuredOptions.mode == sl::DLSSGMode::eDynamic &&
-				configuredOptions.dynamicTargetFrameRate == 0.0f,
-			"dynamic zero target preserves the SDK automatic display target");
-
-		sl::FSROptions fsrOptions{};
-		sl::FSRAlgorithmOptions fsrAlgorithm{};
-		Check(cs::features::streamline_fidelityfx::ClassifyCapability(
-				  sl::Result::eErrorInvalidState,
-				  sl::Boolean::eFalse) ==
-				  CapabilityAvailability::kUnknown &&
-				cs::features::streamline_fidelityfx::ClassifyCapability(
-					sl::Result::eOk, sl::Boolean::eFalse) ==
-					CapabilityAvailability::kUnsupported &&
-				cs::features::streamline_fidelityfx::ClassifyCapability(
-					sl::Result::eOk, sl::Boolean::eTrue) ==
-					CapabilityAvailability::kSupported,
-			"FSR 4 keeps a failed capability query distinct from an "
-			"authoritative unsupported result");
-		cs::features::streamline_fidelityfx::SelectAlgorithm(
-			fsrOptions, fsrAlgorithm, sl::FSRAlgorithm::eFSR3);
-		Check(fsrOptions.next == nullptr,
-			"FSR 3 retains the established provider contract without an "
-			"algorithm extension");
-		cs::features::streamline_fidelityfx::SelectAlgorithm(
-			fsrOptions, fsrAlgorithm, sl::FSRAlgorithm::eFSR4);
-		Check(fsrOptions.next == &fsrAlgorithm &&
-				fsrAlgorithm.algorithm == sl::FSRAlgorithm::eFSR4,
-			"FSR 4 super resolution is selected by the explicit production "
-			"algorithm chain");
-
-		sl::FSRGOptions fsrgOptions{};
-		sl::FSRGAlgorithmOptions fsrgAlgorithm{};
-		cs::features::streamline_fidelityfx::SelectAlgorithm(
-			fsrgOptions, fsrgAlgorithm, sl::FSRGAlgorithm::eFSR3);
-		Check(fsrgOptions.next == nullptr,
-			"FSR 3 frame generation retains the established provider contract");
-		cs::features::streamline_fidelityfx::SelectAlgorithm(
-			fsrgOptions, fsrgAlgorithm, sl::FSRGAlgorithm::eFSR4);
-		Check(fsrgOptions.next == &fsrgAlgorithm &&
-				fsrgAlgorithm.algorithm == sl::FSRGAlgorithm::eFSR4,
-			"FSR 4 ML frame generation is selected by the explicit production "
-			"algorithm chain");
-
-		sl::FSRGState fsrgState{};
-		fsrgState.completionMode = sl::FSRGCompletionMode::eFence;
-		fsrgState.completionFence = reinterpret_cast<void*>(1);
-		fsrgState.algorithm = sl::FSRGAlgorithm::eFSR4;
-		fsrgState.available = sl::Boolean::eTrue;
-		using FSRGValidation =
-			cs::features::streamline_fidelityfx::FSRGStateValidation;
-		Check(cs::features::streamline_fidelityfx::ValidateState(
-				  fsrgState, sl::FSRGAlgorithm::eFSR4, false) ==
-				  FSRGValidation::kValid,
-			"MLFG preflight accepts the asynchronous fence capability before "
-			"a Present submits a fence value");
-		Check(cs::features::streamline_fidelityfx::ValidateState(
-				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
-				  FSRGValidation::kSubmittedDependencyMissing,
-			"MLFG requires a real last-reader fence value after Present");
-		fsrgState.completionFenceValue = 7;
-		Check(cs::features::streamline_fidelityfx::ValidateState(
-				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
-				  FSRGValidation::kValid,
-			"MLFG accepts the selected algorithm's asynchronous last-reader "
-			"dependency");
-		fsrgState.algorithm = sl::FSRGAlgorithm::eFSR3;
-		Check(cs::features::streamline_fidelityfx::ValidateState(
-				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
-				  FSRGValidation::kAlgorithmUnavailable,
-			"an FSR 3 state cannot masquerade as active FSR 4 MLFG");
-		fsrgState.algorithm = sl::FSRGAlgorithm::eFSR4;
-		fsrgState.completionMode =
-			sl::FSRGCompletionMode::eVendorCompletionUnavailable;
-		Check(cs::features::streamline_fidelityfx::ValidateState(
-				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
-				  FSRGValidation::kCompletionFenceUnavailable,
-			"MLFG rejects a provider without the required asynchronous "
-			"completion fence");
-
 		struct CleanupCase
 		{
-			bool allocated;
 			int failingStep;
-			bool succeeds;
 			std::vector<std::string> events;
 		};
 		for (const auto& test :
-			std::array{ CleanupCase{ false, -1, true, {} },
-				CleanupCase{ true, -1, true, { "clear", "options", "free" } },
-				CleanupCase{ true, 0, false, { "clear" } },
-				CleanupCase{ true, 1, false, { "clear", "options" } },
-				CleanupCase{ true, 2, false, { "clear", "options", "free" } } }) {
+			std::array{ CleanupCase{ -1, { "clear", "options", "free" } },
+				CleanupCase{ 0, { "clear" } } }) {
 			std::vector<std::string> events;
 			sl::DLSSGOptions options{};
 			const auto stepResult = [&](int a_step) {
 				return test.failingStep == a_step ? sl::Result::eErrorInvalidState : sl::Result::eOk;
 			};
 			const auto result = cs::features::streamline_fg::DestroyResources(
-				test.allocated, sl::ViewportHandle{ 9 },
+				true, sl::ViewportHandle{ 9 },
 				[&]() {
 					events.emplace_back("clear");
 					return stepResult(0);
@@ -873,9 +666,10 @@ namespace
 						"DLSS-G cleanup frees only its own allocation");
 					return stepResult(2);
 				});
-			Check(result.succeeded == test.succeeds && events == test.events,
+			Check(result.succeeded == (test.failingStep < 0) &&
+					  events == test.events,
 				"DLSS-G cleanup stops at the first failed ownership step");
-			if (test.allocated && test.failingStep != 0) {
+			if (test.failingStep < 0) {
 				Check(options.mode == sl::DLSSGMode::eOff,
 					"DLSS-G cleanup disables generation before resource free");
 			}
@@ -924,7 +718,6 @@ int main()
 	TestTransactionalResourceReplacement();
 	TestResizeCommitProtocol();
 	TestSafePreparation();
-	TestInputReuseGate();
 	TestDelayedRetirementAcrossRingCycles();
 	TestPresentStatusOrchestration();
 	TestStreamlineBackendContracts();

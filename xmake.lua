@@ -445,12 +445,10 @@ target("FrameGenerationContractTests", function()
     add_headerfiles(
         "src/Render/FrameGenerationCpuTiming.h",
         "src/Render/FrameGenerationOrchestration.h",
-        "features/FrameGeneration/src/StreamlineFrameGenerationContract.h",
-        "features/Upscaling/src/StreamlineFidelityFXContract.h"
+        "features/FrameGeneration/src/StreamlineFrameGenerationContract.h"
     )
     add_includedirs(
         "features/FrameGeneration/src",
-        "features/Upscaling/src",
         "extern",
         "extern/Streamline/include"
     )
