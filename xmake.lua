@@ -223,8 +223,7 @@ target(plugin_name, function()
 
     set_pcxxheader("src/PCH.h")
 
-    add_installfiles("package/(F4SE/**)", { prefixdir = "." })
-    add_installfiles("package/(Shaders/**)", { prefixdir = "." })
+    add_installfiles("package/(**)", { prefixdir = "." })
     for _, feature in ipairs(features) do
         if feature == "Upscaling" then
             add_installfiles(
