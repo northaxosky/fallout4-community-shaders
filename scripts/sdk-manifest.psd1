@@ -5,9 +5,8 @@
 		@{
 			Name        = 'Streamline'
 			Version     = 'cs-streamline-v2.14.1-4'
-			# Populate only from the published signed release; local signed candidates can be staged meanwhile.
-			Url         = ''
-			Sha256      = ''
+			Url         = 'https://github.com/northaxosky/Streamline/releases/download/cs-streamline-v2.14.1-4/streamline-sdk-cs-streamline-v2.14.1-4.zip'
+			Sha256      = '474531ba5b29e724f687c311e69383f7679ea6ebde43c89da0c677c561d57b3e'
 			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline'
 			# One signed package owns the core, plugins, and native vendor runtimes.
 			Files       = @(
