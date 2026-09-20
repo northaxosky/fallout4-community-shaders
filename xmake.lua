@@ -374,8 +374,8 @@ end)
 target("UpscalingPublicationTests", function()
     set_kind("binary")
     set_default(false)
-    add_rules("fo4cs.directxtk", "fo4cs.shader-stage")
-    add_deps(plugin_name .. "Version", "commonlibf4")
+    add_rules("fo4cs.directxtk")
+    add_deps(plugin_name .. "Version", "commonlibf4", "ShaderStage")
     add_files(
         "tests/UpscalingPublicationTests.cpp",
         "src/Render/Annotation.cpp",
@@ -506,8 +506,8 @@ end)
 target("ShaderCompileTests", function()
     set_kind("binary")
     set_default(false)
-    add_rules("fo4cs.directxtk", "fo4cs.shader-stage")
-    add_deps(plugin_name .. "Version", "commonlibf4")
+    add_rules("fo4cs.directxtk")
+    add_deps(plugin_name .. "Version", "commonlibf4", "ShaderStage")
     add_files(
         "tests/ShaderCompileTests.cpp",
         "src/Render/ShaderInjection.cpp",

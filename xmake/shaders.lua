@@ -68,6 +68,8 @@ local function stage_shaders()
     end
 end
 
-rule("fo4cs.shader-stage", function()
-    before_test(stage_shaders)
+target("ShaderStage", function()
+    set_kind("phony")
+    set_default(false)
+    on_build(stage_shaders)
 end)
