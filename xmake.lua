@@ -125,8 +125,9 @@ local generated_include = path.join("build", ".gens", plugin_name)
 target(plugin_name .. "Version", function()
     set_kind("phony")
     set_default(false)
+    set_policy("build.fence", true)
 
-    before_build(function()
+    on_prepare(function()
         local describe = "unknown"
         local sha = "unknown"
         if os.isfile(".git") or os.isdir(".git") then
