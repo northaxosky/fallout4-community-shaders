@@ -1230,7 +1230,9 @@ namespace
 				&& SetBaselineShaderOwnership(
 					ShaderInjectionTarget::kImageSpace, true)
 				&& SetBaselineShaderOwnership(
-					ShaderInjectionTarget::kFaceCustomization, true),
+					ShaderInjectionTarget::kFaceCustomization, true)
+				&& SetBaselineShaderOwnership(
+					ShaderInjectionTarget::kBsdfLight, true),
 			"could not enable native prequeue targets");
 
 		constexpr bool modern = true;
@@ -1506,6 +1508,107 @@ namespace
 				&& requests[2].stage == ShaderStage::kVertex
 				&& requests[2].owner == "FaceCustomization",
 			"loader prequeue ignored the target's supported stage mask");
+
+		const ShaderFamilyDescriptor firstStageEntry{
+			.target = ShaderInjectionTarget::kBsdfLight,
+			.stage = ShaderStage::kPixel,
+			.descriptor = 0x04020080U,
+			.nativeName = "BSDFLightShader"
+		};
+		auto secondStageEntry = firstStageEntry;
+		secondStageEntry.descriptor = 0x04020000U;
+		Expect(
+			QueueNativeShaderVariantForTesting(firstStageEntry)
+				&& QueueNativeShaderVariantForTesting(
+					secondStageEntry),
+			"BSDFLight native stage aliases were not queued");
+		const auto lightHandle = pendingCompilation;
+		const auto lightStats =
+			GetNativeVariantCacheStatsForTesting();
+		{
+			const std::scoped_lock lock(compilationRequestsMutex);
+			requests = compilationRequests;
+		}
+		Expect(
+			lightHandle
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 5
+				&& lightStats.entries == 5
+				&& requests.size() == 5
+				&& requests[3].descriptor
+					== firstStageEntry.descriptor
+				&& requests[3].stage == requests[4].stage
+				&& requests[3].defines == requests[4].defines
+				&& requests[3].descriptor
+					!= requests[4].descriptor
+				&& requests[4].descriptor
+					== secondStageEntry.descriptor
+				&& requests[3].owner == requests[4].owner
+				&& hasDefine(
+					requests[3],
+					"BSDFLIGHT_PS_CHARACTER_LIGHT")
+				&& hasDefine(requests[3], "CHARACTER_LIGHT")
+				&& hasDefine(requests[3], "DIRSPLITS", "2"),
+			"BSDFLight aliases did not preserve distinct literal compile requests");
+
+		RE::BSGraphics::PixelShader nativeLight{};
+		nativeLight.id = firstStageEntry.descriptor;
+		nativeLight.shader =
+			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
+				std::uintptr_t{ 3 });
+		const auto beforeLightBinding =
+			GetShaderInjectionTargetSnapshot(
+				ShaderInjectionTarget::kBsdfLight);
+		const auto lightBinding =
+			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
+				firstStageEntry,
+				0xFFFFFFFFU,
+				firstStageEntry.descriptor,
+				nullptr,
+				&nativeLight);
+		const auto matchingLightBinding =
+			GetShaderInjectionTargetSnapshot(
+				ShaderInjectionTarget::kBsdfLight);
+		RE::BSGraphics::PixelShader secondNativeLight{};
+		secondNativeLight.id = secondStageEntry.descriptor;
+		secondNativeLight.shader =
+			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
+				std::uintptr_t{ 4 });
+		const auto secondBinding =
+			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
+				secondStageEntry,
+				0xFFFFFFFFU,
+				secondStageEntry.descriptor,
+				nullptr,
+				&secondNativeLight);
+		const auto secondLightBinding =
+			GetShaderInjectionTargetSnapshot(
+				ShaderInjectionTarget::kBsdfLight);
+		std::ignore =
+			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
+				firstStageEntry,
+				0xFFFFFFFFU,
+				secondStageEntry.descriptor,
+				nullptr,
+				&nativeLight);
+		const auto mismatchedLightBinding =
+			GetShaderInjectionTargetSnapshot(
+				ShaderInjectionTarget::kBsdfLight);
+		Expect(
+			lightBinding.pixel == &nativeLight
+				&& secondBinding.pixel == &secondNativeLight
+				&& pendingCompilation == lightHandle
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 5
+				&& matchingLightBinding.matches
+					== beforeLightBinding.matches + 1
+				&& secondLightBinding.matches
+					== matchingLightBinding.matches + 1
+				&& mismatchedLightBinding.matches
+					== secondLightBinding.matches,
+			"BSDFLight draw alias reuse bypassed the native wrapper ID guard");
 		holdCompilationPending = false;
 		pendingCompilation.reset();
 	}

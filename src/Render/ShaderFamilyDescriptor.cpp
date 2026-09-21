@@ -408,25 +408,25 @@ namespace cs::engine
 				kAmbient
 			};
 			Family family = Family::kDeferred;
-			if (d == 0x0C400282U)
+			const bool characterLight = (d & 0x4000000U) != 0;
+			if (characterLight
+				&& (lightKind == 1U || (d & 0x400000U) != 0))
 				family = Family::kCharacterC26;
-			else if (d == 0x04000000U)
+			else if (characterLight)
 				family = Family::kCharacter;
-			else if (d == 0x20000U)
+			else if (lightKind == 0U && (d & 0x20000U) != 0)
 				family = Family::kAmbient;
 			else if (lightKind == 4U && (d & 0x1000U) != 0)
 				family = Family::kGobo;
 			else if ((lightKind & 0x2U) != 0) {
-				if ((d & 0x8000000U) != 0) {
-					if ((d & 0x40000U) != 0) {
-						family = (d & 0x1000000U) != 0 ?
-							Family::kShadowOnlyBlendSplit :
-							Family::kShadowOnly;
-					} else {
-						family = (d & 0x10000U) != 0 ?
-							Family::kDirSplits1 :
-							Family::kDirSplits3;
-					}
+				if ((d & 0x40000U) != 0) {
+					family = (d & 0x1000000U) != 0 ?
+						Family::kShadowOnlyBlendSplit :
+						Family::kShadowOnly;
+				} else if ((d & 0x8000000U) != 0) {
+					family = (d & 0x10000U) != 0 ?
+						Family::kDirSplits1 :
+						Family::kDirSplits3;
 				} else if ((d & 0x10000U) != 0) {
 					family = Family::kDirSplits1;
 				} else {
@@ -473,30 +473,55 @@ namespace cs::engine
 			}
 			if (family == Family::kCharacterC26)
 				return true;
+			if (family == Family::kCharacter) {
+				Define(a_defines, "CHARACTER_LIGHT");
+				Define(a_defines, "RGBSPEC");
+				Define(a_defines, "DIRSPLITS", "2");
+				return true;
+			}
+			if (family == Family::kAmbient) {
+				Define(a_defines, "AMBIENT");
+				Define(a_defines, "RGBSPEC");
+				Define(a_defines, "DIRSPLITS", "2");
+				return true;
+			}
 
 			DefineBit(a_defines, d, 0x200U, "SPECULAR");
 			DefineBit(a_defines, d, 0x1000U, "GOBOPROJECTION");
-			DefineBit(a_defines, d, 0x4000U, "IGNOREROUGHNESS");
-			DefineBit(a_defines, d, 0x8000U, "IGNORERIM");
-			if (family != Family::kCharacterC26)
-				Define(a_defines, "RGBSPEC");
-			if ((lightKind == 1U || lightKind == 2U)
-				&& family != Family::kCharacter
-				&& family != Family::kCharacterC26)
+			const bool attenuationOnly = (d & 0x800U) != 0;
+			if (!attenuationOnly) {
+				DefineBit(a_defines, d, 0x4000U, "IGNOREROUGHNESS");
+				const bool combinedIgnoreMode =
+					(d & 0xC000U) == 0xC000U;
+				const bool ignoreRimSuppressed =
+					combinedIgnoreMode
+					&& (lightKind == 4U
+						|| (lightKind == 8U
+							&& (d & 0x1000U) == 0));
+				if (!ignoreRimSuppressed)
+					DefineBit(a_defines, d, 0x8000U, "IGNORERIM");
+			}
+			Define(a_defines, "RGBSPEC");
+			if (lightKind == 1U || lightKind == 2U)
 				Define(a_defines, "DIRECTIONAL");
 			if (lightKind == 2U || lightKind == 8U ||
 				lightKind == 16U || lightKind == 32U)
 				Define(a_defines, "SHADOW");
-			DefineBit(a_defines, d, 0x40000U, "SHADOW_ONLY");
+			if (family == Family::kShadowOnly
+				|| family == Family::kShadowOnlyBlendSplit)
+				Define(a_defines, "SHADOW_ONLY");
 			DefineBit(a_defines, d, 0x80000U, "FILTER_PCF1");
 			DefineBit(a_defines, d, 0x100000U, "FILTER_PCF9");
 			DefineBit(a_defines, d, 0x200000U, "FILTER_POISSON");
 			if ((d & 0x4780103U) == 0x400002U)
 				Define(a_defines, "FILTER_PCSS");
 			DefineBit(a_defines, d, 0x800000U, "FILTER_PCSSPOISSON");
-			DefineBit(a_defines, d, 0x1000000U, "BLENDSPLIT");
-			DefineBit(a_defines, d, 0x4000000U, "CHARACTER_LIGHT");
-			if ((d & 0x800U) != 0)
+			if ((family == Family::kDirSplits2
+					|| family == Family::kDirSplits3
+					|| family == Family::kShadowOnlyBlendSplit)
+				&& (d & 0x1000000U) != 0)
+				Define(a_defines, "BLENDSPLIT");
+			if (attenuationOnly)
 				Define(a_defines, "ATTENUATION_ONLY");
 			if (lightKind == 4U || lightKind == 8U || lightKind == 16U)
 				Define(a_defines, "POINTOMNI");
@@ -529,7 +554,8 @@ namespace cs::engine
 			}
 			if (family == Family::kDeferred)
 				Define(a_defines, "LIGHT_TYPE", "3");
-			else if (family == Family::kDirSplits2)
+			else if (family == Family::kDirSplits2
+				|| family == Family::kShadowOnly)
 				Define(a_defines, "LIGHT_TYPE", "1");
 			return true;
 		}
@@ -601,27 +627,57 @@ namespace cs::engine
 				kNoPositionTexcoord
 			};
 			Family family = Family::kCubeIbl;
-			if (d == 0x20800U)
+			switch (d) {
+			case 0x800U:
+			case 0x20800U:
+			case 0x40800U:
+			case 0x50800U:
+			case 0x60800U:
+			case 0x70800U:
 				family = Family::kNoPosition;
-			else if (d == 0x20801U)
+				break;
+			case 0x801U:
+			case 0x805U:
+			case 0x20801U:
+			case 0x20805U:
+			case 0x40801U:
+			case 0x40805U:
+			case 0x60801U:
+			case 0x60805U:
+			case 0x70801U:
+			case 0x70805U:
 				family = Family::kNoPositionTexcoord;
-			else if ((d & ~0x10300U) == 0x860U)
-				family = Family::kAmbientCb47;
-			else if ((d & ~0x70301U) == 0x820U)
-				family = Family::kAmbientCb31;
-			else if ((d & ~0x10240U) == 0x120U)
-				family = Family::kAmbientCompact;
-			else if ((d & ~0x200U) == 0x4068U)
-				family = Family::kAmbientMinimal;
-			else if ((d & ~0x30280U) == 0x4008U)
-				family = Family::kNoTextureAccumulator;
-			else if ((d & ~0x10280U) == 0x4048U)
-				family = Family::kNoTextureFog;
-			else if ((d & ~0x230280U) == 0x8U)
+				break;
+			case 0x10000U:
+			case 0x200000U:
+			case 0x210000U:
 				family = Family::kAccumulator2D;
-			else if ((d & 0x7FU) == 0x40U ||
-				(d & 0x7FU) == 0x48U)
-				family = Family::kFog2D;
+				break;
+			case 0x204088U:
+				family = Family::kNoTextureAccumulator;
+				break;
+			default:
+				break;
+			}
+			if (family == Family::kCubeIbl) {
+				if ((d & ~0x10300U) == 0x860U)
+					family = Family::kAmbientCb47;
+				else if ((d & ~0x70301U) == 0x820U)
+					family = Family::kAmbientCb31;
+				else if ((d & ~0x10240U) == 0x120U)
+					family = Family::kAmbientCompact;
+				else if ((d & ~0x200U) == 0x4068U)
+					family = Family::kAmbientMinimal;
+				else if ((d & ~0x30280U) == 0x4008U)
+					family = Family::kNoTextureAccumulator;
+				else if ((d & ~0x10280U) == 0x4048U)
+					family = Family::kNoTextureFog;
+				else if ((d & ~0x230280U) == 0x8U)
+					family = Family::kAccumulator2D;
+				else if ((d & 0x7FU) == 0x40U ||
+					(d & 0x7FU) == 0x48U)
+					family = Family::kFog2D;
+			}
 
 			switch (family) {
 			case Family::kAmbientMinimal:
@@ -727,6 +783,7 @@ namespace cs::engine
 				Define(
 					a_defines,
 					"WAVE5A_ACCUMULATOR_SHAPE",
+					d == 0x204088U ? "2" :
 					(d & 0x20000U) != 0 ?
 						((d & 0x10000U) != 0 ? "3" : "2") :
 						((d & 0x10000U) != 0 ? "1" : "4"));
@@ -805,25 +862,74 @@ namespace cs::engine
 				}
 			};
 			const auto matchesMacros =
-				[&a_descriptor](std::string_view a_macro) {
+				[&a_descriptor](
+					std::string_view a_macro,
+					std::string_view a_value = {}) {
 					if (a_macro.empty())
 						return a_descriptor.nativeMacros.empty();
 					return a_descriptor.nativeMacros.size() == 1
 						&& a_descriptor.nativeMacros.begin()->first == a_macro
-						&& a_descriptor.nativeMacros.begin()->second.empty();
+						&& a_descriptor.nativeMacros.begin()->second == a_value;
 				};
+			const auto matchesRoute = [&](
+				std::string_view a_name,
+				std::string_view a_className,
+				std::string_view a_sourceGroup,
+				std::string_view a_macro = {},
+				std::string_view a_value = {}) {
+				return a_descriptor.descriptor == 0
+					&& a_descriptor.nativeName == a_name
+					&& a_descriptor.nativeClassName == a_className
+					&& a_descriptor.nativeSourceGroup == a_sourceGroup
+					&& matchesMacros(a_macro, a_value);
+			};
 			const auto hudGlassRoute = std::ranges::find_if(
 				hudGlassRoutes,
 				[&](const HudGlassRoute& a_route) {
-					return a_descriptor.descriptor == 0
-						&& a_descriptor.nativeName == a_route.nativeName
-						&& a_descriptor.nativeClassName
-							== a_route.nativeClassName
-						&& a_descriptor.nativeSourceGroup == "ISHUDGlass"
-						&& matchesMacros(a_route.nativeMacro);
+					return matchesRoute(
+						a_route.nativeName,
+						a_route.nativeClassName,
+						"ISHUDGlass",
+						a_route.nativeMacro);
 				});
 
 			if (a_descriptor.stage == ShaderStage::kCompute) {
+				if (matchesRoute(
+						"ISSAOCameraZAndMipsCS",
+						"BSImagespaceShaderSAOCameraZAndMipsCS",
+						"ISSAOCameraZAndMipsCS")) {
+					Define(
+						a_defines,
+						"IMAGESPACE_SSAO_CAMERA_Z_AND_MIPS_CS_SOURCE");
+					return true;
+				}
+				if (matchesRoute(
+						"ISSAOMipsCS",
+						"BSImagespaceShaderSAOMipsCS",
+						"ISSAOMipsCS")) {
+					Define(a_defines, "IMAGESPACE_SSAO_MIPS_CS_SOURCE");
+					return true;
+				}
+				if (matchesRoute(
+						"ISSAOBlurHCS",
+						"BSImagespaceShaderSAOBlurHCS",
+						"ISSAOBlurCS",
+						"GRID_SIZE",
+						"972")) {
+					Define(a_defines, "IMAGESPACE_SSAO_BLUR_CS_SOURCE");
+					Define(a_defines, "GRID_SIZE", "972");
+					return true;
+				}
+				if (matchesRoute(
+						"ISSAOBlurVCS",
+						"BSImagespaceShaderSAOBlurVCS",
+						"ISSAOBlurCS",
+						"GRID_SIZE",
+						"552")) {
+					Define(a_defines, "IMAGESPACE_SSAO_BLUR_CS_SOURCE");
+					Define(a_defines, "GRID_SIZE", "552");
+					return true;
+				}
 				if (a_descriptor.descriptor != 2
 					&& a_descriptor.descriptor != 5
 					&& a_descriptor.descriptor != 6) {

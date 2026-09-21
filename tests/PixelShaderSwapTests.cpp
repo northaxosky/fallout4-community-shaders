@@ -226,6 +226,20 @@ namespace
 		Check(
 			stencil && stencil->id.Value() == 0x104,
 			"Light stencil technique resolved incorrectly");
+
+		constexpr std::array normalizationCases{
+			std::pair{ 0x00020080U, 0x00020000U },
+			std::pair{ 0x04020080U, 0x04020000U },
+			std::pair{ 0x00850202U, 0x00850202U },
+			std::pair{ 0x000D0202U, 0x000D0202U }
+		};
+		for (const auto [raw, expected] : normalizationCases) {
+			const auto resolved = ResolvePixelShaderVariant(
+				"BSDFLightShader", raw, std::nullopt);
+			Check(
+				resolved && resolved->id.Value() == expected,
+				"Light resolver normalized a technique incorrectly");
+		}
 	}
 
 	void TestBrokerPipelineForwarding()

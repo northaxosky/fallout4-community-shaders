@@ -402,13 +402,23 @@ namespace
 		check(ShaderInjectionTarget::kBsdfLight, 0x4804U,
 			std::array{ 0x804U, 0xC804U, 0x1804U });
 		check(ShaderInjectionTarget::kBsdfComposite, 0x30008U,
-			std::array{ 0x210008U, 0x10008U });
+			std::array{
+				0x210008U, 0x10008U, 0x10000U, 0x210000U });
 		check(ShaderInjectionTarget::kBsdfComposite, 0x20088U,
 			std::array{ 0x88U, 0x200088U });
 		check(ShaderInjectionTarget::kBsdfComposite, 0x30208U,
 			std::array{ 0x10208U });
 		check(ShaderInjectionTarget::kBsdfComposite, 0x20008U,
-			std::array{ 0x200008U, 0x8U });
+			std::array{ 0x200008U, 0x8U, 0x200000U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x20800U,
+			std::array{
+				0x800U, 0x40800U, 0x50800U, 0x60800U, 0x70800U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x20801U,
+			std::array{
+				0x801U, 0x805U, 0x20805U, 0x40801U, 0x40805U,
+				0x60801U, 0x60805U, 0x70801U, 0x70805U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x24088U,
+			std::array{ 0x204088U });
 		check(ShaderInjectionTarget::kBsdfComposite, 0x20208U,
 			std::array{ 0x208U });
 		check(ShaderInjectionTarget::kBsdfComposite, 0x30088U,
@@ -511,6 +521,29 @@ namespace
 			.nativeClassName = "BSImagespaceShaderGammaCorrectLUT",
 			.nativeSourceGroup = "ISGamma",
 			.nativeMacros = { { "LUT", "" } }
+		});
+		reject("unproven SSAO raw AO compute route", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kCompute,
+			.nativeName = "ISSAORawAOCS",
+			.nativeClassName = "BSImagespaceShaderSAORawAOCS",
+			.nativeSourceGroup = "ISSAORawAOCS"
+		});
+		reject("SSAO blur owner/grid cross-product", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kCompute,
+			.nativeName = "ISSAOBlurHCS",
+			.nativeClassName = "BSImagespaceShaderSAOBlurHCS",
+			.nativeSourceGroup = "ISSAOBlurCS",
+			.nativeMacros = { { "GRID_SIZE", "552" } }
+		});
+		reject("SSAO camera route extra macro", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kCompute,
+			.nativeName = "ISSAOCameraZAndMipsCS",
+			.nativeClassName = "BSImagespaceShaderSAOCameraZAndMipsCS",
+			.nativeSourceGroup = "ISSAOCameraZAndMipsCS",
+			.nativeMacros = { { "UNPROVEN", "" } }
 		});
 	}
 
@@ -1743,25 +1776,25 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
-	constexpr std::size_t kExpectedBaselineRegistrationRows = 1836;
-	constexpr std::size_t kExpectedBaselineCompileInputs = 1823;
-	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 4;
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1898;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1827;
+	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 32;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
-	constexpr std::size_t kExpectedAmbientNonTargetRows = 54;
-	constexpr std::size_t kExpectedBsdfLightRows = 167;
-	constexpr std::size_t kExpectedWetnessDirectRows = 146;
-	constexpr std::size_t kExpectedWetnessDirectInertRows = 21;
-	constexpr std::size_t kExpectedTerrainDirectRows = 81;
-	constexpr std::size_t kExpectedTerrainDirectInertRows = 86;
-	constexpr std::size_t kExpectedInverseSquareRows = 81;
-	constexpr std::size_t kExpectedInverseSquareInertRows = 86;
-	constexpr std::size_t kExpectedTerrainCompositeRows = 80;
+	constexpr std::size_t kExpectedAmbientNonTargetRows = 72;
+	constexpr std::size_t kExpectedBsdfLightRows = 207;
+	constexpr std::size_t kExpectedWetnessDirectRows = 167;
+	constexpr std::size_t kExpectedWetnessDirectInertRows = 40;
+	constexpr std::size_t kExpectedTerrainDirectRows = 114;
+	constexpr std::size_t kExpectedTerrainDirectInertRows = 93;
+	constexpr std::size_t kExpectedInverseSquareRows = 84;
+	constexpr std::size_t kExpectedInverseSquareInertRows = 123;
+	constexpr std::size_t kExpectedTerrainCompositeRows = 98;
 	constexpr std::size_t kExpectedTerrainCompositeInertRows = 0;
-	constexpr std::size_t kExpectedWetnessDebugCompositeRows = 80;
+	constexpr std::size_t kExpectedWetnessDebugCompositeRows = 98;
 	constexpr std::size_t kExpectedWetnessDebugCompositeInertRows = 0;
-	constexpr std::size_t kExpectedCompositeRegistrationRows = 84;
-	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
-	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 22;
+	constexpr std::size_t kExpectedCompositeRegistrationRows = 102;
+	constexpr std::size_t kExpectedWetnessCompositeRows = 61;
+	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 37;
 	constexpr std::size_t kExpectedWetnessCompositeVertexRows = 4;
 	bool DeclaresFamily(
 		const BaselineShaderCase& a_registration,
@@ -2432,53 +2465,56 @@ namespace
 				else
 					++inverseSquareInertRows;
 
-				for (const auto& defines :
-					inverseSquareCompositions) {
-					const bool consumesTerrain =
-						IsTerrainShadowConsumer(registration);
-					SlotExpectations slots;
-					slots.forbiddenTextures.push_back(
-						kGbufferNormalTextureSlot);
-					const bool terrainOn =
-						HasDefine(defines, kTerrainShadows);
-					auto& terrainTextures =
-						terrainOn && consumesTerrain ?
-							slots.requiredTextures :
-							slots.forbiddenTextures;
-					terrainTextures.push_back(
-						kTerrainShadowTextureSlot);
-					slots.forbiddenTextures.push_back(
-						kTerrainSceneDepthTextureSlot);
-					auto& terrainSamplers =
-						terrainOn && consumesTerrain ?
-							slots.requiredSamplers :
-							slots.forbiddenSamplers;
-					terrainSamplers.push_back(
-						kTerrainShadowSamplerSlot);
-					std::optional<FeatureOffIdentityExpectation>
-						identity;
-					if (defines.size() == 1) {
-						identity = FeatureOffIdentityExpectation{
-							.key = registrationInputKey,
-							.variant = FeatureIdentityVariant::
-								kInverseSquareLighting
-						};
+				if (prepareFeaturePermutations) {
+					for (const auto& defines :
+						inverseSquareCompositions) {
+						const bool consumesTerrain =
+							IsTerrainShadowConsumer(registration);
+						SlotExpectations slots;
+						slots.forbiddenTextures.push_back(
+							kGbufferNormalTextureSlot);
+						const bool terrainOn =
+							HasDefine(defines, kTerrainShadows);
+						auto& terrainTextures =
+							terrainOn && consumesTerrain ?
+								slots.requiredTextures :
+								slots.forbiddenTextures;
+						terrainTextures.push_back(
+							kTerrainShadowTextureSlot);
+						slots.forbiddenTextures.push_back(
+							kTerrainSceneDepthTextureSlot);
+						auto& terrainSamplers =
+							terrainOn && consumesTerrain ?
+								slots.requiredSamplers :
+								slots.forbiddenSamplers;
+						terrainSamplers.push_back(
+							kTerrainShadowSamplerSlot);
+						std::optional<FeatureOffIdentityExpectation>
+							identity;
+						if (defines.size() == 1) {
+							identity = FeatureOffIdentityExpectation{
+								.key = registrationInputKey,
+								.variant = FeatureIdentityVariant::
+									kInverseSquareLighting
+							};
+						}
+						AddRegistration(
+							a_jobs,
+							a_root,
+							registration,
+							defines,
+							nullptr,
+							std::move(slots),
+							std::move(identity));
+						++contributorCompositionCount;
 					}
-					AddRegistration(
-						a_jobs,
-						a_root,
-						registration,
-						defines,
-						nullptr,
-						std::move(slots),
-						std::move(identity));
-					++contributorCompositionCount;
 				}
 			}
 
 			const auto* compositions =
 				registration.targetId
 						== cs::engine::ShaderInjectionTarget::kBsdfLight
+					&& prepareFeaturePermutations
 				? &directionalCompositions
 				: nullptr;
 			if (compositions) {

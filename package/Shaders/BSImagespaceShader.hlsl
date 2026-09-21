@@ -6,6 +6,12 @@
 #include "Imagespace/CopyPS.hlsli"
 #elif defined(IMAGESPACE_FULLSCREEN_COLOR_PS_SOURCE)
 #include "Imagespace/FullScreenColorPS.hlsli"
+#elif defined(IMAGESPACE_SSAO_CAMERA_Z_AND_MIPS_CS_SOURCE)
+#include "Imagespace/SSAOCameraZAndMipsCS.hlsli"
+#elif defined(IMAGESPACE_SSAO_MIPS_CS_SOURCE)
+#include "Imagespace/SSAOMipsCS.hlsli"
+#elif defined(IMAGESPACE_SSAO_BLUR_CS_SOURCE)
+#include "Imagespace/SSAOBlurCS.hlsli"
 #elif defined(IMAGESPACE_PASSTHROUGH_VS_SOURCE)
 struct VS_INPUT
 {

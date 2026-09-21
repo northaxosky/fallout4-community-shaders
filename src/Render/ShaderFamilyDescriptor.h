@@ -12,6 +12,7 @@ namespace cs::engine
 	{
 		ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
 		ShaderStage stage = ShaderStage::kPixel;
+		// Native stage-map ID, not the raw SetupTechnique value.
 		std::uint32_t descriptor = 0;
 		std::string_view nativeName;
 		std::string_view nativeClassName;
