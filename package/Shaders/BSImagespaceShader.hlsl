@@ -12,6 +12,12 @@
 #include "Imagespace/LensFlarePS.hlsli"
 #elif defined(IMAGESPACE_LENS_FLARE_VISIBILITY_PS_SOURCE)
 #include "Imagespace/LensFlareVisibilityPS.hlsli"
+#elif defined(IMAGESPACE_SSLR_BLUR_V_VS_SOURCE)
+#include "Imagespace/SSLRBlurVVS.hlsli"
+#elif defined(IMAGESPACE_GAMMA_LUT_PS_SOURCE)
+#include "Imagespace/GammaLUTPS.hlsli"
+#elif defined(IMAGESPACE_MOTION_BLUR_PS_SOURCE)
+#include "Imagespace/MotionBlurPS.hlsli"
 #elif defined(IMAGESPACE_HDR_PS_SOURCE)
 #include "Imagespace/HDRPS.hlsli"
 #elif defined(IMAGESPACE_SSAO_CAMERA_Z_AND_MIPS_CS_SOURCE)

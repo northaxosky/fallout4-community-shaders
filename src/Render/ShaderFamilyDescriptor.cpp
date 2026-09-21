@@ -1008,8 +1008,35 @@ namespace cs::engine
 					Define(a_defines, "VISIBILITY");
 					return true;
 				}
+				if (matchesRoute(
+						"ISGammaLUT",
+						"BSImagespaceShaderGammaCorrectLUT",
+						"ISGamma",
+						{ { "LUT", "" } })) {
+					Define(a_defines, "IMAGESPACE_GAMMA_LUT_PS_SOURCE");
+					return true;
+				}
+				if (matchesRoute(
+						"ISMotionBlur",
+						"BSImagespaceShaderMotionBlur",
+						"ISMotionBlur")) {
+					Define(a_defines, "IMAGESPACE_MOTION_BLUR_PS_SOURCE");
+					return true;
+				}
 				std::optional<std::string_view> hdrDefine;
 				if (matchesRoute(
+						"ISHDRDownSample4",
+						"BSImagespaceShaderHDRDownSample4",
+						"ISHDR",
+						{ { "DOWNSAMPLE", "4" } })) {
+					hdrDefine = "DOWNSAMPLE";
+				} else if (matchesRoute(
+							   "ISHDRTonemapBlendCinematic",
+							   "BSImagespaceShaderHDRTonemapBlendCinematic",
+							   "ISHDR",
+							   { { "BLEND", "4" } })) {
+					hdrDefine = "BLEND";
+				} else if (matchesRoute(
 						"ISHDRDownSample16Lum",
 						"BSImagespaceShaderHDRDownSample16Lum",
 						"ISHDR",
@@ -1136,6 +1163,14 @@ namespace cs::engine
 				}
 			}
 			if (a_descriptor.stage == ShaderStage::kVertex) {
+				if (matchesRoute(
+						"ISSSLRBlurV",
+						"BSImagespaceShaderSSLRBlurV",
+						"ISSSLRBlur",
+						{ { "VERTICAL", "" } })) {
+					Define(a_defines, "IMAGESPACE_SSLR_BLUR_V_VS_SOURCE");
+					return true;
+				}
 				if (matchesRoute(
 						"LensFlare",
 						"BSLensFlare",

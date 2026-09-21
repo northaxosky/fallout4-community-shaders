@@ -721,14 +721,6 @@ namespace
 				{ "UNPROVEN", "" }
 			}
 		});
-		reject("unproven Gamma LUT route", {
-			.target = ShaderInjectionTarget::kImageSpace,
-			.stage = ShaderStage::kPixel,
-			.nativeName = "ISGammaLUT",
-			.nativeClassName = "BSImagespaceShaderGammaCorrectLUT",
-			.nativeSourceGroup = "ISGamma",
-			.nativeMacros = { { "LUT", "" } }
-		});
 		reject("unproven SSAO raw AO compute route", {
 			.target = ShaderInjectionTarget::kImageSpace,
 			.stage = ShaderStage::kCompute,
@@ -774,14 +766,6 @@ namespace
 			.nativeClassName = "BSLensFlare",
 			.nativeSourceGroup = "LensFlare",
 			.nativeMacros = { { "VISIBILITY", "" } }
-		});
-		reject("unproven HDR downsample route", {
-			.target = ShaderInjectionTarget::kImageSpace,
-			.stage = ShaderStage::kPixel,
-			.nativeName = "ISHDRDownSample4",
-			.nativeClassName = "BSImagespaceShaderHDRDownSample4",
-			.nativeSourceGroup = "ISHDR",
-			.nativeMacros = { { "DOWNSAMPLE", "" } }
 		});
 		reject("HDR complete set with wrong DOWNSAMPLE", {
 			.target = ShaderInjectionTarget::kImageSpace,
@@ -2034,8 +2018,8 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
-	constexpr std::size_t kExpectedBaselineRegistrationRows = 1906;
-	constexpr std::size_t kExpectedBaselineCompileInputs = 1835;
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1911;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1840;
 	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 32;
 	constexpr std::size_t kExpectedCanonicalIdentityRows = 12;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
