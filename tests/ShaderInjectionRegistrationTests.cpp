@@ -2321,16 +2321,129 @@ namespace
 			"could not create baseline compute fixtures");
 		if (!stock || !output.uav)
 			return;
+		compilationAttempts.store(0, std::memory_order_relaxed);
+		Expect(
+			SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kDfTiledLighting, true),
+			"could not enable baseline compute ownership");
+
+		alignas(std::max_align_t)
+			std::array<std::byte, 0x80> ownerStorage{};
+		const char* ownerName = "DFTiledLighting";
+		std::memcpy(
+			ownerStorage.data() + 0x18,
+			&ownerName,
+			sizeof(ownerName));
+		RE::BSGraphics::ComputeShader observedWrapper{};
+		observedWrapper.id = 0;
+		observedWrapper.shader =
+			reinterpret_cast<REX::W32::ID3D11ComputeShader*>(
+				stock.get());
+		SyntheticShaderMapEntry<RE::BSGraphics::ComputeShader*>
+			ownerEntry;
+		SetSingleShaderMapEntry(
+			const_cast<native::ComputeShaderMap&>(
+				native::StandaloneComputeShaders(ownerStorage.data())),
+			ownerEntry,
+			&observedWrapper);
+		alignas(std::max_align_t)
+			std::array<std::byte, 0x20> streamStorage{};
+		auto* stream = reinterpret_cast<RE::BSIStream*>(
+			streamStorage.data());
+		streamStorage[0x10] = std::byte{ 1 };
+		const char* indexBufferOwnerName = "IndexBufferOffsetCS";
+		std::memcpy(
+			ownerStorage.data() + 0x18,
+			&indexBufferOwnerName,
+			sizeof(indexBufferOwnerName));
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kImageSpace,
+			stream);
+		Expect(
+			GetNativeVariantCacheStatsForTesting().entries == 0,
+			"unproven standalone owner was proactively queued");
+		std::memcpy(
+			ownerStorage.data() + 0x18,
+			&ownerName,
+			sizeof(ownerName));
+		streamStorage[0x10] = std::byte{ 0 };
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kDfTiledLighting,
+			stream);
+		Expect(
+			GetNativeVariantCacheStatsForTesting().entries == 0
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 0,
+			"payloadless standalone load queued a replacement");
+		streamStorage[0x10] = std::byte{ 1 };
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kDfTiledLighting,
+			stream);
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kDfTiledLighting,
+			stream);
+		Expect(
+			GetNativeVariantCacheStatsForTesting().entries == 1
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 0,
+			"first-seen standalone load was lost or duplicated before freeze");
+		observedWrapper.id = 1;
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kDfTiledLighting,
+			stream);
+		observedWrapper.id = 2;
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kDfTiledLighting,
+			stream);
+		Expect(
+			GetNativeVariantCacheStatsForTesting().entries == 1,
+			"existing DFTiled final-kernel routes were proactively queued");
+		observedWrapper.id = 0;
+		FreezeAndCompileShaderInjections(device.get());
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 1,
+			"standalone DFTiled CS0 was not queued after publish");
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kDfTiledLighting,
+			stream);
+		auto* prequeued =
+			ResolveNativeComputeShaderBinding(&observedWrapper);
+		Expect(
+			prequeued != &observedWrapper
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 1,
+			"repeated standalone load or draw did not reuse CS0 compilation");
+		observedWrapper.id = 3;
+		ObserveNativeComputeOwnerLoadForTesting(
+			ownerStorage.data(),
+			ShaderInjectionTarget::kDfTiledLighting,
+			stream);
+		const auto unsupportedStats =
+			GetNativeVariantCacheStatsForTesting();
+		Expect(
+			ResolveNativeComputeShaderBinding(&observedWrapper)
+					== &observedWrapper
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 1
+				&& unsupportedStats.entries == 2
+				&& unsupportedStats.unsupported == 1,
+			"unproven DFTiled CS3 did not remain native");
 		ObserveNativeComputeShaderForTesting(
 			ShaderInjectionTarget::kDfTiledLighting,
 			1,
 			"DFTiledLighting",
 			stock.get());
-		Expect(
-			SetBaselineShaderOwnership(
-				ShaderInjectionTarget::kDfTiledLighting, true),
-			"could not enable baseline compute ownership");
-		FreezeAndCompileShaderInjections(device.get());
 
 		sharedDataBindCount = 0;
 		const auto before = GetComputeDispatchBridgeStatus();
@@ -2382,6 +2495,9 @@ namespace
 					nativeComputeBytecode.size())
 					== 0,
 			"compute replacement wrapper did not preserve native metadata");
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 2,
+			"existing DFTiled final-kernel late bind regressed");
 		bridge.Dispatch(context.get(), 2, 1, 1);
 		const auto after = GetComputeDispatchBridgeStatus();
 		Expect(

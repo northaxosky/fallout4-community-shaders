@@ -151,6 +151,8 @@ namespace cs::engine
 				void* a_owner,
 				RE::BSIStream* a_stream)
 			{
+				const bool hasPayload =
+					native::ShaderArchiveStreamHasPayload(a_stream);
 				const auto result = func(a_owner, a_stream);
 				const std::string_view name =
 					native::StandaloneComputeOwnerName(a_owner) ?
@@ -159,12 +161,14 @@ namespace cs::engine
 					ObserveNativeComputeOwner(
 						a_owner,
 						ShaderInjectionTarget::kDfTiledLighting,
-						name);
+						name,
+						hasPayload);
 				} else if (name == "IndexBufferOffsetCS") {
 					ObserveNativeComputeOwner(
 						a_owner,
 						ShaderInjectionTarget::kImageSpace,
-						name);
+						name,
+						false);
 				}
 				return result;
 			}
@@ -178,8 +182,10 @@ namespace cs::engine
 				RE::BSShader* a_shader,
 				RE::BSIStream* a_stream)
 			{
+				const bool hasPayload =
+					native::ShaderArchiveStreamHasPayload(a_stream);
 				const auto result = func(a_shader, a_stream);
-				ObserveNativeShader(a_shader, a_stream);
+				ObserveNativeShader(a_shader, hasPayload);
 				return result;
 			}
 

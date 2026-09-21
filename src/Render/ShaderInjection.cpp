@@ -539,6 +539,13 @@ namespace cs::engine
 			}
 		}
 
+		constexpr bool IsDfTiledStandaloneLoadTechnique(
+			std::uint32_t a_descriptor) noexcept
+		{
+			return a_descriptor == 0
+				|| (a_descriptor >= 3 && a_descriptor <= 18);
+		}
+
 		enum class MatchedShaderOutcome : std::uint8_t
 		{
 			kKeptStock,
@@ -2330,13 +2337,12 @@ namespace cs::engine
 
 		void ObserveNativeShaderImpl(
 			RE::BSShader* a_shader,
-			const RE::BSIStream* a_stream,
+			bool a_hasPayload,
 			bool a_allowUnvalidatedImageSpaceRuntime,
 			std::optional<bool> a_modernLayoutForTesting =
 				std::nullopt) noexcept
 		{
-			if (!a_shader
-				|| !native::ShaderArchiveStreamHasPayload(a_stream))
+			if (!a_shader || !a_hasPayload)
 				return;
 			try {
 				const auto family =
@@ -2623,16 +2629,17 @@ namespace cs::engine
 
 	void ObserveNativeShader(
 		RE::BSShader* a_shader,
-		const RE::BSIStream* a_stream) noexcept
+		bool a_hasPayload) noexcept
 	{
 		ObserveNativeShaderImpl(
-			a_shader, a_stream, false);
+			a_shader, a_hasPayload, false);
 	}
 
 	void ObserveNativeComputeOwner(
 		const void* a_owner,
 		ShaderInjectionTarget a_target,
-		std::string_view a_nativeName) noexcept
+		std::string_view a_nativeName,
+		bool a_hasPayload) noexcept
 	{
 		if (!a_owner || !IsValidTarget(a_target))
 			return;
@@ -2640,6 +2647,12 @@ namespace cs::engine
 			for (auto* entry : native::StandaloneComputeShaders(a_owner)) {
 				if (!entry || !entry->shader)
 					continue;
+				const bool prequeue =
+					a_hasPayload
+					&& a_target
+						== ShaderInjectionTarget::kDfTiledLighting
+					&& a_nativeName == "DFTiledLighting"
+					&& IsDfTiledStandaloneLoadTechnique(entry->id);
 				RecordNativeComputeShader(
 					MakeNativeVariantKey({
 						.target = a_target,
@@ -2649,7 +2662,7 @@ namespace cs::engine
 					}),
 					reinterpret_cast<ID3D11ComputeShader*>(
 						entry->shader),
-					false);
+					prequeue);
 			}
 		} catch (...) {
 			CS_LOG_EVERY_MS(
@@ -2860,7 +2873,27 @@ namespace cs::engine
 		bool a_modernLayout) noexcept
 	{
 		ObserveNativeShaderImpl(
-			a_shader, a_stream, true, a_modernLayout);
+			a_shader,
+			native::ShaderArchiveStreamHasPayload(a_stream),
+			true,
+			a_modernLayout);
+	}
+
+	void ObserveNativeComputeOwnerLoadForTesting(
+		const void* a_owner,
+		ShaderInjectionTarget a_target,
+		const RE::BSIStream* a_stream) noexcept
+	{
+		if (!a_owner)
+			return;
+		const auto* ownerName =
+			native::StandaloneComputeOwnerName(a_owner);
+		const std::string_view nativeName = ownerName ? ownerName : "";
+		ObserveNativeComputeOwner(
+			a_owner,
+			a_target,
+			nativeName,
+			native::ShaderArchiveStreamHasPayload(a_stream));
 	}
 #endif
 

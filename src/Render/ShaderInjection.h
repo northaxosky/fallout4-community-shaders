@@ -264,6 +264,10 @@ namespace cs::engine
 		RE::BSShader* a_shader,
 		const RE::BSIStream* a_stream,
 		bool a_modernLayout) noexcept;
+	void ObserveNativeComputeOwnerLoadForTesting(
+		const void* a_owner,
+		ShaderInjectionTarget a_target,
+		const RE::BSIStream* a_stream) noexcept;
 #endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
@@ -280,11 +284,12 @@ namespace cs::engine
 		RE::BSGraphics::ComputeShader* a_nativeCompute) noexcept;
 	void ObserveNativeShader(
 		RE::BSShader* a_shader,
-		const RE::BSIStream* a_stream) noexcept;
+		bool a_hasPayload) noexcept;
 	void ObserveNativeComputeOwner(
 		const void* a_owner,
 		ShaderInjectionTarget a_target,
-		std::string_view a_nativeName) noexcept;
+		std::string_view a_nativeName,
+		bool a_hasPayload) noexcept;
 	void ObserveNativeShaderBytecode(
 		ShaderStage a_stage,
 		const void* a_bytecode,
