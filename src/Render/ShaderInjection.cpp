@@ -1062,8 +1062,9 @@ namespace cs::engine
 
 			const auto* metadata = GetShaderInjectionTarget(a_target);
 			L->error(
-				"Native descriptor compile failed for '{}/{}': {}",
+				"Native descriptor compile failed for '{}/{}/{:#010x}': {}",
 				metadata ? metadata->name : "unknown",
+				StageName(variant->stage),
 				a_descriptor,
 				a_error.empty() ?
 					"shader compilation failed" :
@@ -1134,8 +1135,9 @@ namespace cs::engine
 					NativeVariant::State::kUnsupported,
 					std::memory_order_release);
 				L->error(
-					"Native descriptor compile request rejected for '{}/{}': {}",
+					"Native descriptor compile request rejected for '{}/{}/{:#010x}': {}",
 					metadata->name,
+					StageName(descriptor.stage),
 					descriptor.descriptor,
 					error);
 				return;
@@ -1188,8 +1190,9 @@ namespace cs::engine
 					NativeVariant::State::kUnsupported,
 					std::memory_order_release);
 				L->error(
-					"Native descriptor compile failed for '{}/{}': {}",
+					"Native descriptor compile failed for '{}/{}/{:#010x}': {}",
 					metadata->name,
+					StageName(descriptor.stage),
 					descriptor.descriptor,
 					"compilation cache rejected request");
 				service.runtime[ToIndex(descriptor.target)]
