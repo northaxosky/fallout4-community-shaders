@@ -1352,12 +1352,14 @@ namespace cs::engine
 
 		if (!AddFamilyDefines(result.defines, a_descriptor)) {
 			L->warn(
-				"Unsupported native shader descriptor: target='{}', stage={}, descriptor={:#010x}, name='{}', source='{}'",
+				"Unsupported native shader descriptor: target='{}', stage={}, descriptor={:#010x}, name='{}', source='{}', class='{}', macros='{}'",
 				target->name,
 				static_cast<unsigned>(a_descriptor.stage),
 				a_descriptor.descriptor,
 				a_descriptor.nativeName,
-				a_descriptor.nativeSourceGroup);
+				a_descriptor.nativeSourceGroup,
+				a_descriptor.nativeClassName,
+				DescribeShaderInjectionDefines(a_descriptor.nativeMacros));
 			return std::nullopt;
 		}
 		AddStageSourceDefine(result.defines, a_descriptor);

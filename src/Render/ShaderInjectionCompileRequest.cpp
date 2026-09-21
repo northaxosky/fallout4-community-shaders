@@ -69,6 +69,19 @@ namespace cs::engine
 		}
 	}
 
+	std::string DescribeShaderInjectionDefines(const ShaderInjectionDefines& a_defines)
+	{
+		std::string names;
+		for (const auto& [name, value] : a_defines) {
+			if (!names.empty())
+				names += ",";
+			names += name;
+			names += "=";
+			names += value;
+		}
+		return names.empty() ? std::string("none") : names;
+	}
+
 	std::optional<ShaderVariantCompilationDescriptor>
 		BuildEffectiveShaderCompileRequest(
 			const ShaderInjectionTargetMetadata& a_target,

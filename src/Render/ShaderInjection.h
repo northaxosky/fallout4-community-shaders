@@ -179,6 +179,8 @@ namespace cs::engine
 		ComputeDispatchBridgeStatus computeBridge;
 	};
 
+	std::string DescribeShaderInjectionDefines(const ShaderInjectionDefines& a_defines);
+
 	std::optional<ShaderVariantCompilationDescriptor>
 		BuildEffectiveShaderCompileRequest(
 			const ShaderInjectionTargetMetadata& a_target,

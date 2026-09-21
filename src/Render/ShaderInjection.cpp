@@ -1959,17 +1959,6 @@ namespace cs::engine
 			}
 			return names.empty() ? std::string("none") : names;
 		};
-		const auto defineNames = [](const ShaderInjectionDefines& a_defines) {
-			std::string names;
-			for (const auto& [name, value] : a_defines) {
-				if (!names.empty())
-					names += ",";
-				names += name;
-				names += "=";
-				names += value;
-			}
-			return names.empty() ? std::string("none") : names;
-		};
 		std::vector<const ShaderReplacementRegistration*> matched;
 		bool foundRegistration = false;
 		for (const auto& registration : service.registrations) {
@@ -2055,7 +2044,7 @@ namespace cs::engine
 					+ "' lost a registered route for contributor '"
 					+ std::string(a_contributor)
 					+ "' (stages=" + stageNames(registration.stages)
-					+ ", defines=" + defineNames(registration.defines)
+					+ ", defines=" + DescribeShaderInjectionDefines(registration.defines)
 					+ ", slot_claims="
 					+ std::to_string(registration.slotClaims.size())
 					+ ")";
