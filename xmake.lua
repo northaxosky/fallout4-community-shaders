@@ -521,7 +521,6 @@ target("ShaderCompileTests", function()
         "src/Utils/ShaderCompile.cpp"
     )
     add_headerfiles(
-        "tests/ShaderCompileIdentityWitnesses.inl",
         "src/Render/ShaderFamilyDescriptor.h",
         "src/Render/ShaderSubclassContext.h",
         "src/Utils/CSSha256.h",
@@ -771,7 +770,10 @@ end)
 
 target("ShaderCompileTests", function()
     add_tests("ShaderCompile", {
-        runargs = path.join(os.projectdir(), "build/ShaderStage/Shaders")
+        runargs = {
+            path.join(os.projectdir(), "build/ShaderStage/Shaders"),
+            path.join(os.projectdir(), "tests/data/shader-identities.toml")
+        }
     })
 end)
 

@@ -8,6 +8,8 @@
 #include "Utils/CSSha256.h"
 #include "Utils/ShaderCompile.h"
 
+#include <toml++/toml.hpp>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -20,6 +22,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -132,49 +135,31 @@ namespace
 	struct StrippedShaderIdentityExpectation
 	{
 		std::size_t byteLength = 0;
-		std::string_view sha1;
-		std::string_view sha256;
+		std::string sha1;
+		std::string sha256;
 	};
 
-	struct ShaderIdentityWitness
-	{
-		cs::engine::ShaderInjectionTarget target =
-			cs::engine::ShaderInjectionTarget::kCount;
-		cs::engine::ShaderStage stage =
-			cs::engine::ShaderStage::kCompute;
-		std::uint32_t descriptor = 0;
-		std::string_view nativeName;
-		std::string_view nativeClassName;
-		bool forceEarlyDepthStencil = false;
-		bool runtimeReachable = true;
-		std::string_view nativeSourceGroup;
-		std::array<cs::engine::ShaderInjectionDefineMetadata, 7>
-			nativeMacros{};
-		std::string_view stockSha1;
-		StrippedShaderIdentityExpectation expected;
-		std::string_view compileInputAliasGroup;
-	};
-
-	constexpr ShaderIdentityWitness kShaderIdentityWitnesses[]{
-#include "ShaderCompileIdentityWitnesses.inl"
-	};
-
-	std::string NativeRouteKey(const ShaderIdentityWitness& a_witness)
+	std::string NativeRouteKey(
+		cs::engine::ShaderInjectionTarget a_target,
+		cs::engine::ShaderStage a_stage,
+		std::uint32_t a_descriptor,
+		std::string_view a_nativeName,
+		std::string_view a_nativeClassName,
+		bool a_forceEarlyDepthStencil,
+		std::string_view a_nativeSourceGroup,
+		const cs::engine::ShaderInjectionDefines& a_nativeMacros)
 	{
 		auto key = std::to_string(
-				static_cast<std::uint32_t>(a_witness.target))
+				static_cast<std::uint32_t>(a_target))
 			+ "|" + std::to_string(
-				static_cast<std::uint32_t>(a_witness.stage))
-			+ "|" + std::to_string(a_witness.descriptor)
-			+ "|" + std::string(a_witness.nativeName)
-			+ "|" + std::string(a_witness.nativeClassName)
-			+ "|" + (a_witness.forceEarlyDepthStencil ? "1" : "0")
-			+ "|" + std::string(a_witness.nativeSourceGroup);
-		for (const auto& [name, value] : a_witness.nativeMacros) {
-			if (name.empty())
-				break;
-			key += "|" + std::string(name) + "=" + std::string(value);
-		}
+				static_cast<std::uint32_t>(a_stage))
+			+ "|" + std::to_string(a_descriptor)
+			+ "|" + std::string(a_nativeName)
+			+ "|" + std::string(a_nativeClassName)
+			+ "|" + (a_forceEarlyDepthStencil ? "1" : "0")
+			+ "|" + std::string(a_nativeSourceGroup);
+		for (const auto& [name, value] : a_nativeMacros)
+			key += "|" + name + "=" + value;
 		return key;
 	}
 
@@ -194,51 +179,277 @@ namespace
 		std::string preparationError;
 	};
 
-	std::vector<BaselineShaderCase> GetBaselineShaderCases()
+	bool IsLowerHexString(std::string_view a_value, std::size_t a_size)
 	{
+		return a_value.size() == a_size
+			&& std::ranges::all_of(a_value, [](char a_character) {
+				return (a_character >= '0' && a_character <= '9')
+					|| (a_character >= 'a' && a_character <= 'f');
+			});
+	}
+
+	void SetTomlFieldError(
+		std::string& a_error,
+		std::string_view a_location,
+		std::string_view a_field,
+		std::string_view a_message)
+	{
+		a_error = std::string(a_location) + "." + std::string(a_field)
+			+ " " + std::string(a_message);
+	}
+
+	template <class T>
+	std::optional<T> RequireTomlValue(
+		const toml::table& a_table,
+		std::string_view a_field,
+		std::string_view a_location,
+		std::string& a_error,
+		std::string_view a_expectedType)
+	{
+		const auto* node = a_table.get(a_field);
+		const auto value = node ? node->value<T>() : std::nullopt;
+		if (!value) {
+			SetTomlFieldError(
+				a_error,
+				a_location,
+				a_field,
+				"must be " + std::string(a_expectedType));
+		}
+		return value;
+	}
+
+	std::string OptionalTomlString(
+		const toml::table& a_table,
+		std::string_view a_field,
+		std::string_view a_location,
+		std::string& a_error)
+	{
+		const auto* node = a_table.get(a_field);
+		if (!node)
+			return {};
+		const auto value = node->value<std::string>();
+		if (!value) {
+			SetTomlFieldError(
+				a_error,
+				a_location,
+				a_field,
+				"must be a string when present");
+			return {};
+		}
+		return *value;
+	}
+
+	std::vector<BaselineShaderCase> GetBaselineShaderCases(
+		const std::filesystem::path& a_path,
+		std::string& a_error)
+	{
+		toml::table root;
+		try {
+			root = toml::parse_file(a_path.string());
+		} catch (const toml::parse_error& error) {
+			a_error = "Failed to parse " + a_path.string() + ": "
+				+ std::string(error.description());
+			return {};
+		} catch (const std::exception& error) {
+			a_error = "Failed to read " + a_path.string() + ": "
+				+ error.what();
+			return {};
+		}
+
+		const auto schemaVersion =
+			root["schema_version"].value<std::int64_t>();
+		if (!schemaVersion || *schemaVersion != 1) {
+			a_error = a_path.string()
+				+ ": schema_version must be integer 1";
+			return {};
+		}
+		const auto* witnesses = root["witnesses"].as_array();
+		if (!witnesses) {
+			a_error = a_path.string()
+				+ ": witnesses must be an array";
+			return {};
+		}
+
 		std::vector<BaselineShaderCase> cases;
-		cases.reserve(std::size(kShaderIdentityWitnesses));
-		for (const auto& witness : kShaderIdentityWitnesses) {
-			BaselineShaderCase shaderCase{
-				.targetId = witness.target,
-				.name = std::string(
-					witness.runtimeReachable ?
-						witness.stockSha1 :
-						std::string_view("archive-unreachable:"))
-					+ (witness.runtimeReachable ?
-						"" :
-						std::string(witness.stockSha1)),
-				.routeKey = NativeRouteKey(witness),
-				.expectedStockSha1 = std::string(witness.stockSha1),
-				.stage = witness.stage,
-				.descriptor = witness.descriptor,
-				.expected = witness.expected,
-				.compileInputAliasGroup =
-					std::string(witness.compileInputAliasGroup)
+		cases.reserve(witnesses->size());
+		for (std::size_t index = 0; index < witnesses->size(); ++index) {
+			const auto location = a_path.string() + ": witnesses["
+				+ std::to_string(index) + "]";
+			const auto* witness = (*witnesses)[index].as_table();
+			if (!witness) {
+				a_error = location + " must be a table";
+				return {};
+			}
+			const auto fail = [&](std::string_view a_field,
+								  std::string_view a_message) {
+				SetTomlFieldError(
+					a_error,
+					location,
+					a_field,
+					a_message);
 			};
-			const auto descriptor =
+
+			const auto targetName = RequireTomlValue<std::string>(
+				*witness, "target", location, a_error, "a string");
+			const auto stageName = RequireTomlValue<std::string>(
+				*witness, "stage", location, a_error, "a string");
+			const auto stageId = RequireTomlValue<std::int64_t>(
+				*witness, "stage_id", location, a_error, "an integer");
+			const auto nativeName = OptionalTomlString(
+				*witness, "native_name", location, a_error);
+			const auto nativeClass = OptionalTomlString(
+				*witness, "native_class", location, a_error);
+			const auto earlyDepth = RequireTomlValue<bool>(
+				*witness, "early_depth", location, a_error, "a boolean");
+			const auto reached = RequireTomlValue<bool>(
+				*witness, "reached", location, a_error, "a boolean");
+			const auto sourceGroup = OptionalTomlString(
+				*witness, "source_group", location, a_error);
+			const auto stockSha1 = RequireTomlValue<std::string>(
+				*witness, "stock_sha1", location, a_error, "a string");
+			const auto aliasGroup = OptionalTomlString(
+				*witness, "alias_group", location, a_error);
+			if (!a_error.empty())
+				return {};
+
+			const auto* target =
+				cs::engine::FindShaderInjectionTarget(*targetName);
+			if (!target) {
+				fail("target", "contains unknown target \""
+					+ *targetName + "\"");
+				return {};
+			}
+			cs::engine::ShaderStage stage;
+			if (*stageName == "vertex") {
+				stage = cs::engine::ShaderStage::kVertex;
+			} else if (*stageName == "pixel") {
+				stage = cs::engine::ShaderStage::kPixel;
+			} else if (*stageName == "compute") {
+				stage = cs::engine::ShaderStage::kCompute;
+			} else {
+				fail("stage", "contains unknown stage \""
+					+ *stageName + "\"");
+				return {};
+			}
+			if (*stageId < 0
+				|| static_cast<std::uint64_t>(*stageId)
+					> std::numeric_limits<std::uint32_t>::max()) {
+				fail("stage_id", "must fit an unsigned 32-bit integer");
+				return {};
+			}
+			if (!IsLowerHexString(*stockSha1, 40)) {
+				fail("stock_sha1",
+					"must be a 40-character lowercase SHA-1");
+				return {};
+			}
+
+			cs::engine::ShaderInjectionDefines nativeMacros;
+			if (const auto* macrosNode = witness->get("macros")) {
+				const auto* macros = macrosNode->as_table();
+				if (!macros) {
+					fail("macros", "must be a table when present");
+					return {};
+				}
+				if (macros->size() > 7) {
+					fail("macros", "must contain at most 7 entries");
+					return {};
+				}
+				for (const auto& [name, valueNode] : *macros) {
+					const auto value = valueNode.value<std::string>();
+					if (!value) {
+						fail("macros", "values must be strings");
+						return {};
+					}
+					nativeMacros.emplace(name.str(), *value);
+				}
+			}
+
+			const auto* candidate = witness->get("candidate");
+			const auto* candidateTable =
+				candidate ? candidate->as_table() : nullptr;
+			if (!candidateTable) {
+				fail("candidate", "must be a table");
+				return {};
+			}
+			const auto candidateLocation = location + ".candidate";
+			const auto byteLength = RequireTomlValue<std::int64_t>(
+				*candidateTable,
+				"byte_length",
+				candidateLocation,
+				a_error,
+				"an integer");
+			const auto candidateSha1 = RequireTomlValue<std::string>(
+				*candidateTable,
+				"sha1",
+				candidateLocation,
+				a_error,
+				"a string");
+			const auto candidateSha256 = RequireTomlValue<std::string>(
+				*candidateTable,
+				"sha256",
+				candidateLocation,
+				a_error,
+				"a string");
+			if (!a_error.empty())
+				return {};
+			if (*byteLength < 0
+				|| static_cast<std::uint64_t>(*byteLength)
+					> std::numeric_limits<std::size_t>::max()) {
+				fail("candidate.byte_length",
+					"must fit an unsigned size");
+				return {};
+			}
+			if (!IsLowerHexString(*candidateSha1, 40)) {
+				fail("candidate.sha1",
+					"must be a 40-character lowercase SHA-1");
+				return {};
+			}
+			if (!IsLowerHexString(*candidateSha256, 64)) {
+				fail("candidate.sha256",
+					"must be a 64-character lowercase SHA-256");
+				return {};
+			}
+
+			const auto stageDescriptor =
+				static_cast<std::uint32_t>(*stageId);
+			BaselineShaderCase shaderCase{
+				.targetId = target->id,
+				.name = *reached ?
+					*stockSha1 :
+					"archive-unreachable:" + *stockSha1,
+				.routeKey = NativeRouteKey(
+					target->id,
+					stage,
+					stageDescriptor,
+					nativeName,
+					nativeClass,
+					*earlyDepth,
+					sourceGroup,
+					nativeMacros),
+				.expectedStockSha1 = *stockSha1,
+				.stage = stage,
+				.descriptor = stageDescriptor,
+				.expected = {
+					.byteLength =
+						static_cast<std::size_t>(*byteLength),
+					.sha1 = *candidateSha1,
+					.sha256 = *candidateSha256
+				},
+				.compileInputAliasGroup = aliasGroup
+			};
+			const auto compilationDescriptor =
 				cs::engine::BuildShaderFamilyCompilationDescriptor({
-					.target = witness.target,
-					.stage = witness.stage,
-					.descriptor = witness.descriptor,
-					.nativeName = witness.nativeName,
-					.nativeClassName = witness.nativeClassName,
-					.nativeSourceGroup = witness.nativeSourceGroup,
-					.forceEarlyDepthStencil =
-						witness.forceEarlyDepthStencil,
-					.nativeMacros = [&] {
-						cs::engine::ShaderInjectionDefines macros;
-						for (const auto& [name, value] :
-							witness.nativeMacros) {
-							if (name.empty())
-								break;
-							macros.emplace(name, value);
-						}
-						return macros;
-					}()
+					.target = target->id,
+					.stage = stage,
+					.descriptor = shaderCase.descriptor,
+					.nativeName = nativeName,
+					.nativeClassName = nativeClass,
+					.nativeSourceGroup = sourceGroup,
+					.forceEarlyDepthStencil = *earlyDepth,
+					.nativeMacros = std::move(nativeMacros)
 				});
-			if (descriptor) {
-				shaderCase.compilation = *descriptor;
+			if (compilationDescriptor) {
+				shaderCase.compilation = *compilationDescriptor;
 			} else {
 				shaderCase.preparationError =
 					"Native family descriptor was not admitted";
@@ -1960,24 +2171,22 @@ namespace
 
 	LightingCounts AddLighting(
 		std::vector<ShaderCompileJob>& a_jobs,
-		const std::filesystem::path& a_root)
+		const std::filesystem::path& a_root,
+		const std::filesystem::path& a_identityWitnessPath)
 	{
-		const auto registrations = GetBaselineShaderCases();
-		if (registrations.empty()) {
+		std::string witnessLoadError;
+		const auto registrations =
+			GetBaselineShaderCases(a_identityWitnessPath, witnessLoadError);
+		if (!witnessLoadError.empty()) {
+			AddPreparationFailure(
+				a_jobs,
+				"baseline identity witness data",
+				std::move(witnessLoadError));
+		} else if (registrations.empty()) {
 			AddPreparationFailure(
 				a_jobs,
 				"shader replacement registrations",
 				"No shader replacement registrations were discovered");
-		}
-		if (registrations.size() != std::size(kShaderIdentityWitnesses)) {
-			AddPreparationFailure(
-				a_jobs,
-				"baseline identity witness coverage",
-				"Expected one witness for each of "
-					+ std::to_string(registrations.size())
-					+ " registrations, found "
-					+ std::to_string(
-						std::size(kShaderIdentityWitnesses)));
 		}
 		const auto compositePath = a_root / "BSDFCompositeShader.hlsl";
 		std::string compositeSourceError;
@@ -2988,10 +3197,11 @@ namespace
 
 int main(int argc, char** argv)
 {
-	if (argc != 2) {
+	if (argc != 3) {
 		std::fprintf(
 			stderr,
-			"Usage: ShaderCompileTests <shader directory>\n");
+			"Usage: ShaderCompileTests <shader directory> "
+			"<identity witness data>\n");
 		return 2;
 	}
 
@@ -3016,7 +3226,7 @@ int main(int argc, char** argv)
 				+ " permutations, prepared "
 				+ std::to_string(dynamicCubemapCount));
 	}
-	const auto lightingCounts = AddLighting(jobs, argv[1]);
+	const auto lightingCounts = AddLighting(jobs, argv[1], argv[2]);
 	const auto terrainShadowsCount = AddTerrainShadows(jobs, argv[1]);
 	if (terrainShadowsCount != kTerrainShadowsPermutations) {
 		AddPreparationFailure(
