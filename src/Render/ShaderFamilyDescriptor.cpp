@@ -753,6 +753,72 @@ namespace cs::engine
 			ShaderInjectionDefines& a_defines,
 			const ShaderFamilyDescriptor& a_descriptor)
 		{
+			struct HudGlassRoute
+			{
+				std::string_view nativeName;
+				std::string_view nativeClassName;
+				std::string_view nativeMacro;
+				std::string_view pixelDefine;
+				bool clear = false;
+			};
+			static constexpr std::array hudGlassRoutes{
+				HudGlassRoute{
+					"ISHUDGlass",
+					"BSImagespaceShaderHUDGlass",
+					"",
+					"IMAGESPACE_HUD_GLASS_BASE"
+				},
+				HudGlassRoute{
+					"ISHUDGlassDS",
+					"BSImagespaceShaderHUDGlassDropShadow",
+					"DROPSHADOW",
+					"IMAGESPACE_HUD_GLASS_DROPSHADOW"
+				},
+				HudGlassRoute{
+					"ISHUDGlassBY",
+					"BSImagespaceShaderHUDGlassBlurY",
+					"BLURY",
+					"IMAGESPACE_HUD_GLASS_BLUR_Y"
+				},
+				HudGlassRoute{
+					"ISHUDGlassBX",
+					"BSImagespaceShaderHUDGlassBlurX",
+					"BLURX",
+					"IMAGESPACE_HUD_GLASS_BLUR_X"
+				},
+				HudGlassRoute{
+					"ISHUDGlassClear",
+					"BSImagespaceShaderHUDGlassClear",
+					"CLEAR",
+					"IMAGESPACE_HUD_GLASS_CLEAR",
+					true
+				},
+				HudGlassRoute{
+					"ISHUDGlassCopy",
+					"BSImagespaceShaderHUDGlassCopy",
+					"COPY",
+					"IMAGESPACE_HUD_GLASS_COPY"
+				}
+			};
+			const auto matchesMacros =
+				[&a_descriptor](std::string_view a_macro) {
+					if (a_macro.empty())
+						return a_descriptor.nativeMacros.empty();
+					return a_descriptor.nativeMacros.size() == 1
+						&& a_descriptor.nativeMacros.begin()->first == a_macro
+						&& a_descriptor.nativeMacros.begin()->second.empty();
+				};
+			const auto hudGlassRoute = std::ranges::find_if(
+				hudGlassRoutes,
+				[&](const HudGlassRoute& a_route) {
+					return a_descriptor.descriptor == 0
+						&& a_descriptor.nativeName == a_route.nativeName
+						&& a_descriptor.nativeClassName
+							== a_route.nativeClassName
+						&& a_descriptor.nativeSourceGroup == "ISHUDGlass"
+						&& matchesMacros(a_route.nativeMacro);
+				});
+
 			if (a_descriptor.stage == ShaderStage::kCompute) {
 				if (a_descriptor.descriptor != 2
 					&& a_descriptor.descriptor != 5
@@ -777,6 +843,39 @@ namespace cs::engine
 						return std::nullopt;
 					return found->second;
 				};
+				if (hudGlassRoute != hudGlassRoutes.end()) {
+					Define(a_defines, hudGlassRoute->pixelDefine);
+					return true;
+				}
+				if (a_descriptor.descriptor == 0
+					&& a_descriptor.nativeName == "ISCopy"
+					&& a_descriptor.nativeClassName
+						== "BSImagespaceShaderCopy"
+					&& a_descriptor.nativeSourceGroup == "ISCopy"
+					&& a_descriptor.nativeMacros.empty()) {
+					Define(a_defines, "IMAGESPACE_COPY_PS_SOURCE");
+					return true;
+				}
+				if (a_descriptor.descriptor == 0
+					&& a_descriptor.nativeName == "ISCopyNormals"
+					&& a_descriptor.nativeClassName
+						== "BSImagespaceShaderCopyNormals"
+					&& a_descriptor.nativeSourceGroup == "ISCopy"
+					&& matchesMacros("COPY_NORMALS")) {
+					Define(a_defines, "IMAGESPACE_COPY_PS_SOURCE");
+					return true;
+				}
+				if (a_descriptor.descriptor == 0
+					&& a_descriptor.nativeName == "ISFullScreenColor"
+					&& a_descriptor.nativeClassName
+						== "BSImagespaceShaderFullScreenColor"
+					&& a_descriptor.nativeSourceGroup == "ISFullScreenColor"
+					&& a_descriptor.nativeMacros.empty()) {
+					Define(
+						a_defines,
+						"IMAGESPACE_FULLSCREEN_COLOR_PS_SOURCE");
+					return true;
+				}
 				if (a_descriptor.nativeSourceGroup == "ISBlur") {
 					const auto tapCount = macro("TEXTAP");
 					const auto brightPass = macro("BRIGHTPASS");
@@ -871,6 +970,12 @@ namespace cs::engine
 				}
 			}
 			if (a_descriptor.stage == ShaderStage::kVertex) {
+				if (hudGlassRoute != hudGlassRoutes.end()) {
+					Define(a_defines, "IMAGESPACE_HUD_GLASS_VS_SOURCE");
+					if (hudGlassRoute->clear)
+						Define(a_defines, "IMAGESPACE_HUD_GLASS_CLEAR");
+					return true;
+				}
 				if (a_descriptor.nativeSourceGroup == "ISHUDGlass"
 					&& a_descriptor.nativeMacros
 						== ShaderInjectionDefines{
@@ -1062,12 +1167,12 @@ namespace cs::engine
 					a_defines, a_descriptor.stage, d);
 			case ShaderInjectionTarget::kDfTiledLighting:
 				if (a_descriptor.stage != ShaderStage::kCompute ||
-					(d != 1 && d != 2))
+					d > 2)
 					return false;
 				Define(
 					a_defines,
 					"DFTILEDLIGHTING_VARIANT",
-					d == 1 ? "1" : "2");
+					std::to_string(d));
 				return true;
 			default:
 				return false;

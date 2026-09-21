@@ -154,6 +154,7 @@ namespace
 		std::string_view nativeMacroValue2;
 		std::string_view stockSha1;
 		StrippedShaderIdentityExpectation expected;
+		std::string_view compileInputAliasGroup;
 	};
 
 	constexpr ShaderIdentityWitness kShaderIdentityWitnesses[]{
@@ -189,6 +190,7 @@ namespace
 		std::uint32_t descriptor = 0;
 		cs::engine::ShaderVariantCompilationDescriptor compilation;
 		StrippedShaderIdentityExpectation expected;
+		std::string compileInputAliasGroup;
 		std::string preparationError;
 	};
 
@@ -210,7 +212,9 @@ namespace
 				.expectedStockSha1 = std::string(witness.stockSha1),
 				.stage = witness.stage,
 				.descriptor = witness.descriptor,
-				.expected = witness.expected
+				.expected = witness.expected,
+				.compileInputAliasGroup =
+					std::string(witness.compileInputAliasGroup)
 			};
 			const auto descriptor =
 				cs::engine::BuildShaderFamilyCompilationDescriptor({
@@ -434,6 +438,80 @@ namespace
 					"Unreconstructed SSS MRT variants must remain native");
 			}
 		}
+	}
+
+	void CheckImageSpaceFailureRouteAdmission(
+		std::vector<ShaderCompileJob>& a_jobs)
+	{
+		using namespace cs::engine;
+		const auto reject = [&a_jobs](
+			std::string a_name,
+			ShaderFamilyDescriptor a_descriptor) {
+			if (BuildShaderFamilyCompilationDescriptor(a_descriptor)) {
+				AddPreparationFailure(
+					a_jobs,
+					"Imagespace failure-route admission " + a_name,
+					"Unproven or identity-mismatched native route was admitted");
+			}
+		};
+
+		reject("nonzero copy descriptor", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.descriptor = 1,
+			.nativeName = "ISCopy",
+			.nativeClassName = "BSImagespaceShaderCopy",
+			.nativeSourceGroup = "ISCopy"
+		});
+		reject("copy owner/macro cross-product", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISCopyNormals",
+			.nativeClassName = "BSImagespaceShaderCopy",
+			.nativeSourceGroup = "ISCopy",
+			.nativeMacros = { { "COPY_NORMALS", "" } }
+		});
+		reject("fullscreen source-group-only fallback", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISFullScreenColor",
+			.nativeClassName = "BSImagespaceShaderCopy",
+			.nativeSourceGroup = "ISFullScreenColor"
+		});
+		reject("fullscreen parameter name is not a source group", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISFullScreenColor",
+			.nativeClassName = "BSImagespaceShaderFullScreenColor",
+			.nativeSourceGroup = "FullScreenColor"
+		});
+		reject("HUD Glass owner/macro cross-product", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kVertex,
+			.nativeName = "ISHUDGlassDS",
+			.nativeClassName = "BSImagespaceShaderHUDGlass",
+			.nativeSourceGroup = "ISHUDGlass",
+			.nativeMacros = { { "DROPSHADOW", "" } }
+		});
+		reject("HUD Glass extra macro", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISHUDGlassCopy",
+			.nativeClassName = "BSImagespaceShaderHUDGlassCopy",
+			.nativeSourceGroup = "ISHUDGlass",
+			.nativeMacros = {
+				{ "COPY", "" },
+				{ "UNPROVEN", "" }
+			}
+		});
+		reject("unproven Gamma LUT route", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISGammaLUT",
+			.nativeClassName = "BSImagespaceShaderGammaCorrectLUT",
+			.nativeSourceGroup = "ISGamma",
+			.nativeMacros = { { "LUT", "" } }
+		});
 	}
 
 	struct ExpectedVariable
@@ -1665,9 +1743,9 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
-	constexpr std::size_t kExpectedBaselineRegistrationRows = 1819;
-	constexpr std::size_t kExpectedBaselineCompileInputs = 1811;
-	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 2;
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1835;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1822;
+	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 4;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 54;
 	constexpr std::size_t kExpectedBsdfLightRows = 167;
@@ -1864,6 +1942,11 @@ namespace
 			std::string,
 			std::vector<const BaselineShaderCase*>>
 			registrationInputRoutes;
+		std::map<
+			std::string,
+			std::set<std::string>,
+			std::less<>>
+			aliasGroupRouteContracts;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
 		std::size_t exponentialFogRows = 0;
@@ -1873,6 +1956,11 @@ namespace
 			auto& inputRoutes =
 				registrationInputRoutes[registrationInputKey];
 			inputRoutes.push_back(&registration);
+			if (!registration.compileInputAliasGroup.empty()) {
+				aliasGroupRouteContracts[
+					registration.compileInputAliasGroup]
+					.insert(registration.routeKey);
+			}
 			const bool isCompileIdentityRepresentative =
 				inputRoutes.size() == 1;
 			uniqueRegistrationRoutes.insert(registration.routeKey);
@@ -1891,7 +1979,10 @@ namespace
 							"1"
 						}
 					});
-				++inverseSquareTiledRows;
+				if (registration.descriptor == 0)
+					AttachBaselineIdentity(registration, a_jobs.back());
+				else
+					++inverseSquareTiledRows;
 			}
 			bool exponentialFogConsumer = false;
 			if (compositeSource
@@ -2008,42 +2099,69 @@ namespace
 					+ std::to_string(
 						uniqueRegistrationInputs.size()));
 		}
-		const std::set<std::uint32_t> expectedSurfaceContactAliases(
-			kSssSurfaceContactDescriptors.begin(),
-			kSssSurfaceContactDescriptors.end());
-		const std::set<std::uint32_t> expectedRecordNormalAliases(
-			kSssRecordNormalDescriptors.begin(),
-			kSssRecordNormalDescriptors.end());
+		if (aliasGroupRouteContracts.size()
+			!= kExpectedEquivalentCompileInputGroups) {
+			AddPreparationFailure(
+				a_jobs,
+				"base registration alias contracts",
+				"Expected "
+					+ std::to_string(
+						kExpectedEquivalentCompileInputGroups)
+					+ " witness-declared alias groups, found "
+					+ std::to_string(aliasGroupRouteContracts.size()));
+		}
+		std::set<std::string, std::less<>> witnessedAliasGroups;
 		std::size_t equivalentCompileInputGroups = 0;
 		for (const auto& [input, routes] : registrationInputRoutes) {
 			if (routes.size() == 1)
 				continue;
 			++equivalentCompileInputGroups;
-			std::set<std::uint32_t> descriptors;
-			for (const auto* route : routes)
-				descriptors.insert(route->descriptor);
-			const bool expectedAliases =
-				routes.front()->targetId
-						== cs::engine::ShaderInjectionTarget::kBsdfComposite
-				&& routes.front()->stage
-						== cs::engine::ShaderStage::kPixel
-				&& (descriptors == expectedSurfaceContactAliases
-					|| descriptors == expectedRecordNormalAliases);
+			std::set<std::string> routeKeys;
+			std::set<std::string> aliasGroups;
+			for (const auto* route : routes) {
+				routeKeys.insert(route->routeKey);
+				aliasGroups.insert(route->compileInputAliasGroup);
+			}
+			const auto aliasContract =
+				aliasGroups.size() == 1
+						&& !aliasGroups.begin()->empty() ?
+					aliasGroupRouteContracts.find(*aliasGroups.begin()) :
+					aliasGroupRouteContracts.end();
+			const bool exactAliasContract =
+				aliasContract != aliasGroupRouteContracts.end()
+				&& routeKeys == aliasContract->second;
 			const auto& expected = routes.front()->expected;
-			const bool identicalWitnesses = std::ranges::all_of(
+			const auto& expectedStockSha1 =
+				routes.front()->expectedStockSha1;
+			const bool identicalStockIdentities = std::ranges::all_of(
 				routes,
-				[&expected](const BaselineShaderCase* a_route) {
-					return a_route->expected.byteLength
+				[&](const BaselineShaderCase* a_route) {
+					return a_route->expectedStockSha1
+							== expectedStockSha1
+						&& a_route->expected.byteLength
 							== expected.byteLength
 						&& a_route->expected.sha1 == expected.sha1
 						&& a_route->expected.sha256 == expected.sha256;
 				});
-			if (!expectedAliases || !identicalWitnesses) {
+			if (!exactAliasContract || !identicalStockIdentities) {
 				AddPreparationFailure(
 					a_jobs,
 					"base registration equivalent input " + input,
-					"Only the two proven BSDFComposite SSS alias groups "
-					"may share a compile input and identity");
+					"Shared compile inputs must exactly match one "
+					"witness-declared route group and stock identity");
+			} else {
+				witnessedAliasGroups.insert(aliasContract->first);
+			}
+		}
+		for (const auto& [group, routeKeys] : aliasGroupRouteContracts) {
+			if (routeKeys.size() < 2
+				|| !witnessedAliasGroups.contains(group)) {
+				AddPreparationFailure(
+					a_jobs,
+					"base registration equivalent input group "
+						+ std::string(group),
+					"Exact witness-declared members did not share one "
+					"compile input and stock identity");
 			}
 		}
 		if (equivalentCompileInputGroups
@@ -2057,13 +2175,13 @@ namespace
 					+ " proven alias groups, found "
 					+ std::to_string(equivalentCompileInputGroups));
 		}
-		if (dfTiledLightingRows != 2) {
+		if (dfTiledLightingRows != 3) {
 			AddPreparationFailure(
 				a_jobs,
 				"DFTiledLighting registration coverage",
 				"Expected "
-					+ std::to_string(2)
-					+ " final-kernel routes, found "
+					+ std::to_string(3)
+					+ " depth-bounds and final-kernel routes, found "
 					+ std::to_string(dfTiledLightingRows));
 		}
 		if (inverseSquareTiledRows != 2) {
@@ -2781,6 +2899,7 @@ int main(int argc, char** argv)
 
 	std::vector<ShaderCompileJob> jobs;
 	CheckNativeDescriptorAliases(jobs);
+	CheckImageSpaceFailureRouteAdmission(jobs);
 	const auto sharedDataCount = AddSharedDataProbes(jobs, argv[1]);
 	const auto screenSpaceGiCount = AddScreenSpaceGI(jobs, argv[1]);
 	if (screenSpaceGiCount != kScreenSpaceGIPermutations) {

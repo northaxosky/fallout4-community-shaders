@@ -1,10 +1,14 @@
 #ifndef DFTILEDLIGHTING_VARIANT
-#error "DFTILEDLIGHTING_VARIANT must be 1 or 2"
+#error "DFTILEDLIGHTING_VARIANT must be 0, 1, or 2"
 #endif
 
-#if DFTILEDLIGHTING_VARIANT != 1 && DFTILEDLIGHTING_VARIANT != 2
-#error "DFTILEDLIGHTING_VARIANT must be 1 or 2"
+#if DFTILEDLIGHTING_VARIANT != 0 && DFTILEDLIGHTING_VARIANT != 1 && DFTILEDLIGHTING_VARIANT != 2
+#error "DFTILEDLIGHTING_VARIANT must be 0, 1, or 2"
 #endif
+
+#if DFTILEDLIGHTING_VARIANT == 0
+#include "DFTiledLighting/DepthBoundsCS.hlsli"
+#else
 
 #ifdef INVERSE_SQUARE_LIGHTING
 #include "InverseSquareLighting/InverseSquareLighting.hlsli"
@@ -484,3 +488,5 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     DiffuseOutput[pixel] = diffuseOutput;
     SpecularOutput[pixel] = specularOutput;
 }
+
+#endif

@@ -1,4 +1,12 @@
-#if defined(IMAGESPACE_PASSTHROUGH_VS_SOURCE)
+#if defined(IMAGESPACE_HUD_GLASS_VS_SOURCE)
+#include "Imagespace/HUDGlassVS.hlsli"
+#elif defined(IMAGESPACE_HUD_GLASS_BASE) || defined(IMAGESPACE_HUD_GLASS_DROPSHADOW) || defined(IMAGESPACE_HUD_GLASS_BLUR_Y) || defined(IMAGESPACE_HUD_GLASS_BLUR_X) || defined(IMAGESPACE_HUD_GLASS_CLEAR) || defined(IMAGESPACE_HUD_GLASS_COPY)
+#include "Imagespace/HUDGlassPS.hlsli"
+#elif defined(IMAGESPACE_COPY_PS_SOURCE)
+#include "Imagespace/CopyPS.hlsli"
+#elif defined(IMAGESPACE_FULLSCREEN_COLOR_PS_SOURCE)
+#include "Imagespace/FullScreenColorPS.hlsli"
+#elif defined(IMAGESPACE_PASSTHROUGH_VS_SOURCE)
 struct VS_INPUT
 {
 	float4 Position : POSITION0;
