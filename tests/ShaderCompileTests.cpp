@@ -160,14 +160,33 @@ namespace
 #include "ShaderCompileIdentityWitnesses.inl"
 	};
 
+	std::string NativeRouteKey(const ShaderIdentityWitness& a_witness)
+	{
+		return std::to_string(
+				static_cast<std::uint32_t>(a_witness.target))
+			+ "|" + std::to_string(
+				static_cast<std::uint32_t>(a_witness.stage))
+			+ "|" + std::to_string(a_witness.descriptor)
+			+ "|" + std::string(a_witness.nativeName)
+			+ "|" + std::string(a_witness.nativeClassName)
+			+ "|" + (a_witness.forceEarlyDepthStencil ? "1" : "0")
+			+ "|" + std::string(a_witness.nativeSourceGroup)
+			+ "|" + std::string(a_witness.nativeMacro1)
+			+ "=" + std::string(a_witness.nativeMacroValue1)
+			+ "|" + std::string(a_witness.nativeMacro2)
+			+ "=" + std::string(a_witness.nativeMacroValue2);
+	}
+
 	struct BaselineShaderCase
 	{
 		cs::engine::ShaderInjectionTarget targetId =
 			cs::engine::ShaderInjectionTarget::kCount;
 		std::string name;
+		std::string routeKey;
 		std::string expectedStockSha1;
 		cs::engine::ShaderStage stage =
 			cs::engine::ShaderStage::kCompute;
+		std::uint32_t descriptor = 0;
 		cs::engine::ShaderVariantCompilationDescriptor compilation;
 		StrippedShaderIdentityExpectation expected;
 		std::string preparationError;
@@ -187,8 +206,10 @@ namespace
 					+ (witness.runtimeReachable ?
 						"" :
 						std::string(witness.stockSha1)),
+				.routeKey = NativeRouteKey(witness),
 				.expectedStockSha1 = std::string(witness.stockSha1),
 				.stage = witness.stage,
+				.descriptor = witness.descriptor,
 				.expected = witness.expected
 			};
 			const auto descriptor =
@@ -266,6 +287,28 @@ namespace
 		return key;
 	}
 
+	template <class Defines>
+	ShaderDefines CopyShaderDefines(const Defines& a_defines)
+	{
+		ShaderDefines defines;
+		defines.reserve(a_defines.size());
+		for (const auto& [name, value] : a_defines)
+			defines.emplace_back(name, value);
+		return defines;
+	}
+
+	std::string BaselineCompileInputKey(
+		const std::filesystem::path& a_root,
+		const BaselineShaderCase& a_registration)
+	{
+		const auto& compilation = a_registration.compilation;
+		return CompileInputKey(
+			a_root / compilation.sourcePath,
+			CopyShaderDefines(compilation.defines),
+			compilation.profile.c_str(),
+			compilation.entryPoint.c_str());
+	}
+
 	ShaderCompileJob& AddCompile(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_path,
@@ -308,6 +351,13 @@ namespace
 			.preparationError = std::move(a_error)
 		});
 	}
+
+	constexpr std::array kSssSurfaceContactDescriptors{
+		0x1000U, 0x11000U, 0x81000U, 0x91000U, 0x181000U, 0x191000U
+	};
+	constexpr std::array kSssRecordNormalDescriptors{
+		0x3000U, 0x1020U, 0x11020U, 0x13000U
+	};
 
 	void CheckNativeDescriptorAliases(std::vector<ShaderCompileJob>& a_jobs)
 	{
@@ -359,10 +409,16 @@ namespace
 			std::array{ 0x208U });
 		check(ShaderInjectionTarget::kBsdfComposite, 0x30088U,
 			std::array{ 0x210088U, 0x10088U });
+		check(
+			ShaderInjectionTarget::kBsdfComposite,
+			kSssSurfaceContactDescriptors.front(),
+			std::span(kSssSurfaceContactDescriptors).subspan(1));
+		check(
+			ShaderInjectionTarget::kBsdfComposite,
+			kSssRecordNormalDescriptors.front(),
+			std::span(kSssRecordNormalDescriptors).subspan(1));
 
 		for (const auto descriptor : std::array{
-				 0x1000U, 0x11000U, 0x181000U, 0x191000U, 0x81000U, 0x91000U,
-				 0x3000U, 0x1020U, 0x11020U, 0x13000U,
 				 0x21020U, 0x23000U, 0x31020U, 0x33000U,
 				 0x61000U, 0x63000U, 0x71000U, 0x73000U,
 				 0xC1000U, 0xD1000U, 0xE1000U, 0xF1000U,
@@ -1232,10 +1288,7 @@ namespace
 			return;
 		}
 
-		ShaderDefines defines;
-		defines.reserve(compileTestRequest->defines.size());
-		for (const auto& [name, value] : compileTestRequest->defines)
-			defines.emplace_back(name, value);
+		auto defines = CopyShaderDefines(compileTestRequest->defines);
 		const auto path = a_root / compileTestRequest->sourcePath;
 		if (a_uniqueInputs) {
 			a_uniqueInputs->insert(CompileInputKey(
@@ -1612,8 +1665,11 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1819;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1811;
+	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 2;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
-	constexpr std::size_t kExpectedAmbientNonTargetRows = 44;
+	constexpr std::size_t kExpectedAmbientNonTargetRows = 54;
 	constexpr std::size_t kExpectedBsdfLightRows = 167;
 	constexpr std::size_t kExpectedWetnessDirectRows = 146;
 	constexpr std::size_t kExpectedWetnessDirectInertRows = 21;
@@ -1621,13 +1677,13 @@ namespace
 	constexpr std::size_t kExpectedTerrainDirectInertRows = 86;
 	constexpr std::size_t kExpectedInverseSquareRows = 81;
 	constexpr std::size_t kExpectedInverseSquareInertRows = 86;
-	constexpr std::size_t kExpectedTerrainCompositeRows = 70;
+	constexpr std::size_t kExpectedTerrainCompositeRows = 80;
 	constexpr std::size_t kExpectedTerrainCompositeInertRows = 0;
-	constexpr std::size_t kExpectedWetnessDebugCompositeRows = 70;
+	constexpr std::size_t kExpectedWetnessDebugCompositeRows = 80;
 	constexpr std::size_t kExpectedWetnessDebugCompositeInertRows = 0;
-	constexpr std::size_t kExpectedCompositeRegistrationRows = 74;
+	constexpr std::size_t kExpectedCompositeRegistrationRows = 84;
 	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
-	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
+	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 22;
 	constexpr std::size_t kExpectedWetnessCompositeVertexRows = 4;
 	bool DeclaresFamily(
 		const BaselineShaderCase& a_registration,
@@ -1803,10 +1859,24 @@ namespace
 			}
 		}
 		std::set<std::string> uniqueRegistrationInputs;
+		std::set<std::string> uniqueRegistrationRoutes;
+		std::map<
+			std::string,
+			std::vector<const BaselineShaderCase*>>
+			registrationInputRoutes;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
 		std::size_t exponentialFogRows = 0;
 		for (const auto& registration : registrations) {
+			const auto registrationInputKey =
+				BaselineCompileInputKey(a_root, registration);
+			auto& inputRoutes =
+				registrationInputRoutes[registrationInputKey];
+			inputRoutes.push_back(&registration);
+			const bool isCompileIdentityRepresentative =
+				inputRoutes.size() == 1;
+			uniqueRegistrationRoutes.insert(registration.routeKey);
+
 			if (registration.targetId
 				== cs::engine::ShaderInjectionTarget::kDfTiledLighting) {
 				++dfTiledLightingRows;
@@ -1889,11 +1959,12 @@ namespace
 			std::optional<FeatureOffIdentityExpectation> identity;
 			const bool directRow = registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfLight;
-			if (directRow
+			if (isCompileIdentityRepresentative
+				&& (directRow
 				|| registration.targetId
-					== cs::engine::ShaderInjectionTarget::kBsdfComposite) {
+					== cs::engine::ShaderInjectionTarget::kBsdfComposite)) {
 				identity = FeatureOffIdentityExpectation{
-					.key = registration.name,
+					.key = registrationInputKey,
 					.variant = FeatureIdentityVariant::kBase,
 					.wetnessShouldDiffer = IsWetnessConsumer(registration),
 					.terrainShouldDiffer =
@@ -1914,14 +1985,77 @@ namespace
 				{},
 				std::move(identity));
 		}
-		if (uniqueRegistrationInputs.size() != registrations.size()) {
+		if (registrations.size() != kExpectedBaselineRegistrationRows
+			|| uniqueRegistrationRoutes.size() != registrations.size()) {
+			AddPreparationFailure(
+				a_jobs,
+				"base registration route coverage",
+				"Expected "
+					+ std::to_string(kExpectedBaselineRegistrationRows)
+					+ " distinct target/stage/descriptor routes, found "
+					+ std::to_string(registrations.size()) + " rows and "
+					+ std::to_string(uniqueRegistrationRoutes.size())
+					+ " distinct routes");
+		}
+		if (uniqueRegistrationInputs.size()
+			!= kExpectedBaselineCompileInputs) {
 			AddPreparationFailure(
 				a_jobs,
 				"base registration compile inputs",
-				"Expected " + std::to_string(registrations.size())
+				"Expected "
+					+ std::to_string(kExpectedBaselineCompileInputs)
 					+ " unique inputs, found "
 					+ std::to_string(
 						uniqueRegistrationInputs.size()));
+		}
+		const std::set<std::uint32_t> expectedSurfaceContactAliases(
+			kSssSurfaceContactDescriptors.begin(),
+			kSssSurfaceContactDescriptors.end());
+		const std::set<std::uint32_t> expectedRecordNormalAliases(
+			kSssRecordNormalDescriptors.begin(),
+			kSssRecordNormalDescriptors.end());
+		std::size_t equivalentCompileInputGroups = 0;
+		for (const auto& [input, routes] : registrationInputRoutes) {
+			if (routes.size() == 1)
+				continue;
+			++equivalentCompileInputGroups;
+			std::set<std::uint32_t> descriptors;
+			for (const auto* route : routes)
+				descriptors.insert(route->descriptor);
+			const bool expectedAliases =
+				routes.front()->targetId
+						== cs::engine::ShaderInjectionTarget::kBsdfComposite
+				&& routes.front()->stage
+						== cs::engine::ShaderStage::kPixel
+				&& (descriptors == expectedSurfaceContactAliases
+					|| descriptors == expectedRecordNormalAliases);
+			const auto& expected = routes.front()->expected;
+			const bool identicalWitnesses = std::ranges::all_of(
+				routes,
+				[&expected](const BaselineShaderCase* a_route) {
+					return a_route->expected.byteLength
+							== expected.byteLength
+						&& a_route->expected.sha1 == expected.sha1
+						&& a_route->expected.sha256 == expected.sha256;
+				});
+			if (!expectedAliases || !identicalWitnesses) {
+				AddPreparationFailure(
+					a_jobs,
+					"base registration equivalent input " + input,
+					"Only the two proven BSDFComposite SSS alias groups "
+					"may share a compile input and identity");
+			}
+		}
+		if (equivalentCompileInputGroups
+			!= kExpectedEquivalentCompileInputGroups) {
+			AddPreparationFailure(
+				a_jobs,
+				"base registration equivalent input groups",
+				"Expected "
+					+ std::to_string(
+						kExpectedEquivalentCompileInputGroups)
+					+ " proven alias groups, found "
+					+ std::to_string(equivalentCompileInputGroups));
 		}
 		if (dfTiledLightingRows != 2) {
 			AddPreparationFailure(
@@ -2134,7 +2268,12 @@ namespace
 		std::size_t wetnessCompositeVertexRows = 0;
 		std::size_t inverseSquareRows = 0;
 		std::size_t inverseSquareInertRows = 0;
+		std::set<std::string> preparedFeatureInputs;
 		for (const auto& registration : registrations) {
+			const auto registrationInputKey =
+				BaselineCompileInputKey(a_root, registration);
+			const bool prepareFeaturePermutations =
+				preparedFeatureInputs.insert(registrationInputKey).second;
 			if (registration.stage == cs::engine::ShaderStage::kPixel &&
 				(registration.targetId
 						== cs::engine::ShaderInjectionTarget::kBsLighting ||
@@ -2202,7 +2341,7 @@ namespace
 						identity;
 					if (defines.size() == 1) {
 						identity = FeatureOffIdentityExpectation{
-							.key = registration.name,
+							.key = registrationInputKey,
 							.variant = FeatureIdentityVariant::
 								kInverseSquareLighting
 						};
@@ -2232,12 +2371,12 @@ namespace
 					if (defines.size() == 1) {
 						if (HasDefine(defines, kWetnessEffects)) {
 							identity = FeatureOffIdentityExpectation{
-								.key = registration.name,
+								.key = registrationInputKey,
 								.variant = FeatureIdentityVariant::kWetness
 							};
 						} else if (HasDefine(defines, kTerrainShadows)) {
 							identity = FeatureOffIdentityExpectation{
-								.key = registration.name,
+								.key = registrationInputKey,
 								.variant = FeatureIdentityVariant::kTerrainShadows
 							};
 						}
@@ -2322,6 +2461,8 @@ namespace
 					"Registration " + registration.name
 						+ " is neither pixel nor vertex");
 			}
+			if (!prepareFeaturePermutations)
+				continue;
 
 			for (const auto& defines : ambientCompositions) {
 				const bool screenSpaceGi = HasDefine(defines, kScreenSpaceGi);
@@ -2347,7 +2488,7 @@ namespace
 				std::optional<FeatureOffIdentityExpectation> identity;
 				if (defines.size() == 1 && wetnessEffects) {
 					identity = FeatureOffIdentityExpectation{
-						.key = registration.name,
+						.key = registrationInputKey,
 						.variant = FeatureIdentityVariant::kWetness
 					};
 				}
@@ -2435,7 +2576,7 @@ namespace
 				nullptr,
 				std::move(terrainSlots),
 				FeatureOffIdentityExpectation{
-					.key = registration.name,
+					.key = registrationInputKey,
 					.variant = FeatureIdentityVariant::kTerrainShadows
 				});
 			++contributorCompositionCount;

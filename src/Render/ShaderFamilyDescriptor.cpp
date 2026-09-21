@@ -545,7 +545,40 @@ namespace cs::engine
 			}
 			if (a_stage != ShaderStage::kPixel)
 				return false;
-			// The native SSS MRT families still lack stock-faithful reconstructions.
+
+			switch (d) {
+			case 0x1000U:
+			case 0x11000U:
+			case 0x81000U:
+			case 0x91000U:
+			case 0x181000U:
+			case 0x191000U:
+				Define(
+					a_defines,
+					"BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT");
+				Define(
+					a_defines,
+					"WAVE5B_SSS_SURFACE_CONTACT_SHAPE",
+					"1");
+				return true;
+			case 0x1020U:
+			case 0x3000U:
+			case 0x11020U:
+			case 0x13000U:
+				Define(
+					a_defines,
+					"BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL");
+				Define(
+					a_defines,
+					"WAVE5B_SSS_RECORD_NORMAL_SHAPE",
+					"1");
+				return true;
+			default:
+				break;
+			}
+
+			// The remaining native SSS MRT families still lack
+			// stock-faithful reconstructions.
 			if ((d & 0x1000U) != 0)
 				return false;
 

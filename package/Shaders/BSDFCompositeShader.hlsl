@@ -4044,14 +4044,22 @@ PS_OUTPUT main(PS_INPUT input)
     float surfaceFacing = dot(projectionDirection, surfaceNormal) - 0.3;
     bool surfaceBack = surfaceFacing < 0.0;
 
+#if WAVE5B_SSS_RECORD_NORMAL_SHAPE == 1
+    clip((geometricBack && surfaceBack) ? -1.0 : 1.0);
+#else
     if (geometricBack && surfaceBack)
         discard;
+#endif
 
     float4 decalColor = g_tDecalColor.SampleLevel(g_sDecalColor, projectedPosition.xy, decalLod);
     float2 auxiliary = g_tDecalAux.SampleLevel(g_sDecalAux, projectedPosition.xy, decalLod).xy;
     float2 decalNormalXy = g_tDecalNormal.SampleLevel(g_sDecalNormal, projectedPosition.xy, decalLod).xy;
     float angleFade = geometricBack ? min(max(surfaceFacing, 0.0), 0.25) : 0.25;
+#if WAVE5B_SSS_RECORD_NORMAL_SHAPE == 1
+    float alpha = angleFade * decalColor.w * 4.0;
+#else
     float alpha = decalColor.w * angleFade * 4.0;
+#endif
     clip(alpha - 4.0 / 255.0);
     alpha *= decalOpacity;
 
@@ -4388,14 +4396,22 @@ PS_OUTPUT main(PS_INPUT input)
     float surfaceFacing = dot(projectionDirection, surfaceNormal) - 0.3;
     bool surfaceBack = surfaceFacing < 0.0;
 
+#if WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 1
+    clip((geometricBack && surfaceBack) ? -1.0 : 1.0);
+#else
     if (geometricBack && surfaceBack)
         discard;
+#endif
 
     float4 decalColor = g_tDecalColor.SampleLevel(g_sDecalColor, projectedPosition.xy, decalLod);
     float2 auxiliary = g_tDecalAux.SampleLevel(g_sDecalAux, projectedPosition.xy, decalLod).xy;
     float2 decalNormalXy = g_tDecalNormal.SampleLevel(g_sDecalNormal, projectedPosition.xy, decalLod).xy;
     float angleFade = geometricBack ? min(max(surfaceFacing, 0.0), 0.25) : 0.25;
+#if WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 1
+    float alpha = angleFade * decalColor.w * 4.0;
+#else
     float alpha = decalColor.w * angleFade * 4.0;
+#endif
     clip(alpha - 4.0 / 255.0);
     alpha *= decalOpacity;
 
