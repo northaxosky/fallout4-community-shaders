@@ -68,7 +68,6 @@ namespace cs::features
 		void SaveSettings();
 		void PublishSettings() noexcept;
 		void ObserveConsumerBind() noexcept;
-		void ObserveRouteDiagnostics() const noexcept;
 		void SetObservationStatus(ObservationStatus a_status) noexcept;
 		void SetValidationDetail(std::string a_detail) const;
 		std::string GetValidationDetail() const;
@@ -84,7 +83,6 @@ namespace cs::features
 		std::atomic_bool _fogFactorDebug{ false };
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
-		mutable std::atomic_bool _routeSubstitutionMismatch{ false };
 		mutable std::atomic_bool _locationResolved{ false };
 		mutable std::atomic_bool _inInterior{ false };
 		mutable std::atomic_bool _publishedActive{ false };

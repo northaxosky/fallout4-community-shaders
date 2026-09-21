@@ -26,10 +26,6 @@ namespace cs::features
 
 		constexpr std::uint32_t kEnabledFlag = 1U << 0;
 		constexpr std::uint32_t kComparisonDebugFlag = 1U << 1;
-		constexpr std::array kInjectionTargets{
-			cs::engine::ShaderInjectionTarget::kBsdfLight,
-			cs::engine::ShaderInjectionTarget::kDfTiledLighting
-		};
 		constexpr std::array<FeatureDebugView, 1> kDebugViews{ {
 			{
 				"inverse_square_comparison",
@@ -271,35 +267,44 @@ namespace cs::features
 			return false;
 		}
 
-		for (const auto target : kInjectionTargets) {
-			const auto snapshot =
-				cs::engine::GetShaderInjectionTargetSnapshot(target);
-			const auto define = snapshot.defines.find(
-				cs::engine::shader_injection_defines::kInverseSquareLighting);
-			const bool contributed =
-				define != snapshot.defines.end() && define->second == "1";
-			if (!snapshot.requested
-				|| !snapshot.compileComplete
-				|| !snapshot.swappable
-				|| snapshot.slotCollision
-				|| !contributed) {
-				a_error = "'" + snapshot.name
-					+ "' cannot deliver inverse-square lighting (requested="
-					+ std::to_string(snapshot.requested)
-					+ " compile_complete="
-					+ std::to_string(snapshot.compileComplete)
-					+ " swappable=" + std::to_string(snapshot.swappable)
-					+ " slot_collision="
-					+ std::to_string(snapshot.slotCollision)
-					+ " contributed=" + std::to_string(contributed) + ")";
-				SetValidationDetail(a_error);
-				return false;
+		const std::array routes{
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target = cs::engine::ShaderInjectionTarget::kBsdfLight,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "InverseSquareLighting",
+				.defines = {
+					{
+						cs::engine::shader_injection_defines::
+							kInverseSquareLighting,
+						"1"
+					}
+				}
+			},
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target =
+					cs::engine::ShaderInjectionTarget::kDfTiledLighting,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kCompute),
+				.contributor = "InverseSquareLighting",
+				.defines = {
+					{
+						cs::engine::shader_injection_defines::
+							kInverseSquareLighting,
+						"1"
+					}
+				}
 			}
+		};
+		if (!cs::engine::ValidateShaderInjectionRoutes(
+				"inverse-square lighting", routes, a_error)) {
+			SetValidationDetail(a_error);
+			return false;
 		}
 
 		_injectionsOperational.store(true, std::memory_order_release);
 		SetValidationDetail({});
-		L->info("Inverse-square BSDF and tiled routes are ready.");
+		L->info("Inverse-square BSDF and tiled routes are eligible and published.");
 		return true;
 	}
 
@@ -313,8 +318,6 @@ namespace cs::features
 
 		const bool operational =
 			_injectionsOperational.load(std::memory_order_acquire);
-		if (operational)
-			ObserveRouteDiagnostics();
 		const bool enabled = _enabled.load(std::memory_order_acquire);
 		const float exteriorStrength =
 			_exteriorStrength.load(std::memory_order_acquire);
@@ -341,41 +344,6 @@ namespace cs::features
 		};
 	}
 
-	void InverseSquareLighting::ObserveRouteDiagnostics() const noexcept
-	{
-		const auto volume =
-			cs::engine::GetShaderInjectionOutcomeSnapshot(
-				cs::engine::ShaderInjectionTarget::kBsdfLight);
-		const auto tiled =
-			cs::engine::GetShaderInjectionOutcomeSnapshot(
-				cs::engine::ShaderInjectionTarget::kDfTiledLighting);
-		const bool mismatch =
-			(volume.matches != 0
-				&& volume.substitutions < volume.matches)
-			|| (tiled.matches != 0
-				&& tiled.substitutions < tiled.matches);
-		const bool previous = _routeSubstitutionMismatch.exchange(
-			mismatch, std::memory_order_acq_rel);
-		if (mismatch && !previous) {
-			L->warn(
-				"Inverse-square route substitution mismatch: BSDF "
-				"substitutions={}/{}, tiled substitutions={}/{}; reporting "
-				"only, rendering remains unchanged.",
-				volume.substitutions,
-				volume.matches,
-				tiled.substitutions,
-				tiled.matches);
-		} else if (!mismatch && previous) {
-			L->info(
-				"Inverse-square route substitutions now agree: BSDF "
-				"substitutions={}/{}, tiled substitutions={}/{}.",
-				volume.substitutions,
-				volume.matches,
-				tiled.substitutions,
-				tiled.matches);
-		}
-	}
-
 	void InverseSquareLighting::CollectTelemetry(
 		cs::telemetry::Sink& a_sink) const
 	{
@@ -384,11 +352,6 @@ namespace cs::features
 		const auto tiledSnapshot =
 			cs::engine::GetShaderInjectionTargetSnapshot(
 				cs::engine::ShaderInjectionTarget::kDfTiledLighting);
-		const bool routeMismatch =
-			(snapshot.matches != 0
-				&& snapshot.substitutions < snapshot.matches)
-			|| (tiledSnapshot.matches != 0
-				&& tiledSnapshot.substitutions < tiledSnapshot.matches);
 		const auto detail = GetValidationDetail();
 		a_sink
 			.Field(
@@ -424,19 +387,33 @@ namespace cs::features
 			.Field(
 				"injection_operational",
 				_injectionsOperational.load(std::memory_order_relaxed))
-			.Field(
-				"route_substitution_mismatch",
-				routeMismatch)
 			.Field("injection_requested", snapshot.requested)
-			.Field("injection_compile_attempted", snapshot.compileAttempted)
-			.Field("injection_compile_ok", snapshot.compileOk)
-			.Field("injection_compile_complete", snapshot.compileComplete)
+			.Field("injection_published", snapshot.published)
 			.Field(
-				"injection_compile_error",
-				snapshot.compileError.empty() ?
+				"injection_publication_error",
+				snapshot.publicationError.empty() ?
 					"none" :
-					snapshot.compileError)
-			.Field("injection_swappable", snapshot.swappable)
+					snapshot.publicationError)
+			.Field(
+				"injection_variants_observed",
+				static_cast<std::int64_t>(
+					snapshot.variantsObserved))
+			.Field(
+				"injection_variants_pending",
+				static_cast<std::int64_t>(
+					snapshot.variantsPending))
+			.Field(
+				"injection_variants_ready",
+				static_cast<std::int64_t>(
+					snapshot.variantsReady))
+			.Field(
+				"injection_variants_failed",
+				static_cast<std::int64_t>(
+					snapshot.variantsFailed))
+			.Field(
+				"injection_variants_unsupported",
+				static_cast<std::int64_t>(
+					snapshot.variantsUnsupported))
 			.Field("injection_slot_collision", snapshot.slotCollision)
 			.Field(
 				"injection_matches",
@@ -454,8 +431,28 @@ namespace cs::features
 				"tiled_injection_substitutions",
 				static_cast<std::int64_t>(tiledSnapshot.substitutions))
 			.Field(
-				"injection_passthrough_compile_fail",
-				static_cast<std::int64_t>(snapshot.passthroughCompileFail))
+				"tiled_injection_variants_pending",
+				static_cast<std::int64_t>(
+					tiledSnapshot.variantsPending))
+			.Field(
+				"tiled_injection_variants_ready",
+				static_cast<std::int64_t>(
+					tiledSnapshot.variantsReady))
+			.Field(
+				"tiled_injection_variants_failed",
+				static_cast<std::int64_t>(
+					tiledSnapshot.variantsFailed))
+			.Field(
+				"tiled_injection_variants_unsupported",
+				static_cast<std::int64_t>(
+					tiledSnapshot.variantsUnsupported))
+			.Field(
+				"tiled_injection_variant_compile_failures",
+				static_cast<std::int64_t>(
+					tiledSnapshot.compileFailures))
+			.Field(
+				"injection_variant_compile_failures",
+				static_cast<std::int64_t>(snapshot.compileFailures))
 			.Field(
 				"injection_passthrough_not_ready",
 				static_cast<std::int64_t>(snapshot.passthroughNotReady))

@@ -239,35 +239,31 @@ namespace cs::features
 			return false;
 		}
 
-		const auto snapshot = cs::engine::GetShaderInjectionTargetSnapshot(
-			cs::engine::ShaderInjectionTarget::kBsdfComposite);
-		const auto define = snapshot.defines.find(
-			cs::engine::shader_injection_defines::kExponentialHeightFog);
-		const bool contributed =
-			define != snapshot.defines.end() && define->second == "1";
-		if (!snapshot.requested
-			|| !snapshot.compileComplete
-			|| !snapshot.swappable
-			|| snapshot.slotCollision
-			|| !contributed) {
-			a_error = "'" + snapshot.name
-				+ "' cannot deliver analytic fog (requested="
-				+ std::to_string(snapshot.requested)
-				+ " compile_complete="
-				+ std::to_string(snapshot.compileComplete)
-				+ " swappable=" + std::to_string(snapshot.swappable)
-				+ " slot_collision="
-				+ std::to_string(snapshot.slotCollision)
-				+ " contributed=" + std::to_string(contributed) + ")";
+		const std::array routes{
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target =
+					cs::engine::ShaderInjectionTarget::kBsdfComposite,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "ExponentialHeightFog",
+				.defines = {
+					{
+						cs::engine::shader_injection_defines::
+							kExponentialHeightFog,
+						"1"
+					}
+				}
+			}
+		};
+		if (!cs::engine::ValidateShaderInjectionRoutes(
+				"analytic fog", routes, a_error)) {
 			SetValidationDetail(a_error);
 			return false;
 		}
 
 		_injectionsOperational.store(true, std::memory_order_release);
 		SetValidationDetail({});
-		L->info(
-			"Analytic fog BSDFComposite contribution compiled and is "
-			"swappable.");
+		L->info("Analytic fog BSDFComposite route is eligible and published.");
 		return true;
 	}
 
@@ -411,30 +407,6 @@ namespace cs::features
 		SetObservationStatus(ObservationStatus::kUsingDerived);
 	}
 
-	void ExponentialHeightFog::ObserveRouteDiagnostics() const noexcept
-	{
-		const auto outcome =
-			cs::engine::GetShaderInjectionOutcomeSnapshot(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite);
-		const bool mismatch =
-			outcome.matches != 0 && outcome.substitutions < outcome.matches;
-		const bool previous = _routeSubstitutionMismatch.exchange(
-			mismatch, std::memory_order_acq_rel);
-		if (mismatch && !previous) {
-			L->warn(
-				"Analytic fog route substitution mismatch: substitutions={}/{}; "
-				"reporting only, rendering remains unchanged.",
-				outcome.substitutions,
-				outcome.matches);
-		} else if (!mismatch && previous) {
-			L->info(
-				"Analytic fog route substitutions now agree: "
-				"substitutions={}/{}.",
-				outcome.substitutions,
-				outcome.matches);
-		}
-	}
-
 	const char* ExponentialHeightFog::ObservationStatusName(
 		ObservationStatus a_status) noexcept
 	{
@@ -473,8 +445,6 @@ namespace cs::features
 	void ExponentialHeightFog::CollectTelemetry(
 		cs::telemetry::Sink& a_sink) const
 	{
-		if (_injectionsOperational.load(std::memory_order_acquire))
-			ObserveRouteDiagnostics();
 		const auto injection = cs::engine::GetShaderInjectionTargetSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfComposite);
 		const auto define = injection.defines.find(
@@ -557,11 +527,27 @@ namespace cs::features
 			.Field("define_contributed", contributed)
 			.Field("injection_requested", injection.requested)
 			.Field(
-				"injection_compile_attempted", injection.compileAttempted)
-			.Field("injection_compile_ok", injection.compileOk)
+				"injection_published", injection.published)
 			.Field(
-				"injection_compile_complete", injection.compileComplete)
-			.Field("injection_swappable", injection.swappable)
+				"injection_variants_observed",
+				static_cast<std::int64_t>(
+					injection.variantsObserved))
+			.Field(
+				"injection_variants_pending",
+				static_cast<std::int64_t>(
+					injection.variantsPending))
+			.Field(
+				"injection_variants_ready",
+				static_cast<std::int64_t>(
+					injection.variantsReady))
+			.Field(
+				"injection_variants_failed",
+				static_cast<std::int64_t>(
+					injection.variantsFailed))
+			.Field(
+				"injection_variants_unsupported",
+				static_cast<std::int64_t>(
+					injection.variantsUnsupported))
 			.Field("injection_slot_collision", injection.slotCollision)
 			.Field(
 				"injection_matches",
@@ -573,9 +559,9 @@ namespace cs::features
 				"injection_dispatches",
 				static_cast<std::int64_t>(injection.dispatches))
 			.Field(
-				"injection_passthrough_compile_fail",
+				"injection_variant_compile_failures",
 				static_cast<std::int64_t>(
-					injection.passthroughCompileFail))
+					injection.compileFailures))
 			.Field(
 				"injection_passthrough_not_ready",
 				static_cast<std::int64_t>(
@@ -584,10 +570,6 @@ namespace cs::features
 				"injection_passthrough_disabled",
 				static_cast<std::int64_t>(
 					injection.passthroughDisabled))
-			.Field(
-				"route_substitution_mismatch",
-				injection.matches != 0
-					&& injection.substitutions < injection.matches)
 			.Field(
 				"validation_detail",
 				detail.empty() ? "operational" : detail);

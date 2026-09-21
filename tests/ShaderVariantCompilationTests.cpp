@@ -185,6 +185,9 @@ namespace
 	void CheckFailureAndInvalidation(ID3D11Device& a_device)
 	{
 		std::atomic<unsigned> attempts{ 0 };
+		std::atomic<unsigned> completionCalls{ 0 };
+		std::atomic<unsigned> failedCompletions{ 0 };
+		std::atomic<unsigned> readyCompletions{ 0 };
 		std::array<std::uint64_t, 2> generations{};
 		auto child = CreateDeviceChild(a_device);
 		auto cache =
@@ -203,25 +206,66 @@ namespace
 					return result;
 				});
 
-		const auto failed = cache->Request(Request(a_device));
+		auto failedRequest = Request(a_device);
+		failedRequest.completion = [&](
+			ShaderVariantCompilationState a_state,
+			std::string_view a_error) {
+			if (a_state == ShaderVariantCompilationState::kFailed
+				&& a_error == "controlled compiler failure") {
+				failedCompletions.fetch_add(
+					1, std::memory_order_relaxed);
+			}
+			completionCalls.fetch_add(1, std::memory_order_release);
+		};
+		const auto failed = cache->Request(std::move(failedRequest));
 		Check(
 			WaitForState(failed, ShaderVariantCompilationState::kFailed),
 			"failed compilation did not become terminal");
+		const auto waitForCompletionCount = [&](unsigned a_expected) {
+			const auto deadline =
+				std::chrono::steady_clock::now() + 2s;
+			while (std::chrono::steady_clock::now() < deadline) {
+				if (completionCalls.load(std::memory_order_acquire)
+					>= a_expected) {
+					return true;
+				}
+				std::this_thread::sleep_for(1ms);
+			}
+			return completionCalls.load(std::memory_order_acquire)
+				>= a_expected;
+		};
+		Check(
+			waitForCompletionCount(1)
+				&& failedCompletions.load(std::memory_order_relaxed) == 1,
+			"compiler failure did not notify its completion observer");
 		const auto repeated = cache->Request(Request(a_device));
 		Check(
 			repeated == failed
 				&& attempts.load(std::memory_order_relaxed) == 1
+				&& completionCalls.load(std::memory_order_relaxed) == 1
 				&& failed->GetError() == "controlled compiler failure",
-			"terminal failure was retried or lost its diagnostic");
+			"terminal failure was retried, re-notified, or lost its diagnostic");
 
 		cache->Invalidate();
-		const auto retried = cache->Request(Request(a_device));
+		auto retryRequest = Request(a_device);
+		retryRequest.completion = [&](
+			ShaderVariantCompilationState a_state,
+			std::string_view) {
+			if (a_state == ShaderVariantCompilationState::kReady) {
+				readyCompletions.fetch_add(
+					1, std::memory_order_relaxed);
+			}
+			completionCalls.fetch_add(1, std::memory_order_release);
+		};
+		const auto retried = cache->Request(std::move(retryRequest));
 		Check(
 			retried != failed,
 			"invalidation reused the terminal failure handle");
 		Check(
 			WaitForState(retried, ShaderVariantCompilationState::kReady)
+				&& waitForCompletionCount(2)
 				&& attempts.load(std::memory_order_relaxed) == 2
+				&& readyCompletions.load(std::memory_order_relaxed) == 1
 				&& generations[1] > generations[0],
 			"invalidation did not permit exactly one fresh generation attempt");
 	}

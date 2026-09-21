@@ -120,22 +120,22 @@ namespace cs::engine
 		ShaderInjectionTarget  id = ShaderInjectionTarget::kCount;
 		std::string            name;
 		bool                   requested = false;
-		bool                   compileAttempted = false;
-		bool                   compileOk = false;
-		// every registered variant for this target prepared and reached kReady
-		bool                   compileComplete = false;
-		bool                   swappable = false;
+		bool                   published = false;
 		bool                   slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 		ShaderInjectionRequestReason requestReasons =
 			ShaderInjectionRequestReason::kNone;
 		std::size_t            contributors = 0;
 		ShaderInjectionDefines defines;
-		std::string            compiledSha1;
-		std::string            compileError;
+		std::string            publicationError;
+		std::size_t            variantsObserved = 0;
+		std::size_t            variantsPending = 0;
+		std::size_t            variantsReady = 0;
+		std::size_t            variantsFailed = 0;
+		std::size_t            variantsUnsupported = 0;
 		std::uint64_t          matches = 0;
 		std::uint64_t          substitutions = 0;
-		std::uint64_t          passthroughCompileFail = 0;
+		std::uint64_t          compileFailures = 0;
 		std::uint64_t          passthroughNotReady = 0;
 		std::uint64_t          passthroughDisabled = 0;
 		std::uint64_t          dispatches = 0;
@@ -160,20 +160,30 @@ namespace cs::engine
 	struct ShaderInjectionSummary
 	{
 		std::size_t requested = 0;
-		std::size_t compileAttempted = 0;
-		std::size_t compiled = 0;
-		std::size_t compileComplete = 0;
-		std::size_t swappable = 0;
+		std::size_t published = 0;
+		std::size_t variantsObserved = 0;
+		std::size_t variantsPending = 0;
+		std::size_t variantsReady = 0;
+		std::size_t variantsFailed = 0;
+		std::size_t variantsUnsupported = 0;
 		std::size_t requestedByFeatureContributor = 0;
 		std::size_t requestedByBaselineOwnership = 0;
 		std::size_t requestedByDeveloperForceOn = 0;
 		std::uint64_t matches = 0;
 		std::uint64_t substitutions = 0;
-		std::uint64_t passthroughCompileFail = 0;
+		std::uint64_t compileFailures = 0;
 		std::uint64_t passthroughNotReady = 0;
 		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
 		ComputeDispatchBridgeStatus computeBridge;
+	};
+
+	struct ShaderInjectionRouteRequirement
+	{
+		ShaderInjectionTarget  target = ShaderInjectionTarget::kCount;
+		ShaderStageMask        stages = ShaderStageBit(ShaderStage::kPixel);
+		std::string_view       contributor;
+		ShaderInjectionDefines defines;
 	};
 
 	std::optional<ShaderVariantCompilationDescriptor>
@@ -195,6 +205,10 @@ namespace cs::engine
 	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
 	bool SetDeveloperShaderSourceRoot(std::wstring a_sourceRoot);
 	bool SetShaderInjectionEnabled(bool a_enabled);
+	bool ValidateShaderInjectionRoutes(
+		std::string_view a_capability,
+		std::span<const ShaderInjectionRouteRequirement> a_requirements,
+		std::string& a_error);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
 	bool EnsureComputeDispatchBridgeInstalled(
@@ -219,6 +233,8 @@ namespace cs::engine
 		GetObservedNativeShaderMetadataForTesting(
 			ID3D11DeviceChild* a_shader) noexcept;
 	ID3D11DeviceChild* PrepareNativeShaderVariantForTesting(
+		const ShaderFamilyDescriptor& a_descriptor) noexcept;
+	bool QueueNativeShaderVariantForTesting(
 		const ShaderFamilyDescriptor& a_descriptor) noexcept;
 	NativeGraphicsShaderBinding
 		ResolveNativeGraphicsShaderBindingForTesting(

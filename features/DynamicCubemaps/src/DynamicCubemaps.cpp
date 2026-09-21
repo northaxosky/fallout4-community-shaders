@@ -790,52 +790,44 @@ namespace cs::features
 			return false;
 		}
 
-		const auto validateTarget = [&a_error](
-			cs::engine::ShaderInjectionTarget a_target,
-			bool a_requiresDebug) {
-			const auto snapshot =
-				cs::engine::GetShaderInjectionTargetSnapshot(a_target);
-			const auto define = snapshot.defines.find(
-				cs::engine::shader_injection_defines::kDynamicCubemaps);
-			const bool contributed =
-				define != snapshot.defines.end() && define->second == "1";
-			const auto debugDefine = snapshot.defines.find(
-				cs::engine::shader_injection_defines::
-					kDynamicCubemapsFullscreenDebug);
-			const bool debugContributed =
-				debugDefine != snapshot.defines.end() &&
-				debugDefine->second == "1";
-			if (snapshot.requested &&
-				snapshot.compileComplete &&
-				snapshot.swappable &&
-				!snapshot.slotCollision &&
-				contributed &&
-				(!a_requiresDebug || debugContributed)) {
-				return true;
+		const std::array routes{
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target =
+					cs::engine::ShaderInjectionTarget::kBsdfComposite,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "DynamicCubemaps",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" },
+					{
+						cs::engine::shader_injection_defines::
+							kDynamicCubemapsFullscreenDebug,
+						"1"
+					}
+				}
+			},
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target =
+					cs::engine::ShaderInjectionTarget::kBsLighting,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "DynamicCubemaps",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" }
+				}
+			},
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target = cs::engine::ShaderInjectionTarget::kBsWater,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "DynamicCubemaps",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" }
+				}
 			}
-			a_error =
-				"'" + snapshot.name +
-				"' cannot deliver dynamic cubemaps (requested=" +
-				std::to_string(snapshot.requested) +
-				" compile_complete=" +
-				std::to_string(snapshot.compileComplete) +
-				" swappable=" + std::to_string(snapshot.swappable) +
-				" slot_collision=" +
-				std::to_string(snapshot.slotCollision) +
-				" contributed=" + std::to_string(contributed) +
-				" debug_contributed=" +
-				std::to_string(debugContributed) + ")";
-			return false;
 		};
-		if (!validateTarget(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				true) ||
-			!validateTarget(
-				cs::engine::ShaderInjectionTarget::kBsLighting,
-				false) ||
-			!validateTarget(
-				cs::engine::ShaderInjectionTarget::kBsWater,
-				false)) {
+		if (!cs::engine::ValidateShaderInjectionRoutes(
+				"dynamic cubemaps", routes, a_error)) {
 			_validationDetail = a_error;
 			return false;
 		}

@@ -15,6 +15,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
@@ -32,6 +33,7 @@ namespace
 	std::array<winrt::com_ptr<ID3D11Buffer>, 2> publishedComputeBuffers;
 	std::atomic<std::uint32_t> compilationAttempts{ 0 };
 	bool forceCompilationFailure = false;
+	bool holdCompilationPending = false;
 
 	struct TestNativeMacro
 	{
@@ -55,35 +57,73 @@ namespace
 	public:
 		TestCompilationHandle(
 			winrt::com_ptr<ID3D11DeviceChild> a_shader,
-			cs::engine::ShaderVariantCompilationState a_state =
-				cs::engine::ShaderVariantCompilationState::kReady,
-			std::string a_error = {}) :
+			cs::engine::ShaderVariantCompilationCompletion a_completion) :
 			shader(std::move(a_shader)),
-			state(a_state),
-			error(std::move(a_error))
+			completion(std::move(a_completion))
 		{}
 
 		cs::engine::ShaderVariantCompilationState
 			GetState() const noexcept override
 		{
-			return state;
+			return state.load(std::memory_order_acquire);
 		}
 
 		winrt::com_ptr<ID3D11DeviceChild> Acquire() noexcept override
 		{
-			return shader;
+			return GetState()
+					== cs::engine::ShaderVariantCompilationState::kReady ?
+				shader :
+				nullptr;
 		}
 
 		std::string GetError() const override
 		{
+			if (GetState()
+				!= cs::engine::ShaderVariantCompilationState::kFailed) {
+				return {};
+			}
+			const std::scoped_lock lock(mutex);
 			return error;
 		}
 
+		void Succeed()
+		{
+			Complete(cs::engine::ShaderVariantCompilationState::kReady, {});
+		}
+
+		void Fail(std::string a_error)
+		{
+			Complete(
+				cs::engine::ShaderVariantCompilationState::kFailed,
+				std::move(a_error));
+		}
+
 	private:
+		void Complete(
+			cs::engine::ShaderVariantCompilationState a_state,
+			std::string a_error)
+		{
+			cs::engine::ShaderVariantCompilationCompletion notify;
+			{
+				const std::scoped_lock lock(mutex);
+				error = std::move(a_error);
+				notify = std::move(completion);
+			}
+			state.store(a_state, std::memory_order_release);
+			if (notify)
+				notify(a_state, error);
+		}
+
 		winrt::com_ptr<ID3D11DeviceChild> shader;
-		cs::engine::ShaderVariantCompilationState state;
+		std::atomic<cs::engine::ShaderVariantCompilationState> state{
+			cs::engine::ShaderVariantCompilationState::kPending
+		};
+		mutable std::mutex mutex;
 		std::string error;
+		cs::engine::ShaderVariantCompilationCompletion completion;
 	};
+
+	std::shared_ptr<TestCompilationHandle> pendingCompilation;
 
 	class TestCompilationCache final :
 		public cs::engine::ShaderVariantCompilationCache
@@ -95,16 +135,16 @@ namespace
 			using namespace cs::engine;
 			compilationAttempts.fetch_add(1, std::memory_order_relaxed);
 			if (!a_request.device) {
-				return std::make_shared<TestCompilationHandle>(
-					nullptr,
-					ShaderVariantCompilationState::kFailed,
-					"missing test device");
+				auto handle = std::make_shared<TestCompilationHandle>(
+					nullptr, std::move(a_request.completion));
+				handle->Fail("missing test device");
+				return handle;
 			}
 			if (forceCompilationFailure) {
-				return std::make_shared<TestCompilationHandle>(
-					nullptr,
-					ShaderVariantCompilationState::kFailed,
-					"controlled native compilation failure");
+				auto handle = std::make_shared<TestCompilationHandle>(
+					nullptr, std::move(a_request.completion));
+				handle->Fail("controlled native compilation failure");
+				return handle;
 			}
 
 			const auto profile =
@@ -150,10 +190,10 @@ namespace
 						static_cast<const char*>(errors->GetBufferPointer()),
 						errors->GetBufferSize()) :
 					"test shader compilation failed";
-				return std::make_shared<TestCompilationHandle>(
-					nullptr,
-					ShaderVariantCompilationState::kFailed,
-					error);
+				auto handle = std::make_shared<TestCompilationHandle>(
+					nullptr, std::move(a_request.completion));
+				handle->Fail(error);
+				return handle;
 			}
 
 			winrt::com_ptr<ID3D11DeviceChild> shader;
@@ -187,14 +227,20 @@ namespace
 					shader.attach(typed.detach());
 			}
 			if (FAILED(createResult) || !shader) {
-				return std::make_shared<TestCompilationHandle>(
-					nullptr,
-					ShaderVariantCompilationState::kFailed,
-					"test shader creation failed");
+				auto handle = std::make_shared<TestCompilationHandle>(
+					nullptr, std::move(a_request.completion));
+				handle->Fail("test shader creation failed");
+				return handle;
 			}
 
-			return std::make_shared<TestCompilationHandle>(
-				std::move(shader));
+			auto handle = std::make_shared<TestCompilationHandle>(
+				std::move(shader), std::move(a_request.completion));
+			if (holdCompilationPending) {
+				pendingCompilation = handle;
+			} else {
+				handle->Succeed();
+			}
+			return handle;
 		}
 
 		void Invalidate() override {}
@@ -1085,6 +1131,20 @@ namespace
 			.descriptor = 0,
 			.nativeName = "BSLightingShader"
 		};
+		Expect(
+			QueueNativeShaderVariantForTesting(failed),
+			"failed native compilation was not queued");
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 1
+				&& GetShaderInjectionTargetSnapshot(
+					ShaderInjectionTarget::kBsLighting)
+					.variantsFailed
+					== 1
+				&& GetShaderInjectionTargetSnapshot(
+					ShaderInjectionTarget::kBsLighting)
+					.compileFailures
+					== 1,
+			"queued native failure was not diagnosed before a draw lookup");
 		for (std::size_t index = 0; index < 8; ++index) {
 			Expect(
 				PrepareNativeShaderVariantForTesting(failed) == nullptr,
@@ -1095,7 +1155,7 @@ namespace
 				ShaderInjectionTarget::kBsLighting);
 		Expect(
 			compilationAttempts.load(std::memory_order_relaxed) == 1
-				&& failedSnapshot.passthroughCompileFail == 1,
+				&& failedSnapshot.compileFailures == 1,
 			"repeated failed native requests retried or diagnosed more than once");
 
 		const ShaderFamilyDescriptor unsupported{
@@ -1110,11 +1170,16 @@ namespace
 				"unsupported native descriptor published a shader");
 		}
 		const auto stats = GetNativeVariantCacheStatsForTesting();
+		const auto unsupportedSnapshot =
+			GetShaderInjectionTargetSnapshot(
+				ShaderInjectionTarget::kImageSpace);
 		Expect(
 			compilationAttempts.load(std::memory_order_relaxed) == 1
 				&& stats.entries == 2
 				&& stats.compilation == 1
-				&& stats.unsupported == 1,
+				&& stats.unsupported == 1
+				&& unsupportedSnapshot.variantsUnsupported == 1
+				&& unsupportedSnapshot.variantsFailed == 0,
 			"unsupported native requests were not retained as one terminal cache outcome");
 
 		InvalidateNativeShaderVariantCompilations();
@@ -1124,9 +1189,193 @@ namespace
 			compilationAttempts.load(std::memory_order_relaxed) == 2
 				&& GetShaderInjectionTargetSnapshot(
 					ShaderInjectionTarget::kBsLighting)
-					.passthroughCompileFail
+					.compileFailures
 					== 2,
 			"native invalidation did not permit exactly one fresh failed attempt");
+	}
+
+	void CheckRouteEligibilityAndVariantObservations()
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(
+			CreateWarpDevice(device, context),
+			"could not create route-validation WARP device");
+		if (!device)
+			return;
+
+		ShaderReplacementRegistration contribution;
+		contribution.targetId = ShaderInjectionTarget::kBsLighting;
+		contribution.stages = ShaderStageBit(ShaderStage::kPixel);
+		contribution.contributor = "route-validation";
+		contribution.defines = {
+			{ "ROUTE_VALIDATION", "1" },
+			{ "ROUTE_DEBUG", "1" }
+		};
+		Expect(
+			RegisterReplacement(std::move(contribution)),
+			"could not register route-validation contribution");
+		FreezeAndCompileShaderInjections(device.get());
+
+		const std::array validRoutes{
+			ShaderInjectionRouteRequirement{
+				.target = ShaderInjectionTarget::kBsLighting,
+				.stages = ShaderStageBit(ShaderStage::kPixel),
+				.contributor = "route-validation",
+				.defines = {
+					{ "ROUTE_VALIDATION", "1" },
+					{ "ROUTE_DEBUG", "1" }
+				}
+			}
+		};
+		std::string error;
+		Expect(
+			ValidateShaderInjectionRoutes(
+				"route validation", validRoutes, error),
+			"published route was rejected before any variant was observed");
+		auto snapshot = GetShaderInjectionTargetSnapshot(
+			ShaderInjectionTarget::kBsLighting);
+		Expect(
+			snapshot.requested
+				&& snapshot.published
+				&& snapshot.variantsObserved == 0
+				&& snapshot.variantsPending == 0
+				&& snapshot.variantsReady == 0
+				&& snapshot.variantsFailed == 0
+				&& snapshot.variantsUnsupported == 0,
+			"unobserved published route reported fabricated compilation state");
+
+		auto missingContributor = validRoutes;
+		missingContributor.front().contributor = "missing-contributor";
+		Expect(
+			!ValidateShaderInjectionRoutes(
+				"route validation", missingContributor, error),
+			"route validation accepted a missing contributor");
+
+		auto missingDefine = validRoutes;
+		missingDefine.front().defines["ROUTE_DEBUG"] = "0";
+		Expect(
+			!ValidateShaderInjectionRoutes(
+				"route validation", missingDefine, error),
+			"route validation accepted a missing exact define value");
+
+		auto missingStage = validRoutes;
+		missingStage.front().stages =
+			ShaderStageBit(ShaderStage::kVertex);
+		Expect(
+			!ValidateShaderInjectionRoutes(
+				"route validation", missingStage, error),
+			"route validation accepted an undelivered shader stage");
+
+		holdCompilationPending = true;
+		const ShaderFamilyDescriptor descriptor{
+			.target = ShaderInjectionTarget::kBsLighting,
+			.stage = ShaderStage::kPixel,
+			.descriptor = 0,
+			.nativeName = "BSLightingShader"
+		};
+		Expect(
+			PrepareNativeShaderVariantForTesting(descriptor) == nullptr,
+			"pending native compilation replaced the stock shader");
+		RE::BSGraphics::PixelShader nativePixel{};
+		nativePixel.id = descriptor.descriptor;
+		const auto pendingBinding =
+			ResolveNativeGraphicsShaderBindingForTesting(
+				ShaderInjectionTarget::kBsLighting,
+				"BSLightingShader",
+				0xFFFFFFFFU,
+				descriptor.descriptor,
+				nullptr,
+				&nativePixel);
+		snapshot = GetShaderInjectionTargetSnapshot(
+			ShaderInjectionTarget::kBsLighting);
+		Expect(
+			pendingBinding.pixel == &nativePixel
+				&& snapshot.matches == 1
+				&& snapshot.substitutions == 0
+				&& snapshot.variantsObserved == 1
+				&& snapshot.variantsPending == 1
+				&& snapshot.variantsReady == 0
+				&& snapshot.variantsFailed == 0
+				&& ValidateShaderInjectionRoutes(
+					"route validation", validRoutes, error),
+			"expected pending fallback changed route eligibility or terminal diagnostics");
+
+		Expect(
+			static_cast<bool>(pendingCompilation),
+			"pending compilation handle was not retained");
+		if (pendingCompilation)
+			pendingCompilation->Succeed();
+		holdCompilationPending = false;
+		winrt::com_ptr<ID3D11DeviceChild> replacement;
+		replacement.attach(
+			PrepareNativeShaderVariantForTesting(descriptor));
+		snapshot = GetShaderInjectionTargetSnapshot(
+			ShaderInjectionTarget::kBsLighting);
+		Expect(
+			replacement
+				&& snapshot.variantsObserved == 1
+				&& snapshot.variantsPending == 0
+				&& snapshot.variantsReady == 1
+				&& snapshot.variantsFailed == 0,
+			"completed native compilation did not report a truthful ready transition");
+		pendingCompilation.reset();
+	}
+
+	void CheckUnavailableRoute(
+		bool a_coreDisabled,
+		bool a_forceOff,
+		bool a_missingDevice)
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		if (!a_missingDevice) {
+			Expect(
+				CreateWarpDevice(device, context),
+				"could not create unavailable-route WARP device");
+			if (!device)
+				return;
+		}
+
+		ShaderReplacementRegistration contribution;
+		contribution.targetId = ShaderInjectionTarget::kBsLighting;
+		contribution.stages = ShaderStageBit(ShaderStage::kPixel);
+		contribution.contributor = "unavailable-route";
+		contribution.defines = { { "UNAVAILABLE_ROUTE", "1" } };
+		Expect(
+			RegisterReplacement(std::move(contribution)),
+			"could not register unavailable-route contribution");
+		if (a_coreDisabled) {
+			Expect(
+				SetShaderInjectionEnabled(false),
+				"could not disable shader injection");
+		}
+		if (a_forceOff) {
+			Expect(
+				SetDeveloperShaderForceOffEnabled(true)
+					&& SetDeveloperShaderOverride(
+						ShaderInjectionTarget::kBsLighting,
+						DeveloperShaderOverride::kForceOff),
+				"could not force off shader route");
+		}
+		FreezeAndCompileShaderInjections(device.get());
+
+		const std::array routes{
+			ShaderInjectionRouteRequirement{
+				.target = ShaderInjectionTarget::kBsLighting,
+				.stages = ShaderStageBit(ShaderStage::kPixel),
+				.contributor = "unavailable-route",
+				.defines = { { "UNAVAILABLE_ROUTE", "1" } }
+			}
+		};
+		std::string error;
+		Expect(
+			!ValidateShaderInjectionRoutes(
+				"unavailable route", routes, error)
+				&& !error.empty(),
+			"unavailable route passed eligibility validation");
 	}
 
 	class ExecutableDispatchFixture
@@ -1633,16 +1882,37 @@ namespace
 			SetBaselineShaderOwnership(
 				ShaderInjectionTarget::kDfTiledLighting, true),
 			"could not enable missing-hook baseline ownership");
+		ShaderReplacementRegistration contribution;
+		contribution.targetId = ShaderInjectionTarget::kDfTiledLighting;
+		contribution.stages = ShaderStageBit(ShaderStage::kCompute);
+		contribution.contributor = "compute-missing-hook";
+		contribution.defines = { { "COMPUTE_MISSING_HOOK", "1" } };
+		Expect(
+			RegisterReplacement(std::move(contribution)),
+			"could not register missing-hook compute contribution");
 		FreezeAndCompileShaderInjections(device.get());
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
+		const std::array routes{
+			ShaderInjectionRouteRequirement{
+				.target =
+					ShaderInjectionTarget::kDfTiledLighting,
+				.stages = ShaderStageBit(ShaderStage::kCompute),
+				.contributor = "compute-missing-hook",
+				.defines = { { "COMPUTE_MISSING_HOOK", "1" } }
+			}
+		};
+		std::string error;
 		Expect(
 			snapshot.requested
-				&& snapshot.compileAttempted
-				&& !snapshot.compileOk
-				&& !snapshot.compileComplete
-				&& !snapshot.swappable
-				&& !snapshot.compileError.empty(),
+				&& !snapshot.published
+				&& snapshot.variantsObserved == 0
+				&& snapshot.publicationError
+					== "RunComputeShader dispatch bridge is unavailable"
+				&& !ValidateShaderInjectionRoutes(
+					"compute route", routes, error)
+				&& error.find("dispatch bridge")
+					!= std::string::npos,
 			"compute ownership did not fail closed without the engine bridge");
 	}
 
@@ -1965,6 +2235,14 @@ int main(int argc, char** argv)
 		CheckLazyPreparationDoesNotDeadlock();
 	if (mode == "--native-outcome-cache")
 		CheckNativeVariantOutcomeCaching();
+	if (mode == "--route-validation")
+		CheckRouteEligibilityAndVariantObservations();
+	if (mode == "--route-core-disabled")
+		CheckUnavailableRoute(true, false, false);
+	if (mode == "--route-force-off")
+		CheckUnavailableRoute(false, true, false);
+	if (mode == "--route-missing-device")
+		CheckUnavailableRoute(false, false, true);
 	if (mode == "--dispatch-bridge")
 		CheckComputeDispatchBridge();
 	if (mode == "--compute-hooks-missing")

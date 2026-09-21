@@ -27,10 +27,6 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.wetnesseffects");
 
-		constexpr std::array kInjectionTargets{
-			cs::engine::ShaderInjectionTarget::kBsdfLight,
-			cs::engine::ShaderInjectionTarget::kBsdfComposite
-		};
 		constexpr std::array<FeatureDebugView, 2> kDebugViews{ {
 			{
 				"wetness_term",
@@ -257,37 +253,36 @@ namespace cs::features
 			return false;
 		}
 
-		for (const auto target : kInjectionTargets) {
-			const auto snapshot = cs::engine::GetShaderInjectionTargetSnapshot(target);
-			const auto define = snapshot.defines.find(
-				cs::engine::shader_injection_defines::kWetnessEffects);
-			const bool contributed = define != snapshot.defines.end()
-				&& define->second == "1";
-			const auto debugDefine = snapshot.defines.find(
-				cs::engine::shader_injection_defines::
-					kWetnessEffectsFullscreenDebug);
-			const bool debugContributed =
-				target != cs::engine::ShaderInjectionTarget::kBsdfComposite
-				|| (debugDefine != snapshot.defines.end()
-					&& debugDefine->second == "1");
-			if (!snapshot.requested
-				|| !snapshot.compileComplete
-				|| !snapshot.swappable
-				|| snapshot.slotCollision
-				|| !contributed
-				|| !debugContributed) {
-				a_error = "'" + snapshot.name
-					+ "' cannot deliver wetness (requested="
-					+ std::to_string(snapshot.requested)
-					+ " compile_complete=" + std::to_string(snapshot.compileComplete)
-					+ " swappable=" + std::to_string(snapshot.swappable)
-					+ " slot_collision=" + std::to_string(snapshot.slotCollision)
-					+ " contributed=" + std::to_string(contributed)
-					+ " debug_contributed="
-					+ std::to_string(debugContributed) + ")";
-				_validationDetail = a_error;
-				return false;
+		const std::array routes{
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target = cs::engine::ShaderInjectionTarget::kBsdfLight,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "WetnessEffects",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" }
+				}
+			},
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target =
+					cs::engine::ShaderInjectionTarget::kBsdfComposite,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "WetnessEffects",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" },
+					{
+						cs::engine::shader_injection_defines::
+							kWetnessEffectsFullscreenDebug,
+						"1"
+					}
+				}
 			}
+		};
+		if (!cs::engine::ValidateShaderInjectionRoutes(
+				"wetness", routes, a_error)) {
+			_validationDetail = a_error;
+			return false;
 		}
 
 		_validationDetail.clear();

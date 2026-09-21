@@ -805,6 +805,19 @@ target("ShaderInjectionRegistrationTests", function()
         runargs = "--native-outcome-cache",
         run_timeout = 30000
     })
+    add_tests("ShaderInjectionRouteValidation", {
+        runargs = "--route-validation",
+        run_timeout = 30000
+    })
+    add_tests("ShaderInjectionRouteCoreDisabled", {
+        runargs = "--route-core-disabled"
+    })
+    add_tests("ShaderInjectionRouteForceOff", {
+        runargs = "--route-force-off"
+    })
+    add_tests("ShaderInjectionRouteMissingDevice", {
+        runargs = "--route-missing-device"
+    })
     add_tests("ShaderInjectionComputeDispatchBridge", {
         runargs = "--dispatch-bridge"
     })

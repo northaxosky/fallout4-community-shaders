@@ -96,23 +96,18 @@ namespace cs::engine
 		struct TargetRuntimeState
 		{
 			std::atomic<bool>          requested{ false };
-			std::atomic<bool>          compileAttempted{ false };
-			std::atomic<bool>          compileOk{ false };
-			std::atomic<bool>          compileComplete{ false };
-			std::atomic<bool>          swappable{ false };
 			std::atomic<bool>          slotCollision{ false };
 			std::atomic<std::uint8_t>  requestReasons{ 0 };
 			std::atomic<std::size_t>   contributors{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
-			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
+			std::atomic<std::uint64_t> compileFailures{ 0 };
 			std::atomic<std::uint64_t> passthroughNotReady{ 0 };
 			std::atomic<std::uint64_t> passthroughDisabled{ 0 };
 			std::atomic<std::uint64_t> dispatches{ 0 };
 			DeveloperShaderOverride   developerOverride = DeveloperShaderOverride::kAuto;
 			ShaderInjectionDefines    defines;
-			std::string               compiledSha1;
-			std::string               compileError;
+			std::string               publicationError;
 		};
 
 		struct FrozenTarget
@@ -470,7 +465,7 @@ namespace cs::engine
 			runtime.matches.fetch_add(1, std::memory_order_relaxed);
 			switch (a_outcome) {
 			case MatchedShaderOutcome::kCompileFailed:
-				runtime.passthroughCompileFail.fetch_add(
+				runtime.compileFailures.fetch_add(
 					1, std::memory_order_relaxed);
 				break;
 			case MatchedShaderOutcome::kNotReady:
@@ -889,6 +884,89 @@ namespace cs::engine
 			return target == a_plan.targets.end() ? nullptr : &*target;
 		}
 
+		struct VariantObservationCounts
+		{
+			std::size_t observed = 0;
+			std::size_t pending = 0;
+			std::size_t ready = 0;
+			std::size_t failed = 0;
+			std::size_t unsupported = 0;
+		};
+
+		VariantObservationCounts CollectNativeVariantObservations(
+			std::optional<ShaderInjectionTarget> a_target = std::nullopt)
+		{
+			VariantObservationCounts counts;
+			auto& service = GetService();
+			std::scoped_lock lock(service.nativeVariantMutex);
+			for (const auto& [key, variant] : service.nativeVariants) {
+				if (a_target && key.target != *a_target)
+					continue;
+
+				++counts.observed;
+				switch (variant->state.load(std::memory_order_acquire)) {
+				case NativeVariant::State::kUnsupported:
+					++counts.unsupported;
+					break;
+				case NativeVariant::State::kResolving:
+					++counts.pending;
+					break;
+				case NativeVariant::State::kCompilation:
+				{
+					std::shared_ptr<ShaderVariantCompilationHandle>
+						compilation;
+					{
+						std::scoped_lock variantLock(variant->mutex);
+						compilation = variant->compilation;
+					}
+					if (!compilation) {
+						++counts.pending;
+						break;
+					}
+					switch (compilation->GetState()) {
+					case ShaderVariantCompilationState::kReady:
+						++counts.ready;
+						break;
+					case ShaderVariantCompilationState::kPending:
+						++counts.pending;
+						break;
+					case ShaderVariantCompilationState::kFailed:
+						++counts.failed;
+						break;
+					}
+					break;
+				}
+				}
+			}
+			return counts;
+		}
+
+		void DiagnoseNativeVariantCompilationFailure(
+			const std::weak_ptr<NativeVariant>& a_variant,
+			ShaderInjectionTarget a_target,
+			std::uint32_t a_descriptor,
+			std::string_view a_error) noexcept
+		{
+			const auto variant = a_variant.lock();
+			if (!variant
+				|| variant->failureDiagnosed.exchange(
+					true, std::memory_order_relaxed)) {
+				return;
+			}
+
+			const auto* metadata = GetShaderInjectionTarget(a_target);
+			L->error(
+				"Native descriptor compile failed for '{}/{}': {}",
+				metadata ? metadata->name : "unknown",
+				a_descriptor,
+				a_error.empty() ?
+					"shader compilation failed" :
+					a_error);
+			GetService().runtime[ToIndex(a_target)]
+				.compileFailures.fetch_add(
+					1, std::memory_order_relaxed);
+		}
+
 		void RecordNativeComputeShader(
 			ShaderInjectionTarget a_target,
 			std::uint32_t a_descriptor,
@@ -1006,6 +1084,17 @@ namespace cs::engine
 			request.defines.reserve(effective->defines.size());
 			for (const auto& define : effective->defines)
 				request.defines.push_back(define);
+			request.completion = [
+				variant = std::weak_ptr<NativeVariant>(candidate),
+				target = a_descriptor.target,
+				descriptor = a_descriptor.descriptor](
+					ShaderVariantCompilationState a_state,
+					std::string_view a_error) {
+				if (a_state == ShaderVariantCompilationState::kFailed) {
+					DiagnoseNativeVariantCompilationFailure(
+						variant, target, descriptor, a_error);
+				}
+			};
 
 			auto compilation =
 				a_plan.compilationCache->Request(std::move(request));
@@ -1020,7 +1109,7 @@ namespace cs::engine
 					"compilation cache rejected request");
 				auto& runtime =
 					service.runtime[ToIndex(a_descriptor.target)];
-				runtime.passthroughCompileFail.fetch_add(
+				runtime.compileFailures.fetch_add(
 					1, std::memory_order_relaxed);
 				return candidate;
 			}
@@ -1060,21 +1149,11 @@ namespace cs::engine
 					GetService().runtime[ToIndex(a_descriptor.target)];
 				if (compilation->GetState()
 					== ShaderVariantCompilationState::kFailed) {
-					if (!variant->failureDiagnosed.exchange(
-							true, std::memory_order_relaxed)) {
-						const auto* metadata =
-							GetShaderInjectionTarget(a_descriptor.target);
-						const auto error = compilation->GetError();
-						L->error(
-							"Native descriptor compile failed for '{}/{}': {}",
-							metadata ? metadata->name : "unknown",
-							a_descriptor.descriptor,
-							error.empty() ?
-								"shader compilation failed" :
-								error);
-						runtime.passthroughCompileFail.fetch_add(
-							1, std::memory_order_relaxed);
-					}
+					DiagnoseNativeVariantCompilationFailure(
+						variant,
+						a_descriptor.target,
+						a_descriptor.descriptor,
+						compilation->GetError());
 				} else if (!variant->pendingObserved.exchange(
 						true, std::memory_order_relaxed)) {
 					runtime.passthroughNotReady.fetch_add(
@@ -1680,6 +1759,155 @@ namespace cs::engine
 		return true;
 	}
 
+	bool ValidateShaderInjectionRoutes(
+		std::string_view a_capability,
+		std::span<const ShaderInjectionRouteRequirement> a_requirements,
+		std::string& a_error)
+	{
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		if (service.lifecycle != Lifecycle::kPublished) {
+			a_error = std::string(a_capability)
+				+ " routes were validated before injection publication";
+			return false;
+		}
+		if (!service.enabled) {
+			a_error = std::string(a_capability)
+				+ " routes are disabled by the shader-injection core kill switch";
+			return false;
+		}
+
+		const auto plan =
+			service.published.load(std::memory_order_acquire);
+		if (!plan || !plan->device) {
+			a_error = std::string(a_capability)
+				+ " routes were not published because the D3D11 device is unavailable";
+			return false;
+		}
+
+		for (const auto& requirement : a_requirements) {
+			const auto* metadata =
+				GetShaderInjectionTarget(requirement.target);
+			if (!metadata) {
+				a_error = std::string(a_capability)
+					+ " requires an unknown shader-injection target";
+				return false;
+			}
+
+			const auto& runtime =
+				service.runtime[ToIndex(requirement.target)];
+			if (runtime.developerOverride
+				== DeveloperShaderOverride::kForceOff) {
+				a_error = "'" + std::string(metadata->name)
+					+ "' cannot deliver " + std::string(a_capability)
+					+ " because its developer override is force-off";
+				return false;
+			}
+			if (!runtime.requested.load(std::memory_order_relaxed)
+				|| !HasShaderInjectionRequestReason(
+					static_cast<ShaderInjectionRequestReason>(
+						runtime.requestReasons.load(
+							std::memory_order_relaxed)),
+					ShaderInjectionRequestReason::kFeatureContributor)) {
+				a_error = "'" + std::string(metadata->name)
+					+ "' cannot deliver " + std::string(a_capability)
+					+ " because feature ownership was not frozen";
+				return false;
+			}
+			if (runtime.slotCollision.load(std::memory_order_relaxed)) {
+				a_error = "'" + std::string(metadata->name)
+					+ "' cannot deliver " + std::string(a_capability)
+					+ " because its slot or define claims conflict";
+				return false;
+			}
+			if (requirement.stages == 0
+				|| (requirement.stages
+					& ~SupportedStages(requirement.target))
+					!= 0) {
+				a_error = "'" + std::string(metadata->name)
+					+ "' has no supported route for the stages required by "
+					+ std::string(a_capability);
+				return false;
+			}
+			if (requirement.target
+					== ShaderInjectionTarget::kDfTiledLighting
+				&& (requirement.stages
+					& ShaderStageBit(ShaderStage::kCompute))
+					!= 0
+				&& !ComputeDispatchBridgeInstalled()) {
+				a_error = "'" + std::string(metadata->name)
+					+ "' cannot deliver " + std::string(a_capability)
+					+ " because the RunComputeShader dispatch bridge is unavailable";
+				return false;
+			}
+
+			const auto* published =
+				FindPublishedTarget(*plan, requirement.target);
+			if (!published) {
+				a_error = "'" + std::string(metadata->name)
+					+ "' cannot deliver " + std::string(a_capability)
+					+ " because the requested route was not published";
+				if (!runtime.publicationError.empty()) {
+					a_error += ": ";
+					a_error += runtime.publicationError;
+				}
+				return false;
+			}
+			if ((published->contributedStages & requirement.stages)
+				!= requirement.stages) {
+				a_error = "'" + std::string(metadata->name)
+					+ "' cannot deliver " + std::string(a_capability)
+					+ " at the required shader stage";
+				return false;
+			}
+
+			for (std::size_t stageIndex = 0;
+				stageIndex < static_cast<std::size_t>(ShaderStage::kCount);
+				++stageIndex) {
+				const auto stage =
+					static_cast<ShaderStage>(stageIndex);
+				const auto stageBit = ShaderStageBit(stage);
+				if ((requirement.stages & stageBit) == 0)
+					continue;
+
+				const auto contribution = std::ranges::find_if(
+					published->contributions,
+					[&](const ShaderReplacementRegistration& a_candidate) {
+						if (a_candidate.contributor
+								!= requirement.contributor
+							|| (a_candidate.stages & stageBit) == 0) {
+							return false;
+						}
+						return std::ranges::all_of(
+							requirement.defines,
+							[&](const auto& a_required) {
+								const auto found =
+									a_candidate.defines.find(
+										a_required.first);
+								return found
+										!= a_candidate.defines.end()
+									&& found->second
+										== a_required.second;
+							});
+					});
+				if (contribution == published->contributions.end()) {
+					a_error = "'" + std::string(metadata->name)
+						+ "' cannot deliver "
+						+ std::string(a_capability)
+						+ " because contributor '"
+						+ std::string(requirement.contributor)
+						+ "' did not publish the required "
+						+ std::string(StageName(stage))
+						+ " defines";
+					return false;
+				}
+			}
+		}
+
+		a_error.clear();
+		return true;
+	}
+
 	bool EnsureComputeDispatchBridgeInstalled(
 		ID3D11DeviceContext* a_immediateContext) noexcept
 	{
@@ -1828,7 +2056,7 @@ namespace cs::engine
 			CreateCachingShaderVariantCompilationCache();
 		plan->device.copy_from(a_device);
 		plan->developerSourceRoot = developerSourceRoot;
-		std::size_t compileRequested = 0;
+		std::size_t publishedTargets = 0;
 		std::vector<FrozenTarget> frozenTargets;
 		if (enabled) {
 			frozenTargets = FreezeTargets(
@@ -1842,35 +2070,28 @@ namespace cs::engine
 			L->warn("Shader injection disabled by core kill switch.");
 		} else if (!a_device) {
 			L->error("Shader injection freeze failed: no D3D11 device.");
+			for (const auto& frozenTarget : frozenTargets) {
+				service.runtime[ToIndex(frozenTarget.metadata->id)]
+					.publicationError = "no D3D11 device";
+			}
 		} else {
 			plan->targets.reserve(frozenTargets.size());
 			for (const auto& frozenTarget : frozenTargets) {
 				const auto targetIndex =
 					ToIndex(frozenTarget.metadata->id);
 				auto& runtime = service.runtime[targetIndex];
-				runtime.compileAttempted.store(
-					true,
-					std::memory_order_relaxed);
 				if (frozenTarget.metadata->id
 						== ShaderInjectionTarget::kDfTiledLighting
 					&& !ComputeDispatchBridgeInstalled()) {
-					runtime.compileOk.store(false, std::memory_order_release);
-					runtime.compileComplete.store(
-						false, std::memory_order_release);
-					runtime.swappable.store(false, std::memory_order_release);
-					runtime.compileError =
+					runtime.publicationError =
 						"RunComputeShader dispatch bridge is unavailable";
 					L->error(
 						"Shader injection target '{}' remains native: {}.",
 						frozenTarget.metadata->name,
-						runtime.compileError);
+						runtime.publicationError);
 					continue;
 				}
-				runtime.compileOk.store(true, std::memory_order_release);
-				runtime.compileComplete.store(false, std::memory_order_release);
-				runtime.swappable.store(true, std::memory_order_release);
-				runtime.compileError.clear();
-				runtime.compiledSha1.clear();
+				runtime.publicationError.clear();
 
 				ShaderStageMask contributedStages = 0;
 				for (const auto& contribution :
@@ -1883,7 +2104,7 @@ namespace cs::engine
 					.binds = frozenTarget.binds,
 					.contributions = frozenTarget.contributions
 				});
-				++compileRequested;
+				++publishedTargets;
 			}
 		}
 
@@ -1892,19 +2113,16 @@ namespace cs::engine
 			std::scoped_lock lock(service.mutex);
 			service.lifecycle = Lifecycle::kPublished;
 		}
-		if (compileRequested == 0 && !registrations.empty()) {
+		if (publishedTargets == 0 && !registrations.empty()) {
 			L->warn(
 				"{} injection contributor(s) registered but no target was baked; all shaders remain stock.",
 				registrations.size());
 		}
 		const auto summary = GetShaderInjectionSummary();
 		L->info(
-			"Shader injection freeze: targets requested={} compile_attempted={} compiled_ok={} compile_complete={} swappable={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); native variants compile lazily from observed descriptors.",
+			"Shader injection freeze: targets requested={} published={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); native variants compile asynchronously from observed descriptors.",
 			summary.requested,
-			summary.compileAttempted,
-			summary.compiled,
-			summary.compileComplete,
-			summary.swappable,
+			summary.published,
 			summary.requestedByFeatureContributor,
 			summary.requestedByBaselineOwnership,
 			summary.requestedByDeveloperForceOn);
@@ -2286,6 +2504,23 @@ namespace cs::engine
 		}
 	}
 
+	bool QueueNativeShaderVariantForTesting(
+		const ShaderFamilyDescriptor& a_descriptor) noexcept
+	{
+		try {
+			const auto plan =
+				GetService().published.load(std::memory_order_acquire);
+			const auto* target =
+				plan ? FindPublishedTarget(*plan, a_descriptor.target) : nullptr;
+			return target
+				&& static_cast<bool>(
+					FindOrPrepareNativeVariant(
+						*plan, *target, a_descriptor));
+		} catch (...) {
+			return false;
+		}
+	}
+
 	NativeGraphicsShaderBinding
 		ResolveNativeGraphicsShaderBindingForTesting(
 			ShaderInjectionTarget a_target,
@@ -2423,42 +2658,55 @@ namespace cs::engine
 			return snapshot;
 
 		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		const auto& metadata = kTargets[ToIndex(a_target)];
-		const auto& runtime = service.runtime[ToIndex(a_target)];
-		snapshot.id = a_target;
-		snapshot.name = metadata.name;
-		snapshot.requested = runtime.requested.load(std::memory_order_relaxed);
-		snapshot.compileAttempted = runtime.compileAttempted.load(std::memory_order_relaxed);
-		snapshot.compileOk = runtime.compileOk.load(std::memory_order_relaxed);
-		snapshot.compileComplete =
-			runtime.compileComplete.load(std::memory_order_relaxed);
-		snapshot.swappable = runtime.swappable.load(std::memory_order_relaxed);
-		snapshot.slotCollision = runtime.slotCollision.load(std::memory_order_relaxed);
-		snapshot.developerOverride = runtime.developerOverride;
-		snapshot.requestReasons =
-			static_cast<ShaderInjectionRequestReason>(
-				runtime.requestReasons.load(std::memory_order_relaxed));
-		snapshot.contributors = runtime.contributors.load(std::memory_order_relaxed);
-		snapshot.defines = runtime.defines;
-		snapshot.compiledSha1 = runtime.compiledSha1;
-		snapshot.compileError = runtime.compileError;
 		{
-			SwapCountersGuard counterGuard(service);
-			snapshot.matches = runtime.matches.load(std::memory_order_relaxed);
-			snapshot.substitutions =
-				runtime.substitutions.load(std::memory_order_relaxed);
-			snapshot.passthroughCompileFail =
-				runtime.passthroughCompileFail.load(
-					std::memory_order_relaxed);
-			snapshot.passthroughNotReady =
-				runtime.passthroughNotReady.load(
-					std::memory_order_relaxed);
-			snapshot.passthroughDisabled =
-				runtime.passthroughDisabled.load(
-					std::memory_order_relaxed);
+			std::scoped_lock lock(service.mutex);
+			const auto& metadata = kTargets[ToIndex(a_target)];
+			const auto& runtime = service.runtime[ToIndex(a_target)];
+			const auto plan =
+				service.published.load(std::memory_order_acquire);
+			snapshot.id = a_target;
+			snapshot.name = metadata.name;
+			snapshot.requested =
+				runtime.requested.load(std::memory_order_relaxed);
+			snapshot.published =
+				plan && FindPublishedTarget(*plan, a_target);
+			snapshot.slotCollision =
+				runtime.slotCollision.load(std::memory_order_relaxed);
+			snapshot.developerOverride = runtime.developerOverride;
+			snapshot.requestReasons =
+				static_cast<ShaderInjectionRequestReason>(
+					runtime.requestReasons.load(
+						std::memory_order_relaxed));
+			snapshot.contributors =
+				runtime.contributors.load(std::memory_order_relaxed);
+			snapshot.defines = runtime.defines;
+			snapshot.publicationError = runtime.publicationError;
+			{
+				SwapCountersGuard counterGuard(service);
+				snapshot.matches =
+					runtime.matches.load(std::memory_order_relaxed);
+				snapshot.substitutions =
+					runtime.substitutions.load(std::memory_order_relaxed);
+				snapshot.compileFailures =
+					runtime.compileFailures.load(
+						std::memory_order_relaxed);
+				snapshot.passthroughNotReady =
+					runtime.passthroughNotReady.load(
+						std::memory_order_relaxed);
+				snapshot.passthroughDisabled =
+					runtime.passthroughDisabled.load(
+						std::memory_order_relaxed);
+			}
+			snapshot.dispatches =
+				runtime.dispatches.load(std::memory_order_relaxed);
 		}
-		snapshot.dispatches = runtime.dispatches.load(std::memory_order_relaxed);
+		const auto observations =
+			CollectNativeVariantObservations(a_target);
+		snapshot.variantsObserved = observations.observed;
+		snapshot.variantsPending = observations.pending;
+		snapshot.variantsReady = observations.ready;
+		snapshot.variantsFailed = observations.failed;
+		snapshot.variantsUnsupported = observations.unsupported;
 		return snapshot;
 	}
 
@@ -2466,53 +2714,56 @@ namespace cs::engine
 	{
 		ShaderInjectionSummary summary;
 		auto& service = GetService();
-		SwapCountersGuard counterGuard(service);
-		for (const auto& runtime : service.runtime) {
-			if (runtime.requested.load(std::memory_order_relaxed))
-				++summary.requested;
-			if (runtime.compileAttempted.load(std::memory_order_relaxed))
-				++summary.compileAttempted;
-			if (runtime.compileOk.load(std::memory_order_relaxed))
-				++summary.compiled;
-			if (runtime.compileComplete.load(std::memory_order_relaxed))
-				++summary.compileComplete;
-			if (runtime.swappable.load(std::memory_order_relaxed))
-				++summary.swappable;
-			const auto requestReasons =
-				static_cast<ShaderInjectionRequestReason>(
-					runtime.requestReasons.load(
-						std::memory_order_relaxed));
-			if (HasShaderInjectionRequestReason(
-					requestReasons,
-					ShaderInjectionRequestReason::
-						kFeatureContributor)) {
-				++summary.requestedByFeatureContributor;
+		const auto plan =
+			service.published.load(std::memory_order_acquire);
+		summary.published = plan ? plan->targets.size() : 0;
+		{
+			SwapCountersGuard counterGuard(service);
+			for (const auto& runtime : service.runtime) {
+				if (runtime.requested.load(std::memory_order_relaxed))
+					++summary.requested;
+				const auto requestReasons =
+					static_cast<ShaderInjectionRequestReason>(
+						runtime.requestReasons.load(
+							std::memory_order_relaxed));
+				if (HasShaderInjectionRequestReason(
+						requestReasons,
+						ShaderInjectionRequestReason::
+							kFeatureContributor)) {
+					++summary.requestedByFeatureContributor;
+				}
+				if (HasShaderInjectionRequestReason(
+						requestReasons,
+						ShaderInjectionRequestReason::
+							kBaselineOwnership)) {
+					++summary.requestedByBaselineOwnership;
+				}
+				if (HasShaderInjectionRequestReason(
+						requestReasons,
+						ShaderInjectionRequestReason::
+							kDeveloperForceOn)) {
+					++summary.requestedByDeveloperForceOn;
+				}
+				summary.matches += runtime.matches.load(std::memory_order_relaxed);
+				summary.substitutions += runtime.substitutions.load(std::memory_order_relaxed);
+				summary.compileFailures +=
+					runtime.compileFailures.load(
+						std::memory_order_relaxed);
+				summary.passthroughNotReady +=
+					runtime.passthroughNotReady.load(
+						std::memory_order_relaxed);
+				summary.passthroughDisabled +=
+					runtime.passthroughDisabled.load(
+						std::memory_order_relaxed);
+				summary.dispatches += runtime.dispatches.load(std::memory_order_relaxed);
 			}
-			if (HasShaderInjectionRequestReason(
-					requestReasons,
-					ShaderInjectionRequestReason::
-						kBaselineOwnership)) {
-				++summary.requestedByBaselineOwnership;
-			}
-			if (HasShaderInjectionRequestReason(
-					requestReasons,
-					ShaderInjectionRequestReason::
-						kDeveloperForceOn)) {
-				++summary.requestedByDeveloperForceOn;
-			}
-			summary.matches += runtime.matches.load(std::memory_order_relaxed);
-			summary.substitutions += runtime.substitutions.load(std::memory_order_relaxed);
-			summary.passthroughCompileFail +=
-				runtime.passthroughCompileFail.load(
-					std::memory_order_relaxed);
-			summary.passthroughNotReady +=
-				runtime.passthroughNotReady.load(
-					std::memory_order_relaxed);
-			summary.passthroughDisabled +=
-				runtime.passthroughDisabled.load(
-					std::memory_order_relaxed);
-			summary.dispatches += runtime.dispatches.load(std::memory_order_relaxed);
 		}
+		const auto observations = CollectNativeVariantObservations();
+		summary.variantsObserved = observations.observed;
+		summary.variantsPending = observations.pending;
+		summary.variantsReady = observations.ready;
+		summary.variantsFailed = observations.failed;
+		summary.variantsUnsupported = observations.unsupported;
 		summary.computeBridge = GetComputeDispatchBridgeStatus();
 		return summary;
 	}

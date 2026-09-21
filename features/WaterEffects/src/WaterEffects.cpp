@@ -378,31 +378,36 @@ namespace cs::features
 			return false;
 		}
 
-		for (const auto target : {
-				 cs::engine::ShaderInjectionTarget::kBsdfLight,
-				 cs::engine::ShaderInjectionTarget::kBsdfComposite }) {
-			const auto snapshot =
-				cs::engine::GetShaderInjectionTargetSnapshot(target);
-			const auto define = snapshot.defines.find(
-				cs::engine::shader_injection_defines::kWaterEffects);
-			const bool contributed =
-				define != snapshot.defines.end() && define->second == "1";
-			if (!snapshot.requested
-				|| !snapshot.compileComplete
-				|| !snapshot.swappable
-				|| snapshot.slotCollision
-				|| !contributed) {
-				a_error = "'" + snapshot.name
-					+ "' cannot deliver water caustics (requested="
-					+ std::to_string(snapshot.requested)
-					+ " compile_complete="
-					+ std::to_string(snapshot.compileComplete)
-					+ " swappable=" + std::to_string(snapshot.swappable)
-					+ " slot_collision=" + std::to_string(snapshot.slotCollision)
-					+ " contributed=" + std::to_string(contributed) + ")";
-				SetValidationDetail(a_error);
-				return false;
+		const std::array routes{
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target = cs::engine::ShaderInjectionTarget::kBsdfLight,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "WaterEffects",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kWaterEffects, "1" }
+				}
+			},
+			cs::engine::ShaderInjectionRouteRequirement{
+				.target =
+					cs::engine::ShaderInjectionTarget::kBsdfComposite,
+				.stages = cs::engine::ShaderStageBit(
+					cs::engine::ShaderStage::kPixel),
+				.contributor = "WaterEffects",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kWaterEffects, "1" },
+					{
+						cs::engine::shader_injection_defines::
+							kWaterEffectsFullscreenDebug,
+						"1"
+					}
+				}
 			}
+		};
+		if (!cs::engine::ValidateShaderInjectionRoutes(
+				"water caustics", routes, a_error)) {
+			SetValidationDetail(a_error);
+			return false;
 		}
 
 		SetValidationDetail({});
@@ -552,13 +557,32 @@ namespace cs::features
 				"injection_operational",
 				_injectionsOperational.load(std::memory_order_relaxed))
 			.Field("injection_requested", lightSnapshot.requested)
-			.Field("injection_compile_complete", lightSnapshot.compileComplete)
+			.Field("injection_published", lightSnapshot.published)
 			.Field(
-				"injection_compile_error",
-				lightSnapshot.compileError.empty() ?
+				"injection_publication_error",
+				lightSnapshot.publicationError.empty() ?
 					"none" :
-					lightSnapshot.compileError)
-			.Field("injection_swappable", lightSnapshot.swappable)
+					lightSnapshot.publicationError)
+			.Field(
+				"injection_variants_observed",
+				static_cast<std::int64_t>(
+					lightSnapshot.variantsObserved))
+			.Field(
+				"injection_variants_pending",
+				static_cast<std::int64_t>(
+					lightSnapshot.variantsPending))
+			.Field(
+				"injection_variants_ready",
+				static_cast<std::int64_t>(
+					lightSnapshot.variantsReady))
+			.Field(
+				"injection_variants_failed",
+				static_cast<std::int64_t>(
+					lightSnapshot.variantsFailed))
+			.Field(
+				"injection_variants_unsupported",
+				static_cast<std::int64_t>(
+					lightSnapshot.variantsUnsupported))
 			.Field("injection_slot_collision", lightSnapshot.slotCollision)
 			.Field(
 				"caustics_binds",
