@@ -124,26 +124,6 @@ namespace cs::telemetry
 					static_cast<std::int64_t>(
 						summary.published))
 				.Field(
-					"variants_observed",
-					static_cast<std::int64_t>(
-						summary.variantsObserved))
-				.Field(
-					"variants_pending",
-					static_cast<std::int64_t>(
-						summary.variantsPending))
-				.Field(
-					"variants_ready",
-					static_cast<std::int64_t>(
-						summary.variantsReady))
-				.Field(
-					"variants_failed",
-					static_cast<std::int64_t>(
-						summary.variantsFailed))
-				.Field(
-					"variants_unsupported",
-					static_cast<std::int64_t>(
-						summary.variantsUnsupported))
-				.Field(
 					"requested_by_feature_contributor",
 					static_cast<std::int64_t>(
 						summary.requestedByFeatureContributor))
@@ -160,8 +140,8 @@ namespace cs::telemetry
 					"replacements",
 					TomlInteger(summary.substitutions))
 				.Field(
-					"variant_compile_failures",
-					TomlInteger(summary.compileFailures))
+					"passthrough_compile_failed",
+					TomlInteger(summary.passthroughCompileFail))
 				.Field(
 					"passthrough_not_ready",
 					TomlInteger(summary.passthroughNotReady))

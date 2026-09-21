@@ -512,26 +512,6 @@ namespace cs::features
 			.Field("injection_requested", injection.requested)
 			.Field(
 				"injection_published", injection.published)
-			.Field(
-				"injection_variants_observed",
-				static_cast<std::int64_t>(
-					injection.variantsObserved))
-			.Field(
-				"injection_variants_pending",
-				static_cast<std::int64_t>(
-					injection.variantsPending))
-			.Field(
-				"injection_variants_ready",
-				static_cast<std::int64_t>(
-					injection.variantsReady))
-			.Field(
-				"injection_variants_failed",
-				static_cast<std::int64_t>(
-					injection.variantsFailed))
-			.Field(
-				"injection_variants_unsupported",
-				static_cast<std::int64_t>(
-					injection.variantsUnsupported))
 			.Field("injection_slot_collision", injection.slotCollision)
 			.Field(
 				"injection_matches",
@@ -543,9 +523,9 @@ namespace cs::features
 				"injection_dispatches",
 				static_cast<std::int64_t>(injection.dispatches))
 			.Field(
-				"injection_variant_compile_failures",
+				"injection_passthrough_compile_failed",
 				static_cast<std::int64_t>(
-					injection.compileFailures))
+					injection.passthroughCompileFail))
 			.Field(
 				"injection_passthrough_not_ready",
 				static_cast<std::int64_t>(

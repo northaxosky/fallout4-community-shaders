@@ -365,26 +365,6 @@ namespace cs::features
 				snapshot.publicationError.empty() ?
 					"none" :
 					snapshot.publicationError)
-			.Field(
-				"injection_variants_observed",
-				static_cast<std::int64_t>(
-					snapshot.variantsObserved))
-			.Field(
-				"injection_variants_pending",
-				static_cast<std::int64_t>(
-					snapshot.variantsPending))
-			.Field(
-				"injection_variants_ready",
-				static_cast<std::int64_t>(
-					snapshot.variantsReady))
-			.Field(
-				"injection_variants_failed",
-				static_cast<std::int64_t>(
-					snapshot.variantsFailed))
-			.Field(
-				"injection_variants_unsupported",
-				static_cast<std::int64_t>(
-					snapshot.variantsUnsupported))
 			.Field("injection_slot_collision", snapshot.slotCollision)
 			.Field(
 				"injection_matches",
@@ -402,28 +382,13 @@ namespace cs::features
 				"tiled_injection_substitutions",
 				static_cast<std::int64_t>(tiledSnapshot.substitutions))
 			.Field(
-				"tiled_injection_variants_pending",
+				"tiled_injection_passthrough_compile_failed",
 				static_cast<std::int64_t>(
-					tiledSnapshot.variantsPending))
+					tiledSnapshot.passthroughCompileFail))
 			.Field(
-				"tiled_injection_variants_ready",
+				"injection_passthrough_compile_failed",
 				static_cast<std::int64_t>(
-					tiledSnapshot.variantsReady))
-			.Field(
-				"tiled_injection_variants_failed",
-				static_cast<std::int64_t>(
-					tiledSnapshot.variantsFailed))
-			.Field(
-				"tiled_injection_variants_unsupported",
-				static_cast<std::int64_t>(
-					tiledSnapshot.variantsUnsupported))
-			.Field(
-				"tiled_injection_variant_compile_failures",
-				static_cast<std::int64_t>(
-					tiledSnapshot.compileFailures))
-			.Field(
-				"injection_variant_compile_failures",
-				static_cast<std::int64_t>(snapshot.compileFailures))
+					snapshot.passthroughCompileFail))
 			.Field(
 				"injection_passthrough_not_ready",
 				static_cast<std::int64_t>(snapshot.passthroughNotReady))

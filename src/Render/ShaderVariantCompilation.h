@@ -11,7 +11,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -23,11 +22,6 @@ namespace cs::engine
 		kPending,
 		kFailed
 	};
-
-	using ShaderVariantCompilationCompletion =
-		std::function<void(
-			ShaderVariantCompilationState,
-			std::string_view)>;
 
 	struct ShaderVariantCompilationRequest
 	{
@@ -41,7 +35,6 @@ namespace cs::engine
 		std::uint32_t descriptor = 0;
 		std::string owner;
 		std::uint64_t sourceGeneration = 0;
-		ShaderVariantCompilationCompletion completion;
 	};
 
 	class ShaderVariantCompilationHandle

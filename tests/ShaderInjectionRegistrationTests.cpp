@@ -15,8 +15,6 @@
 #include <iostream>
 #include <map>
 #include <memory>
-#include <mutex>
-#include <span>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
@@ -33,19 +31,7 @@ namespace
 	std::optional<bool> activeComputeVariantDefine;
 	std::array<winrt::com_ptr<ID3D11Buffer>, 2> publishedComputeBuffers;
 	std::atomic<std::uint32_t> compilationAttempts{ 0 };
-	std::atomic<std::uint32_t> compilationInvalidations{ 0 };
 	bool forceCompilationFailure = false;
-	bool holdCompilationPending = false;
-	struct CompilationRequestSnapshot
-	{
-		cs::engine::ShaderStage stage =
-			cs::engine::ShaderStage::kPixel;
-		std::vector<std::pair<std::string, std::string>> defines;
-		std::uint32_t descriptor = 0;
-		std::string owner;
-	};
-	std::mutex compilationRequestsMutex;
-	std::vector<CompilationRequestSnapshot> compilationRequests;
 
 	struct TestNativeMacro
 	{
@@ -63,126 +49,41 @@ namespace
 		return a_output;
 	}
 
-	template <class T>
-	struct SyntheticShaderMapEntry
-	{
-		T value = nullptr;
-		const void* next = nullptr;
-	};
-
-	template <class TMap, class T>
-	void SetSingleShaderMapEntry(
-		TMap& a_map,
-		SyntheticShaderMapEntry<T>& a_entry,
-		T a_value)
-	{
-		static_assert(sizeof(TMap) == 0x30);
-		static_assert(sizeof(SyntheticShaderMapEntry<T>) == 0x10);
-		std::fill_n(
-			reinterpret_cast<std::byte*>(&a_map),
-			sizeof(a_map),
-			std::byte{});
-		constexpr std::uint32_t capacity = 1;
-		constexpr std::uint32_t free = 0;
-		const auto sentinel =
-			reinterpret_cast<const void*>(std::uintptr_t{ 1 });
-		a_entry = {
-			.value = a_value,
-			.next = sentinel
-		};
-		const auto entries = &a_entry;
-		auto* mapBytes = reinterpret_cast<std::byte*>(&a_map);
-		std::memcpy(mapBytes + 0x0C, &capacity, sizeof(capacity));
-		std::memcpy(mapBytes + 0x10, &free, sizeof(free));
-		std::memcpy(mapBytes + 0x18, &sentinel, sizeof(sentinel));
-		std::memcpy(mapBytes + 0x28, &entries, sizeof(entries));
-	}
-
-	void SetSyntheticShaderFilename(
-		std::span<std::byte> a_storage,
-		const char* a_filename,
-		bool a_modern)
-	{
-		const auto offset = a_modern ? 0x188U : 0x110U;
-		std::memcpy(
-			a_storage.data() + offset,
-			&a_filename,
-			sizeof(a_filename));
-	}
-
 	class TestCompilationHandle final :
 		public cs::engine::ShaderVariantCompilationHandle
 	{
 	public:
 		TestCompilationHandle(
 			winrt::com_ptr<ID3D11DeviceChild> a_shader,
-			cs::engine::ShaderVariantCompilationCompletion a_completion) :
+			cs::engine::ShaderVariantCompilationState a_state =
+				cs::engine::ShaderVariantCompilationState::kReady,
+			std::string a_error = {}) :
 			shader(std::move(a_shader)),
-			completion(std::move(a_completion))
+			state(a_state),
+			error(std::move(a_error))
 		{}
 
 		cs::engine::ShaderVariantCompilationState
 			GetState() const noexcept override
 		{
-			return state.load(std::memory_order_acquire);
+			return state;
 		}
 
 		winrt::com_ptr<ID3D11DeviceChild> Acquire() noexcept override
 		{
-			return GetState()
-					== cs::engine::ShaderVariantCompilationState::kReady ?
-				shader :
-				nullptr;
+			return shader;
 		}
 
 		std::string GetError() const override
 		{
-			if (GetState()
-				!= cs::engine::ShaderVariantCompilationState::kFailed) {
-				return {};
-			}
-			const std::scoped_lock lock(mutex);
 			return error;
 		}
 
-		void Succeed()
-		{
-			Complete(cs::engine::ShaderVariantCompilationState::kReady, {});
-		}
-
-		void Fail(std::string a_error)
-		{
-			Complete(
-				cs::engine::ShaderVariantCompilationState::kFailed,
-				std::move(a_error));
-		}
-
 	private:
-		void Complete(
-			cs::engine::ShaderVariantCompilationState a_state,
-			std::string a_error)
-		{
-			cs::engine::ShaderVariantCompilationCompletion notify;
-			{
-				const std::scoped_lock lock(mutex);
-				error = std::move(a_error);
-				notify = std::move(completion);
-			}
-			state.store(a_state, std::memory_order_release);
-			if (notify)
-				notify(a_state, error);
-		}
-
 		winrt::com_ptr<ID3D11DeviceChild> shader;
-		std::atomic<cs::engine::ShaderVariantCompilationState> state{
-			cs::engine::ShaderVariantCompilationState::kPending
-		};
-		mutable std::mutex mutex;
+		cs::engine::ShaderVariantCompilationState state;
 		std::string error;
-		cs::engine::ShaderVariantCompilationCompletion completion;
 	};
-
-	std::shared_ptr<TestCompilationHandle> pendingCompilation;
 
 	class TestCompilationCache final :
 		public cs::engine::ShaderVariantCompilationCache
@@ -193,26 +94,17 @@ namespace
 		{
 			using namespace cs::engine;
 			compilationAttempts.fetch_add(1, std::memory_order_relaxed);
-			{
-				const std::scoped_lock lock(compilationRequestsMutex);
-				compilationRequests.push_back({
-					.stage = a_request.stage,
-					.defines = a_request.defines,
-					.descriptor = a_request.descriptor,
-					.owner = a_request.owner
-				});
-			}
 			if (!a_request.device) {
-				auto handle = std::make_shared<TestCompilationHandle>(
-					nullptr, std::move(a_request.completion));
-				handle->Fail("missing test device");
-				return handle;
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					"missing test device");
 			}
 			if (forceCompilationFailure) {
-				auto handle = std::make_shared<TestCompilationHandle>(
-					nullptr, std::move(a_request.completion));
-				handle->Fail("controlled native compilation failure");
-				return handle;
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					"controlled native compilation failure");
 			}
 
 			const auto profile =
@@ -258,10 +150,10 @@ namespace
 						static_cast<const char*>(errors->GetBufferPointer()),
 						errors->GetBufferSize()) :
 					"test shader compilation failed";
-				auto handle = std::make_shared<TestCompilationHandle>(
-					nullptr, std::move(a_request.completion));
-				handle->Fail(error);
-				return handle;
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					error);
 			}
 
 			winrt::com_ptr<ID3D11DeviceChild> shader;
@@ -295,27 +187,17 @@ namespace
 					shader.attach(typed.detach());
 			}
 			if (FAILED(createResult) || !shader) {
-				auto handle = std::make_shared<TestCompilationHandle>(
-					nullptr, std::move(a_request.completion));
-				handle->Fail("test shader creation failed");
-				return handle;
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					"test shader creation failed");
 			}
 
-			auto handle = std::make_shared<TestCompilationHandle>(
-				std::move(shader), std::move(a_request.completion));
-			if (holdCompilationPending) {
-				pendingCompilation = handle;
-			} else {
-				handle->Succeed();
-			}
-			return handle;
+			return std::make_shared<TestCompilationHandle>(
+				std::move(shader));
 		}
 
-		void Invalidate() override
-		{
-			compilationInvalidations.fetch_add(
-				1, std::memory_order_relaxed);
-		}
+		void Invalidate() override {}
 
 		void Stop() noexcept override {}
 	};
@@ -647,18 +529,6 @@ namespace
 				standaloneComputeStorage.data())
 				== standaloneName,
 			"standalone compute owner name offset was not selected");
-		alignas(std::max_align_t)
-			std::array<std::byte, 0x20> shaderStreamStorage{};
-		auto* shaderStream = reinterpret_cast<RE::BSIStream*>(
-			shaderStreamStorage.data());
-		Expect(
-			!native::ShaderArchiveStreamHasPayload(nullptr)
-				&& !native::ShaderArchiveStreamHasPayload(shaderStream),
-			"empty shader archive stream passed the payload gate");
-		shaderStreamStorage[0x10] = std::byte{ 1 };
-		Expect(
-			native::ShaderArchiveStreamHasPayload(shaderStream),
-			"shader archive stream payload byte was not translated");
 		alignas(std::max_align_t)
 			std::array<std::byte, 0x260> imageSpaceStorage{};
 		auto* imageSpaceShader = reinterpret_cast<RE::BSShader*>(
@@ -1018,21 +888,6 @@ namespace
 		Expect(
 			!RegisterReplacement(std::move(duplicateSampler)),
 			"duplicate s13 claim was accepted");
-
-		winrt::com_ptr<ID3D11Device> device;
-		winrt::com_ptr<ID3D11DeviceContext> context;
-		Expect(
-			CreateWarpDevice(device, context),
-			"could not create claim-ledger WARP device");
-		if (!device)
-			return;
-		FreezeAndCompileShaderInjections(device.get());
-		std::string error;
-		Expect(
-			!ValidateShaderInjectionRoutes("ledger-first", error)
-				&& error.find("stages=pixel") != std::string::npos
-				&& error.find("LEDGER_TEST=1") != std::string::npos,
-			"registered stage and define loss was not diagnosed after freeze");
 	}
 
 	void CheckLazyPreparationDoesNotDeadlock()
@@ -1203,416 +1058,6 @@ namespace
 		}
 	}
 
-	void CheckNativeLoadPrequeue()
-	{
-		using namespace cs::engine;
-		winrt::com_ptr<ID3D11Device> device;
-		winrt::com_ptr<ID3D11DeviceContext> context;
-		Expect(
-			CreateWarpDevice(device, context),
-			"could not create native prequeue WARP device");
-		if (!device)
-			return;
-
-		compilationAttempts.store(0, std::memory_order_relaxed);
-		compilationInvalidations.store(0, std::memory_order_relaxed);
-		forceCompilationFailure = false;
-		holdCompilationPending = true;
-		pendingCompilation.reset();
-		{
-			const std::scoped_lock lock(compilationRequestsMutex);
-			compilationRequests.clear();
-		}
-		SetPixelShaderSwapBrokerDevice(device.get());
-		Expect(
-			SetBaselineShaderOwnership(
-				ShaderInjectionTarget::kDeferredPrepass, true)
-				&& SetBaselineShaderOwnership(
-					ShaderInjectionTarget::kImageSpace, true)
-				&& SetBaselineShaderOwnership(
-					ShaderInjectionTarget::kFaceCustomization, true)
-				&& SetBaselineShaderOwnership(
-					ShaderInjectionTarget::kBsdfLight, true),
-			"could not enable native prequeue targets");
-
-		constexpr bool modern = true;
-		alignas(std::max_align_t)
-			std::array<std::byte, 0x260> prepassStorage{};
-		auto* prepassShader = reinterpret_cast<RE::BSShader*>(
-			prepassStorage.data());
-		SetSyntheticShaderFilename(
-			prepassStorage, "DFPrePass", modern);
-		const ShaderFamilyDescriptor preFreezeDescriptor{
-			.target = ShaderInjectionTarget::kDeferredPrepass,
-			.stage = ShaderStage::kPixel,
-			.descriptor = 1U << 13,
-			.nativeName = "DFPrePass",
-			.forceEarlyDepthStencil = true
-		};
-		const auto earlyBytecode = CompileStrippedShader(
-			"[earlydepthstencil] float4 main() : SV_Target { return 1.0; }",
-			"ps_5_0");
-		winrt::com_ptr<ID3D11PixelShader> nativePrepassShader;
-		if (earlyBytecode) {
-			std::ignore = device->CreatePixelShader(
-				earlyBytecode->GetBufferPointer(),
-				earlyBytecode->GetBufferSize(),
-				nullptr,
-				nativePrepassShader.put());
-		}
-		RE::BSGraphics::PixelShader nativePrepass{};
-		nativePrepass.id = preFreezeDescriptor.descriptor;
-		nativePrepass.shader =
-			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
-				nativePrepassShader.get());
-		SyntheticShaderMapEntry<RE::BSGraphics::PixelShader*>
-			prepassPixelEntry;
-		SetSingleShaderMapEntry(
-			const_cast<native::PixelShaderMap&>(
-				native::PixelShadersForTesting(
-					prepassShader, modern)),
-			prepassPixelEntry,
-			static_cast<RE::BSGraphics::PixelShader*>(nullptr));
-		alignas(std::max_align_t)
-			std::array<std::byte, 0x20> streamStorage{};
-		auto* stream = reinterpret_cast<RE::BSIStream*>(
-			streamStorage.data());
-		ObserveNativeShaderForTesting(
-			prepassShader, stream, modern);
-		streamStorage[0x10] = std::byte{ 1 };
-		ObserveNativeShaderForTesting(
-			prepassShader, stream, modern);
-		Expect(
-			GetNativeVariantCacheStatsForTesting().entries == 0
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 0,
-			"payload-false or null post-load entries were retained");
-		prepassPixelEntry.value = &nativePrepass;
-		ObserveNativeShaderForTesting(
-			prepassShader, stream, modern);
-		Expect(
-			nativePrepassShader
-				&& GetNativeVariantCacheStatsForTesting().entries == 1
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 0,
-			"pre-freeze loader observation was not retained");
-
-		FreezeAndCompileShaderInjections(device.get());
-		const auto preFreezeHandle = pendingCompilation;
-		Expect(
-			compilationAttempts.load(std::memory_order_relaxed) == 1
-				&& preFreezeHandle,
-			"pre-freeze loader observation was not queued after publish");
-		ObserveNativeShaderForTesting(
-			prepassShader, stream, modern);
-		Expect(
-			compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 1
-				&& compilationInvalidations.load(
-					std::memory_order_relaxed)
-					== 0,
-			"ordinary repeated native load retried or invalidated a variant");
-		const auto preFreezeBinding =
-			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
-				preFreezeDescriptor,
-				0xFFFFFFFFU,
-				preFreezeDescriptor.descriptor,
-				nullptr,
-				&nativePrepass);
-		Expect(
-			nativePrepassShader
-				&& preFreezeBinding.pixel == &nativePrepass
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 1
-				&& pendingCompilation == preFreezeHandle,
-			"pending prequeued variant did not reuse its loader handle");
-
-		std::vector<CompilationRequestSnapshot> requests;
-		{
-			const std::scoped_lock lock(compilationRequestsMutex);
-			requests = compilationRequests;
-		}
-		const auto hasDefine = [](
-			const CompilationRequestSnapshot& a_request,
-			std::string_view a_name,
-			std::string_view a_value = "1") {
-			return std::ranges::find(
-				a_request.defines,
-				std::pair<std::string, std::string>(
-					a_name, a_value))
-				!= a_request.defines.end();
-		};
-		Expect(
-			requests.size() == 1
-				&& requests[0].stage == ShaderStage::kPixel
-				&& requests[0].descriptor
-					== preFreezeDescriptor.descriptor
-				&& requests[0].owner == "DFPrePass"
-				&& hasDefine(requests[0], "EARLYDEPTH"),
-			"prequeue and draw did not share early-depth compile identity");
-
-		alignas(std::max_align_t)
-			std::array<std::byte, 0x260> imageStorage{};
-		auto* imageShader = reinterpret_cast<RE::BSShader*>(
-			imageStorage.data());
-		std::array<std::uintptr_t, 18> imageVtable{};
-		imageVtable[17] =
-			reinterpret_cast<std::uintptr_t>(&EmitBlurMacros);
-		auto* imageVtablePointer = imageVtable.data();
-		std::memcpy(
-			imageStorage.data(),
-			&imageVtablePointer,
-			sizeof(imageVtablePointer));
-		const std::int32_t imageShaderType = 0xC;
-		std::memcpy(
-			imageStorage.data() + 0x18,
-			&imageShaderType,
-			sizeof(imageShaderType));
-		SetSyntheticShaderFilename(
-			imageStorage, "ISBrightPassBlur7", modern);
-		const char* imageSourceGroup = "ISBlur";
-		const char* imageClass =
-			"BSImagespaceShaderBrightPassBlur7";
-		std::memcpy(
-			imageStorage.data() + 0x240,
-			&imageClass,
-			sizeof(imageClass));
-		std::memcpy(
-			imageStorage.data() + 0x248,
-			&imageSourceGroup,
-			sizeof(imageSourceGroup));
-		const ShaderFamilyDescriptor postFreezeDescriptor{
-			.target = ShaderInjectionTarget::kImageSpace,
-			.stage = ShaderStage::kPixel,
-			.descriptor = 0,
-			.nativeName = "ISBrightPassBlur7",
-			.nativeClassName =
-				"BSImagespaceShaderBrightPassBlur7",
-			.nativeSourceGroup = "ISBlur",
-			.nativeMacros = {
-				{ "BRIGHTPASS", "" },
-				{ "TEXTAP", "7" }
-			}
-		};
-		RE::BSGraphics::PixelShader nativeImage{};
-		nativeImage.id = postFreezeDescriptor.descriptor;
-		nativeImage.shader =
-			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
-				std::uintptr_t{ 1 });
-		SyntheticShaderMapEntry<RE::BSGraphics::PixelShader*>
-			imagePixelEntry;
-		SetSingleShaderMapEntry(
-			const_cast<native::PixelShaderMap&>(
-				native::PixelShadersForTesting(
-					imageShader, modern)),
-			imagePixelEntry,
-			&nativeImage);
-		ObserveNativeShaderForTesting(
-			imageShader, stream, modern);
-		Expect(
-			compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 2,
-			"post-publish loader observation was not queued before draw");
-		const auto postFreezeHandle = pendingCompilation;
-		ObserveNativeShaderForTesting(
-			imageShader, stream, modern);
-		Expect(
-			postFreezeHandle
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 2
-				&& compilationInvalidations.load(
-					std::memory_order_relaxed)
-					== 0,
-			"repeated post-publish load did not reuse the cached variant");
-
-		const auto postFreezeBinding =
-			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
-				postFreezeDescriptor,
-				0xFFFFFFFFU,
-				postFreezeDescriptor.descriptor,
-				nullptr,
-				&nativeImage);
-		Expect(
-			postFreezeBinding.pixel == &nativeImage
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 2
-				&& pendingCompilation == postFreezeHandle,
-			"post-publish draw did not reuse the prequeue handle");
-
-		{
-			const std::scoped_lock lock(compilationRequestsMutex);
-			requests = compilationRequests;
-		}
-		Expect(
-			requests.size() == 2
-				&& requests[1].owner
-					== "BSImagespaceShaderBrightPassBlur7|ISBlur"
-				&& hasDefine(
-					requests[1],
-					"IMAGESPACE_TAPARRAY_TAP_COUNT",
-					"7")
-				&& hasDefine(
-					requests[1],
-					"IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE",
-					"1"),
-			"prequeue and draw did not share owner and native macro identity");
-
-		alignas(std::max_align_t)
-			std::array<std::byte, 0x1A0> faceStorage{};
-		auto* faceShader = reinterpret_cast<RE::BSShader*>(
-			faceStorage.data());
-		SetSyntheticShaderFilename(
-			faceStorage, "FaceCustomization", modern);
-		RE::BSGraphics::VertexShader nativeFaceVertex{};
-		nativeFaceVertex.shader =
-			reinterpret_cast<REX::W32::ID3D11VertexShader*>(
-				std::uintptr_t{ 1 });
-		RE::BSGraphics::PixelShader nativeFacePixel{};
-		nativeFacePixel.shader =
-			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
-				std::uintptr_t{ 2 });
-		SyntheticShaderMapEntry<RE::BSGraphics::VertexShader*>
-			faceVertexEntry;
-		SyntheticShaderMapEntry<RE::BSGraphics::PixelShader*>
-			facePixelEntry;
-		SetSingleShaderMapEntry(
-			const_cast<native::VertexShaderMap&>(
-				native::VertexShadersForTesting(faceShader, modern)),
-			faceVertexEntry,
-			&nativeFaceVertex);
-		SetSingleShaderMapEntry(
-			const_cast<native::PixelShaderMap&>(
-				native::PixelShadersForTesting(faceShader, modern)),
-			facePixelEntry,
-			&nativeFacePixel);
-		ObserveNativeShaderForTesting(
-			faceShader, stream, modern);
-		const auto faceStats =
-			GetNativeVariantCacheStatsForTesting();
-		{
-			const std::scoped_lock lock(compilationRequestsMutex);
-			requests = compilationRequests;
-		}
-		Expect(
-			compilationAttempts.load(std::memory_order_relaxed) == 3
-				&& faceStats.entries == 3
-				&& faceStats.unsupported == 0
-				&& requests.size() == 3
-				&& requests[2].stage == ShaderStage::kVertex
-				&& requests[2].owner == "FaceCustomization",
-			"loader prequeue ignored the target's supported stage mask");
-
-		const ShaderFamilyDescriptor firstStageEntry{
-			.target = ShaderInjectionTarget::kBsdfLight,
-			.stage = ShaderStage::kPixel,
-			.descriptor = 0x04020080U,
-			.nativeName = "BSDFLightShader"
-		};
-		auto secondStageEntry = firstStageEntry;
-		secondStageEntry.descriptor = 0x04020000U;
-		Expect(
-			QueueNativeShaderVariantForTesting(firstStageEntry)
-				&& QueueNativeShaderVariantForTesting(
-					secondStageEntry),
-			"BSDFLight native stage aliases were not queued");
-		const auto lightHandle = pendingCompilation;
-		const auto lightStats =
-			GetNativeVariantCacheStatsForTesting();
-		{
-			const std::scoped_lock lock(compilationRequestsMutex);
-			requests = compilationRequests;
-		}
-		Expect(
-			lightHandle
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 5
-				&& lightStats.entries == 5
-				&& requests.size() == 5
-				&& requests[3].descriptor
-					== firstStageEntry.descriptor
-				&& requests[3].stage == requests[4].stage
-				&& requests[3].defines == requests[4].defines
-				&& requests[3].descriptor
-					!= requests[4].descriptor
-				&& requests[4].descriptor
-					== secondStageEntry.descriptor
-				&& requests[3].owner == requests[4].owner
-				&& hasDefine(
-					requests[3],
-					"BSDFLIGHT_PS_CHARACTER_LIGHT")
-				&& hasDefine(requests[3], "CHARACTER_LIGHT")
-				&& hasDefine(requests[3], "DIRSPLITS", "2"),
-			"BSDFLight aliases did not preserve distinct literal compile requests");
-
-		RE::BSGraphics::PixelShader nativeLight{};
-		nativeLight.id = firstStageEntry.descriptor;
-		nativeLight.shader =
-			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
-				std::uintptr_t{ 3 });
-		const auto beforeLightBinding =
-			GetShaderInjectionTargetSnapshot(
-				ShaderInjectionTarget::kBsdfLight);
-		const auto lightBinding =
-			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
-				firstStageEntry,
-				0xFFFFFFFFU,
-				firstStageEntry.descriptor,
-				nullptr,
-				&nativeLight);
-		const auto matchingLightBinding =
-			GetShaderInjectionTargetSnapshot(
-				ShaderInjectionTarget::kBsdfLight);
-		RE::BSGraphics::PixelShader secondNativeLight{};
-		secondNativeLight.id = secondStageEntry.descriptor;
-		secondNativeLight.shader =
-			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
-				std::uintptr_t{ 4 });
-		const auto secondBinding =
-			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
-				secondStageEntry,
-				0xFFFFFFFFU,
-				secondStageEntry.descriptor,
-				nullptr,
-				&secondNativeLight);
-		const auto secondLightBinding =
-			GetShaderInjectionTargetSnapshot(
-				ShaderInjectionTarget::kBsdfLight);
-		std::ignore =
-			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
-				firstStageEntry,
-				0xFFFFFFFFU,
-				secondStageEntry.descriptor,
-				nullptr,
-				&nativeLight);
-		const auto mismatchedLightBinding =
-			GetShaderInjectionTargetSnapshot(
-				ShaderInjectionTarget::kBsdfLight);
-		Expect(
-			lightBinding.pixel == &nativeLight
-				&& secondBinding.pixel == &secondNativeLight
-				&& pendingCompilation == lightHandle
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 5
-				&& matchingLightBinding.matches
-					== beforeLightBinding.matches + 1
-				&& secondLightBinding.matches
-					== matchingLightBinding.matches + 1
-				&& mismatchedLightBinding.matches
-					== secondLightBinding.matches,
-			"BSDFLight draw alias reuse bypassed the native wrapper ID guard");
-		holdCompilationPending = false;
-		pendingCompilation.reset();
-	}
-
 	void CheckNativeVariantOutcomeCaching()
 	{
 		using namespace cs::engine;
@@ -1640,20 +1085,6 @@ namespace
 			.descriptor = 0,
 			.nativeName = "BSLightingShader"
 		};
-		Expect(
-			QueueNativeShaderVariantForTesting(failed),
-			"failed native compilation was not queued");
-		Expect(
-			compilationAttempts.load(std::memory_order_relaxed) == 1
-				&& GetShaderInjectionTargetSnapshot(
-					ShaderInjectionTarget::kBsLighting)
-					.variantsFailed
-					== 1
-				&& GetShaderInjectionTargetSnapshot(
-					ShaderInjectionTarget::kBsLighting)
-					.compileFailures
-					== 1,
-			"queued native failure was not diagnosed before a draw lookup");
 		for (std::size_t index = 0; index < 8; ++index) {
 			Expect(
 				PrepareNativeShaderVariantForTesting(failed) == nullptr,
@@ -1664,7 +1095,7 @@ namespace
 				ShaderInjectionTarget::kBsLighting);
 		Expect(
 			compilationAttempts.load(std::memory_order_relaxed) == 1
-				&& failedSnapshot.compileFailures == 1,
+				&& failedSnapshot.passthroughCompileFail == 1,
 			"repeated failed native requests retried or diagnosed more than once");
 
 		const ShaderFamilyDescriptor unsupported{
@@ -1679,16 +1110,11 @@ namespace
 				"unsupported native descriptor published a shader");
 		}
 		const auto stats = GetNativeVariantCacheStatsForTesting();
-		const auto unsupportedSnapshot =
-			GetShaderInjectionTargetSnapshot(
-				ShaderInjectionTarget::kImageSpace);
 		Expect(
 			compilationAttempts.load(std::memory_order_relaxed) == 1
 				&& stats.entries == 2
 				&& stats.compilation == 1
-				&& stats.unsupported == 1
-				&& unsupportedSnapshot.variantsUnsupported == 1
-				&& unsupportedSnapshot.variantsFailed == 0,
+				&& stats.unsupported == 1,
 			"unsupported native requests were not retained as one terminal cache outcome");
 
 		InvalidateNativeShaderVariantCompilations();
@@ -1698,156 +1124,9 @@ namespace
 			compilationAttempts.load(std::memory_order_relaxed) == 2
 				&& GetShaderInjectionTargetSnapshot(
 					ShaderInjectionTarget::kBsLighting)
-					.compileFailures
+					.passthroughCompileFail
 					== 2,
 			"native invalidation did not permit exactly one fresh failed attempt");
-	}
-
-	void CheckRouteEligibilityAndVariantObservations()
-	{
-		using namespace cs::engine;
-		winrt::com_ptr<ID3D11Device> device;
-		winrt::com_ptr<ID3D11DeviceContext> context;
-		Expect(
-			CreateWarpDevice(device, context),
-			"could not create route-validation WARP device");
-		if (!device)
-			return;
-
-		ShaderReplacementRegistration contribution;
-		contribution.targetId = ShaderInjectionTarget::kBsLighting;
-		contribution.stages = ShaderStageBit(ShaderStage::kPixel);
-		contribution.contributor = "route-validation";
-		contribution.defines = {
-			{ "ROUTE_VALIDATION", "1" },
-			{ "ROUTE_DEBUG", "1" }
-		};
-		Expect(
-			RegisterReplacement(std::move(contribution)),
-			"could not register route-validation contribution");
-		FreezeAndCompileShaderInjections(device.get());
-
-		std::string error;
-		Expect(
-			ValidateShaderInjectionRoutes("route-validation", error),
-			"published route was rejected before any variant was observed");
-		auto snapshot = GetShaderInjectionTargetSnapshot(
-			ShaderInjectionTarget::kBsLighting);
-		Expect(
-			snapshot.requested
-				&& snapshot.published
-				&& snapshot.variantsObserved == 0
-				&& snapshot.variantsPending == 0
-				&& snapshot.variantsReady == 0
-				&& snapshot.variantsFailed == 0
-				&& snapshot.variantsUnsupported == 0,
-			"unobserved published route reported fabricated compilation state");
-
-		Expect(
-			!ValidateShaderInjectionRoutes("missing-contributor", error)
-				&& error.find("no shader routes")
-					!= std::string::npos,
-			"route validation accepted a missing contributor");
-
-		holdCompilationPending = true;
-		const ShaderFamilyDescriptor descriptor{
-			.target = ShaderInjectionTarget::kBsLighting,
-			.stage = ShaderStage::kPixel,
-			.descriptor = 0,
-			.nativeName = "BSLightingShader"
-		};
-		Expect(
-			PrepareNativeShaderVariantForTesting(descriptor) == nullptr,
-			"pending native compilation replaced the stock shader");
-		RE::BSGraphics::PixelShader nativePixel{};
-		nativePixel.id = descriptor.descriptor;
-		const auto pendingBinding =
-			ResolveNativeGraphicsShaderBindingForTesting(
-				ShaderInjectionTarget::kBsLighting,
-				"BSLightingShader",
-				0xFFFFFFFFU,
-				descriptor.descriptor,
-				nullptr,
-				&nativePixel);
-		snapshot = GetShaderInjectionTargetSnapshot(
-			ShaderInjectionTarget::kBsLighting);
-		Expect(
-			pendingBinding.pixel == &nativePixel
-				&& snapshot.matches == 1
-				&& snapshot.substitutions == 0
-				&& snapshot.variantsObserved == 1
-				&& snapshot.variantsPending == 1
-				&& snapshot.variantsReady == 0
-				&& snapshot.variantsFailed == 0
-				&& ValidateShaderInjectionRoutes(
-					"route-validation", error),
-			"expected pending fallback changed route eligibility or terminal diagnostics");
-
-		Expect(
-			static_cast<bool>(pendingCompilation),
-			"pending compilation handle was not retained");
-		if (pendingCompilation)
-			pendingCompilation->Succeed();
-		holdCompilationPending = false;
-		winrt::com_ptr<ID3D11DeviceChild> replacement;
-		replacement.attach(
-			PrepareNativeShaderVariantForTesting(descriptor));
-		snapshot = GetShaderInjectionTargetSnapshot(
-			ShaderInjectionTarget::kBsLighting);
-		Expect(
-			replacement
-				&& snapshot.variantsObserved == 1
-				&& snapshot.variantsPending == 0
-				&& snapshot.variantsReady == 1
-				&& snapshot.variantsFailed == 0,
-			"completed native compilation did not report a truthful ready transition");
-		pendingCompilation.reset();
-	}
-
-	void CheckUnavailableRoute(
-		bool a_coreDisabled,
-		bool a_forceOff,
-		bool a_missingDevice)
-	{
-		using namespace cs::engine;
-		winrt::com_ptr<ID3D11Device> device;
-		winrt::com_ptr<ID3D11DeviceContext> context;
-		if (!a_missingDevice) {
-			Expect(
-				CreateWarpDevice(device, context),
-				"could not create unavailable-route WARP device");
-			if (!device)
-				return;
-		}
-
-		ShaderReplacementRegistration contribution;
-		contribution.targetId = ShaderInjectionTarget::kBsLighting;
-		contribution.stages = ShaderStageBit(ShaderStage::kPixel);
-		contribution.contributor = "unavailable-route";
-		contribution.defines = { { "UNAVAILABLE_ROUTE", "1" } };
-		Expect(
-			RegisterReplacement(std::move(contribution)),
-			"could not register unavailable-route contribution");
-		if (a_coreDisabled) {
-			Expect(
-				SetShaderInjectionEnabled(false),
-				"could not disable shader injection");
-		}
-		if (a_forceOff) {
-			Expect(
-				SetDeveloperShaderForceOffEnabled(true)
-					&& SetDeveloperShaderOverride(
-						ShaderInjectionTarget::kBsLighting,
-						DeveloperShaderOverride::kForceOff),
-				"could not force off shader route");
-		}
-		FreezeAndCompileShaderInjections(device.get());
-
-		std::string error;
-		Expect(
-			!ValidateShaderInjectionRoutes("unavailable-route", error)
-				&& !error.empty(),
-			"unavailable route passed eligibility validation");
 	}
 
 	class ExecutableDispatchFixture
@@ -2354,28 +1633,13 @@ namespace
 			SetBaselineShaderOwnership(
 				ShaderInjectionTarget::kDfTiledLighting, true),
 			"could not enable missing-hook baseline ownership");
-		ShaderReplacementRegistration contribution;
-		contribution.targetId = ShaderInjectionTarget::kDfTiledLighting;
-		contribution.stages = ShaderStageBit(ShaderStage::kCompute);
-		contribution.contributor = "compute-missing-hook";
-		contribution.defines = { { "COMPUTE_MISSING_HOOK", "1" } };
-		Expect(
-			RegisterReplacement(std::move(contribution)),
-			"could not register missing-hook compute contribution");
 		FreezeAndCompileShaderInjections(device.get());
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
-		std::string error;
 		Expect(
 			snapshot.requested
 				&& !snapshot.published
-				&& snapshot.variantsObserved == 0
-				&& snapshot.publicationError
-					== "RunComputeShader dispatch bridge is unavailable"
-				&& !ValidateShaderInjectionRoutes(
-					"compute-missing-hook", error)
-				&& error.find("dispatch bridge")
-					!= std::string::npos,
+				&& !snapshot.publicationError.empty(),
 			"compute ownership did not fail closed without the engine bridge");
 	}
 
@@ -2424,129 +1688,16 @@ namespace
 			"could not create baseline compute fixtures");
 		if (!stock || !output.uav)
 			return;
-		compilationAttempts.store(0, std::memory_order_relaxed);
-		Expect(
-			SetBaselineShaderOwnership(
-				ShaderInjectionTarget::kDfTiledLighting, true),
-			"could not enable baseline compute ownership");
-
-		alignas(std::max_align_t)
-			std::array<std::byte, 0x80> ownerStorage{};
-		const char* ownerName = "DFTiledLighting";
-		std::memcpy(
-			ownerStorage.data() + 0x18,
-			&ownerName,
-			sizeof(ownerName));
-		RE::BSGraphics::ComputeShader observedWrapper{};
-		observedWrapper.id = 0;
-		observedWrapper.shader =
-			reinterpret_cast<REX::W32::ID3D11ComputeShader*>(
-				stock.get());
-		SyntheticShaderMapEntry<RE::BSGraphics::ComputeShader*>
-			ownerEntry;
-		SetSingleShaderMapEntry(
-			const_cast<native::ComputeShaderMap&>(
-				native::StandaloneComputeShaders(ownerStorage.data())),
-			ownerEntry,
-			&observedWrapper);
-		alignas(std::max_align_t)
-			std::array<std::byte, 0x20> streamStorage{};
-		auto* stream = reinterpret_cast<RE::BSIStream*>(
-			streamStorage.data());
-		streamStorage[0x10] = std::byte{ 1 };
-		const char* indexBufferOwnerName = "IndexBufferOffsetCS";
-		std::memcpy(
-			ownerStorage.data() + 0x18,
-			&indexBufferOwnerName,
-			sizeof(indexBufferOwnerName));
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kImageSpace,
-			stream);
-		Expect(
-			GetNativeVariantCacheStatsForTesting().entries == 0,
-			"unproven standalone owner was proactively queued");
-		std::memcpy(
-			ownerStorage.data() + 0x18,
-			&ownerName,
-			sizeof(ownerName));
-		streamStorage[0x10] = std::byte{ 0 };
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kDfTiledLighting,
-			stream);
-		Expect(
-			GetNativeVariantCacheStatsForTesting().entries == 0
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 0,
-			"payloadless standalone load queued a replacement");
-		streamStorage[0x10] = std::byte{ 1 };
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kDfTiledLighting,
-			stream);
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kDfTiledLighting,
-			stream);
-		Expect(
-			GetNativeVariantCacheStatsForTesting().entries == 1
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 0,
-			"first-seen standalone load was lost or duplicated before freeze");
-		observedWrapper.id = 1;
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kDfTiledLighting,
-			stream);
-		observedWrapper.id = 2;
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kDfTiledLighting,
-			stream);
-		Expect(
-			GetNativeVariantCacheStatsForTesting().entries == 1,
-			"existing DFTiled final-kernel routes were proactively queued");
-		observedWrapper.id = 0;
-		FreezeAndCompileShaderInjections(device.get());
-		Expect(
-			compilationAttempts.load(std::memory_order_relaxed) == 1,
-			"standalone DFTiled CS0 was not queued after publish");
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kDfTiledLighting,
-			stream);
-		auto* prequeued =
-			ResolveNativeComputeShaderBinding(&observedWrapper);
-		Expect(
-			prequeued != &observedWrapper
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 1,
-			"repeated standalone load or draw did not reuse CS0 compilation");
-		observedWrapper.id = 3;
-		ObserveNativeComputeOwnerLoadForTesting(
-			ownerStorage.data(),
-			ShaderInjectionTarget::kDfTiledLighting,
-			stream);
-		const auto unsupportedStats =
-			GetNativeVariantCacheStatsForTesting();
-		Expect(
-			ResolveNativeComputeShaderBinding(&observedWrapper)
-					== &observedWrapper
-				&& compilationAttempts.load(
-					std::memory_order_relaxed)
-					== 1
-				&& unsupportedStats.entries == 2
-				&& unsupportedStats.unsupported == 1,
-			"unproven DFTiled CS3 did not remain native");
 		ObserveNativeComputeShaderForTesting(
 			ShaderInjectionTarget::kDfTiledLighting,
 			1,
 			"DFTiledLighting",
 			stock.get());
+		Expect(
+			SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kDfTiledLighting, true),
+			"could not enable baseline compute ownership");
+		FreezeAndCompileShaderInjections(device.get());
 
 		sharedDataBindCount = 0;
 		const auto before = GetComputeDispatchBridgeStatus();
@@ -2598,9 +1749,6 @@ namespace
 					nativeComputeBytecode.size())
 					== 0,
 			"compute replacement wrapper did not preserve native metadata");
-		Expect(
-			compilationAttempts.load(std::memory_order_relaxed) == 2,
-			"existing DFTiled final-kernel late bind regressed");
 		bridge.Dispatch(context.get(), 2, 1, 1);
 		const auto after = GetComputeDispatchBridgeStatus();
 		Expect(
@@ -2812,18 +1960,8 @@ int main(int argc, char** argv)
 		CheckObservedNativeBytecode();
 	if (mode == "--lazy-preparation")
 		CheckLazyPreparationDoesNotDeadlock();
-	if (mode == "--native-load-prequeue")
-		CheckNativeLoadPrequeue();
 	if (mode == "--native-outcome-cache")
 		CheckNativeVariantOutcomeCaching();
-	if (mode == "--route-validation")
-		CheckRouteEligibilityAndVariantObservations();
-	if (mode == "--route-core-disabled")
-		CheckUnavailableRoute(true, false, false);
-	if (mode == "--route-force-off")
-		CheckUnavailableRoute(false, true, false);
-	if (mode == "--route-missing-device")
-		CheckUnavailableRoute(false, false, true);
 	if (mode == "--dispatch-bridge")
 		CheckComputeDispatchBridge();
 	if (mode == "--compute-hooks-missing")

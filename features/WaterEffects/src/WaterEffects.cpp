@@ -537,26 +537,6 @@ namespace cs::features
 				lightSnapshot.publicationError.empty() ?
 					"none" :
 					lightSnapshot.publicationError)
-			.Field(
-				"injection_variants_observed",
-				static_cast<std::int64_t>(
-					lightSnapshot.variantsObserved))
-			.Field(
-				"injection_variants_pending",
-				static_cast<std::int64_t>(
-					lightSnapshot.variantsPending))
-			.Field(
-				"injection_variants_ready",
-				static_cast<std::int64_t>(
-					lightSnapshot.variantsReady))
-			.Field(
-				"injection_variants_failed",
-				static_cast<std::int64_t>(
-					lightSnapshot.variantsFailed))
-			.Field(
-				"injection_variants_unsupported",
-				static_cast<std::int64_t>(
-					lightSnapshot.variantsUnsupported))
 			.Field("injection_slot_collision", lightSnapshot.slotCollision)
 			.Field(
 				"caustics_binds",

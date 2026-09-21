@@ -21,7 +21,6 @@ struct ID3D11ComputeShader;
 struct ID3D11PixelShader;
 namespace RE
 {
-	class BSIStream;
 	class BSShader;
 	namespace BSGraphics
 	{
@@ -129,14 +128,9 @@ namespace cs::engine
 		std::size_t            contributors = 0;
 		ShaderInjectionDefines defines;
 		std::string            publicationError;
-		std::size_t            variantsObserved = 0;
-		std::size_t            variantsPending = 0;
-		std::size_t            variantsReady = 0;
-		std::size_t            variantsFailed = 0;
-		std::size_t            variantsUnsupported = 0;
 		std::uint64_t          matches = 0;
 		std::uint64_t          substitutions = 0;
-		std::uint64_t          compileFailures = 0;
+		std::uint64_t          passthroughCompileFail = 0;
 		std::uint64_t          passthroughNotReady = 0;
 		std::uint64_t          passthroughDisabled = 0;
 		std::uint64_t          dispatches = 0;
@@ -162,24 +156,20 @@ namespace cs::engine
 	{
 		std::size_t requested = 0;
 		std::size_t published = 0;
-		std::size_t variantsObserved = 0;
-		std::size_t variantsPending = 0;
-		std::size_t variantsReady = 0;
-		std::size_t variantsFailed = 0;
-		std::size_t variantsUnsupported = 0;
 		std::size_t requestedByFeatureContributor = 0;
 		std::size_t requestedByBaselineOwnership = 0;
 		std::size_t requestedByDeveloperForceOn = 0;
 		std::uint64_t matches = 0;
 		std::uint64_t substitutions = 0;
-		std::uint64_t compileFailures = 0;
+		std::uint64_t passthroughCompileFail = 0;
 		std::uint64_t passthroughNotReady = 0;
 		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
 		ComputeDispatchBridgeStatus computeBridge;
 	};
 
-	std::string DescribeShaderInjectionDefines(const ShaderInjectionDefines& a_defines);
+	std::string DescribeShaderInjectionDefines(
+		const ShaderInjectionDefines& a_defines);
 
 	std::optional<ShaderVariantCompilationDescriptor>
 		BuildEffectiveShaderCompileRequest(
@@ -228,19 +218,10 @@ namespace cs::engine
 			ID3D11DeviceChild* a_shader) noexcept;
 	ID3D11DeviceChild* PrepareNativeShaderVariantForTesting(
 		const ShaderFamilyDescriptor& a_descriptor) noexcept;
-	bool QueueNativeShaderVariantForTesting(
-		const ShaderFamilyDescriptor& a_descriptor) noexcept;
 	NativeGraphicsShaderBinding
 		ResolveNativeGraphicsShaderBindingForTesting(
 			ShaderInjectionTarget a_target,
 			std::string_view a_nativeName,
-			std::uint32_t a_vertexShaderId,
-			std::uint32_t a_pixelShaderId,
-			RE::BSGraphics::VertexShader* a_nativeVertex,
-			RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
-	NativeGraphicsShaderBinding
-		ResolveNativeGraphicsShaderBindingForDescriptorTesting(
-			const ShaderFamilyDescriptor& a_descriptor,
 			std::uint32_t a_vertexShaderId,
 			std::uint32_t a_pixelShaderId,
 			RE::BSGraphics::VertexShader* a_nativeVertex,
@@ -262,14 +243,6 @@ namespace cs::engine
 		std::uint32_t a_descriptor,
 		std::string_view a_nativeName,
 		ID3D11ComputeShader* a_shader) noexcept;
-	void ObserveNativeShaderForTesting(
-		RE::BSShader* a_shader,
-		const RE::BSIStream* a_stream,
-		bool a_modernLayout) noexcept;
-	void ObserveNativeComputeOwnerLoadForTesting(
-		const void* a_owner,
-		ShaderInjectionTarget a_target,
-		const RE::BSIStream* a_stream) noexcept;
 #endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,

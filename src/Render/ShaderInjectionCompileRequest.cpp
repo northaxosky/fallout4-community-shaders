@@ -69,7 +69,8 @@ namespace cs::engine
 		}
 	}
 
-	std::string DescribeShaderInjectionDefines(const ShaderInjectionDefines& a_defines)
+	std::string DescribeShaderInjectionDefines(
+		const ShaderInjectionDefines& a_defines)
 	{
 		std::string names;
 		for (const auto& [name, value] : a_defines) {

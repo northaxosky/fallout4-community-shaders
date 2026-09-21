@@ -254,9 +254,6 @@ namespace cs::engine
 					}
 
 					ShaderVariantCompilationOutput output;
-					auto completion =
-						std::move(task.request.completion);
-					task.request.completion = {};
 					try {
 						output = _compiler(std::move(task.request));
 					} catch (const std::exception& error) {
@@ -271,29 +268,11 @@ namespace cs::engine
 							!_stopped
 							&& task.generation == _generation;
 					}
-					if (publish) {
-						const auto state = output.shader ?
-							ShaderVariantCompilationState::kReady :
-							ShaderVariantCompilationState::kFailed;
+					if (publish)
 						task.handle->Complete(std::move(output));
-						if (completion) {
-							try {
-								if (state
-									== ShaderVariantCompilationState::kFailed) {
-									const auto error =
-										task.handle->GetError();
-									completion(state, error);
-								} else {
-									completion(state, {});
-								}
-							} catch (...) {
-								// Diagnostic observers must not terminate the worker.
-							}
-						}
-					} else {
+					else
 						task.handle->Fail(
 							"shader compilation invalidated");
-					}
 				}
 			}
 

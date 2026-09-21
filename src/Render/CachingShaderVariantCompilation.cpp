@@ -10,6 +10,7 @@
 #include <bit>
 #include <cstdio>
 #include <mutex>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -20,6 +21,50 @@ namespace cs::engine
 	namespace
 	{
 		auto* L = cs::log::Get("cs.render.shadercache");
+
+		constexpr std::string_view StageName(ShaderStage a_stage) noexcept
+		{
+			switch (a_stage) {
+			case ShaderStage::kVertex:
+				return "vertex";
+			case ShaderStage::kPixel:
+				return "pixel";
+			case ShaderStage::kCompute:
+				return "compute";
+			}
+			std::unreachable();
+		}
+
+		std::string DescribeDefines(
+			const std::vector<std::pair<std::string, std::string>>& a_defines)
+		{
+			std::string result;
+			for (const auto& [name, value] : a_defines) {
+				if (!result.empty())
+					result += ",";
+				result += name;
+				result += "=";
+				result += value;
+			}
+			return result.empty() ? "none" : result;
+		}
+
+		void LogCompilationFailure(
+			const ShaderVariantCompilationRequest& a_request,
+			std::string_view a_error)
+		{
+			L->error(
+				"Injected shader compile failed: owner='{}' family={} stage={} descriptor={:#010x} source='{}' entry='{}' profile='{}' defines='{}': {}",
+				a_request.owner.empty() ? "<unknown>" : a_request.owner,
+				a_request.familyId,
+				StageName(a_request.stage),
+				a_request.descriptor,
+				a_request.sourcePath.string(),
+				a_request.entryPoint,
+				a_request.profile,
+				DescribeDefines(a_request.defines),
+				a_error.empty() ? "shader compilation failed" : a_error);
+		}
 
 		shader_cache::ShaderCacheStage ToCacheStage(
 			ShaderStage a_stage) noexcept
@@ -149,6 +194,7 @@ namespace cs::engine
 			ShaderVariantCompilationOutput result;
 			if (!a_request.device) {
 				result.error = "no D3D11 device";
+				LogCompilationFailure(a_request, result.error);
 				return result;
 			}
 
@@ -161,6 +207,7 @@ namespace cs::engine
 				result.error = outcome.error.empty() ?
 					"shader compilation failed" :
 					std::move(outcome.error);
+				LogCompilationFailure(a_request, result.error);
 				return result;
 			}
 			if (!outcome.recordWritten
@@ -190,6 +237,7 @@ namespace cs::engine
 					result.error = outcome.error.empty() ?
 						createError :
 						std::move(outcome.error);
+					LogCompilationFailure(a_request, result.error);
 					return result;
 				}
 				created = CreateShaderChild(
@@ -203,6 +251,7 @@ namespace cs::engine
 
 			if (!created) {
 				result.error = std::move(createError);
+				LogCompilationFailure(a_request, result.error);
 				return result;
 			}
 			const std::string shaderName =
