@@ -106,6 +106,16 @@ namespace cs::engine
 				static_cast<const std::byte*>(a_owner) + 0x20);
 		}
 
+		// AE 1.11.240 REL 2318873 gates map publication on this byte.
+		[[nodiscard]] inline bool ShaderArchiveStreamHasPayload(
+			const RE::BSIStream* a_stream) noexcept
+		{
+			if (!a_stream)
+				return false;
+			return *(reinterpret_cast<const std::byte*>(a_stream) + 0x10)
+				!= std::byte{ 0 };
+		}
+
 		[[nodiscard]] inline const char*
 			StandaloneComputeOwnerName(const void* a_owner) noexcept
 		{

@@ -5,6 +5,7 @@
 #include "Log.h"
 #include "Plugin.h"
 #include "Render/Engine.h"
+#include "Render/ShaderInjection.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
@@ -1581,6 +1582,7 @@ namespace cs
 			a_error = "Failed to clear the shader cache; see the log.";
 			return false;
 		}
+		engine::InvalidateNativeShaderVariantCompilations();
 		L->info("Cleared {} shader cache entries from '{}'", removed, root.string());
 		ShowToast("Shader cache cleared", 2.5);
 		return true;

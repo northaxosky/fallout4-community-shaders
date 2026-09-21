@@ -801,6 +801,10 @@ target("ShaderInjectionRegistrationTests", function()
         runargs = "--lazy-preparation",
         run_timeout = 30000
     })
+    add_tests("ShaderInjectionNativeLoadPrequeue", {
+        runargs = "--native-load-prequeue",
+        run_timeout = 30000
+    })
     add_tests("ShaderInjectionNativeOutcomeCache", {
         runargs = "--native-outcome-cache",
         run_timeout = 30000

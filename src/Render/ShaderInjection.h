@@ -21,6 +21,7 @@ struct ID3D11ComputeShader;
 struct ID3D11PixelShader;
 namespace RE
 {
+	class BSIStream;
 	class BSShader;
 	namespace BSGraphics
 	{
@@ -235,6 +236,13 @@ namespace cs::engine
 			std::uint32_t a_pixelShaderId,
 			RE::BSGraphics::VertexShader* a_nativeVertex,
 			RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
+	NativeGraphicsShaderBinding
+		ResolveNativeGraphicsShaderBindingForDescriptorTesting(
+			const ShaderFamilyDescriptor& a_descriptor,
+			std::uint32_t a_vertexShaderId,
+			std::uint32_t a_pixelShaderId,
+			RE::BSGraphics::VertexShader* a_nativeVertex,
+			RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
 	RE::BSGraphics::VertexShader*
 		CacheNativeVertexReplacementWrapperForTesting(
 			RE::BSGraphics::VertexShader* a_nativeVertex,
@@ -252,6 +260,10 @@ namespace cs::engine
 		std::uint32_t a_descriptor,
 		std::string_view a_nativeName,
 		ID3D11ComputeShader* a_shader) noexcept;
+	void ObserveNativeShaderForTesting(
+		RE::BSShader* a_shader,
+		const RE::BSIStream* a_stream,
+		bool a_modernLayout) noexcept;
 #endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
@@ -266,7 +278,9 @@ namespace cs::engine
 		RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
 	RE::BSGraphics::ComputeShader* ResolveNativeComputeShaderBinding(
 		RE::BSGraphics::ComputeShader* a_nativeCompute) noexcept;
-	void ObserveNativeShader(RE::BSShader* a_shader) noexcept;
+	void ObserveNativeShader(
+		RE::BSShader* a_shader,
+		const RE::BSIStream* a_stream) noexcept;
 	void ObserveNativeComputeOwner(
 		const void* a_owner,
 		ShaderInjectionTarget a_target,

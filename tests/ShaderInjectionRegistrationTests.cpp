@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
@@ -32,8 +33,19 @@ namespace
 	std::optional<bool> activeComputeVariantDefine;
 	std::array<winrt::com_ptr<ID3D11Buffer>, 2> publishedComputeBuffers;
 	std::atomic<std::uint32_t> compilationAttempts{ 0 };
+	std::atomic<std::uint32_t> compilationInvalidations{ 0 };
 	bool forceCompilationFailure = false;
 	bool holdCompilationPending = false;
+	struct CompilationRequestSnapshot
+	{
+		cs::engine::ShaderStage stage =
+			cs::engine::ShaderStage::kPixel;
+		std::vector<std::pair<std::string, std::string>> defines;
+		std::uint32_t descriptor = 0;
+		std::string owner;
+	};
+	std::mutex compilationRequestsMutex;
+	std::vector<CompilationRequestSnapshot> compilationRequests;
 
 	struct TestNativeMacro
 	{
@@ -49,6 +61,53 @@ namespace
 		a_output[1] = { "BRIGHTPASS", "" };
 		a_output[2] = { nullptr, nullptr };
 		return a_output;
+	}
+
+	template <class T>
+	struct SyntheticShaderMapEntry
+	{
+		T value = nullptr;
+		const void* next = nullptr;
+	};
+
+	template <class TMap, class T>
+	void SetSingleShaderMapEntry(
+		TMap& a_map,
+		SyntheticShaderMapEntry<T>& a_entry,
+		T a_value)
+	{
+		static_assert(sizeof(TMap) == 0x30);
+		static_assert(sizeof(SyntheticShaderMapEntry<T>) == 0x10);
+		std::fill_n(
+			reinterpret_cast<std::byte*>(&a_map),
+			sizeof(a_map),
+			std::byte{});
+		constexpr std::uint32_t capacity = 1;
+		constexpr std::uint32_t free = 0;
+		const auto sentinel =
+			reinterpret_cast<const void*>(std::uintptr_t{ 1 });
+		a_entry = {
+			.value = a_value,
+			.next = sentinel
+		};
+		const auto entries = &a_entry;
+		auto* mapBytes = reinterpret_cast<std::byte*>(&a_map);
+		std::memcpy(mapBytes + 0x0C, &capacity, sizeof(capacity));
+		std::memcpy(mapBytes + 0x10, &free, sizeof(free));
+		std::memcpy(mapBytes + 0x18, &sentinel, sizeof(sentinel));
+		std::memcpy(mapBytes + 0x28, &entries, sizeof(entries));
+	}
+
+	void SetSyntheticShaderFilename(
+		std::span<std::byte> a_storage,
+		const char* a_filename,
+		bool a_modern)
+	{
+		const auto offset = a_modern ? 0x188U : 0x110U;
+		std::memcpy(
+			a_storage.data() + offset,
+			&a_filename,
+			sizeof(a_filename));
 	}
 
 	class TestCompilationHandle final :
@@ -134,6 +193,15 @@ namespace
 		{
 			using namespace cs::engine;
 			compilationAttempts.fetch_add(1, std::memory_order_relaxed);
+			{
+				const std::scoped_lock lock(compilationRequestsMutex);
+				compilationRequests.push_back({
+					.stage = a_request.stage,
+					.defines = a_request.defines,
+					.descriptor = a_request.descriptor,
+					.owner = a_request.owner
+				});
+			}
 			if (!a_request.device) {
 				auto handle = std::make_shared<TestCompilationHandle>(
 					nullptr, std::move(a_request.completion));
@@ -243,7 +311,11 @@ namespace
 			return handle;
 		}
 
-		void Invalidate() override {}
+		void Invalidate() override
+		{
+			compilationInvalidations.fetch_add(
+				1, std::memory_order_relaxed);
+		}
 
 		void Stop() noexcept override {}
 	};
@@ -575,6 +647,18 @@ namespace
 				standaloneComputeStorage.data())
 				== standaloneName,
 			"standalone compute owner name offset was not selected");
+		alignas(std::max_align_t)
+			std::array<std::byte, 0x20> shaderStreamStorage{};
+		auto* shaderStream = reinterpret_cast<RE::BSIStream*>(
+			shaderStreamStorage.data());
+		Expect(
+			!native::ShaderArchiveStreamHasPayload(nullptr)
+				&& !native::ShaderArchiveStreamHasPayload(shaderStream),
+			"empty shader archive stream passed the payload gate");
+		shaderStreamStorage[0x10] = std::byte{ 1 };
+		Expect(
+			native::ShaderArchiveStreamHasPayload(shaderStream),
+			"shader archive stream payload byte was not translated");
 		alignas(std::max_align_t)
 			std::array<std::byte, 0x260> imageSpaceStorage{};
 		auto* imageSpaceShader = reinterpret_cast<RE::BSShader*>(
@@ -1117,6 +1201,313 @@ namespace
 				false,
 				"could not construct vertex replacement cache-transition fixture");
 		}
+	}
+
+	void CheckNativeLoadPrequeue()
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(
+			CreateWarpDevice(device, context),
+			"could not create native prequeue WARP device");
+		if (!device)
+			return;
+
+		compilationAttempts.store(0, std::memory_order_relaxed);
+		compilationInvalidations.store(0, std::memory_order_relaxed);
+		forceCompilationFailure = false;
+		holdCompilationPending = true;
+		pendingCompilation.reset();
+		{
+			const std::scoped_lock lock(compilationRequestsMutex);
+			compilationRequests.clear();
+		}
+		SetPixelShaderSwapBrokerDevice(device.get());
+		Expect(
+			SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kDeferredPrepass, true)
+				&& SetBaselineShaderOwnership(
+					ShaderInjectionTarget::kImageSpace, true)
+				&& SetBaselineShaderOwnership(
+					ShaderInjectionTarget::kFaceCustomization, true),
+			"could not enable native prequeue targets");
+
+		constexpr bool modern = true;
+		alignas(std::max_align_t)
+			std::array<std::byte, 0x260> prepassStorage{};
+		auto* prepassShader = reinterpret_cast<RE::BSShader*>(
+			prepassStorage.data());
+		SetSyntheticShaderFilename(
+			prepassStorage, "DFPrePass", modern);
+		const ShaderFamilyDescriptor preFreezeDescriptor{
+			.target = ShaderInjectionTarget::kDeferredPrepass,
+			.stage = ShaderStage::kPixel,
+			.descriptor = 1U << 13,
+			.nativeName = "DFPrePass",
+			.forceEarlyDepthStencil = true
+		};
+		const auto earlyBytecode = CompileStrippedShader(
+			"[earlydepthstencil] float4 main() : SV_Target { return 1.0; }",
+			"ps_5_0");
+		winrt::com_ptr<ID3D11PixelShader> nativePrepassShader;
+		if (earlyBytecode) {
+			std::ignore = device->CreatePixelShader(
+				earlyBytecode->GetBufferPointer(),
+				earlyBytecode->GetBufferSize(),
+				nullptr,
+				nativePrepassShader.put());
+		}
+		RE::BSGraphics::PixelShader nativePrepass{};
+		nativePrepass.id = preFreezeDescriptor.descriptor;
+		nativePrepass.shader =
+			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
+				nativePrepassShader.get());
+		SyntheticShaderMapEntry<RE::BSGraphics::PixelShader*>
+			prepassPixelEntry;
+		SetSingleShaderMapEntry(
+			const_cast<native::PixelShaderMap&>(
+				native::PixelShadersForTesting(
+					prepassShader, modern)),
+			prepassPixelEntry,
+			static_cast<RE::BSGraphics::PixelShader*>(nullptr));
+		alignas(std::max_align_t)
+			std::array<std::byte, 0x20> streamStorage{};
+		auto* stream = reinterpret_cast<RE::BSIStream*>(
+			streamStorage.data());
+		ObserveNativeShaderForTesting(
+			prepassShader, stream, modern);
+		streamStorage[0x10] = std::byte{ 1 };
+		ObserveNativeShaderForTesting(
+			prepassShader, stream, modern);
+		Expect(
+			GetNativeVariantCacheStatsForTesting().entries == 0
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 0,
+			"payload-false or null post-load entries were retained");
+		prepassPixelEntry.value = &nativePrepass;
+		ObserveNativeShaderForTesting(
+			prepassShader, stream, modern);
+		Expect(
+			nativePrepassShader
+				&& GetNativeVariantCacheStatsForTesting().entries == 1
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 0,
+			"pre-freeze loader observation was not retained");
+
+		FreezeAndCompileShaderInjections(device.get());
+		const auto preFreezeHandle = pendingCompilation;
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 1
+				&& preFreezeHandle,
+			"pre-freeze loader observation was not queued after publish");
+		ObserveNativeShaderForTesting(
+			prepassShader, stream, modern);
+		Expect(
+			compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 1
+				&& compilationInvalidations.load(
+					std::memory_order_relaxed)
+					== 0,
+			"ordinary repeated native load retried or invalidated a variant");
+		const auto preFreezeBinding =
+			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
+				preFreezeDescriptor,
+				0xFFFFFFFFU,
+				preFreezeDescriptor.descriptor,
+				nullptr,
+				&nativePrepass);
+		Expect(
+			nativePrepassShader
+				&& preFreezeBinding.pixel == &nativePrepass
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 1
+				&& pendingCompilation == preFreezeHandle,
+			"pending prequeued variant did not reuse its loader handle");
+
+		std::vector<CompilationRequestSnapshot> requests;
+		{
+			const std::scoped_lock lock(compilationRequestsMutex);
+			requests = compilationRequests;
+		}
+		const auto hasDefine = [](
+			const CompilationRequestSnapshot& a_request,
+			std::string_view a_name,
+			std::string_view a_value = "1") {
+			return std::ranges::find(
+				a_request.defines,
+				std::pair<std::string, std::string>(
+					a_name, a_value))
+				!= a_request.defines.end();
+		};
+		Expect(
+			requests.size() == 1
+				&& requests[0].stage == ShaderStage::kPixel
+				&& requests[0].descriptor
+					== preFreezeDescriptor.descriptor
+				&& requests[0].owner == "DFPrePass"
+				&& hasDefine(requests[0], "EARLYDEPTH"),
+			"prequeue and draw did not share early-depth compile identity");
+
+		alignas(std::max_align_t)
+			std::array<std::byte, 0x260> imageStorage{};
+		auto* imageShader = reinterpret_cast<RE::BSShader*>(
+			imageStorage.data());
+		std::array<std::uintptr_t, 18> imageVtable{};
+		imageVtable[17] =
+			reinterpret_cast<std::uintptr_t>(&EmitBlurMacros);
+		auto* imageVtablePointer = imageVtable.data();
+		std::memcpy(
+			imageStorage.data(),
+			&imageVtablePointer,
+			sizeof(imageVtablePointer));
+		const std::int32_t imageShaderType = 0xC;
+		std::memcpy(
+			imageStorage.data() + 0x18,
+			&imageShaderType,
+			sizeof(imageShaderType));
+		SetSyntheticShaderFilename(
+			imageStorage, "ISBrightPassBlur7", modern);
+		const char* imageSourceGroup = "ISBlur";
+		const char* imageClass =
+			"BSImagespaceShaderBrightPassBlur7";
+		std::memcpy(
+			imageStorage.data() + 0x240,
+			&imageClass,
+			sizeof(imageClass));
+		std::memcpy(
+			imageStorage.data() + 0x248,
+			&imageSourceGroup,
+			sizeof(imageSourceGroup));
+		const ShaderFamilyDescriptor postFreezeDescriptor{
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.descriptor = 0,
+			.nativeName = "ISBrightPassBlur7",
+			.nativeClassName =
+				"BSImagespaceShaderBrightPassBlur7",
+			.nativeSourceGroup = "ISBlur",
+			.nativeMacros = {
+				{ "BRIGHTPASS", "" },
+				{ "TEXTAP", "7" }
+			}
+		};
+		RE::BSGraphics::PixelShader nativeImage{};
+		nativeImage.id = postFreezeDescriptor.descriptor;
+		nativeImage.shader =
+			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
+				std::uintptr_t{ 1 });
+		SyntheticShaderMapEntry<RE::BSGraphics::PixelShader*>
+			imagePixelEntry;
+		SetSingleShaderMapEntry(
+			const_cast<native::PixelShaderMap&>(
+				native::PixelShadersForTesting(
+					imageShader, modern)),
+			imagePixelEntry,
+			&nativeImage);
+		ObserveNativeShaderForTesting(
+			imageShader, stream, modern);
+		Expect(
+			compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 2,
+			"post-publish loader observation was not queued before draw");
+		const auto postFreezeHandle = pendingCompilation;
+		ObserveNativeShaderForTesting(
+			imageShader, stream, modern);
+		Expect(
+			postFreezeHandle
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 2
+				&& compilationInvalidations.load(
+					std::memory_order_relaxed)
+					== 0,
+			"repeated post-publish load did not reuse the cached variant");
+
+		const auto postFreezeBinding =
+			ResolveNativeGraphicsShaderBindingForDescriptorTesting(
+				postFreezeDescriptor,
+				0xFFFFFFFFU,
+				postFreezeDescriptor.descriptor,
+				nullptr,
+				&nativeImage);
+		Expect(
+			postFreezeBinding.pixel == &nativeImage
+				&& compilationAttempts.load(
+					std::memory_order_relaxed)
+					== 2
+				&& pendingCompilation == postFreezeHandle,
+			"post-publish draw did not reuse the prequeue handle");
+
+		{
+			const std::scoped_lock lock(compilationRequestsMutex);
+			requests = compilationRequests;
+		}
+		Expect(
+			requests.size() == 2
+				&& requests[1].owner
+					== "BSImagespaceShaderBrightPassBlur7|ISBlur"
+				&& hasDefine(
+					requests[1],
+					"IMAGESPACE_TAPARRAY_TAP_COUNT",
+					"7")
+				&& hasDefine(
+					requests[1],
+					"IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE",
+					"1"),
+			"prequeue and draw did not share owner and native macro identity");
+
+		alignas(std::max_align_t)
+			std::array<std::byte, 0x1A0> faceStorage{};
+		auto* faceShader = reinterpret_cast<RE::BSShader*>(
+			faceStorage.data());
+		SetSyntheticShaderFilename(
+			faceStorage, "FaceCustomization", modern);
+		RE::BSGraphics::VertexShader nativeFaceVertex{};
+		nativeFaceVertex.shader =
+			reinterpret_cast<REX::W32::ID3D11VertexShader*>(
+				std::uintptr_t{ 1 });
+		RE::BSGraphics::PixelShader nativeFacePixel{};
+		nativeFacePixel.shader =
+			reinterpret_cast<REX::W32::ID3D11PixelShader*>(
+				std::uintptr_t{ 2 });
+		SyntheticShaderMapEntry<RE::BSGraphics::VertexShader*>
+			faceVertexEntry;
+		SyntheticShaderMapEntry<RE::BSGraphics::PixelShader*>
+			facePixelEntry;
+		SetSingleShaderMapEntry(
+			const_cast<native::VertexShaderMap&>(
+				native::VertexShadersForTesting(faceShader, modern)),
+			faceVertexEntry,
+			&nativeFaceVertex);
+		SetSingleShaderMapEntry(
+			const_cast<native::PixelShaderMap&>(
+				native::PixelShadersForTesting(faceShader, modern)),
+			facePixelEntry,
+			&nativeFacePixel);
+		ObserveNativeShaderForTesting(
+			faceShader, stream, modern);
+		const auto faceStats =
+			GetNativeVariantCacheStatsForTesting();
+		{
+			const std::scoped_lock lock(compilationRequestsMutex);
+			requests = compilationRequests;
+		}
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 3
+				&& faceStats.entries == 3
+				&& faceStats.unsupported == 0
+				&& requests.size() == 3
+				&& requests[2].stage == ShaderStage::kVertex
+				&& requests[2].owner == "FaceCustomization",
+			"loader prequeue ignored the target's supported stage mask");
+		holdCompilationPending = false;
+		pendingCompilation.reset();
 	}
 
 	void CheckNativeVariantOutcomeCaching()
@@ -2202,6 +2593,8 @@ int main(int argc, char** argv)
 		CheckObservedNativeBytecode();
 	if (mode == "--lazy-preparation")
 		CheckLazyPreparationDoesNotDeadlock();
+	if (mode == "--native-load-prequeue")
+		CheckNativeLoadPrequeue();
 	if (mode == "--native-outcome-cache")
 		CheckNativeVariantOutcomeCaching();
 	if (mode == "--route-validation")
