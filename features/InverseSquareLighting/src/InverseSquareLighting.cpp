@@ -267,37 +267,8 @@ namespace cs::features
 			return false;
 		}
 
-		const std::array routes{
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target = cs::engine::ShaderInjectionTarget::kBsdfLight,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "InverseSquareLighting",
-				.defines = {
-					{
-						cs::engine::shader_injection_defines::
-							kInverseSquareLighting,
-						"1"
-					}
-				}
-			},
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target =
-					cs::engine::ShaderInjectionTarget::kDfTiledLighting,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kCompute),
-				.contributor = "InverseSquareLighting",
-				.defines = {
-					{
-						cs::engine::shader_injection_defines::
-							kInverseSquareLighting,
-						"1"
-					}
-				}
-			}
-		};
 		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"inverse-square lighting", routes, a_error)) {
+				"InverseSquareLighting", a_error)) {
 			SetValidationDetail(a_error);
 			return false;
 		}

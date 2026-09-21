@@ -934,6 +934,21 @@ namespace
 		Expect(
 			!RegisterReplacement(std::move(duplicateSampler)),
 			"duplicate s13 claim was accepted");
+
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(
+			CreateWarpDevice(device, context),
+			"could not create claim-ledger WARP device");
+		if (!device)
+			return;
+		FreezeAndCompileShaderInjections(device.get());
+		std::string error;
+		Expect(
+			!ValidateShaderInjectionRoutes("ledger-first", error)
+				&& error.find("stages=pixel") != std::string::npos
+				&& error.find("LEDGER_TEST=1") != std::string::npos,
+			"registered stage and define loss was not diagnosed after freeze");
 	}
 
 	void CheckLazyPreparationDoesNotDeadlock()
@@ -1218,21 +1233,9 @@ namespace
 			"could not register route-validation contribution");
 		FreezeAndCompileShaderInjections(device.get());
 
-		const std::array validRoutes{
-			ShaderInjectionRouteRequirement{
-				.target = ShaderInjectionTarget::kBsLighting,
-				.stages = ShaderStageBit(ShaderStage::kPixel),
-				.contributor = "route-validation",
-				.defines = {
-					{ "ROUTE_VALIDATION", "1" },
-					{ "ROUTE_DEBUG", "1" }
-				}
-			}
-		};
 		std::string error;
 		Expect(
-			ValidateShaderInjectionRoutes(
-				"route validation", validRoutes, error),
+			ValidateShaderInjectionRoutes("route-validation", error),
 			"published route was rejected before any variant was observed");
 		auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kBsLighting);
@@ -1246,27 +1249,11 @@ namespace
 				&& snapshot.variantsUnsupported == 0,
 			"unobserved published route reported fabricated compilation state");
 
-		auto missingContributor = validRoutes;
-		missingContributor.front().contributor = "missing-contributor";
 		Expect(
-			!ValidateShaderInjectionRoutes(
-				"route validation", missingContributor, error),
+			!ValidateShaderInjectionRoutes("missing-contributor", error)
+				&& error.find("no shader routes")
+					!= std::string::npos,
 			"route validation accepted a missing contributor");
-
-		auto missingDefine = validRoutes;
-		missingDefine.front().defines["ROUTE_DEBUG"] = "0";
-		Expect(
-			!ValidateShaderInjectionRoutes(
-				"route validation", missingDefine, error),
-			"route validation accepted a missing exact define value");
-
-		auto missingStage = validRoutes;
-		missingStage.front().stages =
-			ShaderStageBit(ShaderStage::kVertex);
-		Expect(
-			!ValidateShaderInjectionRoutes(
-				"route validation", missingStage, error),
-			"route validation accepted an undelivered shader stage");
 
 		holdCompilationPending = true;
 		const ShaderFamilyDescriptor descriptor{
@@ -1299,7 +1286,7 @@ namespace
 				&& snapshot.variantsReady == 0
 				&& snapshot.variantsFailed == 0
 				&& ValidateShaderInjectionRoutes(
-					"route validation", validRoutes, error),
+					"route-validation", error),
 			"expected pending fallback changed route eligibility or terminal diagnostics");
 
 		Expect(
@@ -1362,18 +1349,9 @@ namespace
 		}
 		FreezeAndCompileShaderInjections(device.get());
 
-		const std::array routes{
-			ShaderInjectionRouteRequirement{
-				.target = ShaderInjectionTarget::kBsLighting,
-				.stages = ShaderStageBit(ShaderStage::kPixel),
-				.contributor = "unavailable-route",
-				.defines = { { "UNAVAILABLE_ROUTE", "1" } }
-			}
-		};
 		std::string error;
 		Expect(
-			!ValidateShaderInjectionRoutes(
-				"unavailable route", routes, error)
+			!ValidateShaderInjectionRoutes("unavailable-route", error)
 				&& !error.empty(),
 			"unavailable route passed eligibility validation");
 	}
@@ -1893,15 +1871,6 @@ namespace
 		FreezeAndCompileShaderInjections(device.get());
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
-		const std::array routes{
-			ShaderInjectionRouteRequirement{
-				.target =
-					ShaderInjectionTarget::kDfTiledLighting,
-				.stages = ShaderStageBit(ShaderStage::kCompute),
-				.contributor = "compute-missing-hook",
-				.defines = { { "COMPUTE_MISSING_HOOK", "1" } }
-			}
-		};
 		std::string error;
 		Expect(
 			snapshot.requested
@@ -1910,7 +1879,7 @@ namespace
 				&& snapshot.publicationError
 					== "RunComputeShader dispatch bridge is unavailable"
 				&& !ValidateShaderInjectionRoutes(
-					"compute route", routes, error)
+					"compute-missing-hook", error)
 				&& error.find("dispatch bridge")
 					!= std::string::npos,
 			"compute ownership did not fail closed without the engine bridge");

@@ -239,24 +239,8 @@ namespace cs::features
 			return false;
 		}
 
-		const std::array routes{
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target =
-					cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "ExponentialHeightFog",
-				.defines = {
-					{
-						cs::engine::shader_injection_defines::
-							kExponentialHeightFog,
-						"1"
-					}
-				}
-			}
-		};
 		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"analytic fog", routes, a_error)) {
+				"ExponentialHeightFog", a_error)) {
 			SetValidationDetail(a_error);
 			return false;
 		}

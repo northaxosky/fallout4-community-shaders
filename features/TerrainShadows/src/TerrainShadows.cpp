@@ -660,34 +660,8 @@ namespace cs::features
 			return false;
 		}
 
-		const std::array routes{
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target = cs::engine::ShaderInjectionTarget::kBsdfLight,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "TerrainShadows",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kTerrainShadows, "1" }
-				}
-			},
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target =
-					cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "TerrainShadows",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kTerrainShadows, "1" },
-					{
-						cs::engine::shader_injection_defines::
-							kTerrainShadowsFullscreenDebug,
-						"1"
-					}
-				}
-			}
-		};
 		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"terrain shadows", routes, a_error)) {
+				"TerrainShadows", a_error)) {
 			_validationDetail = a_error;
 			return false;
 		}

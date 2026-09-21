@@ -1760,19 +1760,18 @@ namespace cs::engine
 	}
 
 	bool ValidateShaderInjectionRoutes(
-		std::string_view a_capability,
-		std::span<const ShaderInjectionRouteRequirement> a_requirements,
+		std::string_view a_contributor,
 		std::string& a_error)
 	{
 		auto& service = GetService();
 		std::scoped_lock lock(service.mutex);
 		if (service.lifecycle != Lifecycle::kPublished) {
-			a_error = std::string(a_capability)
+			a_error = std::string(a_contributor)
 				+ " routes were validated before injection publication";
 			return false;
 		}
 		if (!service.enabled) {
-			a_error = std::string(a_capability)
+			a_error = std::string(a_contributor)
 				+ " routes are disabled by the shader-injection core kill switch";
 			return false;
 		}
@@ -1780,27 +1779,60 @@ namespace cs::engine
 		const auto plan =
 			service.published.load(std::memory_order_acquire);
 		if (!plan || !plan->device) {
-			a_error = std::string(a_capability)
+			a_error = std::string(a_contributor)
 				+ " routes were not published because the D3D11 device is unavailable";
 			return false;
 		}
 
-		for (const auto& requirement : a_requirements) {
+		const auto stageNames = [](ShaderStageMask a_stages) {
+			std::string names;
+			for (std::size_t stageIndex = 0;
+				stageIndex < static_cast<std::size_t>(ShaderStage::kCount);
+				++stageIndex) {
+				const auto stage =
+					static_cast<ShaderStage>(stageIndex);
+				if ((a_stages & ShaderStageBit(stage)) == 0)
+					continue;
+				if (!names.empty())
+					names += "|";
+				names += StageName(stage);
+			}
+			return names.empty() ? std::string("none") : names;
+		};
+		const auto defineNames = [](const ShaderInjectionDefines& a_defines) {
+			std::string names;
+			for (const auto& [name, value] : a_defines) {
+				if (!names.empty())
+					names += ",";
+				names += name;
+				names += "=";
+				names += value;
+			}
+			return names.empty() ? std::string("none") : names;
+		};
+		std::vector<const ShaderReplacementRegistration*> matched;
+		bool foundRegistration = false;
+		for (const auto& registration : service.registrations) {
+			if (registration.contributor != a_contributor)
+				continue;
+			foundRegistration = true;
+
 			const auto* metadata =
-				GetShaderInjectionTarget(requirement.target);
+				GetShaderInjectionTarget(registration.targetId);
 			if (!metadata) {
-				a_error = std::string(a_capability)
-					+ " requires an unknown shader-injection target";
+				a_error = "contributor '" + std::string(a_contributor)
+					+ "' registered an unknown shader-injection target";
 				return false;
 			}
 
 			const auto& runtime =
-				service.runtime[ToIndex(requirement.target)];
+				service.runtime[ToIndex(registration.targetId)];
 			if (runtime.developerOverride
 				== DeveloperShaderOverride::kForceOff) {
 				a_error = "'" + std::string(metadata->name)
-					+ "' cannot deliver " + std::string(a_capability)
-					+ " because its developer override is force-off";
+					+ "' cannot deliver contributor '"
+					+ std::string(a_contributor)
+					+ "' because its developer override is force-off";
 				return false;
 			}
 			if (!runtime.requested.load(std::memory_order_relaxed)
@@ -1810,98 +1842,71 @@ namespace cs::engine
 							std::memory_order_relaxed)),
 					ShaderInjectionRequestReason::kFeatureContributor)) {
 				a_error = "'" + std::string(metadata->name)
-					+ "' cannot deliver " + std::string(a_capability)
-					+ " because feature ownership was not frozen";
+					+ "' did not freeze feature ownership for contributor '"
+					+ std::string(a_contributor) + "'";
 				return false;
 			}
 			if (runtime.slotCollision.load(std::memory_order_relaxed)) {
 				a_error = "'" + std::string(metadata->name)
-					+ "' cannot deliver " + std::string(a_capability)
-					+ " because its slot or define claims conflict";
+					+ "' cannot deliver contributor '"
+					+ std::string(a_contributor)
+					+ "' because its slot or define claims conflict";
 				return false;
 			}
-			if (requirement.stages == 0
-				|| (requirement.stages
-					& ~SupportedStages(requirement.target))
-					!= 0) {
-				a_error = "'" + std::string(metadata->name)
-					+ "' has no supported route for the stages required by "
-					+ std::string(a_capability);
-				return false;
-			}
-			if (requirement.target
+			if (registration.targetId
 					== ShaderInjectionTarget::kDfTiledLighting
-				&& (requirement.stages
+				&& (registration.stages
 					& ShaderStageBit(ShaderStage::kCompute))
 					!= 0
 				&& !ComputeDispatchBridgeInstalled()) {
 				a_error = "'" + std::string(metadata->name)
-					+ "' cannot deliver " + std::string(a_capability)
-					+ " because the RunComputeShader dispatch bridge is unavailable";
+					+ "' cannot deliver contributor '"
+					+ std::string(a_contributor)
+					+ "' because the RunComputeShader dispatch bridge is unavailable";
 				return false;
 			}
 
 			const auto* published =
-				FindPublishedTarget(*plan, requirement.target);
+				FindPublishedTarget(*plan, registration.targetId);
 			if (!published) {
 				a_error = "'" + std::string(metadata->name)
-					+ "' cannot deliver " + std::string(a_capability)
-					+ " because the requested route was not published";
+					+ "' did not publish the registered route for contributor '"
+					+ std::string(a_contributor) + "'";
 				if (!runtime.publicationError.empty()) {
 					a_error += ": ";
 					a_error += runtime.publicationError;
 				}
 				return false;
 			}
-			if ((published->contributedStages & requirement.stages)
-				!= requirement.stages) {
+
+			const auto contribution = std::ranges::find_if(
+				published->contributions,
+				[&](const ShaderReplacementRegistration& a_candidate) {
+					return a_candidate.contributor == a_contributor
+						&& a_candidate.targetId == registration.targetId
+						&& a_candidate.stages == registration.stages
+						&& a_candidate.defines == registration.defines
+						&& a_candidate.slotClaims == registration.slotClaims
+						&& !std::ranges::contains(
+							matched, std::addressof(a_candidate));
+				});
+			if (contribution == published->contributions.end()) {
 				a_error = "'" + std::string(metadata->name)
-					+ "' cannot deliver " + std::string(a_capability)
-					+ " at the required shader stage";
+					+ "' lost a registered route for contributor '"
+					+ std::string(a_contributor)
+					+ "' (stages=" + stageNames(registration.stages)
+					+ ", defines=" + defineNames(registration.defines)
+					+ ", slot_claims="
+					+ std::to_string(registration.slotClaims.size())
+					+ ")";
 				return false;
 			}
-
-			for (std::size_t stageIndex = 0;
-				stageIndex < static_cast<std::size_t>(ShaderStage::kCount);
-				++stageIndex) {
-				const auto stage =
-					static_cast<ShaderStage>(stageIndex);
-				const auto stageBit = ShaderStageBit(stage);
-				if ((requirement.stages & stageBit) == 0)
-					continue;
-
-				const auto contribution = std::ranges::find_if(
-					published->contributions,
-					[&](const ShaderReplacementRegistration& a_candidate) {
-						if (a_candidate.contributor
-								!= requirement.contributor
-							|| (a_candidate.stages & stageBit) == 0) {
-							return false;
-						}
-						return std::ranges::all_of(
-							requirement.defines,
-							[&](const auto& a_required) {
-								const auto found =
-									a_candidate.defines.find(
-										a_required.first);
-								return found
-										!= a_candidate.defines.end()
-									&& found->second
-										== a_required.second;
-							});
-					});
-				if (contribution == published->contributions.end()) {
-					a_error = "'" + std::string(metadata->name)
-						+ "' cannot deliver "
-						+ std::string(a_capability)
-						+ " because contributor '"
-						+ std::string(requirement.contributor)
-						+ "' did not publish the required "
-						+ std::string(StageName(stage))
-						+ " defines";
-					return false;
-				}
-			}
+			matched.push_back(std::addressof(*contribution));
+		}
+		if (!foundRegistration) {
+			a_error = "no shader routes were registered for contributor '"
+				+ std::string(a_contributor) + "'";
+			return false;
 		}
 
 		a_error.clear();

@@ -253,34 +253,8 @@ namespace cs::features
 			return false;
 		}
 
-		const std::array routes{
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target = cs::engine::ShaderInjectionTarget::kBsdfLight,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "WetnessEffects",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" }
-				}
-			},
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target =
-					cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "WetnessEffects",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" },
-					{
-						cs::engine::shader_injection_defines::
-							kWetnessEffectsFullscreenDebug,
-						"1"
-					}
-				}
-			}
-		};
 		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"wetness", routes, a_error)) {
+				"WetnessEffects", a_error)) {
 			_validationDetail = a_error;
 			return false;
 		}

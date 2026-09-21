@@ -790,44 +790,8 @@ namespace cs::features
 			return false;
 		}
 
-		const std::array routes{
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target =
-					cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "DynamicCubemaps",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" },
-					{
-						cs::engine::shader_injection_defines::
-							kDynamicCubemapsFullscreenDebug,
-						"1"
-					}
-				}
-			},
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target =
-					cs::engine::ShaderInjectionTarget::kBsLighting,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "DynamicCubemaps",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" }
-				}
-			},
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target = cs::engine::ShaderInjectionTarget::kBsWater,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "DynamicCubemaps",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" }
-				}
-			}
-		};
 		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"dynamic cubemaps", routes, a_error)) {
+				"DynamicCubemaps", a_error)) {
 			_validationDetail = a_error;
 			return false;
 		}

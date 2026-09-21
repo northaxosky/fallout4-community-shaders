@@ -178,14 +178,6 @@ namespace cs::engine
 		ComputeDispatchBridgeStatus computeBridge;
 	};
 
-	struct ShaderInjectionRouteRequirement
-	{
-		ShaderInjectionTarget  target = ShaderInjectionTarget::kCount;
-		ShaderStageMask        stages = ShaderStageBit(ShaderStage::kPixel);
-		std::string_view       contributor;
-		ShaderInjectionDefines defines;
-	};
-
 	std::optional<ShaderVariantCompilationDescriptor>
 		BuildEffectiveShaderCompileRequest(
 			const ShaderInjectionTargetMetadata& a_target,
@@ -206,8 +198,7 @@ namespace cs::engine
 	bool SetDeveloperShaderSourceRoot(std::wstring a_sourceRoot);
 	bool SetShaderInjectionEnabled(bool a_enabled);
 	bool ValidateShaderInjectionRoutes(
-		std::string_view a_capability,
-		std::span<const ShaderInjectionRouteRequirement> a_requirements,
+		std::string_view a_contributor,
 		std::string& a_error);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);

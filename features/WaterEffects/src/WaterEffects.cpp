@@ -378,34 +378,8 @@ namespace cs::features
 			return false;
 		}
 
-		const std::array routes{
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target = cs::engine::ShaderInjectionTarget::kBsdfLight,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "WaterEffects",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kWaterEffects, "1" }
-				}
-			},
-			cs::engine::ShaderInjectionRouteRequirement{
-				.target =
-					cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				.stages = cs::engine::ShaderStageBit(
-					cs::engine::ShaderStage::kPixel),
-				.contributor = "WaterEffects",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kWaterEffects, "1" },
-					{
-						cs::engine::shader_injection_defines::
-							kWaterEffectsFullscreenDebug,
-						"1"
-					}
-				}
-			}
-		};
 		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"water caustics", routes, a_error)) {
+				"WaterEffects", a_error)) {
 			SetValidationDetail(a_error);
 			return false;
 		}
