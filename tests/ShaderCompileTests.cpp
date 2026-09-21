@@ -1743,8 +1743,8 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
-	constexpr std::size_t kExpectedBaselineRegistrationRows = 1835;
-	constexpr std::size_t kExpectedBaselineCompileInputs = 1822;
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1836;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1823;
 	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 4;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 54;

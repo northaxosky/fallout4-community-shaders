@@ -51,6 +51,9 @@ namespace cs::engine
 			const ShaderFamilyDescriptor& a_family)
 		{
 			const auto a_descriptor = a_family.descriptor;
+			const bool tessellatedVertex =
+				a_family.stage == ShaderStage::kVertex
+				&& (a_descriptor & ((1U << 19) | (1U << 20))) != 0;
 			DefineBit(a_defines, a_descriptor, 1U << 0, "VC");
 			Define(
 				a_defines,
@@ -72,6 +75,7 @@ namespace cs::engine
 			DefineBit(a_defines, a_descriptor, 1U << 8, "ALPHA_TEST");
 			if ((a_descriptor & (1U << 9)) != 0
 				|| (a_family.stage == ShaderStage::kVertex
+					&& !tessellatedVertex
 					&& (a_descriptor & (1U << 25)) != 0)) {
 				Define(a_defines, "LOD_LANDSCAPE");
 			}
@@ -97,7 +101,7 @@ namespace cs::engine
 			DefineBit(a_defines, a_descriptor, 1U << 21, "DISMEMBERMENT");
 			DefineBit(a_defines, a_descriptor, 1U << 22, "DISMEMBERMENT_MEATCUFF");
 			DefineBit(a_defines, a_descriptor, 1U << 24, "ADDITIONAL_ALPHA_MASK");
-			if (a_family.stage == ShaderStage::kPixel)
+			if (a_family.stage == ShaderStage::kPixel || tessellatedVertex)
 				DefineBit(
 					a_defines,
 					a_descriptor,
