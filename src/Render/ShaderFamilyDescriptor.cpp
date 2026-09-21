@@ -990,6 +990,58 @@ namespace cs::engine
 						"IMAGESPACE_FULLSCREEN_COLOR_PS_SOURCE");
 					return true;
 				}
+				if (matchesRoute(
+						"LensFlare",
+						"BSLensFlare",
+						"LensFlare")) {
+					Define(a_defines, "IMAGESPACE_LENS_FLARE_PS_SOURCE");
+					return true;
+				}
+				if (matchesRoute(
+						"LensFlareVis",
+						"BSLensFlareVis",
+						"LensFlare",
+						{ { "VISIBILITY", "" } })) {
+					Define(
+						a_defines,
+						"IMAGESPACE_LENS_FLARE_VISIBILITY_PS_SOURCE");
+					Define(a_defines, "VISIBILITY");
+					return true;
+				}
+				std::optional<std::string_view> hdrDefine;
+				if (matchesRoute(
+						"ISHDRDownSample16Lum",
+						"BSImagespaceShaderHDRDownSample16Lum",
+						"ISHDR",
+						{ { "DOWNSAMPLE", "16" }, { "LUM", "" } })) {
+					hdrDefine = "LUM";
+				} else if (matchesRoute(
+							   "ISHDRDownSample4RGB2Lum",
+							   "BSImagespaceShaderHDRDownSample4RGB2Lum",
+							   "ISHDR",
+							   {
+								   { "DOWNSAMPLE", "4" },
+								   { "LUM", "" },
+								   { "RGB2LUM", "" }
+							   })) {
+					hdrDefine = "RGB2LUM";
+				} else if (matchesRoute(
+							   "ISHDRDownSample16LightAdapt",
+							   "BSImagespaceShaderHDRDownSample16LightAdapt",
+							   "ISHDR",
+							   {
+								   { "DOWNADAPT", "" },
+								   { "DOWNSAMPLE", "16" },
+								   { "LUM", "" }
+							   })) {
+					hdrDefine = "";
+				}
+				if (hdrDefine) {
+					Define(a_defines, "IMAGESPACE_HDR_PS_SOURCE");
+					if (!hdrDefine->empty())
+						Define(a_defines, *hdrDefine);
+					return true;
+				}
 				if (a_descriptor.nativeSourceGroup == "ISBlur") {
 					const auto tapCount = macro("TEXTAP");
 					const auto brightPass = macro("BRIGHTPASS");
@@ -1084,6 +1136,13 @@ namespace cs::engine
 				}
 			}
 			if (a_descriptor.stage == ShaderStage::kVertex) {
+				if (matchesRoute(
+						"LensFlare",
+						"BSLensFlare",
+						"LensFlare")) {
+					Define(a_defines, "IMAGESPACE_LENS_FLARE_VS_SOURCE");
+					return true;
+				}
 				if (hudGlassRoute != hudGlassRoutes.end()) {
 					Define(a_defines, "IMAGESPACE_HUD_GLASS_VS_SOURCE");
 					if (hudGlassRoute->clear)
@@ -1263,7 +1322,9 @@ namespace cs::engine
 				DefineBit(a_defines, d, 1, "RENDER_DEPTH");
 				return true;
 			case ShaderInjectionTarget::kFaceCustomization:
-				return a_descriptor.stage == ShaderStage::kVertex && d == 0;
+				return d == 0
+					&& (a_descriptor.stage == ShaderStage::kVertex
+						|| a_descriptor.stage == ShaderStage::kPixel);
 			case ShaderInjectionTarget::kImageSpace:
 				return AddImageSpaceDefines(a_defines, a_descriptor);
 			case ShaderInjectionTarget::kBsSky:
@@ -1322,6 +1383,11 @@ namespace cs::engine
 			case ShaderInjectionTarget::kDistantTree:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
 					"BSDISTANTTREE_VS_SOURCE" : "BSDISTANTTREE_PS_SOURCE";
+				break;
+			case ShaderInjectionTarget::kFaceCustomization:
+				define = a_descriptor.stage == ShaderStage::kVertex ?
+					"BSFACECUSTOMIZATION_VS_SOURCE" :
+					"BSFACECUSTOMIZATION_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kBsSky:
 				define = a_descriptor.stage == ShaderStage::kVertex ?

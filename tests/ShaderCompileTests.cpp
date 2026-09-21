@@ -148,10 +148,8 @@ namespace
 		bool forceEarlyDepthStencil = false;
 		bool runtimeReachable = true;
 		std::string_view nativeSourceGroup;
-		std::string_view nativeMacro1;
-		std::string_view nativeMacroValue1;
-		std::string_view nativeMacro2;
-		std::string_view nativeMacroValue2;
+		std::array<cs::engine::ShaderInjectionDefineMetadata, 7>
+			nativeMacros{};
 		std::string_view stockSha1;
 		StrippedShaderIdentityExpectation expected;
 		std::string_view compileInputAliasGroup;
@@ -163,7 +161,7 @@ namespace
 
 	std::string NativeRouteKey(const ShaderIdentityWitness& a_witness)
 	{
-		return std::to_string(
+		auto key = std::to_string(
 				static_cast<std::uint32_t>(a_witness.target))
 			+ "|" + std::to_string(
 				static_cast<std::uint32_t>(a_witness.stage))
@@ -171,11 +169,13 @@ namespace
 			+ "|" + std::string(a_witness.nativeName)
 			+ "|" + std::string(a_witness.nativeClassName)
 			+ "|" + (a_witness.forceEarlyDepthStencil ? "1" : "0")
-			+ "|" + std::string(a_witness.nativeSourceGroup)
-			+ "|" + std::string(a_witness.nativeMacro1)
-			+ "=" + std::string(a_witness.nativeMacroValue1)
-			+ "|" + std::string(a_witness.nativeMacro2)
-			+ "=" + std::string(a_witness.nativeMacroValue2);
+			+ "|" + std::string(a_witness.nativeSourceGroup);
+		for (const auto& [name, value] : a_witness.nativeMacros) {
+			if (name.empty())
+				break;
+			key += "|" + std::string(name) + "=" + std::string(value);
+		}
+		return key;
 	}
 
 	struct BaselineShaderCase
@@ -228,15 +228,11 @@ namespace
 						witness.forceEarlyDepthStencil,
 					.nativeMacros = [&] {
 						cs::engine::ShaderInjectionDefines macros;
-						if (!witness.nativeMacro1.empty()) {
-							macros.emplace(
-								witness.nativeMacro1,
-								witness.nativeMacroValue1);
-						}
-						if (!witness.nativeMacro2.empty()) {
-							macros.emplace(
-								witness.nativeMacro2,
-								witness.nativeMacroValue2);
+						for (const auto& [name, value] :
+							witness.nativeMacros) {
+							if (name.empty())
+								break;
+							macros.emplace(name, value);
 						}
 						return macros;
 					}()
@@ -552,6 +548,49 @@ namespace
 			.nativeClassName = "BSImagespaceShaderSAOCameraZAndMipsCS",
 			.nativeSourceGroup = "ISSAOCameraZAndMipsCS",
 			.nativeMacros = { { "UNPROVEN", "" } }
+		});
+		reject("LensFlare visibility macro is required", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "LensFlareVis",
+			.nativeClassName = "BSLensFlareVis",
+			.nativeSourceGroup = "LensFlare"
+		});
+		reject("LensFlare base/visibility cross-product", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "LensFlare",
+			.nativeClassName = "BSLensFlare",
+			.nativeSourceGroup = "LensFlare",
+			.nativeMacros = { { "VISIBILITY", "" } }
+		});
+		reject("unproven HDR downsample route", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISHDRDownSample4",
+			.nativeClassName = "BSImagespaceShaderHDRDownSample4",
+			.nativeSourceGroup = "ISHDR",
+			.nativeMacros = { { "DOWNSAMPLE", "" } }
+		});
+		reject("HDR complete set with wrong DOWNSAMPLE", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISHDRDownSample16Lum",
+			.nativeClassName = "BSImagespaceShaderHDRDownSample16Lum",
+			.nativeSourceGroup = "ISHDR",
+			.nativeMacros = { { "DOWNSAMPLE", "4" }, { "LUM", "" } }
+		});
+		reject("HDR complete set with extra native flag", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kPixel,
+			.nativeName = "ISHDRDownSample16Lum",
+			.nativeClassName = "BSImagespaceShaderHDRDownSample16Lum",
+			.nativeSourceGroup = "ISHDR",
+			.nativeMacros = {
+				{ "DOWNSAMPLE", "16" },
+				{ "LUM", "" },
+				{ "RGB2LUM", "" }
+			}
 		});
 	}
 
@@ -1784,9 +1823,10 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
-	constexpr std::size_t kExpectedBaselineRegistrationRows = 1898;
-	constexpr std::size_t kExpectedBaselineCompileInputs = 1827;
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1905;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1834;
 	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 32;
+	constexpr std::size_t kExpectedCanonicalIdentityRows = 11;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 72;
 	constexpr std::size_t kExpectedBsdfLightRows = 207;
@@ -1991,7 +2031,12 @@ namespace
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
 		std::size_t exponentialFogRows = 0;
+		std::size_t canonicalIdentityRows = 0;
 		for (const auto& registration : registrations) {
+			if (registration.expectedStockSha1
+				!= registration.expected.sha1) {
+				++canonicalIdentityRows;
+			}
 			const auto registrationInputKey =
 				BaselineCompileInputKey(a_root, registration);
 			auto& inputRoutes =
@@ -2128,6 +2173,15 @@ namespace
 					+ std::to_string(registrations.size()) + " rows and "
 					+ std::to_string(uniqueRegistrationRoutes.size())
 					+ " distinct routes");
+		}
+		if (canonicalIdentityRows != kExpectedCanonicalIdentityRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"base registration canonical identities",
+				"Expected "
+					+ std::to_string(kExpectedCanonicalIdentityRows)
+					+ " approved canonical identities, found "
+					+ std::to_string(canonicalIdentityRows));
 		}
 		if (uniqueRegistrationInputs.size()
 			!= kExpectedBaselineCompileInputs) {

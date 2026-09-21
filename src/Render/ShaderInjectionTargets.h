@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/ShaderStage.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +29,24 @@ namespace cs::engine
 		kCount
 	};
 
+	constexpr ShaderStageMask ShaderInjectionTargetStages(
+		ShaderInjectionTarget a_target) noexcept
+	{
+		constexpr auto graphics =
+			ShaderStageBit(ShaderStage::kVertex)
+			| ShaderStageBit(ShaderStage::kPixel);
+		switch (a_target) {
+		case ShaderInjectionTarget::kImageSpace:
+			return graphics | ShaderStageBit(ShaderStage::kCompute);
+		case ShaderInjectionTarget::kDfTiledLighting:
+			return ShaderStageBit(ShaderStage::kCompute);
+		case ShaderInjectionTarget::kCount:
+			return 0;
+		default:
+			return graphics;
+		}
+	}
+
 	struct ShaderInjectionDefineMetadata
 	{
 		std::string_view name;
@@ -42,6 +62,7 @@ namespace cs::engine
 		std::string_view                               entryPoint;
 		std::string_view                               profile;
 		std::span<const ShaderInjectionDefineMetadata> baseDefines;
+		ShaderStageMask                                supportedStages = ShaderInjectionTargetStages(id);
 	};
 
 	inline constexpr std::array<ShaderInjectionDefineMetadata, 0>
@@ -99,7 +120,7 @@ namespace cs::engine
 		return kShaderInjectionTargets;
 	}
 
-	inline const ShaderInjectionTargetMetadata* GetShaderInjectionTarget(
+	inline constexpr const ShaderInjectionTargetMetadata* GetShaderInjectionTarget(
 		ShaderInjectionTarget a_target) noexcept
 	{
 		const auto index = static_cast<std::size_t>(a_target);

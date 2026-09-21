@@ -6,6 +6,14 @@
 #include "Imagespace/CopyPS.hlsli"
 #elif defined(IMAGESPACE_FULLSCREEN_COLOR_PS_SOURCE)
 #include "Imagespace/FullScreenColorPS.hlsli"
+#elif defined(IMAGESPACE_LENS_FLARE_VS_SOURCE)
+#include "Imagespace/LensFlareVS.hlsli"
+#elif defined(IMAGESPACE_LENS_FLARE_PS_SOURCE)
+#include "Imagespace/LensFlarePS.hlsli"
+#elif defined(IMAGESPACE_LENS_FLARE_VISIBILITY_PS_SOURCE)
+#include "Imagespace/LensFlareVisibilityPS.hlsli"
+#elif defined(IMAGESPACE_HDR_PS_SOURCE)
+#include "Imagespace/HDRPS.hlsli"
 #elif defined(IMAGESPACE_SSAO_CAMERA_Z_AND_MIPS_CS_SOURCE)
 #include "Imagespace/SSAOCameraZAndMipsCS.hlsli"
 #elif defined(IMAGESPACE_SSAO_MIPS_CS_SOURCE)

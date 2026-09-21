@@ -1,3 +1,6 @@
+#if defined(BSFACECUSTOMIZATION_PS_SOURCE)
+#include "FaceCustomization/FaceCustomizationPS.hlsli"
+#elif defined(BSFACECUSTOMIZATION_VS_SOURCE)
 // SPDX-License-Identifier: GPL-3.0-or-later
 // AE 1.11.240, shaders011.fxp ordinal 3581.
 
@@ -16,3 +19,6 @@ void main(
     clipPosition.z = position.z;
     clipPosition.w = 1.0;
 }
+#else
+#error "define a FaceCustomization shader stage source"
+#endif
