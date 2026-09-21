@@ -535,7 +535,15 @@ namespace
 			.nativeName = "ISSAOBlurHCS",
 			.nativeClassName = "BSImagespaceShaderSAOBlurHCS",
 			.nativeSourceGroup = "ISSAOBlurCS",
-			.nativeMacros = { { "GRID_SIZE", "552" } }
+			.nativeMacros = { { "AXIS_H", "" }, { "GRID_SIZE", "552" } }
+		});
+		reject("SSAO blur owner/axis cross-product", {
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kCompute,
+			.nativeName = "ISSAOBlurHCS",
+			.nativeClassName = "BSImagespaceShaderSAOBlurHCS",
+			.nativeSourceGroup = "ISSAOBlurCS",
+			.nativeMacros = { { "AXIS_V", "" }, { "GRID_SIZE", "972" } }
 		});
 		reject("SSAO camera route extra macro", {
 			.target = ShaderInjectionTarget::kImageSpace,

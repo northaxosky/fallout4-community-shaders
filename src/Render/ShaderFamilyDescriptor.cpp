@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <initializer_list>
 #include <string>
 
 namespace cs::engine
@@ -863,34 +864,39 @@ namespace cs::engine
 			};
 			const auto matchesMacros =
 				[&a_descriptor](
-					std::string_view a_macro,
-					std::string_view a_value = {}) {
-					if (a_macro.empty())
-						return a_descriptor.nativeMacros.empty();
-					return a_descriptor.nativeMacros.size() == 1
-						&& a_descriptor.nativeMacros.begin()->first == a_macro
-						&& a_descriptor.nativeMacros.begin()->second == a_value;
+					std::initializer_list<ShaderInjectionDefineMetadata> a_macros) {
+					return a_descriptor.nativeMacros.size() == a_macros.size()
+						&& std::ranges::all_of(a_macros, [&](const auto& a_macro) {
+							const auto found = a_descriptor.nativeMacros.find(a_macro.name);
+							return found != a_descriptor.nativeMacros.end()
+								&& found->second == a_macro.value;
+						});
 				};
 			const auto matchesRoute = [&](
 				std::string_view a_name,
 				std::string_view a_className,
 				std::string_view a_sourceGroup,
-				std::string_view a_macro = {},
-				std::string_view a_value = {}) {
+				std::initializer_list<ShaderInjectionDefineMetadata> a_macros = {}) {
 				return a_descriptor.descriptor == 0
 					&& a_descriptor.nativeName == a_name
 					&& a_descriptor.nativeClassName == a_className
 					&& a_descriptor.nativeSourceGroup == a_sourceGroup
-					&& matchesMacros(a_macro, a_value);
+					&& matchesMacros(a_macros);
 			};
 			const auto hudGlassRoute = std::ranges::find_if(
 				hudGlassRoutes,
 				[&](const HudGlassRoute& a_route) {
+					if (a_route.nativeMacro.empty()) {
+						return matchesRoute(
+							a_route.nativeName,
+							a_route.nativeClassName,
+							"ISHUDGlass");
+					}
 					return matchesRoute(
 						a_route.nativeName,
 						a_route.nativeClassName,
 						"ISHUDGlass",
-						a_route.nativeMacro);
+						{ { a_route.nativeMacro, "" } });
 				});
 
 			if (a_descriptor.stage == ShaderStage::kCompute) {
@@ -914,8 +920,7 @@ namespace cs::engine
 						"ISSAOBlurHCS",
 						"BSImagespaceShaderSAOBlurHCS",
 						"ISSAOBlurCS",
-						"GRID_SIZE",
-						"972")) {
+						{ { "AXIS_H", "" }, { "GRID_SIZE", "972" } })) {
 					Define(a_defines, "IMAGESPACE_SSAO_BLUR_CS_SOURCE");
 					Define(a_defines, "GRID_SIZE", "972");
 					return true;
@@ -924,8 +929,7 @@ namespace cs::engine
 						"ISSAOBlurVCS",
 						"BSImagespaceShaderSAOBlurVCS",
 						"ISSAOBlurCS",
-						"GRID_SIZE",
-						"552")) {
+						{ { "AXIS_V", "" }, { "GRID_SIZE", "552" } })) {
 					Define(a_defines, "IMAGESPACE_SSAO_BLUR_CS_SOURCE");
 					Define(a_defines, "GRID_SIZE", "552");
 					return true;
@@ -971,7 +975,7 @@ namespace cs::engine
 					&& a_descriptor.nativeClassName
 						== "BSImagespaceShaderCopyNormals"
 					&& a_descriptor.nativeSourceGroup == "ISCopy"
-					&& matchesMacros("COPY_NORMALS")) {
+					&& matchesMacros({ { "COPY_NORMALS", "" } })) {
 					Define(a_defines, "IMAGESPACE_COPY_PS_SOURCE");
 					return true;
 				}
