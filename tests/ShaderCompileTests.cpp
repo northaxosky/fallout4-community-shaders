@@ -2018,10 +2018,10 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
-	constexpr std::size_t kExpectedBaselineRegistrationRows = 1911;
-	constexpr std::size_t kExpectedBaselineCompileInputs = 1840;
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1912;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1841;
 	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 32;
-	constexpr std::size_t kExpectedCanonicalIdentityRows = 12;
+	constexpr std::size_t kExpectedCanonicalIdentityRows = 13;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 72;
 	constexpr std::size_t kExpectedBsdfLightRows = 207;

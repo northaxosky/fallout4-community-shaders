@@ -18,6 +18,8 @@
 #include "Imagespace/GammaLUTPS.hlsli"
 #elif defined(IMAGESPACE_MOTION_BLUR_PS_SOURCE)
 #include "Imagespace/MotionBlurPS.hlsli"
+#elif defined(IMAGESPACE_REFRACTION_PS_SOURCE)
+#include "Imagespace/RefractionPS.hlsli"
 #elif defined(IMAGESPACE_HDR_PS_SOURCE)
 #include "Imagespace/HDRPS.hlsli"
 #elif defined(IMAGESPACE_SSAO_CAMERA_Z_AND_MIPS_CS_SOURCE)

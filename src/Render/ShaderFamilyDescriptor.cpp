@@ -1023,6 +1023,13 @@ namespace cs::engine
 					Define(a_defines, "IMAGESPACE_MOTION_BLUR_PS_SOURCE");
 					return true;
 				}
+				if (matchesRoute(
+						"ISRefraction",
+						"BSImagespaceShaderRefraction",
+						"ISRefraction")) {
+					Define(a_defines, "IMAGESPACE_REFRACTION_PS_SOURCE");
+					return true;
+				}
 				std::optional<std::string_view> hdrDefine;
 				if (matchesRoute(
 						"ISHDRDownSample4",
