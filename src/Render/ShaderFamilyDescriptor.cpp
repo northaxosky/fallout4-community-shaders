@@ -1342,8 +1342,10 @@ namespace cs::engine
 					a_defines, a_descriptor.stage, d);
 			case ShaderInjectionTarget::kDfTiledLighting:
 				if (a_descriptor.stage != ShaderStage::kCompute ||
-					d > 2)
+					d > 3)
 					return false;
+				if (d == 3)
+					Define(a_defines, "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM", "10");
 				Define(
 					a_defines,
 					"DFTILEDLIGHTING_VARIANT",

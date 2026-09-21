@@ -2342,7 +2342,7 @@ namespace cs::engine
 					&& a_target
 						== ShaderInjectionTarget::kDfTiledLighting
 					&& a_nativeName == "DFTiledLighting"
-					&& entry->id == 0;
+					&& (entry->id == 0 || entry->id == 3);
 				RecordNativeComputeShader(
 					MakeNativeVariantKey({
 						.target = a_target,

@@ -2034,10 +2034,10 @@ namespace
 	constexpr UINT kWaterSceneDepthTextureSlot = 33;
 	constexpr UINT kWaterCausticsSamplerSlot = 14;
 
-	constexpr std::size_t kExpectedBaselineRegistrationRows = 1905;
-	constexpr std::size_t kExpectedBaselineCompileInputs = 1834;
+	constexpr std::size_t kExpectedBaselineRegistrationRows = 1906;
+	constexpr std::size_t kExpectedBaselineCompileInputs = 1835;
 	constexpr std::size_t kExpectedEquivalentCompileInputGroups = 32;
-	constexpr std::size_t kExpectedCanonicalIdentityRows = 11;
+	constexpr std::size_t kExpectedCanonicalIdentityRows = 12;
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 72;
 	constexpr std::size_t kExpectedBsdfLightRows = 207;
@@ -2274,7 +2274,7 @@ namespace
 							"1"
 						}
 					});
-				if (registration.descriptor == 0)
+				if (registration.descriptor == 0 || registration.descriptor == 3)
 					AttachBaselineIdentity(registration, a_jobs.back());
 				else
 					++inverseSquareTiledRows;
@@ -2479,13 +2479,13 @@ namespace
 					+ " proven alias groups, found "
 					+ std::to_string(equivalentCompileInputGroups));
 		}
-		if (dfTiledLightingRows != 3) {
+		if (dfTiledLightingRows != 4) {
 			AddPreparationFailure(
 				a_jobs,
 				"DFTiledLighting registration coverage",
 				"Expected "
-					+ std::to_string(3)
-					+ " depth-bounds and final-kernel routes, found "
+					+ std::to_string(4)
+					+ " depth-bounds, tile-cull, and final-kernel routes, found "
 					+ std::to_string(dfTiledLightingRows));
 		}
 		if (inverseSquareTiledRows != 2) {

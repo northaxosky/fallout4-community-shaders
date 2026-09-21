@@ -2,14 +2,16 @@ schema_version = 1
 source = "build/proof/current-baseline-proof.json"
 ae240_ba2_sha256 = "6fecbd744f0f3235dea45dda4c259abd90fb599897ecb04226c9916a723889d3"
 fxc_sha256 = "005eff830845789c7efb2831a0b41950ee6954e9bcd93baf50de67ad537728b2"
-route_count = 1905
+route_count = 1906
 exact_identity_count = 1894
-canonical_identity_count = 11
+canonical_identity_count = 12
 
 # Every record passed native executable, signature, and resource-ABI proof.
 # PrePass stage IDs are reachable normalized native stage-map keys.
 # One dead archive-only PrePass body is retained with reached = false.
 witnesses = [
+  # RE fda17103: real CS3 candidate, opt-in groupshared initialization and temporary-lane SSA proofs.
+  { target = "df_tiled_lighting", stage = "compute", stage_id = 3, early_depth = false, reached = true, stock_sha1 = "e5f6cc91c8d37f7a074f09e533d09da0a529f720", candidate = { byte_length = 2128, sha1 = "8f2553d9dbbd5673665dc690c38f1dfd9b6b229c", sha256 = "e2728545c119e8a45f34c543fd126949d86f8b34d5ff385a660a4043d7385bc1" } },
   { target = "blood_splatter", stage = "pixel", stage_id = 0, early_depth = false, reached = true, stock_sha1 = "700a1e3169f8d0c02ed360cabd1d0a2f2631e243", candidate = { byte_length = 672, sha1 = "700a1e3169f8d0c02ed360cabd1d0a2f2631e243", sha256 = "84ed00f865c14f4adcc56b94f94dd26fd486a2ed70192d1d51efaac08813dfa8" } },
   { target = "blood_splatter", stage = "pixel", stage_id = 1, early_depth = false, reached = true, stock_sha1 = "fabc7b50a63bc9f1ac022eb29c9018e98b1abf26", candidate = { byte_length = 460, sha1 = "fabc7b50a63bc9f1ac022eb29c9018e98b1abf26", sha256 = "3c5826afa101ddd2bdd30316c9ed854593cf687a2687894642eb70c34a537aa7" } },
   { target = "blood_splatter", stage = "vertex", stage_id = 0, early_depth = false, reached = true, stock_sha1 = "a83cf576f5b08683d917d05e6be9d7b4dfc3bc77", candidate = { byte_length = 700, sha1 = "a83cf576f5b08683d917d05e6be9d7b4dfc3bc77", sha256 = "12b631e842ab1ada173186eaebfa798e838e6e9c0fc2134d681988bac82b32e9" } },
