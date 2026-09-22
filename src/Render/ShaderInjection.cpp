@@ -367,8 +367,6 @@ namespace cs::engine
 				return ShaderInjectionTarget::kBloodSplatter;
 			if (name.contains("distanttree"))
 				return ShaderInjectionTarget::kDistantTree;
-			if (name.contains("facecustom"))
-				return ShaderInjectionTarget::kFaceCustomization;
 			if (name.starts_with("is") || name.contains("imagespace"))
 				return ShaderInjectionTarget::kImageSpace;
 			if (name.contains("sky"))

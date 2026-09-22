@@ -63,6 +63,23 @@ namespace cs::feature_config
 			return a_path.string();
 		}
 
+		bool RemoveRetiredFaceCustomizationOwnership(toml::table& a_root)
+		{
+			auto* ownership = a_root["shader_ownership"].as_table();
+			auto* targets =
+				ownership ? (*ownership)["targets"].as_table() : nullptr;
+			return targets && targets->erase("face_customization") != 0;
+		}
+
+		void AppendMigrationNotice(
+			std::string& a_notice,
+			std::string_view a_message)
+		{
+			if (!a_notice.empty())
+				a_notice += ' ';
+			a_notice += a_message;
+		}
+
 		FileLoadResult IoError(const std::filesystem::path& a_path, std::string_view a_detail)
 		{
 			return {
@@ -486,6 +503,8 @@ namespace cs::feature_config
 
 		result.root = std::move(defaultLoad.table);
 		result.defaultLoaded = true;
+		bool retiredOwnership =
+			RemoveRetiredFaceCustomizationOwnership(result.root);
 		(void)NormalizeLegacyTemporalSettings(result.root);
 
 		auto userLoad = LoadFile(a_userPath);
@@ -493,20 +512,36 @@ namespace cs::feature_config
 		switch (userLoad.status) {
 		case FileLoadStatus::kMissing:
 			break;
-		case FileLoadStatus::kParsed:
+		case FileLoadStatus::kParsed: {
 			result.userRoot = std::move(userLoad.table);
 			if (const auto migration = NormalizeLegacyTemporalSettings(result.userRoot);
 				migration.changed) {
 				result.userMigrated = true;
-				result.migrationNotice = migration.notice;
+				AppendMigrationNotice(
+					result.migrationNotice,
+					migration.notice);
 			}
+			const bool retiredUserOwnership =
+				RemoveRetiredFaceCustomizationOwnership(result.userRoot);
+			result.userMigrated =
+				result.userMigrated || retiredUserOwnership;
+			retiredOwnership =
+				retiredOwnership || retiredUserOwnership;
 			DeepMerge(result.root, result.userRoot);
 			result.userLoaded = true;
 			break;
+		}
 		case FileLoadStatus::kParseError:
 		case FileLoadStatus::kIoError:
 			result.userWarning = std::move(userLoad.error);
 			break;
+		}
+		if (retiredOwnership) {
+			AppendMigrationNotice(
+				result.migrationNotice,
+				"Retired shader ownership target 'face_customization' "
+				"was removed from the loaded configuration; native "
+				"FaceCustomization shaders remain stock.");
 		}
 		return result;
 	}

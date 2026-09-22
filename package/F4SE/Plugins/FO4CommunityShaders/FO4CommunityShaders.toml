@@ -20,7 +20,6 @@ particle = true
 effect = true
 blood_splatter = true
 distant_tree = true
-face_customization = true
 imagespace = true
 bssky = true
 bswater = true

@@ -1363,10 +1363,6 @@ namespace cs::engine
 					return false;
 				DefineBit(a_defines, d, 1, "RENDER_DEPTH");
 				return true;
-			case ShaderInjectionTarget::kFaceCustomization:
-				return d == 0
-					&& (a_descriptor.stage == ShaderStage::kVertex
-						|| a_descriptor.stage == ShaderStage::kPixel);
 			case ShaderInjectionTarget::kImageSpace:
 				return AddImageSpaceDefines(a_defines, a_descriptor);
 			case ShaderInjectionTarget::kBsSky:
@@ -1427,11 +1423,6 @@ namespace cs::engine
 			case ShaderInjectionTarget::kDistantTree:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
 					"BSDISTANTTREE_VS_SOURCE" : "BSDISTANTTREE_PS_SOURCE";
-				break;
-			case ShaderInjectionTarget::kFaceCustomization:
-				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSFACECUSTOMIZATION_VS_SOURCE" :
-					"BSFACECUSTOMIZATION_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kBsSky:
 				define = a_descriptor.stage == ShaderStage::kVertex ?

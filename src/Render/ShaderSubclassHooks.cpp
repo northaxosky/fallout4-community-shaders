@@ -18,7 +18,6 @@
 #include "RE/B/BSDFPrePassShader.h"
 #include "RE/B/BSDistantTreeShader.h"
 #include "RE/B/BSEffectShader.h"
-#include "RE/B/BSFaceCustomizationShader.h"
 #include "RE/B/BSLightingShader.h"
 #include "RE/B/BSParticleShader.h"
 #include "RE/B/BSSkyShader.h"
@@ -253,7 +252,6 @@ namespace cs::engine
 			CS_HOOK_SHADER_SUBCLASS(BSDFPrePassShader, kDeferredPrepass);
 			CS_HOOK_SHADER_SUBCLASS(BSDistantTreeShader, kDistantTree);
 			CS_HOOK_SHADER_SUBCLASS(BSEffectShader, kEffect);
-			CS_HOOK_SHADER_SUBCLASS(BSFaceCustomizationShader, kFaceCustomization);
 			CS_HOOK_SHADER_SUBCLASS(BSLightingShader, kBsLighting);
 			CS_HOOK_SHADER_SUBCLASS(BSParticleShader, kParticle);
 			CS_HOOK_SHADER_SUBCLASS(BSSkyShader, kBsSky);
