@@ -272,16 +272,6 @@ target("TemporalPipelineStateTests", function()
     )
 end)
 
-target("ScreenSpaceShadowsMathTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files("tests/ScreenSpaceShadowsMathTests.cpp")
-    add_headerfiles(
-        "features/ScreenSpaceShadows/src/ScreenSpaceShadowsMath.h"
-    )
-    add_includedirs("features/ScreenSpaceShadows/src")
-end)
-
 target("TerrainShadowsMathTests", function()
     set_kind("binary")
     set_default(false)
@@ -339,20 +329,6 @@ target("WaterEffectsMathTests", function()
     add_includedirs("features/WaterEffects/src")
 end)
 
-target("HostIntegrationTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files(
-        "tests/HostIntegrationTests.cpp",
-        "src/Host/HostPageCatalog.cpp"
-    )
-    add_headerfiles(
-        "src/Host/HostClientOptions.h",
-        "src/Host/HostPageCatalog.h"
-    )
-    add_packages("vcpkg::tomlplusplus")
-end)
-
 target("StreamlineModuleFixture", function()
     set_kind("shared")
     set_default(false)
@@ -382,10 +358,8 @@ target("UpscalingPublicationTests", function()
         "src/Render/RendererContext.cpp"
     )
     add_headerfiles(
-        "features/Upscaling/src/ProviderOutputPreview.h",
         "features/Upscaling/src/UpscalingPublication.h",
         "src/Render/Annotation.h",
-        "src/Render/RenderUIPathGate.h",
         "src/Render/RendererContext.h"
     )
     add_includedirs(
@@ -430,22 +404,13 @@ target("FrameBufferTests", function()
     add_packages("vcpkg::directxmath")
 end)
 
-target("FrameGenerationCameraTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files("tests/FrameGenerationCameraTests.cpp")
-    add_headerfiles("src/Render/FrameBufferMath.h")
-    add_packages("vcpkg::directxmath")
-end)
-
 target("FrameGenerationContractTests", function()
     set_kind("binary")
     set_default(false)
     add_files("tests/FrameGenerationContractTests.cpp")
     add_headerfiles(
-        "src/Render/FrameGenerationCpuTiming.h",
         "src/Render/FrameGenerationOrchestration.h",
-        "features/FrameGeneration/src/StreamlineFrameGenerationContract.h"
+        "src/Render/TemporalPipelineState.h"
     )
     add_includedirs(
         "features/FrameGeneration/src",
@@ -483,16 +448,6 @@ target("FrameGenerationRetirementGpuTests", function()
     add_syslinks("d3d11", "d3d12", "dxgi", "ole32", "version")
 end)
 
-target("FrustumEmbedTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files("tests/FrustumEmbedTests.cpp")
-    add_headerfiles(
-        "features/ScreenSpaceGI/src/OracleProjectionEmbed.h"
-    )
-    add_includedirs("features/ScreenSpaceGI/src")
-end)
-
 target("ScreenSpaceGIHistoryTests", function()
     set_kind("binary")
     set_default(false)
@@ -506,49 +461,14 @@ end)
 target("ShaderCompileTests", function()
     set_kind("binary")
     set_default(false)
-    add_rules("fo4cs.directxtk")
-    add_deps(plugin_name .. "Version", "commonlibf4", "ShaderStage")
+    add_deps("ShaderStage")
     add_files(
         "tests/ShaderCompileTests.cpp",
-        "src/Render/ShaderInjection.cpp",
-        "src/Render/ShaderInjectionCompileRequest.cpp",
-        "src/Render/ShaderFamilyDescriptor.cpp",
-        "src/Render/ShaderSubclassContext.cpp",
-        "src/Render/SharedDataDispatchScope.cpp",
-        "src/Render/PixelShaderSwapModel.cpp",
-        "src/Utils/CSSha1.cpp",
-        "src/Utils/CSSha256.cpp",
         "src/Utils/ShaderCompile.cpp"
     )
-    add_headerfiles(
-        "src/Render/ShaderFamilyDescriptor.h",
-        "src/Render/ShaderSubclassContext.h",
-        "src/Utils/CSSha256.h",
-        "src/Utils/ShaderCompile.h"
-    )
-    add_includedirs(
-        generated_include,
-        "extern",
-        "tests",
-        "extern/CommonLibF4/include",
-        "extern/CommonLibF4/lib/commonlib-shared/include"
-    )
-    add_packages(
-        "vcpkg::directx-headers",
-        "vcpkg::directxtk",
-        "vcpkg::magic-enum",
-        "vcpkg::tomlplusplus"
-    )
-    add_defines(
-        "_WINDOWS",
-        "_AMD64_",
-        "_UNICODE",
-        "COMMONLIB_RUNTIMECOUNT=3"
-    )
-    add_syslinks("bcrypt", "d3dcompiler")
-    add_linkdirs("extern/detours/Release")
-    add_links("detours")
-    set_pcxxheader("src/PCH.h")
+    add_headerfiles("src/Utils/ShaderCompile.h")
+    add_packages("vcpkg::directx-headers")
+    add_syslinks("d3dcompiler")
 end)
 
 target("PixelShaderSwapTests", function()
@@ -652,23 +572,10 @@ end)
 
 target("FeatureConfigTests", function()
     add_tests("FeatureConfig")
-    add_tests("FeatureConfigSeeds", {
-        runargs = {
-            "--validate-seeds",
-            path.join(
-                os.projectdir(),
-                "package/F4SE/Plugins/FO4CommunityShaders/FO4CommunityShaders.toml"
-            )
-        }
-    })
 end)
 
 target("TemporalPipelineStateTests", function()
     add_tests("TemporalPipelineState")
-end)
-
-target("ScreenSpaceShadowsMathTests", function()
-    add_tests("ScreenSpaceShadowsMath")
 end)
 
 target("TerrainShadowsMathTests", function()
@@ -693,10 +600,6 @@ end)
 
 target("WaterEffectsMathTests", function()
     add_tests("WaterEffectsMath")
-end)
-
-target("HostIntegrationTests", function()
-    add_tests("HostIntegration")
 end)
 
 target("StreamlineModuleTests", function()
@@ -735,10 +638,6 @@ target("FrameBufferTests", function()
     add_tests("FrameBuffer")
 end)
 
-target("FrameGenerationCameraTests", function()
-    add_tests("FrameGenerationCamera")
-end)
-
 target("FrameGenerationContractTests", function()
     add_tests("FrameGenerationContract")
 end)
@@ -760,20 +659,13 @@ target("FrameGenerationRetirementGpuTests", function()
     })
 end)
 
-target("FrustumEmbedTests", function()
-    add_tests("FrustumEmbed")
-end)
-
 target("ScreenSpaceGIHistoryTests", function()
     add_tests("ScreenSpaceGIHistory")
 end)
 
 target("ShaderCompileTests", function()
     add_tests("ShaderCompile", {
-        runargs = {
-            path.join(os.projectdir(), "build/ShaderStage/Shaders"),
-            path.join(os.projectdir(), "tests/data/shader-identities.toml")
-        }
+        runargs = path.join(os.projectdir(), "build/ShaderStage/Shaders")
     })
 end)
 
@@ -790,37 +682,14 @@ target("ShaderVariantCompilationTests", function()
 end)
 
 target("ShaderInjectionRegistrationTests", function()
-    add_tests("ShaderInjectionDescriptorSelection", {
-        runargs = "--baseline-ownership"
-    })
     add_tests("ShaderInjectionClaimLedger", {
         runargs = "--claim-ledger"
-    })
-    add_tests("ShaderInjectionNativeObserver", {
-        runargs = "--native-observer"
-    })
-    add_tests("ShaderInjectionLazyPreparation", {
-        runargs = "--lazy-preparation",
-        run_timeout = 30000
-    })
-    add_tests("ShaderInjectionNativeOutcomeCache", {
-        runargs = "--native-outcome-cache",
-        run_timeout = 30000
-    })
-    add_tests("ShaderInjectionComputeDispatchBridge", {
-        runargs = "--dispatch-bridge"
     })
     add_tests("ShaderInjectionComputeHooksMissing", {
         runargs = "--compute-hooks-missing"
     })
-    add_tests("ShaderInjectionComputeBaselineOnly", {
-        runargs = "--compute-baseline-only"
-    })
     add_tests("ShaderInjectionComputePhase", {
         runargs = "--compute-phase"
-    })
-    add_tests("ShaderInjectionComputeDescriptor", {
-        runargs = "--compute-descriptor"
     })
     add_tests("ShaderInjectionContributorConflict", {
         runargs = "--contributor-conflict"

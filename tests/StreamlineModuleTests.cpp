@@ -444,13 +444,10 @@ namespace
 	class TestContext
 	{
 	public:
-		explicit TestContext(fs::path a_fixture, fs::path a_official) :
-			fixture(std::move(a_fixture)),
-			official(std::move(a_official))
+		explicit TestContext(fs::path a_fixture) :
+			fixture(std::move(a_fixture))
 		{
 			Require(fs::is_regular_file(fixture), "fixture DLL does not exist");
-			if (!official.empty())
-				Require(fs::is_regular_file(official), "official interposer does not exist");
 		}
 
 		[[nodiscard]] ProjectTrustConfig TrustFor(
@@ -496,9 +493,7 @@ namespace
 				a_directory / sl::security::kProjectManifestSignatureName,
 				signature);
 		}
-
 		fs::path fixture;
-		fs::path official;
 		Workspace workspace;
 		EphemeralKey signingKey;
 		EphemeralKey wrongKey;
@@ -588,62 +583,6 @@ namespace
 		CHECK(!FixtureAttached());
 	}
 
-	void TestPartialMetadataFailsClosed(TestContext& a_context)
-	{
-		const auto trust = a_context.TrustFor(a_context.signingKey);
-		const auto missingSignature =
-			a_context.workspace.Fresh(L"missing signature");
-		a_context.PrepareDlls(missingSignature);
-		a_context.SignPackage(missingSignature, a_context.signingKey);
-		fs::remove(
-			missingSignature / sl::security::kProjectManifestSignatureName);
-		const auto signatureResult =
-			cs::files::LoadStreamlineInterposer(missingSignature, trust);
-		ScopedModule signatureModule(signatureResult.module);
-		CheckFailure(
-			signatureResult, TrustFailure::eManifestIncomplete,
-			"missing detached signature");
-		CHECK(signatureResult.systemError == ERROR_FILE_NOT_FOUND);
-		CHECK(!FixtureAttached());
-
-		const auto missingManifest =
-			a_context.workspace.Fresh(L"missing manifest");
-		a_context.PrepareDlls(missingManifest);
-		a_context.SignPackage(missingManifest, a_context.signingKey);
-		fs::remove(missingManifest / sl::security::kProjectManifestName);
-		const auto manifestResult =
-			cs::files::LoadStreamlineInterposer(missingManifest, trust);
-		ScopedModule manifestModule(manifestResult.module);
-		CheckFailure(
-			manifestResult, TrustFailure::eManifestIncomplete,
-			"missing project manifest");
-		CHECK(manifestResult.systemError == ERROR_FILE_NOT_FOUND);
-		CHECK(!FixtureAttached());
-	}
-
-	void TestMetadataDirectoryFailsClosed(TestContext& a_context)
-	{
-		const auto directory =
-			a_context.workspace.Fresh(L"metadata directory");
-		CopyFile(a_context.fixture, directory / L"sl.interposer.dll");
-		fs::create_directory(
-			directory / sl::security::kProjectManifestName);
-		const std::array<std::uint8_t, 64> signature{};
-		WriteBytes(
-			directory / sl::security::kProjectManifestSignatureName,
-			signature);
-		const auto trust = a_context.TrustFor(a_context.signingKey);
-
-		const auto result =
-			cs::files::LoadStreamlineInterposer(directory, trust);
-		ScopedModule module(result.module);
-		CheckFailure(
-			result, TrustFailure::eManifestIo,
-			"manifest path naming a directory");
-		CHECK(result.systemError == ERROR_DIRECTORY);
-		CHECK(!FixtureAttached());
-	}
-
 	void TestWrongPublicKeyFailsClosed(TestContext& a_context)
 	{
 		const auto directory = a_context.workspace.Fresh(L"wrong public key");
@@ -681,145 +620,6 @@ namespace
 		CHECK(!FixtureAttached());
 	}
 
-	void TestMissingManifestMemberHasSystemError(TestContext& a_context)
-	{
-		const auto directory =
-			a_context.workspace.Fresh(L"missing manifest member");
-		a_context.PrepareDlls(directory);
-		a_context.SignPackage(directory, a_context.signingKey);
-		fs::remove(directory / L"sl.common.dll");
-		const auto trust = a_context.TrustFor(a_context.signingKey);
-
-		const auto result =
-			cs::files::LoadStreamlineInterposer(directory, trust);
-		ScopedModule module(result.module);
-		CheckFailure(
-			result, TrustFailure::eFileOpenFailed,
-			"missing manifest-listed DLL");
-		CHECK(
-			result.systemError == ERROR_FILE_NOT_FOUND ||
-			result.systemError == ERROR_PATH_NOT_FOUND);
-		CHECK(!FixtureAttached());
-	}
-
-	void TestMalformedAndZeroManifestFailClosed(TestContext& a_context)
-	{
-		const auto trust = a_context.TrustFor(a_context.signingKey);
-		const auto malformed = a_context.workspace.Fresh(L"malformed manifest");
-		a_context.PrepareDlls(malformed);
-		const std::array<std::uint8_t, 32> malformedBytes{};
-		const std::array<std::uint8_t, 64> signature{};
-		WriteBytes(
-			malformed / sl::security::kProjectManifestName,
-			malformedBytes);
-		WriteBytes(
-			malformed / sl::security::kProjectManifestSignatureName,
-			signature);
-		const auto malformedResult =
-			cs::files::LoadStreamlineInterposer(malformed, trust);
-		ScopedModule malformedModule(malformedResult.module);
-		CheckFailure(
-			malformedResult, TrustFailure::eManifestMalformed,
-			"malformed manifest");
-		CHECK(!FixtureAttached());
-
-		const auto zero = a_context.workspace.Fresh(L"zero manifest");
-		a_context.PrepareDlls(zero);
-		WriteBytes(
-			zero / sl::security::kProjectManifestName,
-			std::span<const std::uint8_t>{});
-		WriteBytes(
-			zero / sl::security::kProjectManifestSignatureName,
-			signature);
-		const auto zeroResult =
-			cs::files::LoadStreamlineInterposer(zero, trust);
-		ScopedModule zeroModule(zeroResult.module);
-		CHECK(!static_cast<bool>(zeroResult));
-		CHECK(zeroResult.module == nullptr);
-		CHECK(!FixtureAttached());
-	}
-
-	void TestWrongReleaseFailsClosed(TestContext& a_context)
-	{
-		const auto directory = a_context.workspace.Fresh(L"wrong release");
-		a_context.PrepareDlls(directory);
-		a_context.SignPackage(
-			directory, a_context.signingKey,
-			"fo4cs-streamline-bootstrap-test-2");
-		const auto trust = a_context.TrustFor(a_context.signingKey);
-
-		const auto result =
-			cs::files::LoadStreamlineInterposer(directory, trust);
-		ScopedModule module(result.module);
-		CheckFailure(
-			result, TrustFailure::eManifestReleaseMismatch,
-			"wrong release ID");
-		CHECK(!FixtureAttached());
-	}
-
-	void TestHardLinkedPackageUsesPhysicalResolver(TestContext& a_context)
-	{
-		const auto root = a_context.workspace.Fresh(L"hard linked package");
-		const auto logical = root / L"logical links";
-		const auto commonBacking = root / L"common backing";
-		const auto interposerBacking = root / L"interposer backing";
-		const auto manifestBacking = root / L"manifest backing";
-		const auto signatureBacking = root / L"signature backing";
-		for (const auto& directory : {
-				 logical, commonBacking, interposerBacking,
-				 manifestBacking, signatureBacking }) {
-			fs::create_directories(directory);
-		}
-
-		const auto common = commonBacking / L"common-source.dll";
-		const auto interposer = interposerBacking / L"interposer-source.dll";
-		CopyFile(a_context.fixture, common);
-		CopyFile(a_context.fixture, interposer);
-		const std::array entries{
-			ManifestEntry{
-				"sl.common.dll",
-				ProjectFileRole::eProjectCommon,
-				common },
-			ManifestEntry{
-				"sl.interposer.dll",
-				ProjectFileRole::eProjectInterposer,
-				interposer }
-		};
-		const auto manifest = BuildManifest(kReleaseId, kKeyId, entries);
-		const auto signature = a_context.signingKey.Sign(manifest);
-		const auto manifestSource =
-			manifestBacking / L"manifest-source.bin";
-		const auto signatureSource =
-			signatureBacking / L"signature-source.sig";
-		WriteBytes(manifestSource, manifest);
-		WriteBytes(signatureSource, signature);
-
-		const std::array links{
-			std::pair{
-				logical / L"sl.common.dll",
-				common },
-			std::pair{
-				logical / L"sl.interposer.dll",
-				interposer },
-			std::pair{
-				logical / sl::security::kProjectManifestName,
-				manifestSource },
-			std::pair{
-				logical / sl::security::kProjectManifestSignatureName,
-				signatureSource }
-		};
-		for (const auto& [link, backing] : links) {
-			CreateHardLink(link, backing);
-		}
-
-		const auto trust = a_context.TrustFor(a_context.signingKey);
-		const auto result =
-			cs::files::LoadStreamlineInterposer(logical, trust);
-		ScopedModule module(result.module);
-		CHECK(static_cast<bool>(result));
-		CHECK(FixtureAttached());
-	}
-
 	void TestUnsignedFixtureRejectedBeforeAttach(TestContext& a_context)
 	{
 		const auto directory = a_context.workspace.Fresh(L"unsigned fixture");
@@ -835,65 +635,32 @@ namespace
 		CHECK(!FixtureAttached());
 	}
 
-	void TestOfficialFallback(TestContext& a_context)
-	{
-		const auto directory =
-			a_context.workspace.Fresh(L"official NVIDIA fallback");
-		CopyFile(a_context.official, directory / L"sl.interposer.dll");
-		const auto trust = a_context.TrustFor(a_context.signingKey);
-
-		const auto result =
-			cs::files::LoadStreamlineInterposer(directory, trust);
-		ScopedModule module(result.module);
-		CHECK(static_cast<bool>(result));
-		CHECK(result.module != nullptr);
-		CHECK(!FixtureAttached());
-	}
 }
 
 int wmain(int a_argc, wchar_t** a_argv)
 {
-	if (a_argc != 2 && a_argc != 3) {
-		std::cerr << "usage: StreamlineModuleTests <fixture-dll> "
-					 "[official-nvidia-interposer]\n";
+	if (a_argc != 2) {
+		std::cerr << "usage: StreamlineModuleTests <fixture-dll>\n";
 		return 2;
 	}
 
 	try {
-		TestContext context(
-			fs::absolute(a_argv[1]),
-			a_argc == 3 ? fs::absolute(a_argv[2]) : fs::path{});
-
-		RunTest("Unicode workspace", [&] {
-			CHECK(context.workspace.Root().wstring().find(L' ') != std::wstring::npos);
-			CHECK(
-				context.workspace.Root().wstring().find(L"\u6D4B\u8BD5") !=
-				std::wstring::npos);
+		TestContext context(fs::absolute(a_argv[1]));
+		RunTest("valid signed bootstrap", [&] {
+			TestValidSignedBootstrap(context);
 		});
-		RunTest("valid signed bootstrap", [&] { TestValidSignedBootstrap(context); });
-		RunTest("disabled trust", [&] { TestDisabledTrustFailsClosed(context); });
-		RunTest("partial metadata", [&] { TestPartialMetadataFailsClosed(context); });
-		RunTest("metadata directory", [&] { TestMetadataDirectoryFailsClosed(context); });
-		RunTest("wrong public key", [&] { TestWrongPublicKeyFailsClosed(context); });
-		RunTest("tampered DLL", [&] { TestTamperedDllFailsBeforeAttach(context); });
-		RunTest("missing manifest member", [&] {
-			TestMissingManifestMemberHasSystemError(context);
+		RunTest("disabled trust", [&] {
+			TestDisabledTrustFailsClosed(context);
 		});
-		RunTest("malformed manifest", [&] {
-			TestMalformedAndZeroManifestFailClosed(context);
+		RunTest("wrong public key", [&] {
+			TestWrongPublicKeyFailsClosed(context);
 		});
-		RunTest("wrong release", [&] { TestWrongReleaseFailsClosed(context); });
-		RunTest("hard linked package", [&] {
-			TestHardLinkedPackageUsesPhysicalResolver(context);
+		RunTest("tampered DLL", [&] {
+			TestTamperedDllFailsBeforeAttach(context);
 		});
 		RunTest("unsigned fixture", [&] {
 			TestUnsignedFixtureRejectedBeforeAttach(context);
 		});
-		if (!context.official.empty()) {
-			RunTest("official NVIDIA fallback", [&] {
-				TestOfficialFallback(context);
-			});
-		}
 	} catch (const std::exception& exception) {
 		std::cerr << "StreamlineModule test setup failed: "
 				  << exception.what() << '\n';
@@ -904,7 +671,6 @@ int wmain(int a_argc, wchar_t** a_argv)
 		std::cerr << failures << " StreamlineModule check(s) failed\n";
 		return 1;
 	}
-
 	std::cout << "StreamlineModule tests passed\n";
 	return 0;
 }

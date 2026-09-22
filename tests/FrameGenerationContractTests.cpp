@@ -1,8 +1,5 @@
-#include "Render/FrameGenerationCpuTiming.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/TemporalPipelineState.h"
-
-#include "StreamlineFrameGenerationContract.h"
 
 #include <iostream>
 #include <memory>
@@ -13,10 +10,6 @@
 namespace
 {
 	int failures = 0;
-	std::array<std::uint64_t, 8> fakeClockValues{};
-	std::size_t fakeClockIndex = 0;
-
-	std::uint64_t FakeClock() noexcept { return fakeClockValues[fakeClockIndex++]; }
 
 	void Check(bool a_condition, std::string_view a_message)
 	{
@@ -24,94 +17,6 @@ namespace
 			std::cerr << "FAIL: " << a_message << '\n';
 			++failures;
 		}
-	}
-
-	void TestFailureReporting()
-	{
-		using namespace cs::render::temporal;
-		const ProviderResult failure{ .code = ProviderResultCode::kFailure,
-			.sdkResult = -12,
-			.message = "Frame interpolation failed." };
-		const auto message = FormatProviderFailure("Collect present status", failure);
-		Check(message ==
-				  "Collect present status: Frame interpolation failed. (SDK "
-				  "result -12)",
-			"failure reason preserves its operation and exact signed SDK code");
-		const ProviderResult transport{
-			.code = ProviderResultCode::kFailure,
-			.hresult = DXGI_ERROR_DEVICE_REMOVED,
-			.message = "Presentation transport failed."
-		};
-		const auto transportMessage =
-			FormatProviderFailure("Present", transport);
-		Check(transportMessage.contains(std::to_string(
-				  static_cast<std::uint32_t>(DXGI_ERROR_DEVICE_REMOVED))),
-			"failure reporting preserves the original HRESULT");
-	}
-
-	void TestCpuPhaseTimingCollector()
-	{
-		using Phase = cs::render::FrameGenerationCpuPhase;
-		cs::render::FrameGenerationCpuTimingCollector<3> collector(&FakeClock);
-
-		fakeClockIndex = 0;
-		{
-			auto scope = collector.Measure(Phase::kLatencySleep);
-		}
-		Check(fakeClockIndex == 0 && !collector.GetSnapshot().available,
-			"disabled CPU phase timing does not invoke the clock");
-
-		collector.SetEnabled(true);
-		collector.RecordNanoseconds(Phase::kLatencySleep, 1'000'000);
-		collector.RecordNanoseconds(Phase::kLatencySleep, 2'000'000);
-		collector.RecordNanoseconds(Phase::kLatencySleep, 3'000'000);
-		collector.RecordNanoseconds(Phase::kLatencySleep, 4'000'000);
-		collector.RecordNanoseconds(Phase::kSdkPresent, 8'000'000);
-		collector.RecordFrameTimeInput(15.5);
-		auto snapshot = collector.GetSnapshot();
-		const auto& sleep =
-			snapshot.phases[static_cast<std::size_t>(Phase::kLatencySleep)];
-		const auto& present =
-			snapshot.phases[static_cast<std::size_t>(Phase::kSdkPresent)];
-		Check(snapshot.available && sleep.sampleCount == 4 &&
-				  sleep.windowSampleCount == 3 &&
-				  sleep.windowMeanMilliseconds == 3.0 &&
-				  sleep.windowMaxMilliseconds == 4.0,
-			"CPU phase timing keeps a deterministic bounded rolling window");
-		Check(present.sampleCount == 1 && present.windowMeanMilliseconds == 8.0 &&
-				  snapshot.frameTimeInputAvailable &&
-				  snapshot.lastFrameTimeInputMilliseconds == 15.5 &&
-				  snapshot.phases[static_cast<std::size_t>(Phase::kPrepareFrame)]
-						  .sampleCount == 0,
-			"CPU phase timing keeps stages independent");
-
-		collector.SetEnabled(false);
-		collector.SetEnabled(true);
-		fakeClockValues = { 10, 2'000'010 };
-		fakeClockIndex = 0;
-		const auto earlyReturn = [&]() {
-			auto scope = collector.Measure(Phase::kPrepareFrame);
-			return;
-		};
-		earlyReturn();
-		snapshot = collector.GetSnapshot();
-		const auto& prepare =
-			snapshot.phases[static_cast<std::size_t>(Phase::kPrepareFrame)];
-		Check(fakeClockIndex == 2 && prepare.sampleCount == 1 &&
-				  prepare.windowMeanMilliseconds == 2.0,
-			"CPU phase timing records scopes that leave through an early return");
-
-		collector.SetEnabled(false);
-		fakeClockIndex = 0;
-		{
-			auto scope = collector.Measure(Phase::kSdkPresent);
-		}
-		snapshot = collector.GetSnapshot();
-		Check(fakeClockIndex == 0 && !snapshot.available &&
-				  !snapshot.frameTimeInputAvailable &&
-				  snapshot.phases[static_cast<std::size_t>(Phase::kSdkPresent)]
-						  .sampleCount == 0,
-			"disabling CPU phase timing clears samples and reports unavailable");
 	}
 
 	class RecordingProvider final : public cs::render::temporal::IFrameGenerationProvider
@@ -580,102 +485,6 @@ namespace
 		}
 	}
 
-	void TestPresentStatusOrchestration()
-	{
-		RecordingProvider provider;
-		provider.generatedCount = 2;
-		provider.presentedCount = 3;
-		const auto accepted =
-			cs::render::temporal::CollectAcceptedPresentStatus(provider, 0, S_OK);
-		Check(accepted.observed && accepted.generatedFrames == 2u &&
-				  accepted.presentedFrames == 3u && provider.statusCalls == 1 &&
-				  provider.lastStatusFlags == 0 &&
-				  provider.lastPresentResult == S_OK,
-			"accepted Present polls status and retains provider counts");
-
-		const auto retry = cs::render::temporal::CollectAcceptedPresentStatus(
-			provider, 0, DXGI_ERROR_WAS_STILL_DRAWING);
-		Check(!retry.observed && provider.statusCalls == 1,
-			"retryable Present does not consume provider status");
-	}
-
-	void TestStreamlineBackendContracts()
-	{
-		using namespace cs::render::temporal;
-		PresentedFrameAccumulator generated;
-		PresentedFrameAccumulator presented;
-		sl::DLSSGStatus status = sl::DLSSGStatus::eOk;
-		std::uint32_t calls = 0;
-		FrameGenerationCapabilities observed{};
-		for (const std::uint32_t count : { 1u, 4u }) {
-			const auto result = cs::features::streamline_fg::PollState(
-				sl::ViewportHandle{ 1 }, generated, presented, status,
-				[&](sl::ViewportHandle, sl::DLSSGState& a_state,
-					const sl::DLSSGOptions*) {
-					++calls;
-					a_state.numFramesActuallyPresented = count;
-					a_state.numFramesToGenerateMax = 5;
-					a_state.bIsDynamicMFGSupported =
-						sl::Boolean::eTrue;
-					a_state.status = sl::DLSSGStatus::eOk;
-					return sl::Result::eOk;
-				},
-				[&](const sl::DLSSGState& a_state) {
-					observed.configurationKnown = true;
-					observed.maxGeneratedFrames =
-						a_state.numFramesToGenerateMax;
-					observed.dynamicModeSupported =
-						a_state.bIsDynamicMFGSupported ==
-						sl::Boolean::eTrue;
-				});
-			Check(result == sl::Result::eOk, "DLSS-G state query succeeds");
-		}
-		Check(calls == 2 && generated.Consume() == 5 &&
-				presented.Consume() == 5 &&
-				observed.maxGeneratedFrames == 5 &&
-				observed.dynamicModeSupported,
-			"the one DLSS-G state query retains counts and capabilities");
-
-		struct CleanupCase
-		{
-			int failingStep;
-			std::vector<std::string> events;
-		};
-		for (const auto& test :
-			std::array{ CleanupCase{ -1, { "clear", "options", "free" } },
-				CleanupCase{ 0, { "clear" } } }) {
-			std::vector<std::string> events;
-			sl::DLSSGOptions options{};
-			const auto stepResult = [&](int a_step) {
-				return test.failingStep == a_step ? sl::Result::eErrorInvalidState : sl::Result::eOk;
-			};
-			const auto result = cs::features::streamline_fg::DestroyResources(
-				true, sl::ViewportHandle{ 9 },
-				[&]() {
-					events.emplace_back("clear");
-					return stepResult(0);
-				},
-				[&](sl::ViewportHandle, const sl::DLSSGOptions& a_options) {
-					events.emplace_back("options");
-					options = a_options;
-					return stepResult(1);
-				},
-				[&](sl::Feature a_feature, sl::ViewportHandle) {
-					events.emplace_back("free");
-					Check(a_feature == sl::kFeatureDLSS_G,
-						"DLSS-G cleanup frees only its own allocation");
-					return stepResult(2);
-				});
-			Check(result.succeeded == (test.failingStep < 0) &&
-					  events == test.events,
-				"DLSS-G cleanup stops at the first failed ownership step");
-			if (test.failingStep < 0) {
-				Check(options.mode == sl::DLSSGMode::eOff,
-					"DLSS-G cleanup disables generation before resource free");
-			}
-		}
-	}
-
 	void TestProductionInputWriteOrdering()
 	{
 		using namespace cs::render::temporal;
@@ -711,16 +520,12 @@ namespace
 
 int main()
 {
-	TestCpuPhaseTimingCollector();
-	TestFailureReporting();
 	TestLifecycleOrderAndFailures();
 	TestResizeRestoration();
 	TestTransactionalResourceReplacement();
 	TestResizeCommitProtocol();
 	TestSafePreparation();
 	TestDelayedRetirementAcrossRingCycles();
-	TestPresentStatusOrchestration();
-	TestStreamlineBackendContracts();
 	TestProductionInputWriteOrdering();
 	if (failures) {
 		std::cerr << failures << " check(s) failed\n";

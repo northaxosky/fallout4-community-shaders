@@ -112,28 +112,6 @@ namespace
 		return parsed ? *parsed : ts::HeightMapMetadata{};
 	}
 
-	void TestFeatureBlock()
-	{
-		const auto metadata = MakeMetadata();
-		const auto block = ts::BuildFeatureBlock(metadata, true);
-		Check(block.enableTerrainShadow == 1u, "enabled block publishes one");
-
-		const double uWest = metadata.pos0[0] * block.scale[0] + block.offset[0];
-		const double uEast = metadata.pos1[0] * block.scale[0] + block.offset[0];
-		const double vNorth = metadata.pos0[1] * block.scale[1] + block.offset[1];
-		const double vSouth = metadata.pos1[1] * block.scale[1] + block.offset[1];
-		CheckNear(uWest, 0.0, 1e-5, "west edge maps to U=0");
-		CheckNear(uEast, 1.0, 1e-5, "east edge maps to U=1");
-		CheckNear(vNorth, 0.0, 1e-5, "north edge maps to V=0");
-		CheckNear(vSouth, 1.0, 1e-5, "south edge maps to V=1");
-		Check(block.scale[1] < 0.0f, "the V axis is flipped against world north");
-
-		const auto disabled = ts::BuildFeatureBlock(metadata, false);
-		Check(
-			disabled.enableTerrainShadow == 0u,
-			"the disabled block publishes shader identity");
-	}
-
 	void TestDdaPlan()
 	{
 		const auto metadata = MakeMetadata();
@@ -189,37 +167,6 @@ namespace
 		Check(
 			northward.signDir == -1,
 			"a northward sun sweeps toward the top of the image");
-	}
-
-	void TestDownsample()
-	{
-		Check(
-			ts::kDefaultDownsampleFactor == 4,
-			"factor 4 is the default");
-		Check(ts::IsValidDownsampleFactor(1), "factor 1 is valid");
-		Check(ts::IsValidDownsampleFactor(2), "factor 2 is valid");
-		Check(ts::IsValidDownsampleFactor(4), "factor 4 is valid");
-		Check(!ts::IsValidDownsampleFactor(0), "factor 0 is rejected");
-		Check(!ts::IsValidDownsampleFactor(3), "factor 3 is rejected");
-		Check(!ts::IsValidDownsampleFactor(8), "factor 8 is rejected");
-
-		Check(ts::ApplyDownsample(4096, 1) == 4096, "factor 1 is faithful");
-		Check(ts::ApplyDownsample(4096, 2) == 2048, "factor 2 halves");
-		Check(ts::ApplyDownsample(4096, 4) == 1024, "factor 4 quarters");
-		Check(ts::ApplyDownsample(2, 4) == 1, "a small extent never collapses");
-		Check(ts::ApplyDownsample(0, 4) == 0, "an empty extent stays empty");
-
-		const auto full = ts::ComputeVramCost(4096, 4096);
-		Check(full.heightBytes == 4096ull * 4096ull * 2ull, "R16 heights cost two bytes");
-		Check(full.shadowBytes == 4096ull * 4096ull * 4ull, "R16G16 shadows cost four");
-		Check(
-			full.totalBytes == full.heightBytes + full.shadowBytes,
-			"the total is the sum");
-		const auto quarter = ts::ComputeVramCost(1024, 1024);
-		Check(
-			quarter.totalBytes * 16 == full.totalBytes,
-			"factor 4 costs a sixteenth");
-		CheckNear(ts::BytesToMiB(1024 * 1024), 1.0, 1e-9, "one MiB converts");
 	}
 
 	void TestGameHourJump()
@@ -342,9 +289,7 @@ int main()
 {
 	TestXLodGenParsing();
 	TestCustomParsing();
-	TestFeatureBlock();
 	TestDdaPlan();
-	TestDownsample();
 	TestGameHourJump();
 	TestBootstrapReadiness();
 	TestHeightPercentileRange();

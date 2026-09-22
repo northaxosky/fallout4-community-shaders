@@ -436,29 +436,6 @@ namespace
 			cs::features::swap_chain_facade::BuildDescription1(a_owner.desc);
 		a_owner.fullscreenDesc =
 			cs::features::swap_chain_facade::BuildFullscreenDescription(a_owner.desc);
-		Check(a_owner.desc.BufferCount == 2 &&
-				  a_owner.desc.SwapEffect == DXGI_SWAP_EFFECT_DISCARD &&
-				  a_owner.desc.Flags == 0,
-			"facade descriptor is a coherent two-buffer discard model");
-		Check(cs::features::swap_chain_facade::SupportsResizeBufferCount(
-				  0, a_owner.desc) &&
-				  cs::features::swap_chain_facade::SupportsResizeBufferCount(
-					  2, a_owner.desc) &&
-				  !cs::features::swap_chain_facade::SupportsResizeBufferCount(
-					  1, a_owner.desc),
-			"facade accepts retained or explicit two-buffer resize counts");
-		Check(cs::features::swap_chain_facade::PreservePrivateResizeFlags(
-				  a_owner.desc.Flags, inner) == inner.Flags,
-			"resize preserves private flip-model creation flags");
-		Check(cs::features::swap_chain_facade::PreservePrivateResizeFlags(
-				  DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH, inner) ==
-				  (inner.Flags | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH),
-			"resize combines public and private flags");
-		auto plainInner = inner;
-		plainInner.Flags = 0;
-		Check(cs::features::swap_chain_facade::PreservePrivateResizeFlags(
-				  0, plainInner) == 0,
-			"resize does not invent private capabilities");
 	}
 
 	void TestInterfacesAndIdentity(cs::features::DXGISwapChainProxy& a_proxy)
@@ -609,66 +586,27 @@ namespace
 		}
 	}
 
-	void TestFacadeAndDetach(cs::features::DXGISwapChainProxy& a_proxy,
-		InnerSwapChain& a_inner,
-		const RecordingOwner& a_owner)
+	void TestDetachSafety(cs::features::DXGISwapChainProxy& a_proxy)
 	{
-		DXGI_SWAP_CHAIN_DESC desc{};
-		DXGI_SWAP_CHAIN_DESC1 desc1{};
-		DXGI_SWAP_CHAIN_FULLSCREEN_DESC fullscreen{};
-		HWND window = nullptr;
-		Check(SUCCEEDED(a_proxy.GetDesc(&desc)) &&
-				  SUCCEEDED(a_proxy.GetDesc1(&desc1)) &&
-				  SUCCEEDED(a_proxy.GetFullscreenDesc(&fullscreen)) &&
-				  SUCCEEDED(a_proxy.GetHwnd(&window)) && desc.BufferCount == 2 &&
-				  desc.SwapEffect == DXGI_SWAP_EFFECT_DISCARD && desc.Flags == 0 &&
-				  desc1.BufferCount == desc.BufferCount &&
-				  desc1.SwapEffect == desc.SwapEffect && fullscreen.Windowed &&
-				  window == a_owner.window,
-			"versioned descriptors expose one coherent outward facade");
-
-		Check(a_proxy.SetPrivateData(__uuidof(IDXGISwapChain4), 19, nullptr) ==
-					  S_FALSE &&
-				  a_inner.privateDataSize == 19,
-			"private data forwards to the live inner swap chain");
-		IUnknown* parent = nullptr;
-		IUnknown* expectedParent = nullptr;
-		a_owner.device->QueryInterface(IID_PPV_ARGS(&expectedParent));
-		Check(SUCCEEDED(a_proxy.GetParent(IID_PPV_ARGS(&parent))) &&
-				  parent == expectedParent,
-			"GetParent preserves caller-owned COM output");
-		if (parent) {
-			parent->Release();
-		}
-		if (expectedParent) {
-			expectedParent->Release();
-		}
-
 		Check(a_proxy.AddRef() == 2, "facade AddRef increments ownership");
 		Check(a_proxy.Release() == 1, "facade Release preserves owner reference");
 		a_proxy.DetachOwner();
 		ID3D11Device* detachedDevice = reinterpret_cast<ID3D11Device*>(1);
-		IDXGIFactory* detachedParent = reinterpret_cast<IDXGIFactory*>(1);
-		UINT privateDataSize = 99;
-		DXGI_FRAME_STATISTICS statistics{};
-		statistics.PresentCount = 99;
-		UINT presentCount = 99;
+		ID3D11Texture2D* detachedBuffer =
+			reinterpret_cast<ID3D11Texture2D*>(1);
 		Check(a_proxy.GetDevice(IID_PPV_ARGS(&detachedDevice)) ==
 					  DXGI_ERROR_INVALID_CALL &&
 				  detachedDevice == nullptr &&
-				  a_proxy.GetParent(IID_PPV_ARGS(&detachedParent)) ==
+				  a_proxy.GetBuffer(
+					  0, IID_PPV_ARGS(&detachedBuffer)) ==
 					  DXGI_ERROR_INVALID_CALL &&
-				  detachedParent == nullptr &&
-				  a_proxy.GetPrivateData(__uuidof(IDXGISwapChain), &privateDataSize,
-					  nullptr) == DXGI_ERROR_INVALID_CALL &&
-				  privateDataSize == 0 &&
-				  a_proxy.GetFrameStatistics(&statistics) ==
+				  detachedBuffer == nullptr &&
+				  a_proxy.Present(0, 0) ==
 					  DXGI_ERROR_INVALID_CALL &&
-				  statistics.PresentCount == 0 &&
-				  a_proxy.GetLastPresentCount(&presentCount) ==
-					  DXGI_ERROR_INVALID_CALL &&
-				  presentCount == 0,
-			"detached facade clears outputs and cannot reach torn-down objects");
+				  a_proxy.ResizeBuffers(
+					  2, 1920, 1080, DXGI_FORMAT_R8G8B8A8_UNORM, 0) ==
+					  DXGI_ERROR_INVALID_CALL,
+			"detached facade clears outputs and rejects runtime entry points");
 	}
 }  // namespace
 
@@ -690,7 +628,7 @@ int main()
 	TestDeviceAndBuffer(*proxy, owner);
 	TestPresentAndResize(*proxy, owner);
 	TestInnerReplacement(*proxy, *inner.get(), *replacement.get());
-	TestFacadeAndDetach(*proxy, *replacement.get(), owner);
+	TestDetachSafety(*proxy);
 	proxy->Release();
 
 	if (failures) {

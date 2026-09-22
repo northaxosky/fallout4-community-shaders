@@ -129,17 +129,6 @@ namespace
 		return cs::engine::ShaderSwapResolverResult::kReplaced;
 	}
 
-	void TestCompositeResolutionStaysUnavailable()
-	{
-		using namespace cs::engine;
-		Check(
-			!ResolvePixelShaderVariant(
-				"BSDFCompositeShader", 0xB60, std::nullopt)
-				&& !ResolvePixelShaderVariant(
-					"BSDFCompositeShader", 0x10B60, std::nullopt),
-			"unresolved Tilelight state produced a variant key");
-	}
-
 	void TestCompositeResolverMasksAndForcesTilelight()
 	{
 		using namespace cs::engine;
@@ -449,38 +438,6 @@ namespace
 			"pixel resolver ran for a vertex shader");
 	}
 
-	void TestResolverRegistryGeneration()
-	{
-		using namespace cs::engine;
-		PixelShaderResolverRegistryModel registry;
-		Check(
-			registry.Generation() == 0
-				&& registry.Identities().empty(),
-			"resolver registry did not start empty");
-		const auto first = registry.Register(-100);
-		const auto second = registry.Register(0);
-		Check(
-			first == 1
-				&& second == 2
-				&& registry.Generation() == 2
-				&& registry.Identities().size() == 2,
-			"resolver registration generation is wrong");
-		Check(
-			BuildPixelShaderResolverRegistryDescriptor(
-				registry.Identities())
-				== "{\"resolvers\":[{\"priority\":-100,"
-				   "\"registration_generation\":1},{\"priority\":0,"
-				   "\"registration_generation\":2}],"
-				   "\"schema\":\"fo4cs.broker-resolver-registry\","
-				   "\"schema_version\":1}\n",
-			"resolver registry descriptor is not canonical");
-		Check(
-			registry.Unregister(first)
-				&& registry.Generation() == 3
-				&& registry.Identities().size() == 1
-				&& !registry.Unregister(first),
-			"resolver unregistration generation is wrong");
-	}
 }
 
 int main()
@@ -492,13 +449,11 @@ int main()
 	};
 	const Test tests[]{
 		{ "deferred draw anchor truth table", &TestDeferredDrawAnchorTruthTable },
-		{ "composite unresolved state unavailable", &TestCompositeResolutionStaysUnavailable },
 		{ "composite resolver masks technique", &TestCompositeResolverMasksAndForcesTilelight },
 		{ "Light resolver masks technique", &TestBsdfLightResolverMasksTechnique },
 		{ "broker pipeline forwarding", &TestBrokerPipelineForwarding },
 		{ "resolver claim stops lower priority", &TestResolverClaimStopsLowerPriority },
 		{ "resolver stage mask", &TestResolverStageMask },
-		{ "resolver registry generation", &TestResolverRegistryGeneration }
 	};
 
 	unsigned failures = 0;

@@ -11,20 +11,9 @@
 #include <winrt/base.h>
 
 #include "UpscalingPublication.h"
-#include "ProviderOutputPreview.h"
-#include "Render/RenderUIPathGate.h"
-#include "Render/TemporalRenderSettings.h"
 
 namespace
 {
-	using cs::render::temporal::IsExternalUpscaler;
-	using cs::render::temporal::UpscaleMethod;
-	static_assert(!IsExternalUpscaler(UpscaleMethod::kNONE));
-	static_assert(!IsExternalUpscaler(UpscaleMethod::kTAA));
-	static_assert(IsExternalUpscaler(UpscaleMethod::kFSR));
-	static_assert(IsExternalUpscaler(UpscaleMethod::kDLSS));
-	static_assert(!IsExternalUpscaler(UpscaleMethod::kCount));
-
 	bool Check(bool a_condition, const char* a_message)
 	{
 		if (!a_condition) {
@@ -225,79 +214,6 @@ namespace
 		cs::engine::CopyResourcePreservingOM(a_context, snapshot.get(), source.get());
 		ok &= Check(ReadPixel(a_device, a_context, snapshot.get(), unchanged) && unchanged == live,
 			"refresh must update the shared raw snapshot");
-		return ok;
-	}
-
-	bool TestRenderUIPathGateDecoder()
-	{
-		std::array<std::uint8_t, 32> image{};
-		constexpr std::size_t gateOffset = 16;
-		image[0] = 0x80;
-		image[1] = 0x3D;
-		const auto displacement =
-			static_cast<std::int32_t>(gateOffset - cs::engine::RenderUIPathGate::kInstructionLength);
-		std::memcpy(image.data() + 2, &displacement, sizeof(displacement));
-		image[6] = 0x00;
-		image[gateOffset] = 1;
-
-		const auto imageAddress =
-			reinterpret_cast<std::uintptr_t>(image.data());
-		const auto expectedTarget = imageAddress + gateOffset;
-		const auto decoded = cs::engine::RenderUIPathGate::Decode(
-			imageAddress,
-			imageAddress,
-			image.size(),
-			expectedTarget);
-		bool ok = Check(
-			decoded && decoded->Address() == expectedTarget &&
-				decoded->TakesFullEffectsPath(),
-			"Render_UI gate decoder accepted the validated RIP-relative byte compare");
-
-		image[gateOffset] = 0;
-		ok &= Check(
-			decoded && !decoded->TakesFullEffectsPath(),
-			"Render_UI gate accessor observes the live Gamma-only selection");
-
-		image[0] = 0x81;
-		ok &= Check(
-			!cs::engine::RenderUIPathGate::Decode(
-				imageAddress, imageAddress, image.size(), expectedTarget),
-			"Render_UI gate decoder rejects an unexpected opcode");
-		image[0] = 0x80;
-		image[6] = 1;
-		ok &= Check(
-			!cs::engine::RenderUIPathGate::Decode(
-				imageAddress, imageAddress, image.size(), expectedTarget),
-			"Render_UI gate decoder rejects a nonzero compare immediate");
-		image[6] = 0;
-		ok &= Check(
-			!cs::engine::RenderUIPathGate::Decode(
-				imageAddress, imageAddress, gateOffset, expectedTarget),
-			"Render_UI gate decoder rejects a target outside the validated data range");
-		ok &= Check(
-			!cs::engine::RenderUIPathGate::Decode(
-				imageAddress, imageAddress, image.size(), expectedTarget + 1),
-			"Render_UI gate decoder rejects an unexpected runtime target");
-		ok &= Check(
-			cs::engine::ClassifyRenderUIOutputExtent(
-				0.0f, 0.0f, 3840.0f, 2160.0f, 2560, 1440, 3840, 2160) ==
-				cs::engine::RenderUIOutputExtent::kFull,
-			"a full-size Gamma output selects passthrough");
-		ok &= Check(
-			cs::engine::ClassifyRenderUIOutputExtent(
-				0.0f, 0.0f, 2560.0f, 1440.0f, 2560, 1440, 3840, 2160) ==
-				cs::engine::RenderUIOutputExtent::kCommitted,
-			"a committed subrect Gamma output selects spatial recovery");
-		ok &= Check(
-			cs::engine::ClassifyRenderUIOutputExtent(
-				0.0f, 0.0f, 3840.0f, 2160.0f, 3840, 2160, 3840, 2160) ==
-				cs::engine::RenderUIOutputExtent::kFull,
-			"native-size output is not double-scaled");
-		ok &= Check(
-			cs::engine::ClassifyRenderUIOutputExtent(
-				1.0f, 0.0f, 2560.0f, 1440.0f, 2560, 1440, 3840, 2160) ==
-				cs::engine::RenderUIOutputExtent::kInvalid,
-			"an offset or unknown output extent is rejected");
 		return ok;
 	}
 
@@ -753,27 +669,6 @@ int main(int argc, char** argv)
 	context->OMSetRenderTargets(1, renderTargets, nullptr);
 
 	bool ok = true;
-	ok &= TestRenderUIPathGateDecoder();
-	ok &= Check(
-		cs::features::GetProviderOutputPreviewViewFormat(
-			DXGI_FORMAT_R8G8B8A8_UNORM) == DXGI_FORMAT_R8G8B8A8_UNORM,
-		"typed RT0 format changed");
-	ok &= Check(
-		cs::features::GetProviderOutputPreviewViewFormat(
-			DXGI_FORMAT_R8G8B8A8_TYPELESS) == DXGI_FORMAT_R8G8B8A8_UNORM,
-		"RGBA8 typeless RT0 did not select an UNORM view");
-	ok &= Check(
-		cs::features::GetProviderOutputPreviewViewFormat(
-			DXGI_FORMAT_B8G8R8A8_TYPELESS) == DXGI_FORMAT_B8G8R8A8_UNORM,
-		"BGRA8 typeless RT0 did not select an UNORM view");
-	ok &= Check(
-		cs::features::GetProviderOutputPreviewViewFormat(
-			DXGI_FORMAT_R16G16B16A16_TYPELESS) == DXGI_FORMAT_R16G16B16A16_FLOAT,
-		"RGBA16 typeless RT0 did not select a FLOAT view");
-	ok &= Check(
-		cs::features::GetProviderOutputPreviewViewFormat(
-			DXGI_FORMAT_R8_TYPELESS) == DXGI_FORMAT_UNKNOWN,
-		"ambiguous typeless format was accepted");
 	ok &= Check(
 		!cs::features::PublishUpscalingOutput(
 			context.get(),

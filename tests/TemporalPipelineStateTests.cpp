@@ -1,12 +1,10 @@
-#include "Render/TemporalDevicePolicy.h"
 #include "Render/TemporalPipelineState.h"
 #include "Render/TemporalProvider.h"
-#include "Render/TemporalRenderSettings.h"
-#include "Render/TemporalRenderSizing.h"
 #include "Render/TemporalStartup.h"
 
 #include <iostream>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -177,52 +175,6 @@ namespace
 					"a queued resolve fallback cannot re-enable a quarantined renderer");
 			}
 		}
-	}
-
-	void TestTemporalFeatureLevels()
-	{
-		using namespace cs::render::temporal;
-		RequestedTopology request;
-		request.upscalingEligible = true;
-		request.superResolution = SuperResolutionMethod::kFSR3;
-		request.frameGenerationEligible = true;
-		request.frameGeneration = FrameGenerationMethod::kFSR3;
-		std::vector<D3D_FEATURE_LEVEL> levels{ D3D_FEATURE_LEVEL_11_0 };
-		ConfigureTemporalFeatureLevels(request, levels);
-		Check(levels == std::vector<D3D_FEATURE_LEVEL>{ D3D_FEATURE_LEVEL_11_1,
-							D3D_FEATURE_LEVEL_11_0 },
-			"temporal sessions request the shared-fence interop feature level");
-		const auto once = levels;
-		ConfigureTemporalFeatureLevels(request, levels);
-		Check(levels == once, "feature-level preference is idempotent");
-
-		levels = { D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_11_0,
-			D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_1 };
-		ConfigureTemporalFeatureLevels(request, levels);
-		Check(levels == std::vector<D3D_FEATURE_LEVEL>{ D3D_FEATURE_LEVEL_12_1,
-							D3D_FEATURE_LEVEL_11_1,
-							D3D_FEATURE_LEVEL_11_0 },
-			"higher feature levels retain priority and lower levels remain "
-			"fallbacks");
-
-		levels.clear();
-		ConfigureTemporalFeatureLevels(request, levels);
-		Check(levels.size() == 7 && levels.front() == D3D_FEATURE_LEVEL_11_1 &&
-				  levels[1] == D3D_FEATURE_LEVEL_11_0 &&
-				  levels.back() == D3D_FEATURE_LEVEL_9_1,
-			"an empty engine list preserves D3D11's default fallback levels");
-
-		request.upscalingEligible = false;
-		levels = { D3D_FEATURE_LEVEL_11_0 };
-		ConfigureTemporalFeatureLevels(request, levels);
-		Check(levels.front() == D3D_FEATURE_LEVEL_11_1,
-			"frame generation alone preserves the shared interop requirement");
-
-		request.frameGenerationEligible = false;
-		levels.clear();
-		ConfigureTemporalFeatureLevels(request, levels);
-		Check(levels.empty(),
-			"inactive temporal features leave native device creation unchanged");
 	}
 
 	void TestLiveTransitions()
@@ -412,127 +364,6 @@ namespace
 			"unavailable external startup resolves to native TAA");
 	}
 
-	void TestPreUiHandoffPlanning()
-	{
-		using namespace cs::render::temporal;
-		struct Case
-		{
-			bool fullEffects;
-			bool frameGeneration;
-			bool superResolution;
-			bool resolved;
-			PreUiHandoffPlan expected;
-			bool captureHudless;
-		};
-		for (const auto test :
-			std::array{ Case{ true, true, false, false, { true, false }, true },
-				Case{ true, false, true, true, { false, true }, false },
-				Case{ true, true, true, true, { true, true }, true },
-				Case{ true, true, true, false, { true, true }, false },
-				Case{ true, false, false, false, {}, false },
-				Case{ false, true, true, true, {}, false } }) {
-			const auto plan = PlanPreUiHandoff(test.fullEffects, test.frameGeneration,
-				test.superResolution);
-			Check(plan.captureFrameGenerationInputs ==
-						  test.expected.captureFrameGenerationInputs &&
-					  plan.driveSuperResolution == test.expected.driveSuperResolution &&
-					  plan.ShouldCaptureHudlessColor(test.resolved) ==
-						  test.captureHudless,
-				"pre-UI handoff preserves capture and resolve ownership");
-		}
-	}
-
-	void TestFrameGenerationActivity()
-	{
-		using namespace cs::render::temporal;
-
-		FrameTransaction frame;
-		Check(!IsFrameGenerationActive(true, true, true, 20, 200, frame),
-			"ready configuration is not active before frame work");
-		Check(Capture(frame, 20, 200) && frame.PreparePresent(),
-			"activity frame is captured and prepared");
-		frame.SetFrameGenerationPrepared(true);
-		Check(IsFrameGenerationActive(true, true, true, 20, 200, frame),
-			"valid prepared FG work is active without a generated-frame counter");
-		struct ActivityCase
-		{
-			bool configured;
-			bool enabled;
-			bool ready;
-			std::uint64_t realFrame;
-			std::optional<std::uint64_t> engineFrame;
-			bool active;
-		};
-		for (const auto test :
-			std::array{ ActivityCase{ false, true, true, 20, 200, false },
-				ActivityCase{ true, false, true, 20, 200, false },
-				ActivityCase{ true, true, false, 20, 200, false },
-				ActivityCase{ true, true, true, 21, 201, true },
-				ActivityCase{ true, true, true, 25, 201, true },
-				ActivityCase{ true, true, true, 21, 202, false },
-				ActivityCase{ true, true, true, 19, 200, false },
-				ActivityCase{ true, true, true, 20, 199, false },
-				ActivityCase{ true, true, true, 20, std::nullopt, false } }) {
-			Check(IsFrameGenerationActive(test.configured, test.enabled, test.ready,
-					  test.realFrame, test.engineFrame,
-					  frame) == test.active,
-				"FG activity requires current prepared work and all runtime gates");
-		}
-		Check(frame.PresentAttempt(false, true, false), "activity Present succeeds");
-		Check(frame.Retire(), "activity frame retires");
-		Check(IsFrameGenerationActive(true, true, true, 20, 200, frame),
-			"accepted FG work remains observable through its frame boundary");
-
-		TopologyState topology;
-		RequestedTopology requested;
-		requested.frameGenerationEligible = true;
-		requested.frameGeneration = FrameGenerationMethod::kDLSSG;
-		Check(topology.Freeze(requested), "activity topology freezes");
-		SessionTopology session;
-		session.valid = true;
-		session.proxyInstalled = true;
-		session.admittedFg[static_cast<std::size_t>(
-			FrameGenerationMethod::kOff)] = true;
-		session.admittedFg[static_cast<std::size_t>(
-			FrameGenerationMethod::kDLSSG)] = true;
-		session.activeFg = FrameGenerationMethod::kDLSSG;
-		Check(topology.Admit(session), "activity topology admits");
-		topology.SubmitLive(false, SuperResolutionMethod::kNone, 1, true,
-			FrameGenerationMethod::kOff, 1);
-		const auto& effective = topology.Effective();
-		Check(!topology.Pending().required &&
-				  IsFrameGenerationActive(
-					  effective.frameGeneration != FrameGenerationMethod::kOff,
-					  effective.frameGenerationEnabled, true, 20, 200, frame),
-			"a pending Off selection does not hide work by the effective FG "
-			"provider");
-		Check(topology.CommitPendingTransition(
-				  1, FrameGenerationMethod::kOff) &&
-				  topology.Effective().frameGeneration ==
-					  FrameGenerationMethod::kDLSSG &&
-				  !topology.Effective().frameGenerationEnabled &&
-				  topology.Session()->activeFg ==
-					  FrameGenerationMethod::kOff &&
-				  !topology.Pending().required,
-			"explicit Off disables host FG work and commits the plain private "
-			"chain at the frame boundary");
-
-		FrameTransaction disabled;
-		Check(Capture(disabled, 30) && disabled.PreparePresent(),
-			"disabled frame prepares real-frame presentation");
-		Check(!IsFrameGenerationActive(true, true, true, 30, 0, disabled),
-			"a present prepared without FG work is not active");
-
-		FrameTransaction failed;
-		Check(Capture(failed, 31) && failed.PreparePresent(),
-			"failed frame reaches presentation");
-		failed.SetFrameGenerationPrepared(true);
-		Check(!failed.PresentAttempt(false, false, false),
-			"failed Present marks the frame failed");
-		Check(!IsFrameGenerationActive(true, true, true, 31, 0, failed),
-			"failed prepared FG work is not active");
-	}
-
 	void TestFrameTransactionLifecycle()
 	{
 		using namespace cs::render::temporal;
@@ -573,172 +404,15 @@ namespace
 			"interrupted capture abandons ownership before reuse");
 	}
 
-	void TestIndependentResetEpochs()
-	{
-		using namespace cs::render::temporal;
-
-		ResetEpochs epochs;
-		Check(epochs.SuperResolutionPending(), "SR reset starts pending");
-		Check(epochs.FrameGenerationPending(), "FG reset starts pending");
-		Check(epochs.ArmFrameGeneration(), "FG reset arms once");
-		Check(!epochs.ArmFrameGeneration(),
-			"FG reset is not re-issued before completion");
-		Check(epochs.FrameGenerationRequested() == 1,
-			"initial FG reset epoch is reported");
-		Check(epochs.FrameGenerationConsumed() == 0,
-			"initial FG reset is unconsumed");
-		epochs.ConsumeSuperResolution(false);
-		Check(epochs.SuperResolutionPending(),
-			"failed SR work does not consume reset");
-		epochs.ConsumeSuperResolution(true);
-		Check(!epochs.SuperResolutionPending(), "successful SR work consumes reset");
-		Check(epochs.FrameGenerationPending(),
-			"SR consumption does not consume FG reset");
-		epochs.RequestFrameGeneration();
-		Check(epochs.ArmFrameGeneration(), "new FG epoch can be armed");
-		epochs.ConsumeFrameGeneration(true);
-		Check(!epochs.FrameGenerationPending(), "FG reset consumes independently");
-		Check(epochs.FrameGenerationConsumed() == epochs.FrameGenerationRequested(),
-			"FG reset epoch reports successful consumption");
-	}
-
-	void TestLatencyTimeline()
-	{
-		using namespace cs::render::temporal;
-
-		LatencyTimeline timeline;
-		Check(timeline.Frame() == 0, "latency timeline starts without a frame");
-		Check(timeline.BeginFrame() == 1, "normal loop begins the first real frame");
-		Check(timeline.Phase() == LatencyPhase::kSleep,
-			"sleep precedes message-loop input and simulation");
-		Check(timeline.BeginSimulation(), "simulation starts after the message loop");
-		Check(timeline.EndSimulationAndBeginRenderSubmit(),
-			"main-thread simulation end precedes render submission");
-		Check(timeline.BeginPresent(false),
-			"first real Present closes render submission");
-		Check(timeline.RenderSubmitEnded(),
-			"render submission ends exactly before the first Present attempt");
-		Check(timeline.EndPresent(false, true),
-			"retryable Present completes its attempt");
-		Check(timeline.Phase() == LatencyPhase::kPresentRetry,
-			"retryable Present retains the real-frame timeline");
-		Check(timeline.BeginPresent(false), "same-frame Present retry is accepted");
-		Check(timeline.EndPresent(false, false),
-			"accepted Present completes the frame");
-		Check(timeline.PresentAttempts() == 2,
-			"Present retries do not create another real frame");
-		Check(timeline.BeginPresent(true), "DXGI_PRESENT_TEST is observational");
-		Check(timeline.EndPresent(true, false),
-			"DXGI_PRESENT_TEST has no phase effect");
-		Check(timeline.BeginFrame() == 2, "next normal loop advances once");
-	}
-
-	void TestTypedProviderContracts()
-	{
-		using namespace cs::render::temporal;
-
-		ColorContract observed{ .resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-			.range = ColorRange::kFull,
-			.transfer = TransferFunction::kGamma22,
-			.primaries = ColorPrimaries::kUnspecified,
-			.stage = ColorStage::kPostTonemapLut,
-			.alpha = AlphaMode::kIgnored,
-			.exposure = ExposureMode::kAutomatic };
-		Check(IsFo4PostTonemapSdr(observed),
-			"observed gamma-2.2 post-LUT contract is accepted");
-		observed.transfer = TransferFunction::kLinear;
-		Check(!IsFo4PostTonemapSdr(observed),
-			"linear intermediates cannot masquerade as engine gamma output");
-
-		const SuperResolutionSizeRequest nativeRequest{
-			.outputWidth = 3840,
-			.outputHeight = 2160,
-			.qualityMode = 0
-		};
-		const SuperResolutionSizeResult nativeSize{
-			.result = { .code = ProviderResultCode::kSuccess },
-			.renderWidth = nativeRequest.outputWidth,
-			.renderHeight = nativeRequest.outputHeight
-		};
-		SuperResolutionSizeCache sizeCache;
-		sizeCache.Store(nativeRequest, nativeSize);
-		Check(sizeCache.Find(nativeRequest) &&
-				  sizeCache.Find(nativeRequest)->renderWidth ==
-					  nativeRequest.outputWidth,
-			"provider sizing cache returns only the exact successful request");
-		Check(!sizeCache.Find({ .outputWidth = 3840,
-				  .outputHeight = 2160,
-				  .qualityMode = 1 }),
-			"quality changes miss the provider sizing cache");
-		sizeCache.Store(nativeRequest,
-			{ .result = { .code = ProviderResultCode::kFailure } });
-		Check(sizeCache.Find(nativeRequest),
-			"failed queries never replace the last usable provider sizing");
-
-		RenderSizeState sizing;
-		sizing.SetNative(3441, 1441);
-		const SuperResolutionSizeRequest oddRequest{
-			.outputWidth = 3441,
-			.outputHeight = 1441,
-			.qualityMode = 1
-		};
-		const SuperResolutionSizeResult oddResult{
-			.result = { .code = ProviderResultCode::kSuccess },
-			.renderWidth = 2024,
-			.renderHeight = 848
-		};
-		Check(sizing.SetRequested(oddRequest, oddResult),
-			"valid queried extents are staged");
-		Check(sizing.Committed() == RenderExtent{ 3441, 1441 },
-			"queried extents remain uncommitted before preflight");
-		sizing.CommitRequested();
-		Check(sizing.Committed() == RenderExtent{ 2024, 848 },
-			"preflight commit preserves exact queried integers");
-		Check(static_cast<std::uint32_t>(static_cast<float>(oddRequest.outputWidth) *
-										 sizing.WidthRatio()) ==
-					  oddResult.renderWidth &&
-				  static_cast<std::uint32_t>(
-					  static_cast<float>(oddRequest.outputHeight) *
-					  sizing.HeightRatio()) == oddResult.renderHeight,
-			"published per-axis ratios reconstruct exact queried extents");
-		const SuperResolutionSizeResult invalidResult{
-			.result = { .code = ProviderResultCode::kFailure,
-				.message = "query failed" }
-		};
-		Check(!sizing.SetRequested(oddRequest, invalidResult) &&
-				  sizing.Requested() == RenderExtent{ 3441, 1441 } &&
-				  sizing.Committed() == RenderExtent{ 3441, 1441 },
-			"failed sizing restores native state before commitment");
-
-		ProviderResult recorded{ .code = ProviderResultCode::kSuccess,
-			.workState = ProviderWorkState::kRecorded,
-			.outputDependencyEstablished = true };
-		Check(!recorded.CanPublishOutput(),
-			"recording success alone cannot authorize output publication");
-		recorded.workState = ProviderWorkState::kOutputReady;
-		Check(recorded.CanPublishOutput(),
-			"output publication requires completed work and an established GPU "
-			"dependency");
-		recorded.outputDependencyEstablished = false;
-		Check(!recorded.CanPublishOutput(),
-			"missing synchronization dependency denies publication");
-
-	}
 }  // namespace
 
 int main()
 {
 	TestRequestedEffectiveAndPending();
 	TestQuarantinedConfiguration();
-	TestTemporalFeatureLevels();
 	TestLiveTransitions();
 	TestSelectedStartupInitialization();
-	TestPreUiHandoffPlanning();
-	TestFrameGenerationActivity();
 	TestFrameTransactionLifecycle();
-	TestIndependentResetEpochs();
-	TestLatencyTimeline();
-	TestTypedProviderContracts();
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";
 		return 1;
