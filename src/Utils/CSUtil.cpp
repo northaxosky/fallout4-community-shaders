@@ -5,14 +5,63 @@
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
+#include <format>
 #include <span>
 #include <string>
+#include <dxgi.h>
 #include <wrl/client.h>
 
 #include "Log.h"
 
 namespace cs::util
 {
+	std::string AdapterDescription(ID3D11Device* a_device)
+	{
+		if (!a_device)
+			return "D3D11 device not ready";
+
+		Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+		if (FAILED(a_device->QueryInterface(IID_PPV_ARGS(dxgiDevice.GetAddressOf()))))
+			return "adapter query unavailable";
+
+		Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+		if (FAILED(dxgiDevice->GetAdapter(adapter.GetAddressOf())) || !adapter)
+			return "adapter query unavailable";
+
+		DXGI_ADAPTER_DESC description{};
+		if (FAILED(adapter->GetDesc(&description)))
+			return "adapter description unavailable";
+
+		std::string name = "unnamed adapter";
+		const auto length = std::char_traits<wchar_t>::length(description.Description);
+		if (length != 0) {
+			const auto bytes = WideCharToMultiByte(
+				CP_UTF8, 0, description.Description, static_cast<int>(length),
+				nullptr, 0, nullptr, nullptr);
+			if (bytes <= 0)
+				return "adapter description unavailable";
+			name.resize(static_cast<std::size_t>(bytes));
+			if (WideCharToMultiByte(
+					CP_UTF8, 0, description.Description, static_cast<int>(length),
+					name.data(), bytes, nullptr, nullptr) != bytes) {
+				return "adapter description unavailable";
+			}
+		}
+
+		LARGE_INTEGER driverVersion{};
+		std::string driver = "unavailable";
+		if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &driverVersion))) {
+			driver = std::format("{}.{}.{}.{}",
+				HIWORD(driverVersion.HighPart), LOWORD(driverVersion.HighPart),
+				HIWORD(driverVersion.LowPart), LOWORD(driverVersion.LowPart));
+		}
+
+		return std::format(
+			"{} (vendor 0x{:04X}, device 0x{:04X}, driver {}, {} MiB VRAM)",
+			name, description.VendorId, description.DeviceId, driver,
+			description.DedicatedVideoMemory / (1024 * 1024));
+	}
+
 	namespace
 	{
 		auto* L = cs::log::Get("cs.util");

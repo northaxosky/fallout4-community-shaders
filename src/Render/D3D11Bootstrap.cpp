@@ -116,6 +116,9 @@ namespace cs::d3d11
 		if (!ready.compare_exchange_strong(expected, true))
 			return;
 		{
+			InvokeOwner("GPU adapter diagnostics", [&] {
+				L->info("GPU adapter: {}", util::AdapterDescription(*a_device));
+			});
 			render::annotation::Initialize(*a_immediateContext);
 			render::profiling::InitializeD3D11(*a_device, *a_immediateContext);
 			InvokeOwner("Shader cache initialization", [] {

@@ -9,6 +9,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/CSUtil.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 
 #include <algorithm>
@@ -20,7 +21,6 @@
 #include <vector>
 
 #include <d3d11.h>
-#include <dxgi.h>
 
 namespace
 {
@@ -95,57 +95,6 @@ namespace
 		default:
 			return dmui::TextTone::kStatusInfo;
 		}
-	}
-
-	std::string AdapterDescription()
-	{
-		auto* device = cs::engine::GetDevice();
-		if (!device)
-			return "D3D11 device not ready";
-
-		IDXGIDevice* dxgiDevice{};
-		if (FAILED(device->QueryInterface(
-				__uuidof(IDXGIDevice),
-				reinterpret_cast<void**>(&dxgiDevice)))) {
-			return "adapter query unavailable";
-		}
-		IDXGIAdapter* adapter{};
-		const auto adapterResult = dxgiDevice->GetAdapter(&adapter);
-		dxgiDevice->Release();
-		if (FAILED(adapterResult) || !adapter)
-			return "adapter query unavailable";
-
-		DXGI_ADAPTER_DESC description{};
-		const auto descriptionResult = adapter->GetDesc(&description);
-		adapter->Release();
-		if (FAILED(descriptionResult))
-			return "adapter description unavailable";
-
-		const auto length = std::char_traits<wchar_t>::length(description.Description);
-		if (length == 0)
-			return "unnamed adapter";
-		const auto bytes = WideCharToMultiByte(
-			CP_UTF8,
-			0,
-			description.Description,
-			static_cast<int>(length),
-			nullptr,
-			0,
-			nullptr,
-			nullptr);
-		if (bytes <= 0)
-			return "adapter description unavailable";
-		std::string result(static_cast<std::size_t>(bytes), '\0');
-		(void)WideCharToMultiByte(
-			CP_UTF8,
-			0,
-			description.Description,
-			static_cast<int>(length),
-			result.data(),
-			bytes,
-			nullptr,
-			nullptr);
-		return result;
 	}
 
 	const cs::FeatureDebugView* ResolveDebugView(
@@ -1096,7 +1045,7 @@ namespace cs
 					std::pair{ "Plugin version", Plugin::VERSION.string(".") },
 					std::pair{ "Build", std::string(CS_BUILD_DESCRIBE) },
 					std::pair{ "Commit", std::string(CS_BUILD_GIT_SHA) },
-					std::pair{ "GPU adapter", AdapterDescription() }
+					std::pair{ "GPU adapter", util::AdapterDescription(engine::GetDevice()) }
 				};
 				for (std::size_t index = 0; index < values.size(); ++index) {
 					const auto id = std::format("diagnostic-{}", index);

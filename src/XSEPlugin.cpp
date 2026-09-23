@@ -112,9 +112,9 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	}
 	cs::env::DetectENB();
 
-	L->info("FO4CommunityShaders v{}.{}.{} loaded",
-		Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
-	L->info("BUILD_DESCRIBE {}", CS_BUILD_DESCRIBE);
+	L->info("FO4CommunityShaders v{}.{}.{} loaded (build {}, commit {})",
+		Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2],
+		CS_BUILD_DESCRIBE, CS_BUILD_GIT_SHA);
 
 	cs::engine::InstallShaderSubclassHooks();
 	cs::render::TemporalPipeline::Get().RegisterCreationRouter();

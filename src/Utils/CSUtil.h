@@ -33,4 +33,6 @@ namespace cs::util
 
 	// Returns null before the engine device is ready.
 	[[nodiscard]] ID3D11Device* GetD3DDevice();
+
+	[[nodiscard]] std::string AdapterDescription(ID3D11Device* a_device);
 }
