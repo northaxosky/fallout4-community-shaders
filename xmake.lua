@@ -54,6 +54,27 @@ option("tracy", function()
     set_description("Enable Tracy profiler instrumentation")
 end)
 
+option("release_identity", function()
+    set_default("")
+    set_showmenu(true)
+    set_description("Release tag embedded in the build and package filename")
+end)
+
+task("release-info", function()
+    set_category("plugin")
+    on_run("xmake.release_info")
+    set_menu {
+        usage = "xmake release-info [options]",
+        description = "Compute release metadata for the checked-out commit",
+        options = {
+            { nil, "before", "kv", nil, "Previous push commit" },
+            { nil, "dispatch", "k", nil, "Select the stable release channel" },
+            { nil, "no-publish", "k", nil, "Build without publishing" },
+            { nil, "output", "kv", nil, "Append metadata to this output file" }
+        }
+    }
+end)
+
 add_repositories("fo4cs-repository xmake")
 
 add_requires("vcpkg::directx-headers 1.619.1")
@@ -117,6 +138,12 @@ rule("fo4cs.sdk-assets", function()
     end)
 end)
 
+rule("fo4cs.release-package", function()
+    after_package(function(target)
+        import("xmake.release_package", { rootdir = os.projectdir() }).main(target)
+    end)
+end)
+
 includes("xmake/streamline.lua")
 includes("xmake/shaders.lua")
 
@@ -128,6 +155,8 @@ target(plugin_name .. "Version", function()
     set_policy("build.fence", true)
 
     on_prepare(function()
+        import("core.project.config")
+
         local describe = "unknown"
         local sha = "unknown"
         if os.isfile(".git") or os.isdir(".git") then
@@ -136,6 +165,12 @@ target(plugin_name .. "Version", function()
                 { "describe", "--tags", "--dirty", "--always" }
             ):trim()
             sha = os.iorunv("git", { "rev-parse", "HEAD" }):trim()
+        end
+        local identity = config.get("release_identity") or ""
+        if identity ~= "" then
+            assert(identity:match("^v%d+%.%d+%.%d+$") or identity:match("^v%d+%.%d+%.%d+%-dev%.%d+$"),
+                "release_identity must be a stable or dev release tag")
+            describe = identity
         end
         local content = io.readfile("xmake/Plugin.h.in")
         local variables = {
@@ -168,7 +203,7 @@ target(plugin_name, function()
         description = "Community Shaders for Fallout 4",
         plugin_template = "xmake/commonlibf4-plugin.cpp.in"
     })
-    add_rules("fo4cs.directxtk", "fo4cs.sdk-assets")
+    add_rules("fo4cs.directxtk", "fo4cs.sdk-assets", "fo4cs.release-package")
     add_deps(plugin_name .. "Version", "Streamline")
 
     add_files(
