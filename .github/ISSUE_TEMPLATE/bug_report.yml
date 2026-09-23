@@ -1,0 +1,117 @@
+name: Bug report
+description: Report a crash, visual artifact, performance problem, or other defect.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before reporting, confirm the problem still happens on the latest release and without ENB.
+        Include the log for every report; issues without one usually cannot be diagnosed.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Crash or freeze
+        - Visual artifact
+        - Performance
+        - Settings or menu
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem. Screenshots or videos help for visual issues.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Location, weather, time of day, and settings changes that trigger it.
+      placeholder: |
+        1. Enable Screen Space GI
+        2. Go to Sanctuary at night
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Mod version
+      description: Shown in the first lines of the log and in the in-game menu.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: features
+    attributes:
+      label: Enabled features
+      description: Select every feature with `load = true`.
+      options:
+        - label: Screen Space Shadows
+        - label: Terrain Shadows
+        - label: Screen Space GI
+        - label: Inverse Square Lighting
+        - label: Exponential Height Fog
+        - label: Dynamic Cubemaps
+        - label: Wetness Effects
+        - label: Water Effects
+        - label: Motion Vector Fixes
+        - label: Upscaling
+        - label: Frame Generation
+        - label: Performance Overlay
+        - label: RenderDoc
+
+  - type: input
+    id: upscaling
+    attributes:
+      label: Upscaling and frame generation
+      description: Method and mode, if either is enabled.
+      placeholder: DLSS Quality, DLSS frame generation 2x
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      description: Also logged at startup as `GPU adapter`.
+      placeholder: NVIDIA GeForce RTX 4070, driver 581.57
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Mod setup
+      description: Mod manager, notable graphics or engine mods (Addictol, crash logger, weather and lighting mods), and resolution or display mode.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and configuration
+      description: |
+        Drag and drop these files:
+        - `Documents\My Games\Fallout4\F4SE\FO4CommunityShaders.log`
+        - `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml`, if present
+        - The crash log, for crashes
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I am running Fallout 4 1.11.240 with the required F4SE and Address Library.
+          required: true
+        - label: ENB is not installed.
+          required: true
+        - label: I searched existing issues for this problem.
+          required: true

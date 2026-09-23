@@ -1,0 +1,10 @@
+name: Other
+description: Questions, documentation, or anything that is not a bug or request.
+labels: ["triage"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+    validations:
+      required: true

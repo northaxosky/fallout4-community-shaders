@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a new feature or an improvement to an existing one.
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe what you want to achieve and why current behavior falls short.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or change you would like.
+    validations:
+      required: true
+
+  - type: input
+    id: upstream
+    attributes:
+      label: Skyrim Community Shaders equivalent
+      description: Link the upstream feature if this exists in Skyrim Community Shaders.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, references, or related mods.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for this request.
+          required: true

@@ -1,0 +1,49 @@
+name: Mod compatibility
+description: Report a conflict with another mod or tool.
+labels: ["compatibility", "triage"]
+body:
+  - type: input
+    id: mod
+    attributes:
+      label: Conflicting mod
+      description: Name, version, and link.
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What goes wrong?
+      description: Describe the conflict and confirm it disappears when the other mod is disabled.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Mod version
+      description: Shown in the first lines of the log and in the in-game menu.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and configuration
+      description: |
+        Drag and drop these files:
+        - `Documents\My Games\Fallout4\F4SE\FO4CommunityShaders.log`
+        - `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml`, if present
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The conflict is not with ENB, which is unsupported.
+          required: true
+        - label: I searched existing issues for this mod.
+          required: true
