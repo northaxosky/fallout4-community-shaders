@@ -16,13 +16,12 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](xmake.lua)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
-<sub>[Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
+<sub>[Install](#installation) · [Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
 
 </div>
 
 > [!WARNING]
-> **Experimental.** Features are still being developed and tested. There is no
-> packaged release yet; source builds are intended for development and playtesting.
+> **Beta.** Features are still being developed and tested.
 
 ---
 
@@ -34,6 +33,14 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
+
+---
+
+## Installation
+
+Download a package from [Releases](https://github.com/northaxosky/fallout4-community-shaders/releases) and install it with your mod manager. The **Latest** release is stable; the prerelease is the newest development build. Uninstall by removing the mod.
+
+Report problems through [Issues](https://github.com/northaxosky/fallout4-community-shaders/issues/new/choose) with `Documents\My Games\Fallout4\F4SE\FO4CommunityShaders.log` attached.
 
 ---
 
