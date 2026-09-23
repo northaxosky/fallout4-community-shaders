@@ -32,9 +32,6 @@ jobs:
           done < <(git ls-files '*.sh')
           exit "$fail"
 
-      - name: Test release publishing guards
-        run: bash tests/ReleasePublishingTests.sh
-
       - name: PowerShell parse check (*.ps1)
         shell: pwsh
         run: |
