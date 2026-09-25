@@ -1,0 +1,82 @@
+[center][size=6][color=#42FA60][b]FO4 Community Shaders[/b][/color][/size]
+[b]Modern rendering for Fallout 4.[/b]
+[color=#A8B5A8]Configured through Dear Modding UI[/color][/center]
+
+[b]FO4 Community Shaders[/b] brings modern lighting, shadows, reflections, weather effects, and upscaling to Fallout 4 as a single F4SE plugin. It is a port of [url=https://github.com/community-shaders/skyrim-community-shaders]Skyrim Community Shaders[/url], rebuilt on the game's own renderer.
+
+Every feature ships turned off. Enable only what you want, and the rest of the game renders exactly as before.
+
+[color=#FFB84D][b]Beta:[/b] Features are still being developed and tested. Expect rough edges, and please report what you find.[/color]
+
+[size=5][color=#42FA60][b]FEATURES[/b][/color][/size]
+[list]
+[*][b]Screen Space Shadows:[/b] Contact shadows and finer shadow detail.[/*]
+[*][b]Terrain Shadows:[/b] Long-range shadows cast by distant terrain.[/*]
+[*][b]Screen Space GI:[/b] Ambient occlusion and indirect lighting.[/*]
+[*][b]Inverse Square Lighting:[/b] More natural light falloff.[/*]
+[*][b]Exponential Height Fog:[/b] Weather-driven fog that thins with altitude.[/*]
+[*][b]Dynamic Cubemaps:[/b] Reflections that respond to the surrounding scene.[/*]
+[*][b]Wetness Effects:[/b] Rain-darkened surfaces and wet reflections.[/*]
+[*][b]Water Effects:[/b] Sunlight caustics on submerged surfaces.[/*]
+[*][b]Upscaling:[/b] TAA, FSR 3/4, and DLSS.[/*]
+[*][b]Frame Generation:[/b] FSR 3/4 and DLSS, including supported Multi Frame Generation modes.[/*]
+[*][b]Motion Vector Fixes:[/b] Motion-data corrections for temporal rendering.[/*]
+[*][b]Performance Overlay:[/b] FPS, frame-time, and latency graphs.[/*]
+[/list]
+
+[size=5][color=#42FA60][b]REQUIREMENTS[/b][/color][/size]
+[list]
+[*]Fallout 4 [b]1.11.240[/b] on Windows[/*]
+[*][url=https://f4se.silverlock.org/]F4SE[/url] matching your game version[/*]
+[*][url=https://www.nexusmods.com/fallout4/mods/47327]Address Library for F4SE Plugins[/url][/*]
+[*][url=https://github.com/Dear-Modding-FO4/DearModdingUI]Dear Modding UI[/url] for the in-game menu (recommended)[/*]
+[*][url=https://www.nexusmods.com/fallout4/mods/84214]Addictol[/url] for engine stability and bug fixes (recommended)[/*]
+[/list]
+
+Upscaling and frame generation need a DX12-capable GPU. DLSS requires an NVIDIA RTX card, and FSR 4 requires a compatible AMD Radeon card.
+
+[size=5][color=#42FA60][b]INSTALLATION & USAGE[/b][/color][/size]
+[list=1]
+[*]Install F4SE, Address Library, and Dear Modding UI.[/*]
+[*]Install FO4 Community Shaders through your mod manager.[/*]
+[*]Launch Fallout 4 through F4SE and open Community Shaders in Dear Modding UI.[/*]
+[*]Enable the features you want, then restart the game.[/*]
+[/list]
+
+Enabling or disabling a feature takes effect after a restart. Settings for enabled features apply live.
+
+Without Dear Modding UI, enable features in [b]Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml[/b]:
+[code][features.ScreenSpaceShadows]
+load = true[/code]
+
+[b]Hotkeys:[/b] [b]F10[/b] toggles the performance overlay, and [b]Ctrl+F12[/b] writes a diagnostic dump. Rebind them in Dear Modding UI.
+
+[size=5][color=#42FA60][b]THINGS TO KNOW[/b][/color][/size]
+[list]
+[*][b]ENB and HDR are not supported.[/b][/*]
+[*]Only runtime 1.11.240 is supported. Older OG and NG runtimes are not.[/*]
+[*]Frame generation requires borderless windowed mode.[/*]
+[*]Terrain Shadows requires an xLODGen terrain heightmap export.[/*]
+[*]Switching upscaling or frame-generation methods can briefly pause rendering.[/*]
+[*]The first launch after installing or updating compiles shaders, which takes longer. Later launches use the cache.[/*]
+[/list]
+
+[size=5][color=#42FA60][b]LINKS & SUPPORT[/b][/color][/size]
+[list]
+[*][url=https://github.com/northaxosky/fallout4-community-shaders][b]GitHub Repository[/b][/url][/*]
+[*][url=https://github.com/northaxosky/fallout4-community-shaders/issues/new/choose][b]Report an Issue[/b][/url][/*]
+[*][url=https://github.com/northaxosky/fallout4-community-shaders/releases][b]Development Builds[/b][/url][/*]
+[/list]
+
+When reporting a problem, include your mod version, GPU, the features you enabled, and [b]FO4CommunityShaders.log[/b]. Attach [b]FO4CommunityShaders.User.toml[/b] if you edited it.
+
+Logs are saved in: [b]Documents\My Games\Fallout4\F4SE\[/b]
+
+[size=5][color=#42FA60][b]CREDITS[/b][/color][/size]
+[list]
+[*]The [url=https://github.com/community-shaders/skyrim-community-shaders]Skyrim Community Shaders[/url] team, whose work this port is based on.[/*]
+[*][url=https://github.com/Dear-Modding-FO4]Dear Modding FO4[/url] for CommonLibF4 and Dear Modding UI.[/*]
+[*]NVIDIA Streamline and AMD FidelityFX for upscaling and frame generation.[/*]
+[/list]
+
+Licensed under GPL-3.0-or-later with the project's modding and linking exceptions.
