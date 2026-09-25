@@ -51,19 +51,36 @@ load = true[/code]
 
 [b]Hotkeys:[/b] [b]F10[/b] toggles the performance overlay, and [b]Ctrl+F12[/b] writes a diagnostic dump. Rebind them in Dear Modding UI.
 
-[size=5][color=#42FA60][b]THINGS TO KNOW[/b][/color][/size]
-[list]
-[*][b]ENB and HDR are not supported.[/b][/*]
-[*]Only runtime 1.11.240 is supported. Older OG and NG runtimes are not.[/*]
-[*]Frame generation requires borderless windowed mode.[/*]
-[*]Terrain Shadows requires an xLODGen terrain heightmap export.[/*]
-[*]Switching upscaling or frame-generation methods can briefly pause rendering.[/*]
-[*]The first launch after installing or updating compiles shaders, which takes longer. Later launches use the cache.[/*]
-[/list]
-
 [size=5][color=#42FA60][b]FAQ[/b][/color][/size]
 [b]Is this mod compatible with ENB?[/b]
 I will now have to publicly execute you.
+
+[b]What about HDR?[/b]
+Not supported.
+
+[b]I installed it and nothing changed.[/b]
+Every feature ships turned off. Enable the ones you want in Dear Modding UI, then restart the game.
+
+[b]Does it work on the OG or NG runtime?[/b]
+No. Only Fallout 4 1.11.240 is supported.
+
+[b]Which upscaler should I use?[/b]
+DLSS on NVIDIA RTX cards and FSR 4 on compatible AMD Radeon cards. TAA and FSR 3 work on other DX12-capable GPUs.
+
+[b]Frame generation won't turn on.[/b]
+Switch the game to borderless windowed mode.
+
+[b]Terrain Shadows does nothing.[/b]
+It needs a terrain heightmap exported with xLODGen.
+
+[b]Why is the first launch slow?[/b]
+Shaders compile after installing or updating. Later launches load them from the cache.
+
+[b]The game froze for a moment when I changed upscalers.[/b]
+That's expected. Switching upscaling or frame-generation methods briefly pauses rendering.
+
+[b]Can I add or remove it mid-playthrough?[/b]
+Yes. It has no plugin file and writes nothing to your saves.
 
 [size=5][color=#42FA60][b]LINKS & SUPPORT[/b][/color][/size]
 [list]
