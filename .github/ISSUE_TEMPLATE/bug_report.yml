@@ -99,7 +99,7 @@ body:
       description: |
         Drag and drop these files:
         - `Documents\My Games\Fallout4\F4SE\FO4CommunityShaders.log`
-        - `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml`, if present
+        - `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml`
         - The crash log, for crashes
     validations:
       required: true
