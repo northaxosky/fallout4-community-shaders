@@ -196,6 +196,10 @@ namespace cs::render::renderer_detail
 
 		inline void ForceViewportToRenderTargetDimensions()
 		{
+			// Null until InitD3D finishes; the engine dereferences it.
+			if (!cs::engine::GetActiveContext()) {
+				return;
+			}
 			using func_t = void (*)();
 			static REL::Relocation<func_t> func{ REL::ID({
 				upscaling_anchors::kForceViewportToRenderTargetDimensions[0],
