@@ -146,7 +146,8 @@ namespace
 				settingPath.push_back(field.key);
 				CHECK(paths.insert(std::move(settingPath)).second);
 				// A multi-line description would emit an uncommented line into the file.
-				CHECK(!field.description.empty() && field.description.find_first_of("\r\n") == std::string::npos);
+				const auto& description = field.description.empty() ? section.description : field.description;
+				CHECK(!description.empty() && description.find_first_of("\r\n") == std::string::npos);
 				CHECK(!field.minimum || *field.minimum <= field.defaultValue);
 				CHECK(!field.maximum || *field.maximum >= field.defaultValue);
 				const auto parsed = toml::parse("value = " + FormatValue(field.defaultValue));

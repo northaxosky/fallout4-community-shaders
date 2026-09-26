@@ -79,15 +79,15 @@ namespace cs::settings
 			{ { "logging" }, MakeSchemaView(core::kLogging) },
 			{ { "logging", "channels" }, {}, true },
 			{ { "shader_ownership" }, MakeSchemaView(core::kShaderOwnership) },
-			{ { "shader_ownership", "targets" }, {} },
+			{ { "shader_ownership", "targets" }, {}, false,
+				"Allow baseline replacement of each shader target. (restart required)" },
 			{ { "menu" }, MakeSchemaView(core::kMenu) },
 			{ { "menu", "debug_view_previews" }, {}, true },
 			{ { "preset" }, MakeSchemaView(core::kPreset) }
 		};
 		for (const auto& target : engine::GetShaderInjectionTargets()) {
 			const Schema schema{ std::tuple{
-				Field{ target.name, "Allow baseline replacement of this shader target.",
-					&core::ShaderTarget::enabled, {}, ApplyTiming::kNextLaunch }
+				Field{ target.name, "", &core::ShaderTarget::enabled, {}, ApplyTiming::kNextLaunch }
 			} };
 			auto fields = MakeSchemaView(schema);
 			registry[3].fields.push_back(std::move(fields.front()));

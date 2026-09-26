@@ -39,6 +39,8 @@ namespace cs::settings
 		std::vector<std::string> path;
 		SchemaView fields;
 		bool openMap = false;
+		// Shared by fields without their own description.
+		std::string description;
 	};
 
 	using Registry = std::vector<Section>;

@@ -283,6 +283,8 @@ namespace cs::feature_config
 			if (blocked)
 				continue;
 			output += "\n[" + FormatPath(section.path) + "]\n";
+			if (!section.description.empty())
+				output += "# " + section.description + "\n";
 			std::string error;
 			auto* rest = EnsureTablePath(remaining, std::span{ section.path }, error);
 			if (table) {
@@ -296,10 +298,12 @@ namespace cs::feature_config
 				}
 			}
 			for (const auto& field : section.fields) {
-				output += "# " + field.description;
-				if (field.timing != settings::ApplyTiming::kImmediate)
-					output += " (restart required)";
-				output += '\n';
+				if (!field.description.empty()) {
+					output += "# " + field.description;
+					if (field.timing != settings::ApplyTiming::kImmediate)
+						output += " (restart required)";
+					output += '\n';
+				}
 				const auto* value = table ? table->get(field.key) : nullptr;
 				if (value) {
 					const auto typed = field.read(*value);
