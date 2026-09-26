@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Bash syntax check (*.sh)
         shell: bash
@@ -72,7 +72,7 @@ jobs:
           }
 
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           lfs: true
           submodules: recursive
@@ -107,14 +107,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Restore SDK archive cache
-        if: steps.release-info.outputs.publish == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .sdk-cache
           key: ${{ runner.os }}-sdk-${{ hashFiles('scripts/sdk-manifest.psd1') }}
 
       - name: Fetch SDK runtimes
-        if: steps.release-info.outputs.publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -150,7 +148,7 @@ jobs:
 
       - name: Upload release package
         if: steps.release-info.outputs.publish == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package-metadata.outputs.package-name }}-archive
           path: build/packages/*.zip
@@ -170,14 +168,14 @@ jobs:
 
     steps:
       - name: Check out release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
 
       - name: Download release package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.package-name }}-archive
           path: dist
