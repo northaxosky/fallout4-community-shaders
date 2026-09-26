@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DynamicCubemapsSettings.h"
+
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/PixelShaderResourceSnapshot.h"
@@ -43,10 +45,7 @@ namespace cs::features
 			kReflectionContribution
 		};
 
-		struct Settings
-		{
-			bool enabled = true;
-		};
+		using Settings = dynamic_cubemaps::Settings;
 
 		static DynamicCubemaps* GetSingleton();
 
@@ -147,7 +146,8 @@ namespace cs::features
 
 		DynamicCubemaps() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(dynamic_cubemaps::kSchema); }
 		void PublishSettings() noexcept;
 		void SaveBindings();
 		void RestoreBindings();

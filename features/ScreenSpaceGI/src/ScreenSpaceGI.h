@@ -7,6 +7,7 @@
 #include "Render/FrameBuffer.h"
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "ScreenSpaceGIHistory.h"
+#include "ScreenSpaceGISettings.h"
 #include "Utils/CSBuffer.h"
 
 #include <DirectXMath.h>
@@ -52,23 +53,7 @@ namespace cs::features
 
 		cs::ScreenSpaceGIFeatureData GetCommonBufferData();
 
-		struct Settings
-		{
-			bool  denoiseEnabled = true;
-			float denoiseRadius = 2.0f;
-			float aoRadius = 256.0f;
-			float giRadius = 256.0f;
-			float aoPower = 1.0f;
-			float depthFadeStart = 40000.0f;
-			float depthFadeEnd = 50000.0f;
-			float bounceStrength = 1.0f;
-			int   numSlices = 4;
-			int   numSteps = 8;
-			bool  enabled = true;
-			bool  enableTemporalDenoiser = true;
-			float depthDisocclusion = 0.1f;
-			int   maxAccumFrames = 16;
-		};
+		using Settings = ssgi_settings::Settings;
 
 	private:
 		// Must match Shaders/XeGTAO/common.hlsli.
@@ -159,7 +144,8 @@ namespace cs::features
 
 		ScreenSpaceGI() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(ssgi_settings::kSchema); }
 		void OnPostDeferredLights();
 		void SaveCompositionBindings();
 		void RestoreCompositionBindings();

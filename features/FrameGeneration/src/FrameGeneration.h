@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "FrameGenerationSettings.h"
 
 #include <cstdint>
 #include <optional>
@@ -12,24 +13,8 @@ namespace cs::features
 	class FrameGeneration : public Feature
 	{
 	public:
-		enum class Method : std::uint32_t
-		{
-			kOff,
-			kFSR3,
-			kDLSSG,
-			kFSR4
-		};
-
-		struct Settings
-		{
-			std::uint32_t frameGenerationMethod =
-				static_cast<std::uint32_t>(Method::kFSR3);
-			bool frameGenerationAllowInMenus = false;
-			std::uint32_t dlssgMode = 0;
-			std::uint32_t dlssgFixedMultiplier = 2;
-			float dlssgDynamicTargetFps = 0.0f;
-			bool detailedDiagnostics = false;
-		};
+		using Method = frame_generation::Method;
+		using Settings = frame_generation::Settings;
 
 		static FrameGeneration* GetSingleton();
 
@@ -70,7 +55,8 @@ namespace cs::features
 			kMotion
 		};
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(frame_generation::kSchema); }
 		FeatureDebugTexture GetDebugTexture(DebugView a_view) const;
 
 		std::optional<Settings> _stagedSettings;

@@ -27,7 +27,7 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
-		settings::RestartSettingsView GetRestartSettings() const noexcept override;
+		std::vector<std::string_view> GetRestartSettings() const override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
@@ -46,7 +46,8 @@ namespace cs::features
 
 	private:
 		Upscaling() = default;
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(render::temporal::kSchema); }
 		Settings _bootSettings;
 		std::optional<Settings> _stagedSettings;
 	};

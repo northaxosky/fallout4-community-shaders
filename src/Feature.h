@@ -3,7 +3,7 @@
 #include "DebugView.h"
 #include "FeatureCategories.h"
 #include "FeatureState.h"
-#include "Utils/RestartSettings.h"
+#include "Settings/SettingsMetadata.h"
 
 #include <optional>
 #include <span>
@@ -18,6 +18,11 @@ struct IDXGIAdapter;
 struct ID3D11Device;
 namespace cs
 {
+	namespace settings
+	{
+		class SettingsEdit;
+	}
+
 	struct PresetApplyContext;
 	namespace telemetry
 	{
@@ -58,7 +63,20 @@ namespace cs
 		}
 
 		virtual void DrawSettings() {}
-		virtual settings::RestartSettingsView GetRestartSettings() const noexcept { return {}; }
+		// False keeps recorded edits pending for a later flush.
+		virtual bool SaveSettings() { return true; }
+		virtual settings::SchemaView GetSettingsSchema() const { return {}; }
+
+		// Persists edits recorded by settings::SettingsEdit, optionally only once an edit completes.
+		void FlushSettings(bool a_completedOnly = false)
+		{
+			if (!_settingsSavePending || (a_completedOnly && !_settingsEditCompleted))
+				return;
+			_settingsEditCompleted = false;
+			if (SaveSettings())
+				_settingsSavePending = false;
+		}
+		virtual std::vector<std::string_view> GetRestartSettings() const { return {}; }
 
 		virtual bool ProducesTelemetry() const { return false; }
 		// Telemetry must read only cached or atomic state.
@@ -119,6 +137,7 @@ namespace cs
 		virtual void ExportToPreset(toml::table& ) {}
 
 	private:
+		friend class settings::SettingsEdit;
 		friend class FeatureManager;
 		void SetState(FeatureState a_state) { _state = std::move(a_state); }
 		void SetRuntimeState(FeatureRuntimeState a_state, std::string a_detail = {})
@@ -139,6 +158,8 @@ namespace cs
 		FeatureState            _state;
 		mutable spdlog::logger* _log = nullptr;
 		bool                    _loadFailed = false;
+		bool                    _settingsSavePending = false;
+		bool                    _settingsEditCompleted = false;
 		std::string             _loadFailureReason;
 	};
 

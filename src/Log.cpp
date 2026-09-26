@@ -1,6 +1,7 @@
 #include "Log.h"
 
 #include "Settings/FeatureConfig.h"
+#include "Settings/SettingsRegistry.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/Hotkey.h"
 
@@ -21,10 +22,10 @@ namespace cs::log
 		constexpr const char* kPattern = "[%T.%e] [%=5t] [%L] [%n] %v";
 		struct ConfigState
 		{
-			std::atomic<spdlog::level::level_enum> globalLevel{ spdlog::level::info };
+			std::atomic<spdlog::level::level_enum> globalLevel{ *LevelFromString(settings::core::Logging{}.level) };
 			std::mutex mutex;
 			std::unordered_map<std::string, spdlog::level::level_enum> channelLevels;
-			cs::input::Hotkey dumpHotkey = cs::input::Hotkey::Parse("Ctrl+F12");
+			cs::input::Hotkey dumpHotkey = cs::input::Hotkey::Parse(settings::core::Logging{}.dumpHotkey);
 		};
 
 		ConfigState& Config()
@@ -184,28 +185,25 @@ namespace cs::log
 	void ApplyConfigFromToml(const toml::table& a_logging)
 	{
 		auto* logger = Get("cs.log");
-		constexpr std::array<std::string_view, 5> knownKeys{
-			"level",
-			"channels",
-			"telemetry",
-			"telemetry_interval_seconds",
-			"dump_hotkey"
-		};
 		for (const auto& [key, value] : a_logging) {
 			(void)value;
-			if (std::ranges::find(knownKeys, key.str()) == knownKeys.end())
+			const bool known = key.str() == "channels" || std::apply([&](const auto&... fields) {
+				return ((key.str() == fields.key) || ...);
+			}, settings::core::kLogging.fields);
+			if (!known)
 				logger->warn("Unknown logging key '{}'; ignoring", key.str());
 		}
 
+		const settings::core::Logging defaults;
 		auto& config = Config();
 		{
 			std::scoped_lock lock(config.mutex);
 			config.channelLevels.clear();
-			config.dumpHotkey = cs::input::Hotkey::Parse("Ctrl+F12");
+			config.dumpHotkey = cs::input::Hotkey::Parse(defaults.dumpHotkey);
 		}
-		SetGlobalLevel(spdlog::level::info);
-		cs::telemetry::pump::SetEnabled(false);
-		cs::telemetry::pump::SetIntervalSeconds(5);
+		SetGlobalLevel(*LevelFromString(defaults.level));
+		cs::telemetry::pump::SetEnabled(defaults.telemetry);
+		cs::telemetry::pump::SetIntervalSeconds(defaults.telemetryIntervalSeconds);
 
 		if (const auto* levelNode = a_logging.get("level")) {
 			if (const auto value = levelNode->value<std::string>()) {
@@ -264,7 +262,7 @@ namespace cs::log
 					std::scoped_lock lock(config.mutex);
 					config.dumpHotkey = hotkey;
 				} else {
-					logger->warn("Invalid logging.dump_hotkey '{}'; using Ctrl+F12", *hotkeyText);
+					logger->warn("Invalid logging.dump_hotkey '{}'; using {}", *hotkeyText, defaults.dumpHotkey);
 				}
 			} else {
 				logger->warn("logging.dump_hotkey must be a string");
@@ -274,13 +272,6 @@ namespace cs::log
 
 	toml::table ConfigAsToml()
 	{
-		toml::table logging;
-		logging.insert_or_assign("level", std::string(LevelToString(GlobalLevel())));
-		logging.insert_or_assign("telemetry", cs::telemetry::pump::Enabled());
-		logging.insert_or_assign(
-			"telemetry_interval_seconds",
-			static_cast<std::int64_t>(cs::telemetry::pump::IntervalSeconds()));
-
 		std::vector<std::pair<std::string, spdlog::level::level_enum>> overrides;
 		std::string hotkey;
 		{
@@ -293,7 +284,12 @@ namespace cs::log
 		}
 		std::sort(overrides.begin(), overrides.end(),
 			[](const auto& a_lhs, const auto& a_rhs) { return a_lhs.first < a_rhs.first; });
-		logging.insert_or_assign("dump_hotkey", hotkey);
+		auto logging = settings::SerializeFull(settings::core::kLogging, settings::core::Logging{
+			.level = std::string(LevelToString(GlobalLevel())),
+			.telemetry = cs::telemetry::pump::Enabled(),
+			.telemetryIntervalSeconds = cs::telemetry::pump::IntervalSeconds(),
+			.dumpHotkey = std::move(hotkey)
+		});
 
 		toml::table channels;
 		for (const auto& [name, level] : overrides)

@@ -31,7 +31,8 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
@@ -135,34 +136,6 @@ namespace cs::features
 			return value;
 		}
 
-		std::string SettingError(std::string_view a_key, std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "invalid value");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value is out of range");
-				break;
-			}
-			return false;
-		}
-
 		std::string_view DebugVisualizationName(
 			TerrainShadows::DebugVisualization a_visualization) noexcept
 		{
@@ -174,54 +147,6 @@ namespace cs::features
 			default:
 				return "off";
 			}
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			TerrainShadows::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode)
-				return true;
-
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			if (!AcceptSetting(
-					feature_config::ReadBool(
-						*settingsTable, "enabled", a_candidate.enabled),
-					"enabled",
-					"boolean",
-					a_error)) {
-				return false;
-			}
-
-			auto factor = static_cast<std::uint64_t>(a_candidate.downsampleFactor);
-			const auto factorStatus = feature_config::ReadUnsignedInteger(
-				*settingsTable,
-				"downsample_factor",
-				factor,
-				ts::kDownsampleFactors.front(),
-				ts::kDownsampleFactors.back());
-			if (!AcceptSetting(
-					factorStatus, "downsample_factor", "integer", a_error)) {
-				return false;
-			}
-			if (factorStatus == feature_config::ScalarReadStatus::kValid) {
-				if (!ts::IsValidDownsampleFactor(factor)) {
-					a_error = SettingError(
-						"downsample_factor",
-						"expected one of 1, 2, or 4");
-					return false;
-				}
-				a_candidate.downsampleFactor = static_cast<std::uint32_t>(factor);
-			}
-			return true;
 		}
 
 		ID3D11DeviceContext* GetImmediateContext() noexcept
@@ -290,8 +215,12 @@ namespace cs::features
 	bool TerrainShadows::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error))
+		if (!settings::Parse(ts::kSchema, a_config, candidate, a_error))
 			return false;
+		if (!ts::IsValidDownsampleFactor(candidate.downsampleFactor)) {
+			a_error = "settings.downsample_factor: expected one of 1, 2, or 4";
+			return false;
+		}
 		_settings = candidate;
 		PublishSettings();
 		return true;
@@ -307,18 +236,9 @@ namespace cs::features
 			std::memory_order_release);
 	}
 
-	void TerrainShadows::SaveSettings()
+	bool TerrainShadows::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign(
-			"downsample_factor",
-			static_cast<std::int64_t>(_settings.downsampleFactor));
-		if (const auto result =
-				feature_config::UpdateFeatureSettings(GetConfigKey(), settings);
-			!result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(ts::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void TerrainShadows::Load()
@@ -1614,7 +1534,8 @@ namespace cs::features
 
 	void TerrainShadows::DrawSettings()
 	{
-		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		settings::SettingsEdit edit{ *this };
+		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled("Off publishes zero terrain shadow, which is shader identity.");
 
 		static const std::array factorOptions{
@@ -1638,7 +1559,7 @@ namespace cs::features
 				factorOptions },
 			"Unavailable",
 			"Downsample factor");
-		if (factor.changed) {
+		if (edit.Discrete(factor.changed)) {
 			_settings.downsampleFactor = *factor.selected;
 			changed = true;
 		}
@@ -1647,7 +1568,6 @@ namespace cs::features
 
 		if (changed) {
 			PublishSettings();
-			SaveSettings();
 		}
 
 		std::string worldspace;

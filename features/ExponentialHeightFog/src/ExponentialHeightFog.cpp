@@ -17,7 +17,8 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -38,80 +39,6 @@ namespace cs::features
 			}
 		} };
 
-		std::string SettingError(
-			std::string_view a_key,
-			std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": "
-				+ std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error =
-					SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "invalid value");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value is out of range");
-				break;
-			}
-			return false;
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			ExponentialHeightFog::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode)
-				return true;
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			const auto readFloat = [&](
-				std::string_view a_key,
-				float& a_value) {
-				return AcceptSetting(
-					feature_config::ReadFloat(
-						*settingsTable,
-						a_key,
-						a_value,
-						ehf::kMultiplierMin,
-						ehf::kMultiplierMax),
-					a_key,
-					"float",
-					a_error);
-			};
-
-			return AcceptSetting(
-					feature_config::ReadBool(
-						*settingsTable, "enabled", a_candidate.enabled),
-					"enabled",
-					"boolean",
-					a_error)
-				&& readFloat(
-					"density_multiplier", a_candidate.densityMultiplier)
-				&& readFloat(
-					"height_falloff_multiplier",
-					a_candidate.heightFalloffMultiplier);
-		}
 	}
 
 	ExponentialHeightFog* ExponentialHeightFog::GetSingleton()
@@ -138,7 +65,7 @@ namespace cs::features
 		std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error))
+		if (!settings::Parse(ehf::kSchema, a_config, candidate, a_error))
 			return false;
 		_settings = ehf::Clamp(candidate);
 		return true;
@@ -154,20 +81,9 @@ namespace cs::features
 			_settings.heightFalloffMultiplier, std::memory_order_release);
 	}
 
-	void ExponentialHeightFog::SaveSettings()
+	bool ExponentialHeightFog::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign(
-			"density_multiplier", _settings.densityMultiplier);
-		settings.insert_or_assign(
-			"height_falloff_multiplier",
-			_settings.heightFalloffMultiplier);
-		if (const auto result =
-				feature_config::UpdateFeatureSettings(GetConfigKey(), settings);
-			!result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(ehf::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void ExponentialHeightFog::Load()
@@ -541,17 +457,17 @@ namespace cs::features
 
 	void ExponentialHeightFog::DrawSettings()
 	{
-		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		settings::SettingsEdit edit{ *this };
+		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled(
 			"Off takes the exact vanilla fog math path.");
-		const float multiplierMin = ehf::kMultiplierMin;
-		const float multiplierMax = ehf::kMultiplierMax;
-		changed |= dmui::ui::SliderScalar(
+		const auto densityRange = ehf::kSchema.EditRange(&Settings::densityMultiplier);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
 			"Density multiplier",
 			&_settings.densityMultiplier,
-			&multiplierMin,
-			&multiplierMax,
-			"%.2f");
+			&densityRange.min,
+			&densityRange.max,
+			"%.2f"));
 		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
 			dmui::ui::Text(
@@ -559,12 +475,13 @@ namespace cs::features
 				"Scales the extinction fitted from the current weather's "
 				"near and far fog distances. 1.0 is neutral.");
 		}
-		changed |= dmui::ui::SliderScalar(
+		const auto heightFalloffRange = ehf::kSchema.EditRange(&Settings::heightFalloffMultiplier);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
 			"Height-falloff multiplier",
 			&_settings.heightFalloffMultiplier,
-			&multiplierMin,
-			&multiplierMax,
-			"%.2f");
+			&heightFalloffRange.min,
+			&heightFalloffRange.max,
+			"%.2f"));
 		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
 			dmui::ui::Text(
@@ -577,7 +494,6 @@ namespace cs::features
 		if (changed) {
 			_settings = ehf::Clamp(_settings);
 			PublishSettings();
-			SaveSettings();
 		}
 
 		if (_derivedParametersInUse.load(std::memory_order_relaxed)) {
@@ -597,7 +513,7 @@ namespace cs::features
 
 	void ExponentialHeightFog::RestoreDefaultSettings()
 	{
-		_settings = {};
+		_settings = Settings{};
 		PublishSettings();
 		SaveSettings();
 	}

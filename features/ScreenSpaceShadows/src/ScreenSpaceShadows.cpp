@@ -23,6 +23,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
@@ -31,6 +32,7 @@
 #include "Render/ShaderInjectionDefines.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
 #include "SssMaskBinding.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -52,98 +54,6 @@ namespace cs::features
 		// Engine depth uses near=0, far=1.
 		constexpr float kFarDepthValue = 1.0f;
 		constexpr float kNearDepthValue = 0.0f;
-
-		std::string SettingError(std::string_view a_key, std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "invalid value");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value is out of range");
-				break;
-			}
-			return false;
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			ScreenSpaceShadows::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			if (!AcceptSetting(feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
-					"enabled", "boolean", a_error)
-				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "surface_thickness", a_candidate.surfaceThickness, 0.005f, 0.05f),
-					"surface_thickness", "number", a_error)
-				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "bilinear_threshold", a_candidate.bilinearThreshold, 0.02f, 1.0f),
-					"bilinear_threshold", "number", a_error)
-				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "shadow_contrast", a_candidate.shadowContrast, 0.0f, 4.0f),
-					"shadow_contrast", "number", a_error)) {
-				return false;
-			}
-
-			auto sampleCount = static_cast<std::uint64_t>(a_candidate.sampleCount);
-			const auto sampleCountStatus = feature_config::ReadUnsignedInteger(
-				*settingsTable,
-				"sample_count",
-				sampleCount,
-				sss_math::kMinSampleMultiplier,
-				sss_math::kMaxSampleMultiplier);
-			if (!AcceptSetting(sampleCountStatus, "sample_count", "integer", a_error)) {
-				return false;
-			}
-			if (sampleCountStatus == feature_config::ScalarReadStatus::kValid) {
-				a_candidate.sampleCount = static_cast<std::uint32_t>(sampleCount);
-				return true;
-			}
-
-			float legacyPercent = 0.0f;
-			const auto legacyStatus = feature_config::ReadFloat(
-				*settingsTable,
-				"max_shadow_length_percent",
-				legacyPercent,
-				0.5f,
-				15.0f);
-			if (!AcceptSetting(legacyStatus, "max_shadow_length_percent", "number", a_error)) {
-				return false;
-			}
-			if (legacyStatus == feature_config::ScalarReadStatus::kValid) {
-				a_candidate.sampleCount = sss_math::MigrateLegacyShadowLengthPercent(legacyPercent);
-				L->info(
-					"Mapped legacy max_shadow_length_percent={} to sample_count={}; save settings to persist the canonical key.",
-					legacyPercent,
-					a_candidate.sampleCount);
-			}
-
-			return true;
-		}
 
 		void GetPixelShaderResource(
 			void* a_context,
@@ -224,7 +134,7 @@ namespace cs::features
 	bool ScreenSpaceShadows::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		if (!settings::Parse(sss_settings::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
 
@@ -232,18 +142,9 @@ namespace cs::features
 		return true;
 	}
 
-	void ScreenSpaceShadows::SaveSettings()
+	bool ScreenSpaceShadows::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign("surface_thickness", _settings.surfaceThickness);
-		settings.insert_or_assign("bilinear_threshold", _settings.bilinearThreshold);
-		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
-		settings.insert_or_assign("sample_count", static_cast<std::int64_t>(_settings.sampleCount));
-
-		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(sss_settings::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void ScreenSpaceShadows::Load()
@@ -990,42 +891,37 @@ namespace cs::features
 
 	void ScreenSpaceShadows::DrawSettings()
 	{
-		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
-		const float surfaceThicknessMin = 0.005f;
-		const float surfaceThicknessMax = 0.05f;
-		changed |= dmui::ui::SliderScalar(
+		settings::SettingsEdit edit{ *this };
+		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
+		constexpr auto surfaceThickness = sss_settings::kSchema.EditRange(&Settings::surfaceThickness);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Surface thickness",
 			&_settings.surfaceThickness,
-			&surfaceThicknessMin,
-			&surfaceThicknessMax);
-		const float bilinearThresholdMin = 0.02f;
-		const float bilinearThresholdMax = 1.0f;
-		changed |= dmui::ui::SliderScalar(
+			&surfaceThickness.min,
+			&surfaceThickness.max));
+		constexpr auto bilinearThreshold = sss_settings::kSchema.EditRange(&Settings::bilinearThreshold);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Bilinear threshold",
 			&_settings.bilinearThreshold,
-			&bilinearThresholdMin,
-			&bilinearThresholdMax);
-		const float shadowContrastMin = 0.0f;
-		const float shadowContrastMax = 4.0f;
-		changed |= dmui::ui::SliderScalar(
+			&bilinearThreshold.min,
+			&bilinearThreshold.max));
+		constexpr auto shadowContrast = sss_settings::kSchema.EditRange(&Settings::shadowContrast);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Shadow contrast",
 			&_settings.shadowContrast,
-			&shadowContrastMin,
-			&shadowContrastMax);
+			&shadowContrast.min,
+			&shadowContrast.max));
 
 		auto sampleCount = static_cast<int>(_settings.sampleCount);
-		const int sampleCountMin = 1;
-		const int sampleCountMax = 4;
-		if (dmui::ui::SliderScalar(
+		constexpr auto sampleCountRange = sss_settings::kSchema.EditRange(&Settings::sampleCount);
+		constexpr int sampleCountMin = static_cast<int>(sampleCountRange.min);
+		constexpr int sampleCountMax = static_cast<int>(sampleCountRange.max);
+		if (edit.Continuous(dmui::ui::SliderScalar(
 				"Sample count multiplier",
 				&sampleCount,
 				&sampleCountMin,
-				&sampleCountMax)) {
+				&sampleCountMax))) {
 			_settings.sampleCount = static_cast<std::uint32_t>(sampleCount);
-			changed = true;
-		}
-		if (changed) {
-			SaveSettings();
 		}
 
 		dmui::ui::TextDisabled(

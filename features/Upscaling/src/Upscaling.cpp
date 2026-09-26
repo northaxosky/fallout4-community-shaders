@@ -11,7 +11,8 @@
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -59,84 +60,6 @@ namespace cs::features
 			return "Unknown";
 		}
 
-		std::string SettingError(std::string_view a_key, std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "invalid value");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value is out of range");
-				break;
-			}
-			return false;
-		}
-
-		bool ReadEnum(
-			const toml::table& a_table,
-			std::string_view a_key,
-			std::uint32_t& a_value,
-			std::uint64_t a_max,
-			std::string& a_error)
-		{
-			auto raw = static_cast<std::uint64_t>(a_value);
-			const auto status = feature_config::ReadUnsignedInteger(a_table, a_key, raw, 0, a_max);
-			if (!AcceptSetting(status, a_key, "integer", a_error)) {
-				return false;
-			}
-			a_value = static_cast<std::uint32_t>(raw);
-			return true;
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			Upscaling::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			if (!ReadEnum(*settingsTable, "upscale_method", a_candidate.upscaleMethod,
-					render::temporal::kMaxUpscaleMethodValue, a_error)
-				|| !ReadEnum(*settingsTable, "quality_mode", a_candidate.qualityMode, 4, a_error)
-				|| !ReadEnum(*settingsTable, "streamline_log_level", a_candidate.streamlineLogLevel, 2, a_error)
-				|| !ReadEnum(*settingsTable, "preset_dlss", a_candidate.presetDLSS, 4, a_error)
-				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "sharpness_fsr", a_candidate.sharpnessFSR, 0.0f, 1.0f),
-					"sharpness_fsr", "number", a_error)
-				|| !AcceptSetting(feature_config::ReadBool(*settingsTable, "sharpness_enabled_dlss", a_candidate.sharpnessEnabledDLSS),
-					"sharpness_enabled_dlss", "boolean", a_error)
-				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "sharpness_dlss", a_candidate.sharpnessDLSS, 0.0f, 1.0f),
-					"sharpness_dlss", "number", a_error)) {
-				return false;
-			}
-
-			return true;
-		}
-
 	}
 
 	Upscaling* Upscaling::GetSingleton()
@@ -148,7 +71,7 @@ namespace cs::features
 	bool Upscaling::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		if (!settings::Parse(render::temporal::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
 
@@ -160,20 +83,9 @@ namespace cs::features
 		return true;
 	}
 
-	void Upscaling::SaveSettings()
+	bool Upscaling::SaveSettings()
 	{
-		toml::table table;
-		table.insert_or_assign("upscale_method", static_cast<std::int64_t>(settings.upscaleMethod));
-		table.insert_or_assign("quality_mode", static_cast<std::int64_t>(settings.qualityMode));
-		table.insert_or_assign("streamline_log_level", static_cast<std::int64_t>(settings.streamlineLogLevel));
-		table.insert_or_assign("preset_dlss", static_cast<std::int64_t>(settings.presetDLSS));
-		table.insert_or_assign("sharpness_fsr", settings.sharpnessFSR);
-		table.insert_or_assign("sharpness_enabled_dlss", settings.sharpnessEnabledDLSS);
-		table.insert_or_assign("sharpness_dlss", settings.sharpnessDLSS);
-
-		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), table); !result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(render::temporal::kSchema, GetConfigKey(), settings, *L);
 	}
 
 	void Upscaling::RestoreDefaultSettings()
@@ -192,14 +104,10 @@ namespace cs::features
 		const PresetApplyContext&,
 		std::string& a_error)
 	{
-		auto normalized = a_table;
-		(void)feature_config::NormalizeLegacyTemporalFeatureSettings(
-			GetConfigKey(),
-			normalized);
 		toml::table config;
-		config.insert_or_assign("settings", std::move(normalized));
+		config.insert_or_assign("settings", a_table);
 		auto candidate = settings;
-		if (!ParseSettingsTable(config, candidate, a_error)) {
+		if (!settings::Parse(render::temporal::kSchema, config, candidate, a_error)) {
 			return false;
 		}
 		candidate.enabled =
@@ -228,40 +136,17 @@ namespace cs::features
 
 	void Upscaling::ExportToPreset(toml::table& a_out)
 	{
-		a_out.insert_or_assign(
-			"upscale_method",
-			static_cast<std::int64_t>(settings.upscaleMethod));
-		a_out.insert_or_assign(
-			"quality_mode",
-			static_cast<std::int64_t>(settings.qualityMode));
-		a_out.insert_or_assign(
-			"streamline_log_level",
-			static_cast<std::int64_t>(settings.streamlineLogLevel));
-		a_out.insert_or_assign(
-			"preset_dlss",
-			static_cast<std::int64_t>(settings.presetDLSS));
-		a_out.insert_or_assign("sharpness_fsr", settings.sharpnessFSR);
-		a_out.insert_or_assign(
-			"sharpness_enabled_dlss",
-			settings.sharpnessEnabledDLSS);
-		a_out.insert_or_assign(
-			"sharpness_dlss",
-			settings.sharpnessDLSS);
+		a_out = settings::SerializeFull(render::temporal::kSchema, settings);
 	}
 
-	cs::settings::RestartSettingsView Upscaling::GetRestartSettings() const noexcept
+	std::vector<std::string_view> Upscaling::GetRestartSettings() const
 	{
-		static constexpr std::array fields{
-			CS_RESTART_FIELD(
-				Settings,
-				streamlineLogLevel,
-				"Streamline log level")
-		};
-		return cs::settings::MakeRestartSettingsView(fields, _bootSettings, settings);
+		return cs::settings::RestartRequired(render::temporal::kSchema, _bootSettings, settings);
 	}
 
 	void Upscaling::DrawSettings()
 	{
+		settings::SettingsEdit edit{ *this };
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto fidelityFx = pipeline.GetFidelityFXCapabilities();
@@ -296,7 +181,7 @@ namespace cs::features
 			std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
 			"Unavailable",
 			"Method");
-		if (method.changed) {
+		if (edit.Discrete(method.changed)) {
 			settings.upscaleMethod = *method.selected;
 			settings.enabled =
 				settings.upscaleMethod !=
@@ -335,23 +220,22 @@ namespace cs::features
 					qualityModes },
 				"Unavailable",
 				"Quality");
-			if (qualityMode.changed) {
+			if (edit.Discrete(qualityMode.changed)) {
 				settings.qualityMode = *qualityMode.selected;
 				changed = true;
 			}
 
-			const float sharpnessMin = 0.0f;
-			const float sharpnessMax = 1.0f;
 			if (settings.upscaleMethod ==
 				static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
+				const auto sharpnessRange = render::temporal::kSchema.EditRange(&Settings::sharpnessDLSS);
 				auto sharpness = settings.sharpnessEnabledDLSS
 					? settings.sharpnessDLSS
 					: 0.0f;
-				if (dmui::ui::SliderScalar(
+				if (edit.Continuous(dmui::ui::SliderScalar(
 						"Sharpening",
 						&sharpness,
-						&sharpnessMin,
-						&sharpnessMax)) {
+						&sharpnessRange.min,
+						&sharpnessRange.max))) {
 					settings.sharpnessEnabledDLSS = sharpness > 0.0f;
 					if (settings.sharpnessEnabledDLSS) {
 						settings.sharpnessDLSS = sharpness;
@@ -359,11 +243,12 @@ namespace cs::features
 					changed = true;
 				}
 			} else {
-				changed |= dmui::ui::SliderScalar(
+				const auto sharpnessRange = render::temporal::kSchema.EditRange(&Settings::sharpnessFSR);
+				changed |= edit.Continuous(dmui::ui::SliderScalar(
 					"Sharpening",
 					&settings.sharpnessFSR,
-					&sharpnessMin,
-					&sharpnessMax);
+					&sharpnessRange.min,
+					&sharpnessRange.max));
 			}
 		}
 
@@ -385,7 +270,7 @@ namespace cs::features
 						presets },
 					"Unavailable",
 					"DLSS preset");
-				if (preset.changed) {
+				if (edit.Discrete(preset.changed)) {
 					settings.presetDLSS = *preset.selected;
 					changed = true;
 				}
@@ -393,7 +278,6 @@ namespace cs::features
 		}
 
 		if (changed) {
-			SaveSettings();
 			pipeline.SubmitLiveConfiguration();
 		}
 
@@ -467,9 +351,8 @@ namespace cs::features
 					logLevels },
 				"Unavailable",
 				"Streamline logging");
-			if (logLevel.changed) {
+			if (edit.Discrete(logLevel.changed)) {
 				settings.streamlineLogLevel = *logLevel.selected;
-				SaveSettings();
 			}
 			const auto [scale, ready] = pipeline.Renderer().GetReadiness();
 			dmui::ui::TextDisabled(

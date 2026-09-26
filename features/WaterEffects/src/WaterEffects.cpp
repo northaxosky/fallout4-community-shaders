@@ -20,7 +20,8 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -100,27 +101,12 @@ namespace cs::features
 		const toml::table& a_config,
 		std::string& a_error)
 	{
-		a_error.clear();
-		const auto* settingsNode = a_config.get("settings");
-		if (!settingsNode) {
-			PublishSettings();
-			return true;
-		}
-		const auto* settingsTable = settingsNode->as_table();
-		if (!settingsTable) {
-			a_error = "settings: expected table";
-			return false;
-		}
-
 		auto candidate = _settings;
-		const auto status =
-			feature_config::ReadBool(*settingsTable, "enabled", candidate.enabled);
-		if (status != feature_config::ScalarReadStatus::kMissing
-			&& status != feature_config::ScalarReadStatus::kValid) {
-			a_error = "settings.enabled: expected boolean";
+		if (!settings::Parse(we::kSchema, a_config, candidate, a_error))
 			return false;
-		}
 		_settings = we::Clamp(candidate);
+		if (!a_config.contains("settings"))
+			PublishSettings();
 		return true;
 	}
 
@@ -129,15 +115,9 @@ namespace cs::features
 		_enabled.store(_settings.enabled, std::memory_order_release);
 	}
 
-	void WaterEffects::SaveSettings()
+	bool WaterEffects::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		if (const auto result =
-				feature_config::UpdateFeatureSettings(GetConfigKey(), settings);
-			!result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(we::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void WaterEffects::Load()
@@ -556,10 +536,10 @@ namespace cs::features
 
 	void WaterEffects::DrawSettings()
 	{
-		if (dmui::ui::Checkbox("Enabled", &_settings.enabled)) {
+		settings::SettingsEdit edit{ *this };
+		if (edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled))) {
 			_settings = we::Clamp(_settings);
 			PublishSettings();
-			SaveSettings();
 		}
 		dmui::ui::TextDisabled(
 			"Upstream ships no caustics tunables; every constant is fixed.");

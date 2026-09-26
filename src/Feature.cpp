@@ -3,6 +3,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "Settings/FeatureConfig.h"
+#include "Settings/FeatureKeys.h"
 #include "Settings/PresetManager.h"
 #include "Render/TemporalPipeline.h"
 
@@ -110,6 +111,10 @@ namespace cs
 		}
 
 		_registeredFeatures.push_back(a_feature);
+		std::ranges::stable_sort(_registeredFeatures, {}, [](const Feature* feature) {
+			return std::ranges::find(feature_config::kAllFeatureKeys, feature->GetConfigKey()) -
+				feature_config::kAllFeatureKeys.begin();
+		});
 	}
 
 	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view ) noexcept
@@ -231,7 +236,7 @@ namespace cs
 			feature->SetState({});
 		}
 
-		const auto configRoot = feature_config::GetMergedRoot();
+		const auto configRoot = feature_config::GetRoot();
 		const auto* features = configRoot["features"].as_table();
 		std::unordered_set<std::string> registeredKeys;
 		registeredKeys.reserve(_registeredFeatures.size());
@@ -288,9 +293,6 @@ namespace cs
 			const auto key = feature->GetConfigKey();
 			const auto* featureTable = features->get(key)->as_table();
 			const auto activation = feature_config::ParseActivation(*featureTable);
-			if (!activation.present) {
-				L->warn("Feature {} configuration has no boolean load key; treating as false", key);
-			}
 			if (!activation.valid) {
 				L->warn("Feature {} configuration load key must be a boolean; treating as false", key);
 			}

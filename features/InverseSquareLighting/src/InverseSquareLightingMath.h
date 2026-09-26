@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Settings/SettingsSchema.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -31,6 +33,15 @@ namespace cs::features::inverse_square_lighting
 		float exteriorStrength = 1.0f;
 		float interiorStrength = 1.0f;
 		float nearFieldDistance = kDefaultNearFieldDistance;
+	};
+
+	inline const settings::Schema kSchema{
+		std::tuple{
+			settings::Field{ "enabled", "Enable inverse-square deferred punctual-light attenuation.", &Settings::enabled },
+			settings::Field{ "exterior_strength", "Attenuation blend strength for exterior lights.", &Settings::exteriorStrength, settings::Range{ kStrengthMin, kStrengthMax } },
+			settings::Field{ "interior_strength", "Attenuation blend strength for interior lights.", &Settings::interiorStrength, settings::Range{ kStrengthMin, kStrengthMax } },
+			settings::Field{ "near_field_distance", "Near-field light source distance in game units.", &Settings::nearFieldDistance, settings::Range{ kNearFieldDistanceMin, kNearFieldDistanceMax } }
+		}
 	};
 
 	inline float ClampFinite(

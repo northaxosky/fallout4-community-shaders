@@ -68,7 +68,8 @@ namespace cs::features
 	private:
 		WaterEffects() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(water_effects::kSchema); }
 		void PublishSettings() noexcept;
 		bool BuildCausticsResources(ID3D11Device* a_device, std::string& a_error);
 		void SetValidationDetail(std::string a_detail);

@@ -51,7 +51,8 @@ namespace cs::features
 	private:
 		WetnessEffects() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(wetness_math::kSchema); }
 		void BindGbufferNormal(ID3D11DeviceContext* a_context);
 		void SaveNormalBinding();
 		void RestoreNormalBinding();

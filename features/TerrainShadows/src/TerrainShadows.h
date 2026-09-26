@@ -6,6 +6,7 @@
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "Render/PixelShaderSamplerSnapshot.h"
 #include "TerrainShadowsMath.h"
+#include "TerrainShadowsSettings.h"
 #include "Utils/CSBuffer.h"
 
 #include <array>
@@ -63,12 +64,7 @@ namespace cs::features
 
 		cs::TerrainShadowsFeatureData GetCommonBufferData() const;
 
-		struct Settings
-		{
-			bool          enabled = true;
-			std::uint32_t downsampleFactor =
-				terrain_shadows::kDefaultDownsampleFactor;
-		};
+		using Settings = terrain_shadows::Settings;
 
 	private:
 		struct alignas(16) ShadowUpdateCB
@@ -106,7 +102,8 @@ namespace cs::features
 
 		TerrainShadows() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(terrain_shadows::kSchema); }
 		void PublishSettings();
 
 		void DiscoverHeightMaps();

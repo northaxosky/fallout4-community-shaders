@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "RenderDocSettings.h"
 
 #include <array>
 #include <atomic>
@@ -22,11 +23,7 @@ namespace cs::features
 	class RenderDoc : public Feature
 	{
 	public:
-		enum class CaptureTarget : std::uint8_t
-		{
-			kEngineD3D11,
-			kTemporalD3D12
-		};
+		using CaptureTarget = renderdoc_settings::CaptureTarget;
 
 		static RenderDoc* GetSingleton();
 
@@ -41,7 +38,7 @@ namespace cs::features
 		void DrawSettings() override;
 		void DrawOverlay() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
-		settings::RestartSettingsView GetRestartSettings() const noexcept override;
+		std::vector<std::string_view> GetRestartSettings() const override;
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -65,24 +62,13 @@ namespace cs::features
 		void TriggerCapture();
 		void TriggerMultiFrameCapture();
 
-		struct Settings
-		{
-			bool        enabled = false;
-			std::string dllPath = "Data\\F4SE\\Plugins\\RenderDoc\\renderdoc.dll";
-			std::string captureFolder = "";
-			double      minFreeDiskGiB = 1.0;
-			int         multiFrameCount = 5;
-			CaptureTarget captureTarget = CaptureTarget::kEngineD3D11;
-
-			// Suggested host defaults. Host overrides are authoritative.
-			std::string captureHotkey = "F11";
-			std::string multiCaptureHotkey = "Shift+F11";
-		};
+		using Settings = renderdoc_settings::Settings;
 
 	private:
 		RenderDoc() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(renderdoc_settings::kSchema); }
 		bool TryLoadRuntime();
 		void ApplyCapturePath();
 		bool CheckCaptureDiskSpace() const;

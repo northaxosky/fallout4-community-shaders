@@ -26,7 +26,8 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
@@ -80,39 +81,6 @@ namespace cs::features
 			default:
 				return "off";
 			}
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			DynamicCubemaps::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-			switch (feature_config::ReadBool(
-				*settingsTable, "enabled", a_candidate.enabled)) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = "settings.enabled: expected boolean";
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = "settings.enabled: invalid value";
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = "settings.enabled: value is out of range";
-				break;
-			}
-			return false;
 		}
 
 		bool DescribeTexture(
@@ -254,7 +222,7 @@ namespace cs::features
 		std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		if (!settings::Parse(dynamic_cubemaps::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
 		_settings = candidate;
@@ -270,15 +238,9 @@ namespace cs::features
 		}
 	}
 
-	void DynamicCubemaps::SaveSettings()
+	bool DynamicCubemaps::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		if (const auto result = feature_config::UpdateFeatureSettings(
-				GetConfigKey(), settings);
-			!result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(dynamic_cubemaps::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void DynamicCubemaps::Load()
@@ -1412,12 +1374,12 @@ namespace cs::features
 
 	void DynamicCubemaps::DrawSettings()
 	{
-		const bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		settings::SettingsEdit edit{ *this };
+		const bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled(
 			"Off restores native probe reflections and pauses capture.");
 		if (changed) {
 			PublishSettings();
-			SaveSettings();
 		}
 		Menu::Get().DrawDebugViewSelector(*this);
 	}

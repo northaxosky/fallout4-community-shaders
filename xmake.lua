@@ -292,6 +292,9 @@ target("FeatureConfigTests", function()
         "src/Settings/FeatureConfig.h",
         "src/Settings/FeatureKeys.h"
     )
+    for _, feature in ipairs(features) do
+        add_includedirs("features/" .. feature .. "/src")
+    end
     add_packages("vcpkg::tomlplusplus")
 end)
 
@@ -332,6 +335,7 @@ target("WetnessEffectsMathTests", function()
     add_files("tests/WetnessEffectsMathTests.cpp")
     add_headerfiles("features/WetnessEffects/src/WetnessMath.h")
     add_includedirs("features/WetnessEffects/src")
+    add_packages("vcpkg::tomlplusplus")
 end)
 
 target("InverseSquareLightingMathTests", function()
@@ -342,6 +346,7 @@ target("InverseSquareLightingMathTests", function()
         "features/InverseSquareLighting/src/InverseSquareLightingMath.h"
     )
     add_includedirs("features/InverseSquareLighting/src")
+    add_packages("vcpkg::tomlplusplus")
 end)
 
 target("ExponentialHeightFogMathTests", function()
@@ -352,6 +357,7 @@ target("ExponentialHeightFogMathTests", function()
         "features/ExponentialHeightFog/src/ExponentialHeightFogMath.h"
     )
     add_includedirs("features/ExponentialHeightFog/src")
+    add_packages("vcpkg::tomlplusplus")
 end)
 
 target("WaterEffectsMathTests", function()
@@ -360,6 +366,7 @@ target("WaterEffectsMathTests", function()
     add_files("tests/WaterEffectsMathTests.cpp")
     add_headerfiles("features/WaterEffects/src/WaterEffectsMath.h")
     add_includedirs("features/WaterEffects/src")
+    add_packages("vcpkg::tomlplusplus")
 end)
 
 target("UpscalingPublicationTests", function()

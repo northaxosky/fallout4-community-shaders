@@ -9,6 +9,7 @@
 #include "Render/SwapChainHook.h"
 #include "Render/TemporalPipeline.h"
 #include "Settings/FeatureConfig.h"
+#include "Settings/SettingsRegistry.h"
 #include "Telemetry/Telemetry.h"
 
 namespace
@@ -78,18 +79,12 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	F4SE::Init(a_f4se, initInfo);
 
 	cs::log::AttachToDefaultLogger();
-	const auto config = cs::feature_config::Reload();
-	if (!config.defaultLoaded) {
-		L->error(
-			"Unified default configuration unavailable; all features and baseline shader ownership disabled: {}",
-			config.defaultError);
-	}
-	if (!config.userWarning.empty()) {
-		L->warn("Ignoring unified user configuration: {}", config.userWarning);
-	}
-	if (!config.migrationNotice.empty()) {
-		L->info("{}", config.migrationNotice);
-	}
+	auto registry = cs::settings::BuildCoreRegistry();
+	for (const auto* feature : cs::FeatureManager::Get().GetRegisteredFeatures())
+		cs::settings::AddFeatureSections(registry, feature->GetConfigKey(), feature->GetSettingsSchema());
+	const auto config = cs::feature_config::Initialize(std::move(registry));
+	if (!config.error.empty())
+		L->error("Settings initialization: {}", config.error);
 	toml::table loggingConfig;
 	if (const auto* logging = config.root["logging"].as_table()) {
 		loggingConfig = *logging;

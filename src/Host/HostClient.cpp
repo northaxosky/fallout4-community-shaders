@@ -214,16 +214,10 @@ namespace cs::host
 	{
 		bool succeeded = true;
 		auto* performance = features::PerformanceOverlay::GetSingleton();
-		const auto& legacyOverlayHotkey =
-			Menu::Get().LegacyOverlayToggleHotkey();
-		const std::string performanceHotkey{ ResolveHotkeySeed(
-			performance->SuggestedToggleHotkey(),
-			performance->HasConfiguredToggleHotkey(),
-			legacyOverlayHotkey) };
 		_overlayHotkey = _client.AddHotkeyAction(
 			"dearmodding.cs.performance-overlay.toggle",
 			"Toggle Performance Overlay",
-			performanceHotkey.c_str(),
+			performance->SuggestedToggleHotkey().c_str(),
 			[this](bool pressed) {
 				auto* feature = features::PerformanceOverlay::GetSingleton();
 				if (pressed &&
@@ -583,6 +577,7 @@ namespace cs::host
 				CS_FEATURE_ZONE(&a_feature, "DrawSettings");
 				try {
 					a_feature.DrawSettings();
+					a_feature.FlushSettings(true);
 				} catch (const std::exception& error) {
 					FeatureManager::Get().QuarantineRuntimeCallback(
 						a_feature,
@@ -656,12 +651,10 @@ namespace cs::host
 		}
 
 		const auto restartSettings = a_feature.GetRestartSettings();
-		for (const auto& field : restartSettings.fields) {
-			if (!restartSettings.IsRestartRequired(field))
-				continue;
+		for (const auto field : restartSettings) {
 			const auto id =
-				std::format("restart-required-{}", field.label);
-			const auto label = std::string(field.label);
+				std::format("restart-required-{}", field);
+			const auto label = std::string(field);
 			dmui::SettingsRowScope row{
 				_client,
 				id.c_str(),
@@ -813,8 +806,30 @@ namespace cs::host
 	void HostClient::ObservePageActivity(
 		const dmui::PageActivity& a_activity) noexcept
 	{
-		if (a_activity.kind == dmui::PageActivityKind::kDeactivated)
-			Menu::Get().ReleaseDebugImages();
+		if (a_activity.kind != dmui::PageActivityKind::kDeactivated &&
+			a_activity.kind != dmui::PageActivityKind::kChanged)
+			return;
+		Menu::Get().ReleaseDebugImages();
+
+		for (const auto& page : _pages) {
+			if (page->handle != a_activity.previousPage || !page->feature)
+				continue;
+			auto& feature = *page->feature;
+			auto& manager = FeatureManager::Get();
+			constexpr std::string_view phase = "DearModdingUI::SaveSettings";
+			if (!manager.PrepareRuntimeCallback(feature, phase))
+				return;
+			try {
+				feature.FlushSettings();
+			} catch (const std::exception& error) {
+				manager.QuarantineRuntimeCallback(feature, phase, error.what());
+				manager.FinishRuntimeCallbackPass();
+			} catch (...) {
+				manager.QuarantineRuntimeCallback(feature, phase, "non-standard exception");
+				manager.FinishRuntimeCallbackPass();
+			}
+			return;
+		}
 	}
 
 	void HostClient::SyncOverlay() noexcept

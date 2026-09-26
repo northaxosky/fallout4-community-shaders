@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Render/ShaderInjectionTargets.h"
+#include "Settings/SettingsMetadata.h"
 
 #include <array>
 #include <cstdint>
@@ -14,10 +15,8 @@
 
 namespace cs::feature_config
 {
-	inline constexpr char kDefaultConfigPath[] =
+	inline constexpr char kConfigPath[] =
 		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
-	inline constexpr char kUserConfigPath[] =
-		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.User.toml";
 
 	enum class FileLoadStatus
 	{
@@ -36,43 +35,18 @@ namespace cs::feature_config
 
 	FileLoadResult LoadFile(const std::filesystem::path& a_path);
 
-	struct UnifiedLoadResult
+	struct RefreshResult
 	{
 		toml::table root;
-		toml::table userRoot;
-		FileLoadStatus userStatus{ FileLoadStatus::kMissing };
-		bool defaultLoaded{ false };
-		bool userLoaded{ false };
-		bool userMigrated{ false };
-		std::string defaultError;
-		std::string userWarning;
-		std::string migrationNotice;
+		FileLoadStatus status{ FileLoadStatus::kMissing };
+		std::string error;
 	};
 
-	struct TemporalMigrationResult
-	{
-		bool changed{ false };
-		std::string notice;
-	};
-
-	void DeepMerge(toml::table& a_base, const toml::table& a_override);
-	TemporalMigrationResult NormalizeLegacyTemporalSettings(toml::table& a_userRoot);
-	TemporalMigrationResult NormalizeLegacyTemporalFeatureSettings(
-		std::string_view a_featureKey,
-		toml::table& a_settings);
-	UnifiedLoadResult LoadMergedFiles(
-		const std::filesystem::path& a_defaultPath,
-		const std::filesystem::path& a_userPath);
-	UnifiedLoadResult ReloadFromFiles(
-		const std::filesystem::path& a_defaultPath,
-		const std::filesystem::path& a_userPath);
-	UnifiedLoadResult Reload();
-	toml::table GetMergedRoot();
-	toml::table GetUserRoot();
+	std::string RenderDocument(const settings::Registry& a_registry, const toml::table& a_root);
+	RefreshResult Initialize(settings::Registry a_registry);
+	RefreshResult InitializeAt(const std::filesystem::path& a_path, settings::Registry a_registry);
+	toml::table GetRoot();
 	std::optional<toml::table> GetFeature(std::string_view a_key);
-	bool HasUserFeatureSetting(
-		std::string_view a_featureKey,
-		std::string_view a_settingKey);
 
 	struct ShaderOwnershipTargets
 	{
@@ -115,12 +89,13 @@ namespace cs::feature_config
 		explicit operator bool() const noexcept { return success; }
 	};
 
-	WriteResult UpdateUserTableAt(
-		const std::filesystem::path& a_userPath,
+	WriteResult UpdateOwnedSettingsAt(
+		const std::filesystem::path& a_filePath,
 		std::span<const std::string_view> a_path,
 		const toml::table& a_value);
-	WriteResult UpdateFeatureSettings(std::string_view a_featureKey, const toml::table& a_settings);
-	WriteResult UpdateFeature(std::string_view a_featureKey, const toml::table& a_feature);
+	WriteResult UpdateFeatureOwnedSettings(
+		std::string_view a_featureKey,
+		const toml::table& a_delta);
 	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load);
 	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value);
 

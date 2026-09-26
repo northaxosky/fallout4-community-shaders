@@ -10,6 +10,7 @@
 #include "Render/RenderHooks.h"
 #include "Render/FrameProfiler.h"
 #include "Render/ShaderInjection.h"
+#include "Settings/SettingsRegistry.h"
 
 #include <atomic>
 #include <charconv>
@@ -26,8 +27,8 @@ namespace cs::telemetry
 	namespace
 	{
 		std::atomic<std::uint64_t> g_frame{ 0 };
-		std::atomic_bool          g_enabled{ false };
-		std::atomic<std::uint32_t> g_intervalSeconds{ 5 };
+		std::atomic_bool          g_enabled{ settings::core::Logging{}.telemetry };
+		std::atomic<std::uint32_t> g_intervalSeconds{ settings::core::Logging{}.telemetryIntervalSeconds };
 		std::atomic<std::uint64_t> g_lastEmitMilliseconds{ 0 };
 		std::atomic_bool          g_dumpRequested{ false };
 		bool g_installed = false;

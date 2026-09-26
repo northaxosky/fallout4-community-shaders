@@ -18,7 +18,8 @@
 #include "REX/CONVERT.h"
 #include "REX/W32/OLE32.h"
 #include "REX/W32/SHELL32.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -26,11 +27,11 @@ namespace cs::features
 	namespace { auto* L = cs::log::Get("cs.feature.renderdoc"); }
 
 	constexpr double      kBytesPerGiB = 1024.0 * 1024.0 * 1024.0;
-	constexpr int         kMinMultiFrameCount = 2;
-	constexpr int         kMaxMultiFrameCount = 60;
+	using renderdoc_settings::kMinMultiFrameCount;
+	using renderdoc_settings::kMaxMultiFrameCount;
 	constexpr std::string_view kLegacyCaptureFolder = "Data\\F4SE\\Plugins\\RenderDoc\\captures";
-	constexpr std::string_view kEngineD3D11Target = "engine_d3d11";
-	constexpr std::string_view kTemporalD3D12Target = "temporal_d3d12";
+	using renderdoc_settings::kEngineD3D11Target;
+	using renderdoc_settings::kTemporalD3D12Target;
 
 	RenderDoc* RenderDoc::GetSingleton()
 	{
@@ -138,145 +139,12 @@ namespace cs::features
 			return path;
 		}
 
-		std::string SettingError(std::string_view a_key, std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string_view a_range,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "value must be finite");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, a_range);
-				break;
-			}
-			return false;
-		}
-
-		bool ReadIntegerSetting(
-			const toml::table& a_table,
-			std::string_view a_key,
-			std::int64_t a_min,
-			std::int64_t a_max,
-			int& a_value,
-			std::string& a_error)
-		{
-			auto value = static_cast<std::int64_t>(a_value);
-			const auto status = feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max);
-			if (!AcceptSetting(status, a_key, "integer", "value must be in range 2..60", a_error)) {
-				return false;
-			}
-			if (status == feature_config::ScalarReadStatus::kValid) {
-				a_value = static_cast<int>(value);
-			}
-			return true;
-		}
-
-		bool ReadCaptureTargetSetting(
-			const toml::table& a_table,
-			RenderDoc::CaptureTarget& a_value,
-			std::string& a_error)
-		{
-			auto configured = std::string(CaptureTargetConfigName(a_value));
-			const auto status = feature_config::ReadString(
-				a_table, "capture_target", configured);
-			if (!AcceptSetting(
-					status,
-					"capture_target",
-					"string",
-					"string value is out of range",
-					a_error)) {
-				return false;
-			}
-			if (status != feature_config::ScalarReadStatus::kValid) {
-				return true;
-			}
-			if (configured == kEngineD3D11Target) {
-				a_value = RenderDoc::CaptureTarget::kEngineD3D11;
-				return true;
-			}
-			if (configured == kTemporalD3D12Target) {
-				a_value = RenderDoc::CaptureTarget::kTemporalD3D12;
-				return true;
-			}
-			a_error = SettingError(
-				"capture_target",
-				"expected \"engine_d3d11\" or \"temporal_d3d12\"");
-			return false;
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			RenderDoc::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			return AcceptSetting(
-					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
-					"enabled", "boolean", "boolean value is out of range", a_error)
-				&& AcceptSetting(
-					feature_config::ReadString(*settingsTable, "dll_path", a_candidate.dllPath),
-					"dll_path", "string", "string value is out of range", a_error)
-				&& AcceptSetting(
-					feature_config::ReadString(*settingsTable, "capture_folder", a_candidate.captureFolder),
-					"capture_folder", "string", "string value is out of range", a_error)
-				&& AcceptSetting(
-					feature_config::ReadDouble(
-						*settingsTable,
-						"min_free_disk_gib",
-						a_candidate.minFreeDiskGiB,
-						0.0,
-						std::numeric_limits<double>::max()),
-					"min_free_disk_gib", "number", "value must be greater than or equal to 0", a_error)
-				&& ReadIntegerSetting(
-					*settingsTable,
-					"multi_frame_count",
-					kMinMultiFrameCount,
-					kMaxMultiFrameCount,
-					a_candidate.multiFrameCount,
-					a_error)
-				&& ReadCaptureTargetSetting(
-					*settingsTable,
-					a_candidate.captureTarget,
-					a_error)
-				&& AcceptSetting(
-					feature_config::ReadString(*settingsTable, "capture_hotkey", a_candidate.captureHotkey),
-					"capture_hotkey", "string", "string value is out of range", a_error)
-				&& AcceptSetting(
-					feature_config::ReadString(*settingsTable, "multi_capture_hotkey", a_candidate.multiCaptureHotkey),
-					"multi_capture_hotkey", "string", "string value is out of range", a_error);
-		}
 	}
 
 	bool RenderDoc::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		if (!settings::Parse(renderdoc_settings::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
 
@@ -303,23 +171,9 @@ namespace cs::features
 		}
 	}
 
-	void RenderDoc::SaveSettings()
+	bool RenderDoc::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign("dll_path", _settings.dllPath);
-		settings.insert_or_assign("capture_folder", _settings.captureFolder);
-		settings.insert_or_assign("min_free_disk_gib", _settings.minFreeDiskGiB);
-		settings.insert_or_assign("multi_frame_count", static_cast<int64_t>(_settings.multiFrameCount));
-		settings.insert_or_assign(
-			"capture_target",
-			std::string(CaptureTargetConfigName(_settings.captureTarget)));
-		settings.insert_or_assign("capture_hotkey", _settings.captureHotkey);
-		settings.insert_or_assign("multi_capture_hotkey", _settings.multiCaptureHotkey);
-
-		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(renderdoc_settings::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	bool RenderDoc::TryLoadRuntime()
@@ -661,9 +515,9 @@ namespace cs::features
 
 	void RenderDoc::DrawSettings()
 	{
+		settings::SettingsEdit edit{ *this };
 		bool prevEnabled = _settings.enabled;
-		if (dmui::ui::Checkbox("Enabled", &_settings.enabled)) {
-			SaveSettings();
+		if (edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled))) {
 			if (_settings.enabled && !_api)
 				L->warn("Enabled at runtime; restart the game to load renderdoc.dll safely");
 			else if (!_settings.enabled && prevEnabled)
@@ -701,9 +555,8 @@ namespace cs::features
 			std::span<const dmui::ChoiceOption<CaptureTarget>>{ captureTargets },
 			"Unavailable",
 			"Capture target");
-		if (captureTarget.changed) {
+		if (edit.Discrete(captureTarget.changed)) {
 			_settings.captureTarget = *captureTarget.selected;
-			SaveSettings();
 		}
 		if (!CaptureTargetAvailable()) {
 			dmui::ui::TextDisabled(
@@ -713,42 +566,34 @@ namespace cs::features
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
-		if (dmui::ui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf)))
+		if (edit.Continuous(dmui::ui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf))))
 			_settings.dllPath = dllPathBuf;
-		if (dmui::ui::IsItemDeactivatedAfterEdit())
-			SaveSettings();
 
 		char folderBuf[260];
 		strncpy_s(folderBuf, _settings.captureFolder.c_str(), _TRUNCATE);
-		if (dmui::ui::InputText("Capture folder", folderBuf, sizeof(folderBuf)))
+		if (edit.Continuous(dmui::ui::InputText("Capture folder", folderBuf, sizeof(folderBuf))))
 			_settings.captureFolder = folderBuf;
 		if (dmui::ui::IsItemDeactivatedAfterEdit()) {
-			SaveSettings();
 			ApplyCapturePath();
 		}
 
 		const double diskStep = 0.25;
 		const double diskFastStep = 1.0;
-		if (dmui::ui::InputScalar(
+		if (edit.Continuous(dmui::ui::InputScalar(
 				"Minimum free disk (GiB)",
 				&_settings.minFreeDiskGiB,
 				&diskStep,
 				&diskFastStep,
-				"%.2f"))
+				"%.2f")))
 			_settings.minFreeDiskGiB = ClampMinFreeDiskGiB(_settings.minFreeDiskGiB);
-		if (dmui::ui::IsItemDeactivatedAfterEdit())
-			SaveSettings();
-
-		const int minimumFrames = kMinMultiFrameCount;
-		const int maximumFrames = kMaxMultiFrameCount;
-		(void)dmui::ui::SliderScalar(
+		const auto frameRange = renderdoc_settings::kSchema.EditRange(&Settings::multiFrameCount);
+		(void)edit.Continuous(dmui::ui::SliderScalar(
 			"Multi-frame count",
 			&_settings.multiFrameCount,
-			&minimumFrames,
-			&maximumFrames);
+			&frameRange.min,
+			&frameRange.max));
 		if (dmui::ui::IsItemDeactivatedAfterEdit()) {
 			_settings.multiFrameCount = ClampMultiFrameCount(_settings.multiFrameCount);
-			SaveSettings();
 		}
 
 		(void)dmui::ui::InputTextMultiline("Comments (embedded in next .rdc)",
@@ -767,19 +612,9 @@ namespace cs::features
 			dmui::ui::TextDisabled("Runtime load failed - fix the DLL path then restart the game.");
 	}
 
-	cs::settings::RestartSettingsView RenderDoc::GetRestartSettings() const noexcept
+	std::vector<std::string_view> RenderDoc::GetRestartSettings() const
 	{
-		static constexpr std::array fields{
-			CS_RESTART_ENABLE_FIELD(
-				Settings,
-				enabled,
-				"Enabled (loads renderdoc.dll)"),
-			CS_RESTART_FIELD(
-				Settings,
-				dllPath,
-				"DLL path")
-		};
-		return cs::settings::MakeRestartSettingsView(fields, _bootSettings, _settings);
+		return cs::settings::RestartRequired(renderdoc_settings::kSchema, _bootSettings, _settings);
 	}
 
 	void RenderDoc::RestoreDefaultSettings()

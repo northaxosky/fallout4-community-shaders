@@ -26,7 +26,8 @@
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Telemetry/Telemetry.h"
@@ -53,34 +54,6 @@ namespace cs::features
 		constexpr float kTeleportDistance = 512.0f;
 		constexpr float kMinFrameAxisDot = 0.7071f;
 		constexpr float kProjectionTolerance = 0.15f;
-
-		std::string SettingError(std::string_view a_key, std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "invalid value");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value is out of range");
-				break;
-			}
-			return false;
-		}
 
 		bool IsFullResolutionHDR(
 			ID3D11ShaderResourceView* a_srv,
@@ -155,80 +128,6 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Resource> resource;
 			a_srv->GetResource(resource.put());
 			return resource;
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			ScreenSpaceGI::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			if (!AcceptSetting(
-					feature_config::ReadBool(*settingsTable, "denoise_enabled", a_candidate.denoiseEnabled),
-					"denoise_enabled", "boolean", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(*settingsTable, "denoise_radius", a_candidate.denoiseRadius),
-					"denoise_radius", "number", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(*settingsTable, "ao_radius", a_candidate.aoRadius),
-					"ao_radius", "number", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(*settingsTable, "gi_radius", a_candidate.giRadius),
-					"gi_radius", "number", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(*settingsTable, "ao_power", a_candidate.aoPower),
-					"ao_power", "number", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(
-						*settingsTable, "bounce_strength", a_candidate.bounceStrength, 0.0f, 8.0f),
-					"bounce_strength", "number", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(*settingsTable, "depth_fade_start", a_candidate.depthFadeStart),
-					"depth_fade_start", "number", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(*settingsTable, "depth_fade_end", a_candidate.depthFadeEnd),
-					"depth_fade_end", "number", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
-					"enabled", "boolean", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadBool(
-						*settingsTable, "enable_temporal_denoiser", a_candidate.enableTemporalDenoiser),
-					"enable_temporal_denoiser", "boolean", a_error) ||
-				!AcceptSetting(
-					feature_config::ReadFloat(
-						*settingsTable, "depth_disocclusion", a_candidate.depthDisocclusion, 0.0f, 0.2f),
-					"depth_disocclusion", "number", a_error)) {
-				return false;
-			}
-
-			auto readInteger = [&](std::string_view a_key, int& a_value, std::int64_t a_min, std::int64_t a_max) {
-				auto value = static_cast<std::int64_t>(a_value);
-				const auto status = feature_config::ReadSignedInteger(
-					*settingsTable, a_key, value, a_min, a_max);
-				if (!AcceptSetting(status, a_key, "integer", a_error)) {
-					return false;
-				}
-				if (status == feature_config::ScalarReadStatus::kValid) {
-					a_value = static_cast<int>(value);
-				}
-				return true;
-			};
-
-			return readInteger("num_slices", a_candidate.numSlices, 1, 64) &&
-				readInteger("num_steps", a_candidate.numSteps, 1, 64) &&
-				readInteger("max_accum_frames", a_candidate.maxAccumFrames, 1, 255);
 		}
 
 		std::unique_ptr<cs::buffer::Texture2D> CreateTexture(
@@ -430,7 +329,7 @@ namespace cs::features
 	bool ScreenSpaceGI::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		if (!settings::Parse(ssgi_settings::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
 
@@ -438,27 +337,9 @@ namespace cs::features
 		return true;
 	}
 
-	void ScreenSpaceGI::SaveSettings()
+	bool ScreenSpaceGI::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("denoise_enabled", _settings.denoiseEnabled);
-		settings.insert_or_assign("denoise_radius", _settings.denoiseRadius);
-		settings.insert_or_assign("ao_radius", _settings.aoRadius);
-		settings.insert_or_assign("gi_radius", _settings.giRadius);
-		settings.insert_or_assign("ao_power", _settings.aoPower);
-		settings.insert_or_assign("bounce_strength", _settings.bounceStrength);
-		settings.insert_or_assign("depth_fade_start", _settings.depthFadeStart);
-		settings.insert_or_assign("depth_fade_end", _settings.depthFadeEnd);
-		settings.insert_or_assign("num_slices", _settings.numSlices);
-		settings.insert_or_assign("num_steps", _settings.numSteps);
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign("enable_temporal_denoiser", _settings.enableTemporalDenoiser);
-		settings.insert_or_assign("depth_disocclusion", _settings.depthDisocclusion);
-		settings.insert_or_assign("max_accum_frames", _settings.maxAccumFrames);
-
-		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(ssgi_settings::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void ScreenSpaceGI::Load()
@@ -1589,87 +1470,78 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSettings()
 	{
-		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		settings::SettingsEdit edit{ *this };
+		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 
-		const int slicesMin = 1;
-		const int slicesMax = 8;
-		changed |= dmui::ui::SliderScalar(
-			"Slices", &_settings.numSlices, &slicesMin, &slicesMax);
-		const int stepsMin = 4;
-		const int stepsMax = 32;
-		changed |= dmui::ui::SliderScalar(
-			"Steps", &_settings.numSteps, &stepsMin, &stepsMax);
-		const float radiusMin = 16.0f;
-		const float aoRadiusMax = 512.0f;
-		changed |= dmui::ui::SliderScalar(
+		const auto slicesRange = ssgi_settings::kSchema.EditRange(&Settings::numSlices);
+		edit.Continuous(dmui::ui::SliderScalar(
+			"Slices", &_settings.numSlices, &slicesRange.min, &slicesRange.max));
+		const auto stepsRange = ssgi_settings::kSchema.EditRange(&Settings::numSteps);
+		edit.Continuous(dmui::ui::SliderScalar(
+			"Steps", &_settings.numSteps, &stepsRange.min, &stepsRange.max));
+		const auto aoRadiusRange = ssgi_settings::kSchema.EditRange(&Settings::aoRadius);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"AO radius (game units)",
 			&_settings.aoRadius,
-			&radiusMin,
-			&aoRadiusMax);
-		changed |= dmui::ui::SliderScalar(
+			&aoRadiusRange.min,
+			&aoRadiusRange.max));
+		const auto giRadiusRange = ssgi_settings::kSchema.EditRange(&Settings::giRadius);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"GI radius (game units)",
 			&_settings.giRadius,
-			&radiusMin,
-			&aoRadiusMax);
-		const float aoPowerMin = 0.5f;
-		const float aoPowerMax = 5.0f;
-		changed |= dmui::ui::SliderScalar(
+			&giRadiusRange.min,
+			&giRadiusRange.max));
+		const auto aoPowerRange = ssgi_settings::kSchema.EditRange(&Settings::aoPower);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"AO power",
 			&_settings.aoPower,
-			&aoPowerMin,
-			&aoPowerMax);
-		const float bounceMin = 0.0f;
-		const float bounceMax = 8.0f;
-		changed |= dmui::ui::SliderScalar(
+			&aoPowerRange.min,
+			&aoPowerRange.max));
+		const auto bounceRange = ssgi_settings::kSchema.EditRange(&Settings::bounceStrength);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Bounce strength",
 			&_settings.bounceStrength,
-			&bounceMin,
-			&bounceMax);
-		changed |= dmui::ui::Checkbox("Denoise", &_settings.denoiseEnabled);
-		const float denoiseRadiusMin = 0.5f;
-		const float denoiseRadiusMax = 4.0f;
-		changed |= dmui::ui::SliderScalar(
+			&bounceRange.min,
+			&bounceRange.max));
+		edit.Discrete(dmui::ui::Checkbox("Denoise", &_settings.denoiseEnabled));
+		const auto denoiseRadiusRange = ssgi_settings::kSchema.EditRange(&Settings::denoiseRadius);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Denoise radius",
 			&_settings.denoiseRadius,
-			&denoiseRadiusMin,
-			&denoiseRadiusMax);
-		changed |= dmui::ui::Checkbox("Temporal denoiser", &_settings.enableTemporalDenoiser);
+			&denoiseRadiusRange.min,
+			&denoiseRadiusRange.max));
+		edit.Discrete(dmui::ui::Checkbox("Temporal denoiser", &_settings.enableTemporalDenoiser));
 		float depthDisocclusionPercent = _settings.depthDisocclusion * 100.0f;
-		const float depthDisocclusionMin = 0.0f;
-		const float depthDisocclusionMax = 20.0f;
-		if (dmui::ui::SliderScalar(
+		const auto depthDisocclusionRange = ssgi_settings::kSchema.EditRange(&Settings::depthDisocclusion);
+		const float depthDisocclusionMin = depthDisocclusionRange.min * 100.0f;
+		const float depthDisocclusionMax = depthDisocclusionRange.max * 100.0f;
+		if (edit.Continuous(dmui::ui::SliderScalar(
 				"Depth disocclusion",
 				&depthDisocclusionPercent,
 				&depthDisocclusionMin,
 				&depthDisocclusionMax,
-				"%.1f%%")) {
+				"%.1f%%"))) {
 			_settings.depthDisocclusion = depthDisocclusionPercent * 0.01f;
-			changed = true;
 		}
-		const int maxAccumulatedFramesMin = 1;
-		const int maxAccumulatedFramesMax = 64;
-		changed |= dmui::ui::SliderScalar(
+		const auto maxAccumulatedFramesRange = ssgi_settings::kSchema.EditRange(&Settings::maxAccumFrames);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Max accumulated frames",
 			&_settings.maxAccumFrames,
-			&maxAccumulatedFramesMin,
-			&maxAccumulatedFramesMax);
-		const float depthFadeMin = 0.0f;
-		const float depthFadeStartMax = 60000.0f;
-		changed |= dmui::ui::SliderScalar(
+			&maxAccumulatedFramesRange.min,
+			&maxAccumulatedFramesRange.max));
+		const auto depthFadeStartRange = ssgi_settings::kSchema.EditRange(&Settings::depthFadeStart);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Depth fade start (game units)",
 			&_settings.depthFadeStart,
-			&depthFadeMin,
-			&depthFadeStartMax);
-		const float depthFadeEndMax = 80000.0f;
-		changed |= dmui::ui::SliderScalar(
+			&depthFadeStartRange.min,
+			&depthFadeStartRange.max));
+		const auto depthFadeEndRange = ssgi_settings::kSchema.EditRange(&Settings::depthFadeEnd);
+		edit.Continuous(dmui::ui::SliderScalar(
 			"Depth fade end (game units)",
 			&_settings.depthFadeEnd,
-			&depthFadeMin,
-			&depthFadeEndMax);
+			&depthFadeEndRange.min,
+			&depthFadeEndRange.max));
 
-		if (changed) {
-			SaveSettings();
-		}
 
 		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
 			(_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");

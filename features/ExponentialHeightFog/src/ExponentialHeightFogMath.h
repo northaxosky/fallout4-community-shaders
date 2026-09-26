@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Settings/SettingsSchema.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -18,6 +20,14 @@ namespace cs::features::exponential_height_fog
 		bool  enabled = true;
 		float densityMultiplier = 1.0f;
 		float heightFalloffMultiplier = 1.0f;
+	};
+
+	inline constexpr settings::Schema kSchema{
+		std::tuple{
+			settings::Field{ "enabled", "Enable height fog; disabling uses stock fog equations.", &Settings::enabled },
+			settings::Field{ "density_multiplier", "Density multiplier around the current weather baseline.", &Settings::densityMultiplier, settings::Range{ kMultiplierMin, kMultiplierMax } },
+			settings::Field{ "height_falloff_multiplier", "Height falloff multiplier around the current weather baseline.", &Settings::heightFalloffMultiplier, settings::Range{ kMultiplierMin, kMultiplierMax } }
+		}
 	};
 
 	enum class FitStatus : std::uint8_t

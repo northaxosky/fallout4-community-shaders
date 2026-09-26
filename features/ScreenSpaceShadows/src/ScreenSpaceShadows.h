@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
+#include "ScreenSpaceShadowsSettings.h"
 #include "SssMaskBinding.h"
 #include "Utils/CSBuffer.h"
 
@@ -39,14 +40,7 @@ namespace cs::features
 
 		cs::ScreenSpaceShadowsFeatureData GetCommonBufferData() const;
 
-		struct Settings
-		{
-			bool          enabled = true;
-			float         surfaceThickness = 0.02f;
-			float         bilinearThreshold = 0.02f;
-			float         shadowContrast = 1.0f;
-			std::uint32_t sampleCount = 1;
-		};
+		using Settings = sss_settings::Settings;
 
 	private:
 		struct alignas(16) RaymarchCB
@@ -66,7 +60,8 @@ namespace cs::features
 
 		ScreenSpaceShadows() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(sss_settings::kSchema); }
 		void OnPreDeferredLights();
 		void BindShadowMask(ID3D11DeviceContext* a_context);
 		void OnPostDeferredLights();

@@ -34,10 +34,6 @@ namespace cs
 
 		void RequestClearShaderCache() noexcept;
 		void ReleaseDebugImages() noexcept;
-		[[nodiscard]] const std::string& LegacyOverlayToggleHotkey() const noexcept
-		{
-			return _legacyOverlayToggleHotkey;
-		}
 
 		static void ShowToast(
 			std::string a_text,
@@ -109,7 +105,6 @@ namespace cs
 
 		debug_view::SelectionState _debugViews;
 		host::StartupLoadSnapshot _startupLoads;
-		std::string _legacyOverlayToggleHotkey;
 		std::unordered_map<std::string, DebugImage> _debugImages;
 		std::unordered_map<std::string, DMUI_Result> _hostCallFailures;
 		DialogState _dialog;

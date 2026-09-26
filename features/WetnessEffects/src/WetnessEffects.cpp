@@ -17,7 +17,8 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 #include "World/Weather.h"
 
@@ -39,82 +40,6 @@ namespace cs::features
 				FeatureDebugViewKind::kFullscreen
 			}
 		} };
-
-		std::string SettingError(std::string_view a_key, std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "invalid value");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value is out of range");
-				break;
-			}
-			return false;
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			WetnessEffects::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			const auto readFloat = [&](
-				std::string_view a_key,
-				float& a_value,
-				float a_min,
-				float a_max) {
-				return AcceptSetting(
-					feature_config::ReadFloat(
-						*settingsTable, a_key, a_value, a_min, a_max),
-					a_key,
-					"float",
-					a_error);
-			};
-
-			return AcceptSetting(
-					feature_config::ReadBool(
-						*settingsTable, "enabled", a_candidate.enabled),
-					"enabled",
-					"boolean",
-					a_error)
-				&& readFloat(
-					"max_rain_wetness",
-					a_candidate.maxRainWetness,
-					wetness_math::kMaxRainWetnessMin,
-					wetness_math::kMaxRainWetnessMax)
-				&& readFloat(
-					"min_rain_wetness",
-					a_candidate.minRainWetness,
-					wetness_math::kMinRainWetnessMin,
-					wetness_math::kMinRainWetnessMax);
-		}
 
 		ID3D11DeviceContext* GetImmediateContext() noexcept
 		{
@@ -149,22 +74,16 @@ namespace cs::features
 	bool WetnessEffects::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		if (!settings::Parse(wetness_math::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
 		_settings = wetness_math::Clamp(candidate);
 		return true;
 	}
 
-	void WetnessEffects::SaveSettings()
+	bool WetnessEffects::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign("max_rain_wetness", _settings.maxRainWetness);
-		settings.insert_or_assign("min_rain_wetness", _settings.minRainWetness);
-		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(wetness_math::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void WetnessEffects::Load()
@@ -373,29 +292,27 @@ namespace cs::features
 
 	void WetnessEffects::DrawSettings()
 	{
-		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		settings::SettingsEdit edit{ *this };
+		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled("Off publishes zero wetness, which is shader identity.");
-		const float maxRainWetnessMin = wetness_math::kMaxRainWetnessMin;
-		const float maxRainWetnessMax = wetness_math::kMaxRainWetnessMax;
-		changed |= dmui::ui::SliderScalar(
+		const auto maxRainWetnessRange = wetness_math::kSchema.EditRange(&Settings::maxRainWetness);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
 			"Max rain wetness",
 			&_settings.maxRainWetness,
-			&maxRainWetnessMin,
-			&maxRainWetnessMax,
-			"%.2f");
+			&maxRainWetnessRange.min,
+			&maxRainWetnessRange.max,
+			"%.2f"));
 		dmui::ui::TextDisabled("Wetness of surfaces facing straight up.");
-		const float minRainWetnessMin = wetness_math::kMinRainWetnessMin;
-		const float minRainWetnessMax = wetness_math::kMinRainWetnessMax;
-		changed |= dmui::ui::SliderScalar(
+		const auto minRainWetnessRange = wetness_math::kSchema.EditRange(&Settings::minRainWetness);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
 			"Min rain wetness",
 			&_settings.minRainWetness,
-			&minRainWetnessMin,
-			&minRainWetnessMax,
-			"%.2f");
+			&minRainWetnessRange.min,
+			&minRainWetnessRange.max,
+			"%.2f"));
 		dmui::ui::TextDisabled("Wetness floor for surfaces facing away from the sky.");
 		if (changed) {
 			_settings = wetness_math::Clamp(_settings);
-			SaveSettings();
 		}
 
 		const bool operational = _injectionsOperational.load(std::memory_order_relaxed);

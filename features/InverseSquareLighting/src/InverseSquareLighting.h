@@ -51,7 +51,8 @@ namespace cs::features
 	private:
 		InverseSquareLighting() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(inverse_square_lighting::kSchema); }
 		void PublishSettings() noexcept;
 		void SetValidationDetail(std::string a_detail) const;
 		std::string GetValidationDetail() const;

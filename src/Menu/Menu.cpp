@@ -8,6 +8,7 @@
 #include "Render/ShaderInjection.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
+#include "Settings/SettingsRegistry.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "Utils/ShaderCache/CacheStorage.h"
@@ -123,29 +124,17 @@ namespace cs
 	void Menu::Load()
 	{
 		_debugViews.Clear();
-		_legacyOverlayToggleHotkey.clear();
-		const auto root = feature_config::GetMergedRoot();
+		const auto root = feature_config::GetRoot();
 		_startupLoads.Capture(root);
 		const auto* menu = root["menu"].as_table();
 		if (!menu)
 			return;
 
-		const auto legacy =
-			host::ParseLegacyKeyboardHotkey(menu->get("overlay_toggle_key"));
-		if (legacy.present && legacy.valid) {
-			_legacyOverlayToggleHotkey = legacy.chord;
-		} else if (legacy.present) {
-			L->warn(
-				"Ignoring legacy menu.overlay_toggle_key: {}",
-				legacy.error);
-		}
-
-		std::string fullscreenFeature;
-		std::string fullscreenView;
+		settings::core::Menu selection;
 		if (const auto value = (*menu)["debug_view_feature"].value<std::string>())
-			fullscreenFeature = *value;
+			selection.debugViewFeature = *value;
 		if (const auto value = (*menu)["debug_view"].value<std::string>())
-			fullscreenView = *value;
+			selection.debugView = *value;
 		if (const auto* previews = (*menu)["debug_view_previews"].as_table()) {
 			for (const auto& [feature, node] : *previews) {
 				if (const auto view = node.value<std::string>()) {
@@ -158,24 +147,21 @@ namespace cs
 				}
 			}
 		}
-		if (!fullscreenFeature.empty() && !fullscreenView.empty()) {
+		if (!selection.debugViewFeature.empty() && !selection.debugView.empty()) {
 			_debugViews.Select(
-				std::move(fullscreenFeature),
-				std::move(fullscreenView),
+				std::move(selection.debugViewFeature),
+				std::move(selection.debugView),
 				FeatureDebugViewKind::kFullscreen);
 		}
 	}
 
 	bool Menu::Save()
 	{
-		toml::table menu;
-		const auto root = feature_config::GetMergedRoot();
-		if (const auto* existing = root["menu"].as_table())
-			menu = *existing;
-
 		const auto& fullscreen = _debugViews.Fullscreen();
-		menu.insert_or_assign("debug_view_feature", fullscreen.feature);
-		menu.insert_or_assign("debug_view", fullscreen.view);
+		auto menu = settings::SerializeFull(settings::core::kMenu, settings::core::Menu{
+			.debugViewFeature = fullscreen.feature,
+			.debugView = fullscreen.view
+		});
 		toml::table previews;
 		for (const auto& [feature, view] : _debugViews.Previews())
 			previews.insert_or_assign(feature, view);
@@ -477,7 +463,7 @@ namespace cs
 				"Every feature ships disabled. Check it under Advanced > Load on startup, then restart." },
 			dmui::FaqEntry{
 				"Where are settings stored?",
-				"Defaults remain in FO4CommunityShaders.toml. Changes are written to FO4CommunityShaders.User.toml." },
+				"FO4CommunityShaders.toml is created on first launch. The menu writes changed values; Reset restores commented defaults." },
 			dmui::FaqEntry{
 				"Why is there no standalone menu?",
 				"Community Shaders is forwarding-only. Without a compatible DearModdingUI host, shader features continue headless." }
@@ -571,7 +557,7 @@ namespace cs
 	void Menu::DrawShaderSettings(dmui::Client& a_client)
 	{
 		const auto ownership =
-			feature_config::ParseShaderOwnership(feature_config::GetMergedRoot());
+			feature_config::ParseShaderOwnership(feature_config::GetRoot());
 		if (!CheckHostResult(
 				a_client,
 				a_client.DrawSectionHeader("Shader Ownership"),
@@ -756,23 +742,13 @@ namespace cs
 					a_client,
 					"open-configuration-folder",
 					"Configuration file location",
-					"Open the physical location of your User TOML, or the Default TOML if no User file exists. MO2 can store them in different folders." };
+					"Open the physical location of FO4CommunityShaders.toml, created on first launch." };
 				if (folder.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin configuration folder row");
 					return;
 				}
 				if (folder.Visible() && dmui::ui::Button("Open")) {
-					std::error_code error;
-					const bool userExists = std::filesystem::exists(
-						feature_config::kUserConfigPath, error);
-					if (error) {
-						L->warn("Cannot inspect the User TOML location: {}", error.message());
-						ShowToast("Could not locate the User TOML; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR);
-					} else {
-						OpenFileLocation(a_client, userExists ?
-							feature_config::kUserConfigPath :
-							feature_config::kDefaultConfigPath);
-					}
+					OpenFileLocation(a_client, feature_config::kConfigPath);
 				}
 				if (!folder.End()) {
 					CheckHostResult(a_client, false, "end configuration folder row");
@@ -837,8 +813,6 @@ namespace cs
 								"Failed to save boot state for {}: {}",
 								feature->GetName(),
 								result.error);
-						} else {
-							(void)feature_config::Reload();
 						}
 					}
 					if (row.Visible() &&

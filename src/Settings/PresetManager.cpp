@@ -4,6 +4,7 @@
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Settings/FeatureConfig.h"
+#include "Settings/SettingsRegistry.h"
 
 #include <algorithm>
 #include <array>
@@ -228,6 +229,11 @@ namespace cs
 		id.append(ToLower(a_name));
 		return id;
 	}
+
+	PresetManager::PresetManager() :
+		activeIdentity(settings::core::Preset{}.active),
+		autoLoadOnBoot(settings::core::Preset{}.autoLoadOnBoot)
+	{}
 
 	PresetManager& PresetManager::Get()
 	{
@@ -611,25 +617,27 @@ namespace cs
 
 	void PresetManager::LoadCoreConfig()
 	{
-		activeIdentity.clear();
+		const settings::core::Preset defaults;
+		activeIdentity = defaults.active;
 		activeName.clear();
-		autoLoadOnBoot = false;
+		autoLoadOnBoot = defaults.autoLoadOnBoot;
 
-		const auto table = cs::feature_config::GetMergedRoot();
+		const auto table = cs::feature_config::GetRoot();
 		const auto* presetTbl = table["preset"].as_table();
 		if (!presetTbl) return;
 
 		if (const auto v = (*presetTbl)["active"].value<std::string>()) {
 			activeIdentity = ToLower(*v);
 		}
-		autoLoadOnBoot = (*presetTbl)["auto_load_on_boot"].value_or(false);
+		autoLoadOnBoot = (*presetTbl)["auto_load_on_boot"].value_or(defaults.autoLoadOnBoot);
 	}
 
 	bool PresetManager::SaveCoreConfig()
 	{
-		toml::table p;
-		p.insert_or_assign("active",            activeIdentity);
-		p.insert_or_assign("auto_load_on_boot", autoLoadOnBoot);
+		const auto p = settings::SerializeFull(settings::core::kPreset, settings::core::Preset{
+			.active = activeIdentity,
+			.autoLoadOnBoot = autoLoadOnBoot
+		});
 
 		const auto result = cs::feature_config::UpdateTopLevelSection("preset", p);
 		if (!result) {

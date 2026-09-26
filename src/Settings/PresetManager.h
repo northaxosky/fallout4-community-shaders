@@ -53,7 +53,7 @@ namespace cs
 
 		std::string activeIdentity;        // Survives Refresh().
 		std::string activeName;
-		bool        autoLoadOnBoot = false;
+		bool        autoLoadOnBoot;
 		std::string pendingComboIdentity;  // Selection changes only after Load.
 		std::string lastError;
 		char        saveAsBuf[64] = {};
@@ -62,7 +62,7 @@ namespace cs
 		bool SaveCoreConfig();
 
 	private:
-		PresetManager() = default;
+		PresetManager();
 
 		void LoadCoreConfig();
 		std::vector<PresetMeta> _entries;

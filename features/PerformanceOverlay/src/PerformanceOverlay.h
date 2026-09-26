@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "PerformanceOverlaySettings.h"
 
 #include <DearModdingUI/API.h>
 
@@ -42,76 +43,23 @@ namespace cs::features
 		{
 			return settings.toggleHotkey;
 		}
-		[[nodiscard]] bool HasConfiguredToggleHotkey() const noexcept
-		{
-			return _toggleHotkeyConfigured;
-		}
-
-		enum class Preset : int
-		{
-			Off      = 0,
-			Minimal  = 1,
-			Standard = 2,
-			Verbose  = 3
-		};
-
-		enum class Corner : int
-		{
-			TopLeft     = 0,
-			TopRight    = 1,
-			BottomLeft  = 2,
-			BottomRight = 3
-		};
-
-		struct Settings
-		{
-			bool   enabled        = false;
-			int    preset         = static_cast<int>(Preset::Standard);
-
-			bool   showFps        = true;
-			bool   showFrameTime  = true;
-			bool   showGraph      = true;
-			bool   showVram       = false;
-			bool   showStats      = false;
-
-			int    corner         = static_cast<int>(Corner::TopLeft);
-			bool   freeDrag       = false;
-			float  dragPosX       = 10.0f;
-			float  dragPosY       = 10.0f;
-
-			float  opacity        = 0.5f;
-			bool   showBorder     = true;
-			float  fontScale      = 1.0f;
-			bool   highContrast   = false;
-
-			// Auto thresholds follow monitor refresh.
-			bool   autoThresholds = true;
-			float  fpsGood        = 60.0f;
-			float  fpsWarn        = 30.0f;
-
-			float  updateInterval = 0.5f;
-			int    historySize    = 120;
-
-			// Height at fontScale=1.0.
-			float  graphHeightPx  = 80.0f;
-
-			// Suggested host default. Host overrides are authoritative.
-			std::string toggleHotkey = "F10";
-		};
+		using Preset = performance_overlay::Preset;
+		using Corner = performance_overlay::Corner;
+		using Settings = performance_overlay::Settings;
 
 		Settings settings;
-		bool _toggleHotkeyConfigured{};
 
 	private:
 		PerformanceOverlay() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(performance_overlay::kSchema); }
 		void ApplyPreset(Preset preset);
 		void TickFrame();
 		void RecomputeStats();
 		void EnsureRefreshHz();
 
-		static constexpr int kHistoryCapacity = 600;
+		static constexpr int kHistoryCapacity = performance_overlay::kHistoryCapacity;
 		std::array<float, kHistoryCapacity> _frameTimesMs{};
 		int    _frameTimesHead    = 0;
 		int    _frameTimesCount   = 0;

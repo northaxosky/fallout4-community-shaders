@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Settings/SettingsSchema.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -16,6 +18,14 @@ namespace cs::features::wetness_math
 	inline constexpr float kMaxRainWetnessMax = 2.5f;
 	inline constexpr float kMinRainWetnessMin = 0.0f;
 	inline constexpr float kMinRainWetnessMax = 0.9f;
+
+	inline constexpr settings::Schema kSchema{
+		std::tuple{
+			settings::Field{ "enabled", "Enable rain wetness.", &Settings::enabled },
+			settings::Field{ "max_rain_wetness", "Maximum rain wetness strength.", &Settings::maxRainWetness, settings::Range{ kMaxRainWetnessMin, kMaxRainWetnessMax } },
+			settings::Field{ "min_rain_wetness", "Minimum rain wetness strength.", &Settings::minRainWetness, settings::Range{ kMinRainWetnessMin, kMinRainWetnessMax } }
+		}
+	};
 
 	inline Settings Clamp(Settings a_settings) noexcept
 	{

@@ -27,11 +27,4 @@ namespace cs::features::sss_math
 		return std::max(scaled, kMinSampleCount);
 	}
 
-	inline std::uint32_t MigrateLegacyShadowLengthPercent(float a_percent)
-	{
-		const float legacySamples = (a_percent / 100.0f) * kReferenceHeight;
-		const auto multiplier = static_cast<std::uint32_t>(
-			std::round(legacySamples / kSamplesPerMultiplier));
-		return std::clamp(multiplier, kMinSampleMultiplier, kMaxSampleMultiplier);
-	}
 }

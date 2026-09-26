@@ -13,7 +13,8 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -33,89 +34,6 @@ namespace cs::features
 				FeatureDebugViewKind::kFullscreen
 			}
 		} };
-
-		std::string SettingError(
-			std::string_view a_key,
-			std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": "
-				+ std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error =
-					SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "invalid value");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value is out of range");
-				break;
-			}
-			return false;
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			InverseSquareLighting::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode)
-				return true;
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			const auto readFloat = [&](
-				std::string_view a_key,
-				float& a_value,
-				float a_min,
-				float a_max) {
-				return AcceptSetting(
-					feature_config::ReadFloat(
-						*settingsTable, a_key, a_value, a_min, a_max),
-					a_key,
-					"float",
-					a_error);
-			};
-
-			return AcceptSetting(
-					feature_config::ReadBool(
-						*settingsTable, "enabled", a_candidate.enabled),
-					"enabled",
-					"boolean",
-					a_error)
-				&& readFloat(
-					"exterior_strength",
-					a_candidate.exteriorStrength,
-					isl::kStrengthMin,
-					isl::kStrengthMax)
-				&& readFloat(
-					"interior_strength",
-					a_candidate.interiorStrength,
-					isl::kStrengthMin,
-					isl::kStrengthMax)
-				&& readFloat(
-					"near_field_distance",
-					a_candidate.nearFieldDistance,
-					isl::kNearFieldDistanceMin,
-					isl::kNearFieldDistanceMax);
-		}
 
 		std::string_view DebugVisualizationName(
 			InverseSquareLighting::DebugVisualization a_visualization) noexcept
@@ -155,7 +73,7 @@ namespace cs::features
 		std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error))
+		if (!settings::Parse(isl::kSchema, a_config, candidate, a_error))
 			return false;
 		_settings = isl::Clamp(candidate);
 		return true;
@@ -173,21 +91,9 @@ namespace cs::features
 			settings.nearFieldDistance, std::memory_order_release);
 	}
 
-	void InverseSquareLighting::SaveSettings()
+	bool InverseSquareLighting::SaveSettings()
 	{
-		toml::table settings;
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign(
-			"exterior_strength", _settings.exteriorStrength);
-		settings.insert_or_assign(
-			"interior_strength", _settings.interiorStrength);
-		settings.insert_or_assign(
-			"near_field_distance", _settings.nearFieldDistance);
-		if (const auto result =
-				feature_config::UpdateFeatureSettings(GetConfigKey(), settings);
-			!result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(isl::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void InverseSquareLighting::Load()
@@ -402,17 +308,17 @@ namespace cs::features
 
 	void InverseSquareLighting::DrawSettings()
 	{
-		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		settings::SettingsEdit edit{ *this };
+		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled(
 			"Off preserves the exact stock attenuation curve.");
-		const float strengthMin = isl::kStrengthMin;
-		const float strengthMax = isl::kStrengthMax;
-		changed |= dmui::ui::SliderScalar(
+		const auto exteriorRange = isl::kSchema.EditRange(&Settings::exteriorStrength);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
 			"Exterior strength",
 			&_settings.exteriorStrength,
-			&strengthMin,
-			&strengthMax,
-			"%.2f");
+			&exteriorRange.min,
+			&exteriorRange.max,
+			"%.2f"));
 		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
 			dmui::ui::Text(
@@ -420,12 +326,13 @@ namespace cs::features
 				"1.0 matches upstream's full effect; lower values blend "
 				"exterior punctual lights toward vanilla.");
 		}
-		changed |= dmui::ui::SliderScalar(
+		const auto interiorRange = isl::kSchema.EditRange(&Settings::interiorStrength);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
 			"Interior strength",
 			&_settings.interiorStrength,
-			&strengthMin,
-			&strengthMax,
-			"%.2f");
+			&interiorRange.min,
+			&interiorRange.max,
+			"%.2f"));
 		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
 			dmui::ui::Text(
@@ -437,21 +344,19 @@ namespace cs::features
 				"Lower values damp interior punctual lights if authored "
 				"lighting reads too hot.");
 		}
-		const float nearFieldMin = isl::kNearFieldDistanceMin;
-		const float nearFieldMax = isl::kNearFieldDistanceMax;
-		changed |= dmui::ui::SliderScalar(
+		const auto nearFieldRange = isl::kSchema.EditRange(&Settings::nearFieldDistance);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
 			"Near-field distance (game units)",
 			&_settings.nearFieldDistance,
-			&nearFieldMin,
-			&nearFieldMax,
+			&nearFieldRange.min,
+			&nearFieldRange.max,
 			"%.1f",
-			dmui::ui::SliderFlags::kLogarithmic);
+			dmui::ui::SliderFlags::kLogarithmic));
 		dmui::ui::TextDisabled(
 			"Matches upstream's default size sqrt(2); peak attenuation is 1.0.");
 		if (changed) {
 			_settings = isl::Clamp(_settings);
 			PublishSettings();
-			SaveSettings();
 		}
 
 		const bool operational =

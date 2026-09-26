@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Settings/SettingsSchema.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -12,6 +14,10 @@ namespace cs::features::water_effects
 	struct Settings
 	{
 		bool enabled = true;
+	};
+
+	inline constexpr settings::Schema kSchema{
+		std::tuple{ settings::Field{ "enabled", "Enable water caustics.", &Settings::enabled } }
 	};
 
 	inline constexpr float kShoreRange = 64.0f;

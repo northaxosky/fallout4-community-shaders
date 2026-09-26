@@ -1,133 +1,202 @@
 #include "Settings/FeatureConfig.h"
+#include "Settings/SettingsRegistry.h"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
+#include <charconv>
 #include <cmath>
 #include <fstream>
 #include <mutex>
+#include <sstream>
 #include <system_error>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
 
+namespace cs::settings
+{
+	std::string FormatValue(const Value& a_value)
+	{
+		return std::visit([](const auto& value) -> std::string {
+			using T = std::remove_cvref_t<decltype(value)>;
+			if constexpr (std::same_as<T, bool> || std::same_as<T, std::string>) {
+				std::ostringstream output;
+				output << toml::value{ value };
+				return output.str();
+			} else {
+				std::array<char, 64> buffer{};
+				const auto [end, error] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+				if (error != std::errc{})
+					throw std::runtime_error("Cannot format settings value");
+				std::string text(buffer.data(), end);
+				if constexpr (std::floating_point<T>) {
+					if (text.find_first_of(".eE") == std::string::npos)
+						text += ".0";
+				}
+				return text;
+			}
+		}, a_value);
+	}
+}
+
 namespace cs::feature_config
 {
 	namespace
 	{
-		std::mutex& ConfigMutex()
+		struct Store
 		{
-			static std::mutex mutex;
-			return mutex;
+			std::mutex mutex;
+			settings::Registry registry;
+			std::filesystem::path path;
+			toml::table root;
+			std::string readError;
+		};
+
+		Store& Config()
+		{
+			static Store store;
+			return store;
 		}
 
-		toml::table& CachedRoot()
+		std::string FormatKey(std::string_view a_key)
 		{
-			static toml::table root;
-			return root;
+			if (!a_key.empty() && std::ranges::all_of(a_key, [](char c) {
+					return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+						(c >= '0' && c <= '9') || c == '_' || c == '-';
+				}))
+				return std::string(a_key);
+			return settings::FormatValue(std::string(a_key));
 		}
 
-		bool& CachedDefaultLoaded()
+		std::string FormatPath(std::span<const std::string> a_path)
 		{
-			static bool loaded = false;
-			return loaded;
+			std::string text;
+			for (const auto& key : a_path) {
+				if (!text.empty())
+					text += '.';
+				text += FormatKey(key);
+			}
+			return text;
 		}
 
-		std::filesystem::path& CachedUserPath()
+		std::string FormatNode(const toml::node& a_node)
 		{
-			static std::filesystem::path path;
-			return path;
+			if (const auto* table = a_node.as_table()) {
+				std::string text = "{ ";
+				for (const auto& [key, value] : *table) {
+					if (text.size() > 2)
+						text += ", ";
+					text += FormatKey(key.str()) + " = " + FormatNode(value);
+				}
+				return text + " }";
+			}
+			if (const auto* array = a_node.as_array()) {
+				std::string text = "[";
+				for (const auto& value : *array) {
+					if (text.size() > 1)
+						text += ", ";
+					text += FormatNode(value);
+				}
+				return text + "]";
+			}
+			std::ostringstream output;
+			output << toml::toml_formatter{ a_node };
+			return output.str();
 		}
 
-		toml::table& CachedUserRoot()
+		template <class String>
+		const toml::table* FindTable(const toml::table& a_root, std::span<const String> a_path, bool& a_blocked)
 		{
-			static toml::table root;
-			return root;
+			const auto* table = &a_root;
+			for (const auto& key : a_path) {
+				const auto* node = table->get(key);
+				if (!node)
+					return nullptr;
+				table = node->as_table();
+				if (!table) {
+					a_blocked = true;
+					return nullptr;
+				}
+			}
+			return table;
 		}
 
-		FileLoadStatus& CachedUserStatus()
+		template <class String>
+		toml::table* EnsureTablePath(toml::table& a_root, std::span<const String> a_path, std::string& a_error)
 		{
-			static FileLoadStatus status = FileLoadStatus::kMissing;
-			return status;
+			auto* current = &a_root;
+			for (const auto& key : a_path) {
+				auto* existing = current->get(key);
+				if (existing && !existing->is_table()) {
+					a_error = "Path component '" + std::string(key) + "' is not a table";
+					return nullptr;
+				}
+				if (!existing) {
+					current->insert(key, toml::table{});
+					existing = current->get(key);
+				}
+				current = existing->as_table();
+			}
+			return current;
 		}
 
-		std::string& CachedUserError()
+		const settings::Section* FindSection(const settings::Registry& a_registry, std::span<const std::string> a_path)
 		{
-			static std::string error;
-			return error;
+			const auto found = std::ranges::find_if(a_registry, [&](const auto& section) {
+				return std::ranges::equal(section.path, a_path);
+			});
+			return found == a_registry.end() ? nullptr : &*found;
 		}
 
-		std::string PathText(const std::filesystem::path& a_path)
+		void RenderUnknownTables(
+			std::string& a_output, const toml::table& a_table,
+			std::vector<std::string>& a_path, const settings::Registry& a_registry)
 		{
-			return a_path.string();
-		}
-
-		bool RemoveRetiredFaceCustomizationOwnership(toml::table& a_root)
-		{
-			auto* ownership = a_root["shader_ownership"].as_table();
-			auto* targets =
-				ownership ? (*ownership)["targets"].as_table() : nullptr;
-			return targets && targets->erase("face_customization") != 0;
-		}
-
-		void AppendMigrationNotice(
-			std::string& a_notice,
-			std::string_view a_message)
-		{
-			if (!a_notice.empty())
-				a_notice += ' ';
-			a_notice += a_message;
-		}
-
-		FileLoadResult IoError(const std::filesystem::path& a_path, std::string_view a_detail)
-		{
-			return {
-				FileLoadStatus::kIoError,
-				{},
-				"Failed to read configuration file '" + PathText(a_path) + "': " + std::string(a_detail)
-			};
+			if (!a_path.empty()) {
+				const bool hasValues = std::ranges::any_of(a_table, [](const auto& entry) {
+					return !entry.second.is_table();
+				});
+				if (hasValues || (a_table.empty() && !FindSection(a_registry, a_path))) {
+					a_output += "\n[" + FormatPath(a_path) + "]\n";
+					for (const auto& [key, value] : a_table) {
+						if (!value.is_table())
+							a_output += FormatKey(key.str()) + " = " + FormatNode(value) + "\n";
+					}
+				}
+			}
+			for (const auto& [key, value] : a_table) {
+				if (const auto* child = value.as_table()) {
+					a_path.emplace_back(key.str());
+					RenderUnknownTables(a_output, *child, a_path, a_registry);
+					a_path.pop_back();
+				}
+			}
 		}
 
 		WriteResult WriteError(const std::filesystem::path& a_path, std::string_view a_detail)
 		{
-			return {
-				.success = false,
-				.error = "Failed to write configuration file '" + PathText(a_path) + "': " + std::string(a_detail)
-			};
+			return { false, "Failed to write configuration file '" + a_path.string() + "': " + std::string(a_detail) };
 		}
 
-		WriteResult ProductionWriteUnavailable()
-		{
-			std::scoped_lock lock(ConfigMutex());
-			if (CachedDefaultLoaded()) {
-				return { .success = true };
-			}
-			return WriteError(kUserConfigPath, "default configuration is unavailable");
-		}
-
-		WriteResult AtomicWrite(const std::filesystem::path& a_path, const toml::table& a_table)
+		WriteResult AtomicWrite(const std::filesystem::path& a_path, std::string_view a_text)
 		{
 			std::error_code ec;
 			const auto parent = a_path.parent_path();
 			if (!parent.empty()) {
 				std::filesystem::create_directories(parent, ec);
-				if (ec) {
+				if (ec)
 					return WriteError(a_path, ec.message());
-				}
 			}
-
 			static std::atomic_uint64_t sequence{ 0 };
 			auto temporary = a_path;
 			temporary += ".tmp." + std::to_string(GetCurrentProcessId()) + "." +
 				std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
-
 			{
 				std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-				if (!output.is_open()) {
+				if (!output.is_open())
 					return WriteError(a_path, "unable to open temporary file");
-				}
-				output << a_table;
+				output << a_text;
 				output.flush();
 				if (!output.good()) {
 					output.close();
@@ -140,747 +209,348 @@ namespace cs::feature_config
 					return WriteError(a_path, "temporary file close failed");
 				}
 			}
-
-			if (!MoveFileExW(
-					temporary.c_str(),
-					a_path.c_str(),
-					MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-				const auto moveError = std::error_code(
-					static_cast<int>(GetLastError()), std::system_category());
+			if (!MoveFileExW(temporary.c_str(), a_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+				const auto moveError = std::error_code(static_cast<int>(GetLastError()), std::system_category());
 				std::filesystem::remove(temporary, ec);
 				return WriteError(a_path, moveError.message());
 			}
-
 			return { .success = true };
 		}
 
-		toml::table* EnsureTablePath(
-			toml::table& a_root,
-			std::span<const std::string_view> a_path,
-			std::string& a_error)
+		WriteResult WriteIfChanged(const std::filesystem::path& a_path, std::string_view a_text)
 		{
-			auto* current = &a_root;
-			for (const auto key : a_path) {
-				auto* existing = current->get(key);
-				if (existing && !existing->is_table()) {
-					a_error = "Path component '" + std::string(key) + "' is not a table";
-					return nullptr;
-				}
-				if (!existing) {
-					current->insert_or_assign(key, toml::table{});
-					existing = current->get(key);
-				}
-				current = existing->as_table();
-			}
-			return current;
-		}
-
-		template <class Mutator>
-		WriteResult UpdateUserFile(const std::filesystem::path& a_path, Mutator&& a_mutator)
-		{
-			std::scoped_lock lock(ConfigMutex());
-
-			toml::table user;
-			const bool useCachedUser =
-				CachedDefaultLoaded() && a_path == CachedUserPath();
-			if (useCachedUser) {
-				// The loaded delta is authoritative when virtualized reads and writes resolve differently.
-				switch (CachedUserStatus()) {
-				case FileLoadStatus::kMissing:
-					break;
-				case FileLoadStatus::kParsed:
-					user = CachedUserRoot();
-					break;
-				case FileLoadStatus::kParseError:
-				case FileLoadStatus::kIoError:
-					return WriteError(a_path, CachedUserError());
-				}
-			} else {
-				auto load = LoadFile(a_path);
-				switch (load.status) {
-				case FileLoadStatus::kMissing:
-					break;
-				case FileLoadStatus::kParsed:
-					user = std::move(load.table);
-					break;
-				case FileLoadStatus::kParseError:
-				case FileLoadStatus::kIoError:
-					return WriteError(a_path, load.error);
-				}
-			}
-
-			std::string error;
-			if (!a_mutator(user, error)) {
-				return WriteError(a_path, error);
-			}
-			const auto write = AtomicWrite(a_path, user);
-			if (!write) {
+			std::ifstream input(a_path, std::ios::binary);
+			const std::string existing{ std::istreambuf_iterator<char>{ input }, {} };
+			if (!input.bad() && existing == a_text)
+				return { .success = true };
+			input.close();
+			const auto write = AtomicWrite(a_path, a_text);
+			if (!write)
 				return write;
-			}
-			if (useCachedUser) {
-				CachedUserRoot() = user;
-				CachedUserStatus() = FileLoadStatus::kParsed;
-				CachedUserError().clear();
-			}
-
 			const auto verification = LoadFile(a_path);
-			if (verification.status != FileLoadStatus::kParsed) {
-				return WriteError(
-					a_path,
-					"write verification failed: " + verification.error);
-			}
-			if (verification.table != user) {
-				return WriteError(
-					a_path,
-					"written configuration did not read back as expected");
-			}
+			if (verification.status != FileLoadStatus::kParsed)
+				return WriteError(a_path, "write verification failed: " + verification.error);
+			if (verification.table != toml::parse(a_text))
+				return WriteError(a_path, "written configuration did not read back as expected");
 			return { .success = true };
 		}
 
-		bool ReadRequiredOwnershipBool(
-			const toml::table& a_table,
-			std::string_view a_key,
-			std::string_view a_path,
-			bool& a_value,
-			std::string& a_error)
+		bool MutateSection(
+			toml::table& a_root, const settings::Registry& a_registry,
+			const settings::Section& a_section, const toml::table& a_value, std::string& a_error)
 		{
-			const auto status = ReadBool(a_table, a_key, a_value);
-			if (status == ScalarReadStatus::kValid)
+			auto* table = EnsureTablePath(a_root, std::span{ a_section.path }, a_error);
+			if (!table)
+				return false;
+			if (a_section.openMap) {
+				*table = a_value;
 				return true;
-
-			a_error = std::string(a_path) + "." + std::string(a_key)
-				+ (status == ScalarReadStatus::kMissing
-						? " is required"
-						: " must be a boolean");
-			return false;
+			}
+			for (const auto& field : a_section.fields) {
+				table->erase(field.key);
+				if (const auto* value = a_value.get(field.key)) {
+					const auto typed = field.read(*value);
+					if (!typed || *typed != field.defaultValue)
+						table->insert(field.key, *value);
+				}
+			}
+			for (const auto& child : a_registry) {
+				if (child.path.size() != a_section.path.size() + 1 ||
+					!std::equal(a_section.path.begin(), a_section.path.end(), child.path.begin()))
+					continue;
+				if (const auto* value = a_value[child.path.back()].as_table()) {
+					if (!MutateSection(a_root, a_registry, child, *value, a_error))
+						return false;
+				}
+			}
+			return true;
 		}
+	}
+
+	std::string RenderDocument(const settings::Registry& a_registry, const toml::table& a_root)
+	{
+		std::string output = "# FO4 Community Shaders settings. Uncomment a line to change it; the in-game menu writes this file.\n";
+		auto remaining = a_root;
+		for (const auto& [key, value] : a_root) {
+			if (!value.is_table()) {
+				output += FormatKey(key.str()) + " = " + FormatNode(value) + "\n";
+				remaining.erase(key);
+			}
+		}
+		for (const auto& section : a_registry) {
+			bool blocked = false;
+			const auto* table = FindTable(a_root, std::span{ section.path }, blocked);
+			if (blocked)
+				continue;
+			output += "\n[" + FormatPath(section.path) + "]\n";
+			std::string error;
+			auto* rest = EnsureTablePath(remaining, std::span{ section.path }, error);
+			if (table) {
+				for (const auto& [key, value] : *table) {
+					if (std::ranges::find(section.fields, key.str(), &settings::FieldView::key) != section.fields.end())
+						continue;
+					if (!value.is_table() || section.openMap) {
+						output += FormatKey(key.str()) + " = " + FormatNode(value) + "\n";
+						rest->erase(key);
+					}
+				}
+			}
+			for (const auto& field : section.fields) {
+				output += "# " + field.description;
+				if (field.timing != settings::ApplyTiming::kImmediate)
+					output += " (restart required)";
+				output += '\n';
+				const auto* value = table ? table->get(field.key) : nullptr;
+				if (value) {
+					const auto typed = field.read(*value);
+					output += FormatKey(field.key) + " = " +
+						(typed ? settings::FormatValue(*typed) : FormatNode(*value)) + "\n";
+				} else {
+					output += "# " + FormatKey(field.key) + " = " + settings::FormatValue(field.defaultValue) + "\n";
+				}
+				rest->erase(field.key);
+			}
+		}
+		std::vector<std::string> path;
+		RenderUnknownTables(output, remaining, path, a_registry);
+		return output;
 	}
 
 	FileLoadResult LoadFile(const std::filesystem::path& a_path)
 	{
+		const auto ioError = [&](std::string_view detail) -> FileLoadResult {
+			return { FileLoadStatus::kIoError, {}, "Failed to read configuration file '" + a_path.string() + "': " + std::string(detail) };
+		};
 		std::error_code ec;
 		const bool exists = std::filesystem::exists(a_path, ec);
-		if (ec) {
-			return IoError(a_path, ec.message());
-		}
-		if (!exists) {
-			return {
-				FileLoadStatus::kMissing,
-				{},
-				"Configuration file does not exist: '" + PathText(a_path) + "'"
-			};
-		}
-
-		const bool regularFile = std::filesystem::is_regular_file(a_path, ec);
-		if (ec) {
-			return IoError(a_path, ec.message());
-		}
-		if (!regularFile) {
-			return IoError(a_path, "path is not a regular file");
-		}
-
+		if (ec)
+			return ioError(ec.message());
+		if (!exists)
+			return {};
+		if (!std::filesystem::is_regular_file(a_path, ec))
+			return ioError(ec ? ec.message() : "path is not a regular file");
 		std::ifstream input(a_path, std::ios::binary);
-		if (!input.is_open()) {
-			return IoError(a_path, "unable to open file");
-		}
-
+		if (!input.is_open())
+			return ioError("unable to open file");
 		std::string contents;
 		std::array<char, 4096> buffer{};
 		while (true) {
 			input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-			const auto count = input.gcount();
-			if (count > 0) {
-				contents.append(buffer.data(), static_cast<std::size_t>(count));
-			}
-			if (input.bad()) {
-				return IoError(a_path, "stream read failed");
-			}
-			if (input.eof()) {
+			contents.append(buffer.data(), static_cast<std::size_t>(input.gcount()));
+			if (input.bad())
+				return ioError("stream read failed");
+			if (input.eof())
 				break;
-			}
-			if (input.fail()) {
-				return IoError(a_path, "stream read failed before end of file");
-			}
+			if (input.fail())
+				return ioError("stream read failed before end of file");
 		}
-
 		try {
-			return {
-				FileLoadStatus::kParsed,
-				toml::parse(contents, PathText(a_path)),
-				{}
-			};
-		} catch (const toml::parse_error& e) {
-			return {
-				FileLoadStatus::kParseError,
-				{},
-				"Failed to parse configuration file '" + PathText(a_path) + "': " + std::string(e.description())
-			};
+			return { FileLoadStatus::kParsed, toml::parse(contents, a_path.string()), {} };
+		} catch (const toml::parse_error& error) {
+			return { FileLoadStatus::kParseError, {},
+				"Failed to parse configuration file '" + a_path.string() + "': " + std::string(error.description()) };
 		}
 	}
 
-	void DeepMerge(toml::table& a_base, const toml::table& a_override)
+	RefreshResult Initialize(settings::Registry a_registry)
 	{
-		for (const auto& [key, overrideNode] : a_override) {
-			auto* baseNode = a_base.get(key);
-			if (baseNode && baseNode->is_table() && overrideNode.is_table()) {
-				DeepMerge(*baseNode->as_table(), *overrideNode.as_table());
-			} else {
-				a_base.insert_or_assign(key, overrideNode);
-			}
-		}
+		return InitializeAt(kConfigPath, std::move(a_registry));
 	}
 
-	TemporalMigrationResult NormalizeLegacyTemporalSettings(toml::table& a_userRoot)
+	RefreshResult InitializeAt(const std::filesystem::path& a_path, settings::Registry a_registry)
 	{
-		TemporalMigrationResult result;
-		auto* features = a_userRoot["features"].as_table();
-		if (!features) {
-			return result;
+		auto& store = Config();
+		std::scoped_lock lock(store.mutex);
+		store.registry = std::move(a_registry);
+		store.path = a_path;
+		const auto loaded = LoadFile(a_path);
+		store.readError = loaded.error;
+		const auto document = RenderDocument(store.registry, loaded.table);
+		store.root = toml::parse(document);
+		std::string error = loaded.error;
+		if (loaded.status == FileLoadStatus::kMissing || loaded.status == FileLoadStatus::kParsed) {
+			const auto written = WriteIfChanged(a_path, document);
+			error = written.error;
 		}
-
-		auto* upscaling = (*features)["Upscaling"].as_table();
-		auto* legacySettings = upscaling ? (*upscaling)["settings"].as_table() : nullptr;
-		auto* frameGeneration = (*features)["FrameGeneration"].as_table();
-		const bool legacySettingsPresent = legacySettings &&
-			(legacySettings->contains("frame_generation_mode") ||
-				legacySettings->contains("frame_generation_allow_in_menus"));
-
-		if (legacySettingsPresent) {
-			if (!frameGeneration) {
-				features->insert_or_assign("FrameGeneration", toml::table{});
-				frameGeneration = (*features)["FrameGeneration"].as_table();
-			}
-			if (!frameGeneration) {
-				return result;
-			}
-
-			bool legacyLoad = false;
-			const toml::node* legacyLoadNode = nullptr;
-			if (upscaling) {
-				legacyLoadNode = upscaling->get("load");
-				if (const auto value = (*upscaling)["load"].value<bool>()) {
-					legacyLoad = *value;
-				}
-			}
-
-			std::int64_t legacyMode = 1;
-			const toml::node* legacyModeNode =
-				legacySettings->get("frame_generation_mode");
-			const toml::node* legacyMenusNode =
-				legacySettings->get("frame_generation_allow_in_menus");
-			if (legacyModeNode) {
-				if (const auto value = legacyModeNode->value<std::int64_t>()) {
-					legacyMode = *value;
-				}
-			}
-
-			if (!frameGeneration->contains("load")) {
-				if (legacyLoadNode && !legacyLoadNode->is_boolean()) {
-					frameGeneration->insert_or_assign("load", *legacyLoadNode);
-				} else {
-					frameGeneration->insert_or_assign(
-						"load",
-						legacyLoad && legacyMode > 0);
-				}
-			}
-			auto* newSettings = (*frameGeneration)["settings"].as_table();
-			if (!newSettings) {
-				frameGeneration->insert_or_assign("settings", toml::table{});
-				newSettings = (*frameGeneration)["settings"].as_table();
-			}
-			if (!newSettings) {
-				return result;
-			}
-			if (!newSettings->contains("frame_generation_method")) {
-				if (legacyModeNode) {
-					newSettings->insert_or_assign(
-						"frame_generation_method", *legacyModeNode);
-				} else {
-					newSettings->insert_or_assign("frame_generation_method", 1);
-				}
-			}
-			if (!newSettings->contains("frame_generation_allow_in_menus")) {
-				if (legacyMenusNode) {
-					newSettings->insert_or_assign(
-						"frame_generation_allow_in_menus", *legacyMenusNode);
-				} else {
-					newSettings->insert_or_assign(
-						"frame_generation_allow_in_menus", false);
-				}
-			}
-
-			legacySettings->erase("frame_generation_mode");
-			legacySettings->erase("frame_generation_allow_in_menus");
-			result.changed = true;
-		}
-
-		const auto normalizeMethodEnablement =
-			[&result](toml::table* a_settings,
-				std::string_view a_methodKey) {
-				if (!a_settings) {
-					return;
-				}
-				const auto* enabledNode = a_settings->get("enabled");
-				if (!enabledNode) {
-					return;
-				}
-				if (const auto enabled = enabledNode->value<bool>()) {
-					if (!*enabled) {
-						a_settings->insert_or_assign(a_methodKey, 0);
-					}
-				} else if (!a_settings->contains(a_methodKey)) {
-					// Preserve the established explicit parse error instead of
-					// allowing a malformed legacy toggle to enable a default.
-					a_settings->insert_or_assign(a_methodKey, *enabledNode);
-				}
-				a_settings->erase("enabled");
-				result.changed = true;
-			};
-
-		auto* upscalingSettings =
-			upscaling ? (*upscaling)["settings"].as_table() : nullptr;
-		normalizeMethodEnablement(upscalingSettings, "upscale_method");
-		if (upscalingSettings) {
-			result.changed =
-				upscalingSettings->erase("upscale_method_no_dlss") != 0 ||
-				result.changed;
-			result.changed =
-				upscalingSettings->erase(
-					"frame_generation_force_enable") != 0 ||
-				result.changed;
-		}
-
-		frameGeneration = (*features)["FrameGeneration"].as_table();
-		auto* frameGenerationSettings =
-			frameGeneration ? (*frameGeneration)["settings"].as_table() : nullptr;
-		normalizeMethodEnablement(
-			frameGenerationSettings, "frame_generation_method");
-		if (frameGenerationSettings) {
-			result.changed =
-				frameGenerationSettings->erase(
-					"frame_generation_force_enable") != 0 ||
-				result.changed;
-		}
-
-		if (result.changed) {
-			result.notice =
-				"Legacy temporal settings were normalized to method-based "
-				"enablement and retired policy keys; the next explicit settings "
-				"save will persist the migration.";
-		}
-		return result;
+		return { store.root, loaded.status, std::move(error) };
 	}
 
-	TemporalMigrationResult NormalizeLegacyTemporalFeatureSettings(
-		std::string_view a_featureKey,
-		toml::table& a_settings)
+	toml::table GetRoot()
 	{
-		toml::table root;
-		toml::table feature;
-		feature.insert_or_assign("settings", a_settings);
-		toml::table features;
-		features.insert_or_assign(a_featureKey, std::move(feature));
-		root.insert_or_assign("features", std::move(features));
-		auto result = NormalizeLegacyTemporalSettings(root);
-		const auto* normalized =
-			root["features"][a_featureKey]["settings"].as_table();
-		if (normalized) {
-			a_settings = *normalized;
-		}
-		return result;
-	}
-
-	UnifiedLoadResult LoadMergedFiles(
-		const std::filesystem::path& a_defaultPath,
-		const std::filesystem::path& a_userPath)
-	{
-		UnifiedLoadResult result;
-		auto defaultLoad = LoadFile(a_defaultPath);
-		if (defaultLoad.status != FileLoadStatus::kParsed) {
-			result.defaultError = std::move(defaultLoad.error);
-			return result;
-		}
-
-		result.root = std::move(defaultLoad.table);
-		result.defaultLoaded = true;
-		bool retiredOwnership =
-			RemoveRetiredFaceCustomizationOwnership(result.root);
-		(void)NormalizeLegacyTemporalSettings(result.root);
-
-		auto userLoad = LoadFile(a_userPath);
-		result.userStatus = userLoad.status;
-		switch (userLoad.status) {
-		case FileLoadStatus::kMissing:
-			break;
-		case FileLoadStatus::kParsed: {
-			result.userRoot = std::move(userLoad.table);
-			if (const auto migration = NormalizeLegacyTemporalSettings(result.userRoot);
-				migration.changed) {
-				result.userMigrated = true;
-				AppendMigrationNotice(
-					result.migrationNotice,
-					migration.notice);
-			}
-			const bool retiredUserOwnership =
-				RemoveRetiredFaceCustomizationOwnership(result.userRoot);
-			result.userMigrated =
-				result.userMigrated || retiredUserOwnership;
-			retiredOwnership =
-				retiredOwnership || retiredUserOwnership;
-			DeepMerge(result.root, result.userRoot);
-			result.userLoaded = true;
-			break;
-		}
-		case FileLoadStatus::kParseError:
-		case FileLoadStatus::kIoError:
-			result.userWarning = std::move(userLoad.error);
-			break;
-		}
-		if (retiredOwnership) {
-			AppendMigrationNotice(
-				result.migrationNotice,
-				"Retired shader ownership target 'face_customization' "
-				"was removed from the loaded configuration; native "
-				"FaceCustomization shaders remain stock.");
-		}
-		return result;
-	}
-
-	UnifiedLoadResult Reload()
-	{
-		return ReloadFromFiles(kDefaultConfigPath, kUserConfigPath);
-	}
-
-	UnifiedLoadResult ReloadFromFiles(
-		const std::filesystem::path& a_defaultPath,
-		const std::filesystem::path& a_userPath)
-	{
-		auto result = LoadMergedFiles(a_defaultPath, a_userPath);
-		{
-			std::scoped_lock lock(ConfigMutex());
-			CachedRoot() = result.root;
-			CachedDefaultLoaded() = result.defaultLoaded;
-			CachedUserPath() = a_userPath;
-			CachedUserRoot() = result.userRoot;
-			CachedUserStatus() = result.userStatus;
-			CachedUserError() = result.userWarning;
-		}
-		return result;
-	}
-
-	toml::table GetMergedRoot()
-	{
-		std::scoped_lock lock(ConfigMutex());
-		return CachedRoot();
-	}
-
-	toml::table GetUserRoot()
-	{
-		std::scoped_lock lock(ConfigMutex());
-		return CachedUserRoot();
+		auto& store = Config();
+		std::scoped_lock lock(store.mutex);
+		return store.root;
 	}
 
 	std::optional<toml::table> GetFeature(std::string_view a_key)
 	{
-		std::scoped_lock lock(ConfigMutex());
-		const auto* features = CachedRoot()["features"].as_table();
-		if (!features) {
-			return std::nullopt;
-		}
-
-		const auto* feature = features->get(a_key);
-		if (!feature || !feature->is_table()) {
-			return std::nullopt;
-		}
-		return *feature->as_table();
+		const auto root = GetRoot();
+		if (const auto* feature = root["features"][a_key].as_table())
+			return *feature;
+		return std::nullopt;
 	}
 
-	bool HasUserFeatureSetting(
-		std::string_view a_featureKey,
-		std::string_view a_settingKey)
+	WriteResult UpdateOwnedSettingsAt(
+		const std::filesystem::path& a_filePath, std::span<const std::string_view> a_path, const toml::table& a_value)
 	{
-		std::scoped_lock lock(ConfigMutex());
-		const auto* features = CachedUserRoot()["features"].as_table();
-		const auto* feature =
-			features ? features->get(a_featureKey) : nullptr;
-		const auto* featureTable =
-			feature ? feature->as_table() : nullptr;
-		const auto* settings =
-			featureTable ? featureTable->get("settings") : nullptr;
-		return settings &&
-			settings->is_table() &&
-			settings->as_table()->contains(a_settingKey);
+		auto& store = Config();
+		std::scoped_lock lock(store.mutex);
+		if (a_filePath != store.path)
+			return WriteError(a_filePath, "settings store has not been initialized for this path");
+		if (!store.readError.empty())
+			return WriteError(a_filePath, "writes are disabled until the settings file is repaired and the game restarted: " + store.readError);
+		const std::vector<std::string> path(a_path.begin(), a_path.end());
+		const auto* section = FindSection(store.registry, path);
+		if (!section)
+			return WriteError(a_filePath, "unregistered settings section");
+		auto candidate = store.root;
+		std::string error;
+		if (!MutateSection(candidate, store.registry, *section, a_value, error))
+			return WriteError(a_filePath, error);
+		const auto document = RenderDocument(store.registry, candidate);
+		const auto written = WriteIfChanged(a_filePath, document);
+		if (written)
+			store.root = toml::parse(document);
+		return written;
+	}
+
+	WriteResult UpdateFeatureOwnedSettings(std::string_view a_featureKey, const toml::table& a_delta)
+	{
+		const std::array path{ std::string_view("features"), a_featureKey, std::string_view("settings") };
+		return UpdateOwnedSettingsAt(kConfigPath, path, a_delta);
+	}
+
+	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load)
+	{
+		const std::array path{ std::string_view("features"), a_featureKey };
+		return UpdateOwnedSettingsAt(kConfigPath, path, toml::table{ { "load", a_load } });
+	}
+
+	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value)
+	{
+		const std::array path{ a_section };
+		return UpdateOwnedSettingsAt(kConfigPath, path, a_value);
 	}
 
 	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root)
 	{
 		ShaderOwnershipParseResult result;
+		result.config.enabled = settings::core::ShaderOwnership{}.enabled;
+		result.config.targets.enabled.fill(settings::core::ShaderTarget{}.enabled);
 		const auto* ownershipNode = a_root.get("shader_ownership");
 		if (!ownershipNode)
 			return result;
-
 		result.present = true;
-		const auto* ownership = ownershipNode->as_table();
-		if (!ownership) {
-			result.valid = false;
-			result.error = "shader_ownership must be a table";
-			return result;
-		}
-
-		if (!ReadRequiredOwnershipBool(
-				*ownership,
-				"enabled",
-				"shader_ownership",
-				result.config.enabled,
-				result.error)) {
+		const auto fail = [&](std::string error) {
 			result.valid = false;
 			result.config = {};
+			result.error = std::move(error);
 			return result;
-		}
-
-		const auto* targetsNode = ownership->get("targets");
-		const auto* targets = targetsNode ? targetsNode->as_table() : nullptr;
-		if (!targets) {
-			result.valid = false;
-			result.config = {};
-			result.error = targetsNode
-				? "shader_ownership.targets must be a table"
-				: "shader_ownership.targets is required";
-			return result;
-		}
-
-		for (const auto& [key, node] : *targets) {
-			(void)node;
-			if (!engine::FindShaderInjectionTarget(key.str())) {
-				result.valid = false;
-				result.config = {};
-				result.error = "shader_ownership.targets contains unknown target '"
-					+ std::string(key.str()) + "'";
-				return result;
-			}
-		}
-
-		const auto readTarget = [&](std::string_view a_key, bool& a_value) {
-			return ReadRequiredOwnershipBool(
-				*targets,
-				a_key,
-				"shader_ownership.targets",
-				a_value,
-				result.error);
 		};
-		for (const auto& target : engine::GetShaderInjectionTargets()) {
-			if (!readTarget(target.name, result.config.targets[target.id])) {
-				result.valid = false;
-				result.config = {};
-				break;
-			}
+		const auto* ownership = ownershipNode->as_table();
+		if (!ownership)
+			return fail("shader_ownership must be a table");
+		if (ReadBool(*ownership, "enabled", result.config.enabled) == ScalarReadStatus::kWrongType)
+			return fail("shader_ownership.enabled must be a boolean");
+		const auto* targetsNode = ownership->get("targets");
+		if (!targetsNode)
+			return result;
+		const auto* targets = targetsNode->as_table();
+		if (!targets)
+			return fail("shader_ownership.targets must be a table");
+		for (const auto& [key, node] : *targets) {
+			const auto* target = engine::FindShaderInjectionTarget(key.str());
+			if (!target)
+				return fail("shader_ownership.targets contains unknown target '" + std::string(key.str()) + "'");
+			if (!node.is_boolean())
+				return fail("shader_ownership.targets." + std::string(key.str()) + " must be a boolean");
+			result.config.targets[target->id] = node.as_boolean()->get();
 		}
 		return result;
-	}
-
-	WriteResult UpdateUserTableAt(
-		const std::filesystem::path& a_userPath,
-		std::span<const std::string_view> a_path,
-		const toml::table& a_value)
-	{
-		if (a_path.empty()) {
-			return WriteError(a_userPath, "update path is empty");
-		}
-
-		return UpdateUserFile(a_userPath, [&](toml::table& a_user, std::string& a_error) {
-			const auto parentPath = a_path.first(a_path.size() - 1);
-			auto* parent = EnsureTablePath(a_user, parentPath, a_error);
-			if (!parent) {
-				return false;
-			}
-			parent->insert_or_assign(a_path.back(), a_value);
-			return true;
-		});
-	}
-
-	WriteResult UpdateFeatureSettings(std::string_view a_featureKey, const toml::table& a_settings)
-	{
-		if (const auto available = ProductionWriteUnavailable(); !available) {
-			return available;
-		}
-		const std::array path{ std::string_view("features"), a_featureKey, std::string_view("settings") };
-		return UpdateUserTableAt(kUserConfigPath, path, a_settings);
-	}
-
-	WriteResult UpdateFeature(std::string_view a_featureKey, const toml::table& a_feature)
-	{
-		if (const auto available = ProductionWriteUnavailable(); !available) {
-			return available;
-		}
-		const std::array path{ std::string_view("features"), a_featureKey };
-		return UpdateUserFile(kUserConfigPath, [&](toml::table& a_user, std::string& a_error) {
-			auto* feature = EnsureTablePath(a_user, path, a_error);
-			if (!feature) {
-				return false;
-			}
-			for (const auto& [key, node] : a_feature) {
-				feature->insert_or_assign(key, node);
-			}
-			return true;
-		});
-	}
-
-	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load)
-	{
-		if (const auto available = ProductionWriteUnavailable(); !available) {
-			return available;
-		}
-		const std::array path{ std::string_view("features"), a_featureKey };
-		return UpdateUserFile(kUserConfigPath, [&](toml::table& a_user, std::string& a_error) {
-			auto* feature = EnsureTablePath(a_user, path, a_error);
-			if (!feature) {
-				return false;
-			}
-			feature->insert_or_assign("load", a_load);
-			return true;
-		});
-	}
-
-	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value)
-	{
-		if (const auto available = ProductionWriteUnavailable(); !available) {
-			return available;
-		}
-		const std::array path{ a_section };
-		return UpdateUserTableAt(kUserConfigPath, path, a_value);
 	}
 
 	ScalarReadStatus ReadBool(const toml::table& a_table, std::string_view a_key, bool& a_value)
 	{
 		const auto* node = a_table.get(a_key);
-		if (!node) {
+		if (!node)
 			return ScalarReadStatus::kMissing;
-		}
-		if (!node->is_boolean()) {
+		if (!node->is_boolean())
 			return ScalarReadStatus::kWrongType;
-		}
-
 		a_value = node->as_boolean()->get();
 		return ScalarReadStatus::kValid;
 	}
 
 	ScalarReadStatus ReadSignedInteger(
-		const toml::table& a_table,
-		std::string_view a_key,
-		std::int64_t& a_value,
-		std::int64_t a_min,
-		std::int64_t a_max)
+		const toml::table& a_table, std::string_view a_key, std::int64_t& a_value, std::int64_t a_min, std::int64_t a_max)
 	{
 		const auto* node = a_table.get(a_key);
-		if (!node) {
+		if (!node)
 			return ScalarReadStatus::kMissing;
-		}
-		if (!node->is_integer()) {
+		if (!node->is_integer())
 			return ScalarReadStatus::kWrongType;
-		}
-
 		const auto value = node->as_integer()->get();
-		if (value < a_min || value > a_max) {
+		if (value < a_min || value > a_max)
 			return ScalarReadStatus::kOutOfRange;
-		}
-
 		a_value = value;
 		return ScalarReadStatus::kValid;
 	}
 
 	ScalarReadStatus ReadUnsignedInteger(
-		const toml::table& a_table,
-		std::string_view a_key,
-		std::uint64_t& a_value,
-		std::uint64_t a_min,
-		std::uint64_t a_max)
+		const toml::table& a_table, std::string_view a_key, std::uint64_t& a_value, std::uint64_t a_min, std::uint64_t a_max)
 	{
 		const auto* node = a_table.get(a_key);
-		if (!node) {
+		if (!node)
 			return ScalarReadStatus::kMissing;
-		}
-		if (!node->is_integer()) {
+		if (!node->is_integer())
 			return ScalarReadStatus::kWrongType;
-		}
-
 		const auto value = node->as_integer()->get();
-		if (value < 0) {
+		if (value < 0)
 			return ScalarReadStatus::kOutOfRange;
-		}
-
 		const auto unsignedValue = static_cast<std::uint64_t>(value);
-		if (unsignedValue < a_min || unsignedValue > a_max) {
+		if (unsignedValue < a_min || unsignedValue > a_max)
 			return ScalarReadStatus::kOutOfRange;
-		}
-
 		a_value = unsignedValue;
 		return ScalarReadStatus::kValid;
 	}
 
 	ScalarReadStatus ReadFloat(
-		const toml::table& a_table,
-		std::string_view a_key,
-		float& a_value,
-		float a_min,
-		float a_max)
+		const toml::table& a_table, std::string_view a_key, float& a_value, float a_min, float a_max)
 	{
 		const auto* node = a_table.get(a_key);
-		if (!node) {
+		if (!node)
 			return ScalarReadStatus::kMissing;
-		}
 		return ReadFloat(*node, a_value, a_min, a_max);
 	}
 
 	ScalarReadStatus ReadFloat(const toml::node& a_node, float& a_value, float a_min, float a_max)
 	{
-		if (!a_node.is_floating_point() && !a_node.is_integer()) {
+		if (!a_node.is_floating_point() && !a_node.is_integer())
 			return ScalarReadStatus::kWrongType;
-		}
-
 		const double value = a_node.is_floating_point() ?
-			a_node.as_floating_point()->get() :
-			static_cast<double>(a_node.as_integer()->get());
-		if (!std::isfinite(value)) {
+			a_node.as_floating_point()->get() : static_cast<double>(a_node.as_integer()->get());
+		if (!std::isfinite(value))
 			return ScalarReadStatus::kInvalidValue;
-		}
-
 		const auto floatValue = static_cast<float>(value);
-		if (!std::isfinite(floatValue)) {
+		if (!std::isfinite(floatValue) || floatValue < a_min || floatValue > a_max)
 			return ScalarReadStatus::kOutOfRange;
-		}
-		if (floatValue < a_min || floatValue > a_max) {
-			return ScalarReadStatus::kOutOfRange;
-		}
-
 		a_value = floatValue;
 		return ScalarReadStatus::kValid;
 	}
 
 	ScalarReadStatus ReadDouble(
-		const toml::table& a_table,
-		std::string_view a_key,
-		double& a_value,
-		double a_min,
-		double a_max)
+		const toml::table& a_table, std::string_view a_key, double& a_value, double a_min, double a_max)
 	{
 		const auto* node = a_table.get(a_key);
-		if (!node) {
+		if (!node)
 			return ScalarReadStatus::kMissing;
-		}
-		if (!node->is_floating_point() && !node->is_integer()) {
+		if (!node->is_floating_point() && !node->is_integer())
 			return ScalarReadStatus::kWrongType;
-		}
-
 		const double value = node->is_floating_point() ?
-			node->as_floating_point()->get() :
-			static_cast<double>(node->as_integer()->get());
-		if (!std::isfinite(value)) {
+			node->as_floating_point()->get() : static_cast<double>(node->as_integer()->get());
+		if (!std::isfinite(value))
 			return ScalarReadStatus::kInvalidValue;
-		}
-		if (value < a_min || value > a_max) {
+		if (value < a_min || value > a_max)
 			return ScalarReadStatus::kOutOfRange;
-		}
-
 		a_value = value;
 		return ScalarReadStatus::kValid;
 	}
@@ -888,35 +558,21 @@ namespace cs::feature_config
 	ScalarReadStatus ReadString(const toml::table& a_table, std::string_view a_key, std::string& a_value)
 	{
 		const auto* node = a_table.get(a_key);
-		if (!node) {
+		if (!node)
 			return ScalarReadStatus::kMissing;
-		}
-		if (!node->is_string()) {
+		if (!node->is_string())
 			return ScalarReadStatus::kWrongType;
-		}
-
 		a_value = node->as_string()->get();
 		return ScalarReadStatus::kValid;
 	}
 
 	ActivationResult ParseActivation(const toml::table& a_table)
 	{
-		const auto* loadNode = a_table.get("load");
-		if (!loadNode) {
+		const auto* load = a_table.get("load");
+		if (!load)
 			return {};
-		}
-		if (!loadNode->is_boolean()) {
-			return {
-				.load = false,
-				.valid = false,
-				.present = true
-			};
-		}
-
-		return {
-			.load = loadNode->as_boolean()->get(),
-			.valid = true,
-			.present = true
-		};
+		if (!load->is_boolean())
+			return { .load = false, .valid = false, .present = true };
+		return { .load = load->as_boolean()->get(), .valid = true, .present = true };
 	}
 }

@@ -15,7 +15,8 @@
 #include "Log.h"
 #include "Host/HostClient.h"
 #include "Menu/Menu.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -24,128 +25,6 @@ namespace cs::features
 
 	constexpr std::array<float, 3> kFrameTimeReferenceFps{ 30.0f, 60.0f, 120.0f };
 
-	namespace
-	{
-		std::string SettingError(std::string_view a_key, std::string_view a_reason)
-		{
-			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
-		}
-
-		bool AcceptSetting(
-			feature_config::ScalarReadStatus a_status,
-			std::string_view a_key,
-			std::string_view a_expected,
-			std::string_view a_range,
-			std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = SettingError(a_key, "expected " + std::string(a_expected));
-				break;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = SettingError(a_key, "value must be finite");
-				break;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, a_range);
-				break;
-			}
-			return false;
-		}
-
-		bool ReadBoolSetting(
-			const toml::table& a_table,
-			std::string_view a_key,
-			bool& a_value,
-			std::string& a_error)
-		{
-			return AcceptSetting(
-				feature_config::ReadBool(a_table, a_key, a_value),
-				a_key, "boolean", "boolean value is out of range", a_error);
-		}
-
-		bool ReadIntegerSetting(
-			const toml::table& a_table,
-			std::string_view a_key,
-			std::int64_t a_min,
-			std::int64_t a_max,
-			std::string_view a_range,
-			int& a_value,
-			std::string& a_error)
-		{
-			auto value = static_cast<std::int64_t>(a_value);
-			const auto status = feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max);
-			if (!AcceptSetting(status, a_key, "integer", a_range, a_error)) {
-				return false;
-			}
-			if (status == feature_config::ScalarReadStatus::kValid) {
-				a_value = static_cast<int>(value);
-			}
-			return true;
-		}
-
-		bool ReadFloatSetting(
-			const toml::table& a_table,
-			std::string_view a_key,
-			float a_min,
-			float a_max,
-			std::string_view a_range,
-			float& a_value,
-			std::string& a_error)
-		{
-			return AcceptSetting(
-				feature_config::ReadFloat(a_table, a_key, a_value, a_min, a_max),
-				a_key, "number", a_range, a_error);
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			PerformanceOverlay::Settings& a_candidate,
-			int a_historyCapacity,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-
-			const auto* settingsTable = settingsNode->as_table();
-			if (!settingsTable) {
-				a_error = "settings: expected table";
-				return false;
-			}
-
-			const auto floatLowest = std::numeric_limits<float>::lowest();
-			const auto floatMax = std::numeric_limits<float>::max();
-			return ReadBoolSetting(*settingsTable, "enabled", a_candidate.enabled, a_error)
-				&& ReadIntegerSetting(*settingsTable, "preset", 0, 3, "value must be in range 0..3", a_candidate.preset, a_error)
-				&& ReadBoolSetting(*settingsTable, "show_fps", a_candidate.showFps, a_error)
-				&& ReadBoolSetting(*settingsTable, "show_frame_time", a_candidate.showFrameTime, a_error)
-				&& ReadBoolSetting(*settingsTable, "show_graph", a_candidate.showGraph, a_error)
-				&& ReadBoolSetting(*settingsTable, "show_vram", a_candidate.showVram, a_error)
-				&& ReadBoolSetting(*settingsTable, "show_stats", a_candidate.showStats, a_error)
-				&& ReadIntegerSetting(*settingsTable, "corner", 0, 3, "value must be in range 0..3", a_candidate.corner, a_error)
-				&& ReadBoolSetting(*settingsTable, "free_drag", a_candidate.freeDrag, a_error)
-				&& ReadFloatSetting(*settingsTable, "drag_pos_x", floatLowest, floatMax, "value must be representable as float", a_candidate.dragPosX, a_error)
-				&& ReadFloatSetting(*settingsTable, "drag_pos_y", floatLowest, floatMax, "value must be representable as float", a_candidate.dragPosY, a_error)
-				&& ReadFloatSetting(*settingsTable, "opacity", 0.0f, 1.0f, "value must be in range 0..1", a_candidate.opacity, a_error)
-				&& ReadBoolSetting(*settingsTable, "show_border", a_candidate.showBorder, a_error)
-				&& ReadFloatSetting(*settingsTable, "font_scale", 0.5f, 3.0f, "value must be in range 0.5..3", a_candidate.fontScale, a_error)
-				&& ReadBoolSetting(*settingsTable, "high_contrast", a_candidate.highContrast, a_error)
-				&& ReadBoolSetting(*settingsTable, "auto_thresholds", a_candidate.autoThresholds, a_error)
-				&& ReadFloatSetting(*settingsTable, "fps_good", 1.0f, 1000.0f, "value must be in range 1..1000", a_candidate.fpsGood, a_error)
-				&& ReadFloatSetting(*settingsTable, "fps_warn", 1.0f, 1000.0f, "value must be in range 1..1000", a_candidate.fpsWarn, a_error)
-				&& ReadFloatSetting(*settingsTable, "update_interval", 0.05f, 5.0f, "value must be in range 0.05..5", a_candidate.updateInterval, a_error)
-				&& ReadIntegerSetting(*settingsTable, "history_size", 30, a_historyCapacity, "value must be in range 30..600", a_candidate.historySize, a_error)
-				&& ReadFloatSetting(*settingsTable, "graph_height_px", 40.0f, 160.0f, "value must be in range 40..160", a_candidate.graphHeightPx, a_error)
-				&& AcceptSetting(
-					feature_config::ReadString(*settingsTable, "toggle_hotkey", a_candidate.toggleHotkey),
-					"toggle_hotkey", "string", "string value is out of range", a_error);
-		}
-	}
 
 	PerformanceOverlay* PerformanceOverlay::GetSingleton()
 	{
@@ -156,12 +35,10 @@ namespace cs::features
 	bool PerformanceOverlay::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = settings;
-		if (!ParseSettingsTable(a_config, candidate, kHistoryCapacity, a_error)) {
+		if (!settings::Parse(performance_overlay::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
 
-		_toggleHotkeyConfigured = feature_config::HasUserFeatureSetting(
-			GetConfigKey(), "toggle_hotkey");
 		settings = candidate;
 		return true;
 	}
@@ -176,36 +53,9 @@ namespace cs::features
 			settings.enabled, settings.preset, settings.corner, settings.toggleHotkey);
 	}
 
-	void PerformanceOverlay::SaveSettings()
+	bool PerformanceOverlay::SaveSettings()
 	{
-		toml::table settingsTable;
-		settingsTable.insert_or_assign("enabled", settings.enabled);
-		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
-		settingsTable.insert_or_assign("show_fps", settings.showFps);
-		settingsTable.insert_or_assign("show_frame_time", settings.showFrameTime);
-		settingsTable.insert_or_assign("show_graph", settings.showGraph);
-		settingsTable.insert_or_assign("show_vram", settings.showVram);
-		settingsTable.insert_or_assign("show_stats", settings.showStats);
-		settingsTable.insert_or_assign("corner", static_cast<int64_t>(settings.corner));
-		settingsTable.insert_or_assign("free_drag", settings.freeDrag);
-		settingsTable.insert_or_assign("drag_pos_x", static_cast<double>(settings.dragPosX));
-		settingsTable.insert_or_assign("drag_pos_y", static_cast<double>(settings.dragPosY));
-		settingsTable.insert_or_assign("opacity", static_cast<double>(settings.opacity));
-		settingsTable.insert_or_assign("show_border", settings.showBorder);
-		settingsTable.insert_or_assign("font_scale", static_cast<double>(settings.fontScale));
-		settingsTable.insert_or_assign("high_contrast", settings.highContrast);
-		settingsTable.insert_or_assign("auto_thresholds", settings.autoThresholds);
-		settingsTable.insert_or_assign("fps_good", static_cast<double>(settings.fpsGood));
-		settingsTable.insert_or_assign("fps_warn", static_cast<double>(settings.fpsWarn));
-		settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
-		settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
-		settingsTable.insert_or_assign("graph_height_px", static_cast<double>(settings.graphHeightPx));
-		if (_toggleHotkeyConfigured)
-			settingsTable.insert_or_assign("toggle_hotkey", settings.toggleHotkey);
-
-		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settingsTable); !result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(performance_overlay::kSchema, GetConfigKey(), settings, *L);
 	}
 
 	void PerformanceOverlay::ApplyPreset(Preset preset)
@@ -482,17 +332,14 @@ namespace cs::features
 
 	void PerformanceOverlay::DrawSettings()
 	{
+		settings::SettingsEdit edit{ *this };
 		dmui::ui::TextDisabled(
 			"The host owns the overlay hotkey. Suggested default: %s.",
 			settings.toggleHotkey.c_str());
 
-		if (dmui::ui::Checkbox("Enabled", &settings.enabled))
-			SaveSettings();
+		edit.Discrete(dmui::ui::Checkbox("Enabled", &settings.enabled));
 
 		dmui::ui::Separator();
-
-		// Save sliders only on commit to avoid render-thread writes.
-		auto sliderCommit = [] { return dmui::ui::IsItemDeactivatedAfterEdit(); };
 
 		static const std::array presetOptions{
 			dmui::ChoiceOption<int>{ 0, "Off", "off" },
@@ -506,19 +353,16 @@ namespace cs::features
 			std::span<const dmui::ChoiceOption<int>>{ presetOptions },
 			"Unavailable",
 			"Preset");
-		if (preset.changed) {
+		if (edit.Discrete(preset.changed)) {
 			ApplyPreset(static_cast<Preset>(*preset.selected));
-			SaveSettings();
 		}
 
 		if (dmui::ui::CollapsingHeader("Sections")) {
-			bool changed = false;
-			changed |= dmui::ui::Checkbox("FPS", &settings.showFps);
-			changed |= dmui::ui::Checkbox("Frame time (ms)", &settings.showFrameTime);
-			changed |= dmui::ui::Checkbox("Frame time graph", &settings.showGraph);
-			changed |= dmui::ui::Checkbox("VRAM", &settings.showVram);
-			changed |= dmui::ui::Checkbox("Frame stats (avg / 1%% low / 0.1%% low)", &settings.showStats);
-			if (changed) SaveSettings();
+			edit.Discrete(dmui::ui::Checkbox("FPS", &settings.showFps));
+			edit.Discrete(dmui::ui::Checkbox("Frame time (ms)", &settings.showFrameTime));
+			edit.Discrete(dmui::ui::Checkbox("Frame time graph", &settings.showGraph));
+			edit.Discrete(dmui::ui::Checkbox("VRAM", &settings.showVram));
+			edit.Discrete(dmui::ui::Checkbox("Frame stats (avg / 1%% low / 0.1%% low)", &settings.showStats));
 		}
 
 		if (dmui::ui::CollapsingHeader("Position")) {
@@ -534,87 +378,72 @@ namespace cs::features
 				std::span<const dmui::ChoiceOption<int>>{ cornerOptions },
 				"Unavailable",
 				"Corner");
-			if (corner.changed) {
+			if (edit.Discrete(corner.changed)) {
 				settings.corner = *corner.selected;
-				SaveSettings();
 			}
-			if (dmui::ui::Checkbox("Free-drag (override corner snap)", &settings.freeDrag))
-				SaveSettings();
+			edit.Discrete(dmui::ui::Checkbox("Free-drag (override corner snap)", &settings.freeDrag));
 		}
 
 		if (dmui::ui::CollapsingHeader("Style")) {
-			bool changed = false;
-			const float opacityMin = 0.0f;
-			const float opacityMax = 1.0f;
-			(void)dmui::ui::SliderScalar(
+			const auto opacityRange = performance_overlay::kSchema.EditRange(&Settings::opacity);
+			edit.Continuous(dmui::ui::SliderScalar(
 				"Background opacity",
 				&settings.opacity,
-				&opacityMin,
-				&opacityMax,
-				"%.2f");
-			if (sliderCommit()) {
-				settings.opacity = std::clamp(settings.opacity, 0.0f, 1.0f);
-				changed = true;
+				&opacityRange.min,
+				&opacityRange.max,
+				"%.2f"));
+			if (dmui::ui::IsItemDeactivatedAfterEdit()) {
+				settings.opacity = std::clamp(settings.opacity, opacityRange.min, opacityRange.max);
 			}
-			if (dmui::ui::Checkbox("Show border", &settings.showBorder)) changed = true;
-			const float fontScaleMin = 0.5f;
-			const float fontScaleMax = 3.0f;
-			(void)dmui::ui::SliderScalar(
+			edit.Discrete(dmui::ui::Checkbox("Show border", &settings.showBorder));
+			const auto fontScaleRange = performance_overlay::kSchema.EditRange(&Settings::fontScale);
+			edit.Continuous(dmui::ui::SliderScalar(
 				"Font scale",
 				&settings.fontScale,
-				&fontScaleMin,
-				&fontScaleMax,
-				"%.2fx");
-			if (sliderCommit()) {
-				settings.fontScale = std::clamp(settings.fontScale, 0.5f, 3.0f);
-				changed = true;
+				&fontScaleRange.min,
+				&fontScaleRange.max,
+				"%.2fx"));
+			if (dmui::ui::IsItemDeactivatedAfterEdit()) {
+				settings.fontScale = std::clamp(settings.fontScale, fontScaleRange.min, fontScaleRange.max);
 			}
-			if (dmui::ui::Checkbox("High contrast (force white text)", &settings.highContrast)) changed = true;
-			if (changed) SaveSettings();
+			edit.Discrete(dmui::ui::Checkbox("High contrast (force white text)", &settings.highContrast));
 		}
 
 		if (dmui::ui::CollapsingHeader("Color thresholds")) {
-			if (dmui::ui::Checkbox("Auto-seed from monitor refresh rate", &settings.autoThresholds)) {
+			if (edit.Discrete(dmui::ui::Checkbox("Auto-seed from monitor refresh rate", &settings.autoThresholds))) {
 				if (settings.autoThresholds) {
 					_refreshKnown = false;
 					EnsureRefreshHz();
 				}
-				SaveSettings();
 			}
 			dmui::ui::TextDisabled("Detected refresh: %.0f Hz", _refreshHz);
 			dmui::ui::BeginDisabled(settings.autoThresholds);
-			bool committed = false;
-			const float goodFpsMin = 30.0f;
-			const float goodFpsMax = 360.0f;
-			(void)dmui::ui::SliderScalar(
+			const auto goodFpsRange = performance_overlay::kSchema.EditRange(&Settings::fpsGood);
+			edit.Continuous(dmui::ui::SliderScalar(
 				"Good (>= FPS)",
 				&settings.fpsGood,
-				&goodFpsMin,
-				&goodFpsMax,
-				"%.0f");
-			if (sliderCommit()) committed = true;
-			const float warnFpsMin = 15.0f;
-			const float warnFpsMax = 240.0f;
-			(void)dmui::ui::SliderScalar(
+				&goodFpsRange.min,
+				&goodFpsRange.max,
+				"%.0f"));
+			const auto warnFpsRange = performance_overlay::kSchema.EditRange(&Settings::fpsWarn);
+			edit.Continuous(dmui::ui::SliderScalar(
 				"Warn (>= FPS)",
 				&settings.fpsWarn,
-				&warnFpsMin,
-				&warnFpsMax,
-				"%.0f");
-			if (sliderCommit()) committed = true;
+				&warnFpsRange.min,
+				&warnFpsRange.max,
+				"%.0f"));
 			dmui::ui::EndDisabled();
-			if (committed) SaveSettings();
 		}
 
 		if (dmui::ui::CollapsingHeader("Tracking")) {
-			const float updateIntervalMin = 0.05f;
-			const float updateIntervalMax = 2.0f;
-			(void)dmui::ui::SliderScalar(
+			const auto updateIntervalRange = performance_overlay::kSchema.EditRange(&Settings::updateInterval);
+			edit.Continuous(dmui::ui::SliderScalar(
 				"Update interval (s)",
 				&settings.updateInterval,
-				&updateIntervalMin,
-				&updateIntervalMax,
-				"%.2f");
+				&updateIntervalRange.min,
+				&updateIntervalRange.max,
+				"%.2f"));
+			const bool intervalCommitted = dmui::ui::IsItemDeactivatedAfterEdit();
 			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 				tooltip.Visible()) {
 				dmui::ui::Text(
@@ -622,24 +451,21 @@ namespace cs::features
 					"How often the displayed FPS/frametime number refreshes. "
 					"The history graph updates every frame.");
 			}
-			const bool intervalCommitted = sliderCommit();
-			const int historySizeMin = 30;
-			const int historySizeMax = kHistoryCapacity;
-			(void)dmui::ui::SliderScalar(
+			const auto historySizeRange = performance_overlay::kSchema.EditRange(&Settings::historySize);
+			edit.Continuous(dmui::ui::SliderScalar(
 				"History size (frames)",
 				&settings.historySize,
-				&historySizeMin,
-				&historySizeMax);
-			const bool historyCommitted = sliderCommit();
-			const float graphHeightMin = 40.0f;
-			const float graphHeightMax = 160.0f;
-			(void)dmui::ui::SliderScalar(
+				&historySizeRange.min,
+				&historySizeRange.max));
+			const bool historyCommitted = dmui::ui::IsItemDeactivatedAfterEdit();
+			const auto graphHeightRange = performance_overlay::kSchema.EditRange(&Settings::graphHeightPx);
+			edit.Continuous(dmui::ui::SliderScalar(
 				"Graph height (px)",
 				&settings.graphHeightPx,
-				&graphHeightMin,
-				&graphHeightMax,
-				"%.0f");
-			const bool graphHeightCommitted = sliderCommit();
+				&graphHeightRange.min,
+				&graphHeightRange.max,
+				"%.0f"));
+			const bool graphHeightCommitted = dmui::ui::IsItemDeactivatedAfterEdit();
 			if (intervalCommitted || historyCommitted || graphHeightCommitted) {
 				settings.updateInterval = std::clamp(settings.updateInterval, 0.05f, 5.0f);
 				settings.historySize    = std::clamp(settings.historySize, 30, kHistoryCapacity);
@@ -649,7 +475,6 @@ namespace cs::features
 					_frameTimesHead = 0;
 					_frameTimesCount = 0;
 				}
-				SaveSettings();
 			}
 		}
 	}

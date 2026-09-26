@@ -1,14 +1,24 @@
 #include "Settings/FeatureConfig.h"
+#include "Settings/FeatureKeys.h"
+#include "Settings/SettingsRegistry.h"
+#include "DynamicCubemapsSettings.h"
+#include "ExponentialHeightFogMath.h"
+#include "FrameGenerationSettings.h"
+#include "InverseSquareLightingMath.h"
+#include "PerformanceOverlaySettings.h"
+#include "RenderDocSettings.h"
+#include "Render/TemporalRenderSettings.h"
+#include "ScreenSpaceGISettings.h"
+#include "ScreenSpaceShadowsSettings.h"
+#include "TerrainShadowsSettings.h"
+#include "WaterEffectsMath.h"
+#include "WetnessMath.h"
 
-#include <array>
-#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <system_error>
+#include <set>
+#include <sstream>
 
 namespace
 {
@@ -17,308 +27,216 @@ namespace
 	void Check(bool a_condition, std::string_view a_expression, int a_line)
 	{
 		if (!a_condition) {
-			std::cerr << "CHECK failed at line " << a_line << ": "
-					  << a_expression << '\n';
+			std::cerr << "CHECK failed at line " << a_line << ": " << a_expression << '\n';
 			++failures;
 		}
 	}
 
-#define CHECK(a_expression) \
-	Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
+#define CHECK(a_expression) Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
 
-	class TestDirectory
+	using namespace cs::settings;
+	using namespace cs::feature_config;
+
+	enum class Target : std::uint8_t
 	{
-	public:
-		TestDirectory()
-		{
-			static std::atomic<unsigned> counter{ 0 };
-			path = std::filesystem::temp_directory_path()
-				/ ("fo4cs-feature-config-"
-					+ std::to_string(counter.fetch_add(1)));
-			std::filesystem::remove_all(path);
-			std::filesystem::create_directories(path);
-		}
-
-		~TestDirectory()
-		{
-			std::error_code error;
-			std::filesystem::remove_all(path, error);
-		}
-
-		std::filesystem::path path;
+		kEngine,
+		kTemporal
 	};
 
-	void WriteFile(
-		const std::filesystem::path& a_path,
-		std::string_view a_contents)
+	struct TestSettings
+	{
+		bool enabled = true;
+		std::uint32_t count = 2;
+		float thickness = 0.02f;
+		Target target = Target::kEngine;
+
+		bool operator==(const TestSettings&) const = default;
+	};
+
+	constexpr std::array kTargets{
+		Choice{ "engine", Target::kEngine },
+		Choice{ "temporal", Target::kTemporal }
+	};
+	constexpr Schema kTestSchema{
+		std::tuple{
+			Field{ "enabled", "Enable.", &TestSettings::enabled },
+			Field{ "count", "Count.", &TestSettings::count, Range{ 1u, 4u } },
+			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } },
+			ChoiceField{ "target", "Target.", &TestSettings::target, kTargets }
+		}
+	};
+
+	Registry BuildRegistry()
+	{
+		using namespace cs::features;
+		auto registry = BuildCoreRegistry();
+		const std::array features{
+			std::pair{ "ScreenSpaceGI", MakeSchemaView(ssgi_settings::kSchema) },
+			std::pair{ "InverseSquareLighting", MakeSchemaView(inverse_square_lighting::kSchema) },
+			std::pair{ "ExponentialHeightFog", MakeSchemaView(exponential_height_fog::kSchema) },
+			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },
+			std::pair{ "WetnessEffects", MakeSchemaView(wetness_math::kSchema) },
+			std::pair{ "WaterEffects", MakeSchemaView(water_effects::kSchema) },
+			std::pair{ "ScreenSpaceShadows", MakeSchemaView(sss_settings::kSchema) },
+			std::pair{ "TerrainShadows", MakeSchemaView(terrain_shadows::kSchema) },
+			std::pair{ "MotionVectorFixes", SchemaView{} },
+			std::pair{ "Upscaling", MakeSchemaView(cs::render::temporal::kSchema) },
+			std::pair{ "FrameGeneration", MakeSchemaView(frame_generation::kSchema) },
+			std::pair{ "PerformanceOverlay", MakeSchemaView(performance_overlay::kSchema) },
+			std::pair{ "RenderDoc", MakeSchemaView(renderdoc_settings::kSchema) }
+		};
+		CHECK(features.size() == kAllFeatureKeys.size());
+		for (const auto& [key, schema] : features)
+			AddFeatureSections(registry, key, schema);
+		return registry;
+	}
+
+	void WriteFile(const std::filesystem::path& a_path, std::string_view a_contents)
 	{
 		std::ofstream output(a_path, std::ios::binary | std::ios::trunc);
-		output.exceptions(std::ios::failbit | std::ios::badbit);
-		output.write(
-			a_contents.data(),
-			static_cast<std::streamsize>(a_contents.size()));
+		output << a_contents;
 	}
 
-	toml::table Parse(std::string_view a_document)
+	std::string ReadFile(const std::filesystem::path& a_path)
 	{
-		return toml::parse(a_document);
+		std::ifstream input(a_path, std::ios::binary);
+		return { std::istreambuf_iterator<char>{ input }, {} };
 	}
 
-	std::string OwnershipDocument(
-		bool a_enabled,
-		std::string_view a_disabledTarget = {},
-		std::string_view a_omittedTarget = {})
+	void TestSchema()
 	{
-		std::string document =
-			"[shader_ownership]\nenabled = "
-			+ std::string(a_enabled ? "true" : "false")
-			+ "\n[shader_ownership.targets]\n";
-		for (const auto& target : cs::engine::GetShaderInjectionTargets()) {
-			if (target.name == a_omittedTarget)
-				continue;
-			document += std::string(target.name) + " = "
-				+ (target.name == a_disabledTarget ? "false\n" : "true\n");
+		TestSettings value;
+		std::string error;
+		CHECK(Parse(kTestSchema, toml::parse("[settings]\nenabled = false\ncount = 4\nthickness = 0.049\ntarget = 'temporal'\n"), value, error));
+		const TestSettings expected{ false, 4, 0.049f, Target::kTemporal };
+		CHECK(value == expected);
+
+		std::ostringstream serialized;
+		serialized << toml::table{ { "settings", SerializeFull(kTestSchema, value) } };
+		TestSettings roundTrip;
+		CHECK(Parse(kTestSchema, toml::parse(serialized.str()), roundTrip, error));
+		CHECK(roundTrip == expected);
+
+		// Float fields compare as float, so a TOML 0.02 is not a delta from 0.02f.
+		TestSettings defaults;
+		CHECK(Parse(kTestSchema, toml::parse("[settings]\nthickness = 0.02\n"), defaults, error));
+		CHECK(SerializeDelta(kTestSchema, defaults, TestSettings{}).empty());
+		defaults.count = 3;
+		CHECK(SerializeDelta(kTestSchema, defaults, TestSettings{}).size() == 1);
+
+		for (const auto& [document, message] : {
+				 std::pair{ "[settings]\nenabled = 1\n", "settings.enabled: expected boolean" },
+				 std::pair{ "[settings]\ncount = 5\n", "settings.count: value is out of range" },
+				 std::pair{ "[settings]\nthickness = nan\n", "settings.thickness: invalid value" },
+				 std::pair{ "[settings]\ncount = 3\ntarget = 'other'\n", "settings.target: invalid value" } }) {
+			auto candidate = expected;
+			CHECK(!Parse(kTestSchema, toml::parse(document), candidate, error));
+			CHECK(error == message);
+			CHECK(candidate == expected);
 		}
-		return document;
 	}
 
-	void TestActivationAndOwnership()
+	void TestRegistry(const Registry& a_registry)
 	{
-		const auto active =
-			cs::feature_config::ParseActivation(Parse("load = true\n"));
-		CHECK(active.present && active.valid && active.load);
-		const auto absent = cs::feature_config::ParseActivation(Parse(""));
-		CHECK(!absent.present && absent.valid && !absent.load);
-		const auto malformed =
-			cs::feature_config::ParseActivation(Parse("load = \"yes\"\n"));
-		CHECK(malformed.present && !malformed.valid && !malformed.load);
-
-		using enum cs::engine::ShaderInjectionTarget;
-		const auto ownership = cs::feature_config::ParseShaderOwnership(
-			Parse(OwnershipDocument(true, "bsdf_light")));
-		CHECK(ownership.present && ownership.valid);
-		CHECK(ownership.config.enabled);
-		CHECK(!ownership.config.targets[kBsdfLight]);
-		CHECK(ownership.config.targets[kBsdfComposite]);
-
-		const auto incomplete = cs::feature_config::ParseShaderOwnership(
-			Parse(OwnershipDocument(true, {}, "bsdf_composite")));
-		CHECK(incomplete.present && !incomplete.valid);
-		CHECK(!incomplete.config.enabled);
-
-		const auto unknown = cs::feature_config::ParseShaderOwnership(
-			Parse(OwnershipDocument(true)
-				+ "deferred_composite = true\n"));
-		CHECK(unknown.present && !unknown.valid);
-		CHECK(!unknown.config.enabled);
+		std::set<std::vector<std::string>> paths;
+		for (const auto& section : a_registry) {
+			CHECK(paths.insert(section.path).second);
+			for (const auto& field : section.fields) {
+				auto settingPath = section.path;
+				settingPath.push_back(field.key);
+				CHECK(paths.insert(std::move(settingPath)).second);
+				// A multi-line description would emit an uncommented line into the file.
+				CHECK(!field.description.empty() && field.description.find_first_of("\r\n") == std::string::npos);
+				CHECK(!field.minimum || *field.minimum <= field.defaultValue);
+				CHECK(!field.maximum || *field.maximum >= field.defaultValue);
+				const auto parsed = toml::parse("value = " + FormatValue(field.defaultValue));
+				CHECK(field.read(*parsed.get("value")) == field.defaultValue);
+			}
+		}
 	}
 
-	void TestDeepMerge()
+	void TestDocument(const Registry& a_registry, const std::filesystem::path& a_path)
 	{
-		auto base = Parse(
-			"[logging]\n"
-			"level = \"info\"\n"
-			"telemetry = false\n"
-			"[features.One]\n"
-			"load = false\n"
-			"[features.One.settings]\n"
-			"enabled = false\n"
-			"quality = 2\n"
-			"[features.Two]\n"
-			"load = false\n");
-		const auto user = Parse(
-			"[logging]\n"
-			"telemetry = true\n"
-			"[features.One.settings]\n"
-			"enabled = true\n");
+		const auto fresh = RenderDocument(a_registry, {});
+		std::istringstream lines(fresh);
+		for (std::string line; std::getline(lines, line);)
+			CHECK(line.empty() || line.front() == '#' || line.front() == '[');
+		CHECK(RenderDocument(a_registry, toml::parse(fresh)) == fresh);
 
-		cs::feature_config::DeepMerge(base, user);
-		CHECK(
-			base["logging"]["level"].value<std::string>()
-			== std::optional<std::string>{ "info" });
-		CHECK(
-			base["logging"]["telemetry"].value<bool>()
-			== std::optional<bool>{ true });
-		CHECK(
-			base["features"]["One"]["load"].value<bool>()
-			== std::optional<bool>{ false });
-		CHECK(
-			base["features"]["One"]["settings"]["enabled"].value<bool>()
-			== std::optional<bool>{ true });
-		CHECK(
-			base["features"]["One"]["settings"]["quality"]
-				.value<std::int64_t>()
-			== std::optional<std::int64_t>{ 2 });
-		CHECK(
-			base["features"]["Two"]["load"].value<bool>()
-			== std::optional<bool>{ false });
-	}
+		CHECK(InitializeAt(a_path, a_registry).error.empty());
+		CHECK(ReadFile(a_path) == fresh);
 
-	void TestLegacyTemporalMigration()
-	{
-		auto user = Parse(
-			"[features.Upscaling]\n"
-			"load = true\n"
-			"[features.Upscaling.settings]\n"
-			"enabled = false\n"
-			"upscale_method = 3\n"
-			"upscale_method_no_dlss = 2\n"
-			"frame_generation_mode = 1\n"
-			"frame_generation_force_enable = 1\n"
-			"frame_generation_allow_in_menus = true\n");
-		const auto migration =
-			cs::feature_config::NormalizeLegacyTemporalSettings(user);
-		CHECK(migration.changed && !migration.notice.empty());
-		CHECK(
-			user["features"]["Upscaling"]["settings"]["upscale_method"]
-				.value<std::int64_t>()
-			== std::optional<std::int64_t>{ 0 });
-		CHECK(
-			user["features"]["FrameGeneration"]["load"].value<bool>()
-			== std::optional<bool>{ true });
-		CHECK(
-			user["features"]["FrameGeneration"]["settings"]
-				["frame_generation_method"]
-					.value<std::int64_t>()
-			== std::optional<std::int64_t>{ 1 });
-		CHECK(
-			user["features"]["FrameGeneration"]["settings"]
-				["frame_generation_allow_in_menus"]
-					.value<bool>()
-			== std::optional<bool>{ true });
-		CHECK(
-			!user["features"]["Upscaling"]["settings"].as_table()
-				 ->contains("enabled"));
-		CHECK(
-			!user["features"]["Upscaling"]["settings"].as_table()
-				 ->contains("frame_generation_mode"));
-		CHECK(
-			!user["features"]["Upscaling"]["settings"].as_table()
-				 ->contains("frame_generation_force_enable"));
-		CHECK(
-			!cs::feature_config::NormalizeLegacyTemporalSettings(user)
-				 .changed);
-	}
+		WriteFile(a_path,
+			"[features.ScreenSpaceShadows]\nload = true\n"
+			"[features.ScreenSpaceShadows.settings]\nsurface_thickness = 0.03\ncustom = 1\n"
+			"[unknown]\nvalue = 'kept'\n");
+		CHECK(InitializeAt(a_path, a_registry).error.empty());
+		const auto refreshed = ReadFile(a_path);
+		CHECK(RenderDocument(a_registry, toml::parse(refreshed)) == refreshed);
 
-	void TestMergedLoadFailures(const std::filesystem::path& a_root)
-	{
-		const auto defaultPath = a_root / "Default.toml";
-		const auto userPath = a_root / "User.toml";
-
-		WriteFile(
-			defaultPath,
-			"[features.ScreenSpaceShadows]\nload = false\n");
-		WriteFile(
-			userPath,
-			"[features.ScreenSpaceShadows\nload = true\n");
-		const auto malformedUser =
-			cs::feature_config::LoadMergedFiles(defaultPath, userPath);
-		CHECK(malformedUser.defaultLoaded);
-		CHECK(!malformedUser.userLoaded);
-		CHECK(!malformedUser.userWarning.empty());
-		CHECK(
-			malformedUser.root["features"]["ScreenSpaceShadows"]["load"]
-				.value<bool>()
-			== std::optional<bool>{ false });
-
-		WriteFile(
-			defaultPath,
-			"[features.ScreenSpaceShadows\nload = false\n");
-		WriteFile(
-			userPath,
-			"[features.ScreenSpaceShadows]\nload = true\n");
-		const auto malformedDefault =
-			cs::feature_config::LoadMergedFiles(defaultPath, userPath);
-		CHECK(!malformedDefault.defaultLoaded);
-		CHECK(!malformedDefault.defaultError.empty());
-		CHECK(malformedDefault.root.empty());
-	}
-
-	void TestAtomicPersistence(const std::filesystem::path& a_root)
-	{
-		const auto defaultPath = a_root / "Atomic.Default.toml";
-		const auto userPath = a_root / "Atomic.User.toml";
-		WriteFile(
-			defaultPath,
-			"[logging]\n"
-			"telemetry = false\n"
-			"[features.One]\n"
-			"load = false\n"
-			"[features.One.settings]\n"
-			"enabled = false\n");
-		WriteFile(
-			userPath,
-			"[logging]\n"
-			"level = \"debug\"\n"
-			"[features.One]\n"
-			"load = true\n"
-			"[features.One.settings]\n"
-			"enabled = false\n"
-			"[features.Two]\n"
-			"load = false\n");
-
-		const auto loaded =
-			cs::feature_config::ReloadFromFiles(defaultPath, userPath);
-		CHECK(loaded.defaultLoaded && loaded.userLoaded);
-
-		const std::array path{
-			std::string_view("features"),
-			std::string_view("One"),
-			std::string_view("settings")
+		constexpr std::array path{
+			std::string_view("features"), std::string_view("ScreenSpaceShadows"), std::string_view("settings")
 		};
-		const auto written = cs::feature_config::UpdateUserTableAt(
-			userPath,
-			path,
-			Parse("enabled = true\nquality = 3\n"));
-		CHECK(written.success && written.error.empty());
+		CHECK(UpdateOwnedSettingsAt(a_path, path, toml::parse("shadow_contrast = 2.0\n")));
+		auto root = LoadFile(a_path).table;
+		CHECK(root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == true);
+		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["shadow_contrast"].value<double>() == 2.0);
+		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["custom"].value<std::int64_t>() == 1);
+		CHECK(root["unknown"]["value"].value<std::string>() == "kept");
 
-		const auto persisted = cs::feature_config::LoadFile(userPath);
-		CHECK(
-			persisted.status
-			== cs::feature_config::FileLoadStatus::kParsed);
-		CHECK(
-			persisted.table["logging"]["level"].value<std::string>()
-			== std::optional<std::string>{ "debug" });
-		CHECK(
-			persisted.table["features"]["One"]["load"].value<bool>()
-			== std::optional<bool>{ true });
-		CHECK(
-			persisted.table["features"]["One"]["settings"]["enabled"]
-				.value<bool>()
-			== std::optional<bool>{ true });
-		CHECK(
-			persisted.table["features"]["One"]["settings"]["quality"]
-				.value<std::int64_t>()
-			== std::optional<std::int64_t>{ 3 });
-		CHECK(
-			persisted.table["features"]["Two"]["load"].value<bool>()
-			== std::optional<bool>{ false });
+		CHECK(UpdateOwnedSettingsAt(a_path, path, {}));
+		const auto reset = ReadFile(a_path);
+		CHECK(reset.find("# surface_thickness = 0.02\n") != std::string::npos);
+		CHECK(reset.find("# shadow_contrast = 1.0\n") != std::string::npos);
 
-		const auto merged =
-			cs::feature_config::LoadMergedFiles(defaultPath, userPath);
-		CHECK(merged.defaultLoaded && merged.userLoaded);
-		CHECK(
-			merged.root["features"]["One"]["settings"]["quality"]
-				.value<std::int64_t>()
-			== std::optional<std::int64_t>{ 3 });
+		// A value where an owned table belongs must still render a parseable document.
+		const auto blocked = RenderDocument(a_registry, toml::parse("[features.ScreenSpaceShadows]\nsettings = false\n"));
+		CHECK(RenderDocument(a_registry, toml::parse(blocked)) == blocked);
+	}
+
+	void TestInvalidDocument(const Registry& a_registry, const std::filesystem::path& a_path)
+	{
+		const std::string invalid = "[features.ScreenSpaceShadows\nload = true\n";
+		WriteFile(a_path, invalid);
+		const auto loaded = InitializeAt(a_path, a_registry);
+		CHECK(loaded.status == FileLoadStatus::kParseError);
+		CHECK(!ParseActivation(*loaded.root["features"]["ScreenSpaceShadows"].as_table()).load);
+		constexpr std::array path{ std::string_view("logging") };
+		CHECK(!UpdateOwnedSettingsAt(a_path, path, toml::parse("level = 'debug'")));
+		CHECK(ReadFile(a_path) == invalid);
+	}
+
+	void TestRestartTiming()
+	{
+		using namespace cs::features::renderdoc_settings;
+		const Settings boot;
+		auto current = boot;
+		current.enabled = true;
+		CHECK(RestartRequired(kSchema, boot, current).size() == 1);
+		// Disabling an enable-only restart setting applies live.
+		CHECK(RestartRequired(kSchema, current, boot).empty());
 	}
 }
 
 int main()
 {
+	const auto directory = std::filesystem::temp_directory_path() / "fo4cs-feature-config-tests";
+	std::filesystem::remove_all(directory);
+	std::filesystem::create_directories(directory);
 	try {
-		const TestDirectory directory;
-		TestActivationAndOwnership();
-		TestDeepMerge();
-		TestLegacyTemporalMigration();
-		TestMergedLoadFailures(directory.path);
-		TestAtomicPersistence(directory.path);
+		const auto registry = BuildRegistry();
+		TestSchema();
+		TestRegistry(registry);
+		TestDocument(registry, directory / "settings.toml");
+		TestInvalidDocument(registry, directory / "invalid.toml");
+		TestRestartTiming();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
-		return 1;
+		++failures;
 	}
-
-	if (failures != 0) {
+	std::error_code ignored;
+	std::filesystem::remove_all(directory, ignored);
+	if (failures) {
 		std::cerr << failures << " check(s) failed\n";
 		return 1;
 	}

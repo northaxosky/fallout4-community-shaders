@@ -15,7 +15,8 @@
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
-#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsPersistence.h"
+#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -23,27 +24,6 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.framegeneration");
-
-		bool Accept(feature_config::ScalarReadStatus a_status, std::string_view a_key,
-			std::string_view a_type, std::string& a_error)
-		{
-			switch (a_status) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error =
-					"settings." + std::string(a_key) + ": expected " + std::string(a_type);
-				return false;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = "settings." + std::string(a_key) + ": invalid value";
-				return false;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = "settings." + std::string(a_key) + ": value is out of range";
-				return false;
-			}
-			return false;
-		}
 
 		std::string_view MethodName(std::uint32_t a_method) noexcept
 		{
@@ -58,60 +38,6 @@ namespace cs::features
 				return "FSR 4";
 			}
 			return "Unknown";
-		}
-
-		bool ParseSettingsTable(
-			const toml::table& a_config,
-			FrameGeneration::Settings& a_candidate,
-			std::string& a_error)
-		{
-			a_error.clear();
-			const auto* settingsNode = a_config.get("settings");
-			if (!settingsNode) {
-				return true;
-			}
-			const auto* table = settingsNode->as_table();
-			if (!table) {
-				a_error = "settings: expected table";
-				return false;
-			}
-			std::uint64_t method = a_candidate.frameGenerationMethod;
-			std::uint64_t dlssgMode = a_candidate.dlssgMode;
-			std::uint64_t dlssgFixedMultiplier =
-				a_candidate.dlssgFixedMultiplier;
-			if (!Accept(feature_config::ReadUnsignedInteger(
-							*table, "frame_generation_method", method, 0,
-							render::temporal::kMaxFrameGenerationMethodValue),
-					"frame_generation_method", "integer", a_error) ||
-				!Accept(feature_config::ReadBool(*table,
-							"frame_generation_allow_in_menus",
-							a_candidate.frameGenerationAllowInMenus),
-					"frame_generation_allow_in_menus", "boolean", a_error) ||
-				!Accept(feature_config::ReadUnsignedInteger(
-							*table, "dlssg_mode", dlssgMode, 0, 1),
-					"dlssg_mode", "integer", a_error) ||
-				!Accept(feature_config::ReadUnsignedInteger(
-							*table, "dlssg_fixed_multiplier",
-							dlssgFixedMultiplier, 2,
-							std::numeric_limits<std::uint32_t>::max()),
-					"dlssg_fixed_multiplier", "integer", a_error) ||
-				!Accept(feature_config::ReadFloat(*table,
-							"dlssg_dynamic_target_fps",
-							a_candidate.dlssgDynamicTargetFps, 0.0f,
-							std::numeric_limits<float>::max()),
-					"dlssg_dynamic_target_fps", "number", a_error) ||
-				!Accept(feature_config::ReadBool(*table, "detailed_diagnostics",
-							a_candidate.detailedDiagnostics),
-					"detailed_diagnostics", "boolean", a_error)) {
-				return false;
-			}
-			a_candidate.frameGenerationMethod =
-				static_cast<std::uint32_t>(method);
-			a_candidate.dlssgMode =
-				static_cast<std::uint32_t>(dlssgMode);
-			a_candidate.dlssgFixedMultiplier =
-				static_cast<std::uint32_t>(dlssgFixedMultiplier);
-			return true;
 		}
 
 		struct RetirementCounterField
@@ -262,10 +188,9 @@ namespace cs::features
 		std::string& a_error)
 	{
 		auto candidate = settings;
-		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		if (!settings::Parse(frame_generation::kSchema, a_config, candidate, a_error)) {
 			return false;
 		}
-		settings = candidate;
 		settings = candidate;
 		return true;
 	}
@@ -281,14 +206,10 @@ namespace cs::features
 		const PresetApplyContext&,
 		std::string& a_error)
 	{
-		auto normalized = a_table;
-		(void)feature_config::NormalizeLegacyTemporalFeatureSettings(
-			GetConfigKey(),
-			normalized);
 		toml::table config;
-		config.insert_or_assign("settings", std::move(normalized));
+		config.insert_or_assign("settings", a_table);
 		auto candidate = settings;
-		if (!ParseSettingsTable(config, candidate, a_error)) {
+		if (!settings::Parse(frame_generation::kSchema, config, candidate, a_error)) {
 			return false;
 		}
 		_stagedSettings = candidate;
@@ -316,46 +237,12 @@ namespace cs::features
 
 	void FrameGeneration::ExportToPreset(toml::table& a_out)
 	{
-		a_out.insert_or_assign(
-			"frame_generation_method",
-			static_cast<std::int64_t>(settings.frameGenerationMethod));
-		a_out.insert_or_assign(
-			"frame_generation_allow_in_menus",
-			settings.frameGenerationAllowInMenus);
-		a_out.insert_or_assign(
-			"dlssg_mode",
-			static_cast<std::int64_t>(settings.dlssgMode));
-		a_out.insert_or_assign(
-			"dlssg_fixed_multiplier",
-			static_cast<std::int64_t>(settings.dlssgFixedMultiplier));
-		a_out.insert_or_assign(
-			"dlssg_dynamic_target_fps",
-			settings.dlssgDynamicTargetFps);
-		a_out.insert_or_assign(
-			"detailed_diagnostics",
-			settings.detailedDiagnostics);
+		a_out = settings::SerializeFull(frame_generation::kSchema, settings);
 	}
 
-	void FrameGeneration::SaveSettings()
+	bool FrameGeneration::SaveSettings()
 	{
-		toml::table table;
-		table.insert_or_assign(
-			"frame_generation_method",
-			static_cast<std::int64_t>(settings.frameGenerationMethod));
-		table.insert_or_assign("frame_generation_allow_in_menus",
-			settings.frameGenerationAllowInMenus);
-		table.insert_or_assign(
-			"dlssg_mode", static_cast<std::int64_t>(settings.dlssgMode));
-		table.insert_or_assign("dlssg_fixed_multiplier",
-			static_cast<std::int64_t>(settings.dlssgFixedMultiplier));
-		table.insert_or_assign(
-			"dlssg_dynamic_target_fps", settings.dlssgDynamicTargetFps);
-		table.insert_or_assign("detailed_diagnostics", settings.detailedDiagnostics);
-		if (const auto result =
-				feature_config::UpdateFeatureSettings(GetConfigKey(), table);
-			!result) {
-			L->error("Failed to save settings: {}", result.error);
-		}
+		return settings::SaveDelta(frame_generation::kSchema, GetConfigKey(), settings, *L);
 	}
 
 	void FrameGeneration::RestoreDefaultSettings()
@@ -630,6 +517,7 @@ namespace cs::features
 
 	void FrameGeneration::DrawSettings()
 	{
+		settings::SettingsEdit edit{ *this };
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto dlssCapabilities =
@@ -665,7 +553,7 @@ namespace cs::features
 			"frame-generation-provider", settings.frameGenerationMethod,
 			std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
 			"Unavailable", "Method");
-		if (method.changed) {
+		if (edit.Discrete(method.changed)) {
 			settings.frameGenerationMethod = *method.selected;
 			changed = true;
 		}
@@ -766,7 +654,7 @@ namespace cs::features
 							generationOptions },
 						"Unavailable",
 						"Generation");
-				if (generation.changed) {
+				if (edit.Discrete(generation.changed)) {
 					if (*generation.selected == kDynamicChoice) {
 						settings.dlssgMode = 1;
 					} else {
@@ -794,7 +682,7 @@ namespace cs::features
 						targets },
 					"Unavailable",
 					"Dynamic target");
-				if (target.changed) {
+				if (edit.Discrete(target.changed)) {
 					settings.dlssgDynamicTargetFps =
 						*target.selected == 0 ? 0.0f : 60.0f;
 					changed = true;
@@ -802,9 +690,9 @@ namespace cs::features
 				if (settings.dlssgDynamicTargetFps > 0.0f) {
 					float customTarget =
 						settings.dlssgDynamicTargetFps;
-					if (dmui::ui::InputScalar(
+					if (edit.Continuous(dmui::ui::InputScalar(
 							"Custom target FPS",
-							&customTarget)) {
+							&customTarget))) {
 						if (std::isfinite(customTarget) &&
 							customTarget > 0.0f) {
 							settings.dlssgDynamicTargetFps =
@@ -825,9 +713,9 @@ namespace cs::features
 		}
 
 		if (dmui::ui::CollapsingHeader("Advanced")) {
-			changed |= dmui::ui::Checkbox(
+			changed |= edit.Discrete(dmui::ui::Checkbox(
 				"Allow in menus",
-				&settings.frameGenerationAllowInMenus);
+				&settings.frameGenerationAllowInMenus));
 			dmui::ui::TextWrapped(
 				"Generated frames improve display smoothness; they do not speed up game simulation.");
 			dmui::ui::TextDisabled(
@@ -835,7 +723,6 @@ namespace cs::features
 		}
 
 		if (changed) {
-			SaveSettings();
 			pipeline.SubmitLiveConfiguration();
 		}
 
@@ -900,12 +787,11 @@ namespace cs::features
 		}
 
 		if (dmui::ui::CollapsingHeader("Diagnostics")) {
-			if (dmui::ui::Checkbox(
+			if (edit.Discrete(dmui::ui::Checkbox(
 					"Detailed diagnostics",
-					&settings.detailedDiagnostics)) {
+					&settings.detailedDiagnostics))) {
 				pipeline.SetDetailedTracing(
 					settings.detailedDiagnostics);
-				SaveSettings();
 			}
 			const auto diagnostics =
 				pipeline.GetFrameGenerationDiagnostics();

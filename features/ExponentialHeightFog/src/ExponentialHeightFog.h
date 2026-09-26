@@ -65,7 +65,8 @@ namespace cs::features
 
 		ExponentialHeightFog() = default;
 
-		void SaveSettings();
+		bool SaveSettings() override;
+		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(exponential_height_fog::kSchema); }
 		void PublishSettings() noexcept;
 		void ObserveConsumerBind() noexcept;
 		void SetObservationStatus(ObservationStatus a_status) noexcept;
