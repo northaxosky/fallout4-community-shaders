@@ -45,7 +45,7 @@ namespace cs::settings
 		if (a_status == kMissing || a_status == kValid)
 			return true;
 
-		a_error = "settings." + std::string(a_key) + ": ";
+		a_error = std::string(a_key) + ": ";
 		switch (a_status) {
 		case kWrongType:
 			a_error += "expected " + std::string(a_expected);
@@ -321,6 +321,23 @@ namespace cs::settings
 	}
 
 	template <class... Fields>
+	bool ParseTable(
+		const Schema<Fields...>& a_schema,
+		const toml::table& a_table,
+		typename Schema<Fields...>::SettingsType& a_candidate,
+		std::string& a_error)
+	{
+		a_error.clear();
+		auto candidate = a_candidate;
+		const bool valid = std::apply([&](const auto&... a_fields) {
+			return (a_fields.Read(a_table, candidate, a_error) && ...);
+		}, a_schema.fields);
+		if (valid)
+			a_candidate = std::move(candidate);
+		return valid;
+	}
+
+	template <class... Fields>
 	bool Parse(
 		const Schema<Fields...>& a_schema,
 		const toml::table& a_featureTable,
@@ -336,14 +353,10 @@ namespace cs::settings
 			a_error = "settings: expected table";
 			return false;
 		}
-
-		auto candidate = a_candidate;
-		const bool valid = std::apply([&](const auto&... a_fields) {
-			return (a_fields.Read(*table, candidate, a_error) && ...);
-		}, a_schema.fields);
-		if (valid)
-			a_candidate = std::move(candidate);
-		return valid;
+		if (ParseTable(a_schema, *table, a_candidate, a_error))
+			return true;
+		a_error.insert(0, "settings.");
+		return false;
 	}
 
 	template <class... Fields>

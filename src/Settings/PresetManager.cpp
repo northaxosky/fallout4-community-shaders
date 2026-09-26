@@ -626,10 +626,13 @@ namespace cs
 		const auto* presetTbl = table["preset"].as_table();
 		if (!presetTbl) return;
 
-		if (const auto v = (*presetTbl)["active"].value<std::string>()) {
-			activeIdentity = ToLower(*v);
+		settings::core::Preset preset;
+		if (std::string error; !settings::ParseTable(settings::core::kPreset, *presetTbl, preset, error)) {
+			L->warn("preset.{}; using preset defaults", error);
+			return;
 		}
-		autoLoadOnBoot = (*presetTbl)["auto_load_on_boot"].value_or(defaults.autoLoadOnBoot);
+		activeIdentity = ToLower(preset.active);
+		autoLoadOnBoot = preset.autoLoadOnBoot;
 	}
 
 	bool PresetManager::SaveCoreConfig()

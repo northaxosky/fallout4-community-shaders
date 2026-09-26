@@ -453,8 +453,10 @@ namespace cs::feature_config
 		const auto* ownership = ownershipNode->as_table();
 		if (!ownership)
 			return fail("shader_ownership must be a table");
-		if (ReadBool(*ownership, "enabled", result.config.enabled) == ScalarReadStatus::kWrongType)
-			return fail("shader_ownership.enabled must be a boolean");
+		settings::core::ShaderOwnership parsed;
+		if (std::string error; !settings::ParseTable(settings::core::kShaderOwnership, *ownership, parsed, error))
+			return fail("shader_ownership." + error);
+		result.config.enabled = parsed.enabled;
 		const auto* targetsNode = ownership->get("targets");
 		if (!targetsNode)
 			return result;
@@ -465,9 +467,10 @@ namespace cs::feature_config
 			const auto* target = engine::FindShaderInjectionTarget(key.str());
 			if (!target)
 				return fail("shader_ownership.targets contains unknown target '" + std::string(key.str()) + "'");
-			if (!node.is_boolean())
-				return fail("shader_ownership.targets." + std::string(key.str()) + " must be a boolean");
-			result.config.targets[target->id] = node.as_boolean()->get();
+			settings::core::ShaderTarget value;
+			if (std::string error; !settings::ParseTable(settings::core::ShaderTargetSchema(target->name), *targets, value, error))
+				return fail("shader_ownership.targets." + error);
+			result.config.targets[target->id] = value.enabled;
 		}
 		return result;
 	}

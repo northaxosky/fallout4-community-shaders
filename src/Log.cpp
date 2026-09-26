@@ -201,19 +201,18 @@ namespace cs::log
 			config.channelLevels.clear();
 			config.dumpHotkey = cs::input::Hotkey::Parse(defaults.dumpHotkey);
 		}
-		SetGlobalLevel(*LevelFromString(defaults.level));
-		cs::telemetry::pump::SetEnabled(defaults.telemetry);
-		cs::telemetry::pump::SetIntervalSeconds(defaults.telemetryIntervalSeconds);
 
-		if (const auto* levelNode = a_logging.get("level")) {
-			if (const auto value = levelNode->value<std::string>()) {
-				if (const auto level = LevelFromString(*value))
-					SetGlobalLevel(*level);
-				else
-					logger->warn("Invalid logging.level '{}'; using {}", *value, LevelToString(GlobalLevel()));
-			} else {
-				logger->warn("logging.level must be a string; using {}", LevelToString(GlobalLevel()));
-			}
+		settings::core::Logging logging;
+		if (std::string error; !settings::ParseTable(settings::core::kLogging, a_logging, logging, error)) {
+			logger->warn("logging.{}; using logging defaults", error);
+			logging = defaults;
+		}
+
+		if (const auto level = LevelFromString(logging.level)) {
+			SetGlobalLevel(*level);
+		} else {
+			logger->warn("Invalid logging.level '{}'; using {}", logging.level, defaults.level);
+			SetGlobalLevel(*LevelFromString(defaults.level));
 		}
 
 		if (const auto* channelsNode = a_logging.get("channels")) {
@@ -237,36 +236,16 @@ namespace cs::log
 			}
 		}
 
-		if (const auto* telemetryNode = a_logging.get("telemetry")) {
-			if (const auto enabled = telemetryNode->value<bool>())
-				cs::telemetry::pump::SetEnabled(*enabled);
-			else
-				logger->warn("logging.telemetry must be a boolean");
-		}
+		cs::telemetry::pump::SetEnabled(logging.telemetry);
+		cs::telemetry::pump::SetIntervalSeconds(logging.telemetryIntervalSeconds);
 
-		if (const auto* intervalNode = a_logging.get("telemetry_interval_seconds")) {
-			if (const auto interval = intervalNode->value<std::int64_t>();
-				interval && *interval >= 1
-				&& *interval <= static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max())) {
-				cs::telemetry::pump::SetIntervalSeconds(static_cast<std::uint32_t>(*interval));
-			} else {
-				logger->warn("logging.telemetry_interval_seconds must be an integer of at least 1");
-			}
-		}
-
-		if (const auto* hotkeyNode = a_logging.get("dump_hotkey")) {
-			if (const auto hotkeyText = hotkeyNode->value<std::string>()) {
-				bool valid = false;
-				auto hotkey = cs::input::Hotkey::Parse(*hotkeyText, &valid);
-				if (valid) {
-					std::scoped_lock lock(config.mutex);
-					config.dumpHotkey = hotkey;
-				} else {
-					logger->warn("Invalid logging.dump_hotkey '{}'; using {}", *hotkeyText, defaults.dumpHotkey);
-				}
-			} else {
-				logger->warn("logging.dump_hotkey must be a string");
-			}
+		bool validHotkey = false;
+		auto hotkey = cs::input::Hotkey::Parse(logging.dumpHotkey, &validHotkey);
+		if (validHotkey) {
+			std::scoped_lock lock(config.mutex);
+			config.dumpHotkey = hotkey;
+		} else {
+			logger->warn("Invalid logging.dump_hotkey '{}'; using {}", logging.dumpHotkey, defaults.dumpHotkey);
 		}
 	}
 

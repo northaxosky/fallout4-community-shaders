@@ -131,10 +131,8 @@ namespace cs
 			return;
 
 		settings::core::Menu selection;
-		if (const auto value = (*menu)["debug_view_feature"].value<std::string>())
-			selection.debugViewFeature = *value;
-		if (const auto value = (*menu)["debug_view"].value<std::string>())
-			selection.debugView = *value;
+		if (std::string error; !settings::ParseTable(settings::core::kMenu, *menu, selection, error))
+			L->warn("menu.{}; ignoring the fullscreen debug view", error);
 		if (const auto* previews = (*menu)["debug_view_previews"].as_table()) {
 			for (const auto& [feature, node] : *previews) {
 				if (const auto view = node.value<std::string>()) {

@@ -37,6 +37,11 @@ namespace cs::settings
 			bool enabled = true;
 		};
 
+		constexpr auto ShaderTargetSchema(std::string_view a_target)
+		{
+			return Schema{ std::tuple{ Field{ a_target, "", &ShaderTarget::enabled, {}, ApplyTiming::kNextLaunch } } };
+		}
+
 		struct Menu
 		{
 			std::string debugViewFeature;
@@ -86,10 +91,7 @@ namespace cs::settings
 			{ { "preset" }, MakeSchemaView(core::kPreset) }
 		};
 		for (const auto& target : engine::GetShaderInjectionTargets()) {
-			const Schema schema{ std::tuple{
-				Field{ target.name, "", &core::ShaderTarget::enabled, {}, ApplyTiming::kNextLaunch }
-			} };
-			auto fields = MakeSchemaView(schema);
+			auto fields = MakeSchemaView(core::ShaderTargetSchema(target.name));
 			registry[3].fields.push_back(std::move(fields.front()));
 		}
 		return registry;
