@@ -432,6 +432,11 @@ namespace cs
 				a_client.DrawSectionHeader("Links"),
 				"draw links section"))
 			return;
+		// Host icon data is immutable, so one lookup per icon suffices.
+		static const char32_t githubGlyph =
+			a_client.ResolveIconGlyph("GitHub", "github-logo").value_or(0);
+		static const char32_t nexusGlyph =
+			a_client.ResolveIconGlyph("Nexus Mods", "download-simple").value_or(0);
 		const std::array links{
 			dmui::Link{
 				.label = "GitHub",
@@ -439,11 +444,15 @@ namespace cs
 					.targetKind = DMUI_EXTERNAL_TARGET_URI,
 					.target = "https://github.com/northaxosky/fallout4-community-shaders" },
 				.note = "Opens the project page in your default browser.",
+				.glyph = githubGlyph,
 				.action = dmui::LinkAction::kOpenExternal },
 			dmui::Link{
 				.label = "Nexus Mods",
-				.note = "Not available yet.",
-				.enabled = false,
+				.external = {
+					.targetKind = DMUI_EXTERNAL_TARGET_URI,
+					.target = "https://www.nexusmods.com/fallout4/mods/109442" },
+				.note = "Opens the mod page in your default browser.",
+				.glyph = nexusGlyph,
 				.action = dmui::LinkAction::kOpenExternal }
 		};
 		if (!CheckHostResult(
