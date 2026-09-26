@@ -19,12 +19,10 @@ namespace cs::shader_cache
 {
 	namespace
 	{
-		std::atomic<std::uint64_t> g_temporarySequence{ 0 };
 		constexpr std::string_view kIdentitySchema =
 			"FO4CS.compiler-identity.v1";
 		constexpr std::uint64_t kMaxIdentityBytes = 256ull * 1024ull;
 
-		// FILE_SHARE_DELETE: else a reader blocks publication
 		class ScopedHandle
 		{
 		public:
@@ -61,22 +59,6 @@ namespace cs::shader_cache
 				a_stage,
 				a_error);
 			return buffer;
-		}
-
-		std::filesystem::path MakeTemporaryPath(
-			const std::filesystem::path& a_directory,
-			std::uint64_t                a_attempt)
-		{
-			wchar_t name[96]{};
-			std::swprintf(
-				name,
-				std::size(name),
-				L"write-%lu-%lu-%llu-%llu.tmp",
-				GetCurrentProcessId(),
-				GetCurrentThreadId(),
-				g_temporarySequence.fetch_add(1, std::memory_order_relaxed),
-				a_attempt);
-			return a_directory / name;
 		}
 
 		bool WriteAll(HANDLE a_file, std::span<const std::uint8_t> a_bytes) noexcept
@@ -476,7 +458,7 @@ namespace cs::shader_cache
 			const auto* first =
 				reinterpret_cast<const std::uint8_t*>(current.data());
 			std::string writeError;
-			if (!WriteRecordAtomically(
+			if (!WriteRecord(
 					identityPath,
 					std::span(first, current.size()),
 					writeError)) {
@@ -503,14 +485,13 @@ namespace cs::shader_cache
 			/ (digest + ".fxc");
 	}
 
-	bool WriteRecordAtomically(
+	// No temp-file rename: MO2's usvfs mishandles it, and torn records fail digest validation.
+	bool WriteRecord(
 		const std::filesystem::path&  a_path,
 		std::span<const std::uint8_t> a_bytes,
 		std::string&                  a_error) noexcept
 	{
 		a_error.clear();
-		HANDLE                file = INVALID_HANDLE_VALUE;
-		std::filesystem::path temporaryPath;
 		try {
 			const auto directory = a_path.parent_path();
 			if (!directory.empty()) {
@@ -522,71 +503,26 @@ namespace cs::shader_cache
 				}
 			}
 
-			for (std::uint64_t attempt = 0; attempt < 8; ++attempt) {
-				temporaryPath = MakeTemporaryPath(directory, attempt);
-				file          = CreateFileW(
-                    temporaryPath.c_str(),
-                    GENERIC_WRITE,
-                    0,
-                    nullptr,
-                    CREATE_NEW,
-                    FILE_ATTRIBUTE_NORMAL,
-                    nullptr);
-				if (file != INVALID_HANDLE_VALUE)
-					break;
-				const DWORD error = GetLastError();
-				if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS) {
-					a_error = FormatWin32Error("CreateFileW", error);
-					return false;
-				}
-			}
-			if (file == INVALID_HANDLE_VALUE) {
-				a_error = "CreateFileW exhausted temporary names";
+			// exclusive share: concurrent readers and writers treat an in-progress record as absent
+			const ScopedHandle file(CreateFileW(
+				a_path.c_str(),
+				GENERIC_WRITE,
+				0,
+				nullptr,
+				CREATE_ALWAYS,
+				FILE_ATTRIBUTE_NORMAL,
+				nullptr));
+			if (!file.Valid()) {
+				a_error = FormatWin32Error("CreateFileW", GetLastError());
 				return false;
 			}
-
-			const bool  written = WriteAll(file, a_bytes);
-			const DWORD writeError = written ? ERROR_SUCCESS : GetLastError();
-			const bool  flushed = written && FlushFileBuffers(file);
-			const DWORD flushError = flushed ? ERROR_SUCCESS : GetLastError();
-			const bool closed = CloseHandle(file) != FALSE;
-			const DWORD closeError = closed ? ERROR_SUCCESS : GetLastError();
-			file = INVALID_HANDLE_VALUE;
-
-			if (!written || !flushed || !closed) {
-				DeleteFileW(temporaryPath.c_str());
-				a_error = FormatWin32Error(
-					!written ? "WriteFile" : !flushed ? "FlushFileBuffers" : "CloseHandle",
-					!written ? writeError : !flushed ? flushError : closeError);
+			if (!WriteAll(file.Get(), a_bytes)) {
+				a_error = FormatWin32Error("WriteFile", GetLastError());
 				return false;
 			}
-
-			// bounded retry for racing publication
-			DWORD moveError = ERROR_SUCCESS;
-			for (unsigned attempt = 0; attempt < 4; ++attempt) {
-				if (MoveFileExW(
-						temporaryPath.c_str(),
-						a_path.c_str(),
-						MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-					return true;
-				}
-				moveError = GetLastError();
-				if (moveError != ERROR_ACCESS_DENIED
-					&& moveError != ERROR_SHARING_VIOLATION) {
-					break;
-				}
-				Sleep(1);
-			}
-
-			DeleteFileW(temporaryPath.c_str());
-			a_error = FormatWin32Error("MoveFileExW", moveError);
-			return false;
+			return true;
 		} catch (...) {
-			if (file != INVALID_HANDLE_VALUE)
-				CloseHandle(file);
-			if (!temporaryPath.empty())
-				DeleteFileW(temporaryPath.c_str());
-			a_error = "unexpected failure while publishing the record";
+			a_error = "unexpected failure while writing the record";
 			return false;
 		}
 	}

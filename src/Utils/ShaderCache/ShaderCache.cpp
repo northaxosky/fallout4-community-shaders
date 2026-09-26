@@ -137,7 +137,7 @@ namespace cs::shader_cache
 				}
 
 				std::string writeError;
-				if (!WriteRecordAtomically(a_recordPath, recordBytes, writeError))
+				if (!WriteRecord(a_recordPath, recordBytes, writeError))
 					a_outcome.cacheNote = std::move(writeError);
 				else
 					a_outcome.recordWritten = true;

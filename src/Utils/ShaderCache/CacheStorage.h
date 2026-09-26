@@ -52,7 +52,7 @@ namespace cs::shader_cache
 		ShaderCacheStage             a_stage,
 		const sha256::Sha256Result&  a_logicalDigest);
 
-	bool WriteRecordAtomically(
+	bool WriteRecord(
 		const std::filesystem::path&       a_path,
 		std::span<const std::uint8_t>      a_bytes,
 		std::string&                       a_error) noexcept;

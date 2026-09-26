@@ -8,6 +8,7 @@
 #include "Utils/ShaderCache/ShaderCache.h"
 #include "Utils/ShaderCompile.h"
 
+#include <algorithm>
 #include <atomic>
 #include <barrier>
 #include <cstdio>
@@ -164,18 +165,6 @@ float4 Wrapped() { return SharedValue(); }
 		return { begin, begin + blob->GetBufferSize() };
 	}
 
-	std::size_t CountTemporaryFiles(const std::filesystem::path& a_root)
-	{
-		std::size_t count = 0;
-		std::error_code error;
-		for (const auto& entry :
-			std::filesystem::recursive_directory_iterator(a_root, error)) {
-			if (entry.is_regular_file() && entry.path().extension() == ".tmp")
-				++count;
-		}
-		return count;
-	}
-
 	struct PrimedCache
 	{
 		ShaderCacheOutcome cold;
@@ -320,14 +309,13 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		Check(
 			!outcome.succeeded && !outcome.error.empty()
 				&& !outcome.recordWritten
-				&& !std::filesystem::exists(outcome.recordPath)
-				&& CountTemporaryFiles(workspace.CacheRoot()) == 0,
+				&& !std::filesystem::exists(outcome.recordPath),
 			"failed compilation must publish no cache artifact");
 	}
 
-	void TestAtomicWriters()
+	void TestConcurrentWriters()
 	{
-		Workspace workspace("atomic-writers");
+		Workspace workspace("concurrent-writers");
 		workspace.WriteDefaultTree();
 		const auto primed = Prime(workspace, workspace.Recipe());
 
@@ -351,31 +339,27 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 
 		std::barrier start(writers + 1);
 		std::atomic<bool> running{ true };
-		std::atomic<int> tornReads{ 0 };
+		std::atomic<int> acceptedForeign{ 0 };
 		std::vector<std::thread> threads;
 		for (int index = 0; index < writers; ++index) {
 			threads.emplace_back([&, index] {
 				start.arrive_and_wait();
 				for (int round = 0; round < rounds; ++round) {
 					std::string error;
-					if (!WriteRecordAtomically(
-							primed.cold.recordPath,
-							encoded[index],
-							error)) {
-						continue;
-					}
+					WriteRecord(primed.cold.recordPath, encoded[index], error);
 				}
 			});
 		}
+		// torn reads are expected; accepting anything but a whole writer record is not
 		std::thread reader([&] {
 			start.arrive_and_wait();
 			while (running.load()) {
 				const auto bytes = ReadAll(primed.cold.recordPath);
 				ShaderCacheRecord seen;
 				if (!bytes.empty()
-					&& ParseShaderCacheRecord(bytes, seen)
-						!= RecordStatus::kOk) {
-					++tornReads;
+					&& ParseShaderCacheRecord(bytes, seen) == RecordStatus::kOk
+					&& std::ranges::find(encoded, bytes) == encoded.end()) {
+					++acceptedForeign;
 				}
 			}
 		});
@@ -385,13 +369,10 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		reader.join();
 
 		const auto finalBytes = ReadAll(primed.cold.recordPath);
-		bool matchedWriter = false;
-		for (const auto& candidate : encoded)
-			matchedWriter = matchedWriter || candidate == finalBytes;
 		Check(
-			tornReads.load() == 0 && matchedWriter
-				&& CountTemporaryFiles(workspace.CacheRoot()) == 0,
-			"atomic publication must expose one complete record and leak no temporaries");
+			acceptedForeign.load() == 0
+				&& std::ranges::find(encoded, finalBytes) != encoded.end(),
+			"concurrent writers must never yield an accepted partial record");
 	}
 
 	void TestConcurrentCompilersAndRecompile()
@@ -419,9 +400,6 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 					&& outcome.bytecode == outcomes.front().bytecode,
 				"concurrent compilers must agree on bytecode");
 		}
-		Check(
-			CountTemporaryFiles(workspace.CacheRoot()) == 0,
-			"concurrent compilers must leak no temporaries");
 
 		const auto forced = LoadOrCompileShader(
 			recipe, workspace.Options(), CacheMode::kRecompile);
@@ -445,7 +423,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		{ "compiler-identity-reset", &TestCompilerIdentityReset },
 		{ "corrupt-record", &TestCorruptRecord },
 		{ "failed-compile-not-cached", &TestFailedCompileIsNotCached },
-		{ "atomic-writers", &TestAtomicWriters },
+		{ "concurrent-writers", &TestConcurrentWriters },
 		{ "concurrent-compilers-and-recompile",
 			&TestConcurrentCompilersAndRecompile }
 	};
