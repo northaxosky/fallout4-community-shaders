@@ -48,7 +48,7 @@ Folder actions pass the absolute UTF-8 path of the configuration or cache identi
 `Client::OpenExternal` with `DMUI_EXTERNAL_TARGET_VIRTUAL_FILE_PARENT`. The host resolves that
 existing file's physical backing location through MO2/USVFS before opening its containing folder;
 Community Shaders neither resolves the backing path nor launches Explorer itself. Configuration
-actions prefer the User TOML when it exists, otherwise the Default TOML. Cache actions use the
+actions use `FO4CommunityShaders.toml`, created on first launch. Cache actions use the
 existing cache identity file and do not guess a future Overwrite destination.
 
 The host supports readable, nonempty loose files. Empty files, directories, archive interiors,

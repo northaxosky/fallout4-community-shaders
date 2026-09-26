@@ -69,7 +69,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 
 ## Feature activation
 
-Every feature ships inactive and is opt-in. Enable features in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml` or through the in-game menu:
+Every feature starts inactive and is opt-in. Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml`, created on first launch. Uncomment a line to change it, or use the in-game menu:
 
 ```toml
 [features.ScreenSpaceShadows]
@@ -77,6 +77,8 @@ load = true
 ```
 
 Feature loading is evaluated **at startup**—restart the game after enabling or disabling features. Settings for already-loaded features can be adjusted live in-game.
+
+The menu writes only changed values. Reset restores each setting's commented default.
 
 ---
 
