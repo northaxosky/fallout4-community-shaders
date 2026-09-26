@@ -10,6 +10,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 <br>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/northaxosky/fallout4-community-shaders/pr.yml?branch=main&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)](https://github.com/northaxosky/fallout4-community-shaders/actions/workflows/pr.yml)
+[![Version](https://img.shields.io/github/v/release/northaxosky/fallout4-community-shaders?include_prereleases&sort=semver&display_name=tag&style=for-the-badge&label=version)](https://github.com/northaxosky/fallout4-community-shaders/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 
 [![Fallout 4](https://img.shields.io/badge/Fallout%204-1.11.240-3a7d44?style=for-the-badge)](https://www.nexusmods.com/fallout4)
