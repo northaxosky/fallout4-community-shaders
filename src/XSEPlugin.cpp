@@ -94,10 +94,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	cs::log::ApplyConfigFromToml(loggingConfig);
 	const auto shaderOwnership =
 		cs::feature_config::ParseShaderOwnership(config.root);
-	if (!shaderOwnership.present) {
-		L->warn(
-			"Unified config [shader_ownership] is missing; baseline shader ownership disabled");
-	} else if (!shaderOwnership.valid) {
+	if (!shaderOwnership.valid) {
 		L->error(
 			"Invalid [shader_ownership] configuration; baseline shader ownership disabled: {}",
 			shaderOwnership.error);

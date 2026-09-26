@@ -440,7 +440,6 @@ namespace cs::feature_config
 		const auto* ownershipNode = a_root.get("shader_ownership");
 		if (!ownershipNode)
 			return result;
-		result.present = true;
 		const auto fail = [&](std::string error) {
 			result.valid = false;
 			result.config = {};
@@ -572,7 +571,7 @@ namespace cs::feature_config
 		if (!load)
 			return {};
 		if (!load->is_boolean())
-			return { .load = false, .valid = false, .present = true };
-		return { .load = load->as_boolean()->get(), .valid = true, .present = true };
+			return { .load = false, .valid = false };
+		return { .load = load->as_boolean()->get(), .valid = true };
 	}
 }

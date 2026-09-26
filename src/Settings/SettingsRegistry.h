@@ -25,7 +25,7 @@ namespace cs::settings
 
 		struct ShaderOwnership
 		{
-			bool enabled = false;
+			bool enabled = true;
 		};
 
 		inline constexpr Schema kShaderOwnership{

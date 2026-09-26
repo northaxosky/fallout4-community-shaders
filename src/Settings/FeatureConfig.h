@@ -74,7 +74,6 @@ namespace cs::feature_config
 	struct ShaderOwnershipParseResult
 	{
 		ShaderOwnershipConfig config;
-		bool present{ false };
 		bool valid{ true };
 		std::string error;
 	};
@@ -144,7 +143,6 @@ namespace cs::feature_config
 	{
 		bool load{ false };
 		bool valid{ true };
-		bool present{ false };
 	};
 
 	ActivationResult ParseActivation(const toml::table& a_table);
