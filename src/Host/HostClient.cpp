@@ -817,7 +817,8 @@ namespace cs::host
 			auto& feature = *page->feature;
 			auto& manager = FeatureManager::Get();
 			constexpr std::string_view phase = "DearModdingUI::SaveSettings";
-			if (!manager.PrepareRuntimeCallback(feature, phase))
+			// Inactive features draw editable settings, so they must also flush.
+			if (!manager.PrepareMenuCallback(feature, phase))
 				return;
 			try {
 				feature.FlushSettings();
