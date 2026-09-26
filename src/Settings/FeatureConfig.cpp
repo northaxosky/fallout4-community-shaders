@@ -2,17 +2,12 @@
 #include "Settings/SettingsRegistry.h"
 
 #include <algorithm>
-#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <fstream>
 #include <mutex>
 #include <sstream>
 #include <system_error>
-
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
 
 namespace cs::settings
 {
@@ -179,7 +174,7 @@ namespace cs::feature_config
 			return { false, "Failed to write configuration file '" + a_path.string() + "': " + std::string(a_detail) };
 		}
 
-		WriteResult AtomicWrite(const std::filesystem::path& a_path, std::string_view a_text)
+		WriteResult WriteText(const std::filesystem::path& a_path, std::string_view a_text)
 		{
 			std::error_code ec;
 			const auto parent = a_path.parent_path();
@@ -188,32 +183,13 @@ namespace cs::feature_config
 				if (ec)
 					return WriteError(a_path, ec.message());
 			}
-			static std::atomic_uint64_t sequence{ 0 };
-			auto temporary = a_path;
-			temporary += ".tmp." + std::to_string(GetCurrentProcessId()) + "." +
-				std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
-			{
-				std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-				if (!output.is_open())
-					return WriteError(a_path, "unable to open temporary file");
-				output << a_text;
-				output.flush();
-				if (!output.good()) {
-					output.close();
-					std::filesystem::remove(temporary, ec);
-					return WriteError(a_path, "temporary file write failed");
-				}
-				output.close();
-				if (output.fail()) {
-					std::filesystem::remove(temporary, ec);
-					return WriteError(a_path, "temporary file close failed");
-				}
-			}
-			if (!MoveFileExW(temporary.c_str(), a_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-				const auto moveError = std::error_code(static_cast<int>(GetLastError()), std::system_category());
-				std::filesystem::remove(temporary, ec);
-				return WriteError(a_path, moveError.message());
-			}
+			std::ofstream output(a_path, std::ios::binary | std::ios::trunc);
+			if (!output.is_open())
+				return WriteError(a_path, "unable to open file");
+			output << a_text;
+			output.close();
+			if (output.fail())
+				return WriteError(a_path, "file write failed");
 			return { .success = true };
 		}
 
@@ -224,7 +200,7 @@ namespace cs::feature_config
 			if (!input.bad() && existing == a_text)
 				return { .success = true };
 			input.close();
-			const auto write = AtomicWrite(a_path, a_text);
+			const auto write = WriteText(a_path, a_text);
 			if (!write)
 				return write;
 			const auto verification = LoadFile(a_path);
