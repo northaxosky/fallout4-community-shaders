@@ -69,7 +69,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 
 ## Feature activation
 
-Every feature starts inactive and is opt-in. Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml`, created on first launch. Uncomment a line to change it, or use the in-game menu:
+Every feature starts inactive and is opt-in. Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml`, filled in on first launch. Uncomment a line to change it, or use the in-game menu:
 
 ```toml
 [features.ScreenSpaceShadows]

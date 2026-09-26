@@ -74,4 +74,4 @@ To deploy, set one destination before running `xmake install`:
 xmake install
 ```
 
-Launch through MO2/F4SE. Enable only the features being tested in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml`, created on first launch.
+Launch through MO2/F4SE. Enable only the features being tested in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml`, filled in on first launch.
