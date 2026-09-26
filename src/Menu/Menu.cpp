@@ -483,7 +483,8 @@ namespace cs
 			return;
 		dmui::ui::TextWrapped(
 			"Loaded means the feature was loaded at startup. "
-			"Its Enabled setting controls whether the effect is currently applied.");
+			"Its Enabled setting controls whether the effect is currently applied; "
+			"live controls are on each feature's page.");
 		dmui::SettingsTableScope table{ a_client, "home-feature-status" };
 		if (table.Result() != DMUI_RESULT_OK) {
 			CheckHostResult(a_client, false, "begin feature status table");
@@ -519,7 +520,7 @@ namespace cs
 				a_client,
 				id.c_str(),
 				label.c_str(),
-				"Startup loading result; live effect controls are on the feature page." };
+				"" };
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin feature status row");
 				return;
@@ -799,7 +800,7 @@ namespace cs
 						a_client,
 						id.c_str(),
 						label.c_str(),
-						"Checked: load this feature on the next launch. Requires restart." };
+						"" };
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin startup loading row");
 						return;
