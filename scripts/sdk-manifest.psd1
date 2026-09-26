@@ -4,9 +4,9 @@
 	Packages = @(
 		@{
 			Name        = 'Streamline'
-			Version     = 'cs-streamline-v2.14.1-4'
-			Url         = 'https://github.com/northaxosky/Streamline/releases/download/cs-streamline-v2.14.1-4/streamline-sdk-cs-streamline-v2.14.1-4.zip'
-			Sha256      = '474531ba5b29e724f687c311e69383f7679ea6ebde43c89da0c677c561d57b3e'
+			Version     = 'cs-streamline-v2.14.1-5'
+			Url         = 'https://github.com/northaxosky/Streamline/releases/download/cs-streamline-v2.14.1-5/streamline-sdk-cs-streamline-v2.14.1-5.zip'
+			Sha256      = '0a81a7cf31b69b6f27e1d1f7398f06472d8cb9ecf537a4817493929ee4da596b'
 			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline'
 			# One signed package owns the core, plugins, and native vendor runtimes.
 			Files       = @(
