@@ -117,8 +117,6 @@ local required_sdk_assets = {
     "features/Upscaling/Shaders/Upscaling/Streamline/cs_fidelityfx_upscaler_dx12.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/D3D12/D3D12Core.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/D3D12/LICENSE.txt",
-    "features/Upscaling/Shaders/Upscaling/Streamline/sl.project-manifest.bin",
-    "features/Upscaling/Shaders/Upscaling/Streamline/sl.project-manifest.sig",
     "features/Upscaling/Shaders/Upscaling/Streamline/license.txt",
     "features/Upscaling/Shaders/Upscaling/Streamline/3rd-party-licenses.md",
     "features/Upscaling/Shaders/Upscaling/Streamline/amd-fidelityfx-license.md",
@@ -144,7 +142,6 @@ rule("fo4cs.release-package", function()
     end)
 end)
 
-includes("xmake/streamline.lua")
 includes("xmake/shaders.lua")
 
 local generated_include = path.join("build", ".gens", plugin_name)
@@ -204,7 +201,7 @@ target(plugin_name, function()
         plugin_template = "xmake/commonlibf4-plugin.cpp.in"
     })
     add_rules("fo4cs.directxtk", "fo4cs.sdk-assets", "fo4cs.release-package")
-    add_deps(plugin_name .. "Version", "Streamline")
+    add_deps(plugin_name .. "Version")
 
     add_files(
         "src/**.cpp",
@@ -218,7 +215,8 @@ target(plugin_name, function()
     end
     add_includedirs(
         "features/Upscaling/src/RCAS",
-        "extern/RenderDoc/include"
+        "extern/RenderDoc/include",
+        "extern/Streamline/include"
     )
 
     add_packages(
@@ -362,24 +360,6 @@ target("WaterEffectsMathTests", function()
     add_files("tests/WaterEffectsMathTests.cpp")
     add_headerfiles("features/WaterEffects/src/WaterEffectsMath.h")
     add_includedirs("features/WaterEffects/src")
-end)
-
-target("StreamlineModuleFixture", function()
-    set_kind("shared")
-    set_default(false)
-    set_targetdir(path.join(os.projectdir(), "build", "tests"))
-    add_files("tests/StreamlineModuleFixture.cpp")
-end)
-
-target("StreamlineModuleTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files(
-        "tests/StreamlineModuleTests.cpp",
-        "src/Utils/StreamlineModule.cpp"
-    )
-    add_deps("Streamline", "StreamlineModuleFixture")
-    add_syslinks("psapi")
 end)
 
 target("UpscalingPublicationTests", function()
@@ -635,15 +615,6 @@ end)
 
 target("WaterEffectsMathTests", function()
     add_tests("WaterEffectsMath")
-end)
-
-target("StreamlineModuleTests", function()
-    add_tests("StreamlineModule", {
-        runargs = path.join(
-            os.projectdir(),
-            "build/tests/StreamlineModuleFixture.dll"
-        )
-    })
 end)
 
 target("UpscalingPublicationTests", function()

@@ -1,14 +1,13 @@
 @{
 	# Pinned third-party runtime binaries that are not vendored in this repository.
-	# SHA-256 pins bind the exact vendor archives.
+	# SHA-256 pins bind the exact vendor archives; Repository packages follow their latest release.
 	Packages = @(
 		@{
 			Name        = 'Streamline'
-			Version     = 'cs-streamline-v2.14.1-5'
-			Url         = 'https://github.com/northaxosky/Streamline/releases/download/cs-streamline-v2.14.1-5/streamline-sdk-cs-streamline-v2.14.1-5.zip'
-			Sha256      = '0a81a7cf31b69b6f27e1d1f7398f06472d8cb9ecf537a4817493929ee4da596b'
+			# The fork publishes every main push; SHA256SUMS.txt from the same release binds the archive.
+			Repository  = 'northaxosky/Streamline'
+			Asset       = 'streamline-sdk.zip'
 			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline'
-			# One signed package owns the core, plugins, and native vendor runtimes.
 			Files       = @(
 				'bin/x64/sl.interposer.dll',
 				'bin/x64/sl.common.dll',
@@ -23,9 +22,7 @@
 				'bin/x64/amd_fidelityfx_upscaler_dx12.dll',
 				'bin/x64/amd_fidelityfx_framegeneration_dx12.dll',
 				'bin/x64/cs_fidelityfx_upscaler_dx12.dll',
-				'bin/x64/cs_fidelityfx_framegeneration_dx12.dll',
-				'bin/x64/sl.project-manifest.bin',
-				'bin/x64/sl.project-manifest.sig'
+				'bin/x64/cs_fidelityfx_framegeneration_dx12.dll'
 			)
 			Licenses    = @(
 				'license.txt',

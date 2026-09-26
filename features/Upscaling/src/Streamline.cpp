@@ -15,7 +15,6 @@
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "StreamlineFrameGenerationContract.h"
-#include "Utils/StreamlineModule.h"
 
 namespace cs::features
 {
@@ -143,16 +142,15 @@ namespace cs::features
 		_fsrFeatureRequested = a_loadFsr;
 		_fsrGFeatureRequested = a_loadFsrG;
 
-		const auto loaded = cs::files::LoadStreamlineInterposer(Streamline::PluginDir);
-		if (!loaded) {
+		const auto interposerPath =
+			std::filesystem::path(Streamline::PluginDir) / L"sl.interposer.dll";
+		interposer = LoadLibraryW(interposerPath.c_str());
+		if (!interposer) {
 			L->error(
-				"Streamline authentication/load rejected: {} (trust {}, Windows {:#010x}).",
-				sl::security::getTrustFailureMessage(loaded.failure),
-				static_cast<std::uint32_t>(loaded.failure),
-				loaded.systemError);
+				"Failed to load the Streamline interposer (Windows {:#010x}).",
+				static_cast<std::uint32_t>(GetLastError()));
 			return;
 		}
-		interposer = loaded.module;
 		L->info("Interposer loaded at address: {0:p}", static_cast<void*>(interposer));
 
 		L->info("Initializing Streamline");

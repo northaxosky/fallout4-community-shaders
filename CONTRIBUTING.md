@@ -23,16 +23,15 @@ git submodule foreach --recursive "git lfs install --local && git lfs pull"
 
 ## Stage SDK runtimes
 
-SDK runtime binaries are staged, not committed. Run the staging script after cloning
-and whenever `scripts\sdk-manifest.psd1` changes:
+SDK runtime binaries are staged, not committed. Run the staging script after cloning,
+whenever `scripts\sdk-manifest.psd1` changes, and to pick up a newer Streamline build:
 
 ```powershell
 pwsh scripts\fetch-sdks.ps1
 ```
 
-Unpublished SDK builds require a signed local candidate. See the script's
-`-StreamlineCandidateDirectory` option and the Streamline fork's
-`docs\ProjectSigning.md`.
+Streamline comes from the latest `northaxosky/Streamline` release, which that fork
+publishes on every `main` push. `extern\Streamline` supplies only the headers.
 
 ## Configure and build
 
