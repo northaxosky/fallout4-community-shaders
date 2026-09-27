@@ -458,10 +458,10 @@ namespace cs::shader_cache
 			const auto* first =
 				reinterpret_cast<const std::uint8_t*>(current.data());
 			std::string writeError;
-			if (!WriteRecord(
+			if (WriteRecord(
 					identityPath,
 					std::span(first, current.size()),
-					writeError)) {
+					writeError) == RecordWriteStatus::kFailed) {
 				result.error =
 					"identity sidecar write failed: " + writeError;
 			}
@@ -486,7 +486,7 @@ namespace cs::shader_cache
 	}
 
 	// No temp-file rename: MO2's usvfs mishandles it, and torn records fail digest validation.
-	bool WriteRecord(
+	RecordWriteStatus WriteRecord(
 		const std::filesystem::path&  a_path,
 		std::span<const std::uint8_t> a_bytes,
 		std::string&                  a_error) noexcept
@@ -499,7 +499,7 @@ namespace cs::shader_cache
 				std::filesystem::create_directories(directory, error);
 				if (error && !std::filesystem::is_directory(directory)) {
 					a_error = "create_directories failed: " + error.message();
-					return false;
+					return RecordWriteStatus::kFailed;
 				}
 			}
 
@@ -513,17 +513,20 @@ namespace cs::shader_cache
 				FILE_ATTRIBUTE_NORMAL,
 				nullptr));
 			if (!file.Valid()) {
-				a_error = FormatWin32Error("CreateFileW", GetLastError());
-				return false;
+				const auto error = GetLastError();
+				if (error == ERROR_SHARING_VIOLATION)
+					return RecordWriteStatus::kConcurrentPublication;
+				a_error = FormatWin32Error("CreateFileW", error);
+				return RecordWriteStatus::kFailed;
 			}
 			if (!WriteAll(file.Get(), a_bytes)) {
 				a_error = FormatWin32Error("WriteFile", GetLastError());
-				return false;
+				return RecordWriteStatus::kFailed;
 			}
-			return true;
+			return RecordWriteStatus::kWritten;
 		} catch (...) {
 			a_error = "unexpected failure while writing the record";
-			return false;
+			return RecordWriteStatus::kFailed;
 		}
 	}
 }

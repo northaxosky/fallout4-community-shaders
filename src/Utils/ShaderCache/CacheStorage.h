@@ -52,7 +52,14 @@ namespace cs::shader_cache
 		ShaderCacheStage             a_stage,
 		const sha256::Sha256Result&  a_logicalDigest);
 
-	bool WriteRecord(
+	enum class RecordWriteStatus : std::uint8_t
+	{
+		kWritten,
+		kConcurrentPublication,
+		kFailed
+	};
+
+	RecordWriteStatus WriteRecord(
 		const std::filesystem::path&       a_path,
 		std::span<const std::uint8_t>      a_bytes,
 		std::string&                       a_error) noexcept;

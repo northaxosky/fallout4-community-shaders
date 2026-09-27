@@ -137,12 +137,18 @@ namespace cs::shader_cache
 				}
 
 				std::string writeError;
-				if (!WriteRecord(a_recordPath, recordBytes, writeError))
-					a_outcome.cacheNote = std::move(writeError);
-				else
+				switch (WriteRecord(a_recordPath, recordBytes, writeError)) {
+				case RecordWriteStatus::kWritten:
 					a_outcome.recordWritten = true;
-				if (a_outcome.recordWritten)
 					g_written.fetch_add(1, std::memory_order_relaxed);
+					break;
+				case RecordWriteStatus::kConcurrentPublication:
+					a_outcome.cacheNote.clear();
+					break;
+				case RecordWriteStatus::kFailed:
+					a_outcome.cacheNote = std::move(writeError);
+					break;
+				}
 			} catch (...) {
 				a_outcome.cacheNote = "record publication failed";
 			}
