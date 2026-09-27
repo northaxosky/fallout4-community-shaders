@@ -96,6 +96,7 @@ namespace cs::features
 		};
 		std::atomic_uint64_t _fallbackFrames{ 0 };
 		std::atomic_uint64_t _lastFallbackFrame{ UINT64_MAX };
+		std::atomic_uint32_t _consecutiveRejectedFrames{ 0 };
 		std::atomic_uint32_t _warnedFallbackReasons{ 0 };
 		std::atomic_bool _derivedParametersInUse{ false };
 		std::atomic<float> _derivedDensity{ 0.0f };

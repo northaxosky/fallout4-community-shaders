@@ -31,6 +31,8 @@ namespace cs::features
 
 		constexpr std::uint32_t kEnabledFlag = 1U << 0;
 		constexpr std::uint32_t kFogFactorDebugFlag = 1U << 1;
+		// Load transitions publish a few frames of unpopulated fog ramps.
+		constexpr std::uint32_t kPersistentRejectionFrames = 60;
 		constexpr std::array<FeatureDebugView, 1> kDebugViews{ {
 			{
 				"fog_factor",
@@ -225,18 +227,44 @@ namespace cs::features
 		ObservationStatus a_status) noexcept
 	{
 		_observationStatus.store(a_status, std::memory_order_release);
-		if (a_status == ObservationStatus::kUsingDerived)
+		if (a_status == ObservationStatus::kUsingDerived) {
+			_consecutiveRejectedFrames.store(0, std::memory_order_relaxed);
 			return;
+		}
 
 		_lastFallbackReason.store(a_status, std::memory_order_release);
 		const auto* graphicsState = cs::engine::GetGraphicsState();
 		const auto frame = graphicsState ?
 			static_cast<std::uint64_t>(graphicsState->frameCount) :
 			static_cast<std::uint64_t>(UINT32_MAX);
-		if (_lastFallbackFrame.exchange(frame, std::memory_order_relaxed) !=
-			frame) {
+		const bool newFrame =
+			_lastFallbackFrame.exchange(frame, std::memory_order_relaxed) != frame;
+		if (newFrame)
 			_fallbackFrames.fetch_add(1, std::memory_order_relaxed);
+
+		bool warn = false;
+		switch (a_status) {
+		case ObservationStatus::kInjectionUnavailable:
+			warn = true;
+			break;
+		case ObservationStatus::kNonFiniteDistanceRamp:
+		case ObservationStatus::kDistanceSlopeNearZero:
+		case ObservationStatus::kDistancePlaneOrder:
+		case ObservationStatus::kNonFiniteHeightRamp:
+		case ObservationStatus::kHeightSlopeXNearZero:
+		case ObservationStatus::kHeightSlopeYNearZero:
+		case ObservationStatus::kNonFiniteDerived:
+			warn = newFrame
+				&& _consecutiveRejectedFrames.fetch_add(1, std::memory_order_relaxed) + 1
+					>= kPersistentRejectionFrames;
+			break;
+		default:
+			// Disabled, interior, and unresolved-location frames are expected states.
+			_consecutiveRejectedFrames.store(0, std::memory_order_relaxed);
+			break;
 		}
+		if (!warn)
+			return;
 
 		const auto reasonBit =
 			std::uint32_t{ 1 } << static_cast<std::uint8_t>(a_status);
