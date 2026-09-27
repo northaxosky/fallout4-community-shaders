@@ -232,7 +232,6 @@ namespace cs::features
 		float _previousHoursPassed = 0.0f;
 		std::uint32_t _lastCallbackFrame = 0;
 		bool _lastCallbackFrameValid = false;
-		bool _captureSourceLogged = false;
 		std::string _validationDetail;
 	};
 }

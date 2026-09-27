@@ -211,6 +211,7 @@ namespace cs::features
 		terrain_shadows::HeightMapMetadata _loadedMetadata;
 		terrain_shadows::DdaPlan _plan;
 		std::string _loadedWorldspace;
+		std::string _missingMapWorldspace;
 		std::string _failedWorldspace;
 		std::string _failedDetail;
 		std::uint32_t _failedFactor = 0;

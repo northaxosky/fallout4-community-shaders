@@ -895,12 +895,12 @@ namespace cs::features
 		const auto record = _heightMaps.find(worldspace);
 		if (record == _heightMaps.end()) {
 			PublishStatus(worldspace, "no heightmap for this worldspace");
-			CS_LOG_EVERY_MS(
-				L,
-				kMissingMapLogIntervalMs,
-				spdlog::level::info,
-				"No terrain heightmap for worldspace '{}'; terrain shadows publish identity.",
-				worldspace);
+			if (_missingMapWorldspace != worldspace) {
+				_missingMapWorldspace = worldspace;
+				L->info(
+					"No terrain heightmap for worldspace '{}'; terrain shadows publish identity.",
+					worldspace);
+			}
 			if (_shadowResourcesReady.load(std::memory_order_acquire))
 				ReleaseLiveResources(a_context);
 			return;

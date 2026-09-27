@@ -897,15 +897,6 @@ namespace cs::features
 		_captureSourceFormat.store(
 			static_cast<std::uint32_t>(sourceDesc.Format),
 			std::memory_order_relaxed);
-		if (!_captureSourceLogged) {
-			_captureSourceLogged = true;
-			L->info(
-				"Pre-composite capture source RT3 kMain: {}x{}, format {}. "
-				"Verify this is the scene before composite in an in-game capture.",
-				sourceDesc.Width,
-				sourceDesc.Height,
-				static_cast<std::uint32_t>(sourceDesc.Format));
-		}
 
 		auto* targetManager = cs::engine::GetRenderTargetManager();
 		if (!targetManager) {
