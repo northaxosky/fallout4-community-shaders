@@ -256,6 +256,8 @@ namespace cs::engine
 			std::mutex nativeVariantMutex;
 			std::unordered_map<NativeVariantKey, std::shared_ptr<NativeVariant>,
 				NativeVariantKeyHash> nativeVariants;
+			std::array<bool,
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> unsupportedNativeVariantReported{};
 			std::unordered_map<ID3D11DeviceChild*, NativeVariantKey>
 				nativeShaderIdentities;
 			struct NativeShaderMetadata
@@ -951,6 +953,26 @@ namespace cs::engine
 				candidate->state.store(
 					NativeVariant::State::kUnsupported,
 					std::memory_order_release);
+				bool reportUnsupported = false;
+				if (IsValidTarget(descriptor.target)) {
+					std::scoped_lock lock(service.nativeVariantMutex);
+					const auto entry = service.nativeVariants.find(a_key);
+					// An invalidated candidate must not consume the new generation's notice.
+					if (entry != service.nativeVariants.end()
+						&& entry->second == candidate) {
+						reportUnsupported = !std::exchange(
+							service.unsupportedNativeVariantReported[ToIndex(descriptor.target)],
+							true);
+					}
+				}
+				if (reportUnsupported) {
+					L->info(
+						"{}: native variants without a reconstruction stay stock (first: {}, stage {}, descriptor {:#010x})",
+						kTargets[ToIndex(descriptor.target)].name,
+						descriptor.nativeName,
+						static_cast<unsigned>(descriptor.stage),
+						descriptor.descriptor);
+				}
 				return candidate;
 			}
 
@@ -2030,6 +2052,7 @@ namespace cs::engine
 		plan->compilationCache->Invalidate();
 		std::scoped_lock lock(service.nativeVariantMutex);
 		service.nativeVariants.clear();
+		service.unsupportedNativeVariantReported.fill(false);
 		service.nativeShaderIdentities.clear();
 	}
 

@@ -1456,7 +1456,7 @@ namespace cs::engine
 			return std::nullopt;
 
 		if (!AddFamilyDefines(result.defines, a_descriptor)) {
-			L->warn(
+			L->debug(
 				"Unsupported native shader descriptor: target='{}', stage={}, descriptor={:#010x}, name='{}', source='{}', class='{}', macros='{}'",
 				target->name,
 				static_cast<unsigned>(a_descriptor.stage),
