@@ -6,9 +6,13 @@ namespace ScreenSpaceShadows
 {
 	Texture2D<float> ScreenSpaceShadowsTexture : register(t24);
 
-	// SV_POSITION is pixel-centered; no +0.5 unlike upstream
 	float GetScreenSpaceShadow(float2 screenPosition)
 	{
 		return ScreenSpaceShadowsTexture.Load(int3(int2(screenPosition), 0)).x;
+	}
+
+	float GetScreenSpaceShadow(float2 screenPosition, float NdotL)
+	{
+		return NdotL >= 0.0 ? GetScreenSpaceShadow(screenPosition) : 1.0;
 	}
 }
