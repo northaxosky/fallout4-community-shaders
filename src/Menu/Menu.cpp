@@ -470,7 +470,7 @@ namespace cs
 				"Every feature ships disabled. Check it under Advanced > Load on startup, then restart." },
 			dmui::FaqEntry{
 				"Where are settings stored?",
-				"FO4CommunityShaders.toml is filled in on first launch. The menu writes changed values; Reset restores commented defaults." },
+				"FO4CommunityShaders.toml is created on first launch (in MO2, under Overwrite). The menu writes changed values; Reset restores commented defaults." },
 			dmui::FaqEntry{
 				"Why is there no standalone menu?",
 				"Community Shaders is forwarding-only. Without a compatible DearModdingUI host, shader features continue headless." }
