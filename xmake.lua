@@ -137,6 +137,10 @@ rule("fo4cs.sdk-assets", function()
 end)
 
 rule("fo4cs.release-package", function()
+    on_config(function(target)
+        -- Mod managers and Nexus expect F4SE\ and Shaders\ at the archive root.
+        target:data_set("commonlib.plugin.package", { prefixdir = "" })
+    end)
     after_package(function(target)
         import("xmake.release_package", { rootdir = os.projectdir() }).main(target)
     end)
