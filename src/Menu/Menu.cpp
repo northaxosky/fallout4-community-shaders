@@ -435,6 +435,8 @@ namespace cs
 			a_client.ResolveIconGlyph("GitHub", "github-logo").value_or(0);
 		static const char32_t nexusGlyph =
 			a_client.ResolveIconGlyph("Nexus Mods", "download-simple").value_or(0);
+		static const char32_t discordGlyph =
+			a_client.ResolveIconGlyph("Discord", "discord-logo").value_or(0);
 		const std::array links{
 			dmui::Link{
 				.label = "GitHub",
@@ -451,6 +453,14 @@ namespace cs
 					.target = "https://www.nexusmods.com/fallout4/mods/109442" },
 				.note = "Opens the mod page in your default browser.",
 				.glyph = nexusGlyph,
+				.action = dmui::LinkAction::kOpenExternal },
+			dmui::Link{
+				.label = "Discord",
+				.external = {
+					.targetKind = DMUI_EXTERNAL_TARGET_URI,
+					.target = "https://discord.com/invite/nkrQybAsyy" },
+				.note = "Opens the Community Shaders Discord in your default browser.",
+				.glyph = discordGlyph,
 				.action = dmui::LinkAction::kOpenExternal }
 		};
 		if (!CheckHostResult(

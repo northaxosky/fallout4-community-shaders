@@ -41,7 +41,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 
 Download a package from [Releases](https://github.com/northaxosky/fallout4-community-shaders/releases) and install it with your mod manager. The **Latest** release is stable; the prerelease is the newest development build. Uninstall by removing the mod.
 
-Report problems through [Issues](https://github.com/northaxosky/fallout4-community-shaders/issues/new/choose) with `Documents\My Games\Fallout4\F4SE\FO4CommunityShaders.log` attached.
+Report problems through [Issues](https://github.com/northaxosky/fallout4-community-shaders/issues/new/choose) with `Documents\My Games\Fallout4\F4SE\FO4CommunityShaders.log` attached. For questions, join the [Community Shaders Discord](https://discord.com/invite/nkrQybAsyy) and use its [Fallout 4 channel](https://discord.com/channels/1080142797870485606/1553853859972124712).
 
 ---
 
