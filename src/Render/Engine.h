@@ -206,9 +206,10 @@ namespace cs::engine
 		if (!state) {
 			return false;
 		}
-		// CommonLibF4 keeps the member private; +0xC0 is identical on OG, NG and AE.
+		// CommonLibF4 keeps the member private; the global transform is +0xB8 on OG, +0xC0 later.
+		const std::ptrdiff_t offset = REX::FModule::IsRuntimeOG() ? 0xB8 : 0xC0;
 		const auto& transform = *reinterpret_cast<const RE::NiTransform*>(
-			reinterpret_cast<const std::byte*>(state) + 0xC0);
+			reinterpret_cast<const std::byte*>(state) + offset);
 		const float translate[3]{ transform.translate.x, transform.translate.y, transform.translate.z };
 		// Captured light constants show the engine consumes the rotation's columns.
 		for (std::size_t row = 0; row < 3; ++row) {

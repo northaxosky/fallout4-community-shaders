@@ -5,10 +5,11 @@
 #ifndef __COLOR_DEPENDENCY_HLSL__
 #define __COLOR_DEPENDENCY_HLSL__
 
+// FO4 composites in linear space (sRGB albedo views, float light buffers, pow 2.2 ambient
+// decode), which is upstream's linear-lighting branch: identity transfers and unit scale.
 namespace Color
 {
-	// Skyrim-derived scale; FO4 color-space parity is unverified.
-	const static float PBRLightingScale = 0.65;
+	const static float PBRLightingScale = 1.0;
 
 	float3 RGBToYCoCg(float3 color)
 	{
@@ -29,30 +30,29 @@ namespace Color
 			tmp - color.y);
 	}
 
-	// FO4 has no linear-lighting mode, so upstream's non-linear branch applies.
 	float3 RadianceToLinear(float3 color)
 	{
-		return pow(abs(color), 1.6);
+		return color;
 	}
 
 	float IrradianceToLinear(float color)
 	{
-		return pow(abs(color), 1.6);
+		return color;
 	}
 
 	float IrradianceToGamma(float color)
 	{
-		return pow(abs(color), 1.0 / 1.6);
+		return color;
 	}
 
 	float3 IrradianceToLinear(float3 color)
 	{
-		return pow(abs(color), 1.6);
+		return color;
 	}
 
 	float3 IrradianceToGamma(float3 color)
 	{
-		return pow(abs(color), 1.0 / 1.6);
+		return color;
 	}
 }
 
