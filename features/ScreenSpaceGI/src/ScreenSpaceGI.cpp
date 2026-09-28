@@ -1,5 +1,6 @@
 #include "ScreenSpaceGI.h"
 
+#include <DirectXTex.h>
 #include <d3d11.h>
 #include <DearModdingUI/Client.h>
 
@@ -45,6 +46,7 @@ namespace cs::features
 		constexpr const wchar_t* kPrefilterNormalPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\prefilterNormal.cs.hlsl";
 		constexpr const wchar_t* kRadianceDisoccPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\radianceDisocc.cs.hlsl";
 		constexpr const wchar_t* kAOPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\gi.cs.hlsl";
+		constexpr const wchar_t* kNoisePath = L"Data\\Shaders\\ScreenSpaceGI\\fast_2uges.dds";
 		constexpr const wchar_t* kBlurPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\blur.cs.hlsl";
 
 		// occlusion and bounce both read as "no contribution" at zero
@@ -603,70 +605,24 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Texture2D> noiseTex;
 			winrt::com_ptr<ID3D11ShaderResourceView> noiseSRV;
 			if (!_noiseTex) {
-				constexpr std::uint32_t kNoiseWidth = 128;
-				constexpr std::uint32_t kNoiseHeight = 8192;
-				std::vector<std::uint8_t> noiseData(kNoiseWidth * kNoiseHeight * 2);
-				auto hilbertIndex = [](std::uint32_t a_posX, std::uint32_t a_posY) -> std::uint32_t {
-					std::uint32_t index = 0u;
-					for (std::uint32_t curLevel = 64u / 2u; curLevel > 0u; curLevel /= 2u) {
-						const std::uint32_t regionX = (a_posX & curLevel) > 0u ? 1u : 0u;
-						const std::uint32_t regionY = (a_posY & curLevel) > 0u ? 1u : 0u;
-						index += curLevel * curLevel * ((3u * regionX) ^ regionY);
-						if (regionY == 0u) {
-							if (regionX == 1u) {
-								a_posX = 63u - a_posX;
-								a_posY = 63u - a_posY;
-							}
-							std::swap(a_posX, a_posY);
-						}
-					}
-					return index;
-				};
-				constexpr double kR2X = 0.75487766624669276005;
-				constexpr double kR2Y = 0.569840290998053414;
-				for (std::uint32_t t = 0; t < 64u; ++t) {
-					for (std::uint32_t yy = 0; yy < 128u; ++yy) {
-						for (std::uint32_t x = 0; x < 128u; ++x) {
-							const std::uint32_t index = hilbertIndex(x % 64u, yy % 64u) + 288u * t;
-							const double nx = std::fmod(0.5 + static_cast<double>(index) * kR2X, 1.0);
-							const double ny = std::fmod(0.5 + static_cast<double>(index) * kR2Y, 1.0);
-							const std::size_t texel =
-								(static_cast<std::size_t>(t) * 128u + yy) * 128u + x;
-							noiseData[texel * 2 + 0] =
-								static_cast<std::uint8_t>(std::lround(nx * 255.0));
-							noiseData[texel * 2 + 1] =
-								static_cast<std::uint8_t>(std::lround(ny * 255.0));
-						}
-					}
+				// EA fastnoise, 128x128x64 frames stacked vertically, as upstream ships it.
+				DirectX::ScratchImage loaded;
+				DirectX::TexMetadata metadata{};
+				DX::ThrowIfFailed(DirectX::LoadFromDDSFile(
+					kNoisePath, DirectX::DDS_FLAGS_NONE, &metadata, loaded));
+				DX::ThrowIfFailed(DirectX::CreateShaderResourceView(
+					device, loaded.GetImages(), loaded.GetImageCount(), metadata, noiseSRV.put()));
+				winrt::com_ptr<ID3D11Resource> noiseResource;
+				noiseSRV->GetResource(noiseResource.put());
+				noiseTex = noiseResource.try_as<ID3D11Texture2D>();
+				if (!noiseTex) {
+					throw std::runtime_error("fast_2uges.dds is not a 2D texture");
 				}
-
-				D3D11_TEXTURE2D_DESC noiseDesc{};
-				noiseDesc.Width = kNoiseWidth;
-				noiseDesc.Height = kNoiseHeight;
-				noiseDesc.MipLevels = 1;
-				noiseDesc.ArraySize = 1;
-				noiseDesc.Format = DXGI_FORMAT_R8G8_UNORM;
-				noiseDesc.SampleDesc.Count = 1;
-				noiseDesc.Usage = D3D11_USAGE_IMMUTABLE;
-				noiseDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-				D3D11_SUBRESOURCE_DATA initialData{};
-				initialData.pSysMem = noiseData.data();
-				initialData.SysMemPitch = kNoiseWidth * 2;
-				DX::ThrowIfFailed(device->CreateTexture2D(&noiseDesc, &initialData, noiseTex.put()));
-
-				D3D11_SHADER_RESOURCE_VIEW_DESC noiseSRVDesc{};
-				noiseSRVDesc.Format = DXGI_FORMAT_R8G8_UNORM;
-				noiseSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-				noiseSRVDesc.Texture2D.MostDetailedMip = 0;
-				noiseSRVDesc.Texture2D.MipLevels = 1;
-				DX::ThrowIfFailed(device->CreateShaderResourceView(noiseTex.get(), &noiseSRVDesc, noiseSRV.put()));
 				cs::render::annotation::SetName(
 					noiseTex.get(), "ScreenSpaceGI/Noise.Texture");
 				cs::render::annotation::SetName(
 					noiseSRV.get(), "ScreenSpaceGI/Noise.SRV");
 			}
-
 			_resourcesReady.store(false, std::memory_order_release);
 			_linearDepthTex = std::move(linearDepthTex);
 			_workingDepthTex = std::move(workingDepthTex);
