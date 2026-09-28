@@ -18,7 +18,7 @@ namespace cs
 	{
 		std::uint32_t EnableScreenSpaceGI = 0;
 		std::uint32_t pad0[3]{};
-		// World-space directional ambient rows; see engine::TryGetDirectionalAmbientRows.
+		// See engine::TryGetDirectionalAmbientRows.
 		float         DirectionalAmbient[3][4]{};
 	};
 	static_assert(sizeof(ScreenSpaceGIFeatureData) == 64);

@@ -7,8 +7,7 @@
 #include "../Common/Math.hlsli"
 #include "common.hlsli"
 
-// FO4 has no pre-composite diffuse colour target, so the deferred composite's diffuse term,
-// albedo * (diffuse light A + B) * 3 plus emissive, is rebuilt from its own inputs.
+// Rebuilds the composite's diffuse term; FO4 has no diffuse colour target.
 Texture2D<float3> srcDiffuseLightA : register(t0);
 Texture2D<float3> srcDiffuseLightB : register(t1);
 Texture2D<float> srcCurrDepth : register(t2);
@@ -33,7 +32,7 @@ void readHistory(
 	float curr_depth, float3 curr_pos, int2 pixCoord, float bilinear_weight,
 	inout float4 prev_y, inout float2 prev_co_cg, inout float accum_frames, inout float wsum)
 {
-	// Previous extents differ from the current ones under dynamic resolution.
+	// Previous extents under dynamic resolution.
 	const float2 uv = (pixCoord + .5) * RcpPrevFrameDim;
 	const float2 screen_pos = uv;
 	if (any(screen_pos < 0) || any(screen_pos > 1))
@@ -42,7 +41,7 @@ void readHistory(
 	const float3 prev_geo = srcPrevGeo[pixCoord];
 	const float prev_depth = prev_geo.x;
 
-	// Early reject before the world-space reconstruction; wider so parallax survives.
+	// Cheap wide reject before reconstruction.
 	if (abs(curr_depth - prev_depth) > curr_depth * DepthDisocclusion * 3)
 		return;
 
@@ -136,7 +135,7 @@ void main(const uint2 pixCoord : SV_DispatchThreadID)
 	outRadianceDisocc[pixCoord] = radiance;
 
 #ifdef TEMPORAL_DENOISER
-	// On disocclusion, halve the accumulation instead of resetting to 1 to soften the flash.
+	// Halve on disocclusion to soften the flash.
 	float prevAccum = accum_frames * 255;
 	if (wsum < 1e-2)
 		prevAccum = prevAccum * 0.5;

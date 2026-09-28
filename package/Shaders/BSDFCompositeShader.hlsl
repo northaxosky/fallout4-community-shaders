@@ -1834,7 +1834,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #endif
     {
 #ifdef SSGI
-        // Emissive belongs to the diffuse colour, specular stays outside, as upstream.
+        // Specular stays outside SSGI, as upstream.
         color += secondaryTexture.Sample(secondarySampler, uv).xyz;
         ssgiSpecular = ambientTexture.SampleLevel(ambientSampler, uv, 0.0).xyz;
 #if TILED_LIGHTS
@@ -2859,7 +2859,7 @@ float4 main(PSInput input) : SV_Target0
 #if COMPOSITE_MATERIAL_EXCLUSION
     float3 ssgiEmissive = ambientBase;
 #endif
-    // Emissive belongs to the diffuse colour, specular stays outside, as upstream.
+    // Specular stays outside SSGI, as upstream.
     color = ScreenSpaceGI::ComposeDiffuse(
         input.position.xy,
         float3x3(scene[12].xyz, scene[13].xyz, scene[14].xyz),

@@ -164,7 +164,7 @@ namespace cs::features
 		void ResetHistory(ssgi::HistoryResetReason a_reason);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
-		// Contiguous plugin slots: occlusion, SH luma, CoCg, encoded g-buffer normal.
+		// Slots: occlusion, SH luma, CoCg, g-buffer normal.
 		static constexpr std::uint32_t kCompositionPSSlot = 26;
 		static constexpr std::uint32_t kCompositionPSSlotCount = 4;
 		static constexpr auto kRadianceSourceA = cs::engine::RenderTarget::kDiffuseBufferA;
@@ -256,7 +256,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterCS;
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterRadianceCS;
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterNormalCS;
-		// Indexed by whether the temporal denoiser is compiled in.
+		// Indexed by temporal denoiser.
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _radianceDisoccCS;
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _giCS;
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _blurCS;

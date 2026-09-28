@@ -605,7 +605,7 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Texture2D> noiseTex;
 			winrt::com_ptr<ID3D11ShaderResourceView> noiseSRV;
 			if (!_noiseTex) {
-				// EA fastnoise, 128x128x64 frames stacked vertically, as upstream ships it.
+				// EA fastnoise, 128x128x64.
 				DirectX::ScratchImage loaded;
 				DirectX::TexMetadata metadata{};
 				DX::ThrowIfFailed(DirectX::LoadFromDDSFile(
@@ -1216,7 +1216,7 @@ namespace cs::features
 			_occlusionOutputsDirty = true;
 			_aoProducedLastFrame.store(true, std::memory_order_relaxed);
 
-			// Upstream blurs indirect light only; AO reaches composition unfiltered.
+			// Upstream never blurs AO.
 			if (radianceAvailable && _settings.enableBlur) {
 				ID3D11ShaderResourceView* blurSRVs[]{
 					_workingDepthTex->srv.get(),
@@ -1410,7 +1410,7 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSettings()
 	{
-		// Mirrors the upstream panel; the advanced toggle is session-only there too.
+		// Session-only, as upstream.
 		static bool showAdvanced = false;
 		settings::SettingsEdit edit{ *this };
 		const auto tooltip = [](const char* a_text) {

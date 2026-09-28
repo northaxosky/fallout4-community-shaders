@@ -4,7 +4,7 @@
 
 namespace cs::features::ssgi_settings
 {
-	// Defaults and editor ranges follow Skyrim Community Shaders d330bf12d.
+	// Upstream d330bf12d defaults and ranges.
 	struct Settings
 	{
 		bool  enabled = true;
@@ -50,7 +50,7 @@ namespace cs::features::ssgi_settings
 			settings::Field{ "enable_blur", "Enable the indirect lighting blur.", &Settings::enableBlur },
 			settings::Field{ "depth_disocclusion", "Movement disocclusion threshold for temporal history.", &Settings::depthDisocclusion, {}, settings::Range{ 0.0f, 0.2f } },
 			settings::Field{ "normal_disocclusion", "Normal disocclusion threshold for temporal history.", &Settings::normalDisocclusion },
-			// Accumulation is stored in an R8 target.
+			// Stored in R8.
 			settings::Field{ "max_accum_frames", "Maximum accumulated temporal frames.", &Settings::maxAccumFrames, settings::Range{ 1, 255 }, settings::Range{ 1, 64 } },
 			settings::Field{ "blur_radius", "Blur radius in pixels.", &Settings::blurRadius, {}, settings::Range{ 0.0f, 30.0f } },
 			settings::Field{ "distance_normalisation", "Blur geometry weight.", &Settings::distanceNormalisation, {}, settings::Range{ 0.0f, 5.0f } }

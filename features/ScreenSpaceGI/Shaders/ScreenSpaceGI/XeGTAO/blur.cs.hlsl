@@ -7,7 +7,7 @@
 #include "common.hlsli"
 
 Texture2D<float> srcDepth : register(t0);
-// Decoded view normals stand in for upstream's encoded normal-roughness target.
+// Decoded view normals.
 Texture2D<float3> srcNormal : register(t1);
 Texture2D<unorm float> srcAccumFrames : register(t2);
 Texture2D<float4> srcIlY : register(t3);
@@ -46,7 +46,7 @@ float3x3 getBasis(float3 N)
 	float3 T = float3(c * N.x * a - 1.0, sz * b, c);
 	float3 B = float3(b, N.y * ya - sz, N.y);
 
-	// The quaternion formulation rotates the frame by 180 degrees.
+	// Frame is rotated 180 degrees.
 	return float3x3(T, B, N);
 }
 

@@ -5,8 +5,7 @@
 #ifndef __COLOR_DEPENDENCY_HLSL__
 #define __COLOR_DEPENDENCY_HLSL__
 
-// FO4 composites in linear space (sRGB albedo views, float light buffers, pow 2.2 ambient
-// decode), which is upstream's linear-lighting branch: identity transfers and unit scale.
+// FO4 composites linearly: upstream's linear-lighting branch.
 namespace Color
 {
 	const static float PBRLightingScale = 1.0;

@@ -27,8 +27,7 @@ namespace ScreenSpaceGI
 			-(1.0 - lengthSquared * 0.5));
 	}
 
-	// The deferred lights add this to diffuse irradiance, so albedo times it is the
-	// directional-ambient part of FO4's lit diffuse colour.
+	// Ambient the deferred lights fold into diffuse.
 	float3 DirectionalAmbient(float3 worldNormal)
 	{
 		float4 normal = float4(worldNormal, 1.0);
@@ -39,8 +38,7 @@ namespace ScreenSpaceGI
 		return exp2(log2(encoded) * 2.2);
 	}
 
-	// diffuseColor is FO4's lit diffuse, albedo * (direct + ambient) plus emissive, in the
-	// composite's gamma domain; specular stays outside, as upstream adds it afterwards.
+	// diffuseColor excludes specular, as upstream.
 	float3 ComposeDiffuse(
 		float2 screenPosition,
 		float3x3 viewToWorld,

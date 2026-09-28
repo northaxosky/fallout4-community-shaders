@@ -198,20 +198,19 @@ namespace cs::engine
 		return singleton.get();
 	}
 
-	// Directional ambient as world-space rows: dot(row, float4(normal, 1)) is the
-	// gamma-encoded ambient colour the deferred lights decode with pow 2.2.
+	// World-space ambient rows the lights decode with pow 2.2.
 	[[nodiscard]] inline bool TryGetDirectionalAmbientRows(std::array<DirectX::XMFLOAT4, 3>& a_rows)
 	{
 		const auto* state = GetShaderManagerState();
 		if (!state) {
 			return false;
 		}
-		// CommonLibF4 keeps the member private; the global transform is +0xB8 on OG, +0xC0 later.
+		// Private in CommonLibF4; +0xB8 on OG.
 		const std::ptrdiff_t offset = REX::FModule::IsRuntimeOG() ? 0xB8 : 0xC0;
 		const auto& transform = *reinterpret_cast<const RE::NiTransform*>(
 			reinterpret_cast<const std::byte*>(state) + offset);
 		const float translate[3]{ transform.translate.x, transform.translate.y, transform.translate.z };
-		// Captured light constants show the engine consumes the rotation's columns.
+		// The engine uploads rotation columns.
 		for (std::size_t row = 0; row < 3; ++row) {
 			a_rows[row] = {
 				transform.rotate.entry[0][row],

@@ -39,7 +39,7 @@ namespace SharedData
 	{
 		bool EnableScreenSpaceGI;
 		uint3 pad0;
-		// World-space directional ambient rows; dot(row, float4(n, 1)) is gamma-encoded.
+		// World-space ambient rows, pow 2.2 encoded.
 		float4 DirectionalAmbient[3];
 	};
 

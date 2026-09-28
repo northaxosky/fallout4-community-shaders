@@ -166,7 +166,7 @@ namespace
 				 "prefilterNormal.cs.hlsl" }) {
 			a_jobs.push_back({ .path = ssgi / file, .description = file });
 		}
-		// The runtime selects these permutations from the GI and temporal settings.
+		// Runtime GI/temporal permutations.
 		for (const char* file : { "radianceDisocc.cs.hlsl", "gi.cs.hlsl", "blur.cs.hlsl" }) {
 			a_jobs.push_back({ .path = ssgi / file, .description = file });
 			a_jobs.push_back({
@@ -327,7 +327,7 @@ namespace
 				Texture(26), Texture(27), Texture(28), Texture(29)
 			}
 		});
-		// SSGI composes where FO4 forms albedo * diffuse light, not in the ambient-IBL passes.
+		// SSGI composes where diffuse light meets albedo.
 		const std::pair<const char*, ShaderDefines> ssgiFamilies[] = {
 			{ "2D accumulator SSGI", {
 				{ "BSDFCOMPOSITE_PS_2D_ACCUMULATOR", "1" },

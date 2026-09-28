@@ -58,7 +58,6 @@ void CalculateGI(
 	const float rcpNumSlices = rcp((float)NumSlices);
 	const float rcpNumSteps = rcp((float)NumSteps);
 
-	// if the offset is under approx pixel size (pixelTooCloseThreshold), push it out to the minimum distance
 	const float pixelTooCloseThreshold = 1.3;
 	const float2 pixelDirRBViewspaceSizeAtCenterZ = viewspaceZ.xx * NDCToViewMul.xy * RCP_OUT_FRAME_DIM;
 
@@ -91,7 +90,7 @@ void CalculateGI(
 
 		float2 omega = float2(directionVec.x, -directionVec.y) * screenspaceRadius;
 
-		// log2(length(s * omega)) decomposes to log2(s) + logLenOmega for s >= 0.
+		// log2(s * |omega|) = log2(s) + logLenOmega.
 		const float logLenOmega = 0.5 * log2(max(dot(omega, omega), EPSILON_LENGTH_SQ));
 
 		const float3 orthoDirectionVec = directionVec - (dot(directionVec, viewVec) * viewVec);
@@ -132,7 +131,7 @@ void CalculateGI(
 				float mipLevelRadiance = max(mipLevel, 1);
 
 				float SZ = srcWorkingDepth.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevel);
-				// The decoded first-person partition carries no view depth.
+				// First-person decodes to zero depth.
 				if (SZ <= FP_Z) continue;
 
 				float3 samplePos = ScreenToViewPosition(sampleScreenPos, SZ);
@@ -150,7 +149,7 @@ void CalculateGI(
 				uint maskedBits = s < AORadius ? ((1 << bitsRange.y) - 1) << bitsRange.x : 0;
 
 #ifdef GI
-				// Back-side horizon for the GI interval uses a fixed ~300-unit thickness.
+				// GI uses a fixed 300-unit thickness.
 				float3 sampleBackHorizonVecGI = normalize(sampleDelta - viewVec * 300);
 				float angleBackGI = FastMath::ACos(dot(sampleBackHorizonVecGI, viewVec));
 				float2 angleRangeGI = -sideSign * (sideSign == -1 ? float2(angleFront, angleBackGI) : float2(angleBackGI, angleFront));
@@ -233,7 +232,7 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 		EncodeWorldNormal(ViewToWorldDirection(viewspaceNormal, ViewToWorld)));
 #endif
 
-	// Move center pixel slightly towards camera to avoid depth-buffer imprecision artifacts.
+	// Bias toward the camera against depth imprecision.
 	viewspaceZ *= 0.99920h;
 
 	float currAo = 0;
@@ -257,7 +256,7 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 		float4 prevY = srcPrevY[pxCoord];
 		float2 prevCoCg = srcPrevCoCg[pxCoord];
 
-		// Clamp young history to its neighbourhood to limit ghosting (SVGF, Schied 2017).
+		// Clamp young history against ghosting.
 		[branch] if (lerpFactor >= 0.15)
 		{
 			float4 yL = srcPrevY[pxCoord + int2(-1, 0)];
