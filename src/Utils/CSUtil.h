@@ -24,7 +24,7 @@ namespace cs::util
 		shader_cache::RevalidationContext* _previous = nullptr;
 	};
 
-	// Compiles HLSL and returns null on failure.
+	// Returns null on failure; failed recipes are not retried.
 	ID3D11DeviceChild* CompileShader(
 		const wchar_t* a_filePath,
 		const std::vector<std::pair<const char*, const char*>>& a_defines,

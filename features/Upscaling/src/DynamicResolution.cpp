@@ -524,14 +524,11 @@ namespace cs::features
 
 	ID3D11ComputeShader* DynamicResolution::GetOverrideDepthCS()
 	{
-		if (!_overrideDepthCS && !_overrideDepthCSFailed) {
+		if (!_overrideDepthCS) {
 			L->debug("Compiling OverrideDepthCS.hlsl");
 			_overrideDepthCS.attach(
 				static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(kOverrideDepthPath, {}, "cs_5_0")));
-			if (!_overrideDepthCS) {
-				_overrideDepthCSFailed = true;
-				L->error("OverrideDepthCS.hlsl failed to compile; depth override is disabled");
-			} else {
+			if (_overrideDepthCS) {
 				cs::render::annotation::SetName(
 					_overrideDepthCS.get(), "Upscaling/OverrideDepth.CS");
 			}
@@ -541,14 +538,11 @@ namespace cs::features
 
 	ID3D11ComputeShader* DynamicResolution::GetOverrideLinearDepthCS()
 	{
-		if (!_overrideLinearDepthCS && !_overrideLinearDepthCSFailed) {
+		if (!_overrideLinearDepthCS) {
 			L->debug("Compiling OverrideLinearDepthCS.hlsl");
 			_overrideLinearDepthCS.attach(
 				static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(kOverrideLinearDepthPath, {}, "cs_5_0")));
-			if (!_overrideLinearDepthCS) {
-				_overrideLinearDepthCSFailed = true;
-				L->error("OverrideLinearDepthCS.hlsl failed to compile; depth override is disabled");
-			} else {
+			if (_overrideLinearDepthCS) {
 				cs::render::annotation::SetName(
 					_overrideLinearDepthCS.get(), "Upscaling/OverrideLinearDepth.CS");
 			}

@@ -114,7 +114,6 @@ namespace cs::render
 		ID3D11PixelShader* GetSpatialFallbackPS();
 
 		winrt::com_ptr<ID3D11PixelShader> sslrRaytracingPS;
-		bool _sslrCompileFailed = false;
 		ID3D11PixelShader* GetSSLRRaytracingPS();
 		void PatchSSRShader();
 

@@ -357,16 +357,12 @@ namespace cs::render
 
 	ID3D11PixelShader* TemporalRenderer::GetSSLRRaytracingPS()
 	{
-		if (!sslrRaytracingPS && !_sslrCompileFailed) {
+		if (!sslrRaytracingPS) {
 			L->debug("Compiling BSImagespaceShaderSSLRRaytracing.hlsl");
 			sslrRaytracingPS.attach((ID3D11PixelShader*)cs::util::CompileShader(
 				kSSLRRaytracingPath, {}, "ps_5_0"));
 			cs::render::annotation::SetName(
 				sslrRaytracingPS.get(), "Upscaling/SSLRRaytracing.PS");
-			if (!sslrRaytracingPS) {
-				_sslrCompileFailed = true;
-				L->error("BSImagespaceShaderSSLRRaytracing.hlsl failed to compile; SSR runs unpatched");
-			}
 		}
 		return sslrRaytracingPS.get();
 	}

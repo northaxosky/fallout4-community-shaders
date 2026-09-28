@@ -75,7 +75,5 @@ namespace cs::features
 		bool          _hasProxies = false;
 		bool          _renderTargetsOverridden = false;
 		bool          _depthOverridden = false;
-		bool          _overrideDepthCSFailed = false;
-		bool          _overrideLinearDepthCSFailed = false;
 	};
 }

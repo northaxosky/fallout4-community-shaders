@@ -6,8 +6,10 @@
 #include <atomic>
 #include <filesystem>
 #include <format>
+#include <mutex>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <dxgi.h>
 #include <wrl/client.h>
 
@@ -198,6 +200,46 @@ namespace cs::util
 				L->warn("Shader compilation failed ({}):\n{}", a_path,
 					a_error.empty() ? "Unknown error" : a_error);
 		}
+
+		// Stops per-frame getters from recompiling a known failure.
+		class FailedRecipes
+		{
+		public:
+			static std::string Key(
+				const std::string& a_path,
+				const std::vector<std::pair<const char*, const char*>>& a_defines,
+				const char* a_programType,
+				const char* a_program)
+			{
+				auto key = std::format("{}|{}|{}", a_path,
+					a_programType ? a_programType : "", a_program ? a_program : "");
+				for (const auto& [name, value] : a_defines)
+					key += std::format("|{}={}", name ? name : "", value ? value : "");
+				return key;
+			}
+
+			bool Contains(const std::string& a_key)
+			{
+				std::scoped_lock lock(_mutex);
+				return _keys.contains(a_key);
+			}
+
+			void Add(std::string a_key)
+			{
+				std::scoped_lock lock(_mutex);
+				_keys.insert(std::move(a_key));
+			}
+
+		private:
+			std::mutex _mutex;
+			std::unordered_set<std::string> _keys;
+		};
+
+		FailedRecipes& GetFailedRecipes()
+		{
+			static FailedRecipes recipes;
+			return recipes;
+		}
 	}
 
 	ShaderCompilationBatch::ShaderCompilationBatch() noexcept :
@@ -244,6 +286,16 @@ namespace cs::util
 			return nullptr;
 		}
 
+		auto& failedRecipes = GetFailedRecipes();
+		auto failureKey = FailedRecipes::Key(narrow, a_defines, a_programType, a_program);
+		if (failedRecipes.Contains(failureKey))
+			return nullptr;
+		const auto fail = [&](const std::string& a_error) -> ID3D11DeviceChild* {
+			LogCompileFailure(narrow, a_error);
+			failedRecipes.Add(std::move(failureKey));
+			return nullptr;
+		};
+
 		shader_cache::ShaderCacheStage cacheStage{};
 		if (TryGetCacheStage(kind, cacheStage)) {
 			const auto recipe =
@@ -252,10 +304,8 @@ namespace cs::util
 			options.revalidation = g_activeRevalidation;
 			auto outcome =
 				shader_cache::LoadOrCompileShader(recipe, options);
-			if (!outcome.succeeded) {
-				LogCompileFailure(narrow, outcome.error);
-				return nullptr;
-			}
+			if (!outcome.succeeded)
+				return fail(outcome.error);
 
 			static std::atomic<bool> reportedCacheFailure{ false };
 			if (!outcome.recordWritten && !outcome.cacheNote.empty()
@@ -272,10 +322,8 @@ namespace cs::util
 					recipe,
 					options,
 					shader_cache::CacheMode::kRecompile);
-				if (!outcome.succeeded) {
-					LogCompileFailure(narrow, outcome.error);
-					return nullptr;
-				}
+				if (!outcome.succeeded)
+					return fail(outcome.error);
 				createResult = CreateShaderChild(*device, kind, outcome.bytecode, shader);
 			}
 
@@ -290,10 +338,8 @@ namespace cs::util
 
 		std::string shaderLogs;
 		auto shaderBlob = CompileShaderToBlob(a_filePath, a_defines, a_programType, a_program, &shaderLogs);
-		if (!shaderBlob) {
-			LogCompileFailure(narrow, shaderLogs);
-			return nullptr;
-		}
+		if (!shaderBlob)
+			return fail(shaderLogs);
 		if (!shaderLogs.empty())
 			L->debug("Shader logs ({}):\n{}", narrow, shaderLogs);
 
