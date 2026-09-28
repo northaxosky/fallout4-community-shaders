@@ -1298,7 +1298,7 @@ namespace cs::features
 			.Field(
 				"camera_ready",
 				_cameraReadyLastFrame.load(std::memory_order_relaxed))
-			.Field("capture_source", "RT3 kMain pre-composite")
+			.Field("capture_source", "kMain pre-composite")
 			.Field(
 				"capture_width",
 				static_cast<std::int64_t>(

@@ -63,7 +63,7 @@ namespace cs::features::upscaling_anchors
 		inline constexpr std::uint64_t kRenderPreUIForwardTarget[] = { 656535, 2318315, 2318315 };
 		inline constexpr std::uint64_t kSamplerStateTable[] = { 44312, 2704455, 2704455 };
 
-	// Resource setup follows creation of RT4 and the remaining engine targets.
+	// Resource setup follows creation of the engine render targets.
 	inline constexpr std::uint64_t kBSShaderRenderTargetsCreate[] = { 1118299, 2318909, 2318909 };
 
 	inline constexpr std::uint64_t kImageSpaceInitEffects[] = { 889489, 2316625, 2316625 };

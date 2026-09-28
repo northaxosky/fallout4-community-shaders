@@ -3,12 +3,13 @@
 #include <d3d11.h>
 
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
-#include <vector>
 
 #include <winrt/base.h>
 
+#include "Render/Engine.h"
 #include "Utils/CSBuffer.h"
 
 namespace cs::features
@@ -32,8 +33,9 @@ namespace cs::features
 
 		void UpdateRenderTargets(float a_widthRatio, float a_heightRatio);
 
-		void OverrideRenderTargets(const std::vector<int>& a_indicesToCopy = {});
-		void ResetRenderTargets(const std::vector<int>& a_indicesToCopy = {});
+		void OverrideRenderTargets(std::initializer_list<cs::engine::RenderTarget> a_toCopy = {});
+		// An empty list copies every proxied target back.
+		void ResetRenderTargets(std::initializer_list<cs::engine::RenderTarget> a_toCopy = {});
 
 		void OverrideDepth(bool a_doCopy = true);
 		void ResetDepth();
@@ -41,14 +43,14 @@ namespace cs::features
 		void Release();
 
 		[[nodiscard]] bool HasProxies() const noexcept { return _hasProxies; }
-		[[nodiscard]] ProxyTexture GetProxyTexture(int a_index) const noexcept;
+		[[nodiscard]] ProxyTexture GetProxyTexture(cs::engine::RenderTarget a_target) const noexcept;
 
 	private:
-		void UpdateRenderTarget(int a_index, float a_widthRatio, float a_heightRatio);
-		void OverrideRenderTarget(int a_index, bool a_doCopy);
-		void ResetRenderTarget(int a_index, bool a_doCopy);
+		void UpdateRenderTarget(cs::engine::RenderTarget a_target, float a_widthRatio, float a_heightRatio);
+		void OverrideRenderTarget(cs::engine::RenderTarget a_target, bool a_doCopy);
+		void ResetRenderTarget(cs::engine::RenderTarget a_target, bool a_doCopy);
 		void CopyDepth();
-		void ReleaseProxy(int a_index);
+		void ReleaseProxy(cs::engine::RenderTarget a_target);
 
 		ID3D11ComputeShader*         GetOverrideDepthCS();
 		ID3D11ComputeShader*         GetOverrideLinearDepthCS();
@@ -58,8 +60,9 @@ namespace cs::features
 									 float2               a_screenSize,
 									 float2               a_renderSize);
 
-		RE::BSGraphics::RenderTarget           originalRenderTargets[101]{};
-		RE::BSGraphics::RenderTarget           proxyRenderTargets[101]{};
+		// Indexed by logical ID.
+		RE::BSGraphics::RenderTarget           originalRenderTargets[static_cast<std::size_t>(cs::engine::RenderTarget::kCount)]{};
+		RE::BSGraphics::RenderTarget           proxyRenderTargets[static_cast<std::size_t>(cs::engine::RenderTarget::kCount)]{};
 		RE::BSGraphics::RenderTargetProperties originalRenderTargetData[100]{};
 
 		ID3D11ShaderResourceView*             _originalDepthView = nullptr;

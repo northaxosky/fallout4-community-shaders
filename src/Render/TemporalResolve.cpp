@@ -72,7 +72,7 @@ namespace cs::render
 					"Upscaling/EncodeTextures");
 				cs::ComputeScope computeScope(context);
 
-				// Null t0 and RT20's unused channel produce the accepted zero masks.
+				// Null t0 and the G-buffer normal's unused channel produce the accepted zero masks.
 				auto* normalsSRV = cs::engine::GetRenderTargetSRV(kNormalsTarget);
 				auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(
 					cs::engine::DepthStencilTarget::kMain);

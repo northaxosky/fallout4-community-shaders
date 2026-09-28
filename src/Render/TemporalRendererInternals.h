@@ -46,10 +46,9 @@ namespace cs::render::renderer_detail
 		constexpr const wchar_t* kCopyDepthForFrameGenerationPath =
 			L"Data\\Shaders\\FrameGeneration\\CopyDepthForFrameGenerationCS.hlsl";
 
-		// RT4 supplies post-alpha color for first-person alpha conditioning.
+		// kMainTemp supplies post-alpha color for first-person alpha conditioning.
 		constexpr auto kSceneColorTarget = cs::engine::RenderTarget::kMainTemp;
 		constexpr auto kPreAlphaColorTarget = cs::engine::RenderTarget::kMain;
-		// RT29 holds full-resolution R16G16_FLOAT motion.
 		constexpr auto kMotionVectorTarget = cs::engine::RenderTarget::kMotionVectors;
 		constexpr auto kNormalsTarget = cs::engine::RenderTarget::kGbufferNormal;
 		constexpr auto kRefractionNormalTarget = cs::engine::RenderTarget::kRefractionNormal;

@@ -18,10 +18,45 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.upscaling.dynres");
 
-		// Engine render-target slots that hold the world and HDR imagespace chain.
-		constexpr int renderTargetsPatch[] = {
-			20, 57, 24, 25, 23, 58, 59, 28, 3, 9, 60, 61, 4, 29, 1, 36, 37, 22, 10, 11, 7, 8, 64, 14, 16
+		// Engine render targets that hold the world and HDR imagespace chain.
+		using cs::engine::RenderTarget;
+		constexpr RenderTarget kProxiedTargets[] = {
+			RenderTarget::kGbufferNormal,
+			RenderTarget::kGbufferMetadata,
+			RenderTarget::kGbufferMaterial,
+			RenderTarget::kAmbientOcclusion,
+			RenderTarget::kGbufferEmissive,
+			RenderTarget::kDiffuseBufferA,
+			RenderTarget::kSpecularBufferA,
+			RenderTarget::kAmbientOcclusionHalf,
+			RenderTarget::kMain,
+			RenderTarget::kSSLRBlurV,
+			RenderTarget::kDiffuseBufferB,
+			RenderTarget::kSpecularBufferB,
+			RenderTarget::kMainTemp,
+			RenderTarget::kMotionVectors,
+			RenderTarget::kRefractionNormal,
+			RenderTarget::kUIDownscaled,
+			RenderTarget::kUIDownscaledComposite,
+			RenderTarget::kGbufferAlbedo,
+			RenderTarget::kSSLRRayStart,
+			RenderTarget::kSSLRSurfaceDepth,
+			RenderTarget::kSSLRRayResult,
+			RenderTarget::kSSLRBlurH,
+			RenderTarget::kLuminanceDownscale,
+			RenderTarget::kMainVerticalBlur,
+			RenderTarget::kHdrImagespaceAux
 		};
+
+		constexpr std::size_t Index(RenderTarget a_target) noexcept
+		{
+			return static_cast<std::size_t>(a_target);
+		}
+
+		bool Contains(std::initializer_list<RenderTarget> a_targets, RenderTarget a_target) noexcept
+		{
+			return std::find(a_targets.begin(), a_targets.end(), a_target) != a_targets.end();
+		}
 
 		constexpr const wchar_t* kOverrideDepthPath = L"Data\\Shaders\\Upscaling\\OverrideDepthCS.hlsl";
 		constexpr const wchar_t* kOverrideLinearDepthPath = L"Data\\Shaders\\Upscaling\\OverrideLinearDepthCS.hlsl";
@@ -44,9 +79,9 @@ namespace cs::features
 		}
 	}
 
-	void DynamicResolution::ReleaseProxy(int a_index)
+	void DynamicResolution::ReleaseProxy(RenderTarget a_target)
 	{
-		auto& proxy = proxyRenderTargets[a_index];
+		auto& proxy = proxyRenderTargets[Index(a_target)];
 		SafeRelease(proxy.uaView);
 		SafeRelease(proxy.srView);
 		SafeRelease(proxy.rtView);
@@ -54,13 +89,13 @@ namespace cs::features
 		proxy = {};
 	}
 
-	DynamicResolution::ProxyTexture DynamicResolution::GetProxyTexture(int a_index) const noexcept
+	DynamicResolution::ProxyTexture DynamicResolution::GetProxyTexture(RenderTarget a_target) const noexcept
 	{
-		if (a_index < 0 || a_index >= static_cast<int>(std::size(proxyRenderTargets))) {
+		if (Index(a_target) >= std::size(proxyRenderTargets)) {
 			return {};
 		}
 
-		const auto& proxy = proxyRenderTargets[a_index];
+		const auto& proxy = proxyRenderTargets[Index(a_target)];
 		auto* texture = reinterpret_cast<ID3D11Texture2D*>(proxy.texture);
 		auto* view = reinterpret_cast<ID3D11ShaderResourceView*>(proxy.srView);
 		if (!texture || !view) {
@@ -72,23 +107,26 @@ namespace cs::features
 		return { view, desc.Width, desc.Height };
 	}
 
-	void DynamicResolution::UpdateRenderTarget(int a_index, float a_widthRatio, float a_heightRatio)
+	void DynamicResolution::UpdateRenderTarget(RenderTarget a_target, float a_widthRatio, float a_heightRatio)
 	{
 		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
+		auto* engineTarget = cs::engine::ResolveRenderTarget(a_target);
+		const auto index = Index(a_target);
+		originalRenderTargets[index] = {};
+		if (!rendererData || !engineTarget) {
 			return;
 		}
 
 		// Keep the engine's copyTexture/copySRView pointers so a swap-in never nulls them.
-		originalRenderTargets[a_index] = rendererData->renderTargets[a_index];
-		proxyRenderTargets[a_index] = originalRenderTargets[a_index];
-		proxyRenderTargets[a_index].texture = nullptr;
-		proxyRenderTargets[a_index].rtView = nullptr;
-		proxyRenderTargets[a_index].srView = nullptr;
-		proxyRenderTargets[a_index].uaView = nullptr;
+		originalRenderTargets[index] = *engineTarget;
+		proxyRenderTargets[index] = originalRenderTargets[index];
+		proxyRenderTargets[index].texture = nullptr;
+		proxyRenderTargets[index].rtView = nullptr;
+		proxyRenderTargets[index].srView = nullptr;
+		proxyRenderTargets[index].uaView = nullptr;
 
-		auto& original = originalRenderTargets[a_index];
-		auto& proxy = proxyRenderTargets[a_index];
+		auto& original = originalRenderTargets[index];
+		auto& proxy = proxyRenderTargets[index];
 
 		if (a_widthRatio == 1.0f && a_heightRatio == 1.0f) {
 			return;
@@ -122,7 +160,7 @@ namespace cs::features
 
 		DX::ThrowIfFailed(device->CreateTexture2D(
 			&textureDesc, nullptr, reinterpret_cast<ID3D11Texture2D**>(&proxy.texture)));
-		const auto baseName = std::format("Upscaling/DynamicResolutionProxy[{}]", a_index);
+		const auto baseName = std::format("Upscaling/DynamicResolutionProxy[{}]", index);
 		cs::render::annotation::SetName(
 			reinterpret_cast<ID3D11Texture2D*>(proxy.texture),
 			baseName + ".Texture");
@@ -159,9 +197,9 @@ namespace cs::features
 		_previousWidthRatio = a_widthRatio;
 		_previousHeightRatio = a_heightRatio;
 
-		for (const int index : renderTargetsPatch) {
-			ReleaseProxy(index);
-			UpdateRenderTarget(index, a_widthRatio, a_heightRatio);
+		for (const auto target : kProxiedTargets) {
+			ReleaseProxy(target);
+			UpdateRenderTarget(target, a_widthRatio, a_heightRatio);
 		}
 
 		_depthOverrideTexture = nullptr;
@@ -217,21 +255,23 @@ namespace cs::features
 			"Upscaling/DepthOverride.UAV");
 	}
 
-	void DynamicResolution::OverrideRenderTarget(int a_index, bool a_doCopy)
+	void DynamicResolution::OverrideRenderTarget(RenderTarget a_target, bool a_doCopy)
 	{
-		if (!originalRenderTargets[a_index].texture || !proxyRenderTargets[a_index].texture) {
+		const auto index = Index(a_target);
+		auto* engineTarget = cs::engine::ResolveRenderTarget(a_target);
+		if (!engineTarget || !originalRenderTargets[index].texture || !proxyRenderTargets[index].texture) {
 			return;
 		}
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
-		rendererData->renderTargets[a_index] = proxyRenderTargets[a_index];
+		*engineTarget = proxyRenderTargets[index];
 
 		if (!a_doCopy) {
 			return;
 		}
 
-		auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxyRenderTargets[a_index].texture);
-		auto* originalTexture = reinterpret_cast<ID3D11Texture2D*>(originalRenderTargets[a_index].texture);
+		auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxyRenderTargets[index].texture);
+		auto* originalTexture = reinterpret_cast<ID3D11Texture2D*>(originalRenderTargets[index].texture);
 
 		D3D11_TEXTURE2D_DESC proxyDesc{};
 		proxyTexture->GetDesc(&proxyDesc);
@@ -241,17 +281,19 @@ namespace cs::features
 		context->CopySubresourceRegion(proxyTexture, 0, 0, 0, 0, originalTexture, 0, &box);
 	}
 
-	void DynamicResolution::ResetRenderTarget(int a_index, bool a_doCopy)
+	void DynamicResolution::ResetRenderTarget(RenderTarget a_target, bool a_doCopy)
 	{
-		if (!originalRenderTargets[a_index].texture || !proxyRenderTargets[a_index].texture) {
+		const auto index = Index(a_target);
+		auto* engineTarget = cs::engine::ResolveRenderTarget(a_target);
+		if (!engineTarget || !originalRenderTargets[index].texture || !proxyRenderTargets[index].texture) {
 			return;
 		}
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 
 		if (a_doCopy) {
-			auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxyRenderTargets[a_index].texture);
-			auto* originalTexture = reinterpret_cast<ID3D11Texture2D*>(originalRenderTargets[a_index].texture);
+			auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxyRenderTargets[index].texture);
+			auto* originalTexture = reinterpret_cast<ID3D11Texture2D*>(originalRenderTargets[index].texture);
 
 			D3D11_TEXTURE2D_DESC proxyDesc{};
 			proxyTexture->GetDesc(&proxyDesc);
@@ -261,10 +303,10 @@ namespace cs::features
 			context->CopySubresourceRegion(originalTexture, 0, 0, 0, 0, proxyTexture, 0, &box);
 		}
 
-		rendererData->renderTargets[a_index] = originalRenderTargets[a_index];
+		*engineTarget = originalRenderTargets[index];
 	}
 
-	void DynamicResolution::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
+	void DynamicResolution::OverrideRenderTargets(std::initializer_list<RenderTarget> a_toCopy)
 	{
 		if (!_hasProxies) {
 			return;
@@ -272,10 +314,8 @@ namespace cs::features
 		cs::render::annotation::ScopedEvent annotationScope(
 			"Upscaling/DynamicResolution/CopyToProxies");
 
-		for (const int index : renderTargetsPatch) {
-			const bool shouldCopy =
-				std::find(a_indicesToCopy.begin(), a_indicesToCopy.end(), index) != a_indicesToCopy.end();
-			OverrideRenderTarget(index, shouldCopy);
+		for (const auto target : kProxiedTargets) {
+			OverrideRenderTarget(target, Contains(a_toCopy, target));
 		}
 
 		auto* renderTargetManager = cs::engine::GetRenderTargetManager();
@@ -305,9 +345,9 @@ namespace cs::features
 			if (!boundSRVs[slot]) {
 				continue;
 			}
-			for (const int index : renderTargetsPatch) {
-				auto* originalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(originalRenderTargets[index].srView);
-				auto* proxySRV = reinterpret_cast<ID3D11ShaderResourceView*>(proxyRenderTargets[index].srView);
+			for (const auto target : kProxiedTargets) {
+				auto* originalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(originalRenderTargets[Index(target)].srView);
+				auto* proxySRV = reinterpret_cast<ID3D11ShaderResourceView*>(proxyRenderTargets[Index(target)].srView);
 				if (boundSRVs[slot] == originalSRV && proxySRV) {
 					context->PSSetShaderResources(slot, 1, &proxySRV);
 					break;
@@ -320,7 +360,7 @@ namespace cs::features
 		_renderTargetsOverridden = true;
 	}
 
-	void DynamicResolution::ResetRenderTargets(const std::vector<int>& a_indicesToCopy)
+	void DynamicResolution::ResetRenderTargets(std::initializer_list<RenderTarget> a_toCopy)
 	{
 		if (!_renderTargetsOverridden) {
 			return;
@@ -328,10 +368,8 @@ namespace cs::features
 		cs::render::annotation::ScopedEvent annotationScope(
 			"Upscaling/DynamicResolution/CopyFromProxies");
 
-		for (const int index : renderTargetsPatch) {
-			const bool shouldCopy = a_indicesToCopy.empty() ||
-				std::find(a_indicesToCopy.begin(), a_indicesToCopy.end(), index) != a_indicesToCopy.end();
-			ResetRenderTarget(index, shouldCopy);
+		for (const auto target : kProxiedTargets) {
+			ResetRenderTarget(target, a_toCopy.size() == 0 || Contains(a_toCopy, target));
 		}
 
 		auto* renderTargetManager = cs::engine::GetRenderTargetManager();
@@ -352,9 +390,9 @@ namespace cs::features
 			if (!boundSRVs[slot]) {
 				continue;
 			}
-			for (const int index : renderTargetsPatch) {
-				auto* originalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(originalRenderTargets[index].srView);
-				auto* proxySRV = reinterpret_cast<ID3D11ShaderResourceView*>(proxyRenderTargets[index].srView);
+			for (const auto target : kProxiedTargets) {
+				auto* originalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(originalRenderTargets[Index(target)].srView);
+				auto* proxySRV = reinterpret_cast<ID3D11ShaderResourceView*>(proxyRenderTargets[Index(target)].srView);
 				if (boundSRVs[slot] == proxySRV && originalSRV) {
 					context->PSSetShaderResources(slot, 1, &originalSRV);
 					break;
@@ -483,11 +521,13 @@ namespace cs::features
 		// Unwind an in-progress render-target override so no engine state is left mutated.
 		if (_renderTargetsOverridden) {
 			if (rendererData) {
-				for (const int index : renderTargetsPatch) {
+				for (const auto target : kProxiedTargets) {
+					const auto index = Index(target);
+					auto* engineTarget = cs::engine::ResolveRenderTarget(target);
 					auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxyRenderTargets[index].texture);
-					auto* liveTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[index].texture);
+					auto* liveTexture = engineTarget ? reinterpret_cast<ID3D11Texture2D*>(engineTarget->texture) : nullptr;
 					if (proxyTexture && liveTexture == proxyTexture && originalRenderTargets[index].texture) {
-						rendererData->renderTargets[index] = originalRenderTargets[index];
+						*engineTarget = originalRenderTargets[index];
 					}
 				}
 			}
@@ -509,9 +549,9 @@ namespace cs::features
 			_depthOverridden = false;
 		}
 
-		for (const int index : renderTargetsPatch) {
-			ReleaseProxy(index);
-			originalRenderTargets[index] = {};
+		for (const auto target : kProxiedTargets) {
+			ReleaseProxy(target);
+			originalRenderTargets[Index(target)] = {};
 		}
 
 		_originalDepthView = nullptr;

@@ -218,7 +218,7 @@ namespace cs::features
 		if (!a_context) {
 			return;
 		}
-		// resolve per draw: kGbufferNormalSwap can move the authoritative target
+		// resolve per draw: target recreation moves its pool slot
 		auto* srv =
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		// a null bind reads outside the encode domain, which is wetness identity

@@ -372,19 +372,23 @@ namespace cs::render
 		try {
 			// HDR effects render against the render-resolution proxies.
 			func(a_this, 0, 3, 1, 1);
-			upscaling->dynamicResolution.OverrideRenderTargets({ 1, 4, 29, 16 });
+			upscaling->dynamicResolution.OverrideRenderTargets({
+				cs::engine::RenderTarget::kRefractionNormal,
+				cs::engine::RenderTarget::kMainTemp,
+				cs::engine::RenderTarget::kMotionVectors,
+				cs::engine::RenderTarget::kHdrImagespaceAux });
 			upscaling->dynamicResolution.OverrideDepth(true);
 			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
 
 			// LDR effects render full-extent.
 			func(a_this, 4, 13, 1, 1);
 			upscaling->dynamicResolution.ResetDepth();
-			upscaling->dynamicResolution.ResetRenderTargets({ 4 });
+			upscaling->dynamicResolution.ResetRenderTargets({ cs::engine::RenderTarget::kMainTemp });
 
 			cs::engine::SetDynamicResolution(widthRatio, heightRatio, true);
 		} catch (...) {
 			upscaling->dynamicResolution.ResetDepth();
-			upscaling->dynamicResolution.ResetRenderTargets({ 4 });
+			upscaling->dynamicResolution.ResetRenderTargets({ cs::engine::RenderTarget::kMainTemp });
 			cs::engine::SetDynamicResolution(widthRatio, heightRatio, true);
 			upscaling->QuarantineAfterException("Upscaling imagespace effect split");
 		}
@@ -487,8 +491,20 @@ namespace cs::render
 
 		if (overrideActive) {
 			GuardedThunkBody("Upscaling composite override", [&] {
-				upscaling->dynamicResolution.OverrideRenderTargets(
-					{ 20, 25, 57, 24, 23, 58, 59, 3, 9, 60, 61, 28 });
+				using cs::engine::RenderTarget;
+				upscaling->dynamicResolution.OverrideRenderTargets({
+					RenderTarget::kGbufferNormal,
+					RenderTarget::kAmbientOcclusion,
+					RenderTarget::kGbufferMetadata,
+					RenderTarget::kGbufferMaterial,
+					RenderTarget::kGbufferEmissive,
+					RenderTarget::kDiffuseBufferA,
+					RenderTarget::kSpecularBufferA,
+					RenderTarget::kMain,
+					RenderTarget::kSSLRBlurV,
+					RenderTarget::kDiffuseBufferB,
+					RenderTarget::kSpecularBufferB,
+					RenderTarget::kAmbientOcclusionHalf });
 				upscaling->dynamicResolution.OverrideDepth(true);
 				cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
 			});
@@ -498,7 +514,7 @@ namespace cs::render
 
 		if (overrideActive) {
 			GuardedThunkBody("Upscaling composite reset", [&] {
-				upscaling->dynamicResolution.ResetRenderTargets({ 4 });
+				upscaling->dynamicResolution.ResetRenderTargets({ cs::engine::RenderTarget::kMainTemp });
 				upscaling->dynamicResolution.ResetDepth();
 				if (upscaling->dynamicResolution.HasProxies()) {
 					cs::engine::SetDynamicResolution(widthRatio, heightRatio, true);

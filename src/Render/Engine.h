@@ -393,74 +393,53 @@ namespace cs::engine
 			a_outNdcToViewAdd);
 	}
 
-	enum class RenderTarget
+	// Logical RenderTargetManager IDs; recreation reassigns their physical pool slots.
+	enum class RenderTarget : std::uint32_t
 	{
 		kFrameBuffer = 0,
 
-		kRefractionNormal = 1,
+		kMainTemp = 1,
+		kMain = 2,
 
-		kMainPreAlpha = 2,
-		kMain = 3,
-		kMainTemp = 4,
+		kSSLRRayStart = 4,
+		kSSLRRayResult = 5,
+		kSSLRBlurH = 6,
+		kSSLRBlurV = 7,
+		kSSLRSurfaceDepth = 8,
 
-		kSSRRaw = 7,
-		kSSRBlurred = 8,
-		kSSRBlurredExtra = 9,
+		kRefractionNormal = 14,
+		kHdrImagespaceAux = 15,
 
-		kSSRDirection = 10,
-		kSSRMask = 11,
+		kUIDownscaled = 24,
+		kUIDownscaledComposite = 25,
 
-		kMainVerticalBlur = 14,
-		kMainHorizontalBlur = 15,
+		kGbufferAlbedo = 26,
+		kGbufferNormal = 27,
+		// Prepass MRT2: material flag, cubemap index, environment strength.
+		kGbufferMetadata = 29,
+		kGbufferMaterial = 30,  // Glossiness, specular, backlighting, SSS.
+		kGbufferEmissive = 31,
 
-		kUI = 17,
-		kUITemp = 18,
+		// Full-resolution R16G16_FLOAT motion.
+		kMotionVectors = 32,
 
-		kGbufferNormal = 20,
-		kGbufferNormalSwap = 21,
-		kGbufferAlbedo = 22,
-		kGbufferEmissive = 23,
-		kGbufferMaterial = 24,  // Glossiness, specular, backlighting, SSS.
+		// RGBSPEC gates the specular side; tiled lighting gates the B pair.
+		kDiffuseBufferA = 33,
+		kSpecularBufferA = 34,
+		kDiffuseBufferB = 35,
+		kSpecularBufferB = 36,
 
-		// Deferred ambient composite samples this AO target.
-		kSSAOFinal = 25,
+		// Composite t9 reads the half-resolution target unless NVHBAO or full-resolution AO is active.
+		kAmbientOcclusion = 37,
+		kAmbientOcclusionHalf = 39,
 
-		kTAAAccumulation = 26,
-		kTAAAccumulationSwap = 27,
+		// Depth pyramid; logical 41-45 are its mip views.
+		kMainDepthMips = 40,
 
-		kSSAO = 28,
+		kMainVerticalBlur = 68,
+		kLuminanceDownscale = 70,
 
-		// RT29 is full-resolution R16G16_FLOAT motion; half-resolution RT32 contains none.
-		kMotionVectors = 29,
-
-		kUIDownscaled = 36,
-		kUIDownscaledComposite = 37,
-
-		kMainDepthMips = 39,
-		kSSLRRaytracing = 40,
-
-		kSSAOTemp = 48,
-		kSSAOTemp2 = 49,
-		kSSAOTemp3 = 50,
-
-		// Scalable Ambient Obscurance working buffer, half-res R8G8B8A8; not a mask.
-		kSAOWorkBuffer = 57,
-
-		// B slots are repointed from Pip-Boy allocations only while tiled lighting is active.
-		kDiffuseBufferA = 58,
-		kProbeBufferA = 59,
-		kDiffuseBufferB = 60,
-		kProbeBufferB = 61,
-
-		kDownscaledHDR = 64,
-		kDownscaledHDRLuminance2 = 65,
-		kDownscaledHDRLuminance3 = 66,
-		kDownscaledHDRLuminance4 = 67,
-		kDownscaledHDRLuminance5Adaptation = 68,
-		kDownscaledHDRLuminance6AdaptationSwap = 69,
-		kDownscaledHDRLuminance6 = 70,
-
-		kCount = 101
+		kCount = 100
 	};
 
 	enum class DepthStencilTarget
@@ -504,64 +483,62 @@ namespace cs::engine
 			rendererData->depthStencilTargets[static_cast<uint>(DepthStencilTarget::kMain)].srViewDepth);
 	}
 
+	// Resolve at each use; a cached slot goes stale when targets are recreated.
+	[[nodiscard]] inline std::optional<std::uint32_t> ResolveRenderTargetSlot(RenderTarget a_renderTarget)
+	{
+		const auto logicalID = static_cast<std::uint32_t>(a_renderTarget);
+		auto*      rendererData = RE::BSGraphics::GetRendererData();
+		auto*      renderTargetManager = GetRenderTargetManager();
+		if (!rendererData || !renderTargetManager || logicalID >= static_cast<std::uint32_t>(RenderTarget::kCount)) {
+			return std::nullopt;
+		}
+		const auto slot = renderTargetManager->GetRenderTargetPlatformID(logicalID);
+		if (slot >= std::size(rendererData->renderTargets)) {
+			return std::nullopt;
+		}
+		return slot;
+	}
+
+	[[nodiscard]] inline RE::BSGraphics::RenderTarget* ResolveRenderTarget(RenderTarget a_renderTarget)
+	{
+		const auto slot = ResolveRenderTargetSlot(a_renderTarget);
+		return slot ? &RE::BSGraphics::GetRendererData()->renderTargets[*slot] : nullptr;
+	}
+
 	[[nodiscard]] inline ID3D11ShaderResourceView* GetRenderTargetSRV(RenderTarget a_renderTarget)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11ShaderResourceView*>(
-			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].srView);
+		auto* target = ResolveRenderTarget(a_renderTarget);
+		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srView) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11RenderTargetView* GetRenderTargetRTV(RenderTarget a_renderTarget)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11RenderTargetView*>(
-			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].rtView);
+		auto* target = ResolveRenderTarget(a_renderTarget);
+		return target ? reinterpret_cast<ID3D11RenderTargetView*>(target->rtView) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11UnorderedAccessView* GetRenderTargetUAV(RenderTarget a_renderTarget)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11UnorderedAccessView*>(
-			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].uaView);
+		auto* target = ResolveRenderTarget(a_renderTarget);
+		return target ? reinterpret_cast<ID3D11UnorderedAccessView*>(target->uaView) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11Texture2D* GetRenderTargetTexture(RenderTarget a_renderTarget)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11Texture2D*>(
-			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].texture);
+		auto* target = ResolveRenderTarget(a_renderTarget);
+		return target ? reinterpret_cast<ID3D11Texture2D*>(target->texture) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11Texture2D* GetRenderTargetCopyTexture(RenderTarget a_renderTarget)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11Texture2D*>(
-			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].copyTexture);
+		auto* target = ResolveRenderTarget(a_renderTarget);
+		return target ? reinterpret_cast<ID3D11Texture2D*>(target->copyTexture) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11ShaderResourceView* GetRenderTargetCopySRV(RenderTarget a_renderTarget)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11ShaderResourceView*>(
-			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].copySRView);
+		auto* target = ResolveRenderTarget(a_renderTarget);
+		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->copySRView) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11Texture2D* GetDepthStencilTexture(DepthStencilTarget a_target)

@@ -293,7 +293,7 @@ namespace cs::render
 			sourceMotionDesc.Format != DXGI_FORMAT_R16G16_FLOAT ||
 			targetMotionDesc.Format != DXGI_FORMAT_R16G16_FLOAT) {
 			render::TemporalPipeline::Get().FailFrameGenerationFrame(
-				"RT29 motion-vector contract is incompatible");
+				"Engine motion-vector contract is incompatible");
 			return;
 		}
 

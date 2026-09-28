@@ -9,7 +9,7 @@ namespace cs::render
 		static constexpr std::array views{
 			FeatureDebugView{
 				.id = "render_subrect",
-				.label = "Active render sub-rect (RT4)",
+				.label = "Active render sub-rect (scene color)",
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature&) {
 					return TemporalRenderer::GetSingleton()->GetRenderSubrectDebugTexture();
@@ -17,7 +17,7 @@ namespace cs::render
 			},
 			FeatureDebugView{
 				.id = "render_proxy",
-				.label = "Render-resolution proxy (RT4)",
+				.label = "Render-resolution proxy (scene color)",
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature&) {
 					return TemporalRenderer::GetSingleton()->GetProxyDebugTexture();
@@ -387,7 +387,7 @@ namespace cs::render
 			static_cast<std::uint8_t>(DebugView::kRenderSubrect),
 			_debugView.load(std::memory_order_acquire) ==
 				DebugView::kRenderSubrect,
-			"Frozen RT4 snapshot is pending.");
+			"Frozen scene-color snapshot is pending.");
 	}
 
 	FeatureDebugTexture TemporalRenderer::GetProxyDebugTexture() const
@@ -396,7 +396,7 @@ namespace cs::render
 			_superResolutionDebugSnapshot,
 			static_cast<std::uint8_t>(DebugView::kProxy),
 			_debugView.load(std::memory_order_acquire) == DebugView::kProxy,
-			"Frozen RT4 proxy snapshot is pending.");
+			"Frozen scene-color proxy snapshot is pending.");
 	}
 
 	FeatureDebugTexture TemporalRenderer::GetMotionVectorsDebugTexture() const
@@ -558,7 +558,7 @@ namespace cs::render
 				selected,
 				view,
 				std::format(
-					"Frozen RT4 snapshot {}x{}; captured active {}x{} "
+					"Frozen scene-color snapshot {}x{}; captured active {}x{} "
 					"({:.1f}% x {:.1f}%), top-left; raw HDR, outside is undefined",
 					desc.Width,
 					desc.Height,
@@ -569,8 +569,7 @@ namespace cs::render
 			return;
 		}
 		if (selected == DebugView::kProxy) {
-			const auto proxy = dynamicResolution.GetProxyTexture(
-				static_cast<int>(kSceneColorTarget));
+			const auto proxy = dynamicResolution.GetProxyTexture(kSceneColorTarget);
 			if (!proxy.view)
 				return;
 			const auto* state = cs::engine::GetGraphicsState();
@@ -581,7 +580,7 @@ namespace cs::render
 				selected,
 				proxy.view,
 				std::format(
-					"Frozen RT4 proxy snapshot {}x{}; captured expected {}x{}; "
+					"Frozen scene-color proxy snapshot {}x{}; captured expected {}x{}; "
 					"raw HDR, no display transform",
 					proxy.width,
 					proxy.height,
@@ -600,7 +599,7 @@ namespace cs::render
 			} else if (IsExternalUpscaler(method)) {
 				view =
 					cs::engine::GetRenderTargetSRV(kMotionVectorTarget);
-				source = "FSR RT29";
+				source = "FSR engine motion";
 			}
 			D3D11_TEXTURE2D_DESC desc{};
 			if (!TryDescribeTextureView(view, desc))
