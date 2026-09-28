@@ -119,7 +119,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 - Linux/Proton needs a Windows 10 `d3dcompiler_47.dll` in the prefix's `system32` or next to `Fallout4.exe`; Proton's built-in compiler cannot build the shaders.
 - Upscaling requires a DX12-capable GPU. DLSS requires compatible NVIDIA RTX hardware.
 - FSR 4 requires compatible AMD Radeon hardware.
-- Frame generation requires borderless windowed mode.
+- Upscaling (except TAA) and frame generation require borderless windowed mode.
 - Supported upscaling and frame-generation methods can change while playing; switching may briefly pause rendering.
 - Terrain Shadows requires an xLODGen terrain heightmap export.
 - RenderDoc capture requires an external RenderDoc runtime.

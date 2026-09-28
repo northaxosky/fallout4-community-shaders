@@ -147,6 +147,7 @@ namespace cs::features
 	void Upscaling::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		dmui::ui::TextDisabled("DLSS and FSR require borderless windowed mode.");
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto fidelityFx = pipeline.GetFidelityFXCapabilities();

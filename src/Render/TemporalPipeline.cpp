@@ -1128,21 +1128,21 @@ namespace cs::render
 				"creation request.");
 			return std::nullopt;
 		}
+		// The D3D12 proxy presents black in exclusive fullscreen.
+		if (!a_context.swapChainDesc->Windowed) {
+			_impl->creationState.store(TemporalCreationState::kNative,
+				std::memory_order_release);
+			PostFailure(temporal::FailureDomain::kTransport,
+				"Upscaling and frame generation require windowed or borderless "
+				"presentation; exclusive fullscreen keeps native presentation.");
+			return std::nullopt;
+		}
 		const double refreshRate =
 			GetRefreshRate(a_context.swapChainDesc->OutputWindow);
-		const bool wantsFrameGeneration =
+		const bool frameGenerationEligible =
 			request.frameGenerationEligible &&
 			request.frameGenerationEnabled &&
 			request.frameGeneration != temporal::FrameGenerationMethod::kOff;
-		bool frameGenerationEligible = wantsFrameGeneration;
-		if (frameGenerationEligible &&
-			!a_context.swapChainDesc->Windowed) {
-			frameGenerationEligible = false;
-			PostFailure(
-				temporal::FailureDomain::kFrameGeneration,
-				"Frame generation requires windowed or borderless presentation; "
-				"plain D3D12 presentation remains available.");
-		}
 		_impl->creationState.store(TemporalCreationState::kCreating,
 			std::memory_order_release);
 		ID3D11Device* device = nullptr;

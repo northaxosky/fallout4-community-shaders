@@ -518,6 +518,7 @@ namespace cs::features
 	void FrameGeneration::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		dmui::ui::TextDisabled("Requires borderless windowed mode.");
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto dlssCapabilities =
