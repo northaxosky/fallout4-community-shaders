@@ -7,8 +7,8 @@
 #include "../Common/Math.hlsli"
 #include "common.hlsli"
 
-// FO4 has no pre-composite diffuse colour target, so the 2D-accumulator diffuse term
-// albedo * (diffuse light A + B) * 3 is rebuilt from its own inputs.
+// FO4 has no pre-composite diffuse colour target, so the deferred composite's diffuse term,
+// albedo * (diffuse light A + B) * 3 plus emissive, is rebuilt from its own inputs.
 Texture2D<float3> srcDiffuseLightA : register(t0);
 Texture2D<float3> srcDiffuseLightB : register(t1);
 Texture2D<float> srcCurrDepth : register(t2);
@@ -18,6 +18,7 @@ Texture2D<unorm float> srcAccumFrames : register(t5);
 Texture2D<float4> srcPrevIlY : register(t6);
 Texture2D<float2> srcPrevIlCoCg : register(t7);
 Texture2D<float4> srcAlbedo : register(t8);
+Texture2D<float4> srcEmissive : register(t9);
 
 RWTexture2D<float3> outRadianceDisocc : register(u0);
 RWTexture2D<unorm float> outAccumFrames : register(u1);
@@ -127,7 +128,7 @@ void main(const uint2 pixCoord : SV_DispatchThreadID)
 	float3 diffuseLight = srcDiffuseLightA[pixCoord];
 	if (IncludeSourceB())
 		diffuseLight += srcDiffuseLightB[pixCoord];
-	float3 diffuseColor = srcAlbedo[pixCoord].rgb * diffuseLight * 3.0;
+	float3 diffuseColor = srcAlbedo[pixCoord].rgb * diffuseLight * 3.0 + srcEmissive[pixCoord].rgb;
 
 	float3 radiance = Color::RadianceToLinear(diffuseColor * GIStrength);
 	radiance = filterNaN(radiance);

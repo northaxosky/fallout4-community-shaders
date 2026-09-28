@@ -229,9 +229,9 @@ namespace cs::features
 				_context(a_context)
 			{
 				// Tiled lighting can leave its B buffers in the owned low slots.
-				static constexpr ID3D11ShaderResourceView* nullSRVs[8]{};
+				static constexpr ID3D11ShaderResourceView* nullSRVs[16]{};
 				static constexpr ID3D11UnorderedAccessView* nullUAVs[8]{};
-				_context->CSSetShaderResources(0, 8, nullSRVs);
+				_context->CSSetShaderResources(0, 16, nullSRVs);
 				_context->CSSetUnorderedAccessViews(0, 8, nullUAVs, nullptr);
 			}
 
@@ -255,7 +255,7 @@ namespace cs::features
 				_context->CSSetShader(a_shader, nullptr, 0);
 				_context->Dispatch(a_groupsX, a_groupsY, 1);
 
-				static constexpr ID3D11ShaderResourceView* nullSRVs[8]{};
+				static constexpr ID3D11ShaderResourceView* nullSRVs[16]{};
 				static constexpr ID3D11UnorderedAccessView* nullUAVs[8]{};
 				ID3D11Buffer* nullConstants = nullptr;
 				ID3D11SamplerState* nullSampler = nullptr;
@@ -499,12 +499,21 @@ namespace cs::features
 			!_aoProducedLastFrame.load(std::memory_order_relaxed) ||
 			!IsGeneratorReady() ||
 			!cs::engine::GetRenderTargetSRV(
-				cs::engine::RenderTarget::kGbufferAlbedo)) {
+				cs::engine::RenderTarget::kGbufferNormal)) {
 			return {};
 		}
-		return {
-			.EnableScreenSpaceGI = 1
-		};
+		ScreenSpaceGIFeatureData data{ .EnableScreenSpaceGI = 1 };
+		std::array<DirectX::XMFLOAT4, 3> ambient{};
+		if (!cs::engine::TryGetDirectionalAmbientRows(ambient)) {
+			return {};
+		}
+		for (std::size_t row = 0; row < ambient.size(); ++row) {
+			data.DirectionalAmbient[row][0] = ambient[row].x;
+			data.DirectionalAmbient[row][1] = ambient[row].y;
+			data.DirectionalAmbient[row][2] = ambient[row].z;
+			data.DirectionalAmbient[row][3] = ambient[row].w;
+		}
+		return data;
 	}
 
 	bool ScreenSpaceGI::EnsureResources()
@@ -798,7 +807,7 @@ namespace cs::features
 		_bounceProducedLastFrame.store(false, std::memory_order_relaxed);
 		_bounceDenoisedLastFrame.store(false, std::memory_order_relaxed);
 		_radianceAvailableLastFrame.store(false, std::memory_order_relaxed);
-		_albedoBoundLastFrame.store(false, std::memory_order_relaxed);
+		_normalBoundLastFrame.store(false, std::memory_order_relaxed);
 		_historyValidLastFrame.store(false, std::memory_order_relaxed);
 		_motionAvailableLastFrame.store(false, std::memory_order_relaxed);
 		_tiledBAvailable.store(false, std::memory_order_relaxed);
@@ -875,17 +884,19 @@ namespace cs::features
 		D3D11_TEXTURE2D_DESC radianceDesc{};
 		auto* radianceSRV = cs::engine::GetRenderTargetSRV(kRadianceSourceA);
 		auto* albedoSRV = cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferAlbedo);
+		auto* emissiveSRV = cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferEmissive);
 		const bool radianceAvailable =
 			_settings.enableGI &&
 			IsTemporalReady() &&
 			albedoSRV &&
+			emissiveSRV &&
 			IsFullResolutionHDR(radianceSRV, _allocW, _allocH, radianceDesc);
 		_radianceAvailableLastFrame.store(radianceAvailable, std::memory_order_relaxed);
 		if (_settings.enableGI && !radianceAvailable) {
 			CS_LOG_ONCE(
 				L,
 				spdlog::level::warn,
-				"SSGI indirect lighting unavailable: it needs the albedo target and full-resolution R11G11B10_FLOAT diffuse light.");
+				"SSGI indirect lighting unavailable: it needs the albedo and emissive targets and full-resolution R11G11B10_FLOAT diffuse light.");
 		}
 
 		const bool tiledLighting = cs::engine::QueryTiledLightingEnabled();
@@ -1156,7 +1167,8 @@ namespace cs::features
 					_accumTex[readIndex]->srv.get(),
 					_bounceSHTex[readIndex]->srv.get(),
 					_bounceCoCgTex[readIndex]->srv.get(),
-					albedoSRV
+					albedoSRV,
+					emissiveSRV
 				};
 				ID3D11UnorderedAccessView* disoccUAVs[]{
 					_radianceTempTex->uav.get(),
@@ -1348,29 +1360,29 @@ namespace cs::features
 			return;
 		}
 
-		auto* albedoSRV =
-			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferAlbedo);
+		auto* normalSRV =
+			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		const bool compositionReady =
 			_aoProducedLastFrame.load(std::memory_order_relaxed) &&
 			IsGeneratorReady() &&
-			albedoSRV;
+			normalSRV;
 		const auto publishedIndex = _history.ReadIndex();
 		ID3D11ShaderResourceView* composition[kCompositionPSSlotCount] = {
 			compositionReady ? SRVOf(_aoTex) : nullptr,
 			compositionReady ? SRVOf(_bounceSHTex[publishedIndex]) : nullptr,
 			compositionReady ? SRVOf(_bounceCoCgTex[publishedIndex]) : nullptr,
-			compositionReady ? albedoSRV : nullptr
+			compositionReady ? normalSRV : nullptr
 		};
 		a_context->PSSetShaderResources(
 			kCompositionPSSlot, kCompositionPSSlotCount, composition);
 
-		_albedoBoundLastFrame.store(compositionReady, std::memory_order_relaxed);
+		_normalBoundLastFrame.store(compositionReady, std::memory_order_relaxed);
 		_compositionBindsLastFrame.fetch_add(1, std::memory_order_relaxed);
-		if (!albedoSRV) {
+		if (!normalSRV) {
 			CS_LOG_ONCE(
 				L,
 				spdlog::level::warn,
-				"SSGI albedo source is unavailable; composition is neutral for this draw.");
+				"SSGI normal source is unavailable; composition is neutral for this draw.");
 		}
 	}
 
@@ -1389,7 +1401,7 @@ namespace cs::features
 			.Field("radiance_available", _radianceAvailableLastFrame.load(std::memory_order_relaxed))
 			.Field("bounce_produced", _bounceProducedLastFrame.load(std::memory_order_relaxed))
 			.Field("bounce_denoised", _bounceDenoisedLastFrame.load(std::memory_order_relaxed))
-			.Field("albedo_bound", _albedoBoundLastFrame.load(std::memory_order_relaxed))
+			.Field("normal_bound", _normalBoundLastFrame.load(std::memory_order_relaxed))
 			.Field("history_valid", _historyValidLastFrame.load(std::memory_order_relaxed))
 			.Field("motion_available", _motionAvailableLastFrame.load(std::memory_order_relaxed))
 			.Field(

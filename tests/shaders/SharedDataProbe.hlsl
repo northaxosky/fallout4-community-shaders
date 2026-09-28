@@ -28,7 +28,9 @@ float4 main() : SV_Target
 
 	value += BoolValue(
 		SharedData::screenSpaceGISettings.EnableScreenSpaceGI);
-	value += SharedData::screenSpaceGISettings.pad0;
+	value += dot(float3(SharedData::screenSpaceGISettings.pad0), 1.0);
+	value += dot(SharedData::screenSpaceGISettings.DirectionalAmbient[0], 1.0);
+	value += dot(SharedData::screenSpaceGISettings.DirectionalAmbient[2], 1.0);
 
 	value += SharedData::wetnessEffectsSettings.Wetness;
 	value += SharedData::wetnessEffectsSettings.MaxRainWetness;

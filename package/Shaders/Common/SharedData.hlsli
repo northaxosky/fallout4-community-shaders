@@ -38,9 +38,9 @@ namespace SharedData
 	struct ScreenSpaceGISettings
 	{
 		bool EnableScreenSpaceGI;
-		uint pad0;
-		uint pad1;
-		uint pad2;
+		uint3 pad0;
+		// World-space directional ambient rows; dot(row, float4(n, 1)) is gamma-encoded.
+		float4 DirectionalAmbient[3];
 	};
 
 	struct WetnessEffectsSettings

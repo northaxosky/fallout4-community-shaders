@@ -164,7 +164,7 @@ namespace cs::features
 		void ResetHistory(ssgi::HistoryResetReason a_reason);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
-		// Contiguous plugin slots: occlusion, SH luma, CoCg, albedo.
+		// Contiguous plugin slots: occlusion, SH luma, CoCg, encoded g-buffer normal.
 		static constexpr std::uint32_t kCompositionPSSlot = 26;
 		static constexpr std::uint32_t kCompositionPSSlotCount = 4;
 		static constexpr auto kRadianceSourceA = cs::engine::RenderTarget::kDiffuseBufferA;
@@ -186,7 +186,7 @@ namespace cs::features
 		std::atomic_bool _bounceProducedLastFrame{ false };
 		std::atomic_bool _bounceDenoisedLastFrame{ false };
 		std::atomic_bool _radianceAvailableLastFrame{ false };
-		std::atomic_bool _albedoBoundLastFrame{ false };
+		std::atomic_bool _normalBoundLastFrame{ false };
 		std::atomic_bool _historyValidLastFrame{ false };
 		std::atomic_bool _motionAvailableLastFrame{ false };
 		std::atomic_bool _tiledLightingActive{ false };

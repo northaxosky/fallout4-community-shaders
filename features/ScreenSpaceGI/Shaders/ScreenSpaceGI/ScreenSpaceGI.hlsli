@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
+// Ported from Skyrim Community Shaders d330bf12d DeferredCompositeCS.
 #ifndef __SCREEN_SPACE_GI_DEPENDENCY_HLSL__
 #define __SCREEN_SPACE_GI_DEPENDENCY_HLSL__
 
@@ -9,17 +10,13 @@
 #include "Common/Color.hlsli"
 #include "../Common/SphericalHarmonics.hlsli"
 
-#ifdef WETNESS_EFFECTS
-#include "WetnessEffects/WetnessEffects.hlsli"
-#endif
-
 namespace ScreenSpaceGI
 {
 	// occlusion: 0 open, 1 occluded
 	Texture2D<float> OcclusionTexture : register(t26);
 	Texture2D<float4> BounceLumaTexture : register(t27);
 	Texture2D<float2> BounceChromaTexture : register(t28);
-	Texture2D<float4> AlbedoTexture : register(t29);
+	Texture2D<float4> NormalTexture : register(t29);
 
 	float3 DecodeViewNormal(float2 encodedNormal)
 	{
@@ -30,51 +27,62 @@ namespace ScreenSpaceGI
 			-(1.0 - lengthSquared * 0.5));
 	}
 
-	// direct and ambient arrive gamma-encoded
-	float3 ComposeAmbient(
+	// The deferred lights add this to diffuse irradiance, so albedo times it is the
+	// directional-ambient part of FO4's lit diffuse colour.
+	float3 DirectionalAmbient(float3 worldNormal)
+	{
+		float4 normal = float4(worldNormal, 1.0);
+		float3 encoded = float3(
+			dot(SharedData::screenSpaceGISettings.DirectionalAmbient[0], normal),
+			dot(SharedData::screenSpaceGISettings.DirectionalAmbient[1], normal),
+			dot(SharedData::screenSpaceGISettings.DirectionalAmbient[2], normal));
+		return exp2(log2(encoded) * 2.2);
+	}
+
+	// diffuseColor is FO4's lit diffuse, albedo * (direct + ambient) plus emissive, in the
+	// composite's gamma domain; specular stays outside, as upstream adds it afterwards.
+	float3 ComposeDiffuse(
 		float2 screenPosition,
-		float3 viewNormal,
 		float3x3 viewToWorld,
-		float3 directLighting,
-		float3 directionalAmbient,
-		float engineAmbientOcclusion,
-		float wetness = 0.0)
+		float3 albedo,
+		float3 diffuseColor)
 	{
 		if (!SharedData::screenSpaceGISettings.EnableScreenSpaceGI)
-			return (directLighting + directionalAmbient) * engineAmbientOcclusion;
+			return diffuseColor;
 
 		int3 texel = int3(int2(screenPosition), 0);
-		// AO power is applied by the generator, as upstream does.
-		float visibility = saturate(1.0 - OcclusionTexture.Load(texel));
+		float3 normalVS = DecodeViewNormal(NormalTexture.Load(texel).xy);
+		float3 normalWS = normalize(mul(viewToWorld, normalVS));
 
-#ifdef WETNESS_EFFECTS
-		float3 albedo = saturate(
-			WetnessEffects::WetAlbedo(AlbedoTexture.Load(texel).rgb, wetness));
-#else
-		float3 albedo = saturate(AlbedoTexture.Load(texel).rgb);
-#endif
-		float3 linearAlbedo =
-			Color::IrradianceToLinear(albedo / Color::PBRLightingScale);
-		float3 multiBounceAO = Shading::MultiBounceAO(linearAlbedo, visibility);
+		float ssgiAo = 1 - OcclusionTexture.Load(texel);
+		float4 ssgiIlYSh = BounceLumaTexture.Load(texel);
+		float ssgiIlY = SphericalHarmonics::SHHallucinateZH3Irradiance(ssgiIlYSh, normalWS);
+		float2 ssgiIlCoCg = BounceChromaTexture.Load(texel);
+		float3 ssgiIl = max(0, Color::YCoCgToRGB(float3(ssgiIlY, ssgiIlCoCg)));
 
-		float3 directColor = Color::IrradianceToGamma(
-			Color::IrradianceToLinear(directLighting) * sqrt(multiBounceAO));
-		float3 ambientColor = Color::IrradianceToGamma(
-			Color::IrradianceToLinear(directionalAmbient) * multiBounceAO);
+		float3 linAlbedo = Color::IrradianceToLinear(albedo / Color::PBRLightingScale);
+		float3 multiBounceSSGIAo = Shading::MultiBounceAO(linAlbedo, ssgiAo);
 
-		float3 bounce = 0.0;
-		float4 luma = BounceLumaTexture.Load(texel);
-		if (luma.x > 1e-6) {
-			float2 chroma = BounceChromaTexture.Load(texel);
-			float3 worldNormal = normalize(mul(viewToWorld, viewNormal));
-			float irradianceY =
-				SphericalHarmonics::SHHallucinateZH3Irradiance(luma, worldNormal);
-			float3 irradiance = max(0.0, Color::YCoCgToRGB(float3(irradianceY, chroma)));
-			bounce = irradiance * linearAlbedo;
-		}
+		float3 directionalAmbientColor = max(0, DirectionalAmbient(normalWS) * albedo);
 
-		return Color::IrradianceToGamma(
-			Color::IrradianceToLinear(directColor + ambientColor) + bounce);
+		float maxScale = 1.0;
+		if (directionalAmbientColor.x > 0.0)
+			maxScale = min(maxScale, diffuseColor.x / directionalAmbientColor.x);
+		if (directionalAmbientColor.y > 0.0)
+			maxScale = min(maxScale, diffuseColor.y / directionalAmbientColor.y);
+		if (directionalAmbientColor.z > 0.0)
+			maxScale = min(maxScale, diffuseColor.z / directionalAmbientColor.z);
+		directionalAmbientColor *= maxScale;
+
+		diffuseColor = max(0.0, diffuseColor - directionalAmbientColor);
+		float3 linDiffuseColor = Color::IrradianceToLinear(diffuseColor);
+		linDiffuseColor *= sqrt(multiBounceSSGIAo);
+		diffuseColor = Color::IrradianceToGamma(linDiffuseColor);
+		diffuseColor += Color::IrradianceToGamma(Color::IrradianceToLinear(directionalAmbientColor) * multiBounceSSGIAo);
+		linDiffuseColor = Color::IrradianceToLinear(diffuseColor);
+
+		linDiffuseColor += ssgiIl * linAlbedo;
+		return Color::IrradianceToGamma(linDiffuseColor);
 	}
 }
 

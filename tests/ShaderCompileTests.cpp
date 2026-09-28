@@ -321,10 +321,47 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
 			.required = {
-				CB(5), CB(6), Texture(16), Texture(17), Texture(25),
+				CB(5), CB(6), Texture(16), Texture(17), Texture(25)
+			},
+			.forbidden = {
 				Texture(26), Texture(27), Texture(28), Texture(29)
 			}
 		});
+		// SSGI composes where FO4 forms albedo * diffuse light, not in the ambient-IBL passes.
+		const std::pair<const char*, ShaderDefines> ssgiFamilies[] = {
+			{ "2D accumulator SSGI", {
+				{ "BSDFCOMPOSITE_PS_2D_ACCUMULATOR", "1" },
+				{ "COMPOSITE_CB2_COUNT", "6" },
+				{ "COMPOSITE_MATERIAL_5", "1" },
+				{ "COMPOSITE_MODULATION", "1" },
+				{ "TILED_LIGHTS", "1" } } },
+			{ "2D fog SSGI", {
+				{ "BSDFCOMPOSITE_PS_2D_FOG", "1" },
+				{ "COMPOSITE_HAS_LIGHT", "1" },
+				{ "COMPOSITE_MODULATION", "1" },
+				{ "COMPOSITE_SCENE_BLEND", "1" } } },
+			{ "2D fog material 5 SSGI", {
+				{ "BSDFCOMPOSITE_PS_2D_FOG", "1" },
+				{ "COMPOSITE_HAS_TYPE", "1" },
+				{ "COMPOSITE_MATERIAL_5", "1" },
+				{ "COMPOSITE_HAS_LIGHT", "1" } } },
+			{ "cube IBL SSGI", {
+				{ "BSDFCOMPOSITE_PS_CUBE_IBL", "1" } } }
+		};
+		for (const auto& [description, defines] : ssgiFamilies) {
+			auto familyDefines = defines;
+			familyDefines.push_back({ "FO4CS_SUBSTRATE", "1" });
+			familyDefines.push_back({ "SSGI", "1" });
+			a_jobs.push_back({
+				.path = composite,
+				.defines = std::move(familyDefines),
+				.profile = "ps_5_0",
+				.description = description,
+				.required = {
+					CB(6), Texture(26), Texture(27), Texture(28), Texture(29)
+				}
+			});
+		}
 
 		const auto tiled = a_root / "DFTiledLighting.hlsl";
 		a_jobs.push_back({

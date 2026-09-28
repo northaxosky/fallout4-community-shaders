@@ -27,9 +27,6 @@
 #include "WetnessEffects/WetnessEffects.hlsli"
 #endif
 
-#ifdef SSGI
-#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
-#endif
 
 #ifndef AMBIENT_DIFFUSE_SET_B
 #define AMBIENT_DIFFUSE_SET_B 1
@@ -405,23 +402,7 @@ PS_OUTPUT main(PS_INPUT input)
         dynamicSpec * (1.0 - litAlpha) * glossFactor *
         glossSquaredScaled * ambientPairSum * aoFactor;
 #endif
-#ifdef SSGI
-    float3 ssgiViewNormal = ScreenSpaceGI::DecodeViewNormal(
-        g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
-    output.color.xyz = ScreenSpaceGI::ComposeAmbient(
-        input.position.xy,
-        ssgiViewNormal,
-        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
-        spec * ambientPairSum,
-        ambientAccum,
-        aoFactor
-#ifdef WETNESS_EFFECTS
-        , wetSurface.wetness
-#endif
-        );
-#else
     output.color.xyz = modulated * aoFactor;
-#endif
 #ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
     output.color.xyz = DynamicCubemaps::ApplyFullscreenDebug(
         output.color.xyz, dynamicReflectionContribution);
@@ -441,9 +422,6 @@ PS_OUTPUT main(PS_INPUT input)
 #include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #endif
 
-#ifdef SSGI
-#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
-#endif
 
 #ifndef FO4_AMBIENT_OCCLUSION
 #define FO4_AMBIENT_OCCLUSION 1
@@ -827,23 +805,11 @@ PS_OUTPUT main(PS_INPUT input)
     float3 wetIblLitBlend = lerp(
         wetIblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
     float3 reflectionBlend = lerp(iblLitBlend, wetIblLitBlend, wetFilmWeight);
-#ifdef SSGI
-    float3 directComponent =
-        glossFactor * reflectionBlend * glossSquaredScaled * ambientPair;
-    float3 ambientComponent = ambientAccum;
-#else
     float3 modulated =
         ambientAccum + glossFactor * reflectionBlend * glossSquaredScaled * ambientPair;
-#endif
-#else
-#ifdef SSGI
-    float3 directComponent =
-        glossFactor * iblLitBlend * glossSquaredScaled * ambientPair;
-    float3 ambientComponent = ambientAccum;
 #else
     float3 modulated =
         ambientAccum + glossFactor * iblLitBlend * glossSquaredScaled * ambientPair;
-#endif
 #endif
 #if FO4_AMBIENT_OCCLUSION
     float ao = g_tSsao.Sample(g_sSsao, litSceneUv).x;
@@ -861,23 +827,7 @@ PS_OUTPUT main(PS_INPUT input)
         dynamicReflectionBlend * (1.0 - litAlpha) * glossFactor *
         glossSquaredScaled * ambientPair * ao;
 #endif
-#ifdef SSGI
-    float3 ssgiViewNormal = ScreenSpaceGI::DecodeViewNormal(
-        g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
-    float3 aoColor = ScreenSpaceGI::ComposeAmbient(
-        input.position.xy,
-        ssgiViewNormal,
-        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
-        directComponent,
-        ambientComponent,
-        ao
-#ifdef WETNESS_EFFECTS
-        , wetSurface.wetness
-#endif
-        );
-#else
     float3 aoColor = modulated * ao;
-#endif
 #ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
     aoColor = DynamicCubemaps::ApplyFullscreenDebug(
         aoColor, dynamicReflectionContribution);
@@ -993,9 +943,6 @@ PS_OUTPUT main(PS_INPUT input)
 #include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #endif
 
-#ifdef SSGI
-#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
-#endif
 
 #ifndef TILELIGHT
 #define TILELIGHT 0
@@ -1120,9 +1067,6 @@ float3 sampleDirectLighting(float2 coordinate)
 
 float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFactor,
                       float gloss, float3 environment, float3 centerColor
-#ifdef SSGI
-                      , float2 screenPosition, float3 viewNormal
-#endif
 #ifdef WETNESS_EFFECTS
                       , float3 wetEnvironment, float wetFilmWeight, float wetness
 #endif
@@ -1140,24 +1084,6 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
         environment * glossFactor * gloss * directLighting;
 #endif
 #endif
-#ifdef SSGI
-    // this family carries no engine ambient-occlusion texture
-    float3 color = ScreenSpaceGI::ComposeAmbient(
-        screenPosition,
-        viewNormal,
-        float3x3(ambientFrame[12].xyz, ambientFrame[13].xyz, ambientFrame[14].xyz),
-#ifdef WETNESS_EFFECTS
-        reflectionBlend * glossFactor * gloss * directLighting,
-#else
-        environment * glossFactor * gloss * directLighting,
-#endif
-        centerColor,
-        1.0
-#ifdef WETNESS_EFFECTS
-        , wetness
-#endif
-        );
-#else
 #ifdef WETNESS_EFFECTS
     float3 color = reflectionBlend * glossFactor;
 #else
@@ -1165,7 +1091,6 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 #endif
     color *= gloss;
     color = color * directLighting + centerColor;
-#endif
 #if OUTPUTMASK
     float outputMask =
         outputMaskTexture.Sample(
@@ -1197,11 +1122,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #endif
     float3 wetEnvironment = 0.0;
     float wetFilmWeight = 0.0;
-#endif
-#ifdef SSGI
-    // the composition needs the view normal outside the environment branch
-    float3 viewNormal = ScreenSpaceGI::DecodeViewNormal(
-        normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy);
 #endif
     float3 surface = surfaceTexture.SampleLevel(surfaceSampler, coordinate, 0.0).xyw;
 #if !FOGSTACK
@@ -1285,14 +1205,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float3 environment = 0.0;
     if (material.x > 0.0019607844296842813)
     {
-#ifdef SSGI
-        float3 normal = viewNormal;
-#else
         float2 encodedNormal = normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy * 4.0 - 2.0;
         float normalLengthSquared = dot(encodedNormal, encodedNormal);
         float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
         float3 normal = float3(encodedNormal * sqrt(normalFactors.x), -normalFactors.y);
-#endif
 #if !FOGSTACK
 
         float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
@@ -1400,9 +1316,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #if !FOGSTACK
     return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
-#ifdef SSGI
-        , position.xy, viewNormal
-#endif
 #ifdef WETNESS_EFFECTS
         , wetEnvironment, wetFilmWeight, wetSurface.wetness
 #endif
@@ -1417,9 +1330,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         glossFactor *= roughFactor;
         float gloss = material.y * material.y * 50.0;
         float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
-#ifdef SSGI
-            , position.xy, viewNormal
-#endif
 #ifdef WETNESS_EFFECTS
             , wetEnvironment, wetFilmWeight, wetSurface.wetness
 #endif
@@ -1783,7 +1693,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
 #ifdef BSDFCOMPOSITE_PS_2D_ACCUMULATOR
 
-#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS) || defined(WATER_EFFECTS) || defined(SSGI)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
@@ -1797,6 +1707,9 @@ cbuffer PerFrame_CB12 : register(b12)
 #ifdef WETNESS_EFFECTS
 #define WETNESS_COMPOSITE_CONSUMER 1
 #include "WetnessEffects/WetnessEffects.hlsli"
+#endif
+#ifdef SSGI
+#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
 #endif
 
 cbuffer ScreenData : register(b2)
@@ -1895,6 +1808,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #ifdef WETNESS_EFFECTS
     base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.wetness);
 #endif
+#ifdef SSGI
+    float3 ssgiAlbedo = base.xyz;
+#endif
 #if COMPOSITE_MATERIAL_5
     float material = typeTexture.SampleLevel(typeSampler, uv, 0.0).w;
 #endif
@@ -1909,11 +1825,22 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float3 color = base.xyz;
 #endif
     color *= 3.0;
+#ifdef SSGI
+    float3 ssgiSpecular = 0.0;
+#endif
 
 #if COMPOSITE_MATERIAL_5
     if (abs(material * 255.0 - 5.0) >= 0.25)
 #endif
     {
+#ifdef SSGI
+        // Emissive belongs to the diffuse colour, specular stays outside, as upstream.
+        color += secondaryTexture.Sample(secondarySampler, uv).xyz;
+        ssgiSpecular = ambientTexture.SampleLevel(ambientSampler, uv, 0.0).xyz;
+#if TILED_LIGHTS
+        ssgiSpecular += tileAmbientTexture.SampleLevel(tileAmbientSampler, uv, 0.0).xyz;
+#endif
+#else
 #if TILED_LIGHTS
 #if COMPOSITE_MATERIAL_5
         float3 secondary =
@@ -1944,7 +1871,15 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #endif
 #endif
         color += ambient;
+#endif
     }
+#ifdef SSGI
+    color = ScreenSpaceGI::ComposeDiffuse(
+        position.xy,
+        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+        ssgiAlbedo,
+        color) + ssgiSpecular;
+#endif
 
 #if COMPOSITE_MODULATION
     float2 modulationUv = min(uv, screenData[5].xy);
@@ -1962,6 +1897,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #endif
 #ifdef EXPONENTIAL_HEIGHT_FOG
 #include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#endif
+#ifdef SSGI
+#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
 #endif
 
 cbuffer PerFrame_CB12 : register(b12)
@@ -2183,10 +2121,17 @@ PS_OUTPUT main(PS_INPUT input)
 
 #if COMPOSITE_MATERIAL_5
     float3 ambientWeighted = litColor * 3.0;
+#ifdef SSGI
+    float3 ssgiEmissive = 0.0;
+    float3 ssgiSpecular = 0.0;
+#endif
     if (abs(matIdByte - 5.0) >= 0.25)
     {
         float3 materialSecondary =
             g_tSecondaryColor.Sample(g_sSecondaryColor, uv).xyz;
+#ifdef SSGI
+        ssgiEmissive = materialSecondary;
+#endif
 #if COMPOSITE_HAS_LIGHT
         float3 materialAmbient =
             g_tAmbientLight.SampleLevel(g_sAmbientLight, uv, 0).xyz;
@@ -2195,10 +2140,20 @@ PS_OUTPUT main(PS_INPUT input)
             g_tAmbientLightSecondary.SampleLevel(
                 g_sAmbientLightSecondary, uv, 0).xyz;
 #endif
+#ifdef SSGI
+        ssgiSpecular = materialAmbient;
+#endif
         materialSecondary = materialAmbient + materialSecondary;
 #endif
         ambientWeighted = mad(litColor, 3.0, materialSecondary);
     }
+#ifdef SSGI
+    ambientWeighted = ScreenSpaceGI::ComposeDiffuse(
+        input.position.xy,
+        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+        baseColor,
+        mad(litColor, 3.0, ssgiEmissive)) + ssgiSpecular;
+#endif
 #endif
 
 #if COMPOSITE_MATERIAL_EXCLUSION
@@ -2255,11 +2210,21 @@ PS_OUTPUT main(PS_INPUT input)
         ambientLight = ambientLight + tileAmbient;
 #endif
 #if COMPOSITE_HAS_LIGHT && !COMPOSITE_MATERIAL_5
+#ifdef SSGI
+        float3 ssgiEmissive = secondaryColor;
+#endif
         secondaryColor = ambientLight + secondaryColor;
 #endif
 #if COMPOSITE_HAS_LIGHT && !COMPOSITE_MATERIAL_5
         float3 ambientWeighted =
             mad(litColor, 3.0, secondaryColor);
+#ifdef SSGI
+        ambientWeighted = ScreenSpaceGI::ComposeDiffuse(
+            input.position.xy,
+            float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+            baseColor,
+            mad(litColor, 3.0, ssgiEmissive)) + ambientLight;
+#endif
 #if COMPOSITE_MODULATION
         float2 modulationUv = min(uv, ModulationUvClamp.xy);
         ambientWeighted *=
@@ -2351,6 +2316,13 @@ PS_OUTPUT main(PS_INPUT input)
 #if !COMPOSITE_HAS_LIGHT && !COMPOSITE_MATERIAL_5
         float3 ambientWeighted = litColor * 3.0;
         ambientWeighted += secondaryColor;
+#ifdef SSGI
+        ambientWeighted = ScreenSpaceGI::ComposeDiffuse(
+            input.position.xy,
+            float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+            baseColor,
+            ambientWeighted);
+#endif
 #endif
         bool useGraySaturated = (fogMixFactor < FogNearHighColor_and_clamp.w);
         float  gray            = dot(ambientWeighted, float3(1.0/3.0, 1.0/3.0, 1.0/3.0));
@@ -2582,6 +2554,9 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef EXPONENTIAL_HEIGHT_FOG
 #include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#endif
+#ifdef SSGI
+#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
 #endif
 
 #ifndef COMPOSITE_CB12_COUNT
@@ -2873,10 +2848,24 @@ float4 main(PSInput input) : SV_Target0
         tileLightTexture.SampleLevel(tileLightSampler, uv, 0.0).xyz;
     light += tileLight;
 #endif
+#ifdef SSGI
+    float3 ssgiEmissive = ambient;
+#endif
     ambient += light;
 #endif
 
     float3 color = mad(diffuse, base.xyz, ambient);
+#ifdef SSGI
+#if COMPOSITE_MATERIAL_EXCLUSION
+    float3 ssgiEmissive = ambientBase;
+#endif
+    // Emissive belongs to the diffuse colour, specular stays outside, as upstream.
+    color = ScreenSpaceGI::ComposeDiffuse(
+        input.position.xy,
+        float3x3(scene[12].xyz, scene[13].xyz, scene[14].xyz),
+        base.xyz,
+        mad(diffuse, base.xyz, ssgiEmissive)) + light;
+#endif
 #if COMPOSITE_MATERIAL_EXCLUSION
     float gloss = typeData.y * 3.0;
     float roughFactor = min(

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RE/B/BSShader.h"
+#include "RE/B/BSShaderManager.h"
 #include "RE/S/SceneGraph.h"
 
 #include <DirectXMath.h>
@@ -189,6 +190,36 @@ namespace cs::engine
 	{
 		static REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
 		return singleton.get();
+	}
+
+	[[nodiscard]] inline RE::BSShaderManager::State* GetShaderManagerState()
+	{
+		static REL::Relocation<RE::BSShaderManager::State*> singleton{ REL::ID({ 1327069, 2712479, 2712479 }) };
+		return singleton.get();
+	}
+
+	// Directional ambient as world-space rows: dot(row, float4(normal, 1)) is the
+	// gamma-encoded ambient colour the deferred lights decode with pow 2.2.
+	[[nodiscard]] inline bool TryGetDirectionalAmbientRows(std::array<DirectX::XMFLOAT4, 3>& a_rows)
+	{
+		const auto* state = GetShaderManagerState();
+		if (!state) {
+			return false;
+		}
+		// CommonLibF4 keeps the member private; +0xC0 is identical on OG, NG and AE.
+		const auto& transform = *reinterpret_cast<const RE::NiTransform*>(
+			reinterpret_cast<const std::byte*>(state) + 0xC0);
+		const float translate[3]{ transform.translate.x, transform.translate.y, transform.translate.z };
+		// Captured light constants show the engine consumes the rotation's columns.
+		for (std::size_t row = 0; row < 3; ++row) {
+			a_rows[row] = {
+				transform.rotate.entry[0][row],
+				transform.rotate.entry[1][row],
+				transform.rotate.entry[2][row],
+				translate[row]
+			};
+		}
+		return true;
 	}
 
 	[[nodiscard]] inline RE::NiCamera* GetWorldRootCamera()
