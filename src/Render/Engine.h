@@ -178,7 +178,8 @@ namespace cs::engine
 		{
 			static REL::Relocation<std::byte*> state{ REL::ID({ 1327069, 2712479, 2712479 }) };
 			auto* base = state.get();
-			return base ? reinterpret_cast<const RE::NiTransform*>(base + 0xC0) : nullptr;
+			const auto offset = REX::FModule::IsRuntimeOG() ? 0xB8 : 0xC0;
+			return base ? reinterpret_cast<const RE::NiTransform*>(base + offset) : nullptr;
 		}
 	}
 
