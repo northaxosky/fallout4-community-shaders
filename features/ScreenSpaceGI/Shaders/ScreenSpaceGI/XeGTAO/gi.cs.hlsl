@@ -13,7 +13,7 @@
 #include "common.hlsli"
 
 Texture2D<float> srcWorkingDepth : register(t0);
-Texture2D<float3> srcNormal : register(t1);
+Texture2D<float2> srcNormal : register(t1);
 #ifdef GI
 Texture2D<float3> srcRadiance : register(t2);
 #endif
@@ -128,7 +128,16 @@ void CalculateGI(
 				[branch] if (any(sampleScreenPos > 1.0) || any(sampleScreenPos < 0.0)) continue;
 
 				float mipLevel = clamp(log2(s) + logLenOmega - 3.3, 0, 5);
-				float mipLevelRadiance = max(mipLevel, 1);
+				float mipLevelRadiance = mipLevel;
+#if defined(HALF_RES)
+				mipLevel = max(mipLevel, 1);
+				mipLevelRadiance = max(mipLevelRadiance, 2);
+#elif defined(QUARTER_RES)
+				mipLevel = max(mipLevel, 2);
+				mipLevelRadiance = max(mipLevelRadiance, 3);
+#else
+				mipLevelRadiance = max(mipLevelRadiance, 1);
+#endif
 
 				float SZ = srcWorkingDepth.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevel);
 				// First-person decodes to zero depth.
@@ -165,7 +174,7 @@ void CalculateGI(
 				if (checkGI) {
 					float giBoost = 4.0 * Math::PI * (1 + GIDistanceCompensation * smoothstep(0, GICompensationMaxDist, s * EffectRadius));
 
-					float3 normalSample = srcNormal.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevelRadiance);
+					float3 normalSample = GBuffer::DecodeNormal(srcNormal.SampleLevel(samplerPointClamp, sampleUV * OUT_FRAME_SCALE, mipLevelRadiance));
 					if (dot(samplePos, normalSample) > 0)
 						normalSample = -normalSample;
 					float frontBackMult = -dot(normalSample, sampleHorizonVec);
@@ -174,7 +183,7 @@ void CalculateGI(
 					if (frontBackMult > 0.f) {
 						float3 sampleHorizonVecWS = ViewToWorldDirection(sampleHorizonVec, ViewToWorld);
 
-						float3 sampleRadiance = srcRadiance.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevelRadiance).rgb * frontBackMult * giBoost * countbits(validBits) * 0.03125;
+						float3 sampleRadiance = srcRadiance.SampleLevel(samplerPointClamp, sampleUV * OUT_FRAME_SCALE, mipLevelRadiance).rgb * frontBackMult * giBoost * countbits(validBits) * 0.03125;
 						sampleRadiance = max(sampleRadiance, 0);
 						float3 sampleRadianceYCoCg = Color::RGBToYCoCg(sampleRadiance);
 
@@ -220,16 +229,18 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 	if (any(dtid >= uint2(OUT_FRAME_DIM)))
 		return;
 
+	const float2 frameScale = FrameDim * RcpTexDim;
+
 	uint2 pxCoord = dtid;
 	float2 uv = (pxCoord + .5) * RCP_OUT_FRAME_DIM;
 
 	float viewspaceZ = READ_DEPTH(srcWorkingDepth, pxCoord);
-	float3 viewspaceNormal = srcNormal[pxCoord];
+	float3 viewspaceNormal = GBuffer::DecodeNormal(FULLRES_LOAD(srcNormal, pxCoord, uv * OUT_FRAME_SCALE, samplerLinearClamp));
 
 #ifdef GI
 	outPrevGeo[pxCoord] = float3(
 		clamp(viewspaceZ, 0.0, R11_MAX_DEPTH),
-		EncodeWorldNormal(ViewToWorldDirection(viewspaceNormal, ViewToWorld)));
+		GBuffer::EncodeNormal(ViewToWorldDirection(viewspaceNormal, ViewToWorld)));
 #endif
 
 	// Bias toward the camera against depth imprecision.

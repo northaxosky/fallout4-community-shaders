@@ -159,26 +159,22 @@ namespace
 		const std::filesystem::path& a_root)
 	{
 		const auto ssgi = a_root / "ScreenSpaceGI" / "XeGTAO";
-		for (const char* file : {
-				 "decode.cs.hlsl",
-				 "prefilterDepths.cs.hlsl",
-				 "prefilterRadiance.cs.hlsl",
-				 "prefilterNormal.cs.hlsl" }) {
-			a_jobs.push_back({ .path = ssgi / file, .description = file });
-		}
-		// Runtime GI/temporal permutations.
-		for (const char* file : { "radianceDisocc.cs.hlsl", "gi.cs.hlsl", "blur.cs.hlsl" }) {
-			a_jobs.push_back({ .path = ssgi / file, .description = file });
-			a_jobs.push_back({
-				.path = ssgi / file,
-				.defines = { { "GI", "1" } },
-				.description = file
-			});
-			a_jobs.push_back({
-				.path = ssgi / file,
-				.defines = { { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } },
-				.description = file
-			});
+		// Runtime resolution, GI and temporal permutations.
+		for (const char* resolution : { "", "HALF_RES", "QUARTER_RES" }) {
+			const auto withResolution = [&](ShaderDefines a_defines) {
+				if (*resolution)
+					a_defines.push_back({ resolution, "1" });
+				return a_defines;
+			};
+			a_jobs.push_back({ .path = ssgi / "prefilterDepths.cs.hlsl", .defines = withResolution({ { "LINEAR_FILTER", "1" } }), .description = "prefilterDepths.cs.hlsl" });
+			for (const char* file : { "prefilterRadiance.cs.hlsl", "prefilterNormal.cs.hlsl", "gi.cs.hlsl" })
+				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({}), .description = file });
+			for (const char* file : { "radianceDisocc.cs.hlsl", "gi.cs.hlsl", "blur.cs.hlsl" }) {
+				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" } }), .description = file });
+				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } }), .description = file });
+			}
+			if (*resolution)
+				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({}), .description = "upsample.cs.hlsl" });
 		}
 
 		const auto cubemaps = a_root / "DynamicCubemaps";

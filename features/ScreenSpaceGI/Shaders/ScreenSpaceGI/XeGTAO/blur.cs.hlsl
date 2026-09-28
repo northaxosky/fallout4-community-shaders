@@ -7,8 +7,8 @@
 #include "common.hlsli"
 
 Texture2D<float> srcDepth : register(t0);
-// Decoded view normals.
-Texture2D<float3> srcNormal : register(t1);
+// FO4 RT20 normal.
+Texture2D<float2> srcNormalRoughness : register(t1);
 Texture2D<unorm float> srcAccumFrames : register(t2);
 Texture2D<float4> srcIlY : register(t3);
 Texture2D<float2> srcIlCoCg : register(t4);
@@ -92,7 +92,7 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 
 	float depth = READ_DEPTH(srcDepth, dtid);
 	float3 pos = ScreenToViewPosition(screenPos, depth);
-	float3 normal = srcNormal[dtid];
+	float3 normal = GBuffer::DecodeFO4Normal(FULLRES_LOAD(srcNormalRoughness, dtid, uv, samplerLinearClamp).xy);
 
 	const float2 pixelDirRBViewspaceSizeAtCenterZ = depth.xx * NDCToViewMul.xy * RCP_OUT_FRAME_DIM;
 	const float worldRadius = radius * pixelDirRBViewspaceSizeAtCenterZ.x;
@@ -132,7 +132,7 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 		float depthSample = srcDepth.SampleLevel(samplerPointClamp, uvSample * frameScale, RES_MIP);
 		float3 posSample = ScreenToViewPosition(screenPosSample, depthSample);
 
-		float3 normalSample = srcNormal.SampleLevel(samplerPointClamp, uvSample * frameScale, 0);
+		float3 normalSample = GBuffer::DecodeFO4Normal(srcNormalRoughness.SampleLevel(samplerPointClamp, uvSample * frameScale, 0).xy);
 
 		// geometry weight
 		w *= saturate(1 - abs(dot(normal, posSample - pos)) * DistanceNormalisation);

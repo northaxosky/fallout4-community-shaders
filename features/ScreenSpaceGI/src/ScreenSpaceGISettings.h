@@ -9,8 +9,11 @@ namespace cs::features::ssgi_settings
 	{
 		bool  enabled = true;
 		bool  enableGI = true;
+		bool  enableVanillaSSAO = false;
 		int   numSlices = 4;
 		int   numSteps = 8;
+		// 0 full, 1 half, 2 quarter.
+		int   resolutionMode = 1;
 		float minScreenRadius = 0.01f;
 		float aoRadius = 256.0f;
 		float giRadius = 256.0f;
@@ -34,8 +37,10 @@ namespace cs::features::ssgi_settings
 		std::tuple{
 			settings::Field{ "enabled", "Enable screen-space global illumination.", &Settings::enabled },
 			settings::Field{ "enable_gi", "Enable indirect lighting.", &Settings::enableGI },
+			settings::Field{ "enable_vanilla_ssao", "Enable Fallout 4's built-in SSAO.", &Settings::enableVanillaSSAO },
 			settings::Field{ "num_slices", "How many directions the samples take.", &Settings::numSlices, settings::Range{ 1, 64 }, settings::Range{ 1, 10 } },
 			settings::Field{ "num_steps", "How many samples are taken in one direction.", &Settings::numSteps, settings::Range{ 1, 64 }, settings::Range{ 1, 20 } },
+			settings::Field{ "resolution_mode", "Indirect lighting resolution: 0 full, 1 half, 2 quarter.", &Settings::resolutionMode, settings::Range{ 0, 2 } },
 			settings::Field{ "min_screen_radius", "Minimum screen-space effect radius as a proportion of display width.", &Settings::minScreenRadius, {}, settings::Range{ 0.0f, 0.05f } },
 			settings::Field{ "ao_radius", "Ambient occlusion radius in game units.", &Settings::aoRadius, {}, settings::Range{ 10.0f, 1024.0f } },
 			settings::Field{ "gi_radius", "Indirect lighting radius in game units.", &Settings::giRadius, {}, settings::Range{ 10.0f, 1024.0f } },

@@ -33,7 +33,7 @@ void readHistory(
 	inout float4 prev_y, inout float2 prev_co_cg, inout float accum_frames, inout float wsum)
 {
 	// Previous extents under dynamic resolution.
-	const float2 uv = (pixCoord + .5) * RcpPrevFrameDim;
+	const float2 uv = (pixCoord + .5) * RCP_PREV_OUT_FRAME_DIM;
 	const float2 screen_pos = uv;
 	if (any(screen_pos < 0) || any(screen_pos > 1))
 		return;
@@ -63,18 +63,47 @@ void readHistory(
 	}
 }
 
+float3 LoadDiffuseColor(int2 px)
+{
+	float3 diffuseLight = srcDiffuseLightA[px];
+	if (IncludeSourceB())
+		diffuseLight += srcDiffuseLightB[px];
+	return srcAlbedo[px].rgb * diffuseLight * 3.0 + srcEmissive[px].rgb;
+}
+
+// Bilinear over the rebuilt colour, as upstream's linear tap of its diffuse target.
+float3 SampleDiffuseColor(float2 texCoord)
+{
+	const float2 texel = texCoord * TexDim - 0.5;
+	const int2 base = int2(floor(texel));
+	const float2 w = texel - base;
+	const int2 maxCoord = int2(TexDim) - 1;
+	const float3 c00 = LoadDiffuseColor(clamp(base, 0, maxCoord));
+	const float3 c10 = LoadDiffuseColor(clamp(base + int2(1, 0), 0, maxCoord));
+	const float3 c01 = LoadDiffuseColor(clamp(base + int2(0, 1), 0, maxCoord));
+	const float3 c11 = LoadDiffuseColor(clamp(base + int2(1, 1), 0, maxCoord));
+	return lerp(lerp(c00, c10, w.x), lerp(c01, c11, w.x), w.y);
+}
+
+#if defined(HALF_RES) || defined(QUARTER_RES)
+#	define LOAD_DIFFUSE_COLOR(px, texCoord) SampleDiffuseColor(texCoord)
+#else
+#	define LOAD_DIFFUSE_COLOR(px, texCoord) LoadDiffuseColor(px)
+#endif
+
 [numthreads(8, 8, 1)]
 void main(const uint2 pixCoord : SV_DispatchThreadID)
 {
 	if (any(pixCoord >= uint2(OUT_FRAME_DIM)))
 		return;
+	const float2 frameScale = FrameDim * RcpTexDim;
 
 	const float2 uv = (pixCoord + .5) * RCP_OUT_FRAME_DIM;
 	const float2 screen_pos = uv;
 
 	float2 prev_screen_pos = screen_pos;
 #ifdef REPROJECTION
-	prev_screen_pos += srcMotionVec[pixCoord];
+	prev_screen_pos += FULLRES_LOAD(srcMotionVec, pixCoord, uv * frameScale, samplerLinearClamp).xy;
 #endif
 	float2 prev_uv = prev_screen_pos;
 
@@ -98,7 +127,7 @@ void main(const uint2 pixCoord : SV_DispatchThreadID)
 		float3 curr_pos = ScreenToViewPosition(screen_pos, curr_depth);
 		curr_pos = ViewToWorldPosition(curr_pos, ViewToWorld, CameraOrigin.xyz);
 
-		float2 prev_px_coord = prev_uv * PrevFrameDim;
+		float2 prev_px_coord = prev_uv * PREV_OUT_FRAME_DIM;
 		int2 prev_px_lu = floor(prev_px_coord - 0.5);
 		float2 bilinear_weights = prev_px_coord - 0.5 - prev_px_lu;
 
@@ -124,10 +153,7 @@ void main(const uint2 pixCoord : SV_DispatchThreadID)
 	}
 #endif
 
-	float3 diffuseLight = srcDiffuseLightA[pixCoord];
-	if (IncludeSourceB())
-		diffuseLight += srcDiffuseLightB[pixCoord];
-	float3 diffuseColor = srcAlbedo[pixCoord].rgb * diffuseLight * 3.0 + srcEmissive[pixCoord].rgb;
+	float3 diffuseColor = LOAD_DIFFUSE_COLOR(pixCoord, uv * frameScale);
 
 	float3 radiance = Color::RadianceToLinear(diffuseColor * GIStrength);
 	radiance = filterNaN(radiance);

@@ -2,6 +2,8 @@
 
 #include "RE/B/BSShader.h"
 #include "RE/B/BSShaderManager.h"
+#include "RE/I/ImageSpaceEffect.h"
+#include "RE/I/ImageSpaceManager.h"
 #include "RE/S/SceneGraph.h"
 
 #include <DirectXMath.h>
@@ -196,6 +198,39 @@ namespace cs::engine
 	{
 		static REL::Relocation<RE::BSShaderManager::State*> singleton{ REL::ID({ 1327069, 2712479, 2712479 }) };
 		return singleton.get();
+	}
+
+	[[nodiscard]] inline RE::ImageSpaceEffect* GetImageSpaceEffect(
+		RE::ImageSpaceManager::ImageSpaceEffectEnum a_effect)
+	{
+		auto* manager = RE::ImageSpaceManager::GetSingleton();
+		using Index = decltype(manager->effectList)::size_type;
+		const auto index = static_cast<Index>(a_effect);
+		return manager && index < manager->effectList.size() ? manager->effectList[index] : nullptr;
+	}
+
+	// SAO_CS is the only rendered vanilla AO; the composite applies it while `applied` is set,
+	// whatever IsActive reports. Same layout on OG/NG/AE (sizeof 0x122).
+	struct ScalableAOComputeState
+	{
+		bool* active;       // +0x08
+		const bool* base;   // +0x120, constructor's constant 1
+		bool* applied;      // +0x121, bSAOEnable snapshot from InitEffects
+	};
+
+	[[nodiscard]] inline std::optional<ScalableAOComputeState> GetScalableAOComputeState()
+	{
+		auto* effect = GetImageSpaceEffect(
+			RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_SAO_CS);
+		if (!effect) {
+			return std::nullopt;
+		}
+		auto* bytes = reinterpret_cast<std::byte*>(effect);
+		return ScalableAOComputeState{
+			.active = &effect->isActive,
+			.base = reinterpret_cast<const bool*>(bytes + 0x120),
+			.applied = reinterpret_cast<bool*>(bytes + 0x121)
+		};
 	}
 
 	// World-space ambient rows the lights decode with pow 2.2.

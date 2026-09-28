@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <winrt/base.h>
@@ -95,8 +96,10 @@ namespace cs::features
 			float         PrevViewToWorld[12];
 			float         CameraOrigin[4];
 			float         PrevCameraOrigin[4];
+			float         InvProjZ[4];
+			float         InvProjW[4];
 		};
-		static_assert(sizeof(XeGTAOCB) == 320);
+		static_assert(sizeof(XeGTAOCB) == 352);
 		static_assert(offsetof(XeGTAOCB, PrevFrameDim) == 64);
 		static_assert(offsetof(XeGTAOCB, FrameIndex) == 80);
 		static_assert(offsetof(XeGTAOCB, DepthDisocclusion) == 136);
@@ -108,15 +111,21 @@ namespace cs::features
 		static_assert(offsetof(XeGTAOCB, PrevViewToWorld) == 240);
 		static_assert(offsetof(XeGTAOCB, CameraOrigin) == 288);
 		static_assert(offsetof(XeGTAOCB, PrevCameraOrigin) == 304);
+		static_assert(offsetof(XeGTAOCB, InvProjZ) == 320);
 
-		// Must match Shaders/XeGTAO/decode.cs.hlsl.
-		struct alignas(16) DecodeCB
+		// Variants compiled for one resolution mode; pairs index the temporal denoiser.
+		struct ResolutionShaders
 		{
-			DirectX::XMFLOAT4X4 InvProj;  // Row-major and untransposed.
-			float               RcpFrameDim[2];
-			float               FrameDim[2];
+			winrt::com_ptr<ID3D11ComputeShader> prefilterDepth;
+			winrt::com_ptr<ID3D11ComputeShader> prefilterRadiance;
+			winrt::com_ptr<ID3D11ComputeShader> prefilterNormal;
+			winrt::com_ptr<ID3D11ComputeShader> ao;
+			std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> radianceDisocc;
+			std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> gi;
+			std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> blur;
+			winrt::com_ptr<ID3D11ComputeShader> upsample;
 		};
-		static_assert(sizeof(DecodeCB) % 16 == 0);
+		static constexpr std::size_t kResolutionModes = 3;
 
 		// Rotation rows and projection terms retained for the next temporal frame.
 		struct CameraTransform
@@ -152,11 +161,13 @@ namespace cs::features
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(ssgi_settings::kSchema); }
 		void OnPostDeferredLights();
+		void ApplyVanillaSSAO();
 		void SaveCompositionBindings();
 		void RestoreCompositionBindings();
 		void BindComposition(ID3D11DeviceContext* a_context);
 		bool IsGeneratorReady() const noexcept;
 		bool IsTemporalReady() const noexcept;
+		const ResolutionShaders& ActiveShaders() const noexcept;
 		bool EnsureResources();
 		void ClearOcclusionOutputs(ID3D11DeviceContext* a_context);
 		void ClearBounceOutputs(ID3D11DeviceContext* a_context);
@@ -193,6 +204,7 @@ namespace cs::features
 		std::atomic_bool _tiledBAvailable{ false };
 		std::atomic_bool _debugPreviewEnabled{ false };
 		std::atomic_bool _queuedHistoryReset{ false };
+		std::atomic_bool _vanillaSSAOAppliedLastFrame{ false };
 		std::atomic_uint32_t _compositionBindsLastFrame{ 0 };
 		std::atomic_uint32_t _temporalDispatchesLastFrame{ 0 };
 		std::atomic_uint32_t _radianceSourceCount{ 0 };
@@ -218,6 +230,10 @@ namespace cs::features
 		bool _bounceOutputsDirty = false;
 		bool _lastEnabled = false;
 		bool _lastTemporalEnabled = false;
+		int _lastResolutionMode = 0;
+		bool _upsampledLastFrame = false;
+		// The engine's startup bSAOEnable snapshot, restored when vanilla SSAO is re-enabled.
+		std::optional<bool> _vanillaSSAOSnapshot;
 		bool _lastCallbackFrameValid = false;
 		bool _prevCameraValid = false;
 		std::uint8_t _lastSourceMode = 0;
@@ -230,12 +246,10 @@ namespace cs::features
 		cs::render::PixelShaderResourceSnapshot<kCompositionPSSlotCount>
 			_compositionBindingSnapshot;
 
-		std::unique_ptr<cs::buffer::Texture2D> _linearDepthTex;
 		std::unique_ptr<cs::buffer::Texture2D> _workingDepthTex;
 		std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> _workingDepthMipUAVs;
-		std::unique_ptr<cs::buffer::Texture2D> _viewNormalTex;
-		std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> _viewNormalMipUAVs;
-		winrt::com_ptr<ID3D11ShaderResourceView> _viewNormalMip0SRV;
+		std::unique_ptr<cs::buffer::Texture2D> _normalTex;
+		std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> _normalMipUAVs;
 		std::unique_ptr<cs::buffer::Texture2D> _radianceTempTex;
 		std::unique_ptr<cs::buffer::Texture2D> _radianceTex;
 		std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> _radianceMipUAVs;
@@ -247,20 +261,16 @@ namespace cs::features
 		std::array<std::unique_ptr<cs::buffer::Texture2D>, 2> _accumTex;
 		std::array<std::unique_ptr<cs::buffer::Texture2D>, 2> _prevGeoTex;
 		std::unique_ptr<cs::buffer::Texture2D> _accumBlurTex;
+		// Full-resolution upsample targets; history stays at the internal resolution.
+		std::unique_ptr<cs::buffer::Texture2D> _aoUpsampledTex;
+		std::unique_ptr<cs::buffer::Texture2D> _bounceSHUpsampledTex;
+		std::unique_ptr<cs::buffer::Texture2D> _bounceCoCgUpsampledTex;
 		winrt::com_ptr<ID3D11Texture2D> _noiseTex;
 		winrt::com_ptr<ID3D11ShaderResourceView> _noiseSRV;
 		winrt::com_ptr<ID3D11SamplerState> _pointClampSampler;
+		winrt::com_ptr<ID3D11SamplerState> _linearClampSampler;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _xegtaoCB;
-		std::unique_ptr<cs::buffer::ConstantBuffer> _decodeCB;
-		winrt::com_ptr<ID3D11ComputeShader> _decodeCS;
-		winrt::com_ptr<ID3D11ComputeShader> _prefilterCS;
-		winrt::com_ptr<ID3D11ComputeShader> _prefilterRadianceCS;
-		winrt::com_ptr<ID3D11ComputeShader> _prefilterNormalCS;
-		// Indexed by temporal denoiser.
-		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _radianceDisoccCS;
-		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _giCS;
-		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _blurCS;
-		winrt::com_ptr<ID3D11ComputeShader> _aoCS;
+		std::array<ResolutionShaders, kResolutionModes> _shaders;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;

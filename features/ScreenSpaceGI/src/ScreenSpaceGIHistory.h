@@ -40,7 +40,7 @@ namespace cs::features::ssgi
 		kResize,
 		kInputGenerationChange,
 		kFeatureReEnabled,
-		kTemporalSettingChanged,
+		kShaderVariantChanged,
 		kLoadingScreenClosed,
 		kMissingInputs,
 		kMissingMotion,
@@ -63,8 +63,8 @@ namespace cs::features::ssgi
 			return "input_generation_change";
 		case HistoryResetReason::kFeatureReEnabled:
 			return "feature_re_enabled";
-		case HistoryResetReason::kTemporalSettingChanged:
-			return "temporal_setting_changed";
+		case HistoryResetReason::kShaderVariantChanged:
+			return "shader_variant_changed";
 		case HistoryResetReason::kLoadingScreenClosed:
 			return "loading_screen_closed";
 		case HistoryResetReason::kMissingInputs:
