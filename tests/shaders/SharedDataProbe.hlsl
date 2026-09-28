@@ -18,6 +18,8 @@ float4 main() : SV_Target
 	value += SharedData::Timer + SharedData::DeltaTime;
 	value += SharedData::FrameCount;
 	value += BoolValue(SharedData::InInterior);
+	value += dot(SharedData::GetAmbient(float3(0.0, 0.0, 1.0)), 1.0);
+	value += dot(SharedData::DirLightColor, 1.0);
 
 	value += BoolValue(
 		SharedData::screenSpaceShadowsSettings.EnableScreenSpaceShadows);

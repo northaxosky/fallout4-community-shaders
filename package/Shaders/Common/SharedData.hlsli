@@ -26,6 +26,10 @@ namespace SharedData
 		float DeltaTime;
 		uint FrameCount;
 		bool InInterior;
+		// World-space directional ambient rows; evaluate with GetAmbient
+		float4 DirectionalAmbient[3];
+		// rgb: linear sun radiance of the deferred sun pass, w: 1 when sourced
+		float4 DirLightColor;
 	};
 
 	struct ScreenSpaceShadowsSettings
@@ -126,6 +130,17 @@ namespace SharedData
 	{
 		float2 adjusted = max(0.0, uv * DynamicResolution.xy);
 		return ClampDynamicResolutionAdjustedScreenPosition(adjusted, uv);
+	}
+
+	// Linear directional ambient for a world-space direction, as the deferred ambient pass evaluates it.
+	float3 GetAmbient(float3 direction)
+	{
+		float4 directionH = float4(direction, 1.0);
+		float3 encoded = float3(
+			dot(DirectionalAmbient[0], directionH),
+			dot(DirectionalAmbient[1], directionH),
+			dot(DirectionalAmbient[2], directionH));
+		return pow(max(encoded, 0.0), 2.2);
 	}
 
 }

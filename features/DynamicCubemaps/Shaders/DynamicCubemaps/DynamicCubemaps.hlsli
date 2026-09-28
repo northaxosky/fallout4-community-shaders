@@ -1,7 +1,7 @@
 #ifndef DYNAMIC_CUBEMAPS_HLSLI
 #define DYNAMIC_CUBEMAPS_HLSLI
 
-#include "Common/SharedData.hlsli"
+#include "../Common/SharedData.hlsli"
 
 namespace DynamicCubemaps
 {

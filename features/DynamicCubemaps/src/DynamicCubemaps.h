@@ -99,8 +99,6 @@ namespace cs::features
 			CubeTexture color;
 			CubeTexture raw;
 			CubeTexture position;
-			DirectX::XMFLOAT3 previousCameraOrigin{};
-			bool reset = true;
 		};
 
 		struct CompressedCube
@@ -111,13 +109,22 @@ namespace cs::features
 
 		struct alignas(16) UpdateCubemapCB
 		{
+			DirectX::XMFLOAT3 CameraPreviousPosAdjust;
+			std::uint32_t CaptureIndex = 0;
+			float CaptureDeltaTime = 0.0f;
+			std::uint32_t ResetCapture = 0;
+			std::uint32_t pad0[2]{};
+			DirectX::XMFLOAT4 CameraPosAdjust;
 			DirectX::XMFLOAT4 ViewToWorld[3];
-			DirectX::XMFLOAT4 CameraOrigin;
-			DirectX::XMFLOAT4 CameraPreviousOrigin;
-			DirectX::XMFLOAT4 NDCToViewMul;
-			DirectX::XMFLOAT4 NDCToViewAdd;
 			DirectX::XMFLOAT4X4 InvProj;
-			DirectX::XMFLOAT4 ActiveRatioAndExtent;
+		};
+
+		struct alignas(16) CaptureLightingState
+		{
+			float ReferenceLuminance = 0.0f;
+			std::uint32_t PendingResetMask = 0;
+			std::uint32_t Reset = 0;
+			std::uint32_t Initialized = 0;
 		};
 
 		struct alignas(16) SpecularMapFilterSettingsCB
@@ -152,11 +159,11 @@ namespace cs::features
 		void SaveBindings();
 		void RestoreBindings();
 		void BindCubemaps(ID3D11DeviceContext* a_context);
+		void ResolveReflectionMode();
 		void UpdateCubemap();
 		void UpdateCubemapCapture(bool a_reflections);
 		void Inference(bool a_reflections);
 		void Irradiance(
-			bool a_reflections,
 			std::uint32_t a_startLevel,
 			std::uint32_t a_endLevel,
 			bool a_doSetup);
@@ -165,20 +172,22 @@ namespace cs::features
 		FeatureDebugTexture GetCubemapDebugTexture() const;
 		bool CreateResources(ID3D11Device* a_device);
 		void ResetCapture();
-		ID3D11ShaderResourceView* ResolveReflectionFallback() const noexcept;
 
 		CaptureStream& Stream(bool a_reflections);
-		CubeTexture& Filtered(bool a_reflections);
+		ID3D11ComputeShader* UpdateShader(bool a_reflections) const;
+		ID3D11ComputeShader* InferShader(bool a_reflections) const;
 
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _enabled{ true };
 		std::atomic_bool _queuedReset{ false };
-		std::atomic_bool _usedEngineReflectionFallback{ false };
-		std::atomic_bool _reflectionFallbackResolved{ false };
+		std::atomic_bool _activeReflections{ false };
+		std::atomic_bool _fakeReflections{ false };
+		std::atomic_bool _engineReflectionCube{ false };
 		std::atomic_bool _cameraReadyLastFrame{ false };
 		std::atomic_bool _previewPopulated{ false };
+		std::array<std::atomic_bool, 2> _cubemapValid{};
 		std::atomic_uint32_t _captureSourceWidth{ 0 };
 		std::atomic_uint32_t _captureSourceHeight{ 0 };
 		std::atomic_uint32_t _captureSourceFormat{ 0 };
@@ -194,17 +203,19 @@ namespace cs::features
 		CaptureStream _baseStream;
 		CaptureStream _reflectionsStream;
 		CubeTexture _inferred;
+		CubeTexture _filtered;
 		CubeTexture _environment;
 		CubeTexture _reflections;
 		CompressedCube _environmentBC6H;
 		CompressedCube _reflectionsBC6H;
-		winrt::com_ptr<ID3D11ShaderResourceView> _environmentArraySRV;
-		winrt::com_ptr<ID3D11ShaderResourceView> _reflectionsArraySRV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _filteredArraySRV;
 		winrt::com_ptr<ID3D11Texture2D> _bc6hScratchTexture;
 		std::array<
 			winrt::com_ptr<ID3D11UnorderedAccessView>,
 			kBc6hMipLevels>
 			_bc6hScratchUAVs;
+		winrt::com_ptr<ID3D11Buffer> _lightingStateBuffer;
+		winrt::com_ptr<ID3D11UnorderedAccessView> _lightingStateUAV;
 		winrt::com_ptr<ID3D11Texture2D> _previewTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView> _previewSRV;
 		winrt::com_ptr<ID3D11UnorderedAccessView> _previewUAV;
@@ -215,10 +226,13 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Buffer> _updateBuffer;
 		winrt::com_ptr<ID3D11Buffer> _filterBuffer;
 		winrt::com_ptr<ID3D11Buffer> _bc6hBuffer;
+		winrt::com_ptr<ID3D11ComputeShader> _detectLightingCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateReflectionsCS;
+		winrt::com_ptr<ID3D11ComputeShader> _updateFakeReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferReflectionsCS;
+		winrt::com_ptr<ID3D11ComputeShader> _inferFakeReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _irradianceCS;
 		winrt::com_ptr<ID3D11ComputeShader> _bc6hEncodeCS;
 		winrt::com_ptr<ID3D11ComputeShader> _previewCS;
@@ -229,6 +243,9 @@ namespace cs::features
 		std::atomic<NextTask> _nextTask{
 			NextTask::kCaptureInferAndIrradianceA
 		};
+		std::array<bool, 2> _resetCapture{ true, true };
+		std::array<DirectX::XMFLOAT3, 2> _cameraPreviousPosAdjust{};
+		std::array<double, 2> _previousCaptureTime{};
 		float _previousHoursPassed = 0.0f;
 		std::uint32_t _lastCallbackFrame = 0;
 		bool _lastCallbackFrameValid = false;

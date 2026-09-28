@@ -171,6 +171,53 @@ namespace cs::engine
 		}
 	}
 
+	namespace native
+	{
+		// CommonLibF4 declares BSShaderManager::State members private and exposes no singleton.
+		[[nodiscard]] inline const RE::NiTransform* DirectionalAmbientTransform() noexcept
+		{
+			static REL::Relocation<std::byte*> state{ REL::ID({ 1327069, 2712479, 2712479 }) };
+			auto* base = state.get();
+			return base ? reinterpret_cast<const RE::NiTransform*>(base + 0xC0) : nullptr;
+		}
+	}
+
+	// World-space directional ambient: channel c is pow(max(0, dot(rows[c], float4(N, 1))), 2.2).
+	[[nodiscard]] inline bool TryGetDirectionalAmbientRows(DirectX::XMFLOAT4 (&a_rows)[3]) noexcept
+	{
+		const auto* transform = native::DirectionalAmbientTransform();
+		if (!transform)
+			return false;
+		// BSDFLightShader::SetupGeometry scales rotation by scale, appends (translate, 1), and evaluates (N, 1) * M.
+		const auto& rotate = transform->rotate.entry;
+		const float scale = transform->scale;
+		const float translate[3]{ transform->translate.x, transform->translate.y, transform->translate.z };
+		const auto column = [&](const RE::NiPoint4& a_row, std::size_t a_channel) {
+			return (a_channel == 0 ? a_row.x : a_channel == 1 ? a_row.y : a_row.z) * scale;
+		};
+		for (std::size_t channel = 0; channel < 3; ++channel) {
+			a_rows[channel] = {
+				column(rotate[0], channel),
+				column(rotate[1], channel),
+				column(rotate[2], channel),
+				translate[channel]
+			};
+		}
+		return std::isfinite(scale);
+	}
+
+	// Engine reflection cube (logical cube 0); rendered only when bUseCubeMapReflections:Display is set.
+	[[nodiscard]] inline ID3D11ShaderResourceView* GetActiveReflectionCubeSRV() noexcept
+	{
+		const auto* setting = RE::GetINISetting("bUseCubeMapReflections:Display");
+		if (!setting || !setting->GetBinary())
+			return nullptr;
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		return rendererData ?
+			reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->cubeMapRenderTargets[0].srView) :
+			nullptr;
+	}
+
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
 	{
 		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };

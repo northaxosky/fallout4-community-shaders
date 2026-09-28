@@ -171,13 +171,27 @@ namespace
 		}
 
 		const auto cubemaps = a_root / "DynamicCubemaps";
+		const ShaderDefines substrate{ { "FO4CS_SUBSTRATE", "1" } };
 		for (const char* file : {
+				 "DetectCaptureLightingCS.hlsl",
 				 "UpdateCubemapCS.hlsl",
-				 "InferCubemapCS.hlsl",
+				 "InferCubemapCS.hlsl" }) {
+			for (const char* variant : { "", "REFLECTIONS", "FAKEREFLECTIONS" }) {
+				auto defines = substrate;
+				if (*variant)
+					defines.emplace_back(variant, "");
+				a_jobs.push_back({
+					.path = cubemaps / file,
+					.defines = std::move(defines),
+					.description = file
+				});
+			}
+		}
+		for (const char* file : {
 				 "SpecularIrradianceCS.hlsl",
 				 "BC6HEncodeCS.hlsl",
 				 "CubemapPreviewCS.hlsl" }) {
-			a_jobs.push_back({ .path = cubemaps / file, .description = file });
+			a_jobs.push_back({ .path = cubemaps / file, .defines = substrate, .description = file });
 		}
 
 		const auto terrain = a_root / "TerrainShadows";
