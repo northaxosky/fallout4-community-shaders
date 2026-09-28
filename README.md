@@ -114,7 +114,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 
 ## Compatibility notes
 
-- ENB and HDR are unsupported.
+- ENB is unsupported.
+- Native HDR mods (RenoDX, Special K HDR) are unsupported with Upscaling or Frame Generation and untested otherwise.
 - Upscaling requires a DX12-capable GPU. DLSS requires compatible NVIDIA RTX hardware.
 - FSR 4 requires compatible AMD Radeon hardware.
 - Frame generation requires borderless windowed mode.
