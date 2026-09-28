@@ -77,5 +77,5 @@ namespace cs::engine
 	std::optional<ShaderVariantKeyView> ResolvePixelShaderVariant(
 		std::string_view a_subclass,
 		std::uint32_t a_techniqueBits,
-		std::optional<bool> a_tileLightingEnabled) noexcept;
+		bool a_tileLightingEnabled) noexcept;
 }

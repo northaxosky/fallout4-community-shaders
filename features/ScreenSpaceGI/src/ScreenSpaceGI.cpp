@@ -890,12 +890,10 @@ namespace cs::features
 				"SSGI bounce unavailable: the radiance source must expose a full-resolution R11G11B10_FLOAT SRV.");
 		}
 
-		// The B descriptor is only ever retrieved while the tiled predicate is known and true.
-		const auto tiledLighting = cs::engine::QueryTiledLightingEnabled();
-		_tiledPredicateAvailable.store(tiledLighting.has_value(), std::memory_order_relaxed);
-		_tiledLightingActive.store(tiledLighting.value_or(false), std::memory_order_relaxed);
+		const bool tiledLighting = cs::engine::QueryTiledLightingEnabled();
+		_tiledLightingActive.store(tiledLighting, std::memory_order_relaxed);
 		ID3D11ShaderResourceView* radianceBSRV = nullptr;
-		if (radianceAvailable && tiledLighting.has_value() && *tiledLighting) {
+		if (radianceAvailable && tiledLighting) {
 			auto* candidate = cs::engine::GetRenderTargetSRV(kRadianceSourceB);
 			D3D11_TEXTURE2D_DESC candidateDesc{};
 			if (IsFullResolutionHDR(candidate, radianceDesc.Width, radianceDesc.Height, candidateDesc)) {
@@ -952,8 +950,7 @@ namespace cs::features
 			.sourceB = ResourceIdentity(radianceBSRV)
 		};
 		const std::uint8_t sourceMode =
-			(tiledLighting.has_value() ? 1u : 0u) |
-			(tiledLighting.value_or(false) ? 2u : 0u) |
+			(tiledLighting ? 2u : 0u) |
 			(includeSourceB ? 4u : 0u);
 		const bool sourceModeChanged = sourceMode != _lastSourceMode;
 		if (sourceModeChanged || !(inputs == _lastInputs)) {
@@ -1427,7 +1424,6 @@ namespace cs::features
 				"reset_count",
 				static_cast<std::int64_t>(_historyResetCount.load(std::memory_order_relaxed)))
 			.Field("last_reset_reason", std::string_view(ssgi::HistoryResetReasonName(resetReason)))
-			.Field("tiled_predicate_available", _tiledPredicateAvailable.load(std::memory_order_relaxed))
 			.Field("tiled_lighting_active", _tiledLightingActive.load(std::memory_order_relaxed))
 			.Field("tiled_b_available", _tiledBAvailable.load(std::memory_order_relaxed))
 			.Field(

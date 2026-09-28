@@ -22,49 +22,15 @@ namespace cs::engine
 	{
 		namespace detail
 		{
-			enum class ShaderRuntimeLayout
-			{
-				kOriginal,
-				kModern
-			};
-
-			[[nodiscard]] inline ShaderRuntimeLayout CurrentShaderRuntimeLayout()
-				noexcept
-			{
-				return REX::FModule::IsRuntimeOG() ?
-					ShaderRuntimeLayout::kOriginal :
-					ShaderRuntimeLayout::kModern;
-			}
-
-			template <class T>
-			[[nodiscard]] inline T& RuntimeMember(
-				RE::BSShader* a_shader,
-				std::ptrdiff_t a_ogOffset,
-				std::ptrdiff_t a_modernOffset,
-				ShaderRuntimeLayout a_layout =
-					CurrentShaderRuntimeLayout()) noexcept
-			{
-				const auto offset =
-					a_layout == ShaderRuntimeLayout::kOriginal ?
-					a_ogOffset :
-					a_modernOffset;
-				return *reinterpret_cast<T*>(
-					reinterpret_cast<std::byte*>(a_shader) + offset);
-			}
-
 			template <class T>
 			[[nodiscard]] inline const T& RuntimeMember(
 				const RE::BSShader* a_shader,
 				std::ptrdiff_t a_ogOffset,
-				std::ptrdiff_t a_modernOffset,
-				ShaderRuntimeLayout a_layout =
-					CurrentShaderRuntimeLayout()) noexcept
+				std::ptrdiff_t a_modernOffset) noexcept
 			{
-				return RuntimeMember<T>(
-					const_cast<RE::BSShader*>(a_shader),
-					a_ogOffset,
-					a_modernOffset,
-					a_layout);
+				const auto offset = REX::FModule::IsRuntimeOG() ? a_ogOffset : a_modernOffset;
+				return *reinterpret_cast<const T*>(
+					reinterpret_cast<const std::byte*>(a_shader) + offset);
 			}
 		}
 
@@ -106,7 +72,7 @@ namespace cs::engine
 				static_cast<const std::byte*>(a_owner) + 0x20);
 		}
 
-		// AE 1.11.240 REL 2318873 gates map publication on this byte.
+		// Shader loaders gate map publication on this byte.
 		[[nodiscard]] inline bool ShaderArchiveStreamHasPayload(
 			const RE::BSIStream* a_stream) noexcept
 		{
@@ -133,41 +99,27 @@ namespace cs::engine
 		[[nodiscard]] inline std::int32_t ShaderType(
 			const RE::BSShader* a_shader) noexcept
 		{
-			return detail::RuntimeMember<std::int32_t>(
-				a_shader,
-				0x18,
-				0x18,
-				detail::ShaderRuntimeLayout::kOriginal);
+			return *reinterpret_cast<const std::int32_t*>(
+				reinterpret_cast<const std::byte*>(a_shader) + 0x18);
 		}
 
+		// Class name and source prefix follow the BSShader base.
 		[[nodiscard]] inline const char* ImageSpaceShaderPrefix(
 			const RE::BSShader* a_shader) noexcept
 		{
-			if (!a_shader
-				|| !REX::FModule::IsRuntimeAE()
-				|| ShaderType(a_shader) != 0xC) {
+			if (!a_shader || ShaderType(a_shader) != 0xC) {
 				return nullptr;
 			}
-			return detail::RuntimeMember<const char*>(
-				a_shader,
-				0x248,
-				0x248,
-				detail::ShaderRuntimeLayout::kModern);
+			return detail::RuntimeMember<const char*>(a_shader, 0x1D0, 0x248);
 		}
 
 		[[nodiscard]] inline const char* ImageSpaceShaderClassName(
 			const RE::BSShader* a_shader) noexcept
 		{
-			if (!a_shader
-				|| !REX::FModule::IsRuntimeAE()
-				|| ShaderType(a_shader) != 0xC) {
+			if (!a_shader || ShaderType(a_shader) != 0xC) {
 				return nullptr;
 			}
-			return detail::RuntimeMember<const char*>(
-				a_shader,
-				0x240,
-				0x240,
-				detail::ShaderRuntimeLayout::kModern);
+			return detail::RuntimeMember<const char*>(a_shader, 0x1C8, 0x240);
 		}
 
 		struct ImageSpaceMacroSet
@@ -176,151 +128,61 @@ namespace cs::engine
 			std::size_t count = 0;
 		};
 
-		namespace detail
-		{
-			template <bool RequireAeRuntime>
-			[[nodiscard]] inline std::optional<ImageSpaceMacroSet>
-				GetImageSpaceMacrosImpl(RE::BSShader* a_shader) noexcept
-			{
-				if (!a_shader || ShaderType(a_shader) != 0xC)
-					return std::nullopt;
-				if constexpr (RequireAeRuntime) {
-					if (!REX::FModule::IsRuntimeAE())
-						return std::nullopt;
-				}
-
-				struct NativeMacro
-				{
-					const char* name = nullptr;
-					const char* value = nullptr;
-				};
-				using GetMacros = NativeMacro* (*)(
-					RE::BSShader*, NativeMacro*);
-				const auto vtable =
-					*reinterpret_cast<std::uintptr_t**>(a_shader);
-				if (!vtable || !vtable[17])
-					return std::nullopt;
-
-				std::array<NativeMacro, 8> nativeMacros{};
-				const auto emitter =
-					reinterpret_cast<GetMacros>(vtable[17]);
-				std::ignore = emitter(a_shader, nativeMacros.data());
-
-				ImageSpaceMacroSet result;
-				for (const auto& macro : nativeMacros) {
-					if (!macro.name) {
-						if (macro.value)
-							return std::nullopt;
-						return result;
-					}
-					if (!macro.value
-						|| result.count >= result.values.size()) {
-						return std::nullopt;
-					}
-					result.values[result.count++] = {
-						macro.name, macro.value
-					};
-				}
-				return std::nullopt;
-			}
-		}
-
+		// Vtable slot 17 emits null-terminated macro pairs.
 		[[nodiscard]] inline std::optional<ImageSpaceMacroSet>
 			GetImageSpaceMacros(RE::BSShader* a_shader) noexcept
 		{
-			return detail::GetImageSpaceMacrosImpl<true>(a_shader);
-		}
+			if (!a_shader || ShaderType(a_shader) != 0xC)
+				return std::nullopt;
 
-#ifdef FO4CS_SHADER_INJECTION_TESTING
-		[[nodiscard]] inline const VertexShaderMap&
-			VertexShadersForTesting(
-				const RE::BSShader* a_shader,
-				bool a_modern) noexcept
-		{
-			return detail::RuntimeMember<VertexShaderMap>(
-				a_shader,
-				0x20,
-				0x98,
-				a_modern ?
-					detail::ShaderRuntimeLayout::kModern :
-					detail::ShaderRuntimeLayout::kOriginal);
-		}
+			struct NativeMacro
+			{
+				const char* name = nullptr;
+				const char* value = nullptr;
+			};
+			using GetMacros = NativeMacro* (*)(
+				RE::BSShader*, NativeMacro*);
+			const auto vtable =
+				*reinterpret_cast<std::uintptr_t**>(a_shader);
+			if (!vtable || !vtable[17])
+				return std::nullopt;
 
-		[[nodiscard]] inline const PixelShaderMap&
-			PixelShadersForTesting(
-				const RE::BSShader* a_shader,
-				bool a_modern) noexcept
-		{
-			return detail::RuntimeMember<PixelShaderMap>(
-				a_shader,
-				0xB0,
-				0x128,
-				a_modern ?
-					detail::ShaderRuntimeLayout::kModern :
-					detail::ShaderRuntimeLayout::kOriginal);
-		}
+			std::array<NativeMacro, 8> nativeMacros{};
+			const auto emitter =
+				reinterpret_cast<GetMacros>(vtable[17]);
+			std::ignore = emitter(a_shader, nativeMacros.data());
 
-		[[nodiscard]] inline const ComputeShaderMap&
-			ComputeShadersForTesting(
-				const RE::BSShader* a_shader,
-				bool a_modern) noexcept
-		{
-			return detail::RuntimeMember<ComputeShaderMap>(
-				a_shader,
-				0xE0,
-				0x158,
-				a_modern ?
-					detail::ShaderRuntimeLayout::kModern :
-					detail::ShaderRuntimeLayout::kOriginal);
+			ImageSpaceMacroSet result;
+			for (const auto& macro : nativeMacros) {
+				if (!macro.name) {
+					if (macro.value)
+						return std::nullopt;
+					return result;
+				}
+				if (!macro.value
+					|| result.count >= result.values.size()) {
+					return std::nullopt;
+				}
+				result.values[result.count++] = {
+					macro.name, macro.value
+				};
+			}
+			return std::nullopt;
 		}
-
-		[[nodiscard]] inline const char* FxpFilenameForTesting(
-			const RE::BSShader* a_shader,
-			bool a_modern) noexcept
-		{
-			return detail::RuntimeMember<const char*>(
-				a_shader,
-				0x110,
-				0x188,
-				a_modern ?
-					detail::ShaderRuntimeLayout::kModern :
-					detail::ShaderRuntimeLayout::kOriginal);
-		}
-
-		[[nodiscard]] inline std::optional<ImageSpaceMacroSet>
-			GetImageSpaceMacrosForTesting(RE::BSShader* a_shader) noexcept
-		{
-			return detail::GetImageSpaceMacrosImpl<false>(a_shader);
-		}
-
-		[[nodiscard]] inline const char*
-			ImageSpaceShaderPrefixForTesting(
-				const RE::BSShader* a_shader) noexcept
-		{
-			return detail::RuntimeMember<const char*>(
-				a_shader,
-				0x248,
-				0x248,
-				detail::ShaderRuntimeLayout::kModern);
-		}
-
-		[[nodiscard]] inline const char*
-			ImageSpaceShaderClassNameForTesting(
-				const RE::BSShader* a_shader) noexcept
-		{
-			return detail::RuntimeMember<const char*>(
-				a_shader,
-				0x240,
-				0x240,
-				detail::ShaderRuntimeLayout::kModern);
-		}
-#endif
 	}
 
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
 	{
 		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
 		return singleton.get();
+	}
+
+	// CommonLibF4 uses OG's taaState offset; NG/AE read +0xAC.
+	inline void SetGraphicsStateTemporalAA(RE::BSGraphics::State& a_state, bool a_enabled) noexcept
+	{
+		const auto offset = REX::FModule::IsRuntimeOG() ? 0xA8 : 0xAC;
+		*reinterpret_cast<RE::BSGraphics::TAA_STATE*>(reinterpret_cast<std::byte*>(&a_state) + offset) =
+			a_enabled ? RE::BSGraphics::TAA_STATE::kEnabled : RE::BSGraphics::TAA_STATE::kDisabled;
 	}
 
 	[[nodiscard]] inline RE::BSGraphics::RenderTargetManager* GetRenderTargetManager()

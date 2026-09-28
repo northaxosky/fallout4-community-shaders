@@ -185,7 +185,6 @@ namespace cs::features
 		std::atomic_bool _albedoBoundLastFrame{ false };
 		std::atomic_bool _historyValidLastFrame{ false };
 		std::atomic_bool _motionAvailableLastFrame{ false };
-		std::atomic_bool _tiledPredicateAvailable{ false };
 		std::atomic_bool _tiledLightingActive{ false };
 		std::atomic_bool _tiledBAvailable{ false };
 		std::atomic_bool _debugPreviewEnabled{ false };

@@ -9,8 +9,10 @@
 #include <Windows.h>
 
 #include <exception>
+#include <format>
 #include <mutex>
 #include <optional>
+#include <string_view>
 
 #include "RE/B/BSBloodSplatterShader.h"
 #include "RE/B/BSDFCompositeShader.h"
@@ -208,26 +210,33 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		template <class Install>
+		bool TryPatch(std::string_view a_label, Install&& a_install)
+		{
+			try {
+				a_install();
+				L->info("Patched {}", a_label);
+				return true;
+			} catch (const std::exception& e) {
+				L->error("Failed to patch {}: {}", a_label, e.what());
+			} catch (...) {
+				L->error("Failed to patch {}.", a_label);
+			}
+			return false;
+		}
+
+		void CountRoutingHook(bool a_patched) noexcept
+		{
+			++g_setupStats.attempted;
+			++(a_patched ? g_setupStats.succeeded : g_setupStats.failed);
+		}
+
 		template <class Subclass, class Tag>
 		void TryInstallSetupTechnique()
 		{
-			++g_setupStats.attempted;
-			try {
-				stl::write_vfunc<Subclass, 0, SetupTechniqueHook<Tag>>();
-				++g_setupStats.succeeded;
-				L->info("Patched SetupTechnique for {}", Tag::Name());
-			} catch (const std::exception& e) {
-				++g_setupStats.failed;
-				L->warn(
-					"Failed to patch SetupTechnique for {}: {}",
-					Tag::Name(),
-					e.what());
-			} catch (...) {
-				++g_setupStats.failed;
-				L->warn(
-					"Failed to patch SetupTechnique for {}: unknown exception",
-					Tag::Name());
-			}
+			CountRoutingHook(TryPatch(
+				std::format("SetupTechnique for {}", Tag::Name()),
+				[] { stl::write_vfunc<Subclass, 0, SetupTechniqueHook<Tag>>(); }));
 		}
 
 #define CS_HOOK_SHADER_SUBCLASS(klass, target)                              \
@@ -240,12 +249,6 @@ namespace cs::engine
 	void InstallShaderSubclassHooks()
 	{
 		std::call_once(g_installOnce, [] {
-			if (!REX::FModule::IsRuntimeAE()) {
-				L->warn(
-					"Native shader subclass hooks require Fallout 4 AE 1.11.240; "
-					"baseline shader ownership remains inactive.");
-				return;
-			}
 			CS_HOOK_SHADER_SUBCLASS(BSBloodSplatterShader, kBloodSplatter);
 			CS_HOOK_SHADER_SUBCLASS(BSDFCompositeShader, kBsdfComposite);
 			CS_HOOK_SHADER_SUBCLASS(BSDFLightShader, kBsdfLight);
@@ -257,70 +260,22 @@ namespace cs::engine
 			CS_HOOK_SHADER_SUBCLASS(BSSkyShader, kBsSky);
 			CS_HOOK_SHADER_SUBCLASS(BSUtilityShader, kUtility);
 			CS_HOOK_SHADER_SUBCLASS(BSWaterShader, kBsWater);
-			try {
-				stl::detour_thunk<ReloadFromStreamHook>(
-					REL::ID(2318873));
-				L->info("Patched BSShader archive loader observer");
-			} catch (const std::exception& e) {
-				L->error(
-					"Failed to patch BSShader archive loader observer: {}",
-					e.what());
-			} catch (...) {
-				L->error(
-					"Failed to patch BSShader archive loader observer.");
-			}
-			try {
-				stl::detour_thunk<SetShadersHook>(
-					REL::ID(2276942));
-				L->info("Patched native graphics shader-set boundary");
-			} catch (const std::exception& e) {
-				L->error(
-					"Failed to patch native graphics shader-set boundary: {}",
-					e.what());
-			} catch (...) {
-				L->error(
-					"Failed to patch native graphics shader-set boundary.");
-			}
-			try {
-				stl::detour_thunk<RunComputeShaderHook>(
-					REL::ID(2276940));
-				L->info("Patched native compute shader-run boundary");
-			} catch (const std::exception& e) {
-				L->error(
-					"Failed to patch native compute shader-run boundary: {}",
-					e.what());
-			} catch (...) {
-				L->error(
-					"Failed to patch native compute shader-run boundary.");
-			}
-			try {
-				stl::detour_thunk<ReloadStandaloneComputeHook>(
-					REL::ID(2319682));
-				L->info("Patched standalone compute shader observers");
-			} catch (const std::exception& e) {
-				L->error(
-					"Failed to patch standalone compute shader observers: {}",
-					e.what());
-			} catch (...) {
-				L->error(
-					"Failed to patch standalone compute shader observers.");
-			}
-			++g_setupStats.attempted;
-			try {
-				stl::detour_thunk<BeginTechniqueHook>(
-					REL::ID(2318876));
-				++g_setupStats.succeeded;
-				L->info("Patched BSShader native technique binder");
-			} catch (const std::exception& e) {
-				++g_setupStats.failed;
-				L->error(
-					"Failed to patch BSShader native technique binder: {}",
-					e.what());
-			} catch (...) {
-				++g_setupStats.failed;
-				L->error(
-					"Failed to patch BSShader native technique binder.");
-			}
+
+			TryPatch("BSShader archive loader observer", [] {
+				stl::detour_thunk<ReloadFromStreamHook>(REL::ID({ 101507, 2318873, 2318873 }));
+			});
+			TryPatch("native graphics shader-set boundary", [] {
+				stl::detour_thunk<SetShadersHook>(REL::ID({ 894905, 2276942, 2276942 }));
+			});
+			TryPatch("native compute shader-run boundary", [] {
+				stl::detour_thunk<RunComputeShaderHook>(REL::ID({ 1108829, 2276940, 2276940 }));
+			});
+			TryPatch("standalone compute shader observers", [] {
+				stl::detour_thunk<ReloadStandaloneComputeHook>(REL::ID({ 166975, 2319682, 2319682 }));
+			});
+			CountRoutingHook(TryPatch("BSShader native technique binder", [] {
+				stl::detour_thunk<BeginTechniqueHook>(REL::ID({ 1041640, 2318876, 2318876 }));
+			}));
 
 			L->info(
 				"Subclass SetupTechnique hooks: {}/{} patched ({} failed)",

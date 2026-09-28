@@ -2,12 +2,12 @@
 
 #include "Log.h"
 #include "Render/DeferredDrawAnchor.h"
+#include "Render/EngineCallSite.h"
 #include "Render/ShaderInjection.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <string>
@@ -234,10 +234,18 @@ namespace cs::engine
 			if (g_deferredDrawAnchorInstalled) {
 				return;
 			}
-			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
-			constexpr std::ptrdiff_t offsets[] = { 0x9C, 0x9A, 0x9A };
-			stl::write_thunk_call<DeferredDrawAnchor_Hook>(
-				REL::ID({ 763320, 2276846, 2276846 }).address() + offsets[runtimeIdx]);
+			constexpr cs::engine::CallSiteAnchor kDrawTriShapeSetDirtyStates{
+				.name = "DrawTriShape -> BSGraphics::SetDirtyStates",
+				.function = REL::ID({ 763320, 2276846, 2276846 }),
+				.offset = { 0x9C, 0x9A, 0x9A },
+				.target = REL::ID({ 1557284, 2277017, 2277017 })
+			};
+			const auto site = cs::engine::ResolveCallSite(kDrawTriShapeSetDirtyStates);
+			if (!site) {
+				L->error("Deferred draw anchor unavailable: {}", site.error());
+				return;
+			}
+			stl::write_thunk_call<DeferredDrawAnchor_Hook>(*site);
 			g_deferredDrawAnchorInstalled = true;
 			L->info("Hook installed on DrawTriShape SetDirtyStates call (deferred draw anchor)");
 		}

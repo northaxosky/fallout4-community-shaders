@@ -11,7 +11,7 @@ namespace cs::engine
 			ResolvePixelShaderVariantFormulaForIdentity(
 				std::string_view a_subclass,
 				std::uint32_t a_techniqueBits,
-				std::optional<bool> a_tiledLighting) noexcept
+				bool a_tiledLighting) noexcept
 		{
 			volatile std::uint32_t stableTechnique =
 				a_techniqueBits;
@@ -22,25 +22,13 @@ namespace cs::engine
 		}
 	}
 
-	std::optional<bool> QueryTiledLightingEnabled() noexcept
+	bool QueryTiledLightingEnabled() noexcept
 	{
-		if (!REX::FModule::IsRuntimeNG()
-			&& !REX::FModule::IsRuntimeAE()) {
-			return std::nullopt;
-		}
-
-		// NG and AE share this ID; OG remains unresolved.
 		static REL::Relocation<bool()> tileLightingGetter{
-			REL::ID(2318371)
+			REL::ID({ 1154650, 2318371, 2318371 })
 		};
 		// Tilelight changes per frame.
 		return tileLightingGetter();
-	}
-
-	bool IsPixelShaderVariantResolutionAvailable() noexcept
-	{
-		return REX::FModule::IsRuntimeNG()
-			|| REX::FModule::IsRuntimeAE();
 	}
 
 	std::optional<ShaderVariantKeyView> ResolvePixelShaderVariant(
@@ -70,18 +58,14 @@ namespace cs::engine
 			.stage = ShaderStage::kPixel,
 			.rawTechnique = a_techniqueBits
 		};
-		if (!IsPixelShaderVariantResolutionAvailable())
-			return route;
 
-		if (a_subclass == "BSDFCompositeShader") {
-			route.tiledLighting = QueryTiledLightingEnabled();
-		}
-
+		const bool tiledLighting =
+			a_subclass == "BSDFCompositeShader" && QueryTiledLightingEnabled();
 		const auto variant =
 			ResolvePixelShaderVariantFormulaForIdentity(
 			a_subclass,
 			a_techniqueBits,
-			route.tiledLighting);
+			tiledLighting);
 		if (variant)
 			route.pluginResolvedPsid = variant->id;
 		return route;

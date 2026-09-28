@@ -1,14 +1,13 @@
 #include "MotionVectorFixes.h"
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <unordered_map>
 
 #include <DearModdingUI/Client.h>
 
 #include "Log.h"
+#include "Render/EngineCallSite.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -20,20 +19,6 @@ namespace cs::features
 		using ShaderFlag = RE::BSShaderProperty::EShaderPropertyFlag;
 
 		std::atomic_bool g_loadingMenuOpen{ false };
-
-		bool IsCallSiteTargeting(std::uintptr_t a_site, std::uintptr_t a_expectedTarget)
-		{
-			if (!a_site || !a_expectedTarget) {
-				return false;
-			}
-			const auto* bytes = reinterpret_cast<const std::uint8_t*>(a_site);
-			if (bytes[0] != 0xE8) {
-				return false;
-			}
-			std::int32_t displacement = 0;
-			std::memcpy(&displacement, bytes + 1, sizeof(displacement));
-			return a_site + 5 + static_cast<std::intptr_t>(displacement) == a_expectedTarget;
-		}
 
 		void ResetPreviousWorldDownwards(RE::NiAVObject* a_object)
 		{
@@ -167,24 +152,17 @@ namespace cs::features
 			REL::ID({ 1318162, 2228929, 2228929 }));
 		_playerUpdateHooked = true;
 
-		// OG's callsite is unproven; NG and AE target NiAVObject::Update.
-		constexpr std::ptrdiff_t offsets[] = { 0x1D7, 0x1D7, 0x1D7 };
-		const auto runtimeIndex = static_cast<std::size_t>(REX::FModule::GetRuntimeIndex());
-		const auto site =
-			REL::ID({ 854236, 2200766, 2200766 }).address() + offsets[runtimeIndex];
-		const auto expectedTarget = runtimeIndex == 0
-			? 0
-			: REL::ID({ 0, 2270101, 2270101 }).address();
-
-		if (!expectedTarget) {
-			L->warn("SetSequencePosition target is unproven on OG; skipping its correction");
-		} else if (!IsCallSiteTargeting(site, expectedTarget)) {
-			L->warn(
-				"SetSequencePosition call target mismatch at {:#x}; skipping its correction",
-				site);
-		} else {
-			stl::write_thunk_call<TESObjectREFR_SetSequencePosition>(site);
+		constexpr cs::engine::CallSiteAnchor kSetSequencePositionUpdate{
+			.name = "TESObjectREFR::SetSequencePosition -> NiAVObject::Update",
+			.function = REL::ID({ 854236, 2200766, 2200766 }),
+			.offset = { 0x1D7, 0x1D7, 0x1D7 },
+			.target = REL::ID({ 121052, 2270101, 2270101 })
+		};
+		if (const auto site = cs::engine::ResolveCallSite(kSetSequencePositionUpdate)) {
+			stl::write_thunk_call<TESObjectREFR_SetSequencePosition>(*site);
 			_setSequencePositionHooked = true;
+		} else {
+			L->warn("Animated-object correction unavailable: {}", site.error());
 		}
 
 		stl::write_vfunc<43, BSLightingShaderProperty_GetRenderPasses>(

@@ -14,10 +14,7 @@ namespace cs::engine
 		std::uintptr_t formulaResolver = 0;
 	};
 
-	bool IsPixelShaderVariantResolutionAvailable() noexcept;
-
-	// Nullopt on OG, where the tiled-lighting getter has no resolved address.
-	std::optional<bool> QueryTiledLightingEnabled() noexcept;
+	bool QueryTiledLightingEnabled() noexcept;
 
 	std::optional<PixelShaderRuntimeRoute> ResolvePixelShaderRuntimeRoute(
 		std::string_view a_subclass,

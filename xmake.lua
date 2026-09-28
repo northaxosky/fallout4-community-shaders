@@ -384,6 +384,13 @@ target("WaterEffectsMathTests", function()
     add_packages("vcpkg::tomlplusplus")
 end)
 
+target("EngineCallSiteTests", function()
+    set_kind("binary")
+    set_default(false)
+    add_files("tests/EngineCallSiteTests.cpp")
+    add_headerfiles("src/Render/CallSiteDecode.h")
+end)
+
 target("UpscalingPublicationTests", function()
     set_kind("binary")
     set_default(false)
@@ -637,6 +644,10 @@ end)
 
 target("WaterEffectsMathTests", function()
     add_tests("WaterEffectsMath")
+end)
+
+target("EngineCallSiteTests", function()
+    add_tests("EngineCallSite")
 end)
 
 target("UpscalingPublicationTests", function()

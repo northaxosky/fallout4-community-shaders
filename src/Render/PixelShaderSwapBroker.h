@@ -71,7 +71,6 @@ namespace cs::engine
 		ShaderStage stage = ShaderStage::kPixel;
 		std::uint32_t rawTechnique = 0;
 		std::optional<ShaderVariantId> pluginResolvedPsid;
-		std::optional<bool> tiledLighting;
 	};
 
 	enum class ShaderSwapResolverResult : std::uint8_t

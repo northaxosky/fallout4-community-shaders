@@ -44,11 +44,12 @@ extern "C" DLLEXPORT constinit auto F4SEPlugin_Version = []() noexcept {
 	data.PluginName(Plugin::NAME.data());
 	data.AuthorName("northaxosky");
 	data.UsesAddressLibrary(true);
+	// NG F4SE checks the 1.10.980 bits; AE F4SE checks 1.11.137.
+	data.UsesAddressLibraryNG(true);
 	data.UsesSigScanning(false);
 	data.IsLayoutDependent(true);
+	data.IsLayoutDependentNG(true);
 	data.HasNoStructUse(false);
-	// new runtime checklist: all 13 write_thunk_call sites, including reticleOffsets + literal
-	// unknown runtimes fall through to AE and silently apply stale offsets
 	data.CompatibleVersions({ F4SE::RUNTIME_LATEST });
 
 	return data;

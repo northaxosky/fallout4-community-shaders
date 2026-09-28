@@ -16,16 +16,13 @@ namespace cs::engine
 		constexpr std::uint32_t kBsdfLightFallbackPixelShaderMask =
 			0xFC07FF7F;
 
-		std::optional<ShaderVariantId> ResolveBsdfCompositeVariantId(
+		ShaderVariantId ResolveBsdfCompositeVariantId(
 			std::uint32_t a_techniqueBits,
-			std::optional<bool> a_tileLightingEnabled) noexcept
+			bool a_tileLightingEnabled) noexcept
 		{
-			if (!a_tileLightingEnabled)
-				return std::nullopt;
-
 			auto pixelShaderId =
 				a_techniqueBits & kBsdfCompositePixelShaderMask;
-			if (*a_tileLightingEnabled)
+			if (a_tileLightingEnabled)
 				pixelShaderId |= kTileLighting;
 			else
 				pixelShaderId &= ~kTileLighting;
@@ -54,19 +51,14 @@ namespace cs::engine
 	std::optional<ShaderVariantKeyView> ResolvePixelShaderVariant(
 		std::string_view a_subclass,
 		std::uint32_t a_techniqueBits,
-		std::optional<bool> a_tileLightingEnabled) noexcept
+		bool a_tileLightingEnabled) noexcept
 	{
 		if (a_subclass == "BSDFCompositeShader") {
-			if (const auto id =
-					ResolveBsdfCompositeVariantId(
-						a_techniqueBits,
-						a_tileLightingEnabled)) {
-				return ShaderVariantKeyView{
-					a_subclass,
-					ShaderStage::kPixel,
-					*id
-				};
-			}
+			return ShaderVariantKeyView{
+				a_subclass,
+				ShaderStage::kPixel,
+				ResolveBsdfCompositeVariantId(a_techniqueBits, a_tileLightingEnabled)
+			};
 		}
 		if (a_subclass == "BSDFLightShader") {
 			return ShaderVariantKeyView{

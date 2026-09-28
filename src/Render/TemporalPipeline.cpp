@@ -76,22 +76,6 @@ namespace cs::render
 	{
 		auto* L = cs::log::Get("cs.render.temporalpipeline");
 
-		bool IsCallSiteTargeting(std::uintptr_t a_site,
-			std::uintptr_t a_expectedTarget) noexcept
-		{
-			if (!a_site || !a_expectedTarget) {
-				return false;
-			}
-			const auto* bytes = reinterpret_cast<const std::uint8_t*>(a_site);
-			if (bytes[0] != 0xE8) {
-				return false;
-			}
-			std::int32_t displacement = 0;
-			std::memcpy(&displacement, bytes + 1, sizeof(displacement));
-			return a_site + 5 + static_cast<std::intptr_t>(displacement) ==
-			       a_expectedTarget;
-		}
-
 		struct MainLoop_WindowsMessageLoop
 		{
 			static void thunk(RE::Main* a_main)
@@ -374,30 +358,18 @@ namespace cs::render
 			return true;
 		}
 		try {
-			const auto runtimeIndex =
-				static_cast<std::size_t>(REX::FModule::GetRuntimeIndex());
-			const auto messageLoopSite =
-				REL::ID({ kMainLoopAnchor[0], kMainLoopAnchor[1], kMainLoopAnchor[2] })
-					.address() +
-				kMainLoopMessageLoopCall[runtimeIndex];
-			const auto messageLoopTarget =
-				REL::ID({ kWindowsMessageLoop[0], kWindowsMessageLoop[1],
-							kWindowsMessageLoop[2] })
-					.address();
-			const auto swapSite =
-				REL::ID({ kOnIdle[0], kOnIdle[1], kOnIdle[2] }).address() +
-				kOnIdleSwapCall[runtimeIndex];
-			const auto swapTarget = REL::ID({ kSwap[0], kSwap[1], kSwap[2] }).address();
-			if (!IsCallSiteTargeting(messageLoopSite, messageLoopTarget) ||
-				!IsCallSiteTargeting(swapSite, swapTarget)) {
+			const auto messageLoop = engine::ResolveCallSite(kMainLoopMessageLoopCall);
+			const auto swap = engine::ResolveCallSite(kOnIdleSwapCall);
+			if (!messageLoop || !swap) {
 				PostFailure(temporal::FailureDomain::kEngine,
-					"Normal main-loop latency callsites did not match their "
-					"validated targets.");
+					std::format(
+						"Reflex latency markers are unavailable: {}",
+						!messageLoop ? messageLoop.error() : swap.error()));
 				return false;
 			}
 
-			stl::write_thunk_call<MainLoop_WindowsMessageLoop>(messageLoopSite);
-			stl::write_thunk_call<OnIdle_Swap>(swapSite);
+			stl::write_thunk_call<MainLoop_WindowsMessageLoop>(*messageLoop);
+			stl::write_thunk_call<OnIdle_Swap>(*swap);
 			_impl->latencyHooksInstalled.store(true, std::memory_order_release);
 			L->info("Installed validated normal-loop latency hooks");
 			return true;
@@ -1433,6 +1405,7 @@ namespace cs::render
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kDLSSG)] =
 			request.frameGenerationEligible && fgDisplayEligible &&
+			session.latencyHooksInstalled &&
 			_impl->streamlinePresentation.IsAvailable();
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kFSR4)] =

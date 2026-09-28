@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstring>
 #include <exception>
 #include <format>
 #include <limits>
@@ -200,10 +199,7 @@ namespace cs::render::renderer_detail
 				return;
 			}
 			using func_t = void (*)();
-			static REL::Relocation<func_t> func{ REL::ID({
-				upscaling_anchors::kForceViewportToRenderTargetDimensions[0],
-				upscaling_anchors::kForceViewportToRenderTargetDimensions[1],
-				upscaling_anchors::kForceViewportToRenderTargetDimensions[2] }) };
+			static REL::Relocation<func_t> func{ upscaling_anchors::kForceViewportToRenderTargetDimensions };
 			func();
 		}
 
@@ -214,9 +210,7 @@ namespace cs::render::renderer_detail
 				*global = a_enabled ? 1u : 0u;
 			}
 			if (auto* state = cs::engine::GetGraphicsState()) {
-				state->taaState = a_enabled
-					? RE::BSGraphics::TAA_STATE::kEnabled
-					: RE::BSGraphics::TAA_STATE::kDisabled;
+				cs::engine::SetGraphicsStateTemporalAA(*state, a_enabled);
 			}
 		}
 
@@ -233,22 +227,6 @@ namespace cs::render::renderer_detail
 				CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "{} failed", a_where);
 			}
 			TemporalRenderer::GetSingleton()->QuarantineAfterException(a_where);
-		}
-
-		// Validate all anchors first to avoid partial hook installation.
-		inline bool IsCallSiteTargeting(std::uintptr_t a_site, std::uintptr_t a_expectedTarget)
-		{
-			if (!a_site || !a_expectedTarget) {
-				return false;
-			}
-			const auto* bytes = reinterpret_cast<const std::uint8_t*>(a_site);
-			if (bytes[0] != 0xE8) {
-				return false;
-			}
-			std::int32_t displacement = 0;
-			std::memcpy(&displacement, bytes + 1, sizeof(displacement));
-			const auto target = a_site + 5 + static_cast<std::intptr_t>(displacement);
-			return target == a_expectedTarget;
 		}
 
 		inline bool ViewReferencesTexture(

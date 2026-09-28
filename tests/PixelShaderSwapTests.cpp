@@ -176,7 +176,7 @@ namespace
 				const auto resolved = ResolvePixelShaderVariant(
 					key.subclass,
 					key.id.Value(),
-					std::nullopt);
+					false);
 				Check(
 					resolved && *resolved == key,
 					"Light resolver changed a shipped PSID");
@@ -190,28 +190,28 @@ namespace
 				kBsdfLightDeferredDirectionalIbl);
 
 		const auto setupAlias = ResolvePixelShaderVariant(
-			"BSDFLightShader", 0x02001204, std::nullopt);
+			"BSDFLightShader", 0x02001204, false);
 		Check(
 			setupAlias
 				&& setupAlias->id.Value() == 0x00001204,
 			"Light fallback mask retained CPU-only setup bit");
 
 		const auto keyFeature = ResolvePixelShaderVariant(
-			"BSDFLightShader", 0x10000002, std::nullopt);
+			"BSDFLightShader", 0x10000002, false);
 		Check(
 			keyFeature
 				&& keyFeature->id.Value() == 0x10000002,
 			"Light key-feature branch was not identity");
 
 		const auto overdraw = ResolvePixelShaderVariant(
-			"BSDFLightShader", 0xFFFFFFFF, std::nullopt);
+			"BSDFLightShader", 0xFFFFFFFF, false);
 		Check(
 			overdraw
 				&& overdraw->id.Value() == 0xF801257F,
 			"Light overdraw mask produced the wrong PSID");
 
 		const auto stencil = ResolvePixelShaderVariant(
-			"BSDFLightShader", 0x104, std::nullopt);
+			"BSDFLightShader", 0x104, false);
 		Check(
 			stencil && stencil->id.Value() == 0x104,
 			"Light stencil technique resolved incorrectly");

@@ -149,6 +149,12 @@ namespace cs::render::temporal::presentation
 			return {};
 		}
 		if (a_method == FrameGenerationMethod::kDLSSG) {
+			if (!a_status.session.latencyHooksInstalled) {
+				return {
+					.kind = AvailabilityKind::kUnavailable,
+					.reason = "Reflex latency markers could not be installed; see the log."
+				};
+			}
 			if (a_dlss.configurationQueryFailed) {
 				return {
 					.kind = AvailabilityKind::kUnavailable,
