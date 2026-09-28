@@ -39,8 +39,8 @@ namespace SharedData
 	{
 		bool EnableScreenSpaceGI;
 		uint pad0;
-		float AoPower;
-		float BounceStrength;
+		uint pad1;
+		uint pad2;
 	};
 
 	struct WetnessEffectsSettings

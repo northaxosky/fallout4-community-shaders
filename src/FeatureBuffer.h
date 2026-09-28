@@ -18,8 +18,8 @@ namespace cs
 	{
 		std::uint32_t EnableScreenSpaceGI = 0;
 		std::uint32_t pad0 = 0;
-		float         AoPower = 0.0f;
-		float         BounceStrength = 0.0f;
+		std::uint32_t pad1 = 0;
+		std::uint32_t pad2 = 0;
 	};
 	static_assert(sizeof(ScreenSpaceGIFeatureData) == 16);
 

@@ -79,13 +79,16 @@ namespace cs::features
 			float         DepthFadeScaleConst;
 			float         BlurRadius;
 			float         DistanceNormalisation;
-			float         CenterBeta;
+			float         NormalDisocclusion;
 			float         DepthDisocclusion;
 			std::uint32_t MaxAccumFrames;
 			std::uint32_t TemporalFlags;
-			float         _temporalPad[3];
-			float         RadianceScale[2];
-			float         _bouncePad[2];
+			float         GISaturation;
+			float         GIDistanceCompensation;
+			float         GICompensationMaxDist;
+			float         _pad0[2];
+			float         AOPower;
+			float         GIStrength;
 			float         PrevNDCToViewMul[2];
 			float         PrevNDCToViewAdd[2];
 			float         ViewToWorld[12];
@@ -99,7 +102,7 @@ namespace cs::features
 		static_assert(offsetof(XeGTAOCB, DepthDisocclusion) == 136);
 		static_assert(offsetof(XeGTAOCB, MaxAccumFrames) == 140);
 		static_assert(offsetof(XeGTAOCB, TemporalFlags) == 144);
-		static_assert(offsetof(XeGTAOCB, RadianceScale) == 160);
+		static_assert(offsetof(XeGTAOCB, AOPower) == 168);
 		static_assert(offsetof(XeGTAOCB, PrevNDCToViewMul) == 176);
 		static_assert(offsetof(XeGTAOCB, ViewToWorld) == 192);
 		static_assert(offsetof(XeGTAOCB, PrevViewToWorld) == 240);
@@ -131,6 +134,7 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Resource> motion;
 			winrt::com_ptr<ID3D11Resource> sourceA;
 			winrt::com_ptr<ID3D11Resource> sourceB;
+			winrt::com_ptr<ID3D11Resource> albedo;
 
 			[[nodiscard]] bool operator==(const InputIdentity& a_rhs) const noexcept
 			{
@@ -138,7 +142,8 @@ namespace cs::features
 					normal.get() == a_rhs.normal.get() &&
 					motion.get() == a_rhs.motion.get() &&
 					sourceA.get() == a_rhs.sourceA.get() &&
-					sourceB.get() == a_rhs.sourceB.get();
+					sourceB.get() == a_rhs.sourceB.get() &&
+					albedo.get() == a_rhs.albedo.get();
 			}
 		};
 
@@ -178,7 +183,6 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _resourceInitFailed{ false };
 		std::atomic_bool _aoProducedLastFrame{ false };
-		std::atomic_bool _aoDenoisedLastFrame{ false };
 		std::atomic_bool _bounceProducedLastFrame{ false };
 		std::atomic_bool _bounceDenoisedLastFrame{ false };
 		std::atomic_bool _radianceAvailableLastFrame{ false };
@@ -235,8 +239,7 @@ namespace cs::features
 		std::unique_ptr<cs::buffer::Texture2D> _radianceTempTex;
 		std::unique_ptr<cs::buffer::Texture2D> _radianceTex;
 		std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> _radianceMipUAVs;
-		std::unique_ptr<cs::buffer::Texture2D> _aoRawTex;
-		std::unique_ptr<cs::buffer::Texture2D> _aoDenoisedTex;
+		std::unique_ptr<cs::buffer::Texture2D> _aoTex;
 		std::unique_ptr<cs::buffer::Texture2D> _bounceSHRawTex;
 		std::unique_ptr<cs::buffer::Texture2D> _bounceCoCgRawTex;
 		std::array<std::unique_ptr<cs::buffer::Texture2D>, 2> _bounceSHTex;
@@ -253,11 +256,11 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterCS;
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterRadianceCS;
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterNormalCS;
-		winrt::com_ptr<ID3D11ComputeShader> _radianceDisoccCS;
+		// Indexed by whether the temporal denoiser is compiled in.
+		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _radianceDisoccCS;
+		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _giCS;
+		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _blurCS;
 		winrt::com_ptr<ID3D11ComputeShader> _aoCS;
-		winrt::com_ptr<ID3D11ComputeShader> _bounceCS;
-		winrt::com_ptr<ID3D11ComputeShader> _denoiseCS;
-		winrt::com_ptr<ID3D11ComputeShader> _bounceDenoiseCS;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;

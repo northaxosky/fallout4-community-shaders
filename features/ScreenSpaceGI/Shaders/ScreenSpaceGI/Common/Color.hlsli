@@ -29,6 +29,12 @@ namespace Color
 			tmp - color.y);
 	}
 
+	// FO4 has no linear-lighting mode, so upstream's non-linear branch applies.
+	float3 RadianceToLinear(float3 color)
+	{
+		return pow(abs(color), 1.6);
+	}
+
 	float IrradianceToLinear(float color)
 	{
 		return pow(abs(color), 1.6);

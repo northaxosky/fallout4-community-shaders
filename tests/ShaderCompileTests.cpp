@@ -163,11 +163,22 @@ namespace
 				 "decode.cs.hlsl",
 				 "prefilterDepths.cs.hlsl",
 				 "prefilterRadiance.cs.hlsl",
-				 "prefilterNormal.cs.hlsl",
-				 "radianceDisocc.cs.hlsl",
-				 "gi.cs.hlsl",
-				 "denoise.cs.hlsl" }) {
+				 "prefilterNormal.cs.hlsl" }) {
 			a_jobs.push_back({ .path = ssgi / file, .description = file });
+		}
+		// The runtime selects these permutations from the GI and temporal settings.
+		for (const char* file : { "radianceDisocc.cs.hlsl", "gi.cs.hlsl", "blur.cs.hlsl" }) {
+			a_jobs.push_back({ .path = ssgi / file, .description = file });
+			a_jobs.push_back({
+				.path = ssgi / file,
+				.defines = { { "GI", "1" } },
+				.description = file
+			});
+			a_jobs.push_back({
+				.path = ssgi / file,
+				.defines = { { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } },
+				.description = file
+			});
 		}
 
 		const auto cubemaps = a_root / "DynamicCubemaps";

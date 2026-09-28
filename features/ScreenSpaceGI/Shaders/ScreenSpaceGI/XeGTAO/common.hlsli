@@ -34,15 +34,18 @@ cbuffer XeGTAOCB : register(b0)
 	float BlurRadius;
 
 	float DistanceNormalisation;
-	float CenterBeta;
+	float NormalDisocclusion;
 	float DepthDisocclusion;
 	uint MaxAccumFrames;
 
 	uint TemporalFlags;
-	float3 _temporalPad;
+	float GISaturation;
+	float GIDistanceCompensation;
+	float GICompensationMaxDist;
 
-	float2 RadianceScale;
-	float2 _bouncePad;
+	float2 _pad0;
+	float AOPower;
+	float GIStrength;
 
 	float2 PrevNDCToViewMul;
 	float2 PrevNDCToViewAdd;
@@ -56,17 +59,28 @@ cbuffer XeGTAOCB : register(b0)
 
 SamplerState samplerPointClamp : register(s0);
 
-#define SSGI_TEMPORAL_ENABLED (1u)
 #define SSGI_HISTORY_VALID (2u)
 #define SSGI_INCLUDE_SOURCE_B (4u)
 
 #define FP_Z (18.0)
+#define RES_MIP 0
+#define OUT_FRAME_SCALE frameScale
+
+#define ISNAN(x) (!(x < 0.f || x > 0.f || x == 0.f))
+float filterNaN(float v) { return ISNAN(v) ? 0 : v; }
+float2 filterNaN(float2 v) { return float2(filterNaN(v.x), filterNaN(v.y)); }
+float3 filterNaN(float3 v) { return float3(filterNaN(v.x), filterNaN(v.y), filterNaN(v.z)); }
+float4 filterNaN(float4 v) { return float4(filterNaN(v.x), filterNaN(v.y), filterNaN(v.z), filterNaN(v.w)); }
+
+float filterInf(float v) { return isinf(v) ? 0 : v; }
+float2 filterInf(float2 v) { return float2(filterInf(v.x), filterInf(v.y)); }
+float3 filterInf(float3 v) { return float3(filterInf(v.x), filterInf(v.y), filterInf(v.z)); }
+float4 filterInf(float4 v) { return float4(filterInf(v.x), filterInf(v.y), filterInf(v.z), filterInf(v.w)); }
 #define R11_MAX_DEPTH (65024.0)
 #define READ_DEPTH(tex, px) tex[px]
 #define OUT_FRAME_DIM FrameDim
 #define RCP_OUT_FRAME_DIM RcpFrameDim
 
-bool TemporalEnabled() { return (TemporalFlags & SSGI_TEMPORAL_ENABLED) != 0u; }
 bool HistoryValid() { return (TemporalFlags & SSGI_HISTORY_VALID) != 0u; }
 bool IncludeSourceB() { return (TemporalFlags & SSGI_INCLUDE_SOURCE_B) != 0u; }
 

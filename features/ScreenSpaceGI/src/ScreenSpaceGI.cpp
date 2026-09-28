@@ -45,7 +45,7 @@ namespace cs::features
 		constexpr const wchar_t* kPrefilterNormalPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\prefilterNormal.cs.hlsl";
 		constexpr const wchar_t* kRadianceDisoccPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\radianceDisocc.cs.hlsl";
 		constexpr const wchar_t* kAOPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\gi.cs.hlsl";
-		constexpr const wchar_t* kDenoisePath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\denoise.cs.hlsl";
+		constexpr const wchar_t* kBlurPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\blur.cs.hlsl";
 
 		// occlusion and bounce both read as "no contribution" at zero
 		constexpr std::array<float, 4> kOpenIdentity{ 0.0f, 0.0f, 0.0f, 0.0f };
@@ -305,10 +305,7 @@ namespace cs::features
 		FeatureDebugTexture texture{
 			.unavailableText = "Buffer not allocated."
 		};
-		const auto& source =
-			_aoDenoisedLastFrame.load(std::memory_order_relaxed) ?
-				_aoDenoisedTex :
-				_aoRawTex;
+		const auto& source = _aoTex;
 		if (!_debugPreviewEnabled.load(std::memory_order_acquire)
 			|| !source
 			|| !source->srv
@@ -444,11 +441,13 @@ namespace cs::features
 		compile(_prefilterCS, kPrefilterPath, {}, "depth prefilter", "ScreenSpaceGI/PrefilterDepth.CS");
 		compile(_prefilterRadianceCS, kPrefilterRadiancePath, {}, "radiance prefilter", "ScreenSpaceGI/PrefilterRadiance.CS");
 		compile(_prefilterNormalCS, kPrefilterNormalPath, {}, "normal prefilter", "ScreenSpaceGI/PrefilterNormal.CS");
-		compile(_radianceDisoccCS, kRadianceDisoccPath, {}, "radiance disocclusion", "ScreenSpaceGI/RadianceDisocclusion.CS");
 		compile(_aoCS, kAOPath, {}, "AO", "ScreenSpaceGI/AO.CS");
-		compile(_bounceCS, kAOPath, { { "SSGI_BOUNCE", "1" } }, "bounce", "ScreenSpaceGI/Bounce.CS");
-		compile(_denoiseCS, kDenoisePath, {}, "denoise", "ScreenSpaceGI/DenoiseAO.CS");
-		compile(_bounceDenoiseCS, kDenoisePath, { { "SSGI_BOUNCE", "1" } }, "bounce denoise", "ScreenSpaceGI/DenoiseBounce.CS");
+		compile(_radianceDisoccCS[0], kRadianceDisoccPath, { { "GI", "1" } }, "radiance disocclusion", "ScreenSpaceGI/RadianceDisocclusion.CS");
+		compile(_radianceDisoccCS[1], kRadianceDisoccPath, { { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } }, "temporal radiance disocclusion", "ScreenSpaceGI/RadianceDisocclusionTemporal.CS");
+		compile(_giCS[0], kAOPath, { { "GI", "1" } }, "GI", "ScreenSpaceGI/GI.CS");
+		compile(_giCS[1], kAOPath, { { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } }, "temporal GI", "ScreenSpaceGI/GITemporal.CS");
+		compile(_blurCS[0], kBlurPath, { { "GI", "1" } }, "blur", "ScreenSpaceGI/Blur.CS");
+		compile(_blurCS[1], kBlurPath, { { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } }, "temporal blur", "ScreenSpaceGI/BlurTemporal.CS");
 
 		if (!_pointClampSampler) {
 			D3D11_SAMPLER_DESC samplerDesc{};
@@ -472,7 +471,7 @@ namespace cs::features
 	{
 		return _decodeCS && _prefilterCS && _aoCS &&
 			_linearDepthTex && _workingDepthTex && _viewNormalTex &&
-			_aoRawTex && _aoDenoisedTex &&
+			_aoTex &&
 			_noiseSRV && _pointClampSampler && _xegtaoCB && _decodeCB &&
 			_workingDepthMipUAVs[kMipCount - 1] && _viewNormalMipUAVs[kMipCount - 1] &&
 			_viewNormalMip0SRV;
@@ -480,7 +479,10 @@ namespace cs::features
 
 	bool ScreenSpaceGI::IsTemporalReady() const noexcept
 	{
-		return _bounceCS && _radianceDisoccCS && _prefilterRadianceCS && _prefilterNormalCS &&
+		const auto temporal = _settings.enableTemporalDenoiser ? 1u : 0u;
+		return _giCS[temporal] && _radianceDisoccCS[temporal] &&
+			(!_settings.enableBlur || _blurCS[temporal]) &&
+			_prefilterRadianceCS && _prefilterNormalCS &&
 			_radianceTempTex && _radianceTex && _radianceMipUAVs[kMipCount - 1] &&
 			_bounceSHRawTex && _bounceCoCgRawTex && _accumBlurTex &&
 			_bounceSHTex[0] && _bounceSHTex[1] &&
@@ -501,10 +503,7 @@ namespace cs::features
 			return {};
 		}
 		return {
-			.EnableScreenSpaceGI = 1,
-			.pad0 = 0,
-			.AoPower = _settings.aoPower,
-			.BounceStrength = _settings.bounceStrength
+			.EnableScreenSpaceGI = 1
 		};
 	}
 
@@ -518,7 +517,7 @@ namespace cs::features
 		}
 
 		const bool resourcesReady = _resourcesReady.load(std::memory_order_acquire);
-		const bool hadResources = _aoRawTex != nullptr;
+		const bool hadResources = _aoTex != nullptr;
 
 		// an engine that has not published dimensions or a context yet is not a failure
 		auto* state = cs::engine::GetGraphicsState();
@@ -552,8 +551,7 @@ namespace cs::features
 			auto viewNormalTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, "ScreenSpaceGI/ViewNormal", kMipCount, false);
 			auto radianceTempTex = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "ScreenSpaceGI/RadianceTemp");
 			auto radianceTex = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "ScreenSpaceGI/Radiance", kMipCount, false);
-			auto aoRawTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, "ScreenSpaceGI/AORaw");
-			auto aoDenoisedTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, "ScreenSpaceGI/AODenoised");
+			auto aoTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, "ScreenSpaceGI/AO");
 			auto bounceSHRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, "ScreenSpaceGI/BounceSHRaw");
 			auto bounceCoCgRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16_FLOAT, "ScreenSpaceGI/BounceCoCgRaw");
 			auto accumBlurTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, "ScreenSpaceGI/AccumulationBlur");
@@ -670,8 +668,7 @@ namespace cs::features
 			_radianceTempTex = std::move(radianceTempTex);
 			_radianceTex = std::move(radianceTex);
 			_radianceMipUAVs = std::move(radianceMipUAVs);
-			_aoRawTex = std::move(aoRawTex);
-			_aoDenoisedTex = std::move(aoDenoisedTex);
+			_aoTex = std::move(aoTex);
 			_bounceSHRawTex = std::move(bounceSHRawTex);
 			_bounceCoCgRawTex = std::move(bounceCoCgRawTex);
 			_bounceSHTex = std::move(bounceSHTex);
@@ -736,8 +733,7 @@ namespace cs::features
 		}
 		cs::render::annotation::ScopedEvent annotationScope(
 			"ScreenSpaceGI/ClearOcclusionOutputs");
-		ClearToIdentity(a_context, _aoRawTex);
-		ClearToIdentity(a_context, _aoDenoisedTex);
+		ClearToIdentity(a_context, _aoTex);
 		_occlusionOutputsDirty = false;
 	}
 
@@ -799,7 +795,6 @@ namespace cs::features
 		}
 
 		_aoProducedLastFrame.store(false, std::memory_order_relaxed);
-		_aoDenoisedLastFrame.store(false, std::memory_order_relaxed);
 		_bounceProducedLastFrame.store(false, std::memory_order_relaxed);
 		_bounceDenoisedLastFrame.store(false, std::memory_order_relaxed);
 		_radianceAvailableLastFrame.store(false, std::memory_order_relaxed);
@@ -879,15 +874,18 @@ namespace cs::features
 
 		D3D11_TEXTURE2D_DESC radianceDesc{};
 		auto* radianceSRV = cs::engine::GetRenderTargetSRV(kRadianceSourceA);
+		auto* albedoSRV = cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferAlbedo);
 		const bool radianceAvailable =
+			_settings.enableGI &&
 			IsTemporalReady() &&
+			albedoSRV &&
 			IsFullResolutionHDR(radianceSRV, _allocW, _allocH, radianceDesc);
 		_radianceAvailableLastFrame.store(radianceAvailable, std::memory_order_relaxed);
-		if (!radianceAvailable) {
+		if (_settings.enableGI && !radianceAvailable) {
 			CS_LOG_ONCE(
 				L,
 				spdlog::level::warn,
-				"SSGI bounce unavailable: the radiance source must expose a full-resolution R11G11B10_FLOAT SRV.");
+				"SSGI indirect lighting unavailable: it needs the albedo target and full-resolution R11G11B10_FLOAT diffuse light.");
 		}
 
 		const bool tiledLighting = cs::engine::QueryTiledLightingEnabled();
@@ -947,7 +945,8 @@ namespace cs::features
 			.normal = ResourceIdentity(normalSRV),
 			.motion = ResourceIdentity(motionAvailable ? motionSRV : nullptr),
 			.sourceA = ResourceIdentity(radianceAvailable ? radianceSRV : nullptr),
-			.sourceB = ResourceIdentity(radianceBSRV)
+			.sourceB = ResourceIdentity(radianceBSRV),
+			.albedo = ResourceIdentity(radianceAvailable ? albedoSRV : nullptr)
 		};
 		const std::uint8_t sourceMode =
 			(tiledLighting ? 2u : 0u) |
@@ -1079,29 +1078,29 @@ namespace cs::features
 			xegtaoCB.FrameIndex = static_cast<std::uint32_t>(state->frameCount);
 			xegtaoCB.NumSlices = static_cast<std::uint32_t>(_settings.numSlices);
 			xegtaoCB.NumSteps = static_cast<std::uint32_t>(_settings.numSteps);
-			xegtaoCB.MinScreenRadius = 3.0f;
+			xegtaoCB.MinScreenRadius = _settings.minScreenRadius * frameWidth;
 			xegtaoCB.AORadius = std::clamp(_settings.aoRadius / effectRadius, 0.0f, 1.0f);
 			xegtaoCB.EffectRadius = effectRadius;
-			xegtaoCB.Thickness = 32.0f;
+			xegtaoCB.Thickness = _settings.thickness;
 			xegtaoCB.GIRadius = std::clamp(_settings.giRadius / effectRadius, 0.0f, 1.0f);
 			// Metric-scale fades suppress almost all AO.
 			xegtaoCB.DepthFadeRange[0] = _settings.depthFadeStart;
 			xegtaoCB.DepthFadeRange[1] = _settings.depthFadeEnd;
 			const float depthFadeSpan = _settings.depthFadeEnd - _settings.depthFadeStart;
 			xegtaoCB.DepthFadeScaleConst = depthFadeSpan > 1.0f ? 1.0f / depthFadeSpan : 1.0f;
-			xegtaoCB.BlurRadius = _settings.denoiseRadius;
-			xegtaoCB.DistanceNormalisation = 2.0f;
-			xegtaoCB.CenterBeta = 1.0f;
+			xegtaoCB.BlurRadius = _settings.blurRadius;
+			xegtaoCB.DistanceNormalisation = _settings.distanceNormalisation;
+			xegtaoCB.NormalDisocclusion = _settings.normalDisocclusion;
 			xegtaoCB.DepthDisocclusion = _settings.depthDisocclusion;
 			xegtaoCB.MaxAccumFrames = static_cast<std::uint32_t>(_settings.maxAccumFrames);
 			xegtaoCB.TemporalFlags =
-				(temporalEnabled ? 1u : 0u) |
 				(useHistory ? 2u : 0u) |
 				(includeSourceB ? 4u : 0u);
-			if (radianceAvailable) {
-				xegtaoCB.RadianceScale[0] = frameWidth / static_cast<float>(radianceDesc.Width);
-				xegtaoCB.RadianceScale[1] = frameHeight / static_cast<float>(radianceDesc.Height);
-			}
+			xegtaoCB.GISaturation = _settings.giSaturation;
+			xegtaoCB.GIDistanceCompensation = _settings.giDistanceCompensation;
+			xegtaoCB.GICompensationMaxDist = _settings.aoRadius;
+			xegtaoCB.AOPower = _settings.aoPower;
+			xegtaoCB.GIStrength = _settings.giStrength;
 			const CameraTransform& previousCamera = useHistory ? _prevCamera : camera;
 			const DirectX::XMFLOAT3 temporalPreviousOrigin =
 				useHistory ? previousCameraOrigin : cameraOrigin;
@@ -1146,6 +1145,7 @@ namespace cs::features
 				_decodeCS.get(), decodeSRVs, decodeUAVs, _decodeCB->CB(), sampler,
 				groups8X, groups8Y, "ScreenSpaceGI/Decode");
 
+			const std::size_t variant = temporalEnabled ? 1u : 0u;
 			if (radianceAvailable) {
 				ID3D11ShaderResourceView* disoccSRVs[]{
 					radianceSRV,
@@ -1155,7 +1155,8 @@ namespace cs::features
 					_prevGeoTex[readIndex]->srv.get(),
 					_accumTex[readIndex]->srv.get(),
 					_bounceSHTex[readIndex]->srv.get(),
-					_bounceCoCgTex[readIndex]->srv.get()
+					_bounceCoCgTex[readIndex]->srv.get(),
+					albedoSRV
 				};
 				ID3D11UnorderedAccessView* disoccUAVs[]{
 					_radianceTempTex->uav.get(),
@@ -1164,7 +1165,7 @@ namespace cs::features
 					_bounceCoCgTex[writeIndex]->uav.get()
 				};
 				pass.Dispatch(
-					_radianceDisoccCS.get(), disoccSRVs, disoccUAVs, constants, sampler,
+					_radianceDisoccCS[variant].get(), disoccSRVs, disoccUAVs, constants, sampler,
 					groups8X, groups8Y, "ScreenSpaceGI/RadianceDisocclusion");
 				if (temporalEnabled) {
 					++temporalDispatches;
@@ -1219,14 +1220,14 @@ namespace cs::features
 					_bounceCoCgTex[writeIndex]->srv.get()
 				};
 				ID3D11UnorderedAccessView* giUAVs[]{
-					_aoRawTex->uav.get(),
+					_aoTex->uav.get(),
 					_bounceSHRawTex->uav.get(),
 					_bounceCoCgRawTex->uav.get(),
 					_prevGeoTex[writeIndex]->uav.get()
 				};
 				pass.Dispatch(
-					_bounceCS.get(), giSRVs, giUAVs, constants, sampler, groups8X, groups8Y,
-					"ScreenSpaceGI/Bounce");
+					_giCS[variant].get(), giSRVs, giUAVs, constants, sampler, groups8X, groups8Y,
+					"ScreenSpaceGI/GI");
 				if (temporalEnabled) {
 					++temporalDispatches;
 				}
@@ -1239,7 +1240,7 @@ namespace cs::features
 					nullptr,
 					_noiseSRV.get()
 				};
-				ID3D11UnorderedAccessView* aoUAVs[]{ _aoRawTex->uav.get() };
+				ID3D11UnorderedAccessView* aoUAVs[]{ _aoTex->uav.get() };
 				pass.Dispatch(
 					_aoCS.get(), aoSRVs, aoUAVs, constants, sampler, groups8X, groups8Y,
 					"ScreenSpaceGI/AO");
@@ -1247,60 +1248,39 @@ namespace cs::features
 			_occlusionOutputsDirty = true;
 			_aoProducedLastFrame.store(true, std::memory_order_relaxed);
 
-			const bool denoiseBounce =
-				radianceAvailable && _settings.denoiseEnabled && _bounceDenoiseCS;
-			if (denoiseBounce) {
-				ID3D11ShaderResourceView* denoiseSRVs[]{
+			// Upstream blurs indirect light only; AO reaches composition unfiltered.
+			if (radianceAvailable && _settings.enableBlur) {
+				ID3D11ShaderResourceView* blurSRVs[]{
 					_workingDepthTex->srv.get(),
 					_viewNormalTex->srv.get(),
-					_aoRawTex->srv.get(),
+					_accumTex[writeIndex]->srv.get(),
 					_bounceSHRawTex->srv.get(),
-					_bounceCoCgRawTex->srv.get(),
-					_accumTex[writeIndex]->srv.get()
+					_bounceCoCgRawTex->srv.get()
 				};
-				ID3D11UnorderedAccessView* denoiseUAVs[]{
-					_aoDenoisedTex->uav.get(),
+				ID3D11UnorderedAccessView* blurUAVs[]{
+					_accumBlurTex->uav.get(),
 					_bounceSHTex[writeIndex]->uav.get(),
-					_bounceCoCgTex[writeIndex]->uav.get(),
-					_accumBlurTex->uav.get()
+					_bounceCoCgTex[writeIndex]->uav.get()
 				};
 				pass.Dispatch(
-					_bounceDenoiseCS.get(), denoiseSRVs, denoiseUAVs, constants, sampler,
-					groups8X, groups8Y, "ScreenSpaceGI/DenoiseBounce");
+					_blurCS[variant].get(), blurSRVs, blurUAVs, constants, sampler,
+					groups8X, groups8Y, "ScreenSpaceGI/Blur");
 				if (temporalEnabled) {
 					++temporalDispatches;
-				}
-				{
 					cs::render::annotation::ScopedEvent historyScope(
 						"ScreenSpaceGI/CopyAccumulationHistory");
 					context->CopyResource(
 						_accumTex[writeIndex]->resource.get(), _accumBlurTex->resource.get());
 				}
-				_aoDenoisedLastFrame.store(true, std::memory_order_relaxed);
 				_bounceDenoisedLastFrame.store(true, std::memory_order_relaxed);
-			} else {
-				if (_settings.denoiseEnabled && _denoiseCS) {
-					ID3D11ShaderResourceView* denoiseSRVs[]{
-						_workingDepthTex->srv.get(),
-						_viewNormalTex->srv.get(),
-						_aoRawTex->srv.get()
-					};
-					ID3D11UnorderedAccessView* denoiseUAVs[]{ _aoDenoisedTex->uav.get() };
-					pass.Dispatch(
-						_denoiseCS.get(), denoiseSRVs, denoiseUAVs, constants, sampler,
-						groups8X, groups8Y, "ScreenSpaceGI/DenoiseAO");
-					_aoDenoisedLastFrame.store(true, std::memory_order_relaxed);
-				}
-				if (radianceAvailable) {
-					cs::render::annotation::ScopedEvent historyScope(
-						"ScreenSpaceGI/CopyBounceHistory");
-					context->CopyResource(
-						_bounceSHTex[writeIndex]->resource.get(), _bounceSHRawTex->resource.get());
-					context->CopyResource(
-						_bounceCoCgTex[writeIndex]->resource.get(), _bounceCoCgRawTex->resource.get());
-				}
+			} else if (radianceAvailable) {
+				cs::render::annotation::ScopedEvent historyScope(
+					"ScreenSpaceGI/CopyBounceHistory");
+				context->CopyResource(
+					_bounceSHTex[writeIndex]->resource.get(), _bounceSHRawTex->resource.get());
+				context->CopyResource(
+					_bounceCoCgTex[writeIndex]->resource.get(), _bounceCoCgRawTex->resource.get());
 			}
-
 			if (radianceAvailable) {
 				_history.Publish(frameIndex);
 				_prevCamera = camera;
@@ -1316,7 +1296,6 @@ namespace cs::features
 			ClearOcclusionOutputs(context);
 			ClearBounceOutputs(context);
 			_aoProducedLastFrame.store(false, std::memory_order_relaxed);
-			_aoDenoisedLastFrame.store(false, std::memory_order_relaxed);
 			_bounceProducedLastFrame.store(false, std::memory_order_relaxed);
 			_bounceDenoisedLastFrame.store(false, std::memory_order_relaxed);
 			_radianceAvailableLastFrame.store(false, std::memory_order_relaxed);
@@ -1329,7 +1308,6 @@ namespace cs::features
 			ClearOcclusionOutputs(context);
 			ClearBounceOutputs(context);
 			_aoProducedLastFrame.store(false, std::memory_order_relaxed);
-			_aoDenoisedLastFrame.store(false, std::memory_order_relaxed);
 			_bounceProducedLastFrame.store(false, std::memory_order_relaxed);
 			_bounceDenoisedLastFrame.store(false, std::memory_order_relaxed);
 			_radianceAvailableLastFrame.store(false, std::memory_order_relaxed);
@@ -1370,7 +1348,6 @@ namespace cs::features
 			return;
 		}
 
-		const bool useDenoisedAO = _aoDenoisedLastFrame.load(std::memory_order_relaxed);
 		auto* albedoSRV =
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferAlbedo);
 		const bool compositionReady =
@@ -1379,7 +1356,7 @@ namespace cs::features
 			albedoSRV;
 		const auto publishedIndex = _history.ReadIndex();
 		ID3D11ShaderResourceView* composition[kCompositionPSSlotCount] = {
-			compositionReady ? SRVOf(useDenoisedAO ? _aoDenoisedTex : _aoRawTex) : nullptr,
+			compositionReady ? SRVOf(_aoTex) : nullptr,
 			compositionReady ? SRVOf(_bounceSHTex[publishedIndex]) : nullptr,
 			compositionReady ? SRVOf(_bounceCoCgTex[publishedIndex]) : nullptr,
 			compositionReady ? albedoSRV : nullptr
@@ -1409,7 +1386,6 @@ namespace cs::features
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
 			.Field("resource_init_failed", _resourceInitFailed.load(std::memory_order_acquire))
 			.Field("ao_produced", _aoProducedLastFrame.load(std::memory_order_relaxed))
-			.Field("ao_denoised", _aoDenoisedLastFrame.load(std::memory_order_relaxed))
 			.Field("radiance_available", _radianceAvailableLastFrame.load(std::memory_order_relaxed))
 			.Field("bounce_produced", _bounceProducedLastFrame.load(std::memory_order_relaxed))
 			.Field("bounce_denoised", _bounceDenoisedLastFrame.load(std::memory_order_relaxed))
@@ -1466,80 +1442,124 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSettings()
 	{
+		// Mirrors the upstream panel; the advanced toggle is session-only there too.
+		static bool showAdvanced = false;
 		settings::SettingsEdit edit{ *this };
+		const auto tooltip = [](const char* a_text) {
+			if (dmui::ui::IsItemHovered())
+				dmui::ui::SetTooltip("%s", a_text);
+		};
+		const auto slider = [&](const char* a_label, auto Settings::* a_member, const char* a_format = nullptr) {
+			const auto range = ssgi_settings::kSchema.EditRange(a_member);
+			edit.Continuous(dmui::ui::SliderScalar(
+				a_label, &(_settings.*a_member), &range.min, &range.max, a_format));
+		};
+		const auto percentSlider = [&](const char* a_label, float Settings::* a_member) {
+			const auto range = ssgi_settings::kSchema.EditRange(a_member);
+			float percent = _settings.*a_member * 100.0f;
+			const float minimum = range.min * 100.0f;
+			const float maximum = range.max * 100.0f;
+			if (edit.Continuous(dmui::ui::SliderScalar(a_label, &percent, &minimum, &maximum, "%.1f%%")))
+				_settings.*a_member = percent * 0.01f;
+		};
+		const auto applyPreset = [&](int a_slices, int a_steps, bool a_gi) {
+			_settings.numSlices = a_slices;
+			_settings.numSteps = a_steps;
+			_settings.enableBlur = true;
+			_settings.enableGI = a_gi;
+			edit.Discrete(true);
+		};
+
+		dmui::ui::Separator();
+		dmui::ui::Text("Toggles");
+		static_cast<void>(dmui::ui::Checkbox("Show Advanced Options", &showAdvanced));
 		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
+		tooltip("Enable Screen Space Global Illumination. When disabled, all other settings are ignored.");
+		dmui::ui::BeginDisabled(!_settings.enabled);
+		edit.Discrete(dmui::ui::Checkbox("Indirect Lighting (IL)", &_settings.enableGI));
+		dmui::ui::EndDisabled();
 
-		const auto slicesRange = ssgi_settings::kSchema.EditRange(&Settings::numSlices);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Slices", &_settings.numSlices, &slicesRange.min, &slicesRange.max));
-		const auto stepsRange = ssgi_settings::kSchema.EditRange(&Settings::numSteps);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Steps", &_settings.numSteps, &stepsRange.min, &stepsRange.max));
-		const auto aoRadiusRange = ssgi_settings::kSchema.EditRange(&Settings::aoRadius);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"AO radius (game units)",
-			&_settings.aoRadius,
-			&aoRadiusRange.min,
-			&aoRadiusRange.max));
-		const auto giRadiusRange = ssgi_settings::kSchema.EditRange(&Settings::giRadius);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"GI radius (game units)",
-			&_settings.giRadius,
-			&giRadiusRange.min,
-			&giRadiusRange.max));
-		const auto aoPowerRange = ssgi_settings::kSchema.EditRange(&Settings::aoPower);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"AO power",
-			&_settings.aoPower,
-			&aoPowerRange.min,
-			&aoPowerRange.max));
-		const auto bounceRange = ssgi_settings::kSchema.EditRange(&Settings::bounceStrength);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Bounce strength",
-			&_settings.bounceStrength,
-			&bounceRange.min,
-			&bounceRange.max));
-		edit.Discrete(dmui::ui::Checkbox("Denoise", &_settings.denoiseEnabled));
-		const auto denoiseRadiusRange = ssgi_settings::kSchema.EditRange(&Settings::denoiseRadius);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Denoise radius",
-			&_settings.denoiseRadius,
-			&denoiseRadiusRange.min,
-			&denoiseRadiusRange.max));
-		edit.Discrete(dmui::ui::Checkbox("Temporal denoiser", &_settings.enableTemporalDenoiser));
-		float depthDisocclusionPercent = _settings.depthDisocclusion * 100.0f;
-		const auto depthDisocclusionRange = ssgi_settings::kSchema.EditRange(&Settings::depthDisocclusion);
-		const float depthDisocclusionMin = depthDisocclusionRange.min * 100.0f;
-		const float depthDisocclusionMax = depthDisocclusionRange.max * 100.0f;
-		if (edit.Continuous(dmui::ui::SliderScalar(
-				"Depth disocclusion",
-				&depthDisocclusionPercent,
-				&depthDisocclusionMin,
-				&depthDisocclusionMax,
-				"%.1f%%"))) {
-			_settings.depthDisocclusion = depthDisocclusionPercent * 0.01f;
+		dmui::ui::Separator();
+		dmui::ui::Text("Quality/Performance");
+		dmui::ui::BeginDisabled(!_settings.enabled);
+		if (dmui::ui::Button("AO only"))
+			applyPreset(1, 6, false);
+		tooltip("1 Slice, 6 Steps, blur enabled, no GI");
+		dmui::ui::SameLine();
+		if (dmui::ui::Button("Standard"))
+			applyPreset(4, 8, true);
+		dmui::ui::SameLine();
+		if (dmui::ui::Button("Reference"))
+			applyPreset(8, 10, true);
+		tooltip("Reference mode.");
+		if (showAdvanced) {
+			slider("Slices", &Settings::numSlices);
+			tooltip("How many directions do the samples take.\nControls noise.");
+			slider("Steps Per Slice", &Settings::numSteps);
+			tooltip("How many samples does it take in one direction.\nControls accuracy of lighting, and noise when effect radius is large.");
 		}
-		const auto maxAccumulatedFramesRange = ssgi_settings::kSchema.EditRange(&Settings::maxAccumFrames);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Max accumulated frames",
-			&_settings.maxAccumFrames,
-			&maxAccumulatedFramesRange.min,
-			&maxAccumulatedFramesRange.max));
-		const auto depthFadeStartRange = ssgi_settings::kSchema.EditRange(&Settings::depthFadeStart);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Depth fade start (game units)",
-			&_settings.depthFadeStart,
-			&depthFadeStartRange.min,
-			&depthFadeStartRange.max));
-		const auto depthFadeEndRange = ssgi_settings::kSchema.EditRange(&Settings::depthFadeEnd);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Depth fade end (game units)",
-			&_settings.depthFadeEnd,
-			&depthFadeEndRange.min,
-			&depthFadeEndRange.max));
+		dmui::ui::EndDisabled();
 
+		dmui::ui::Separator();
+		dmui::ui::Text("Visual");
+		dmui::ui::BeginDisabled(!_settings.enabled);
+		slider("AO Power", &Settings::aoPower, "%.2f");
+		dmui::ui::BeginDisabled(!_settings.enableGI);
+		slider("IL Source Brightness", &Settings::giStrength, "%.2f");
+		dmui::ui::EndDisabled();
+		slider("AO radius", &Settings::aoRadius, "%.1f units");
+		tooltip("A smaller radius produces tighter AO.");
+		dmui::ui::BeginDisabled(!_settings.enableGI);
+		slider("IL radius", &Settings::giRadius, "%.1f units");
+		tooltip("A larger radius produces wider IL.");
+		dmui::ui::EndDisabled();
+		if (showAdvanced) {
+			slider("Min Screen Radius", &Settings::minScreenRadius, "%.3f");
+			tooltip("The minimum screen-space effect radius as proportion of display width, to prevent far field AO being too small.");
+		}
+		slider("Depth Fade Near", &Settings::depthFadeStart, "%.0f units");
+		slider("Depth Fade Far", &Settings::depthFadeEnd, "%.0f units");
+		tooltip("Distance range where depth-based effects fade out.");
+		if (showAdvanced) {
+			slider("Thickness", &Settings::thickness, "%.1f units");
+			tooltip("How thick the occluders are. Only affects AO.");
+		}
+		dmui::ui::EndDisabled();
 
-		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
+		dmui::ui::Separator();
+		dmui::ui::Text("Visual - IL");
+		dmui::ui::BeginDisabled(!_settings.enabled || !_settings.enableGI);
+		if (showAdvanced) {
+			slider("IL Distance Compensation", &Settings::giDistanceCompensation, "%.1f");
+			tooltip("Brighten/Dimming further radiance samples.");
+		}
+		percentSlider("IL Saturation", &Settings::giSaturation);
+		dmui::ui::EndDisabled();
+
+		dmui::ui::Separator();
+		dmui::ui::Text("Denoising");
+		dmui::ui::BeginDisabled(!_settings.enabled);
+		edit.Discrete(dmui::ui::Checkbox("Temporal Denoiser", &_settings.enableTemporalDenoiser));
+		dmui::ui::SameLine();
+		edit.Discrete(dmui::ui::Checkbox("Blur", &_settings.enableBlur));
+		if (showAdvanced) {
+			dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser);
+			slider("Max Frame Accumulation", &Settings::maxAccumFrames);
+			tooltip("How many past frames to accumulate results with. Higher values are less noisy but potentially cause ghosting.");
+			dmui::ui::EndDisabled();
+			dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser && !_settings.enableGI);
+			percentSlider("Movement Disocclusion", &Settings::depthDisocclusion);
+			tooltip("If a pixel has moved too far from the last frame, its radiance will not be carried to this frame.\nLower values are stricter.");
+			dmui::ui::EndDisabled();
+			dmui::ui::BeginDisabled(!_settings.enableBlur);
+			slider("Blur Radius", &Settings::blurRadius, "%.1f px");
+			slider("Geometry Weight", &Settings::distanceNormalisation, "%.2f");
+			tooltip("Higher value makes the blur more sensitive to differences in geometry.");
+			dmui::ui::EndDisabled();
+		}
+		dmui::ui::EndDisabled();
+
+		dmui::ui::Separator();		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
 			(_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
 		dmui::ui::TextDisabled(
 			"Resources: %s (%ux%u) | composition binds: %u | generation: %u",

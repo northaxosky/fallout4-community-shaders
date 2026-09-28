@@ -44,9 +44,8 @@ namespace ScreenSpaceGI
 			return (directLighting + directionalAmbient) * engineAmbientOcclusion;
 
 		int3 texel = int3(int2(screenPosition), 0);
-		float visibility = pow(
-			saturate(1.0 - OcclusionTexture.Load(texel)),
-			SharedData::screenSpaceGISettings.AoPower);
+		// AO power is applied by the generator, as upstream does.
+		float visibility = saturate(1.0 - OcclusionTexture.Load(texel));
 
 #ifdef WETNESS_EFFECTS
 		float3 albedo = saturate(
@@ -71,8 +70,7 @@ namespace ScreenSpaceGI
 			float irradianceY =
 				SphericalHarmonics::SHHallucinateZH3Irradiance(luma, worldNormal);
 			float3 irradiance = max(0.0, Color::YCoCgToRGB(float3(irradianceY, chroma)));
-			bounce = irradiance * linearAlbedo *
-				SharedData::screenSpaceGISettings.BounceStrength;
+			bounce = irradiance * linearAlbedo;
 		}
 
 		return Color::IrradianceToGamma(

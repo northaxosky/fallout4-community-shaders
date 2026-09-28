@@ -29,8 +29,6 @@ float4 main() : SV_Target
 	value += BoolValue(
 		SharedData::screenSpaceGISettings.EnableScreenSpaceGI);
 	value += SharedData::screenSpaceGISettings.pad0;
-	value += SharedData::screenSpaceGISettings.AoPower;
-	value += SharedData::screenSpaceGISettings.BounceStrength;
 
 	value += SharedData::wetnessEffectsSettings.Wetness;
 	value += SharedData::wetnessEffectsSettings.MaxRainWetness;

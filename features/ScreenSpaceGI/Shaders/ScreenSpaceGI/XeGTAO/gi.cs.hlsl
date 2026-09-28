@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2016-2021 Intel Corporation
+// Ported from Skyrim Community Shaders d330bf12d, with additional edits by FiveLimbedCat/ProfJack.
+//
+// Screen Space Indirect Lighting with Visibility Bitmask: https://arxiv.org/abs/2301.11376
 
 #include "../Common/FastMath.hlsli"
 #include "../Common/Math.hlsli"
-#ifdef SSGI_BOUNCE
+#ifdef GI
 #include "../Common/Color.hlsli"
 #include "../../Common/SphericalHarmonics.hlsli"
 #endif
@@ -11,20 +14,20 @@
 
 Texture2D<float> srcWorkingDepth : register(t0);
 Texture2D<float3> srcNormal : register(t1);
-#ifdef SSGI_BOUNCE
+#ifdef GI
 Texture2D<float3> srcRadiance : register(t2);
 #endif
 Texture2D<unorm float2> srcNoise : register(t3);
-#ifdef SSGI_BOUNCE
+#ifdef GI
 Texture2D<unorm float> srcAccumFrames : register(t4);
-Texture2D<float4> srcPrevIlY : register(t5);
-Texture2D<float2> srcPrevIlCoCg : register(t6);
+Texture2D<float4> srcPrevY : register(t5);
+Texture2D<float2> srcPrevCoCg : register(t6);
 #endif
 
 RWTexture2D<unorm float> outAo : register(u0);
-#ifdef SSGI_BOUNCE
-RWTexture2D<float4> outBounceSH : register(u1);
-RWTexture2D<float2> outBounceCoCg : register(u2);
+#ifdef GI
+RWTexture2D<float4> outY : register(u1);
+RWTexture2D<float2> outCoCg : register(u2);
 RWTexture2D<float3> outPrevGeo : register(u3);
 #endif
 
@@ -33,6 +36,7 @@ float GetDepthFade(float depth)
 	return saturate((depth - DepthFadeRange.x) * DepthFadeScaleConst);
 }
 
+// noise texture from https://github.com/electronicarts/fastnoise, 128x128x64
 float2 SpatioTemporalNoise(uint2 pixCoord, uint temporalIndex)
 {
 	uint2 noiseCoord = (pixCoord % 128) + uint2(0, (temporalIndex % 64) * 128);
@@ -42,8 +46,8 @@ float2 SpatioTemporalNoise(uint2 pixCoord, uint temporalIndex)
 void CalculateGI(
 	uint2 dtid, float2 uv, float viewspaceZ, float3 viewspaceNormal,
 	out float o_ao
-#ifdef SSGI_BOUNCE
-	, out float4 o_bounceSH, out float2 o_bounceCoCg
+#ifdef GI
+	, out float4 o_currY, out float2 o_currCoCg
 #endif
 )
 {
@@ -54,6 +58,7 @@ void CalculateGI(
 	const float rcpNumSlices = rcp((float)NumSlices);
 	const float rcpNumSteps = rcp((float)NumSteps);
 
+	// if the offset is under approx pixel size (pixelTooCloseThreshold), push it out to the minimum distance
 	const float pixelTooCloseThreshold = 1.3;
 	const float2 pixelDirRBViewspaceSizeAtCenterZ = viewspaceZ.xx * NDCToViewMul.xy * RCP_OUT_FRAME_DIM;
 
@@ -69,11 +74,12 @@ void CalculateGI(
 	const float3 pixCenterPos = ScreenToViewPosition(normalizedScreenPos, viewspaceZ);
 	const float3 viewVec = normalize(-pixCenterPos);
 
+	// flip foliage normal
 	if (dot(viewVec, pixCenterPos) > 0)
 		viewspaceNormal = -viewspaceNormal;
 
 	float visibility = 0;
-#ifdef SSGI_BOUNCE
+#ifdef GI
 	float4 radianceY = 0;
 	float2 radianceCoCg = 0;
 #endif
@@ -85,6 +91,7 @@ void CalculateGI(
 
 		float2 omega = float2(directionVec.x, -directionVec.y) * screenspaceRadius;
 
+		// log2(length(s * omega)) decomposes to log2(s) + logLenOmega for s >= 0.
 		const float logLenOmega = 0.5 * log2(max(dot(omega, omega), EPSILON_LENGTH_SQ));
 
 		const float3 orthoDirectionVec = directionVec - (dot(directionVec, viewVec) * viewVec);
@@ -98,10 +105,11 @@ void CalculateGI(
 		float n = signNorm * FastMath::ACos(cosNorm);
 
 		uint bitmask = 0;
-#ifdef SSGI_BOUNCE
+#ifdef GI
 		uint bitmaskGI = 0;
 #endif
 
+		// R1 sequence (http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/)
 		float stepNoise = frac(noiseStep + slice * 0.6180339887498948482);
 
 		[unroll] for (int sideSign = -1; sideSign <= 1; sideSign += 2)
@@ -121,8 +129,10 @@ void CalculateGI(
 				[branch] if (any(sampleScreenPos > 1.0) || any(sampleScreenPos < 0.0)) continue;
 
 				float mipLevel = clamp(log2(s) + logLenOmega - 3.3, 0, 5);
+				float mipLevelRadiance = max(mipLevel, 1);
 
 				float SZ = srcWorkingDepth.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevel);
+				// The decoded first-person partition carries no view depth.
 				if (SZ <= FP_Z) continue;
 
 				float3 samplePos = ScreenToViewPosition(sampleScreenPos, SZ);
@@ -137,36 +147,48 @@ void CalculateGI(
 				angleRange = smoothstep(0, 1, (angleRange + n) * Math::INV_PI + .5);
 
 				uint2 bitsRange = uint2(round(angleRange.x * 32u), round((angleRange.y - angleRange.x) * 32u));
-				uint sampleBits = ((1 << bitsRange.y) - 1) << bitsRange.x;
-				uint maskedBits = s < AORadius ? sampleBits : 0;
+				uint maskedBits = s < AORadius ? ((1 << bitsRange.y) - 1) << bitsRange.x : 0;
 
-#ifdef SSGI_BOUNCE
-				uint giBits = s < GIRadius ? sampleBits : 0;
-				uint validBits = giBits & ~bitmaskGI;
-				bitmaskGI |= giBits;
-				if (validBits != 0) {
-					float3 sampleNormal = normalize(
-						srcNormal.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevel));
-					if (dot(samplePos, sampleNormal) > 0)
-						sampleNormal = -sampleNormal;
+#ifdef GI
+				// Back-side horizon for the GI interval uses a fixed ~300-unit thickness.
+				float3 sampleBackHorizonVecGI = normalize(sampleDelta - viewVec * 300);
+				float angleBackGI = FastMath::ACos(dot(sampleBackHorizonVecGI, viewVec));
+				float2 angleRangeGI = -sideSign * (sideSign == -1 ? float2(angleFront, angleBackGI) : float2(angleBackGI, angleFront));
 
-					float frontBackMult = max(0, -dot(sampleNormal, sampleHorizonVec));
-					if (frontBackMult > 0) {
-						float angularWeight = countbits(validBits) * 0.03125;
-						float3 sampleRadiance = max(
-							0,
-							srcRadiance.SampleLevel(
-								samplerPointClamp, sampleUV * frameScale, mipLevel));
-						sampleRadiance *= frontBackMult * angularWeight;
+				angleRangeGI = smoothstep(0, 1, (angleRangeGI + n) * Math::INV_PI + .5);
 
-						float3 sampleYCoCg = Color::RGBToYCoCg(sampleRadiance);
-						float3 horizonVecWS = ViewToWorldDirection(sampleHorizonVec, ViewToWorld);
-						radianceY += sampleYCoCg.x * SphericalHarmonics::Evaluate(horizonVecWS);
-						radianceCoCg += sampleYCoCg.yz;
+				uint2 bitsRangeGI = uint2(round(angleRangeGI.x * 32u), round((angleRangeGI.y - angleRangeGI.x) * 32u));
+				uint maskedBitsGI = s < GIRadius ? ((1 << bitsRangeGI.y) - 1) << bitsRangeGI.x : 0;
+
+				uint validBits = maskedBitsGI & ~bitmaskGI;
+				bool checkGI = validBits;
+
+				if (checkGI) {
+					float giBoost = 4.0 * Math::PI * (1 + GIDistanceCompensation * smoothstep(0, GICompensationMaxDist, s * EffectRadius));
+
+					float3 normalSample = srcNormal.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevelRadiance);
+					if (dot(samplePos, normalSample) > 0)
+						normalSample = -normalSample;
+					float frontBackMult = -dot(normalSample, sampleHorizonVec);
+					frontBackMult = frontBackMult < 0 ? 0.0 : frontBackMult;  // backface
+
+					if (frontBackMult > 0.f) {
+						float3 sampleHorizonVecWS = ViewToWorldDirection(sampleHorizonVec, ViewToWorld);
+
+						float3 sampleRadiance = srcRadiance.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevelRadiance).rgb * frontBackMult * giBoost * countbits(validBits) * 0.03125;
+						sampleRadiance = max(sampleRadiance, 0);
+						float3 sampleRadianceYCoCg = Color::RGBToYCoCg(sampleRadiance);
+
+						radianceY += sampleRadianceYCoCg.r * SphericalHarmonics::Evaluate(sampleHorizonVecWS);
+						radianceCoCg += sampleRadianceYCoCg.gb;
 					}
 				}
-#endif
+#endif  // GI
+
 				bitmask |= maskedBits;
+#ifdef GI
+				bitmaskGI |= maskedBitsGI;
+#endif
 			}
 		}
 
@@ -177,13 +199,19 @@ void CalculateGI(
 
 	visibility *= rcpNumSlices;
 	visibility = lerp(saturate(visibility), 0, depthFade);
+	visibility = 1 - pow(abs(1 - visibility), AOPower);
+
+#ifdef GI
+	radianceY *= rcpNumSlices;
+	radianceY = lerp(radianceY, 0, depthFade);
+
+	radianceCoCg *= rcpNumSlices * GISaturation;
+#endif
 
 	o_ao = visibility;
-#ifdef SSGI_BOUNCE
-	radianceY *= rcpNumSlices;
-	radianceCoCg *= rcpNumSlices;
-	o_bounceSH = lerp(radianceY, 0, depthFade);
-	o_bounceCoCg = radianceCoCg;
+#ifdef GI
+	o_currY = radianceY;
+	o_currCoCg = radianceCoCg;
 #endif
 }
 
@@ -199,75 +227,70 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 	float viewspaceZ = READ_DEPTH(srcWorkingDepth, pxCoord);
 	float3 viewspaceNormal = srcNormal[pxCoord];
 
-#ifdef SSGI_BOUNCE
+#ifdef GI
 	outPrevGeo[pxCoord] = float3(
 		clamp(viewspaceZ, 0.0, R11_MAX_DEPTH),
 		EncodeWorldNormal(ViewToWorldDirection(viewspaceNormal, ViewToWorld)));
 #endif
 
+	// Move center pixel slightly towards camera to avoid depth-buffer imprecision artifacts.
 	viewspaceZ *= 0.99920h;
 
 	float currAo = 0;
-#ifdef SSGI_BOUNCE
-	float4 currBounceSH = 0;
-	float2 currBounceCoCg = 0;
+#ifdef GI
+	float4 currY = 0;
+	float2 currCoCg = 0;
 #endif
 
 	bool needGI = viewspaceZ > FP_Z && viewspaceZ < DepthFadeRange.y;
 	if (needGI) {
 		CalculateGI(
 			pxCoord, uv, viewspaceZ, viewspaceNormal, currAo
-#ifdef SSGI_BOUNCE
-			, currBounceSH, currBounceCoCg
+#ifdef GI
+			, currY, currCoCg
 #endif
 		);
 
-#ifdef SSGI_BOUNCE
-		if (TemporalEnabled()) {
-			// The reprojection pass floors accumulation at one, so this stays in range.
-			float lerpFactor = saturate(rcp(max(srcAccumFrames[pxCoord] * 255, 1.0)));
+#if defined(GI) && defined(TEMPORAL_DENOISER)
+		float lerpFactor = rcp(srcAccumFrames[pxCoord] * 255);
 
-			float4 prevY = srcPrevIlY[pxCoord];
-			float2 prevCoCg = srcPrevIlCoCg[pxCoord];
+		float4 prevY = srcPrevY[pxCoord];
+		float2 prevCoCg = srcPrevCoCg[pxCoord];
 
-			// Clamp history to its neighbourhood while the blend is still young.
-			[branch] if (lerpFactor >= 0.15)
-			{
-				const int2 maxCoord = int2(OUT_FRAME_DIM) - 1;
-				const int2 center = int2(pxCoord);
-				const int2 left = clamp(center + int2(-1, 0), int2(0, 0), maxCoord);
-				const int2 right = clamp(center + int2(1, 0), int2(0, 0), maxCoord);
-				const int2 up = clamp(center + int2(0, -1), int2(0, 0), maxCoord);
-				const int2 down = clamp(center + int2(0, 1), int2(0, 0), maxCoord);
+		// Clamp young history to its neighbourhood to limit ghosting (SVGF, Schied 2017).
+		[branch] if (lerpFactor >= 0.15)
+		{
+			float4 yL = srcPrevY[pxCoord + int2(-1, 0)];
+			float4 yR = srcPrevY[pxCoord + int2(1, 0)];
+			float4 yU = srcPrevY[pxCoord + int2(0, -1)];
+			float4 yD = srcPrevY[pxCoord + int2(0, 1)];
+			float2 cL = srcPrevCoCg[pxCoord + int2(-1, 0)];
+			float2 cR = srcPrevCoCg[pxCoord + int2(1, 0)];
+			float2 cU = srcPrevCoCg[pxCoord + int2(0, -1)];
+			float2 cD = srcPrevCoCg[pxCoord + int2(0, 1)];
 
-				float4 yL = srcPrevIlY[left];
-				float4 yR = srcPrevIlY[right];
-				float4 yU = srcPrevIlY[up];
-				float4 yD = srcPrevIlY[down];
-				float2 cL = srcPrevIlCoCg[left];
-				float2 cR = srcPrevIlCoCg[right];
-				float2 cU = srcPrevIlCoCg[up];
-				float2 cD = srcPrevIlCoCg[down];
+			float4 nMinY = min(min(min(yL, yR), min(yU, yD)), currY);
+			float4 nMaxY = max(max(max(yL, yR), max(yU, yD)), currY);
+			float2 nMinCoCg = min(min(min(cL, cR), min(cU, cD)), currCoCg);
+			float2 nMaxCoCg = max(max(max(cL, cR), max(cU, cD)), currCoCg);
 
-				float4 minY = min(min(min(yL, yR), min(yU, yD)), currBounceSH);
-				float4 maxY = max(max(max(yL, yR), max(yU, yD)), currBounceSH);
-				float2 minCoCg = min(min(min(cL, cR), min(cU, cD)), currBounceCoCg);
-				float2 maxCoCg = max(max(max(cL, cR), max(cU, cD)), currBounceCoCg);
-
-				prevY = clamp(prevY, minY, maxY);
-				prevCoCg = clamp(prevCoCg, minCoCg, maxCoCg);
-			}
-
-			currBounceSH = lerp(prevY, currBounceSH, lerpFactor);
-			currBounceCoCg = lerp(prevCoCg, currBounceCoCg, lerpFactor);
+			prevY = clamp(prevY, nMinY, nMaxY);
+			prevCoCg = clamp(prevCoCg, nMinCoCg, nMaxCoCg);
 		}
+
+		currY = lerp(prevY, currY, lerpFactor);
+		currCoCg = lerp(prevCoCg, currCoCg, lerpFactor);
 #endif
 	}
+#ifdef GI
+	currY = filterNaN(currY);
+	currCoCg = filterNaN(currCoCg);
+#endif
 
 	// Output is occlusion: 0=open, 1=occluded.
 	outAo[pxCoord] = currAo;
-#ifdef SSGI_BOUNCE
-	outBounceSH[pxCoord] = currBounceSH;
-	outBounceCoCg[pxCoord] = currBounceCoCg;
+#ifdef GI
+	outY[pxCoord] = currY;
+	outCoCg[pxCoord] = currCoCg;
 #endif
 }
