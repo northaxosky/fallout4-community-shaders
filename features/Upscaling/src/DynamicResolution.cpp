@@ -417,9 +417,11 @@ namespace cs::features
 			return;
 		}
 
-		auto& mainDepth =
-			rendererData->depthStencilTargets[static_cast<uint>(cs::engine::DepthStencilTarget::kMain)];
-		_originalDepthView = reinterpret_cast<ID3D11ShaderResourceView*>(mainDepth.srViewDepth);
+		auto* mainDepth = cs::engine::ResolveDepthStencilTarget(cs::engine::DepthStencilTarget::kMain);
+		if (!mainDepth) {
+			return;
+		}
+		_originalDepthView = reinterpret_cast<ID3D11ShaderResourceView*>(mainDepth->srViewDepth);
 
 		if (a_doCopy) {
 			const std::uint64_t frame = cs::engine::GetGraphicsState()
@@ -431,7 +433,7 @@ namespace cs::features
 			}
 		}
 
-		mainDepth.srViewDepth =
+		mainDepth->srViewDepth =
 			reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(_depthOverrideTexture->srv.get());
 		_depthOverridden = true;
 	}
@@ -443,12 +445,9 @@ namespace cs::features
 		}
 		_depthOverridden = false;
 
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return;
+		if (auto* mainDepth = cs::engine::ResolveDepthStencilTarget(cs::engine::DepthStencilTarget::kMain)) {
+			mainDepth->srViewDepth = reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(_originalDepthView);
 		}
-		rendererData->depthStencilTargets[static_cast<uint>(cs::engine::DepthStencilTarget::kMain)].srViewDepth =
-			reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(_originalDepthView);
 	}
 
 	void DynamicResolution::CopyDepth()
@@ -542,9 +541,8 @@ namespace cs::features
 
 		// Restore the engine depth SRV if the override is still applied.
 		if (_depthOverridden) {
-			if (rendererData) {
-				rendererData->depthStencilTargets[static_cast<uint>(cs::engine::DepthStencilTarget::kMain)].srViewDepth =
-					reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(_originalDepthView);
+			if (auto* mainDepth = cs::engine::ResolveDepthStencilTarget(cs::engine::DepthStencilTarget::kMain)) {
+				mainDepth->srViewDepth = reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(_originalDepthView);
 			}
 			_depthOverridden = false;
 		}

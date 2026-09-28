@@ -133,6 +133,15 @@ namespace cs::render
 		cs::buffer::Texture2D* sharpenerTexture = nullptr;
 		cs::buffer::Texture2D* publicationTexture = nullptr;
 
+		// FO4 creates neither the copyable refraction normals nor a full-size depth copy that upstream samples.
+		std::unique_ptr<cs::buffer::Texture2D> refractionNormalsCopy;
+		std::unique_ptr<cs::buffer::Texture2D> sceneDepthCopy;
+		static bool EnsureShaderReadableCopy(
+			std::unique_ptr<cs::buffer::Texture2D>& a_copy,
+			ID3D11Texture2D* a_source,
+			DXGI_FORMAT a_viewFormat,
+			std::string_view a_name);
+
 		features::RCAS rcas;
 
 		bool PerformUpscaling();

@@ -203,6 +203,45 @@ namespace cs::render
 		destroy(upscalingTexture);
 		destroy(sharpenerTexture);
 		destroy(publicationTexture);
+		refractionNormalsCopy.reset();
+		sceneDepthCopy.reset();
+	}
+
+	bool TemporalRenderer::EnsureShaderReadableCopy(
+		std::unique_ptr<cs::buffer::Texture2D>& a_copy,
+		ID3D11Texture2D* a_source,
+		DXGI_FORMAT a_viewFormat,
+		std::string_view a_name)
+	{
+		D3D11_TEXTURE2D_DESC desc{};
+		a_source->GetDesc(&desc);
+		if (a_copy) {
+			D3D11_TEXTURE2D_DESC current{};
+			a_copy->resource->GetDesc(&current);
+			if (current.Width == desc.Width && current.Height == desc.Height && current.Format == desc.Format) {
+				return true;
+			}
+			a_copy.reset();
+		}
+
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags = 0;
+		auto copy = std::make_unique<cs::buffer::Texture2D>(desc);
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = a_viewFormat;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		copy->CreateSRV(srvDesc);
+		copy->SetName(
+			std::string(a_name) + ".Texture",
+			std::string(a_name) + ".SRV",
+			std::string(a_name) + ".UAV",
+			std::string(a_name) + ".RTV");
+		a_copy = std::move(copy);
+		return a_copy->srv != nullptr;
 	}
 
 	bool TemporalRenderer::CheckResources(UpscaleMethod a_upscalemethod)

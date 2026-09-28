@@ -540,24 +540,25 @@ namespace cs::render
 			cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMain);
 		auto* depthDSV =
 			cs::engine::GetDepthStencilDSV(cs::engine::DepthStencilTarget::kMain);
-		auto* depthCopyTexture = cs::engine::GetDepthStencilTexture(
-			cs::engine::DepthStencilTarget::kMainCopy);
-		auto* depthCopySRV = cs::engine::GetDepthStencilDepthSRV(
-			cs::engine::DepthStencilTarget::kMainCopy);
-		auto* depthCopyStencilSRV = cs::engine::GetDepthStencilStencilSRV(
-			cs::engine::DepthStencilTarget::kMainCopy);
+		auto* depthSRV =
+			cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kMain);
 		auto* refractionNormalsTexture =
 			cs::engine::GetRenderTargetTexture(kRefractionNormalTarget);
-		auto* refractionNormalsCopy =
-			cs::engine::GetRenderTargetCopyTexture(kRefractionNormalTarget);
-		auto* refractionNormalsCopySRV =
-			cs::engine::GetRenderTargetCopySRV(kRefractionNormalTarget);
 		auto* refractionNormalsRTV =
 			cs::engine::GetRenderTargetRTV(kRefractionNormalTarget);
+		if (!depthTexture || !depthDSV || !depthSRV || !refractionNormalsTexture ||
+			!refractionNormalsRTV) {
+			return;
+		}
 
-		if (!depthTexture || !depthDSV || !depthCopyTexture || !depthCopySRV ||
-			!refractionNormalsTexture || !refractionNormalsCopy ||
-			!refractionNormalsCopySRV || !refractionNormalsRTV) {
+		D3D11_SHADER_RESOURCE_VIEW_DESC depthSRVDesc{};
+		depthSRV->GetDesc(&depthSRVDesc);
+		D3D11_TEXTURE2D_DESC refractionNormalsDesc{};
+		refractionNormalsTexture->GetDesc(&refractionNormalsDesc);
+		if (!EnsureShaderReadableCopy(sceneDepthCopy, depthTexture, depthSRVDesc.Format,
+				"Upscaling/SceneDepthCopy") ||
+			!EnsureShaderReadableCopy(refractionNormalsCopy, refractionNormalsTexture,
+				refractionNormalsDesc.Format, "Upscaling/RefractionNormalsCopy")) {
 			return;
 		}
 
@@ -599,21 +600,15 @@ namespace cs::render
 		auto bufferArray = jitterCB->CB();
 		context->PSSetConstantBuffers(0, 1, &bufferArray);
 
-		const auto copyIfNonAliased = [&](ID3D11Resource* dst, ID3D11Resource* src) {
-			if (dst && src && dst != src) {
-				context->CopyResource(dst, src);
-			}
-		};
-
 		{
-			copyIfNonAliased(depthCopyTexture, depthTexture);
+			context->CopyResource(sceneDepthCopy->resource.get(), depthTexture);
 
 			context->OMSetDepthStencilState(upscaleDepthStencilState.get(), 0x00);
 
-			copyIfNonAliased(refractionNormalsCopy, refractionNormalsTexture);
+			context->CopyResource(refractionNormalsCopy->resource.get(), refractionNormalsTexture);
 
-			ID3D11ShaderResourceView* srvs[] = { refractionNormalsCopySRV, depthCopySRV,
-				depthCopyStencilSRV };
+			ID3D11ShaderResourceView* srvs[] = { refractionNormalsCopy->srv.get(),
+				sceneDepthCopy->srv.get() };
 			context->PSSetShaderResources(0, ARRAYSIZE(srvs), srvs);
 
 			// Fallout 4's SAO derives camera-Z without a second output.
@@ -624,7 +619,7 @@ namespace cs::render
 			context->Draw(3, 0);
 		}
 
-		ID3D11ShaderResourceView* nullPSResources[3] = { nullptr, nullptr, nullptr };
+		ID3D11ShaderResourceView* nullPSResources[2] = { nullptr, nullptr };
 		context->PSSetShaderResources(0, ARRAYSIZE(nullPSResources), nullPSResources);
 
 		context->PSSetShader(nullptr, nullptr, 0);

@@ -442,23 +442,15 @@ namespace cs::engine
 		kCount = 100
 	};
 
-	enum class DepthStencilTarget
+	// Logical RenderTargetManager depth IDs; recreation reassigns their physical pool slots.
+	enum class DepthStencilTarget : std::uint32_t
 	{
-		kMainOtherOther = 0,
-		kMainOther = 1,
-		kMain = 2,
-		kMainCopy = 3,
-		kMainCopyCopy = 4,
+		kMain = 1,
 
-		// DS5 is the configurable sun shadow depth, sized from iShadowMapResolution:Display.
-		kShadowMap = 5,
-
-		// DS8 is the fixed 512x512 precipitation occlusion depth, pair-mate of RT86.
+		// Fixed 512x512 precipitation occlusion depth.
 		kPrecipitationOcclusion = 8,
 
-		kGodraysDepth = 10,
-
-		kCount = 13
+		kCount = 12
 	};
 
 	[[nodiscard]] inline ID3D11Device* GetDevice()
@@ -473,14 +465,22 @@ namespace cs::engine
 		return rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
 	}
 
-	[[nodiscard]] inline ID3D11ShaderResourceView* GetSceneDepthSRV()
+	[[nodiscard]] inline RE::BSGraphics::DepthStencilTarget* ResolveDepthStencilTarget(DepthStencilTarget a_target)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
+		const auto logicalID = static_cast<std::uint32_t>(a_target);
+		auto*      rendererData = RE::BSGraphics::GetRendererData();
+		auto*      renderTargetManager = GetRenderTargetManager();
+		if (!rendererData || !renderTargetManager || logicalID >= static_cast<std::uint32_t>(DepthStencilTarget::kCount)) {
 			return nullptr;
 		}
-		return reinterpret_cast<ID3D11ShaderResourceView*>(
-			rendererData->depthStencilTargets[static_cast<uint>(DepthStencilTarget::kMain)].srViewDepth);
+		const auto slot = renderTargetManager->GetDepthStencilTargetPlatformID(logicalID);
+		return slot < std::size(rendererData->depthStencilTargets) ? &rendererData->depthStencilTargets[slot] : nullptr;
+	}
+
+	[[nodiscard]] inline ID3D11ShaderResourceView* GetSceneDepthSRV()
+	{
+		auto* target = ResolveDepthStencilTarget(DepthStencilTarget::kMain);
+		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srViewDepth) : nullptr;
 	}
 
 	// Resolve at each use; a cached slot goes stale when targets are recreated.
@@ -529,55 +529,27 @@ namespace cs::engine
 		return target ? reinterpret_cast<ID3D11Texture2D*>(target->texture) : nullptr;
 	}
 
-	[[nodiscard]] inline ID3D11Texture2D* GetRenderTargetCopyTexture(RenderTarget a_renderTarget)
-	{
-		auto* target = ResolveRenderTarget(a_renderTarget);
-		return target ? reinterpret_cast<ID3D11Texture2D*>(target->copyTexture) : nullptr;
-	}
-
-	[[nodiscard]] inline ID3D11ShaderResourceView* GetRenderTargetCopySRV(RenderTarget a_renderTarget)
-	{
-		auto* target = ResolveRenderTarget(a_renderTarget);
-		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->copySRView) : nullptr;
-	}
-
 	[[nodiscard]] inline ID3D11Texture2D* GetDepthStencilTexture(DepthStencilTarget a_target)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11Texture2D*>(
-			rendererData->depthStencilTargets[static_cast<uint>(a_target)].texture);
+		auto* target = ResolveDepthStencilTarget(a_target);
+		return target ? reinterpret_cast<ID3D11Texture2D*>(target->texture) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11DepthStencilView* GetDepthStencilDSV(DepthStencilTarget a_target)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11DepthStencilView*>(
-			rendererData->depthStencilTargets[static_cast<uint>(a_target)].dsView[0]);
+		auto* target = ResolveDepthStencilTarget(a_target);
+		return target ? reinterpret_cast<ID3D11DepthStencilView*>(target->dsView[0]) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11ShaderResourceView* GetDepthStencilDepthSRV(DepthStencilTarget a_target)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11ShaderResourceView*>(
-			rendererData->depthStencilTargets[static_cast<uint>(a_target)].srViewDepth);
+		auto* target = ResolveDepthStencilTarget(a_target);
+		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srViewDepth) : nullptr;
 	}
 
 	[[nodiscard]] inline ID3D11ShaderResourceView* GetDepthStencilStencilSRV(DepthStencilTarget a_target)
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return nullptr;
-		}
-		return reinterpret_cast<ID3D11ShaderResourceView*>(
-			rendererData->depthStencilTargets[static_cast<uint>(a_target)].srViewStencil);
+		auto* target = ResolveDepthStencilTarget(a_target);
+		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srViewStencil) : nullptr;
 	}
 }
