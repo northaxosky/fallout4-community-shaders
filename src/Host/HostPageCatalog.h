@@ -12,6 +12,7 @@ namespace cs::host
 		kHome,
 		kAdvanced,
 		kPresets,
+		kChangelog,
 		kFeature,
 		kOverlay
 	};

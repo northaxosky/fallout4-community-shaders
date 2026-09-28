@@ -56,6 +56,13 @@ xmake test
 Add regression tests for critical behavior and real failure modes, not implementation
 details. Validate rendering and hook changes in game before claiming they work.
 
+## Changelog
+
+`CHANGELOG.md` is the only maintained release history. It feeds the in-game
+**General > Changelog** page and stable release notes. Keep versions newest first,
+using only the `# Changelog` title, `## MAJOR.MINOR.PATCH` headings, single-line
+`- ` bullets, and blank lines. Builds embed the file directly in the DLL.
+
 ## Install or deploy
 
 ```powershell

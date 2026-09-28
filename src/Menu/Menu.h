@@ -29,6 +29,7 @@ namespace cs
 		void DrawHome(dmui::Client& a_client);
 		void DrawAdvanced(dmui::Client& a_client);
 		void DrawPresets(dmui::Client& a_client);
+		void DrawChangelog(dmui::Client& a_client);
 		void ObserveHostFrame(dmui::Client& a_client);
 		void OnHostDeviceReady() noexcept;
 

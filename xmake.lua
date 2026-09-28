@@ -211,6 +211,17 @@ target(plugin_name, function()
         "src/**.cpp",
         "features/*/src/**.cpp"
     )
+    add_files("src/Menu/Changelog.rc", { includedirs = os.projectdir() })
+
+    before_build(function(target)
+        local changelog = path.join(os.projectdir(), "CHANGELOG.md")
+        local resource_object = target:objectfile("src/Menu/Changelog.rc")
+
+        -- The resource rule does not track RCDATA payload files.
+        if os.isfile(resource_object) and os.mtime(changelog) > os.mtime(resource_object) then
+            os.rm(resource_object)
+        end
+    end)
 
     add_headerfiles("src/**.h", "features/*/src/**.h")
     add_includedirs(generated_include, "src", "extern")

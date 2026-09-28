@@ -1,0 +1,3 @@
+#include "Menu/ChangelogResource.h"
+
+IDR_CHANGELOG RCDATA "CHANGELOG.md"

@@ -18,7 +18,7 @@ CommonLibF4-pinned DearModdingUI API; no
 compatibility shim is provided for superseded development snapshots. It then registers all category
 descriptors before any page that references their stable IDs:
 
-- Home, Advanced, and Presets pages under the General category;
+- Home, Advanced, Presets, and Changelog pages under the General category;
 - one settings page for every menu-visible registered feature, including inactive features under
   Unloaded;
 - the managed Performance Overlay page;

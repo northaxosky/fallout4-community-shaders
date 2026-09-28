@@ -9,6 +9,25 @@ shopt -s nullglob
 archives=(dist/*.zip)
 [[ ${#archives[@]} -eq 1 && -f "dist/$ASSET" ]]
 
+notes="Source: $GITHUB_SERVER_URL/$GH_REPO/commit/$GITHUB_SHA"
+if [[ "$CHANNEL" == stable ]]; then
+    [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    if ! changelog=$(awk -v heading="## ${TAG#v}" '
+        { sub(/\r$/, "") }
+        /^## / {
+            if (found) exit
+            if ($0 == heading) found = 1
+            next
+        }
+        found { print }
+        END { if (!found) exit 1 }
+    ' CHANGELOG.md); then
+        echo "::error::CHANGELOG.md has no section for $TAG"
+        exit 1
+    fi
+    notes="$changelog"$'\n\n'"$notes"
+fi
+
 git fetch --force --tags origin
 tag_exists=false
 if git show-ref --verify --quiet "refs/tags/$TAG"; then
@@ -32,15 +51,15 @@ if [[ -n "$existing" ]]; then
     cmp "$temporary/existing.zip" "dist/$ASSET"
     echo "Matching published release already exists."
 else
-    args=(--target "$GITHUB_SHA" --title "FO4 Community Shaders $TAG" --generate-notes
-        --notes "Source: $GITHUB_SERVER_URL/$GH_REPO/commit/$GITHUB_SHA")
+    args=(--target "$GITHUB_SHA" --title "FO4 Community Shaders $TAG"
+        --notes "$notes")
     if [[ "$tag_exists" == true ]]; then
         args+=(--verify-tag)
     fi
     if [[ "$CHANNEL" == stable ]]; then
         args+=(--latest)
     else
-        args+=(--prerelease --latest=false)
+        args+=(--prerelease --latest=false --generate-notes)
         if [[ -n "${PREVIOUS_STABLE_TAG:-}" ]]; then
             args+=(--notes-start-tag "$PREVIOUS_STABLE_TAG")
         fi

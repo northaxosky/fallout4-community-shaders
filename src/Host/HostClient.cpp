@@ -375,6 +375,9 @@ namespace cs::host
 		case HostPageKind::kPresets:
 			Menu::Get().DrawPresets(_client);
 			break;
+		case HostPageKind::kChangelog:
+			Menu::Get().DrawChangelog(_client);
+			break;
 		case HostPageKind::kFeature:
 			if (a_page.feature)
 				DrawFeaturePage(*a_page.feature);
