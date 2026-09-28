@@ -64,6 +64,9 @@ Every feature ships turned off. Enable the ones you want in Dear Modding UI, the
 [b]Does it work on the OG or NG runtime?[/b]
 The code paths exist, and they have received exactly zero testing. Have fun. Only 1.11.240 is supported.
 
+[b]Does it work on Linux / Steam Deck (Proton)?[/b]
+Proton's built-in shader compiler cannot build the shaders, so only upscaling and frame generation work. Place a Windows 10 [b]d3dcompiler_47.dll[/b] in the prefix's [b]system32[/b] or next to Fallout4.exe, then delete [b]Data\ShaderCache[/b]. The log's compiler version should then start with 10.0.
+
 [b]Which upscaler should I use?[/b]
 DLSS on NVIDIA RTX cards and FSR 4 on compatible AMD Radeon cards. TAA and FSR 3 work on other DX12-capable GPUs.
 

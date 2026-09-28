@@ -60,6 +60,15 @@ namespace cs::d3d11
 					identity.mechanism),
 				identity.moduleLength,
 				identity.modulePath.string());
+			// Wine's builtin compiler cannot parse the feature HLSL.
+			auto* ntdll = GetModuleHandleW(L"ntdll.dll");
+			if (ntdll && GetProcAddress(ntdll, "wine_get_version")
+				&& identity.fileVersion.major < 10) {
+				CacheL->warn(
+					"Wine/Proton detected with an old or builtin d3dcompiler_47 ({}); feature shaders will fail to compile. "
+					"Place a Windows 10 d3dcompiler_47.dll in the prefix's system32 or next to Fallout4.exe.",
+					shader_cache::DescribeCompilerIdentity(identity));
+			}
 
 			if (!identity.established)
 				return;
