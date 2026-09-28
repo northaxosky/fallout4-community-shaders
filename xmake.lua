@@ -6,7 +6,7 @@ set_config("commonlib_xbyak", true)
 includes("extern/CommonLibF4")
 
 local plugin_name = "FO4CommunityShaders"
-local plugin_version = "0.1.0"
+local plugin_version = "0.1.1"
 local plugin_version_major, plugin_version_minor, plugin_version_patch =
     plugin_version:match("^(%d+)%.(%d+)%.(%d+)$")
 
