@@ -4,6 +4,16 @@
 namespace DynamicCubemaps
 {
 	// FO4 lights in linear HDR, so upstream's linear-lighting branch applies: irradiance conversions are identity.
+	float IrradianceToLinear(float color)
+	{
+		return color;
+	}
+
+	float IrradianceToGamma(float color)
+	{
+		return color;
+	}
+
 	float3 IrradianceToLinear(float3 color)
 	{
 		return color;

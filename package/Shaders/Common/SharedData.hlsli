@@ -30,6 +30,9 @@ namespace SharedData
 		float4 DirectionalAmbient[3];
 		// rgb: linear sun radiance of the deferred sun pass, w: 1 when sourced
 		float4 DirLightColor;
+		// Sky::Flags::kHideSky
+		bool HideSky;
+		uint3 pad0;
 	};
 
 	struct ScreenSpaceShadowsSettings

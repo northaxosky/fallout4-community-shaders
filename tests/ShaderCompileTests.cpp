@@ -307,7 +307,7 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature off",
 			.forbidden = {
-				CB(5), CB(6), Texture(16), Texture(17), Texture(25),
+				CB(5), CB(6), Texture(25),
 				Texture(26), Texture(27), Texture(28), Texture(29)
 			}
 		});
@@ -318,13 +318,12 @@ namespace
 				{ "FO4CS_SUBSTRATE", "1" },
 				{ "SSGI", "1" },
 				{ "WETNESS_EFFECTS", "1" },
-				{ "DYNAMIC_CUBEMAPS", "1" },
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" }
 			},
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
 			.required = {
-				CB(5), CB(6), Texture(16), Texture(17), Texture(25),
+				CB(6), Texture(25),
 				Texture(26), Texture(27), Texture(28), Texture(29)
 			}
 		});
@@ -351,29 +350,6 @@ namespace
 			});
 		}
 
-		const auto lighting = a_root / "BSLightingShader.hlsl";
-		const ShaderDefines lightingBase{
-			{ "BSLIGHTING_PS_CORE", "1" },
-			{ "BSL_ENVMAP", "1" }
-		};
-		a_jobs.push_back({
-			.path = lighting,
-			.defines = lightingBase,
-			.profile = "ps_5_0",
-			.description = "BSLighting dynamic cubemaps off",
-			.forbidden = { CB(5), CB(6), Texture(16), Texture(17) }
-		});
-		auto lightingFeatures = lightingBase;
-		lightingFeatures.emplace_back("FO4CS_SUBSTRATE", "1");
-		lightingFeatures.emplace_back("DYNAMIC_CUBEMAPS", "1");
-		a_jobs.push_back({
-			.path = lighting,
-			.defines = std::move(lightingFeatures),
-			.profile = "ps_5_0",
-			.description = "BSLighting dynamic cubemaps",
-			.required = { CB(6), Texture(16), Texture(17) }
-		});
-
 		const auto water = a_root / "BSWaterShader.hlsl";
 		const ShaderDefines waterBase{
 			{ "BSWATER_PIXEL_SHADER", "1" },
@@ -384,7 +360,7 @@ namespace
 			.defines = waterBase,
 			.profile = "ps_5_0",
 			.description = "BSWater dynamic cubemaps off",
-			.forbidden = { CB(5), CB(6), Texture(16), Texture(17) }
+			.forbidden = { CB(5), CB(6), Texture(30), Texture(31), Sampler(3) }
 		});
 		auto waterFeatures = waterBase;
 		waterFeatures.emplace_back("FO4CS_SUBSTRATE", "1");
@@ -394,7 +370,7 @@ namespace
 			.defines = std::move(waterFeatures),
 			.profile = "ps_5_0",
 			.description = "BSWater dynamic cubemaps",
-			.required = { CB(5), CB(6), Texture(16), Texture(17) }
+			.required = { CB(5), CB(6), Texture(30), Texture(31), Sampler(3) }
 		});
 	}
 }

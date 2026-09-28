@@ -4,7 +4,6 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "Render/PixelShaderResourceSnapshot.h"
 
 #include <DirectXMath.h>
 #include <array>
@@ -41,8 +40,7 @@ namespace cs::features
 		{
 			kOff,
 			kCaptureInput,
-			kFilteredReflections,
-			kReflectionContribution
+			kFilteredReflections
 		};
 
 		using Settings = dynamic_cubemaps::Settings;
@@ -54,7 +52,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Captures and prefilters the current scene for deferred environment reflections.";
+			return "Captures and prefilters the current scene for dynamic water reflections.";
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
@@ -83,7 +81,7 @@ namespace cs::features
 		static constexpr std::uint32_t kBc6hMipLevels = 7;
 		static constexpr std::uint32_t kPreviewWidth = 512;
 		static constexpr std::uint32_t kPreviewHeight = 256;
-		static constexpr std::uint32_t kDynamicCubemapPSSlot = 16;
+		static constexpr std::uint32_t kDynamicCubemapPSSlot = 30;
 		static constexpr std::uint32_t kDynamicCubemapPSSlotCount = 2;
 
 		struct CubeTexture
@@ -156,9 +154,7 @@ namespace cs::features
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(dynamic_cubemaps::kSchema); }
 		void PublishSettings() noexcept;
-		void SaveBindings();
-		void RestoreBindings();
-		void BindCubemaps(ID3D11DeviceContext* a_context);
+		void PostDeferred();
 		void ResolveReflectionMode();
 		void UpdateCubemap();
 		void UpdateCubemapCapture(bool a_reflections);
@@ -237,8 +233,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _bc6hEncodeCS;
 		winrt::com_ptr<ID3D11ComputeShader> _previewCS;
 
-		cs::render::PixelShaderResourceSnapshot<kDynamicCubemapPSSlotCount>
-			_engineBindings;
 
 		std::atomic<NextTask> _nextTask{
 			NextTask::kCaptureInferAndIrradianceA

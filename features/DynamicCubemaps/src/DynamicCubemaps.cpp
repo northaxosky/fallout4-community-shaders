@@ -68,8 +68,6 @@ namespace cs::features
 				return "capture_input";
 			case DynamicCubemaps::DebugVisualization::kFilteredReflections:
 				return "filtered_reflections";
-			case DynamicCubemaps::DebugVisualization::kReflectionContribution:
-				return "reflection_contribution";
 			default:
 				return "off";
 			}
@@ -157,11 +155,6 @@ namespace cs::features
 					return static_cast<const DynamicCubemaps&>(a_feature)
 						.GetCubemapDebugTexture();
 				}
-			},
-			FeatureDebugView{
-				.id = "reflection_contribution",
-				.label = "Dynamic reflection contribution",
-				.kind = FeatureDebugViewKind::kFullscreen
 			}
 		};
 		return views;
@@ -174,8 +167,6 @@ namespace cs::features
 			visualization = DebugVisualization::kCaptureInput;
 		} else if (a_view == "filtered_reflections") {
 			visualization = DebugVisualization::kFilteredReflections;
-		} else if (a_view == "reflection_contribution") {
-			visualization = DebugVisualization::kReflectionContribution;
 		}
 		const auto previous = _debugVisualization.exchange(
 			visualization, std::memory_order_acq_rel);
@@ -238,67 +229,27 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		const auto registerConsumer = [this](
-			cs::engine::ShaderInjectionTarget a_target,
-			bool a_fullscreenDebug) {
-			cs::engine::ShaderInjectionDefines defines{
-				{
-					cs::engine::shader_injection_defines::kDynamicCubemaps,
-					"1"
-				}
-			};
-			if (a_fullscreenDebug) {
-				defines.emplace(
-					cs::engine::shader_injection_defines::
-						kDynamicCubemapsFullscreenDebug,
-					"1");
-			}
-			std::vector<cs::engine::ShaderSlotClaim> slotClaims;
-			slotClaims.reserve(kDynamicCubemapPSSlotCount);
-			for (std::uint32_t offset = 0;
-				 offset < kDynamicCubemapPSSlotCount;
-				 ++offset) {
-				slotClaims.push_back({
-					.stage = cs::engine::ShaderStage::kPixel,
-					.resourceType =
-						cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kDynamicCubemapPSSlot + offset
-				});
-			}
-			return cs::engine::RegisterReplacement({
-				.targetId = a_target,
-				.contributor = "DynamicCubemaps",
-				.defines = std::move(defines),
-				.isReady = [this] {
-					return _registrationsReady.load(
-						std::memory_order_acquire);
-				},
-				.bind = [this](ID3D11DeviceContext* a_context) {
-					BindCubemaps(a_context);
-				},
-				.slotClaims = std::move(slotClaims)
+		std::vector<cs::engine::ShaderSlotClaim> slotClaims;
+		for (std::uint32_t offset = 0;
+			 offset < kDynamicCubemapPSSlotCount;
+			 ++offset) {
+			slotClaims.push_back({
+				.stage = cs::engine::ShaderStage::kPixel,
+				.resourceType =
+					cs::engine::ShaderResourceType::kShaderResource,
+				.slot = kDynamicCubemapPSSlot + offset
 			});
-		};
-
-		if (!registerConsumer(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				true)) {
-			FailLoad(
-				"DynamicCubemaps requires the reconstructed BSDFComposite "
-				"shader; registering that replacement failed");
-			return;
 		}
-		if (!registerConsumer(
-				cs::engine::ShaderInjectionTarget::kBsLighting,
-				false)) {
-			FailLoad(
-				"DynamicCubemaps requires the reconstructed BSLighting "
-				"shader; registering that replacement failed");
-			return;
-		}
-		if (!registerConsumer(
-				cs::engine::ShaderInjectionTarget::kBsWater,
-				false)) {
+		if (!cs::engine::RegisterReplacement({
+				.targetId = cs::engine::ShaderInjectionTarget::kBsWater,
+				.contributor = "DynamicCubemaps",
+				.defines = {
+					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" }
+				},
+				.isReady = [this] {
+					return _registrationsReady.load(std::memory_order_acquire);
+				},
+				.slotClaims = std::move(slotClaims) })) {
 			FailLoad(
 				"DynamicCubemaps requires the reconstructed BSWater "
 				"shader; registering that replacement failed");
@@ -306,36 +257,28 @@ namespace cs::features
 		}
 
 		if (!cs::engine::RegisterPreDeferredComposite(
-				[] { DynamicCubemaps::GetSingleton()->SaveBindings(); },
-				cs::engine::HookPriority::Early)) {
-			FailLoad(
-				"DynamicCubemaps could not register its composite binding "
-				"save hook");
-			return;
-		}
-		if (!cs::engine::RegisterPreDeferredComposite(
 				[] { DynamicCubemaps::GetSingleton()->UpdateCubemap(); })) {
 			FailLoad(
 				"DynamicCubemaps could not register its pre-composite "
 				"capture hook");
 			return;
 		}
+		// Registered after the substrate and earlier features, so this Late bind follows their restores.
 		if (!cs::engine::RegisterPostDeferredComposite(
-				[] {
-					DynamicCubemaps::GetSingleton()->
-						RestoreBindings();
-				},
+				[] { DynamicCubemaps::GetSingleton()->PostDeferred(); },
 				cs::engine::HookPriority::Late)) {
 			FailLoad(
-				"DynamicCubemaps could not register its composite binding "
-				"restore hook");
+				"DynamicCubemaps could not register its post-composite "
+				"binding hook");
 			return;
 		}
 
 		_registrationsReady.store(true, std::memory_order_release);
 		L->info(
-			"Registered pre-composite capture and BSDFComposite, "
-			"BSLighting, and BSWater consumption at t16-t17.");
+			"Registered pre-composite capture and forward BSWater "
+			"consumption at t{}-t{}.",
+			kDynamicCubemapPSSlot,
+			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1);
 	}
 
 	void DynamicCubemaps::OnDataLoaded()
@@ -694,49 +637,32 @@ namespace cs::features
 		return true;
 	}
 
-	void DynamicCubemaps::SaveBindings()
+	void DynamicCubemaps::PostDeferred()
 	{
 		auto* context = cs::engine::GetImmediateContext();
-		if (!_engineBindings.Save(context, kDynamicCubemapPSSlot) &&
-			_engineBindings.IsSaved()) {
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::err,
-				"DynamicCubemaps t16-t17 binding scopes overlap.");
-		}
-	}
-
-	void DynamicCubemaps::RestoreBindings()
-	{
-		auto* context = cs::engine::GetImmediateContext();
-		_engineBindings.Restore(context);
-	}
-
-	void DynamicCubemaps::BindCubemaps(ID3D11DeviceContext* a_context)
-	{
-		if (!a_context) {
+		if (!context) {
 			return;
 		}
-		std::array<ID3D11ShaderResourceView*, 2> views{};
+		std::array<ID3D11ShaderResourceView*, kDynamicCubemapPSSlotCount> views{};
 		if (_injectionsOperational.load(std::memory_order_acquire) &&
 			_resourcesReady.load(std::memory_order_acquire)) {
 			const bool active =
 				_activeReflections.load(std::memory_order_acquire);
-			const bool environmentValid =
-				_cubemapValid[0].load(std::memory_order_acquire);
-			const bool reflectionsValid =
-				_cubemapValid[active ? 1 : 0].load(std::memory_order_acquire);
 			views = {
-				environmentValid ? _environmentBC6H.srv.get() : nullptr,
-				reflectionsValid ?
-					(active ? _reflectionsBC6H.srv.get() : _environmentBC6H.srv.get()) :
+				_cubemapValid[active ? 1 : 0].load(std::memory_order_acquire) ?
+					(active ? _reflectionsBC6H : _environmentBC6H).srv.get() :
+					nullptr,
+				_cubemapValid[0].load(std::memory_order_acquire) ?
+					_environmentBC6H.srv.get() :
 					nullptr
 			};
 		}
-		a_context->PSSetShaderResources(
+		context->PSSetShaderResources(
 			kDynamicCubemapPSSlot,
 			static_cast<UINT>(views.size()),
 			views.data());
+		// Engine PS constant buffers stop at b2 and b12/b13, so forward consumers keep the substrate.
+		cs::render::BindSharedData(context, cs::engine::ShaderStage::kPixel);
 	}
 
 	DynamicCubemaps::CaptureStream& DynamicCubemaps::Stream(
@@ -846,12 +772,6 @@ namespace cs::features
 		ResolveReflectionMode();
 		const bool activeReflections =
 			_activeReflections.load(std::memory_order_relaxed);
-
-		std::array<ID3D11ShaderResourceView*, 2> nullPsViews{};
-		context->PSSetShaderResources(
-			kDynamicCubemapPSSlot,
-			static_cast<UINT>(nullPsViews.size()),
-			nullPsViews.data());
 
 		cs::engine::ComputeOMScope scope(context);
 		cs::render::BindSharedData(context, cs::engine::ShaderStage::kCompute);
@@ -1252,7 +1172,7 @@ namespace cs::features
 		settings::SettingsEdit edit{ *this };
 		const bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled(
-			"Off restores native probe reflections and pauses capture.");
+			"Off restores native water reflections and pauses capture.");
 		if (changed) {
 			PublishSettings();
 		}

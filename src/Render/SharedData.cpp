@@ -40,8 +40,10 @@ namespace cs::render
 			std::uint32_t     InInterior = 0;
 			DirectX::XMFLOAT4 DirectionalAmbient[3]{};
 			DirectX::XMFLOAT4 DirLightColor{};
+			std::uint32_t     HideSky = 0;
+			std::uint32_t     pad0[3]{};
 		};
-		static_assert(sizeof(SharedDataCB) == 176);
+		static_assert(sizeof(SharedDataCB) == 192);
 		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
 		struct SubstrateState
@@ -138,6 +140,7 @@ namespace cs::render
 				for (auto& row : data.DirectionalAmbient)
 					row = {};
 			}
+			data.HideSky = engine::IsSkyHidden() ? 1u : 0u;
 
 			auto* player = RE::PlayerCharacter::GetSingleton();
 			if (const auto* cell = player ? player->GetParentCell() : nullptr)
