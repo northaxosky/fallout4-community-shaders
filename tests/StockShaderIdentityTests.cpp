@@ -36,6 +36,7 @@ namespace
 		std::string stage;
 		std::string expected;
 		std::string actual;
+		bool proven = true;
 	};
 
 	void Require(bool a_condition, const std::string& a_message)
@@ -90,11 +91,15 @@ namespace
 		while (std::getline(file, line)) {
 			Row row;
 			unsigned early = 0;
+			std::string tier;
 			std::istringstream input(line);
 			Require(static_cast<bool>(input >> row.target >> row.stage >> std::hex >> row.family.descriptor
-				>> std::dec >> early >> row.expected), "Malformed identity row: " + line);
+				>> std::dec >> early >> tier >> row.expected), "Malformed identity row: " + line);
 			input >> std::ws;
-			Require(input.eof() && early <= 1 && IsHex(row.expected, 40), "Invalid identity row: " + line);
+			Require(input.eof() && early <= 1 && (tier == "exact" || tier == "canonical" || tier == "unproven") &&
+						IsHex(row.expected, 40),
+				"Invalid identity row: " + line);
+			row.proven = tier != "unproven";
 			for (const auto& target : cs::engine::GetShaderInjectionTargets()) {
 				if (target.name == row.target)
 					row.family.target = target.id;
@@ -172,17 +177,23 @@ int main(int a_argc, char** a_argv)
 		}
 		const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 		std::size_t failed = 0;
+		std::size_t stock = 0;
 		for (const auto& row : rows) {
 			if (row.actual == row.expected)
 				continue;
+			// Unproven routes may stay stock at runtime; any route CS reconstructs must match.
+			if (!row.proven && row.actual == "unresolved") {
+				++stock;
+				continue;
+			}
 			if (++failed <= 50)
 				std::printf("%s %s 0x%08x expected=%s actual=%s\n",
 					row.target.c_str(), row.stage.c_str(), row.family.descriptor, row.expected.c_str(), row.actual.c_str());
 		}
 		if (failed > 50)
 			std::printf("... %zu additional failures omitted\n", failed - 50);
-		std::printf("Stock shader identity: %zu passed, %zu failed, %zu total; %.3fs wall time (%u threads)\n",
-			rows.size() - failed, failed, rows.size(), seconds, threadCount);
+		std::printf("Stock shader identity: %zu passed (%zu unproven left stock), %zu failed, %zu total; %.3fs wall time (%u threads)\n",
+			rows.size() - failed, stock, failed, rows.size(), seconds, threadCount);
 		return failed == 0 ? 0 : 1;
 	} catch (const std::exception& error) {
 		std::fprintf(stderr, "Stock shader identity: %s\n", error.what());
