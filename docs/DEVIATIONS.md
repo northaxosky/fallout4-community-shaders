@@ -8,8 +8,6 @@ forces the difference, and where it lives. Each code site also carries a one-lin
 - **Not supported**: upstream behavior that has no Fallout 4 equivalent without new FO4-only machinery.
 - **Pending**: upstream behavior not ported yet.
 
-Engine evidence refers to rows in `fallout4-re` `docs\engine-facts.md`.
-
 ## Dynamic Cubemaps
 
 Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\BSWaterShader.hlsl`,
@@ -20,8 +18,8 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 
 | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|
-| Capture before the deferred composite | Capture and publication run after the Forward cloud group (`RegisterPostForwardSky`) | FO4 draws the sky inside `DrawWorld::Forward`, after the composite ("Render-hook anchors", "Sky and clouds") | `DynamicCubemaps.cpp` `Load` |
-| Capture the main color target | Geometry radiance is rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky pixels come from scene color | FO4 has no diffuse-only target; scene color contains specular, probe and SSLR reflections, which made the cube view-dependent ("Render targets & engine state") | `CaptureCommon.hlsli` |
+| Capture before the deferred composite | Capture and publication run after the Forward cloud group (`RegisterPostForwardSky`) | FO4 draws the sky inside `DrawWorld::Forward`, after the composite | `DynamicCubemaps.cpp` `Load` |
+| Capture the main color target | Geometry radiance is rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky pixels come from scene color | FO4 has no diffuse-only target; scene color contains specular, probe and SSLR reflections, which made the cube view-dependent | `CaptureCommon.hlsli` |
 | Sky depth reconstructs a finite far-plane position | Sky depth `1.0` is placed on the camera far plane | FO4's world projection has an infinite far plane | `CaptureCommon.hlsli` `SampleCapture` |
 | `FrameBuffer::WorldToView(-s)` with `z < 0` | View-space test `z > 0` on `s` | FO4 views down +Z; both select the same screen texel | `CaptureCommon.hlsli` `SampleCapture` |
 | Skyrim frame-buffer camera | Validated b12 world camera plus world-scene inverse projection | FO4 publishes the camera through b12 | `CaptureCommon.hlsli` `UpdateData` |
