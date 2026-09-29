@@ -56,6 +56,15 @@ xmake test
 Add regression tests for critical behavior and real failure modes, not implementation
 details. Validate rendering and hook changes in game before claiming they work.
 
+## Format
+
+```powershell
+pwsh scripts\format.ps1
+```
+
+CI runs `scripts\format.ps1 -Check` on C++ and HLSL. Run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once to skip the bulk reformat in blame.
+
 ## Changelog
 
 `CHANGELOG.md` is the only maintained release history. It feeds the in-game

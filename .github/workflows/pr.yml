@@ -50,6 +50,10 @@ jobs:
           }
           exit $failed
 
+      - name: clang-format check
+        shell: pwsh
+        run: ./scripts/format.ps1 -Check
+
   build:
     name: Windows Release
     runs-on: windows-latest
