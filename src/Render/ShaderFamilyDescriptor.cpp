@@ -51,10 +51,22 @@ namespace cs::engine
 			ShaderInjectionDefines& a_defines,
 			const ShaderFamilyDescriptor& a_family)
 		{
-			const auto a_descriptor = a_family.descriptor;
+			auto a_descriptor = a_family.descriptor;
 			const bool tessellatedVertex =
 				a_family.stage == ShaderStage::kVertex
 				&& (a_descriptor & ((1U << 19) | (1U << 20))) != 0;
+			// FO4 vertex normalization is fitted to the pinned AE 1.11.240 route population.
+			if (a_family.stage == ShaderStage::kVertex) {
+				if (!tessellatedVertex && (a_descriptor & 0x220U) == 0)
+					a_descriptor &= ~(1U << 25);
+				if ((a_descriptor & 0x2000U) != 0)
+					a_descriptor &= ~0x18U;
+				else if ((a_descriptor & 0x2U) != 0
+					&& (a_descriptor & 0x4240U) != 0)
+					a_descriptor |= 0x18U;
+				if (tessellatedVertex)
+					a_descriptor &= ~(1U << 10);
+			}
 			DefineBit(a_defines, a_descriptor, 1U << 0, "VC");
 			Define(
 				a_defines,
@@ -663,7 +675,7 @@ namespace cs::engine
 			if (family == Family::kCubeIbl) {
 				if ((d & ~0x10300U) == 0x860U)
 					family = Family::kAmbientCb47;
-				else if ((d & ~0x70301U) == 0x820U)
+				else if ((d & ~0x70305U) == 0x820U)
 					family = Family::kAmbientCb31;
 				else if ((d & ~0x10240U) == 0x120U)
 					family = Family::kAmbientCompact;
@@ -740,8 +752,7 @@ namespace cs::engine
 				DefineBit(a_defines, d, 0x10000U, "TILELIGHT");
 				return true;
 			case Family::kAmbientCb31:
-				if (((d & 0x50000U) == 0)
-					|| ((d & 0x60000U) == 0x20000U))
+				if ((d & 0x10000U) == 0)
 					Define(a_defines, "AMBIENT_DIFFUSE_SET_B", "0");
 				if ((d & 0x200U) == 0)
 					Define(a_defines, "AMBIENT_SSAO", "0");
@@ -784,8 +795,7 @@ namespace cs::engine
 				Define(
 					a_defines,
 					"WAVE5A_ACCUMULATOR_SHAPE",
-					d == 0x204088U ? "2" :
-					(d & 0x20000U) != 0 ?
+					(d & 0x80U) != 0 ?
 						((d & 0x10000U) != 0 ? "3" : "2") :
 						((d & 0x10000U) != 0 ? "1" : "4"));
 				return true;
