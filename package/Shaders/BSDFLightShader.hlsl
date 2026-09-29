@@ -17,7 +17,6 @@
 #endif
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-#include "WaterEffects/WaterCausticsSampler.hlsli"
 #include "WaterEffects/WaterCaustics.hlsli"
 #endif
 

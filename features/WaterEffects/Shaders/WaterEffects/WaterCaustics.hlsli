@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Common/SharedData.hlsli"
 #include "Common/DeferredPosition.hlsli"
+#ifndef WATER_EFFECTS_FULLSCREEN_DEBUG
+#	include "WaterEffects/WaterCausticsSampler.hlsli"
+#endif
 
 namespace WaterEffects
 {
@@ -47,7 +50,6 @@ namespace WaterEffects
 			lerp(s00, s10, weight.x), lerp(s01, s11, weight.x), weight.y);
 	}
 #else
-	// WaterCausticsSampler: see WaterCausticsSampler.hlsli.
 	float SampleCaustics(float2 uv)
 	{
 		return WaterCaustics.Sample(WaterCausticsSampler, uv).x;
