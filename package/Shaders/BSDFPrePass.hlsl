@@ -1083,7 +1083,12 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     output.auxA.w = blendAlpha;
 #endif
+#if HAIR && defined(SSGI)
+    // MRT4 alpha is also its blend factor, so hair writes 0 and keeps the value beneath instead of upstream's coverage-weighted 1 - vertexAO.
+    output.specTint.w = 0.0;
+#else
     output.specTint.w = blendAlpha;
+#endif
 #else
 #ifdef SSGI
     // 1 - vertexAO for SSGI, as upstream's Masks2; nothing else reads MRT4 alpha.
