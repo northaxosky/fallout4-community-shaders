@@ -92,7 +92,7 @@ namespace cs::features
 
 		void UnbindCompute(ID3D11DeviceContext* a_context)
 		{
-			constexpr std::array<ID3D11ShaderResourceView*, 3> nullSrvs{};
+			constexpr std::array<ID3D11ShaderResourceView*, 6> nullSrvs{};
 			constexpr std::array<ID3D11UnorderedAccessView*, 4> nullUavs{};
 			ID3D11Buffer* nullBuffer = nullptr;
 			ID3D11SamplerState* nullSampler = nullptr;
@@ -920,7 +920,18 @@ namespace cs::features
 		UpdateBuffer(context, _updateBuffer.get(), &constants, sizeof(constants));
 
 		auto& stream = Stream(a_reflections);
-		std::array<ID3D11ShaderResourceView*, 2> srvs{ depthSRV, colorSRV };
+		const auto* tiledSetting = RE::GetINISetting("bComputeShaderDeferredTiledLighting:Display");
+		const bool tiledLighting = tiledSetting && tiledSetting->GetBinary();
+		std::array<ID3D11ShaderResourceView*, 6> srvs{
+			depthSRV,
+			colorSRV,
+			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferAlbedo),
+			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kDiffuseBufferA),
+			tiledLighting ?
+				cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kDiffuseBufferB) :
+				nullptr,
+			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferEmissive)
+		};
 		std::array<ID3D11UnorderedAccessView*, 4> uavs{
 			stream.color.mip0Uav.get(),
 			stream.raw.mip0Uav.get(),

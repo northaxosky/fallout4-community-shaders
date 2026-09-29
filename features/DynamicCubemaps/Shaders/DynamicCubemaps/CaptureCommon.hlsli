@@ -20,6 +20,11 @@ RWStructuredBuffer<CaptureLightingState> LightingState : register(u3);
 
 Texture2D<float> DepthTexture : register(t0);
 Texture2D<float4> ColorTexture : register(t1);
+// FO4 has no diffuse-only main target, so geometry radiance is rebuilt from the composite's diffuse inputs.
+Texture2D<float4> AlbedoTexture : register(t2);
+Texture2D<float4> DiffuseTexture : register(t3);
+Texture2D<float4> TiledDiffuseTexture : register(t4);
+Texture2D<float4> EmissiveTexture : register(t5);
 SamplerState LinearSampler : register(s0);
 
 cbuffer UpdateData : register(b0)
@@ -114,7 +119,12 @@ bool SampleCapture(uint3 texel, out float3 position, out float3 color, out float
 		return false;
 
 	position = ViewToWorldDirection(positionView) * 0.001;
-	color = DynamicCubemaps::IrradianceToLinear(ColorTexture.SampleLevel(LinearSampler, sampleUV, 0).rgb);
+	float3 radiance = ColorTexture.SampleLevel(LinearSampler, sampleUV, 0).rgb;
+	if (depth < 1.0) {
+		float3 diffuse = DiffuseTexture.SampleLevel(LinearSampler, sampleUV, 0).rgb + TiledDiffuseTexture.SampleLevel(LinearSampler, sampleUV, 0).rgb;
+		radiance = 3.0 * AlbedoTexture.SampleLevel(LinearSampler, sampleUV, 0).rgb * diffuse + EmissiveTexture.SampleLevel(LinearSampler, sampleUV, 0).rgb;
+	}
+	color = DynamicCubemaps::IrradianceToLinear(radiance);
 	if (!all(isfinite(position)) || !all(isfinite(color)))
 		return false;
 	color = clamp(color, 0.0, 65504.0);
