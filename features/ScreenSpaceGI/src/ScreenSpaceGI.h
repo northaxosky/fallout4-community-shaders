@@ -66,8 +66,6 @@ namespace cs::features
 			float         RcpTexDim[2];
 			float         FrameDim[2];
 			float         RcpFrameDim[2];
-			float         PrevFrameDim[2];
-			float         RcpPrevFrameDim[2];
 			std::uint32_t FrameIndex;
 			std::uint32_t NumSlices;
 			std::uint32_t NumSteps;
@@ -90,8 +88,6 @@ namespace cs::features
 			float         _pad0[2];
 			float         AOPower;
 			float         GIStrength;
-			float         PrevNDCToViewMul[2];
-			float         PrevNDCToViewAdd[2];
 			float         ViewToWorld[12];
 			float         PrevViewToWorld[12];
 			float         CameraOrigin[4];
@@ -101,19 +97,17 @@ namespace cs::features
 			float         NearReprojZ[4];
 			float         NearReprojW[4];
 		};
-		static_assert(sizeof(XeGTAOCB) == 384);
-		static_assert(offsetof(XeGTAOCB, PrevFrameDim) == 64);
-		static_assert(offsetof(XeGTAOCB, FrameIndex) == 80);
-		static_assert(offsetof(XeGTAOCB, DepthDisocclusion) == 136);
-		static_assert(offsetof(XeGTAOCB, MaxAccumFrames) == 140);
-		static_assert(offsetof(XeGTAOCB, TemporalFlags) == 144);
-		static_assert(offsetof(XeGTAOCB, AOPower) == 168);
-		static_assert(offsetof(XeGTAOCB, PrevNDCToViewMul) == 176);
-		static_assert(offsetof(XeGTAOCB, ViewToWorld) == 192);
-		static_assert(offsetof(XeGTAOCB, PrevViewToWorld) == 240);
-		static_assert(offsetof(XeGTAOCB, CameraOrigin) == 288);
-		static_assert(offsetof(XeGTAOCB, PrevCameraOrigin) == 304);
-		static_assert(offsetof(XeGTAOCB, FarReprojZ) == 320);
+		static_assert(sizeof(XeGTAOCB) == 352);
+		static_assert(offsetof(XeGTAOCB, FrameIndex) == 64);
+		static_assert(offsetof(XeGTAOCB, DepthDisocclusion) == 120);
+		static_assert(offsetof(XeGTAOCB, MaxAccumFrames) == 124);
+		static_assert(offsetof(XeGTAOCB, TemporalFlags) == 128);
+		static_assert(offsetof(XeGTAOCB, AOPower) == 152);
+		static_assert(offsetof(XeGTAOCB, ViewToWorld) == 160);
+		static_assert(offsetof(XeGTAOCB, PrevViewToWorld) == 208);
+		static_assert(offsetof(XeGTAOCB, CameraOrigin) == 256);
+		static_assert(offsetof(XeGTAOCB, PrevCameraOrigin) == 272);
+		static_assert(offsetof(XeGTAOCB, FarReprojZ) == 288);
 
 		// Variants compiled for one resolution mode; pairs index the temporal denoiser.
 		struct ResolutionShaders
@@ -129,12 +123,10 @@ namespace cs::features
 		};
 		static constexpr std::size_t kResolutionModes = 3;
 
-		// Rotation rows and projection terms retained for the next temporal frame.
+		// Rotation rows retained for the next temporal frame.
 		struct CameraTransform
 		{
 			float rows[12]{};
-			float ndcToViewMul[2]{};
-			float ndcToViewAdd[2]{};
 		};
 
 		ScreenSpaceGI() = default;
@@ -212,8 +204,6 @@ namespace cs::features
 		std::optional<bool> _vanillaSSAOSnapshot;
 		bool _lastCallbackFrameValid = false;
 		std::uint32_t _lastCallbackFrame = 0;
-		std::uint32_t _prevFrameW = 0;
-		std::uint32_t _prevFrameH = 0;
 		CameraTransform _prevCamera{};
 		ssgi::HistoryState _history;
 		cs::render::PixelShaderResourceSnapshot<kCompositionPSSlotCount>

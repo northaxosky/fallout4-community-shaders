@@ -32,8 +32,7 @@ void readHistory(
 	float curr_depth, float3 curr_pos, int2 pixCoord, float bilinear_weight,
 	inout float4 prev_y, inout float2 prev_co_cg, inout float accum_frames, inout float wsum)
 {
-	// Previous extents under dynamic resolution.
-	const float2 uv = (pixCoord + .5) * RCP_PREV_OUT_FRAME_DIM;
+	const float2 uv = (pixCoord + .5) * RCP_OUT_FRAME_DIM;
 	const float2 screen_pos = uv;
 	if (any(screen_pos < 0) || any(screen_pos > 1))
 		return;
@@ -45,7 +44,7 @@ void readHistory(
 	if (abs(curr_depth - prev_depth) > curr_depth * DepthDisocclusion * 3)
 		return;
 
-	float3 prev_pos = PreviousScreenToViewPosition(screen_pos, prev_depth);
+	float3 prev_pos = ScreenToViewPosition(screen_pos, prev_depth);
 	prev_pos = ViewToWorldPosition(prev_pos, PrevViewToWorld, PrevCameraOrigin.xyz);
 
 	float3 delta_pos = curr_pos - prev_pos;
@@ -127,7 +126,7 @@ void main(const uint2 pixCoord : SV_DispatchThreadID)
 		float3 curr_pos = ScreenToViewPosition(screen_pos, curr_depth);
 		curr_pos = ViewToWorldPosition(curr_pos, ViewToWorld, CameraOrigin.xyz);
 
-		float2 prev_px_coord = prev_uv * PREV_OUT_FRAME_DIM;
+		float2 prev_px_coord = prev_uv * OUT_FRAME_DIM;
 		int2 prev_px_lu = floor(prev_px_coord - 0.5);
 		float2 bilinear_weights = prev_px_coord - 0.5 - prev_px_lu;
 

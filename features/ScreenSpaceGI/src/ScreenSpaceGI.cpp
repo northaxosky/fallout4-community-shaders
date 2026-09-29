@@ -927,10 +927,6 @@ namespace cs::features
 		_cameraPreviousOriginZLastFrame.store(
 			previousCameraOrigin.z,
 			std::memory_order_relaxed);
-		camera.ndcToViewMul[0] = worldNdcToViewMul.x;
-		camera.ndcToViewMul[1] = worldNdcToViewMul.y;
-		camera.ndcToViewAdd[0] = worldNdcToViewAdd.x;
-		camera.ndcToViewAdd[1] = worldNdcToViewAdd.y;
 
 		// Upstream only resets on loading screens; disocclusion rejects everything else.
 		const auto historyFrame = _history.Prepare();
@@ -953,10 +949,6 @@ namespace cs::features
 			const float texHeight = static_cast<float>(_allocH);
 			const float frameWidth = static_cast<float>(frameW);
 			const float frameHeight = static_cast<float>(frameH);
-			const float prevFrameWidth =
-				useHistory ? static_cast<float>(_prevFrameW) : frameWidth;
-			const float prevFrameHeight =
-				useHistory ? static_cast<float>(_prevFrameH) : frameHeight;
 
 			// one screen-space radius drives the sweep; AO and GI cut it at their own fractions
 			const float effectRadius = std::max(
@@ -979,10 +971,6 @@ namespace cs::features
 			xegtaoCB.FrameDim[1] = frameHeight;
 			xegtaoCB.RcpFrameDim[0] = 1.0f / frameWidth;
 			xegtaoCB.RcpFrameDim[1] = 1.0f / frameHeight;
-			xegtaoCB.PrevFrameDim[0] = prevFrameWidth;
-			xegtaoCB.PrevFrameDim[1] = prevFrameHeight;
-			xegtaoCB.RcpPrevFrameDim[0] = 1.0f / prevFrameWidth;
-			xegtaoCB.RcpPrevFrameDim[1] = 1.0f / prevFrameHeight;
 			xegtaoCB.FrameIndex = static_cast<std::uint32_t>(state->frameCount);
 			xegtaoCB.NumSlices = static_cast<std::uint32_t>(_settings.numSlices);
 			xegtaoCB.NumSteps = static_cast<std::uint32_t>(_settings.numSteps);
@@ -1012,14 +1000,6 @@ namespace cs::features
 			const CameraTransform& previousCamera = useHistory ? _prevCamera : camera;
 			const DirectX::XMFLOAT3 temporalPreviousOrigin =
 				useHistory ? previousCameraOrigin : cameraOrigin;
-			std::memcpy(
-				xegtaoCB.PrevNDCToViewMul,
-				previousCamera.ndcToViewMul,
-				sizeof(previousCamera.ndcToViewMul));
-			std::memcpy(
-				xegtaoCB.PrevNDCToViewAdd,
-				previousCamera.ndcToViewAdd,
-				sizeof(previousCamera.ndcToViewAdd));
 			std::memcpy(xegtaoCB.ViewToWorld, camera.rows, sizeof(camera.rows));
 			std::memcpy(
 				xegtaoCB.PrevViewToWorld,
@@ -1220,8 +1200,6 @@ namespace cs::features
 			if (radianceAvailable) {
 				_history.Publish();
 				_prevCamera = camera;
-				_prevFrameW = frameW;
-				_prevFrameH = frameH;
 			} else {
 				ClearBounceOutputs(context);
 			}

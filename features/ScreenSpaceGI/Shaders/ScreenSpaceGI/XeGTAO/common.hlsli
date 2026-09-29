@@ -17,8 +17,6 @@ cbuffer XeGTAOCB : register(b0)
 	float2 RcpTexDim;
 	float2 FrameDim;
 	float2 RcpFrameDim;
-	float2 PrevFrameDim;
-	float2 RcpPrevFrameDim;
 
 	uint FrameIndex;
 	uint NumSlices;
@@ -47,9 +45,6 @@ cbuffer XeGTAOCB : register(b0)
 	float2 _pad0;
 	float AOPower;
 	float GIStrength;
-
-	float2 PrevNDCToViewMul;
-	float2 PrevNDCToViewAdd;
 
 	// Engine b12 view-to-world rows; w carries the row's translation term.
 	float4 ViewToWorld[3];
@@ -96,8 +91,6 @@ float4 filterInf(float4 v) { return float4(filterInf(v.x), filterInf(v.y), filte
 #	define OUT_FRAME_DIM (FrameDim * 0.5)
 #	define RCP_OUT_FRAME_DIM (RcpFrameDim * 2)
 #	define OUT_FRAME_SCALE (frameScale * 0.5)
-#	define PREV_OUT_FRAME_DIM (PrevFrameDim * 0.5)
-#	define RCP_PREV_OUT_FRAME_DIM (RcpPrevFrameDim * 2)
 #elif defined(QUARTER_RES)
 #	define RES_MIP 2
 #	define READ_DEPTH(tex, px) tex.Load(int3(px, RES_MIP))
@@ -105,8 +98,6 @@ float4 filterInf(float4 v) { return float4(filterInf(v.x), filterInf(v.y), filte
 #	define OUT_FRAME_DIM (FrameDim * 0.25)
 #	define RCP_OUT_FRAME_DIM (RcpFrameDim * 4)
 #	define OUT_FRAME_SCALE (frameScale * 0.25)
-#	define PREV_OUT_FRAME_DIM (PrevFrameDim * 0.25)
-#	define RCP_PREV_OUT_FRAME_DIM (RcpPrevFrameDim * 4)
 #else
 #	define RES_MIP 0
 #	define READ_DEPTH(tex, px) tex[px]
@@ -114,8 +105,6 @@ float4 filterInf(float4 v) { return float4(filterInf(v.x), filterInf(v.y), filte
 #	define OUT_FRAME_DIM FrameDim
 #	define RCP_OUT_FRAME_DIM RcpFrameDim
 #	define OUT_FRAME_SCALE frameScale
-#	define PREV_OUT_FRAME_DIM PrevFrameDim
-#	define RCP_PREV_OUT_FRAME_DIM RcpPrevFrameDim
 #endif
 
 bool HistoryValid() { return (TemporalFlags & SSGI_HISTORY_VALID) != 0u; }
@@ -125,14 +114,6 @@ float3 ScreenToViewPosition(const float2 screenPos, const float viewspaceDepth)
 {
 	float3 ret;
 	ret.xy = (NDCToViewMul.xy * screenPos.xy + NDCToViewAdd.xy) * viewspaceDepth;
-	ret.z = viewspaceDepth;
-	return ret;
-}
-
-float3 PreviousScreenToViewPosition(const float2 screenPos, const float viewspaceDepth)
-{
-	float3 ret;
-	ret.xy = (PrevNDCToViewMul * screenPos.xy + PrevNDCToViewAdd) * viewspaceDepth;
 	ret.z = viewspaceDepth;
 	return ret;
 }
