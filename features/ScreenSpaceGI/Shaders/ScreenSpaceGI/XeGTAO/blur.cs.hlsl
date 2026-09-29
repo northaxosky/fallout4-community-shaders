@@ -92,7 +92,7 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 
 	float depth = READ_DEPTH(srcDepth, dtid);
 	float3 pos = ScreenToViewPosition(screenPos, depth);
-	float3 normal = GBuffer::DecodeFO4Normal(FULLRES_LOAD(srcNormalRoughness, dtid, uv, samplerLinearClamp).xy);
+	float3 normal = GBuffer::DecodeFO4Normal(FULLRES_LOAD(srcNormalRoughness, dtid, uv * frameScale, samplerLinearClamp).xy);
 
 	const float2 pixelDirRBViewspaceSizeAtCenterZ = depth.xx * NDCToViewMul.xy * RCP_OUT_FRAME_DIM;
 	const float worldRadius = radius * pixelDirRBViewspaceSizeAtCenterZ.x;
