@@ -256,26 +256,21 @@ namespace cs::features
 			return;
 		}
 
-		if (!cs::engine::RegisterPreDeferredComposite(
-				[] { DynamicCubemaps::GetSingleton()->UpdateCubemap(); })) {
+		// FO4 draws the sky inside DrawWorld::Forward after the composite, so capture and publication follow it.
+		if (!cs::engine::RegisterPostForwardSky([] {
+				auto* feature = DynamicCubemaps::GetSingleton();
+				feature->UpdateCubemap();
+				feature->PostDeferred();
+			})) {
 			FailLoad(
-				"DynamicCubemaps could not register its pre-composite "
+				"DynamicCubemaps could not register its post-sky "
 				"capture hook");
-			return;
-		}
-		// Registered after the substrate and earlier features, so this Late bind follows their restores.
-		if (!cs::engine::RegisterPostDeferredComposite(
-				[] { DynamicCubemaps::GetSingleton()->PostDeferred(); },
-				cs::engine::HookPriority::Late)) {
-			FailLoad(
-				"DynamicCubemaps could not register its post-composite "
-				"binding hook");
 			return;
 		}
 
 		_registrationsReady.store(true, std::memory_order_release);
 		L->info(
-			"Registered pre-composite capture and forward BSWater "
+			"Registered post-sky capture and forward BSWater "
 			"consumption at t{}-t{}.",
 			kDynamicCubemapPSSlot,
 			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1);
@@ -696,13 +691,13 @@ namespace cs::features
 
 	void DynamicCubemaps::ResolveReflectionMode()
 	{
-		// FO4 host translation of upstream Reset(): the engine cube stands in for Skyrim's reflection prepass.
 		const bool engineCube = cs::engine::GetActiveReflectionCubeSRV() != nullptr;
-		bool active = engineCube;
-		bool fake = engineCube && cs::engine::IsSkyHidden();
 		const auto* player = RE::PlayerCharacter::GetSingleton();
 		const auto* cell = player ? player->GetParentCell() : nullptr;
 		const bool interior = cell && !cell->IsExterior();
+		// FO4 exterior water always renders its REFLECTIONS technique, standing in for Skyrim's reflections prepass.
+		bool active = engineCube || !interior;
+		bool fake = active && cs::engine::IsSkyHidden();
 		if (!active && !interior) {
 			active = true;
 			fake = true;
@@ -749,7 +744,7 @@ namespace cs::features
 		auto* context = cs::engine::GetImmediateContext();
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
-			cs::engine::RenderTarget::kMain);
+			cs::engine::RenderTarget::kMainTemp);
 		const auto& frameBuffer = cs::engine::GetFrameBuffer();
 		const bool cameraReady =
 			frameBuffer.valid &&
@@ -824,7 +819,7 @@ namespace cs::features
 		auto* context = cs::engine::GetImmediateContext();
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
-			cs::engine::RenderTarget::kMain);
+			cs::engine::RenderTarget::kMainTemp);
 		const auto& frameBuffer = cs::engine::GetFrameBuffer();
 		DirectX::XMFLOAT4X4 projection{};
 		DirectX::XMFLOAT4X4 inverseProjection{};
@@ -898,6 +893,7 @@ namespace cs::features
 		auto& stream = Stream(a_reflections);
 		context->GenerateMips(stream.color.srv.get());
 
+		// FO4's engine reflection cube is inactive by default, so uncaptured reflection directions infer toward black.
 		std::array<ID3D11ShaderResourceView*, 3> srvs{
 			stream.color.srv.get(),
 			cs::engine::GetActiveReflectionCubeSRV(),
@@ -1102,7 +1098,7 @@ namespace cs::features
 			.Field(
 				"camera_ready",
 				_cameraReadyLastFrame.load(std::memory_order_relaxed))
-			.Field("capture_source", "kMain pre-composite")
+			.Field("capture_source", "logical scene color post-sky")
 			.Field(
 				"capture_width",
 				static_cast<std::int64_t>(
