@@ -4,6 +4,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "Render/PixelShaderResourceSnapshot.h"
 
 #include <DirectXMath.h>
 #include <array>
@@ -83,6 +84,8 @@ namespace cs::features
 		static constexpr std::uint32_t kPreviewHeight = 256;
 		static constexpr std::uint32_t kDynamicCubemapPSSlot = 30;
 		static constexpr std::uint32_t kDynamicCubemapPSSlotCount = 2;
+		static constexpr std::uint32_t kCompositionPSSlot = 34;
+		static constexpr std::uint32_t kCompositionPSSlotCount = 2;
 
 		struct CubeTexture
 		{
@@ -155,6 +158,7 @@ namespace cs::features
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(dynamic_cubemaps::kSchema); }
 		void PublishSettings() noexcept;
 		void PostDeferred();
+		void BindComposition(ID3D11DeviceContext* a_context);
 		void ResolveReflectionMode();
 		void UpdateCubemap();
 		void UpdateCubemapCapture(bool a_reflections);
@@ -202,6 +206,7 @@ namespace cs::features
 		CubeTexture _filtered;
 		CubeTexture _environment;
 		CubeTexture _reflections;
+		cs::render::PixelShaderResourceSnapshot<kCompositionPSSlotCount> _compositionBindingSnapshot;
 		CompressedCube _environmentBC6H;
 		CompressedCube _reflectionsBC6H;
 		winrt::com_ptr<ID3D11ShaderResourceView> _filteredArraySRV;

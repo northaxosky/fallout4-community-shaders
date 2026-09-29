@@ -93,6 +93,9 @@ namespace cs::features
 			bool a_bindsNormal) {
 			cs::engine::ShaderReplacementRegistration registration{
 				.targetId = a_target,
+				.stages = cs::engine::ShaderStageBit(
+					a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting ?
+						cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel),
 				.contributor = "WetnessEffects",
 				.defines = {
 					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" }
@@ -124,6 +127,10 @@ namespace cs::features
 			FailLoad(
 				"Wetness shades through the reconstructed BSDFLight shader; "
 				"registering that replacement failed, so there is no delivery path");
+			return;
+		}
+		if (!registerContribution(cs::engine::ShaderInjectionTarget::kDfTiledLighting, false)) {
+			FailLoad("Wetness could not register its tiled lighting shader contribution");
 			return;
 		}
 		if (!registerContribution(cs::engine::ShaderInjectionTarget::kBsdfComposite, true)) {

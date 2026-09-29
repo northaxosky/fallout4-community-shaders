@@ -219,16 +219,14 @@ namespace WetnessEffects
 		return weight;
 	}
 
-	// partial wetness must never blur a more polished native reflection
-	float GetFilmMipRoughness(float nativeRoughness, float wetness)
+#if defined(DYNAMIC_CUBEMAPS)
+	// FO4 evaluates indirect diffuse in light passes rather than upstream's material pass.
+	float GetIndirectDiffuseWeight(float3 normalView, float3 viewDir, float4 viewToWorldRow2)
 	{
-		return min(FilmRoughness(wetness), nativeRoughness);
+		float wetness = GetWetness(normalView, float4(viewToWorldRow2.xyz, 1.0));
+		return 1.0 - GetEnvironmentFilmWeight(normalView, viewDir, wetness);
 	}
-
-	float3 GetFilmReflectionView(float3 normalView, float3 viewDir)
-	{
-		return normalView * -(2.0 * dot(viewDir, normalView)) + viewDir;
-	}
+#endif
 }
 
 #endif  // __WETNESS_EFFECTS_DEPENDENCY_HLSL__

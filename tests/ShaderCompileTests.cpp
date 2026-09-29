@@ -288,6 +288,7 @@ namespace
 				{ "SCREEN_SPACE_SHADOWS", "1" },
 				{ "TERRAIN_SHADOWS", "1" },
 				{ "WETNESS_EFFECTS", "1" },
+				{ "DYNAMIC_CUBEMAPS", "1" },
 				{ "WATER_EFFECTS", "1" }
 			});
 		a_jobs.push_back({
@@ -311,7 +312,8 @@ namespace
 			.description = "BSDFComposite feature off",
 			.forbidden = {
 				CB(5), CB(6), Texture(25),
-				Texture(26), Texture(27), Texture(28), Texture(29)
+				Texture(26), Texture(27), Texture(28), Texture(29),
+				Texture(34), Texture(35)
 			}
 		});
 		a_jobs.push_back({
@@ -321,15 +323,91 @@ namespace
 				{ "FO4CS_SUBSTRATE", "1" },
 				{ "SSGI", "1" },
 				{ "WETNESS_EFFECTS", "1" },
+				{ "DYNAMIC_CUBEMAPS", "1" },
+				{ "TERRAIN_SHADOWS", "1" },
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" }
 			},
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
 			.required = {
 				CB(6), Texture(25),
-				Texture(26), Texture(27), Texture(28), Texture(29)
+				Texture(26), Texture(27), Texture(28), Texture(29),
+				Texture(34), Texture(35)
 			}
 		});
+
+		for (const char* family : {
+				 "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY",
+				 "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY",
+				 "BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY",
+				 "BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY",
+				 "BSDFCOMPOSITE_PS_CUBE_IBL" }) {
+			for (bool dynamicCubemaps : { false, true }) {
+				ShaderDefines defines{
+					{ family, "1" },
+					{ "FO4CS_SUBSTRATE", "1" },
+					{ "WETNESS_EFFECTS", "1" }
+				};
+				if (dynamicCubemaps)
+					defines.emplace_back("DYNAMIC_CUBEMAPS", "1");
+				a_jobs.push_back({
+					.path = composite,
+					.defines = std::move(defines),
+					.profile = "ps_5_0",
+					.description = family,
+					.required = dynamicCubemaps ?
+						std::vector<Resource>{ Texture(34), Texture(35) } :
+						std::vector<Resource>{},
+					.forbidden = dynamicCubemaps ?
+						std::vector<Resource>{} :
+						std::vector<Resource>{ Texture(34), Texture(35) }
+				});
+			}
+		}
+
+		for (auto defines : std::vector<ShaderDefines>{
+				 { { "BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY", "1" }, { "FOGSTACK", "1" }, { "SSGI", "1" } },
+				 { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" }, { "COMPOSITE_MATERIAL_EXCLUSION", "0" }, { "COMPOSITE_FOG_STACK", "0" } } }) {
+			defines.insert(defines.end(), {
+				{ "FO4CS_SUBSTRATE", "1" },
+				{ "WETNESS_EFFECTS", "1" },
+				{ "DYNAMIC_CUBEMAPS", "1" }
+			});
+			a_jobs.push_back({
+				.path = composite,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "BSDFComposite wet reflection reconstruction branches",
+				.required = { Texture(34), Texture(35) }
+			});
+		}
+
+		for (auto defines : std::vector<ShaderDefines>{
+				 { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "AMBIENT_IBL_IN_LIGHT", "1" } },
+				 { { "BSDFLIGHT_PS_DIRSPLITS1", "1" }, { "DIRSPLITS", "1" }, { "SHADOW", "1" }, { "FILTER_PCF1", "1" } },
+				 { { "BSDFLIGHT_PS_DIRSPLITS2", "1" }, { "DIRSPLITS", "2" }, { "SHADOW", "1" } },
+				 { { "BSDFLIGHT_PS_DIRSPLITS3", "1" }, { "DIRSPLITS", "3" }, { "SHADOW", "1" } },
+				 { { "BSDFLIGHT_PS_SHADOW_ONLY_BLEND_SPLIT", "1" }, { "DIRSPLITS", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" }, { "BLENDSPLIT", "1" }, { "FILTER_PCF1", "1" } },
+				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRSPLITS", "2" } },
+				 { { "BSDFLIGHT_PS_AMBIENT", "1" } } }) {
+			defines.insert(defines.end(), {
+				{ "FO4CS_SUBSTRATE", "1" },
+				{ "WETNESS_EFFECTS", "1" },
+				{ "DYNAMIC_CUBEMAPS", "1" },
+				{ "AMBIENT", "1" },
+				{ "DIRECTIONAL", "1" },
+				{ "SPECULAR", "1" },
+				{ "RGBSPEC", "1" }
+			});
+			a_jobs.push_back({
+				.path = bsdfLight,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "BSDFLight wet indirect diffuse",
+				.required = { CB(6) },
+				.forbidden = { Texture(30), Texture(31), Texture(34), Texture(35) }
+			});
+		}
 
 		const auto tiled = a_root / "DFTiledLighting.hlsl";
 		a_jobs.push_back({
@@ -344,6 +422,8 @@ namespace
 				.defines = {
 					{ "DFTILEDLIGHTING_VARIANT", variant },
 					{ "FO4CS_SUBSTRATE", "1" },
+					{ "WETNESS_EFFECTS", "1" },
+					{ "DYNAMIC_CUBEMAPS", "1" },
 					{ "INVERSE_SQUARE_LIGHTING", "1" }
 				},
 				.description = variant[0] == '1' ?

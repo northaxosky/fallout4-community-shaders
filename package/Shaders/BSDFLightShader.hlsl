@@ -800,6 +800,11 @@ PS_OUTPUT main(PS_INPUT input)
     float posViewLen   = rsqrt(posViewLenSq);
     float3 viewDirNeg  = -posView * posViewLen;
 
+#if defined(AMBIENT_IBL_IN_LIGHT) && defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
+        normalView, viewDirNeg, ViewToWorld_row2);
+#endif
+
     bool cascade0Active = (linearizedDepth < cb2_idx10_cascade_range.y);
     bool cascade1Active = (cb2_idx10_cascade_range.x < linearizedDepth);
 
@@ -2708,6 +2713,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef AMBIENT
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
+        normalView, viewDirNeg, ViewToWorld_row2);
+#endif
     float3 ambientSpecular = 0.0;
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
     float ambientFresLog = log2(1.0 - NdotV_view);
@@ -3374,6 +3383,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef AMBIENT
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
+        normalView, viewDirNeg, ViewToWorld_row2);
+#endif
     float3 ambientSpecular = 0.0;
 #endif
 
@@ -4509,6 +4522,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef AMBIENT
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
+        normalView, viewDirNeg, ViewToWorld_row2);
+#endif
     float3 ambientSpecular = 0.0;
 #endif
 
@@ -5848,6 +5865,10 @@ PS_OUTPUT main(PS_INPUT input)
     ambientDiffuse.y = dot(cb2_ambient_row1, float4(normal, 1.0));
     ambientDiffuse.z = dot(cb2_ambient_row2, float4(normal, 1.0));
     ambientDiffuse = pow(ambientDiffuse, 2.2);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
+        normal, normalize(-posView), ViewToWorld_row2);
+#endif
 
     bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
 #endif
@@ -6256,6 +6277,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef AMBIENT
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
+        normalView, normalize(-posView), ViewToWorld_row2);
+#endif
     float3 ambientSpecular = 0.0;
 #endif
 
@@ -6730,7 +6755,9 @@ PS_OUTPUT main(PS_INPUT input)
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    float4 cb12_pad_0_19[20];
+    float4 cb12_pad_0_13[14];
+    float4 ViewToWorld_row2;
+    float4 cb12_pad_15_19[5];
     float4 FarReproj_row0;
     float4 FarReproj_row1;
     float4 FarReproj_row2;
@@ -6830,6 +6857,10 @@ PS_OUTPUT main(PS_INPUT input)
     float3 viewDirection = normalize(-positionView);
 
     float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
+        normalView, viewDirection, ViewToWorld_row2);
+#endif
     float ndotv = dot(normalView, viewDirection);
     float3 reflectionDirection = 2.0 * ndotv * normalView - viewDirection;
     float oneMinusNdotV = 1.0 - saturate(ndotv);

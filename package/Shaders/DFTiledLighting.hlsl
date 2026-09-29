@@ -16,6 +16,9 @@
 #include "InverseSquareLighting/InverseSquareLighting.hlsli"
 #endif
 
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+#include "WetnessEffects/WetnessEffects.hlsli"
+#endif
 
 cbuffer TiledLightingParameters : register(b0)
 {
@@ -138,6 +141,10 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     bool materialOne = abs(material.w * 255.0 - 1.0) < 0.25;
     float materialSpecular = materialOne ? 0.0 : material.y;
     diffuseAccum = EvaluateAmbientGradient(normalView);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    diffuseAccum *= WetnessEffects::GetIndirectDiffuseWeight(
+        normalView, viewDirection, PerFrame[14]);
+#endif
 
     float normalDotView = dot(normalView, viewDirection);
     float3 reflectionDirection =

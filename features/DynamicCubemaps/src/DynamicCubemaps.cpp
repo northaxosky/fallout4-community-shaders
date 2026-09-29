@@ -229,19 +229,23 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		std::vector<cs::engine::ShaderSlotClaim> slotClaims;
-		for (std::uint32_t offset = 0;
-			 offset < kDynamicCubemapPSSlotCount;
-			 ++offset) {
-			slotClaims.push_back({
-				.stage = cs::engine::ShaderStage::kPixel,
-				.resourceType =
-					cs::engine::ShaderResourceType::kShaderResource,
-				.slot = kDynamicCubemapPSSlot + offset
-			});
-		}
-		if (!cs::engine::RegisterReplacement({
-				.targetId = cs::engine::ShaderInjectionTarget::kBsWater,
+		const auto registerContribution = [this](
+			cs::engine::ShaderInjectionTarget a_target,
+			cs::engine::ShaderStage a_stage,
+			std::uint32_t a_firstSlot,
+			std::uint32_t a_slotCount,
+			cs::engine::ShaderInjectionBindCallback a_bind = {}) {
+			std::vector<cs::engine::ShaderSlotClaim> slotClaims;
+			for (std::uint32_t offset = 0; offset < a_slotCount; ++offset) {
+				slotClaims.push_back({
+					.stage = a_stage,
+					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+					.slot = a_firstSlot + offset
+				});
+			}
+			return cs::engine::RegisterReplacement({
+				.targetId = a_target,
+				.stages = cs::engine::ShaderStageBit(a_stage),
 				.contributor = "DynamicCubemaps",
 				.defines = {
 					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" }
@@ -249,10 +253,44 @@ namespace cs::features
 				.isReady = [this] {
 					return _registrationsReady.load(std::memory_order_acquire);
 				},
-				.slotClaims = std::move(slotClaims) })) {
+				.bind = std::move(a_bind),
+				.slotClaims = std::move(slotClaims) });
+		};
+		if (!registerContribution(
+				cs::engine::ShaderInjectionTarget::kBsWater,
+				cs::engine::ShaderStage::kPixel,
+				kDynamicCubemapPSSlot,
+				kDynamicCubemapPSSlotCount) ||
+			!registerContribution(
+				cs::engine::ShaderInjectionTarget::kBsdfComposite,
+				cs::engine::ShaderStage::kPixel,
+				kCompositionPSSlot,
+				kCompositionPSSlotCount,
+				[this](ID3D11DeviceContext* a_context) {
+					BindComposition(a_context);
+				}) ||
+			!registerContribution(
+				cs::engine::ShaderInjectionTarget::kBsdfLight,
+				cs::engine::ShaderStage::kPixel, 0, 0) ||
+			!registerContribution(
+				cs::engine::ShaderInjectionTarget::kDfTiledLighting,
+				cs::engine::ShaderStage::kCompute, 0, 0)) {
 			FailLoad(
-				"DynamicCubemaps requires the reconstructed BSWater "
-				"shader; registering that replacement failed");
+				"DynamicCubemaps could not register its water, composite, "
+				"or deferred lighting shader contributions");
+			return;
+		}
+
+		// FO4 consumes the previous publication at composite draws, so preserve its t34-t35 bindings across that pass.
+		if (!cs::engine::RegisterPostDeferredComposite([] {
+				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Restore(
+					cs::engine::GetImmediateContext());
+			}, cs::engine::HookPriority::Late) ||
+			!cs::engine::RegisterPreDeferredComposite([] {
+				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Save(
+					cs::engine::GetImmediateContext(), kCompositionPSSlot);
+			}, cs::engine::HookPriority::Early)) {
+			FailLoad("DynamicCubemaps could not register its composite binding scope");
 			return;
 		}
 
@@ -270,10 +308,32 @@ namespace cs::features
 
 		_registrationsReady.store(true, std::memory_order_release);
 		L->info(
-			"Registered post-sky capture and forward BSWater "
-			"consumption at t{}-t{}.",
+			"Registered post-sky capture, forward BSWater consumption at t{}-t{}, "
+			"composite consumption at t{}-t{}, and deferred lighting contributions.",
 			kDynamicCubemapPSSlot,
-			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1);
+			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1,
+			kCompositionPSSlot,
+			kCompositionPSSlot + kCompositionPSSlotCount - 1);
+	}
+
+	void DynamicCubemaps::BindComposition(ID3D11DeviceContext* a_context)
+	{
+		if (!a_context) {
+			return;
+		}
+		std::array<ID3D11ShaderResourceView*, kCompositionPSSlotCount> resources{};
+		if (_resourcesReady.load(std::memory_order_acquire) &&
+			_injectionsOperational.load(std::memory_order_acquire) &&
+			_enabled.load(std::memory_order_acquire)) {
+			resources[0] = _cubemapValid[0].load(std::memory_order_acquire) ?
+				_environment.srv.get() : nullptr;
+			resources[1] = _activeReflections.load(std::memory_order_acquire) ?
+				(_cubemapValid[1].load(std::memory_order_acquire) ?
+					_reflections.srv.get() : nullptr) :
+				resources[0];
+		}
+		a_context->PSSetShaderResources(
+			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
 	}
 
 	void DynamicCubemaps::OnDataLoaded()
