@@ -605,6 +605,10 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 cb12_idx29_sss_angles;
 
     float4 cb12_idx30;
+#ifdef WETNESS_EFFECTS
+    float4 cb12_pad_31_34[4];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -802,7 +806,8 @@ PS_OUTPUT main(PS_INPUT input)
 
 #if defined(AMBIENT_IBL_IN_LIGHT) && defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-        normalView, viewDirNeg, ViewToWorld_row2);
+        normalView, viewDirNeg, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 #endif
 
     bool cascade0Active = (linearizedDepth < cb2_idx10_cascade_range.y);
@@ -1284,6 +1289,10 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 cb12_idx29_sss_angles;
 
+#ifdef WETNESS_EFFECTS
+    float4 cb12_pad_30_34[5];
+    float4 CameraPosAdjust;
+#endif
 #endif
 };
 
@@ -2206,6 +2215,8 @@ shadowRef -= cb2_idx15_shadow_sample_param.x;
         lightDir,
         wetLightColor,
         wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         wetDiffuse,
         wetSpecular);
     output.specular = float4(wetSpecular, 1.0);
@@ -2443,7 +2454,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 cb12_idx30;
 
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -2715,7 +2726,8 @@ PS_OUTPUT main(PS_INPUT input)
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-        normalView, viewDirNeg, ViewToWorld_row2);
+        normalView, viewDirNeg, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 #endif
     float3 ambientSpecular = 0.0;
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -2923,6 +2935,8 @@ PS_OUTPUT main(PS_INPUT input)
         SunDirection.xyz,
         SunColor_HDR.xyz * shadow,
         wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT
@@ -3079,7 +3093,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 cb12_idx30;
 
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -3385,7 +3399,8 @@ PS_OUTPUT main(PS_INPUT input)
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-        normalView, viewDirNeg, ViewToWorld_row2);
+        normalView, viewDirNeg, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 #endif
     float3 ambientSpecular = 0.0;
 #endif
@@ -3814,6 +3829,8 @@ PS_OUTPUT main(PS_INPUT input)
         SunDirection.xyz,
         SunColor_HDR.xyz * shadow,
         wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT
@@ -4026,7 +4043,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 cb12_idx30;
 
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -4524,7 +4541,8 @@ PS_OUTPUT main(PS_INPUT input)
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-        normalView, viewDirNeg, ViewToWorld_row2);
+        normalView, viewDirNeg, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 #endif
     float3 ambientSpecular = 0.0;
 #endif
@@ -4850,6 +4868,8 @@ PS_OUTPUT main(PS_INPUT input)
         SunDirection.xyz,
         SunColor_HDR.xyz * shadow,
         wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT
@@ -4955,6 +4975,10 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 cb12_idx28_sss_params;
 
     float4 cb12_idx29_sss_angles;
+#ifdef WETNESS_EFFECTS
+    float4 cb12_pad_30_34[5];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -5296,6 +5320,8 @@ PS_OUTPUT main(PS_INPUT input)
         lightDir,
         wetLightColor,
         wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         wetDiffuse,
         wetSpecular);
     output.specular = float4(wetSpecular, 1.0);
@@ -5750,7 +5776,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
     float4 cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -5867,7 +5893,8 @@ PS_OUTPUT main(PS_INPUT input)
     ambientDiffuse = pow(ambientDiffuse, 2.2);
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-        normal, normalize(-posView), ViewToWorld_row2);
+        normal, normalize(-posView), posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 #endif
 
     bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
@@ -6095,11 +6122,11 @@ cbuffer PerFrame_CB12 : register(b12)
 
 #if defined(DIRECTIONAL) && defined(SPECULAR)
     float4 cb12_idx30;
-#elif defined(DIRECTIONAL) && (defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS))
+#elif (defined(DIRECTIONAL) && (defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS))) || defined(WETNESS_EFFECTS)
     float4 cb12_idx30_terrain_pad;
 #endif
 
-#if defined(DIRECTIONAL) && (defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS))
+#if (defined(DIRECTIONAL) && (defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS))) || defined(WETNESS_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -6279,7 +6306,8 @@ PS_OUTPUT main(PS_INPUT input)
     float3 ambientDiffuse  = EvaluateAmbientGradient(normalView);
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-        normalView, normalize(-posView), ViewToWorld_row2);
+        normalView, normalize(-posView), posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 #endif
     float3 ambientSpecular = 0.0;
 #endif
@@ -6693,6 +6721,8 @@ PS_OUTPUT main(PS_INPUT input)
         lightDir,
         wetLightColor,
         wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT
@@ -6753,19 +6783,15 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFLIGHT_PS_AMBIENT
 
+#include "Common/DeferredContracts.hlsli"
+
 cbuffer PerFrame_CB12 : register(b12)
 {
-    float4 cb12_pad_0_13[14];
-    float4 ViewToWorld_row2;
-    float4 cb12_pad_15_19[5];
-    float4 FarReproj_row0;
-    float4 FarReproj_row1;
-    float4 FarReproj_row2;
-    float4 FarReproj_row3;
-    float4 NearReproj_row0;
-    float4 NearReproj_row1;
-    float4 NearReproj_row2;
-    float4 NearReproj_row3;
+    DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    float4 cb12_pad_28_34[7];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -6859,7 +6885,8 @@ PS_OUTPUT main(PS_INPUT input)
     float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-        normalView, viewDirection, ViewToWorld_row2);
+        normalView, viewDirection, positionView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 #endif
     float ndotv = dot(normalView, viewDirection);
     float3 reflectionDirection = 2.0 * ndotv * normalView - viewDirection;

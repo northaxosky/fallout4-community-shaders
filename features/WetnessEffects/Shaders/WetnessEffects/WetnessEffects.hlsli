@@ -4,6 +4,7 @@
 #define __WETNESS_EFFECTS_DEPENDENCY_HLSL__
 
 #include "Common/SharedData.hlsli"
+#include "Common/Random.hlsli"
 
 namespace WetnessEffects
 {
@@ -13,7 +14,6 @@ namespace WetnessEffects
 #endif
 
 	static const float FilmF0 = 0.02;
-	static const float MinFilmRoughness = 0.05;
 	static const float MaxFilmSpecularMagnitude = 15.0;
 	// FO4's six reconstructed BSDFLight families normalize traditional specular with pi
 	static const float FilmSpecularScale = 3.1415927;
@@ -22,6 +22,7 @@ namespace WetnessEffects
 	static const uint DebugModeWetnessTerm = 1;
 	static const uint DebugModeWorldUp = 2;
 
+	// FO4 deferred passes use the shading normal because the vertex normal is unavailable.
 	float GetWorldUp(float3 normalView, float4 worldUpView)
 	{
 		return dot(normalView, worldUpView.xyz);
@@ -48,9 +49,50 @@ namespace WetnessEffects
 			worldUpView.w);
 	}
 
-	float FilmRoughness(float wetness)
+	float GetWaterRoughness(float wetness, float3 worldPosition, float viewDepth, float worldUp)
 	{
-		return max(saturate(1.0 - wetness), MinFilmRoughness);
+		float nearFactor = smoothstep(4096.0 * 2.5, 0.0, viewDepth);
+
+		// Calculate wetness angle and occlusion
+		float minWetnessValue = SharedData::wetnessEffectsSettings.MinRainWetness;
+		float minWetnessAngle = saturate(max(minWetnessValue, worldUp));
+		// FO4 has no skylighting; these deferred consumers shade world geometry.
+		float wetnessOcclusion = 1.0;
+
+		// Calculate puddle effects
+		float puddleWetness = SharedData::wetnessEffectsSettings.PuddleWetness * minWetnessAngle;
+		float puddle = wetness;
+		if (wetness > 0.0 || puddleWetness > 0.0) {
+			float3 puddleCoords = (worldPosition * 0.5 + 0.5) * 0.01 / SharedData::wetnessEffectsSettings.PuddleRadius;
+			puddle = Random::perlinNoise(puddleCoords) * 0.5 + 0.5;
+			puddle = puddle * ((minWetnessAngle / SharedData::wetnessEffectsSettings.PuddleMaxAngle) * SharedData::wetnessEffectsSettings.MaxPuddleWetness * 0.25) + 0.5;
+			puddle *= lerp(wetness, puddleWetness, saturate(puddle - 0.25));
+		}
+
+		// Apply occlusion and distance factors
+		puddle *= saturate(wetnessOcclusion * 2.0) * nearFactor;
+
+		// Calculate wetness glossiness factors
+		float wetnessGlossinessSpecular = puddle;
+
+		// Minimum roughness prevents an extreme retroreflective peak (NdotH→1) for near-zero
+		// roughness puddles. Real water has ripples and surface tension that keep it from being
+		// optically perfect; the ripple normal map adds micro-variation but GGX still peaks
+		// sharply without this floor.
+		static const float wetnessMinPuddleRoughness = 0.05;
+		return max(saturate(1.0 - wetnessGlossinessSpecular), wetnessMinPuddleRoughness);
+	}
+
+	// FO4 reconstructs absolute world position from b12 rows and camera adjustment; view Z is forward depth.
+	float GetWaterRoughnessFromView(float wetness, float3 normalView, float3 viewPosition,
+		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2, float4 cameraPosAdjust)
+	{
+		float3 worldPosition = float3(
+			dot(viewToWorldRow0, float4(viewPosition, 1.0)),
+			dot(viewToWorldRow1, float4(viewPosition, 1.0)),
+			dot(viewToWorldRow2, float4(viewPosition, 1.0))) + cameraPosAdjust.xyz;
+		return GetWaterRoughness(wetness, worldPosition, viewPosition.z,
+			GetWorldUp(normalView, viewToWorldRow2));
 	}
 
 	float FilmStrength(float filmRoughness)
@@ -174,11 +216,11 @@ namespace WetnessEffects
 		float3 lightDir,
 		float3 lightColor,
 		float wetness,
+		float roughness,
 		inout float3 diffuse,
 		inout float3 specular)
 	{
 		[branch] if (wetness > 0.0) {
-			float roughness = FilmRoughness(wetness);
 			float strength = FilmStrength(roughness);
 
 			float3 halfVector = viewDir + lightDir;
@@ -206,11 +248,10 @@ namespace WetnessEffects
 	}
 
 	// upstream GetWetnessIndirectLobeWeights: environment-BRDF weighted film Fresnel
-	float GetEnvironmentFilmWeight(float3 normalView, float3 viewDir, float wetness)
+	float GetEnvironmentFilmWeight(float3 normalView, float3 viewDir, float wetness, float roughness)
 	{
 		float weight = 0.0;
 		[branch] if (wetness > 0.0) {
-			float roughness = FilmRoughness(wetness);
 			float NdotV = saturate(abs(dot(normalView, viewDir)) + DotClampEpsilon);
 			float2 environmentBRDF = EnvBRDF(roughness, NdotV);
 			weight = (FilmF0 * environmentBRDF.x + environmentBRDF.y) *
@@ -221,10 +262,13 @@ namespace WetnessEffects
 
 #if defined(DYNAMIC_CUBEMAPS)
 	// FO4 evaluates indirect diffuse in light passes rather than upstream's material pass.
-	float GetIndirectDiffuseWeight(float3 normalView, float3 viewDir, float4 viewToWorldRow2)
+	float GetIndirectDiffuseWeight(float3 normalView, float3 viewDir, float3 viewPosition,
+		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2, float4 cameraPosAdjust)
 	{
 		float wetness = GetWetness(normalView, float4(viewToWorldRow2.xyz, 1.0));
-		return 1.0 - GetEnvironmentFilmWeight(normalView, viewDir, wetness);
+		float roughness = GetWaterRoughnessFromView(wetness, normalView, viewPosition,
+			viewToWorldRow0, viewToWorldRow1, viewToWorldRow2, cameraPosAdjust);
+		return 1.0 - GetEnvironmentFilmWeight(normalView, viewDir, wetness, roughness);
 	}
 #endif
 }

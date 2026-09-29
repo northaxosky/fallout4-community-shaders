@@ -56,6 +56,10 @@ namespace SharedData
 		float MaxRainWetness;
 		float MinRainWetness;
 		uint DebugVisualization;
+		float PuddleRadius;
+		float PuddleMaxAngle;
+		float MaxPuddleWetness;
+		float PuddleWetness;
 	};
 
 	struct TerrainShadowsSettings

@@ -46,7 +46,7 @@ cbuffer PerFrame_CB12 : register(b12)
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
     float4 cb12_pad_28_29[2];
     float4 cb12_idx30_ibl_desaturation;
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -374,6 +374,8 @@ PS_OUTPUT main(PS_INPUT input)
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     output.color.xyz += DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, viewDirNeg, wetSurface.wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetSurface.wetness, wetSurface.normalView, pos.xyz,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
         g_sIBLProbeCube);
 #endif
@@ -639,6 +641,8 @@ PS_OUTPUT main(PS_INPUT input)
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, viewDirection, wetSurface.wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetSurface.wetness, wetSurface.normalView, positionView,
+            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
         float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
         g_sIblProbeCube);
 #endif
@@ -907,7 +911,7 @@ PS_OUTPUT main(PS_INPUT input)
 #define OUTPUTMASK 0
 #endif
 
-#if FOGSTACK || defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if FOGSTACK || defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
 #define AMBIENT_FRAME_COUNT 47
 #else
 #define AMBIENT_FRAME_COUNT 31
@@ -1147,6 +1151,8 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, normalize(-viewPosition), wetSurface.wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetSurface.wetness, wetSurface.normalView, viewPosition,
+            ambientFrame[12], ambientFrame[13], ambientFrame[14], ambientFrame[35]),
         float3x3(ambientFrame[12].xyz, ambientFrame[13].xyz, ambientFrame[14].xyz),
         environmentSampler);
 #endif
@@ -1475,6 +1481,8 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, v, wetSurface.wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetSurface.wetness, wetSurface.normalView, pos.xyz,
+            g_PF[12], g_PF[13], g_PF[14], g_PF[35]),
         float3x3(g_PF[12].xyz, g_PF[13].xyz, g_PF[14].xyz),
         SampCube);
 #endif
@@ -2408,7 +2416,7 @@ PS_OUTPUT main(PS_INPUT input)
 #ifndef COMPOSITE_CB12_COUNT
 #define COMPOSITE_CB12_COUNT 47
 #endif
-#if (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)) && COMPOSITE_CB12_COUNT < 36
+#if (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))) && COMPOSITE_CB12_COUNT < 36
 #undef COMPOSITE_CB12_COUNT
 #define COMPOSITE_CB12_COUNT 36
 #endif
@@ -2589,6 +2597,8 @@ float4 main(PSInput input) : SV_Target0
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, normalize(-worldPosition), wetSurface.wetness,
+        WetnessEffects::GetWaterRoughnessFromView(wetSurface.wetness, wetSurface.normalView, worldPosition,
+            scene[12], scene[13], scene[14], scene[35]),
         float3x3(scene[12].xyz, scene[13].xyz, scene[14].xyz),
         probeSampler);
 #endif

@@ -216,7 +216,12 @@ namespace cs::features
 			.MaxRainWetness = _settings.maxRainWetness,
 			.MinRainWetness = _settings.minRainWetness,
 			.DebugVisualization = static_cast<std::uint32_t>(
-				_debugVisualization.load(std::memory_order_acquire))
+				_debugVisualization.load(std::memory_order_acquire)),
+			.PuddleRadius = _settings.puddleRadius,
+			.PuddleMaxAngle = _settings.puddleMaxAngle,
+			.MaxPuddleWetness = _settings.maxPuddleWetness,
+			// FO4 puddle accumulation is not yet ported, so only rain feeds the puddle chain.
+			.PuddleWetness = 0.0f
 		};
 	}
 
@@ -276,6 +281,9 @@ namespace cs::features
 			.Field(
 				"min_rain_wetness",
 				static_cast<double>(_settings.minRainWetness))
+			.Field("puddle_radius", static_cast<double>(_settings.puddleRadius))
+			.Field("puddle_max_angle", static_cast<double>(_settings.puddleMaxAngle))
+			.Field("max_puddle_wetness", static_cast<double>(_settings.maxPuddleWetness))
 			.Field(
 				"normal_binds",
 				static_cast<std::int64_t>(_normalBinds.load(std::memory_order_relaxed)))
@@ -300,24 +308,20 @@ namespace cs::features
 	void WetnessEffects::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		const auto slider = [&](const char* a_label, float Settings::* a_member) {
+			const auto range = wetness_math::kSchema.EditRange(a_member);
+			return edit.Continuous(dmui::ui::SliderScalar(
+				a_label, &(_settings.*a_member), &range.min, &range.max, "%.2f"));
+		};
 		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled("Off publishes zero wetness, which is shader identity.");
-		const auto maxRainWetnessRange = wetness_math::kSchema.EditRange(&Settings::maxRainWetness);
-		changed |= edit.Continuous(dmui::ui::SliderScalar(
-			"Max rain wetness",
-			&_settings.maxRainWetness,
-			&maxRainWetnessRange.min,
-			&maxRainWetnessRange.max,
-			"%.2f"));
+		changed |= slider("Max rain wetness", &Settings::maxRainWetness);
 		dmui::ui::TextDisabled("Wetness of surfaces facing straight up.");
-		const auto minRainWetnessRange = wetness_math::kSchema.EditRange(&Settings::minRainWetness);
-		changed |= edit.Continuous(dmui::ui::SliderScalar(
-			"Min rain wetness",
-			&_settings.minRainWetness,
-			&minRainWetnessRange.min,
-			&minRainWetnessRange.max,
-			"%.2f"));
+		changed |= slider("Min rain wetness", &Settings::minRainWetness);
 		dmui::ui::TextDisabled("Wetness floor for surfaces facing away from the sky.");
+		changed |= slider("Puddle Wetness", &Settings::maxPuddleWetness);
+		changed |= slider("Puddle Radius", &Settings::puddleRadius);
+		changed |= slider("Puddle Max Angle", &Settings::puddleMaxAngle);
 		if (changed) {
 			_settings = wetness_math::Clamp(_settings);
 		}

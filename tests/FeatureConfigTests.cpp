@@ -136,6 +136,31 @@ namespace
 		}
 	}
 
+	void TestWetnessSettings()
+	{
+		using namespace cs::features::wetness_math;
+		Settings value;
+		std::string error;
+		CHECK(Parse(kSchema, toml::parse(
+			"[settings]\npuddle_radius = 0.3\npuddle_max_angle = 0.6\nmax_puddle_wetness = 6.0\n"), value, error));
+		CHECK(value.puddleRadius == 0.3f && value.puddleMaxAngle == 0.6f && value.maxPuddleWetness == 6.0f);
+		const auto serialized = SerializeDelta(kSchema, value, Settings{});
+		std::ostringstream document;
+		document << toml::table{ { "settings", serialized } };
+		Settings restored;
+		CHECK(Parse(kSchema, toml::parse(document.str()), restored, error));
+		CHECK(restored.puddleRadius == value.puddleRadius &&
+			restored.puddleMaxAngle == value.puddleMaxAngle &&
+			restored.maxPuddleWetness == value.maxPuddleWetness);
+
+		for (const char* invalid : {
+				 "[settings]\npuddle_radius = 0.0\n",
+				 "[settings]\npuddle_max_angle = 0.0\n",
+				 "[settings]\nmax_puddle_wetness = 6.1\n" }) {
+			CHECK(!Parse(kSchema, toml::parse(invalid), restored, error));
+		}
+	}
+
 	void TestRegistry(const Registry& a_registry)
 	{
 		std::set<std::vector<std::string>> paths;
@@ -227,6 +252,7 @@ int main()
 	try {
 		const auto registry = BuildRegistry();
 		TestSchema();
+		TestWetnessSettings();
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");

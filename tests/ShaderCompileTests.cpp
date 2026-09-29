@@ -367,7 +367,7 @@ namespace
 
 		for (auto defines : std::vector<ShaderDefines>{
 				 { { "BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY", "1" }, { "FOGSTACK", "1" }, { "SSGI", "1" } },
-				 { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" }, { "COMPOSITE_MATERIAL_EXCLUSION", "0" }, { "COMPOSITE_FOG_STACK", "0" } } }) {
+				 { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" }, { "COMPOSITE_MATERIAL_EXCLUSION", "0" }, { "COMPOSITE_FOG_STACK", "0" }, { "COMPOSITE_CB12_COUNT", "31" } } }) {
 			defines.insert(defines.end(), {
 				{ "FO4CS_SUBSTRATE", "1" },
 				{ "WETNESS_EFFECTS", "1" },
@@ -406,6 +406,23 @@ namespace
 				.description = "BSDFLight wet indirect diffuse",
 				.required = { CB(6) },
 				.forbidden = { Texture(30), Texture(31), Texture(34), Texture(35) }
+			});
+		}
+
+		for (auto defines : std::vector<ShaderDefines>{
+				 { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "LIGHT_TYPE", "3" }, { "SPOT", "1" } },
+				 { { "BSDFLIGHT_PS_GOBO", "1" }, { "POINTOMNI", "1" }, { "GOBOPROJECTION", "1" }, { "RGBSPEC", "1" }, { "DIRSPLITS", "2" } },
+				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "POINTOMNI", "1" }, { "RGBSPEC", "1" }, { "DIRSPLITS", "2" } } }) {
+			defines.insert(defines.end(), {
+				{ "FO4CS_SUBSTRATE", "1" },
+				{ "WETNESS_EFFECTS", "1" }
+			});
+			a_jobs.push_back({
+				.path = bsdfLight,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "BSDFLight wet direct coat camera reconstruction",
+				.required = { CB(6), CB(12) }
 			});
 		}
 

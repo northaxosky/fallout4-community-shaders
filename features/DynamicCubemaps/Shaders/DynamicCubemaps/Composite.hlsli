@@ -37,15 +37,15 @@ namespace DynamicCubemaps
 	}
 
 	// FO4 has no wet reflectance G-buffer, so the composite evaluates the film and transforms its view-space directions.
-	float3 GetWetnessReflection(float3 normalView, float3 viewDir, float wetness,
+	float3 GetWetnessReflection(float3 normalView, float3 viewDir, float wetness, float roughness,
 		float3x3 viewToWorld, SamplerState probeSampler)
 	{
-		float reflectance = WetnessEffects::GetEnvironmentFilmWeight(normalView, viewDir, wetness);
+		float reflectance = WetnessEffects::GetEnvironmentFilmWeight(normalView, viewDir, wetness, roughness);
 		float3 color = 0;
 		if (reflectance > 0.0) {
 			float3 N = normalize(mul(viewToWorld, normalView));
 			float3 V = normalize(mul(viewToWorld, viewDir));
-			color += reflectance * GetFinalIrradiance(N, V, WetnessEffects::FilmRoughness(wetness), probeSampler);
+			color += reflectance * GetFinalIrradiance(N, V, roughness, probeSampler);
 		}
 		return color;
 	}
