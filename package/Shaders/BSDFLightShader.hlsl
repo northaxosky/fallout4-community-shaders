@@ -2724,10 +2724,8 @@ PS_OUTPUT main(PS_INPUT input)
     float fadeFactor = 1.0 - dist4 * dist4;
     shadow = fadeFactor * (shadow - 1.0) + 1.0;
 
-    float NdotL_raw = dot(normalView, SunDirection.xyz);
-
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, NdotL_raw);
+    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
     shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -2748,6 +2746,7 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
     float3 albedoPremult  = albedoSample.xyz * albedoSample.w;
+    float  NdotL_raw      = dot(normalView, SunDirection.xyz);
     float  NdotL_pos      = max(NdotL_raw, 0.0);
     float  NdotL_clamped  = min(NdotL_pos, 1.0);
     float  oneMinusGloss  = 1.0 - saturate(cb12_idx30.y);
@@ -3510,10 +3509,8 @@ PS_OUTPUT main(PS_INPUT input)
     float3 albedoPremult  = albedoSample.w * albedoSample.xyz;
 #endif
 
-    float NdotL_raw = dot(normalView, SunDirection.xyz);
-
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, NdotL_raw);
+    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
     shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -3533,6 +3530,7 @@ PS_OUTPUT main(PS_INPUT input)
         CameraPosAdjust);
 #endif
 
+    float  NdotL_raw      = dot(normalView, SunDirection.xyz);
     float  NdotL_pos      = max(NdotL_raw, 0.0);
     float  NdotL_clamped  = min(NdotL_pos, 1.0);
     float  oneMinusGloss  = 1.0 - saturate(cb12_idx30.y);
@@ -4524,10 +4522,8 @@ PS_OUTPUT main(PS_INPUT input)
 
     float shadow = ComputeDirectionalShadow(posView, linearizedDepth);
 
-    float NdotL_raw = dot(normalView, SunDirection.xyz);
-
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, NdotL_raw);
+    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
     shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -4552,6 +4548,7 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     float3 albedoPremult  = albedoSample.w * albedoSample.xyz;
 #endif
+    float  NdotL_raw      = dot(normalView, SunDirection.xyz);
     float  NdotL_pos      = max(NdotL_raw, 0.0);
     float  NdotL_clamped  = min(NdotL_pos, 1.0);
     float  oneMinusGloss  = 1.0 - saturate(cb12_idx30.y);
