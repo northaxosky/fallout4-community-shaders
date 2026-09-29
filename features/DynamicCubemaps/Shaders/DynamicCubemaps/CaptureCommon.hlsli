@@ -102,8 +102,14 @@ bool SampleCapture(uint3 texel, out float3 position, out float3 color, out float
 #endif
 		return false;
 
-	float4 positionCS = mul(float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), mad(depth, 1.01, -0.01), 1.0), InvProj);
-	float3 positionView = positionCS.xyz / positionCS.w;
+	float3 positionView;
+	// FO4's world projection has an infinite far plane, so sky depth 1.0 is placed on the camera far plane as Skyrim's finite one does.
+	if (depth >= 1.0) {
+		positionView = viewDirection / viewDirection.z * SharedData::CameraData.x;
+	} else {
+		float4 positionCS = mul(float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), mad(depth, 1.01, -0.01), 1.0), InvProj);
+		positionView = positionCS.xyz / positionCS.w;
+	}
 	if (positionView.z <= 16.5)
 		return false;
 

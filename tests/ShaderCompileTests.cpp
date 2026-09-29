@@ -176,10 +176,13 @@ namespace
 				 "DetectCaptureLightingCS.hlsl",
 				 "UpdateCubemapCS.hlsl",
 				 "InferCubemapCS.hlsl" }) {
-			for (const char* variant : { "", "REFLECTIONS", "FAKEREFLECTIONS" }) {
+			for (const auto& variant : std::vector<ShaderDefines>{
+					 {},
+					 { { "REFLECTIONS", "" } },
+					 { { "FAKEREFLECTIONS", "" } },
+					 { { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } } }) {
 				auto defines = substrate;
-				if (*variant)
-					defines.emplace_back(variant, "");
+				defines.insert(defines.end(), variant.begin(), variant.end());
 				a_jobs.push_back({
 					.path = cubemaps / file,
 					.defines = std::move(defines),

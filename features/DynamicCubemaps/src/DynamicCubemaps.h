@@ -226,6 +226,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _updateCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateFakeReflectionsCS;
+		winrt::com_ptr<ID3D11ComputeShader> _updateSkyReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferFakeReflectionsCS;

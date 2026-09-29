@@ -325,6 +325,7 @@ namespace cs::features
 			compile(_updateCS, kUpdatePath, {}, "DynamicCubemaps/Update.CS");
 			compile(_updateReflectionsCS, kUpdatePath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/UpdateReflections.CS");
 			compile(_updateFakeReflectionsCS, kUpdatePath, { { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateFakeReflections.CS");
+			compile(_updateSkyReflectionsCS, kUpdatePath, { { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateSkyReflections.CS");
 			compile(_inferCS, kInferPath, {}, "DynamicCubemaps/Infer.CS");
 			compile(_inferReflectionsCS, kInferPath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/InferReflections.CS");
 			compile(_inferFakeReflectionsCS, kInferPath, { { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/InferFakeReflections.CS");
@@ -670,16 +671,20 @@ namespace cs::features
 	{
 		if (!a_reflections)
 			return _updateCS.get();
-		return _fakeReflections.load(std::memory_order_relaxed) ?
-			_updateFakeReflectionsCS.get() :
-			_updateReflectionsCS.get();
+		if (_fakeReflections.load(std::memory_order_relaxed))
+			return _updateFakeReflectionsCS.get();
+		// Without FO4's engine cube, sky is captured from the scene and kept with the fake variant's history persistence.
+		return _engineReflectionCube.load(std::memory_order_relaxed) ?
+			_updateReflectionsCS.get() :
+			_updateSkyReflectionsCS.get();
 	}
 
 	ID3D11ComputeShader* DynamicCubemaps::InferShader(bool a_reflections) const
 	{
 		if (!a_reflections)
 			return _inferCS.get();
-		return _fakeReflections.load(std::memory_order_relaxed) ?
+		return _fakeReflections.load(std::memory_order_relaxed) ||
+				!_engineReflectionCube.load(std::memory_order_relaxed) ?
 			_inferFakeReflectionsCS.get() :
 			_inferReflectionsCS.get();
 	}
@@ -696,12 +701,8 @@ namespace cs::features
 		const auto* cell = player ? player->GetParentCell() : nullptr;
 		const bool interior = cell && !cell->IsExterior();
 		// FO4 exterior water always renders its REFLECTIONS technique, standing in for Skyrim's reflections prepass.
-		bool active = engineCube || !interior;
-		bool fake = active && cs::engine::IsSkyHidden();
-		if (!active && !interior) {
-			active = true;
-			fake = true;
-		}
+		const bool active = engineCube || !interior;
+		const bool fake = active && cs::engine::IsSkyHidden();
 		_engineReflectionCube.store(engineCube, std::memory_order_relaxed);
 		_activeReflections.store(active, std::memory_order_release);
 		_fakeReflections.store(fake, std::memory_order_release);
@@ -893,7 +894,6 @@ namespace cs::features
 		auto& stream = Stream(a_reflections);
 		context->GenerateMips(stream.color.srv.get());
 
-		// FO4's engine reflection cube is inactive by default, so uncaptured reflection directions infer toward black.
 		std::array<ID3D11ShaderResourceView*, 3> srvs{
 			stream.color.srv.get(),
 			cs::engine::GetActiveReflectionCubeSRV(),
@@ -1113,7 +1113,9 @@ namespace cs::features
 					_captureSourceFormat.load(std::memory_order_relaxed)))
 			.Field(
 				"reflection_mode",
-				!active ? "base_only" : (fake ? "fake" : "active"))
+				!active ? "base_only" :
+					fake ? "fake" :
+					_engineReflectionCube.load(std::memory_order_relaxed) ? "active" : "scene_sky")
 			.Field(
 				"engine_reflection_cube",
 				_engineReflectionCube.load(std::memory_order_relaxed))
