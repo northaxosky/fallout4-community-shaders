@@ -38,15 +38,8 @@ namespace cs::features::ssgi
 		kFirstFrame = 0,
 		kResourceCreate,
 		kResize,
-		kInputGenerationChange,
-		kFeatureReEnabled,
 		kShaderVariantChanged,
 		kLoadingScreenClosed,
-		kMissingInputs,
-		kMissingMotion,
-		kCameraDiscontinuity,
-		kSourceModeChanged,
-		kFrameGap,
 		kGenerationFailed
 	};
 
@@ -59,51 +52,14 @@ namespace cs::features::ssgi
 			return "resource_create";
 		case HistoryResetReason::kResize:
 			return "resize";
-		case HistoryResetReason::kInputGenerationChange:
-			return "input_generation_change";
-		case HistoryResetReason::kFeatureReEnabled:
-			return "feature_re_enabled";
 		case HistoryResetReason::kShaderVariantChanged:
 			return "shader_variant_changed";
 		case HistoryResetReason::kLoadingScreenClosed:
 			return "loading_screen_closed";
-		case HistoryResetReason::kMissingInputs:
-			return "missing_inputs";
-		case HistoryResetReason::kMissingMotion:
-			return "missing_motion";
-		case HistoryResetReason::kCameraDiscontinuity:
-			return "camera_discontinuity";
-		case HistoryResetReason::kSourceModeChanged:
-			return "source_mode_change";
-		case HistoryResetReason::kFrameGap:
-			return "frame_gap";
 		case HistoryResetReason::kGenerationFailed:
 			return "generation_failed";
 		}
 		return "unknown";
-	}
-
-	enum class CameraDiscontinuityCause : std::uint32_t
-	{
-		kNone = 0,
-		kTranslation,
-		kRotation,
-		kProjection
-	};
-
-	[[nodiscard]] constexpr const char* CameraDiscontinuityCauseName(
-		CameraDiscontinuityCause a_cause) noexcept
-	{
-		switch (a_cause) {
-		case CameraDiscontinuityCause::kTranslation:
-			return "translation";
-		case CameraDiscontinuityCause::kRotation:
-			return "rotation";
-		case CameraDiscontinuityCause::kProjection:
-			return "projection";
-		default:
-			return "none";
-		}
 	}
 
 	// Ping-pong bookkeeping for the temporal history pair. Render-thread owned, no D3D.
@@ -123,14 +79,10 @@ namespace cs::features::ssgi
 		[[nodiscard]] std::uint32_t WriteIndex() const noexcept { return 1u - _readIndex; }
 		[[nodiscard]] std::uint32_t ResetCount() const noexcept { return _resetCount; }
 		[[nodiscard]] HistoryResetReason LastResetReason() const noexcept { return _lastResetReason; }
-		[[nodiscard]] std::uint64_t LastPublishFrame() const noexcept { return _lastPublishFrame; }
 
-		// A frame that is not the immediate successor of the last publish cannot reproject.
-		Frame Prepare(std::uint64_t a_frameIndex) noexcept
+		// Skipped frames keep history; reprojection rejects what no longer matches, as upstream.
+		[[nodiscard]] Frame Prepare() const noexcept
 		{
-			if (_valid && a_frameIndex != _lastPublishFrame + 1u) {
-				Reset(HistoryResetReason::kFrameGap);
-			}
 			return { _valid, _readIndex, WriteIndex() };
 		}
 
@@ -142,13 +94,12 @@ namespace cs::features::ssgi
 			++_resetCount;
 		}
 
-		void Publish(std::uint64_t a_frameIndex) noexcept
+		void Publish() noexcept
 		{
 			_readIndex = WriteIndex();
 			_valid = true;
 			_published = true;
 			_clearPending = false;
-			_lastPublishFrame = a_frameIndex;
 		}
 
 		// True once per reset; the caller owns the matching GPU clear.
@@ -160,7 +111,6 @@ namespace cs::features::ssgi
 		}
 
 	private:
-		std::uint64_t      _lastPublishFrame = 0;
 		std::uint32_t      _readIndex = 0;
 		std::uint32_t      _resetCount = 0;
 		HistoryResetReason _lastResetReason = HistoryResetReason::kFirstFrame;

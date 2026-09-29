@@ -135,27 +135,6 @@ namespace cs::features
 			float ndcToViewAdd[2]{};
 		};
 
-		// Identity of the engine resources a dispatch consumed.
-		struct InputIdentity
-		{
-			winrt::com_ptr<ID3D11Resource> depth;
-			winrt::com_ptr<ID3D11Resource> normal;
-			winrt::com_ptr<ID3D11Resource> motion;
-			winrt::com_ptr<ID3D11Resource> sourceA;
-			winrt::com_ptr<ID3D11Resource> sourceB;
-			winrt::com_ptr<ID3D11Resource> albedo;
-
-			[[nodiscard]] bool operator==(const InputIdentity& a_rhs) const noexcept
-			{
-				return depth.get() == a_rhs.depth.get() &&
-					normal.get() == a_rhs.normal.get() &&
-					motion.get() == a_rhs.motion.get() &&
-					sourceA.get() == a_rhs.sourceA.get() &&
-					sourceB.get() == a_rhs.sourceB.get() &&
-					albedo.get() == a_rhs.albedo.get();
-			}
-		};
-
 		ScreenSpaceGI() = default;
 
 		bool SaveSettings() override;
@@ -210,16 +189,12 @@ namespace cs::features
 		std::atomic_uint32_t _radianceSourceCount{ 0 };
 		std::atomic_uint32_t _repeatCallbacks{ 0 };
 		std::atomic_bool _cameraReadyLastFrame{ false };
-		std::atomic<float> _cameraTranslationLastFrame{ 0.0f };
 		std::atomic<float> _cameraOriginXLastFrame{ 0.0f };
 		std::atomic<float> _cameraOriginYLastFrame{ 0.0f };
 		std::atomic<float> _cameraOriginZLastFrame{ 0.0f };
 		std::atomic<float> _cameraPreviousOriginXLastFrame{ 0.0f };
 		std::atomic<float> _cameraPreviousOriginYLastFrame{ 0.0f };
 		std::atomic<float> _cameraPreviousOriginZLastFrame{ 0.0f };
-		std::atomic_uint32_t _cameraDiscontinuityCause{
-			static_cast<std::uint32_t>(ssgi::CameraDiscontinuityCause::kNone)
-		};
 		std::atomic_uint32_t _historyResetCount{ 0 };
 		std::atomic_uint32_t _lastResetReason{
 			static_cast<std::uint32_t>(ssgi::HistoryResetReason::kFirstFrame)
@@ -228,20 +203,16 @@ namespace cs::features
 		// Render-thread state.
 		bool _occlusionOutputsDirty = false;
 		bool _bounceOutputsDirty = false;
-		bool _lastEnabled = false;
 		bool _lastTemporalEnabled = false;
 		int _lastResolutionMode = 0;
 		bool _upsampledLastFrame = false;
 		// The engine's startup bSAOEnable snapshot, restored when vanilla SSAO is re-enabled.
 		std::optional<bool> _vanillaSSAOSnapshot;
 		bool _lastCallbackFrameValid = false;
-		bool _prevCameraValid = false;
-		std::uint8_t _lastSourceMode = 0;
 		std::uint32_t _lastCallbackFrame = 0;
 		std::uint32_t _prevFrameW = 0;
 		std::uint32_t _prevFrameH = 0;
 		CameraTransform _prevCamera{};
-		InputIdentity _lastInputs{};
 		ssgi::HistoryState _history;
 		cs::render::PixelShaderResourceSnapshot<kCompositionPSSlotCount>
 			_compositionBindingSnapshot;

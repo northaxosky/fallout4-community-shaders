@@ -52,11 +52,6 @@ namespace cs::features
 		// occlusion and bounce both read as "no contribution" at zero
 		constexpr std::array<float, 4> kOpenIdentity{ 0.0f, 0.0f, 0.0f, 0.0f };
 
-		// A single-frame jump past these is a cut, not animation.
-		constexpr float kTeleportDistance = 512.0f;
-		constexpr float kMinFrameAxisDot = 0.7071f;
-		constexpr float kProjectionTolerance = 0.15f;
-
 		bool IsFullResolutionHDR(
 			ID3D11ShaderResourceView* a_srv,
 			std::uint32_t a_width,
@@ -119,17 +114,6 @@ namespace cs::features
 				desc.Format == DXGI_FORMAT_R16G16_FLOAT &&
 				desc.ArraySize == 1 &&
 				desc.SampleDesc.Count == 1;
-		}
-
-		winrt::com_ptr<ID3D11Resource> ResourceIdentity(ID3D11ShaderResourceView* a_srv)
-		{
-			if (!a_srv) {
-				return {};
-			}
-
-			winrt::com_ptr<ID3D11Resource> resource;
-			a_srv->GetResource(resource.put());
-			return resource;
 		}
 
 		std::unique_ptr<cs::buffer::Texture2D> CreateTexture(
@@ -405,7 +389,6 @@ namespace cs::features
 		}
 
 		// Seed the transition detectors so the first frame is not a spurious re-enable.
-		_lastEnabled = _settings.enabled;
 		_lastTemporalEnabled = _settings.enableTemporalDenoiser;
 		_started.store(true, std::memory_order_release);
 		L->info(
@@ -728,7 +711,6 @@ namespace cs::features
 	void ScreenSpaceGI::ResetHistory(ssgi::HistoryResetReason a_reason)
 	{
 		_history.Reset(a_reason);
-		_prevCameraValid = false;
 		_historyResetCount.store(_history.ResetCount(), std::memory_order_relaxed);
 		_lastResetReason.store(static_cast<std::uint32_t>(a_reason), std::memory_order_relaxed);
 	}
@@ -816,24 +798,16 @@ namespace cs::features
 		_temporalDispatchesLastFrame.store(0, std::memory_order_relaxed);
 		_radianceSourceCount.store(0, std::memory_order_relaxed);
 		_cameraReadyLastFrame.store(false, std::memory_order_relaxed);
-		_cameraTranslationLastFrame.store(0.0f, std::memory_order_relaxed);
 		_cameraOriginXLastFrame.store(0.0f, std::memory_order_relaxed);
 		_cameraOriginYLastFrame.store(0.0f, std::memory_order_relaxed);
 		_cameraOriginZLastFrame.store(0.0f, std::memory_order_relaxed);
 		_cameraPreviousOriginXLastFrame.store(0.0f, std::memory_order_relaxed);
 		_cameraPreviousOriginYLastFrame.store(0.0f, std::memory_order_relaxed);
 		_cameraPreviousOriginZLastFrame.store(0.0f, std::memory_order_relaxed);
-		_cameraDiscontinuityCause.store(
-			static_cast<std::uint32_t>(ssgi::CameraDiscontinuityCause::kNone),
-			std::memory_order_relaxed);
 
 		if (_queuedHistoryReset.exchange(false, std::memory_order_acq_rel)) {
 			ResetHistory(ssgi::HistoryResetReason::kLoadingScreenClosed);
 		}
-		if (_settings.enabled && !_lastEnabled) {
-			ResetHistory(ssgi::HistoryResetReason::kFeatureReEnabled);
-		}
-		_lastEnabled = _settings.enabled;
 		const bool temporalEnabled = _settings.enableTemporalDenoiser;
 		const int resolutionMode = std::clamp(_settings.resolutionMode, 0, 2);
 		if (temporalEnabled != _lastTemporalEnabled || resolutionMode != _lastResolutionMode) {
@@ -843,9 +817,6 @@ namespace cs::features
 		_lastResolutionMode = resolutionMode;
 
 		if (!_settings.enabled || !EnsureResources()) {
-			if (_history.Valid()) {
-				ResetHistory(ssgi::HistoryResetReason::kMissingInputs);
-			}
 			ClearOcclusionOutputs(context);
 			ClearBounceOutputs(context);
 			return;
@@ -865,9 +836,6 @@ namespace cs::features
 		if (!state || !rtm || !cameraReady || !IsGeneratorReady() || !depthSRV || !normalSRV ||
 			!cs::engine::TryGetWorldSceneProjection(
 				worldProj, worldInvProj, worldNdcToViewMul, worldNdcToViewAdd)) {
-			if (_history.Valid()) {
-				ResetHistory(ssgi::HistoryResetReason::kMissingInputs);
-			}
 			ClearOcclusionOutputs(context);
 			ClearBounceOutputs(context);
 			return;
@@ -876,9 +844,6 @@ namespace cs::features
 		const std::uint32_t frameW = ActiveExtent(_allocW, rtm->GetDynamicWidthRatio());
 		const std::uint32_t frameH = ActiveExtent(_allocH, rtm->GetDynamicHeightRatio());
 		if (frameW == 0 || frameH == 0) {
-			if (_history.Valid()) {
-				ResetHistory(ssgi::HistoryResetReason::kMissingInputs);
-			}
 			ClearOcclusionOutputs(context);
 			ClearBounceOutputs(context);
 			return;
@@ -954,84 +919,8 @@ namespace cs::features
 		camera.ndcToViewAdd[0] = worldNdcToViewAdd.x;
 		camera.ndcToViewAdd[1] = worldNdcToViewAdd.y;
 
-		const InputIdentity inputs{
-			.depth = ResourceIdentity(depthSRV),
-			.normal = ResourceIdentity(normalSRV),
-			.motion = ResourceIdentity(motionAvailable ? motionSRV : nullptr),
-			.sourceA = ResourceIdentity(radianceAvailable ? radianceSRV : nullptr),
-			.sourceB = ResourceIdentity(radianceBSRV),
-			.albedo = ResourceIdentity(radianceAvailable ? albedoSRV : nullptr)
-		};
-		const std::uint8_t sourceMode =
-			(tiledLighting ? 2u : 0u) |
-			(includeSourceB ? 4u : 0u);
-		const bool sourceModeChanged = sourceMode != _lastSourceMode;
-		if (sourceModeChanged || !(inputs == _lastInputs)) {
-			if (_history.Valid()) {
-				ResetHistory(sourceModeChanged ?
-					ssgi::HistoryResetReason::kSourceModeChanged :
-					ssgi::HistoryResetReason::kInputGenerationChange);
-			}
-			_lastSourceMode = sourceMode;
-			_lastInputs = inputs;
-		}
-		if (!radianceAvailable && _history.Valid()) {
-			ResetHistory(ssgi::HistoryResetReason::kMissingInputs);
-		}
-		if (!motionAvailable && _history.Valid()) {
-			ResetHistory(ssgi::HistoryResetReason::kMissingMotion);
-		}
-		if (_prevCameraValid && _history.Valid()) {
-			const float deltaX = cameraOrigin.x - previousCameraOrigin.x;
-			const float deltaY = cameraOrigin.y - previousCameraOrigin.y;
-			const float deltaZ = cameraOrigin.z - previousCameraOrigin.z;
-			const float translationSquared =
-				deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
-			_cameraTranslationLastFrame.store(
-				std::sqrt(translationSquared), std::memory_order_relaxed);
-			auto discontinuityCause = translationSquared >
-					kTeleportDistance * kTeleportDistance ?
-				ssgi::CameraDiscontinuityCause::kTranslation :
-				ssgi::CameraDiscontinuityCause::kNone;
-			for (std::size_t row = 0;
-				discontinuityCause == ssgi::CameraDiscontinuityCause::kNone && row < 3;
-				++row) {
-				const std::size_t offset = row * 4;
-				const float axisDot =
-					_prevCamera.rows[offset + 0] * camera.rows[offset + 0] +
-					_prevCamera.rows[offset + 1] * camera.rows[offset + 1] +
-					_prevCamera.rows[offset + 2] * camera.rows[offset + 2];
-				if (axisDot < kMinFrameAxisDot) {
-					discontinuityCause = ssgi::CameraDiscontinuityCause::kRotation;
-				}
-			}
-			for (std::size_t axis = 0;
-				discontinuityCause == ssgi::CameraDiscontinuityCause::kNone && axis < 2;
-				++axis) {
-				const float currentMul = camera.ndcToViewMul[axis];
-				const float previousMul = _prevCamera.ndcToViewMul[axis];
-				const float currentAdd = camera.ndcToViewAdd[axis];
-				const float previousAdd = _prevCamera.ndcToViewAdd[axis];
-				const float mulScale = std::max(
-					{ std::abs(currentMul), std::abs(previousMul), 1e-6f });
-				const float addScale = std::max(
-					{ std::abs(currentAdd), std::abs(previousAdd), 1.0f });
-				if (std::abs(currentMul - previousMul) > kProjectionTolerance * mulScale
-					|| std::abs(currentAdd - previousAdd) >
-						kProjectionTolerance * addScale) {
-					discontinuityCause = ssgi::CameraDiscontinuityCause::kProjection;
-				}
-			}
-			_cameraDiscontinuityCause.store(
-				static_cast<std::uint32_t>(discontinuityCause),
-				std::memory_order_relaxed);
-			if (discontinuityCause != ssgi::CameraDiscontinuityCause::kNone) {
-				ResetHistory(ssgi::HistoryResetReason::kCameraDiscontinuity);
-			}
-		}
-
-		const auto frameIndex = static_cast<std::uint64_t>(state->frameCount);
-		const auto historyFrame = _history.Prepare(frameIndex);
+		// Upstream only resets on loading screens; disocclusion rejects everything else.
+		const auto historyFrame = _history.Prepare();
 		_historyResetCount.store(_history.ResetCount(), std::memory_order_relaxed);
 		_lastResetReason.store(
 			static_cast<std::uint32_t>(_history.LastResetReason()), std::memory_order_relaxed);
@@ -1310,9 +1199,8 @@ namespace cs::features
 					"ScreenSpaceGI/Upsample");
 			}
 			if (radianceAvailable) {
-				_history.Publish(frameIndex);
+				_history.Publish();
 				_prevCamera = camera;
-				_prevCameraValid = true;
 				_prevFrameW = frameW;
 				_prevFrameH = frameH;
 			} else {
@@ -1407,8 +1295,6 @@ namespace cs::features
 	{
 		const auto resetReason = static_cast<ssgi::HistoryResetReason>(
 			_lastResetReason.load(std::memory_order_relaxed));
-		const auto discontinuityCause = static_cast<ssgi::CameraDiscontinuityCause>(
-			_cameraDiscontinuityCause.load(std::memory_order_relaxed));
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("injection_registered", _injectionRegistered.load(std::memory_order_acquire))
@@ -1442,10 +1328,6 @@ namespace cs::features
 			.Field("contaminated_routes", kContaminatedRoutes)
 			.Field("camera_ready", _cameraReadyLastFrame.load(std::memory_order_relaxed))
 			.Field(
-				"camera_translation",
-				static_cast<double>(
-					_cameraTranslationLastFrame.load(std::memory_order_relaxed)))
-			.Field(
 				"camera_origin",
 				std::format(
 					"{} {} {}",
@@ -1459,9 +1341,6 @@ namespace cs::features
 					_cameraPreviousOriginXLastFrame.load(std::memory_order_relaxed),
 					_cameraPreviousOriginYLastFrame.load(std::memory_order_relaxed),
 					_cameraPreviousOriginZLastFrame.load(std::memory_order_relaxed)))
-			.Field(
-				"camera_discontinuity_cause",
-				std::string_view(ssgi::CameraDiscontinuityCauseName(discontinuityCause)))
 			.Field(
 				"composition_binds",
 				static_cast<std::int64_t>(

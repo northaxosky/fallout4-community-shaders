@@ -23,44 +23,27 @@ namespace
 		return std::abs(a_left - a_right) < 1.0e-5f;
 	}
 
-	void Seed(HistoryState& a_history, std::uint64_t a_frame)
+	void Seed(HistoryState& a_history)
 	{
-		a_history.Prepare(a_frame);
-		a_history.Publish(a_frame);
+		a_history.Publish();
 	}
 
 	void TestInvalidation()
 	{
 		HistoryState history;
-		Seed(history, 10);
-		const auto gap = history.Prepare(14);
-		Check(
-			!gap.useHistory
-				&& history.LastResetReason()
-					== HistoryResetReason::kFrameGap
-				&& history.ConsumeClearPending(),
-			"frame gaps must invalidate and clear history");
+		Check(!history.Prepare().useHistory, "an unpublished history must not be read");
+		Seed(history);
+		Check(history.Prepare().useHistory, "a skipped frame must keep history, as upstream");
 
-		Seed(history, 20);
 		history.Reset(HistoryResetReason::kResize);
 		Check(
 			!history.Valid()
-				&& !history.Prepare(21).useHistory
-				&& history.LastResetReason()
-					== HistoryResetReason::kResize,
-			"resize must force a current-frame seed");
-
-		Seed(history, 30);
-		history.Reset(HistoryResetReason::kMissingMotion);
-		Check(
-			!history.Prepare(31).useHistory
-				&& history.LastResetReason()
-					== HistoryResetReason::kMissingMotion,
-			"missing motion must reject the previous frame");
-		history.Publish(31);
-		Check(
-			history.Prepare(32).useHistory,
-			"a valid replacement frame must restore history use");
+				&& !history.Prepare().useHistory
+				&& history.LastResetReason() == HistoryResetReason::kResize
+				&& history.ConsumeClearPending(),
+			"resize must force a cleared current-frame seed");
+		history.Publish();
+		Check(history.Prepare().useHistory, "a valid replacement frame must restore history use");
 	}
 
 	void TestReprojectionSign()
