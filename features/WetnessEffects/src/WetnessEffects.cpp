@@ -90,7 +90,7 @@ namespace cs::features
 	{
 		const auto registerContribution = [this](
 			cs::engine::ShaderInjectionTarget a_target,
-			bool a_bindsNormal) {
+			bool a_bindsComposite) {
 			cs::engine::ShaderReplacementRegistration registration{
 				.targetId = a_target,
 				.stages = cs::engine::ShaderStageBit(
@@ -104,21 +104,21 @@ namespace cs::features
 					return _registrationsReady.load(std::memory_order_acquire);
 				}
 			};
-			if (a_bindsNormal) {
+			if (a_bindsComposite) {
 				registration.defines.emplace(
 					cs::engine::shader_injection_defines::
 						kWetnessEffectsFullscreenDebug,
 					"1");
 				registration.bind = [this](ID3D11DeviceContext* a_context) {
-					BindGbufferNormal(a_context);
+					BindCompositeResources(a_context);
 				};
-				registration.slotClaims = {
-					{
+				for (const auto slot : kCompositePSSlots) {
+					registration.slotClaims.push_back({
 						.stage = cs::engine::ShaderStage::kPixel,
 						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = kGbufferNormalPSSlot
-					}
-				};
+						.slot = slot
+					});
+				}
 			}
 			return cs::engine::RegisterReplacement(std::move(registration));
 		};
@@ -136,23 +136,23 @@ namespace cs::features
 		if (!registerContribution(cs::engine::ShaderInjectionTarget::kBsdfComposite, true)) {
 			FailLoad(
 				"Wetness composes through the reconstructed BSDFComposite shader and owns "
-				"the authoritative normal at t25; registering that replacement failed");
+				"the authoritative normal at t25 and depth at t36; registering that replacement failed");
 			return;
 		}
 		// restore first: a failed save then leaves the restore a no-op
 		if (!cs::engine::RegisterPostDeferredComposite(
-				[] { WetnessEffects::GetSingleton()->RestoreNormalBinding(); },
+				[] { WetnessEffects::GetSingleton()->RestoreCompositeBindings(); },
 				cs::engine::HookPriority::Late)) {
 			FailLoad(
-				"Wetness needs a post-composite hook to hand t25 back to the engine; "
+				"Wetness needs a post-composite hook to restore its resource bindings; "
 				"registering it failed");
 			return;
 		}
 		if (!cs::engine::RegisterPreDeferredComposite(
-				[] { WetnessEffects::GetSingleton()->SaveNormalBinding(); },
+				[] { WetnessEffects::GetSingleton()->SaveCompositeBindings(); },
 				cs::engine::HookPriority::Early)) {
 			FailLoad(
-				"Wetness needs a pre-composite hook to save the engine t25 binding; "
+				"Wetness needs a pre-composite hook to save the engine resource bindings; "
 				"registering it failed");
 			return;
 		}
@@ -200,23 +200,20 @@ namespace cs::features
 		const auto* cell = player ? player->GetParentCell() : nullptr;
 		const bool isExterior = cell && cell->IsExterior();
 		const auto weather = cs::engine::SnapshotWeather();
-		const float weatherWetness = wetness_math::ComputeWeatherWetness(
+		const auto weatherWetness = wetness_math::ComputeWeatherWetness(
 			isExterior,
 			weather.previousIsRain,
+			weather.previousEndPrecip,
 			weather.currentIsRain,
+			weather.currentBeginPrecip,
 			weather.transitionPct);
 		const float wetness = wetness_math::PublishedWetness(
-			_settings.enabled, weatherWetness);
+			_settings.enabled, weatherWetness.wetness);
 		const float puddleWetness = wetness_math::PublishedWetness(
-			_settings.enabled,
-			wetness_math::ComputeWeatherPuddleWetness(
-				isExterior,
-				weather.previousIsRain,
-				weather.currentIsRain,
-				weather.transitionPct));
+			_settings.enabled, weatherWetness.puddleWetness);
 
 		_isExterior.store(isExterior, std::memory_order_relaxed);
-		_weatherWetness.store(weatherWetness, std::memory_order_relaxed);
+		_weatherWetness.store(weatherWetness.wetness, std::memory_order_relaxed);
 		_wetness.store(wetness, std::memory_order_relaxed);
 		return {
 			.Wetness = wetness,
@@ -227,11 +224,13 @@ namespace cs::features
 			.PuddleRadius = _settings.puddleRadius,
 			.PuddleMaxAngle = _settings.puddleMaxAngle,
 			.MaxPuddleWetness = _settings.maxPuddleWetness,
-			.PuddleWetness = puddleWetness
+			.PuddleWetness = puddleWetness,
+			.MaxShoreWetness = _settings.enabled ? _settings.maxShoreWetness : 0.0f,
+			.ShoreRange = _settings.shoreRange
 		};
 	}
 
-	void WetnessEffects::BindGbufferNormal(ID3D11DeviceContext* a_context)
+	void WetnessEffects::BindCompositeResources(ID3D11DeviceContext* a_context)
 	{
 		if (!a_context) {
 			return;
@@ -241,6 +240,8 @@ namespace cs::features
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		// a null bind reads outside the encode domain, which is wetness identity
 		a_context->PSSetShaderResources(kGbufferNormalPSSlot, 1, &srv);
+		auto* depth = cs::engine::GetSceneDepthSRV();
+		a_context->PSSetShaderResources(kSceneDepthPSSlot, 1, &depth);
 		if (srv) {
 			_normalBinds.fetch_add(1, std::memory_order_relaxed);
 		} else {
@@ -248,21 +249,25 @@ namespace cs::features
 		}
 	}
 
-	void WetnessEffects::SaveNormalBinding()
+	void WetnessEffects::SaveCompositeBindings()
 	{
 		auto* context = GetImmediateContext();
-		if (!_engineNormalBinding.Save(context, kGbufferNormalPSSlot)
-			&& _engineNormalBinding.IsSaved()) {
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::err,
-				"Wetness t25 binding scopes overlap; preserving the active snapshot.");
+		for (std::size_t i = 0; i < kCompositePSSlots.size(); ++i) {
+			if (!_engineBindings[i].Save(context, kCompositePSSlots[i])
+				&& _engineBindings[i].IsSaved()) {
+				CS_LOG_ONCE(
+					L,
+					spdlog::level::err,
+					"Wetness binding scopes overlap; preserving the active snapshot.");
+			}
 		}
 	}
 
-	void WetnessEffects::RestoreNormalBinding()
+	void WetnessEffects::RestoreCompositeBindings()
 	{
-		_engineNormalBinding.Restore(GetImmediateContext());
+		auto* context = GetImmediateContext();
+		for (auto& binding : _engineBindings)
+			binding.Restore(context);
 	}
 
 	void WetnessEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -290,6 +295,8 @@ namespace cs::features
 			.Field("puddle_radius", static_cast<double>(_settings.puddleRadius))
 			.Field("puddle_max_angle", static_cast<double>(_settings.puddleMaxAngle))
 			.Field("max_puddle_wetness", static_cast<double>(_settings.maxPuddleWetness))
+			.Field("max_shore_wetness", static_cast<double>(_settings.maxShoreWetness))
+			.Field("shore_range", static_cast<std::int64_t>(_settings.shoreRange))
 			.Field(
 				"normal_binds",
 				static_cast<std::int64_t>(_normalBinds.load(std::memory_order_relaxed)))
@@ -326,6 +333,10 @@ namespace cs::features
 		changed |= slider("Min rain wetness", &Settings::minRainWetness);
 		dmui::ui::TextDisabled("Wetness floor for surfaces facing away from the sky.");
 		changed |= slider("Puddle Wetness", &Settings::maxPuddleWetness);
+		changed |= slider("Shore Wetness", &Settings::maxShoreWetness);
+		constexpr auto shoreRange = wetness_math::kSchema.EditRange(&Settings::shoreRange);
+		changed |= edit.Continuous(dmui::ui::SliderScalar(
+			"Shore Range", &_settings.shoreRange, &shoreRange.min, &shoreRange.max));
 		changed |= slider("Puddle Radius", &Settings::puddleRadius);
 		changed |= slider("Puddle Max Angle", &Settings::puddleMaxAngle);
 		if (changed) {

@@ -43,6 +43,9 @@ float4 main() : SV_Target
 	value += SharedData::wetnessEffectsSettings.PuddleMaxAngle;
 	value += SharedData::wetnessEffectsSettings.MaxPuddleWetness;
 	value += SharedData::wetnessEffectsSettings.PuddleWetness;
+	value += SharedData::wetnessEffectsSettings.MaxShoreWetness;
+	value += SharedData::wetnessEffectsSettings.ShoreRange;
+	value += dot(SharedData::wetnessEffectsSettings.pad0, 1.0);
 
 	value += BoolValue(
 		SharedData::terrainShadowsSettings.TerrainShadowMode != 0);

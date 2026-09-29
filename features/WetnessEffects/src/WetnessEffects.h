@@ -7,6 +7,7 @@
 #include "WetnessMath.h"
 
 #include <atomic>
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -30,7 +31,7 @@ namespace cs::features
 		std::string_view GetDisplayName() const override { return "Wetness Effects"; }
 		std::string GetConfigKey() const override { return "WetnessEffects"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
-		std::string GetFeatureSummary() const override { return "Adds rain wetness to deferred lighting and composition."; }
+		std::string GetFeatureSummary() const override { return "Adds rain and shore wetness to deferred lighting and composition."; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
@@ -53,11 +54,13 @@ namespace cs::features
 
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(wetness_math::kSchema); }
-		void BindGbufferNormal(ID3D11DeviceContext* a_context);
-		void SaveNormalBinding();
-		void RestoreNormalBinding();
+		void BindCompositeResources(ID3D11DeviceContext* a_context);
+		void SaveCompositeBindings();
+		void RestoreCompositeBindings();
 
 		static constexpr std::uint32_t kGbufferNormalPSSlot = 25;
+		static constexpr std::uint32_t kSceneDepthPSSlot = 36;
+		static constexpr std::array kCompositePSSlots{ kGbufferNormalPSSlot, kSceneDepthPSSlot };
 
 		Settings _settings;
 		// every contribution and hook of the pair must register before any of them runs
@@ -76,6 +79,6 @@ namespace cs::features
 		std::atomic_uint32_t _normalBindsNull{ 0 };
 
 		// render thread only
-		cs::render::PixelShaderResourceSnapshot<1> _engineNormalBinding;
+		std::array<cs::render::PixelShaderResourceSnapshot<1>, kCompositePSSlots.size()> _engineBindings;
 	};
 }

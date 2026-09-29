@@ -2199,9 +2199,9 @@ shadowRef -= cb2_idx15_shadow_sample_param.x;
 #endif
 
 #if defined(WETNESS_EFFECTS) && !defined(ATTENUATION_ONLY)
-    float wetness = WetnessEffects::GetWetness(
-        normalView,
-        float4(ViewToWorld_row2.xyz, 1.0));
+    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+        normalView, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetLightColor = LightColor_HDR.xyz * attenuation;
 #  ifdef GOBOPROJECTION
@@ -2214,9 +2214,8 @@ shadowRef -= cb2_idx15_shadow_sample_param.x;
         wetViewDir,
         lightDir,
         wetLightColor,
-        wetness,
-        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
-            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
+        wetSurface.wetness,
+        wetSurface.waterRoughness,
         wetDiffuse,
         wetSpecular);
     output.specular = float4(wetSpecular, 1.0);
@@ -2923,9 +2922,9 @@ PS_OUTPUT main(PS_INPUT input)
 
     float specMix = mad(schlickFres, -0.5, 1.0);
 #ifdef WETNESS_EFFECTS
-    float wetness = WetnessEffects::GetWetness(
-        normalView,
-        float4(ViewToWorld_row2.xyz, 1.0));
+    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+        normalView, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetDiffuse = finalDiffuse * shadow;
     float3 wetSpecular = (brdfSpecular * specMix) * shadow;
@@ -2934,9 +2933,8 @@ PS_OUTPUT main(PS_INPUT input)
         wetViewDir,
         SunDirection.xyz,
         SunColor_HDR.xyz * shadow,
-        wetness,
-        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
-            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
+        wetSurface.wetness,
+        wetSurface.waterRoughness,
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT
@@ -3817,9 +3815,9 @@ PS_OUTPUT main(PS_INPUT input)
     float specMix = 1.0 - schlickFres * 0.5;
 #endif
 #ifdef WETNESS_EFFECTS
-    float wetness = WetnessEffects::GetWetness(
-        normalView,
-        float4(ViewToWorld_row2.xyz, 1.0));
+    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+        normalView, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetDiffuse = finalDiffuse * shadow;
     float3 wetSpecular = (brdfSpecular * specMix) * shadow;
@@ -3828,9 +3826,8 @@ PS_OUTPUT main(PS_INPUT input)
         wetViewDir,
         SunDirection.xyz,
         SunColor_HDR.xyz * shadow,
-        wetness,
-        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
-            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
+        wetSurface.wetness,
+        wetSurface.waterRoughness,
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT
@@ -4856,9 +4853,9 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
 #ifdef WETNESS_EFFECTS
-    float wetness = WetnessEffects::GetWetness(
-        normalView,
-        float4(ViewToWorld_row2.xyz, 1.0));
+    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+        normalView, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetDiffuse = finalDiffuse * shadow;
     float3 wetSpecular = (brdfSpecular * specMix) * shadow;
@@ -4867,9 +4864,8 @@ PS_OUTPUT main(PS_INPUT input)
         wetViewDir,
         SunDirection.xyz,
         SunColor_HDR.xyz * shadow,
-        wetness,
-        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
-            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
+        wetSurface.wetness,
+        wetSurface.waterRoughness,
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT
@@ -5303,9 +5299,9 @@ PS_OUTPUT main(PS_INPUT input)
 
     diffuseAccum *= cookieRGB;
 #ifdef WETNESS_EFFECTS
-    float wetness = WetnessEffects::GetWetness(
-        normalView,
-        float4(ViewToWorld_row2.xyz, 1.0));
+    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+        normalView, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetLightColor = (LightColor_HDR.xyz * cookieRGB) * attenuation;
     float3 wetDiffuse = diffuseAccum * attenuation;
@@ -5319,9 +5315,8 @@ PS_OUTPUT main(PS_INPUT input)
         wetViewDir,
         lightDir,
         wetLightColor,
-        wetness,
-        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
-            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
+        wetSurface.wetness,
+        wetSurface.waterRoughness,
         wetDiffuse,
         wetSpecular);
     output.specular = float4(wetSpecular, 1.0);
@@ -6690,9 +6685,9 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
 #ifdef WETNESS_EFFECTS
-    float wetness = WetnessEffects::GetWetness(
-        normalView,
-        float4(ViewToWorld_row2.xyz, 1.0));
+    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+        normalView, posView,
+        ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 #  ifdef POINTOMNI
     float3 wetLightColor = LightColor_HDR.xyz * attenuation;
@@ -6720,9 +6715,8 @@ PS_OUTPUT main(PS_INPUT input)
         wetViewDir,
         lightDir,
         wetLightColor,
-        wetness,
-        WetnessEffects::GetWaterRoughnessFromView(wetness, normalView, posView,
-            ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust),
+        wetSurface.wetness,
+        wetSurface.waterRoughness,
         wetDiffuse,
         wetSpecular);
 #  ifdef AMBIENT

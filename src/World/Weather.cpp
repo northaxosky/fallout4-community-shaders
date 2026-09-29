@@ -11,19 +11,21 @@ namespace cs::engine
 {
 	namespace
 	{
-		bool IsPrecipitation(const RE::TESWeather* a_weather) noexcept
+		// FO4 stores precipitation fades and flags in signed weatherData bytes; decode them as unsigned.
+		std::uint8_t WeatherByte(const RE::TESWeather* a_weather, RE::TESWeather::WeatherData a_field) noexcept
 		{
-			if (!a_weather) {
+			return a_weather ? static_cast<std::uint8_t>(
+				a_weather->weatherData[static_cast<std::size_t>(a_field)]) : 0;
+		}
+
+		bool IsRain(const RE::TESWeather* a_weather) noexcept
+		{
+			if (!a_weather || !a_weather->precipitationData) {
 				return false;
 			}
 
-			const auto flags = static_cast<std::uint8_t>(
-				a_weather->weatherData[static_cast<std::size_t>(RE::TESWeather::WeatherData::kFlags)]);
-			using F = RE::TESWeather::WeatherDataFlags;
-			const auto precipitationFlags =
-				static_cast<std::uint8_t>(F::kRainy) |
-				static_cast<std::uint8_t>(F::kSnow);
-			return (flags & precipitationFlags) != 0;
+			const auto flags = WeatherByte(a_weather, RE::TESWeather::WeatherData::kFlags);
+			return (flags & static_cast<std::uint8_t>(RE::TESWeather::WeatherDataFlags::kRainy)) != 0;
 		}
 	}
 
@@ -35,8 +37,10 @@ namespace cs::engine
 		s.current        = sky->currentWeather;
 		s.previous       = sky->lastWeather;
 		s.transitionPct  = std::clamp(sky->currentWeatherPct, 0.0f, 1.0f);
-		s.currentIsRain  = IsPrecipitation(s.current);
-		s.previousIsRain = IsPrecipitation(s.previous);
+		s.currentIsRain  = IsRain(s.current);
+		s.previousIsRain = IsRain(s.previous);
+		s.currentBeginPrecip = WeatherByte(s.current, RE::TESWeather::WeatherData::kBeginPrecip);
+		s.previousEndPrecip = WeatherByte(s.previous, RE::TESWeather::WeatherData::kEndPrecip);
 		return s;
 	}
 }

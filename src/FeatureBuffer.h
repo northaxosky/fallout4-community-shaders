@@ -33,8 +33,11 @@ namespace cs
 		float PuddleMaxAngle = 0.95f;
 		float MaxPuddleWetness = 1.5f;
 		float PuddleWetness = 0.0f;
+		float MaxShoreWetness = 0.0f;
+		std::uint32_t ShoreRange = 32;
+		std::uint32_t pad0[2]{};
 	};
-	static_assert(sizeof(WetnessEffectsFeatureData) == 32);
+	static_assert(sizeof(WetnessEffectsFeatureData) == 48);
 
 	struct alignas(16) TerrainShadowsFeatureData
 	{
@@ -94,7 +97,7 @@ namespace cs
 		DynamicCubemapsFeatureData        dynamicCubemapsSettings;
 		ExponentialHeightFogFeatureData   exponentialHeightFogSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 176);
+	static_assert(sizeof(FeatureDataCB) == 192);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
@@ -105,27 +108,30 @@ namespace cs
 	static_assert(offsetof(WetnessEffectsFeatureData, PuddleMaxAngle) == 20);
 	static_assert(offsetof(WetnessEffectsFeatureData, MaxPuddleWetness) == 24);
 	static_assert(offsetof(WetnessEffectsFeatureData, PuddleWetness) == 28);
-	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 64);
+	static_assert(offsetof(WetnessEffectsFeatureData, MaxShoreWetness) == 32);
+	static_assert(offsetof(WetnessEffectsFeatureData, ShoreRange) == 36);
+	static_assert(offsetof(WetnessEffectsFeatureData, pad0) == 40);
+	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 80);
 	static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);
 	static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);
 	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
 	static_assert(offsetof(TerrainShadowsFeatureData, HeightRange) == 32);
 	static_assert(offsetof(TerrainShadowsFeatureData, DebugHeightRange) == 40);
-	static_assert(offsetof(FeatureDataCB, inverseSquareLightingSettings) == 112);
+	static_assert(offsetof(FeatureDataCB, inverseSquareLightingSettings) == 128);
 	static_assert(offsetof(InverseSquareLightingFeatureData, Mode) == 0);
 	static_assert(offsetof(InverseSquareLightingFeatureData, ExteriorStrength) == 4);
 	static_assert(offsetof(InverseSquareLightingFeatureData, InteriorStrength) == 8);
 	static_assert(offsetof(InverseSquareLightingFeatureData, NearFieldDistance) == 12);
-	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 128);
+	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 144);
 	static_assert(offsetof(WaterEffectsFeatureData, Mode) == 0);
 	static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
 	static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
 	static_assert(offsetof(WaterEffectsFeatureData, pad0) == 12);
-	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 144);
+	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 160);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 4);
-	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 160);
+	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 176);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, Mode) == 0);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, DensityMultiplier) == 4);
 	static_assert(

@@ -38,7 +38,7 @@ namespace ScreenSpaceGI
 		float3 directLighting,
 		float3 directionalAmbient,
 		float engineAmbientOcclusion,
-		float wetness = 0.0)
+		float wetnessGlossinessAlbedo = 0.0)
 	{
 		if (!SharedData::screenSpaceGISettings.EnableScreenSpaceGI)
 			return (directLighting + directionalAmbient) * engineAmbientOcclusion;
@@ -50,7 +50,7 @@ namespace ScreenSpaceGI
 
 #ifdef WETNESS_EFFECTS
 		float3 albedo = saturate(
-			WetnessEffects::WetAlbedo(AlbedoTexture.Load(texel).rgb, wetness));
+			WetnessEffects::WetAlbedo(AlbedoTexture.Load(texel).rgb, wetnessGlossinessAlbedo));
 #else
 		float3 albedo = saturate(AlbedoTexture.Load(texel).rgb);
 #endif

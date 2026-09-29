@@ -313,7 +313,7 @@ namespace
 			.forbidden = {
 				CB(5), CB(6), Texture(25),
 				Texture(26), Texture(27), Texture(28), Texture(29),
-				Texture(34), Texture(35)
+				Texture(34), Texture(35), Texture(36)
 			}
 		});
 		a_jobs.push_back({
@@ -330,7 +330,7 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
 			.required = {
-				CB(6), Texture(25),
+				CB(6), Texture(25), Texture(36),
 				Texture(26), Texture(27), Texture(28), Texture(29),
 				Texture(34), Texture(35)
 			}
@@ -346,7 +346,8 @@ namespace
 				ShaderDefines defines{
 					{ family, "1" },
 					{ "FO4CS_SUBSTRATE", "1" },
-					{ "WETNESS_EFFECTS", "1" }
+					{ "WETNESS_EFFECTS", "1" },
+					{ "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" }
 				};
 				if (dynamicCubemaps)
 					defines.emplace_back("DYNAMIC_CUBEMAPS", "1");
@@ -356,13 +357,34 @@ namespace
 					.profile = "ps_5_0",
 					.description = family,
 					.required = dynamicCubemaps ?
-						std::vector<Resource>{ Texture(34), Texture(35) } :
-						std::vector<Resource>{},
+						std::vector<Resource>{ Texture(25), Texture(34), Texture(35), Texture(36) } :
+						std::vector<Resource>{ Texture(25), Texture(36) },
 					.forbidden = dynamicCubemaps ?
 						std::vector<Resource>{} :
 						std::vector<Resource>{ Texture(34), Texture(35) }
 				});
 			}
+		}
+
+		for (auto defines : std::vector<ShaderDefines>{
+				 { { "BSDFCOMPOSITE_PS_2D_ACCUMULATOR", "1" }, { "COMPOSITE_CB2_COUNT", "1" } },
+				 { { "BSDFCOMPOSITE_PS_2D_FOG", "1" }, { "COMPOSITE_HAS_LIGHT", "1" } },
+				 { { "BSDFCOMPOSITE_PS_NO_SRV_POSITION", "1" } },
+				 { { "BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR", "1" }, { "WAVE5A_ACCUMULATOR_SHAPE", "1" } },
+				 { { "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL", "1" }, { "WAVE5B_SSS_RECORD_NORMAL_SHAPE", "1" } },
+				 { { "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "1" }, { "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", "1" } } }) {
+			defines.insert(defines.end(), {
+				{ "FO4CS_SUBSTRATE", "1" },
+				{ "WETNESS_EFFECTS", "1" },
+				{ "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" }
+			});
+			a_jobs.push_back({
+				.path = composite,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "BSDFComposite shore albedo and debug reconstruction",
+				.required = { CB(5), CB(6), CB(12), Texture(25), Texture(36) }
+			});
 		}
 
 		for (auto defines : std::vector<ShaderDefines>{

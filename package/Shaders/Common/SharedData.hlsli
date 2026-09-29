@@ -60,6 +60,9 @@ namespace SharedData
 		float PuddleMaxAngle;
 		float MaxPuddleWetness;
 		float PuddleWetness;
+		float MaxShoreWetness;
+		uint ShoreRange;
+		uint2 pad0;
 	};
 
 	struct TerrainShadowsSettings
