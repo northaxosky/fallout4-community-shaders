@@ -1088,7 +1088,8 @@ PS_OUTPUT main(PS_INPUT input)
 #ifdef SSGI
     // 1 - vertexAO for SSGI, as upstream's Masks2; nothing else reads MRT4 alpha.
 #if VC && !LANDSCAPE && !HAIR && !EYE && !SKIN_TINT
-    output.specTint.w = 1.0 - pow(max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z), 2.2);
+    // Albedo is already linear here, so unlike upstream the max needs no ColorToLinear.
+    output.specTint.w = 1.0 - max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z);
 #else
     output.specTint.w = 0.0;
 #endif
