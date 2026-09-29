@@ -52,4 +52,32 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 |---|---|
 | `EnabledSSR` setting and `ENABLESSR` gate | Needs the byte-identical `BSImagespaceShaderSSLRRaytracing` reconstruction to own the shader, replacing Upscaling's decompile and hook |
 
+## Screen Space GI
+
+Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package\Shaders\BSDFCompositeShader.hlsl` and
+`package\Shaders\BSDFPrePass.hlsl`.
+
+### Translations
+
+| Upstream | Fallout 4 | Why | Where |
+|---|---|---|---|
+| Compose in `DeferredCompositeCS` | Compose in the composite families that form diffuse light: 2D accumulator, 2D fog and cube IBL | FO4 has no single deferred composite; each family forms `3 · albedo · (diffuse A + diffuse B) + emissive` itself | `BSDFCompositeShader.hlsl`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
+| Radiance from the diffuse target | Rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive` | FO4 has no diffuse-only target | `radianceDisocc.cs.hlsl` |
+| Directional ambient: `Color::Ambient(GetAmbient(N)) · albedo` with luma from `Masks.z` | FO4 directional ambient transform · albedo, clamped to the diffuse term | FO4 light passes fold ambient into the diffuse accumulators and write no ambient mask; the transform matches the light passes' gradient rows | `ScreenSpaceGI.hlsli` `DirectionalAmbient`, `Engine.h` `TryGetDirectionalAmbientRows` |
+| Vertex AO in `Masks2.x`, written by `Lighting.hlsl` | `1 − vertexAO` in emissive target alpha (logical 31), written by the injected prepass; blended hair writes 0 | FO4 has no spare G-buffer channel; 31.a is unread by stock shaders | `BSDFPrePass.hlsl` |
+| G-buffer normal | FO4 sphere-map view normal (RT20), encoded into upstream's octahedral pyramid | Different G-buffer encoding | `prefilterNormal.cs.hlsl`, `common.hlsli` |
+| `ScreenToViewDepth` from the NDC depth buffer | Raw depth decoded with the composite's far/near reprojection rows | FO4 renders first person into a separate near depth partition | `common.hlsli` |
+| Skyrim frame-buffer camera | Validated b12 world camera and reprojection rows | FO4 publishes the camera through b12 | `common.hlsli`, `ScreenSpaceGI.cpp` |
+| `IrradianceToLinear`/`IrradianceToGamma` | Upstream's linear-lighting branch: identity | FO4 lights in linear HDR | `Common\Color.hlsli` |
+| Skyrim SSAO toggle | Per frame after the deferred prepass, write SAO_CS active (`+0x08`) and applied (`+0x121`); applied comes from the startup `bSAOEnable` snapshot | The composite's AO bit reads SAO_CS `+0x121`, which DrawModel and console commands rewrite | `ScreenSpaceGI.cpp` `ApplyVanillaSSAO`, `Engine.h` `GetScalableAOComputeState` |
+| `AOPower` default 1, range 0–6 | Default 4, range 0–12 | FO4 interiors get most of their light from placed lights, which receive only `sqrt(AO)`; directional ambient is about 7% of occluded diffuse in a measured interior | `ScreenSpaceGISettings.h` |
+
+### Pending
+
+| Upstream | Notes |
+|---|---|
+| `EnableExperimentalSpecularGI` and specular IL in `SampleSSGISpecular` | Not ported |
+| IBL and Skylighting ambient branches | Port with those features |
+| Blur center normal lookup scaled by `frameScale` | Applied locally; upstream fix is community-shaders/skyrim-community-shaders#2795 |
+
 [upstream]: https://github.com/community-shaders/skyrim-community-shaders
