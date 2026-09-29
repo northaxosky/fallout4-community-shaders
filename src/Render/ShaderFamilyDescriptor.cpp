@@ -589,41 +589,29 @@ namespace cs::engine
 			if (a_stage != ShaderStage::kPixel)
 				return false;
 
-			switch (d) {
-			case 0x1000U:
-			case 0x11000U:
-			case 0x81000U:
-			case 0x91000U:
-			case 0x181000U:
-			case 0x191000U:
-				Define(
-					a_defines,
-					"BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT");
-				Define(
-					a_defines,
-					"WAVE5B_SSS_SURFACE_CONTACT_SHAPE",
-					"1");
+			if ((d & 0x1000U) != 0) {
+				// Decal bits the shipped decal composites carry; anything else has no native blob.
+				constexpr std::uint32_t kDecalBits =
+					0x1000U | 0x20U | 0x2000U | 0x10000U | 0x20000U |
+					0x40000U | 0x80000U | 0x100000U;
+				if ((d & ~kDecalBits) != 0)
+					return false;
+				const bool parallax = (d & 0x40000U) != 0;
+				// POM shadows only select the contact root when POM itself is on.
+				const bool recordNormal =
+					(d & 0x2020U) != 0 ||
+					(parallax && (d & 0x80000U) == 0);
+				const auto shape = std::to_string(
+					1U + ((d & 0x20000U) != 0 ? 1U : 0U) + (parallax ? 2U : 0U));
+				if (recordNormal) {
+					Define(a_defines, "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL");
+					Define(a_defines, "WAVE5B_SSS_RECORD_NORMAL_SHAPE", shape);
+				} else {
+					Define(a_defines, "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT");
+					Define(a_defines, "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", shape);
+				}
 				return true;
-			case 0x1020U:
-			case 0x3000U:
-			case 0x11020U:
-			case 0x13000U:
-				Define(
-					a_defines,
-					"BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL");
-				Define(
-					a_defines,
-					"WAVE5B_SSS_RECORD_NORMAL_SHAPE",
-					"1");
-				return true;
-			default:
-				break;
 			}
-
-			// The remaining native SSS MRT families still lack
-			// stock-faithful reconstructions.
-			if ((d & 0x1000U) != 0)
-				return false;
 
 			enum class Family
 			{

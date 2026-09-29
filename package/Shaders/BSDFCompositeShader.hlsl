@@ -3995,10 +3995,11 @@ PS_OUTPUT main(PS_INPUT input)
         dot(decalDirection, reconstructedPosition.xyz),
         dot(recordNormal, reconstructedPosition.xyz));
     localPosition = normalize(localPosition);
-    float2 localDirection = normalize(localPosition.xy);
-    float localRadius = sqrt(dot(localPosition, localPosition) - localPosition.z * localPosition.z);
-    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float facing = dot(recordNormal, viewDirection);
+    float localLengthSq = dot(localPosition, localPosition);
+    float2 localDirection = normalize(localPosition.xy);
+    float localRadius = sqrt(localLengthSq - localPosition.z * localPosition.z);
+    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float maxSteps = min(facing * -56.0 + 72.0, cb2[6].y);
     float inverseMaxSteps = 1.0 / maxSteps;
     float stopCounter = maxSteps + 1.0;
@@ -4024,9 +4025,10 @@ PS_OUTPUT main(PS_INPUT input)
     float previousGap = hit.z - hit.w;
     float currentGap = hit.x - hit.y;
     float denominator = previousGap - currentGap;
-    float fraction = 1.0 - (hit.x * previousGap - currentGap * hit.z) / denominator;
-    fraction = denominator == 0.0 ? 1.0 : fraction;
-    projectedPosition.xy += marchDirection * fraction;
+    bool degenerate = denominator == 0.0;
+    float fraction = 1.0 - (hit.x * previousGap - hit.z * currentGap) / denominator;
+    fraction = degenerate ? 1.0 : fraction;
+    projectedPosition.xy -= -marchDirection * fraction;
 #endif
 
     clip(projectedPosition.xy - uvBounds.xy);
@@ -4044,22 +4046,13 @@ PS_OUTPUT main(PS_INPUT input)
     float surfaceFacing = dot(projectionDirection, surfaceNormal) - 0.3;
     bool surfaceBack = surfaceFacing < 0.0;
 
-#if WAVE5B_SSS_RECORD_NORMAL_SHAPE == 1
-    clip((geometricBack && surfaceBack) ? -1.0 : 1.0);
-#else
-    if (geometricBack && surfaceBack)
-        discard;
-#endif
+    clip((surfaceBack && geometricBack) ? -1.0 : 1.0);
 
     float4 decalColor = g_tDecalColor.SampleLevel(g_sDecalColor, projectedPosition.xy, decalLod);
     float2 auxiliary = g_tDecalAux.SampleLevel(g_sDecalAux, projectedPosition.xy, decalLod).xy;
     float2 decalNormalXy = g_tDecalNormal.SampleLevel(g_sDecalNormal, projectedPosition.xy, decalLod).xy;
     float angleFade = geometricBack ? min(max(surfaceFacing, 0.0), 0.25) : 0.25;
-#if WAVE5B_SSS_RECORD_NORMAL_SHAPE == 1
     float alpha = angleFade * decalColor.w * 4.0;
-#else
-    float alpha = decalColor.w * angleFade * 4.0;
-#endif
     clip(alpha - 4.0 / 255.0);
     alpha *= decalOpacity;
 
@@ -4206,6 +4199,9 @@ PS_OUTPUT main(PS_INPUT input)
     float3 recordNormal = g_decalRecords[input.decalIndex].recordNormal.xyz;
 #endif
     float4 uvBounds = g_decalRecords[input.decalIndex].uvBounds;
+#if WAVE5B_SURFACE_CONTACT_HAS_T2
+    float2 shadowStep = g_decalRecords[input.decalIndex].pad0xd0.xy;
+#endif
     float decalOpacity = g_decalRecords[input.decalIndex].pad0xd0.w;
 
     float2 screenUv = input.position.xy * cb2[0].xy;
@@ -4326,10 +4322,11 @@ PS_OUTPUT main(PS_INPUT input)
         dot(decalDirection, reconstructedPosition.xyz),
         dot(recordNormal, reconstructedPosition.xyz));
     localPosition = normalize(localPosition);
-    float2 localDirection = normalize(localPosition.xy);
-    float localRadius = sqrt(dot(localPosition, localPosition) - localPosition.z * localPosition.z);
-    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float facing = dot(recordNormal, viewDirection);
+    float localLengthSq = dot(localPosition, localPosition);
+    float2 localDirection = normalize(localPosition.xy);
+    float localRadius = sqrt(localLengthSq - localPosition.z * localPosition.z);
+    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float maxSteps = min(facing * -56.0 + 72.0, cb2[6].y);
     float inverseMaxSteps = 1.0 / maxSteps;
     float stopCounter = maxSteps + 1.0;
@@ -4355,28 +4352,31 @@ PS_OUTPUT main(PS_INPUT input)
     float previousGap = hit.z - hit.w;
     float currentGap = hit.x - hit.y;
     float denominator = previousGap - currentGap;
-    float fraction = 1.0 - (hit.x * previousGap - currentGap * hit.z) / denominator;
-    fraction = denominator == 0.0 ? 1.0 : fraction;
-    projectedPosition.xy += marchDirection * fraction;
+    bool degenerate = denominator == 0.0;
+    float fraction = 1.0 - (hit.x * previousGap - hit.z * currentGap) / denominator;
+    fraction = degenerate ? 1.0 : fraction;
+    projectedPosition.xy -= -marchDirection * fraction;
 #endif
 
 #if WAVE5B_SURFACE_CONTACT_HAS_T2
     const float kTapOffset[7] = { 0.22, 0.1925, 0.165, 0.1375, 0.11, 0.0825, 0.055 };
     const float kTapBias[7] = { 0.88, 0.77, 0.66, 0.55, 0.44, 0.33, 0.22 };
     const float kTapWeight[7] = { 1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0 };
-    float2 shadowStep = g_decalRecords[input.decalIndex].pad0xd0.xy;
     float centerOcclusion =
         g_tMarch.SampleLevel(g_sMarch, projectedPosition.xy, 0.0).x;
-    float contact = 0.0;
+    float tapValues[7];
     [unroll]
     for (int tap = 0; tap < 7; ++tap)
     {
         float2 tapUv = shadowStep * kTapOffset[tap] + projectedPosition.xy;
         float tapValue = g_tMarch.SampleLevel(g_sMarch, tapUv, 0.0).x;
         tapValue = (tapValue - centerOcclusion) - kTapBias[tap];
-        tapValue *= kTapWeight[tap];
-        contact = tap == 0 ? tapValue : max(tapValue, contact);
+        tapValues[tap] = tapValue * kTapWeight[tap];
     }
+    float contact = tapValues[0];
+    [unroll]
+    for (int reduce = 1; reduce < 7; ++reduce)
+        contact = max(contact, tapValues[reduce]);
     float contactShadow =
         saturate(1.0 - contact * cb2[6].x * 10.0) * 0.8 + 0.2;
 #endif
@@ -4396,22 +4396,16 @@ PS_OUTPUT main(PS_INPUT input)
     float surfaceFacing = dot(projectionDirection, surfaceNormal) - 0.3;
     bool surfaceBack = surfaceFacing < 0.0;
 
-#if WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 1
-    clip((geometricBack && surfaceBack) ? -1.0 : 1.0);
-#else
-    if (geometricBack && surfaceBack)
-        discard;
-#endif
+    clip((surfaceBack && geometricBack) ? -1.0 : 1.0);
 
     float4 decalColor = g_tDecalColor.SampleLevel(g_sDecalColor, projectedPosition.xy, decalLod);
+#if WAVE5B_SURFACE_CONTACT_HAS_T2
+    output.color.xyz = decalColor.xyz * contactShadow;
+#endif
     float2 auxiliary = g_tDecalAux.SampleLevel(g_sDecalAux, projectedPosition.xy, decalLod).xy;
     float2 decalNormalXy = g_tDecalNormal.SampleLevel(g_sDecalNormal, projectedPosition.xy, decalLod).xy;
     float angleFade = geometricBack ? min(max(surfaceFacing, 0.0), 0.25) : 0.25;
-#if WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 1
     float alpha = angleFade * decalColor.w * 4.0;
-#else
-    float alpha = decalColor.w * angleFade * 4.0;
-#endif
     clip(alpha - 4.0 / 255.0);
     alpha *= decalOpacity;
 
@@ -4432,7 +4426,7 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
     output.material.w = saturate(cb2[3].y);
 #if WAVE5B_SURFACE_CONTACT_HAS_T2
-    output.color = float4(decalColor.xyz * contactShadow, alpha);
+    output.color.w = alpha;
 #else
     output.color = float4(decalColor.xyz, alpha);
 #endif
