@@ -271,6 +271,9 @@ namespace WetnessEffects
 	float GetIndirectDiffuseWeight(float3 normalView, float3 viewDir, float3 viewPosition,
 		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2, float4 cameraPosAdjust)
 	{
+		// FO4 toggles Dynamic Cubemaps live, so the film only takes energy while its reflection is supplied.
+		if (SharedData::dynamicCubemapsSettings.Enabled == 0)
+			return 1.0;
 		Surface surface = GetSurface(normalView, viewPosition,
 			viewToWorldRow0, viewToWorldRow1, viewToWorldRow2, cameraPosAdjust);
 		return 1.0 - GetEnvironmentFilmWeight(normalView, viewDir, surface.wetness, surface.waterRoughness);

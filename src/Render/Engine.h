@@ -214,8 +214,12 @@ namespace cs::engine
 		if (!setting || !setting->GetBinary())
 			return nullptr;
 		auto* rendererData = RE::BSGraphics::GetRendererData();
-		return rendererData ?
-			reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->cubeMapRenderTargets[0].srView) :
+		auto* manager = RE::BSGraphics::RenderTargetManager::GetSingleton();
+		if (!rendererData || !manager)
+			return nullptr;
+		const auto platformID = manager->GetCubeMapRenderTargetPlatformID(0);
+		return platformID < std::size(rendererData->cubeMapRenderTargets) ?
+			reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->cubeMapRenderTargets[platformID].srView) :
 			nullptr;
 	}
 
