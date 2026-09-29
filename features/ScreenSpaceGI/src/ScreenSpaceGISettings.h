@@ -22,7 +22,8 @@ namespace cs::features::ssgi_settings
 		float depthFadeEnd = 50000.0f;
 		float giSaturation = 0.8f;
 		float giDistanceCompensation = 0.0f;
-		float aoPower = 1.0f;
+		// Upstream 1 (range 0-6); raised because FO4 lights interiors with placed lights, which get only sqrt(AO).
+		float aoPower = 4.0f;
 		float giStrength = 1.0f;
 		bool  enableTemporalDenoiser = true;
 		bool  enableBlur = true;
@@ -49,7 +50,7 @@ namespace cs::features::ssgi_settings
 			settings::Field{ "depth_fade_end", "Distance where the effect finishes fading, in game units.", &Settings::depthFadeEnd, {}, settings::Range{ 10000.0f, 50000.0f } },
 			settings::Field{ "gi_saturation", "Indirect lighting saturation.", &Settings::giSaturation, {}, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "gi_distance_compensation", "Brightens or dims further radiance samples.", &Settings::giDistanceCompensation, {}, settings::Range{ -5.0f, 5.0f } },
-			settings::Field{ "ao_power", "Ambient occlusion power.", &Settings::aoPower, {}, settings::Range{ 0.0f, 6.0f } },
+			settings::Field{ "ao_power", "Ambient occlusion power.", &Settings::aoPower, {}, settings::Range{ 0.0f, 12.0f } },
 			settings::Field{ "gi_strength", "Indirect lighting source brightness.", &Settings::giStrength, {}, settings::Range{ 0.0f, 6.0f } },
 			settings::Field{ "enable_temporal_denoiser", "Enable temporal denoising.", &Settings::enableTemporalDenoiser },
 			settings::Field{ "enable_blur", "Enable the indirect lighting blur.", &Settings::enableBlur },
