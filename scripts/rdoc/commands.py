@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 
@@ -221,6 +222,18 @@ def triage(session, actions, args, out_dir):
     return run_triage(session, actions)
 
 
+def script(session, actions, args, out_dir):
+    if not args:
+        raise ValueError("Usage: script <file.py> [args...]")
+    path = os.path.abspath(args[0])
+    spec = importlib.util.spec_from_file_location("rdoc_probe", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "run"):
+        raise ValueError(path + " must define run(session, actions, args, out_dir)")
+    return module.run(session, actions, args[1:], out_dir)
+
+
 COMMANDS = {
     "overview": overview,
     "passes": passes,
@@ -231,6 +244,7 @@ COMMANDS = {
     "cbuffer": cbuffer,
     "disasm": disasm,
     "triage": triage,
+    "script": script,
 }
 
 

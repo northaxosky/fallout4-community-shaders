@@ -12,19 +12,21 @@
     Capture path or a name substring. Defaults to the newest capture.
 
 .PARAMETER Command
-    Analysis command. Defaults to overview.
+    Analysis command. Defaults to overview. `script <file.py> [args...]` runs an ad-hoc probe
+    that defines run(session, actions, args, out_dir) under the same replay lifecycle.
 
 .PARAMETER CommandArgs
     Arguments passed to the selected analysis command.
 
 .PARAMETER OutputDir
-    Artifact directory. Defaults to a unique temporary directory.
+    Artifact directory. Defaults to a unique temporary directory. progress.log there records
+    the last completed stage of a slow or timed-out run.
 
 .PARAMETER RenderDocPath
     Path to qrenderdoc.exe or its installation directory.
 
 .PARAMETER TimeoutSeconds
-    Maximum time to wait for qrenderdoc.exe.
+    Maximum analysis time before the replay is killed.
 
 .PARAMETER List
     List captures in the default capture directory.
@@ -40,6 +42,9 @@
 
 .EXAMPLE
     pwsh scripts\rdoc-analyze.ps1 FO4_frame67748 cbuffer 110 compute --slot 0 --space 0
+
+.EXAMPLE
+    pwsh scripts\rdoc-analyze.ps1 FO4_frame67748 script $env:TEMP\probe.py 55259
 #>
 [CmdletBinding()]
 param(
@@ -113,8 +118,17 @@ function Stop-ProcessTree {
         $Process.Kill($true)
     } catch {
         & "$env:SystemRoot\System32\taskkill.exe" /PID $Process.Id /T /F 2>$null | Out-Null
-        if (-not $Process.HasExited) { $Process.Kill() }
     }
+    # A replay stuck in GPU driver teardown may never finish exiting; never wait on it unbounded.
+    return $Process.WaitForExit(10000)
+}
+
+function Get-LastProgress {
+    $progressPath = Join-Path $OutputDir 'progress.log'
+    if (Test-Path -LiteralPath $progressPath -PathType Leaf) {
+        return (Get-Content -LiteralPath $progressPath -Tail 1)
+    }
+    return $null
 }
 
 if ($List) {
@@ -169,7 +183,7 @@ if (-not $qrenderdoc) {
 
 $jobPath = Join-Path $OutputDir 'job.json'
 $resultPath = Join-Path $OutputDir 'result.json'
-Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $resultPath, (Join-Path $OutputDir 'progress.log') -Force -ErrorAction SilentlyContinue
 $job = [ordered]@{
     capture = $capturePath
     command = $Command.ToLowerInvariant()
@@ -187,33 +201,48 @@ $jobJson = $job | ConvertTo-Json -Depth 10
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = $qrenderdoc
 $startInfo.Arguments = '--python "' + $analyzer + '"'
-$startInfo.UseShellExecute = $false
-$startInfo.CreateNoWindow = $true
-# qrenderdoc is a GUI subsystem app, so CreateNoWindow alone leaves a visible Qt window
-# while --python runs; SW_HIDE via STARTUPINFO suppresses it.
+# qrenderdoc starts a daemonized adb server; ShellExecute inherits no handles, so it cannot pin
+# the caller's output pipe open. Hidden suppresses the Qt window while --python runs.
+$startInfo.UseShellExecute = $true
 $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-$startInfo.EnvironmentVariables['RDOC_JOB'] = $jobPath
+$env:RDOC_JOB = $jobPath
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $startInfo
 
+$replayLingered = $false
 try {
     if (-not $process.Start()) {
         Exit-WithJsonError 'qrenderdoc.exe did not start.' 2 $OutputDir
     }
-    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-        Stop-ProcessTree $process
-        $process.WaitForExit()
-        Exit-WithJsonError "Analysis timed out after $TimeoutSeconds seconds." 3 $OutputDir
+    # The result file, not process exit, marks completion: replay teardown can hang indefinitely.
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while (-not $process.WaitForExit(500)) {
+        if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            if (-not $process.WaitForExit(10000)) {
+                $replayLingered = -not (Stop-ProcessTree $process)
+            }
+            break
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            $exited = Stop-ProcessTree $process
+            $stage = Get-LastProgress
+            $detail = if ($stage) { " Last progress: $stage." } else { '' }
+            $reaped = if ($exited) { '' } else { " Replay process $($process.Id) did not exit after kill." }
+            Exit-WithJsonError "Analysis timed out after $TimeoutSeconds seconds.$detail$reaped" 3 $OutputDir
+        }
     }
 } finally {
     $process.Dispose()
 }
 
 if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
-    Exit-WithJsonError 'Analyzer did not produce result.json.' 2 $OutputDir
+    $stage = Get-LastProgress
+    $detail = if ($stage) { " Last progress: $stage." } else { '' }
+    Exit-WithJsonError "Analyzer did not produce result.json.$detail" 2 $OutputDir
 }
 $resultJson = Get-Content -LiteralPath $resultPath -Raw
 Write-Output $resultJson
+if ($replayLingered) { Write-Warning 'The replay process did not exit after writing its result.' }
 Write-Output "Artifacts: $OutputDir"
 $result = $resultJson | ConvertFrom-Json
 if (-not $result.ok) { exit 1 }

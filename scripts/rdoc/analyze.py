@@ -1,14 +1,30 @@
 import io
 import json
 import os
+import signal
 import sys
+import time
 import traceback
 
 
 def _write_result(path, result):
-    with open(path, "w") as stream:
+    # Rename so the wrapper never reads a half-written result.
+    temporary = path + ".tmp"
+    with open(temporary, "w") as stream:
         json.dump(result, stream, indent=2, sort_keys=True)
-        stream.flush()
+    os.replace(temporary, path)
+
+
+def _progress(out_dir, message):
+    if out_dir:
+        with open(os.path.join(out_dir, "progress.log"), "a") as stream:
+            stream.write(time.strftime("%H:%M:%S ") + message + "\n")
+
+
+def _terminate():
+    # os._exit runs driver DLL teardown, which can block forever after a GPU replay;
+    # on Windows os.kill is TerminateProcess, and qrenderdoc's Python lacks ctypes.
+    os.kill(os.getpid(), signal.SIGTERM)
 
 
 def _inside(path, root):
@@ -20,9 +36,11 @@ def _inside(path, root):
 def main():
     job_path = os.environ.get("RDOC_JOB")
     if not job_path:
-        os._exit(2)
+        _terminate()
+    out_dir = None
     result_path = None
     session = None
+    command = ""
     try:
         with io.open(job_path, "r", encoding="utf-8") as stream:
             job = json.load(stream)
@@ -49,9 +67,12 @@ def main():
         capture_path = os.path.abspath(job["capture"])
         if not os.path.isfile(capture_path):
             raise ValueError("Capture not found: " + capture_path)
+        _progress(out_dir, "opening " + capture_path)
         session = CaptureSession(capture_path)
         session.open()
+        _progress(out_dir, "indexing actions")
         actions = ActionIndex(session.controller)
+        _progress(out_dir, "running " + command)
         payload = run(command, session, actions, args, out_dir)
         result = {
             "ok": True,
@@ -62,32 +83,26 @@ def main():
     except BaseException as error:
         result = {
             "ok": False,
-            "command": str(locals().get("command", "")),
-            "artifactDirectory": locals().get("out_dir"),
+            "command": command,
+            "artifactDirectory": out_dir,
             "error": str(error),
             "errorType": error.__class__.__name__,
             "traceback": traceback.format_exc(),
         }
-    finally:
-        if session is not None:
-            try:
-                session.close()
-            except BaseException as error:
-                if locals().get("result", {}).get("ok"):
-                    result = {
-                        "ok": False,
-                        "command": locals().get("command", ""),
-                        "artifactDirectory": locals().get("out_dir"),
-                        "error": "Replay shutdown failed: " + str(error),
-                        "errorType": error.__class__.__name__,
-                        "traceback": traceback.format_exc(),
-                    }
-        if result_path is not None:
-            try:
-                _write_result(result_path, result)
-            except BaseException:
-                os._exit(2)
-        os._exit(0)
+    if result_path is None:
+        _terminate()
+    try:
+        _write_result(result_path, result)
+        _progress(out_dir, "result written")
+    except BaseException:
+        _terminate()
+    if session is not None:
+        try:
+            session.close()
+            _progress(out_dir, "replay shut down")
+        except BaseException as error:
+            _progress(out_dir, "replay shutdown failed: " + str(error))
+    _terminate()
 
 
 main()
