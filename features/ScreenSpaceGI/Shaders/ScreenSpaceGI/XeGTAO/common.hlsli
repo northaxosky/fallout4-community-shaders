@@ -57,9 +57,11 @@ cbuffer XeGTAOCB : register(b0)
 	float4 CameraOrigin;
 	float4 PrevCameraOrigin;
 
-	// Inverse-projection z and w columns.
-	float4 InvProjZ;
-	float4 InvProjW;
+	// Engine b12 reprojection z and w rows, far then near partition.
+	float4 FarReprojZ;
+	float4 FarReprojW;
+	float4 NearReprojZ;
+	float4 NearReprojW;
 };
 
 SamplerState samplerPointClamp : register(s0);
@@ -135,13 +137,18 @@ float3 PreviousScreenToViewPosition(const float2 screenPos, const float viewspac
 	return ret;
 }
 
-// FO4 raw depth to view depth; the first-person partition decodes to 0.
+// FO4 raw depth to view depth with the composite's partition split; near is first person.
 float ScreenToViewDepth(const float2 screenPos, const float rawDepth)
 {
-	if (rawDepth < 0.01)
-		return 0.0;
-	float4 ndc = float4(screenPos.x * 2.0 - 1.0, 1.0 - screenPos.y * 2.0, (rawDepth - 0.01) / 0.99, 1.0);
-	return dot(ndc, InvProjZ) / dot(ndc, InvProjW);
+	const bool nearDepth = rawDepth <= 0.01;
+	const float4 ndc = float4(
+		screenPos.x * 2.0 - 1.0,
+		1.0 - screenPos.y * 2.0,
+		nearDepth ? rawDepth * 100.0 : rawDepth * 1.01 - 0.01,
+		1.0);
+	return nearDepth ?
+		dot(NearReprojZ, ndc) / dot(NearReprojW, ndc) :
+		dot(FarReprojZ, ndc) / dot(FarReprojW, ndc);
 }
 
 float2 ViewToUV(const float3 viewPos)

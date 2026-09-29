@@ -1018,11 +1018,17 @@ namespace cs::features
 			xegtaoCB.PrevCameraOrigin[0] = temporalPreviousOrigin.x;
 			xegtaoCB.PrevCameraOrigin[1] = temporalPreviousOrigin.y;
 			xegtaoCB.PrevCameraOrigin[2] = temporalPreviousOrigin.z;
-			// Row-vector inverse projection, so z and w are its third and fourth columns.
-			for (std::size_t row = 0; row < 4; ++row) {
-				xegtaoCB.InvProjZ[row] = worldInvProj.m[row][2];
-				xegtaoCB.InvProjW[row] = worldInvProj.m[row][3];
-			}
+			// The composite's own depth reconstruction, so first person decodes too.
+			const auto copyRow = [](float (&a_out)[4], const DirectX::XMFLOAT4& a_row) {
+				a_out[0] = a_row.x;
+				a_out[1] = a_row.y;
+				a_out[2] = a_row.z;
+				a_out[3] = a_row.w;
+			};
+			copyRow(xegtaoCB.FarReprojZ, frameBuffer.data.FarReproj[2]);
+			copyRow(xegtaoCB.FarReprojW, frameBuffer.data.FarReproj[3]);
+			copyRow(xegtaoCB.NearReprojZ, frameBuffer.data.NearReproj[2]);
+			copyRow(xegtaoCB.NearReprojW, frameBuffer.data.NearReproj[3]);
 			_xegtaoCB->Update(xegtaoCB);
 
 			ComputePass pass(

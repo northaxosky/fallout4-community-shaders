@@ -96,10 +96,12 @@ namespace cs::features
 			float         PrevViewToWorld[12];
 			float         CameraOrigin[4];
 			float         PrevCameraOrigin[4];
-			float         InvProjZ[4];
-			float         InvProjW[4];
+			float         FarReprojZ[4];
+			float         FarReprojW[4];
+			float         NearReprojZ[4];
+			float         NearReprojW[4];
 		};
-		static_assert(sizeof(XeGTAOCB) == 352);
+		static_assert(sizeof(XeGTAOCB) == 384);
 		static_assert(offsetof(XeGTAOCB, PrevFrameDim) == 64);
 		static_assert(offsetof(XeGTAOCB, FrameIndex) == 80);
 		static_assert(offsetof(XeGTAOCB, DepthDisocclusion) == 136);
@@ -111,7 +113,7 @@ namespace cs::features
 		static_assert(offsetof(XeGTAOCB, PrevViewToWorld) == 240);
 		static_assert(offsetof(XeGTAOCB, CameraOrigin) == 288);
 		static_assert(offsetof(XeGTAOCB, PrevCameraOrigin) == 304);
-		static_assert(offsetof(XeGTAOCB, InvProjZ) == 320);
+		static_assert(offsetof(XeGTAOCB, FarReprojZ) == 320);
 
 		// Variants compiled for one resolution mode; pairs index the temporal denoiser.
 		struct ResolutionShaders

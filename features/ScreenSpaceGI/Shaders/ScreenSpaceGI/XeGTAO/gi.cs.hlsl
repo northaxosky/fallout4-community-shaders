@@ -140,8 +140,6 @@ void CalculateGI(
 #endif
 
 				float SZ = srcWorkingDepth.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevel);
-				// First-person decodes to zero depth.
-				if (SZ <= FP_Z) continue;
 
 				float3 samplePos = ScreenToViewPosition(sampleScreenPos, SZ);
 				float3 sampleDelta = samplePos - pixCenterPos;
