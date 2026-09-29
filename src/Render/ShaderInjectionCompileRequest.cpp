@@ -24,12 +24,12 @@ namespace cs::engine
 		}
 
 		std::optional<ShaderVariantCompilationDescriptor>
-			BuildEffectiveShaderCompileRequestImpl(
-				const ShaderInjectionTargetMetadata& a_target,
-				ShaderStage a_stage,
-				const ShaderVariantCompilationDescriptor& a_family,
-				std::span<const ShaderReplacementRegistration> a_contributions,
-				std::string* a_error)
+		BuildEffectiveShaderCompileRequestImpl(
+			const ShaderInjectionTargetMetadata& a_target,
+			ShaderStage a_stage,
+			const ShaderVariantCompilationDescriptor& a_family,
+			std::span<const ShaderReplacementRegistration> a_contributions,
+			std::string* a_error)
 		{
 			ShaderVariantCompilationDescriptor request{
 				.sourcePath = a_family.sourcePath,
@@ -42,8 +42,7 @@ namespace cs::engine
 			const auto stage = ShaderStageBit(a_stage);
 			bool substrateActive = false;
 			for (const auto& contribution : a_contributions) {
-				if (contribution.targetId != a_target.id
-					|| (contribution.stages & stage) == 0) {
+				if (contribution.targetId != a_target.id || (contribution.stages & stage) == 0) {
 					continue;
 				}
 				substrateActive = true;
@@ -54,11 +53,10 @@ namespace cs::engine
 					return std::nullopt;
 				}
 			}
-			if (substrateActive
-				&& !MergeDefines(
-					request.defines,
-					{ { shader_injection_defines::kSubstrate, "1" } },
-					a_error)) {
+			if (substrateActive && !MergeDefines(
+									   request.defines,
+									   { { shader_injection_defines::kSubstrate, "1" } },
+									   a_error)) {
 				return std::nullopt;
 			}
 			if (!MergeDefines(request.defines, a_family.defines, a_error))
@@ -84,12 +82,12 @@ namespace cs::engine
 	}
 
 	std::optional<ShaderVariantCompilationDescriptor>
-		BuildEffectiveShaderCompileRequest(
-			const ShaderInjectionTargetMetadata& a_target,
-			ShaderStage a_stage,
-			const ShaderVariantCompilationDescriptor& a_family,
-			std::span<const ShaderReplacementRegistration> a_contributions,
-			std::string* a_error)
+	BuildEffectiveShaderCompileRequest(
+		const ShaderInjectionTargetMetadata& a_target,
+		ShaderStage a_stage,
+		const ShaderVariantCompilationDescriptor& a_family,
+		std::span<const ShaderReplacementRegistration> a_contributions,
+		std::string* a_error)
 	{
 		return BuildEffectiveShaderCompileRequestImpl(
 			a_target,

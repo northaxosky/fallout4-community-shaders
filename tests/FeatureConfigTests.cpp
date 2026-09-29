@@ -1,15 +1,15 @@
-#include "Settings/FeatureConfig.h"
-#include "Settings/FeatureKeys.h"
-#include "Settings/SettingsRegistry.h"
 #include "DynamicCubemapsSettings.h"
 #include "ExponentialHeightFogMath.h"
 #include "FrameGenerationSettings.h"
 #include "InverseSquareLightingMath.h"
 #include "PerformanceOverlaySettings.h"
-#include "RenderDocSettings.h"
 #include "Render/TemporalRenderSettings.h"
+#include "RenderDocSettings.h"
 #include "ScreenSpaceGISettings.h"
 #include "ScreenSpaceShadowsSettings.h"
+#include "Settings/FeatureConfig.h"
+#include "Settings/FeatureKeys.h"
+#include "Settings/SettingsRegistry.h"
 #include "TerrainShadowsSettings.h"
 #include "WaterEffectsMath.h"
 #include "WetnessMath.h"
@@ -62,8 +62,7 @@ namespace
 			Field{ "enabled", "Enable.", &TestSettings::enabled },
 			Field{ "count", "Count.", &TestSettings::count, Range{ 1u, 4u } },
 			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } },
-			ChoiceField{ "target", "Target.", &TestSettings::target, kTargets }
-		}
+			ChoiceField{ "target", "Target.", &TestSettings::target, kTargets } }
 	};
 
 	Registry BuildRegistry()
@@ -141,8 +140,7 @@ namespace
 		using namespace cs::features::wetness_math;
 		Settings value;
 		std::string error;
-		CHECK(Parse(kSchema, toml::parse(
-			"[settings]\npuddle_radius = 0.3\npuddle_max_angle = 0.6\nmax_puddle_wetness = 6.0\nmax_shore_wetness = 0.5\nshore_range = 64\n"), value, error));
+		CHECK(Parse(kSchema, toml::parse("[settings]\npuddle_radius = 0.3\npuddle_max_angle = 0.6\nmax_puddle_wetness = 6.0\nmax_shore_wetness = 0.5\nshore_range = 64\n"), value, error));
 		CHECK(value.puddleRadius == 0.3f && value.puddleMaxAngle == 0.6f && value.maxPuddleWetness == 6.0f);
 		CHECK(value.maxShoreWetness == 0.5f && value.shoreRange == 64);
 		const auto serialized = SerializeDelta(kSchema, value, Settings{});
@@ -151,10 +149,10 @@ namespace
 		Settings restored;
 		CHECK(Parse(kSchema, toml::parse(document.str()), restored, error));
 		CHECK(restored.puddleRadius == value.puddleRadius &&
-			restored.puddleMaxAngle == value.puddleMaxAngle &&
-			restored.maxPuddleWetness == value.maxPuddleWetness &&
-			restored.maxShoreWetness == value.maxShoreWetness &&
-			restored.shoreRange == value.shoreRange);
+			  restored.puddleMaxAngle == value.puddleMaxAngle &&
+			  restored.maxPuddleWetness == value.maxPuddleWetness &&
+			  restored.maxShoreWetness == value.maxShoreWetness &&
+			  restored.shoreRange == value.shoreRange);
 
 		for (const char* invalid : {
 				 "[settings]\npuddle_radius = 0.0\n",

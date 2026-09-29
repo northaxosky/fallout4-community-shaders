@@ -76,8 +76,8 @@ namespace cs::debug_view
 				return _fullscreen.view;
 			const auto preview = _previews.find(a_feature);
 			return preview == _previews.end() ?
-				std::string_view{} :
-				std::string_view(preview->second);
+			           std::string_view{} :
+			           std::string_view(preview->second);
 		}
 
 	private:

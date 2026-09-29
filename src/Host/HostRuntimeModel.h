@@ -4,8 +4,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <unordered_map>
+#include <utility>
 
 #include <DearModdingUI/API.h>
 #include <toml++/toml.hpp>
@@ -52,8 +52,8 @@ namespace cs::host
 			if (a_wanted == _requested)
 				return FrameDemandAction::kNone;
 			return a_wanted ?
-				FrameDemandAction::kRequest :
-				FrameDemandAction::kRelease;
+			           FrameDemandAction::kRequest :
+			           FrameDemandAction::kRelease;
 		}
 
 		void Complete(FrameDemandAction a_action, bool a_succeeded) noexcept
@@ -85,8 +85,8 @@ namespace cs::host
 		[[nodiscard]] bool ShouldExecute(std::uint64_t a_submission) const noexcept
 		{
 			return a_submission != 0 &&
-				a_submission != _lastResolved &&
-				!_pending;
+			       a_submission != _lastResolved &&
+			       !_pending;
 		}
 
 		void RecordOutcome(
@@ -157,7 +157,7 @@ namespace cs::host
 		[[nodiscard]] static constexpr bool HandleLost(DMUI_Result a_result) noexcept
 		{
 			return a_result == DMUI_RESULT_STALE_HANDLE ||
-				a_result == DMUI_RESULT_CLIENT_NOT_FOUND;
+			       a_result == DMUI_RESULT_CLIENT_NOT_FOUND;
 		}
 
 	private:
@@ -181,11 +181,11 @@ namespace cs::host
 		bool a_retryDue) noexcept
 	{
 		return a_sourceChanged ||
-			(a_hasHandle && (!a_querySucceeded || !a_imageReady)) ||
-			(!a_hasHandle &&
-				(a_previousFailure == ImageImportFailure::kNone ||
-					(a_previousFailure == ImageImportFailure::kTransient &&
-						a_retryDue)));
+		       (a_hasHandle && (!a_querySucceeded || !a_imageReady)) ||
+		       (!a_hasHandle &&
+				   (a_previousFailure == ImageImportFailure::kNone ||
+					   (a_previousFailure == ImageImportFailure::kTransient &&
+						   a_retryDue)));
 	}
 
 }

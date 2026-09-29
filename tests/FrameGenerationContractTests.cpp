@@ -42,9 +42,7 @@ namespace
 		SetPresentationActive(bool a_active) override
 		{
 			events.emplace_back(a_active ? "activate" : "deactivate");
-			return presentationActivationSucceeds
-				? Success()
-				: Failure("presentation activation");
+			return presentationActivationSucceeds ? Success() : Failure("presentation activation");
 		}
 		cs::render::temporal::ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
@@ -194,7 +192,8 @@ namespace
 				provider, [&]() {
 					provider.events.emplace_back("drain");
 					return true;
-				}, releasePresentation);
+				},
+				releasePresentation);
 		Check(retirement.Succeeded(),
 			"presentation retirement completes after a proven queue drain");
 		Check(provider.events ==
@@ -210,7 +209,8 @@ namespace
 				provider, [&]() {
 					provider.events.emplace_back("drain");
 					return true;
-				}, releasePresentation);
+				},
+				releasePresentation);
 		Check(!destroyFailure.Succeeded() &&
 				  destroyFailure.globalDrainAttempted &&
 				  destroyFailure.globalDrainCompleted &&
@@ -227,7 +227,8 @@ namespace
 				provider, [&]() {
 					provider.events.emplace_back("drain");
 					return true;
-				}, releasePresentation);
+				},
+				releasePresentation);
 		Check(!deactivateFailure.Succeeded() &&
 				  deactivateFailure.globalDrainAttempted &&
 				  deactivateFailure.globalDrainCompleted &&

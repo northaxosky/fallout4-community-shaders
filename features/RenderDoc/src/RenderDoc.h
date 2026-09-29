@@ -88,28 +88,28 @@ namespace cs::features
 
 		[[nodiscard]] CaptureBinding GetCaptureBinding() const;
 
-		Settings              _settings;
-		Settings              _bootSettings;
+		Settings _settings;
+		Settings _bootSettings;
 		std::filesystem::path _resolvedCaptureFolder;
-		std::string           _resolvedCaptureFolderUtf8;
-		HMODULE              _module = nullptr;
-		RENDERDOC_API_1_7_0* _api    = nullptr;
+		std::string _resolvedCaptureFolderUtf8;
+		HMODULE _module = nullptr;
+		RENDERDOC_API_1_7_0* _api = nullptr;
 		bool _attemptedLoad = false;
 		std::atomic<std::uint32_t> _captureCount{ 0 };
 
-		mutable std::mutex             _captureTargetMutex;
-		winrt::com_ptr<ID3D11Device>   _device11;
-		winrt::com_ptr<ID3D12Device>   _device12;
-		HWND                           _window11 = nullptr;
-		HWND                           _window12 = nullptr;
-		std::atomic_bool               _d3d11TargetAvailable{ false };
-		std::atomic_bool               _d3d12TargetAvailable{ false };
+		mutable std::mutex _captureTargetMutex;
+		winrt::com_ptr<ID3D11Device> _device11;
+		winrt::com_ptr<ID3D12Device> _device12;
+		HWND _window11 = nullptr;
+		HWND _window12 = nullptr;
+		std::atomic_bool _d3d11TargetAvailable{ false };
+		std::atomic_bool _d3d12TargetAvailable{ false };
 
-		std::atomic<std::uint32_t>     _manualFramesPending{ 0 };
-		winrt::com_ptr<ID3D11Device>   _manualFrameDevice;
+		std::atomic<std::uint32_t> _manualFramesPending{ 0 };
+		winrt::com_ptr<ID3D11Device> _manualFrameDevice;
 
 		// Comments apply to a completed capture, so they wait for the file to appear.
-		std::string   _pendingComments;
+		std::string _pendingComments;
 		std::uint32_t _pendingCaptures = 0;
 		std::uint32_t _lastCaptureCount = 0;
 

@@ -1,7 +1,7 @@
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 cbuffer FullScreenColorParameters : register(b2)

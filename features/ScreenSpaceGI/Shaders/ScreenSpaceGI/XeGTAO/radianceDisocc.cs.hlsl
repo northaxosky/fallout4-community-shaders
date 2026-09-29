@@ -90,9 +90,7 @@ float3 SampleDiffuseColor(float2 texCoord)
 #	define LOAD_DIFFUSE_COLOR(px, texCoord) LoadDiffuseColor(px)
 #endif
 
-[numthreads(8, 8, 1)]
-void main(const uint2 pixCoord : SV_DispatchThreadID)
-{
+[numthreads(8, 8, 1)] void main(const uint2 pixCoord : SV_DispatchThreadID) {
 	if (any(pixCoord >= uint2(OUT_FRAME_DIM)))
 		return;
 	const float2 frameScale = FrameDim * RcpTexDim;

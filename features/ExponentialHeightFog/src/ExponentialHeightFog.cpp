@@ -12,13 +12,13 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -33,13 +33,9 @@ namespace cs::features
 		constexpr std::uint32_t kFogFactorDebugFlag = 1U << 1;
 		// Load transitions publish a few frames of unpopulated fog ramps.
 		constexpr std::uint32_t kPersistentRejectionFrames = 60;
-		constexpr std::array<FeatureDebugView, 1> kDebugViews{ {
-			{
-				"fog_factor",
-				"Fog factor (final pre-colour-mix greyscale)",
-				FeatureDebugViewKind::kFullscreen
-			}
-		} };
+		constexpr std::array<FeatureDebugView, 1> kDebugViews{ { { "fog_factor",
+			"Fog factor (final pre-colour-mix greyscale)",
+			FeatureDebugViewKind::kFullscreen } } };
 
 	}
 
@@ -50,7 +46,7 @@ namespace cs::features
 	}
 
 	std::span<const FeatureDebugView>
-		ExponentialHeightFog::GetDebugViews() const noexcept
+	ExponentialHeightFog::GetDebugViews() const noexcept
 	{
 		return kDebugViews;
 	}
@@ -91,26 +87,15 @@ namespace cs::features
 	void ExponentialHeightFog::Load()
 	{
 		PublishSettings();
-		const bool registered = cs::engine::RegisterReplacement({
-			.targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
+		const bool registered = cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
 			.stages = cs::engine::ShaderStageBit(
 				cs::engine::ShaderStage::kPixel),
 			.contributor = "ExponentialHeightFog",
-			.defines = {
-				{
-					cs::engine::shader_injection_defines::
-						kExponentialHeightFog,
-					"1"
-				}
-			},
-			.isReady = [this] {
-				return _registrationsReady.load(std::memory_order_acquire)
-					&& cs::render::IsSharedDataReady();
-			},
-			.bind = [this](ID3D11DeviceContext*) {
-				ObserveConsumerBind();
-			}
-		});
+			.defines = { { cs::engine::shader_injection_defines::
+							   kExponentialHeightFog,
+				"1" } },
+			.isReady = [this] { return _registrationsReady.load(std::memory_order_acquire) && cs::render::IsSharedDataReady(); },
+			.bind = [this](ID3D11DeviceContext*) { ObserveConsumerBind(); } });
 		if (!registered) {
 			FailLoad(
 				"Exponential height fog requires the reconstructed "
@@ -170,7 +155,7 @@ namespace cs::features
 	}
 
 	cs::ExponentialHeightFogFeatureData
-		ExponentialHeightFog::GetCommonBufferData() const
+	ExponentialHeightFog::GetCommonBufferData() const
 	{
 		_sharedDataPublishCalls.fetch_add(1, std::memory_order_relaxed);
 		auto* player = RE::PlayerCharacter::GetSingleton();
@@ -181,10 +166,7 @@ namespace cs::features
 		_inInterior.store(inInterior, std::memory_order_relaxed);
 
 		const bool active =
-			_injectionsOperational.load(std::memory_order_acquire)
-			&& _enabled.load(std::memory_order_acquire)
-			&& locationResolved
-			&& !inInterior;
+			_injectionsOperational.load(std::memory_order_acquire) && _enabled.load(std::memory_order_acquire) && locationResolved && !inInterior;
 		_publishedActive.store(active, std::memory_order_release);
 
 		std::uint32_t mode = active ? kEnabledFlag : 0;
@@ -200,8 +182,8 @@ namespace cs::features
 	}
 
 	ExponentialHeightFog::ObservationStatus
-		ExponentialHeightFog::ToObservationStatus(
-			ehf::FitStatus a_status) noexcept
+	ExponentialHeightFog::ToObservationStatus(
+		ehf::FitStatus a_status) noexcept
 	{
 		switch (a_status) {
 		case ehf::FitStatus::kNonFiniteDistanceRamp:
@@ -235,8 +217,8 @@ namespace cs::features
 		_lastFallbackReason.store(a_status, std::memory_order_release);
 		const auto* graphicsState = cs::engine::GetGraphicsState();
 		const auto frame = graphicsState ?
-			static_cast<std::uint64_t>(graphicsState->frameCount) :
-			static_cast<std::uint64_t>(UINT32_MAX);
+		                       static_cast<std::uint64_t>(graphicsState->frameCount) :
+		                       static_cast<std::uint64_t>(UINT32_MAX);
 		const bool newFrame =
 			_lastFallbackFrame.exchange(frame, std::memory_order_relaxed) != frame;
 		if (newFrame)
@@ -254,9 +236,7 @@ namespace cs::features
 		case ObservationStatus::kHeightSlopeXNearZero:
 		case ObservationStatus::kHeightSlopeYNearZero:
 		case ObservationStatus::kNonFiniteDerived:
-			warn = newFrame
-				&& _consecutiveRejectedFrames.fetch_add(1, std::memory_order_relaxed) + 1
-					>= kPersistentRejectionFrames;
+			warn = newFrame && _consecutiveRejectedFrames.fetch_add(1, std::memory_order_relaxed) + 1 >= kPersistentRejectionFrames;
 			break;
 		default:
 			// Disabled, interior, and unresolved-location frames are expected states.
@@ -269,7 +249,7 @@ namespace cs::features
 		const auto reasonBit =
 			std::uint32_t{ 1 } << static_cast<std::uint8_t>(a_status);
 		if ((_warnedFallbackReasons.fetch_or(
-				reasonBit, std::memory_order_relaxed) &
+				 reasonBit, std::memory_order_relaxed) &
 				reasonBit) == 0) {
 			L->warn(
 				"Analytic fog target bind rejected: {}. The shader keeps "
@@ -294,8 +274,7 @@ namespace cs::features
 			SetObservationStatus(ObservationStatus::kLocationUnavailable);
 			return;
 		}
-		if (_inInterior.load(std::memory_order_acquire)
-			|| !_publishedActive.load(std::memory_order_acquire)) {
+		if (_inInterior.load(std::memory_order_acquire) || !_publishedActive.load(std::memory_order_acquire)) {
 			SetObservationStatus(ObservationStatus::kInterior);
 			return;
 		}
@@ -407,9 +386,8 @@ namespace cs::features
 			.Field("shared_data_ready", cs::render::IsSharedDataReady())
 			.Field(
 				"shared_data_published",
-				cs::render::IsSharedDataReady()
-					&& _sharedDataPublishCalls.load(
-						std::memory_order_relaxed) != 0)
+				cs::render::IsSharedDataReady() && _sharedDataPublishCalls.load(
+													   std::memory_order_relaxed) != 0)
 			.Field(
 				"shared_data_publish_calls",
 				static_cast<std::int64_t>(

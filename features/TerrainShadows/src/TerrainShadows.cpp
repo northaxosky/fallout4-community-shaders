@@ -1,8 +1,8 @@
 #include "TerrainShadows.h"
 
+#include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
 #include <d3d11.h>
-#include <DearModdingUI/Client.h>
 
 #include <algorithm>
 #include <array>
@@ -24,15 +24,15 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
-#include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
@@ -59,8 +59,7 @@ namespace cs::features
 			std::string_view define;
 			std::string_view telemetryName;
 		};
-		constexpr std::array<VariantFamily, 13> kLightFamilies{ {
-			{ "BSDFLIGHT_PS_DEFERRED", "deferred" },
+		constexpr std::array<VariantFamily, 13> kLightFamilies{ { { "BSDFLIGHT_PS_DEFERRED", "deferred" },
 			{ "BSDFLIGHT_PS_DIRSPLITS1", "dirsplits1" },
 			{ "BSDFLIGHT_PS_DIRSPLITS2", "dirsplits2" },
 			{ "BSDFLIGHT_PS_DIRSPLITS3", "dirsplits3" },
@@ -72,10 +71,8 @@ namespace cs::features
 			{ "BSDFLIGHT_PS_ATTENUATION_ONLY", "attenuation_only" },
 			{ "BSDFLIGHT_PS_CHARACTER_LIGHT", "character_light" },
 			{ "BSDFLIGHT_PS_CHARACTER_LIGHT_C26", "character_light_c26" },
-			{ "BSDFLIGHT_PS_OVERDRAW", "overdraw" }
-		} };
-		constexpr std::array<VariantFamily, 13> kCompositeFamilies{ {
-			{ "BSDFCOMPOSITE_PS_2D_ACCUMULATOR", "2d_accumulator" },
+			{ "BSDFLIGHT_PS_OVERDRAW", "overdraw" } } };
+		constexpr std::array<VariantFamily, 13> kCompositeFamilies{ { { "BSDFCOMPOSITE_PS_2D_ACCUMULATOR", "2d_accumulator" },
 			{ "BSDFCOMPOSITE_PS_2D_FOG", "2d_fog" },
 			{ "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY", "ambient_ibl_cb31" },
 			{ "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY", "ambient_ibl_cb47" },
@@ -87,20 +84,13 @@ namespace cs::features
 			{ "BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR", "no_t0_accumulator" },
 			{ "BSDFCOMPOSITE_PS_NO_T0_FOG", "no_t0_fog" },
 			{ "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL", "sss_mrt_record_normal" },
-			{ "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "sss_mrt_surface_contact" }
-		} };
-		constexpr std::array<FeatureDebugView, 2> kDebugViews{ {
-			{
-				"shadow_term",
-				"Shadow term",
-				FeatureDebugViewKind::kFullscreen
-			},
-			{
-				"heightmap",
+			{ "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "sss_mrt_surface_contact" } } };
+		constexpr std::array<FeatureDebugView, 2> kDebugViews{ { { "shadow_term",
+																	 "Shadow term",
+																	 FeatureDebugViewKind::kFullscreen },
+			{ "heightmap",
 				"Raw heightmap sample",
-				FeatureDebugViewKind::kFullscreen
-			}
-		} };
+				FeatureDebugViewKind::kFullscreen } } };
 
 		template <std::size_t N>
 		bool RecordActiveFamily(
@@ -153,8 +143,8 @@ namespace cs::features
 		{
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			return rendererData ?
-				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-				nullptr;
+			           reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+			           nullptr;
 		}
 
 		// Force light propagation downward.
@@ -244,44 +234,36 @@ namespace cs::features
 	void TerrainShadows::Load()
 	{
 		const auto registerContribution = [this](
-			cs::engine::ShaderInjectionTarget a_target,
-			cs::engine::ShaderInjectionBindCallback a_bind,
-			bool a_fullscreenDebug) {
+											  cs::engine::ShaderInjectionTarget a_target,
+											  cs::engine::ShaderInjectionBindCallback a_bind,
+											  bool a_fullscreenDebug) {
 			cs::engine::ShaderInjectionDefines defines{
 				{ cs::engine::shader_injection_defines::kTerrainShadows, "1" }
 			};
 			std::vector<cs::engine::ShaderSlotClaim> slotClaims{
-				{
-					.stage = cs::engine::ShaderStage::kPixel,
+				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kShadowHeightPSSlot
-				},
-				{
-					.stage = cs::engine::ShaderStage::kPixel,
+					.slot = kShadowHeightPSSlot },
+				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kSceneDepthPSSlot
-				},
-				{
-					.stage = cs::engine::ShaderStage::kPixel,
+					.slot = kSceneDepthPSSlot },
+				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kSampler,
-					.slot = kShadowHeightSamplerPSSlot
-				}
+					.slot = kShadowHeightSamplerPSSlot }
 			};
 			if (a_fullscreenDebug) {
 				defines.emplace(
 					cs::engine::shader_injection_defines::kTerrainShadowsFullscreenDebug,
 					"1");
 			}
-			return cs::engine::RegisterReplacement({
-				.targetId = a_target,
+			return cs::engine::RegisterReplacement({ .targetId = a_target,
 				.contributor = "TerrainShadows",
 				.defines = std::move(defines),
 				.isReady = [this] {
 					return ts::IsReadyForInjectionFreeze(GetBootstrapReadiness());
 				},
 				.bind = std::move(a_bind),
-				.slotClaims = std::move(slotClaims)
-			});
+				.slotClaims = std::move(slotClaims) });
 		};
 
 		if (!registerContribution(
@@ -324,8 +306,8 @@ namespace cs::features
 			cs::engine::HookPriority::Late);
 		if (!cs::engine::RegisterPreDeferredComposite(
 				[] { TerrainShadows::GetSingleton()->SaveDebugBindings(); },
-				cs::engine::HookPriority::Early)
-			|| !cs::engine::RegisterPostDeferredComposite(
+				cs::engine::HookPriority::Early) ||
+			!cs::engine::RegisterPostDeferredComposite(
 				[] { TerrainShadows::GetSingleton()->RestoreDebugBindings(); },
 				cs::engine::HookPriority::Late)) {
 			FailLoad(
@@ -347,7 +329,7 @@ namespace cs::features
 	}
 
 	terrain_shadows::BootstrapReadiness
-		TerrainShadows::GetBootstrapReadiness() const noexcept
+	TerrainShadows::GetBootstrapReadiness() const noexcept
 	{
 		return {
 			.registrationsInstalled =
@@ -383,8 +365,7 @@ namespace cs::features
 		// Custom maps override xLODGen output.
 		if (const auto existing = _heightMaps.find(key);
 			existing != _heightMaps.end()) {
-			if (existing->second.metadata.source == ts::HeightMapSource::kCustom
-				&& a_source == ts::HeightMapSource::kXLodGen) {
+			if (existing->second.metadata.source == ts::HeightMapSource::kCustom && a_source == ts::HeightMapSource::kXLodGen) {
 				return;
 			}
 			L->warn(
@@ -415,9 +396,7 @@ namespace cs::features
 		for (const auto& entry : iterator) {
 			const auto& path = entry.path();
 			std::error_code entryEc;
-			if (a_recurseOneLevel
-				&& std::filesystem::is_directory(path, entryEc)
-				&& !entryEc) {
+			if (a_recurseOneLevel && std::filesystem::is_directory(path, entryEc) && !entryEc) {
 				std::error_code innerEc;
 				std::filesystem::directory_iterator inner{ path, innerEc };
 				if (innerEc)
@@ -568,8 +547,7 @@ namespace cs::features
 		_injectionsOperational.store(false, std::memory_order_release);
 		const auto readiness = GetBootstrapReadiness();
 		if (!ts::IsReadyForInjectionFreeze(readiness)) {
-			a_error = "terrain shadow bootstrap is incomplete ("
-				+ ts::MissingBootstrapPrerequisites(readiness) + ")";
+			a_error = "terrain shadow bootstrap is incomplete (" + ts::MissingBootstrapPrerequisites(readiness) + ")";
 			_validationDetail = a_error;
 			return false;
 		}
@@ -674,19 +652,17 @@ namespace cs::features
 		DirectX::TexMetadata metadata{};
 		// Expanding L16 converts it to four-channel R16G16B16A16.
 		const auto loadResult = DirectX::LoadFromDDSFile(
-				a_record.path.c_str(),
-				DirectX::DDS_FLAGS_NONE,
-				&metadata,
-				loaded);
+			a_record.path.c_str(),
+			DirectX::DDS_FLAGS_NONE,
+			&metadata,
+			loaded);
 		if (FAILED(loadResult)) {
 			a_error = std::format(
 				"DirectXTex could not read the DDS (HRESULT 0x{:08X})",
 				static_cast<std::uint32_t>(loadResult));
 			return false;
 		}
-		if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D
-			|| metadata.arraySize != 1
-			|| metadata.depth != 1) {
+		if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.arraySize != 1 || metadata.depth != 1) {
 			a_error = "the DDS is not a single 2D image";
 			return false;
 		}
@@ -696,10 +672,7 @@ namespace cs::features
 				static_cast<std::uint32_t>(metadata.format));
 			return false;
 		}
-		if (metadata.width == 0
-			|| metadata.height == 0
-			|| metadata.width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-			|| metadata.height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
+		if (metadata.width == 0 || metadata.height == 0 || metadata.width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || metadata.height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
 			a_error = "the DDS extent is outside the D3D11 texture limits";
 			return false;
 		}
@@ -718,8 +691,7 @@ namespace cs::features
 			static_cast<std::size_t>(sourceWidth) * sizeof(std::uint16_t);
 		const auto expectedSlicePitch =
 			expectedRowPitch * static_cast<std::size_t>(sourceHeight);
-		if (mip0->rowPitch != expectedRowPitch
-			|| mip0->slicePitch < expectedSlicePitch) {
+		if (mip0->rowPitch != expectedRowPitch || mip0->slicePitch < expectedSlicePitch) {
 			a_error = std::format(
 				"unexpected R16 layout: row pitch {} (expected {}), "
 				"slice pitch {} (expected at least {})",
@@ -885,9 +857,7 @@ namespace cs::features
 		}
 
 		const auto factor = _requestedDownsampleFactor.load(std::memory_order_acquire);
-		if (_shadowResourcesReady.load(std::memory_order_acquire)
-			&& _loadedWorldspace == worldspace
-			&& _appliedFactor == factor) {
+		if (_shadowResourcesReady.load(std::memory_order_acquire) && _loadedWorldspace == worldspace && _appliedFactor == factor) {
 			PublishStatus(worldspace, "loaded");
 			return;
 		}
@@ -955,14 +925,7 @@ namespace cs::features
 		ID3D11DeviceContext* a_context,
 		bool a_refreshImmediately)
 	{
-		if (!a_context
-			|| !_shadowResourcesReady.load(std::memory_order_acquire)
-			|| !_heightTexture
-			|| !_shadowTexture
-			|| !_heightTexture->srv
-			|| !_shadowTexture->uav
-			|| !_shadowUpdateCS
-			|| !_shadowUpdateCB) {
+		if (!a_context || !_shadowResourcesReady.load(std::memory_order_acquire) || !_heightTexture || !_shadowTexture || !_heightTexture->srv || !_shadowTexture->uav || !_shadowUpdateCS || !_shadowUpdateCB) {
 			return false;
 		}
 
@@ -980,15 +943,11 @@ namespace cs::features
 		if (!_plan.valid)
 			return false;
 		const float horizontalLength = std::sqrt(
-			sunDirection[0] * sunDirection[0]
-			+ sunDirection[1] * sunDirection[1]);
+			sunDirection[0] * sunDirection[0] + sunDirection[1] * sunDirection[1]);
 		_sunElevationDegrees.store(
-			std::atan2(-sunDirection[2], horizontalLength)
-				* (180.0 / std::numbers::pi),
+			std::atan2(-sunDirection[2], horizontalLength) * (180.0 / std::numbers::pi),
 			std::memory_order_relaxed);
-		if (_plan.dispatchCount == 0
-			|| _plan.dispatchCount
-				> D3D11_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION) {
+		if (_plan.dispatchCount == 0 || _plan.dispatchCount > D3D11_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION) {
 			CS_LOG_EVERY_MS(
 				L,
 				kMissingMapLogIntervalMs,
@@ -1059,12 +1018,7 @@ namespace cs::features
 
 	void TerrainShadows::UpdateShadowStatistics(ID3D11DeviceContext* a_context)
 	{
-		if (!a_context
-			|| !_shadowStatsCS
-			|| !_shadowStatsBuffer
-			|| !_shadowStatsUav
-			|| !_shadowStatsStaging
-			|| !_shadowStatsCB) {
+		if (!a_context || !_shadowStatsCS || !_shadowStatsBuffer || !_shadowStatsUav || !_shadowStatsStaging || !_shadowStatsCB) {
 			return;
 		}
 
@@ -1122,14 +1076,7 @@ namespace cs::features
 			return;
 		}
 
-		if (!cs::telemetry::pump::Enabled()
-			|| !_enabled.load(std::memory_order_acquire)
-			|| !_injectionsOperational.load(std::memory_order_acquire)
-			|| !_shadowPopulated.load(std::memory_order_acquire)
-			|| !_heightTexture
-			|| !_heightTexture->srv
-			|| !_shadowTexture
-			|| !_shadowTexture->srv) {
+		if (!cs::telemetry::pump::Enabled() || !_enabled.load(std::memory_order_acquire) || !_injectionsOperational.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_heightTexture || !_heightTexture->srv || !_shadowTexture || !_shadowTexture->srv) {
 			return;
 		}
 		const auto interval = std::chrono::seconds(
@@ -1198,8 +1145,7 @@ namespace cs::features
 			const bool timeJump = PollGameHourJump();
 			EnsureLiveResources(context);
 
-			const bool enabled = _enabled.load(std::memory_order_acquire)
-				&& _injectionsOperational.load(std::memory_order_acquire);
+			const bool enabled = _enabled.load(std::memory_order_acquire) && _injectionsOperational.load(std::memory_order_acquire);
 			const bool becameEnabled = enabled && !_wasEnabledLastFrame;
 			_wasEnabledLastFrame = enabled;
 			if (enabled && _shadowResourcesReady.load(std::memory_order_acquire)) {
@@ -1234,8 +1180,7 @@ namespace cs::features
 		auto* context = GetImmediateContext();
 		if (!context)
 			return;
-		if (!_engineShadowBinding.Save(context, kShadowHeightPSSlot)
-			&& _engineShadowBinding.IsSaved()) {
+		if (!_engineShadowBinding.Save(context, kShadowHeightPSSlot) && _engineShadowBinding.IsSaved()) {
 			CS_LOG_ONCE(
 				L,
 				spdlog::level::err,
@@ -1252,15 +1197,7 @@ namespace cs::features
 
 	void TerrainShadows::BindShadowHeights(ID3D11DeviceContext* a_context)
 	{
-		if (!a_context
-			|| !_injectionsOperational.load(std::memory_order_acquire)
-			|| !_enabled.load(std::memory_order_acquire)
-			|| !_mapLoaded.load(std::memory_order_acquire)
-			|| !_shadowResourcesReady.load(std::memory_order_acquire)
-			|| !_shadowPopulated.load(std::memory_order_acquire)
-			|| !_shadowTexture
-			|| !_shadowTexture->srv
-			|| !_linearClampSampler) {
+		if (!a_context || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_shadowTexture || !_shadowTexture->srv || !_linearClampSampler) {
 			return;
 		}
 		auto* depthSrv = cs::engine::GetSceneDepthSRV();
@@ -1294,8 +1231,7 @@ namespace cs::features
 
 	void TerrainShadows::SaveDebugBindings()
 	{
-		if (_debugVisualization.load(std::memory_order_acquire)
-			== DebugVisualization::kOff) {
+		if (_debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff) {
 			return;
 		}
 		auto* context = GetImmediateContext();
@@ -1315,23 +1251,12 @@ namespace cs::features
 			_debugVisualization.load(std::memory_order_acquire);
 		const bool heightmap =
 			visualization == DebugVisualization::kHeightmap;
-		if (!a_context
-			|| visualization == DebugVisualization::kOff
-			|| !_injectionsOperational.load(std::memory_order_acquire)
-			|| !_enabled.load(std::memory_order_acquire)
-			|| !_mapLoaded.load(std::memory_order_acquire)
-			|| !_shadowResourcesReady.load(std::memory_order_acquire)
-			|| (!heightmap
-				&& !_shadowPopulated.load(std::memory_order_acquire))
-			|| (heightmap ?
-					(!_heightTexture || !_heightTexture->srv) :
-					(!_shadowTexture || !_shadowTexture->srv))
-			|| !_linearClampSampler) {
+		if (!a_context || visualization == DebugVisualization::kOff || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || (!heightmap && !_shadowPopulated.load(std::memory_order_acquire)) || (heightmap ? (!_heightTexture || !_heightTexture->srv) : (!_shadowTexture || !_shadowTexture->srv)) || !_linearClampSampler) {
 			return;
 		}
 		ID3D11ShaderResourceView* srv = heightmap ?
-			_heightTexture->srv.get() :
-			_shadowTexture->srv.get();
+		                                    _heightTexture->srv.get() :
+		                                    _shadowTexture->srv.get();
 		auto* depthSrv = cs::engine::GetSceneDepthSRV();
 		ID3D11ShaderResourceView* srvs[2]{ srv, depthSrv };
 		a_context->PSSetShaderResources(kShadowHeightPSSlot, 2, srvs);
@@ -1364,12 +1289,7 @@ namespace cs::features
 	{
 		const auto debugVisualization =
 			_debugVisualization.load(std::memory_order_acquire);
-		if (!_injectionsOperational.load(std::memory_order_acquire)
-			|| !_enabled.load(std::memory_order_acquire)
-			|| !_mapLoaded.load(std::memory_order_acquire)
-			|| !_shadowResourcesReady.load(std::memory_order_acquire)
-			|| (debugVisualization != DebugVisualization::kHeightmap
-				&& !_shadowPopulated.load(std::memory_order_acquire))) {
+		if (!_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || (debugVisualization != DebugVisualization::kHeightmap && !_shadowPopulated.load(std::memory_order_acquire))) {
 			return {};
 		}
 
@@ -1591,10 +1511,8 @@ namespace cs::features
 			if (!dmui::DrawStyledText(
 					client,
 					warning,
-					{
-						.tone = dmui::TextTone::kWarning,
-						.wrapped = true
-					})) {
+					{ .tone = dmui::TextTone::kWarning,
+						.wrapped = true })) {
 				L->warn(
 					"DearModdingUI draw terrain warning failed: {}",
 					DMUI_ResultToString(client.LastResult()));

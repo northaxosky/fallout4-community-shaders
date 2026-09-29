@@ -79,9 +79,7 @@ namespace cs::engine
 		}
 
 		constexpr ShaderStageMask kValidShaderStages =
-			ShaderStageBit(ShaderStage::kVertex)
-			| ShaderStageBit(ShaderStage::kPixel)
-			| ShaderStageBit(ShaderStage::kCompute);
+			ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel) | ShaderStageBit(ShaderStage::kCompute);
 
 		constexpr auto kDefaultShaderRoot = L"Data\\Shaders";
 		auto* L = cs::log::Get("cs.render.shaderinjection");
@@ -95,34 +93,34 @@ namespace cs::engine
 
 		struct TargetRuntimeState
 		{
-			std::atomic<bool>          requested{ false };
-			std::atomic<bool>          slotCollision{ false };
-			std::atomic<std::uint8_t>  requestReasons{ 0 };
-			std::atomic<std::size_t>   contributors{ 0 };
+			std::atomic<bool> requested{ false };
+			std::atomic<bool> slotCollision{ false };
+			std::atomic<std::uint8_t> requestReasons{ 0 };
+			std::atomic<std::size_t> contributors{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
 			std::atomic<std::uint64_t> passthroughNotReady{ 0 };
 			std::atomic<std::uint64_t> passthroughDisabled{ 0 };
 			std::atomic<std::uint64_t> dispatches{ 0 };
-			DeveloperShaderOverride   developerOverride = DeveloperShaderOverride::kAuto;
-			ShaderInjectionDefines    defines;
-			std::string               publicationError;
+			DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
+			ShaderInjectionDefines defines;
+			std::string publicationError;
 		};
 
 		struct FrozenTarget
 		{
 			const ShaderInjectionTargetMetadata* metadata = nullptr;
-			ShaderInjectionDefines               defines;
+			ShaderInjectionDefines defines;
 			std::vector<ShaderReplacementRegistration> contributions;
 			struct Bind
 			{
 				ShaderStageMask stages = 0;
 				ShaderInjectionBindCallback callback;
 			};
-			std::vector<Bind>                    binds;
-			std::size_t                          contributors = 0;
-			bool                                 slotCollision = false;
+			std::vector<Bind> binds;
+			std::size_t contributors = 0;
+			bool slotCollision = false;
 		};
 
 		struct PublishedTarget
@@ -164,17 +162,15 @@ namespace cs::engine
 				value = value * 131U + static_cast<std::size_t>(a_key.stage);
 				value = value * 131U + a_key.descriptor;
 				value = value * 131U +
-					std::hash<std::string>{}(a_key.nativeName);
+				        std::hash<std::string>{}(a_key.nativeName);
 				value = value * 131U +
-					std::hash<std::string>{}(a_key.nativeClassName);
+				        std::hash<std::string>{}(a_key.nativeClassName);
 				value = value * 131U +
-					std::hash<std::string>{}(a_key.nativeSourceGroup);
+				        std::hash<std::string>{}(a_key.nativeSourceGroup);
 				value = value * 131U + a_key.forceEarlyDepthStencil;
 				for (const auto& [name, macroValue] : a_key.nativeMacros) {
-					value = value * 131U
-						+ std::hash<std::string>{}(name);
-					value = value * 131U
-						+ std::hash<std::string>{}(macroValue);
+					value = value * 131U + std::hash<std::string>{}(name);
+					value = value * 131U + std::hash<std::string>{}(macroValue);
 				}
 				return value;
 			}
@@ -215,9 +211,8 @@ namespace cs::engine
 			{
 				auto value = std::hash<const void*>{}(
 					a_key.nativeWrapper);
-				value = value * 131U
-					+ std::hash<const void*>{}(
-						a_key.replacementShader);
+				value = value * 131U + std::hash<const void*>{}(
+										   a_key.replacementShader);
 				return value;
 			}
 		};
@@ -233,7 +228,8 @@ namespace cs::engine
 		{
 			std::vector<ShaderSlotClaim> slots;
 			std::array<ShaderInjectionDefines,
-				static_cast<std::size_t>(ShaderStage::kCount)> defines;
+				static_cast<std::size_t>(ShaderStage::kCount)>
+				defines;
 		};
 
 		struct Service
@@ -244,20 +240,26 @@ namespace cs::engine
 			bool developerForceOffEnabled = false;
 			std::wstring developerSourceRoot;
 			std::array<bool,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> baselineOwnership{};
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
+				baselineOwnership{};
 			std::array<DeveloperShaderOverride,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
+				developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
 			std::array<TargetClaimLedger,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> ledgers;
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
+				ledgers;
 			std::array<TargetRuntimeState,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> runtime;
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
+				runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
 			std::mutex nativeVariantMutex;
 			std::unordered_map<NativeVariantKey, std::shared_ptr<NativeVariant>,
-				NativeVariantKeyHash> nativeVariants;
+				NativeVariantKeyHash>
+				nativeVariants;
 			std::array<bool,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> unsupportedNativeVariantReported{};
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
+				unsupportedNativeVariantReported{};
 			std::unordered_map<ID3D11DeviceChild*, NativeVariantKey>
 				nativeShaderIdentities;
 			struct NativeShaderMetadata
@@ -391,7 +393,7 @@ namespace cs::engine
 		};
 
 		std::optional<NativeShaderFamilyContext>
-			ResolveNativeShaderFamilyContext(RE::BSShader* a_shader)
+		ResolveNativeShaderFamilyContext(RE::BSShader* a_shader)
 		{
 			if (!a_shader)
 				return std::nullopt;
@@ -450,16 +452,14 @@ namespace cs::engine
 			std::uint32_t a_descriptor,
 			bool a_forceEarlyDepthStencil = false)
 		{
-			return MakeNativeVariantKey({
-				.target = a_family.target,
+			return MakeNativeVariantKey({ .target = a_family.target,
 				.stage = a_stage,
 				.descriptor = a_descriptor,
 				.nativeName = a_family.nativeName,
 				.nativeClassName = a_family.nativeClassName,
 				.nativeSourceGroup = a_family.nativeSourceGroup,
 				.forceEarlyDepthStencil = a_forceEarlyDepthStencil,
-				.nativeMacros = a_family.nativeMacros
-			});
+				.nativeMacros = a_family.nativeMacros });
 		}
 
 		ShaderFamilyDescriptor DescribeNativeVariant(
@@ -601,8 +601,7 @@ namespace cs::engine
 					a_target.baseDefines,
 					name,
 					&ShaderInjectionDefineMetadata::name);
-				if (baseDefine != a_target.baseDefines.end()
-					&& baseDefine->value != value) {
+				if (baseDefine != a_target.baseDefines.end() && baseDefine->value != value) {
 					a_conflictingName = name;
 					a_existingValue = baseDefine->value;
 					return true;
@@ -611,8 +610,7 @@ namespace cs::engine
 					if ((contribution.stages & a_registration.stages) == 0)
 						continue;
 					const auto existing = contribution.defines.find(name);
-					if (existing != contribution.defines.end()
-						&& existing->second != value) {
+					if (existing != contribution.defines.end() && existing->second != value) {
 						a_conflictingName = name;
 						a_existingValue = existing->second;
 						return true;
@@ -641,8 +639,7 @@ namespace cs::engine
 			for (const auto& claim : a_claims) {
 				if (claim.resourceType != ShaderResourceType::kConstantBuffer)
 					continue;
-				if (claim.slot != render::kSharedDataSlot
-					&& claim.slot != render::kFeatureDataSlot) {
+				if (claim.slot != render::kSharedDataSlot && claim.slot != render::kFeatureDataSlot) {
 					continue;
 				}
 				return claim;
@@ -695,8 +692,7 @@ namespace cs::engine
 					a_target.baseDefines,
 					name,
 					&ShaderInjectionDefineMetadata::name);
-				if (baseDefine != a_target.baseDefines.end()
-					&& baseDefine->value != value) {
+				if (baseDefine != a_target.baseDefines.end() && baseDefine->value != value) {
 					L->error(
 						"Replacement registration '{}' for '{}' rejected: {}={} conflicts with the target base define {}.",
 						a_registration.contributor,
@@ -713,8 +709,7 @@ namespace cs::engine
 					[&](std::size_t a_stage) {
 						const auto existing =
 							a_ledger.defines[a_stage].find(name);
-						if (existing != a_ledger.defines[a_stage].end()
-							&& existing->second != value) {
+						if (existing != a_ledger.defines[a_stage].end() && existing->second != value) {
 							conflict = true;
 							conflictingValue = existing->second;
 						}
@@ -770,8 +765,7 @@ namespace cs::engine
 
 				const auto targetIndex = ToIndex(metadata.id);
 				auto developerOverride = a_developerOverrides[targetIndex];
-				if (developerOverride == DeveloperShaderOverride::kForceOff
-					&& !a_developerForceOffEnabled)
+				if (developerOverride == DeveloperShaderOverride::kForceOff && !a_developerForceOffEnabled)
 					developerOverride = DeveloperShaderOverride::kAuto;
 				auto requestReasons = ShaderInjectionRequestReason::kNone;
 				if (a_baselineOwnership[targetIndex]) {
@@ -861,10 +855,8 @@ namespace cs::engine
 						registration.slotClaims.begin(),
 						registration.slotClaims.end());
 					if (registration.bind) {
-						target.binds.push_back({
-							registration.stages,
-							registration.bind
-						});
+						target.binds.push_back({ registration.stages,
+							registration.bind });
 					}
 				}
 
@@ -876,15 +868,11 @@ namespace cs::engine
 
 				for (const auto& contribution : target.contributions) {
 					const bool stageMatched =
-						(contribution.stages
-							& SupportedStages(metadata.id))
-						!= 0;
+						(contribution.stages & SupportedStages(metadata.id)) != 0;
 					if (!stageMatched) {
 						L->warn(
 							"Contributor '{}' for '{}' targets no registered shader stages; defines ignored.",
-							contribution.contributor.empty()
-								? "<unnamed>"
-								: contribution.contributor,
+							contribution.contributor.empty() ? "<unnamed>" : contribution.contributor,
 							metadata.name);
 					}
 				}
@@ -911,8 +899,7 @@ namespace cs::engine
 			const std::wstring& a_developerSourceRoot)
 		{
 			const bool useDeveloperRoot =
-				a_developerOverride == DeveloperShaderOverride::kForceOn
-				&& !a_developerSourceRoot.empty();
+				a_developerOverride == DeveloperShaderOverride::kForceOn && !a_developerSourceRoot.empty();
 			const std::filesystem::path root =
 				useDeveloperRoot ? a_developerSourceRoot : kDefaultShaderRoot;
 			return root / a_sourcePath;
@@ -958,8 +945,7 @@ namespace cs::engine
 					std::scoped_lock lock(service.nativeVariantMutex);
 					const auto entry = service.nativeVariants.find(a_key);
 					// An invalidated candidate must not consume the new generation's notice.
-					if (entry != service.nativeVariants.end()
-						&& entry->second == candidate) {
+					if (entry != service.nativeVariants.end() && entry->second == candidate) {
 						reportUnsupported = !std::exchange(
 							service.unsupportedNativeVariantReported[ToIndex(descriptor.target)],
 							true);
@@ -1113,15 +1099,14 @@ namespace cs::engine
 			if (!shader) {
 				auto& runtime =
 					GetService().runtime[ToIndex(a_key.target)];
-				if (compilation->GetState()
-					== ShaderVariantCompilationState::kFailed) {
+				if (compilation->GetState() == ShaderVariantCompilationState::kFailed) {
 					if (!variant->failureObserved.exchange(
 							true, std::memory_order_relaxed)) {
 						runtime.passthroughCompileFail.fetch_add(
 							1, std::memory_order_relaxed);
 					}
 				} else if (!variant->pendingObserved.exchange(
-						true, std::memory_order_relaxed)) {
+							   true, std::memory_order_relaxed)) {
 					runtime.passthroughNotReady.fetch_add(
 						1, std::memory_order_relaxed);
 				}
@@ -1160,15 +1145,12 @@ namespace cs::engine
 
 			std::size_t trailingBytecodeSize = 0;
 			if constexpr (
-				std::is_same_v<TWrapper, RE::BSGraphics::VertexShader>
-				|| std::is_same_v<
-					TWrapper,
-					RE::BSGraphics::ComputeShader>) {
+				std::is_same_v<TWrapper, RE::BSGraphics::VertexShader> || std::is_same_v<
+																			  TWrapper,
+																			  RE::BSGraphics::ComputeShader>) {
 				trailingBytecodeSize = a_nativeWrapper->byteCodeSize;
 			}
-			if (trailingBytecodeSize
-				> std::numeric_limits<std::size_t>::max()
-					- sizeof(TWrapper)) {
+			if (trailingBytecodeSize > std::numeric_limits<std::size_t>::max() - sizeof(TWrapper)) {
 				return nullptr;
 			}
 			auto storage = std::make_unique<std::byte[]>(
@@ -1192,8 +1174,7 @@ namespace cs::engine
 					key,
 					NativeReplacementWrapper{
 						.storage = std::move(storage),
-						.shader = std::move(shaderLifetime)
-					});
+						.shader = std::move(shaderLifetime) });
 			return reinterpret_cast<TWrapper*>(
 				inserted->second.storage.get());
 		}
@@ -1229,11 +1210,11 @@ namespace cs::engine
 				_previousTarget(t_activeTarget)
 			{
 				t_activeDefines = a_variant ?
-					&a_variant->effectiveDefines :
-					nullptr;
+				                      &a_variant->effectiveDefines :
+				                      nullptr;
 				t_activeTarget = a_variant ?
-					a_variant->target :
-					ShaderInjectionTarget::kCount;
+				                     a_variant->target :
+				                     ShaderInjectionTarget::kCount;
 			}
 			~ActiveVariantScope() noexcept
 			{
@@ -1297,7 +1278,7 @@ namespace cs::engine
 			}
 
 			if (a_context != g_computeDispatchContext.load(
-					std::memory_order_acquire)) {
+								 std::memory_order_acquire)) {
 				g_computeContextRejections.fetch_add(
 					1, std::memory_order_relaxed);
 				a_context->Dispatch(
@@ -1372,9 +1353,7 @@ namespace cs::engine
 			g_computeMatchingDispatches.fetch_add(
 				1, std::memory_order_relaxed);
 			const bool hasFeatureBindings =
-				(target->contributedStages
-					& ShaderStageBit(ShaderStage::kCompute))
-				!= 0;
+				(target->contributedStages & ShaderStageBit(ShaderStage::kCompute)) != 0;
 			if (hasFeatureBindings) {
 				if (owner->target !=
 						ShaderInjectionTarget::kDfTiledLighting ||
@@ -1432,13 +1411,9 @@ namespace cs::engine
 			std::uintptr_t a_target) noexcept
 		{
 			const auto displacement =
-				static_cast<std::int64_t>(a_target)
-				- static_cast<std::int64_t>(
-					a_source + sizeof(REL::ASM::JMP5));
-			return displacement
-				>= std::numeric_limits<std::int32_t>::min()
-				&& displacement
-				<= std::numeric_limits<std::int32_t>::max();
+				static_cast<std::int64_t>(a_target) - static_cast<std::int64_t>(
+														  a_source + sizeof(REL::ASM::JMP5));
+			return displacement >= std::numeric_limits<std::int32_t>::min() && displacement <= std::numeric_limits<std::int32_t>::max();
 		}
 
 		bool InstallComputeDispatchBridgeAt(
@@ -1453,23 +1428,13 @@ namespace cs::engine
 				g_computeDispatchBridgeTail.load(
 					std::memory_order_acquire);
 			if (installedTail != 0) {
-				return installedTail == a_validatedTail
-					&& g_computeDispatchContext.load(
-						std::memory_order_acquire)
-						== a_immediateContext
-					&& std::memcmp(
-						reinterpret_cast<const void*>(
-							installedTail),
-						g_computeDispatchBridgePatch.data(),
-						g_computeDispatchBridgePatch.size())
-						== 0;
+				return installedTail == a_validatedTail && g_computeDispatchContext.load(std::memory_order_acquire) == a_immediateContext && std::memcmp(reinterpret_cast<const void*>(installedTail), g_computeDispatchBridgePatch.data(), g_computeDispatchBridgePatch.size()) == 0;
 			}
 
 			if (std::memcmp(
 					reinterpret_cast<const void*>(a_validatedTail),
 					kRunComputeShaderDispatchTail.data(),
-					kRunComputeShaderDispatchTail.size())
-				!= 0) {
+					kRunComputeShaderDispatchTail.size()) != 0) {
 				L->error(
 					"RunComputeShader dispatch bridge installation refused: "
 					"the 7-byte tail does not match the supported layout.");
@@ -1507,22 +1472,20 @@ namespace cs::engine
 					patch.data(),
 					patch.size());
 				const bool patchOwned = std::memcmp(
-						reinterpret_cast<const void*>(
-							a_validatedTail),
-						patch.data(),
-						patch.size())
-					== 0;
+											reinterpret_cast<const void*>(
+												a_validatedTail),
+											patch.data(),
+											patch.size()) == 0;
 				if (!patchOwned) {
 					const bool restored = REL::WriteSafe(
-						a_validatedTail,
-						kRunComputeShaderDispatchTail.data(),
-						kRunComputeShaderDispatchTail.size())
-						&& std::memcmp(
-							reinterpret_cast<const void*>(
-								a_validatedTail),
-							kRunComputeShaderDispatchTail.data(),
-							kRunComputeShaderDispatchTail.size())
-							== 0;
+											  a_validatedTail,
+											  kRunComputeShaderDispatchTail.data(),
+											  kRunComputeShaderDispatchTail.size()) &&
+					                      std::memcmp(
+											  reinterpret_cast<const void*>(
+												  a_validatedTail),
+											  kRunComputeShaderDispatchTail.data(),
+											  kRunComputeShaderDispatchTail.size()) == 0;
 					L->error(
 						"RunComputeShader dispatch bridge installation failed: "
 						"the written tail could not be verified (rollback={}).",
@@ -1568,12 +1531,9 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		const bool installsPreDrawHook =
-			static_cast<bool>(a_registration.bind)
-			&& (a_registration.stages
-				& ShaderStageBit(ShaderStage::kPixel))
-				!= 0;
+			static_cast<bool>(a_registration.bind) && (a_registration.stages & ShaderStageBit(ShaderStage::kPixel)) != 0;
 		const auto admissible = [&service](
-			const ShaderReplacementRegistration& a_candidate) {
+									const ShaderReplacementRegistration& a_candidate) {
 			if (service.lifecycle != Lifecycle::kCollecting) {
 				LogLateMutation("Replacement registration");
 				return false;
@@ -1583,8 +1543,7 @@ namespace cs::engine
 				return false;
 			}
 			const auto& metadata = kTargets[ToIndex(a_candidate.targetId)];
-			if (a_candidate.stages == 0
-				|| (a_candidate.stages & ~kValidShaderStages) != 0) {
+			if (a_candidate.stages == 0 || (a_candidate.stages & ~kValidShaderStages) != 0) {
 				L->error(
 					"Replacement registration '{}' for '{}' rejected: invalid shader stage mask 0x{:X}.",
 					a_candidate.contributor,
@@ -1719,21 +1678,18 @@ namespace cs::engine
 		auto& service = GetService();
 		std::scoped_lock lock(service.mutex);
 		if (service.lifecycle != Lifecycle::kPublished) {
-			a_error = std::string(a_contributor)
-				+ " routes were validated before injection publication";
+			a_error = std::string(a_contributor) + " routes were validated before injection publication";
 			return false;
 		}
 		if (!service.enabled) {
-			a_error = std::string(a_contributor)
-				+ " routes are disabled by the shader-injection core kill switch";
+			a_error = std::string(a_contributor) + " routes are disabled by the shader-injection core kill switch";
 			return false;
 		}
 
 		const auto plan =
 			service.published.load(std::memory_order_acquire);
 		if (!plan || !plan->device) {
-			a_error = std::string(a_contributor)
-				+ " routes were not published because the D3D11 device is unavailable";
+			a_error = std::string(a_contributor) + " routes were not published because the D3D11 device is unavailable";
 			return false;
 		}
 
@@ -1747,44 +1703,33 @@ namespace cs::engine
 			const auto* metadata =
 				GetShaderInjectionTarget(registration.targetId);
 			if (!metadata) {
-				a_error = "contributor '" + std::string(a_contributor)
-					+ "' registered an unknown shader-injection target";
+				a_error = "contributor '" + std::string(a_contributor) + "' registered an unknown shader-injection target";
 				return false;
 			}
 			if ((registration.stages & metadata->supportedStages) == 0) {
-				a_error = "'" + std::string(metadata->name)
-					+ "' has no supported shader stage for contributor '"
-					+ std::string(a_contributor) + "'";
+				a_error = "'" + std::string(metadata->name) + "' has no supported shader stage for contributor '" + std::string(a_contributor) + "'";
 				return false;
 			}
 
 			const auto& runtime =
 				service.runtime[ToIndex(registration.targetId)];
-			if (!runtime.requested.load(std::memory_order_relaxed)
-				|| !HasShaderInjectionRequestReason(
-					static_cast<ShaderInjectionRequestReason>(
-						runtime.requestReasons.load(
-							std::memory_order_relaxed)),
-					ShaderInjectionRequestReason::kFeatureContributor)) {
-				a_error = "'" + std::string(metadata->name)
-					+ "' did not freeze feature ownership for contributor '"
-					+ std::string(a_contributor) + "'";
+			if (!runtime.requested.load(std::memory_order_relaxed) || !HasShaderInjectionRequestReason(
+																		  static_cast<ShaderInjectionRequestReason>(
+																			  runtime.requestReasons.load(
+																				  std::memory_order_relaxed)),
+																		  ShaderInjectionRequestReason::kFeatureContributor)) {
+				a_error = "'" + std::string(metadata->name) + "' did not freeze feature ownership for contributor '" + std::string(a_contributor) + "'";
 				return false;
 			}
 			if (runtime.slotCollision.load(std::memory_order_relaxed)) {
-				a_error = "'" + std::string(metadata->name)
-					+ "' cannot deliver contributor '"
-					+ std::string(a_contributor)
-					+ "' because its slot or define claims conflict";
+				a_error = "'" + std::string(metadata->name) + "' cannot deliver contributor '" + std::string(a_contributor) + "' because its slot or define claims conflict";
 				return false;
 			}
 
 			const auto* published =
 				FindPublishedTarget(*plan, registration.targetId);
 			if (!published) {
-				a_error = "'" + std::string(metadata->name)
-					+ "' did not publish the registered route for contributor '"
-					+ std::string(a_contributor) + "'";
+				a_error = "'" + std::string(metadata->name) + "' did not publish the registered route for contributor '" + std::string(a_contributor) + "'";
 				if (!runtime.publicationError.empty()) {
 					a_error += ": ";
 					a_error += runtime.publicationError;
@@ -1795,25 +1740,16 @@ namespace cs::engine
 			const auto contribution = std::ranges::find_if(
 				published->contributions,
 				[&](const ShaderReplacementRegistration& a_candidate) {
-					return a_candidate.contributor == a_contributor
-						&& a_candidate.targetId == registration.targetId
-						&& a_candidate.stages == registration.stages
-						&& a_candidate.defines == registration.defines
-						&& a_candidate.slotClaims == registration.slotClaims
-						&& !std::ranges::contains(
-							matched, std::addressof(a_candidate));
+					return a_candidate.contributor == a_contributor && a_candidate.targetId == registration.targetId && a_candidate.stages == registration.stages && a_candidate.defines == registration.defines && a_candidate.slotClaims == registration.slotClaims && !std::ranges::contains(matched, std::addressof(a_candidate));
 				});
 			if (contribution == published->contributions.end()) {
-				a_error = "'" + std::string(metadata->name)
-					+ "' lost a registered route for contributor '"
-					+ std::string(a_contributor) + "'";
+				a_error = "'" + std::string(metadata->name) + "' lost a registered route for contributor '" + std::string(a_contributor) + "'";
 				return false;
 			}
 			matched.push_back(std::addressof(*contribution));
 		}
 		if (!foundRegistration) {
-			a_error = "no shader routes were registered for contributor '"
-				+ std::string(a_contributor) + "'";
+			a_error = "no shader routes were registered for contributor '" + std::string(a_contributor) + "'";
 			return false;
 		}
 
@@ -1837,8 +1773,7 @@ namespace cs::engine
 		if (installedTail != 0) {
 			const bool sameContext =
 				g_computeDispatchContext.load(
-					std::memory_order_acquire)
-				== a_immediateContext;
+					std::memory_order_acquire) == a_immediateContext;
 			if (!sameContext) {
 				L->error(
 					"RunComputeShader dispatch bridge rejects a replacement "
@@ -1857,12 +1792,7 @@ namespace cs::engine
 					".text");
 			const auto textBegin = text.GetAddress();
 			const auto textEnd = textBegin + text.GetSize();
-			if (!function
-				|| !textBegin
-				|| tail < textBegin
-				|| tail > textEnd
-				|| textEnd - tail
-					< kRunComputeShaderDispatchTail.size()) {
+			if (!function || !textBegin || tail < textBegin || tail > textEnd || textEnd - tail < kRunComputeShaderDispatchTail.size()) {
 				L->error(
 					"RunComputeShader dispatch bridge installation refused: "
 					"REL target + {:#x} is outside the executable .text section.",
@@ -1900,16 +1830,14 @@ namespace cs::engine
 		const auto tail =
 			g_computeDispatchBridgeTail.load(
 				std::memory_order_acquire);
-		if (!tail
-			|| !g_computeDispatchContext.load(
-				std::memory_order_acquire)) {
+		if (!tail || !g_computeDispatchContext.load(
+						 std::memory_order_acquire)) {
 			return false;
 		}
 		return std::memcmp(
-			reinterpret_cast<const void*>(tail),
-			g_computeDispatchBridgePatch.data(),
-			g_computeDispatchBridgePatch.size())
-			== 0;
+				   reinterpret_cast<const void*>(tail),
+				   g_computeDispatchBridgePatch.data(),
+				   g_computeDispatchBridgePatch.size()) == 0;
 	}
 
 	ComputeDispatchBridgeStatus GetComputeDispatchBridgeStatus() noexcept
@@ -1944,9 +1872,11 @@ namespace cs::engine
 		auto& service = GetService();
 		std::vector<ShaderReplacementRegistration> registrations;
 		std::array<DeveloperShaderOverride,
-			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
+			static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
+			developerOverrides{};
 		std::array<bool,
-			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> baselineOwnership{};
+			static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
+			baselineOwnership{};
 		std::wstring developerSourceRoot;
 		bool developerForceOffEnabled = false;
 		bool enabled = false;
@@ -1993,9 +1923,7 @@ namespace cs::engine
 				const auto targetIndex =
 					ToIndex(frozenTarget.metadata->id);
 				auto& runtime = service.runtime[targetIndex];
-				if (frozenTarget.metadata->id
-						== ShaderInjectionTarget::kDfTiledLighting
-					&& !ComputeDispatchBridgeInstalled()) {
+				if (frozenTarget.metadata->id == ShaderInjectionTarget::kDfTiledLighting && !ComputeDispatchBridgeInstalled()) {
 					runtime.publicationError =
 						"RunComputeShader dispatch bridge is unavailable";
 					L->error(
@@ -2015,8 +1943,7 @@ namespace cs::engine
 					.id = frozenTarget.metadata->id,
 					.contributedStages = contributedStages,
 					.binds = frozenTarget.binds,
-					.contributions = frozenTarget.contributions
-				});
+					.contributions = frozenTarget.contributions });
 				++publishedTargets;
 			}
 		}
@@ -2082,8 +2009,7 @@ namespace cs::engine
 			const auto metadata = service.nativeShaderMetadata.find(
 				reinterpret_cast<ID3D11DeviceChild*>(
 					a_nativePixel->shader));
-			return metadata != service.nativeShaderMetadata.end()
-				&& metadata->second.forceEarlyDepthStencil;
+			return metadata != service.nativeShaderMetadata.end() && metadata->second.forceEarlyDepthStencil;
 		}
 
 		void ObserveNativeShaderImpl(
@@ -2099,9 +2025,7 @@ namespace cs::engine
 					return;
 				const auto supportedStages =
 					SupportedStages(family->target);
-				if ((supportedStages
-						& ShaderStageBit(ShaderStage::kVertex))
-					!= 0) {
+				if ((supportedStages & ShaderStageBit(ShaderStage::kVertex)) != 0) {
 					for (auto* entry : native::VertexShaders(a_shader)) {
 						if (!entry || !entry->shader)
 							continue;
@@ -2112,9 +2036,7 @@ namespace cs::engine
 								entry->id));
 					}
 				}
-				if ((supportedStages
-						& ShaderStageBit(ShaderStage::kPixel))
-					!= 0) {
+				if ((supportedStages & ShaderStageBit(ShaderStage::kPixel)) != 0) {
 					for (auto* entry : native::PixelShaders(a_shader)) {
 						if (!entry || !entry->shader)
 							continue;
@@ -2127,9 +2049,7 @@ namespace cs::engine
 									entry)));
 					}
 				}
-				if ((supportedStages
-						& ShaderStageBit(ShaderStage::kCompute))
-					!= 0) {
+				if ((supportedStages & ShaderStageBit(ShaderStage::kCompute)) != 0) {
 					for (auto* entry : native::ComputeShaders(a_shader)) {
 						if (!entry || !entry->shader)
 							continue;
@@ -2160,86 +2080,84 @@ namespace cs::engine
 		}
 
 		NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBindingImpl(
-		const NativeShaderFamilyContext& a_family,
-		std::uint32_t a_vertexShaderId,
-		std::uint32_t a_pixelShaderId,
-		RE::BSGraphics::VertexShader* a_nativeVertex,
-		RE::BSGraphics::PixelShader* a_nativePixel) noexcept
-	{
-		NativeGraphicsShaderBinding result{
-			.vertex = a_nativeVertex,
-			.pixel = a_nativePixel
-		};
-		if (!IsValidTarget(a_family.target))
-			return result;
-
-		try {
-			const auto plan =
-				GetService().published.load(std::memory_order_acquire);
-			const auto* target =
-				plan ? FindPublishedTarget(*plan, a_family.target) : nullptr;
-			if (!target)
+			const NativeShaderFamilyContext& a_family,
+			std::uint32_t a_vertexShaderId,
+			std::uint32_t a_pixelShaderId,
+			RE::BSGraphics::VertexShader* a_nativeVertex,
+			RE::BSGraphics::PixelShader* a_nativePixel) noexcept
+		{
+			NativeGraphicsShaderBinding result{
+				.vertex = a_nativeVertex,
+				.pixel = a_nativePixel
+			};
+			if (!IsValidTarget(a_family.target))
 				return result;
 
-			auto& runtime =
-				GetService().runtime[ToIndex(a_family.target)];
-			if (a_nativeVertex
-				&& a_nativeVertex->id == a_vertexShaderId) {
-				runtime.matches.fetch_add(1, std::memory_order_relaxed);
-				if (auto* replacement =
-						AcquireNativeReplacementWrapper<
-							RE::BSGraphics::VertexShader,
-							ID3D11VertexShader>(
-							*plan,
-							*target,
-							MakeNativeVariantKey(
-								a_family,
-								ShaderStage::kVertex,
-								a_vertexShaderId),
-							a_nativeVertex)) {
-					result.vertex = replacement;
-					runtime.substitutions.fetch_add(
-						1, std::memory_order_relaxed);
-				}
-			}
+			try {
+				const auto plan =
+					GetService().published.load(std::memory_order_acquire);
+				const auto* target =
+					plan ? FindPublishedTarget(*plan, a_family.target) : nullptr;
+				if (!target)
+					return result;
 
-			if (a_nativePixel
-				&& a_nativePixel->id == a_pixelShaderId) {
-				runtime.matches.fetch_add(1, std::memory_order_relaxed);
-				if (auto* replacement =
-						AcquireNativeReplacementWrapper<
-							RE::BSGraphics::PixelShader,
-							ID3D11PixelShader>(
-							*plan,
-							*target,
-							MakeNativeVariantKey(
-								a_family,
-								ShaderStage::kPixel,
-								a_pixelShaderId,
-								NativePixelForcesEarlyDepthStencil(
-									a_nativePixel)),
-							a_nativePixel)) {
-					result.pixel = replacement;
-					runtime.substitutions.fetch_add(
-						1, std::memory_order_relaxed);
+				auto& runtime =
+					GetService().runtime[ToIndex(a_family.target)];
+				if (a_nativeVertex && a_nativeVertex->id == a_vertexShaderId) {
+					runtime.matches.fetch_add(1, std::memory_order_relaxed);
+					if (auto* replacement =
+							AcquireNativeReplacementWrapper<
+								RE::BSGraphics::VertexShader,
+								ID3D11VertexShader>(
+								*plan,
+								*target,
+								MakeNativeVariantKey(
+									a_family,
+									ShaderStage::kVertex,
+									a_vertexShaderId),
+								a_nativeVertex)) {
+						result.vertex = replacement;
+						runtime.substitutions.fetch_add(
+							1, std::memory_order_relaxed);
+					}
 				}
+
+				if (a_nativePixel && a_nativePixel->id == a_pixelShaderId) {
+					runtime.matches.fetch_add(1, std::memory_order_relaxed);
+					if (auto* replacement =
+							AcquireNativeReplacementWrapper<
+								RE::BSGraphics::PixelShader,
+								ID3D11PixelShader>(
+								*plan,
+								*target,
+								MakeNativeVariantKey(
+									a_family,
+									ShaderStage::kPixel,
+									a_pixelShaderId,
+									NativePixelForcesEarlyDepthStencil(
+										a_nativePixel)),
+								a_nativePixel)) {
+						result.pixel = replacement;
+						runtime.substitutions.fetch_add(
+							1, std::memory_order_relaxed);
+					}
+				}
+			} catch (const std::exception& e) {
+				CS_LOG_EVERY_MS(
+					L,
+					2000,
+					spdlog::level::warn,
+					"Native shader descriptor routing failed: {}.",
+					e.what());
+			} catch (...) {
+				CS_LOG_EVERY_MS(
+					L,
+					2000,
+					spdlog::level::warn,
+					"Native shader descriptor routing failed.");
 			}
-		} catch (const std::exception& e) {
-			CS_LOG_EVERY_MS(
-				L,
-				2000,
-				spdlog::level::warn,
-				"Native shader descriptor routing failed: {}.",
-				e.what());
-		} catch (...) {
-			CS_LOG_EVERY_MS(
-				L,
-				2000,
-				spdlog::level::warn,
-				"Native shader descriptor routing failed.");
+			return result;
 		}
-		return result;
-	}
 	}
 
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
@@ -2293,14 +2211,8 @@ namespace cs::engine
 				return a_nativeCompute;
 
 			const bool hasFeatureBindings =
-				(target->contributedStages
-					& ShaderStageBit(ShaderStage::kCompute))
-				!= 0;
-			if (hasFeatureBindings
-				&& (owner->target
-						!= ShaderInjectionTarget::kDfTiledLighting
-					|| !render::IsDeferredLightsActive()
-					|| !ComputeDispatchBridgeInstalled())) {
+				(target->contributedStages & ShaderStageBit(ShaderStage::kCompute)) != 0;
+			if (hasFeatureBindings && (owner->target != ShaderInjectionTarget::kDfTiledLighting || !render::IsDeferredLightsActive() || !ComputeDispatchBridgeInstalled())) {
 				g_computePhaseRejections.fetch_add(
 					1, std::memory_order_relaxed);
 				return a_nativeCompute;
@@ -2359,18 +2271,12 @@ namespace cs::engine
 				if (!entry || !entry->shader)
 					continue;
 				const bool prequeue =
-					a_hasPayload
-					&& a_target
-						== ShaderInjectionTarget::kDfTiledLighting
-					&& a_nativeName == "DFTiledLighting"
-					&& (entry->id == 0 || entry->id == 3);
+					a_hasPayload && a_target == ShaderInjectionTarget::kDfTiledLighting && a_nativeName == "DFTiledLighting" && (entry->id == 0 || entry->id == 3);
 				RecordNativeComputeShader(
-					MakeNativeVariantKey({
-						.target = a_target,
+					MakeNativeVariantKey({ .target = a_target,
 						.stage = ShaderStage::kCompute,
 						.descriptor = entry->id,
-						.nativeName = a_nativeName
-					}),
+						.nativeName = a_nativeName }),
 					reinterpret_cast<ID3D11ComputeShader*>(
 						entry->shader),
 					prequeue);
@@ -2390,8 +2296,7 @@ namespace cs::engine
 		std::size_t a_bytecodeLength,
 		ID3D11DeviceChild* a_shader) noexcept
 	{
-		if (a_stage != ShaderStage::kPixel
-			|| !a_bytecode || a_bytecodeLength == 0 || !a_shader) {
+		if (a_stage != ShaderStage::kPixel || !a_bytecode || a_bytecodeLength == 0 || !a_shader) {
 			return;
 		}
 		winrt::com_ptr<ID3D11ShaderReflection> reflection;
@@ -2403,9 +2308,7 @@ namespace cs::engine
 		}
 		Service::NativeShaderMetadata metadata;
 		metadata.forceEarlyDepthStencil =
-			(reflection->GetRequiresFlags()
-				& D3D_SHADER_REQUIRES_EARLY_DEPTH_STENCIL)
-			!= 0;
+			(reflection->GetRequiresFlags() & D3D_SHADER_REQUIRES_EARLY_DEPTH_STENCIL) != 0;
 		auto& service = GetService();
 		std::scoped_lock lock(service.nativeVariantMutex);
 		service.nativeShaderMetadata.insert_or_assign(a_shader, metadata);
@@ -2413,8 +2316,8 @@ namespace cs::engine
 
 #ifdef FO4CS_SHADER_INJECTION_TESTING
 	std::optional<NativeShaderMetadataForTesting>
-		GetObservedNativeShaderMetadataForTesting(
-			ID3D11DeviceChild* a_shader) noexcept
+	GetObservedNativeShaderMetadataForTesting(
+		ID3D11DeviceChild* a_shader) noexcept
 	{
 		if (!a_shader)
 			return std::nullopt;
@@ -2464,19 +2367,17 @@ namespace cs::engine
 	}
 
 	NativeGraphicsShaderBinding
-		ResolveNativeGraphicsShaderBindingForTesting(
-			ShaderInjectionTarget a_target,
-			std::string_view a_nativeName,
-			std::uint32_t a_vertexShaderId,
-			std::uint32_t a_pixelShaderId,
-			RE::BSGraphics::VertexShader* a_nativeVertex,
-			RE::BSGraphics::PixelShader* a_nativePixel) noexcept
+	ResolveNativeGraphicsShaderBindingForTesting(
+		ShaderInjectionTarget a_target,
+		std::string_view a_nativeName,
+		std::uint32_t a_vertexShaderId,
+		std::uint32_t a_pixelShaderId,
+		RE::BSGraphics::VertexShader* a_nativeVertex,
+		RE::BSGraphics::PixelShader* a_nativePixel) noexcept
 	{
 		return ResolveNativeGraphicsShaderBindingImpl(
-			{
-				.target = a_target,
-				.nativeName = a_nativeName
-			},
+			{ .target = a_target,
+				.nativeName = a_nativeName },
 			a_vertexShaderId,
 			a_pixelShaderId,
 			a_nativeVertex,
@@ -2484,16 +2385,16 @@ namespace cs::engine
 	}
 
 	RE::BSGraphics::VertexShader*
-		CacheNativeVertexReplacementWrapperForTesting(
-			RE::BSGraphics::VertexShader* a_nativeVertex,
-			ID3D11VertexShader* a_replacement) noexcept
+	CacheNativeVertexReplacementWrapperForTesting(
+		RE::BSGraphics::VertexShader* a_nativeVertex,
+		ID3D11VertexShader* a_replacement) noexcept
 	{
 		return CacheNativeReplacementWrapper(
 			a_nativeVertex, a_replacement);
 	}
 
 	NativeVariantCacheStatsForTesting
-		GetNativeVariantCacheStatsForTesting() noexcept
+	GetNativeVariantCacheStatsForTesting() noexcept
 	{
 		NativeVariantCacheStatsForTesting result;
 		auto& service = GetService();
@@ -2525,12 +2426,10 @@ namespace cs::engine
 	{
 		try {
 			RecordNativeComputeShader(
-				MakeNativeVariantKey({
-					.target = a_target,
+				MakeNativeVariantKey({ .target = a_target,
 					.stage = ShaderStage::kCompute,
 					.descriptor = a_descriptor,
-					.nativeName = a_nativeName
-				}),
+					.nativeName = a_nativeName }),
 				a_shader,
 				false);
 		} catch (...) {

@@ -128,8 +128,8 @@ float ScreenToViewDepth(const float2 screenPos, const float rawDepth)
 		nearDepth ? rawDepth * 100.0 : rawDepth * 1.01 - 0.01,
 		1.0);
 	return nearDepth ?
-		dot(NearReprojZ, ndc) / dot(NearReprojW, ndc) :
-		dot(FarReprojZ, ndc) / dot(FarReprojW, ndc);
+	           dot(NearReprojZ, ndc) / dot(NearReprojW, ndc) :
+	           dot(FarReprojZ, ndc) / dot(FarReprojW, ndc);
 }
 
 float2 ViewToUV(const float3 viewPos)

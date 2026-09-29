@@ -4,11 +4,9 @@ RWTexture2D<float> Mip1 : register(u1);
 
 groupshared float GroupMinimum[64];
 
-[numthreads(8, 8, 1)]
-void main(
+[numthreads(8, 8, 1)] void main(
 	uint2 groupThreadID : SV_GroupThreadID,
-	uint2 dispatchThreadID : SV_DispatchThreadID)
-{
+	uint2 dispatchThreadID : SV_DispatchThreadID) {
 	uint groupIndex = groupThreadID.y * 8 + groupThreadID.x;
 	float4 dispatchCoordinate = (float4)dispatchThreadID.xyyy;
 	uint2 sourceCoordinate =
@@ -31,8 +29,7 @@ void main(
 	Mip0[dispatchThreadID] = minimum;
 
 	uint2 parity = dispatchThreadID & uint2(1, 1);
-	if (parity.x == 0 && parity.y == 0)
-	{
+	if (parity.x == 0 && parity.y == 0) {
 		uint3 neighborIndices = groupIndex + uint3(1, 8, 9);
 		float neighbor0 = GroupMinimum[neighborIndices.x];
 		float neighbor1 = GroupMinimum[neighborIndices.y];

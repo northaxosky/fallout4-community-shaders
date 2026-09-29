@@ -11,10 +11,10 @@ namespace cs::shader_cache
 {
 	struct SourceCompileOutcome
 	{
-		bool                      succeeded = false;
+		bool succeeded = false;
 		std::vector<std::uint8_t> bytecode;
-		DependencyManifest        manifest;
-		std::string               error;
+		DependencyManifest manifest;
+		std::string error;
 	};
 
 	SourceCompileOutcome CompileSourceWithManifest(const ShaderRecipe& a_recipe);

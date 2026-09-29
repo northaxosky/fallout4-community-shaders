@@ -23,5 +23,5 @@ namespace cs::engine
 		std::string_view a_subclass,
 		std::uint32_t a_techniqueBits) noexcept;
 	PixelShaderRuntimeResolverCodeAddresses
-		GetPixelShaderRuntimeResolverCodeAddresses() noexcept;
+	GetPixelShaderRuntimeResolverCodeAddresses() noexcept;
 }

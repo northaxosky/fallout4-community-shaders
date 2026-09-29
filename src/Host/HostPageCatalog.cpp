@@ -70,9 +70,9 @@ namespace cs::host
 				std::ranges::find(FeatureCategories::kRenderOrder, a_displayName);
 			if (liveCategory != FeatureCategories::kRenderOrder.end()) {
 				return 100 +
-					static_cast<std::int32_t>(
-						liveCategory - FeatureCategories::kRenderOrder.begin()) *
-						10;
+				       static_cast<std::int32_t>(
+						   liveCategory - FeatureCategories::kRenderOrder.begin()) *
+				           10;
 			}
 			if (a_displayName == FeatureCategories::kMisc)
 				return 200;
@@ -100,8 +100,7 @@ namespace cs::host
 				const auto suffixText = "-" + std::to_string(suffix);
 				std::string candidate = base.substr(
 					0,
-					(std::min)(
-						base.size(),
+					(std::min)(base.size(),
 						kMaximumCategoryIdLength - suffixText.size()));
 				candidate += suffixText;
 				if (!a_usedIds.contains(candidate)) {
@@ -178,8 +177,8 @@ namespace cs::host
 		for (const auto& displayName : categoryNames) {
 			const auto* known = FindKnownCategory(displayName);
 			auto id = known ?
-				std::string(known->id) :
-				MakeUniqueCategoryId(displayName, usedCategoryIds);
+			              std::string(known->id) :
+			              MakeUniqueCategoryId(displayName, usedCategoryIds);
 			categoryIds.emplace(displayName, id);
 			categories.push_back(HostCategoryDescriptor{
 				.id = std::move(id),
@@ -189,7 +188,7 @@ namespace cs::host
 		}
 		std::ranges::sort(categories, [](const auto& a_lhs, const auto& a_rhs) {
 			return std::tie(a_lhs.sortKey, a_lhs.displayName, a_lhs.id) <
-				std::tie(a_rhs.sortKey, a_rhs.displayName, a_rhs.id);
+			       std::tie(a_rhs.sortKey, a_rhs.displayName, a_rhs.id);
 		});
 
 		std::vector<std::size_t> order(a_features.size());
@@ -224,10 +223,10 @@ namespace cs::host
 			if (displayName.empty())
 				displayName = id;
 			const std::string_view category = feature.active ?
-				(feature.category.empty() ?
-					 kUncategorized :
-					 std::string_view(feature.category)) :
-				kUnloadedCategory;
+			                                      (feature.category.empty() ?
+														  kUncategorized :
+														  std::string_view(feature.category)) :
+			                                      kUnloadedCategory;
 
 			pages.push_back(HostPageDescriptor{
 				.id = std::move(id),

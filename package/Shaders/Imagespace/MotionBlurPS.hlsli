@@ -10,8 +10,8 @@ SamplerState MotionSampler : register(s1);
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 float MotionWeight(float referenceLength, float2 coordinate)
@@ -28,8 +28,7 @@ float4 main(PS_INPUT input) : SV_Target
 	float centerDistance = length(input.TexCoord - Parameters[1].zw);
 	float blurLength =
 		velocityLength * saturate(centerDistance * 0.1 - 0.018);
-	if (blurLength < 0.001)
-	{
+	if (blurLength < 0.001) {
 		return Scene.Sample(SceneSampler, input.TexCoord);
 	}
 
@@ -41,7 +40,7 @@ float4 main(PS_INPUT input) : SV_Target
 	float denominator = centerWeight;
 
 	float4 tapCoordinates = input.TexCoord.xyxy +
-		offset.xyxy * float4(0.25, 0.25, 0.5, 0.5);
+	                        offset.xyxy * float4(0.25, 0.25, 0.5, 0.5);
 	tapCoordinates = min(tapCoordinates, Parameters[1].xyxy);
 	float firstWeight = MotionWeight(velocityLength, tapCoordinates.xy);
 	denominator += firstWeight;

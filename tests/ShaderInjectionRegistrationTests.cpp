@@ -43,7 +43,7 @@ namespace
 		{}
 
 		cs::engine::ShaderVariantCompilationState
-			GetState() const noexcept override
+		GetState() const noexcept override
 		{
 			return state;
 		}
@@ -105,8 +105,8 @@ namespace
 					0,
 					0,
 					bytecode.put(),
-					errors.put()))
-				|| !bytecode) {
+					errors.put())) ||
+				!bytecode) {
 				return std::make_shared<TestCompilationHandle>(
 					nullptr,
 					ShaderVariantCompilationState::kFailed,
@@ -123,8 +123,8 @@ namespace
 					bytecode->GetBufferPointer(),
 					bytecode->GetBufferSize(),
 					nullptr,
-					shader.put()))
-				|| !shader) {
+					shader.put())) ||
+				!shader) {
 				return std::make_shared<TestCompilationHandle>(
 					nullptr,
 					ShaderVariantCompilationState::kFailed,
@@ -185,7 +185,7 @@ namespace cs::render
 namespace cs::engine
 {
 	std::shared_ptr<ShaderVariantCompilationCache>
-		CreateCachingShaderVariantCompilationCache()
+	CreateCachingShaderVariantCompilationCache()
 	{
 		return std::make_shared<TestCompilationCache>();
 	}
@@ -216,17 +216,17 @@ namespace
 			D3D_FEATURE_LEVEL_11_0
 		};
 		return SUCCEEDED(D3D11CreateDevice(
-			nullptr,
-			D3D_DRIVER_TYPE_WARP,
-			nullptr,
-			0,
-			featureLevels,
-			static_cast<UINT>(std::size(featureLevels)),
-			D3D11_SDK_VERSION,
-			a_device.put(),
-			nullptr,
-			a_context.put()))
-			&& a_device && a_context;
+				   nullptr,
+				   D3D_DRIVER_TYPE_WARP,
+				   nullptr,
+				   0,
+				   featureLevels,
+				   static_cast<UINT>(std::size(featureLevels)),
+				   D3D11_SDK_VERSION,
+				   a_device.put(),
+				   nullptr,
+				   a_context.put())) &&
+		       a_device && a_context;
 	}
 
 	void CheckContributorConflict()
@@ -257,8 +257,8 @@ namespace
 				ShaderStage::kPixel,
 				family,
 				std::span(&contribution, 1),
-				&error)
-				&& !error.empty(),
+				&error) &&
+				!error.empty(),
 			"conflicting contributor defines were accepted");
 	}
 
@@ -309,11 +309,9 @@ namespace
 			ShaderReplacementRegistration reserved;
 			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
 			reserved.contributor = "ledger-reserved-slot";
-			reserved.slotClaims = { {
-				.stage = ShaderStage::kPixel,
+			reserved.slotClaims = { { .stage = ShaderStage::kPixel,
 				.resourceType = ShaderResourceType::kConstantBuffer,
-				.slot = slot
-			} };
+				.slot = slot } };
 			Expect(
 				!RegisterReplacement(std::move(reserved)),
 				"reserved b5/b6 claim was accepted");
@@ -514,13 +512,7 @@ namespace
 		ID3D11UnorderedAccessView* uav = nullptr;
 		a_context->CSGetUnorderedAccessViews(0, 1, &uav);
 		const bool matches =
-			buffers[0] == a_inputs.buffers[0].get()
-			&& buffers[1] == a_inputs.buffers[1].get()
-			&& buffers[2] == a_inputs.buffers[2].get()
-			&& highBuffer == a_inputs.highBuffer.get()
-			&& srv == a_inputs.srv.get()
-			&& highSrv == a_inputs.highSrv.get()
-			&& uav == a_uav;
+			buffers[0] == a_inputs.buffers[0].get() && buffers[1] == a_inputs.buffers[1].get() && buffers[2] == a_inputs.buffers[2].get() && highBuffer == a_inputs.highBuffer.get() && srv == a_inputs.srv.get() && highSrv == a_inputs.highSrv.get() && uav == a_uav;
 		for (auto* buffer : buffers) {
 			if (buffer)
 				buffer->Release();
@@ -587,8 +579,8 @@ namespace
 				0,
 				0,
 				bytecode.put(),
-				nullptr))
-			|| !bytecode) {
+				nullptr)) ||
+			!bytecode) {
 			return {};
 		}
 		winrt::com_ptr<ID3D11ComputeShader> shader;
@@ -685,9 +677,7 @@ namespace
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
 		Expect(
-			snapshot.requested
-				&& !snapshot.published
-				&& !snapshot.publicationError.empty(),
+			snapshot.requested && !snapshot.published && !snapshot.publicationError.empty(),
 			"compute ownership did not fail closed without the bridge");
 	}
 
@@ -713,11 +703,7 @@ namespace
 		auto output = CreateComputeOutput(device.get());
 		const auto inputs = CreateNativeComputeInputs(device.get());
 		Expect(
-			stock && output.uav && output.staging
-				&& std::ranges::all_of(
-					inputs.buffers,
-					[](const auto& a_buffer) { return !!a_buffer; })
-				&& inputs.srv && inputs.highBuffer && inputs.highSrv,
+			stock && output.uav && output.staging && std::ranges::all_of(inputs.buffers, [](const auto& a_buffer) { return !!a_buffer; }) && inputs.srv && inputs.highBuffer && inputs.highSrv,
 			"could not create compute bridge fixtures");
 		if (!stock || !output.uav)
 			return;
@@ -763,15 +749,11 @@ namespace
 		BindNativeComputeInputs(
 			context.get(), stock.get(), inputs, output.uav.get());
 		Expect(
-			BindResolvedComputeShader(context.get(), nativeWrapper)
-				== &nativeWrapper,
+			BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper,
 			"inactive phase selected a replacement");
 		bridge.Dispatch(context.get(), 1, 1, 1);
 		Expect(
-			ReadComputeOutput(context.get(), output)
-				== std::array<std::uint32_t, 5>{ 1, 0, 0, 0, 0 }
-				&& sharedDataBindCount == 0
-				&& computeContributionBindCount == 0,
+			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 1, 0, 0, 0, 0 } && sharedDataBindCount == 0 && computeContributionBindCount == 0,
 			"compute contribution ran outside deferred lighting");
 
 		deferredLightsActive = true;
@@ -780,8 +762,7 @@ namespace
 		BindNativeComputeInputs(
 			context.get(), stock.get(), inputs, output.uav.get());
 		Expect(
-			BindResolvedComputeShader(context.get(), nativeWrapper)
-				!= &nativeWrapper,
+			BindResolvedComputeShader(context.get(), nativeWrapper) != &nativeWrapper,
 			"active phase did not select the replacement");
 		bridge.Dispatch(context.get(), 3, 1, 1);
 		Expect(
@@ -789,13 +770,10 @@ namespace
 				context.get(), inputs, output.uav.get()),
 			"compute bridge did not restore b5-b8/t3-t4/u0");
 		Expect(
-			ReadComputeOutput(context.get(), output)
-				== std::array<std::uint32_t, 5>{ 3, 50, 60, 7, 9 },
+			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 50, 60, 7, 9 },
 			"replacement did not execute with shared and native inputs");
 		Expect(
-			sharedDataBindCount == 1
-				&& computeContributionBindCount == 1
-				&& activeComputeVariantDefine == true,
+			sharedDataBindCount == 1 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
 			"active compute contribution state was not exposed exactly once");
 		publishedComputeBuffers = {};
 	}

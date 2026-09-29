@@ -46,8 +46,8 @@ namespace cs::render
 		const auto extent = _renderSize.Committed();
 		const auto* state = cs::engine::GetGraphicsState();
 		return state &&
-			(extent.width < state->screenWidth ||
-				extent.height < state->screenHeight);
+		       (extent.width < state->screenWidth ||
+				   extent.height < state->screenHeight);
 	}
 
 	bool TemporalRenderer::IsFrameGenerationDx12PathActive() const noexcept
@@ -59,15 +59,15 @@ namespace cs::render
 	{
 		const auto status = render::TemporalPipeline::Get().GetStatus();
 		return IsFrameGenerationDx12PathActive() &&
-			status.effective.frameGenerationEnabled;
+		       status.effective.frameGenerationEnabled;
 	}
 
 	bool TemporalRenderer::ShouldUseFrameGenerationThisFrame() const noexcept
 	{
 		if (!IsFrameGenerationDx12PathActive() ||
 			!render::TemporalPipeline::Get()
-				 .GetFrameGenerationCaptureResources()
-				 .ready) {
+				.GetFrameGenerationCaptureResources()
+				.ready) {
 			return false;
 		}
 
@@ -215,12 +215,11 @@ namespace cs::render
 		}
 
 		// Ratios, jitter, and proxies are published after the native dynamic-resolution update.
-		const float mipBias = upscalerActive
-			? CalculateMipBias(
-				  static_cast<float>(renderWidth),
-				  screenSize.x,
-				  upscaleMethod == UpscaleMethod::kDLSS)
-			: 0.0f;
+		const float mipBias = upscalerActive ? CalculateMipBias(
+												   static_cast<float>(renderWidth),
+												   screenSize.x,
+												   upscaleMethod == UpscaleMethod::kDLSS) :
+		                                       0.0f;
 		_mipBias.store(mipBias, std::memory_order_relaxed);
 		if (!samplerBias.Update(mipBias)) {
 			// Retry until the engine has populated every sampler slot.
@@ -239,7 +238,7 @@ namespace cs::render
 		// Jitter is computed for any vendor method (including Native AA at scale 1.0); proxies only below native.
 		const bool vendorMethod = IsExternalUpscaler(method);
 		const bool scaleActive = vendorMethod &&
-			(resolutionScale.x < 0.99f || resolutionScale.y < 0.99f);
+		                         (resolutionScale.x < 0.99f || resolutionScale.y < 0.99f);
 		const float widthRatio =
 			scaleActive ? resolutionScale.x : 1.0f;
 		const float heightRatio =
@@ -275,10 +274,7 @@ namespace cs::render
 
 	bool TemporalRenderer::IsDrivingFrameState() const noexcept
 	{
-		return _hooksInstalled.load(std::memory_order_acquire)
-			&& _resourcesReady.load(std::memory_order_acquire)
-			&& !_quarantined.load(std::memory_order_acquire)
-			&& _superResolutionEligible;
+		return _hooksInstalled.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && !_quarantined.load(std::memory_order_acquire) && _superResolutionEligible;
 	}
 
 	void TemporalRenderer::RestoreNativeFrameState()

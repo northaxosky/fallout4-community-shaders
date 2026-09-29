@@ -19,8 +19,7 @@ namespace cs::settings
 				Field{ "level", "Global log level: trace, debug, info, warn, error, critical, or off.", &Logging::level },
 				Field{ "telemetry", "Write periodic telemetry to the log.", &Logging::telemetry },
 				Field{ "telemetry_interval_seconds", "Interval between telemetry log entries in seconds.", &Logging::telemetryIntervalSeconds, Range{ 1u, UINT32_MAX } },
-				Field{ "dump_hotkey", "Suggested telemetry dump binding; the host's saved override takes precedence.", &Logging::dumpHotkey }
-			}
+				Field{ "dump_hotkey", "Suggested telemetry dump binding; the host's saved override takes precedence.", &Logging::dumpHotkey } }
 		};
 
 		struct ShaderOwnership
@@ -51,8 +50,7 @@ namespace cs::settings
 		inline constexpr Schema kMenu{
 			std::tuple{
 				Field{ "debug_view_feature", "Feature owning the selected fullscreen debug view.", &Menu::debugViewFeature },
-				Field{ "debug_view", "Selected fullscreen debug view; empty disables it.", &Menu::debugView }
-			}
+				Field{ "debug_view", "Selected fullscreen debug view; empty disables it.", &Menu::debugView } }
 		};
 
 		struct Preset
@@ -64,8 +62,7 @@ namespace cs::settings
 		inline constexpr Schema kPreset{
 			std::tuple{
 				Field{ "active", "Identity of the selected preset.", &Preset::active },
-				Field{ "auto_load_on_boot", "Apply the selected preset when the game starts.", &Preset::autoLoadOnBoot, {}, ApplyTiming::kNextLaunch }
-			}
+				Field{ "auto_load_on_boot", "Apply the selected preset when the game starts.", &Preset::autoLoadOnBoot, {}, ApplyTiming::kNextLaunch } }
 		};
 
 		struct Activation

@@ -1,16 +1,16 @@
 #include "ScreenSpaceShadows.h"
 
+#include <DearModdingUI/Client.h>
 #include <DirectXMath.h>
 #include <RE/M/Main.h>
 #include <RE/N/NiCamera.h>
 #include <RE/S/Sky.h>
 #include <d3d11.h>
-#include <DearModdingUI/Client.h>
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cfloat>
+#include <cmath>
 #include <format>
 #include <limits>
 #include <stdexcept>
@@ -26,8 +26,8 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
-#include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "ScreenSpaceShadowsMath.h"
@@ -85,7 +85,7 @@ namespace cs::features
 	}
 
 	std::span<const FeatureDebugView>
-		ScreenSpaceShadows::GetDebugViews() const noexcept
+	ScreenSpaceShadows::GetDebugViews() const noexcept
 	{
 		static constexpr std::array views{
 			FeatureDebugView{
@@ -94,9 +94,8 @@ namespace cs::features
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const ScreenSpaceShadows&>(a_feature)
-						.GetShadowMaskDebugTexture();
-				}
-			}
+			            .GetShadowMaskDebugTexture();
+				} }
 		};
 		return views;
 	}
@@ -109,16 +108,12 @@ namespace cs::features
 	}
 
 	FeatureDebugTexture
-		ScreenSpaceShadows::GetShadowMaskDebugTexture() const
+	ScreenSpaceShadows::GetShadowMaskDebugTexture() const
 	{
 		FeatureDebugTexture texture{
 			.unavailableText = "Mask not allocated."
 		};
-		if (!_debugPreviewEnabled.load(std::memory_order_acquire)
-			|| !_maskTexture
-			|| !_maskTexture->srv
-			|| _allocWidth == 0
-			|| _allocHeight == 0) {
+		if (!_debugPreviewEnabled.load(std::memory_order_acquire) || !_maskTexture || !_maskTexture->srv || _allocWidth == 0 || _allocHeight == 0) {
 			return texture;
 		}
 		texture.texture = _maskTexture->srv.get();
@@ -150,30 +145,16 @@ namespace cs::features
 	void ScreenSpaceShadows::Load()
 	{
 		const bool replacementRegistered =
-			cs::engine::RegisterReplacement({
-				.targetId = cs::engine::ShaderInjectionTarget::kBsdfLight,
+			cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kBsdfLight,
 				.contributor = "ScreenSpaceShadows",
-				.defines = {
-					{
-						cs::engine::shader_injection_defines::
-							kScreenSpaceShadows,
-						"1"
-					}
-				},
-				.isReady = [this] {
-					return IsShadowMaskReady();
-				},
-				.bind = [this](ID3D11DeviceContext* a_context) {
-					BindShadowMask(a_context);
-				},
-				.slotClaims = {
-					{
-						.stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = kMaskPSSlot
-					}
-				}
-			});
+				.defines = { { cs::engine::shader_injection_defines::
+								   kScreenSpaceShadows,
+					"1" } },
+				.isReady = [this] { return IsShadowMaskReady(); },
+				.bind = [this](ID3D11DeviceContext* a_context) { BindShadowMask(a_context); },
+				.slotClaims = { { .stage = cs::engine::ShaderStage::kPixel,
+					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+					.slot = kMaskPSSlot } } });
 		if (!replacementRegistered) {
 			FailLoad("Failed to register the ScreenSpaceShadows BSDF light shader replacement");
 			return;
@@ -245,17 +226,10 @@ namespace cs::features
 		if (!std::isfinite(heightRatio) || heightRatio <= 0.0f)
 			heightRatio = 1.0f;
 		const auto requiredWidth = std::ceil(
-			static_cast<double>(state->screenWidth)
-			* static_cast<double>(widthRatio));
+			static_cast<double>(state->screenWidth) * static_cast<double>(widthRatio));
 		const auto requiredHeight = std::ceil(
-			static_cast<double>(state->screenHeight)
-			* static_cast<double>(heightRatio));
-		if (requiredWidth < 1.0
-			|| requiredHeight < 1.0
-			|| requiredWidth
-				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-			|| requiredHeight
-				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
+			static_cast<double>(state->screenHeight) * static_cast<double>(heightRatio));
+		if (requiredWidth < 1.0 || requiredHeight < 1.0 || requiredWidth > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || requiredHeight > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
 			return false;
 		}
 		a_required = {
@@ -273,16 +247,7 @@ namespace cs::features
 		ID3D11Device* a_device,
 		sss_mask_binding::Extent a_allocation)
 	{
-		if (!a_device
-			|| a_allocation.width == 0
-			|| a_allocation.height == 0
-			|| a_allocation.width
-				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-			|| a_allocation.height
-				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-			|| a_allocation.width
-				> std::numeric_limits<std::size_t>::max()
-					/ a_allocation.height) {
+		if (!a_device || a_allocation.width == 0 || a_allocation.height == 0 || a_allocation.width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || a_allocation.height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || a_allocation.width > std::numeric_limits<std::size_t>::max() / a_allocation.height) {
 			if (L->should_log(spdlog::level::err)) {
 				CS_LOG_EVERY_MS(
 					L,
@@ -296,8 +261,7 @@ namespace cs::features
 		}
 
 		const auto pixelCount =
-			static_cast<std::size_t>(a_allocation.width)
-			* a_allocation.height;
+			static_cast<std::size_t>(a_allocation.width) * a_allocation.height;
 		std::vector<std::uint8_t> white;
 		try {
 			white.assign(
@@ -384,11 +348,9 @@ namespace cs::features
 			_deviceGeneration
 		};
 		const bool needsAllocation =
-			!_whiteFallbackSRV
-			|| _whiteFallbackExtent.allocated != a_allocation;
+			!_whiteFallbackSRV || _whiteFallbackExtent.allocated != a_allocation;
 		if (!needsAllocation) {
-			if (_whiteFallbackBackoff.HasFailure()
-				&& !_whiteFallbackBackoff.IsLatchedFor(key)) {
+			if (_whiteFallbackBackoff.HasFailure() && !_whiteFallbackBackoff.IsLatchedFor(key)) {
 				_whiteFallbackBackoff.RecordSuccess();
 			}
 		} else if (_whiteFallbackBackoff.ShouldAttempt(key)) {
@@ -405,11 +367,9 @@ namespace cs::features
 			}
 		}
 		const bool ready =
-			_whiteFallbackSRV
-			&& _whiteFallbackExtent.IsCompatible(a_required);
+			_whiteFallbackSRV && _whiteFallbackExtent.IsCompatible(a_required);
 		_whiteFallbackFailureLatchedTelemetry.store(
-			needsAllocation
-				&& _whiteFallbackBackoff.IsLatchedFor(key),
+			needsAllocation && _whiteFallbackBackoff.IsLatchedFor(key),
 			std::memory_order_relaxed);
 		_whiteFallbackWidthTelemetry.store(
 			_whiteFallbackExtent.allocated.width,
@@ -423,7 +383,8 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		if (!_started.load(std::memory_order_acquire) || !a_device) return;
+		if (!_started.load(std::memory_order_acquire) || !a_device)
+			return;
 		if (_deviceIdentity != a_device) {
 			_deviceIdentity = a_device;
 			++_deviceGeneration;
@@ -470,12 +431,7 @@ namespace cs::features
 		sss_mask_binding::Extent allocation;
 		auto* device = cs::util::GetD3DDevice();
 		const bool fallbackReady =
-			device
-			&& TryGetMaskExtents(required, allocation)
-			&& EnsureWhiteFallback(
-				device,
-				required,
-				allocation);
+			device && TryGetMaskExtents(required, allocation) && EnsureWhiteFallback(device, required, allocation);
 		_requiredMaskExtent = required;
 		_requiredMaskWidthTelemetry.store(
 			required.width,
@@ -489,15 +445,14 @@ namespace cs::features
 	cs::ScreenSpaceShadowsFeatureData ScreenSpaceShadows::GetCommonBufferData() const
 	{
 		// cached readiness avoids IsShadowMaskReady allocation
-		if (!_started.load(std::memory_order_acquire)
-			|| !_resourcesReady.load(std::memory_order_acquire)) {
+		if (!_started.load(std::memory_order_acquire) || !_resourcesReady.load(std::memory_order_acquire)) {
 			return {};
 		}
 		return {
 			.EnableScreenSpaceShadows =
 				_settings.enabled ?
-				1u :
-				0u,
+					1u :
+					0u,
 			.ShadowContrast = _settings.shadowContrast
 		};
 	}
@@ -651,8 +606,7 @@ namespace cs::features
 		if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
 			return;
 		}
-		if (allocation.width != _allocWidth
-			|| allocation.height != _allocHeight) {
+		if (allocation.width != _allocWidth || allocation.height != _allocHeight) {
 			try {
 				CreateMaskTexture(
 					allocation.width,
@@ -667,9 +621,7 @@ namespace cs::features
 			_allocWidth,
 			_allocHeight
 		};
-		if (_maskTexture
-			&& _maskTexture->uav
-			&& sss_mask_binding::Covers(realExtent, required)) {
+		if (_maskTexture && _maskTexture->uav && sss_mask_binding::Covers(realExtent, required)) {
 			cs::render::annotation::ScopedEvent annotationScope(
 				"ScreenSpaceShadows/ClearMask");
 			context->ClearUnorderedAccessViewFloat(
@@ -683,7 +635,8 @@ namespace cs::features
 		try {
 			auto* sky = RE::Sky::GetSingleton();
 			auto* shader = (_settings.enabled && sky && sky->mode.get() == RE::Sky::Mode::kFull) ?
-				GetComputeRaymarch() : nullptr;
+			                   GetComputeRaymarch() :
+			                   nullptr;
 
 			float sx = 0.0f;
 			float sy = 0.0f;
@@ -796,9 +749,7 @@ namespace cs::features
 			.set = &SetPixelShaderResource
 		};
 		auto* realMask =
-			_maskTexture && _maskTexture->srv
-			? _maskTexture->srv.get()
-			: nullptr;
+			_maskTexture && _maskTexture->srv ? _maskTexture->srv.get() : nullptr;
 		const auto result = sss_mask_binding::Bind(
 			api,
 			kMaskPSSlot,
@@ -834,9 +785,7 @@ namespace cs::features
 			.set = &SetPixelShaderResource
 		};
 		auto* realMask =
-			_maskTexture && _maskTexture->srv
-			? _maskTexture->srv.get()
-			: nullptr;
+			_maskTexture && _maskTexture->srv ? _maskTexture->srv.get() : nullptr;
 		(void)sss_mask_binding::RestoreNullIfOwned(
 			api,
 			kMaskPSSlot,
@@ -867,8 +816,8 @@ namespace cs::features
 			.Field(
 				"white_fallback_stock_latched",
 				_whiteFallbackFailureLatchedTelemetry.load(
-					std::memory_order_relaxed)
-					&& !_whiteFallbackReady.load(
+					std::memory_order_relaxed) &&
+					!_whiteFallbackReady.load(
 						std::memory_order_acquire))
 			.Field("mask_bound", _maskBoundLastFrame.load(std::memory_order_relaxed))
 			.Field("dispatches", static_cast<std::int64_t>(_dispatchedLastFrame.load(std::memory_order_relaxed)))

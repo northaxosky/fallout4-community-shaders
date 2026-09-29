@@ -24,7 +24,7 @@ namespace
 {
 	using namespace cs::shader_cache;
 
-	int         failures = 0;
+	int failures = 0;
 	const char* currentTest = "";
 
 	void Fail(std::string_view a_message)
@@ -50,9 +50,7 @@ namespace
 	{
 		if (a_outcome.disposition != a_expected) {
 			Fail(
-				std::string(a_message) + ": expected "
-				+ DescribeDisposition(a_expected) + ", got "
-				+ DescribeDisposition(a_outcome.disposition));
+				std::string(a_message) + ": expected " + DescribeDisposition(a_expected) + ", got " + DescribeDisposition(a_outcome.disposition));
 		}
 	}
 
@@ -62,9 +60,7 @@ namespace
 		explicit Workspace(std::string_view a_name)
 		{
 			static std::atomic<unsigned> counter{ 0 };
-			_root = std::filesystem::temp_directory_path()
-				/ ("fo4cs-shader-cache-" + std::string(a_name) + "-"
-					+ std::to_string(counter.fetch_add(1)));
+			_root = std::filesystem::temp_directory_path() / ("fo4cs-shader-cache-" + std::string(a_name) + "-" + std::to_string(counter.fetch_add(1)));
 			std::filesystem::remove_all(_root);
 			std::filesystem::create_directories(Sources() / "Sub");
 			std::filesystem::create_directories(CacheRoot());
@@ -176,9 +172,7 @@ float4 Wrapped() { return SharedValue(); }
 		PrimedCache primed;
 		primed.cold = LoadOrCompileShader(a_recipe, a_workspace.Options());
 		Check(
-			primed.cold.succeeded
-				&& primed.cold.origin == CompileOrigin::kFreshCompile
-				&& primed.cold.recordWritten,
+			primed.cold.succeeded && primed.cold.origin == CompileOrigin::kFreshCompile && primed.cold.recordWritten,
 			"cold compile must succeed and publish");
 		const auto warm = LoadOrCompileShader(a_recipe, a_workspace.Options());
 		CheckDisposition(warm, CacheDisposition::kHit, "second compile must hit");
@@ -203,9 +197,7 @@ float4 Wrapped() { return SharedValue(); }
 		const auto tintedCold =
 			LoadOrCompileShader(tinted, workspace.Options());
 		Check(
-			tintedCold.succeeded
-				&& tintedCold.recordPath != primed.cold.recordPath
-				&& tintedCold.bytecode != primed.cold.bytecode,
+			tintedCold.succeeded && tintedCold.recordPath != primed.cold.recordPath && tintedCold.bytecode != primed.cold.bytecode,
 			"defines must address and compile distinct variants");
 
 		workspace.Write("Root.hlsl", R"(#include "Sub/Wrapper.hlsli"
@@ -218,8 +210,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			CacheDisposition::kStale,
 			"root edits must invalidate the record");
 		Check(
-			rootStale.succeeded
-				&& rootStale.bytecode != primed.cold.bytecode,
+			rootStale.succeeded && rootStale.bytecode != primed.cold.bytecode,
 			"root edits must return recompiled bytecode");
 
 		workspace.Write("Shared.hlsli", R"(float4 SharedValue()
@@ -234,8 +225,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			CacheDisposition::kStale,
 			"transitive include edits must invalidate the record");
 		Check(
-			includeStale.succeeded
-				&& includeStale.bytecode != rootStale.bytecode,
+			includeStale.succeeded && includeStale.bytecode != rootStale.bytecode,
 			"transitive include edits must return recompiled bytecode");
 	}
 
@@ -252,8 +242,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		const auto initialized =
 			SynchronizeCacheIdentity(root, oldIdentity, kRecordSchemaVersion);
 		Check(
-			initialized.firstRun && !initialized.reset
-				&& initialized.error.empty(),
+			initialized.firstRun && !initialized.reset && initialized.error.empty(),
 			"first identity must initialize without a reset");
 
 		const auto record = root / "ps" / "record.fxc";
@@ -262,8 +251,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		const auto changed =
 			SynchronizeCacheIdentity(root, newIdentity, kRecordSchemaVersion);
 		Check(
-			changed.reset && changed.error.empty()
-				&& !std::filesystem::exists(record),
+			changed.reset && changed.error.empty() && !std::filesystem::exists(record),
 			"compiler replacement must discard incompatible records");
 	}
 
@@ -279,8 +267,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		WriteAll(primed.cold.recordPath, corrupted);
 		ShaderCacheRecord parsed;
 		Check(
-			ParseShaderCacheRecord(corrupted, parsed)
-				== RecordStatus::kBadMagic,
+			ParseShaderCacheRecord(corrupted, parsed) == RecordStatus::kBadMagic,
 			"corrupt records must be rejected");
 
 		const auto repaired =
@@ -290,8 +277,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			CacheDisposition::kRejected,
 			"corrupt records must fall through");
 		Check(
-			repaired.succeeded && repaired.recordWritten
-				&& repaired.bytecode == primed.cold.bytecode,
+			repaired.succeeded && repaired.recordWritten && repaired.bytecode == primed.cold.bytecode,
 			"corrupt records must recompile and republish");
 		CheckDisposition(
 			LoadOrCompileShader(recipe, workspace.Options()),
@@ -307,9 +293,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		const auto outcome =
 			LoadOrCompileShader(workspace.Recipe(), workspace.Options());
 		Check(
-			!outcome.succeeded && !outcome.error.empty()
-				&& !outcome.recordWritten
-				&& !std::filesystem::exists(outcome.recordPath),
+			!outcome.succeeded && !outcome.error.empty() && !outcome.recordWritten && !std::filesystem::exists(outcome.recordPath),
 			"failed compilation must publish no cache artifact");
 	}
 
@@ -320,8 +304,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		const auto primed = Prime(workspace, workspace.Recipe());
 
 		ShaderCacheRecord record;
-		if (ParseShaderCacheRecord(primed.record, record)
-			!= RecordStatus::kOk) {
+		if (ParseShaderCacheRecord(primed.record, record) != RecordStatus::kOk) {
 			Fail("pristine record must parse");
 			return;
 		}
@@ -356,9 +339,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			while (running.load()) {
 				const auto bytes = ReadAll(primed.cold.recordPath);
 				ShaderCacheRecord seen;
-				if (!bytes.empty()
-					&& ParseShaderCacheRecord(bytes, seen) == RecordStatus::kOk
-					&& std::ranges::find(encoded, bytes) == encoded.end()) {
+				if (!bytes.empty() && ParseShaderCacheRecord(bytes, seen) == RecordStatus::kOk && std::ranges::find(encoded, bytes) == encoded.end()) {
 					++acceptedForeign;
 				}
 			}
@@ -370,8 +351,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 
 		const auto finalBytes = ReadAll(primed.cold.recordPath);
 		Check(
-			acceptedForeign.load() == 0
-				&& std::ranges::find(encoded, finalBytes) != encoded.end(),
+			acceptedForeign.load() == 0 && std::ranges::find(encoded, finalBytes) != encoded.end(),
 			"concurrent writers must never yield an accepted partial record");
 	}
 
@@ -396,19 +376,14 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			thread.join();
 		for (const auto& outcome : outcomes) {
 			Check(
-				outcome.succeeded
-					&& outcome.bytecode == outcomes.front().bytecode,
+				outcome.succeeded && outcome.bytecode == outcomes.front().bytecode,
 				"concurrent compilers must agree on bytecode");
 		}
 
 		const auto forced = LoadOrCompileShader(
 			recipe, workspace.Options(), CacheMode::kRecompile);
 		Check(
-			forced.succeeded
-				&& forced.disposition == CacheDisposition::kBypassed
-				&& forced.origin == CompileOrigin::kFreshCompile
-				&& forced.recordWritten
-				&& forced.bytecode == outcomes.front().bytecode,
+			forced.succeeded && forced.disposition == CacheDisposition::kBypassed && forced.origin == CompileOrigin::kFreshCompile && forced.recordWritten && forced.bytecode == outcomes.front().bytecode,
 			"recompile mode must bypass and republish the cache");
 	}
 
@@ -441,8 +416,7 @@ int main()
 			failures == before ? "ok" : "FAILED");
 	}
 	std::printf(
-		failures == 0 ? "ShaderCache passed\n"
-					  : "%d shader cache assertion(s) failed\n",
+		failures == 0 ? "ShaderCache passed\n" : "%d shader cache assertion(s) failed\n",
 		failures);
 	return failures == 0 ? 0 : 1;
 }

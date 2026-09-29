@@ -72,8 +72,8 @@ namespace cs
 			const auto& release = history.releases[index];
 			dmui::ui::PushID(release.version.c_str());
 			const auto flags = index == 0 ?
-				dmui::ui::TreeNodeFlags::kDefaultOpen :
-				dmui::ui::TreeNodeFlags{};
+			                       dmui::ui::TreeNodeFlags::kDefaultOpen :
+			                       dmui::ui::TreeNodeFlags{};
 			if (dmui::ui::CollapsingHeader(release.version.c_str(), flags)) {
 				dmui::ui::PushTextWrapPos(0.0f);
 				for (const auto& item : release.items) {

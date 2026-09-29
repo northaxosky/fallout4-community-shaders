@@ -15,7 +15,8 @@ namespace cs::engine
 		std::uint8_t WeatherByte(const RE::TESWeather* a_weather, RE::TESWeather::WeatherData a_field) noexcept
 		{
 			return a_weather ? static_cast<std::uint8_t>(
-				a_weather->weatherData[static_cast<std::size_t>(a_field)]) : 0;
+								   a_weather->weatherData[static_cast<std::size_t>(a_field)]) :
+			                   0;
 		}
 
 		bool IsRain(const RE::TESWeather* a_weather) noexcept
@@ -33,11 +34,12 @@ namespace cs::engine
 	{
 		WeatherSnapshot s;
 		auto* sky = RE::Sky::GetSingleton();
-		if (!sky) return s;
-		s.current        = sky->currentWeather;
-		s.previous       = sky->lastWeather;
-		s.transitionPct  = std::clamp(sky->currentWeatherPct, 0.0f, 1.0f);
-		s.currentIsRain  = IsRain(s.current);
+		if (!sky)
+			return s;
+		s.current = sky->currentWeather;
+		s.previous = sky->lastWeather;
+		s.transitionPct = std::clamp(sky->currentWeatherPct, 0.0f, 1.0f);
+		s.currentIsRain = IsRain(s.current);
 		s.previousIsRain = IsRain(s.previous);
 		s.currentBeginPrecip = WeatherByte(s.current, RE::TESWeather::WeatherData::kBeginPrecip);
 		s.previousEndPrecip = WeatherByte(s.previous, RE::TESWeather::WeatherData::kEndPrecip);

@@ -1,48 +1,48 @@
 #if defined(IMAGESPACE_HUD_GLASS_VS_SOURCE)
-#include "Imagespace/HUDGlassVS.hlsli"
+#	include "Imagespace/HUDGlassVS.hlsli"
 #elif defined(IMAGESPACE_HUD_GLASS_BASE) || defined(IMAGESPACE_HUD_GLASS_DROPSHADOW) || defined(IMAGESPACE_HUD_GLASS_BLUR_Y) || defined(IMAGESPACE_HUD_GLASS_BLUR_X) || defined(IMAGESPACE_HUD_GLASS_CLEAR) || defined(IMAGESPACE_HUD_GLASS_COPY)
-#include "Imagespace/HUDGlassPS.hlsli"
+#	include "Imagespace/HUDGlassPS.hlsli"
 #elif defined(IMAGESPACE_COPY_PS_SOURCE)
-#include "Imagespace/CopyPS.hlsli"
+#	include "Imagespace/CopyPS.hlsli"
 #elif defined(IMAGESPACE_FULLSCREEN_COLOR_PS_SOURCE)
-#include "Imagespace/FullScreenColorPS.hlsli"
+#	include "Imagespace/FullScreenColorPS.hlsli"
 #elif defined(IMAGESPACE_LENS_FLARE_VS_SOURCE)
-#include "Imagespace/LensFlareVS.hlsli"
+#	include "Imagespace/LensFlareVS.hlsli"
 #elif defined(IMAGESPACE_LENS_FLARE_PS_SOURCE)
-#include "Imagespace/LensFlarePS.hlsli"
+#	include "Imagespace/LensFlarePS.hlsli"
 #elif defined(IMAGESPACE_LENS_FLARE_VISIBILITY_PS_SOURCE)
-#include "Imagespace/LensFlareVisibilityPS.hlsli"
+#	include "Imagespace/LensFlareVisibilityPS.hlsli"
 #elif defined(IMAGESPACE_SSLR_BLUR_V_VS_SOURCE)
-#include "Imagespace/SSLRBlurVVS.hlsli"
+#	include "Imagespace/SSLRBlurVVS.hlsli"
 #elif defined(IMAGESPACE_GAMMA_LUT_PS_SOURCE)
-#include "Imagespace/GammaLUTPS.hlsli"
+#	include "Imagespace/GammaLUTPS.hlsli"
 #elif defined(IMAGESPACE_MOTION_BLUR_PS_SOURCE)
-#include "Imagespace/MotionBlurPS.hlsli"
+#	include "Imagespace/MotionBlurPS.hlsli"
 #elif defined(IMAGESPACE_REFRACTION_PS_SOURCE)
-#include "Imagespace/RefractionPS.hlsli"
+#	include "Imagespace/RefractionPS.hlsli"
 #elif defined(IMAGESPACE_HDR_PS_SOURCE)
-#include "Imagespace/HDRPS.hlsli"
+#	include "Imagespace/HDRPS.hlsli"
 #elif defined(IMAGESPACE_SSAO_CAMERA_Z_AND_MIPS_CS_SOURCE)
-#include "Imagespace/SSAOCameraZAndMipsCS.hlsli"
+#	include "Imagespace/SSAOCameraZAndMipsCS.hlsli"
 #elif defined(IMAGESPACE_SSAO_MIPS_CS_SOURCE)
-#include "Imagespace/SSAOMipsCS.hlsli"
+#	include "Imagespace/SSAOMipsCS.hlsli"
 #elif defined(IMAGESPACE_SSAO_BLUR_CS_SOURCE)
-#include "Imagespace/SSAOBlurCS.hlsli"
+#	include "Imagespace/SSAOBlurCS.hlsli"
 #elif defined(IMAGESPACE_PASSTHROUGH_VS_SOURCE)
 struct VS_INPUT
 {
-	float4 Position : POSITION0;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: POSITION0;
+	float2 TexCoord: TEXCOORD0;
 };
 
 struct VS_OUTPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 // Unwritten by design: this axis widens the output signature and nothing else.
-#ifdef IMAGESPACE_PASSTHROUGH_TEXCOORD1
-	float4 TexCoord1 : TEXCOORD1;
-#endif
+#	ifdef IMAGESPACE_PASSTHROUGH_TEXCOORD1
+	float4 TexCoord1: TEXCOORD1;
+#	endif
 };
 
 VS_OUTPUT main(VS_INPUT input)
@@ -55,27 +55,27 @@ VS_OUTPUT main(VS_INPUT input)
 #elif defined(IMAGESPACE_XYQUAD_VS_SOURCE)
 struct VS_INPUT
 {
-	float4 Position : POSITION0;
-#ifdef IMAGESPACE_XYQUAD_PACKED
-	float4 Color : COLOR0;
-#endif
+	float4 Position: POSITION0;
+#	ifdef IMAGESPACE_XYQUAD_PACKED
+	float4 Color: COLOR0;
+#	endif
 };
 
 struct VS_OUTPUT
 {
-	float4 Position : SV_POSITION;
-#ifdef IMAGESPACE_XYQUAD_PACKED
-	float3 TexCoord : TEXCOORD0;
-#endif
+	float4 Position: SV_POSITION;
+#	ifdef IMAGESPACE_XYQUAD_PACKED
+	float3 TexCoord: TEXCOORD0;
+#	endif
 };
 
 VS_OUTPUT main(VS_INPUT input)
 {
 	VS_OUTPUT vsout;
 	vsout.Position = float4(input.Position.xy, 0.0, 1.0);
-#ifdef IMAGESPACE_XYQUAD_PACKED
+#	ifdef IMAGESPACE_XYQUAD_PACKED
 	vsout.TexCoord = float3(input.Position.zw, 1.0);
-#endif
+#	endif
 	return vsout;
 }
 #elif defined(IMAGESPACE_TAPARRAY_PS_SOURCE)
@@ -83,39 +83,39 @@ VS_OUTPUT main(VS_INPUT input)
 // Axes TAP_COUNT odd 3..15 and THRESHOLD_SOURCE off or on; names are authored because the containers ship no reflection chunk.
 
 // An absent axis define would otherwise read as zero and silently drop the tap array or the second source.
-#if !defined(IMAGESPACE_TAPARRAY_TAP_COUNT) || (IMAGESPACE_TAPARRAY_TAP_COUNT != 3 && IMAGESPACE_TAPARRAY_TAP_COUNT != 5 && IMAGESPACE_TAPARRAY_TAP_COUNT != 7 && IMAGESPACE_TAPARRAY_TAP_COUNT != 9 && IMAGESPACE_TAPARRAY_TAP_COUNT != 11 && IMAGESPACE_TAPARRAY_TAP_COUNT != 13 && IMAGESPACE_TAPARRAY_TAP_COUNT != 15) || !defined(IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE) || IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE < 0 || IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE > 1
-#error "define IMAGESPACE_TAPARRAY_TAP_COUNT odd within three to fifteen and IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE as zero or one"
-#endif
+#	if !defined(IMAGESPACE_TAPARRAY_TAP_COUNT) || (IMAGESPACE_TAPARRAY_TAP_COUNT != 3 && IMAGESPACE_TAPARRAY_TAP_COUNT != 5 && IMAGESPACE_TAPARRAY_TAP_COUNT != 7 && IMAGESPACE_TAPARRAY_TAP_COUNT != 9 && IMAGESPACE_TAPARRAY_TAP_COUNT != 11 && IMAGESPACE_TAPARRAY_TAP_COUNT != 13 && IMAGESPACE_TAPARRAY_TAP_COUNT != 15) || !defined(IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE) || IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE < 0 || IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE > 1
+#		error "define IMAGESPACE_TAPARRAY_TAP_COUNT odd within three to fifteen and IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE as zero or one"
+#	endif
 
 cbuffer TapParameters : register(b2)
 {
-	float4 ThresholdScale; // Threshold in .x and scale in .y, read only under the threshold axis.
-	float4 Reserved; // Unread by every measured cell; it places the tap array at cb2[2].
-	float4 Taps[IMAGESPACE_TAPARRAY_TAP_COUNT + 1]; // Offset in .xy and weight in .z per tap; the unread spare vector carries the declared count three past the tap count.
+	float4 ThresholdScale;                           // Threshold in .x and scale in .y, read only under the threshold axis.
+	float4 Reserved;                                 // Unread by every measured cell; it places the tap array at cb2[2].
+	float4 Taps[IMAGESPACE_TAPARRAY_TAP_COUNT + 1];  // Offset in .xy and weight in .z per tap; the unread spare vector carries the declared count three past the tap count.
 };
 
 Texture2D<float4> Source : register(t0);
 SamplerState SourceSampler : register(s0);
-#if IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE
+#	if IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE
 Texture2D<float4> ThresholdSource : register(t1);
 SamplerState ThresholdSampler : register(s1);
-#endif
+#	endif
 
 float4 main(float4 position : SV_POSITION, float2 texCoord : TEXCOORD0) : SV_Target
 {
 	float4 sum = 0.0;
-#if IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE
+#	if IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE
 	// Alpha leaves the tap chain for the second source's Rec.709 luma, written ahead of the loop as the native order does.
 	sum.a = dot(ThresholdSource.Sample(ThresholdSampler, texCoord).rgb, float3(0.2125, 0.7154, 0.0721));
-#endif
+#	endif
 	// The bound is a literal, so the measured dynamic loop has to be forced.
 	[loop] for (int tap = 0; tap < IMAGESPACE_TAPARRAY_TAP_COUNT; ++tap)
 	{
-#if IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE
+#	if IMAGESPACE_TAPARRAY_THRESHOLD_SOURCE
 		sum.rgb += max(Source.Sample(SourceSampler, texCoord + Taps[tap].xy).rgb - ThresholdScale.x, 0.0) * ThresholdScale.y * Taps[tap].z;
-#else
+#	else
 		sum += Source.Sample(SourceSampler, texCoord + Taps[tap].xy) * Taps[tap].z;
-#endif
+#	endif
 	}
 	return sum;
 }
@@ -124,25 +124,25 @@ float4 main(float4 position : SV_POSITION, float2 texCoord : TEXCOORD0) : SV_Tar
 // Axes UV_PRE_TRANSFORM identity or constant_scale and CURVE_EXPONENT as a measured decimal literal; names are authored because the containers ship no reflection chunk.
 
 // An absent axis define would otherwise read as zero and silently drop the coordinate scale or flatten the curve.
-#if !defined(IMAGESPACE_GAMMA_UV_PRE_TRANSFORM) || IMAGESPACE_GAMMA_UV_PRE_TRANSFORM < 0 || IMAGESPACE_GAMMA_UV_PRE_TRANSFORM > 1 || !defined(IMAGESPACE_GAMMA_CURVE_EXPONENT)
-#error "define IMAGESPACE_GAMMA_UV_PRE_TRANSFORM as zero or one and IMAGESPACE_GAMMA_CURVE_EXPONENT as the measured decimal curve literal"
-#endif
+#	if !defined(IMAGESPACE_GAMMA_UV_PRE_TRANSFORM) || IMAGESPACE_GAMMA_UV_PRE_TRANSFORM < 0 || IMAGESPACE_GAMMA_UV_PRE_TRANSFORM > 1 || !defined(IMAGESPACE_GAMMA_CURVE_EXPONENT)
+#		error "define IMAGESPACE_GAMMA_UV_PRE_TRANSFORM as zero or one and IMAGESPACE_GAMMA_CURVE_EXPONENT as the measured decimal curve literal"
+#	endif
 
-#if IMAGESPACE_GAMMA_UV_PRE_TRANSFORM
+#	if IMAGESPACE_GAMMA_UV_PRE_TRANSFORM
 cbuffer CoordinateParameters : register(b2)
 {
-	float4 CoordinateScale; // Scale in .xy; .zw are unread by every measured cell and only fill the single declared vector.
+	float4 CoordinateScale;  // Scale in .xy; .zw are unread by every measured cell and only fill the single declared vector.
 };
-#endif
+#	endif
 
 Texture2D<float4> Source : register(t0);
 SamplerState SourceSampler : register(s0);
 
 float4 main(float4 position : SV_POSITION, float2 texCoord : TEXCOORD0) : SV_Target
 {
-#if IMAGESPACE_GAMMA_UV_PRE_TRANSFORM
+#	if IMAGESPACE_GAMMA_UV_PRE_TRANSFORM
 	texCoord *= CoordinateScale.xy;
-#endif
+#	endif
 	float4 tap = Source.Sample(SourceSampler, texCoord);
 	// The curve covers the three color lanes only; the fetched alpha reaches the output as a plain move.
 	return float4(pow(tap.rgb, IMAGESPACE_GAMMA_CURVE_EXPONENT), tap.a);
@@ -152,9 +152,9 @@ float4 main(float4 position : SV_POSITION, float2 texCoord : TEXCOORD0) : SV_Tar
 // Axes: DST_ODD and SRC_ODD are the two base parities; only their disagreement shifts the source window, and only then does COUNT_ODD open the last-index branch.
 // ABI: b0 one vector, raw t0 source, raw u0 destination, a 64x1x1 group, one thread index bounded before any access; names are authored, the containers carry no reflection chunk.
 
-#if !defined(IMAGESPACE_INDEXREBASE_DST_ODD) || !defined(IMAGESPACE_INDEXREBASE_SRC_ODD) || !defined(IMAGESPACE_INDEXREBASE_COUNT_ODD)
-#error "the three index-rebase parity axes must all be defined"
-#endif
+#	if !defined(IMAGESPACE_INDEXREBASE_DST_ODD) || !defined(IMAGESPACE_INDEXREBASE_SRC_ODD) || !defined(IMAGESPACE_INDEXREBASE_COUNT_ODD)
+#		error "the three index-rebase parity axes must all be defined"
+#	endif
 
 cbuffer IndexRebaseParameters : register(b0)
 {
@@ -163,42 +163,37 @@ cbuffer IndexRebaseParameters : register(b0)
 };
 ByteAddressBuffer SourceIndices : register(t0);
 RWByteAddressBuffer DestinationIndices : register(u0);
-[numthreads(64, 1, 1)]
-void main(uint3 threadId : SV_DispatchThreadID)
-{
+[numthreads(64, 1, 1)] void main(uint3 threadId : SV_DispatchThreadID) {
 	uint index = threadId.x;
-	if (index < RebaseParameters.x)
-	{
+	if (index < RebaseParameters.x) {
 		uint bias = RebaseParameters.w;
 		uint loadBase = RebaseParameters.y;
 		uint storeBase = RebaseParameters.z;
 		// An odd base sits one half inside its dword, so that raw address drops to the dword the half lies in.
-#if IMAGESPACE_INDEXREBASE_DST_ODD
+#	if IMAGESPACE_INDEXREBASE_DST_ODD
 		storeBase &= ~3u;
-#endif
+#	endif
 		uint storeAddress = storeBase + index * 4;
-#if IMAGESPACE_INDEXREBASE_SRC_ODD
+#	if IMAGESPACE_INDEXREBASE_SRC_ODD
 		loadBase &= ~3u;
-#endif
+#	endif
 		uint loadAddress = loadBase + index * 4;
-#if IMAGESPACE_INDEXREBASE_DST_ODD
+#	if IMAGESPACE_INDEXREBASE_DST_ODD
 		// An odd store base leaves the first dword half covered, so lane zero merges one biased half into its upper half and keeps the lower one.
-		if (index == 0)
-		{
+		if (index == 0) {
 			uint headTarget = DestinationIndices.Load(storeBase);
 			uint headHalf = SourceIndices.Load(loadBase) & (IMAGESPACE_INDEXREBASE_SRC_ODD ? ~0u : 0xffffu);
-#if IMAGESPACE_INDEXREBASE_SRC_ODD
+#		if IMAGESPACE_INDEXREBASE_SRC_ODD
 			headHalf >>= 16;
-#endif
+#		endif
 			DestinationIndices.Store(storeBase, (headTarget & 0xffffu) | ((headHalf + bias) << 16));
-		}
-		else
-#endif
+		} else
+#	endif
 		{
 			uint value;
-#if IMAGESPACE_INDEXREBASE_DST_ODD != IMAGESPACE_INDEXREBASE_SRC_ODD
+#	if IMAGESPACE_INDEXREBASE_DST_ODD != IMAGESPACE_INDEXREBASE_SRC_ODD
 			// Disagreeing parities put the pair one half out of step with its dword, so the copy reads a two dword window.
-#if IMAGESPACE_INDEXREBASE_DST_ODD != IMAGESPACE_INDEXREBASE_COUNT_ODD
+#		if IMAGESPACE_INDEXREBASE_DST_ODD != IMAGESPACE_INDEXREBASE_COUNT_ODD
 			// The last dword then carries one half only, so its upper half is kept and only a new lower half is merged.
 			[branch] if (index == RebaseParameters.x - 1)
 			{
@@ -207,7 +202,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 				value = (DestinationIndices.Load(storeAddress) & ~0xffffu) | tailHalf;
 			}
 			else
-#endif
+#		endif
 			{
 				uint window = loadBase + index * 4 - IMAGESPACE_INDEXREBASE_DST_ODD * 4;
 				uint lowerHalf = SourceIndices.Load(window) >> 16;
@@ -216,18 +211,18 @@ void main(uint3 threadId : SV_DispatchThreadID)
 				upperHalf += bias;
 				value = lowerHalf | (upperHalf << 16);
 			}
-#else
+#	else
 			uint packedValue = SourceIndices.Load(loadAddress);
 			uint lowerHalf = packedValue & 0xffffu;
 			uint upperHalf = packedValue & ~0xffffu;
 			value = (lowerHalf + bias) | (upperHalf + (bias << 16));
-#endif
+#	endif
 			DestinationIndices.Store(storeAddress, value);
 		}
 	}
 }
 #elif defined(VLS_SLICE_INTERP_SOURCE) || defined(VLS_SLICE_COORD_SOURCE)
-#if defined(VLS_SLICE_INTERP_SOURCE)
+#	if defined(VLS_SLICE_INTERP_SOURCE)
 
 cbuffer PerGeometry : register(b2)
 {
@@ -239,8 +234,8 @@ Texture2D<float> SliceCoordinates : register(t3);
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 uint2 main(PS_INPUT input) : SV_Target0
@@ -252,14 +247,14 @@ uint2 main(PS_INPUT input) : SV_Target0
 	uint selected = texel.y & 15u;
 
 	float coordinates[16];
-	[unroll]
-	for (uint i = 0; i < 16; ++i) {
+	[unroll] for (uint i = 0; i < 16; ++i)
+	{
 		coordinates[i] = SliceCoordinates.Load(int3(block * 16 + i, row, 0));
 	}
 
 	uint lower = selected;
-	[loop]
-	while (lower > 0) {
+	[loop] while (lower > 0)
+	{
 		if (abs(coordinates[lower - 1] - coordinates[lower]) > 4.0) {
 			break;
 		}
@@ -267,8 +262,8 @@ uint2 main(PS_INPUT input) : SV_Target0
 	}
 
 	uint upper = selected;
-	[loop]
-	while (upper < 15) {
+	[loop] while (upper < 15)
+	{
 		if (abs(coordinates[upper] - coordinates[upper + 1]) > 4.0) {
 			break;
 		}
@@ -282,7 +277,7 @@ uint2 main(PS_INPUT input) : SV_Target0
 	return range + base;
 }
 
-#elif defined(VLS_SLICE_COORD_SOURCE)
+#	elif defined(VLS_SLICE_COORD_SOURCE)
 
 cbuffer PerGeometry : register(b2)
 {
@@ -295,8 +290,8 @@ SamplerState SceneDepthSampler : register(s1);
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 void main(
@@ -329,9 +324,7 @@ void main(
 	float extension = max(
 		max(max(max(intersections.x, 0.0), intersections.y), intersections.z),
 		intersections.w);
-	float2 coordinate = useCenter
-		? SliceParams.xy
-		: direction * extension + SliceParams.xy;
+	float2 coordinate = useCenter ? SliceParams.xy : direction * extension + SliceParams.xy;
 	if (any(abs(coordinate) > 1.0001)) {
 		discard;
 	}
@@ -361,9 +354,9 @@ void main(
 	outputCoordinate = result;
 }
 
+#	else
+#		error Select one VLS slice-scatter pixel route.
+#	endif
 #else
-#error Select one VLS slice-scatter pixel route.
-#endif
-#else
-#error "Select one shader family stage or kernel."
+#	error "Select one shader family stage or kernel."
 #endif

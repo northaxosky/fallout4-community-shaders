@@ -68,7 +68,7 @@ namespace cs::features::ssgi
 	public:
 		struct Frame
 		{
-			bool          useHistory = false;
+			bool useHistory = false;
 			std::uint32_t readIndex = 0;
 			std::uint32_t writeIndex = 1;
 		};
@@ -111,11 +111,11 @@ namespace cs::features::ssgi
 		}
 
 	private:
-		std::uint32_t      _readIndex = 0;
-		std::uint32_t      _resetCount = 0;
+		std::uint32_t _readIndex = 0;
+		std::uint32_t _resetCount = 0;
 		HistoryResetReason _lastResetReason = HistoryResetReason::kFirstFrame;
-		bool               _valid = false;
-		bool               _published = false;
-		bool               _clearPending = true;
+		bool _valid = false;
+		bool _published = false;
+		bool _clearPending = true;
 	};
 }

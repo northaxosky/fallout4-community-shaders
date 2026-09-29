@@ -70,11 +70,9 @@ namespace cs::ssgi::dev
 		const double a_cameraWorld[3],
 		double a_output[16])
 	{
-		constexpr std::array<std::array<double, 3>, 3> swapXZ{ {
-			{ 0.0, 0.0, 1.0 },
+		constexpr std::array<std::array<double, 3>, 3> swapXZ{ { { 0.0, 0.0, 1.0 },
 			{ 0.0, 1.0, 0.0 },
-			{ 1.0, 0.0, 0.0 }
-		} };
+			{ 1.0, 0.0, 0.0 } } };
 		std::array<std::array<double, 3>, 3> swappedRotation{};
 		for (std::size_t row = 0; row < 3; ++row) {
 			for (std::size_t column = 0; column < 3; ++column) {

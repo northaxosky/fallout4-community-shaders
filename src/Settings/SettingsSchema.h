@@ -77,12 +77,12 @@ namespace cs::settings
 
 		std::string_view key;
 		std::string_view description;
-		T Settings::*member;
+		T Settings::* member;
 		Range<T> accepted;
 		Range<T> edit;
 		ApplyTiming timing;
 
-		constexpr Field(std::string_view a_key, std::string_view a_description, T Settings::*a_member,
+		constexpr Field(std::string_view a_key, std::string_view a_description, T Settings::* a_member,
 			Range<T> a_range = {}, ApplyTiming a_timing = ApplyTiming::kImmediate) :
 			Field(a_key, a_description, a_member, a_range, a_range, a_timing)
 		{}
@@ -90,7 +90,7 @@ namespace cs::settings
 		constexpr Field(
 			std::string_view a_key,
 			std::string_view a_description,
-			T Settings::*a_member,
+			T Settings::* a_member,
 			Range<T> a_accepted,
 			Range<T> a_edit,
 			ApplyTiming a_timing = ApplyTiming::kImmediate) :
@@ -165,7 +165,7 @@ namespace cs::settings
 
 		std::string_view key;
 		std::string_view description;
-		T Settings::*member;
+		T Settings::* member;
 		std::span<const Choice<T>> choices;
 		ApplyTiming timing;
 
@@ -173,7 +173,7 @@ namespace cs::settings
 		constexpr ChoiceField(
 			std::string_view a_key,
 			std::string_view a_description,
-			T Settings::*a_member,
+			T Settings::* a_member,
 			const std::array<Choice<T>, N>& a_choices,
 			ApplyTiming a_timing = ApplyTiming::kImmediate) :
 			key(a_key), description(a_description), member(a_member), choices(a_choices), timing(a_timing)
@@ -218,19 +218,20 @@ namespace cs::settings
 		{}
 
 		template <class T>
-		constexpr Range<T> EditRange(T SettingsType::*a_member) const
+		constexpr Range<T> EditRange(T SettingsType::* a_member) const
 		{
 			const Range<T>* range = nullptr;
 			std::apply([&](const auto&... a_fields) {
 				const auto find = [&](const auto& a_field) {
 					if constexpr (std::same_as<T, typename std::remove_cvref_t<decltype(a_field)>::ValueType> &&
-						requires { a_field.edit; }) {
+								  requires { a_field.edit; }) {
 						if (a_field.member == a_member)
 							range = &a_field.edit;
 					}
 				};
 				(find(a_fields), ...);
-			}, fields);
+			},
+				fields);
 			if (!range)
 				throw std::invalid_argument("Settings member is not in the schema");
 			return *range;
@@ -293,7 +294,8 @@ namespace cs::settings
 				result.push_back(std::move(view));
 			};
 			(append(a_fields), ...);
-		}, a_schema.fields);
+		},
+			a_schema.fields);
 		return result;
 	}
 
@@ -316,7 +318,8 @@ namespace cs::settings
 				result.push_back(field.description);
 			};
 			(check(a_fields), ...);
-		}, a_schema.fields);
+		},
+			a_schema.fields);
 		return result;
 	}
 
@@ -331,7 +334,8 @@ namespace cs::settings
 		auto candidate = a_candidate;
 		const bool valid = std::apply([&](const auto&... a_fields) {
 			return (a_fields.Read(a_table, candidate, a_error) && ...);
-		}, a_schema.fields);
+		},
+			a_schema.fields);
 		if (valid)
 			a_candidate = std::move(candidate);
 		return valid;
@@ -367,7 +371,8 @@ namespace cs::settings
 		toml::table table;
 		std::apply([&](const auto&... a_fields) {
 			(a_fields.Write(table, a_value), ...);
-		}, a_schema.fields);
+		},
+			a_schema.fields);
 		return table;
 	}
 
@@ -384,7 +389,8 @@ namespace cs::settings
 					a_field.Write(table, a_value);
 			};
 			(write(a_fields), ...);
-		}, a_schema.fields);
+		},
+			a_schema.fields);
 		return table;
 	}
 }

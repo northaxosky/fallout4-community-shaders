@@ -149,8 +149,7 @@ namespace cs::features
 			UINT a_maxLatency) noexcept override;
 		HRESULT STDMETHODCALLTYPE GetMaximumFrameLatency(
 			UINT* a_maxLatency) noexcept override;
-		HANDLE STDMETHODCALLTYPE GetFrameLatencyWaitableObject()
-			noexcept override;
+		HANDLE STDMETHODCALLTYPE GetFrameLatencyWaitableObject() noexcept override;
 		HRESULT STDMETHODCALLTYPE SetMatrixTransform(
 			const DXGI_MATRIX_3X2_F* a_matrix) noexcept override;
 		HRESULT STDMETHODCALLTYPE GetMatrixTransform(

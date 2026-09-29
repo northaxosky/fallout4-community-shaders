@@ -22,6 +22,6 @@ namespace cs::engine
 	};
 
 	[[nodiscard]] std::optional<ShaderVariantCompilationDescriptor>
-		BuildShaderFamilyCompilationDescriptor(
-			const ShaderFamilyDescriptor& a_descriptor);
+	BuildShaderFamilyCompilationDescriptor(
+		const ShaderFamilyDescriptor& a_descriptor);
 }

@@ -126,10 +126,10 @@ namespace cs::features
 					main && main->gameActive && (main->inMenuMode || main->freezeTime);
 				const bool lod =
 					a_property && a_property->flags.any(
-						ShaderFlag::kLODObjects,
-						ShaderFlag::kLODLandscape,
-						ShaderFlag::kLODLandBlend,
-						ShaderFlag::kMultiTextureLandscape);
+									  ShaderFlag::kLODObjects,
+									  ShaderFlag::kLODLandscape,
+									  ShaderFlag::kLODLandBlend,
+									  ShaderFlag::kMultiTextureLandscape);
 				if (a_geometry && !g_loadingMenuOpen.load(std::memory_order_relaxed) &&
 					(frozen || lod)) {
 					a_geometry->previousWorld = a_geometry->world;

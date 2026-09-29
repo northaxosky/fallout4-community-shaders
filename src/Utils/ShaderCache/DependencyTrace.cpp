@@ -10,8 +10,8 @@ namespace cs::shader_cache
 	{
 		RevalidationOutcome Reject(
 			RevalidationStatus a_status,
-			std::string_view   a_what,
-			std::string_view   a_path)
+			std::string_view a_what,
+			std::string_view a_path)
 		{
 			RevalidationOutcome outcome;
 			outcome.status = a_status;
@@ -20,19 +20,17 @@ namespace cs::shader_cache
 		}
 
 		bool MatchesRecordedContent(
-			const FileObservation&      a_observation,
+			const FileObservation& a_observation,
 			const sha256::Sha256Result& a_digest,
-			std::uint64_t               a_length)
+			std::uint64_t a_length)
 		{
 			if (a_observation.status != FileReadStatus::kOk)
 				return false;
-			if (sha256::Sha256IsZero(a_observation.contentDigest)
-				|| sha256::Sha256IsZero(a_digest)) {
+			if (sha256::Sha256IsZero(a_observation.contentDigest) || sha256::Sha256IsZero(a_digest)) {
 				return false;
 			}
 			// length only corroborates the digest
-			return a_observation.contentLength == a_length
-				&& a_observation.contentDigest == a_digest;
+			return a_observation.contentLength == a_length && a_observation.contentDigest == a_digest;
 		}
 
 		FileObservation Observe(RevalidationContext* a_context, const std::string& a_locator)
@@ -60,7 +58,7 @@ namespace cs::shader_cache
 
 	RevalidationOutcome RevalidateDependencyManifest(
 		const DependencyManifest& a_manifest,
-		RevalidationContext*      a_context)
+		RevalidationContext* a_context)
 	{
 		if (!MatchesRecordedContent(
 				Observe(a_context, a_manifest.rootLocator),
@@ -97,8 +95,7 @@ namespace cs::shader_cache
 					}
 					break;
 				case ProbeStatus::kReadFailed:
-					if (observation.status == FileReadStatus::kOk
-						|| observation.status == FileReadStatus::kMissing) {
+					if (observation.status == FileReadStatus::kOk || observation.status == FileReadStatus::kMissing) {
 						return Reject(
 							RevalidationStatus::kProbeUnstable,
 							include.requestedName,

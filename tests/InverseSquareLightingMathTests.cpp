@@ -32,8 +32,7 @@ namespace
 				std::numeric_limits<float>::quiet_NaN(),
 				-1.0f,
 				disabled,
-				false))
-				== vanillaBits,
+				false)) == vanillaBits,
 			"disabled mode must preserve the exact native value");
 
 		const Settings enabled;
@@ -51,8 +50,7 @@ namespace
 					 std::numeric_limits<float>::quiet_NaN() } }) {
 			Check(
 				std::bit_cast<std::uint32_t>(ApplyAttenuation(
-					vanilla, distance, radius, enabled, false))
-					== vanillaBits,
+					vanilla, distance, radius, enabled, false)) == vanillaBits,
 				"malformed light inputs must preserve native attenuation");
 		}
 
@@ -61,8 +59,7 @@ namespace
 			std::numeric_limits<float>::quiet_NaN();
 		Check(
 			std::bit_cast<std::uint32_t>(ApplyAttenuation(
-				vanilla, 1.0f, 100.0f, malformed, false))
-				== vanillaBits,
+				vanilla, 1.0f, 100.0f, malformed, false)) == vanillaBits,
 			"malformed settings must preserve native attenuation");
 	}
 
@@ -81,15 +78,12 @@ namespace
 			std::isfinite(source) && source > middle && middle > far,
 			"physical attenuation must remain finite and monotonic");
 		Check(
-			PhysicalAttenuation(radius, radius, nearField) == 0.0f
-				&& PhysicalAttenuation(
-					radius + 1.0f, radius, nearField)
-					== 0.0f,
+			PhysicalAttenuation(radius, radius, nearField) == 0.0f && PhysicalAttenuation(
+																		  radius + 1.0f, radius, nearField) == 0.0f,
 			"radius cutoff must reach exact zero");
 		Check(
 			PhysicalAttenuation(
-				radius - 0.001f, radius, nearField)
-				< 1.0e-10f,
+				radius - 0.001f, radius, nearField) < 1.0e-10f,
 			"cutoff must remain continuous at the light radius");
 	}
 }

@@ -1,15 +1,15 @@
 #if (defined(DOWNSAMPLE) && (defined(LUM) || defined(RGB2LUM) || defined(BLEND))) || \
-	(defined(LUM) && (defined(RGB2LUM) || defined(BLEND))) || \
+	(defined(LUM) && (defined(RGB2LUM) || defined(BLEND))) ||                        \
 	(defined(RGB2LUM) && defined(BLEND))
-#error "HDR downsample selectors are mutually exclusive"
+#	error "HDR downsample selectors are mutually exclusive"
 #endif
 
 #if defined(BLEND)
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 cbuffer HDRParameters : register(b2)
@@ -31,8 +31,7 @@ float4 main(PS_INPUT input) : SV_Target
 	float3 scene = Scene.Sample(SceneSampler, input.TexCoord).xyz;
 	float marker =
 		Sentinel.Sample(SentinelSampler, input.TexCoord).w * 255.0 - 4.0;
-	if (abs(marker) < 0.25)
-	{
+	if (abs(marker) < 0.25) {
 		return float4(scene, 1.0);
 	}
 
@@ -41,8 +40,10 @@ float4 main(PS_INPUT input) : SV_Target
 	float adaptation =
 		Adaptation.Sample(AdaptationSampler, input.TexCoord).x;
 	float scale = Parameters[1].z / (adaptation + 0.001);
-	if (scale < Parameters[1].y) scale = Parameters[1].y;
-	if (Parameters[1].x < scale) scale = Parameters[1].x;
+	if (scale < Parameters[1].y)
+		scale = Parameters[1].y;
+	if (Parameters[1].x < scale)
+		scale = Parameters[1].x;
 	float3 color = (scene + exposure) * scale;
 	float3 twiceColor = color + color;
 	float3 numerator = mad(color, 0.3, 0.05);
@@ -55,9 +56,9 @@ float4 main(PS_INPUT input) : SV_Target
 		asfloat(0x3d75c290));
 	color = numerator / denominator - cinematicCarrier.y;
 	float inverseCurve = 1.0 / mad(
-		mad(Parameters[1].w, 0.2, 19.375999),
-		asfloat(0x3d2758fd),
-		-cinematicCarrier.y);
+								   mad(Parameters[1].w, 0.2, 19.375999),
+								   asfloat(0x3d2758fd),
+								   -cinematicCarrier.y);
 	color *= inverseCurve;
 
 	float luminance = dot(color, float3(0.2125, 0.7154, 0.0721));
@@ -73,8 +74,8 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 cbuffer HDRParameters : register(b2)
@@ -111,8 +112,8 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 cbuffer HDRParameters : register(b2)
@@ -146,8 +147,8 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 cbuffer HDRParameters : register(b2)
@@ -187,8 +188,8 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 cbuffer HDRParameters : register(b2)

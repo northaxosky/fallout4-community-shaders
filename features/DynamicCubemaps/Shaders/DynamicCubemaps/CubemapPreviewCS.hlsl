@@ -4,9 +4,7 @@ SamplerState LinearSampler : register(s0);
 
 static const float Pi = 3.14159265358979323846;
 
-[numthreads(8, 8, 1)]
-void main(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
+[numthreads(8, 8, 1)] void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
 	uint width;
 	uint height;
 	OutputTexture.GetDimensions(width, height);
@@ -22,7 +20,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		-cosLatitude * sin(longitude),
 		sin(latitude));
 	float3 color = max(InputCubemap.SampleLevel(
-		LinearSampler, direction, 0.0), 0.0);
+						   LinearSampler, direction, 0.0),
+		0.0);
 	color = color / (1.0 + color);
 	color = pow(color, 1.0 / 1.6);
 	OutputTexture[dispatchThreadId.xy] = float4(color, 1.0);

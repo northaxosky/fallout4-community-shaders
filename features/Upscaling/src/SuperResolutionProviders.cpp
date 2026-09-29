@@ -63,33 +63,25 @@ namespace cs::features
 		}
 		if (_method == Method::kDLSS) {
 			return _runtime.featureDLSS &&
-					_runtime.slDLSSGetOptimalSettings
-				? Success()
-				: Failure(
-					"DLSS super-resolution is unavailable in this Streamline "
-					"session.",
-					render::temporal::FailureDomain::kStreamline);
+			               _runtime.slDLSSGetOptimalSettings ?
+			           Success() :
+			           Failure(
+						   "DLSS super-resolution is unavailable in this Streamline "
+						   "session.",
+						   render::temporal::FailureDomain::kStreamline);
 		}
 		return _runtime.ValidateFSRAlgorithm(
-			_method == Method::kFSR4
-				? sl::FSRAlgorithm::eFSR4
-				: sl::FSRAlgorithm::eFSR3);
+			_method == Method::kFSR4 ? sl::FSRAlgorithm::eFSR4 : sl::FSRAlgorithm::eFSR3);
 	}
 
 	render::temporal::SuperResolutionSizeResult
-		StreamlineSuperResolution::QueryRenderSize(
-			const render::temporal::SuperResolutionSizeRequest& a_request)
+	StreamlineSuperResolution::QueryRenderSize(
+		const render::temporal::SuperResolutionSizeRequest& a_request)
 	{
 		if (const auto* cached = _sizeCache.Find(a_request)) {
 			return *cached;
 		}
-		auto result = _method == Method::kDLSS
-			? _runtime.QueryDLSSRenderSize(a_request)
-			: _runtime.QueryFSRRenderSize(
-				  a_request,
-				  _method == Method::kFSR4
-					  ? sl::FSRAlgorithm::eFSR4
-					  : sl::FSRAlgorithm::eFSR3);
+		auto result = _method == Method::kDLSS ? _runtime.QueryDLSSRenderSize(a_request) : _runtime.QueryFSRRenderSize(a_request, _method == Method::kFSR4 ? sl::FSRAlgorithm::eFSR4 : sl::FSRAlgorithm::eFSR3);
 		_sizeCache.Store(a_request, result);
 		return result;
 	}
@@ -100,9 +92,7 @@ namespace cs::features
 		if (_method != Method::kDLSS) {
 			return _runtime.UpscaleFSRD3D12(
 				a_request,
-				_method == Method::kFSR4
-					? sl::FSRAlgorithm::eFSR4
-					: sl::FSRAlgorithm::eFSR3);
+				_method == Method::kFSR4 ? sl::FSRAlgorithm::eFSR4 : sl::FSRAlgorithm::eFSR3);
 		}
 		return _runtime.UpscaleD3D12(a_request);
 	}
@@ -112,10 +102,8 @@ namespace cs::features
 	{
 		_sizeCache.Clear();
 		return _method == Method::kDLSS ?
-			_runtime.DestroyDLSSResources() :
-			_runtime.DestroyFSRResources(
-				_method == Method::kFSR4
-					? sl::FSRAlgorithm::eFSR4
-					: sl::FSRAlgorithm::eFSR3);
+		           _runtime.DestroyDLSSResources() :
+		           _runtime.DestroyFSRResources(
+					   _method == Method::kFSR4 ? sl::FSRAlgorithm::eFSR4 : sl::FSRAlgorithm::eFSR3);
 	}
 }

@@ -157,7 +157,8 @@ namespace cs::engine
 				const auto result = func(a_owner, a_stream);
 				const std::string_view name =
 					native::StandaloneComputeOwnerName(a_owner) ?
-						native::StandaloneComputeOwnerName(a_owner) : "";
+						native::StandaloneComputeOwnerName(a_owner) :
+						"";
 				if (name == "DFTiledLighting") {
 					ObserveNativeComputeOwner(
 						a_owner,
@@ -239,10 +240,11 @@ namespace cs::engine
 				[] { stl::write_vfunc<Subclass, 0, SetupTechniqueHook<Tag>>(); }));
 		}
 
-#define CS_HOOK_SHADER_SUBCLASS(klass, target)                              \
-	struct Tag_##klass {                                                    \
-		static const char* Name() { return #klass; }                         \
-	};                                                                      \
+#define CS_HOOK_SHADER_SUBCLASS(klass, target)       \
+	struct Tag_##klass                               \
+	{                                                \
+		static const char* Name() { return #klass; } \
+	};                                               \
 	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
 	}
 

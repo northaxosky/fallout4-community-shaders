@@ -7,18 +7,16 @@
 #include <system_error>
 
 static_assert(
-	cs::shader_cache::kCachedOptimizedFlags1
-		== (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3
-			| D3DCOMPILE_SKIP_VALIDATION),
+	cs::shader_cache::kCachedOptimizedFlags1 == (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_SKIP_VALIDATION),
 	"cached bytecode is only interchangeable under the flags it was compiled with");
 
 namespace cs::shader_cache
 {
 	namespace
 	{
-		constexpr std::string_view kRecipeSchema      = "FO4CS.shader-recipe";
-		constexpr std::uint32_t    kRecipeSchemaVersion = 1;
-		constexpr std::string_view kDependencySchema  = "FO4CS.shader-recipe.dependency";
+		constexpr std::string_view kRecipeSchema = "FO4CS.shader-recipe";
+		constexpr std::uint32_t kRecipeSchemaVersion = 1;
+		constexpr std::string_view kDependencySchema = "FO4CS.shader-recipe.dependency";
 	}
 
 	const char* DescribeStage(ShaderCacheStage a_stage) noexcept
@@ -36,14 +34,12 @@ namespace cs::shader_cache
 
 	bool IsKnownStage(std::uint8_t a_stage) noexcept
 	{
-		return a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kVertex)
-			|| a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kPixel)
-			|| a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kCompute);
+		return a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kVertex) || a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kPixel) || a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kCompute);
 	}
 
 	std::string EncodeLocator(const std::filesystem::path& a_path)
 	{
-		std::error_code       error;
+		std::error_code error;
 		std::filesystem::path resolved = std::filesystem::weakly_canonical(a_path, error);
 		if (error || resolved.empty()) {
 			resolved = std::filesystem::absolute(a_path, error);
@@ -53,7 +49,7 @@ namespace cs::shader_cache
 
 		// unencodable paths only cost a cache miss
 		try {
-			const auto  encoded = resolved.lexically_normal().u8string();
+			const auto encoded = resolved.lexically_normal().u8string();
 			std::string result(encoded.size(), '\0');
 			std::ranges::transform(
 				encoded,
@@ -72,11 +68,11 @@ namespace cs::shader_cache
 	}
 
 	std::vector<std::uint8_t> EncodeShaderRecipe(
-		const ShaderRecipe&     a_recipe,
+		const ShaderRecipe& a_recipe,
 		const CompilerIdentity& a_identity)
 	{
 		std::vector<std::uint8_t> bytes;
-		ByteWriter                writer(bytes);
+		ByteWriter writer(bytes);
 		writer.Text(kRecipeSchema);
 		writer.U32(kRecipeSchemaVersion);
 		writer.Text(EncodeLocator(a_recipe.source));
@@ -107,10 +103,10 @@ namespace cs::shader_cache
 
 	sha256::Sha256Result ComputeFullRecipeDigest(
 		std::span<const std::uint8_t> a_recipeBytes,
-		const sha256::Sha256Result&   a_dependencyDigest)
+		const sha256::Sha256Result& a_dependencyDigest)
 	{
 		std::vector<std::uint8_t> bytes(a_recipeBytes.begin(), a_recipeBytes.end());
-		ByteWriter                writer(bytes);
+		ByteWriter writer(bytes);
 		writer.Text(kDependencySchema);
 		writer.Digest(a_dependencyDigest);
 		return sha256::Sha256Compute(bytes.data(), bytes.size());

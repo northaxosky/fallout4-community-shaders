@@ -15,9 +15,7 @@ cbuffer CopyDimensions : register(b0)
 	uint3 Padding;
 };
 
-[numthreads(8, 8, 1)]
-void main(uint3 dispatchThreadID : SV_DispatchThreadID)
-{
+[numthreads(8, 8, 1)] void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
 	uint2 pixel = dispatchThreadID.xy;
 	if (any(pixel >= OutputSize))
 		return;

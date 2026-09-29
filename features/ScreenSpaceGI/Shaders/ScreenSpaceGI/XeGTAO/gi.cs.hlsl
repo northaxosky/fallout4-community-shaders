@@ -7,8 +7,8 @@
 #include "../Common/FastMath.hlsli"
 #include "../Common/Math.hlsli"
 #ifdef GI
-#include "../Common/Color.hlsli"
-#include "../../Common/SphericalHarmonics.hlsli"
+#	include "../../Common/SphericalHarmonics.hlsli"
+#	include "../Common/Color.hlsli"
 #endif
 #include "common.hlsli"
 
@@ -47,7 +47,8 @@ void CalculateGI(
 	uint2 dtid, float2 uv, float viewspaceZ, float3 viewspaceNormal,
 	out float o_ao
 #ifdef GI
-	, out float4 o_currY, out float2 o_currCoCg
+	,
+	out float4 o_currY, out float2 o_currCoCg
 #endif
 )
 {
@@ -221,9 +222,7 @@ void CalculateGI(
 #endif
 }
 
-[numthreads(8, 8, 1)]
-void main(const uint2 dtid : SV_DispatchThreadID)
-{
+[numthreads(8, 8, 1)] void main(const uint2 dtid : SV_DispatchThreadID) {
 	if (any(dtid >= uint2(OUT_FRAME_DIM)))
 		return;
 
@@ -255,7 +254,8 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 		CalculateGI(
 			pxCoord, uv, viewspaceZ, viewspaceNormal, currAo
 #ifdef GI
-			, currY, currCoCg
+			,
+			currY, currCoCg
 #endif
 		);
 

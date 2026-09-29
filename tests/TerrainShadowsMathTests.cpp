@@ -30,8 +30,7 @@ namespace
 		double a_tolerance,
 		std::string_view a_message)
 	{
-		if (!std::isfinite(a_actual)
-			|| std::abs(a_actual - a_expected) > a_tolerance) {
+		if (!std::isfinite(a_actual) || std::abs(a_actual - a_expected) > a_tolerance) {
 			std::cerr << "FAIL: " << a_message << " (actual " << a_actual
 					  << ", expected " << a_expected << ")\n";
 			++failures;
@@ -57,8 +56,7 @@ namespace
 		CheckNear(parsed->zRange[1], 3200.0, 1e-3, "max z is quantized by 8");
 
 		const double normalized = 32767.0 / 65535.0;
-		const double decoded = parsed->pos0[2]
-			+ normalized * (parsed->pos1[2] - parsed->pos0[2]);
+		const double decoded = parsed->pos0[2] + normalized * (parsed->pos1[2] - parsed->pos0[2]);
 		CheckNear(decoded, 0.0, 4.0, "the xLODGen midpoint decodes to game Z zero");
 
 		Check(

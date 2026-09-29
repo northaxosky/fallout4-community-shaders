@@ -49,13 +49,11 @@ namespace
 				SelectDeferredDrawAnchorDecision(
 					testCase.insideLights,
 					testCase.insideComposite,
-					testCase.residualR9d)
-					== testCase.expected,
+					testCase.residualR9d) == testCase.expected,
 				"deferred draw anchor decision truth table mismatch");
 		}
 		Check(
-			SelectDeferredDrawAnchorDecision(true, false, UINT32_MAX)
-				== DeferredDrawAnchorDecision{},
+			SelectDeferredDrawAnchorDecision(true, false, UINT32_MAX) == DeferredDrawAnchorDecision{},
 			"lights phase accepted an unrelated residual r9d value");
 	}
 
@@ -87,10 +85,7 @@ namespace
 		auto& fixture = *g_pipelineFixture;
 		fixture.order.push_back(2);
 		Check(
-			a_device == fixture.expectedDevice
-				&& a_linkage == fixture.expectedLinkage
-				&& a_bytecode
-				&& a_bytecodeLength != 0,
+			a_device == fixture.expectedDevice && a_linkage == fixture.expectedLinkage && a_bytecode && a_bytecodeLength != 0,
 			"original CreatePS did not receive broker inputs");
 		if (a_output)
 			*a_output = fixture.stock;
@@ -103,12 +98,7 @@ namespace
 		auto& fixture = *g_pipelineFixture;
 		fixture.order.push_back(4);
 		fixture.resolverForwarded =
-			a_request.device == fixture.expectedDevice
-			&& a_request.linkage == fixture.expectedLinkage
-			&& a_request.stockOutput == fixture.stock
-			&& a_request.output
-			&& *a_request.output == fixture.stock
-			&& a_request.stage == fixture.expectedStage;
+			a_request.device == fixture.expectedDevice && a_request.linkage == fixture.expectedLinkage && a_request.stockOutput == fixture.stock && a_request.output && *a_request.output == fixture.stock && a_request.stage == fixture.expectedStage;
 		if (a_request.output)
 			*a_request.output = fixture.replacement;
 		return cs::engine::ShaderSwapResolverResult::kReplaced;
@@ -137,15 +127,11 @@ namespace
 		const auto tilelight = ResolvePixelShaderVariant(
 			"BSDFCompositeShader", 0xB60, true);
 		Check(
-			noTilelight
-				&& *noTilelight
-					== shader_variants::kBsdfCompositeAmbientIbl,
+			noTilelight && *noTilelight == shader_variants::kBsdfCompositeAmbientIbl,
 			"Composite resolver did not force Tilelight off");
 		Check(
-			tilelight
-				&& *tilelight
-					== shader_variants::
-						kBsdfCompositeAmbientIblTilelight,
+			tilelight && *tilelight == shader_variants::
+										   kBsdfCompositeAmbientIblTilelight,
 			"Composite resolver did not force Tilelight on");
 
 		for (const std::uint32_t discardedBit :
@@ -155,16 +141,14 @@ namespace
 				0xB60 | discardedBit,
 				false);
 			Check(
-				collapsed && noTilelight
-					&& *collapsed == *noTilelight,
+				collapsed && noTilelight && *collapsed == *noTilelight,
 				"Composite resolver did not collapse discarded technique bits");
 		}
 
 		const auto unknownBits = ResolvePixelShaderVariant(
 			"BSDFCompositeShader", 0x00100048, false);
 		Check(
-			unknownBits
-				&& unknownBits->id.Value() == 0x00100048,
+			unknownBits && unknownBits->id.Value() == 0x00100048,
 			"Composite resolver discarded an opaque technique bit");
 	}
 
@@ -192,22 +176,19 @@ namespace
 		const auto setupAlias = ResolvePixelShaderVariant(
 			"BSDFLightShader", 0x02001204, false);
 		Check(
-			setupAlias
-				&& setupAlias->id.Value() == 0x00001204,
+			setupAlias && setupAlias->id.Value() == 0x00001204,
 			"Light fallback mask retained CPU-only setup bit");
 
 		const auto keyFeature = ResolvePixelShaderVariant(
 			"BSDFLightShader", 0x10000002, false);
 		Check(
-			keyFeature
-				&& keyFeature->id.Value() == 0x10000002,
+			keyFeature && keyFeature->id.Value() == 0x10000002,
 			"Light key-feature branch was not identity");
 
 		const auto overdraw = ResolvePixelShaderVariant(
 			"BSDFLightShader", 0xFFFFFFFF, false);
 		Check(
-			overdraw
-				&& overdraw->id.Value() == 0xF801257F,
+			overdraw && overdraw->id.Value() == 0xF801257F,
 			"Light overdraw mask produced the wrong PSID");
 
 		const auto stencil = ResolvePixelShaderVariant(
@@ -237,8 +218,7 @@ namespace
 		g_pipelineFixture = &fixture;
 		const std::array resolvers{
 			PixelShaderSwapResolverRegistration{
-				.resolver = &PipelineResolver
-			}
+				.resolver = &PipelineResolver }
 		};
 		const std::array<std::byte, 4> bytecode{
 			std::byte{ 1 },
@@ -253,8 +233,7 @@ namespace
 			ShaderVariantKeyView{
 				"BSDFLightShader",
 				ShaderStage::kPixel,
-				ShaderVariantId{ 0x1234 }
-			},
+				ShaderVariantId{ 0x1234 } },
 			false,
 			ShaderStage::kPixel,
 			fixture.expectedDevice,
@@ -288,13 +267,11 @@ namespace
 					bytecode.data(),
 					bytecode.size(),
 					fixture.expectedLinkage,
-					&output)
-					== S_OK,
+					&output) == S_OK,
 				"bypassed CreatePS changed original HRESULT");
 		}
 		Check(
-			fixture.order == std::vector<int>{ 2 }
-				&& output == fixture.stock,
+			fixture.order == std::vector<int>{ 2 } && output == fixture.stock,
 			"broker bypass recursed into resolvers");
 
 		fixture.order.clear();
@@ -311,8 +288,7 @@ namespace
 				bytecode.data(),
 				bytecode.size(),
 				fixture.expectedLinkage,
-				&output)
-				== E_FAIL,
+				&output) == E_FAIL,
 			"failed stock CreatePS HRESULT was not preserved");
 		Check(
 			fixture.order == std::vector<int>{ 2 },
@@ -342,12 +318,10 @@ namespace
 		const std::array resolvers{
 			PixelShaderSwapResolverRegistration{
 				.resolver = &FirstPipelineResolver,
-				.priority = kEarlyResolverPriority
-			},
+				.priority = kEarlyResolverPriority },
 			PixelShaderSwapResolverRegistration{
 				.resolver = &LowerPipelineResolver,
-				.priority = kHlslReplacementResolverPriority
-			}
+				.priority = kHlslReplacementResolverPriority }
 		};
 		const std::array<std::byte, 1> bytecode{ std::byte{ 1 } };
 		ID3D11DeviceChild* output = nullptr;
@@ -362,10 +336,8 @@ namespace
 				bytecode.data(),
 				bytecode.size(),
 				fixture.expectedLinkage,
-				&output)
-				== S_OK
-				&& output == fixture.stock
-				&& !fixture.lowerResolverCalled,
+				&output) == S_OK &&
+				output == fixture.stock && !fixture.lowerResolverCalled,
 			"claimed stock route fell through to lower HLSL resolver");
 
 		fixture.firstResolverResult =
@@ -383,10 +355,8 @@ namespace
 				bytecode.data(),
 				bytecode.size(),
 				fixture.expectedLinkage,
-				&output)
-				== S_OK
-				&& output == fixture.replacement
-				&& fixture.lowerResolverCalled,
+				&output) == S_OK &&
+				output == fixture.replacement && fixture.lowerResolverCalled,
 			"unmatched patch route did not reach lower HLSL resolver");
 	}
 
@@ -412,8 +382,7 @@ namespace
 		const std::array resolvers{
 			PixelShaderSwapResolverRegistration{
 				.resolver = &PipelineResolver,
-				.stages = ShaderStageBit(ShaderStage::kPixel)
-			}
+				.stages = ShaderStageBit(ShaderStage::kPixel) }
 		};
 		const std::array<std::byte, 1> bytecode{ std::byte{ 1 } };
 		ID3D11DeviceChild* output = nullptr;
@@ -428,13 +397,10 @@ namespace
 				bytecode.data(),
 				bytecode.size(),
 				fixture.expectedLinkage,
-				&output)
-				== S_OK,
+				&output) == S_OK,
 			"vertex pipeline changed the original result");
 		Check(
-			fixture.order == std::vector<int>{ 2 }
-				&& output == fixture.stock
-				&& !fixture.resolverForwarded,
+			fixture.order == std::vector<int>{ 2 } && output == fixture.stock && !fixture.resolverForwarded,
 			"pixel resolver ran for a vertex shader");
 	}
 

@@ -7,13 +7,13 @@ namespace cs::features::ssgi_settings
 	// Upstream d330bf12d defaults and ranges.
 	struct Settings
 	{
-		bool  enabled = true;
-		bool  enableGI = true;
-		bool  enableVanillaSSAO = false;
-		int   numSlices = 4;
-		int   numSteps = 8;
+		bool enabled = true;
+		bool enableGI = true;
+		bool enableVanillaSSAO = false;
+		int numSlices = 4;
+		int numSteps = 8;
 		// 0 full, 1 half, 2 quarter.
-		int   resolutionMode = 1;
+		int resolutionMode = 1;
 		float minScreenRadius = 0.01f;
 		float aoRadius = 256.0f;
 		float giRadius = 256.0f;
@@ -25,11 +25,11 @@ namespace cs::features::ssgi_settings
 		// Upstream 1 (range 0-6); raised because FO4 lights interiors with placed lights, which get only sqrt(AO).
 		float aoPower = 4.0f;
 		float giStrength = 1.0f;
-		bool  enableTemporalDenoiser = true;
-		bool  enableBlur = true;
+		bool enableTemporalDenoiser = true;
+		bool enableBlur = true;
 		float depthDisocclusion = 0.1f;
 		float normalDisocclusion = 0.1f;
-		int   maxAccumFrames = 16;
+		int maxAccumFrames = 16;
 		float blurRadius = 2.0f;
 		float distanceNormalisation = 2.0f;
 	};
@@ -59,7 +59,6 @@ namespace cs::features::ssgi_settings
 			// Stored in R8.
 			settings::Field{ "max_accum_frames", "Maximum accumulated temporal frames.", &Settings::maxAccumFrames, settings::Range{ 1, 255 }, settings::Range{ 1, 64 } },
 			settings::Field{ "blur_radius", "Blur radius in pixels.", &Settings::blurRadius, {}, settings::Range{ 0.0f, 30.0f } },
-			settings::Field{ "distance_normalisation", "Blur geometry weight.", &Settings::distanceNormalisation, {}, settings::Range{ 0.0f, 5.0f } }
-		}
+			settings::Field{ "distance_normalisation", "Blur geometry weight.", &Settings::distanceNormalisation, {}, settings::Range{ 0.0f, 5.0f } } }
 	};
 }

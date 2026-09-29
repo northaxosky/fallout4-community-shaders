@@ -73,9 +73,7 @@ float2x3 getKernelBasis(float3 D, float3 N, float roughness = 1.0, float anisoFa
 	return float2x3(T, B);
 }
 
-[numthreads(8, 8, 1)]
-void main(const uint2 dtid : SV_DispatchThreadID)
-{
+[numthreads(8, 8, 1)] void main(const uint2 dtid : SV_DispatchThreadID) {
 	if (any(dtid >= uint2(OUT_FRAME_DIM)))
 		return;
 	const float2 frameScale = FrameDim * RcpTexDim;

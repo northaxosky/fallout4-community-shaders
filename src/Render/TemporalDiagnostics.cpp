@@ -13,32 +13,16 @@ namespace cs::render
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature&) {
 					return TemporalRenderer::GetSingleton()->GetRenderSubrectDebugTexture();
-				}
-			},
-			FeatureDebugView{
-				.id = "render_proxy",
-				.label = "Render-resolution proxy (scene color)",
-				.kind = FeatureDebugViewKind::kTexturePreview,
-				.textureProvider = [](const Feature&) {
-					return TemporalRenderer::GetSingleton()->GetProxyDebugTexture();
-				}
-			},
-			FeatureDebugView{
-				.id = "motion_vectors",
-				.label = "Provider motion-vector input",
-				.kind = FeatureDebugViewKind::kTexturePreview,
-				.textureProvider = [](const Feature&) {
-					return TemporalRenderer::GetSingleton()->GetMotionVectorsDebugTexture();
-				}
-			},
-			FeatureDebugView{
-				.id = "provider_output",
-				.label = "Provider output (RT0)",
-				.kind = FeatureDebugViewKind::kTexturePreview,
-				.textureProvider = [](const Feature&) {
-					return TemporalRenderer::GetSingleton()->GetProviderOutputDebugTexture();
-				}
-			}
+				} },
+			FeatureDebugView{ .id = "render_proxy", .label = "Render-resolution proxy (scene color)", .kind = FeatureDebugViewKind::kTexturePreview, .textureProvider = [](const Feature&) {
+								 return TemporalRenderer::GetSingleton()->GetProxyDebugTexture();
+							 } },
+			FeatureDebugView{ .id = "motion_vectors", .label = "Provider motion-vector input", .kind = FeatureDebugViewKind::kTexturePreview, .textureProvider = [](const Feature&) {
+								 return TemporalRenderer::GetSingleton()->GetMotionVectorsDebugTexture();
+							 } },
+			FeatureDebugView{ .id = "provider_output", .label = "Provider output (RT0)", .kind = FeatureDebugViewKind::kTexturePreview, .textureProvider = [](const Feature&) {
+								 return TemporalRenderer::GetSingleton()->GetProviderOutputDebugTexture();
+							 } }
 		};
 		return views;
 	}
@@ -133,7 +117,7 @@ namespace cs::render
 		D3D11_TEXTURE2D_DESC sourceDesc{};
 		a_source->GetDesc(&sourceDesc);
 		const bool needsResources = !a_snapshot.texture || !a_snapshot.view ||
-			!HaveSameTextureDescription(sourceDesc, a_snapshot.sourceDesc);
+		                            !HaveSameTextureDescription(sourceDesc, a_snapshot.sourceDesc);
 		if (needsResources) {
 			auto snapshotDesc = sourceDesc;
 			snapshotDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -262,7 +246,7 @@ namespace cs::render
 	bool TemporalRenderer::HasFrameGenerationDebugSnapshotSelection() const noexcept
 	{
 		return _frameGenerationDebugView.load(std::memory_order_acquire) !=
-			FrameGenerationDebugView::kOff;
+		       FrameGenerationDebugView::kOff;
 	}
 
 	bool TemporalRenderer::FrameGenerationDebugSnapshotPending() const noexcept
@@ -636,9 +620,7 @@ namespace cs::render
 		if (!TryGetFrameBufferTexture(
 				frameBuffer, frameBufferDesc, &textureFailure)) {
 			SetProviderOutputDebugFailure(
-				textureFailure == FrameBufferTextureFailure::kNoRTV
-					? ProviderOutputDebugFailure::kNoRTV
-					: ProviderOutputDebugFailure::kNoTexture);
+				textureFailure == FrameBufferTextureFailure::kNoRTV ? ProviderOutputDebugFailure::kNoRTV : ProviderOutputDebugFailure::kNoTexture);
 			return;
 		}
 

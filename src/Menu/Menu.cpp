@@ -69,9 +69,8 @@ namespace
 			target.push_back(static_cast<char>(character));
 
 		std::uint32_t nativeError{};
-		if (!a_client.OpenExternal({
-				.targetKind = DMUI_EXTERNAL_TARGET_VIRTUAL_FILE_PARENT,
-				.target = target.c_str() },
+		if (!a_client.OpenExternal({ .targetKind = DMUI_EXTERNAL_TARGET_VIRTUAL_FILE_PARENT,
+									   .target = target.c_str() },
 				&nativeError)) {
 			const auto result = a_client.LastResult();
 			L->warn(
@@ -157,9 +156,8 @@ namespace cs
 	{
 		const auto& fullscreen = _debugViews.Fullscreen();
 		auto menu = settings::SerializeFull(settings::core::kMenu, settings::core::Menu{
-			.debugViewFeature = fullscreen.feature,
-			.debugView = fullscreen.view
-		});
+																	   .debugViewFeature = fullscreen.feature,
+																	   .debugView = fullscreen.view });
 		toml::table previews;
 		for (const auto& [feature, view] : _debugViews.Previews())
 			previews.insert_or_assign(feature, view);
@@ -195,8 +193,7 @@ namespace cs
 		_debugViews = std::move(valid);
 		std::vector<FeatureDebugSelection> selections;
 		if (!_debugViews.Fullscreen().Empty()) {
-			selections.push_back({
-				.feature = _debugViews.Fullscreen().feature,
+			selections.push_back({ .feature = _debugViews.Fullscreen().feature,
 				.view = _debugViews.Fullscreen().view });
 		}
 		for (const auto& [feature, view] : _debugViews.Previews())
@@ -238,8 +235,7 @@ namespace cs
 		options.reserve(views.size() + 1);
 		options.push_back({ {}, "Off", "off" });
 		for (const auto& view : views) {
-			options.push_back({
-				std::string(view.id),
+			options.push_back({ std::string(view.id),
 				std::string(view.label),
 				std::string(view.id) });
 		}
@@ -340,9 +336,9 @@ namespace cs
 				cached.importResult = result;
 				cached.importFailure =
 					result == DMUI_RESULT_UNSUPPORTED_RESOURCE ||
-						result == DMUI_RESULT_INVALID_ARGUMENT ?
-					host::ImageImportFailure::kPermanent :
-					host::ImageImportFailure::kTransient;
+							result == DMUI_RESULT_INVALID_ARGUMENT ?
+						host::ImageImportFailure::kPermanent :
+						host::ImageImportFailure::kTransient;
 				cached.retryAfterFrame = _hostFrameSerial + kImageRetryFrames;
 				if (!cached.loggedFailure || *cached.loggedFailure != result) {
 					D3D11_SHADER_RESOURCE_VIEW_DESC descriptor{};
@@ -446,22 +442,7 @@ namespace cs
 				.note = "Opens the project page in your default browser.",
 				.glyph = githubGlyph,
 				.action = dmui::LinkAction::kOpenExternal },
-			dmui::Link{
-				.label = "Nexus Mods",
-				.external = {
-					.targetKind = DMUI_EXTERNAL_TARGET_URI,
-					.target = "https://www.nexusmods.com/fallout4/mods/109442" },
-				.note = "Opens the mod page in your default browser.",
-				.glyph = nexusGlyph,
-				.action = dmui::LinkAction::kOpenExternal },
-			dmui::Link{
-				.label = "Discord",
-				.external = {
-					.targetKind = DMUI_EXTERNAL_TARGET_URI,
-					.target = "https://discord.com/invite/nkrQybAsyy" },
-				.note = "Opens the Community Shaders Discord in your default browser.",
-				.glyph = discordGlyph,
-				.action = dmui::LinkAction::kOpenExternal }
+			dmui::Link{ .label = "Nexus Mods", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://www.nexusmods.com/fallout4/mods/109442" }, .note = "Opens the mod page in your default browser.", .glyph = nexusGlyph, .action = dmui::LinkAction::kOpenExternal }, dmui::Link{ .label = "Discord", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://discord.com/invite/nkrQybAsyy" }, .note = "Opens the Community Shaders Discord in your default browser.", .glyph = discordGlyph, .action = dmui::LinkAction::kOpenExternal }
 		};
 		if (!CheckHostResult(
 				a_client,
@@ -537,7 +518,8 @@ namespace cs
 				a_client,
 				id.c_str(),
 				label.c_str(),
-				"" };
+				""
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin feature status row");
 				return;
@@ -593,15 +575,16 @@ namespace cs
 						a_client,
 						"shader-ownership-status",
 						"Status",
-						"Applied at boot only when the stock shader hash matches." };
+						"Applied at boot only when the stock shader hash matches."
+					};
 					if (status.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader ownership status row");
 						return;
 					}
 					if (status.Visible()) {
 						const auto severity = ownership.config.enabled ?
-							DMUI_STATUS_SEVERITY_SUCCESS :
-							DMUI_STATUS_SEVERITY_INFO;
+						                          DMUI_STATUS_SEVERITY_SUCCESS :
+						                          DMUI_STATUS_SEVERITY_INFO;
 						if (!CheckHostResult(
 								a_client,
 								dmui::DrawStyledText(
@@ -624,7 +607,8 @@ namespace cs
 						a_client,
 						target.name.data(),
 						target.label.data(),
-						"Read-only boot configuration from the unified TOML." };
+						"Read-only boot configuration from the unified TOML."
+					};
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader ownership target row");
 						return;
@@ -645,7 +629,8 @@ namespace cs
 						"shader-ownership-error",
 						"Configuration error",
 						"",
-						dmui::RowPresentation::Layout::kFullSpan };
+						dmui::RowPresentation::Layout::kFullSpan
+					};
 					if (error.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader ownership error row");
 						return;
@@ -691,7 +676,8 @@ namespace cs
 						a_client,
 						"shader-cache-location",
 						"Cache directory",
-						"Compiled shader records are stored here." };
+						"Compiled shader records are stored here."
+					};
 					if (location.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader cache location row");
 						return;
@@ -715,7 +701,8 @@ namespace cs
 					a_client,
 					"open-shader-cache",
 					"Open cache folder",
-					"Open the physical cache location. Under MO2 this may be in Overwrite." };
+					"Open the physical cache location. Under MO2 this may be in Overwrite."
+				};
 				if (open.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin open shader cache row");
 					return;
@@ -760,7 +747,8 @@ namespace cs
 					a_client,
 					"open-configuration-folder",
 					"Configuration file location",
-					"Open the physical location of FO4CommunityShaders.toml." };
+					"Open the physical location of FO4CommunityShaders.toml."
+				};
 				if (folder.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin configuration folder row");
 					return;
@@ -808,8 +796,8 @@ namespace cs
 					const auto featureConfig =
 						feature_config::GetFeature(feature->GetConfigKey());
 					bool loadAtBoot = featureConfig &&
-						featureConfig->get("load") &&
-						featureConfig->get("load")->value_or(false);
+					                  featureConfig->get("load") &&
+					                  featureConfig->get("load")->value_or(false);
 					const auto id =
 						std::format("load-on-startup-{}", feature->GetName());
 					const auto label = std::string(feature->GetDisplayName());
@@ -817,7 +805,8 @@ namespace cs
 						a_client,
 						id.c_str(),
 						label.c_str(),
-						"" };
+						""
+					};
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin startup loading row");
 						return;
@@ -877,7 +866,8 @@ namespace cs
 					a_client,
 					"global-log-level",
 					"Global level",
-					"Default severity threshold for Community Shaders loggers." };
+					"Default severity threshold for Community Shaders loggers."
+				};
 				if (global.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin global logging row");
 					return;
@@ -933,7 +923,8 @@ namespace cs
 						a_client,
 						id.c_str(),
 						name.c_str(),
-						"Overrides the global logging level for this channel." };
+						"Overrides the global logging level for this channel."
+					};
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin log channel row");
 						return;
@@ -981,7 +972,8 @@ namespace cs
 						a_client,
 						"telemetry-enabled",
 						"Emit telemetry",
-						"Collect cached feature and frame diagnostics for log dumps." };
+						"Collect cached feature and frame diagnostics for log dumps."
+					};
 					if (enabledRow.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin telemetry enabled row");
 						return;
@@ -1002,7 +994,8 @@ namespace cs
 					a_client,
 					"telemetry-dump",
 					"Dump now",
-					"Write the current diagnostic snapshot to the log." };
+					"Write the current diagnostic snapshot to the log."
+				};
 				if (dump.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin telemetry dump row");
 					return;
@@ -1045,7 +1038,8 @@ namespace cs
 						a_client,
 						id.c_str(),
 						values[index].first,
-						"" };
+						""
+					};
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin diagnostic row");
 						return;
@@ -1094,7 +1088,8 @@ namespace cs
 				a_client,
 				"active-preset",
 				"Active preset",
-				"The last preset applied to live feature settings." };
+				"The last preset applied to live feature settings."
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin active preset row");
 				return;
@@ -1121,7 +1116,8 @@ namespace cs
 				"preset-error",
 				"Preset error",
 				"",
-				dmui::RowPresentation::Layout::kFullSpan };
+				dmui::RowPresentation::Layout::kFullSpan
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin preset error row");
 				return;
@@ -1147,7 +1143,8 @@ namespace cs
 				a_client,
 				"preset-selection",
 				"Preset",
-				"Choose a built-in or user preset." };
+				"Choose a built-in or user preset."
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin preset selection row");
 				return;
@@ -1156,8 +1153,7 @@ namespace cs
 				std::vector<dmui::ChoiceOption<std::string>> options;
 				options.reserve(list.size());
 				for (const auto& preset : list) {
-					options.push_back({
-						preset.identity,
+					options.push_back({ preset.identity,
 						std::format(
 							"{}: {}",
 							preset.builtin ? "B" : "U",
@@ -1186,7 +1182,8 @@ namespace cs
 			"preset-actions",
 			"Actions",
 			"Load, save, copy, delete, or rescan presets.",
-			dmui::RowPresentation::Layout::kFullSpan };
+			dmui::RowPresentation::Layout::kFullSpan
+		};
 		if (actions.Result() != DMUI_RESULT_OK) {
 			CheckHostResult(a_client, false, "begin preset actions row");
 			return;
@@ -1287,7 +1284,8 @@ namespace cs
 				a_client,
 				"preset-auto-load",
 				"Auto-load on boot",
-				"Apply the active preset during startup." };
+				"Apply the active preset during startup."
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin preset auto-load row");
 				return;
@@ -1386,10 +1384,10 @@ namespace cs
 			}
 			RetryDialogResolution(a_client, *event);
 		} else if (event->kind == DMUI_DIALOG_EVENT_SUBMITTED &&
-			_dialog.submissions.Pending(event->submissionId)) {
+				   _dialog.submissions.Pending(event->submissionId)) {
 			RetryDialogResolution(a_client, *event);
 		} else if (event->kind == DMUI_DIALOG_EVENT_CANCELLED ||
-			event->kind == DMUI_DIALOG_EVENT_COMPLETED) {
+				   event->kind == DMUI_DIALOG_EVENT_COMPLETED) {
 			_dialog = {};
 		}
 	}
@@ -1437,7 +1435,8 @@ namespace cs
 					_dialog.presetName,
 					_dialog.presetIdentity,
 					_dialog.presetPath,
-					false };
+					false
+				};
 				if (!presets.Delete(target, error))
 					break;
 				presets.Refresh();

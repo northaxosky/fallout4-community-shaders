@@ -1,11 +1,11 @@
 #pragma once
 
 #include "DebugView.h"
-#include "Render/TemporalRenderSettings.h"
-#include "Render/TemporalRenderSizing.h"
 #include "RE/I/ImageSpaceEffectTemporalAA.h"
 #include "Render/RenderUIPathGate.h"
 #include "Render/SwapChainHook.h"
+#include "Render/TemporalRenderSettings.h"
+#include "Render/TemporalRenderSizing.h"
 #include "Utils/CSBuffer.h"
 
 #include "DynamicResolution.h"
@@ -14,10 +14,10 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <optional>
 #include <utility>
 
 #include <d3d11_4.h>

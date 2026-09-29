@@ -91,8 +91,7 @@ namespace
 			Row row;
 			unsigned early = 0;
 			std::istringstream input(line);
-			Require(static_cast<bool>(input >> row.target >> row.stage >> std::hex >> row.family.descriptor
-				>> std::dec >> early >> row.expected), "Malformed identity row: " + line);
+			Require(static_cast<bool>(input >> row.target >> row.stage >> std::hex >> row.family.descriptor >> std::dec >> early >> row.expected), "Malformed identity row: " + line);
 			input >> std::ws;
 			Require(input.eof() && early <= 1 && IsHex(row.expected, 40), "Invalid identity row: " + line);
 			for (const auto& target : cs::engine::GetShaderInjectionTargets()) {

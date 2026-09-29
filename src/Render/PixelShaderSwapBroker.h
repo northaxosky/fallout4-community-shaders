@@ -3,12 +3,12 @@
 #include "Render/ShaderStage.h"
 
 #ifndef NOMINMAX
-#  define NOMINMAX
+#	define NOMINMAX
 #endif
 #include <d3d11.h>
 
-#include <cstddef>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -93,7 +93,7 @@ namespace cs::engine
 	inline constexpr int kEarlyResolverPriority = -100;
 	inline constexpr int kHlslReplacementResolverPriority = 0;
 
-	using CreateShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+	using CreateShaderFunction = HRESULT(STDMETHODCALLTYPE*)(
 		ID3D11Device*,
 		const void*,
 		SIZE_T,
@@ -127,7 +127,7 @@ namespace cs::engine
 		bool Unregister(std::uint64_t a_registrationGeneration) noexcept;
 		[[nodiscard]] std::uint64_t Generation() const noexcept;
 		[[nodiscard]] std::span<const PixelShaderResolverRegistryIdentity>
-			Identities() const noexcept;
+		Identities() const noexcept;
 
 	private:
 		std::uint64_t _generation = 0;

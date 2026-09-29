@@ -40,9 +40,7 @@ namespace cs::features::sss_mask_binding
 			const bool owned =
 				current == a_realMask || current == a_whiteFallback;
 			current->Release();
-			return owned
-				? ExistingBinding::kOwned
-				: ExistingBinding::kForeign;
+			return owned ? ExistingBinding::kOwned : ExistingBinding::kForeign;
 		}
 
 		void RestoreNull(
@@ -65,11 +63,7 @@ namespace cs::features::sss_mask_binding
 		Extent a_requiredExtent) noexcept
 	{
 		Result result;
-		if (!a_api.context
-			|| !a_api.get
-			|| !a_api.set
-			|| a_requiredExtent.width == 0
-			|| a_requiredExtent.height == 0) {
+		if (!a_api.context || !a_api.get || !a_api.set || a_requiredExtent.width == 0 || a_requiredExtent.height == 0) {
 			return result;
 		}
 
@@ -77,38 +71,21 @@ namespace cs::features::sss_mask_binding
 				a_api,
 				a_slot,
 				a_realMask,
-				a_whiteFallback)
-			== ExistingBinding::kForeign) {
+				a_whiteFallback) == ExistingBinding::kForeign) {
 			return result;
 		}
 
 		auto* selected =
-			a_realMaskReady
-				&& a_realMask
-				&& Covers(a_realMaskExtent, a_requiredExtent)
-			? a_realMask
-			: a_whiteFallback
-					&& Covers(
-						a_whiteFallbackExtent,
-						a_requiredExtent)
-				? a_whiteFallback
-				: nullptr;
+			a_realMaskReady && a_realMask && Covers(a_realMaskExtent, a_requiredExtent) ? a_realMask : a_whiteFallback && Covers(a_whiteFallbackExtent, a_requiredExtent) ? a_whiteFallback :
+																																											nullptr;
 		result.source =
-			!selected
-				? Source::kNone
-				: selected == a_realMask
-					? Source::kRealMask
-					: Source::kWhiteFallback;
+			!selected ? Source::kNone : selected == a_realMask ? Source::kRealMask :
+																 Source::kWhiteFallback;
 		if (!selected)
 			return result;
 
 		result.validBinding = SetAndVerify(a_api, a_slot, selected);
-		if (!result.validBinding
-			&& selected != a_whiteFallback
-			&& a_whiteFallback
-			&& Covers(
-				a_whiteFallbackExtent,
-				a_requiredExtent)) {
+		if (!result.validBinding && selected != a_whiteFallback && a_whiteFallback && Covers(a_whiteFallbackExtent, a_requiredExtent)) {
 			result.source = Source::kWhiteFallback;
 			result.validBinding =
 				SetAndVerify(a_api, a_slot, a_whiteFallback);
@@ -126,8 +103,7 @@ namespace cs::features::sss_mask_binding
 				a_api,
 				a_slot,
 				a_realMask,
-				a_whiteFallback)
-			!= ExistingBinding::kOwned) {
+				a_whiteFallback) != ExistingBinding::kOwned) {
 			return false;
 		}
 		RestoreNull(a_api, a_slot);

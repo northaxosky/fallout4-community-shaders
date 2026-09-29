@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <utility>
 
 #include <sl_dlss_g.h>
@@ -19,8 +19,7 @@ namespace cs::features::streamline_fg
 
 	[[nodiscard]] inline ConfigurationSupport ValidateConfiguration(
 		const render::temporal::FrameGenerationConfiguration& a_configuration,
-		const render::temporal::FrameGenerationCapabilities& a_capabilities)
-		noexcept
+		const render::temporal::FrameGenerationCapabilities& a_capabilities) noexcept
 	{
 		if (!std::isfinite(
 				a_configuration.dynamicTargetFrameRate) ||
@@ -42,15 +41,13 @@ namespace cs::features::streamline_fg
 		}
 		if (a_configuration.mode ==
 			render::temporal::FrameGenerationMode::kDynamic) {
-			return a_capabilities.dynamicModeSupported
-				? ConfigurationSupport::kSupported
-				: ConfigurationSupport::kUnsupported;
+			return a_capabilities.dynamicModeSupported ? ConfigurationSupport::kSupported : ConfigurationSupport::kUnsupported;
 		}
 		return a_capabilities.maxGeneratedFrames > 0 &&
-				a_configuration.fixedMultiplier - 1 <=
-					a_capabilities.maxGeneratedFrames
-			? ConfigurationSupport::kSupported
-			: ConfigurationSupport::kUnsupported;
+		               a_configuration.fixedMultiplier - 1 <=
+		                   a_capabilities.maxGeneratedFrames ?
+		           ConfigurationSupport::kSupported :
+		           ConfigurationSupport::kUnsupported;
 	}
 
 	[[nodiscard]] inline sl::DLSSGOptions BuildOptions(
@@ -64,17 +61,13 @@ namespace cs::features::streamline_fg
 		bool a_retainResources) noexcept
 	{
 		sl::DLSSGOptions options{};
-		options.mode = !a_enabled
-			? sl::DLSSGMode::eOff
-			: a_configuration.mode ==
-					  render::temporal::FrameGenerationMode::kDynamic
-				? sl::DLSSGMode::eDynamic
-				: sl::DLSSGMode::eOn;
+		options.mode = !a_enabled ? sl::DLSSGMode::eOff : a_configuration.mode == render::temporal::FrameGenerationMode::kDynamic ? sl::DLSSGMode::eDynamic :
+		                                                                                                                            sl::DLSSGMode::eOn;
 		options.numFramesToGenerate =
 			a_configuration.mode ==
-					render::temporal::FrameGenerationMode::kFixed
-				? a_configuration.fixedMultiplier - 1
-				: 1;
+					render::temporal::FrameGenerationMode::kFixed ?
+				a_configuration.fixedMultiplier - 1 :
+				1;
 		options.queueParallelismMode =
 			sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue;
 		options.dynamicTargetFrameRate =

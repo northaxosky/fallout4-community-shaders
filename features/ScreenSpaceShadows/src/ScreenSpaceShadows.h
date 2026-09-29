@@ -46,7 +46,7 @@ namespace cs::features
 		struct alignas(16) RaymarchCB
 		{
 			float LightCoordinate[4];
-			int   WaveOffset[2];
+			int WaveOffset[2];
 			float FarDepthValue;
 			float NearDepthValue;
 			float InvDepthTextureSize[2];

@@ -17,23 +17,23 @@ namespace cs::shader_cache
 	};
 	inline constexpr std::uint32_t kRecordSchemaVersion = 1;
 
-	inline constexpr std::uint64_t kMaxPayloadBytes    = 64ull * 1024ull * 1024ull;
-	inline constexpr std::uint64_t kMaxManifestBytes   = 16ull * 1024ull * 1024ull;
+	inline constexpr std::uint64_t kMaxPayloadBytes = 64ull * 1024ull * 1024ull;
+	inline constexpr std::uint64_t kMaxManifestBytes = 16ull * 1024ull * 1024ull;
 	inline constexpr std::uint32_t kMaxManifestEntries = 4096;
-	inline constexpr std::uint32_t kMaxProbesPerEntry  = 64;
-	inline constexpr std::uint32_t kMaxLocatorBytes    = 4096;
-	inline constexpr std::uint32_t kMaxProfileBytes    = 64;
+	inline constexpr std::uint32_t kMaxProbesPerEntry = 64;
+	inline constexpr std::uint32_t kMaxLocatorBytes = 4096;
+	inline constexpr std::uint32_t kMaxProfileBytes = 64;
 	inline constexpr std::uint64_t kMaxRecordBytes =
 		kMaxPayloadBytes + kMaxManifestBytes + 64ull * 1024ull;
 
 	struct ShaderCacheRecord
 	{
-		sha256::Sha256Result      logicalDigest{};
-		sha256::Sha256Result      recipeDigest{};
-		sha256::Sha256Result      dependencyDigest{};
-		ShaderCacheStage          stage = ShaderCacheStage::kPixel;
-		std::string               profile;
-		DependencyManifest        manifest;
+		sha256::Sha256Result logicalDigest{};
+		sha256::Sha256Result recipeDigest{};
+		sha256::Sha256Result dependencyDigest{};
+		ShaderCacheStage stage = ShaderCacheStage::kPixel;
+		std::string profile;
+		DependencyManifest manifest;
 		std::vector<std::uint8_t> payload;
 	};
 
@@ -55,16 +55,16 @@ namespace cs::shader_cache
 
 	// canonical encoding hashed as the dependency digest
 	bool SerializeDependencyManifest(
-		const DependencyManifest&  a_manifest,
+		const DependencyManifest& a_manifest,
 		std::vector<std::uint8_t>& a_bytes);
 	RecordStatus ParseDependencyManifest(
 		std::span<const std::uint8_t> a_bytes,
-		DependencyManifest&           a_manifest);
+		DependencyManifest& a_manifest);
 
 	bool SerializeShaderCacheRecord(
-		const ShaderCacheRecord&   a_record,
+		const ShaderCacheRecord& a_record,
 		std::vector<std::uint8_t>& a_bytes);
 	RecordStatus ParseShaderCacheRecord(
 		std::span<const std::uint8_t> a_bytes,
-		ShaderCacheRecord&            a_record);
+		ShaderCacheRecord& a_record);
 }

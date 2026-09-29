@@ -106,16 +106,16 @@ namespace cs::features
 			sl::ViewportHandle p_viewport,
 			const render::temporal::SuperResolutionRequest& a_request);
 		[[nodiscard]] render::temporal::SuperResolutionSizeResult
-			QueryDLSSRenderSize(
-				const render::temporal::SuperResolutionSizeRequest& a_request);
+		QueryDLSSRenderSize(
+			const render::temporal::SuperResolutionSizeRequest& a_request);
 		bool SetFSROptions(
 			sl::ViewportHandle p_viewport,
 			const render::temporal::SuperResolutionRequest& a_request,
 			sl::FSRAlgorithm a_algorithm);
 		[[nodiscard]] render::temporal::SuperResolutionSizeResult
-			QueryFSRRenderSize(
-				const render::temporal::SuperResolutionSizeRequest& a_request,
-				sl::FSRAlgorithm a_algorithm);
+		QueryFSRRenderSize(
+			const render::temporal::SuperResolutionSizeRequest& a_request,
+			sl::FSRAlgorithm a_algorithm);
 
 		[[nodiscard]] render::temporal::ProviderResult UpscaleD3D12(
 			const render::temporal::SuperResolutionRequest& a_request);
@@ -123,11 +123,11 @@ namespace cs::features
 			const render::temporal::SuperResolutionRequest& a_request,
 			sl::FSRAlgorithm a_algorithm);
 		[[nodiscard]] render::temporal::ProviderResult
-			ValidateFSRAlgorithm(sl::FSRAlgorithm a_algorithm) const;
+		ValidateFSRAlgorithm(sl::FSRAlgorithm a_algorithm) const;
 		[[nodiscard]] render::temporal::ProviderResult
-			ValidateFSRGAlgorithm(sl::FSRGAlgorithm a_algorithm) const;
+		ValidateFSRGAlgorithm(sl::FSRGAlgorithm a_algorithm) const;
 		[[nodiscard]] render::temporal::FidelityFXCapabilities
-			GetFidelityFXCapabilities() const noexcept;
+		GetFidelityFXCapabilities() const noexcept;
 		bool Sleep(std::uint32_t a_frameIndex);
 		bool SetLatencyMarker(
 			sl::PCLMarker a_marker,
@@ -154,23 +154,23 @@ namespace cs::features
 			std::uint32_t a_height) noexcept;
 		void ObserveDLSSGPresent(std::uint32_t a_syncInterval) noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
-			ValidateDLSSGConfiguration(
-				const render::temporal::FrameGenerationConfiguration&
-					a_configuration) const;
+		ValidateDLSSGConfiguration(
+			const render::temporal::FrameGenerationConfiguration&
+				a_configuration) const;
 		[[nodiscard]] render::temporal::FrameGenerationCapabilities
-			GetDLSSGCapabilities() const noexcept;
+		GetDLSSGCapabilities() const noexcept;
 		[[nodiscard]] bool LastDLSSGStateSucceeded() const noexcept
 		{
 			return _dlssGLastStateQuerySucceeded;
 		}
 		[[nodiscard]] std::uint32_t
-			ConsumeDLSSGGeneratedFrameCount() noexcept;
+		ConsumeDLSSGGeneratedFrameCount() noexcept;
 		[[nodiscard]] std::uint32_t
-			ConsumeDLSSGPresentedFrameCount() noexcept;
+		ConsumeDLSSGPresentedFrameCount() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
-			DestroyDLSSGResources() noexcept;
+		DestroyDLSSGResources() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
-			SetDLSSGPresentationActive(bool a_active) noexcept;
+		SetDLSSGPresentationActive(bool a_active) noexcept;
 		bool ConfigureFSRG(
 			bool a_enabled,
 			const render::temporal::FrameGenerationRequest& a_request,
@@ -182,48 +182,49 @@ namespace cs::features
 		bool PollFSRGState(
 			sl::FSRGAlgorithm a_algorithm) noexcept;
 		[[nodiscard]] std::optional<render::temporal::GpuCompletionDependency>
-			ConsumeFSRGInputCompletionDependency() noexcept;
+		ConsumeFSRGInputCompletionDependency() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
-			DestroyFSRGResources() noexcept;
+		DestroyFSRGResources() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
-			SetFSRGPresentationActive(bool a_active) noexcept;
+		SetFSRGPresentationActive(bool a_active) noexcept;
 		[[nodiscard]] bool HasDLSSGResources() const noexcept
 		{
 			return _dlssGResourcesConfigured;
 		}
 		[[nodiscard]] render::temporal::ProviderResult
-			DestroyDLSSResources() noexcept;
+		DestroyDLSSResources() noexcept;
 		[[nodiscard]] bool HasDLSSResources() const noexcept
 		{
 			return _dlssResourcesConfigured;
 		}
 		[[nodiscard]] render::temporal::ProviderResult
-			DestroyFSRResources(
-				sl::FSRAlgorithm a_algorithm =
-					sl::FSRAlgorithm::eFSR3) noexcept;
+		DestroyFSRResources(
+			sl::FSRAlgorithm a_algorithm =
+				sl::FSRAlgorithm::eFSR3) noexcept;
 		[[nodiscard]] bool HasFSRResources() const noexcept
 		{
 			return _fsrResourcesConfigured;
 		}
+
 	private:
 		[[nodiscard]] render::temporal::ProviderResult
-			UpscaleD3D12Feature(
-				const render::temporal::SuperResolutionRequest& a_request,
-				std::optional<sl::FSRAlgorithm> a_fsrAlgorithm);
+		UpscaleD3D12Feature(
+			const render::temporal::SuperResolutionRequest& a_request,
+			std::optional<sl::FSRAlgorithm> a_fsrAlgorithm);
 		bool TagFrameGenerationFrame(
 			const render::temporal::FrameGenerationRequest& a_request,
 			sl::Feature a_feature,
 			bool a_evaluate);
 		[[nodiscard]] render::temporal::ProviderResult
-			SetPresentationFeatureActive(
-				sl::Feature a_feature,
-				bool a_active,
-				const char* a_name) noexcept;
+		SetPresentationFeatureActive(
+			sl::Feature a_feature,
+			bool a_active,
+			const char* a_name) noexcept;
 		[[nodiscard]] sl::Result ClearFrameGenerationTagsChecked(
 			std::uint32_t a_frameIndex,
 			ID3D12GraphicsCommandList* a_commandList = nullptr) noexcept;
 		[[nodiscard]] sl::Result
-			ClearCurrentFrameGenerationTagsChecked() noexcept;
+		ClearCurrentFrameGenerationTagsChecked() noexcept;
 		bool PollFSRGState(
 			sl::FSRGAlgorithm a_algorithm,
 			bool a_requireSubmittedDependency) noexcept;

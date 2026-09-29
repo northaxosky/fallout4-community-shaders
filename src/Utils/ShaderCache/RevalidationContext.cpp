@@ -8,7 +8,7 @@ namespace cs::shader_cache
 {
 	FileObservation ObserveFile(const std::string& a_locator)
 	{
-		FileObservation           observation;
+		FileObservation observation;
 		std::vector<std::uint8_t> bytes;
 		try {
 			observation.status =
@@ -31,7 +31,7 @@ namespace cs::shader_cache
 		std::shared_ptr<Entry> entry;
 		{
 			const std::scoped_lock lock(_lock);
-			auto&                  slot = _entries[a_locator];
+			auto& slot = _entries[a_locator];
 			if (!slot)
 				slot = std::make_shared<Entry>();
 			entry = slot;

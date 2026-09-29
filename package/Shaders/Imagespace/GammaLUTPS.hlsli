@@ -16,8 +16,8 @@ SamplerState Lut6Sampler : register(s6);
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 float4 main(PS_INPUT input) : SV_Target

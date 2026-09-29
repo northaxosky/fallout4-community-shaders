@@ -103,21 +103,7 @@ namespace cs::render
 				}
 			}
 
-			const HRESULT result = replacementResult
-				? *replacementResult
-				: next(
-					a_adapter,
-					a_driverType,
-					a_software,
-					a_flags,
-					requestedFeatureLevels,
-					requestedFeatureLevelCount,
-					a_sdkVersion,
-					hasDesc ? &swapChainDesc : nullptr,
-					a_swapChain,
-					a_device,
-					a_featureLevel,
-					a_immediateContext);
+			const HRESULT result = replacementResult ? *replacementResult : next(a_adapter, a_driverType, a_software, a_flags, requestedFeatureLevels, requestedFeatureLevelCount, a_sdkVersion, hasDesc ? &swapChainDesc : nullptr, a_swapChain, a_device, a_featureLevel, a_immediateContext);
 
 			if (SUCCEEDED(result)) {
 				// Callbacks run before the bootstrap so an interface upgrade is visible to it.
@@ -180,7 +166,7 @@ namespace cs::render
 		if (installState.load(std::memory_order_acquire) !=
 			SwapChainHookState::kUnattempted) {
 			return installState.load(std::memory_order_acquire) ==
-				SwapChainHookState::kInstalled;
+			       SwapChainHookState::kInstalled;
 		}
 		installState.store(SwapChainHookState::kInstalling, std::memory_order_release);
 
@@ -200,10 +186,9 @@ namespace cs::render
 			const auto existing =
 				nextCreateDeviceAndSwapChain.load(std::memory_order_acquire);
 			auto* d3d11 = GetModuleHandleW(L"d3d11.dll");
-			const auto native = d3d11
-				? reinterpret_cast<CreateDeviceAndSwapChain>(
-					GetProcAddress(d3d11, "D3D11CreateDeviceAndSwapChain"))
-				: nullptr;
+			const auto native = d3d11 ? reinterpret_cast<CreateDeviceAndSwapChain>(
+											GetProcAddress(d3d11, "D3D11CreateDeviceAndSwapChain")) :
+			                            nullptr;
 			if (!existing && native &&
 				native != &CreateDeviceAndSwapChainThunk) {
 				nextCreateDeviceAndSwapChain.store(native, std::memory_order_release);

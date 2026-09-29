@@ -26,8 +26,8 @@ namespace cs::shader_cache
 	// one reader keeps probe replay byte-exact
 	FileReadStatus ReadFileBytes(
 		const std::filesystem::path& a_path,
-		std::uint64_t                a_maxBytes,
-		std::vector<std::uint8_t>&   a_bytes) noexcept;
+		std::uint64_t a_maxBytes,
+		std::vector<std::uint8_t>& a_bytes) noexcept;
 
 	std::filesystem::path DefaultCacheRoot();
 	std::uintmax_t ClearCacheRecords(
@@ -36,21 +36,21 @@ namespace cs::shader_cache
 
 	struct CacheIdentitySyncResult
 	{
-		bool        firstRun = false;
-		bool        reset = false;
+		bool firstRun = false;
+		bool reset = false;
 		std::string resetMessage;
 		std::string error;
 	};
 
 	CacheIdentitySyncResult SynchronizeCacheIdentity(
 		const std::filesystem::path& a_cacheRoot,
-		const CompilerIdentity&      a_identity,
-		std::uint32_t                a_recordSchemaVersion) noexcept;
+		const CompilerIdentity& a_identity,
+		std::uint32_t a_recordSchemaVersion) noexcept;
 
 	std::filesystem::path BuildRecordPath(
 		const std::filesystem::path& a_cacheRoot,
-		ShaderCacheStage             a_stage,
-		const sha256::Sha256Result&  a_logicalDigest);
+		ShaderCacheStage a_stage,
+		const sha256::Sha256Result& a_logicalDigest);
 
 	enum class RecordWriteStatus : std::uint8_t
 	{
@@ -60,7 +60,7 @@ namespace cs::shader_cache
 	};
 
 	RecordWriteStatus WriteRecord(
-		const std::filesystem::path&       a_path,
-		std::span<const std::uint8_t>      a_bytes,
-		std::string&                       a_error) noexcept;
+		const std::filesystem::path& a_path,
+		std::span<const std::uint8_t> a_bytes,
+		std::string& a_error) noexcept;
 }

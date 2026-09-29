@@ -27,11 +27,7 @@ namespace cs::features::terrain_shadows
 		DirectX::ScratchImage& a_storage) noexcept
 	{
 		HeightMapDownsample result;
-		if (!a_source.pixels
-			|| a_targetWidth == 0
-			|| a_targetHeight == 0
-			|| a_targetWidth > a_source.width
-			|| a_targetHeight > a_source.height) {
+		if (!a_source.pixels || a_targetWidth == 0 || a_targetHeight == 0 || a_targetWidth > a_source.width || a_targetHeight > a_source.height) {
 			result.hr = E_INVALIDARG;
 			return result;
 		}
@@ -47,8 +43,7 @@ namespace cs::features::terrain_shadows
 		DirectX::ScratchImage staged;
 
 		// The box filter only accepts an exact 2:1 step, so walk the extent down in halves.
-		while (CanHalveToward(width, a_targetWidth)
-			&& CanHalveToward(height, a_targetHeight)) {
+		while (CanHalveToward(width, a_targetWidth) && CanHalveToward(height, a_targetHeight)) {
 			DirectX::ScratchImage halved;
 			result.hr =
 				DirectX::Resize(*current, width / 2, height / 2, kBoxFilter, halved);

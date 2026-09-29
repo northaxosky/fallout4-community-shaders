@@ -281,8 +281,7 @@ namespace cs::render
 		try {
 			// HDR effects render against the render-resolution proxies.
 			func(a_this, 0, 3, 1, 1);
-			upscaling->dynamicResolution.OverrideRenderTargets({
-				cs::engine::RenderTarget::kRefractionNormal,
+			upscaling->dynamicResolution.OverrideRenderTargets({ cs::engine::RenderTarget::kRefractionNormal,
 				cs::engine::RenderTarget::kMainTemp,
 				cs::engine::RenderTarget::kMotionVectors,
 				cs::engine::RenderTarget::kHdrImagespaceAux });
@@ -342,13 +341,9 @@ namespace cs::render
 					upscaling->RecoverMissedResolveAtRenderUIReturn();
 				const char* failure = nullptr;
 				if (fullEffectsPath) {
-					failure = recovered
-						? "The full-effects Render_UI path unexpectedly skipped +0xC5; spatial fallback was published and temporal rendering is disabled until restart."
-						: "The full-effects Render_UI path unexpectedly skipped +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
+					failure = recovered ? "The full-effects Render_UI path unexpectedly skipped +0xC5; spatial fallback was published and temporal rendering is disabled until restart." : "The full-effects Render_UI path unexpectedly skipped +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
 				} else {
-					failure = recovered
-						? "The Gamma-only Render_UI path bypassed +0xC5; spatial fallback was published and temporal rendering is disabled until restart."
-						: "The Gamma-only Render_UI path bypassed +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
+					failure = recovered ? "The Gamma-only Render_UI path bypassed +0xC5; spatial fallback was published and temporal rendering is disabled until restart." : "The Gamma-only Render_UI path bypassed +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
 				}
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
@@ -375,7 +370,7 @@ namespace cs::render
 			}
 			upscaling->_imagespaceRatiosNeutralized = false;
 			const bool activated = upscaling->_savedDynamicWidthRatio != 1.0f ||
-				upscaling->_savedDynamicHeightRatio != 1.0f;
+			                       upscaling->_savedDynamicHeightRatio != 1.0f;
 			cs::engine::SetDynamicResolution(
 				upscaling->_savedDynamicWidthRatio,
 				upscaling->_savedDynamicHeightRatio,
@@ -401,8 +396,7 @@ namespace cs::render
 		if (overrideActive) {
 			GuardedThunkBody("Upscaling composite override", [&] {
 				using cs::engine::RenderTarget;
-				upscaling->dynamicResolution.OverrideRenderTargets({
-					RenderTarget::kGbufferNormal,
+				upscaling->dynamicResolution.OverrideRenderTargets({ RenderTarget::kGbufferNormal,
 					RenderTarget::kAmbientOcclusion,
 					RenderTarget::kGbufferMetadata,
 					RenderTarget::kGbufferMaterial,
@@ -440,7 +434,7 @@ namespace cs::render
 		if (upscaling->IsDrivingFrameState() && upscaling->dynamicResolution.HasProxies()) {
 			if (auto* renderTargetManager = cs::engine::GetRenderTargetManager()) {
 				overrideActive = renderTargetManager->GetDynamicWidthRatio() != 1.0f ||
-					renderTargetManager->GetDynamicHeightRatio() != 1.0f;
+				                 renderTargetManager->GetDynamicHeightRatio() != 1.0f;
 			}
 		}
 

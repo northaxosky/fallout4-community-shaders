@@ -67,7 +67,7 @@ namespace cs
 		{}
 
 		ActivationOutcome _outcome;
-		std::string       _detail;
+		std::string _detail;
 	};
 
 	struct FeatureState

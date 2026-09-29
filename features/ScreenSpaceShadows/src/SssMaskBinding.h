@@ -21,10 +21,7 @@ namespace cs::features::sss_mask_binding
 		Extent a_available,
 		Extent a_required) noexcept
 	{
-		return a_required.width != 0
-			&& a_required.height != 0
-			&& a_available.width >= a_required.width
-			&& a_available.height >= a_required.height;
+		return a_required.width != 0 && a_required.height != 0 && a_available.width >= a_required.width && a_available.height >= a_required.height;
 	}
 
 	struct ExtentState

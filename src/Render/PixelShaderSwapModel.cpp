@@ -39,10 +39,7 @@ namespace cs::engine
 			a_linkage,
 			a_output);
 		ID3D11DeviceChild* stockOutput = a_output ? *a_output : nullptr;
-		const bool canResolve = SUCCEEDED(result)
-			&& stockOutput
-			&& a_bytecode
-			&& a_bytecodeLength != 0;
+		const bool canResolve = SUCCEEDED(result) && stockOutput && a_bytecode && a_bytecodeLength != 0;
 		if (canResolve) {
 			const ShaderSwapRequest request{
 				.device = a_device,
@@ -55,17 +52,14 @@ namespace cs::engine
 				.output = a_output
 			};
 			for (const auto& registration : a_resolvers) {
-				if (!registration.resolver
-					|| (registration.stages & ShaderStageBit(a_stage)) == 0) {
+				if (!registration.resolver || (registration.stages & ShaderStageBit(a_stage)) == 0) {
 					continue;
 				}
 				const auto resolution = registration.resolver(request);
-				if (resolution
-					== ShaderSwapResolverResult::kReplaced) {
+				if (resolution == ShaderSwapResolverResult::kReplaced) {
 					break;
 				}
-				if (resolution
-					== ShaderSwapResolverResult::kKeepStock) {
+				if (resolution == ShaderSwapResolverResult::kKeepStock) {
 					break;
 				}
 			}
@@ -78,10 +72,8 @@ namespace cs::engine
 		int a_priority)
 	{
 		const auto generation = _generation + 1;
-		_identities.push_back({
-			.registrationGeneration = generation,
-			.priority = a_priority
-		});
+		_identities.push_back({ .registrationGeneration = generation,
+			.priority = a_priority });
 		_generation = generation;
 		return generation;
 	}
@@ -106,7 +98,7 @@ namespace cs::engine
 	}
 
 	std::span<const PixelShaderResolverRegistryIdentity>
-		PixelShaderResolverRegistryModel::Identities() const noexcept
+	PixelShaderResolverRegistryModel::Identities() const noexcept
 	{
 		return _identities;
 	}
@@ -118,12 +110,7 @@ namespace cs::engine
 		for (std::size_t index = 0; index < a_identities.size(); ++index) {
 			if (index != 0)
 				result.push_back(',');
-			result += "{\"priority\":"
-				+ std::to_string(a_identities[index].priority)
-				+ ",\"registration_generation\":"
-				+ std::to_string(
-					a_identities[index].registrationGeneration)
-				+ '}';
+			result += "{\"priority\":" + std::to_string(a_identities[index].priority) + ",\"registration_generation\":" + std::to_string(a_identities[index].registrationGeneration) + '}';
 		}
 		result +=
 			"],\"schema\":\"fo4cs.broker-resolver-registry\","

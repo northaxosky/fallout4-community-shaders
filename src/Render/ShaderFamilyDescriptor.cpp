@@ -53,16 +53,14 @@ namespace cs::engine
 		{
 			auto a_descriptor = a_family.descriptor;
 			const bool tessellatedVertex =
-				a_family.stage == ShaderStage::kVertex
-				&& (a_descriptor & ((1U << 19) | (1U << 20))) != 0;
+				a_family.stage == ShaderStage::kVertex && (a_descriptor & ((1U << 19) | (1U << 20))) != 0;
 			// FO4 vertex normalization is fitted to the pinned AE 1.11.240 route population.
 			if (a_family.stage == ShaderStage::kVertex) {
 				if (!tessellatedVertex && (a_descriptor & 0x220U) == 0)
 					a_descriptor &= ~(1U << 25);
 				if ((a_descriptor & 0x2000U) != 0)
 					a_descriptor &= ~0x18U;
-				else if ((a_descriptor & 0x2U) != 0
-					&& (a_descriptor & 0x4240U) != 0)
+				else if ((a_descriptor & 0x2U) != 0 && (a_descriptor & 0x4240U) != 0)
 					a_descriptor |= 0x18U;
 				if (tessellatedVertex)
 					a_descriptor &= ~(1U << 10);
@@ -86,23 +84,21 @@ namespace cs::engine
 				Define(a_defines, "MAX_ACTOR_VEGETATION_COLLISION", "4");
 			}
 			DefineBit(a_defines, a_descriptor, 1U << 8, "ALPHA_TEST");
-			if ((a_descriptor & (1U << 9)) != 0
-				|| (a_family.stage == ShaderStage::kVertex
-					&& !tessellatedVertex
-					&& (a_descriptor & (1U << 25)) != 0)) {
+			if ((a_descriptor & (1U << 9)) != 0 || (a_family.stage == ShaderStage::kVertex && !tessellatedVertex && (a_descriptor & (1U << 25)) != 0)) {
 				Define(a_defines, "LOD_LANDSCAPE");
 			}
-			if ((a_descriptor & (1U << 10)) != 0
-				&& (a_family.stage == ShaderStage::kVertex || !grassBit))
+			if ((a_descriptor & (1U << 10)) != 0 && (a_family.stage == ShaderStage::kVertex || !grassBit))
 				Define(a_defines, (a_descriptor & (1U << 23)) != 0 ?
-					"SPLINE" : "TREE_ANIM");
+									  "SPLINE" :
+									  "TREE_ANIM");
 			DefineBit(a_defines, a_descriptor, 1U << 12, "CHARACTER_LIGHT_MASK");
 			DefineBit(a_defines, a_descriptor, 1U << 13, "MODELSPACENORMALS");
 			DefineBit(a_defines, a_descriptor, 1U << 14, "GLOWMAP");
 			DefineBit(a_defines, a_descriptor, 1U << 15, "BLEND");
 			if ((a_descriptor & (1U << 11)) != 0)
 				Define(a_defines, (a_descriptor & (1U << 16)) != 0 ?
-					"SKEW_SPECULAR_ALPHA" : "LOD_OBJECT_INSTANCED");
+									  "SKEW_SPECULAR_ALPHA" :
+									  "LOD_OBJECT_INSTANCED");
 			else
 				DefineBit(a_defines, a_descriptor, 1U << 16, "MENU_SCREEN");
 			if ((a_descriptor & (1U << 10)) == 0)
@@ -417,8 +413,7 @@ namespace cs::engine
 			};
 			Family family = Family::kDeferred;
 			const bool characterLight = (d & 0x4000000U) != 0;
-			if (characterLight
-				&& (lightKind == 1U || (d & 0x400000U) != 0))
+			if (characterLight && (lightKind == 1U || (d & 0x400000U) != 0))
 				family = Family::kCharacterC26;
 			else if (characterLight)
 				family = Family::kCharacter;
@@ -429,12 +424,12 @@ namespace cs::engine
 			else if ((lightKind & 0x2U) != 0) {
 				if ((d & 0x40000U) != 0) {
 					family = (d & 0x1000000U) != 0 ?
-						Family::kShadowOnlyBlendSplit :
-						Family::kShadowOnly;
+					             Family::kShadowOnlyBlendSplit :
+					             Family::kShadowOnly;
 				} else if ((d & 0x8000000U) != 0) {
 					family = (d & 0x10000U) != 0 ?
-						Family::kDirSplits1 :
-						Family::kDirSplits3;
+					             Family::kDirSplits1 :
+					             Family::kDirSplits3;
 				} else if ((d & 0x10000U) != 0) {
 					family = Family::kDirSplits1;
 				} else {
@@ -502,10 +497,7 @@ namespace cs::engine
 				const bool combinedIgnoreMode =
 					(d & 0xC000U) == 0xC000U;
 				const bool ignoreRimSuppressed =
-					combinedIgnoreMode
-					&& (lightKind == 4U
-						|| (lightKind == 8U
-							&& (d & 0x1000U) == 0));
+					combinedIgnoreMode && (lightKind == 4U || (lightKind == 8U && (d & 0x1000U) == 0));
 				if (!ignoreRimSuppressed)
 					DefineBit(a_defines, d, 0x8000U, "IGNORERIM");
 			}
@@ -515,8 +507,7 @@ namespace cs::engine
 			if (lightKind == 2U || lightKind == 8U ||
 				lightKind == 16U || lightKind == 32U)
 				Define(a_defines, "SHADOW");
-			if (family == Family::kShadowOnly
-				|| family == Family::kShadowOnlyBlendSplit)
+			if (family == Family::kShadowOnly || family == Family::kShadowOnlyBlendSplit)
 				Define(a_defines, "SHADOW_ONLY");
 			DefineBit(a_defines, d, 0x80000U, "FILTER_PCF1");
 			DefineBit(a_defines, d, 0x100000U, "FILTER_PCF9");
@@ -524,10 +515,7 @@ namespace cs::engine
 			if ((d & 0x4780103U) == 0x400002U)
 				Define(a_defines, "FILTER_PCSS");
 			DefineBit(a_defines, d, 0x800000U, "FILTER_PCSSPOISSON");
-			if ((family == Family::kDirSplits2
-					|| family == Family::kDirSplits3
-					|| family == Family::kShadowOnlyBlendSplit)
-				&& (d & 0x1000000U) != 0)
+			if ((family == Family::kDirSplits2 || family == Family::kDirSplits3 || family == Family::kShadowOnlyBlendSplit) && (d & 0x1000000U) != 0)
 				Define(a_defines, "BLENDSPLIT");
 			if (attenuationOnly)
 				Define(a_defines, "ATTENUATION_ONLY");
@@ -562,8 +550,7 @@ namespace cs::engine
 			}
 			if (family == Family::kDeferred)
 				Define(a_defines, "LIGHT_TYPE", "3");
-			else if (family == Family::kDirSplits2
-				|| family == Family::kShadowOnly)
+			else if (family == Family::kDirSplits2 || family == Family::kShadowOnly)
 				Define(a_defines, "LIGHT_TYPE", "1");
 			return true;
 		}
@@ -671,7 +658,7 @@ namespace cs::engine
 				else if ((d & ~0x230280U) == 0x8U)
 					family = Family::kAccumulator2D;
 				else if ((d & 0x7FU) == 0x40U ||
-					(d & 0x7FU) == 0x48U)
+						 (d & 0x7FU) == 0x48U)
 					family = Family::kFog2D;
 			}
 
@@ -782,19 +769,20 @@ namespace cs::engine
 						((d & 0x10000U) != 0 ? "3" : "2") :
 						((d & 0x10000U) != 0 ? "1" : "4"));
 				return true;
-			case Family::kNoTextureFog: {
-				const auto shape =
-					(d & 0x10000U) != 0 ?
-						((d & 0x200U) != 0 ? 6U :
-							((d & 0x80U) != 0 ? 5U : 4U)) :
-						((d & 0x200U) != 0 ? 3U :
-							((d & 0x80U) != 0 ? 2U : 1U));
-				Define(
-					a_defines,
-					"WAVE5A_FOG_SHAPE",
-					std::to_string(shape));
-				return true;
-			}
+			case Family::kNoTextureFog:
+				{
+					const auto shape =
+						(d & 0x10000U) != 0 ?
+							((d & 0x200U) != 0 ? 6U :
+												 ((d & 0x80U) != 0 ? 5U : 4U)) :
+							((d & 0x200U) != 0 ? 3U :
+												 ((d & 0x80U) != 0 ? 2U : 1U));
+					Define(
+						a_defines,
+						"WAVE5A_FOG_SHAPE",
+						std::to_string(shape));
+					return true;
+				}
 			case Family::kNoPosition:
 			case Family::kNoPositionTexcoord:
 				return true;
@@ -821,60 +809,48 @@ namespace cs::engine
 					"ISHUDGlass",
 					"BSImagespaceShaderHUDGlass",
 					"",
-					"IMAGESPACE_HUD_GLASS_BASE"
-				},
+					"IMAGESPACE_HUD_GLASS_BASE" },
 				HudGlassRoute{
 					"ISHUDGlassDS",
 					"BSImagespaceShaderHUDGlassDropShadow",
 					"DROPSHADOW",
-					"IMAGESPACE_HUD_GLASS_DROPSHADOW"
-				},
+					"IMAGESPACE_HUD_GLASS_DROPSHADOW" },
 				HudGlassRoute{
 					"ISHUDGlassBY",
 					"BSImagespaceShaderHUDGlassBlurY",
 					"BLURY",
-					"IMAGESPACE_HUD_GLASS_BLUR_Y"
-				},
+					"IMAGESPACE_HUD_GLASS_BLUR_Y" },
 				HudGlassRoute{
 					"ISHUDGlassBX",
 					"BSImagespaceShaderHUDGlassBlurX",
 					"BLURX",
-					"IMAGESPACE_HUD_GLASS_BLUR_X"
-				},
+					"IMAGESPACE_HUD_GLASS_BLUR_X" },
 				HudGlassRoute{
 					"ISHUDGlassClear",
 					"BSImagespaceShaderHUDGlassClear",
 					"CLEAR",
 					"IMAGESPACE_HUD_GLASS_CLEAR",
-					true
-				},
+					true },
 				HudGlassRoute{
 					"ISHUDGlassCopy",
 					"BSImagespaceShaderHUDGlassCopy",
 					"COPY",
-					"IMAGESPACE_HUD_GLASS_COPY"
-				}
+					"IMAGESPACE_HUD_GLASS_COPY" }
 			};
 			const auto matchesMacros =
 				[&a_descriptor](
 					std::initializer_list<ShaderInjectionDefineMetadata> a_macros) {
-					return a_descriptor.nativeMacros.size() == a_macros.size()
-						&& std::ranges::all_of(a_macros, [&](const auto& a_macro) {
-							const auto found = a_descriptor.nativeMacros.find(a_macro.name);
-							return found != a_descriptor.nativeMacros.end()
-								&& found->second == a_macro.value;
-						});
+					return a_descriptor.nativeMacros.size() == a_macros.size() && std::ranges::all_of(a_macros, [&](const auto& a_macro) {
+						const auto found = a_descriptor.nativeMacros.find(a_macro.name);
+						return found != a_descriptor.nativeMacros.end() && found->second == a_macro.value;
+					});
 				};
 			const auto matchesRoute = [&](
-				std::string_view a_name,
-				std::string_view a_className,
-				std::string_view a_sourceGroup,
-				std::initializer_list<ShaderInjectionDefineMetadata> a_macros = {}) {
-				return a_descriptor.descriptor == 0
-					&& a_descriptor.nativeName == a_name
-					&& a_descriptor.nativeClassName == a_className
-					&& a_descriptor.nativeSourceGroup == a_sourceGroup
-					&& matchesMacros(a_macros);
+										  std::string_view a_name,
+										  std::string_view a_className,
+										  std::string_view a_sourceGroup,
+										  std::initializer_list<ShaderInjectionDefineMetadata> a_macros = {}) {
+				return a_descriptor.descriptor == 0 && a_descriptor.nativeName == a_name && a_descriptor.nativeClassName == a_className && a_descriptor.nativeSourceGroup == a_sourceGroup && matchesMacros(a_macros);
 			};
 			const auto hudGlassRoute = std::ranges::find_if(
 				hudGlassRoutes,
@@ -927,9 +903,7 @@ namespace cs::engine
 					Define(a_defines, "GRID_SIZE", "552");
 					return true;
 				}
-				if (a_descriptor.descriptor != 2
-					&& a_descriptor.descriptor != 5
-					&& a_descriptor.descriptor != 6) {
+				if (a_descriptor.descriptor != 2 && a_descriptor.descriptor != 5 && a_descriptor.descriptor != 6) {
 					return false;
 				}
 				Define(a_defines, "IMAGESPACE_INDEXREBASE_CS_SOURCE");
@@ -954,30 +928,15 @@ namespace cs::engine
 					Define(a_defines, hudGlassRoute->pixelDefine);
 					return true;
 				}
-				if (a_descriptor.descriptor == 0
-					&& a_descriptor.nativeName == "ISCopy"
-					&& a_descriptor.nativeClassName
-						== "BSImagespaceShaderCopy"
-					&& a_descriptor.nativeSourceGroup == "ISCopy"
-					&& a_descriptor.nativeMacros.empty()) {
+				if (a_descriptor.descriptor == 0 && a_descriptor.nativeName == "ISCopy" && a_descriptor.nativeClassName == "BSImagespaceShaderCopy" && a_descriptor.nativeSourceGroup == "ISCopy" && a_descriptor.nativeMacros.empty()) {
 					Define(a_defines, "IMAGESPACE_COPY_PS_SOURCE");
 					return true;
 				}
-				if (a_descriptor.descriptor == 0
-					&& a_descriptor.nativeName == "ISCopyNormals"
-					&& a_descriptor.nativeClassName
-						== "BSImagespaceShaderCopyNormals"
-					&& a_descriptor.nativeSourceGroup == "ISCopy"
-					&& matchesMacros({ { "COPY_NORMALS", "" } })) {
+				if (a_descriptor.descriptor == 0 && a_descriptor.nativeName == "ISCopyNormals" && a_descriptor.nativeClassName == "BSImagespaceShaderCopyNormals" && a_descriptor.nativeSourceGroup == "ISCopy" && matchesMacros({ { "COPY_NORMALS", "" } })) {
 					Define(a_defines, "IMAGESPACE_COPY_PS_SOURCE");
 					return true;
 				}
-				if (a_descriptor.descriptor == 0
-					&& a_descriptor.nativeName == "ISFullScreenColor"
-					&& a_descriptor.nativeClassName
-						== "BSImagespaceShaderFullScreenColor"
-					&& a_descriptor.nativeSourceGroup == "ISFullScreenColor"
-					&& a_descriptor.nativeMacros.empty()) {
+				if (a_descriptor.descriptor == 0 && a_descriptor.nativeName == "ISFullScreenColor" && a_descriptor.nativeClassName == "BSImagespaceShaderFullScreenColor" && a_descriptor.nativeSourceGroup == "ISFullScreenColor" && a_descriptor.nativeMacros.empty()) {
 					Define(
 						a_defines,
 						"IMAGESPACE_FULLSCREEN_COLOR_PS_SOURCE");
@@ -1037,30 +996,26 @@ namespace cs::engine
 							   { { "BLEND", "4" } })) {
 					hdrDefine = "BLEND";
 				} else if (matchesRoute(
-						"ISHDRDownSample16Lum",
-						"BSImagespaceShaderHDRDownSample16Lum",
-						"ISHDR",
-						{ { "DOWNSAMPLE", "16" }, { "LUM", "" } })) {
+							   "ISHDRDownSample16Lum",
+							   "BSImagespaceShaderHDRDownSample16Lum",
+							   "ISHDR",
+							   { { "DOWNSAMPLE", "16" }, { "LUM", "" } })) {
 					hdrDefine = "LUM";
 				} else if (matchesRoute(
 							   "ISHDRDownSample4RGB2Lum",
 							   "BSImagespaceShaderHDRDownSample4RGB2Lum",
 							   "ISHDR",
-							   {
-								   { "DOWNSAMPLE", "4" },
+							   { { "DOWNSAMPLE", "4" },
 								   { "LUM", "" },
-								   { "RGB2LUM", "" }
-							   })) {
+								   { "RGB2LUM", "" } })) {
 					hdrDefine = "RGB2LUM";
 				} else if (matchesRoute(
 							   "ISHDRDownSample16LightAdapt",
 							   "BSImagespaceShaderHDRDownSample16LightAdapt",
 							   "ISHDR",
-							   {
-								   { "DOWNADAPT", "" },
+							   { { "DOWNADAPT", "" },
 								   { "DOWNSAMPLE", "16" },
-								   { "LUM", "" }
-							   })) {
+								   { "LUM", "" } })) {
 					hdrDefine = "";
 				}
 				if (hdrDefine) {
@@ -1072,32 +1027,16 @@ namespace cs::engine
 				if (a_descriptor.nativeSourceGroup == "ISBlur") {
 					const auto tapCount = macro("TEXTAP");
 					const auto brightPass = macro("BRIGHTPASS");
-					if (!tapCount
-						|| (*tapCount != "3" && *tapCount != "5"
-							&& *tapCount != "7" && *tapCount != "9"
-							&& *tapCount != "11" && *tapCount != "13"
-							&& *tapCount != "15")
-						|| (brightPass && !brightPass->empty())
-						|| a_descriptor.nativeMacros.size()
-							!= (brightPass ? 2U : 1U)) {
+					if (!tapCount || (*tapCount != "3" && *tapCount != "5" && *tapCount != "7" && *tapCount != "9" && *tapCount != "11" && *tapCount != "13" && *tapCount != "15") || (brightPass && !brightPass->empty()) || a_descriptor.nativeMacros.size() != (brightPass ? 2U : 1U)) {
 						return false;
 					}
 					const auto expectedOwner =
-						std::string("BSImagespaceShader")
-						+ (brightPass ? "BrightPass" : "")
-						+ "Blur" + std::string(*tapCount);
+						std::string("BSImagespaceShader") + (brightPass ? "BrightPass" : "") + "Blur" + std::string(*tapCount);
 					const auto nonHdrOwner =
-						std::string("BSImageSpaceShaderNonHDRBlur")
-						+ std::string(*tapCount);
+						std::string("BSImageSpaceShaderNonHDRBlur") + std::string(*tapCount);
 					const auto nonHdrRttiOwner =
-						std::string("BSImagespaceShaderNonHDRBlur")
-						+ std::string(*tapCount);
-					if (a_descriptor.nativeClassName != expectedOwner
-						&& (brightPass
-							|| a_descriptor.nativeClassName
-								!= nonHdrOwner
-							&& a_descriptor.nativeClassName
-								!= nonHdrRttiOwner)) {
+						std::string("BSImagespaceShaderNonHDRBlur") + std::string(*tapCount);
+					if (a_descriptor.nativeClassName != expectedOwner && (brightPass || a_descriptor.nativeClassName != nonHdrOwner && a_descriptor.nativeClassName != nonHdrRttiOwner)) {
 						return false;
 					}
 					Define(a_defines, "IMAGESPACE_TAPARRAY_PS_SOURCE");
@@ -1114,20 +1053,15 @@ namespace cs::engine
 				if (a_descriptor.nativeSourceGroup == "ISGamma") {
 					const auto resize = macro("RESIZE");
 					const auto linearize = macro("LINEARIZE");
-					if ((resize && !resize->empty())
-						|| (linearize && !linearize->empty())
-						|| a_descriptor.nativeMacros.size()
-							!= (resize ? 1U : 0U)
-								+ (linearize ? 1U : 0U)
-						|| (resize && linearize)) {
+					if ((resize && !resize->empty()) || (linearize && !linearize->empty()) || a_descriptor.nativeMacros.size() != (resize ? 1U : 0U) + (linearize ? 1U : 0U) || (resize && linearize)) {
 						return false;
 					}
 					const std::string_view expectedOwner =
 						resize ?
 							"BSImagespaceShaderGammaCorrectResize" :
 							(linearize ?
-								"BSImagespaceShaderGammaLinearize" :
-								"BSImagespaceShaderGammaCorrect");
+									"BSImagespaceShaderGammaLinearize" :
+									"BSImagespaceShaderGammaCorrect");
 					if (a_descriptor.nativeClassName != expectedOwner)
 						return false;
 					Define(a_defines, "IMAGESPACE_GAMMA_PS_SOURCE");
@@ -1143,21 +1077,11 @@ namespace cs::engine
 							"0.4545454680919647");
 					return true;
 				}
-				if (a_descriptor.nativeClassName
-						== "BSImagespaceShaderVLSSliceCoord"
-					&& a_descriptor.nativeSourceGroup
-						== "ISVLS_Coord"
-					&& a_descriptor.nativeMacros.empty()) {
+				if (a_descriptor.nativeClassName == "BSImagespaceShaderVLSSliceCoord" && a_descriptor.nativeSourceGroup == "ISVLS_Coord" && a_descriptor.nativeMacros.empty()) {
 					Define(a_defines, "VLS_SLICE_COORD_SOURCE");
 					return true;
 				}
-				if (a_descriptor.nativeClassName
-						== "BSImagespaceShaderVLSSliceInterp"
-					&& a_descriptor.nativeSourceGroup == "ISVLS"
-					&& a_descriptor.nativeMacros
-						== ShaderInjectionDefines{
-							{ "SLICE_INTERP", "" }
-						}) {
+				if (a_descriptor.nativeClassName == "BSImagespaceShaderVLSSliceInterp" && a_descriptor.nativeSourceGroup == "ISVLS" && a_descriptor.nativeMacros == ShaderInjectionDefines{ { "SLICE_INTERP", "" } }) {
 					Define(a_defines, "VLS_SLICE_INTERP_SOURCE");
 					return true;
 				}
@@ -1184,25 +1108,18 @@ namespace cs::engine
 						Define(a_defines, "IMAGESPACE_HUD_GLASS_CLEAR");
 					return true;
 				}
-				if (a_descriptor.nativeSourceGroup == "ISHUDGlass"
-					&& a_descriptor.nativeMacros
-						== ShaderInjectionDefines{
-							{ "MARKERS", "" }
-						}) {
+				if (a_descriptor.nativeSourceGroup == "ISHUDGlass" && a_descriptor.nativeMacros == ShaderInjectionDefines{
+																									   { "MARKERS", "" } }) {
 					Define(a_defines, "IMAGESPACE_XYQUAD_VS_SOURCE");
 					Define(a_defines, "IMAGESPACE_XYQUAD_PACKED");
 					return true;
 				}
-				if (a_descriptor.nativeSourceGroup == "LensFlare"
-					&& a_descriptor.nativeMacros
-						== ShaderInjectionDefines{
-							{ "VISIBILITY", "" }
-						}) {
+				if (a_descriptor.nativeSourceGroup == "LensFlare" && a_descriptor.nativeMacros == ShaderInjectionDefines{
+																									  { "VISIBILITY", "" } }) {
 					Define(a_defines, "IMAGESPACE_XYQUAD_VS_SOURCE");
 					return true;
 				}
-				if (a_descriptor.nativeSourceGroup == "ISFXAA"
-					&& a_descriptor.nativeMacros.empty()) {
+				if (a_descriptor.nativeSourceGroup == "ISFXAA" && a_descriptor.nativeMacros.empty()) {
 					Define(a_defines, "IMAGESPACE_PASSTHROUGH_VS_SOURCE");
 					Define(a_defines, "IMAGESPACE_PASSTHROUGH_TEXCOORD1");
 					return true;
@@ -1316,8 +1233,7 @@ namespace cs::engine
 				};
 				if (std::ranges::find(
 						passthroughOwners,
-						a_descriptor.nativeClassName)
-					!= passthroughOwners.end()) {
+						a_descriptor.nativeClassName) != passthroughOwners.end()) {
 					Define(a_defines, "IMAGESPACE_PASSTHROUGH_VS_SOURCE");
 					return true;
 				}
@@ -1396,35 +1312,43 @@ namespace cs::engine
 			switch (a_descriptor.target) {
 			case ShaderInjectionTarget::kDeferredPrepass:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSDFPREPASS_VS_SOURCE" : "BSDFPREPASS_PS_SOURCE";
+				             "BSDFPREPASS_VS_SOURCE" :
+				             "BSDFPREPASS_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kUtility:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSUTILITY_VS_SOURCE" : "BSUTILITY_PS_SOURCE";
+				             "BSUTILITY_VS_SOURCE" :
+				             "BSUTILITY_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kParticle:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"PARTICLE_VS_SOURCE" : "PARTICLE_PS_SOURCE";
+				             "PARTICLE_VS_SOURCE" :
+				             "PARTICLE_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kEffect:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSEFFECT_VS_SOURCE" : "BSEFFECT_PS_SOURCE";
+				             "BSEFFECT_VS_SOURCE" :
+				             "BSEFFECT_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kBloodSplatter:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSBLOODSPLATTER_VS_SOURCE" : "BSBLOODSPLATTER_PS_SOURCE";
+				             "BSBLOODSPLATTER_VS_SOURCE" :
+				             "BSBLOODSPLATTER_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kDistantTree:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSDISTANTTREE_VS_SOURCE" : "BSDISTANTTREE_PS_SOURCE";
+				             "BSDISTANTTREE_VS_SOURCE" :
+				             "BSDISTANTTREE_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kBsSky:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSSKY_VERTEX_SHADER" : "BSSKY_PIXEL_SHADER";
+				             "BSSKY_VERTEX_SHADER" :
+				             "BSSKY_PIXEL_SHADER";
 				break;
 			case ShaderInjectionTarget::kBsWater:
 				define = a_descriptor.stage == ShaderStage::kVertex ?
-					"BSWATER_VERTEX_SHADER" : "BSWATER_PIXEL_SHADER";
+				             "BSWATER_VERTEX_SHADER" :
+				             "BSWATER_PIXEL_SHADER";
 				break;
 			default:
 				break;
@@ -1435,8 +1359,8 @@ namespace cs::engine
 	}
 
 	std::optional<ShaderVariantCompilationDescriptor>
-		BuildShaderFamilyCompilationDescriptor(
-			const ShaderFamilyDescriptor& a_descriptor)
+	BuildShaderFamilyCompilationDescriptor(
+		const ShaderFamilyDescriptor& a_descriptor)
 	{
 		const auto* target = GetShaderInjectionTarget(a_descriptor.target);
 		if (!target || a_descriptor.stage == ShaderStage::kCount)

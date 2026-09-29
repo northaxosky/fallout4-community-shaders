@@ -114,8 +114,7 @@ uint GetWrappedCoord(int coord, uint dimension)
 		float2 currentHeights = 0.0;
 		float2 sampleHeights = 0.0;
 		if (isValid && gtid >= offset) {
-			if (all(floor(rawThreadUV - lightUVDir * offset) == floor(rawThreadUV)))
-			{
+			if (all(floor(rawThreadUV - lightUVDir * offset) == floor(rawThreadUV))) {
 				combineHeights = true;
 				currentHeights = g_shadowHeight[gtid];
 				sampleHeights = g_shadowHeight[gtid - offset] + LightDeltaZ * offset;

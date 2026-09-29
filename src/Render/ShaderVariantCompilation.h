@@ -69,10 +69,10 @@ namespace cs::engine
 	};
 
 	std::shared_ptr<ShaderVariantCompilationCache>
-		CreateAsyncShaderVariantCompilationCache(
-			ShaderVariantCompiler a_compiler,
-			std::size_t a_workerCount = 1);
+	CreateAsyncShaderVariantCompilationCache(
+		ShaderVariantCompiler a_compiler,
+		std::size_t a_workerCount = 1);
 
 	std::shared_ptr<ShaderVariantCompilationCache>
-		CreateCachingShaderVariantCompilationCache();
+	CreateCachingShaderVariantCompilationCache();
 }

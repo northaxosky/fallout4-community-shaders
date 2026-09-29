@@ -69,13 +69,13 @@ namespace cs::features
 	private:
 		struct alignas(16) ShadowUpdateCB
 		{
-			float         LightPxDir[2];
-			float         LightDeltaZ[2];
+			float LightPxDir[2];
+			float LightDeltaZ[2];
 			std::uint32_t StartPxCoord;
-			float         PxSize[2];
-			float         BlendWeight;
-			float         PosRange[2];
-			float         ZRange[2];
+			float PxSize[2];
+			float BlendWeight;
+			float PosRange[2];
+			float ZRange[2];
 		};
 		static_assert(sizeof(ShadowUpdateCB) == 48);
 		STATIC_ASSERT_ALIGNAS_16(ShadowUpdateCB);
@@ -91,7 +91,7 @@ namespace cs::features
 		struct HeightMapRecord
 		{
 			terrain_shadows::HeightMapMetadata metadata;
-			std::filesystem::path              path;
+			std::filesystem::path path;
 		};
 
 		enum class StatusSeverity
@@ -116,7 +116,7 @@ namespace cs::features
 			terrain_shadows::HeightMapSource a_source);
 
 		[[nodiscard]] terrain_shadows::BootstrapReadiness
-			GetBootstrapReadiness() const noexcept;
+		GetBootstrapReadiness() const noexcept;
 
 		void OnPostDeferredPrePass();
 		bool PollGameHourJump();

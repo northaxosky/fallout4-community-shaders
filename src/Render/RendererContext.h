@@ -32,7 +32,7 @@ namespace cs::engine
 		OMScope& operator=(OMScope&&) = delete;
 
 	private:
-		ID3D11DeviceContext*    _ctx;
+		ID3D11DeviceContext* _ctx;
 		ID3D11RenderTargetView* _savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
 		ID3D11DepthStencilView* _savedDSV;
 	};
@@ -56,13 +56,13 @@ namespace cs::engine
 				a_constantBufferCount)
 		{}
 
-		ComputeOMScope(const ComputeOMScope&)            = delete;
-		ComputeOMScope(ComputeOMScope&&)                 = delete;
+		ComputeOMScope(const ComputeOMScope&) = delete;
+		ComputeOMScope(ComputeOMScope&&) = delete;
 		ComputeOMScope& operator=(const ComputeOMScope&) = delete;
-		ComputeOMScope& operator=(ComputeOMScope&&)      = delete;
+		ComputeOMScope& operator=(ComputeOMScope&&) = delete;
 
 	private:
-		OMScope          _om;  // Declared first so OM restores last.
+		OMScope _om;           // Declared first so OM restores last.
 		cs::ComputeScope _cs;  // Declared second so CS clears first.
 	};
 }

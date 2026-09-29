@@ -1,7 +1,7 @@
 #include "WetnessEffects.h"
 
-#include <d3d11.h>
 #include <DearModdingUI/Client.h>
+#include <d3d11.h>
 
 #include <array>
 #include <string>
@@ -12,13 +12,13 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 #include "World/Weather.h"
 
@@ -28,25 +28,19 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.wetnesseffects");
 
-		constexpr std::array<FeatureDebugView, 2> kDebugViews{ {
-			{
-				"wetness_term",
-				"Wetness term",
-				FeatureDebugViewKind::kFullscreen
-			},
-			{
-				"world_up",
+		constexpr std::array<FeatureDebugView, 2> kDebugViews{ { { "wetness_term",
+																	 "Wetness term",
+																	 FeatureDebugViewKind::kFullscreen },
+			{ "world_up",
 				"World-up response",
-				FeatureDebugViewKind::kFullscreen
-			}
-		} };
+				FeatureDebugViewKind::kFullscreen } } };
 
 		ID3D11DeviceContext* GetImmediateContext() noexcept
 		{
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			return rendererData ?
-				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-				nullptr;
+			           reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+			           nullptr;
 		}
 	}
 
@@ -89,17 +83,17 @@ namespace cs::features
 	void WetnessEffects::Load()
 	{
 		const auto registerContribution = [this](
-			cs::engine::ShaderInjectionTarget a_target,
-			bool a_bindsComposite) {
+											  cs::engine::ShaderInjectionTarget a_target,
+											  bool a_bindsComposite) {
 			cs::engine::ShaderReplacementRegistration registration{
 				.targetId = a_target,
 				.stages = cs::engine::ShaderStageBit(
 					a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting ?
-						cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel),
+						cs::engine::ShaderStage::kCompute :
+						cs::engine::ShaderStage::kPixel),
 				.contributor = "WetnessEffects",
 				.defines = {
-					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" }
-				},
+					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" } },
 				.isReady = [this] {
 					return _registrationsReady.load(std::memory_order_acquire);
 				}
@@ -113,11 +107,9 @@ namespace cs::features
 					BindCompositeResources(a_context);
 				};
 				for (const auto slot : kCompositePSSlots) {
-					registration.slotClaims.push_back({
-						.stage = cs::engine::ShaderStage::kPixel,
+					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = slot
-					});
+						.slot = slot });
 				}
 			}
 			return cs::engine::RegisterReplacement(std::move(registration));
@@ -253,8 +245,7 @@ namespace cs::features
 	{
 		auto* context = GetImmediateContext();
 		for (std::size_t i = 0; i < kCompositePSSlots.size(); ++i) {
-			if (!_engineBindings[i].Save(context, kCompositePSSlots[i])
-				&& _engineBindings[i].IsSaved()) {
+			if (!_engineBindings[i].Save(context, kCompositePSSlots[i]) && _engineBindings[i].IsSaved()) {
 				CS_LOG_ONCE(
 					L,
 					spdlog::level::err,

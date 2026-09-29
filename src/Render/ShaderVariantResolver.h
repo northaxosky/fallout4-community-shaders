@@ -28,49 +28,41 @@ namespace cs::engine
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x00001204 }
-				},
+					ShaderVariantId{ 0x00001204 } },
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x10001204 }
-				}
+					ShaderVariantId{ 0x10001204 } }
 			};
 		inline constexpr std::array
 			kBsdfLightDeferredDirectional{
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x01200202 }
-				},
+					ShaderVariantId{ 0x01200202 } },
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x01200282 }
-				},
+					ShaderVariantId{ 0x01200282 } },
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x11200202 }
-				}
+					ShaderVariantId{ 0x11200202 } }
 			};
 		inline constexpr std::array
 			kBsdfLightDeferredDirectionalIbl{
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x01220202 }
-				},
+					ShaderVariantId{ 0x01220202 } },
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x01220282 }
-				},
+					ShaderVariantId{ 0x01220282 } },
 				ShaderVariantKeyView{
 					"BSDFLightShader",
 					ShaderStage::kPixel,
-					ShaderVariantId{ 0x11220202 }
-				}
+					ShaderVariantId{ 0x11220202 } }
 			};
 	}
 

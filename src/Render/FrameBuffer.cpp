@@ -111,8 +111,8 @@ namespace cs::engine
 			// A null base would otherwise become a plausible member-offset pointer.
 			auto* context = GetActiveContext();
 			return context ?
-				reinterpret_cast<ID3D11Buffer*>(context->perFrameConstantBuffer) :
-				nullptr;
+			           reinterpret_cast<ID3D11Buffer*>(context->perFrameConstantBuffer) :
+			           nullptr;
 		}
 
 		void RecordDescription(const D3D11_BUFFER_DESC& a_desc) noexcept
@@ -132,8 +132,7 @@ namespace cs::engine
 			D3D11_BUFFER_DESC desc{};
 			a_buffer->GetDesc(&desc);
 			RecordDescription(desc);
-			if ((desc.BindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0
-				|| desc.ByteWidth < kMinimumByteWidth) {
+			if ((desc.BindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0 || desc.ByteWidth < kMinimumByteWidth) {
 				CS_LOG_ONCE(
 					L,
 					spdlog::level::err,
@@ -209,11 +208,10 @@ namespace cs::engine
 
 			const auto count = g_mapsThisFrame.load(std::memory_order_relaxed);
 			auto maximum = g_maxMapsPerFrame.load(std::memory_order_relaxed);
-			while (maximum < count
-				&& !g_maxMapsPerFrame.compare_exchange_weak(
-					maximum,
-					count,
-					std::memory_order_relaxed)) {
+			while (maximum < count && !g_maxMapsPerFrame.compare_exchange_weak(
+										  maximum,
+										  count,
+										  std::memory_order_relaxed)) {
 			}
 		}
 
@@ -266,12 +264,10 @@ namespace cs::engine
 				const HRESULT result =
 					original(a_this, a_resource, a_subresource, a_mapType, a_mapFlags, a_mapped);
 				RefreshContextAccessHooks(a_this, beforeMap, beforeUnmap);
-				if (a_resource != g_identity.load(std::memory_order_relaxed)
-					&& a_resource == EnginePerFrameBuffer()) {
+				if (a_resource != g_identity.load(std::memory_order_relaxed) && a_resource == EnginePerFrameBuffer()) {
 					AdoptIdentity(EnginePerFrameBuffer(), "context_map");
 				}
-				if (a_resource == g_identity.load(std::memory_order_relaxed)
-					&& a_subresource == 0) {
+				if (a_resource == g_identity.load(std::memory_order_relaxed) && a_subresource == 0) {
 					g_matchingMaps.fetch_add(1, std::memory_order_relaxed);
 					if (SUCCEEDED(result)) {
 						g_matchingMapSuccesses.fetch_add(1, std::memory_order_relaxed);
@@ -296,8 +292,7 @@ namespace cs::engine
 			{
 				g_unmapCalls.fetch_add(1, std::memory_order_relaxed);
 				// The mapped pointer dies at Unmap, so snapshot before handing off.
-				if (a_resource == g_identity.load(std::memory_order_relaxed)
-					&& a_subresource == 0) {
+				if (a_resource == g_identity.load(std::memory_order_relaxed) && a_subresource == 0) {
 					g_matchingUnmaps.fetch_add(1, std::memory_order_relaxed);
 					if (g_mapped) {
 						CaptureSnapshot();
@@ -459,12 +454,10 @@ namespace cs::engine
 			for (std::size_t row = 0; row < 3; ++row) {
 				const auto& lhs = a_lhs.ViewToWorld[row];
 				const auto& rhs = a_rhs.ViewToWorld[row];
-				maxRowDelta = std::max({
-					maxRowDelta,
+				maxRowDelta = std::max({ maxRowDelta,
 					std::abs(lhs.x - rhs.x),
 					std::abs(lhs.y - rhs.y),
-					std::abs(lhs.z - rhs.z)
-				});
+					std::abs(lhs.z - rhs.z) });
 			}
 			const auto lhsOrigin = CameraWorldOrigin(a_lhs);
 			const auto rhsOrigin = CameraWorldOrigin(a_rhs);
@@ -483,8 +476,7 @@ namespace cs::engine
 			}
 			if (g_anchorFrame.frameCount != std::numeric_limits<std::uint32_t>::max()) {
 				g_completedFrames.fetch_add(1, std::memory_order_relaxed);
-				if (g_worldSnapshot.valid
-					&& g_worldSnapshot.frameCount == g_anchorFrame.frameCount) {
+				if (g_worldSnapshot.valid && g_worldSnapshot.frameCount == g_anchorFrame.frameCount) {
 					g_publicationFrames.fetch_add(1, std::memory_order_relaxed);
 				} else {
 					g_noPublicationFrames.fetch_add(1, std::memory_order_relaxed);
@@ -522,9 +514,7 @@ namespace cs::engine
 			if (!currentFrame && (!a_allowPreviousFrame || !previousFrame)) {
 				return FrameBufferRejectReason::kStaleSnapshot;
 			}
-			if (!g_latestSnapshot.valid
-				|| g_byteWidth.load(std::memory_order_relaxed)
-					< kMinimumByteWidth) {
+			if (!g_latestSnapshot.valid || g_byteWidth.load(std::memory_order_relaxed) < kMinimumByteWidth) {
 				return FrameBufferRejectReason::kBufferTooSmall;
 			}
 			if (!HasUsableCameraBasis(g_latestSnapshot.data)) {
@@ -536,12 +526,7 @@ namespace cs::engine
 			const auto origin = CameraWorldOrigin(g_latestSnapshot.data);
 			const auto previousOrigin =
 				CameraPreviousWorldOrigin(g_latestSnapshot.data);
-			if (!std::isfinite(origin.x)
-				|| !std::isfinite(origin.y)
-				|| !std::isfinite(origin.z)
-				|| !std::isfinite(previousOrigin.x)
-				|| !std::isfinite(previousOrigin.y)
-				|| !std::isfinite(previousOrigin.z)) {
+			if (!std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(origin.z) || !std::isfinite(previousOrigin.x) || !std::isfinite(previousOrigin.y) || !std::isfinite(previousOrigin.z)) {
 				return FrameBufferRejectReason::kInvalidOrigin;
 			}
 			if (!HasNonzeroWorldCameraOrigin(g_latestSnapshot.data)) {
@@ -565,10 +550,9 @@ namespace cs::engine
 				return;
 			}
 
-			if (!g_anchorFrame.lastCamera.valid
-				|| CameraMateriallyDiffers(
-					g_latestSnapshot.data,
-					g_anchorFrame.lastCamera.data)) {
+			if (!g_anchorFrame.lastCamera.valid || CameraMateriallyDiffers(
+													   g_latestSnapshot.data,
+													   g_anchorFrame.lastCamera.data)) {
 				g_anchorFrame.lastCamera = g_latestSnapshot;
 				g_distinctCamerasThisFrame.fetch_add(1, std::memory_order_relaxed);
 			}
@@ -577,9 +561,7 @@ namespace cs::engine
 				FrameBufferPublishSource::kFullscreenLightDraw;
 
 			const bool sameSnapshot =
-				g_worldSnapshot.valid
-				&& g_worldSnapshot.frameCount == frame
-				&& g_worldSnapshot.sequence == g_latestSnapshot.sequence;
+				g_worldSnapshot.valid && g_worldSnapshot.frameCount == frame && g_worldSnapshot.sequence == g_latestSnapshot.sequence;
 			if (sameSnapshot) {
 				return;
 			}
@@ -659,9 +641,9 @@ namespace cs::engine
 		const auto nativeEntry = [](std::uintptr_t a_entry) {
 			HMODULE owner = nullptr;
 			return GetModuleHandleExW(
-				GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-				reinterpret_cast<LPCWSTR>(a_entry), &owner) &&
-				owner == GetModuleHandleW(L"d3d11.dll");
+					   GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+					   reinterpret_cast<LPCWSTR>(a_entry), &owner) &&
+			       owner == GetModuleHandleW(L"d3d11.dll");
 		};
 		if ((mapMissing && !nativeEntry(table[kMapVtableSlot])) ||
 			(unmapMissing && !nativeEntry(table[kUnmapVtableSlot]))) {

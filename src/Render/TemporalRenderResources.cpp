@@ -32,8 +32,8 @@ namespace cs::render
 		}
 
 		const auto createTexture = [device](
-			const D3D11_TEXTURE2D_DESC& a_desc,
-			std::string_view a_name) {
+									   const D3D11_TEXTURE2D_DESC& a_desc,
+									   std::string_view a_name) {
 			auto texture =
 				render::TemporalPipeline::Get().CreateSuperResolutionTexture(
 					a_desc, a_name);
@@ -151,35 +151,33 @@ namespace cs::render
 		if (a_upscalemethod == UpscaleMethod::kFSR ||
 			a_upscalemethod == UpscaleMethod::kFSR4) {
 			return render::TemporalPipeline::Get()
-					   .IsSuperResolutionRuntimeReady(
-						   a_upscalemethod == UpscaleMethod::kFSR4
-							   ? render::temporal::SuperResolutionMethod::kFSR4
-							   : render::temporal::SuperResolutionMethod::kFSR3) &&
-				sharpenerTexture &&
-				publicationTexture &&
-				sharpenerTexture->resource.get() != upscalingTexture->resource.get() &&
-				publicationTexture->resource.get() != upscalingTexture->resource.get() &&
-				MatchesTextureContract(
-					sharpenerTexture,
-					frameBufferDesc,
-					DXGI_FORMAT_R8G8B8A8_UNORM) &&
-				MatchesTextureContract(
-					publicationTexture,
-					frameBufferDesc,
-					DXGI_FORMAT_R8G8B8A8_UNORM);
+			           .IsSuperResolutionRuntimeReady(
+						   a_upscalemethod == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3) &&
+			       sharpenerTexture &&
+			       publicationTexture &&
+			       sharpenerTexture->resource.get() != upscalingTexture->resource.get() &&
+			       publicationTexture->resource.get() != upscalingTexture->resource.get() &&
+			       MatchesTextureContract(
+					   sharpenerTexture,
+					   frameBufferDesc,
+					   DXGI_FORMAT_R8G8B8A8_UNORM) &&
+			       MatchesTextureContract(
+					   publicationTexture,
+					   frameBufferDesc,
+					   DXGI_FORMAT_R8G8B8A8_UNORM);
 		}
 		return sharpenerTexture &&
-			publicationTexture &&
-			sharpenerTexture->resource.get() != upscalingTexture->resource.get() &&
-			publicationTexture->resource.get() != upscalingTexture->resource.get() &&
-			MatchesTextureContract(
-				sharpenerTexture,
-				frameBufferDesc,
-				DXGI_FORMAT_R8G8B8A8_UNORM) &&
-			MatchesTextureContract(
-				publicationTexture,
-				frameBufferDesc,
-				DXGI_FORMAT_R8G8B8A8_UNORM);
+		       publicationTexture &&
+		       sharpenerTexture->resource.get() != upscalingTexture->resource.get() &&
+		       publicationTexture->resource.get() != upscalingTexture->resource.get() &&
+		       MatchesTextureContract(
+				   sharpenerTexture,
+				   frameBufferDesc,
+				   DXGI_FORMAT_R8G8B8A8_UNORM) &&
+		       MatchesTextureContract(
+				   publicationTexture,
+				   frameBufferDesc,
+				   DXGI_FORMAT_R8G8B8A8_UNORM);
 	}
 
 	void TemporalRenderer::DestroyUpscalingTextureResources(UpscaleMethod a_upscalemethod)
@@ -283,22 +281,18 @@ namespace cs::render
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
 					render::temporal::SuperResolutionMethod::kDLSS);
 		} else if (previousUpscaleMode == UpscaleMethod::kFSR ||
-			previousUpscaleMode == UpscaleMethod::kFSR4) {
+				   previousUpscaleMode == UpscaleMethod::kFSR4) {
 			release =
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-					previousUpscaleMode == UpscaleMethod::kFSR4
-						? render::temporal::SuperResolutionMethod::kFSR4
-						: render::temporal::SuperResolutionMethod::kFSR3);
+					previousUpscaleMode == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3);
 		}
 		if (!release.Succeeded()) {
 			render::TemporalPipeline::Get().PostFailure(
 				release.failureDomain ==
-						render::temporal::FailureDomain::kNone
-					? render::temporal::FailureDomain::kSuperResolution
-					: release.failureDomain,
-				release.message.empty()
-					? "Super-resolution resources could not be retired."
-					: release.message);
+						render::temporal::FailureDomain::kNone ?
+					render::temporal::FailureDomain::kSuperResolution :
+					release.failureDomain,
+				release.message.empty() ? "Super-resolution resources could not be retired." : release.message);
 			return false;
 		}
 
@@ -562,24 +556,20 @@ namespace cs::render
 		if (method == UpscaleMethod::kDLSS) {
 			release =
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-				render::temporal::SuperResolutionMethod::kDLSS);
+					render::temporal::SuperResolutionMethod::kDLSS);
 		} else if (method == UpscaleMethod::kFSR ||
-			method == UpscaleMethod::kFSR4) {
+				   method == UpscaleMethod::kFSR4) {
 			release =
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-				method == UpscaleMethod::kFSR4
-					? render::temporal::SuperResolutionMethod::kFSR4
-					: render::temporal::SuperResolutionMethod::kFSR3);
+					method == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3);
 		}
 		if (!release.Succeeded()) {
 			render::TemporalPipeline::Get().PostFailure(
 				release.failureDomain ==
-						render::temporal::FailureDomain::kNone
-					? render::temporal::FailureDomain::kSuperResolution
-					: release.failureDomain,
-				release.message.empty()
-					? "Super-resolution resources could not be retired."
-					: release.message);
+						render::temporal::FailureDomain::kNone ?
+					render::temporal::FailureDomain::kSuperResolution :
+					release.failureDomain,
+				release.message.empty() ? "Super-resolution resources could not be retired." : release.message);
 			return;
 		}
 
@@ -592,7 +582,7 @@ namespace cs::render
 		const auto sizeResult = PrepareRenderSize(state, method);
 		bool recreated = sizeResult.Succeeded();
 		recreated = recreated &&
-			CreateUpscalingTextureResources(method);
+		            CreateUpscalingTextureResources(method);
 		recreated = recreated && PreflightExternalResolve(method);
 		if (recreated) {
 			_renderSize.CommitRequested();

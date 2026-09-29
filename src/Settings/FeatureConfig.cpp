@@ -31,7 +31,8 @@ namespace cs::settings
 				}
 				return text;
 			}
-		}, a_value);
+		},
+			a_value);
 	}
 }
 
@@ -58,7 +59,7 @@ namespace cs::feature_config
 		{
 			if (!a_key.empty() && std::ranges::all_of(a_key, [](char c) {
 					return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-						(c >= '0' && c <= '9') || c == '_' || c == '-';
+				           (c >= '0' && c <= '9') || c == '_' || c == '-';
 				}))
 				return std::string(a_key);
 			return settings::FormatValue(std::string(a_key));
@@ -284,7 +285,7 @@ namespace cs::feature_config
 				if (value) {
 					const auto typed = field.read(*value);
 					output += FormatKey(field.key) + " = " +
-						(typed ? settings::FormatValue(*typed) : FormatNode(*value)) + "\n";
+					          (typed ? settings::FormatValue(*typed) : FormatNode(*value)) + "\n";
 				} else {
 					output += "# " + FormatKey(field.key) + " = " + settings::FormatValue(field.defaultValue) + "\n";
 				}
@@ -509,7 +510,8 @@ namespace cs::feature_config
 		if (!a_node.is_floating_point() && !a_node.is_integer())
 			return ScalarReadStatus::kWrongType;
 		const double value = a_node.is_floating_point() ?
-			a_node.as_floating_point()->get() : static_cast<double>(a_node.as_integer()->get());
+		                         a_node.as_floating_point()->get() :
+		                         static_cast<double>(a_node.as_integer()->get());
 		if (!std::isfinite(value))
 			return ScalarReadStatus::kInvalidValue;
 		const auto floatValue = static_cast<float>(value);
@@ -528,7 +530,8 @@ namespace cs::feature_config
 		if (!node->is_floating_point() && !node->is_integer())
 			return ScalarReadStatus::kWrongType;
 		const double value = node->is_floating_point() ?
-			node->as_floating_point()->get() : static_cast<double>(node->as_integer()->get());
+		                         node->as_floating_point()->get() :
+		                         static_cast<double>(node->as_integer()->get());
 		if (!std::isfinite(value))
 			return ScalarReadStatus::kInvalidValue;
 		if (value < a_min || value > a_max)

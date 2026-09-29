@@ -2,10 +2,10 @@
 
 #include "Env.h"
 #include "Log.h"
+#include "Render/TemporalPipeline.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
 #include "Settings/PresetManager.h"
-#include "Render/TemporalPipeline.h"
 
 #include <toml++/toml.hpp>
 
@@ -113,11 +113,11 @@ namespace cs
 		_registeredFeatures.push_back(a_feature);
 		std::ranges::stable_sort(_registeredFeatures, {}, [](const Feature* feature) {
 			return std::ranges::find(feature_config::kAllFeatureKeys, feature->GetConfigKey()) -
-				feature_config::kAllFeatureKeys.begin();
+			       feature_config::kAllFeatureKeys.begin();
 		});
 	}
 
-	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view ) noexcept
+	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view) noexcept
 	{
 		return a_feature.IsHealthy();
 	}
@@ -147,9 +147,7 @@ namespace cs
 		const auto featureName = a_feature.GetName();
 		if (featureName == "FrameGeneration" || featureName == "Upscaling") {
 			render::TemporalPipeline::Get().PostFailure(
-				featureName == "FrameGeneration"
-					? render::temporal::FailureDomain::kFrameGeneration
-					: render::temporal::FailureDomain::kSuperResolution,
+				featureName == "FrameGeneration" ? render::temporal::FailureDomain::kFrameGeneration : render::temporal::FailureDomain::kSuperResolution,
 				std::string(a_phase) + ": " + std::string(a_reason));
 		}
 		try {
@@ -259,12 +257,10 @@ namespace cs
 			if (!installed) {
 				missingKeys.push_back(key);
 			}
-			feature->SetState({
-				.installed = installed,
+			feature->SetState({ .installed = installed,
 				.desiredActive = false,
 				.runtimeState = installed ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-				.detail = installed ? std::string{} : "Unified feature configuration is missing"
-			});
+				.detail = installed ? std::string{} : "Unified feature configuration is missing" });
 		}
 		if (!missingKeys.empty()) {
 			std::string names;
@@ -306,21 +302,16 @@ namespace cs
 
 				const bool deactivatedForEnb = cs::env::IsENBLoaded();
 				const bool desiredActive = activation.valid && activation.load && !deactivatedForEnb;
-				feature->SetState({
-					.installed = true,
+				feature->SetState({ .installed = true,
 					.desiredActive = desiredActive,
 					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-					.detail = deactivatedForEnb
-						? "ENB is loaded; this feature is inactive."
-						: std::string{}
-				});
+					.detail = deactivatedForEnb ? "ENB is loaded; this feature is inactive." : std::string{} });
 			} catch (const std::exception& e) {
 				failConfiguration(feature, e.what());
 			} catch (...) {
 				failConfiguration(feature, "Feature configuration threw a non-standard exception");
 			}
 		}
-
 	}
 
 	void FeatureManager::ActivateAll()
@@ -329,8 +320,7 @@ namespace cs
 
 		for (auto* feature : _registeredFeatures) {
 			const auto& state = feature->GetState();
-			if (state.runtimeState == FeatureRuntimeState::kFailed
-				|| state.runtimeState == FeatureRuntimeState::kDegraded) {
+			if (state.runtimeState == FeatureRuntimeState::kFailed || state.runtimeState == FeatureRuntimeState::kDegraded) {
 				continue;
 			}
 			if (state.runtimeState == FeatureRuntimeState::kInactive) {
@@ -342,8 +332,7 @@ namespace cs
 				continue;
 			}
 			const bool wasActive = state.runtimeState == FeatureRuntimeState::kActive;
-			if (!state.desiredActive
-				|| (!wasActive && state.runtimeState != FeatureRuntimeState::kPending)) {
+			if (!state.desiredActive || (!wasActive && state.runtimeState != FeatureRuntimeState::kPending)) {
 				continue;
 			}
 
@@ -429,8 +418,7 @@ namespace cs
 	void FeatureManager::ValidateShaderInjectionsAll()
 	{
 		for (auto* feature : _loadedFeatures) {
-			if (!feature
-				|| !PrepareRuntimeCallback(*feature, "ValidateShaderInjections")) {
+			if (!feature || !PrepareRuntimeCallback(*feature, "ValidateShaderInjections")) {
 				continue;
 			}
 

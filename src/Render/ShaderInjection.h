@@ -43,9 +43,9 @@ namespace cs::engine
 
 	struct ShaderSlotClaim
 	{
-		ShaderStage        stage = ShaderStage::kPixel;
+		ShaderStage stage = ShaderStage::kPixel;
 		ShaderResourceType resourceType = ShaderResourceType::kShaderResource;
-		std::uint32_t      slot = 0;
+		std::uint32_t slot = 0;
 
 		auto operator<=>(const ShaderSlotClaim&) const = default;
 	};
@@ -56,21 +56,21 @@ namespace cs::engine
 
 	struct ShaderReplacementRegistration
 	{
-		ShaderInjectionTarget         targetId = ShaderInjectionTarget::kCount;
-		ShaderStageMask               stages = ShaderStageBit(ShaderStage::kPixel);
-		std::string                   contributor;
-		ShaderInjectionDefines        defines;
+		ShaderInjectionTarget targetId = ShaderInjectionTarget::kCount;
+		ShaderStageMask stages = ShaderStageBit(ShaderStage::kPixel);
+		std::string contributor;
+		ShaderInjectionDefines defines;
 		ShaderInjectionReadyPredicate isReady;
-		ShaderInjectionBindCallback   bind;
-		std::vector<ShaderSlotClaim>  slotClaims;
+		ShaderInjectionBindCallback bind;
+		std::vector<ShaderSlotClaim> slotClaims;
 	};
 
 	struct ShaderVariantCompilationDescriptor
 	{
-		std::wstring            sourcePath;
-		std::string             entryPoint;
-		std::string             profile;
-		ShaderInjectionDefines  defines;
+		std::wstring sourcePath;
+		std::string entryPoint;
+		std::string profile;
+		ShaderInjectionDefines defines;
 	};
 
 	enum class DeveloperShaderOverride : std::uint8_t
@@ -93,8 +93,7 @@ namespace cs::engine
 		ShaderInjectionRequestReason a_right) noexcept
 	{
 		return static_cast<ShaderInjectionRequestReason>(
-			static_cast<std::uint8_t>(a_left)
-			| static_cast<std::uint8_t>(a_right));
+			static_cast<std::uint8_t>(a_left) | static_cast<std::uint8_t>(a_right));
 	}
 
 	constexpr ShaderInjectionRequestReason& operator|=(
@@ -110,30 +109,28 @@ namespace cs::engine
 		ShaderInjectionRequestReason a_reason) noexcept
 	{
 		return (
-			static_cast<std::uint8_t>(a_reasons)
-			& static_cast<std::uint8_t>(a_reason))
-			!= 0;
+				   static_cast<std::uint8_t>(a_reasons) & static_cast<std::uint8_t>(a_reason)) != 0;
 	}
 
 	struct ShaderInjectionTargetSnapshot
 	{
-		ShaderInjectionTarget  id = ShaderInjectionTarget::kCount;
-		std::string            name;
-		bool                   requested = false;
-		bool                   published = false;
-		bool                   slotCollision = false;
+		ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
+		std::string name;
+		bool requested = false;
+		bool published = false;
+		bool slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 		ShaderInjectionRequestReason requestReasons =
 			ShaderInjectionRequestReason::kNone;
-		std::size_t            contributors = 0;
+		std::size_t contributors = 0;
 		ShaderInjectionDefines defines;
-		std::string            publicationError;
-		std::uint64_t          matches = 0;
-		std::uint64_t          substitutions = 0;
-		std::uint64_t          passthroughCompileFail = 0;
-		std::uint64_t          passthroughNotReady = 0;
-		std::uint64_t          passthroughDisabled = 0;
-		std::uint64_t          dispatches = 0;
+		std::string publicationError;
+		std::uint64_t matches = 0;
+		std::uint64_t substitutions = 0;
+		std::uint64_t passthroughCompileFail = 0;
+		std::uint64_t passthroughNotReady = 0;
+		std::uint64_t passthroughDisabled = 0;
+		std::uint64_t dispatches = 0;
 	};
 
 	struct ShaderInjectionOutcomeSnapshot
@@ -172,12 +169,12 @@ namespace cs::engine
 		const ShaderInjectionDefines& a_defines);
 
 	std::optional<ShaderVariantCompilationDescriptor>
-		BuildEffectiveShaderCompileRequest(
-			const ShaderInjectionTargetMetadata& a_target,
-			ShaderStage a_stage,
-			const ShaderVariantCompilationDescriptor& a_family,
-			std::span<const ShaderReplacementRegistration> a_contributions,
-			std::string* a_error = nullptr);
+	BuildEffectiveShaderCompileRequest(
+		const ShaderInjectionTargetMetadata& a_target,
+		ShaderStage a_stage,
+		const ShaderVariantCompilationDescriptor& a_family,
+		std::span<const ShaderReplacementRegistration> a_contributions,
+		std::string* a_error = nullptr);
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
 	bool RegisterReplacementIfEnabled(
@@ -199,7 +196,7 @@ namespace cs::engine
 		ID3D11DeviceContext* a_immediateContext) noexcept;
 	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;
 	[[nodiscard]] ComputeDispatchBridgeStatus
-		GetComputeDispatchBridgeStatus() noexcept;
+	GetComputeDispatchBridgeStatus() noexcept;
 	struct NativeGraphicsShaderBinding
 	{
 		RE::BSGraphics::VertexShader* vertex = nullptr;
@@ -214,22 +211,22 @@ namespace cs::engine
 		bool forceEarlyDepthStencil = false;
 	};
 	std::optional<NativeShaderMetadataForTesting>
-		GetObservedNativeShaderMetadataForTesting(
-			ID3D11DeviceChild* a_shader) noexcept;
+	GetObservedNativeShaderMetadataForTesting(
+		ID3D11DeviceChild* a_shader) noexcept;
 	ID3D11DeviceChild* PrepareNativeShaderVariantForTesting(
 		const ShaderFamilyDescriptor& a_descriptor) noexcept;
 	NativeGraphicsShaderBinding
-		ResolveNativeGraphicsShaderBindingForTesting(
-			ShaderInjectionTarget a_target,
-			std::string_view a_nativeName,
-			std::uint32_t a_vertexShaderId,
-			std::uint32_t a_pixelShaderId,
-			RE::BSGraphics::VertexShader* a_nativeVertex,
-			RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
+	ResolveNativeGraphicsShaderBindingForTesting(
+		ShaderInjectionTarget a_target,
+		std::string_view a_nativeName,
+		std::uint32_t a_vertexShaderId,
+		std::uint32_t a_pixelShaderId,
+		RE::BSGraphics::VertexShader* a_nativeVertex,
+		RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
 	RE::BSGraphics::VertexShader*
-		CacheNativeVertexReplacementWrapperForTesting(
-			RE::BSGraphics::VertexShader* a_nativeVertex,
-			ID3D11VertexShader* a_replacement) noexcept;
+	CacheNativeVertexReplacementWrapperForTesting(
+		RE::BSGraphics::VertexShader* a_nativeVertex,
+		ID3D11VertexShader* a_replacement) noexcept;
 	struct NativeVariantCacheStatsForTesting
 	{
 		std::size_t entries = 0;
@@ -237,7 +234,7 @@ namespace cs::engine
 		std::size_t compilation = 0;
 	};
 	NativeVariantCacheStatsForTesting
-		GetNativeVariantCacheStatsForTesting() noexcept;
+	GetNativeVariantCacheStatsForTesting() noexcept;
 	void ObserveNativeComputeShaderForTesting(
 		ShaderInjectionTarget a_target,
 		std::uint32_t a_descriptor,

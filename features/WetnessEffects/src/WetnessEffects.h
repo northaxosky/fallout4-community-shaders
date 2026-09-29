@@ -6,8 +6,8 @@
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "WetnessMath.h"
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <string>
 

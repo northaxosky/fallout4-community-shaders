@@ -2,12 +2,12 @@
 
 #include "Log.h"
 #include "PCH.h"
-#include "Render/ShaderSubclassContext.h"
 #include "Render/ShaderInjection.h"
+#include "Render/ShaderSubclassContext.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
 
-#include <atomic>
 #include <algorithm>
+#include <atomic>
 #include <d3d11.h>
 #include <memory>
 #include <mutex>
@@ -32,19 +32,19 @@ namespace cs::engine
 		ShaderStageMask g_installRequestedStages = 0;
 		std::atomic<ShaderStageMask> g_hookInstalledStages{ 0 };
 
-		using CreatePixelShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+		using CreatePixelShaderFunction = HRESULT(STDMETHODCALLTYPE*)(
 			ID3D11Device*,
 			const void*,
 			SIZE_T,
 			ID3D11ClassLinkage*,
 			ID3D11PixelShader**);
-		using CreateVertexShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+		using CreateVertexShaderFunction = HRESULT(STDMETHODCALLTYPE*)(
 			ID3D11Device*,
 			const void*,
 			SIZE_T,
 			ID3D11ClassLinkage*,
 			ID3D11VertexShader**);
-		using CreateComputeShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+		using CreateComputeShaderFunction = HRESULT(STDMETHODCALLTYPE*)(
 			ID3D11Device*,
 			const void*,
 			SIZE_T,
@@ -58,9 +58,7 @@ namespace cs::engine
 				return std::nullopt;
 
 			const auto context = shader_context::Current();
-			if (!context.active
-				|| !context.techniqueKnown
-				|| !context.subclassName) {
+			if (!context.active || !context.techniqueKnown || !context.subclassName) {
 				return std::nullopt;
 			}
 			const auto route = ResolvePixelShaderRuntimeRoute(
@@ -76,13 +74,12 @@ namespace cs::engine
 		}
 
 		std::span<const PixelShaderSwapResolverRegistration>
-			GetResolverSpan(
-				const std::shared_ptr<const ResolverList>& a_resolvers)
+		GetResolverSpan(
+			const std::shared_ptr<const ResolverList>& a_resolvers)
 		{
-			return a_resolvers
-				? std::span<const PixelShaderSwapResolverRegistration>(
-					*a_resolvers)
-				: std::span<const PixelShaderSwapResolverRegistration>{};
+			return a_resolvers ? std::span<const PixelShaderSwapResolverRegistration>(
+									 *a_resolvers) :
+			                     std::span<const PixelShaderSwapResolverRegistration>{};
 		}
 
 		struct CreatePixelShaderHook
@@ -102,8 +99,7 @@ namespace cs::engine
 					a_bytecodeLength,
 					a_linkage,
 					reinterpret_cast<ID3D11PixelShader**>(a_out));
-				if (SUCCEEDED(result) && a_out && *a_out
-					&& !PixelShaderBrokerBypassActive()) {
+				if (SUCCEEDED(result) && a_out && *a_out && !PixelShaderBrokerBypassActive()) {
 					ObserveNativeShaderBytecode(
 						ShaderStage::kPixel,
 						a_bytecode,
@@ -154,8 +150,7 @@ namespace cs::engine
 					a_bytecodeLength,
 					a_linkage,
 					reinterpret_cast<ID3D11VertexShader**>(a_out));
-				if (SUCCEEDED(result) && a_out && *a_out
-					&& !PixelShaderBrokerBypassActive()) {
+				if (SUCCEEDED(result) && a_out && *a_out && !PixelShaderBrokerBypassActive()) {
 					ObserveNativeShaderBytecode(
 						ShaderStage::kVertex,
 						a_bytecode,
@@ -240,8 +235,7 @@ namespace cs::engine
 			auto installedStages =
 				g_hookInstalledStages.load(std::memory_order_acquire);
 			const auto pixelBit = ShaderStageBit(ShaderStage::kPixel);
-			if ((g_installRequestedStages & pixelBit) != 0
-				&& (installedStages & pixelBit) == 0) {
+			if ((g_installRequestedStages & pixelBit) != 0 && (installedStages & pixelBit) == 0) {
 				stl::detour_vfunc<15, CreatePixelShaderHook>(g_device);
 				if (CreatePixelShaderHook::func) {
 					installedStages |= pixelBit;
@@ -252,8 +246,7 @@ namespace cs::engine
 			}
 
 			const auto vertexBit = ShaderStageBit(ShaderStage::kVertex);
-			if ((g_installRequestedStages & vertexBit) != 0
-				&& (installedStages & vertexBit) == 0) {
+			if ((g_installRequestedStages & vertexBit) != 0 && (installedStages & vertexBit) == 0) {
 				stl::detour_vfunc<12, CreateVertexShaderHook>(g_device);
 				if (CreateVertexShaderHook::func) {
 					installedStages |= vertexBit;
@@ -264,8 +257,7 @@ namespace cs::engine
 			}
 
 			const auto computeBit = ShaderStageBit(ShaderStage::kCompute);
-			if ((g_installRequestedStages & computeBit) != 0
-				&& (installedStages & computeBit) == 0) {
+			if ((g_installRequestedStages & computeBit) != 0 && (installedStages & computeBit) == 0) {
 				stl::detour_vfunc<18, CreateComputeShaderHook>(g_device);
 				if (CreateComputeShaderHook::func) {
 					installedStages |= computeBit;
@@ -296,17 +288,14 @@ namespace cs::engine
 		if (!g_device)
 			g_device = a_device;
 		g_installRequestedStages |=
-			ShaderStageBit(ShaderStage::kVertex)
-			| ShaderStageBit(ShaderStage::kPixel);
+			ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel);
 		InstallHookIfReady();
 	}
 
 	bool RegisterPixelShaderSwapResolver(ShaderSwapResolver a_resolver)
 	{
-		return RegisterPixelShaderSwapResolver({
-			.resolver = a_resolver,
-			.priority = kHlslReplacementResolverPriority
-		});
+		return RegisterPixelShaderSwapResolver({ .resolver = a_resolver,
+			.priority = kHlslReplacementResolverPriority });
 	}
 
 	bool RegisterPixelShaderSwapResolver(
@@ -319,20 +308,16 @@ namespace cs::engine
 			std::scoped_lock lock(g_resolverRegistrationMutex);
 			const auto current = g_resolvers.load(std::memory_order_acquire);
 			if (current) {
-				if (current->size() >= kMaxResolvers
-					|| std::ranges::any_of(
-						*current,
-						[&a_registration](
-							const PixelShaderSwapResolverRegistration& a_existing) {
-							return a_existing.resolver
-								== a_registration.resolver;
-						})) {
+				if (current->size() >= kMaxResolvers || std::ranges::any_of(
+															*current,
+															[&a_registration](
+																const PixelShaderSwapResolverRegistration& a_existing) {
+																return a_existing.resolver == a_registration.resolver;
+															})) {
 					return false;
 				}
 			}
-			auto updated = current
-				? std::make_shared<ResolverList>(*current)
-				: std::make_shared<ResolverList>();
+			auto updated = current ? std::make_shared<ResolverList>(*current) : std::make_shared<ResolverList>();
 			updated->push_back(a_registration);
 			std::stable_sort(
 				updated->begin(),
@@ -365,11 +350,7 @@ namespace cs::engine
 	{
 		std::scoped_lock lock(g_installMutex);
 		InstallHookIfReady();
-		return g_installRequestedStages != 0
-			&& (
-			g_hookInstalledStages.load(std::memory_order_acquire)
-			& g_installRequestedStages)
-			== g_installRequestedStages;
+		return g_installRequestedStages != 0 && (g_hookInstalledStages.load(std::memory_order_acquire) & g_installRequestedStages) == g_installRequestedStages;
 	}
 
 }

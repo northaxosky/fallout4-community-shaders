@@ -1,7 +1,7 @@
 #pragma once
 
-#include <spdlog/spdlog.h>
 #include <optional>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
 #include <vector>

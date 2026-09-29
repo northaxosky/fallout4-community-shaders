@@ -3,9 +3,9 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
-#include <cstdint>
 #include <vector>
 
 namespace cs::render

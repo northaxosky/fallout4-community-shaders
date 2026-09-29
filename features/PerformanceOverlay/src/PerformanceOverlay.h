@@ -61,26 +61,26 @@ namespace cs::features
 
 		static constexpr int kHistoryCapacity = performance_overlay::kHistoryCapacity;
 		std::array<float, kHistoryCapacity> _frameTimesMs{};
-		int    _frameTimesHead    = 0;
-		int    _frameTimesCount   = 0;
+		int _frameTimesHead = 0;
+		int _frameTimesCount = 0;
 
-		double _lastFrameQpc      = 0.0;
+		double _lastFrameQpc = 0.0;
 		double _lastDisplayUpdate = 0.0;
-		double _qpcFreq           = 0.0;
+		double _qpcFreq = 0.0;
 
-		float  _curFrameMs        = 0.0f;
-		float  _displayedFps      = 0.0f;
-		float  _displayedFrameMs  = 0.0f;
-		float  _avgMs             = 0.0f;
-		float  _stddevMs          = 0.0f;
-		float  _graphYMaxSmoothed = 0.0f;
-		float  _onePctLowMs       = 0.0f;
-		float  _pointOnePctLowMs  = 0.0f;
+		float _curFrameMs = 0.0f;
+		float _displayedFps = 0.0f;
+		float _displayedFrameMs = 0.0f;
+		float _avgMs = 0.0f;
+		float _stddevMs = 0.0f;
+		float _graphYMaxSmoothed = 0.0f;
+		float _onePctLowMs = 0.0f;
+		float _pointOnePctLowMs = 0.0f;
 
-		float  _refreshHz         = 60.0f;
-		bool   _refreshKnown      = false;
+		float _refreshHz = 60.0f;
+		bool _refreshKnown = false;
 
-		uint64_t _vramUsedBytes   = 0;
+		uint64_t _vramUsedBytes = 0;
 		uint64_t _vramBudgetBytes = 0;
 	};
 }

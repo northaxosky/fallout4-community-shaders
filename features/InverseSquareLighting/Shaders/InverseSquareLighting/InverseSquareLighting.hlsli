@@ -23,30 +23,19 @@ namespace InverseSquareLighting
 			return vanilla;
 
 		float strength = SharedData::InInterior ?
-			SharedData::inverseSquareLightingSettings.InteriorStrength :
-			SharedData::inverseSquareLightingSettings.ExteriorStrength;
+		                     SharedData::inverseSquareLightingSettings.InteriorStrength :
+		                     SharedData::inverseSquareLightingSettings.ExteriorStrength;
 		if (!isfinite(strength) || strength <= 0.0)
 			return vanilla;
 		strength = saturate(strength);
 
-		if ((mode & MODE_COMPARISON_DEBUG) != 0
-			&& pixelPositionX
-				< SharedData::BufferDim.x
-					* SharedData::DynamicResolution.x * 0.5) {
+		if ((mode & MODE_COMPARISON_DEBUG) != 0 && pixelPositionX < SharedData::BufferDim.x * SharedData::DynamicResolution.x * 0.5) {
 			return vanilla;
 		}
 
 		float nearFieldDistance =
 			SharedData::inverseSquareLightingSettings.NearFieldDistance;
-		if (!isfinite(vanilla)
-			|| !isfinite(distance)
-			|| distance < 0.0
-			|| distance > MAX_SAFE_SQUARE_INPUT
-			|| !isfinite(radius)
-			|| radius <= 0.0
-			|| !isfinite(nearFieldDistance)
-			|| nearFieldDistance <= 0.0
-			|| nearFieldDistance > MAX_SAFE_SQUARE_INPUT) {
+		if (!isfinite(vanilla) || !isfinite(distance) || distance < 0.0 || distance > MAX_SAFE_SQUARE_INPUT || !isfinite(radius) || radius <= 0.0 || !isfinite(nearFieldDistance) || nearFieldDistance <= 0.0 || nearFieldDistance > MAX_SAFE_SQUARE_INPUT) {
 			return vanilla;
 		}
 

@@ -44,8 +44,7 @@ namespace cs::features::wetness_math
 			settings::Field{ "puddle_max_angle", "How flat a surface needs to be for puddles to form on it.", &Settings::puddleMaxAngle, settings::Range{ kPuddleMaxAngleMin, kPuddleMaxAngleMax } },
 			settings::Field{ "max_puddle_wetness", "Puddle Wetness", &Settings::maxPuddleWetness, settings::Range{ kMaxPuddleWetnessMin, kMaxPuddleWetnessMax } },
 			settings::Field{ "max_shore_wetness", "Shore Wetness", &Settings::maxShoreWetness, settings::Range{ kMaxShoreWetnessMin, kMaxShoreWetnessMax } },
-			settings::Field{ "shore_range", "The maximum distance from a body of water that Shore Wetness affects", &Settings::shoreRange, settings::Range{ kShoreRangeMin, kShoreRangeMax } }
-		}
+			settings::Field{ "shore_range", "The maximum distance from a body of water that Shore Wetness affects", &Settings::shoreRange, settings::Range{ kShoreRangeMin, kShoreRangeMax } } }
 	};
 
 	inline Settings Clamp(Settings a_settings) noexcept
@@ -129,8 +128,8 @@ namespace cs::features::wetness_math
 		if (!a_isExterior)
 			return {};
 		const float transition = std::isfinite(a_transitionPct) ?
-			std::clamp(a_transitionPct, 0.0f, 1.0f) :
-			1.0f;
+		                             std::clamp(a_transitionPct, 0.0f, 1.0f) :
+		                             1.0f;
 		const auto current = CalculateWeatherWetness(a_currentIsRain, a_currentBeginPrecip, transition, true);
 		const auto last = CalculateWeatherWetness(a_previousIsRain, a_previousEndPrecip, transition, false);
 		return {

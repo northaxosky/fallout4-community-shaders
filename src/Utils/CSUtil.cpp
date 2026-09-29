@@ -1,16 +1,16 @@
 #include "Utils/CSUtil.h"
-#include "Utils/ShaderCompile.h"
 #include "Utils/ShaderCache/ShaderCache.h"
+#include "Utils/ShaderCompile.h"
 
 #include <algorithm>
 #include <atomic>
+#include <dxgi.h>
 #include <filesystem>
 #include <format>
 #include <mutex>
 #include <span>
 #include <string>
 #include <unordered_set>
-#include <dxgi.h>
 #include <wrl/client.h>
 
 #include "Log.h"
@@ -117,54 +117,59 @@ namespace cs::util
 		}
 
 		HRESULT CreateShaderChild(
-			ID3D11Device&                a_device,
-			ShaderKind                   a_kind,
+			ID3D11Device& a_device,
+			ShaderKind a_kind,
 			std::span<const std::uint8_t> a_bytecode,
-			ID3D11DeviceChild*&          a_shader) noexcept
+			ID3D11DeviceChild*& a_shader) noexcept
 		{
 			a_shader = nullptr;
 			HRESULT result = E_INVALIDARG;
 			switch (a_kind) {
-			case ShaderKind::kPixel: {
-				Microsoft::WRL::ComPtr<ID3D11PixelShader> shader;
-				result = a_device.CreatePixelShader(
-					a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
-				if (SUCCEEDED(result) && shader)
-					a_shader = shader.Detach();
-				break;
-			}
-			case ShaderKind::kVertex: {
-				Microsoft::WRL::ComPtr<ID3D11VertexShader> shader;
-				result = a_device.CreateVertexShader(
-					a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
-				if (SUCCEEDED(result) && shader)
-					a_shader = shader.Detach();
-				break;
-			}
-			case ShaderKind::kHull: {
-				Microsoft::WRL::ComPtr<ID3D11HullShader> shader;
-				result = a_device.CreateHullShader(
-					a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
-				if (SUCCEEDED(result) && shader)
-					a_shader = shader.Detach();
-				break;
-			}
-			case ShaderKind::kDomain: {
-				Microsoft::WRL::ComPtr<ID3D11DomainShader> shader;
-				result = a_device.CreateDomainShader(
-					a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
-				if (SUCCEEDED(result) && shader)
-					a_shader = shader.Detach();
-				break;
-			}
-			case ShaderKind::kCompute: {
-				Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader;
-				result = a_device.CreateComputeShader(
-					a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
-				if (SUCCEEDED(result) && shader)
-					a_shader = shader.Detach();
-				break;
-			}
+			case ShaderKind::kPixel:
+				{
+					Microsoft::WRL::ComPtr<ID3D11PixelShader> shader;
+					result = a_device.CreatePixelShader(
+						a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
+					if (SUCCEEDED(result) && shader)
+						a_shader = shader.Detach();
+					break;
+				}
+			case ShaderKind::kVertex:
+				{
+					Microsoft::WRL::ComPtr<ID3D11VertexShader> shader;
+					result = a_device.CreateVertexShader(
+						a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
+					if (SUCCEEDED(result) && shader)
+						a_shader = shader.Detach();
+					break;
+				}
+			case ShaderKind::kHull:
+				{
+					Microsoft::WRL::ComPtr<ID3D11HullShader> shader;
+					result = a_device.CreateHullShader(
+						a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
+					if (SUCCEEDED(result) && shader)
+						a_shader = shader.Detach();
+					break;
+				}
+			case ShaderKind::kDomain:
+				{
+					Microsoft::WRL::ComPtr<ID3D11DomainShader> shader;
+					result = a_device.CreateDomainShader(
+						a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
+					if (SUCCEEDED(result) && shader)
+						a_shader = shader.Detach();
+					break;
+				}
+			case ShaderKind::kCompute:
+				{
+					Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader;
+					result = a_device.CreateComputeShader(
+						a_bytecode.data(), a_bytecode.size(), nullptr, shader.GetAddressOf());
+					if (SUCCEEDED(result) && shader)
+						a_shader = shader.Detach();
+					break;
+				}
 			case ShaderKind::kUnsupported:
 				break;
 			}
@@ -308,15 +313,13 @@ namespace cs::util
 				return fail(outcome.error);
 
 			static std::atomic<bool> reportedCacheFailure{ false };
-			if (!outcome.recordWritten && !outcome.cacheNote.empty()
-				&& !reportedCacheFailure.exchange(true, std::memory_order_relaxed)) {
+			if (!outcome.recordWritten && !outcome.cacheNote.empty() && !reportedCacheFailure.exchange(true, std::memory_order_relaxed)) {
 				L->warn("Shader cache unavailable: {}", outcome.cacheNote);
 			}
 
 			ID3D11DeviceChild* shader = nullptr;
 			auto createResult = CreateShaderChild(*device, kind, outcome.bytecode, shader);
-			if ((FAILED(createResult) || !shader)
-				&& outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
+			if ((FAILED(createResult) || !shader) && outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
 				L->warn("Cached shader bytecode rejected by the device; recompiling {}", narrow);
 				outcome = shader_cache::LoadOrCompileShader(
 					recipe,

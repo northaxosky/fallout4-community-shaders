@@ -25,10 +25,10 @@ namespace cs::shader_cache
 
 	struct CompilerIdentity
 	{
-		bool                  established = false;
+		bool established = false;
 		std::filesystem::path modulePath;
-		std::uint64_t         moduleLength = 0;
-		sha256::Sha256Result  moduleDigest{};
+		std::uint64_t moduleLength = 0;
+		sha256::Sha256Result moduleDigest{};
 		CompilerIdentityMechanism mechanism =
 			CompilerIdentityMechanism::kUnavailable;
 		CompilerFileVersion fileVersion;
@@ -42,10 +42,10 @@ namespace cs::shader_cache
 
 	CompilerIdentity MakeVersionCompilerIdentity(
 		std::filesystem::path a_modulePath,
-		std::uint64_t         a_moduleLength,
-		CompilerFileVersion   a_version);
+		std::uint64_t a_moduleLength,
+		CompilerFileVersion a_version);
 	CompilerIdentity ResolveCompilerIdentity(
 		const std::filesystem::path& a_modulePath) noexcept;
 	const CompilerIdentity& GetD3DCompilerIdentity() noexcept;
-	CompilerIdentity        ResolveD3DCompilerIdentity() noexcept;
+	CompilerIdentity ResolveD3DCompilerIdentity() noexcept;
 }

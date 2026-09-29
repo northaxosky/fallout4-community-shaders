@@ -10,11 +10,11 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -27,21 +27,14 @@ namespace cs::features
 
 		constexpr std::uint32_t kEnabledFlag = 1U << 0;
 		constexpr std::uint32_t kComparisonDebugFlag = 1U << 1;
-		constexpr std::array<FeatureDebugView, 1> kDebugViews{ {
-			{
-				"inverse_square_comparison",
-				"Vanilla | configured inverse-square",
-				FeatureDebugViewKind::kFullscreen
-			}
-		} };
+		constexpr std::array<FeatureDebugView, 1> kDebugViews{ { { "inverse_square_comparison",
+			"Vanilla | configured inverse-square",
+			FeatureDebugViewKind::kFullscreen } } };
 
 		std::string_view DebugVisualizationName(
 			InverseSquareLighting::DebugVisualization a_visualization) noexcept
 		{
-			return a_visualization
-					== InverseSquareLighting::DebugVisualization::kComparison
-				? "inverse_square_comparison"
-				: "off";
+			return a_visualization == InverseSquareLighting::DebugVisualization::kComparison ? "inverse_square_comparison" : "off";
 		}
 
 	}
@@ -53,7 +46,7 @@ namespace cs::features
 	}
 
 	std::span<const FeatureDebugView>
-		InverseSquareLighting::GetDebugViews() const noexcept
+	InverseSquareLighting::GetDebugViews() const noexcept
 	{
 		return kDebugViews;
 	}
@@ -100,30 +93,24 @@ namespace cs::features
 	{
 		PublishSettings();
 		const auto registerTarget = [this](
-			cs::engine::ShaderInjectionTarget a_target,
-			cs::engine::ShaderStage a_stage) {
-			return cs::engine::RegisterReplacement({
-				.targetId = a_target,
+										cs::engine::ShaderInjectionTarget a_target,
+										cs::engine::ShaderStage a_stage) {
+			return cs::engine::RegisterReplacement({ .targetId = a_target,
 				.stages = cs::engine::ShaderStageBit(a_stage),
 				.contributor = "InverseSquareLighting",
 				.defines = {
-					{
-						cs::engine::shader_injection_defines::
+					{ cs::engine::shader_injection_defines::
 							kInverseSquareLighting,
-						"1"
-					}
-				},
+						"1" } },
 				.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire)
-						&& cs::render::IsSharedDataReady();
-				}
-			});
+					return _registrationsReady.load(std::memory_order_acquire) && cs::render::IsSharedDataReady();
+				} });
 		};
 		const bool registered =
 			registerTarget(
 				cs::engine::ShaderInjectionTarget::kBsdfLight,
-				cs::engine::ShaderStage::kPixel)
-			&& registerTarget(
+				cs::engine::ShaderStage::kPixel) &&
+			registerTarget(
 				cs::engine::ShaderInjectionTarget::kDfTiledLighting,
 				cs::engine::ShaderStage::kCompute);
 		if (!registered) {
@@ -186,7 +173,7 @@ namespace cs::features
 	}
 
 	cs::InverseSquareLightingFeatureData
-		InverseSquareLighting::GetCommonBufferData() const
+	InverseSquareLighting::GetCommonBufferData() const
 	{
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		const auto* cell = player ? player->GetParentCell() : nullptr;
@@ -201,15 +188,14 @@ namespace cs::features
 		const float interiorStrength =
 			_interiorStrength.load(std::memory_order_acquire);
 		const float activeStrength = operational && enabled ?
-			(inInterior ? interiorStrength : exteriorStrength) :
-			0.0f;
+		                                 (inInterior ? interiorStrength : exteriorStrength) :
+		                                 0.0f;
 		_activeStrength.store(activeStrength, std::memory_order_relaxed);
 		if (!operational)
 			return {};
 
 		std::uint32_t mode = enabled ? kEnabledFlag : 0;
-		if (_debugVisualization.load(std::memory_order_acquire)
-			== DebugVisualization::kComparison) {
+		if (_debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kComparison) {
 			mode |= kComparisonDebugFlag;
 		}
 		return {

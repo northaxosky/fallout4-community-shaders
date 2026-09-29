@@ -34,11 +34,11 @@ namespace cs::shader_cache
 		{
 		public:
 			TracingIncludeHandler(
-				const void*                               a_rootData,
-				std::string                               a_rootLocator,
-				std::filesystem::path                     a_rootDirectory,
+				const void* a_rootData,
+				std::string a_rootLocator,
+				std::filesystem::path a_rootDirectory,
 				const std::vector<std::filesystem::path>& a_includeRoots,
-				DependencyManifest&                       a_manifest) :
+				DependencyManifest& a_manifest) :
 				_rootData(a_rootData),
 				_rootLocator(std::move(a_rootLocator)),
 				_rootDirectory(std::move(a_rootDirectory)),
@@ -47,23 +47,21 @@ namespace cs::shader_cache
 			{}
 			HRESULT STDMETHODCALLTYPE Open(
 				D3D_INCLUDE_TYPE a_includeType,
-				LPCSTR           a_fileName,
-				LPCVOID          a_parentData,
-				LPCVOID*         a_data,
-				UINT*            a_bytes) override
+				LPCSTR a_fileName,
+				LPCVOID a_parentData,
+				LPCVOID* a_data,
+				UINT* a_bytes) override
 			{
 				if (!a_fileName || !a_data || !a_bytes)
 					return E_INVALIDARG;
 
-				*a_data  = nullptr;
+				*a_data = nullptr;
 				*a_bytes = 0;
 
 				// never unwind through d3dcompiler
 				try {
 					IncludeResolution resolution;
-					resolution.kind = a_includeType == D3D_INCLUDE_SYSTEM
-						? IncludeKind::kSystem
-						: IncludeKind::kLocal;
+					resolution.kind = a_includeType == D3D_INCLUDE_SYSTEM ? IncludeKind::kSystem : IncludeKind::kLocal;
 					resolution.requestedName = a_fileName;
 					resolution.parentLocator = _rootLocator;
 
@@ -73,7 +71,7 @@ namespace cs::shader_cache
 					} else if (a_parentData) {
 						const auto parent = _openedFiles.find(a_parentData);
 						if (parent != _openedFiles.end()) {
-							includingDirectory       = parent->second.directory;
+							includingDirectory = parent->second.directory;
 							resolution.parentLocator = parent->second.locator;
 						}
 					}
@@ -82,7 +80,7 @@ namespace cs::shader_cache
 					const std::filesystem::path requested(resolution.requestedName);
 					return Resolve(includingDirectory, requested, resolution, a_data, a_bytes);
 				} catch (...) {
-					*a_data  = nullptr;
+					*a_data = nullptr;
 					*a_bytes = 0;
 					return E_FAIL;
 				}
@@ -107,16 +105,16 @@ namespace cs::shader_cache
 			struct OpenedFile
 			{
 				std::unique_ptr<std::uint8_t[]> buffer;
-				std::filesystem::path           directory;
-				std::string                     locator;
+				std::filesystem::path directory;
+				std::string locator;
 			};
 
 			HRESULT Resolve(
 				const std::filesystem::path& a_includingDirectory,
 				const std::filesystem::path& a_requested,
-				IncludeResolution&           a_resolution,
-				LPCVOID*                     a_data,
-				UINT*                        a_bytes)
+				IncludeResolution& a_resolution,
+				LPCVOID* a_data,
+				UINT* a_bytes)
 			{
 				std::vector<std::filesystem::path> candidates;
 				candidates.reserve(_includeRoots.size() + 1);
@@ -130,7 +128,7 @@ namespace cs::shader_cache
 
 				std::vector<std::uint8_t> bytes;
 				for (const auto& candidate : candidates) {
-					auto         locator = EncodeLocator(candidate);
+					auto locator = EncodeLocator(candidate);
 					IncludeProbe probe;
 					probe.path = locator;
 
@@ -148,7 +146,7 @@ namespace cs::shader_cache
 					}
 
 					// hash exactly what the compiler receives
-					probe.status        = ProbeStatus::kSuccess;
+					probe.status = ProbeStatus::kSuccess;
 					probe.contentDigest = sha256::Sha256Compute(bytes.data(), bytes.size());
 					probe.contentLength = bytes.size();
 					a_resolution.probes.push_back(std::move(probe));
@@ -169,7 +167,7 @@ namespace cs::shader_cache
 						return E_FAIL;
 					}
 
-					*a_data  = file->first;
+					*a_data = file->first;
 					*a_bytes = static_cast<UINT>(bytes.size());
 					_manifest->includes.push_back(std::move(a_resolution));
 					return S_OK;
@@ -179,11 +177,11 @@ namespace cs::shader_cache
 				return E_FAIL;
 			}
 
-			const void*                             _rootData;
-			std::string                             _rootLocator;
-			std::filesystem::path                   _rootDirectory;
-			std::vector<std::filesystem::path>      _includeRoots;
-			DependencyManifest*                     _manifest;
+			const void* _rootData;
+			std::string _rootLocator;
+			std::filesystem::path _rootDirectory;
+			std::vector<std::filesystem::path> _includeRoots;
+			DependencyManifest* _manifest;
 			std::unordered_map<LPCVOID, OpenedFile> _openedFiles;
 		};
 
@@ -193,7 +191,7 @@ namespace cs::shader_cache
 			if (!a_errors)
 				return text;
 			const auto* data = static_cast<const char*>(a_errors->GetBufferPointer());
-			const auto  size = a_errors->GetBufferSize();
+			const auto size = a_errors->GetBufferSize();
 			if (data && size != 0) {
 				text.assign(data, size);
 				while (!text.empty() && text.back() == '\0')
@@ -247,18 +245,18 @@ namespace cs::shader_cache
 
 		Microsoft::WRL::ComPtr<ID3DBlob> blob;
 		Microsoft::WRL::ComPtr<ID3DBlob> errors;
-		const HRESULT                    result = D3DCompile(
-            rootBytes.data(),
-            rootBytes.size(),
-            outcome.manifest.rootLocator.c_str(),
-            macros.data(),
-            &handler,
-            a_recipe.entryPoint.c_str(),
-            a_recipe.profile.c_str(),
-            a_recipe.flags1,
-            a_recipe.flags2,
-            blob.GetAddressOf(),
-            errors.GetAddressOf());
+		const HRESULT result = D3DCompile(
+			rootBytes.data(),
+			rootBytes.size(),
+			outcome.manifest.rootLocator.c_str(),
+			macros.data(),
+			&handler,
+			a_recipe.entryPoint.c_str(),
+			a_recipe.profile.c_str(),
+			a_recipe.flags1,
+			a_recipe.flags2,
+			blob.GetAddressOf(),
+			errors.GetAddressOf());
 
 		outcome.error = ExtractErrorText(errors.Get());
 		if (FAILED(result) || !blob || blob->GetBufferSize() == 0) {

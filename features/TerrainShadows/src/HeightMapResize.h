@@ -11,9 +11,9 @@ namespace cs::features::terrain_shadows
 		HRESULT hr = E_FAIL;
 		// Points at the source when no resampling was needed, else into the storage image.
 		const DirectX::Image* image = nullptr;
-		std::uint32_t         halvings = 0;
-		bool                  resampled = false;
-		bool                  usedTriangleFallback = false;
+		std::uint32_t halvings = 0;
+		bool resampled = false;
+		bool usedTriangleFallback = false;
 	};
 
 	// Downsamples a heightmap to the requested extent with an area-averaging filter.

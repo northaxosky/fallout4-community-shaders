@@ -12,11 +12,11 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -153,12 +153,8 @@ namespace cs::features
 			render::temporal::FrameGenerationMethod a_method)
 		{
 			using render::temporal::FrameGenerationMethod;
-			const std::string_view mode = a_method == FrameGenerationMethod::kDLSSG
-				? "presenting_queue_order"
-				: a_method == FrameGenerationMethod::kFSR3 ||
-						  a_method == FrameGenerationMethod::kFSR4
-					? "vendor_completion_fence"
-					: "none";
+			const std::string_view mode = a_method == FrameGenerationMethod::kDLSSG ? "presenting_queue_order" : a_method == FrameGenerationMethod::kFSR3 || a_method == FrameGenerationMethod::kFSR4 ? "vendor_completion_fence" :
+			                                                                                                                                                                                            "none";
 			a_sink
 				.Field("input_retirement_mode", mode)
 				.Field("input_retirement_source_queue",
@@ -263,8 +259,8 @@ namespace cs::features
 		const auto fidelityFxCapabilities =
 			pipeline.GetFidelityFXCapabilities();
 		a_sink.Field("requested_enabled",
-				settings.frameGenerationMethod !=
-					static_cast<std::uint32_t>(Method::kOff))
+				  settings.frameGenerationMethod !=
+					  static_cast<std::uint32_t>(Method::kOff))
 			.Field("requested_method", settings.frameGenerationMethod)
 			.Field("requested_method_name",
 				MethodName(settings.frameGenerationMethod))
@@ -317,9 +313,7 @@ namespace cs::features
 			.Field("dlssg_max_generated_frames",
 				diagnostics.capabilities.maxGeneratedFrames)
 			.Field("dlssg_max_multiplier",
-				diagnostics.capabilities.maxGeneratedFrames
-					? diagnostics.capabilities.maxGeneratedFrames + 1
-					: 0)
+				diagnostics.capabilities.maxGeneratedFrames ? diagnostics.capabilities.maxGeneratedFrames + 1 : 0)
 			.Field("dlssg_dynamic_supported",
 				diagnostics.capabilities.dynamicModeSupported)
 			.Field("dlssg_vsync_support_available",
@@ -533,7 +527,7 @@ namespace cs::features
 				fidelityFx);
 		};
 		const auto methodOption = [&](std::uint32_t a_method,
-			std::string_view a_key) {
+									  std::string_view a_key) {
 			const auto methodAvailability = availability(a_method);
 			return dmui::ChoiceOption<std::uint32_t>{
 				a_method,
@@ -563,9 +557,7 @@ namespace cs::features
 			static_cast<std::uint32_t>(Method::kDLSSG)) {
 			constexpr std::uint32_t kDynamicChoice = 1;
 			const auto currentGeneration =
-				settings.dlssgMode == 1
-				? kDynamicChoice
-				: settings.dlssgFixedMultiplier;
+				settings.dlssgMode == 1 ? kDynamicChoice : settings.dlssgFixedMultiplier;
 			std::vector<dmui::ChoiceOption<std::uint32_t>>
 				generationOptions;
 			const bool capabilitiesCurrent =
@@ -579,8 +571,8 @@ namespace cs::features
 					std::numeric_limits<std::uint32_t>::max() - 1);
 				generationOptions.reserve(maxGeneratedFrames + 1);
 				for (std::uint32_t generated = 1;
-					 generated <= maxGeneratedFrames;
-					 ++generated) {
+					generated <= maxGeneratedFrames;
+					++generated) {
 					const auto multiplier = generated + 1;
 					generationOptions.push_back(
 						{ multiplier,
@@ -596,13 +588,11 @@ namespace cs::features
 					dlssCapabilities.maxGeneratedFrames;
 			if (settings.dlssgMode == 0 &&
 				!currentFixedSupported) {
-				const auto reason = capabilitiesCurrent
-					? std::format(
-						  "runtime maximum is {}x",
-						  dlssCapabilities.maxGeneratedFrames + 1)
-					: dlssCapabilities.configurationQueryFailed
-					? std::string("runtime capability check failed")
-					: std::string("checking availability");
+				const auto reason = capabilitiesCurrent                       ? std::format(
+																					"runtime maximum is {}x",
+																					dlssCapabilities.maxGeneratedFrames + 1) :
+				                    dlssCapabilities.configurationQueryFailed ? std::string("runtime capability check failed") :
+				                                                                std::string("checking availability");
 				generationOptions.insert(
 					generationOptions.begin(),
 					{ settings.dlssgFixedMultiplier,
@@ -620,19 +610,12 @@ namespace cs::features
 				dlssCapabilities.dynamicModeSupported;
 			std::string dynamicReason;
 			if (!dynamicSupported) {
-				dynamicReason = dlssCapabilities.configurationQueryFailed
-					? "runtime capability check failed"
-					: capabilitiesCurrent
-					? "not supported by this runtime"
-					: "checking availability";
+				dynamicReason = dlssCapabilities.configurationQueryFailed ? "runtime capability check failed" : capabilitiesCurrent ? "not supported by this runtime" :
+				                                                                                                                      "checking availability";
 			}
 			generationOptions.push_back(
 				{ kDynamicChoice,
-					dynamicSupported
-						? "Dynamic"
-						: std::format(
-							  "Dynamic — {}",
-							  dynamicReason),
+					dynamicSupported ? "Dynamic" : std::format("Dynamic — {}", dynamicReason),
 					"dynamic",
 					dynamicSupported });
 			const auto enabledOptions = std::ranges::count_if(
@@ -650,8 +633,7 @@ namespace cs::features
 					dmui::DrawChoice<std::uint32_t>(
 						"dlss-generation",
 						currentGeneration,
-						std::span<const
-							dmui::ChoiceOption<std::uint32_t>>{
+						std::span<const dmui::ChoiceOption<std::uint32_t>>{
 							generationOptions },
 						"Unavailable",
 						"Generation");
@@ -813,9 +795,7 @@ namespace cs::features
 				static_cast<unsigned>(
 					dlssCapabilities.availability),
 				dlssCapabilities.IsCurrent() ? "yes" : "no",
-				dlssCapabilities.maxGeneratedFrames
-					? dlssCapabilities.maxGeneratedFrames + 1
-					: 0,
+				dlssCapabilities.maxGeneratedFrames ? dlssCapabilities.maxGeneratedFrames + 1 : 0,
 				dlssCapabilities.dynamicModeSupported ? "yes" : "no",
 				dlssCapabilities.providerStatus);
 			if (fidelityFx.fsr4FrameGeneration.availability !=

@@ -32,8 +32,7 @@ namespace cs::engine
 		ShaderInjectionTarget a_target) noexcept
 	{
 		constexpr auto graphics =
-			ShaderStageBit(ShaderStage::kVertex)
-			| ShaderStageBit(ShaderStage::kPixel);
+			ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel);
 		switch (a_target) {
 		case ShaderInjectionTarget::kImageSpace:
 			return graphics | ShaderStageBit(ShaderStage::kCompute);
@@ -54,24 +53,23 @@ namespace cs::engine
 
 	struct ShaderInjectionTargetMetadata
 	{
-		ShaderInjectionTarget                          id = ShaderInjectionTarget::kCount;
-		std::string_view                               name;
-		std::string_view                               label;
-		std::wstring_view                              sourcePath;
-		std::string_view                               entryPoint;
-		std::string_view                               profile;
+		ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
+		std::string_view name;
+		std::string_view label;
+		std::wstring_view sourcePath;
+		std::string_view entryPoint;
+		std::string_view profile;
 		std::span<const ShaderInjectionDefineMetadata> baseDefines;
-		ShaderStageMask                                supportedStages = ShaderInjectionTargetStages(id);
+		ShaderStageMask supportedStages = ShaderInjectionTargetStages(id);
 	};
 
 	inline constexpr std::array<ShaderInjectionDefineMetadata, 0>
 		kNoShaderInjectionDefines{};
 	inline constexpr std::array<ShaderInjectionTargetMetadata,
 		static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
-		kShaderInjectionTargets{ {
-			{ ShaderInjectionTarget::kDeferredPrepass, "deferred_prepass",
-				"Deferred prepass", L"BSDFPrePass.hlsl", "main", "ps_5_0",
-				kNoShaderInjectionDefines },
+		kShaderInjectionTargets{ { { ShaderInjectionTarget::kDeferredPrepass, "deferred_prepass",
+									   "Deferred prepass", L"BSDFPrePass.hlsl", "main", "ps_5_0",
+									   kNoShaderInjectionDefines },
 			{ ShaderInjectionTarget::kUtility, "utility", "Utility",
 				L"BSUtilityShader.hlsl", "main", "ps_5_0",
 				kNoShaderInjectionDefines },
@@ -107,11 +105,10 @@ namespace cs::engine
 				"ps_5_0", kNoShaderInjectionDefines },
 			{ ShaderInjectionTarget::kDfTiledLighting, "df_tiled_lighting",
 				"DFTiledLighting", L"DFTiledLighting.hlsl", "main", "cs_5_0",
-				kNoShaderInjectionDefines }
-		} };
+				kNoShaderInjectionDefines } } };
 
 	inline std::span<const ShaderInjectionTargetMetadata>
-		GetShaderInjectionTargets() noexcept
+	GetShaderInjectionTargets() noexcept
 	{
 		return kShaderInjectionTargets;
 	}
@@ -121,8 +118,8 @@ namespace cs::engine
 	{
 		const auto index = static_cast<std::size_t>(a_target);
 		return index < kShaderInjectionTargets.size() ?
-			&kShaderInjectionTargets[index] :
-			nullptr;
+		           &kShaderInjectionTargets[index] :
+		           nullptr;
 	}
 
 	inline const ShaderInjectionTargetMetadata* FindShaderInjectionTarget(

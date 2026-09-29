@@ -51,8 +51,8 @@ namespace cs::engine
 					} else {
 						_shader = nullptr;
 						_error = a_output.error.empty() ?
-							"shader compilation failed" :
-							std::move(a_output.error);
+						             "shader compilation failed" :
+						             std::move(a_output.error);
 					}
 				}
 				_state.store(
@@ -103,23 +103,16 @@ namespace cs::engine
 			std::size_t operator()(const CompilationKey& a_key) const noexcept
 			{
 				auto value = std::hash<std::uint64_t>{}(a_key.generation);
-				value = value * 131U
-					+ std::filesystem::hash_value(a_key.sourcePath);
-				value = value * 131U
-					+ std::hash<std::string>{}(a_key.entryPoint);
-				value = value * 131U
-					+ std::hash<std::string>{}(a_key.profile);
-				value = value * 131U
-					+ static_cast<std::size_t>(a_key.stage);
+				value = value * 131U + std::filesystem::hash_value(a_key.sourcePath);
+				value = value * 131U + std::hash<std::string>{}(a_key.entryPoint);
+				value = value * 131U + std::hash<std::string>{}(a_key.profile);
+				value = value * 131U + static_cast<std::size_t>(a_key.stage);
 				value = value * 131U + a_key.familyId;
 				value = value * 131U + a_key.descriptor;
-				value = value * 131U
-					+ std::hash<std::string>{}(a_key.owner);
+				value = value * 131U + std::hash<std::string>{}(a_key.owner);
 				for (const auto& [name, defineValue] : a_key.defines) {
-					value = value * 131U
-						+ std::hash<std::string>{}(name);
-					value = value * 131U
-						+ std::hash<std::string>{}(defineValue);
+					value = value * 131U + std::hash<std::string>{}(name);
+					value = value * 131U + std::hash<std::string>{}(defineValue);
 				}
 				return value;
 			}
@@ -190,11 +183,9 @@ namespace cs::engine
 						return handle;
 					}
 					_entries.emplace(std::move(key), handle);
-					_queue.push_back({
-						.generation = _generation,
+					_queue.push_back({ .generation = _generation,
 						.request = std::move(a_request),
-						.handle = handle
-					});
+						.handle = handle });
 				}
 				_condition.notify_one();
 				return handle;
@@ -265,8 +256,7 @@ namespace cs::engine
 					{
 						std::scoped_lock lock(_mutex);
 						publish =
-							!_stopped
-							&& task.generation == _generation;
+							!_stopped && task.generation == _generation;
 					}
 					if (publish)
 						task.handle->Complete(std::move(output));
@@ -292,9 +282,9 @@ namespace cs::engine
 	}
 
 	std::shared_ptr<ShaderVariantCompilationCache>
-		CreateAsyncShaderVariantCompilationCache(
-			ShaderVariantCompiler a_compiler,
-			std::size_t a_workerCount)
+	CreateAsyncShaderVariantCompilationCache(
+		ShaderVariantCompiler a_compiler,
+		std::size_t a_workerCount)
 	{
 		return std::make_shared<AsyncShaderVariantCompilationCache>(
 			std::move(a_compiler),

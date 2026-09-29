@@ -15,20 +15,23 @@
 #include "F4SE/API.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "REX/CONVERT.h"
 #include "REX/W32/OLE32.h"
 #include "REX/W32/SHELL32.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
 {
-	namespace { auto* L = cs::log::Get("cs.feature.renderdoc"); }
+	namespace
+	{
+		auto* L = cs::log::Get("cs.feature.renderdoc");
+	}
 
-	constexpr double      kBytesPerGiB = 1024.0 * 1024.0 * 1024.0;
-	using renderdoc_settings::kMinMultiFrameCount;
+	constexpr double kBytesPerGiB = 1024.0 * 1024.0 * 1024.0;
 	using renderdoc_settings::kMaxMultiFrameCount;
+	using renderdoc_settings::kMinMultiFrameCount;
 	constexpr std::string_view kLegacyCaptureFolder = "Data\\F4SE\\Plugins\\RenderDoc\\captures";
 	using renderdoc_settings::kEngineD3D11Target;
 	using renderdoc_settings::kTemporalD3D12Target;
@@ -165,8 +168,7 @@ namespace cs::features
 			return;
 		// Load before D3D initialization.
 		if (!TryLoadRuntime()) {
-			FailLoad("RenderDoc runtime load failed for settings.dll_path '" + _settings.dllPath
-				+ "'; verify the path and RenderDoc 1.7 API compatibility");
+			FailLoad("RenderDoc runtime load failed for settings.dll_path '" + _settings.dllPath + "'; verify the path and RenderDoc 1.7 API compatibility");
 			return;
 		}
 	}
@@ -404,7 +406,7 @@ namespace cs::features
 	{
 		// The proxy presents only through D3D12, so RenderDoc never pairs the game device with a window.
 		return _settings.captureTarget == CaptureTarget::kEngineD3D11 &&
-			_d3d12TargetAvailable.load(std::memory_order_acquire);
+		       _d3d12TargetAvailable.load(std::memory_order_acquire);
 	}
 
 	bool RenderDoc::RequestFrames(std::uint32_t a_frames)
@@ -574,16 +576,12 @@ namespace cs::features
 		const std::array captureTargets{
 			dmui::ChoiceOption<CaptureTarget>{
 				CaptureTarget::kEngineD3D11,
-				d3d11Available
-					? "Engine D3D11"
-					: "Engine D3D11 - unavailable",
+				d3d11Available ? "Engine D3D11" : "Engine D3D11 - unavailable",
 				"engine-d3d11",
 				d3d11Available },
 			dmui::ChoiceOption<CaptureTarget>{
 				CaptureTarget::kTemporalD3D12,
-				d3d12Available
-					? "Temporal D3D12"
-					: "Temporal D3D12 - unavailable",
+				d3d12Available ? "Temporal D3D12" : "Temporal D3D12 - unavailable",
 				"temporal-d3d12",
 				d3d12Available }
 		};

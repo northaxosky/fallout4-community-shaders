@@ -29,7 +29,8 @@ namespace DeferredPosition
 			isNear ? rawDepth * 100.0 : rawDepth * 1.01 - 0.01,
 			1.0);
 		float4 viewPositionH = isNear ?
-			mul(nearReprojection, position) : mul(farReprojection, position);
+		                           mul(nearReprojection, position) :
+		                           mul(farReprojection, position);
 		if (abs(viewPositionH.w) < 1e-6)
 			return false;
 

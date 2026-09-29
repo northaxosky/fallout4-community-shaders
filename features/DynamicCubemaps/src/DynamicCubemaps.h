@@ -239,7 +239,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _bc6hEncodeCS;
 		winrt::com_ptr<ID3D11ComputeShader> _previewCS;
 
-
 		std::atomic<NextTask> _nextTask{
 			NextTask::kCaptureInferAndIrradianceA
 		};

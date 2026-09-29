@@ -14,15 +14,12 @@ namespace ExponentialHeightFog
 
 	bool IsActive()
 	{
-		return (SharedData::exponentialHeightFogSettings.Mode & MODE_ENABLED) != 0
-			&& !SharedData::InInterior;
+		return (SharedData::exponentialHeightFogSettings.Mode & MODE_ENABLED) != 0 && !SharedData::InInterior;
 	}
 
 	bool IsFogFactorDebug()
 	{
-		return IsActive()
-			&& (SharedData::exponentialHeightFogSettings.Mode
-				& MODE_FOG_FACTOR_DEBUG) != 0;
+		return IsActive() && (SharedData::exponentialHeightFogSettings.Mode & MODE_FOG_FACTOR_DEBUG) != 0;
 	}
 
 	bool TryHeightFactor(
@@ -33,9 +30,7 @@ namespace ExponentialHeightFog
 		out float factor)
 	{
 		factor = 0.0;
-		if (!isfinite(height) || !isfinite(scale) || !isfinite(bias)
-			|| !isfinite(multiplier) || abs(scale) <= MINIMUM_SLOPE
-			|| !(multiplier > 0.0)) {
+		if (!isfinite(height) || !isfinite(scale) || !isfinite(bias) || !isfinite(multiplier) || abs(scale) <= MINIMUM_SLOPE || !(multiplier > 0.0)) {
 			return false;
 		}
 
@@ -44,8 +39,7 @@ namespace ExponentialHeightFog
 		float directedAltitude =
 			max((height - zeroHeight) * (scale < 0.0 ? -1.0 : 1.0), 0.0);
 		float opticalDepth = falloff * directedAltitude;
-		if (!isfinite(zeroHeight) || !isfinite(falloff)
-			|| !isfinite(opticalDepth)) {
+		if (!isfinite(zeroHeight) || !isfinite(falloff) || !isfinite(opticalDepth)) {
 			return false;
 		}
 
@@ -70,27 +64,21 @@ namespace ExponentialHeightFog
 			SharedData::exponentialHeightFogSettings.DensityMultiplier;
 		float heightMultiplier =
 			SharedData::exponentialHeightFogSettings.HeightFalloffMultiplier;
-		if (!isfinite(distance) || !isfinite(distanceRamp.x)
-			|| !isfinite(distanceRamp.z) || !isfinite(densityMultiplier)
-			|| abs(distanceRamp.x) <= MINIMUM_SLOPE
-			|| !(densityMultiplier > 0.0)) {
+		if (!isfinite(distance) || !isfinite(distanceRamp.x) || !isfinite(distanceRamp.z) || !isfinite(densityMultiplier) || abs(distanceRamp.x) <= MINIMUM_SLOPE || !(densityMultiplier > 0.0)) {
 			return false;
 		}
 
 		float nearDistance = distanceRamp.z / distanceRamp.x;
 		float farDistance = (1.0 + distanceRamp.z) / distanceRamp.x;
 		float distanceSpan = farDistance - nearDistance;
-		if (!isfinite(nearDistance) || !isfinite(farDistance)
-			|| !isfinite(distanceSpan)
-			|| !(distanceSpan > MINIMUM_DISTANCE_SPAN)) {
+		if (!isfinite(nearDistance) || !isfinite(farDistance) || !isfinite(distanceSpan) || !(distanceSpan > MINIMUM_DISTANCE_SPAN)) {
 			return false;
 		}
 
 		float density =
 			REFERENCE_OPTICAL_DEPTH / distanceSpan * densityMultiplier;
 		float opticalDepth = density * max(distance - nearDistance, 0.0);
-		if (!isfinite(density) || !isfinite(opticalDepth)
-			|| !(density > 0.0)) {
+		if (!isfinite(density) || !isfinite(opticalDepth) || !(density > 0.0)) {
 			return false;
 		}
 
@@ -101,8 +89,8 @@ namespace ExponentialHeightFog
 				heightRamp.x,
 				heightRamp.z,
 				heightMultiplier,
-				heightFactorX)
-			|| !TryHeightFactor(
+				heightFactorX) ||
+			!TryHeightFactor(
 				height,
 				heightRamp.y,
 				heightRamp.w,

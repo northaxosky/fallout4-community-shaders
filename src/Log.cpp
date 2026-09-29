@@ -90,10 +90,13 @@ namespace cs::log
 	void AttachToDefaultLogger()
 	{
 		auto def = spdlog::default_logger();
-		if (!def) return;
+		if (!def)
+			return;
 		spdlog::apply_all([&](std::shared_ptr<spdlog::logger> a_logger) {
-			if (a_logger.get() == def.get()) return;
-			if (!a_logger->name().starts_with("cs")) return;
+			if (a_logger.get() == def.get())
+				return;
+			if (!a_logger->name().starts_with("cs"))
+				return;
 			ConfigureFromDefault(*a_logger, *def);
 		});
 	}
@@ -138,13 +141,20 @@ namespace cs::log
 	std::optional<spdlog::level::level_enum> LevelFromString(std::string_view a_level)
 	{
 		const auto lowered = Lowercase(a_level);
-		if (lowered == "trace") return spdlog::level::trace;
-		if (lowered == "debug") return spdlog::level::debug;
-		if (lowered == "info") return spdlog::level::info;
-		if (lowered == "warn" || lowered == "warning") return spdlog::level::warn;
-		if (lowered == "error" || lowered == "err") return spdlog::level::err;
-		if (lowered == "critical") return spdlog::level::critical;
-		if (lowered == "off") return spdlog::level::off;
+		if (lowered == "trace")
+			return spdlog::level::trace;
+		if (lowered == "debug")
+			return spdlog::level::debug;
+		if (lowered == "info")
+			return spdlog::level::info;
+		if (lowered == "warn" || lowered == "warning")
+			return spdlog::level::warn;
+		if (lowered == "error" || lowered == "err")
+			return spdlog::level::err;
+		if (lowered == "critical")
+			return spdlog::level::critical;
+		if (lowered == "off")
+			return spdlog::level::off;
 		return std::nullopt;
 	}
 
@@ -189,7 +199,8 @@ namespace cs::log
 			(void)value;
 			const bool known = key.str() == "channels" || std::apply([&](const auto&... fields) {
 				return ((key.str() == fields.key) || ...);
-			}, settings::core::kLogging.fields);
+			},
+															  settings::core::kLogging.fields);
 			if (!known)
 				logger->warn("Unknown logging key '{}'; ignoring", key.str());
 		}
@@ -264,11 +275,10 @@ namespace cs::log
 		std::sort(overrides.begin(), overrides.end(),
 			[](const auto& a_lhs, const auto& a_rhs) { return a_lhs.first < a_rhs.first; });
 		auto logging = settings::SerializeFull(settings::core::kLogging, settings::core::Logging{
-			.level = std::string(LevelToString(GlobalLevel())),
-			.telemetry = cs::telemetry::pump::Enabled(),
-			.telemetryIntervalSeconds = cs::telemetry::pump::IntervalSeconds(),
-			.dumpHotkey = std::move(hotkey)
-		});
+																			 .level = std::string(LevelToString(GlobalLevel())),
+																			 .telemetry = cs::telemetry::pump::Enabled(),
+																			 .telemetryIntervalSeconds = cs::telemetry::pump::IntervalSeconds(),
+																			 .dumpHotkey = std::move(hotkey) });
 
 		toml::table channels;
 		for (const auto& [name, level] : overrides)

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "Common/SharedData.hlsli"
 #include "Common/DeferredPosition.hlsli"
+#include "Common/SharedData.hlsli"
 
 namespace TerrainShadows
 {
@@ -59,7 +59,8 @@ namespace TerrainShadows
 		}
 		if (mode == MODE_HEIGHTMAP) {
 			float height = ShadowHeightTexture.SampleLevel(
-				textureSampler, GetTerrainShadowUV(worldPosition.xy), 0).x;
+												  textureSampler, GetTerrainShadowUV(worldPosition.xy), 0)
+			                   .x;
 			height = lerp(
 				SharedData::terrainShadowsSettings.HeightRange.x,
 				SharedData::terrainShadowsSettings.HeightRange.y,

@@ -8,11 +8,11 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -158,7 +158,7 @@ namespace cs::features
 				fidelityFx);
 		};
 		const auto methodOption = [&](std::uint32_t a_method,
-			std::string_view a_key) {
+									  std::string_view a_key) {
 			const auto methodAvailability = availability(a_method);
 			return dmui::ChoiceOption<std::uint32_t>{
 				a_method,
@@ -203,9 +203,9 @@ namespace cs::features
 					0,
 					settings.upscaleMethod ==
 							static_cast<std::uint32_t>(
-								UpscaleMethod::kDLSS)
-						? "DLAA"
-						: "Native AA",
+								UpscaleMethod::kDLSS) ?
+						"DLAA" :
+						"Native AA",
 					"native-aa" },
 				dmui::ChoiceOption<std::uint32_t>{ 1, "Quality", "quality" },
 				dmui::ChoiceOption<std::uint32_t>{ 2, "Balanced", "balanced" },
@@ -229,9 +229,7 @@ namespace cs::features
 			if (settings.upscaleMethod ==
 				static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
 				const auto sharpnessRange = render::temporal::kSchema.EditRange(&Settings::sharpnessDLSS);
-				auto sharpness = settings.sharpnessEnabledDLSS
-					? settings.sharpnessDLSS
-					: 0.0f;
+				auto sharpness = settings.sharpnessEnabledDLSS ? settings.sharpnessDLSS : 0.0f;
 				if (edit.Continuous(dmui::ui::SliderScalar(
 						"Sharpening",
 						&sharpness,
@@ -296,7 +294,7 @@ namespace cs::features
 		} else if (!currentStatus.effective.superResolutionEnabled) {
 			dmui::ui::TextDisabled("Active: Off");
 		} else if (renderWidth && renderHeight &&
-			currentStatus.display.output.IsValid()) {
+				   currentStatus.display.output.IsValid()) {
 			dmui::ui::TextDisabled(
 				"Active: %.*s | %ux%u -> %ux%u",
 				static_cast<int>(effectiveName.size()),

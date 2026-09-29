@@ -100,11 +100,10 @@ namespace cs::features
 			&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1,
 			serialized.GetAddressOf(), errors.GetAddressOf());
 		if (FAILED(serializeResult)) {
-			const std::string detail = errors
-				? std::string(
-					  static_cast<const char*>(errors->GetBufferPointer()),
-					  errors->GetBufferSize())
-				: std::string{};
+			const std::string detail = errors ? std::string(
+													static_cast<const char*>(errors->GetBufferPointer()),
+													errors->GetBufferSize()) :
+			                                    std::string{};
 			L->error("Could not serialize D3D12 RCAS root signature: {}",
 				detail);
 			return false;

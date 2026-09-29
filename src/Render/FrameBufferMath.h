@@ -85,10 +85,7 @@ namespace cs::engine
 		const DirectX::XMFLOAT3& a_origin) noexcept
 	{
 		const auto row = [&a_viewPosition](const DirectX::XMFLOAT4& a_row) noexcept {
-			return a_row.x * a_viewPosition.x
-				+ a_row.y * a_viewPosition.y
-				+ a_row.z * a_viewPosition.z
-				+ a_row.w;
+			return a_row.x * a_viewPosition.x + a_row.y * a_viewPosition.y + a_row.z * a_viewPosition.z + a_row.w;
 		};
 		return {
 			row(a_rows[0]) + a_origin.x,
@@ -103,9 +100,7 @@ namespace cs::engine
 		const DirectX::XMFLOAT4* a_rows) noexcept
 	{
 		const auto row = [&a_direction](const DirectX::XMFLOAT4& a_row) noexcept {
-			return a_row.x * a_direction.x
-				+ a_row.y * a_direction.y
-				+ a_row.z * a_direction.z;
+			return a_row.x * a_direction.x + a_row.y * a_direction.y + a_row.z * a_direction.z;
 		};
 		DirectX::XMFLOAT3 result{ row(a_rows[0]), row(a_rows[1]), row(a_rows[2]) };
 		const float length = std::sqrt(
@@ -124,9 +119,7 @@ namespace cs::engine
 		const DirectX::XMFLOAT4& a_worldToClipRow3) noexcept
 	{
 		const float magnitude =
-			std::abs(a_worldToClipRow3.x)
-			+ std::abs(a_worldToClipRow3.y)
-			+ std::abs(a_worldToClipRow3.z);
+			std::abs(a_worldToClipRow3.x) + std::abs(a_worldToClipRow3.y) + std::abs(a_worldToClipRow3.z);
 		return std::isfinite(magnitude) && magnitude > 1e-6f;
 	}
 
@@ -179,9 +172,7 @@ namespace cs::engine
 			scaledUp.z - centerOffset * forward.z
 		};
 		const float scale = std::sqrt(
-			upComponent.x * upComponent.x
-			+ upComponent.y * upComponent.y
-			+ upComponent.z * upComponent.z);
+			upComponent.x * upComponent.x + upComponent.y * upComponent.y + upComponent.z * upComponent.z);
 		if (!std::isfinite(scale) || !(scale > 1e-8f)) {
 			return 0.0f;
 		}
@@ -201,18 +192,13 @@ namespace cs::engine
 				return false;
 			}
 		}
-		return std::isfinite(a_frameBuffer.CameraPosAdjust.x)
-			&& std::isfinite(a_frameBuffer.CameraPosAdjust.y)
-			&& std::isfinite(a_frameBuffer.CameraPosAdjust.z);
+		return std::isfinite(a_frameBuffer.CameraPosAdjust.x) && std::isfinite(a_frameBuffer.CameraPosAdjust.y) && std::isfinite(a_frameBuffer.CameraPosAdjust.z);
 	}
 
 	[[nodiscard]] inline bool HasFiniteWorldToClip(const FrameBuffer& a_frameBuffer) noexcept
 	{
 		for (const auto& row : a_frameBuffer.CurrFrameWorldToClip) {
-			if (!std::isfinite(row.x)
-				|| !std::isfinite(row.y)
-				|| !std::isfinite(row.z)
-				|| !std::isfinite(row.w)) {
+			if (!std::isfinite(row.x) || !std::isfinite(row.y) || !std::isfinite(row.z) || !std::isfinite(row.w)) {
 				return false;
 			}
 		}
@@ -226,12 +212,7 @@ namespace cs::engine
 		}
 		const auto origin = CameraWorldOrigin(a_frameBuffer);
 		const auto previousOrigin = CameraPreviousWorldOrigin(a_frameBuffer);
-		return std::isfinite(origin.x)
-			&& std::isfinite(origin.y)
-			&& std::isfinite(origin.z)
-			&& std::isfinite(previousOrigin.x)
-			&& std::isfinite(previousOrigin.y)
-			&& std::isfinite(previousOrigin.z);
+		return std::isfinite(origin.x) && std::isfinite(origin.y) && std::isfinite(origin.z) && std::isfinite(previousOrigin.x) && std::isfinite(previousOrigin.y) && std::isfinite(previousOrigin.z);
 	}
 
 	[[nodiscard]] inline bool HasNonzeroWorldCameraOrigin(
@@ -240,9 +221,7 @@ namespace cs::engine
 		const auto origin = CameraWorldOrigin(a_frameBuffer);
 		const float magnitudeSquared =
 			origin.x * origin.x + origin.y * origin.y + origin.z * origin.z;
-		return std::isfinite(magnitudeSquared)
-			&& magnitudeSquared >=
-				kMinimumWorldCameraOriginMagnitude
-					* kMinimumWorldCameraOriginMagnitude;
+		return std::isfinite(magnitudeSquared) && magnitudeSquared >=
+		                                              kMinimumWorldCameraOriginMagnitude * kMinimumWorldCameraOriginMagnitude;
 	}
 }

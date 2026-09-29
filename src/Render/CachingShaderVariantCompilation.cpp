@@ -82,42 +82,45 @@ namespace cs::engine
 			{
 				ScopedPixelShaderBrokerBypass bypassBroker;
 				switch (a_stage) {
-				case ShaderStage::kVertex: {
-					createStage = "Vertex";
-					winrt::com_ptr<ID3D11VertexShader> vertexShader;
-					createResult = a_device.CreateVertexShader(
-						a_bytecode,
-						a_bytecodeLength,
-						nullptr,
-						vertexShader.put());
-					if (vertexShader)
-						a_shader.attach(vertexShader.detach());
-					break;
-				}
-				case ShaderStage::kPixel: {
-					createStage = "Pixel";
-					winrt::com_ptr<ID3D11PixelShader> pixelShader;
-					createResult = a_device.CreatePixelShader(
-						a_bytecode,
-						a_bytecodeLength,
-						nullptr,
-						pixelShader.put());
-					if (pixelShader)
-						a_shader.attach(pixelShader.detach());
-					break;
-				}
-				case ShaderStage::kCompute: {
-					createStage = "Compute";
-					winrt::com_ptr<ID3D11ComputeShader> computeShader;
-					createResult = a_device.CreateComputeShader(
-						a_bytecode,
-						a_bytecodeLength,
-						nullptr,
-						computeShader.put());
-					if (computeShader)
-						a_shader.attach(computeShader.detach());
-					break;
-				}
+				case ShaderStage::kVertex:
+					{
+						createStage = "Vertex";
+						winrt::com_ptr<ID3D11VertexShader> vertexShader;
+						createResult = a_device.CreateVertexShader(
+							a_bytecode,
+							a_bytecodeLength,
+							nullptr,
+							vertexShader.put());
+						if (vertexShader)
+							a_shader.attach(vertexShader.detach());
+						break;
+					}
+				case ShaderStage::kPixel:
+					{
+						createStage = "Pixel";
+						winrt::com_ptr<ID3D11PixelShader> pixelShader;
+						createResult = a_device.CreatePixelShader(
+							a_bytecode,
+							a_bytecodeLength,
+							nullptr,
+							pixelShader.put());
+						if (pixelShader)
+							a_shader.attach(pixelShader.detach());
+						break;
+					}
+				case ShaderStage::kCompute:
+					{
+						createStage = "Compute";
+						winrt::com_ptr<ID3D11ComputeShader> computeShader;
+						createResult = a_device.CreateComputeShader(
+							a_bytecode,
+							a_bytecodeLength,
+							nullptr,
+							computeShader.put());
+						if (computeShader)
+							a_shader.attach(computeShader.detach());
+						break;
+					}
 				}
 			}
 
@@ -178,15 +181,12 @@ namespace cs::engine
 			auto outcome = shader_cache::LoadOrCompileShader(recipe, options);
 			if (!outcome.succeeded) {
 				result.error = outcome.error.empty() ?
-					"shader compilation failed" :
-					std::move(outcome.error);
+				                   "shader compilation failed" :
+				                   std::move(outcome.error);
 				LogCompilationFailure(a_request, result.error);
 				return result;
 			}
-			if (!outcome.recordWritten
-				&& !outcome.cacheNote.empty()
-				&& !a_reportedCacheFailure.exchange(
-					true, std::memory_order_relaxed)) {
+			if (!outcome.recordWritten && !outcome.cacheNote.empty() && !a_reportedCacheFailure.exchange(true, std::memory_order_relaxed)) {
 				L->warn("Shader cache unavailable: {}", outcome.cacheNote);
 			}
 
@@ -200,16 +200,15 @@ namespace cs::engine
 				shader,
 				createError);
 
-			if (!created
-				&& outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
+			if (!created && outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
 				outcome = shader_cache::LoadOrCompileShader(
 					recipe,
 					options,
 					shader_cache::CacheMode::kRecompile);
 				if (!outcome.succeeded) {
 					result.error = outcome.error.empty() ?
-						createError :
-						std::move(outcome.error);
+					                   createError :
+					                   std::move(outcome.error);
 					LogCompilationFailure(a_request, result.error);
 					return result;
 				}
@@ -228,12 +227,8 @@ namespace cs::engine
 				return result;
 			}
 			const std::string shaderName =
-				"Render/Injected/" + a_request.sourcePath.stem().string()
-				+ (a_request.stage == ShaderStage::kVertex ?
-						".VS" :
-						a_request.stage == ShaderStage::kCompute ?
-							".CS" :
-							".PS");
+				"Render/Injected/" + a_request.sourcePath.stem().string() + (a_request.stage == ShaderStage::kVertex ? ".VS" : a_request.stage == ShaderStage::kCompute ? ".CS" :
+																																										  ".PS");
 			render::annotation::SetName(shader.get(), shaderName);
 
 			result.shader = std::move(shader);
@@ -248,8 +243,7 @@ namespace cs::engine
 				DWORD size = 0;
 				GetLogicalProcessorInformationEx(
 					RelationProcessorCore, nullptr, &size);
-				if (GetLastError() != ERROR_INSUFFICIENT_BUFFER
-					|| size == 0) {
+				if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || size == 0) {
 					return fallback;
 				}
 
@@ -280,15 +274,15 @@ namespace cs::engine
 					const auto* entry = reinterpret_cast<
 						const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(
 						storage.data() + offset);
-					if (entry->Processor.EfficiencyClass
-						== highestEfficiencyClass) {
+					if (entry->Processor.EfficiencyClass == highestEfficiencyClass) {
 						for (WORD group = 0;
 							group < entry->Processor.GroupCount;
 							++group) {
 							count += static_cast<std::uint32_t>(
 								std::popcount(
 									entry->Processor
-										.GroupMask[group].Mask));
+										.GroupMask[group]
+										.Mask));
 						}
 					}
 					offset += entry->Size;
@@ -301,7 +295,7 @@ namespace cs::engine
 	}
 
 	std::shared_ptr<ShaderVariantCompilationCache>
-		CreateCachingShaderVariantCompilationCache()
+	CreateCachingShaderVariantCompilationCache()
 	{
 		auto contexts =
 			std::make_shared<GenerationRevalidationContexts>();

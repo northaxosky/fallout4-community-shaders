@@ -64,7 +64,10 @@ namespace cs::buffer
 		}
 
 		template <typename T>
-		void Update(T const& a_srcData) { Update(&a_srcData, sizeof(T)); }
+		void Update(T const& a_srcData)
+		{
+			Update(&a_srcData, sizeof(T));
+		}
 
 	private:
 		winrt::com_ptr<ID3D11Buffer> resource;

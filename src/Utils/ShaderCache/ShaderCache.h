@@ -57,20 +57,20 @@ namespace cs::shader_cache
 
 	struct ShaderCacheOutcome
 	{
-		bool                      succeeded = false;
-		CompileOrigin             origin      = CompileOrigin::kFreshCompile;
-		CacheDisposition          disposition = CacheDisposition::kAbsent;
+		bool succeeded = false;
+		CompileOrigin origin = CompileOrigin::kFreshCompile;
+		CacheDisposition disposition = CacheDisposition::kAbsent;
 		std::vector<std::uint8_t> bytecode;
-		std::filesystem::path     recordPath;
-		bool                      recordWritten = false;
-		std::string               error;
-		std::string               cacheNote;
+		std::filesystem::path recordPath;
+		bool recordWritten = false;
+		std::string error;
+		std::string cacheNote;
 	};
 
 	std::string DescribeCacheOutcome(const ShaderCacheOutcome& a_outcome);
 
 	ShaderCacheOutcome LoadOrCompileShader(
-		const ShaderRecipe&       a_recipe,
+		const ShaderRecipe& a_recipe,
 		const ShaderCacheOptions& a_options = {},
-		CacheMode                 a_mode    = CacheMode::kReadWrite);
+		CacheMode a_mode = CacheMode::kReadWrite);
 }

@@ -69,7 +69,7 @@ namespace cs::engine
 		}
 
 		[[nodiscard]] inline const ComputeShaderMap&
-			StandaloneComputeShaders(const void* a_owner) noexcept
+		StandaloneComputeShaders(const void* a_owner) noexcept
 		{
 			return *reinterpret_cast<const ComputeShaderMap*>(
 				static_cast<const std::byte*>(a_owner) + 0x20);
@@ -81,12 +81,11 @@ namespace cs::engine
 		{
 			if (!a_stream)
 				return false;
-			return *(reinterpret_cast<const std::byte*>(a_stream) + 0x10)
-				!= std::byte{ 0 };
+			return *(reinterpret_cast<const std::byte*>(a_stream) + 0x10) != std::byte{ 0 };
 		}
 
 		[[nodiscard]] inline const char*
-			StandaloneComputeOwnerName(const void* a_owner) noexcept
+		StandaloneComputeOwnerName(const void* a_owner) noexcept
 		{
 			return *reinterpret_cast<const char* const*>(
 				static_cast<const std::byte*>(a_owner) + 0x18);
@@ -133,7 +132,7 @@ namespace cs::engine
 
 		// Vtable slot 17 emits null-terminated macro pairs.
 		[[nodiscard]] inline std::optional<ImageSpaceMacroSet>
-			GetImageSpaceMacros(RE::BSShader* a_shader) noexcept
+		GetImageSpaceMacros(RE::BSShader* a_shader) noexcept
 		{
 			if (!a_shader || ShaderType(a_shader) != 0xC)
 				return std::nullopt;
@@ -143,8 +142,7 @@ namespace cs::engine
 				const char* name = nullptr;
 				const char* value = nullptr;
 			};
-			using GetMacros = NativeMacro* (*)(
-				RE::BSShader*, NativeMacro*);
+			using GetMacros = NativeMacro* (*)(RE::BSShader*, NativeMacro*);
 			const auto vtable =
 				*reinterpret_cast<std::uintptr_t**>(a_shader);
 			if (!vtable || !vtable[17])
@@ -162,8 +160,7 @@ namespace cs::engine
 						return std::nullopt;
 					return result;
 				}
-				if (!macro.value
-					|| result.count >= result.values.size()) {
+				if (!macro.value || result.count >= result.values.size()) {
 					return std::nullopt;
 				}
 				result.values[result.count++] = {
@@ -197,7 +194,9 @@ namespace cs::engine
 		const float scale = transform->scale;
 		const float translate[3]{ transform->translate.x, transform->translate.y, transform->translate.z };
 		const auto column = [&](const RE::NiPoint4& a_row, std::size_t a_channel) {
-			return (a_channel == 0 ? a_row.x : a_channel == 1 ? a_row.y : a_row.z) * scale;
+			return (a_channel == 0 ? a_row.x : a_channel == 1 ? a_row.y :
+																a_row.z) *
+			       scale;
 		};
 		for (std::size_t channel = 0; channel < 3; ++channel) {
 			a_rows[channel] = {
@@ -222,8 +221,8 @@ namespace cs::engine
 			return nullptr;
 		const auto platformID = manager->GetCubeMapRenderTargetPlatformID(0);
 		return platformID < std::size(rendererData->cubeMapRenderTargets) ?
-			reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->cubeMapRenderTargets[platformID].srView) :
-			nullptr;
+		           reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->cubeMapRenderTargets[platformID].srView) :
+		           nullptr;
 	}
 
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
@@ -259,9 +258,9 @@ namespace cs::engine
 	// whatever IsActive reports. Same layout on OG/NG/AE (sizeof 0x122).
 	struct ScalableAOComputeState
 	{
-		bool* active;       // +0x08
-		const bool* base;   // +0x120, constructor's constant 1
-		bool* applied;      // +0x121, bSAOEnable snapshot from InitEffects
+		bool* active;      // +0x08
+		const bool* base;  // +0x120, constructor's constant 1
+		bool* applied;     // +0x121, bSAOEnable snapshot from InitEffects
 	};
 
 	[[nodiscard]] inline std::optional<ScalableAOComputeState> GetScalableAOComputeState()
@@ -325,8 +324,8 @@ namespace cs::engine
 	[[nodiscard]] inline bool TryGetWorldSceneProjection(
 		DirectX::XMFLOAT4X4& a_outProj,
 		DirectX::XMFLOAT4X4& a_outInvProj,
-		DirectX::XMFLOAT4&   a_outNdcToViewMul,
-		DirectX::XMFLOAT4&   a_outNdcToViewAdd)
+		DirectX::XMFLOAT4& a_outNdcToViewMul,
+		DirectX::XMFLOAT4& a_outNdcToViewAdd)
 	{
 		auto* sceneCamera = GetWorldRootCamera();
 		if (!sceneCamera) {
@@ -418,8 +417,8 @@ namespace cs::engine
 	[[nodiscard]] inline RE::BSGraphics::DepthStencilTarget* ResolveDepthStencilTarget(DepthStencilTarget a_target)
 	{
 		const auto logicalID = static_cast<std::uint32_t>(a_target);
-		auto*      rendererData = RE::BSGraphics::GetRendererData();
-		auto*      renderTargetManager = GetRenderTargetManager();
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* renderTargetManager = GetRenderTargetManager();
 		if (!rendererData || !renderTargetManager || logicalID >= static_cast<std::uint32_t>(DepthStencilTarget::kCount)) {
 			return nullptr;
 		}
@@ -437,8 +436,8 @@ namespace cs::engine
 	[[nodiscard]] inline std::optional<std::uint32_t> ResolveRenderTargetSlot(RenderTarget a_renderTarget)
 	{
 		const auto logicalID = static_cast<std::uint32_t>(a_renderTarget);
-		auto*      rendererData = RE::BSGraphics::GetRendererData();
-		auto*      renderTargetManager = GetRenderTargetManager();
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* renderTargetManager = GetRenderTargetManager();
 		if (!rendererData || !renderTargetManager || logicalID >= static_cast<std::uint32_t>(RenderTarget::kCount)) {
 			return std::nullopt;
 		}

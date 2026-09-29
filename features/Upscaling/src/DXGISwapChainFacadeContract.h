@@ -39,8 +39,8 @@ namespace cs::features::swap_chain_facade
 	}
 
 	[[nodiscard]] inline DXGI_SWAP_CHAIN_FULLSCREEN_DESC
-		BuildFullscreenDescription(
-			const DXGI_SWAP_CHAIN_DESC& a_description) noexcept
+	BuildFullscreenDescription(
+		const DXGI_SWAP_CHAIN_DESC& a_description) noexcept
 	{
 		return {
 			.RefreshRate = a_description.BufferDesc.RefreshRate,
@@ -56,7 +56,7 @@ namespace cs::features::swap_chain_facade
 		const DXGI_SWAP_CHAIN_DESC& a_description) noexcept
 	{
 		return !a_requestedCount ||
-			a_requestedCount == a_description.BufferCount;
+		       a_requestedCount == a_description.BufferCount;
 	}
 
 	[[nodiscard]] inline UINT PreservePrivateResizeFlags(

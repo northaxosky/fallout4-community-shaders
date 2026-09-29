@@ -32,7 +32,6 @@ namespace cs::features::frame_generation
 				settings::Range{ 2u, std::numeric_limits<std::uint32_t>::max() } },
 			settings::Field{ "dlssg_dynamic_target_fps", "Dynamic MFG target FPS; 0 selects the SDK display target, and VSync overrides custom targets.", &Settings::dlssgDynamicTargetFps,
 				settings::Range{ 0.0f, std::numeric_limits<float>::max() } },
-			settings::Field{ "detailed_diagnostics", "Keep a bounded in-memory phase trace for failure logs.", &Settings::detailedDiagnostics }
-		}
+			settings::Field{ "detailed_diagnostics", "Keep a bounded in-memory phase trace for failure logs.", &Settings::detailedDiagnostics } }
 	};
 }

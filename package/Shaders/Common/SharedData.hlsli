@@ -2,8 +2,8 @@
 // Copyright (c) 2026 northaxosky
 // gate outermost: inactive emits zero declarations
 #ifdef FO4CS_SUBSTRATE
-#ifndef __SHARED_DATA_DEPENDENCY_HLSL__
-#define __SHARED_DATA_DEPENDENCY_HLSL__
+#	ifndef __SHARED_DATA_DEPENDENCY_HLSL__
+#		define __SHARED_DATA_DEPENDENCY_HLSL__
 
 namespace SharedData
 {
@@ -152,5 +152,5 @@ namespace SharedData
 	}
 
 }
-#endif  // __SHARED_DATA_DEPENDENCY_HLSL__
-#endif  // FO4CS_SUBSTRATE
+#	endif  // __SHARED_DATA_DEPENDENCY_HLSL__
+#endif      // FO4CS_SUBSTRATE

@@ -140,6 +140,6 @@ namespace cs::shader_cache
 
 	private:
 		std::span<const std::uint8_t> _bytes;
-		std::size_t                   _offset = 0;
+		std::size_t _offset = 0;
 	};
 }

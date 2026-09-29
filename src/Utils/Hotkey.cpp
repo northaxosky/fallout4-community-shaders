@@ -66,7 +66,7 @@ namespace cs::input
 				*a_ok = a_valid;
 		};
 
-		const std::string      lowered = ToLower(a_spec);
+		const std::string lowered = ToLower(a_spec);
 		const std::string_view spec = Trim(lowered);
 		// Empty and "none" deliberately unbind.
 		if (spec.empty() || spec == "none") {
@@ -74,8 +74,8 @@ namespace cs::input
 			return {};
 		}
 
-		Hotkey      result;
-		bool        haveKey = false;
+		Hotkey result;
+		bool haveKey = false;
 		std::size_t start = 0;
 		while (true) {
 			const auto plus = spec.find('+', start);
@@ -127,9 +127,7 @@ namespace cs::input
 			return false;
 		if ((HIWORD(a_lparam) & KF_REPEAT) != 0)
 			return false;
-		return ModifierDown(VK_SHIFT) == shift
-			&& ModifierDown(VK_CONTROL) == ctrl
-			&& ModifierDown(VK_MENU) == alt;
+		return ModifierDown(VK_SHIFT) == shift && ModifierDown(VK_CONTROL) == ctrl && ModifierDown(VK_MENU) == alt;
 	}
 
 	bool Hotkey::MatchesUp(UINT a_msg, WPARAM a_wparam) const noexcept

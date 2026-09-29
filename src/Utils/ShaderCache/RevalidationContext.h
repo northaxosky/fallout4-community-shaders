@@ -15,9 +15,9 @@ namespace cs::shader_cache
 {
 	struct FileObservation
 	{
-		FileReadStatus       status = FileReadStatus::kMissing;
+		FileReadStatus status = FileReadStatus::kMissing;
 		sha256::Sha256Result contentDigest{};
-		std::uint64_t        contentLength = 0;
+		std::uint64_t contentLength = 0;
 	};
 
 	FileObservation ObserveFile(const std::string& a_locator);
@@ -39,12 +39,12 @@ namespace cs::shader_cache
 	private:
 		struct Entry
 		{
-			std::once_flag  once;
+			std::once_flag once;
 			FileObservation observation;
 		};
 
-		mutable std::mutex                                     _lock;
+		mutable std::mutex _lock;
 		std::unordered_map<std::string, std::shared_ptr<Entry>> _entries;
-		std::atomic<std::size_t>                               _reads{ 0 };
+		std::atomic<std::size_t> _reads{ 0 };
 	};
 }

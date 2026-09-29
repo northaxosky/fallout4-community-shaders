@@ -8,7 +8,7 @@
 #include <bcrypt.h>
 
 #ifndef NT_SUCCESS
-#  define NT_SUCCESS(s) (((NTSTATUS)(s)) >= 0)
+#	define NT_SUCCESS(s) (((NTSTATUS)(s)) >= 0)
 #endif
 
 namespace cs::sha1
@@ -80,16 +80,27 @@ namespace cs::sha1
 
 	bool Sha1FromHex(const std::string& hex, Sha1Result& out)
 	{
-		if (hex.size() != 40) return false;
+		if (hex.size() != 40)
+			return false;
 		auto hv = [](char c, uint8_t& v) -> bool {
-			if (c >= '0' && c <= '9') { v = static_cast<uint8_t>(c - '0'); return true; }
-			if (c >= 'a' && c <= 'f') { v = static_cast<uint8_t>(10 + c - 'a'); return true; }
-			if (c >= 'A' && c <= 'F') { v = static_cast<uint8_t>(10 + c - 'A'); return true; }
+			if (c >= '0' && c <= '9') {
+				v = static_cast<uint8_t>(c - '0');
+				return true;
+			}
+			if (c >= 'a' && c <= 'f') {
+				v = static_cast<uint8_t>(10 + c - 'a');
+				return true;
+			}
+			if (c >= 'A' && c <= 'F') {
+				v = static_cast<uint8_t>(10 + c - 'A');
+				return true;
+			}
 			return false;
 		};
 		for (std::size_t i = 0; i < 20; ++i) {
 			uint8_t hi = 0, lo = 0;
-			if (!hv(hex[i * 2], hi) || !hv(hex[i * 2 + 1], lo)) return false;
+			if (!hv(hex[i * 2], hi) || !hv(hex[i * 2 + 1], lo))
+				return false;
 			out.bytes[i] = static_cast<uint8_t>((hi << 4) | lo);
 		}
 		return !Sha1IsZero(out);

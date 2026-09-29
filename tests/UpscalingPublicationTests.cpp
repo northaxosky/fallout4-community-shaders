@@ -1,7 +1,7 @@
 #include <array>
 #include <cstddef>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 

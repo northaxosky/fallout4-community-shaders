@@ -24,8 +24,8 @@ namespace
 {
 	auto* L = cs::log::Get("cs.presets");
 
-	constexpr std::string_view kPresetsRoot      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
-	constexpr std::string_view kPresetsBuiltin   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets\\Builtin";
+	constexpr std::string_view kPresetsRoot = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
+	constexpr std::string_view kPresetsBuiltin = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets\\Builtin";
 
 	class FeatureCallbackPassGuard
 	{
@@ -65,8 +65,7 @@ namespace
 		a_out.clear();
 		a_out.reserve(a_manager.GetAll().size());
 		for (auto* feature : a_manager.GetAll()) {
-			if (!feature
-				|| !a_manager.PrepareRuntimeCallback(*feature, "PresetManager::ParticipatesInPresets")) {
+			if (!feature || !a_manager.PrepareRuntimeCallback(*feature, "PresetManager::ParticipatesInPresets")) {
 				continue;
 			}
 
@@ -127,8 +126,7 @@ namespace
 					*feature,
 					"PresetManager::IsInTestMode",
 					"non-standard exception");
-				a_err = "preset participant '" + key
-					+ "' metadata IsInTestMode threw a non-standard exception";
+				a_err = "preset participant '" + key + "' metadata IsInTestMode threw a non-standard exception";
 				return false;
 			}
 			if (testMode) {
@@ -154,7 +152,8 @@ namespace
 
 	bool IEquals(std::string_view a, std::string_view b)
 	{
-		if (a.size() != b.size()) return false;
+		if (a.size() != b.size())
+			return false;
 		for (std::size_t i = 0; i < a.size(); ++i) {
 			if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) {
 				return false;
@@ -182,12 +181,33 @@ namespace
 	bool IsWindowsReservedName(std::string_view a_name)
 	{
 		static constexpr std::array<std::string_view, 23> kReserved = { {
-			"CON", "PRN", "AUX", "NUL", "CLOCK$",
-			"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-			"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+			"CON",
+			"PRN",
+			"AUX",
+			"NUL",
+			"CLOCK$",
+			"COM1",
+			"COM2",
+			"COM3",
+			"COM4",
+			"COM5",
+			"COM6",
+			"COM7",
+			"COM8",
+			"COM9",
+			"LPT1",
+			"LPT2",
+			"LPT3",
+			"LPT4",
+			"LPT5",
+			"LPT6",
+			"LPT7",
+			"LPT8",
+			"LPT9",
 		} };
 		for (const auto& r : kReserved) {
-			if (IEquals(a_name, r)) return true;
+			if (IEquals(a_name, r))
+				return true;
 		}
 		return false;
 	}
@@ -199,20 +219,22 @@ namespace
 			return;
 		}
 		for (auto it = std::filesystem::directory_iterator(a_dir, ec);
-			 !ec && it != std::filesystem::directory_iterator();
-			 it.increment(ec))
-		{
+			!ec && it != std::filesystem::directory_iterator();
+			it.increment(ec)) {
 			const auto& entry = *it;
-			if (!entry.is_regular_file(ec)) continue;
+			if (!entry.is_regular_file(ec))
+				continue;
 			const auto& p = entry.path();
-			if (p.extension() != ".toml") continue;
+			if (p.extension() != ".toml")
+				continue;
 			const auto stem = p.stem().string();
-			if (stem.empty() || stem.front() == '.') continue;  // hidden
+			if (stem.empty() || stem.front() == '.')
+				continue;  // hidden
 			cs::PresetMeta meta;
-			meta.name     = stem;
+			meta.name = stem;
 			meta.identity = cs::MakePresetIdentity(a_builtin ? 'B' : 'U', stem);
-			meta.path     = p;
-			meta.builtin  = a_builtin;
+			meta.path = p;
+			meta.builtin = a_builtin;
 			a_out.push_back(std::move(meta));
 		}
 	}
@@ -244,8 +266,8 @@ namespace cs
 	void PresetManager::Refresh()
 	{
 		_entries.clear();
-		ScanDir(std::filesystem::path(kPresetsBuiltin), true,  _entries);
-		ScanDir(std::filesystem::path(kPresetsRoot),    false, _entries);
+		ScanDir(std::filesystem::path(kPresetsBuiltin), true, _entries);
+		ScanDir(std::filesystem::path(kPresetsRoot), false, _entries);
 
 		// Deduplicate file-shadowing edge cases.
 		std::vector<PresetMeta> deduped;
@@ -274,7 +296,8 @@ namespace cs
 		}
 
 		std::sort(_entries.begin(), _entries.end(), [](const PresetMeta& a, const PresetMeta& b) {
-			if (a.builtin != b.builtin) return a.builtin;
+			if (a.builtin != b.builtin)
+				return a.builtin;
 			return ToLower(a.name) < ToLower(b.name);
 		});
 	}
@@ -283,7 +306,8 @@ namespace cs
 	{
 		const std::string needle = ToLower(a_identity);
 		for (const auto& e : _entries) {
-			if (e.identity == needle) return &e;
+			if (e.identity == needle)
+				return &e;
 		}
 		return nullptr;
 	}
@@ -291,15 +315,19 @@ namespace cs
 	const PresetMeta* PresetManager::FindByName(std::string_view a_name, bool a_preferUser) const
 	{
 		const PresetMeta* builtinHit = nullptr;
-		const PresetMeta* userHit    = nullptr;
+		const PresetMeta* userHit = nullptr;
 		for (const auto& e : _entries) {
 			if (IEquals(e.name, a_name)) {
-				if (e.builtin) builtinHit = &e;
-				else           userHit    = &e;
+				if (e.builtin)
+					builtinHit = &e;
+				else
+					userHit = &e;
 			}
 		}
-		if (a_preferUser && userHit)    return userHit;
-		if (!a_preferUser && builtinHit) return builtinHit;
+		if (a_preferUser && userHit)
+			return userHit;
+		if (!a_preferUser && builtinHit)
+			return builtinHit;
 		return userHit ? userHit : builtinHit;
 	}
 
@@ -348,16 +376,17 @@ namespace cs
 		// Skip test mode to preserve smoke overrides.
 		struct StageEntry
 		{
-			Feature*           feature;
+			Feature* feature;
 			const toml::table* subtable;
-			std::string        key;
+			std::string key;
 		};
 		std::vector<StageEntry> staged;
 		staged.reserve(participants.size());
 
 		for (const auto& [key, node] : *featuresTbl) {
 			const auto* sub = node.as_table();
-			if (!sub) continue;
+			if (!sub)
+				continue;
 			const std::string keyStr(key.str());
 			const auto match = std::find_if(
 				participants.begin(),
@@ -473,19 +502,20 @@ namespace cs
 			oss << "live preset state was swapped, but " << finalizeErrors.size()
 				<< " finalize error(s) left feature files stale; active preset identity was not persisted; see log";
 			a_err = oss.str();
-			L->warn("Applied preset: {} ({}, {} feature(s)) with {} finalize error(s); "
-			        "active preset on disk left unchanged so next boot reapplies the previous state",
+			L->warn(
+				"Applied preset: {} ({}, {} feature(s)) with {} finalize error(s); "
+				"active preset on disk left unchanged so next boot reapplies the previous state",
 				a_meta.name, a_meta.builtin ? "builtin" : "user", staged.size(), finalizeErrors.size());
 			// Skip saving when any feature leaves disk stale.
 			Menu::ShowToast("Applied '" + a_meta.name + "' with " +
-				std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted",
+								std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted",
 				5.0,
 				DMUI_STATUS_SEVERITY_ERROR);
 			return false;
 		}
 
-		activeIdentity       = a_meta.identity;
-		activeName           = a_meta.name;
+		activeIdentity = a_meta.identity;
+		activeName = a_meta.name;
 		pendingComboIdentity = a_meta.identity;
 		SaveCoreConfig();
 
@@ -496,9 +526,9 @@ namespace cs
 	}
 
 	bool PresetManager::Save(const std::filesystem::path& a_path,
-							 std::string_view             a_presetName,
-							 std::string&                 a_err,
-							 bool                         a_allowOverwrite)
+		std::string_view a_presetName,
+		std::string& a_err,
+		bool a_allowOverwrite)
 	{
 		if (!a_allowOverwrite && std::filesystem::exists(a_path)) {
 			std::ostringstream oss;
@@ -564,10 +594,10 @@ namespace cs
 
 		table.insert_or_assign("meta", toml::table{});
 		auto& meta = *table["meta"].as_table();
-		meta.insert_or_assign("name",           std::string(a_presetName));
+		meta.insert_or_assign("name", std::string(a_presetName));
 		meta.insert_or_assign("schema_version", static_cast<std::int64_t>(1));
-		meta.insert_or_assign("created_by",     std::string("FO4CommunityShaders"));
-		meta.insert_or_assign("created_at",     Iso8601UtcNow());
+		meta.insert_or_assign("created_by", std::string("FO4CommunityShaders"));
+		meta.insert_or_assign("created_at", Iso8601UtcNow());
 		callbackPass.Finish();
 
 		std::error_code ec;
@@ -608,7 +638,8 @@ namespace cs
 		if (!std::filesystem::remove(a_meta.path, ec) || ec) {
 			std::ostringstream oss;
 			oss << "delete failed for " << a_meta.path.string();
-			if (ec) oss << ": " << ec.message();
+			if (ec)
+				oss << ": " << ec.message();
 			a_err = oss.str();
 			return false;
 		}
@@ -624,7 +655,8 @@ namespace cs
 
 		const auto table = cs::feature_config::GetRoot();
 		const auto* presetTbl = table["preset"].as_table();
-		if (!presetTbl) return;
+		if (!presetTbl)
+			return;
 
 		settings::core::Preset preset;
 		if (std::string error; !settings::ParseTable(settings::core::kPreset, *presetTbl, preset, error)) {
@@ -638,9 +670,8 @@ namespace cs
 	bool PresetManager::SaveCoreConfig()
 	{
 		const auto p = settings::SerializeFull(settings::core::kPreset, settings::core::Preset{
-			.active = activeIdentity,
-			.autoLoadOnBoot = autoLoadOnBoot
-		});
+																			.active = activeIdentity,
+																			.autoLoadOnBoot = autoLoadOnBoot });
 
 		const auto result = cs::feature_config::UpdateTopLevelSection("preset", p);
 		if (!result) {
@@ -680,9 +711,9 @@ namespace cs
 		pendingComboIdentity = activeIdentity;
 	}
 
-	bool ValidatePresetName(std::string_view               a_name,
-							const std::vector<PresetMeta>& a_existing,
-							std::string&                   a_err)
+	bool ValidatePresetName(std::string_view a_name,
+		const std::vector<PresetMeta>& a_existing,
+		std::string& a_err)
 	{
 		if (a_name.empty()) {
 			a_err = "preset name is empty";
@@ -694,7 +725,7 @@ namespace cs
 		}
 		for (char c : a_name) {
 			const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-							(c >= '0' && c <= '9') || c == '_' || c == '-';
+			                (c >= '0' && c <= '9') || c == '_' || c == '-';
 			if (!ok) {
 				a_err = "preset name contains invalid character; allowed: [A-Za-z0-9_-]";
 				return false;

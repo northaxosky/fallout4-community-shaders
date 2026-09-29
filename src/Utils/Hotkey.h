@@ -11,10 +11,10 @@ namespace cs::input
 	// vk=0 means unbound.
 	struct Hotkey
 	{
-		std::uint32_t vk    = 0;
-		bool          shift = false;
-		bool          ctrl  = false;
-		bool          alt   = false;
+		std::uint32_t vk = 0;
+		bool shift = false;
+		bool ctrl = false;
+		bool alt = false;
 
 		// a_ok distinguishes unbound from malformed input.
 		static Hotkey Parse(std::string_view a_spec, bool* a_ok = nullptr);

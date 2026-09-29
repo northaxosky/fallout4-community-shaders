@@ -88,26 +88,22 @@ namespace
 			.name = "R8G8B8A8_UNORM",
 			.format = DXGI_FORMAT_R8G8B8A8_UNORM,
 			.producerValue = { 0.0F, 1.0F, 0.0F, 1.0F },
-			.consumerValue = { 1.0F, 0.0F, 1.0F, 1.0F }
-		},
+			.consumerValue = { 1.0F, 0.0F, 1.0F, 1.0F } },
 		FormatCase{
 			.name = "R32_FLOAT",
 			.format = DXGI_FORMAT_R32_FLOAT,
 			.producerValue = { 0.25F, 0.0F, 0.0F, 0.0F },
-			.consumerValue = { 0.75F, 0.0F, 0.0F, 0.0F }
-		},
+			.consumerValue = { 0.75F, 0.0F, 0.0F, 0.0F } },
 		FormatCase{
 			.name = "R16G16_FLOAT",
 			.format = DXGI_FORMAT_R16G16_FLOAT,
 			.producerValue = { 0.25F, 0.5F, 0.0F, 0.0F },
-			.consumerValue = { 0.75F, 0.125F, 0.0F, 0.0F }
-		},
+			.consumerValue = { 0.75F, 0.125F, 0.0F, 0.0F } },
 		FormatCase{
 			.name = "R8_UNORM",
 			.format = DXGI_FORMAT_R8_UNORM,
 			.producerValue = { 1.0F / 255.0F, 0.0F, 0.0F, 0.0F },
-			.consumerValue = { 2.0F / 255.0F, 0.0F, 0.0F, 0.0F }
-		}
+			.consumerValue = { 2.0F / 255.0F, 0.0F, 0.0F, 0.0F } }
 	};
 
 	bool Check(bool a_condition, const char* a_message)
@@ -130,8 +126,7 @@ namespace
 		if (!a_detail.empty()) {
 			std::cerr << " (" << a_detail << ')';
 		}
-		std::cerr << " hr=0x" << std::hex << std::uppercase <<
-			static_cast<std::uint32_t>(a_result) << std::dec << '\n';
+		std::cerr << " hr=0x" << std::hex << std::uppercase << static_cast<std::uint32_t>(a_result) << std::dec << '\n';
 		return false;
 	}
 
@@ -195,10 +190,10 @@ namespace
 		}
 		winrt::handle event{ CreateEventW(nullptr, FALSE, FALSE, nullptr) };
 		return event &&
-			SUCCEEDED(a_fence->SetEventOnCompletion(a_value, event.get())) &&
-			WaitForSingleObject(
-				event.get(), static_cast<DWORD>(a_timeout.count())) ==
-				WAIT_OBJECT_0;
+		       SUCCEEDED(a_fence->SetEventOnCompletion(a_value, event.get())) &&
+		       WaitForSingleObject(
+				   event.get(), static_cast<DWORD>(a_timeout.count())) ==
+		           WAIT_OBJECT_0;
 	}
 
 	bool OpenFence(
@@ -404,9 +399,7 @@ namespace
 			D3D11_FORMAT_SUPPORT_SHADER_SAMPLE |
 			D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW;
 		if ((support11 & required11) != required11) {
-			std::cerr << "FAIL: " << a_case.name <<
-				" lacks required D3D11 SRV/UAV support; support=0x" <<
-				std::hex << support11 << std::dec << '\n';
+			std::cerr << "FAIL: " << a_case.name << " lacks required D3D11 SRV/UAV support; support=0x" << std::hex << support11 << std::dec << '\n';
 			return false;
 		}
 
@@ -428,10 +421,7 @@ namespace
 			D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE;
 		if ((support12.Support1 & required12_1) != required12_1 ||
 			(support12.Support2 & required12_2) != required12_2) {
-			std::cerr << "FAIL: " << a_case.name <<
-				" lacks required D3D12 SRV/UAV support; support1=0x" <<
-				std::hex << support12.Support1 << " support2=0x" <<
-				support12.Support2 << std::dec << '\n';
+			std::cerr << "FAIL: " << a_case.name << " lacks required D3D12 SRV/UAV support; support1=0x" << std::hex << support12.Support1 << " support2=0x" << support12.Support2 << std::dec << '\n';
 			return false;
 		}
 		return true;
@@ -491,8 +481,7 @@ namespace
 		const auto resourceDesc = texture.resource12->GetDesc();
 		if ((resourceDesc.Flags &
 				D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) == 0) {
-			std::cerr << "FAIL: imported " << a_case.name <<
-				" allocation lacks D3D12 UAV capability\n";
+			std::cerr << "FAIL: imported " << a_case.name << " allocation lacks D3D12 UAV capability\n";
 			return false;
 		}
 
@@ -569,8 +558,7 @@ namespace
 				0,
 				handoff12,
 				handoff11)) {
-			std::cerr << "FAIL: could not create shared handoff fence for " <<
-				a_case.name << '\n';
+			std::cerr << "FAIL: could not create shared handoff fence for " << a_case.name << '\n';
 			return false;
 		}
 
@@ -662,8 +650,7 @@ namespace
 				a_context11,
 				observationDone.get(),
 				std::chrono::seconds(5))) {
-			std::cerr << "FAIL: final D3D11 observation timed out for " <<
-				a_case.name << '\n';
+			std::cerr << "FAIL: final D3D11 observation timed out for " << a_case.name << '\n';
 			return false;
 		}
 
@@ -707,22 +694,19 @@ namespace
 
 		bool ok = true;
 		if (observedProducer != producerExpected) {
-			std::cerr << "FAIL: D3D12 did not read the D3D11 sentinel for " <<
-				a_case.name << '\n';
+			std::cerr << "FAIL: D3D12 did not read the D3D11 sentinel for " << a_case.name << '\n';
 			PrintBytes("expected", producerExpected);
 			PrintBytes("observed", observedProducer);
 			ok = false;
 		}
 		if (observedConsumer != consumerExpected) {
-			std::cerr << "FAIL: D3D11 did not read the D3D12 sentinel for " <<
-				a_case.name << '\n';
+			std::cerr << "FAIL: D3D11 did not read the D3D12 sentinel for " << a_case.name << '\n';
 			PrintBytes("expected", consumerExpected);
 			PrintBytes("observed", observedConsumer);
 			ok = false;
 		}
 		if (ok) {
-			std::cout << "PASS: same-allocation bidirectional handoff " <<
-				a_case.name << '\n';
+			std::cout << "PASS: same-allocation bidirectional handoff " << a_case.name << '\n';
 		}
 		return ok;
 	}
@@ -973,12 +957,7 @@ namespace
 					presentingCompletion.get(), retirement12.get(), 2,
 					dependency);
 				if (!retirement.Succeeded()) {
-					std::cerr << "FAIL: could not enqueue input retirement at " <<
-						cs::render::temporal::PresentInputRetirementOperationName(
-							retirement.operation) <<
-						" hr=0x" << std::hex << std::uppercase <<
-						static_cast<std::uint32_t>(retirement.result) <<
-						std::dec << '\n';
+					std::cerr << "FAIL: could not enqueue input retirement at " << cs::render::temporal::PresentInputRetirementOperationName(retirement.operation) << " hr=0x" << std::hex << std::uppercase << static_cast<std::uint32_t>(retirement.result) << std::dec << '\n';
 					return false;
 				}
 				if (!Check(
@@ -1001,24 +980,19 @@ namespace
 				appProgress.get(), 1,
 				std::chrono::milliseconds(
 					a_routing == RetirementRouting::kDedicatedQueue &&
-							a_strategy != CompletionStrategy::kQueueOrdered
-						? 5000
-						: 100));
+							a_strategy != CompletionStrategy::kQueueOrdered ?
+						5000 :
+						100));
 			const bool expectedApplicationProgress =
 				a_routing == RetirementRouting::kDedicatedQueue &&
 				a_strategy != CompletionStrategy::kQueueOrdered;
 			if (!Check(
 					applicationProgressed == expectedApplicationProgress,
-					expectedApplicationProgress
-						? "unrelated application work was serialized behind vendor retirement"
-						: "application queue unexpectedly bypassed its ordered dependency")) {
+					expectedApplicationProgress ? "unrelated application work was serialized behind vendor retirement" : "application queue unexpectedly bypassed its ordered dependency")) {
 				return false;
 			}
 			if (a_strategy == CompletionStrategy::kVendorFence) {
-				std::cout <<
-					(a_routing == RetirementRouting::kDedicatedQueue
-							? "PASS: dedicated retirement preserves application queue progress\n"
-							: "PASS: application-queue red control reproduces global serialization\n");
+				std::cout << (a_routing == RetirementRouting::kDedicatedQueue ? "PASS: dedicated retirement preserves application queue progress\n" : "PASS: application-queue red control reproduces global serialization\n");
 			}
 			const bool shouldPreserveOldInput =
 				a_strategy != CompletionStrategy::kWrongFence;
@@ -1028,9 +1002,7 @@ namespace
 					shouldPreserveOldInput ? 100 : 5000));
 			return Check(
 				completedWhileConsumerBlocked != shouldPreserveOldInput,
-				shouldPreserveOldInput
-					? "producer overwrite completed before the consumer retirement signal"
-					: "wrong-fence negative control did not bypass the real consumer");
+				shouldPreserveOldInput ? "producer overwrite completed before the consumer retirement signal" : "wrong-fence negative control did not bypass the real consumer");
 		}();
 
 		if (FAILED(blocker->Signal(1))) {
@@ -1074,27 +1046,19 @@ namespace
 		readback.resource->Unmap(0, &emptyRange);
 		const bool shouldPreserveOldInput =
 			a_strategy != CompletionStrategy::kWrongFence;
-		const bool expectedResult = shouldPreserveOldInput
-			? consumed == oldPixel
-			: consumed != oldPixel;
+		const bool expectedResult = shouldPreserveOldInput ? consumed == oldPixel : consumed != oldPixel;
 		if (!expectedResult) {
-			std::cerr << "observed pixel=" <<
-				static_cast<unsigned>(consumed[0]) << ',' <<
-				static_cast<unsigned>(consumed[1]) << ',' <<
-				static_cast<unsigned>(consumed[2]) << ',' <<
-				static_cast<unsigned>(consumed[3]) << '\n';
+			std::cerr << "observed pixel=" << static_cast<unsigned>(consumed[0]) << ',' << static_cast<unsigned>(consumed[1]) << ',' << static_cast<unsigned>(consumed[2]) << ',' << static_cast<unsigned>(consumed[3]) << '\n';
 		}
 		return Check(
 			expectedResult,
-			shouldPreserveOldInput
-				? "retired reuse did not preserve the consumer's old input"
-				: "wrong-fence negative control unexpectedly preserved the old input");
+			shouldPreserveOldInput ? "retired reuse did not preserve the consumer's old input" : "wrong-fence negative control unexpectedly preserved the old input");
 	}
 
 	bool SameLuid(const LUID& a_left, const LUID& a_right)
 	{
 		return a_left.HighPart == a_right.HighPart &&
-			a_left.LowPart == a_right.LowPart;
+		       a_left.LowPart == a_right.LowPart;
 	}
 
 	bool TryCreateDevices(
@@ -1105,39 +1069,31 @@ namespace
 	{
 		DeviceBundle candidate;
 		candidate.adapter.copy_from(a_adapter);
-		HRESULT result = a_agilitySdkDirectory
-			? cs::features::CreatePrivateD3D12Device(
-				  a_adapter,
-				  *a_agilitySdkDirectory,
-				  candidate.deviceFactory,
-				  candidate.device12.put(),
-				  &candidate.agility)
-			: D3D12CreateDevice(
-				  a_adapter,
-				  D3D_FEATURE_LEVEL_11_0,
-				  IID_PPV_ARGS(candidate.device12.put()));
+		HRESULT result = a_agilitySdkDirectory ? cs::features::CreatePrivateD3D12Device(
+													 a_adapter,
+													 *a_agilitySdkDirectory,
+													 candidate.deviceFactory,
+													 candidate.device12.put(),
+													 &candidate.agility) :
+		                                         D3D12CreateDevice(
+													 a_adapter,
+													 D3D_FEATURE_LEVEL_11_0,
+													 IID_PPV_ARGS(candidate.device12.put()));
 		if (FAILED(result)) {
 			if (a_reportFailure) {
 				CheckHr(result,
-					a_agilitySdkDirectory
-						? "CreatePrivateD3D12Device"
-						: "D3D12CreateDevice");
+					a_agilitySdkDirectory ? "CreatePrivateD3D12Device" : "D3D12CreateDevice");
 			}
 			return false;
 		}
 		if (a_agilitySdkDirectory &&
 			!candidate.agility.UsedSdkFactory()) {
 			if (a_reportFailure) {
-				std::cerr <<
-					"FAIL: Agility SDK factory fell back to the "
-					"system runtime status=" <<
-					cs::features::AgilityBootstrapStatusName(
-						candidate.agility.status) <<
-					" activation=0x" << std::hex <<
-					std::uppercase <<
-					static_cast<std::uint32_t>(
-						candidate.agility.activationResult) <<
-					std::dec << '\n';
+				std::cerr << "FAIL: Agility SDK factory fell back to the "
+							 "system runtime status="
+						  << cs::features::AgilityBootstrapStatusName(
+								 candidate.agility.status)
+						  << " activation=0x" << std::hex << std::uppercase << static_cast<std::uint32_t>(candidate.agility.activationResult) << std::dec << '\n';
 			}
 			return false;
 		}
@@ -1244,8 +1200,8 @@ namespace
 		if (!a_hardware) {
 			winrt::com_ptr<IDXGIAdapter1> warp;
 			if (!CheckHr(
-				a_factory->EnumWarpAdapter(IID_PPV_ARGS(warp.put())),
-				"IDXGIFactory::EnumWarpAdapter")) {
+					a_factory->EnumWarpAdapter(IID_PPV_ARGS(warp.put())),
+					"IDXGIFactory::EnumWarpAdapter")) {
 				return false;
 			}
 			return TryCreateDevices(
@@ -1275,11 +1231,9 @@ namespace
 				return true;
 			}
 		}
-		return !a_reportHardwareUnavailable
-			? false
-			: Check(false,
-				  "no hardware adapter supports the required same-LUID "
-				  "D3D11/D3D12 devices");
+		return !a_reportHardwareUnavailable ? false : Check(false,
+														  "no hardware adapter supports the required same-LUID "
+														  "D3D11/D3D12 devices");
 	}
 
 	void PrintDeviceIdentity(
@@ -1288,34 +1242,13 @@ namespace
 	{
 		DXGI_ADAPTER_DESC1 desc{};
 		a_devices.adapter->GetDesc1(&desc);
-		std::wcout << L"Adapter mode=" <<
-			(a_hardware ? L"hardware" : L"WARP") <<
-			L" name=\"" << desc.Description << L"\" vendor=0x" <<
-			std::hex << desc.VendorId << L" device=0x" << desc.DeviceId <<
-			L" luid=" << static_cast<std::uint32_t>(desc.AdapterLuid.HighPart) <<
-			L':' << desc.AdapterLuid.LowPart << std::dec << L'\n';
-		std::cout << "Feature levels: D3D11=" <<
-			FeatureLevelName(a_devices.featureLevel11) <<
-			" D3D12=" << FeatureLevelName(a_devices.featureLevel12) << '\n';
+		std::wcout << L"Adapter mode=" << (a_hardware ? L"hardware" : L"WARP") << L" name=\"" << desc.Description << L"\" vendor=0x" << std::hex << desc.VendorId << L" device=0x" << desc.DeviceId << L" luid=" << static_cast<std::uint32_t>(desc.AdapterLuid.HighPart) << L':' << desc.AdapterLuid.LowPart << std::dec << L'\n';
+		std::cout << "Feature levels: D3D11=" << FeatureLevelName(a_devices.featureLevel11) << " D3D12=" << FeatureLevelName(a_devices.featureLevel12) << '\n';
 		if (a_devices.agility.UsedSdkFactory()) {
 			const auto& version = a_devices.agility.loadedVersion;
 			const auto& packaged =
 				a_devices.agility.packagedVersion;
-			std::wcout << L"SDK " <<
-				cs::features::kPrivateD3D12SdkVersion <<
-				L" device factory active; requested path=\"" <<
-				a_devices.agility.sdkDirectory.wstring() <<
-				L"\" package version=" << packaged.major << L'.' <<
-				packaged.minor << L'.' << packaged.patch << L'.' <<
-				packaged.revision << L"; selected core source=" <<
-				(a_devices.agility.LoadedPackagedCore()
-					? L"packaged"
-					: L"system/other") <<
-				L" path=\"" <<
-				a_devices.agility.loadedD3D12Core.wstring() <<
-				L"\" version=" << version.major << L'.' <<
-				version.minor << L'.' << version.patch << L'.' <<
-				version.revision << L'\n';
+			std::wcout << L"SDK " << cs::features::kPrivateD3D12SdkVersion << L" device factory active; requested path=\"" << a_devices.agility.sdkDirectory.wstring() << L"\" package version=" << packaged.major << L'.' << packaged.minor << L'.' << packaged.patch << L'.' << packaged.revision << L"; selected core source=" << (a_devices.agility.LoadedPackagedCore() ? L"packaged" : L"system/other") << L" path=\"" << a_devices.agility.loadedD3D12Core.wstring() << L"\" version=" << version.major << L'.' << version.minor << L'.' << version.patch << L'.' << version.revision << L'\n';
 		}
 	}
 
@@ -1357,9 +1290,7 @@ namespace
 			}
 			if (message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION ||
 				message->Severity == D3D12_MESSAGE_SEVERITY_ERROR) {
-				std::cerr << "FAIL: D3D12 validation " <<
-					static_cast<unsigned>(message->ID) << ": " <<
-					message->pDescription << '\n';
+				std::cerr << "FAIL: D3D12 validation " << static_cast<unsigned>(message->ID) << ": " << message->pDescription << '\n';
 				ok = false;
 			}
 		}
@@ -1374,17 +1305,16 @@ int main(int a_argc, char** a_argv)
 	if (a_argc == 2 && std::strcmp(a_argv[1], "--hardware") == 0) {
 		hardware = true;
 	} else if (a_argc == 3 &&
-		(std::strcmp(a_argv[1], "--agility") == 0 ||
-			std::strcmp(a_argv[1], "--agility-hardware") == 0)) {
+			   (std::strcmp(a_argv[1], "--agility") == 0 ||
+				   std::strcmp(a_argv[1], "--agility-hardware") == 0)) {
 		hardware =
 			std::strcmp(a_argv[1], "--agility-hardware") == 0;
 		agilitySdkDirectory =
 			std::filesystem::path(a_argv[2]);
 	} else if (a_argc != 1) {
-		std::cerr <<
-			"Usage: FrameGenerationRetirementGpuTests.exe "
-			"[--hardware | --agility <sdk-directory> | "
-			"--agility-hardware <sdk-directory>]\n";
+		std::cerr << "Usage: FrameGenerationRetirementGpuTests.exe "
+					 "[--hardware | --agility <sdk-directory> | "
+					 "--agility-hardware <sdk-directory>]\n";
 		return 1;
 	}
 

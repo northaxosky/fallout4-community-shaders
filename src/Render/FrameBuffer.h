@@ -29,28 +29,28 @@ namespace cs::engine
 	// The engine's own b12 contents, mirrored byte-for-byte from its Unmap.
 	struct FrameBufferSnapshot
 	{
-		FrameBuffer              data{};
-		std::uint64_t            sequence = 0;
-		std::uint32_t            frameCount = 0;
+		FrameBuffer data{};
+		std::uint64_t sequence = 0;
+		std::uint32_t frameCount = 0;
 		FrameBufferPublishSource source = FrameBufferPublishSource::kNone;
-		bool                     valid = false;
+		bool valid = false;
 	};
 
 	struct FrameBufferSnapshotQuery
 	{
 		const FrameBufferSnapshot* snapshot = nullptr;
-		FrameBufferRejectReason     rejectReason =
+		FrameBufferRejectReason rejectReason =
 			FrameBufferRejectReason::kMissingSnapshot;
 		bool previousFrame = false;
 	};
 
 	struct FrameBufferStatus
 	{
-		bool          hookInstalled = false;
-		bool          hookedContextIsCurrent = false;
-		bool          identified = false;
-		const char*   identitySource = "none";
-		bool          contextMatchesSlot12 = false;
+		bool hookInstalled = false;
+		bool hookedContextIsCurrent = false;
+		bool identified = false;
+		const char* identitySource = "none";
+		bool contextMatchesSlot12 = false;
 		std::uint32_t byteWidth = 0;
 		std::uint32_t usage = 0;
 		std::uint32_t cpuAccessFlags = 0;
@@ -63,20 +63,20 @@ namespace cs::engine
 		std::uint64_t matchingMapDataPointers = 0;
 		std::uint64_t matchingUnmaps = 0;
 		std::uint64_t contextHookRefreshes = 0;
-		bool          mapHookCurrent = false;
-		bool          unmapHookCurrent = false;
+		bool mapHookCurrent = false;
+		bool unmapHookCurrent = false;
 		std::uint32_t mapsLastFrame = 0;
 		std::uint32_t maxMapsPerFrame = 0;
-		bool          latestSnapshotValid = false;
-		bool          publishedSnapshotValid = false;
-		bool          publishedThisFrame = false;
+		bool latestSnapshotValid = false;
+		bool publishedSnapshotValid = false;
+		bool publishedThisFrame = false;
 		std::uint32_t latestFrameCount = 0;
 		std::uint32_t publishedFrameCount = 0;
 		std::uint32_t fullscreenLightAnchorsThisFrame = 0;
 		std::uint32_t publicationsThisFrame = 0;
 		std::uint32_t rejectionsThisFrame = 0;
 		std::uint32_t distinctCamerasThisFrame = 0;
-		float         minimumOriginMagnitude = 0.0f;
+		float minimumOriginMagnitude = 0.0f;
 		std::uint64_t latestSequence = 0;
 		std::uint64_t publishedSequence = 0;
 		std::uint64_t publishedCameraHash = 0;
@@ -85,7 +85,7 @@ namespace cs::engine
 		std::uint64_t noPublicationFrames = 0;
 		std::uint64_t nearZeroOriginRejections = 0;
 		FrameBufferPublishSource publishSource = FrameBufferPublishSource::kNone;
-		FrameBufferRejectReason  lastRejectReason = FrameBufferRejectReason::kNone;
+		FrameBufferRejectReason lastRejectReason = FrameBufferRejectReason::kNone;
 		FrameBufferSnapshot fullscreenLight{};
 	};
 

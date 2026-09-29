@@ -34,14 +34,14 @@ namespace cs::render
 			DirectX::XMFLOAT4 NDCToViewMul{};
 			DirectX::XMFLOAT4 NDCToViewAdd{};
 			DirectX::XMFLOAT4 SunDirection{};
-			float             Timer = 0.0f;
-			float             DeltaTime = 0.0f;
-			std::uint32_t     FrameCount = 0;
-			std::uint32_t     InInterior = 0;
+			float Timer = 0.0f;
+			float DeltaTime = 0.0f;
+			std::uint32_t FrameCount = 0;
+			std::uint32_t InInterior = 0;
 			DirectX::XMFLOAT4 DirectionalAmbient[3]{};
 			DirectX::XMFLOAT4 DirLightColor{};
-			std::uint32_t     HideSky = 0;
-			std::uint32_t     pad0[3]{};
+			std::uint32_t HideSky = 0;
+			std::uint32_t pad0[3]{};
 		};
 		static_assert(sizeof(SharedDataCB) == 192);
 		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
@@ -50,16 +50,16 @@ namespace cs::render
 		{
 			winrt::com_ptr<ID3D11Buffer> sharedDataCB;
 			winrt::com_ptr<ID3D11Buffer> featureDataCB;
-			std::atomic_bool             ready{ false };
-			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
+			std::atomic_bool ready{ false };
+			std::atomic_uint32_t lastFrame{ UINT32_MAX };
 			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
 				savedPixelBuffers;
 			// Render thread only.
-			float                        timer = 0.0f;
-			bool                         updateInstalled = false;
-			bool                         updateInstallFailed = false;
-			bool                         inDeferredLights = false;
-			std::uint32_t                pixelBindingDepth = 0;
+			float timer = 0.0f;
+			bool updateInstalled = false;
+			bool updateInstallFailed = false;
+			bool inDeferredLights = false;
+			std::uint32_t pixelBindingDepth = 0;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -110,8 +110,8 @@ namespace cs::render
 			if (a_sceneCamera) {
 				DirectX::XMFLOAT4X4 projection;
 				DirectX::XMFLOAT4X4 inverseProjection;
-				DirectX::XMFLOAT4   ndcToViewMul;
-				DirectX::XMFLOAT4   ndcToViewAdd;
+				DirectX::XMFLOAT4 ndcToViewMul;
+				DirectX::XMFLOAT4 ndcToViewAdd;
 				// structured binding avoids legacy near/far macros
 				const auto& [left, right, top, bottom, nearZ, farZ, ortho] =
 					a_sceneCamera->viewFrustum;
@@ -169,13 +169,12 @@ namespace cs::render
 			return true;
 		}
 
-
 		ID3D11DeviceContext* GetImmediateContext() noexcept
 		{
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			return rendererData ?
-				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-				nullptr;
+			           reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+			           nullptr;
 		}
 
 		void SavePixelBindings() noexcept
@@ -244,9 +243,7 @@ namespace cs::render
 
 			auto* graphicsState = engine::GetGraphicsState();
 			auto* rendererData = RE::BSGraphics::GetRendererData();
-			auto* context = rendererData
-				? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context)
-				: nullptr;
+			auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
 			auto* sceneCamera = engine::GetWorldRootCamera();
 			if (!graphicsState || !context)
 				return;
@@ -265,8 +262,8 @@ namespace cs::render
 						context,
 						state.sharedDataCB.get(),
 						&sharedData,
-						sizeof(sharedData))
-					|| !WriteConstantBuffer(
+						sizeof(sharedData)) ||
+					!WriteConstantBuffer(
 						context,
 						state.featureDataCB.get(),
 						&featureData,
@@ -329,8 +326,8 @@ namespace cs::render
 				a_context,
 				state.sharedDataCB.get(),
 				&sharedData,
-				sizeof(sharedData))
-			|| !WriteConstantBuffer(
+				sizeof(sharedData)) ||
+			!WriteConstantBuffer(
 				a_context,
 				state.featureDataCB.get(),
 				&featureData,
@@ -351,9 +348,7 @@ namespace cs::render
 	bool IsSharedDataReady() noexcept
 	{
 		const auto& state = GetSubstrateState();
-		return state.updateInstalled
-			&& !state.updateInstallFailed
-			&& state.ready.load(std::memory_order_acquire);
+		return state.updateInstalled && !state.updateInstallFailed && state.ready.load(std::memory_order_acquire);
 	}
 
 	void EnsureSharedDataUpdateInstalled()
@@ -362,8 +357,8 @@ namespace cs::render
 		if (state.updateInstalled || state.updateInstallFailed)
 			return;
 		if (!engine::RegisterPostDeferredPrePass(
-			[] { UpdateSharedData(); },
-			engine::HookPriority::Late)) {
+				[] { UpdateSharedData(); },
+				engine::HookPriority::Late)) {
 			state.updateInstallFailed = true;
 			state.ready.store(false, std::memory_order_release);
 			L->error("Shared substrate per-frame update registration failed.");
@@ -379,8 +374,8 @@ namespace cs::render
 		const bool compositeScopeInstalled =
 			engine::RegisterPreDeferredComposite(
 				[] { SavePixelBindings(); },
-				engine::HookPriority::Early)
-			&& engine::RegisterPostDeferredComposite(
+				engine::HookPriority::Early) &&
+			engine::RegisterPostDeferredComposite(
 				[] { RestorePixelBindings(); },
 				engine::HookPriority::Late);
 		if (!compositeScopeInstalled) {

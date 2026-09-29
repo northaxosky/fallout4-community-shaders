@@ -4,13 +4,14 @@
 
 namespace cs::engine
 {
-	using RenderHookCallback        = std::function<void()>;
+	using RenderHookCallback = std::function<void()>;
 
 	// Late priority keeps additive lights after darkening.
-	enum class HookPriority : int {
-		Early   = -100,
-		Default =    0,
-		Late    =  100,
+	enum class HookPriority : int
+	{
+		Early = -100,
+		Default = 0,
+		Late = 100,
 	};
 
 	// Register only during Load or OnPostPostLoad.

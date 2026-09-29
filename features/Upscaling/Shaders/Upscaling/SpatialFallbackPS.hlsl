@@ -3,8 +3,8 @@
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float2 TexCoord : TEXCOORD;
+	float4 Position: SV_POSITION;
+	float2 TexCoord: TEXCOORD;
 };
 
 cbuffer UpscalingData : register(b0)

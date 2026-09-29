@@ -44,8 +44,8 @@ namespace cs::host
 		{
 			const auto feature = feature_config::GetFeature(a_feature.GetConfigKey());
 			return feature &&
-				feature->get("load") &&
-				feature->get("load")->value_or(false);
+			       feature->get("load") &&
+			       feature->get("load")->value_or(false);
 		}
 
 	}
@@ -130,8 +130,7 @@ namespace cs::host
 
 		auto catalog = BuildPageCatalog(inputs);
 		for (const auto& category : catalog.categories) {
-			if (!_client.AddCategory({
-					.id = category.id.c_str(),
+			if (!_client.AddCategory({ .id = category.id.c_str(),
 					.displayName = category.displayName.c_str(),
 					.sortKey = category.sortKey,
 					.iconName = category.iconName.c_str() })) {
@@ -144,8 +143,8 @@ namespace cs::host
 		for (auto descriptor : catalog.pages) {
 			auto page = std::make_unique<Page>();
 			page->feature = descriptor.kind == HostPageKind::kFeature ?
-				features[descriptor.featureIndex] :
-				nullptr;
+			                    features[descriptor.featureIndex] :
+			                    nullptr;
 			page->descriptor = std::move(descriptor);
 			const dmui::PageDescriptor pageDescriptor{
 				.id = page->descriptor.id.c_str(),
@@ -154,8 +153,8 @@ namespace cs::host
 				.summary = page->descriptor.summary.c_str(),
 				.sortKey = page->descriptor.sortKey,
 				.kind = page->descriptor.kind == HostPageKind::kOverlay ?
-					DMUI_PAGE_KIND_OVERLAY :
-					DMUI_PAGE_KIND_SETTINGS
+				            DMUI_PAGE_KIND_OVERLAY :
+				            DMUI_PAGE_KIND_SETTINGS
 			};
 			_pages.push_back(std::move(page));
 			auto* stored = _pages.back().get();
@@ -335,10 +334,9 @@ namespace cs::host
 			++failed;
 			const auto scope = std::string(feature->GetName());
 			const auto detail = feature->GetState().detail.empty() ?
-				std::string("Feature initialization failed.") :
-				feature->GetState().detail;
-			if (!_client.ReportDiagnostic({
-					DMUI_STATUS_SEVERITY_ERROR,
+			                        std::string("Feature initialization failed.") :
+			                        feature->GetState().detail;
+			if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 					scope.c_str(),
 					"Feature unavailable",
 					detail.c_str() })) {
@@ -347,15 +345,15 @@ namespace cs::host
 		}
 
 		const auto status = failed ?
-			std::format(
-				"{} feature{} active; {} failed. See diagnostics.",
-				active,
-				active == 1 ? "" : "s",
-				failed) :
-			std::format(
-				"{} feature{} active.",
-				active,
-				active == 1 ? "" : "s");
+		                        std::format(
+									"{} feature{} active; {} failed. See diagnostics.",
+									active,
+									active == 1 ? "" : "s",
+									failed) :
+		                        std::format(
+									"{} feature{} active.",
+									active,
+									active == 1 ? "" : "s");
 		if (!_client.SetStatus(
 				failed ? DMUI_STATUS_SEVERITY_WARNING : DMUI_STATUS_SEVERITY_INFO,
 				status.c_str())) {
@@ -391,15 +389,14 @@ namespace cs::host
 	void HostClient::DrawFeaturePage(Feature& a_feature)
 	{
 		const auto reportCallbackFailure = [&](const char* a_phase,
-											  const char* a_summary,
-											  const char* a_detail) {
+											   const char* a_summary,
+											   const char* a_detail) {
 			FeatureManager::Get().QuarantineRuntimeCallback(
 				a_feature,
 				a_phase,
 				a_detail);
 			FeatureManager::Get().FinishRuntimeCallbackPass();
-			if (!_client.ReportDiagnostic({
-					DMUI_STATUS_SEVERITY_ERROR,
+			if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 					a_feature.GetName().data(),
 					a_summary,
 					a_detail })) {
@@ -411,7 +408,8 @@ namespace cs::host
 		const auto& state = a_feature.GetState();
 		dmui::SettingsTableScope table{
 			_client,
-			std::format("feature-settings-{}", a_feature.GetName()).c_str() };
+			std::format("feature-settings-{}", a_feature.GetName()).c_str()
+		};
 		if (table.Result() != DMUI_RESULT_OK) {
 			LogFailure("begin feature settings table");
 			return;
@@ -428,7 +426,8 @@ namespace cs::host
 					"Error" :
 					"Warning",
 				"",
-				dmui::RowPresentation::Layout::kFullSpan };
+				dmui::RowPresentation::Layout::kFullSpan
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				LogFailure("begin feature failure row");
 				return;
@@ -436,8 +435,8 @@ namespace cs::host
 			if (row.Visible()) {
 				const auto tone =
 					state.runtimeState == FeatureRuntimeState::kFailed ?
-					dmui::TextTone::kStatusError :
-					dmui::TextTone::kStatusWarning;
+						dmui::TextTone::kStatusError :
+						dmui::TextTone::kStatusWarning;
 				if (!dmui::DrawStyledText(
 						_client,
 						state.detail.empty() ?
@@ -478,7 +477,8 @@ namespace cs::host
 				"inactive-feature",
 				"Availability",
 				"",
-				dmui::RowPresentation::Layout::kFullSpan };
+				dmui::RowPresentation::Layout::kFullSpan
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				LogFailure("begin inactive feature row");
 				return;
@@ -490,10 +490,8 @@ namespace cs::host
 					if (!dmui::DrawStyledText(
 							_client,
 							"This feature will be available after restart.",
-							{
-								.tone =
-									dmui::TextTone::kStatusRestartNeeded
-							})) {
+							{ .tone =
+									dmui::TextTone::kStatusRestartNeeded })) {
 						LogFailure("draw feature restart availability");
 						return;
 					}
@@ -568,7 +566,8 @@ namespace cs::host
 				"feature-controls",
 				"Settings",
 				"Live feature controls.",
-				dmui::RowPresentation::Layout::kFullSpan };
+				dmui::RowPresentation::Layout::kFullSpan
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				LogFailure("begin feature controls row");
 				return;
@@ -587,8 +586,7 @@ namespace cs::host
 						"DearModdingUI::DrawSettings",
 						error.what());
 					FeatureManager::Get().FinishRuntimeCallbackPass();
-					if (!_client.ReportDiagnostic({
-							DMUI_STATUS_SEVERITY_ERROR,
+					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 							a_feature.GetName().data(),
 							"Feature settings callback failed",
 							error.what() })) {
@@ -601,8 +599,7 @@ namespace cs::host
 						"DearModdingUI::DrawSettings",
 						"non-standard exception");
 					FeatureManager::Get().FinishRuntimeCallbackPass();
-					if (!_client.ReportDiagnostic({
-							DMUI_STATUS_SEVERITY_ERROR,
+					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 							a_feature.GetName().data(),
 							"Feature settings callback failed",
 							"non-standard exception" })) {
@@ -640,15 +637,15 @@ namespace cs::host
 				a_feature.RestoreDefaultSettings();
 			} catch (const std::exception& error) {
 				reportCallbackFailure(
-				"DearModdingUI::RestoreDefaultSettings",
-				"Feature reset callback failed",
-				error.what());
+					"DearModdingUI::RestoreDefaultSettings",
+					"Feature reset callback failed",
+					error.what());
 				throw;
 			} catch (...) {
 				reportCallbackFailure(
-				"DearModdingUI::RestoreDefaultSettings",
-				"Feature reset callback failed",
-				"non-standard exception");
+					"DearModdingUI::RestoreDefaultSettings",
+					"Feature reset callback failed",
+					"non-standard exception");
 				throw;
 			}
 		}
@@ -663,7 +660,8 @@ namespace cs::host
 				id.c_str(),
 				"Restart required",
 				"This setting differs from its active startup value.",
-				dmui::RowPresentation::Layout::kFullSpan };
+				dmui::RowPresentation::Layout::kFullSpan
+			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				LogFailure("begin restart required row");
 				return;
@@ -672,10 +670,8 @@ namespace cs::host
 				if (!dmui::DrawStyledText(
 						_client,
 						label,
-						{
-							.tone =
-								dmui::TextTone::kStatusRestartNeeded
-						})) {
+						{ .tone =
+								dmui::TextTone::kStatusRestartNeeded })) {
 					LogFailure("draw restart required setting");
 					return;
 				}
@@ -726,7 +722,7 @@ namespace cs::host
 					"DearModdingUI forwarding backend is ready; hosted pages, overlays, and "
 					"hotkeys are active");
 			} else if (state && state->state == DMUI_HOST_STATE_UNAVAILABLE &&
-				!_unavailableLogged.exchange(true)) {
+					   !_unavailableLogged.exchange(true)) {
 				L->warn(
 					"DearModdingUI became unavailable (reason={}); Community Shaders UI is "
 					"disabled for this session",

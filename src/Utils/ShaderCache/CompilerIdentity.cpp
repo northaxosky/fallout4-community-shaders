@@ -41,7 +41,7 @@ namespace cs::shader_cache
 
 		bool ReadFileVersion(
 			const std::filesystem::path& a_path,
-			CompilerFileVersion&         a_version)
+			CompilerFileVersion& a_version)
 		{
 			DWORD ignored = 0;
 			const DWORD size =
@@ -59,14 +59,13 @@ namespace cs::shader_cache
 			}
 
 			void* value = nullptr;
-			UINT  valueSize = 0;
+			UINT valueSize = 0;
 			if (!VerQueryValueW(
 					bytes.data(),
 					L"\\",
 					&value,
-					&valueSize)
-				|| !value
-				|| valueSize < sizeof(VS_FIXEDFILEINFO)) {
+					&valueSize) ||
+				!value || valueSize < sizeof(VS_FIXEDFILEINFO)) {
 				return false;
 			}
 
@@ -77,10 +76,7 @@ namespace cs::shader_cache
 			DWORD versionMs = fixed.dwFileVersionMS;
 			DWORD versionLs = fixed.dwFileVersionLS;
 			const bool manifestShimmed =
-				HIWORD(versionMs) == 6
-				&& LOWORD(versionMs) <= 3
-				&& HIWORD(fixed.dwProductVersionMS) >= 10
-				&& versionLs == fixed.dwProductVersionLS;
+				HIWORD(versionMs) == 6 && LOWORD(versionMs) <= 3 && HIWORD(fixed.dwProductVersionMS) >= 10 && versionLs == fixed.dwProductVersionLS;
 			// System DLL file versions may be manifest-shimmed.
 			if (manifestShimmed) {
 				versionMs = fixed.dwProductVersionMS;
@@ -151,14 +147,13 @@ namespace cs::shader_cache
 	{
 		if (!a_identity.established)
 			return "unavailable";
-		return PathToUtf8(a_identity.modulePath.filename()) + " "
-			+ DescribeCompilerIdentityValue(a_identity);
+		return PathToUtf8(a_identity.modulePath.filename()) + " " + DescribeCompilerIdentityValue(a_identity);
 	}
 
 	CompilerIdentity MakeVersionCompilerIdentity(
 		std::filesystem::path a_modulePath,
-		std::uint64_t         a_moduleLength,
-		CompilerFileVersion   a_version)
+		std::uint64_t a_moduleLength,
+		CompilerFileVersion a_version)
 	{
 		CompilerIdentity identity;
 		if (a_modulePath.empty() || a_moduleLength == 0)
@@ -203,12 +198,12 @@ namespace cs::shader_cache
 			}
 
 			sha256::Sha256Result digest{};
-			std::uint64_t        hashedLength = 0;
+			std::uint64_t hashedLength = 0;
 			if (!sha256::Sha256ComputeFile(
 					canonical,
 					digest,
-					hashedLength)
-				|| sha256::Sha256IsZero(digest)) {
+					hashedLength) ||
+				sha256::Sha256IsZero(digest)) {
 				return {};
 			}
 
@@ -233,11 +228,10 @@ namespace cs::shader_cache
 
 			HMODULE module = nullptr;
 			if (!GetModuleHandleExW(
-					GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-						| GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+					GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 					reinterpret_cast<LPCWSTR>(address),
-					&module)
-				|| !module) {
+					&module) ||
+				!module) {
 				return {};
 			}
 

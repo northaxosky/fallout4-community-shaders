@@ -1,9 +1,9 @@
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <cmath>
 #include <limits>
 #include <optional>
 
@@ -28,7 +28,7 @@ namespace cs::engine
 	{
 		const auto isNear = [](float a_value, std::uint32_t a_expected) {
 			return std::isfinite(a_value) &&
-				std::abs(a_value - static_cast<float>(a_expected)) <= 0.5f;
+			       std::abs(a_value - static_cast<float>(a_expected)) <= 0.5f;
 		};
 		if (!isNear(a_topLeftX, 0) || !isNear(a_topLeftY, 0) ||
 			!a_committedWidth || !a_committedHeight ||

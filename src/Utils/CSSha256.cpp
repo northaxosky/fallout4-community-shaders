@@ -1,7 +1,7 @@
 #include "Utils/CSSha256.h"
 
 #ifndef NOMINMAX
-#  define NOMINMAX
+#	define NOMINMAX
 #endif
 #include <Windows.h>
 #include <bcrypt.h>
@@ -16,7 +16,7 @@
 #include <vector>
 
 #ifndef NT_SUCCESS
-#  define NT_SUCCESS(s) (((NTSTATUS)(s)) >= 0)
+#	define NT_SUCCESS(s) (((NTSTATUS)(s)) >= 0)
 #endif
 
 namespace cs::sha256
@@ -55,8 +55,8 @@ namespace cs::sha256
 					reinterpret_cast<PUCHAR>(&objectLength),
 					sizeof(objectLength),
 					&returned,
-					0))
-				|| objectLength == 0) {
+					0)) ||
+				objectLength == 0) {
 				return false;
 			}
 
@@ -92,7 +92,7 @@ namespace cs::sha256
 			std::size_t a_length) noexcept
 		{
 			if (a_length > static_cast<std::size_t>(
-					std::numeric_limits<ULONG>::max())) {
+							   std::numeric_limits<ULONG>::max())) {
 				return false;
 			}
 			return NT_SUCCESS(BCryptHashData(
@@ -124,8 +124,7 @@ namespace cs::sha256
 			return result;
 
 		const bool success =
-			HashChunk(hash, a_data, a_length)
-			&& FinishHash(hash, result);
+			HashChunk(hash, a_data, a_length) && FinishHash(hash, result);
 		BCryptDestroyHash(hash);
 		if (!success)
 			result = {};
@@ -159,9 +158,7 @@ namespace cs::sha256
 			const auto count = input.gcount();
 			if (count > 0) {
 				const auto chunkLength = static_cast<std::size_t>(count);
-				if (a_length
-					> std::numeric_limits<std::uint64_t>::max()
-						- chunkLength) {
+				if (a_length > std::numeric_limits<std::uint64_t>::max() - chunkLength) {
 					success = false;
 					break;
 				}

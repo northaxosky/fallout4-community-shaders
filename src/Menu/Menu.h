@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Menu/DebugViewSelection.h"
 #include "Host/HostRuntimeModel.h"
+#include "Menu/DebugViewSelection.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -73,7 +73,8 @@ namespace cs
 			std::uint64_t generation{};
 			std::uint64_t retryAfterFrame{};
 			host::ImageImportFailure importFailure{
-				host::ImageImportFailure::kNone };
+				host::ImageImportFailure::kNone
+			};
 			DMUI_Result importResult{ DMUI_RESULT_OK };
 			std::optional<DMUI_Result> loggedFailure;
 			dmui::ImageResource image;

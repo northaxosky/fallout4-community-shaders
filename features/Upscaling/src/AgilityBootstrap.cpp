@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-#include <windows.h>
 #include <tlhelp32.h>
+#include <windows.h>
 #include <winver.h>
 
 namespace cs::features
@@ -160,8 +160,8 @@ namespace cs::features
 		}
 		std::error_code error;
 		return std::filesystem::equivalent(
-			loadedD3D12Core.parent_path(), sdkDirectory, error) &&
-			!error;
+				   loadedD3D12Core.parent_path(), sdkDirectory, error) &&
+		       !error;
 	}
 
 	HRESULT CreatePrivateD3D12Device(
@@ -192,12 +192,10 @@ namespace cs::features
 		} else if (!std::filesystem::is_regular_file(
 					   diagnostics.sdkDirectory / L"D3D12Core.dll",
 					   pathError) ||
-			pathError) {
+				   pathError) {
 			diagnostics.status =
 				AgilityBootstrapStatus::kRuntimeMissing;
-			diagnostics.activationResult = pathError
-				? HRESULT_FROM_WIN32(pathError.value())
-				: HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+			diagnostics.activationResult = pathError ? HRESULT_FROM_WIN32(pathError.value()) : HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 		} else {
 			diagnostics.packagedVersion = ReadFileVersion(
 				diagnostics.sdkDirectory / L"D3D12Core.dll");
@@ -209,9 +207,7 @@ namespace cs::features
 				const auto error = GetLastError();
 				diagnostics.activationResult =
 					HRESULT_FROM_WIN32(
-						error
-							? error
-							: ERROR_NO_UNICODE_TRANSLATION);
+						error ? error : ERROR_NO_UNICODE_TRANSLATION);
 			} else {
 				const auto d3d12Module =
 					GetModuleHandleW(L"d3d12.dll");

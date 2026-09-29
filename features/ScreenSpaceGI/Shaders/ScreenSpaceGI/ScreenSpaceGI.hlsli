@@ -4,12 +4,12 @@
 #ifndef __SCREEN_SPACE_GI_DEPENDENCY_HLSL__
 #define __SCREEN_SPACE_GI_DEPENDENCY_HLSL__
 
-#include "Common/SharedData.hlsli"
 #include "Common/Shading.hlsli"
+#include "Common/SharedData.hlsli"
 
+#include "../Common/SphericalHarmonics.hlsli"
 #include "Common/Color.hlsli"
 #include "Common/Math.hlsli"
-#include "../Common/SphericalHarmonics.hlsli"
 
 namespace ScreenSpaceGI
 {

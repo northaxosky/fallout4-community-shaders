@@ -20,7 +20,7 @@ namespace cs::util
 		ShaderCompilationBatch& operator=(const ShaderCompilationBatch&) = delete;
 
 	private:
-		shader_cache::RevalidationContext  _revalidation;
+		shader_cache::RevalidationContext _revalidation;
 		shader_cache::RevalidationContext* _previous = nullptr;
 	};
 

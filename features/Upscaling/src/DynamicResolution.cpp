@@ -424,9 +424,7 @@ namespace cs::features
 		_originalDepthView = reinterpret_cast<ID3D11ShaderResourceView*>(mainDepth->srViewDepth);
 
 		if (a_doCopy) {
-			const std::uint64_t frame = cs::engine::GetGraphicsState()
-				? cs::engine::GetGraphicsState()->frameCount
-				: 0;
+			const std::uint64_t frame = cs::engine::GetGraphicsState() ? cs::engine::GetGraphicsState()->frameCount : 0;
 			if (_depthCopyFrame != frame) {
 				CopyDepth();
 				_depthCopyFrame = frame;
@@ -601,8 +599,8 @@ namespace cs::features
 
 	void DynamicResolution::UpdateAndBindUpscalingCB(
 		ID3D11DeviceContext* a_context,
-		float2               a_screenSize,
-		float2               a_renderSize)
+		float2 a_screenSize,
+		float2 a_renderSize)
 	{
 		const float cameraNear = cs::engine::GetCameraNear();
 		const float cameraFar = cs::engine::GetCameraFar();

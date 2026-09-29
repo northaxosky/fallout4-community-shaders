@@ -41,7 +41,6 @@ namespace cs::features::renderdoc_settings
 			settings::Field{ "multi_frame_count", "Number of frames in a multi-frame capture.", &Settings::multiFrameCount, settings::Range{ kMinMultiFrameCount, kMaxMultiFrameCount } },
 			settings::ChoiceField{ "capture_target", "Capture API: engine_d3d11 or temporal_d3d12.", &Settings::captureTarget, kCaptureTargets },
 			settings::Field{ "capture_hotkey", "Suggested single-frame capture binding; the host's saved override takes precedence.", &Settings::captureHotkey },
-			settings::Field{ "multi_capture_hotkey", "Suggested multi-frame capture binding; registered before single-frame capture.", &Settings::multiCaptureHotkey }
-		}
+			settings::Field{ "multi_capture_hotkey", "Suggested multi-frame capture binding; registered before single-frame capture.", &Settings::multiCaptureHotkey } }
 	};
 }

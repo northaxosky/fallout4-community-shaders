@@ -11,38 +11,38 @@ namespace cs::shader_cache
 {
 	enum class IncludeKind : std::uint8_t
 	{
-		kLocal  = 0,
+		kLocal = 0,
 		kSystem = 1
 	};
 
 	enum class ProbeStatus : std::uint8_t
 	{
-		kSuccess    = 0,
-		kMissing    = 1,
+		kSuccess = 0,
+		kMissing = 1,
 		kReadFailed = 2
 	};
 
 	struct IncludeProbe
 	{
-		std::string          path;
-		ProbeStatus          status = ProbeStatus::kMissing;
+		std::string path;
+		ProbeStatus status = ProbeStatus::kMissing;
 		sha256::Sha256Result contentDigest{};
-		std::uint64_t        contentLength = 0;
+		std::uint64_t contentLength = 0;
 	};
 
 	struct IncludeResolution
 	{
-		IncludeKind               kind = IncludeKind::kLocal;
-		std::string               requestedName;
-		std::string               parentLocator;
+		IncludeKind kind = IncludeKind::kLocal;
+		std::string requestedName;
+		std::string parentLocator;
 		std::vector<IncludeProbe> probes;
 	};
 
 	struct DependencyManifest
 	{
-		std::string                    rootLocator;
-		sha256::Sha256Result           rootDigest{};
-		std::uint64_t                  rootLength = 0;
+		std::string rootLocator;
+		sha256::Sha256Result rootDigest{};
+		std::uint64_t rootLength = 0;
 		std::vector<IncludeResolution> includes;
 	};
 
@@ -58,7 +58,7 @@ namespace cs::shader_cache
 	struct RevalidationOutcome
 	{
 		RevalidationStatus status = RevalidationStatus::kValid;
-		std::string        detail;
+		std::string detail;
 
 		[[nodiscard]] bool Valid() const noexcept
 		{
@@ -71,5 +71,5 @@ namespace cs::shader_cache
 	// replay probes against one optional batch snapshot
 	RevalidationOutcome RevalidateDependencyManifest(
 		const DependencyManifest& a_manifest,
-		RevalidationContext*      a_context = nullptr);
+		RevalidationContext* a_context = nullptr);
 }

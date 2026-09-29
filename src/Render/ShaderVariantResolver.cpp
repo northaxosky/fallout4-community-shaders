@@ -34,16 +34,14 @@ namespace cs::engine
 		{
 			if ((a_techniqueBits & kBsdfLightOverdrawMask) != 0) {
 				return ShaderVariantId{
-					a_techniqueBits
-						& kBsdfLightOverdrawPixelShaderMask
+					a_techniqueBits & kBsdfLightOverdrawPixelShaderMask
 				};
 			}
 			if ((a_techniqueBits & kBsdfLightKeyFeatureMask) != 0)
 				return ShaderVariantId{ a_techniqueBits };
 			// CPU setup may consume bits absent from PSID.
 			return ShaderVariantId{
-				a_techniqueBits
-					& kBsdfLightFallbackPixelShaderMask
+				a_techniqueBits & kBsdfLightFallbackPixelShaderMask
 			};
 		}
 	}

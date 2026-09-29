@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "Common/SharedData.hlsli"
 #include "Common/DeferredPosition.hlsli"
+#include "Common/SharedData.hlsli"
 #ifndef WATER_EFFECTS_FULLSCREEN_DEBUG
 #	include "WaterEffects/WaterCausticsSampler.hlsli"
 #endif
@@ -81,7 +81,7 @@ namespace WaterEffects
 			float2 causticsUV = worldPosition.xy * UV_SCALE;
 			float2 dispersionOffset = float2(0.6, 0.8) *
 			                          (0.025 * shoreFactorCaustics *
-			                              saturate(causticsDistToWater / DISPERSION_RANGE));
+										  saturate(causticsDistToWater / DISPERSION_RANGE));
 
 			float2 causticsUV1 = PanCausticsUV(causticsUV, 0.5 * 0.2, 1.0);
 			float2 causticsUV2 = PanCausticsUV(causticsUV, 1.0 * 0.2, -0.5);
@@ -205,8 +205,8 @@ namespace WaterEffects
 		value = saturate(
 			ComputeCaustics(
 				SharedData::waterEffectsSettings.WaterHeight, worldPosition)
-					.y *
-				0.25);
+				.y *
+			0.25);
 		return true;
 	}
 

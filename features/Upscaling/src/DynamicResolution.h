@@ -20,15 +20,15 @@ namespace cs::features
 		struct ProxyTexture
 		{
 			ID3D11ShaderResourceView* view = nullptr;
-			std::uint32_t             width = 0;
-			std::uint32_t             height = 0;
+			std::uint32_t width = 0;
+			std::uint32_t height = 0;
 		};
 
 		struct UpscalingCB
 		{
 			std::uint32_t ScreenSize[2];
 			std::uint32_t RenderSize[2];
-			float         CameraData[4];
+			float CameraData[4];
 		};
 
 		void UpdateRenderTargets(float a_widthRatio, float a_heightRatio);
@@ -52,31 +52,31 @@ namespace cs::features
 		void CopyDepth();
 		void ReleaseProxy(cs::engine::RenderTarget a_target);
 
-		ID3D11ComputeShader*         GetOverrideDepthCS();
-		ID3D11ComputeShader*         GetOverrideLinearDepthCS();
-		cs::buffer::ConstantBuffer*  GetUpscalingCB();
-		void                         UpdateAndBindUpscalingCB(
-									 ID3D11DeviceContext* a_context,
-									 float2               a_screenSize,
-									 float2               a_renderSize);
+		ID3D11ComputeShader* GetOverrideDepthCS();
+		ID3D11ComputeShader* GetOverrideLinearDepthCS();
+		cs::buffer::ConstantBuffer* GetUpscalingCB();
+		void UpdateAndBindUpscalingCB(
+			ID3D11DeviceContext* a_context,
+			float2 a_screenSize,
+			float2 a_renderSize);
 
 		// Indexed by logical ID.
-		RE::BSGraphics::RenderTarget           originalRenderTargets[static_cast<std::size_t>(cs::engine::RenderTarget::kCount)]{};
-		RE::BSGraphics::RenderTarget           proxyRenderTargets[static_cast<std::size_t>(cs::engine::RenderTarget::kCount)]{};
+		RE::BSGraphics::RenderTarget originalRenderTargets[static_cast<std::size_t>(cs::engine::RenderTarget::kCount)]{};
+		RE::BSGraphics::RenderTarget proxyRenderTargets[static_cast<std::size_t>(cs::engine::RenderTarget::kCount)]{};
 		RE::BSGraphics::RenderTargetProperties originalRenderTargetData[100]{};
 
-		ID3D11ShaderResourceView*             _originalDepthView = nullptr;
+		ID3D11ShaderResourceView* _originalDepthView = nullptr;
 		std::unique_ptr<cs::buffer::Texture2D> _depthOverrideTexture;
 
-		winrt::com_ptr<ID3D11ComputeShader>          _overrideDepthCS;
-		winrt::com_ptr<ID3D11ComputeShader>          _overrideLinearDepthCS;
-		std::unique_ptr<cs::buffer::ConstantBuffer>  _upscalingCB;
+		winrt::com_ptr<ID3D11ComputeShader> _overrideDepthCS;
+		winrt::com_ptr<ID3D11ComputeShader> _overrideLinearDepthCS;
+		std::unique_ptr<cs::buffer::ConstantBuffer> _upscalingCB;
 
-		float         _previousWidthRatio = -1.0f;
-		float         _previousHeightRatio = -1.0f;
+		float _previousWidthRatio = -1.0f;
+		float _previousHeightRatio = -1.0f;
 		std::uint64_t _depthCopyFrame = std::numeric_limits<std::uint64_t>::max();
-		bool          _hasProxies = false;
-		bool          _renderTargetsOverridden = false;
-		bool          _depthOverridden = false;
+		bool _hasProxies = false;
+		bool _renderTargetsOverridden = false;
+		bool _depthOverridden = false;
 	};
 }

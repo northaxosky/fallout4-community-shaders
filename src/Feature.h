@@ -47,7 +47,7 @@ namespace cs
 		bool IsLoaded() const noexcept { return IsHealthy(); }
 
 		// Configure must remain side-effect-free.
-		virtual bool Configure(const toml::table& , std::string& ) { return true; }
+		virtual bool Configure(const toml::table&, std::string&) { return true; }
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
@@ -80,10 +80,10 @@ namespace cs
 
 		virtual bool ProducesTelemetry() const { return false; }
 		// Telemetry must read only cached or atomic state.
-		virtual void CollectTelemetry(telemetry::Sink& ) const {}
+		virtual void CollectTelemetry(telemetry::Sink&) const {}
 
 		virtual std::span<const FeatureDebugView> GetDebugViews() const noexcept { return {}; }
-		virtual void SetDebugView(std::string_view ) noexcept {}
+		virtual void SetDebugView(std::string_view) noexcept {}
 
 		virtual void RestoreDefaultSettings() {}
 
@@ -96,10 +96,10 @@ namespace cs
 		virtual bool IsOverlayActive() const { return false; }
 
 		// Fires after D3D11 device creation.
-		virtual void OnD3D11Ready(IDXGIAdapter* , ID3D11Device* ) {}
+		virtual void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) {}
 
 		// Fires once after shader injections freeze, before the first frame.
-		virtual bool ValidateShaderInjections(std::string& ) { return true; }
+		virtual bool ValidateShaderInjections(std::string&) { return true; }
 
 		virtual std::string GetFeatureSummary() const { return {}; }
 
@@ -125,16 +125,16 @@ namespace cs
 		virtual std::string GetPresetKey() const;
 
 		// Staging must not mutate live state.
-		virtual bool StageFromPreset(const toml::table& ,
-									 const PresetApplyContext& ,
-									 std::string& ) { return true; }
+		virtual bool StageFromPreset(const toml::table&,
+			const PresetApplyContext&,
+			std::string&) { return true; }
 
 		// Swap all staged state before finalization.
 		virtual void CommitStagedSwap() noexcept {}
 		virtual void CommitStagedFinalize() {}
 
 		// Empty output opts out of saving.
-		virtual void ExportToPreset(toml::table& ) {}
+		virtual void ExportToPreset(toml::table&) {}
 
 	private:
 		friend class settings::SettingsEdit;
@@ -155,12 +155,12 @@ namespace cs
 		bool HasLoadFailed() const noexcept { return _loadFailed; }
 		const std::string& LoadFailureReason() const noexcept { return _loadFailureReason; }
 
-		FeatureState            _state;
+		FeatureState _state;
 		mutable spdlog::logger* _log = nullptr;
-		bool                    _loadFailed = false;
-		bool                    _settingsSavePending = false;
-		bool                    _settingsEditCompleted = false;
-		std::string             _loadFailureReason;
+		bool _loadFailed = false;
+		bool _settingsSavePending = false;
+		bool _settingsEditCompleted = false;
+		std::string _loadFailureReason;
 	};
 
 #ifdef TRACY_SUPPORT
@@ -214,17 +214,17 @@ namespace cs
 		FeatureManager() = default;
 		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _loadedFeatures;
-		bool                  _d3d11ReadyDone = false;
+		bool _d3d11ReadyDone = false;
 	};
 }
 
 #ifdef TRACY_SUPPORT
-#define CS_DETAIL_CONCAT_INNER(a, b) a##b
-#define CS_DETAIL_CONCAT(a, b) CS_DETAIL_CONCAT_INNER(a, b)
-#define CS_FEATURE_ZONE_IMPL(featurePtr, methodLiteral, id) \
-	const auto CS_DETAIL_CONCAT(csFeatureZoneName_, id) = ::cs::detail::FeatureZoneName((featurePtr), (methodLiteral)); \
-	ZoneTransientN(CS_DETAIL_CONCAT(csFeatureZone_, id), CS_DETAIL_CONCAT(csFeatureZoneName_, id).c_str(), true)
-#define CS_FEATURE_ZONE(featurePtr, methodLiteral) CS_FEATURE_ZONE_IMPL(featurePtr, methodLiteral, __COUNTER__)
+#	define CS_DETAIL_CONCAT_INNER(a, b) a##b
+#	define CS_DETAIL_CONCAT(a, b) CS_DETAIL_CONCAT_INNER(a, b)
+#	define CS_FEATURE_ZONE_IMPL(featurePtr, methodLiteral, id)                                                             \
+		const auto CS_DETAIL_CONCAT(csFeatureZoneName_, id) = ::cs::detail::FeatureZoneName((featurePtr), (methodLiteral)); \
+		ZoneTransientN(CS_DETAIL_CONCAT(csFeatureZone_, id), CS_DETAIL_CONCAT(csFeatureZoneName_, id).c_str(), true)
+#	define CS_FEATURE_ZONE(featurePtr, methodLiteral) CS_FEATURE_ZONE_IMPL(featurePtr, methodLiteral, __COUNTER__)
 #else
-#define CS_FEATURE_ZONE(featurePtr, methodLiteral) ((void)0)
+#	define CS_FEATURE_ZONE(featurePtr, methodLiteral) ((void)0)
 #endif

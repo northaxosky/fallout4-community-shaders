@@ -9,10 +9,10 @@ namespace cs
 {
 	struct PresetMeta
 	{
-		std::string           name;
-		std::string           identity;  // "B:" or "U:" plus lowercase name.
+		std::string name;
+		std::string identity;  // "B:" or "U:" plus lowercase name.
 		std::filesystem::path path;
-		bool                  builtin = false;
+		bool builtin = false;
 	};
 
 	// Built-ins may ignore user weather overrides.
@@ -42,21 +42,21 @@ namespace cs
 
 		// Recheck existence when overwrites are disabled.
 		bool Save(const std::filesystem::path& a_path,
-				  std::string_view             a_presetName,
-				  std::string&                 a_err,
-				  bool                         a_allowOverwrite = false);
+			std::string_view a_presetName,
+			std::string& a_err,
+			bool a_allowOverwrite = false);
 
 		bool Delete(const PresetMeta& a_meta, std::string& a_err) const;
 
 		// Smoke markers override active-preset auto-loading.
 		void ResolveAndApplyBootPreset();
 
-		std::string activeIdentity;        // Survives Refresh().
+		std::string activeIdentity;  // Survives Refresh().
 		std::string activeName;
-		bool        autoLoadOnBoot;
+		bool autoLoadOnBoot;
 		std::string pendingComboIdentity;  // Selection changes only after Load.
 		std::string lastError;
-		char        saveAsBuf[64] = {};
+		char saveAsBuf[64] = {};
 
 		// Preserve sibling config tables while saving presets.
 		bool SaveCoreConfig();
@@ -69,9 +69,9 @@ namespace cs
 	};
 
 	// Names use 1-64 safe characters and cannot collide or equal "Builtin".
-	bool ValidatePresetName(std::string_view               a_name,
-							const std::vector<PresetMeta>& a_existing,
-							std::string&                   a_err);
+	bool ValidatePresetName(std::string_view a_name,
+		const std::vector<PresetMeta>& a_existing,
+		std::string& a_err);
 
 	std::string MakePresetIdentity(char a_scope, std::string_view a_name);
 }

@@ -17,7 +17,7 @@ namespace cs::features::exponential_height_fog
 
 	struct Settings
 	{
-		bool  enabled = true;
+		bool enabled = true;
 		float densityMultiplier = 1.0f;
 		float heightFalloffMultiplier = 1.0f;
 	};
@@ -26,8 +26,7 @@ namespace cs::features::exponential_height_fog
 		std::tuple{
 			settings::Field{ "enabled", "Enable height fog; disabling uses stock fog equations.", &Settings::enabled },
 			settings::Field{ "density_multiplier", "Density multiplier around the current weather baseline.", &Settings::densityMultiplier, settings::Range{ kMultiplierMin, kMultiplierMax } },
-			settings::Field{ "height_falloff_multiplier", "Height falloff multiplier around the current weather baseline.", &Settings::heightFalloffMultiplier, settings::Range{ kMultiplierMin, kMultiplierMax } }
-		}
+			settings::Field{ "height_falloff_multiplier", "Height falloff multiplier around the current weather baseline.", &Settings::heightFalloffMultiplier, settings::Range{ kMultiplierMin, kMultiplierMax } } }
 	};
 
 	enum class FitStatus : std::uint8_t
@@ -65,8 +64,8 @@ namespace cs::features::exponential_height_fog
 	{
 		const auto clampMultiplier = [](float a_value) noexcept {
 			return std::isfinite(a_value) ?
-				std::clamp(a_value, kMultiplierMin, kMultiplierMax) :
-				1.0f;
+			           std::clamp(a_value, kMultiplierMin, kMultiplierMax) :
+			           1.0f;
 		};
 		a_settings.densityMultiplier =
 			clampMultiplier(a_settings.densityMultiplier);
@@ -86,9 +85,7 @@ namespace cs::features::exponential_height_fog
 		float a_heightFalloffMultiplier) noexcept
 	{
 		DerivedParameters result;
-		if (!std::isfinite(a_distanceScale)
-			|| !std::isfinite(a_distanceBias)
-			|| !std::isfinite(a_densityMultiplier)) {
+		if (!std::isfinite(a_distanceScale) || !std::isfinite(a_distanceBias) || !std::isfinite(a_densityMultiplier)) {
 			result.status = FitStatus::kNonFiniteDistanceRamp;
 			return result;
 		}
@@ -100,18 +97,12 @@ namespace cs::features::exponential_height_fog
 		result.distanceNear = a_distanceBias / a_distanceScale;
 		result.distanceFar = (1.0f + a_distanceBias) / a_distanceScale;
 		const float distanceSpan = result.distanceFar - result.distanceNear;
-		if (!std::isfinite(result.distanceNear)
-			|| !std::isfinite(result.distanceFar)
-			|| !(distanceSpan > kMinimumDistanceSpan)) {
+		if (!std::isfinite(result.distanceNear) || !std::isfinite(result.distanceFar) || !(distanceSpan > kMinimumDistanceSpan)) {
 			result.status = FitStatus::kDistancePlaneOrder;
 			return result;
 		}
 
-		if (!std::isfinite(a_heightScaleX)
-			|| !std::isfinite(a_heightScaleY)
-			|| !std::isfinite(a_heightBiasX)
-			|| !std::isfinite(a_heightBiasY)
-			|| !std::isfinite(a_heightFalloffMultiplier)) {
+		if (!std::isfinite(a_heightScaleX) || !std::isfinite(a_heightScaleY) || !std::isfinite(a_heightBiasX) || !std::isfinite(a_heightBiasY) || !std::isfinite(a_heightFalloffMultiplier)) {
 			result.status = FitStatus::kNonFiniteHeightRamp;
 			return result;
 		}
@@ -124,25 +115,15 @@ namespace cs::features::exponential_height_fog
 			return result;
 		}
 
-		result.density = kReferenceOpticalDepth / distanceSpan
-			* a_densityMultiplier;
+		result.density = kReferenceOpticalDepth / distanceSpan * a_densityMultiplier;
 		result.heightZeroX = a_heightBiasX / a_heightScaleX;
 		result.heightZeroY = a_heightBiasY / a_heightScaleY;
 		result.heightDirectionX = std::copysign(1.0f, a_heightScaleX);
 		result.heightDirectionY = std::copysign(1.0f, a_heightScaleY);
-		result.heightFalloffX = kReferenceOpticalDepth
-			* std::abs(a_heightScaleX) * a_heightFalloffMultiplier;
-		result.heightFalloffY = kReferenceOpticalDepth
-			* std::abs(a_heightScaleY) * a_heightFalloffMultiplier;
+		result.heightFalloffX = kReferenceOpticalDepth * std::abs(a_heightScaleX) * a_heightFalloffMultiplier;
+		result.heightFalloffY = kReferenceOpticalDepth * std::abs(a_heightScaleY) * a_heightFalloffMultiplier;
 
-		if (!std::isfinite(result.density)
-			|| !std::isfinite(result.heightZeroX)
-			|| !std::isfinite(result.heightZeroY)
-			|| !std::isfinite(result.heightFalloffX)
-			|| !std::isfinite(result.heightFalloffY)
-			|| !(result.density > 0.0f)
-			|| !(result.heightFalloffX > 0.0f)
-			|| !(result.heightFalloffY > 0.0f)) {
+		if (!std::isfinite(result.density) || !std::isfinite(result.heightZeroX) || !std::isfinite(result.heightZeroY) || !std::isfinite(result.heightFalloffX) || !std::isfinite(result.heightFalloffY) || !(result.density > 0.0f) || !(result.heightFalloffX > 0.0f) || !(result.heightFalloffY > 0.0f)) {
 			result.status = FitStatus::kNonFiniteDerived;
 			return result;
 		}
@@ -157,8 +138,7 @@ namespace cs::features::exponential_height_fog
 	{
 		if (!a_parameters.IsValid() || !std::isfinite(a_distance))
 			return 0.0f;
-		const float opticalDepth = a_parameters.density
-			* std::max(a_distance - a_parameters.distanceNear, 0.0f);
+		const float opticalDepth = a_parameters.density * std::max(a_distance - a_parameters.distanceNear, 0.0f);
 		return std::clamp(1.0f - std::exp(-opticalDepth), 0.0f, 1.0f);
 	}
 
@@ -168,10 +148,7 @@ namespace cs::features::exponential_height_fog
 		float a_direction,
 		float a_falloff) noexcept
 	{
-		if (!std::isfinite(a_height)
-			|| !std::isfinite(a_zeroHeight)
-			|| !std::isfinite(a_direction)
-			|| !std::isfinite(a_falloff)) {
+		if (!std::isfinite(a_height) || !std::isfinite(a_zeroHeight) || !std::isfinite(a_direction) || !std::isfinite(a_falloff)) {
 			return 0.0f;
 		}
 		const float altitude =

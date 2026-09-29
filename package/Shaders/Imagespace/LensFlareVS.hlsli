@@ -1,14 +1,14 @@
 struct VS_INPUT
 {
-	float4 Position : POSITION;
-	float2 TexCoord : TEXCOORD0;
+	float4 Position: POSITION;
+	float2 TexCoord: TEXCOORD0;
 };
 
 struct VS_OUTPUT
 {
-	float4 Position : SV_POSITION;
-	float4 TexCoord0 : TEXCOORD0;
-	float3 TexCoord1 : TEXCOORD1;
+	float4 Position: SV_POSITION;
+	float4 TexCoord0: TEXCOORD0;
+	float3 TexCoord1: TEXCOORD1;
 };
 
 cbuffer LensFlareParameters : register(b2)

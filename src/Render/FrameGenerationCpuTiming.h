@@ -177,8 +177,7 @@ namespace cs::render
 					static_cast<double>(samples.count);
 				for (std::size_t index = 0; index < samples.count; ++index) {
 					stats.windowMaxMilliseconds =
-						(std::max)(
-							stats.windowMaxMilliseconds,
+						(std::max)(stats.windowMaxMilliseconds,
 							samples.values[index]);
 				}
 			}

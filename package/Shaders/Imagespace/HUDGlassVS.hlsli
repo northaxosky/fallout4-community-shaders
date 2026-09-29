@@ -2,8 +2,8 @@
 
 struct VS_INPUT
 {
-	float4 Position : POSITION0;
-	float4 Color : COLOR0;
+	float4 Position: POSITION0;
+	float4 Color: COLOR0;
 };
 
 float4 main(VS_INPUT input) : SV_POSITION
@@ -15,14 +15,14 @@ float4 main(VS_INPUT input) : SV_POSITION
 
 struct VS_INPUT
 {
-	float4 Position : POSITION0;
-	float4 Color : COLOR0;
+	float4 Position: POSITION0;
+	float4 Color: COLOR0;
 };
 
 struct VS_OUTPUT
 {
-	float4 Position : SV_POSITION;
-	float3 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float3 TexCoord: TEXCOORD0;
 };
 
 VS_OUTPUT main(VS_INPUT input)

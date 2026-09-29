@@ -40,8 +40,7 @@ namespace cs::features::water_effects
 
 	inline bool IsUsableWaterHeight(float a_height) noexcept
 	{
-		return std::isfinite(a_height)
-		    && std::abs(a_height) < kMaxUsableWaterHeight;
+		return std::isfinite(a_height) && std::abs(a_height) < kMaxUsableWaterHeight;
 	}
 
 	constexpr float Saturate(float a_value) noexcept
@@ -86,8 +85,7 @@ namespace cs::features::water_effects
 		float a_distToWater,
 		float a_shoreFactor) noexcept
 	{
-		const float scale = kDispersionScale * a_shoreFactor
-			* Saturate(a_distToWater / kDispersionRange);
+		const float scale = kDispersionScale * a_shoreFactor * Saturate(a_distToWater / kDispersionRange);
 		return {
 			kDispersionDirection[0] * scale,
 			kDispersionDirection[1] * scale
@@ -147,8 +145,7 @@ namespace cs::features::water_effects
 			a_viewPosition[0], a_viewPosition[1], a_viewPosition[2], 1.0f
 		};
 		const auto dot4 = [&](const std::array<float, 4>& a_row) {
-			return a_row[0] * view[0] + a_row[1] * view[1]
-			     + a_row[2] * view[2] + a_row[3] * view[3];
+			return a_row[0] * view[0] + a_row[1] * view[1] + a_row[2] * view[2] + a_row[3] * view[3];
 		};
 		return {
 			dot4(a_row0) + a_cameraPosAdjust[0],

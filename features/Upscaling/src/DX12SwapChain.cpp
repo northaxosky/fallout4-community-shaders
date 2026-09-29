@@ -214,16 +214,11 @@ namespace cs::features
 			result = CreateInteropFence();
 		}
 		if (SUCCEEDED(result) && _streamline) {
-			const auto disableDlssG = _streamline->featureDLSSG
-				? _streamline->SetDLSSGPresentationActive(false)
-				: render::temporal::ProviderResult{
-					  .code =
-						  render::temporal::ProviderResultCode::kSuccess
-				  };
+			const auto disableDlssG = _streamline->featureDLSSG ? _streamline->SetDLSSGPresentationActive(false) : render::temporal::ProviderResult{ .code = render::temporal::ProviderResultCode::kSuccess };
 			const auto disableFsrG = disableDlssG.Succeeded() &&
-					_streamline->featureFSRG
-				? _streamline->SetFSRGPresentationActive(false)
-				: disableDlssG;
+			                                 _streamline->featureFSRG ?
+			                             _streamline->SetFSRGPresentationActive(false) :
+			                             disableDlssG;
 			if (!disableFsrG.Succeeded()) {
 				if (_callbacks.recordFailure) {
 					const auto reason =
@@ -232,9 +227,7 @@ namespace cs::features
 							disableFsrG);
 					_callbacks.recordFailure(reason.c_str());
 				}
-				result = FAILED(disableFsrG.hresult)
-					? disableFsrG.hresult
-					: E_FAIL;
+				result = FAILED(disableFsrG.hresult) ? disableFsrG.hresult : E_FAIL;
 			}
 		}
 		if (SUCCEEDED(result) && _provider && !_provider->IsAvailable()) {
@@ -340,9 +333,7 @@ namespace cs::features
 				L->critical(
 					"Temporal D3D12 resources quarantined after failed provider "
 					"drain: {}",
-					release.message.empty()
-						? "frame-generation display resources could not be released"
-						: release.message);
+					release.message.empty() ? "frame-generation display resources could not be released" : release.message);
 				return E_FAIL;
 			}
 		} else if (_queue && FAILED(Drain())) {
@@ -486,17 +477,15 @@ namespace cs::features
 				"{}.{}.{}.{}",
 				kPrivateD3D12SdkVersion,
 				agilityDiagnostics.sdkDirectory.string(),
-				agilityDiagnostics.LoadedPackagedCore()
-					? "packaged"
-					: "system/other",
+				agilityDiagnostics.LoadedPackagedCore() ? "packaged" : "system/other",
 				agilityDiagnostics.loadedD3D12Core.string(),
 				version.major, version.minor, version.patch,
 				version.revision);
 		} else {
 			const auto level = agilityDiagnostics.status ==
-					AgilityBootstrapStatus::kRuntimeMissing
-				? spdlog::level::info
-				: spdlog::level::warn;
+			                           AgilityBootstrapStatus::kRuntimeMissing ?
+			                       spdlog::level::info :
+			                       spdlog::level::warn;
 			L->log(
 				level,
 				"Agility SDK factory {} was not activated "
@@ -560,7 +549,7 @@ namespace cs::features
 		cs::render::annotation::SetName(_retirementQueue.get(),
 			"Upscaling/FrameGeneration.InputRetirementQueue");
 		const auto createSubmissions = [&](auto& a_submissions,
-										 std::string_view a_phase) {
+										   std::string_view a_phase) {
 			for (UINT index = 0; index < a_submissions.size(); ++index) {
 				auto& submission = a_submissions[index];
 				DX::ThrowIfFailed(_device12->CreateCommandAllocator(
@@ -674,9 +663,7 @@ namespace cs::features
 					*a_providerFailure = activation;
 				}
 				if (!a_allowProviderFallback) {
-					return FAILED(activation.hresult)
-						? activation.hresult
-						: E_FAIL;
+					return FAILED(activation.hresult) ? activation.hresult : E_FAIL;
 				}
 				if (_callbacks.recordFailure) {
 					const auto reason =
@@ -708,9 +695,7 @@ namespace cs::features
 			} else if (FAILED(providerResult.hresult)) {
 				result = providerResult.hresult;
 			} else {
-				result = providerResult.sdkResult
-					? static_cast<HRESULT>(providerResult.sdkResult)
-					: E_FAIL;
+				result = providerResult.sdkResult ? static_cast<HRESULT>(providerResult.sdkResult) : E_FAIL;
 			}
 			if (FAILED(result) || !swapChain) {
 				if (!a_allowProviderFallback) {
@@ -725,9 +710,7 @@ namespace cs::features
 					_callbacks.recordFailure(reason.c_str());
 				}
 				const auto destroy = failedProvider->DestroyAfterDrain();
-				const auto deactivate = destroy.Succeeded()
-					? failedProvider->SetPresentationActive(false)
-					: destroy;
+				const auto deactivate = destroy.Succeeded() ? failedProvider->SetPresentationActive(false) : destroy;
 				if (!deactivate.Succeeded()) {
 					_quarantined = true;
 					return E_FAIL;
@@ -1062,9 +1045,7 @@ namespace cs::features
 		if (!_provider) {
 			const auto start = std::chrono::steady_clock::now();
 			render::temporal::ProviderResult result{
-				.code = SUCCEEDED(Drain())
-					? render::temporal::ProviderResultCode::kSuccess
-					: render::temporal::ProviderResultCode::kFailure,
+				.code = SUCCEEDED(Drain()) ? render::temporal::ProviderResultCode::kSuccess : render::temporal::ProviderResultCode::kFailure,
 				.message = "The plain presentation queue did not drain.",
 				.failureDomain =
 					render::temporal::FailureDomain::kPresentation,
@@ -1245,7 +1226,7 @@ namespace cs::features
 		}
 
 		L->error("{}", render::temporal::FormatProviderFailure(
-						  "Create requested presentation chain", targetResult));
+						   "Create requested presentation chain", targetResult));
 		auto targetFailure = targetResult;
 		if (_provider && _providerPresentationActive) {
 			const auto cleanup = RetireCurrentPresentationProvider();
@@ -1262,7 +1243,7 @@ namespace cs::features
 			CreateReplacementPresentation(nullptr, true);
 		if (!recovery.Succeeded()) {
 			L->error("{}", render::temporal::FormatProviderFailure(
-							  "Recover plain D3D12 presentation", recovery));
+							   "Recover plain D3D12 presentation", recovery));
 			targetFailure.hresult = recovery.hresult;
 			targetFailure.sdkResult = recovery.sdkResult;
 			targetFailure.message =
@@ -1270,9 +1251,9 @@ namespace cs::features
 				"presentation could not be recovered.";
 			targetFailure.failureDomain =
 				recovery.failureDomain ==
-						render::temporal::FailureDomain::kNone
-					? render::temporal::FailureDomain::kPresentation
-					: recovery.failureDomain;
+						render::temporal::FailureDomain::kNone ?
+					render::temporal::FailureDomain::kPresentation :
+					recovery.failureDomain;
 			QuarantineTransport(targetFailure.message);
 			return targetFailure;
 		}
@@ -1300,16 +1281,12 @@ namespace cs::features
 
 	SharedD3D11D3D12Texture* DX12SwapChain::GetDepthTexture() const noexcept
 	{
-		return _frameSlot < _depthBuffers.size()
-			? _depthBuffers[_frameSlot].get()
-			: nullptr;
+		return _frameSlot < _depthBuffers.size() ? _depthBuffers[_frameSlot].get() : nullptr;
 	}
 
 	SharedD3D11D3D12Texture* DX12SwapChain::GetMotionTexture() const noexcept
 	{
-		return _frameSlot < _motionBuffers.size()
-			? _motionBuffers[_frameSlot].get()
-			: nullptr;
+		return _frameSlot < _motionBuffers.size() ? _motionBuffers[_frameSlot].get() : nullptr;
 	}
 
 	ID3D12GraphicsCommandList* DX12SwapChain::GetCommandList() const noexcept
@@ -1412,11 +1389,11 @@ namespace cs::features
 		const auto alias = [](const render::temporal::GpuView& a_view) {
 			const auto* view =
 				std::get_if<render::temporal::D3D11GpuView>(&a_view);
-			return view && view->resource && view->alias12
-				? render::temporal::D3D12GpuView{
-					  .resource = view->alias12,
-					  .state = view->alias12State }
-				: render::temporal::D3D12GpuView{};
+			return view && view->resource && view->alias12 ? render::temporal::D3D12GpuView{
+				.resource = view->alias12,
+				.state = view->alias12State
+			} :
+			                                                 render::temporal::D3D12GpuView{};
 		};
 		const auto color = alias(a_request.colorInput);
 		const auto output = alias(a_request.privateOutput);
@@ -1529,9 +1506,7 @@ namespace cs::features
 				.hresult = error,
 				.message = "D3D12 super-resolution submission failed.",
 				.failureDomain = render::temporal::FailureDomain::kTransport,
-				.workState = submissionMayBeInFlight
-					? render::temporal::ProviderWorkState::kSubmitted
-					: render::temporal::ProviderWorkState::kNone
+				.workState = submissionMayBeInFlight ? render::temporal::ProviderWorkState::kSubmitted : render::temporal::ProviderWorkState::kNone
 			};
 		} catch (const std::exception& e) {
 			_quarantined = true;
@@ -1540,9 +1515,7 @@ namespace cs::features
 				.code = render::temporal::ProviderResultCode::kFailure,
 				.message = e.what(),
 				.failureDomain = render::temporal::FailureDomain::kTransport,
-				.workState = submissionMayBeInFlight
-					? render::temporal::ProviderWorkState::kSubmitted
-					: render::temporal::ProviderWorkState::kNone
+				.workState = submissionMayBeInFlight ? render::temporal::ProviderWorkState::kSubmitted : render::temporal::ProviderWorkState::kNone
 			};
 		}
 		return {
@@ -1716,9 +1689,7 @@ namespace cs::features
 		if (FAILED(result)) {
 			return result;
 		}
-		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0
-			? S_OK
-			: HRESULT_FROM_WIN32(GetLastError());
+		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 	}
 
 	HRESULT DX12SwapChain::WaitForGpu() noexcept
@@ -1754,9 +1725,7 @@ namespace cs::features
 		if (FAILED(result)) {
 			return result;
 		}
-		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0
-			? S_OK
-			: HRESULT_FROM_WIN32(GetLastError());
+		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 	}
 
 	HRESULT DX12SwapChain::Present(UINT a_syncInterval, UINT a_flags) noexcept
@@ -1879,9 +1848,9 @@ namespace cs::features
 				_provider &&
 				pipeline.Renderer().ShouldUseFrameGenerationThisFrame();
 			auto request = frameGenerationRequested &&
-					_callbacks.queryFrameState
-				? _callbacks.queryFrameState()
-				: render::temporal::FrameGenerationRequest{};
+			                       _callbacks.queryFrameState ?
+			                   _callbacks.queryFrameState() :
+			                   render::temporal::FrameGenerationRequest{};
 			if (frameGenerationRequested) {
 				pipeline.Renderer().CaptureFrameGenerationFinalDebugSnapshot();
 			}
@@ -1936,8 +1905,8 @@ namespace cs::features
 			}
 
 			bool requested = frameGenerationRequested &&
-				_frameGenerationInputsReady && !_frameGenerationDisabled &&
-				request.enabled;
+			                 _frameGenerationInputsReady && !_frameGenerationDisabled &&
+			                 request.enabled;
 			if (_provider && requested) {
 				const auto validation =
 					_provider->ValidateConfiguration(
@@ -1971,11 +1940,11 @@ namespace cs::features
 						.queue = _queue.get(),
 						.slot = _frameSlot };
 				request.depth = render::temporal::D3D12GpuView{
-							.resource = _depthBuffers[_frameSlot]->resource12.get(),
+					.resource = _depthBuffers[_frameSlot]->resource12.get(),
 					.state = D3D12_RESOURCE_STATE_COMMON
 				};
 				request.motionVectors = render::temporal::D3D12GpuView{
-							.resource = _motionBuffers[_frameSlot]->resource12.get(),
+					.resource = _motionBuffers[_frameSlot]->resource12.get(),
 					.state = D3D12_RESOURCE_STATE_COMMON
 				};
 				request.hudlessColor = render::temporal::D3D12GpuView{
@@ -2463,10 +2432,9 @@ namespace cs::features
 				QuarantineTransport(
 					"Frame-generation display resources could not be retired "
 					"for resize.");
-				DisableFrameGeneration(releaseResult.message.empty()
-						? "Frame-generation display resources could not be released "
-						  "for resize"
-						: releaseResult.message.c_str());
+				DisableFrameGeneration(releaseResult.message.empty() ? "Frame-generation display resources could not be released "
+																	   "for resize" :
+																	   releaseResult.message.c_str());
 				return E_FAIL;
 			}
 			_providerGenerationEnabled = false;
@@ -2569,13 +2537,8 @@ namespace cs::features
 		_creationDesc.BufferDesc.Height = _innerDesc.Height;
 		_creationDesc.BufferDesc.Format = _proxyDesc.BufferDesc.Format;
 
-		const HRESULT providerResult = !_provider
-			? S_OK
-			: sizeChanged
-				? RecreateFrameGenerationResources(
-					  _innerDesc.Width, _innerDesc.Height)
-				: RestoreFrameGenerationProvider(
-					  _innerDesc.Width, _innerDesc.Height);
+		const HRESULT providerResult = !_provider ? S_OK : sizeChanged ? RecreateFrameGenerationResources(_innerDesc.Width, _innerDesc.Height) :
+		                                                                 RestoreFrameGenerationProvider(_innerDesc.Width, _innerDesc.Height);
 		if (FAILED(providerResult)) {
 			_published = false;
 			DisableFrameGeneration(

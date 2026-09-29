@@ -1,5 +1,5 @@
-#include "Render/TemporalRendererInternals.h"
 #include "Render/FrameBuffer.h"
+#include "Render/TemporalRendererInternals.h"
 
 namespace cs::render
 {
@@ -205,16 +205,12 @@ namespace cs::render
 					render::TemporalPipeline::Get().EvaluateSuperResolution(
 						render::temporal::SuperResolutionMethod::kDLSS, request);
 			} else if (upscaleMethod == UpscaleMethod::kFSR ||
-				upscaleMethod == UpscaleMethod::kFSR4) {
+					   upscaleMethod == UpscaleMethod::kFSR4) {
 				cs::render::annotation::ScopedEvent providerScope(
-					upscaleMethod == UpscaleMethod::kFSR4
-						? "Upscaling/FSR4"
-						: "Upscaling/FSR3");
+					upscaleMethod == UpscaleMethod::kFSR4 ? "Upscaling/FSR4" : "Upscaling/FSR3");
 				providerResult =
 					render::TemporalPipeline::Get().EvaluateSuperResolution(
-						upscaleMethod == UpscaleMethod::kFSR4
-							? render::temporal::SuperResolutionMethod::kFSR4
-							: render::temporal::SuperResolutionMethod::kFSR3,
+						upscaleMethod == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3,
 						request);
 			}
 			upscaled = providerResult.CanPublishOutput();
@@ -231,9 +227,7 @@ namespace cs::render
 					render::temporal::FailureDomain::kTransport) {
 				render::TemporalPipeline::Get().PostFailure(
 					providerResult.failureDomain,
-					providerResult.message.empty()
-						? "Super-resolution transport did not establish a safe output dependency."
-						: providerResult.message);
+					providerResult.message.empty() ? "Super-resolution transport did not establish a safe output dependency." : providerResult.message);
 			}
 
 			if (upscaled) {
@@ -324,9 +318,7 @@ namespace cs::render
 				sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
 				_upscaledThisFrame);
 		} else if (method == UpscaleMethod::kDLSS) {
-			auto* output = _providerPublicationOutputReady
-				? publicationTexture
-				: sharpenerTexture;
+			auto* output = _providerPublicationOutputReady ? publicationTexture : sharpenerTexture;
 			published = PublishUpscalingOutput(
 				context, frameBuffer.get(),
 				output ? output->resource.get() : nullptr,

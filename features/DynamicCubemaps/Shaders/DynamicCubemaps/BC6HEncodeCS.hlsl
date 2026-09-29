@@ -50,8 +50,8 @@ float3 FinishUnquantize(
 {
 	float3 comp =
 		(endpoint0Unq * (64.0f - weight) +
-		 endpoint1Unq * weight +
-		 32.0f) *
+			endpoint1Unq * weight +
+			32.0f) *
 		(31.0f / 4096.0f);
 	return f16tof32(uint3(comp));
 }
@@ -164,7 +164,7 @@ void OptimizeEndpointsP1(
 			f16tof32(clamp(
 				determinantRcp *
 					(alphaTexelSum * betaSquaredSum -
-					 betaTexelSum * alphaBetaSum),
+						betaTexelSum * alphaBetaSum),
 				0.0f,
 				HALF_MAX)),
 			blockMinNonInset,
@@ -173,7 +173,7 @@ void OptimizeEndpointsP1(
 			f16tof32(clamp(
 				determinantRcp *
 					(betaTexelSum * alphaSquaredSum -
-					 alphaTexelSum * alphaBetaSum),
+						alphaTexelSum * alphaBetaSum),
 				0.0f,
 				HALF_MAX)),
 			blockMinNonInset,
@@ -282,23 +282,22 @@ void EncodeP1(
 	block.w |= indices[15] << 28;
 }
 
-[numthreads(8, 8, 1)]
-void main(uint3 dispatchThreadID : SV_DispatchThreadID)
-{
+[numthreads(8, 8, 1)] void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
 	uint2 blockCoordinate = dispatchThreadID.xy;
 	uint faceIndex = dispatchThreadID.z;
 	if (all(blockCoordinate < TextureSizeInBlocks)) {
 		int2 texelBase = int2(blockCoordinate) * 4;
 		float3 texels[16];
-		[unroll]
-		for (int i = 0; i < 16; ++i) {
+		[unroll] for (int i = 0; i < 16; ++i)
+		{
 			int x = i % 4;
 			int y = i / 4;
 			texels[i] = SrcTexture.Load(int4(
-				texelBase.x + x,
-				texelBase.y + y,
-				int(faceIndex),
-				int(MipLevel))).rgb;
+											texelBase.x + x,
+											texelBase.y + y,
+											int(faceIndex),
+											int(MipLevel)))
+			                .rgb;
 		}
 
 		uint4 block = 0;

@@ -102,12 +102,7 @@ namespace
 			storage);
 		Check(SUCCEEDED(result.hr), "shipped factor-4 resize must succeed");
 		Check(
-			result.image
-				&& result.image->width == kCommonwealthExtent / 4
-				&& result.image->height == kCommonwealthExtent / 4
-				&& result.image->format == DXGI_FORMAT_R16_UNORM
-				&& result.halvings == 2
-				&& !result.usedTriangleFallback,
+			result.image && result.image->width == kCommonwealthExtent / 4 && result.image->height == kCommonwealthExtent / 4 && result.image->format == DXGI_FORMAT_R16_UNORM && result.halvings == 2 && !result.usedTriangleFallback,
 			"shipped resize must use two R16 box halvings");
 		if (!result.image)
 			return;
@@ -134,9 +129,7 @@ namespace
 		const auto result = ts::DownsampleHeightMap(
 			*sourceImage.GetImage(0, 0, 0), 5, 5, storage);
 		Check(
-			SUCCEEDED(result.hr) && result.halvings == 1
-				&& result.usedTriangleFallback && result.image
-				&& result.image->width == 5 && result.image->height == 5,
+			SUCCEEDED(result.hr) && result.halvings == 1 && result.usedTriangleFallback && result.image && result.image->width == 5 && result.image->height == 5,
 			"non-halvable extents must finish with the triangle fallback");
 	}
 }

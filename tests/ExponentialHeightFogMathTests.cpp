@@ -8,13 +8,13 @@ namespace
 {
 	int failures = 0;
 
-#define CHECK(expr)                                                           \
-	do {                                                                      \
-		if (!(expr)) {                                                        \
-			std::cerr << "FAIL " << __FILE__ << ':' << __LINE__ << ": "      \
-					  << #expr << '\n';                                       \
-			++failures;                                                       \
-		}                                                                     \
+#define CHECK(expr)                                                     \
+	do {                                                                \
+		if (!(expr)) {                                                  \
+			std::cerr << "FAIL " << __FILE__ << ':' << __LINE__ << ": " \
+					  << #expr << '\n';                                 \
+			++failures;                                                 \
+		}                                                               \
 	} while (false)
 
 	bool Near(float a_left, float a_right, float a_tolerance = 1.0e-5f)
@@ -42,8 +42,7 @@ namespace
 			EvaluateDistanceExtinction(fit, fit.distanceFar),
 			kReferenceExtinction,
 			1.0e-6f));
-		CHECK(EvaluateDistanceExtinction(fit, 3000.0f)
-			> kReferenceExtinction);
+		CHECK(EvaluateDistanceExtinction(fit, 3000.0f) > kReferenceExtinction);
 
 		const auto stronger = DeriveParameters(
 			0.001f,
@@ -108,23 +107,20 @@ namespace
 				1.0f,
 				1.0f);
 		};
-		CHECK(make(0.0f, 1.0f, 1.0f).status
-			== FitStatus::kDistanceSlopeNearZero);
-		CHECK(make(-1.0f, 1.0f, 1.0f).status
-			== FitStatus::kDistancePlaneOrder);
-		CHECK(make(1.0f, 0.0f, 1.0f).status
-			== FitStatus::kHeightSlopeXNearZero);
-		CHECK(make(1.0f, 1.0f, 0.0f).status
-			== FitStatus::kHeightSlopeYNearZero);
+		CHECK(make(0.0f, 1.0f, 1.0f).status == FitStatus::kDistanceSlopeNearZero);
+		CHECK(make(-1.0f, 1.0f, 1.0f).status == FitStatus::kDistancePlaneOrder);
+		CHECK(make(1.0f, 0.0f, 1.0f).status == FitStatus::kHeightSlopeXNearZero);
+		CHECK(make(1.0f, 1.0f, 0.0f).status == FitStatus::kHeightSlopeYNearZero);
 		CHECK(DeriveParameters(
-			std::numeric_limits<float>::quiet_NaN(),
-			0.0f,
-			1.0f,
-			1.0f,
-			0.0f,
-			0.0f,
-			1.0f,
-			1.0f).status == FitStatus::kNonFiniteDistanceRamp);
+				  std::numeric_limits<float>::quiet_NaN(),
+				  0.0f,
+				  1.0f,
+				  1.0f,
+				  0.0f,
+				  0.0f,
+				  1.0f,
+				  1.0f)
+				  .status == FitStatus::kNonFiniteDistanceRamp);
 	}
 
 }

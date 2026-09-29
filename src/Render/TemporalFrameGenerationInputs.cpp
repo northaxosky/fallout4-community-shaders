@@ -1,6 +1,6 @@
-#include "Render/TemporalRendererInternals.h"
-#include "Render/FrameGenerationOrchestration.h"
 #include "Render/FrameBuffer.h"
+#include "Render/FrameGenerationOrchestration.h"
+#include "Render/TemporalRendererInternals.h"
 
 namespace cs::render
 {
@@ -152,7 +152,7 @@ namespace cs::render
 		if (!temporal::WriteFrameGenerationInput(
 				[]() {
 					return render::TemporalPipeline::Get()
-						.AcquireFrameGenerationInputWrite();
+			            .AcquireFrameGenerationInputWrite();
 				},
 				[&]() {
 					cs::render::annotation::ScopedEvent annotationScope(
@@ -218,11 +218,11 @@ namespace cs::render
 		const auto stamp = _firstPersonAlphaStamp;
 		InvalidateFirstPersonAlphaState();
 		return stamp.stage == FirstPersonAlphaStage::kConditioned &&
-			stamp.engineFrame == a_engineFrame &&
-			stamp.nativeMotion == a_nativeMotion &&
-			stamp.nativeDepth == a_nativeDepth &&
-			stamp.sharedMotion == a_sharedMotion &&
-			stamp.sharedDepth == a_sharedDepth;
+		       stamp.engineFrame == a_engineFrame &&
+		       stamp.nativeMotion == a_nativeMotion &&
+		       stamp.nativeDepth == a_nativeDepth &&
+		       stamp.sharedMotion == a_sharedMotion &&
+		       stamp.sharedDepth == a_sharedDepth;
 	}
 
 	void TemporalRenderer::CaptureFrameGenerationInputs()
@@ -245,8 +245,7 @@ namespace cs::render
 		const auto& frameBuffer = cs::engine::GetFrameBuffer();
 		pipeline.FreezeFrameConstants(
 			capture.frameSlot,
-			{
-				.realFrame =
+			{ .realFrame =
 					render::TemporalPipeline::Get().CurrentRealFrame(),
 				.renderWidth = renderWidth,
 				.renderHeight = renderHeight,
@@ -266,9 +265,7 @@ namespace cs::render
 					.stage = temporal::ColorStage::kPostTonemapLut,
 					.alpha = temporal::AlphaMode::kIgnored,
 					.exposure = temporal::ExposureMode::kAutomatic },
-				.camera = temporal::BuildFrameGenerationCamera(
-					frameBuffer, capture.width, capture.height)
-			});
+				.camera = temporal::BuildFrameGenerationCamera(frameBuffer, capture.width, capture.height) });
 
 		auto* context = cs::engine::GetImmediateContext();
 		auto* motion = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
@@ -307,7 +304,7 @@ namespace cs::render
 			if (!temporal::WriteFrameGenerationInput(
 					[]() {
 						return render::TemporalPipeline::Get()
-							.AcquireFrameGenerationInputWrite();
+				            .AcquireFrameGenerationInputWrite();
 					},
 					[&]() {
 						cs::render::annotation::ScopedEvent annotationScope(
@@ -410,7 +407,7 @@ namespace cs::render
 		if (!temporal::WriteFrameGenerationInput(
 				[]() {
 					return render::TemporalPipeline::Get()
-						.AcquireFrameGenerationInputWrite();
+			            .AcquireFrameGenerationInputWrite();
 				},
 				[&]() {
 					cs::render::annotation::ScopedEvent annotationScope(

@@ -15,7 +15,6 @@ namespace cs::features::terrain_shadows
 		std::tuple{
 			settings::Field{ "enabled", "Enable terrain shadows.", &Settings::enabled },
 			settings::Field{ "downsample_factor", "Heightmap resolution divisor; 4 uses one-sixteenth the VRAM of 1.", &Settings::downsampleFactor,
-				settings::Range{ kDownsampleFactors.front(), kDownsampleFactors.back() } }
-		}
+				settings::Range{ kDownsampleFactors.front(), kDownsampleFactors.back() } } }
 	};
 }

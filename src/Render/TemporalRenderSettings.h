@@ -55,7 +55,6 @@ namespace cs::render::temporal
 			settings::Field{ "preset_dlss", "DLSS preset: 0 Default, 1 J, 2 K, 3 L, 4 M.", &UpscalingSettings::presetDLSS, settings::Range{ 0u, 4u } },
 			settings::Field{ "sharpness_fsr", "FSR sharpening strength.", &UpscalingSettings::sharpnessFSR, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "sharpness_enabled_dlss", "Enable DLSS sharpening.", &UpscalingSettings::sharpnessEnabledDLSS },
-			settings::Field{ "sharpness_dlss", "DLSS sharpening strength.", &UpscalingSettings::sharpnessDLSS, settings::Range{ 0.0f, 1.0f } }
-		}
+			settings::Field{ "sharpness_dlss", "DLSS sharpening strength.", &UpscalingSettings::sharpnessDLSS, settings::Range{ 0.0f, 1.0f } } }
 	};
 }

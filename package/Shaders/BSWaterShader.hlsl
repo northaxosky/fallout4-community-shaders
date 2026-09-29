@@ -7,67 +7,67 @@ cbuffer PerFrame : register(b12)
 
 #ifdef BSWATER_VERTEX_SHADER
 
-#define WorldToView (float3x4(perFrame[0], perFrame[1], perFrame[2]))
-#define PosAdjust (perFrame[35])
+#	define WorldToView (float3x4(perFrame[0], perFrame[1], perFrame[2]))
+#	define PosAdjust (perFrame[35])
 
-#if defined(NORMAL_TEXCOORD) || defined(WADING)
-#define HAS_TEXCOORD
-#endif
-#if !defined(FOG) && !defined(STENCIL) && !defined(STENCIL_DISPLACEMENT)
-#define HAS_SURFACE
-#endif
-#if !defined(STENCIL) && !defined(STENCIL_DISPLACEMENT)
-#if defined(VERTEX_ALPHA_DEPTH) || defined(WADING)
-#define HAS_VERTEX_DEPTH
-#endif
-#endif
-#if !defined(LOD) && !defined(SPECULAR)
-#define HAS_OBJECT_POSITION
-#endif
+#	if defined(NORMAL_TEXCOORD) || defined(WADING)
+#		define HAS_TEXCOORD
+#	endif
+#	if !defined(FOG) && !defined(STENCIL) && !defined(STENCIL_DISPLACEMENT)
+#		define HAS_SURFACE
+#	endif
+#	if !defined(STENCIL) && !defined(STENCIL_DISPLACEMENT)
+#		if defined(VERTEX_ALPHA_DEPTH) || defined(WADING)
+#			define HAS_VERTEX_DEPTH
+#		endif
+#	endif
+#	if !defined(LOD) && !defined(SPECULAR)
+#		define HAS_OBJECT_POSITION
+#	endif
 
 struct VS_INPUT
 {
-	float4 Position : POSITION0;
-#ifdef HAS_TEXCOORD
-	float2 TexCoord : TEXCOORD0;
-#endif
-#ifdef VC
-	float4 Color : COLOR0;
-#endif
+	float4 Position: POSITION0;
+#	ifdef HAS_TEXCOORD
+	float2 TexCoord: TEXCOORD0;
+#	endif
+#	ifdef VC
+	float4 Color: COLOR0;
+#	endif
 };
 
 struct VS_OUTPUT
 {
-	float4 HPosition : SV_POSITION;
-	float4 TexCoord0 : TEXCOORD0;
-	float4 WPosition : POSITION0;
-#ifdef HAS_OBJECT_POSITION
-	float4 TexCoord4 : TEXCOORD4;
-#endif
-#ifdef HAS_SURFACE
-	float4 TexCoord1 : TEXCOORD1;
-#ifndef LOD
-	float4 TexCoord2 : TEXCOORD2;
-#endif
-#endif
-#ifdef HAS_VERTEX_DEPTH
-	float3 TexCoord3 : TEXCOORD3;
-#endif
-#ifdef HAS_SURFACE
-	float3 TexCoord5 : TEXCOORD5;
-#endif
-#ifdef CLIP_VOLUME
-	float ClipDistance : SV_ClipDistance0;
-#endif
+	float4 HPosition: SV_POSITION;
+	float4 TexCoord0: TEXCOORD0;
+	float4 WPosition: POSITION0;
+#	ifdef HAS_OBJECT_POSITION
+	float4 TexCoord4: TEXCOORD4;
+#	endif
+#	ifdef HAS_SURFACE
+	float4 TexCoord1: TEXCOORD1;
+#		ifndef LOD
+	float4 TexCoord2: TEXCOORD2;
+#		endif
+#	endif
+#	ifdef HAS_VERTEX_DEPTH
+	float3 TexCoord3: TEXCOORD3;
+#	endif
+#	ifdef HAS_SURFACE
+	float3 TexCoord5: TEXCOORD5;
+#	endif
+#	ifdef CLIP_VOLUME
+	float ClipDistance: SV_ClipDistance0;
+#	endif
 };
 
-#ifdef CLIP_VOLUME
+#	ifdef CLIP_VOLUME
 cbuffer PerTechnique : register(b0)
 {
 	float4 ClipVolumeCenter;
 	float4 ClipVolumeRadius;
 };
-#endif
+#	endif
 
 cbuffer PerMaterial : register(b1)
 {
@@ -94,19 +94,19 @@ VS_OUTPUT main(VS_INPUT input)
 	float3 worldPosition = mul(World, inputPosition);
 	vsout.TexCoord0 = float4(worldPosition, length(worldPosition));
 	vsout.WPosition.xyz = worldPosition;
-#ifdef HAS_OBJECT_POSITION
+#	ifdef HAS_OBJECT_POSITION
 	vsout.TexCoord4 = inputPosition;
-#endif
+#	endif
 
-#ifdef HAS_SURFACE
-#ifdef NORMAL_TEXCOORD
+#	ifdef HAS_SURFACE
+#		ifdef NORMAL_TEXCOORD
 	float3 vertexScale = NormalsScale * 0.001;
 	float4 vertexUv01 = input.TexCoord.xyxy / vertexScale.xxyy;
 	float2 vertexUv2 = input.TexCoord / vertexScale.z;
-#else
+#		else
 	float4 vertexUv01 = 0;
 	float2 vertexUv2 = 0;
-#endif
+#		endif
 	float2 worldUv = worldPosition.xy + PosAdjust.xy;
 	float4 worldUv01 = worldUv.xyxy / NormalsScale.xxyy;
 	float2 worldUv2 = worldUv / NormalsScale.z;
@@ -114,33 +114,33 @@ VS_OUTPUT main(VS_INPUT input)
 	float4 normalUv12 = UseVertexTexCoord ? float4(vertexUv01.zw, vertexUv2) : float4(worldUv01.zw, worldUv2);
 	vsout.TexCoord1.xy = normalUv0 + NormalsScroll01.xy;
 	vsout.TexCoord1.zw = normalUv12.xy + NormalsScroll01.zw;
-#ifndef LOD
+#		ifndef LOD
 	vsout.TexCoord2.xy = normalUv12.zw + NormalsScroll2.xy;
 	vsout.TexCoord2.z = hposition.w;
 	vsout.TexCoord2.w = 0;
-#endif
-#endif
+#		endif
+#	endif
 
-#ifdef HAS_VERTEX_DEPTH
-#ifdef WADING
+#	ifdef HAS_VERTEX_DEPTH
+#		ifdef WADING
 	vsout.TexCoord3.xy = input.TexCoord;
-#else
+#		else
 	vsout.TexCoord3.xy = 0;
-#endif
-#ifdef VERTEX_ALPHA_DEPTH
+#		endif
+#		ifdef VERTEX_ALPHA_DEPTH
 	vsout.TexCoord3.z = input.Color.w;
-#else
+#		else
 	vsout.TexCoord3.z = 0;
-#endif
-#endif
+#		endif
+#	endif
 
-#ifdef HAS_SURFACE
+#	ifdef HAS_SURFACE
 	vsout.TexCoord5 = mul(WorldToView, float4(worldPosition, 1.0));
-#endif
+#	endif
 
-#ifdef CLIP_VOLUME
+#	ifdef CLIP_VOLUME
 	vsout.ClipDistance = length((worldPosition - ClipVolumeCenter.xyz) / ClipVolumeRadius.xyz) - 1.0;
-#endif
+#	endif
 
 	return vsout;
 }
@@ -148,12 +148,12 @@ VS_OUTPUT main(VS_INPUT input)
 
 #ifdef BSWATER_PIXEL_SHADER
 
-#ifdef DYNAMIC_CUBEMAPS
+#	ifdef DYNAMIC_CUBEMAPS
 // FO4 water compiles without upstream's WATER permutation define.
-#define WATER
-#include "DynamicCubemaps/DynamicCubemaps.hlsli"
+#		define WATER
+#		include "DynamicCubemaps/DynamicCubemaps.hlsli"
 SamplerState sampler3 : register(s3);
-#endif
+#	endif
 
 cbuffer PerGeometry : register(b0)
 {
@@ -165,17 +165,17 @@ cbuffer PerMaterial : register(b1)
 	float4 perMaterial[14];
 };
 
-#ifdef SPECULAR
+#	ifdef SPECULAR
 cbuffer PerTechnique : register(b2)
 {
 	float4 perTechnique[NUM_SPECULAR_LIGHTS + 15];
 };
-#else
+#	else
 cbuffer PerTechnique : register(b2)
 {
 	float4 perTechnique[5];
 };
-#endif
+#	endif
 
 SamplerState sampler1 : register(s1);
 SamplerState sampler2 : register(s2);
@@ -196,38 +196,38 @@ Texture2D<float4> texture9 : register(t9);
 Texture2D<float4> texture10 : register(t10);
 Texture2D<float4> texture11 : register(t11);
 
-#if defined(STENCIL) || defined(STENCIL_DISPLACEMENT) || defined(FOG)
-#define BSWATER_FLAT_INPUT
-#endif
+#	if defined(STENCIL) || defined(STENCIL_DISPLACEMENT) || defined(FOG)
+#		define BSWATER_FLAT_INPUT
+#	endif
 
-#if defined(SSLR) && !defined(REFLECTIONS)
-#define BSWATER_SSLR_RAY
-#endif
+#	if defined(SSLR) && !defined(REFLECTIONS)
+#		define BSWATER_SSLR_RAY
+#	endif
 
-#if !defined(BSWATER_FLAT_INPUT) && !defined(LOD) && !defined(SPECULAR)
-#define BSWATER_SURFACE
-#endif
+#	if !defined(BSWATER_FLAT_INPUT) && !defined(LOD) && !defined(SPECULAR)
+#		define BSWATER_SURFACE
+#	endif
 
 struct PS_INPUT
 {
-	float4 screenPosition : SV_POSITION;
-	float4 eyeVector : TEXCOORD0;
-	float4 worldPosition : POSITION0;
-#if !defined(SPECULAR) && !defined(LOD)
-	float4 texcoord4 : TEXCOORD4;
-#endif
-#ifndef BSWATER_FLAT_INPUT
-	float4 normalUv01 : TEXCOORD1;
-#ifndef LOD
-	float4 normalUv2 : TEXCOORD2;
-#if defined(WADING) || defined(VERTEX_ALPHA_DEPTH)
-#ifndef SPECULAR
-	float3 displacement : TEXCOORD3;
-#endif
-#endif
-#endif
-	float3 eyeToPosition : TEXCOORD5;
-#endif
+	float4 screenPosition: SV_POSITION;
+	float4 eyeVector: TEXCOORD0;
+	float4 worldPosition: POSITION0;
+#	if !defined(SPECULAR) && !defined(LOD)
+	float4 texcoord4: TEXCOORD4;
+#	endif
+#	ifndef BSWATER_FLAT_INPUT
+	float4 normalUv01: TEXCOORD1;
+#		ifndef LOD
+	float4 normalUv2: TEXCOORD2;
+#			if defined(WADING) || defined(VERTEX_ALPHA_DEPTH)
+#				ifndef SPECULAR
+	float3 displacement: TEXCOORD3;
+#				endif
+#			endif
+#		endif
+	float3 eyeToPosition: TEXCOORD5;
+#	endif
 };
 
 float3 sceneDepthPosition(float2 screenUv)
@@ -283,14 +283,14 @@ float3 blendedNormal(float2 uv0, float2 uv1, float2 uv2, float fade)
 
 float normalStrength(float shoreFade)
 {
-#ifdef UNDERWATER
+#	ifdef UNDERWATER
 	return perMaterial[11].y;
-#else
+#	else
 	return (1.0 - smoothstep(perMaterial[11].w, perMaterial[11].z, shoreFade)) * perMaterial[11].y;
-#endif
+#	endif
 }
 
-#ifdef BSWATER_SURFACE
+#	ifdef BSWATER_SURFACE
 
 float3 refractedScene(float2 screenPosition, float3 normal, out float3 unclipped)
 {
@@ -307,7 +307,7 @@ float3 refractedScene(float2 screenPosition, float3 normal, out float3 unclipped
 	return (abs(stencil - 2.0) < 0.25 || abs(stencil - 3.0) < 0.25) ? refracted : direct;
 }
 
-#endif
+#	endif
 
 float3 surfaceColor(
 	float slope,
@@ -317,8 +317,8 @@ float3 surfaceColor(
 {
 	float3 color = lerp(perMaterial[3].xyz, perMaterial[4].xyz, saturate(slope + 0.75));
 	color = lerp(color, perMaterial[5].xyz, saturate(slope * 1.9 + 0.35));
-#if defined(REFLECTIONS)
-#ifdef DYNAMIC_CUBEMAPS
+#	if defined(REFLECTIONS)
+#		ifdef DYNAMIC_CUBEMAPS
 	if (SharedData::dynamicCubemapsSettings.Enabled != 0) {
 		const float skylightingSpecular = 1.0;
 		float3 dynamicCubemap;
@@ -343,13 +343,13 @@ float3 surfaceColor(
 		// FO4 reflection permutations shade the sky gradient instead of sampling a reflection cube.
 		color = lerp(dynamicCubemap, color, reflectionAmount);
 	}
-#endif
-#ifdef SSLR
+#		endif
+#		ifdef SSLR
 	float2 clamped = min(screenUv, perGeometry[1].xy);
 	float4 reflection = lerp(texture9.SampleLevel(sampler9, clamped, 0.0), texture10.SampleLevel(sampler10, clamped, 0.0), perGeometry[7].x);
 	color = lerp(color, reflection.xyz, reflection.w);
-#endif
-#endif
+#		endif
+#	endif
 	return color;
 }
 
@@ -379,27 +379,27 @@ float3 atmosphere(float3 eyeToPosition, out float alpha)
 	return fog;
 }
 
-#ifdef STENCIL
+#	ifdef STENCIL
 float4 main(PS_INPUT input) : SV_Target0
 {
 	return float4(0.0, 0.0, 0.0, 0.0078432);
 }
-#endif
+#	endif
 
-#ifdef STENCIL_DISPLACEMENT
+#	ifdef STENCIL_DISPLACEMENT
 float4 main(PS_INPUT input) : SV_Target0
 {
 	return float4(0.0, 0.0, 0.0, 0.0117648);
 }
-#endif
+#	endif
 
-#ifdef FOG
-#ifdef UNDERWATER
+#	ifdef FOG
+#		ifdef UNDERWATER
 float4 main(PS_INPUT input) : SV_Target0
 {
 	return float4(0.0, 0.0, 0.0, 0.0);
 }
-#else
+#		else
 float4 main(PS_INPUT input) : SV_Target0
 {
 	float3 viewDirection = normalize(input.eyeVector.xyz);
@@ -418,10 +418,10 @@ float4 main(PS_INPUT input) : SV_Target0
 	color.xyz = lerp(perMaterial[1].xyz, perMaterial[0].xyz, smoothstep(perMaterial[13].y, perMaterial[13].x, verticalAlpha));
 	return color;
 }
-#endif
-#endif
+#		endif
+#	endif
 
-#if defined(LOD) && !defined(BSWATER_SSLR_RAY)
+#	if defined(LOD) && !defined(BSWATER_SSLR_RAY)
 
 float4 main(PS_INPUT input) : SV_Target0
 {
@@ -447,19 +447,15 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 eyeDirection = normalize(input.eyeVector.xyz);
 	float3 reflectionDirection = reflect(eyeDirection, normal);
 	float slope = reflectionDirection.z;
-	float3 color = lerp(perMaterial[2].xyz, surfaceColor(
-		slope,
-		input.screenPosition.xy * perGeometry[0].xy,
-		reflectionDirection,
-		input.eyeVector.w), perMaterial[2].w) + lighting;
+	float3 color = lerp(perMaterial[2].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, reflectionDirection, input.eyeVector.w), perMaterial[2].w) + lighting;
 	float fogAlpha;
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	fog = lerp(fog, perGeometry[3].xyz, sunGlare);
 	return float4(lerp(color, fog, fogAlpha), 0.0);
 }
 
-#endif
-#if defined(SPECULAR) && !defined(BSWATER_SSLR_RAY)
+#	endif
+#	if defined(SPECULAR) && !defined(BSWATER_SSLR_RAY)
 
 float4 main(PS_INPUT input) : SV_Target0
 {
@@ -470,11 +466,11 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 normal = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
 	normal = normalize(lerp(float3(0.0, 0.0, 1.0), normalize(normal), strength));
 
-#ifdef UNDERWATER
+#		ifdef UNDERWATER
 	float grazing = 1.0 - saturate(dot(-eyeDirection, -normal));
-#else
+#		else
 	float grazing = 1.0 - saturate(dot(-eyeDirection, normal));
-#endif
+#		endif
 	float fresnel = fresnelTerm(grazing);
 
 	float3 specular = 0.0;
@@ -489,10 +485,10 @@ float4 main(PS_INPUT input) : SV_Target0
 	return float4(specular * fresnel, 1.0);
 }
 
-#endif
-#ifdef BSWATER_SURFACE
+#	endif
+#	ifdef BSWATER_SURFACE
 
-#ifdef WADING
+#		ifdef WADING
 float3 displacedNormal(float2 uv, float3 surface)
 {
 	float3 wave;
@@ -501,21 +497,21 @@ float3 displacedNormal(float2 uv, float3 surface)
 	wave = normalize(wave);
 	return lerp(wave, surface, wave.z);
 }
-#endif
+#		endif
 
-#endif
+#	endif
 
-#if defined(BSWATER_SURFACE) && defined(UNDERWATER) && !defined(BSWATER_SSLR_RAY)
+#	if defined(BSWATER_SURFACE) && defined(UNDERWATER) && !defined(BSWATER_SSLR_RAY)
 
 float4 main(PS_INPUT input) : SV_Target0
 {
 	float fade = saturate((input.eyeVector.w - 8192.0) / (perMaterial[10].x - 8192.0));
 	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
-#ifdef WADING
+#		ifdef WADING
 	float3 normal = displacedNormal(input.displacement.xy, normalize(blended));
-#else
+#		else
 	float3 normal = normalize(blended);
-#endif
+#		endif
 	normal = normalize(lerp(float3(0.0, 0.0, 1.0), normal, normalStrength(1.0)));
 
 	float3 unclipped;
@@ -524,44 +520,40 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 reflectionDirection = reflect(eyeDirection, normal);
 	float slope = reflectionDirection.z;
 	float grazing = 1.0 - saturate(dot(-eyeDirection, -normal));
-	float3 water = lerp(perMaterial[0].xyz, surfaceColor(
-		slope,
-		input.screenPosition.xy * perGeometry[0].xy,
-		reflectionDirection,
-		input.eyeVector.w), 0.5);
+	float3 water = lerp(perMaterial[0].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, reflectionDirection, input.eyeVector.w), 0.5);
 	return float4(lerp(water, refraction, 1.0 - fresnelTerm(grazing)), 0.0);
 }
 
-#endif
-#ifdef BSWATER_SSLR_RAY
+#	endif
+#	ifdef BSWATER_SSLR_RAY
 
 struct PS_OUTPUT_SSLR
 {
-	float3 ray : SV_Target0;
-	float4 depth : SV_Target1;
+	float3 ray: SV_Target0;
+	float4 depth: SV_Target1;
 };
 
-#if defined(LOD)
-#define BSWATER_RAY_LOD
-#elif defined(UNDERWATER)
-#define BSWATER_RAY_UNDERWATER
-#else
-#define BSWATER_RAY_SURFACE
-#endif
+#		if defined(LOD)
+#			define BSWATER_RAY_LOD
+#		elif defined(UNDERWATER)
+#			define BSWATER_RAY_UNDERWATER
+#		else
+#			define BSWATER_RAY_SURFACE
+#		endif
 
-#ifndef WADING
-#ifdef BSWATER_RAY_SURFACE
+#		ifndef WADING
+#			ifdef BSWATER_RAY_SURFACE
 float stencilTap(uint2 texel)
 {
 	return texture11.Load(int3(texel, 0)).w;
 }
-#else
+#			else
 bool stencilCovered(uint2 texel)
 {
 	return abs(texture11.Load(int3(texel, 0)).w * 255.0 - 3.0) < 0.25;
 }
-#endif
-#endif
+#			endif
+#		endif
 
 float4 toClip(float3 world)
 {
@@ -576,22 +568,22 @@ float4 toClip(float3 world)
 
 PS_OUTPUT_SSLR main(PS_INPUT input)
 {
-#ifdef BSWATER_RAY_SURFACE
+#		ifdef BSWATER_RAY_SURFACE
 	float3 eyeDirection = normalize(input.eyeVector.xyz);
 	float fade = saturate((input.eyeVector.w - 8192.0) / (perMaterial[10].x - 8192.0));
-#endif
+#		endif
 
-#ifdef SPECULAR
+#		ifdef SPECULAR
 	float2 screenUv = perGeometry[0].xy;
-#else
+#		else
 	float2 screenUv = input.screenPosition.xy * perGeometry[0].xy;
-#endif
+#		endif
 
-#ifndef WADING
+#		ifndef WADING
 	float2 size;
 	texture11.GetDimensions(size.x, size.y);
 	float2 base = floor(screenUv * size);
-#ifdef BSWATER_RAY_SURFACE
+#			ifdef BSWATER_RAY_SURFACE
 	uint2 baseTexel = uint2(base);
 	uint2 downTexel = uint2(base + float2(0.0, 1.0));
 	uint2 rightTexel = uint2(base + float2(1.0, 0.0));
@@ -605,7 +597,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	bool coveredRight = abs(rawRight * 255.0 - 3.0) < 0.25;
 	bool coveredCorner = abs(rawCorner * 255.0 - 3.0) < 0.25;
 	bool covered = coveredBase && coveredDown && coveredRight && coveredCorner;
-#else
+#			else
 	bool covered = stencilCovered(uint2(base));
 	float2 down = base + float2(0.0, 1.0);
 	float2 right = base + float2(1.0, 0.0);
@@ -613,11 +605,11 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	covered = covered && stencilCovered(uint2(down));
 	covered = covered && stencilCovered(uint2(right));
 	covered = covered && stencilCovered(corner);
-#endif
+#			endif
 	clip(covered ? -1.0 : 1.0);
-#endif
+#		endif
 
-#ifdef BSWATER_RAY_LOD
+#		ifdef BSWATER_RAY_LOD
 	float4 startClip = toClip(input.eyeToPosition);
 	float3 start = startClip.xyz / startClip.w;
 	float3 startScreen = start * float3(0.5, -0.5, 1.0) + float3(0.5, 0.5, 0.0);
@@ -625,12 +617,12 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float3 normal = unpackNormal(texture4.Sample(sampler4, input.normalUv01.xy).xy);
 	normal = lerp(float3(0.0, 0.0, 1.0), lerp(float3(0.0, 0.0, 1.0), normal, perMaterial[9].x), 0.5 * perMaterial[11].y);
 	normal = normalize(normal);
-#elif defined(BSWATER_RAY_UNDERWATER)
+#		elif defined(BSWATER_RAY_UNDERWATER)
 	float fade = saturate((input.eyeVector.w - 8192.0) / (perMaterial[10].x - 8192.0));
 	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
 	float3 normal = normalize(blended);
 	normal = normalize(lerp(float3(0.0, 0.0, 1.0), normal, 0.5 * normalStrength(1.0)));
-#else
+#		else
 	float3 hit = -eyeDirection * length(sceneDepthPosition(screenUv));
 	float planeDistance = dot(hit, perTechnique[4].xyz);
 	float submersion = 1.0 - perTechnique[4].w / planeDistance;
@@ -638,15 +630,15 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 
 	float strength = 0.5 * normalStrength(shore);
 	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
-#ifdef WADING
+#			ifdef WADING
 	float3 normal = displacedNormal(input.displacement.xy, normalize(blended));
-#else
+#			else
 	float3 normal = normalize(blended);
-#endif
+#			endif
 	normal = normalize(lerp(float3(0.0, 0.0, 1.0), normal, strength));
-#endif
+#		endif
 
-#ifdef BSWATER_RAY_SURFACE
+#		ifdef BSWATER_RAY_SURFACE
 	float3 viewDirection = normalize(-input.eyeToPosition);
 
 	float3 viewNormal;
@@ -669,7 +661,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float3 endScreen = end * float3(0.5, -0.5, 1.0) + float3(0.5, 0.5, 0.0);
 	float3 delta = endScreen - startScreen;
 	float2 rayUv = -end.z * (delta.xy * (1.0 / delta.z)) + endUv;
-#else
+#		else
 	float3 viewNormal;
 	viewNormal.x = dot(perFrame[0], float4(normal, 1.0));
 	viewNormal.y = dot(perFrame[1], float4(normal, 1.0));
@@ -684,13 +676,13 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float3 end = endClip.xyz / endClip.w;
 	float2 endUv = end.xy * float2(0.5, -0.5) + float2(0.5, 0.5);
 	float3 endScreen = end * float3(0.5, -0.5, 1.0) + float3(0.5, 0.5, 0.0);
-#ifdef BSWATER_RAY_UNDERWATER
+#			ifdef BSWATER_RAY_UNDERWATER
 	float4 startClip = toClip(input.eyeToPosition);
 	float3 start = startClip.xyz / startClip.w;
 	float3 startScreen = start * float3(0.5, -0.5, 1.0) + float3(0.5, 0.5, 0.0);
-#endif
+#			endif
 	float3 delta = endScreen - startScreen;
-#endif
+#		endif
 
 	float3 ray;
 	ray.xy = -end.z * (delta.xy * (1.0 / delta.z)) + endUv;
@@ -703,8 +695,8 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	return output;
 }
 
-#endif
-#if defined(BSWATER_SURFACE) && !defined(UNDERWATER) && !defined(BSWATER_SSLR_RAY)
+#	endif
+#	if defined(BSWATER_SURFACE) && !defined(UNDERWATER) && !defined(BSWATER_SSLR_RAY)
 
 float4 main(PS_INPUT input) : SV_Target0
 {
@@ -712,31 +704,31 @@ float4 main(PS_INPUT input) : SV_Target0
 	float fade = saturate((input.eyeVector.w - 8192.0) / (perMaterial[10].x - 8192.0));
 	float2 screenUv = input.screenPosition.xy * perGeometry[0].xy;
 
-#if defined(VERTEX_ALPHA_DEPTH)
+#		if defined(VERTEX_ALPHA_DEPTH)
 	float depthAlpha = input.displacement.z;
 	float shoreAlpha = input.displacement.z;
-#elif defined(DEPTH)
+#		elif defined(DEPTH)
 	float3 behind = -eyeDirection * length(sceneDepthPosition(screenUv));
 	float planeDistance = dot(behind, perTechnique[4].xyz);
 	float rayLength = length(behind);
 	float submersion = 1.0 - perTechnique[4].w / planeDistance;
 	float depthAlpha = saturate(1.0 - submersion * rayLength / perMaterial[10].w);
 	float shoreAlpha = saturate(1.0 - submersion * abs(planeDistance) / perMaterial[10].w);
-#else
+#		else
 	float depthAlpha = saturate(perMaterial[8].z - (fade - 1.0) * (1.0 - perMaterial[8].z));
 	float shoreAlpha = 1.0 - depthAlpha;
-#endif
+#		endif
 
 	float opacity = pow(1.0 - smoothstep(perMaterial[12].y, perMaterial[12].x, depthAlpha), 0.33);
 	float tint = lerp(perMaterial[12].z, perMaterial[12].w, opacity);
 	float shoreBlend = smoothstep(perMaterial[11].x, 1.0, shoreAlpha);
 	float strength = normalStrength(shoreAlpha);
 	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
-#ifdef WADING
+#		ifdef WADING
 	float3 normal = displacedNormal(input.displacement.xy, normalize(blended));
-#else
+#		else
 	float3 normal = normalize(blended);
-#endif
+#		endif
 	normal = normalize(lerp(float3(0.0, 0.0, 1.0), normal, strength));
 
 	float grazing = 1.0 - saturate(dot(-eyeDirection, normal));
@@ -762,7 +754,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 viewDirection = normalize(-input.eyeToPosition);
 	float sunGlare = pow(max(dot(-viewDirection, perGeometry[2].xyz), 0.0), perGeometry[3].w) * perGeometry[2].w;
 	fog = lerp(fog, perGeometry[3].xyz, sunGlare);
-#ifndef INTERIOR
+#		ifndef INTERIOR
 	float3 lightColor = perGeometry[2].w * perGeometry[3].xyz;
 	float3 ambient = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
 	ambient = ambient * perMaterial[10].z;
@@ -774,17 +766,17 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 reflected = reflect(-viewDirection, viewNormal);
 	float3 specular = pow(saturate(dot(reflected, perGeometry[2].xyz)), perMaterial[8].x) * lightColor;
 	float3 lighting = specular * perMaterial[1].w + ambient;
-#endif
+#		endif
 
 	float3 color = lerp(refraction, water, fresnel * perMaterial[8].y);
 	color = lerp(tinted, color, fade);
-#ifndef INTERIOR
+#		ifndef INTERIOR
 	color = color + lighting;
-#endif
+#		endif
 
 	color = lerp(color, unclipped, shoreBlend);
 	return float4(lerp(color, fog, fogAlpha), 0.0);
 }
 
-#endif
+#	endif
 #endif

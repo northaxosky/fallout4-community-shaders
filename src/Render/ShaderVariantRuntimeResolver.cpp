@@ -8,10 +8,10 @@ namespace cs::engine
 	{
 		__declspec(noinline)
 		std::optional<ShaderVariantKeyView>
-			ResolvePixelShaderVariantFormulaForIdentity(
-				std::string_view a_subclass,
-				std::uint32_t a_techniqueBits,
-				bool a_tiledLighting) noexcept
+		ResolvePixelShaderVariantFormulaForIdentity(
+			std::string_view a_subclass,
+			std::uint32_t a_techniqueBits,
+			bool a_tiledLighting) noexcept
 		{
 			volatile std::uint32_t stableTechnique =
 				a_techniqueBits;
@@ -63,16 +63,16 @@ namespace cs::engine
 			a_subclass == "BSDFCompositeShader" && QueryTiledLightingEnabled();
 		const auto variant =
 			ResolvePixelShaderVariantFormulaForIdentity(
-			a_subclass,
-			a_techniqueBits,
-			tiledLighting);
+				a_subclass,
+				a_techniqueBits,
+				tiledLighting);
 		if (variant)
 			route.pluginResolvedPsid = variant->id;
 		return route;
 	}
 
 	PixelShaderRuntimeResolverCodeAddresses
-		GetPixelShaderRuntimeResolverCodeAddresses() noexcept
+	GetPixelShaderRuntimeResolverCodeAddresses() noexcept
 	{
 		return {
 			reinterpret_cast<std::uintptr_t>(

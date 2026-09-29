@@ -16,10 +16,10 @@ namespace cs
 			UINT a_constantBufferCount = 8) noexcept;
 		~ComputeScope() noexcept;
 
-		ComputeScope(const ComputeScope&)            = delete;
+		ComputeScope(const ComputeScope&) = delete;
 		ComputeScope& operator=(const ComputeScope&) = delete;
-		ComputeScope(ComputeScope&&)                 = delete;
-		ComputeScope& operator=(ComputeScope&&)      = delete;
+		ComputeScope(ComputeScope&&) = delete;
+		ComputeScope& operator=(ComputeScope&&) = delete;
 
 	private:
 		ID3D11DeviceContext* _ctx;

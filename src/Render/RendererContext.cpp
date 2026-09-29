@@ -15,7 +15,8 @@ namespace cs::engine
 
 	void CopyResourcePreservingOM(ID3D11DeviceContext* a_ctx, ID3D11Resource* a_dst, ID3D11Resource* a_src) noexcept
 	{
-		if (!a_ctx || !a_dst || !a_src) return;
+		if (!a_ctx || !a_dst || !a_src)
+			return;
 
 		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
 		ID3D11DepthStencilView* savedDSV = nullptr;
@@ -29,18 +30,22 @@ namespace cs::engine
 		a_ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
 
 		for (auto* rtv : savedRTVs) {
-			if (rtv) rtv->Release();
+			if (rtv)
+				rtv->Release();
 		}
-		if (savedDSV) savedDSV->Release();
+		if (savedDSV)
+			savedDSV->Release();
 	}
 
 	bool WaitForGpuIdle(ID3D11DeviceContext* a_ctx) noexcept
 	{
-		if (!a_ctx) return false;
+		if (!a_ctx)
+			return false;
 
 		ID3D11Device* device = nullptr;
 		a_ctx->GetDevice(&device);
-		if (!device) return false;
+		if (!device)
+			return false;
 
 		D3D11_QUERY_DESC queryDesc{};
 		queryDesc.Query = D3D11_QUERY_EVENT;
@@ -48,7 +53,8 @@ namespace cs::engine
 		ID3D11Query* query = nullptr;
 		const HRESULT createResult = device->CreateQuery(&queryDesc, &query);
 		device->Release();
-		if (FAILED(createResult) || !query) return false;
+		if (FAILED(createResult) || !query)
+			return false;
 		cs::render::annotation::SetName(query, "Render/GpuIdle.Query");
 
 		a_ctx->End(query);
@@ -57,7 +63,8 @@ namespace cs::engine
 		HRESULT result = S_FALSE;
 		while (result == S_FALSE) {
 			result = a_ctx->GetData(query, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
-			if (result == S_FALSE) SwitchToThread();
+			if (result == S_FALSE)
+				SwitchToThread();
 		}
 
 		query->Release();
@@ -69,7 +76,8 @@ namespace cs::engine
 		_savedRTVs{},
 		_savedDSV(nullptr)
 	{
-		if (!_ctx) return;
+		if (!_ctx)
+			return;
 		_ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _savedRTVs, &_savedDSV);
 		_ctx->OMSetRenderTargets(0, nullptr, nullptr);
 	}
@@ -80,8 +88,10 @@ namespace cs::engine
 			_ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _savedRTVs, _savedDSV);
 		}
 		for (auto* rtv : _savedRTVs) {
-			if (rtv) rtv->Release();
+			if (rtv)
+				rtv->Release();
 		}
-		if (_savedDSV) _savedDSV->Release();
+		if (_savedDSV)
+			_savedDSV->Release();
 	}
 }

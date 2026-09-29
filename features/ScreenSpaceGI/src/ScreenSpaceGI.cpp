@@ -1,8 +1,8 @@
 #include "ScreenSpaceGI.h"
 
+#include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
 #include <d3d11.h>
-#include <DearModdingUI/Client.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -22,15 +22,15 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
-#include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
-#include "Render/ShaderVariantRuntimeResolver.h"
-#include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
+#include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
+#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 
@@ -78,10 +78,10 @@ namespace cs::features
 
 			texture->GetDesc(&a_desc);
 			return a_desc.Width == a_width &&
-				a_desc.Height == a_height &&
-				a_desc.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
-				a_desc.ArraySize == 1 &&
-				a_desc.SampleDesc.Count == 1;
+			       a_desc.Height == a_height &&
+			       a_desc.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
+			       a_desc.ArraySize == 1 &&
+			       a_desc.SampleDesc.Count == 1;
 		}
 
 		bool IsFullResolutionMotion(
@@ -110,10 +110,10 @@ namespace cs::features
 			D3D11_TEXTURE2D_DESC desc{};
 			texture->GetDesc(&desc);
 			return desc.Width == a_width &&
-				desc.Height == a_height &&
-				desc.Format == DXGI_FORMAT_R16G16_FLOAT &&
-				desc.ArraySize == 1 &&
-				desc.SampleDesc.Count == 1;
+			       desc.Height == a_height &&
+			       desc.Format == DXGI_FORMAT_R16G16_FLOAT &&
+			       desc.ArraySize == 1 &&
+			       desc.SampleDesc.Count == 1;
 		}
 
 		std::unique_ptr<cs::buffer::Texture2D> CreateTexture(
@@ -277,9 +277,8 @@ namespace cs::features
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const ScreenSpaceGI&>(a_feature)
-						.GetOcclusionDebugTexture();
-				}
-			}
+			            .GetOcclusionDebugTexture();
+				} }
 		};
 		return views;
 	}
@@ -297,11 +296,7 @@ namespace cs::features
 			.unavailableText = "Buffer not allocated."
 		};
 		const auto& source = _upsampledLastFrame ? _aoUpsampledTex : _aoTex;
-		if (!_debugPreviewEnabled.load(std::memory_order_acquire)
-			|| !source
-			|| !source->srv
-			|| _allocW == 0
-			|| _allocH == 0) {
+		if (!_debugPreviewEnabled.load(std::memory_order_acquire) || !source || !source->srv || _allocW == 0 || _allocH == 0) {
 			return texture;
 		}
 		texture.texture = source->srv.get();
@@ -335,27 +330,20 @@ namespace cs::features
 		std::vector<cs::engine::ShaderSlotClaim> slotClaims;
 		slotClaims.reserve(kCompositionPSSlotCount);
 		for (std::uint32_t offset = 0; offset < kCompositionPSSlotCount; ++offset) {
-			slotClaims.push_back({
-				.stage = cs::engine::ShaderStage::kPixel,
+			slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 				.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-				.slot = kCompositionPSSlot + offset
-			});
+				.slot = kCompositionPSSlot + offset });
 		}
 
-		const bool registered = cs::engine::RegisterReplacement({
-			.targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
+		const bool registered = cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
 			.contributor = "ScreenSpaceGI",
 			.defines = {
-				{
-					cs::engine::shader_injection_defines::kScreenSpaceGi,
-					"1"
-				}
-			},
+				{ cs::engine::shader_injection_defines::kScreenSpaceGi,
+					"1" } },
 			.bind = [this](ID3D11DeviceContext* a_context) {
 				BindComposition(a_context);
 			},
-			.slotClaims = std::move(slotClaims)
-		});
+			.slotClaims = std::move(slotClaims) });
 		if (!registered) {
 			FailLoad(
 				"ScreenSpaceGI composes through the reconstructed BSDFComposite shader; "
@@ -365,24 +353,22 @@ namespace cs::features
 
 		_injectionRegistered.store(true, std::memory_order_release);
 		// The prepass carries 1 - vertexAO in MRT4 alpha for the composite.
-		if (!cs::engine::RegisterReplacement({
-				.targetId = cs::engine::ShaderInjectionTarget::kDeferredPrepass,
+		if (!cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kDeferredPrepass,
 				.contributor = "ScreenSpaceGI",
 				.defines = {
-					{
-						cs::engine::shader_injection_defines::kScreenSpaceGi,
-						"1"
-					}
-				} })) {
+					{ cs::engine::shader_injection_defines::kScreenSpaceGi,
+						"1" } } })) {
 			L->warn("Vertex AO is unavailable to SSGI; the deferred prepass replacement did not register.");
 		}
 		const bool compositionScopeRegistered =
 			cs::engine::RegisterPreDeferredComposite([] {
 				ScreenSpaceGI::GetSingleton()->SaveCompositionBindings();
-			}, cs::engine::HookPriority::Early)
-			&& cs::engine::RegisterPostDeferredComposite([] {
+			},
+				cs::engine::HookPriority::Early) &&
+			cs::engine::RegisterPostDeferredComposite([] {
 				ScreenSpaceGI::GetSingleton()->RestoreCompositionBindings();
-			}, cs::engine::HookPriority::Late);
+			},
+				cs::engine::HookPriority::Late);
 		if (!compositionScopeRegistered) {
 			FailLoad(
 				"ScreenSpaceGI needs a paired composite save and restore to hand its "
@@ -429,14 +415,15 @@ namespace cs::features
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		if (!_started.load(std::memory_order_acquire) || !a_device) return;
+		if (!_started.load(std::memory_order_acquire) || !a_device)
+			return;
 
 		auto compile = [](
-			winrt::com_ptr<ID3D11ComputeShader>& a_target,
-			const wchar_t* a_path,
-			const std::vector<std::pair<const char*, const char*>>& a_defines,
-			const char* a_label,
-			std::string_view a_name) {
+						   winrt::com_ptr<ID3D11ComputeShader>& a_target,
+						   const wchar_t* a_path,
+						   const std::vector<std::pair<const char*, const char*>>& a_defines,
+						   const char* a_label,
+						   std::string_view a_name) {
 			a_target.attach(reinterpret_cast<ID3D11ComputeShader*>(
 				cs::util::CompileShader(a_path, a_defines, "cs_5_0")));
 			if (!a_target) {
@@ -507,11 +494,11 @@ namespace cs::features
 	{
 		const auto& shaders = ActiveShaders();
 		const bool upsampleReady = _settings.resolutionMode == 0 ||
-			(shaders.upsample && _aoUpsampledTex && _bounceSHUpsampledTex && _bounceCoCgUpsampledTex);
+		                           (shaders.upsample && _aoUpsampledTex && _bounceSHUpsampledTex && _bounceCoCgUpsampledTex);
 		return shaders.prefilterDepth && shaders.prefilterNormal && shaders.ao && upsampleReady &&
-			_workingDepthTex && _normalTex && _aoTex &&
-			_noiseSRV && _pointClampSampler && _linearClampSampler && _xegtaoCB &&
-			_workingDepthMipUAVs[kMipCount - 1] && _normalMipUAVs[kMipCount - 1];
+		       _workingDepthTex && _normalTex && _aoTex &&
+		       _noiseSRV && _pointClampSampler && _linearClampSampler && _xegtaoCB &&
+		       _workingDepthMipUAVs[kMipCount - 1] && _normalMipUAVs[kMipCount - 1];
 	}
 
 	bool ScreenSpaceGI::IsTemporalReady() const noexcept
@@ -519,14 +506,14 @@ namespace cs::features
 		const auto& shaders = ActiveShaders();
 		const auto temporal = _settings.enableTemporalDenoiser ? 1u : 0u;
 		return shaders.gi[temporal] && shaders.radianceDisocc[temporal] &&
-			(!_settings.enableBlur || shaders.blur[temporal]) &&
-			shaders.prefilterRadiance &&
-			_radianceTempTex && _radianceTex && _radianceMipUAVs[kMipCount - 1] &&
-			_bounceSHRawTex && _bounceCoCgRawTex && _accumBlurTex &&
-			_bounceSHTex[0] && _bounceSHTex[1] &&
-			_bounceCoCgTex[0] && _bounceCoCgTex[1] &&
-			_accumTex[0] && _accumTex[1] &&
-			_prevGeoTex[0] && _prevGeoTex[1];
+		       (!_settings.enableBlur || shaders.blur[temporal]) &&
+		       shaders.prefilterRadiance &&
+		       _radianceTempTex && _radianceTex && _radianceMipUAVs[kMipCount - 1] &&
+		       _bounceSHRawTex && _bounceCoCgRawTex && _accumBlurTex &&
+		       _bounceSHTex[0] && _bounceSHTex[1] &&
+		       _bounceCoCgTex[0] && _bounceCoCgTex[1] &&
+		       _accumTex[0] && _accumTex[1] &&
+		       _prevGeoTex[0] && _prevGeoTex[1];
 	}
 	cs::ScreenSpaceGIFeatureData ScreenSpaceGI::GetCommonBufferData()
 	{
@@ -562,8 +549,8 @@ namespace cs::features
 		}
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* context = rendererData ?
-			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-			nullptr;
+		                    reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+		                    nullptr;
 		if (!context) {
 			return resourcesReady;
 		}
@@ -671,8 +658,8 @@ namespace cs::features
 			_allocH = height;
 			++_generation;
 			ResetHistory(hadResources ?
-				ssgi::HistoryResetReason::kResize :
-				ssgi::HistoryResetReason::kResourceCreate);
+							 ssgi::HistoryResetReason::kResize :
+							 ssgi::HistoryResetReason::kResourceCreate);
 			_resourcesReady.store(true, std::memory_order_release);
 			L->info("Resources ready ({}x{}, generation {}).", _allocW, _allocH, _generation);
 			return true;
@@ -1225,8 +1212,8 @@ namespace cs::features
 	{
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* context = rendererData ?
-			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-			nullptr;
+		                    reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+		                    nullptr;
 		if (!_compositionBindingSnapshot.Save(context, kCompositionPSSlot) &&
 			_compositionBindingSnapshot.IsSaved()) {
 			CS_LOG_ONCE(
@@ -1240,8 +1227,8 @@ namespace cs::features
 	{
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* context = rendererData ?
-			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-			nullptr;
+		                    reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+		                    nullptr;
 		_compositionBindingSnapshot.Restore(context);
 	}
 
@@ -1477,8 +1464,9 @@ namespace cs::features
 		}
 		dmui::ui::EndDisabled();
 
-		dmui::ui::Separator();		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
-			(_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
+		dmui::ui::Separator();
+		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
+		                                                                           (_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
 		dmui::ui::TextDisabled(
 			"Resources: %s (%ux%u) | composition binds: %u | generation: %u",
 			status,

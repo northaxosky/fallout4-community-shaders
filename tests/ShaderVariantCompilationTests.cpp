@@ -162,9 +162,7 @@ namespace
 			attempts.load(std::memory_order_relaxed) == 1,
 			"concurrent requests started more than one compile");
 		Check(
-			handles.front()->GetState()
-					== ShaderVariantCompilationState::kPending
-				&& !handles.front()->Acquire(),
+			handles.front()->GetState() == ShaderVariantCompilationState::kPending && !handles.front()->Acquire(),
 			"pending compilation blocked or returned a shader");
 
 		{
@@ -209,9 +207,7 @@ namespace
 			"failed compilation did not become terminal");
 		const auto repeated = cache->Request(Request(a_device));
 		Check(
-			repeated == failed
-				&& attempts.load(std::memory_order_relaxed) == 1
-				&& failed->GetError() == "controlled compiler failure",
+			repeated == failed && attempts.load(std::memory_order_relaxed) == 1 && failed->GetError() == "controlled compiler failure",
 			"terminal failure was retried or lost its diagnostic");
 
 		cache->Invalidate();
@@ -220,9 +216,7 @@ namespace
 			retried != failed,
 			"invalidation reused the terminal failure handle");
 		Check(
-			WaitForState(retried, ShaderVariantCompilationState::kReady)
-				&& attempts.load(std::memory_order_relaxed) == 2
-				&& generations[1] > generations[0],
+			WaitForState(retried, ShaderVariantCompilationState::kReady) && attempts.load(std::memory_order_relaxed) == 2 && generations[1] > generations[0],
 			"invalidation did not permit exactly one fresh generation attempt");
 	}
 
@@ -243,8 +237,7 @@ namespace
 				});
 			const auto failed = cache->Request(Request(a_device));
 			Check(
-				WaitForState(failed, ShaderVariantCompilationState::kFailed)
-					&& !failed->GetError().empty(),
+				WaitForState(failed, ShaderVariantCompilationState::kFailed) && !failed->GetError().empty(),
 				"compiler exception did not publish a failed diagnostic");
 			Check(
 				cache->Request(Request(a_device)) == failed && attempts == 1,

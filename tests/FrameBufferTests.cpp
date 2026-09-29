@@ -24,8 +24,7 @@ namespace
 		double a_tolerance,
 		std::string_view a_message)
 	{
-		if (!std::isfinite(a_actual)
-			|| std::abs(a_actual - a_expected) > a_tolerance) {
+		if (!std::isfinite(a_actual) || std::abs(a_actual - a_expected) > a_tolerance) {
 			std::cerr << "FAIL: " << a_message << " (actual " << a_actual
 					  << ", expected " << a_expected << ")\n";
 			++failures;
@@ -99,9 +98,7 @@ namespace
 		CheckNear(direction.z, 0.0, 1e-5, "direction z is the row-2 dot");
 
 		const auto length = std::sqrt(
-			static_cast<double>(direction.x) * direction.x
-			+ static_cast<double>(direction.y) * direction.y
-			+ static_cast<double>(direction.z) * direction.z);
+			static_cast<double>(direction.x) * direction.x + static_cast<double>(direction.y) * direction.y + static_cast<double>(direction.z) * direction.z);
 		CheckNear(length, 1.0, 1e-5, "directions come back normalised");
 
 		const DirectX::XMFLOAT3 degenerate{ 0.0f, 0.0f, 0.0f };

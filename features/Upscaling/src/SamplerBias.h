@@ -27,13 +27,13 @@ namespace cs::features
 		bool CacheOriginalsIfTableLive() noexcept;
 
 		ID3D11SamplerState** _samplerTable = nullptr;
-		std::array<ID3D11SamplerState*, kSamplerCount>                _originalSamplers{};
+		std::array<ID3D11SamplerState*, kSamplerCount> _originalSamplers{};
 		std::array<winrt::com_ptr<ID3D11SamplerState>, kSamplerCount> _biasedSamplers{};
 
 		float _mipBias = 0.0f;
 		float _builtMipBias = 1.0f;  // sentinel above any real bias forces the first build
-		bool  _originalsCached = false;
-		bool  _hasBiased = false;
-		bool  _overridden = false;
+		bool _originalsCached = false;
+		bool _hasBiased = false;
+		bool _overridden = false;
 	};
 }

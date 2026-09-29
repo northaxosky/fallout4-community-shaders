@@ -39,7 +39,7 @@ namespace cs::features::terrain_shadows
 
 	struct HeightMapMetadata
 	{
-		std::string     worldspace;
+		std::string worldspace;
 		HeightMapSource source = HeightMapSource::kXLodGen;
 		std::array<float, 3> pos0{};
 		std::array<float, 3> pos1{};
@@ -99,17 +99,8 @@ namespace cs::features::terrain_shadows
 		const HeightMapMetadata& a_metadata) noexcept
 	{
 		const bool finite =
-			std::isfinite(a_metadata.pos0[0]) && std::isfinite(a_metadata.pos0[1])
-			&& std::isfinite(a_metadata.pos0[2]) && std::isfinite(a_metadata.pos1[0])
-			&& std::isfinite(a_metadata.pos1[1]) && std::isfinite(a_metadata.pos1[2])
-			&& std::isfinite(a_metadata.zRange[0])
-			&& std::isfinite(a_metadata.zRange[1]);
-		return finite
-			&& !a_metadata.worldspace.empty()
-			&& a_metadata.pos1[0] > a_metadata.pos0[0]
-			&& a_metadata.pos0[1] > a_metadata.pos1[1]
-			&& a_metadata.pos1[2] > a_metadata.pos0[2]
-			&& a_metadata.zRange[1] > a_metadata.zRange[0];
+			std::isfinite(a_metadata.pos0[0]) && std::isfinite(a_metadata.pos0[1]) && std::isfinite(a_metadata.pos0[2]) && std::isfinite(a_metadata.pos1[0]) && std::isfinite(a_metadata.pos1[1]) && std::isfinite(a_metadata.pos1[2]) && std::isfinite(a_metadata.zRange[0]) && std::isfinite(a_metadata.zRange[1]);
+		return finite && !a_metadata.worldspace.empty() && a_metadata.pos1[0] > a_metadata.pos0[0] && a_metadata.pos0[1] > a_metadata.pos1[1] && a_metadata.pos1[2] > a_metadata.pos0[2] && a_metadata.zRange[1] > a_metadata.zRange[0];
 	}
 
 	[[nodiscard]] inline std::optional<HeightMapMetadata> ParseHeightMapStem(
@@ -121,8 +112,7 @@ namespace cs::features::terrain_shadows
 		if (fields.size() != (xlodgen ? 9u : 10u))
 			return std::nullopt;
 		if (xlodgen) {
-			if (!EqualsIgnoreCase(fields[1], "Terrain")
-				|| !EqualsIgnoreCase(fields[2], "HeightMap")) {
+			if (!EqualsIgnoreCase(fields[1], "Terrain") || !EqualsIgnoreCase(fields[2], "HeightMap")) {
 				return std::nullopt;
 			}
 		} else if (!EqualsIgnoreCase(fields[1], "HeightMap")) {
@@ -135,10 +125,7 @@ namespace cs::features::terrain_shadows
 		std::int32_t east = 0;
 		std::int32_t north = 0;
 		// Current xLODGen filenames use W, S, E, N.
-		if (!ParseInteger(fields[base], west)
-			|| !ParseInteger(fields[base + 1], south)
-			|| !ParseInteger(fields[base + 2], east)
-			|| !ParseInteger(fields[base + 3], north)) {
+		if (!ParseInteger(fields[base], west) || !ParseInteger(fields[base + 1], south) || !ParseInteger(fields[base + 2], east) || !ParseInteger(fields[base + 3], north)) {
 			return std::nullopt;
 		}
 
@@ -164,10 +151,7 @@ namespace cs::features::terrain_shadows
 			std::int32_t zWhite = 0;
 			std::int32_t minZ = 0;
 			std::int32_t maxZ = 0;
-			if (!ParseInteger(fields[6], zBlack)
-				|| !ParseInteger(fields[7], zWhite)
-				|| !ParseInteger(fields[8], minZ)
-				|| !ParseInteger(fields[9], maxZ)) {
+			if (!ParseInteger(fields[6], zBlack) || !ParseInteger(fields[7], zWhite) || !ParseInteger(fields[8], minZ) || !ParseInteger(fields[9], maxZ)) {
 				return std::nullopt;
 			}
 			metadata.pos0[2] = static_cast<float>(zBlack) * kHeightQuantum;
@@ -240,8 +224,7 @@ namespace cs::features::terrain_shadows
 		float a_decodeMin,
 		float a_decodeMax)
 	{
-		if (!a_pixels || a_width == 0 || a_height == 0
-			|| a_rowPitch < static_cast<std::size_t>(a_width) * sizeof(std::uint16_t)) {
+		if (!a_pixels || a_width == 0 || a_height == 0 || a_rowPitch < static_cast<std::size_t>(a_width) * sizeof(std::uint16_t)) {
 			return { a_decodeMin, a_decodeMax };
 		}
 
@@ -263,8 +246,7 @@ namespace cs::features::terrain_shadows
 			return { a_decodeMin, a_decodeMax };
 
 		const auto decode = [&](std::size_t a_bin) noexcept {
-			const float t = static_cast<float>(a_bin)
-				/ static_cast<float>(kHeightHistogramBins - 1);
+			const float t = static_cast<float>(a_bin) / static_cast<float>(kHeightHistogramBins - 1);
 			return a_decodeMin + (a_decodeMax - a_decodeMin) * t;
 		};
 		const auto findPercentile = [&](double a_fraction) noexcept {
@@ -290,7 +272,7 @@ namespace cs::features::terrain_shadows
 
 	struct FeatureBlock
 	{
-		std::uint32_t        enableTerrainShadow = 0;
+		std::uint32_t enableTerrainShadow = 0;
 		std::array<float, 3> scale{};
 		std::array<float, 2> zRange{};
 		std::array<float, 2> offset{};
@@ -317,15 +299,15 @@ namespace cs::features::terrain_shadows
 
 	struct DdaPlan
 	{
-		bool                 valid = false;
-		bool                 vertical = false;
+		bool valid = false;
+		bool vertical = false;
 		std::array<float, 2> lightPxDir{};
 		std::array<float, 2> lightDeltaZ{};
-		std::uint32_t        edgePxCoord = 0;
-		std::int32_t         signDir = 1;
-		std::uint32_t        maxUpdates = 1;
-		std::uint32_t        dispatchCount = 0;
-		std::uint32_t        majorDimension = 0;
+		std::uint32_t edgePxCoord = 0;
+		std::int32_t signDir = 1;
+		std::uint32_t maxUpdates = 1;
+		std::uint32_t dispatchCount = 0;
+		std::uint32_t majorDimension = 0;
 	};
 
 	inline constexpr float kPi = 3.14159265358979323846f;
@@ -342,14 +324,12 @@ namespace cs::features::terrain_shadows
 		DdaPlan plan;
 		if (a_width == 0 || a_height == 0 || !IsMetadataConsistent(a_metadata))
 			return plan;
-		if (!std::isfinite(a_sunDirection[0]) || !std::isfinite(a_sunDirection[1])
-			|| !std::isfinite(a_sunDirection[2])) {
+		if (!std::isfinite(a_sunDirection[0]) || !std::isfinite(a_sunDirection[1]) || !std::isfinite(a_sunDirection[2])) {
 			return plan;
 		}
 
 		const float horizontalLength = std::sqrt(
-			a_sunDirection[0] * a_sunDirection[0]
-			+ a_sunDirection[1] * a_sunDirection[1]);
+			a_sunDirection[0] * a_sunDirection[0] + a_sunDirection[1] * a_sunDirection[1]);
 		if (horizontalLength < kMinHorizontalLength)
 			return plan;
 
@@ -391,9 +371,7 @@ namespace cs::features::terrain_shadows
 			deltaScale * std::tan(upperAngle),
 			deltaScale * std::tan(lowerAngle)
 		};
-		if (!std::isfinite(plan.lightPxDir[0]) || !std::isfinite(plan.lightPxDir[1])
-			|| !std::isfinite(plan.lightDeltaZ[0])
-			|| !std::isfinite(plan.lightDeltaZ[1])) {
+		if (!std::isfinite(plan.lightPxDir[0]) || !std::isfinite(plan.lightPxDir[1]) || !std::isfinite(plan.lightDeltaZ[0]) || !std::isfinite(plan.lightDeltaZ[1])) {
 			return DdaPlan{};
 		}
 		plan.valid = true;
@@ -406,10 +384,7 @@ namespace cs::features::terrain_shadows
 	{
 		if (a_plan.majorDimension == 0)
 			return 0;
-		const auto start = static_cast<std::int64_t>(a_plan.edgePxCoord)
-			+ static_cast<std::int64_t>(a_plan.signDir)
-				* static_cast<std::int64_t>(a_updateIndex)
-				* static_cast<std::int64_t>(kUpdateLength);
+		const auto start = static_cast<std::int64_t>(a_plan.edgePxCoord) + static_cast<std::int64_t>(a_plan.signDir) * static_cast<std::int64_t>(a_updateIndex) * static_cast<std::int64_t>(kUpdateLength);
 		const auto clamped = std::clamp<std::int64_t>(
 			start,
 			0,
@@ -442,11 +417,7 @@ namespace cs::features::terrain_shadows
 	[[nodiscard]] constexpr bool IsReadyForInjectionFreeze(
 		const BootstrapReadiness& a_readiness) noexcept
 	{
-		return a_readiness.registrationsInstalled
-			&& a_readiness.renderCallbacksInstalled
-			&& a_readiness.computeShaderReady
-			&& a_readiness.samplerReady
-			&& a_readiness.constantBufferReady;
+		return a_readiness.registrationsInstalled && a_readiness.renderCallbacksInstalled && a_readiness.computeShaderReady && a_readiness.samplerReady && a_readiness.constantBufferReady;
 	}
 
 	[[nodiscard]] inline std::string MissingBootstrapPrerequisites(

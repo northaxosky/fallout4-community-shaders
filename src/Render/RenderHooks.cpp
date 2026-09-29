@@ -15,7 +15,10 @@
 #include <utility>
 #include <vector>
 
-namespace { auto* L = cs::log::Get("cs.hooks"); }
+namespace
+{
+	auto* L = cs::log::Get("cs.hooks");
+}
 
 namespace cs::engine
 {
@@ -23,27 +26,27 @@ namespace cs::engine
 	{
 		struct PrioritizedCallback
 		{
-			HookPriority        priority;
-			RenderHookCallback  cb;
+			HookPriority priority;
+			RenderHookCallback cb;
 		};
 
-		std::vector<PrioritizedCallback>    g_postDeferredPrePass;
-		std::vector<PrioritizedCallback>    g_preDeferredLightsImpl;
-		std::vector<PrioritizedCallback>    g_postDeferredLightsImpl;
-		std::vector<PrioritizedCallback>    g_preDeferredComposite;
-		std::vector<PrioritizedCallback>    g_postDeferredComposite;
-		std::vector<PrioritizedCallback>    g_preFullscreenDeferredLightDraw;
-		std::vector<PrioritizedCallback>    g_postForwardSky;
-		bool g_prePassInstalled            = false;
-		bool g_lightsImplInstalled         = false;
-		bool g_compositeInstalled          = false;
+		std::vector<PrioritizedCallback> g_postDeferredPrePass;
+		std::vector<PrioritizedCallback> g_preDeferredLightsImpl;
+		std::vector<PrioritizedCallback> g_postDeferredLightsImpl;
+		std::vector<PrioritizedCallback> g_preDeferredComposite;
+		std::vector<PrioritizedCallback> g_postDeferredComposite;
+		std::vector<PrioritizedCallback> g_preFullscreenDeferredLightDraw;
+		std::vector<PrioritizedCallback> g_postForwardSky;
+		bool g_prePassInstalled = false;
+		bool g_lightsImplInstalled = false;
+		bool g_compositeInstalled = false;
 		bool g_deferredDrawAnchorInstalled = false;
-		bool g_forwardSkyInstalled         = false;
-		bool g_insideDeferredLightsImpl    = false;
-		bool g_insideDeferredComposite     = false;
+		bool g_forwardSkyInstalled = false;
+		bool g_insideDeferredLightsImpl = false;
+		bool g_insideDeferredComposite = false;
 
 		// Registration closes when the first render hook runs.
-		const DWORD      g_registrationThreadId = ::GetCurrentThreadId();
+		const DWORD g_registrationThreadId = ::GetCurrentThreadId();
 		std::atomic_bool g_registrationClosed{ false };
 
 		void MarkRegistrationClosed() noexcept
@@ -54,7 +57,7 @@ namespace cs::engine
 		bool RegistrationAllowed(const char* a_where)
 		{
 			const bool onStartupThread = (::GetCurrentThreadId() == g_registrationThreadId);
-			const bool stillOpen       = !g_registrationClosed.load(std::memory_order_relaxed);
+			const bool stillOpen = !g_registrationClosed.load(std::memory_order_relaxed);
 			assert(onStartupThread && "RenderHooks registration must run on the startup thread");
 			assert(stillOpen && "RenderHooks registration must finish before render hooks fire");
 			if (!onStartupThread || !stillOpen) {
@@ -177,8 +180,8 @@ namespace cs::engine
 				if (decision.dispatchInjections) {
 					auto* rendererData = RE::BSGraphics::GetRendererData();
 					DispatchInjectionsForBoundPixelShader(rendererData ?
-						reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-						nullptr);
+															  reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+															  nullptr);
 				}
 			}
 			static inline REL::Relocation<void(bool, bool)> func;
@@ -282,14 +285,16 @@ namespace cs::engine
 
 	bool EnsureDeferredDrawAnchorInstalled()
 	{
-		if (!RegistrationAllowed("DeferredDrawAnchor")) return false;
+		if (!RegistrationAllowed("DeferredDrawAnchor"))
+			return false;
 		InstallDeferredDrawAnchor();
 		return g_deferredDrawAnchorInstalled;
 	}
 
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PostDeferredPrePass")) return false;
+		if (!RegistrationAllowed("PostDeferredPrePass"))
+			return false;
 		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
 		EnsureDeferredPrePassInstalled();
 		return true;
@@ -297,21 +302,24 @@ namespace cs::engine
 
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PreDeferredLightsImpl")) return;
+		if (!RegistrationAllowed("PreDeferredLightsImpl"))
+			return;
 		InsertPrioritized(g_preDeferredLightsImpl, std::move(callback), priority);
 		EnsureDeferredLightsImplInstalled();
 	}
 
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PostDeferredLightsImpl")) return;
+		if (!RegistrationAllowed("PostDeferredLightsImpl"))
+			return;
 		InsertPrioritized(g_postDeferredLightsImpl, std::move(callback), priority);
 		EnsureDeferredLightsImplInstalled();
 	}
 
 	bool RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PreDeferredComposite")) return false;
+		if (!RegistrationAllowed("PreDeferredComposite"))
+			return false;
 		InsertPrioritized(g_preDeferredComposite, std::move(callback), priority);
 		EnsureDeferredCompositeInstalled();
 		return true;
@@ -319,7 +327,8 @@ namespace cs::engine
 
 	bool RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PostDeferredComposite")) return false;
+		if (!RegistrationAllowed("PostDeferredComposite"))
+			return false;
 		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
 		EnsureDeferredCompositeInstalled();
 		return true;
@@ -327,7 +336,8 @@ namespace cs::engine
 
 	bool RegisterPostForwardSky(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PostForwardSky")) return false;
+		if (!RegistrationAllowed("PostForwardSky"))
+			return false;
 		InsertPrioritized(g_postForwardSky, std::move(callback), priority);
 		EnsureForwardSkyInstalled();
 		return true;
@@ -337,7 +347,8 @@ namespace cs::engine
 		RenderHookCallback callback,
 		HookPriority priority)
 	{
-		if (!RegistrationAllowed("PreFullscreenDeferredLightDraw")) return;
+		if (!RegistrationAllowed("PreFullscreenDeferredLightDraw"))
+			return;
 		InsertPrioritized(g_preFullscreenDeferredLightDraw, std::move(callback), priority);
 		InstallDeferredDrawAnchor();
 	}

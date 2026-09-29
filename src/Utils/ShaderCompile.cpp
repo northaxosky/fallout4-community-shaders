@@ -34,7 +34,7 @@ namespace cs::util
 				if (!a_fileName || !a_data || !a_bytes)
 					return E_INVALIDARG;
 
-				*a_data  = nullptr;
+				*a_data = nullptr;
 				*a_bytes = 0;
 
 				auto includingDirectory = baseDirectory_;
@@ -74,7 +74,7 @@ namespace cs::util
 			struct OpenedFile
 			{
 				std::unique_ptr<char[]> buffer;
-				std::filesystem::path   directory;
+				std::filesystem::path directory;
 			};
 
 			OpenResult OpenFrom(
@@ -100,8 +100,8 @@ namespace cs::util
 				if (fileSize < 0 || fileSize > static_cast<std::streamoff>(std::numeric_limits<UINT>::max()))
 					return OpenResult::kReadFailed;
 
-				const auto size   = static_cast<std::size_t>(fileSize);
-				auto       buffer = std::make_unique<char[]>(std::max<std::size_t>(size, 1));
+				const auto size = static_cast<std::size_t>(fileSize);
+				auto buffer = std::make_unique<char[]>(std::max<std::size_t>(size, 1));
 
 				file.seekg(0, std::ios::beg);
 				if (!file)
@@ -118,12 +118,12 @@ namespace cs::util
 				if (!inserted)
 					return OpenResult::kReadFailed;
 
-				*a_data  = fileIt->first;
+				*a_data = fileIt->first;
 				*a_bytes = static_cast<UINT>(size);
 				return OpenResult::kSuccess;
 			}
 
-			std::filesystem::path                    baseDirectory_;
+			std::filesystem::path baseDirectory_;
 			std::unordered_map<LPCVOID, OpenedFile> openedFiles_;
 		};
 	}

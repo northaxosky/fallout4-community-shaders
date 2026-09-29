@@ -20,9 +20,9 @@ namespace cs::shader_cache
 
 		struct LookupResult
 		{
-			CacheDisposition          disposition = CacheDisposition::kAbsent;
+			CacheDisposition disposition = CacheDisposition::kAbsent;
 			std::vector<std::uint8_t> payload;
-			std::string               note;
+			std::string note;
 		};
 
 		LookupResult Reject(CacheDisposition a_disposition, std::string a_note)
@@ -51,11 +51,11 @@ namespace cs::shader_cache
 		}
 
 		LookupResult LookUpRecord(
-			const std::filesystem::path&  a_recordPath,
-			const ShaderRecipe&           a_recipe,
+			const std::filesystem::path& a_recordPath,
+			const ShaderRecipe& a_recipe,
 			std::span<const std::uint8_t> a_recipeBytes,
-			const sha256::Sha256Result&   a_logicalDigest,
-			RevalidationContext*          a_context)
+			const sha256::Sha256Result& a_logicalDigest,
+			RevalidationContext* a_context)
 		{
 			std::vector<std::uint8_t> bytes;
 			const auto readStatus = ReadFileBytes(a_recordPath, kMaxRecordBytes, bytes);
@@ -65,7 +65,7 @@ namespace cs::shader_cache
 				return Reject(CacheDisposition::kRejected, "record unreadable");
 
 			ShaderCacheRecord record;
-			const auto        status = ParseShaderCacheRecord(bytes, record);
+			const auto status = ParseShaderCacheRecord(bytes, record);
 			if (status != RecordStatus::kOk)
 				return Reject(CacheDisposition::kRejected, DescribeRecordStatus(status));
 
@@ -84,28 +84,26 @@ namespace cs::shader_cache
 			if (!revalidation.Valid()) {
 				return Reject(
 					CacheDisposition::kStale,
-					std::string(DescribeRevalidation(revalidation.status)) + " ("
-						+ revalidation.detail + ")");
+					std::string(DescribeRevalidation(revalidation.status)) + " (" + revalidation.detail + ")");
 			}
 
-			if (ComputeFullRecipeDigest(a_recipeBytes, record.dependencyDigest)
-				!= record.recipeDigest) {
+			if (ComputeFullRecipeDigest(a_recipeBytes, record.dependencyDigest) != record.recipeDigest) {
 				return Reject(CacheDisposition::kRejected, "recipe digest mismatch");
 			}
 
 			LookupResult hit;
 			hit.disposition = CacheDisposition::kHit;
-			hit.payload     = std::move(record.payload);
+			hit.payload = std::move(record.payload);
 			return hit;
 		}
 
 		void PublishRecord(
-			const std::filesystem::path&  a_recordPath,
-			const ShaderRecipe&           a_recipe,
-			const sha256::Sha256Result&   a_logicalDigest,
+			const std::filesystem::path& a_recordPath,
+			const ShaderRecipe& a_recipe,
+			const sha256::Sha256Result& a_logicalDigest,
 			std::span<const std::uint8_t> a_recipeBytes,
-			const SourceCompileOutcome&   a_compiled,
-			ShaderCacheOutcome&           a_outcome) noexcept
+			const SourceCompileOutcome& a_compiled,
+			ShaderCacheOutcome& a_outcome) noexcept
 		{
 			try {
 				std::vector<std::uint8_t> manifestBytes;
@@ -115,20 +113,19 @@ namespace cs::shader_cache
 				}
 
 				ShaderCacheRecord record;
-				record.logicalDigest    = a_logicalDigest;
+				record.logicalDigest = a_logicalDigest;
 				record.dependencyDigest =
 					sha256::Sha256Compute(manifestBytes.data(), manifestBytes.size());
 				record.recipeDigest =
 					ComputeFullRecipeDigest(a_recipeBytes, record.dependencyDigest);
-				if (sha256::Sha256IsZero(record.dependencyDigest)
-					|| sha256::Sha256IsZero(record.recipeDigest)) {
+				if (sha256::Sha256IsZero(record.dependencyDigest) || sha256::Sha256IsZero(record.recipeDigest)) {
 					a_outcome.cacheNote = "record digest unavailable";
 					return;
 				}
-				record.stage    = a_recipe.stage;
-				record.profile  = a_recipe.profile;
+				record.stage = a_recipe.stage;
+				record.profile = a_recipe.profile;
 				record.manifest = a_compiled.manifest;
-				record.payload  = a_compiled.bytecode;
+				record.payload = a_compiled.bytecode;
 
 				std::vector<std::uint8_t> recordBytes;
 				if (!SerializeShaderCacheRecord(record, recordBytes)) {
@@ -204,23 +201,23 @@ namespace cs::shader_cache
 	}
 
 	ShaderCacheOutcome LoadOrCompileShader(
-		const ShaderRecipe&       a_recipe,
+		const ShaderRecipe& a_recipe,
 		const ShaderCacheOptions& a_options,
-		CacheMode                 a_mode)
+		CacheMode a_mode)
 	{
 		ShaderCacheOutcome outcome;
 		try {
 			const auto& identity = GetD3DCompilerIdentity();
 			if (!identity.established) {
 				outcome.disposition = CacheDisposition::kNoCompilerIdentity;
-				outcome.cacheNote   = "d3dcompiler identity unavailable";
+				outcome.cacheNote = "d3dcompiler identity unavailable";
 			}
 
 			std::vector<std::uint8_t> recipeBytes;
-			sha256::Sha256Result      logicalDigest{};
-			bool                      cacheAvailable = identity.established;
+			sha256::Sha256Result logicalDigest{};
+			bool cacheAvailable = identity.established;
 			if (cacheAvailable) {
-				recipeBytes   = EncodeShaderRecipe(a_recipe, identity);
+				recipeBytes = EncodeShaderRecipe(a_recipe, identity);
 				logicalDigest = ComputeLogicalDigest(recipeBytes);
 				if (sha256::Sha256IsZero(logicalDigest)) {
 					cacheAvailable = false;
@@ -249,12 +246,12 @@ namespace cs::shader_cache
 							"record validation failed");
 					}
 					outcome.disposition = lookup.disposition;
-					outcome.cacheNote   = std::move(lookup.note);
+					outcome.cacheNote = std::move(lookup.note);
 					CountDisposition(outcome.disposition);
 					if (lookup.disposition == CacheDisposition::kHit) {
 						outcome.succeeded = true;
-						outcome.origin    = CompileOrigin::kCacheHit;
-						outcome.bytecode  = std::move(lookup.payload);
+						outcome.origin = CompileOrigin::kCacheHit;
+						outcome.bytecode = std::move(lookup.payload);
 						return outcome;
 					}
 				} else {
@@ -269,7 +266,7 @@ namespace cs::shader_cache
 			}
 
 			outcome.succeeded = true;
-			outcome.origin    = CompileOrigin::kFreshCompile;
+			outcome.origin = CompileOrigin::kFreshCompile;
 
 			// publication failure must not discard compiled bytecode
 			if (cacheAvailable) {

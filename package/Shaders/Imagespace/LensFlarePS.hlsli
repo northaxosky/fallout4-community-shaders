@@ -1,8 +1,8 @@
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float4 TexCoord0 : TEXCOORD0;
-	float3 TexCoord1 : TEXCOORD1;
+	float4 Position: SV_POSITION;
+	float4 TexCoord0: TEXCOORD0;
+	float3 TexCoord1: TEXCOORD1;
 };
 
 cbuffer LensFlareParameters : register(b2)

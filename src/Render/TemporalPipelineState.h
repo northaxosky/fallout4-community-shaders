@@ -253,7 +253,7 @@ namespace cs::render::temporal
 				if (!a_srEnabled) {
 					target.superResolutionEnabled = false;
 				} else if (srAdmitted &&
-					!_restartForSuperResolutionMethod) {
+						   !_restartForSuperResolutionMethod) {
 					target.superResolution = a_sr;
 					target.qualityMode = a_qualityMode;
 					target.superResolutionEnabled =
@@ -271,7 +271,7 @@ namespace cs::render::temporal
 						target.frameGeneration = a_fg;
 					}
 				} else if (fgAdmitted &&
-					!_restartForFrameGenerationMethod) {
+						   !_restartForFrameGenerationMethod) {
 					target.frameGeneration = a_fg;
 					if (a_fg == FrameGenerationMethod::kDLSSG) {
 						target.frameGenerationConfiguration =
@@ -338,9 +338,9 @@ namespace cs::render::temporal
 			return CommitPendingTransition(
 				a_revision,
 				_pendingTransition &&
-						_pendingTransition->frameGenerationEnabled
-					? _pendingTransition->frameGeneration
-					: FrameGenerationMethod::kOff);
+						_pendingTransition->frameGenerationEnabled ?
+					_pendingTransition->frameGeneration :
+					FrameGenerationMethod::kOff);
 		}
 
 		[[nodiscard]] bool CommitPendingTransition(
@@ -352,7 +352,7 @@ namespace cs::render::temporal
 				_transitionInFlight->revision == a_revision) {
 				completed = &*_transitionInFlight;
 			} else if (_pendingTransition &&
-				_pendingTransition->revision == a_revision) {
+					   _pendingTransition->revision == a_revision) {
 				completed = &*_pendingTransition;
 			}
 			if (!completed) {
@@ -385,7 +385,7 @@ namespace cs::render::temporal
 				_transitionInFlight->revision == a_revision) {
 				completed = &*_transitionInFlight;
 			} else if (_pendingTransition &&
-				_pendingTransition->revision == a_revision) {
+					   _pendingTransition->revision == a_revision) {
 				completed = &*_pendingTransition;
 			}
 			if (!completed) {
@@ -420,7 +420,7 @@ namespace cs::render::temporal
 				_transitionInFlight->revision == a_revision) {
 				_transitionInFlight.reset();
 			} else if (_pendingTransition &&
-				_pendingTransition->revision == a_revision) {
+					   _pendingTransition->revision == a_revision) {
 				_pendingTransition.reset();
 			}
 		}
@@ -485,18 +485,18 @@ namespace cs::render::temporal
 		{
 			const auto srIndex = static_cast<std::size_t>(_effective.superResolution);
 			const bool srReady = !_session ||
-				(_session->valid && srIndex < _session->admittedSr.size() &&
-					_session->admittedSr[srIndex]);
+			                     (_session->valid && srIndex < _session->admittedSr.size() &&
+									 _session->admittedSr[srIndex]);
 			const bool fgReady = !_session ||
-				(_session->valid && _session->proxyInstalled &&
-					static_cast<std::size_t>(_effective.frameGeneration) <
-						_session->admittedFg.size() &&
-					_session->admittedFg[static_cast<std::size_t>(
-						_effective.frameGeneration)] &&
-					(_effective.frameGeneration ==
-							FrameGenerationMethod::kOff ||
-						_session->activeFg ==
-							_effective.frameGeneration));
+			                     (_session->valid && _session->proxyInstalled &&
+									 static_cast<std::size_t>(_effective.frameGeneration) <
+										 _session->admittedFg.size() &&
+									 _session->admittedFg[static_cast<std::size_t>(
+										 _effective.frameGeneration)] &&
+									 (_effective.frameGeneration ==
+											 FrameGenerationMethod::kOff ||
+										 _session->activeFg ==
+											 _effective.frameGeneration));
 			_effective.superResolutionEnabled =
 				_request && _request->superResolutionEnabled && _startupRequest->upscalingEligible &&
 				_effective.superResolution != SuperResolutionMethod::kNone &&
@@ -517,7 +517,7 @@ namespace cs::render::temporal
 			if (_quarantined.superResolution || _quarantined.frameGeneration) {
 				_pending.required = true;
 				_pending.reason = _quarantineReason +
-					" Restart required before the affected temporal processing can resume.";
+				                  " Restart required before the affected temporal processing can resume.";
 			} else if (_superResolutionFailed) {
 				_pending.required = true;
 				_pending.reason = _superResolutionFailureReason;
@@ -525,17 +525,15 @@ namespace cs::render::temporal
 				_pending.required = true;
 				_pending.reason = _frameGenerationFailureReason;
 			} else if (_restartForSuperResolutionMethod ||
-				_restartForFrameGenerationMethod) {
+					   _restartForFrameGenerationMethod) {
 				_pending.required = true;
 				_pending.reason =
-					_restartForSuperResolutionMethod
-						? (_session
-								  ? "The requested super-resolution provider is "
-									"unavailable in the current session."
-								  : "The requested super-resolution method differs "
-									"from the frozen startup request.")
-						: "The requested frame-generation provider is unavailable "
-						  "in the current session.";
+					_restartForSuperResolutionMethod ? (_session ? "The requested super-resolution provider is "
+																   "unavailable in the current session." :
+																   "The requested super-resolution method differs "
+																   "from the frozen startup request.") :
+													   "The requested frame-generation provider is unavailable "
+													   "in the current session.";
 			}
 		}
 
@@ -632,9 +630,7 @@ namespace cs::render::temporal
 			if (_phase != LatencyPhase::kPresent) {
 				return false;
 			}
-			_phase = a_retryable
-				? LatencyPhase::kPresentRetry
-				: LatencyPhase::kComplete;
+			_phase = a_retryable ? LatencyPhase::kPresentRetry : LatencyPhase::kComplete;
 			return true;
 		}
 
@@ -666,7 +662,7 @@ namespace cs::render::temporal
 			bool a_superResolutionResolved) const noexcept
 		{
 			return captureFrameGenerationInputs &&
-				(!driveSuperResolution || a_superResolutionResolved);
+			       (!driveSuperResolution || a_superResolutionResolved);
 		}
 	};
 
@@ -735,7 +731,7 @@ namespace cs::render::temporal
 		{
 			if (a_testOnly) {
 				return _phase == FramePhase::kPresentPrepared ||
-					_phase == FramePhase::kPresentAccepted;
+				       _phase == FramePhase::kPresentAccepted;
 			}
 			if (_phase != FramePhase::kPresentPrepared) {
 				return Fail("Present was attempted without a prepared frame");
@@ -778,8 +774,8 @@ namespace cs::render::temporal
 				return false;
 			}
 			return _phase == FramePhase::kPresentPrepared ||
-				_phase == FramePhase::kPresentAccepted ||
-				_phase == FramePhase::kRetired;
+			       _phase == FramePhase::kPresentAccepted ||
+			       _phase == FramePhase::kRetired;
 		}
 		[[nodiscard]] std::uint32_t PresentAttempts() const noexcept { return _presentAttempts; }
 		[[nodiscard]] std::string_view Failure() const noexcept { return _failure; }
@@ -808,8 +804,8 @@ namespace cs::render::temporal
 		const FrameTransaction& a_frame) noexcept
 	{
 		return a_configured && a_effective && a_ready &&
-			a_frame.HasRecentFrameGenerationWork(
-				a_currentRealFrame, a_currentEngineFrame);
+		       a_frame.HasRecentFrameGenerationWork(
+				   a_currentRealFrame, a_currentEngineFrame);
 	}
 
 	class ResetEpochs
@@ -843,6 +839,7 @@ namespace cs::render::temporal
 				_fgConsumed = _fgRequested;
 			}
 		}
+
 	private:
 		std::uint64_t _srRequested = 1;
 		std::uint64_t _srConsumed = 0;

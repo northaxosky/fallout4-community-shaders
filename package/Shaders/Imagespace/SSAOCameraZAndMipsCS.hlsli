@@ -10,11 +10,9 @@ RWTexture2D<float> CameraZMip1 : register(u2);
 
 groupshared float GroupMinimum[64];
 
-[numthreads(8, 8, 1)]
-void main(
+[numthreads(8, 8, 1)] void main(
 	uint2 groupThreadID : SV_GroupThreadID,
-	uint2 dispatchThreadID : SV_DispatchThreadID)
-{
+	uint2 dispatchThreadID : SV_DispatchThreadID) {
 	float4 dispatchCoordinate = (float4)dispatchThreadID.xyyy;
 	uint2 sourceCoordinate =
 		(uint2)(dispatchCoordinate.xw + dispatchCoordinate.xw);
@@ -23,18 +21,18 @@ void main(
 	uint2 lowerRightCoordinate = sourceCoordinate + uint2(1, 1);
 
 	float upperLeft = CameraZParameters.x /
-		(CameraZParameters.y * SourceDepth.Load(int3(sourceCoordinate, 0)) +
-		 CameraZParameters.z);
+	                  (CameraZParameters.y * SourceDepth.Load(int3(sourceCoordinate, 0)) +
+						  CameraZParameters.z);
 	float upperRight = CameraZParameters.x /
-		(CameraZParameters.y * SourceDepth.Load(int3(right, 0)) +
-		 CameraZParameters.z);
+	                   (CameraZParameters.y * SourceDepth.Load(int3(right, 0)) +
+						   CameraZParameters.z);
 	float lowerLeft = CameraZParameters.x /
-		(CameraZParameters.y * SourceDepth.Load(int3(below, 0)) +
-		 CameraZParameters.z);
+	                  (CameraZParameters.y * SourceDepth.Load(int3(below, 0)) +
+						  CameraZParameters.z);
 	float lowerRight = CameraZParameters.x /
-		(CameraZParameters.y *
-			 SourceDepth.Load(int3(lowerRightCoordinate, 0)) +
-		 CameraZParameters.z);
+	                   (CameraZParameters.y *
+							   SourceDepth.Load(int3(lowerRightCoordinate, 0)) +
+						   CameraZParameters.z);
 
 	float upperMinimum = min(upperLeft, upperRight);
 	float lowerMinimum = min(lowerLeft, lowerRight);
@@ -51,8 +49,7 @@ void main(
 	CameraZMip0[dispatchThreadID] = minimum;
 
 	uint2 parity = dispatchThreadID & uint2(1, 1);
-	if (parity.x == 0 && parity.y == 0)
-	{
+	if (parity.x == 0 && parity.y == 0) {
 		uint3 neighborIndices = groupIndex + uint3(1, 8, 9);
 		float neighbor0 = GroupMinimum[neighborIndices.x];
 		float neighbor1 = GroupMinimum[neighborIndices.y];

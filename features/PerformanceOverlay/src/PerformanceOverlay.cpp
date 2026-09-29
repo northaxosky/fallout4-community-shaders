@@ -8,23 +8,25 @@
 #include <vector>
 
 #include <DearModdingUI/Client.h>
-#include <toml++/toml.hpp>
 #include <Windows.h>
 #include <dxgi1_4.h>
+#include <toml++/toml.hpp>
 
-#include "Log.h"
 #include "Host/HostClient.h"
+#include "Log.h"
 #include "Menu/Menu.h"
-#include "Settings/SettingsPersistence.h"
 #include "Menu/SettingsEdit.h"
+#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
 {
-	namespace { auto* L = cs::log::Get("cs.feature.performanceoverlay"); }
+	namespace
+	{
+		auto* L = cs::log::Get("cs.feature.performanceoverlay");
+	}
 
 	constexpr std::array<float, 3> kFrameTimeReferenceFps{ 30.0f, 60.0f, 120.0f };
-
 
 	PerformanceOverlay* PerformanceOverlay::GetSingleton()
 	{
@@ -62,34 +64,34 @@ namespace cs::features
 	{
 		settings.preset = static_cast<int>(preset);
 		switch (preset) {
-			case Preset::Off:
-				settings.showFps = false;
-				settings.showFrameTime = false;
-				settings.showGraph = false;
-				settings.showVram = false;
-				settings.showStats = false;
-				break;
-			case Preset::Minimal:
-				settings.showFps = true;
-				settings.showFrameTime = false;
-				settings.showGraph = false;
-				settings.showVram = false;
-				settings.showStats = false;
-				break;
-			case Preset::Standard:
-				settings.showFps = true;
-				settings.showFrameTime = true;
-				settings.showGraph = true;
-				settings.showVram = false;
-				settings.showStats = false;
-				break;
-			case Preset::Verbose:
-				settings.showFps = true;
-				settings.showFrameTime = true;
-				settings.showGraph = true;
-				settings.showVram = true;
-				settings.showStats = true;
-				break;
+		case Preset::Off:
+			settings.showFps = false;
+			settings.showFrameTime = false;
+			settings.showGraph = false;
+			settings.showVram = false;
+			settings.showStats = false;
+			break;
+		case Preset::Minimal:
+			settings.showFps = true;
+			settings.showFrameTime = false;
+			settings.showGraph = false;
+			settings.showVram = false;
+			settings.showStats = false;
+			break;
+		case Preset::Standard:
+			settings.showFps = true;
+			settings.showFrameTime = true;
+			settings.showGraph = true;
+			settings.showVram = false;
+			settings.showStats = false;
+			break;
+		case Preset::Verbose:
+			settings.showFps = true;
+			settings.showFrameTime = true;
+			settings.showGraph = true;
+			settings.showVram = true;
+			settings.showStats = true;
+			break;
 		}
 	}
 
@@ -161,21 +163,26 @@ namespace cs::features
 		_stddevMs = static_cast<float>(std::sqrt(sqDiff / sorted.size()));
 
 		// Lows represent the slow-frame tail.
-		const auto idx99   = static_cast<size_t>(sorted.size() * 99 / 100);
-		const auto idx999  = static_cast<size_t>(sorted.size() * 999 / 1000);
-		_onePctLowMs       = sorted[std::min(idx99,  sorted.size() - 1)];
-		_pointOnePctLowMs  = sorted[std::min(idx999, sorted.size() - 1)];
+		const auto idx99 = static_cast<size_t>(sorted.size() * 99 / 100);
+		const auto idx999 = static_cast<size_t>(sorted.size() * 999 / 1000);
+		_onePctLowMs = sorted[std::min(idx99, sorted.size() - 1)];
+		_pointOnePctLowMs = sorted[std::min(idx999, sorted.size() - 1)];
 	}
 
 	void PerformanceOverlay::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		const auto presetName = [](int p) -> std::string_view {
 			switch (static_cast<Preset>(p)) {
-			case Preset::Off:      return "off";
-			case Preset::Minimal:  return "minimal";
-			case Preset::Standard: return "standard";
-			case Preset::Verbose:  return "verbose";
-			default:               return "unknown";
+			case Preset::Off:
+				return "off";
+			case Preset::Minimal:
+				return "minimal";
+			case Preset::Standard:
+				return "standard";
+			case Preset::Verbose:
+				return "verbose";
+			default:
+				return "unknown";
 			}
 		};
 		a_sink
@@ -198,7 +205,7 @@ namespace cs::features
 		EnsureRefreshHz();
 
 		const bool wantContent = settings.showFps || settings.showFrameTime ||
-			settings.showGraph || settings.showVram || settings.showStats;
+		                         settings.showGraph || settings.showVram || settings.showStats;
 		if (!wantContent)
 			return;
 
@@ -207,10 +214,10 @@ namespace cs::features
 		const dmui::ui::Vec4 bad{ 1.00f, 0.30f, 0.30f, 1.00f };
 		const dmui::ui::Vec4 white{ 1.00f, 1.00f, 1.00f, 1.00f };
 		const auto color = settings.highContrast ?
-			white :
-			(_displayedFps >= settings.fpsGood ?
-				good :
-				(_displayedFps >= settings.fpsWarn ? warning : bad));
+		                       white :
+		                       (_displayedFps >= settings.fpsGood ?
+									   good :
+									   (_displayedFps >= settings.fpsWarn ? warning : bad));
 
 		if (settings.showFps) {
 			dmui::ui::PushStyleColor(dmui::ui::Color::kText, color);
@@ -232,8 +239,7 @@ namespace cs::features
 			}
 			const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
 			const float slowestReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
-			const float target = std::max({
-				refreshMs * 2.0f,
+			const float target = std::max({ refreshMs * 2.0f,
 				_avgMs + 3.0f * _stddevMs,
 				slowestReferenceMs * 1.05f });
 			if (_graphYMaxSmoothed <= 0.0f)
@@ -290,11 +296,11 @@ namespace cs::features
 	DMUI_ManagedOverlayOptions PerformanceOverlay::ManagedOverlayOptions() const noexcept
 	{
 		const auto anchor = settings.freeDrag ?
-			DMUI_OVERLAY_ANCHOR_FREE :
-			static_cast<DMUI_OverlayAnchor>(std::clamp(settings.corner, 0, 3));
+		                        DMUI_OVERLAY_ANCHOR_FREE :
+		                        static_cast<DMUI_OverlayAnchor>(std::clamp(settings.corner, 0, 3));
 		const DMUI_Vec2 offset = settings.freeDrag ?
-			DMUI_Vec2{ settings.dragPosX, settings.dragPosY } :
-			DMUI_Vec2{ 10.0f, 10.0f };
+		                             DMUI_Vec2{ settings.dragPosX, settings.dragPosY } :
+		                             DMUI_Vec2{ 10.0f, 10.0f };
 		return {
 			DMUI_MANAGED_OVERLAY_OPTIONS_0_1_SIZE,
 			anchor,
@@ -468,8 +474,8 @@ namespace cs::features
 			const bool graphHeightCommitted = dmui::ui::IsItemDeactivatedAfterEdit();
 			if (intervalCommitted || historyCommitted || graphHeightCommitted) {
 				settings.updateInterval = std::clamp(settings.updateInterval, 0.05f, 5.0f);
-				settings.historySize    = std::clamp(settings.historySize, 30, kHistoryCapacity);
-				settings.graphHeightPx  = std::clamp(settings.graphHeightPx, 40.0f, 160.0f);
+				settings.historySize = std::clamp(settings.historySize, 30, kHistoryCapacity);
+				settings.graphHeightPx = std::clamp(settings.graphHeightPx, 40.0f, 160.0f);
 				if (historyCommitted) {
 					// History-size changes invalidate existing samples.
 					_frameTimesHead = 0;

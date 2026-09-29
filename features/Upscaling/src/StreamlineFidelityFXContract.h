@@ -23,9 +23,7 @@ namespace cs::features::streamline_fidelityfx
 		if (a_result != sl::Result::eOk) {
 			return render::temporal::CapabilityAvailability::kUnknown;
 		}
-		return a_available == sl::Boolean::eTrue
-			? render::temporal::CapabilityAvailability::kSupported
-			: render::temporal::CapabilityAvailability::kUnsupported;
+		return a_available == sl::Boolean::eTrue ? render::temporal::CapabilityAvailability::kSupported : render::temporal::CapabilityAvailability::kUnsupported;
 	}
 
 	inline void SelectAlgorithm(

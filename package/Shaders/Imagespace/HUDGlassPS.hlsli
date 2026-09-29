@@ -2,8 +2,8 @@
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float3 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float3 TexCoord: TEXCOORD0;
 };
 
 Texture2D<float4> Image : register(t0);
@@ -26,8 +26,8 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float3 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float3 TexCoord: TEXCOORD0;
 };
 
 cbuffer BlurParameters : register(b2)
@@ -43,11 +43,11 @@ float4 main(PS_INPUT input) : SV_Target
 	float4 sum = 0.0;
 	[loop] for (int offset = -2; offset <= 2; ++offset)
 	{
-#if defined(IMAGESPACE_HUD_GLASS_BLUR_Y)
+#	if defined(IMAGESPACE_HUD_GLASS_BLUR_Y)
 		sum += Image.Sample(ImageSampler, input.TexCoord.xy + float2(0.0, offset * BlurStep.y));
-#else
+#	else
 		sum += Image.Sample(ImageSampler, input.TexCoord.xy + float2(offset * BlurStep.x, 0.0));
-#endif
+#	endif
 	}
 	return sum * 0.2;
 }
@@ -56,8 +56,8 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float3 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float3 TexCoord: TEXCOORD0;
 };
 
 Texture2D<float4> Image : register(t0);
@@ -78,7 +78,7 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
+	float4 Position: SV_POSITION;
 };
 
 float4 main(PS_INPUT input) : SV_Target
@@ -90,8 +90,8 @@ float4 main(PS_INPUT input) : SV_Target
 
 struct PS_INPUT
 {
-	float4 Position : SV_POSITION;
-	float3 TexCoord : TEXCOORD0;
+	float4 Position: SV_POSITION;
+	float3 TexCoord: TEXCOORD0;
 };
 
 cbuffer CopyParameters : register(b2)
@@ -108,5 +108,5 @@ float4 main(PS_INPUT input) : SV_Target
 }
 
 #else
-#error "define an Imagespace HUD Glass producer macro"
+#	error "define an Imagespace HUD Glass producer macro"
 #endif

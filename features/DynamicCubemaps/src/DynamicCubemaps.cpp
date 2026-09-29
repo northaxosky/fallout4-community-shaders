@@ -1,8 +1,8 @@
 #include "DynamicCubemaps.h"
 
 #include <DDSTextureLoader.h>
-#include <d3d11.h>
 #include <DearModdingUI/Client.h>
+#include <d3d11.h>
 
 #include <algorithm>
 #include <array>
@@ -14,21 +14,21 @@
 #include <string_view>
 #include <vector>
 
+#include "FeatureBuffer.h"
 #include "Log.h"
 #include "LogThrottle.h"
-#include "FeatureBuffer.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
-#include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderStage.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
@@ -135,7 +135,7 @@ namespace cs::features
 	}
 
 	std::span<const FeatureDebugView>
-		DynamicCubemaps::GetDebugViews() const noexcept
+	DynamicCubemaps::GetDebugViews() const noexcept
 	{
 		static constexpr std::array views{
 			FeatureDebugView{
@@ -144,18 +144,12 @@ namespace cs::features
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const DynamicCubemaps&>(a_feature)
-						.GetCubemapDebugTexture();
-				}
-			},
-			FeatureDebugView{
-				.id = "filtered_reflections",
-				.label = "Filtered reflections",
-				.kind = FeatureDebugViewKind::kTexturePreview,
-				.textureProvider = [](const Feature& a_feature) {
-					return static_cast<const DynamicCubemaps&>(a_feature)
-						.GetCubemapDebugTexture();
-				}
-			}
+			            .GetCubemapDebugTexture();
+				} },
+			FeatureDebugView{ .id = "filtered_reflections", .label = "Filtered reflections", .kind = FeatureDebugViewKind::kTexturePreview, .textureProvider = [](const Feature& a_feature) {
+								 return static_cast<const DynamicCubemaps&>(a_feature)
+			                         .GetCubemapDebugTexture();
+							 } }
 		};
 		return views;
 	}
@@ -183,7 +177,7 @@ namespace cs::features
 		const auto visualization =
 			_debugVisualization.load(std::memory_order_acquire);
 		if ((visualization != DebugVisualization::kCaptureInput &&
-			 visualization != DebugVisualization::kFilteredReflections) ||
+				visualization != DebugVisualization::kFilteredReflections) ||
 			!_resourcesReady.load(std::memory_order_acquire) ||
 			!_previewPopulated.load(std::memory_order_acquire) ||
 			!_previewSRV) {
@@ -230,26 +224,22 @@ namespace cs::features
 	{
 		PublishSettings();
 		const auto registerContribution = [this](
-			cs::engine::ShaderInjectionTarget a_target,
-			cs::engine::ShaderStage a_stage,
-			std::uint32_t a_firstSlot,
-			std::uint32_t a_slotCount,
-			cs::engine::ShaderInjectionBindCallback a_bind = {}) {
+											  cs::engine::ShaderInjectionTarget a_target,
+											  cs::engine::ShaderStage a_stage,
+											  std::uint32_t a_firstSlot,
+											  std::uint32_t a_slotCount,
+											  cs::engine::ShaderInjectionBindCallback a_bind = {}) {
 			std::vector<cs::engine::ShaderSlotClaim> slotClaims;
 			for (std::uint32_t offset = 0; offset < a_slotCount; ++offset) {
-				slotClaims.push_back({
-					.stage = a_stage,
+				slotClaims.push_back({ .stage = a_stage,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = a_firstSlot + offset
-				});
+					.slot = a_firstSlot + offset });
 			}
-			return cs::engine::RegisterReplacement({
-				.targetId = a_target,
+			return cs::engine::RegisterReplacement({ .targetId = a_target,
 				.stages = cs::engine::ShaderStageBit(a_stage),
 				.contributor = "DynamicCubemaps",
 				.defines = {
-					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" }
-				},
+					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" } },
 				.isReady = [this] {
 					return _registrationsReady.load(std::memory_order_acquire);
 				},
@@ -285,11 +275,13 @@ namespace cs::features
 		if (!cs::engine::RegisterPostDeferredComposite([] {
 				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Restore(
 					cs::engine::GetImmediateContext());
-			}, cs::engine::HookPriority::Late) ||
+			},
+				cs::engine::HookPriority::Late) ||
 			!cs::engine::RegisterPreDeferredComposite([] {
 				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Save(
 					cs::engine::GetImmediateContext(), kCompositionPSSlot);
-			}, cs::engine::HookPriority::Early)) {
+			},
+				cs::engine::HookPriority::Early)) {
 			FailLoad("DynamicCubemaps could not register its composite binding scope");
 			return;
 		}
@@ -326,11 +318,13 @@ namespace cs::features
 			_injectionsOperational.load(std::memory_order_acquire) &&
 			_enabled.load(std::memory_order_acquire)) {
 			resources[0] = _cubemapValid[0].load(std::memory_order_acquire) ?
-				_environment.srv.get() : nullptr;
+			                   _environment.srv.get() :
+			                   nullptr;
 			resources[1] = _activeReflections.load(std::memory_order_acquire) ?
-				(_cubemapValid[1].load(std::memory_order_acquire) ?
-					_reflections.srv.get() : nullptr) :
-				resources[0];
+			                   (_cubemapValid[1].load(std::memory_order_acquire) ?
+									   _reflections.srv.get() :
+									   nullptr) :
+			                   resources[0];
 		}
 		a_context->PSSetShaderResources(
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
@@ -365,10 +359,10 @@ namespace cs::features
 
 		try {
 			const auto compile = [](
-				winrt::com_ptr<ID3D11ComputeShader>& a_target,
-				const wchar_t* a_path,
-				std::vector<std::pair<const char*, const char*>> a_defines,
-				std::string_view a_name) {
+									 winrt::com_ptr<ID3D11ComputeShader>& a_target,
+									 const wchar_t* a_path,
+									 std::vector<std::pair<const char*, const char*>> a_defines,
+									 std::string_view a_name) {
 				a_defines.emplace_back("FO4CS_SUBSTRATE", "1");
 				a_target.attach(
 					reinterpret_cast<ID3D11ComputeShader*>(
@@ -415,11 +409,11 @@ namespace cs::features
 	bool DynamicCubemaps::CreateResources(ID3D11Device* a_device)
 	{
 		const auto createCube = [a_device](
-			CubeTexture& a_cube,
-			DXGI_FORMAT a_format,
-			bool a_generateMips,
-			bool a_mipUavs,
-			std::string_view a_name) {
+									CubeTexture& a_cube,
+									DXGI_FORMAT a_format,
+									bool a_generateMips,
+									bool a_mipUavs,
+									std::string_view a_name) {
 			D3D11_TEXTURE2D_DESC textureDesc{};
 			textureDesc.Width = kCubemapSize;
 			textureDesc.Height = kCubemapSize;
@@ -483,7 +477,7 @@ namespace cs::features
 		};
 
 		const auto createStream = [&](CaptureStream& a_stream,
-									 std::string_view a_name) {
+									  std::string_view a_name) {
 			createCube(a_stream.color, DXGI_FORMAT_R16G16B16A16_FLOAT, true, false, std::format("{}/Color", a_name));
 			createCube(a_stream.raw, DXGI_FORMAT_R16G16B16A16_FLOAT, true, false, std::format("{}/Raw", a_name));
 			createCube(a_stream.position, DXGI_FORMAT_R16G16B16A16_FLOAT, true, false, std::format("{}/Position", a_name));
@@ -541,8 +535,8 @@ namespace cs::features
 		}
 
 		const auto createCompressedCube = [a_device](
-			CompressedCube& a_cube,
-			std::string_view a_name) {
+											  CompressedCube& a_cube,
+											  std::string_view a_name) {
 			D3D11_TEXTURE2D_DESC textureDesc{};
 			textureDesc.Width = kCubemapSize;
 			textureDesc.Height = kCubemapSize;
@@ -735,8 +729,8 @@ namespace cs::features
 			return _updateFakeReflectionsCS.get();
 		// Without FO4's engine cube, sky is captured from the scene and kept with the fake variant's history persistence.
 		return _engineReflectionCube.load(std::memory_order_relaxed) ?
-			_updateReflectionsCS.get() :
-			_updateSkyReflectionsCS.get();
+		           _updateReflectionsCS.get() :
+		           _updateSkyReflectionsCS.get();
 	}
 
 	ID3D11ComputeShader* DynamicCubemaps::InferShader(bool a_reflections) const
@@ -744,9 +738,9 @@ namespace cs::features
 		if (!a_reflections)
 			return _inferCS.get();
 		return _fakeReflections.load(std::memory_order_relaxed) ||
-				!_engineReflectionCube.load(std::memory_order_relaxed) ?
-			_inferFakeReflectionsCS.get() :
-			_inferReflectionsCS.get();
+		               !_engineReflectionCube.load(std::memory_order_relaxed) ?
+		           _inferFakeReflectionsCS.get() :
+		           _inferReflectionsCS.get();
 	}
 
 	void DynamicCubemaps::ResetCapture()
@@ -898,7 +892,7 @@ namespace cs::features
 		const std::uint32_t index = a_reflections ? 1 : 0;
 		const double now = std::chrono::duration<double>(
 			std::chrono::steady_clock::now().time_since_epoch())
-							   .count();
+		                       .count();
 		const auto cameraOrigin =
 			cs::engine::CameraWorldOrigin(frameBuffer.data);
 
@@ -1020,8 +1014,8 @@ namespace cs::features
 		constexpr float roughnessStep =
 			1.0f / static_cast<float>(kMipLevels - 1);
 		for (std::uint32_t level = a_startLevel;
-			 level < a_endLevel;
-			 ++level) {
+			level < a_endLevel;
+			++level) {
 			SpecularMapFilterSettingsCB constants{};
 			constants.roughness =
 				static_cast<float>(level) * roughnessStep;
@@ -1055,8 +1049,8 @@ namespace cs::features
 		context->CSSetConstantBuffers(0, 1, &buffer);
 
 		for (std::uint32_t level = 0;
-			 level < kBc6hMipLevels;
-			 ++level) {
+			level < kBc6hMipLevels;
+			++level) {
 			const std::uint32_t sourceSize =
 				std::max(1u, kCubemapSize >> level);
 			const std::uint32_t blocks =
@@ -1184,9 +1178,10 @@ namespace cs::features
 					_captureSourceFormat.load(std::memory_order_relaxed)))
 			.Field(
 				"reflection_mode",
-				!active ? "base_only" :
-					fake ? "fake" :
-					_engineReflectionCube.load(std::memory_order_relaxed) ? "active" : "scene_sky")
+				!active                                               ? "base_only" :
+				fake                                                  ? "fake" :
+				_engineReflectionCube.load(std::memory_order_relaxed) ? "active" :
+																		"scene_sky")
 			.Field(
 				"engine_reflection_cube",
 				_engineReflectionCube.load(std::memory_order_relaxed))
@@ -1224,7 +1219,7 @@ namespace cs::features
 	}
 
 	cs::DynamicCubemapsFeatureData
-		DynamicCubemaps::GetCommonBufferData() const
+	DynamicCubemaps::GetCommonBufferData() const
 	{
 		cs::DynamicCubemapsFeatureData data{};
 		if (_injectionsOperational.load(std::memory_order_acquire)) {

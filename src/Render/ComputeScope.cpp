@@ -27,10 +27,10 @@ namespace cs
 
 		constexpr UINT kClearWidth = 8;
 
-		ID3D11ShaderResourceView*  nullSRVs[kClearWidth]     = {};
-		ID3D11SamplerState*        nullSamplers[kClearWidth] = {};
-		ID3D11UnorderedAccessView* nullUAVs[kClearWidth]     = {};
-		ID3D11Buffer*              nullCBs[kClearWidth]      = {};
+		ID3D11ShaderResourceView* nullSRVs[kClearWidth] = {};
+		ID3D11SamplerState* nullSamplers[kClearWidth] = {};
+		ID3D11UnorderedAccessView* nullUAVs[kClearWidth] = {};
+		ID3D11Buffer* nullCBs[kClearWidth] = {};
 
 		if (_srvCount) {
 			_ctx->CSSetShaderResources(0, _srvCount, nullSRVs);

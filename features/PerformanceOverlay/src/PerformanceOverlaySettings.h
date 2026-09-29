@@ -74,7 +74,6 @@ namespace cs::features::performance_overlay
 			settings::Field{ "update_interval", "Overlay statistics update interval in seconds.", &Settings::updateInterval, settings::Range{ 0.05f, 5.0f }, settings::Range{ 0.05f, 2.0f } },
 			settings::Field{ "history_size", "Number of frame-time history samples.", &Settings::historySize, settings::Range{ 30, kHistoryCapacity } },
 			settings::Field{ "graph_height_px", "Graph height in pixels at font scale 1.", &Settings::graphHeightPx, settings::Range{ 40.0f, 160.0f } },
-			settings::Field{ "toggle_hotkey", "Suggested overlay toggle binding; the host's saved override takes precedence.", &Settings::toggleHotkey }
-		}
+			settings::Field{ "toggle_hotkey", "Suggested overlay toggle binding; the host's saved override takes precedence.", &Settings::toggleHotkey } }
 	};
 }

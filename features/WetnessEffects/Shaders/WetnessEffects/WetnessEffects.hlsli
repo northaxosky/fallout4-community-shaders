@@ -3,10 +3,10 @@
 #ifndef __WETNESS_EFFECTS_DEPENDENCY_HLSL__
 #define __WETNESS_EFFECTS_DEPENDENCY_HLSL__
 
-#include "Common/SharedData.hlsli"
 #include "Common/Random.hlsli"
+#include "Common/SharedData.hlsli"
 #ifdef WETNESS_COMPOSITE_CONSUMER
-#include "Common/DeferredPosition.hlsli"
+#	include "Common/DeferredPosition.hlsli"
 #endif
 
 namespace WetnessEffects
@@ -50,9 +50,10 @@ namespace WetnessEffects
 		surface.normalView = normalView;
 		surface.worldUp = GetWorldUp(normalView, viewToWorldRow2);
 		float3 worldPosition = float3(
-			dot(viewToWorldRow0, float4(viewPosition, 1.0)),
-			dot(viewToWorldRow1, float4(viewPosition, 1.0)),
-			dot(viewToWorldRow2, float4(viewPosition, 1.0))) + cameraPosAdjust.xyz;
+								   dot(viewToWorldRow0, float4(viewPosition, 1.0)),
+								   dot(viewToWorldRow1, float4(viewPosition, 1.0)),
+								   dot(viewToWorldRow2, float4(viewPosition, 1.0))) +
+		                       cameraPosAdjust.xyz;
 		float nearFactor = smoothstep(4096.0 * 2.5, 0.0, viewPosition.z);
 
 		// FO4 publishes the player cell's water plane instead of upstream's per-tile water data.
@@ -61,7 +62,8 @@ namespace WetnessEffects
 		// Calculate shore wetness factors
 		float wetnessDistToWater = abs(worldPosition.z - waterHeight);
 		float shoreFactor = hasWater ?
-			saturate(1.0 - (wetnessDistToWater / SharedData::wetnessEffectsSettings.ShoreRange)) : 0.0;
+		                        saturate(1.0 - (wetnessDistToWater / SharedData::wetnessEffectsSettings.ShoreRange)) :
+		                        0.0;
 		float shoreFactorAlbedo = hasWater && worldPosition.z < waterHeight ? 1.0 : shoreFactor;
 
 		// Calculate wetness angle and occlusion
@@ -130,7 +132,8 @@ namespace WetnessEffects
 			GbufferNormal.Load(int3(int2(screenPosition), 0)).xy * 4.0 - 2.0;
 		float encodedLengthSquared = dot(encoded, encoded);
 		// a NaN encoding fails this test and keeps the identity surface
-		[branch] if (encodedLengthSquared <= 4.0) {
+		[branch] if (encodedLengthSquared <= 4.0)
+		{
 			float3 normalView = float3(
 				encoded * sqrt(1.0 - encodedLengthSquared * 0.25),
 				-(1.0 - encodedLengthSquared * 0.5));
@@ -176,7 +179,8 @@ namespace WetnessEffects
 	float3 WetAlbedo(float3 baseColor, float glossinessAlbedo)
 	{
 		float3 wetColor = baseColor;
-		[branch] if (glossinessAlbedo > 0.0) {
+		[branch] if (glossinessAlbedo > 0.0)
+		{
 			wetColor = lerp(
 				baseColor, pow(abs(baseColor), 1.0 + glossinessAlbedo), 0.5);
 		}
@@ -226,7 +230,8 @@ namespace WetnessEffects
 		inout float3 diffuse,
 		inout float3 specular)
 	{
-		[branch] if (wetness > 0.0) {
+		[branch] if (wetness > 0.0)
+		{
 			float strength = FilmStrength(roughness);
 
 			float3 halfVector = viewDir + lightDir;
@@ -257,11 +262,12 @@ namespace WetnessEffects
 	float GetEnvironmentFilmWeight(float3 normalView, float3 viewDir, float wetness, float roughness)
 	{
 		float weight = 0.0;
-		[branch] if (wetness > 0.0) {
+		[branch] if (wetness > 0.0)
+		{
 			float NdotV = saturate(abs(dot(normalView, viewDir)) + DotClampEpsilon);
 			float2 environmentBRDF = EnvBRDF(roughness, NdotV);
 			weight = (FilmF0 * environmentBRDF.x + environmentBRDF.y) *
-				FilmStrength(roughness);
+			         FilmStrength(roughness);
 		}
 		return weight;
 	}

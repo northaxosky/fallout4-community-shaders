@@ -7,8 +7,8 @@
 
 #include <algorithm>
 #include <atomic>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <cstdio>
 #include <iterator>
 #include <limits>
@@ -121,21 +121,18 @@ namespace cs::shader_cache
 			const auto path = EncodeLocator(a_identity.modulePath);
 			if (!a_identity.established || mechanism.empty() || path.empty())
 				return {};
-			return mechanism + "|" + DescribeCompilerIdentityValue(a_identity) + "|"
-				+ std::to_string(a_identity.moduleLength) + "|" + path;
+			return mechanism + "|" + DescribeCompilerIdentityValue(a_identity) + "|" + std::to_string(a_identity.moduleLength) + "|" + path;
 		}
 
 		std::string EncodeCacheIdentity(
 			const CompilerIdentity& a_identity,
-			std::uint32_t           a_recordSchemaVersion)
+			std::uint32_t a_recordSchemaVersion)
 		{
 			const auto compilerFields =
 				EncodeCompilerIdentityFields(a_identity);
 			if (a_recordSchemaVersion == 0 || compilerFields.empty())
 				return {};
-			return std::string(kIdentitySchema) + "|record-schema="
-				+ std::to_string(a_recordSchemaVersion) + "|"
-				+ compilerFields;
+			return std::string(kIdentitySchema) + "|record-schema=" + std::to_string(a_recordSchemaVersion) + "|" + compilerFields;
 		}
 
 		bool IsVersionValue(std::string_view a_value)
@@ -148,9 +145,7 @@ namespace cs::shader_cache
 				unsigned value = 0;
 				const auto parsed =
 					std::from_chars(token.data(), token.data() + token.size(), value);
-				if (parsed.ec != std::errc{}
-					|| parsed.ptr != token.data() + token.size()
-					|| value > std::numeric_limits<std::uint16_t>::max()) {
+				if (parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size() || value > std::numeric_limits<std::uint16_t>::max()) {
 					return false;
 				}
 				if (component == 3)
@@ -165,33 +160,31 @@ namespace cs::shader_cache
 		bool IsHashValue(std::string_view a_value)
 		{
 			constexpr std::string_view prefix = "sha256:";
-			if (!a_value.starts_with(prefix)
-				|| a_value.size() != prefix.size() + 64) {
+			if (!a_value.starts_with(prefix) || a_value.size() != prefix.size() + 64) {
 				return false;
 			}
 			return std::ranges::all_of(
 				a_value.substr(prefix.size()),
 				[](char a_character) {
 					return std::isxdigit(
-						static_cast<unsigned char>(a_character)) != 0;
+							   static_cast<unsigned char>(a_character)) != 0;
 				});
 		}
 
 		struct StoredCacheIdentity
 		{
 			std::uint32_t recordSchemaVersion = 0;
-			std::string   compiler;
-			std::string   compilerFields;
+			std::string compiler;
+			std::string compilerFields;
 		};
 
 		bool ParseCacheIdentity(
-			std::string_view    a_text,
+			std::string_view a_text,
 			StoredCacheIdentity& a_identity)
 		{
 			a_identity = {};
 			const auto schemaEnd = a_text.find('|');
-			if (schemaEnd == std::string_view::npos
-				|| a_text.substr(0, schemaEnd) != kIdentitySchema) {
+			if (schemaEnd == std::string_view::npos || a_text.substr(0, schemaEnd) != kIdentitySchema) {
 				return false;
 			}
 			a_text.remove_prefix(schemaEnd + 1);
@@ -208,9 +201,7 @@ namespace cs::shader_cache
 				versionText.data(),
 				versionText.data() + versionText.size(),
 				a_identity.recordSchemaVersion);
-			if (versionParsed.ec != std::errc{}
-				|| versionParsed.ptr != versionText.data() + versionText.size()
-				|| a_identity.recordSchemaVersion == 0) {
+			if (versionParsed.ec != std::errc{} || versionParsed.ptr != versionText.data() + versionText.size() || a_identity.recordSchemaVersion == 0) {
 				return false;
 			}
 			a_text.remove_prefix(recordSchemaEnd + 1);
@@ -239,19 +230,11 @@ namespace cs::shader_cache
 				lengthText.data(),
 				lengthText.data() + lengthText.size(),
 				length);
-			if (parsed.ec != std::errc{}
-				|| parsed.ptr != lengthText.data() + lengthText.size()
-				|| length == 0
-				|| a_text.empty()
-				|| a_text.contains('\r')
-				|| a_text.contains('\n')) {
+			if (parsed.ec != std::errc{} || parsed.ptr != lengthText.data() + lengthText.size() || length == 0 || a_text.empty() || a_text.contains('\r') || a_text.contains('\n')) {
 				return false;
 			}
 
-			if ((mechanism == "version-info" && !IsVersionValue(value))
-				|| (mechanism == "content-hash" && !IsHashValue(value))
-				|| (mechanism != "version-info"
-					&& mechanism != "content-hash")) {
+			if ((mechanism == "version-info" && !IsVersionValue(value)) || (mechanism == "content-hash" && !IsHashValue(value)) || (mechanism != "version-info" && mechanism != "content-hash")) {
 				return false;
 			}
 
@@ -284,8 +267,8 @@ namespace cs::shader_cache
 
 	FileReadStatus ReadFileBytes(
 		const std::filesystem::path& a_path,
-		std::uint64_t                a_maxBytes,
-		std::vector<std::uint8_t>&   a_bytes) noexcept
+		std::uint64_t a_maxBytes,
+		std::vector<std::uint8_t>& a_bytes) noexcept
 	{
 		a_bytes.clear();
 		try {
@@ -314,8 +297,7 @@ namespace cs::shader_cache
 					a_bytes.size() - read,
 					std::numeric_limits<DWORD>::max()));
 				DWORD produced = 0;
-				if (!ReadFile(file.Get(), a_bytes.data() + read, chunk, &produced, nullptr)
-					|| produced == 0) {
+				if (!ReadFile(file.Get(), a_bytes.data() + read, chunk, &produced, nullptr) || produced == 0) {
 					a_bytes.clear();
 					return FileReadStatus::kReadFailed;
 				}
@@ -334,7 +316,7 @@ namespace cs::shader_cache
 			std::filesystem::path executable;
 			if (ResolveExecutablePath(executable)) {
 				return (executable.parent_path() / L"Data" / L"ShaderCache")
-					.lexically_normal();
+				    .lexically_normal();
 			}
 
 			std::error_code error;
@@ -357,8 +339,8 @@ namespace cs::shader_cache
 		if (!std::filesystem::exists(a_cacheRoot, a_error))
 			return removed;
 		for (auto entries = std::filesystem::recursive_directory_iterator(a_cacheRoot, a_error);
-			 !a_error && entries != std::filesystem::recursive_directory_iterator{};
-			 entries.increment(a_error)) {
+			!a_error && entries != std::filesystem::recursive_directory_iterator{};
+			entries.increment(a_error)) {
 			if (entries->path().extension() == L".fxc" &&
 				entries->is_regular_file(a_error)) {
 				if (std::filesystem::remove(entries->path(), a_error))
@@ -372,8 +354,8 @@ namespace cs::shader_cache
 
 	CacheIdentitySyncResult SynchronizeCacheIdentity(
 		const std::filesystem::path& a_cacheRoot,
-		const CompilerIdentity&      a_identity,
-		std::uint32_t                a_recordSchemaVersion) noexcept
+		const CompilerIdentity& a_identity,
+		std::uint32_t a_recordSchemaVersion) noexcept
 	{
 		CacheIdentitySyncResult result;
 		try {
@@ -411,31 +393,21 @@ namespace cs::shader_cache
 						"shader cache reset: identity sidecar invalid";
 				} else {
 					const bool schemaChanged =
-						storedIdentity.recordSchemaVersion
-						!= a_recordSchemaVersion;
+						storedIdentity.recordSchemaVersion != a_recordSchemaVersion;
 					const bool compilerChanged =
-						storedIdentity.compilerFields
-						!= currentCompilerFields;
+						storedIdentity.compilerFields != currentCompilerFields;
 					if (!schemaChanged && !compilerChanged)
 						return result;
 					resetRequired = true;
 					if (schemaChanged) {
 						result.resetMessage =
-							"shader cache reset: record schema "
-							+ std::to_string(
-								storedIdentity.recordSchemaVersion)
-							+ " -> "
-							+ std::to_string(a_recordSchemaVersion);
+							"shader cache reset: record schema " + std::to_string(storedIdentity.recordSchemaVersion) + " -> " + std::to_string(a_recordSchemaVersion);
 						if (compilerChanged) {
-							result.resetMessage += ", compiler "
-								+ storedIdentity.compiler + " -> "
-								+ currentCompiler;
+							result.resetMessage += ", compiler " + storedIdentity.compiler + " -> " + currentCompiler;
 						}
 					} else {
 						result.resetMessage =
-							"shader cache reset: compiler "
-							+ storedIdentity.compiler + " -> "
-							+ currentCompiler;
+							"shader cache reset: compiler " + storedIdentity.compiler + " -> " + currentCompiler;
 					}
 				}
 			} else {
@@ -475,21 +447,18 @@ namespace cs::shader_cache
 
 	std::filesystem::path BuildRecordPath(
 		const std::filesystem::path& a_cacheRoot,
-		ShaderCacheStage             a_stage,
-		const sha256::Sha256Result&  a_logicalDigest)
+		ShaderCacheStage a_stage,
+		const sha256::Sha256Result& a_logicalDigest)
 	{
 		const auto digest = sha256::Sha256ToHex(a_logicalDigest);
-		return a_cacheRoot
-			/ DescribeStage(a_stage)
-			/ digest.substr(0, 2)
-			/ (digest + ".fxc");
+		return a_cacheRoot / DescribeStage(a_stage) / digest.substr(0, 2) / (digest + ".fxc");
 	}
 
 	// No temp-file rename: MO2's usvfs mishandles it, and torn records fail digest validation.
 	RecordWriteStatus WriteRecord(
-		const std::filesystem::path&  a_path,
+		const std::filesystem::path& a_path,
 		std::span<const std::uint8_t> a_bytes,
-		std::string&                  a_error) noexcept
+		std::string& a_error) noexcept
 	{
 		a_error.clear();
 		try {

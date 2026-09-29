@@ -7,8 +7,8 @@
 #include "Plugin.h"
 #include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
-#include "Render/RenderHooks.h"
 #include "Render/FrameProfiler.h"
+#include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Settings/SettingsRegistry.h"
 
@@ -27,10 +27,10 @@ namespace cs::telemetry
 	namespace
 	{
 		std::atomic<std::uint64_t> g_frame{ 0 };
-		std::atomic_bool          g_enabled{ settings::core::Logging{}.telemetry };
+		std::atomic_bool g_enabled{ settings::core::Logging{}.telemetry };
 		std::atomic<std::uint32_t> g_intervalSeconds{ settings::core::Logging{}.telemetryIntervalSeconds };
 		std::atomic<std::uint64_t> g_lastEmitMilliseconds{ 0 };
-		std::atomic_bool          g_dumpRequested{ false };
+		std::atomic_bool g_dumpRequested{ false };
 		bool g_installed = false;
 		// without the post-composite anchor the pump never ticks
 		std::atomic_bool g_compositeSamplingAvailable{ true };
@@ -235,10 +235,7 @@ namespace cs::telemetry
 			// DumpAll runs from the post-composite render hook.
 			auto* player = RE::PlayerCharacter::GetSingleton();
 			const auto position = player ? player->GetPosition() : RE::NiPoint3{};
-			const bool positionAvailable = player
-				&& std::isfinite(position.x)
-				&& std::isfinite(position.y)
-				&& std::isfinite(position.z);
+			const bool positionAvailable = player && std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z);
 			a_root.insert_or_assign(
 				"player_position_available",
 				positionAvailable);
@@ -548,11 +545,10 @@ namespace cs::telemetry
 			}
 			const auto intervalMilliseconds =
 				static_cast<std::uint64_t>(
-					g_intervalSeconds.load(std::memory_order_relaxed))
-				* 1000;
-			if (now - lastEmit < intervalMilliseconds
-				|| !g_lastEmitMilliseconds.compare_exchange_strong(
-					lastEmit, now, std::memory_order_relaxed)) {
+					g_intervalSeconds.load(std::memory_order_relaxed)) *
+				1000;
+			if (now - lastEmit < intervalMilliseconds || !g_lastEmitMilliseconds.compare_exchange_strong(
+															 lastEmit, now, std::memory_order_relaxed)) {
 				return;
 			}
 
@@ -680,8 +676,7 @@ namespace cs::telemetry
 		void SetEnabled(bool a_enabled)
 		{
 			const bool enabled =
-				a_enabled
-				&& g_compositeSamplingAvailable.load(std::memory_order_relaxed);
+				a_enabled && g_compositeSamplingAvailable.load(std::memory_order_relaxed);
 			if (g_enabled.exchange(enabled, std::memory_order_relaxed) != enabled)
 				g_lastEmitMilliseconds.store(0, std::memory_order_relaxed);
 		}
@@ -713,8 +708,7 @@ namespace cs::telemetry
 			})) {
 			g_compositeSamplingAvailable.store(false, std::memory_order_relaxed);
 			pump::SetEnabled(false);
-			cs::log::Get("cs.telemetry")->error(
-				"Telemetry composite sampling disabled: post-composite hook registration failed.");
+			cs::log::Get("cs.telemetry")->error("Telemetry composite sampling disabled: post-composite hook registration failed.");
 		}
 	}
 }

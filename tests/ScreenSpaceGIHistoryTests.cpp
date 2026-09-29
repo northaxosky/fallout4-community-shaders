@@ -37,10 +37,7 @@ namespace
 
 		history.Reset(HistoryResetReason::kResize);
 		Check(
-			!history.Valid()
-				&& !history.Prepare().useHistory
-				&& history.LastResetReason() == HistoryResetReason::kResize
-				&& history.ConsumeClearPending(),
+			!history.Valid() && !history.Prepare().useHistory && history.LastResetReason() == HistoryResetReason::kResize && history.ConsumeClearPending(),
 			"resize must force a cleared current-frame seed");
 		history.Publish();
 		Check(history.Prepare().useHistory, "a valid replacement frame must restore history use");
@@ -58,12 +55,10 @@ namespace
 		constexpr Float2 motion = MotionFromNDC(currentNdc, previousNdc);
 		constexpr Float2 reprojected = PreviousUV(currentUv, motion);
 		Check(
-			Near(reprojected.x, expected.x)
-				&& Near(reprojected.y, expected.y),
+			Near(reprojected.x, expected.x) && Near(reprojected.y, expected.y),
 			"stored motion must reproject to the previous surface");
 		Check(
-			!Near(currentUv.x - motion.x, expected.x)
-				&& !Near(currentUv.y - motion.y, expected.y),
+			!Near(currentUv.x - motion.x, expected.x) && !Near(currentUv.y - motion.y, expected.y),
 			"the opposite motion sign must not appear valid");
 	}
 }

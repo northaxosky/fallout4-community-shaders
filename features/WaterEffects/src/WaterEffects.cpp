@@ -1,8 +1,8 @@
 #include "WaterEffects.h"
 
+#include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
 #include <d3d11.h>
-#include <DearModdingUI/Client.h>
 
 #include <array>
 #include <exception>
@@ -14,6 +14,7 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
@@ -21,7 +22,6 @@
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
-#include "Menu/SettingsEdit.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -40,25 +40,19 @@ namespace cs::features
 		constexpr std::uint32_t kModeCaustics = 2;
 		constexpr std::uint32_t kModeSubmersion = 3;
 
-		constexpr std::array<FeatureDebugView, 2> kDebugViews{ {
-			{
-				"water_caustics",
-				"Caustics multiplier on submerged surfaces",
-				FeatureDebugViewKind::kFullscreen
-			},
-			{
-				"water_submersion",
+		constexpr std::array<FeatureDebugView, 2> kDebugViews{ { { "water_caustics",
+																	 "Caustics multiplier on submerged surfaces",
+																	 FeatureDebugViewKind::kFullscreen },
+			{ "water_submersion",
 				"Depth below the cell water plane",
-				FeatureDebugViewKind::kFullscreen
-			}
-		} };
+				FeatureDebugViewKind::kFullscreen } } };
 
 		ID3D11DeviceContext* GetImmediateContext() noexcept
 		{
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			return rendererData ?
-				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-				nullptr;
+			           reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+			           nullptr;
 		}
 
 		std::string_view DebugVisualizationName(
@@ -82,7 +76,7 @@ namespace cs::features
 	}
 
 	std::span<const FeatureDebugView>
-		WaterEffects::GetDebugViews() const noexcept
+	WaterEffects::GetDebugViews() const noexcept
 	{
 		return kDebugViews;
 	}
@@ -125,23 +119,19 @@ namespace cs::features
 		PublishSettings();
 
 		const auto registerContribution = [this](
-			cs::engine::ShaderInjectionTarget a_target,
-			cs::engine::ShaderInjectionBindCallback a_bind,
-			bool a_fullscreenDebug) {
+											  cs::engine::ShaderInjectionTarget a_target,
+											  cs::engine::ShaderInjectionBindCallback a_bind,
+											  bool a_fullscreenDebug) {
 			cs::engine::ShaderInjectionDefines defines{
 				{ cs::engine::shader_injection_defines::kWaterEffects, "1" }
 			};
 			std::vector<cs::engine::ShaderSlotClaim> slotClaims{
-				{
-					.stage = cs::engine::ShaderStage::kPixel,
+				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kCausticsPSSlot
-				},
-				{
-					.stage = cs::engine::ShaderStage::kPixel,
+					.slot = kCausticsPSSlot },
+				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kSceneDepthPSSlot
-				}
+					.slot = kSceneDepthPSSlot }
 			};
 			if (a_fullscreenDebug) {
 				defines.emplace(
@@ -149,24 +139,18 @@ namespace cs::features
 					"1");
 			} else {
 				// See WaterCausticsSampler.hlsli.
-				slotClaims.push_back({
-					.stage = cs::engine::ShaderStage::kPixel,
+				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kSampler,
-					.slot = kCausticsSamplerPSSlot
-				});
+					.slot = kCausticsSamplerPSSlot });
 			}
-			return cs::engine::RegisterReplacement({
-				.targetId = a_target,
+			return cs::engine::RegisterReplacement({ .targetId = a_target,
 				.contributor = "WaterEffects",
 				.defines = std::move(defines),
 				.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire)
-						&& _resourcesReady.load(std::memory_order_acquire)
-						&& cs::render::IsSharedDataReady();
+					return _registrationsReady.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && cs::render::IsSharedDataReady();
 				},
 				.bind = std::move(a_bind),
-				.slotClaims = std::move(slotClaims)
-			});
+				.slotClaims = std::move(slotClaims) });
 		};
 
 		if (!registerContribution(
@@ -201,8 +185,8 @@ namespace cs::features
 			cs::engine::HookPriority::Late);
 		if (!cs::engine::RegisterPreDeferredComposite(
 				[] { WaterEffects::GetSingleton()->SaveDebugBindings(); },
-				cs::engine::HookPriority::Early)
-			|| !cs::engine::RegisterPostDeferredComposite(
+				cs::engine::HookPriority::Early) ||
+			!cs::engine::RegisterPostDeferredComposite(
 				[] { WaterEffects::GetSingleton()->RestoreDebugBindings(); },
 				cs::engine::HookPriority::Late)) {
 			FailLoad(
@@ -242,8 +226,7 @@ namespace cs::features
 				static_cast<std::uint32_t>(loadResult));
 			return false;
 		}
-		if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D
-			|| metadata.arraySize != 1) {
+		if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.arraySize != 1) {
 			a_error = "watercaustics.dds is not a single 2D image";
 			return false;
 		}
@@ -346,8 +329,8 @@ namespace cs::features
 		if (!_resourcesReady.load(std::memory_order_acquire)) {
 			const auto detail = GetValidationDetail();
 			a_error = detail.empty() ?
-				"the caustics texture is unavailable" :
-				"the caustics texture is unavailable: " + detail;
+			              "the caustics texture is unavailable" :
+			              "the caustics texture is unavailable: " + detail;
 			SetValidationDetail(a_error);
 			return false;
 		}
@@ -371,11 +354,7 @@ namespace cs::features
 
 	bool WaterEffects::CanBind() const noexcept
 	{
-		return _injectionsOperational.load(std::memory_order_acquire)
-			&& _enabled.load(std::memory_order_acquire)
-			&& _resourcesReady.load(std::memory_order_acquire)
-			&& _causticsSrv
-			&& _causticsSampler;
+		return _injectionsOperational.load(std::memory_order_acquire) && _enabled.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && _causticsSrv && _causticsSampler;
 	}
 
 	void WaterEffects::SaveEngineBindings()
@@ -411,8 +390,7 @@ namespace cs::features
 
 	void WaterEffects::SaveDebugBindings()
 	{
-		if (_debugVisualization.load(std::memory_order_acquire)
-			== DebugVisualization::kOff) {
+		if (_debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff) {
 			return;
 		}
 		auto* context = GetImmediateContext();
@@ -425,10 +403,7 @@ namespace cs::features
 
 	void WaterEffects::BindDebugTextures(ID3D11DeviceContext* a_context)
 	{
-		if (!a_context
-			|| _debugVisualization.load(std::memory_order_acquire)
-				== DebugVisualization::kOff
-			|| !CanBind()) {
+		if (!a_context || _debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff || !CanBind()) {
 			return;
 		}
 		auto* depthSrv = cs::engine::GetSceneDepthSRV();
