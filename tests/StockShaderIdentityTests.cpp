@@ -1,9 +1,9 @@
 #include "Log.h"
 #include "Render/ShaderFamilyDescriptor.h"
+#include "Render/ShaderVariantRecipe.h"
 #include "Utils/CSSha1.h"
 #include "Utils/CSSha256.h"
-#include "Utils/ShaderCache/ShaderRecipe.h"
-#include "Utils/ShaderCompile.h"
+#include "Utils/ShaderCache/SourceCompile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -125,21 +125,19 @@ namespace
 			*cs::engine::GetShaderInjectionTarget(a_row.family.target), a_row.family.stage, *family, {});
 		if (!request)
 			return "invalid-compile-request";
-		cs::shader_cache::ShaderRecipe recipe;
-		recipe.source = a_shaderRoot / request->sourcePath;
-		recipe.entryPoint = request->entryPoint;
-		recipe.profile = request->profile;
-		std::vector<std::pair<const char*, const char*>> defines;
-		for (const auto& [name, value] : request->defines)
-			defines.emplace_back(name.c_str(), value.c_str());
-		std::string error;
-		const auto blob = cs::util::CompileShaderToBlob(
-			recipe.source.c_str(), defines, recipe.profile.c_str(), recipe.entryPoint.c_str(), recipe.flags1, &error);
-		if (!blob)
-			return "compile-error: " + error.substr(0, 240);
-		Microsoft::WRL::ComPtr<ID3DBlob> stripped;
-		if (FAILED(D3DStripShader(blob->GetBufferPointer(), blob->GetBufferSize(),
-				D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.GetAddressOf())))
+		cs::engine::ShaderVariantCompilationRequest variant;
+		variant.sourcePath = a_shaderRoot / request->sourcePath;
+		variant.entryPoint = request->entryPoint;
+		variant.profile = request->profile;
+		variant.stage = a_row.family.stage;
+		variant.defines.assign(request->defines.begin(), request->defines.end());
+		const auto compiled = cs::shader_cache::CompileSourceWithManifest(
+			cs::engine::BuildShaderVariantRecipe(variant));
+		if (!compiled.succeeded)
+			return "compile-error: " + compiled.error.substr(0, 240);
+		winrt::com_ptr<ID3DBlob> stripped;
+		if (FAILED(D3DStripShader(compiled.bytecode.data(), compiled.bytecode.size(),
+				D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.put())))
 			return "strip-error";
 		return cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(stripped->GetBufferPointer(), stripped->GetBufferSize()));
 	}

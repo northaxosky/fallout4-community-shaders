@@ -538,13 +538,18 @@ target("StockShaderIdentityTests", function()
         "tests/StockShaderIdentityTests.cpp",
         "src/Render/ShaderFamilyDescriptor.cpp",
         "src/Render/ShaderInjectionCompileRequest.cpp",
+        "src/Render/ShaderVariantRecipe.cpp",
         "src/Utils/CSSha1.cpp",
         "src/Utils/CSSha256.cpp",
+        "src/Utils/ShaderCache/CacheStorage.cpp",
+        "src/Utils/ShaderCache/CompilerIdentity.cpp",
+        "src/Utils/ShaderCache/DependencyTrace.cpp",
+        "src/Utils/ShaderCache/RevalidationContext.cpp",
         "src/Utils/ShaderCache/ShaderRecipe.cpp",
-        "src/Utils/ShaderCompile.cpp"
+        "src/Utils/ShaderCache/SourceCompile.cpp"
     )
     add_packages("spdlog", "vcpkg::tomlplusplus")
-    add_syslinks("bcrypt", "d3dcompiler")
+    add_syslinks("bcrypt", "d3dcompiler", "version")
     after_build(function(target)
         local vcvars = target:toolchain("msvc"):config("vcvars")
         local sdkdir = os.getenv("WindowsSdkDir") or (vcvars and vcvars.WindowsSdkDir)
