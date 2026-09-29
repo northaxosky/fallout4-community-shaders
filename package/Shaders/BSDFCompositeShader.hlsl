@@ -262,6 +262,7 @@ PS_OUTPUT main(PS_INPUT input)
     float glossSquaredScaled = matGlossOrSpec * matGlossOrSpec * 50.0;
     bool  hasIBL = (matSliceFloat > 0.5 / 255.0);
     float3 iblColor = float3(0, 0, 0);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
     pos.xy = sn * 2.0 - 1.0;
     pos.w  = 1.0;
@@ -271,12 +272,24 @@ PS_OUTPUT main(PS_INPUT input)
     float  posViewW   = dot(reprojRow3, pos);
     pos.xyz = posViewXYZ / posViewW;
     float3 viewDirNeg = normalize(-pos.xyz);
+#endif
     if (hasIBL)
     {
         float2 enc = g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
         float  encDotEnc = dot(enc, enc);
         float  zRecon = 1.0 - encDotEnc * 0.25;
         float3 normalView = float3(enc * sqrt(zRecon), -(1.0 - encDotEnc * 0.5));
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
+        float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
+        pos.xy = sn * 2.0 - 1.0;
+        pos.w  = 1.0;
+        float3 posViewXYZ = float3(dot(reprojRow0, pos),
+                                   dot(reprojRow1, pos),
+                                   dot(reprojRow2, pos));
+        float  posViewW   = dot(reprojRow3, pos);
+        pos.xyz = posViewXYZ / posViewW;
+        float3 viewDirNeg = normalize(-pos.xyz);
+#endif
         float  ndotv2     = dot(viewDirNeg, normalView);
         ndotv2 = ndotv2 + ndotv2;
         float3 reflView   = normalView * -ndotv2 + viewDirNeg;
@@ -642,11 +655,11 @@ PS_OUTPUT main(PS_INPUT input)
         g_tGbufferMaterial.SampleLevel(g_sGbufferMaterial, uv, 0);
     bool hasIbl = material.y > (0.5 / 255.0);
     float3 iblColor = float3(0.0, 0.0, 0.0);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 negativePositionView = -positionView;
     float3 viewDirection =
         negativePositionView *
         rsqrt(dot(negativePositionView, negativePositionView));
-#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, viewDirection, wetSurface.wetness,
         wetSurface.waterRoughness,
@@ -661,6 +674,12 @@ PS_OUTPUT main(PS_INPUT input)
         float3 normalView = float3(
             encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
             -(1.0 - encodedLengthSquared * 0.5));
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
+        float3 negativePositionView = -positionView;
+        float3 viewDirection =
+            negativePositionView *
+            rsqrt(dot(negativePositionView, negativePositionView));
+#endif
         float reflectionScale = 2.0 * dot(viewDirection, normalView);
         float3 reflectionView =
             normalView * -reflectionScale + viewDirection;
@@ -1154,7 +1173,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #endif
 #endif
 
+#if FOGSTACK || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
     float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
+#endif
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, normalize(-viewPosition), wetSurface.wetness,
@@ -1184,6 +1205,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float normalLengthSquared = dot(encodedNormal, encodedNormal);
         float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
         float3 normal = float3(encodedNormal * sqrt(normalFactors.x), -normalFactors.y);
+#endif
+#if !FOGSTACK && (!defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS))
+        float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
 #endif
         float3 reflected = reflect(normalize(-viewPosition), normal);
         float3 environmentCoordinate = float3(
@@ -1483,8 +1507,8 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
     float2 prm = TexParam.SampleLevel(SampParam, uv, 0).yz;
 
-    float3 v = normalize(-pos.xyz);
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    float3 v = normalize(-pos.xyz);
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, v, wetSurface.wetness,
         wetSurface.waterRoughness,
@@ -1501,6 +1525,9 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         nn.xy = nn.xy * sqrt(nn.z);
         nn.z  = -nn.w;
 
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
+        float3 v   = normalize(-pos.xyz);
+#endif
         float  ndv = dot(v, nn.xyz);
         ndv = ndv + ndv;
         float3 r = nn.xyz * -ndv + v;
@@ -2589,6 +2616,7 @@ float4 main(PSInput input) : SV_Target0
 #endif
 #endif
 
+#if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
     float2 projectedXY = float2(
         uv.x * screenData[0].z,
         1.0 - uv.y * screenData[0].w) * 2.0 - 1.0;
@@ -2599,6 +2627,10 @@ float4 main(PSInput input) : SV_Target0
         dot(row2, projected));
     float worldDenominator = dot(row3, projected);
     float3 worldPosition = worldNumerator / worldDenominator;
+#else
+    float4 projected;
+    float3 worldPosition;
+#endif
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
     float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
         wetSurface.normalView, normalize(-worldPosition), wetSurface.wetness,
@@ -2703,6 +2735,18 @@ float4 main(PSInput input) : SV_Target0
         float3 normal = float3(
             encodedNormal * normalScale,
             -(1.0 - encodedLengthSquared * 0.5));
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
+        float2 projectedXY = float2(
+            uv.x * screenData[0].z,
+            1.0 - uv.y * screenData[0].w) * 2.0 - 1.0;
+        projected = float4(projectedXY, linearDepth, 1.0);
+        float3 worldNumerator = float3(
+            dot(row0, projected),
+            dot(row1, projected),
+            dot(row2, projected));
+        float worldDenominator = dot(row3, projected);
+        worldPosition = worldNumerator / worldDenominator;
+#endif
         float3 reflected = reflect(normalize(-worldPosition), normal);
         float3 probeDirection = float3(
             dot(scene[12].xyz, reflected),
