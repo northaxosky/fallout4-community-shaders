@@ -402,6 +402,7 @@ namespace cs::features
 
 		// Seed the transition detectors so the first frame is not a spurious re-enable.
 		_lastTemporalEnabled = _settings.enableTemporalDenoiser;
+		_lastResolutionMode = std::clamp(_settings.resolutionMode, 0, 2);
 		_started.store(true, std::memory_order_release);
 		L->info(
 			"Registered composite injection and post-deferred-lights callback (enabled={}).",
