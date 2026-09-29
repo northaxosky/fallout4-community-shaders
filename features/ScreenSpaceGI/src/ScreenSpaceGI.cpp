@@ -364,6 +364,18 @@ namespace cs::features
 		}
 
 		_injectionRegistered.store(true, std::memory_order_release);
+		// The prepass carries 1 - vertexAO in MRT4 alpha for the composite.
+		if (!cs::engine::RegisterReplacement({
+				.targetId = cs::engine::ShaderInjectionTarget::kDeferredPrepass,
+				.contributor = "ScreenSpaceGI",
+				.defines = {
+					{
+						cs::engine::shader_injection_defines::kScreenSpaceGi,
+						"1"
+					}
+				} })) {
+			L->warn("Vertex AO is unavailable to SSGI; the deferred prepass replacement did not register.");
+		}
 		const bool compositionScopeRegistered =
 			cs::engine::RegisterPreDeferredComposite([] {
 				ScreenSpaceGI::GetSingleton()->SaveCompositionBindings();

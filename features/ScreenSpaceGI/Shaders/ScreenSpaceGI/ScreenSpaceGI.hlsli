@@ -8,6 +8,7 @@
 #include "Common/Shading.hlsli"
 
 #include "Common/Color.hlsli"
+#include "Common/Math.hlsli"
 #include "../Common/SphericalHarmonics.hlsli"
 
 namespace ScreenSpaceGI
@@ -39,11 +40,13 @@ namespace ScreenSpaceGI
 	}
 
 	// diffuseColor excludes specular, as upstream.
+	// vertexAOStore is MRT4 alpha: 1 - vertexAO from the prepass.
 	float3 ComposeDiffuse(
 		float2 screenPosition,
 		float3x3 viewToWorld,
 		float3 albedo,
-		float3 diffuseColor)
+		float3 diffuseColor,
+		float vertexAOStore)
 	{
 		if (!SharedData::screenSpaceGISettings.EnableScreenSpaceGI)
 			return diffuseColor;
@@ -53,6 +56,9 @@ namespace ScreenSpaceGI
 		float3 normalWS = normalize(mul(viewToWorld, normalVS));
 
 		float ssgiAo = 1 - OcclusionTexture.Load(texel);
+		// Uncovered pixels keep stale alpha, but carry no occlusion there, so the ratio saturates to 1.
+		float vertexAO = 1.0 - vertexAOStore;
+		ssgiAo = saturate(ssgiAo / max(vertexAO, EPSILON_DIVISION));
 		float4 ssgiIlYSh = BounceLumaTexture.Load(texel);
 		float ssgiIlY = SphericalHarmonics::SHHallucinateZH3Irradiance(ssgiIlYSh, normalWS);
 		float2 ssgiIlCoCg = BounceChromaTexture.Load(texel);

@@ -292,6 +292,19 @@ namespace
 		});
 
 		const auto composite = a_root / "BSDFCompositeShader.hlsl";
+		// SSGI's vertex-AO write must compile for opaque, vertex-colour and blended prepass bodies.
+		const auto prepass = a_root / "BSDFPrePass.hlsl";
+		for (const ShaderDefines& defines : {
+				 ShaderDefines{ { "BSDFPREPASS_PS_SOURCE", "1" }, { "SSGI", "1" } },
+				 ShaderDefines{ { "BSDFPREPASS_PS_SOURCE", "1" }, { "SSGI", "1" }, { "VC", "1" } },
+				 ShaderDefines{ { "BSDFPREPASS_PS_SOURCE", "1" }, { "SSGI", "1" }, { "VC", "1" }, { "BLEND", "1" } } }) {
+			a_jobs.push_back({
+				.path = prepass,
+				.defines = defines,
+				.profile = "ps_5_0",
+				.description = "BSDFPrePass SSGI vertex AO"
+			});
+		}
 		a_jobs.push_back({
 			.path = composite,
 			.defines = {

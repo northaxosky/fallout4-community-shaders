@@ -1878,7 +1878,8 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         position.xy,
         float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
         ssgiAlbedo,
-        color) + ssgiSpecular;
+        color,
+        secondaryTexture.Sample(secondarySampler, uv).w) + ssgiSpecular;
 #endif
 
 #if COMPOSITE_MODULATION
@@ -2152,7 +2153,8 @@ PS_OUTPUT main(PS_INPUT input)
         input.position.xy,
         float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
         baseColor,
-        mad(litColor, 3.0, ssgiEmissive)) + ssgiSpecular;
+        mad(litColor, 3.0, ssgiEmissive),
+        g_tSecondaryColor.Sample(g_sSecondaryColor, uv).w) + ssgiSpecular;
 #endif
 #endif
 
@@ -2223,7 +2225,8 @@ PS_OUTPUT main(PS_INPUT input)
             input.position.xy,
             float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
             baseColor,
-            mad(litColor, 3.0, ssgiEmissive)) + ambientLight;
+            mad(litColor, 3.0, ssgiEmissive),
+            g_tSecondaryColor.Sample(g_sSecondaryColor, uv).w) + ambientLight;
 #endif
 #if COMPOSITE_MODULATION
         float2 modulationUv = min(uv, ModulationUvClamp.xy);
@@ -2321,7 +2324,8 @@ PS_OUTPUT main(PS_INPUT input)
             input.position.xy,
             float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
             baseColor,
-            ambientWeighted);
+            ambientWeighted,
+            g_tSecondaryColor.Sample(g_sSecondaryColor, uv).w);
 #endif
 #endif
         bool useGraySaturated = (fogMixFactor < FogNearHighColor_and_clamp.w);
@@ -2864,7 +2868,8 @@ float4 main(PSInput input) : SV_Target0
         input.position.xy,
         float3x3(scene[12].xyz, scene[13].xyz, scene[14].xyz),
         base.xyz,
-        mad(diffuse, base.xyz, ssgiEmissive)) + light;
+        mad(diffuse, base.xyz, ssgiEmissive),
+        ambientTexture.Sample(ambientSampler, uv).w) + light;
 #endif
 #if COMPOSITE_MATERIAL_EXCLUSION
     float gloss = typeData.y * 3.0;

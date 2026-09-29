@@ -410,7 +410,7 @@ struct PS_OUTPUT
 #endif
     float4 material : SV_Target2;
     float4 auxA : SV_Target3;
-#if BLEND
+#if BLEND || defined(SSGI)
     float4 specTint : SV_Target4;
 #else
     float3 specTint : SV_Target4;
@@ -1085,6 +1085,14 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
     output.specTint.w = blendAlpha;
 #else
+#ifdef SSGI
+    // 1 - vertexAO for SSGI, as upstream's Masks2; nothing else reads MRT4 alpha.
+#if VC && !LANDSCAPE && !HAIR && !EYE && !SKIN_TINT
+    output.specTint.w = 1.0 - pow(max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z), 2.2);
+#else
+    output.specTint.w = 0.0;
+#endif
+#endif
 #if HAIR
 #if GRADIENT_REMAP
     output.albedo.w = albedoSample.y;
