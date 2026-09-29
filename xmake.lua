@@ -529,6 +529,39 @@ target("PixelShaderSwapTests", function()
     )
 end)
 
+target("StockShaderIdentityTests", function()
+    set_kind("binary")
+    set_default(false)
+    set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/StockShaderIdentityTests")
+    add_deps("ShaderStage")
+    add_files(
+        "tests/StockShaderIdentityTests.cpp",
+        "src/Render/ShaderFamilyDescriptor.cpp",
+        "src/Render/ShaderInjectionCompileRequest.cpp",
+        "src/Utils/CSSha1.cpp",
+        "src/Utils/CSSha256.cpp",
+        "src/Utils/ShaderCache/ShaderRecipe.cpp",
+        "src/Utils/ShaderCompile.cpp"
+    )
+    add_packages("spdlog", "vcpkg::tomlplusplus")
+    add_syslinks("bcrypt", "d3dcompiler")
+    after_build(function(target)
+        local vcvars = target:toolchain("msvc"):config("vcvars")
+        local sdkdir = os.getenv("WindowsSdkDir") or (vcvars and vcvars.WindowsSdkDir)
+        assert(sdkdir, "Cannot locate Windows SDK for the pinned shader compiler")
+        local compiler = path.join(sdkdir, "bin", "10.0.26100.0", "x64", "d3dcompiler_47.dll")
+        assert(os.isfile(compiler), "Stock shader identity requires SDK bin/10.0.26100.0/x64/d3dcompiler_47.dll")
+        os.cp(compiler, target:targetdir())
+    end)
+    add_tests("StockShaderIdentity", {
+        runargs = {
+            path.join(os.projectdir(), "build/ShaderStage/Shaders"),
+            path.join(os.projectdir(), "tests/data/stock-shader-identity.tsv")
+        },
+        run_timeout = 600000
+    })
+end)
+
 target("ShaderCacheTests", function()
     set_kind("binary")
     set_default(false)

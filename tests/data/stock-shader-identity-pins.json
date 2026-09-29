@@ -1,0 +1,9 @@
+[
+  {
+    "target": "df_tiled_lighting",
+    "stage": "compute",
+    "descriptor": 3,
+    "stock_sha1": "e5f6cc91c8d37f7a074f09e533d09da0a529f720",
+    "candidate_sha1": "8f2553d9dbbd5673665dc690c38f1dfd9b6b229c"
+  }
+]
