@@ -72,6 +72,24 @@ namespace cs::features::wetness_math
 		return std::lerp(previous, current, transition);
 	}
 
+	// FO4CS weather wetness has no precipitation fade thresholds, so each weather's wetness is its transition weight.
+	inline float ComputeWeatherPuddleWetness(
+		bool a_isExterior,
+		bool a_previousIsRain,
+		bool a_currentIsRain,
+		float a_transitionPct) noexcept
+	{
+		if (!a_isExterior)
+			return 0.0f;
+		const float transition = std::isfinite(a_transitionPct) ?
+			std::clamp(a_transitionPct, 0.0f, 1.0f) :
+			1.0f;
+		const float currentWetness = a_currentIsRain ? transition : 0.0f;
+		const float currentPuddleWetness = std::pow(currentWetness, 2.0f);
+		const float lastPuddleWetness = a_previousIsRain ? std::pow(1.0f - transition, 0.25f) : 0.0f;
+		return std::min(1.0f, currentPuddleWetness + lastPuddleWetness);
+	}
+
 	// disabled publishes exact zero; enabled hands the weather value through untouched
 	inline constexpr float PublishedWetness(bool a_enabled, float a_weatherWetness) noexcept
 	{

@@ -207,6 +207,13 @@ namespace cs::features
 			weather.transitionPct);
 		const float wetness = wetness_math::PublishedWetness(
 			_settings.enabled, weatherWetness);
+		const float puddleWetness = wetness_math::PublishedWetness(
+			_settings.enabled,
+			wetness_math::ComputeWeatherPuddleWetness(
+				isExterior,
+				weather.previousIsRain,
+				weather.currentIsRain,
+				weather.transitionPct));
 
 		_isExterior.store(isExterior, std::memory_order_relaxed);
 		_weatherWetness.store(weatherWetness, std::memory_order_relaxed);
@@ -220,8 +227,7 @@ namespace cs::features
 			.PuddleRadius = _settings.puddleRadius,
 			.PuddleMaxAngle = _settings.puddleMaxAngle,
 			.MaxPuddleWetness = _settings.maxPuddleWetness,
-			// FO4 puddle accumulation is not yet ported, so only rain feeds the puddle chain.
-			.PuddleWetness = 0.0f
+			.PuddleWetness = puddleWetness
 		};
 	}
 
