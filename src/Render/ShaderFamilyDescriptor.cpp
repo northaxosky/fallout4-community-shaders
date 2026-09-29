@@ -135,11 +135,6 @@ namespace cs::engine
 			DefineBit(a_defines, a_descriptor, 1U << 30, "BONE_TINTING");
 			DefineBit(a_defines, a_descriptor, 1U << 31, "FACE");
 			Define(a_defines, "MOTION_VECTORS");
-			if (a_family.stage == ShaderStage::kVertex
-				&& a_defines.contains("GRASS")
-				&& a_defines.contains("SPLINE")) {
-				return false;
-			}
 			return true;
 		}
 
