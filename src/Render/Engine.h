@@ -246,12 +246,6 @@ namespace cs::engine
 		return singleton.get();
 	}
 
-	[[nodiscard]] inline RE::BSShaderManager::State* GetShaderManagerState()
-	{
-		static REL::Relocation<RE::BSShaderManager::State*> singleton{ REL::ID({ 1327069, 2712479, 2712479 }) };
-		return singleton.get();
-	}
-
 	[[nodiscard]] inline RE::ImageSpaceEffect* GetImageSpaceEffect(
 		RE::ImageSpaceManager::ImageSpaceEffectEnum a_effect)
 	{
@@ -283,30 +277,6 @@ namespace cs::engine
 			.base = reinterpret_cast<const bool*>(bytes + 0x120),
 			.applied = reinterpret_cast<bool*>(bytes + 0x121)
 		};
-	}
-
-	// World-space ambient rows the lights decode with pow 2.2.
-	[[nodiscard]] inline bool TryGetDirectionalAmbientRows(std::array<DirectX::XMFLOAT4, 3>& a_rows)
-	{
-		const auto* state = GetShaderManagerState();
-		if (!state) {
-			return false;
-		}
-		// Private in CommonLibF4; +0xB8 on OG.
-		const std::ptrdiff_t offset = REX::FModule::IsRuntimeOG() ? 0xB8 : 0xC0;
-		const auto& transform = *reinterpret_cast<const RE::NiTransform*>(
-			reinterpret_cast<const std::byte*>(state) + offset);
-		const float translate[3]{ transform.translate.x, transform.translate.y, transform.translate.z };
-		// The engine uploads rotation columns.
-		for (std::size_t row = 0; row < 3; ++row) {
-			a_rows[row] = {
-				transform.rotate.entry[0][row],
-				transform.rotate.entry[1][row],
-				transform.rotate.entry[2][row],
-				translate[row]
-			};
-		}
-		return true;
 	}
 
 	[[nodiscard]] inline RE::NiCamera* GetWorldRootCamera()

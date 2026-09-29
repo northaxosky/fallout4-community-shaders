@@ -28,17 +28,6 @@ namespace ScreenSpaceGI
 			-(1.0 - lengthSquared * 0.5));
 	}
 
-	// Ambient the deferred lights fold into diffuse.
-	float3 DirectionalAmbient(float3 worldNormal)
-	{
-		float4 normal = float4(worldNormal, 1.0);
-		float3 encoded = float3(
-			dot(SharedData::screenSpaceGISettings.DirectionalAmbient[0], normal),
-			dot(SharedData::screenSpaceGISettings.DirectionalAmbient[1], normal),
-			dot(SharedData::screenSpaceGISettings.DirectionalAmbient[2], normal));
-		return exp2(log2(encoded) * 2.2);
-	}
-
 	// diffuseColor excludes specular, as upstream.
 	// vertexAOStore is MRT4 alpha: 1 - vertexAO from the prepass.
 	float3 ComposeDiffuse(
@@ -67,7 +56,8 @@ namespace ScreenSpaceGI
 		float3 linAlbedo = Color::IrradianceToLinear(albedo / Color::PBRLightingScale);
 		float3 multiBounceSSGIAo = Shading::MultiBounceAO(linAlbedo, ssgiAo);
 
-		float3 directionalAmbientColor = max(0, DirectionalAmbient(normalWS) * albedo);
+		// FO4 directional ambient is already linear, so upstream's Color::Ambient is identity.
+		float3 directionalAmbientColor = max(0, SharedData::GetAmbient(normalWS)) * albedo;
 
 		float maxScale = 1.0;
 		if (directionalAmbientColor.x > 0.0)

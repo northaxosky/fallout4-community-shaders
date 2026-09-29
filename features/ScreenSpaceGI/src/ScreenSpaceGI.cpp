@@ -540,16 +540,6 @@ namespace cs::features
 			return {};
 		}
 		ScreenSpaceGIFeatureData data{ .EnableScreenSpaceGI = 1 };
-		std::array<DirectX::XMFLOAT4, 3> ambient{};
-		if (!cs::engine::TryGetDirectionalAmbientRows(ambient)) {
-			return {};
-		}
-		for (std::size_t row = 0; row < ambient.size(); ++row) {
-			data.DirectionalAmbient[row][0] = ambient[row].x;
-			data.DirectionalAmbient[row][1] = ambient[row].y;
-			data.DirectionalAmbient[row][2] = ambient[row].z;
-			data.DirectionalAmbient[row][3] = ambient[row].w;
-		}
 		return data;
 	}
 
