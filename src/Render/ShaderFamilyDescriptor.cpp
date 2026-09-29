@@ -341,7 +341,7 @@ namespace cs::engine
 					Define(a_defines, "BSLIGHTING_VS_REDUCED");
 				else if ((a_descriptor & 0x2U) != 0)
 					Define(a_defines, "BSLIGHTING_VS_SKINNED");
-				else if ((a_descriptor & 0x100U) != 0)
+				else if ((a_descriptor & 0x500U) == 0x100U)
 					Define(a_defines, "BSLIGHTING_VS_WORLD");
 				else
 					Define(a_defines, "BSLIGHTING_VS_STATIC");
