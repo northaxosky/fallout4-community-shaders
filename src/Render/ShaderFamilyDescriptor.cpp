@@ -1378,14 +1378,15 @@ namespace cs::engine
 					a_defines, a_descriptor.stage, d);
 			case ShaderInjectionTarget::kDfTiledLighting:
 				if (a_descriptor.stage != ShaderStage::kCompute ||
-					d > 3)
+					d > 0x12)
 					return false;
-				if (d == 3)
-					Define(a_defines, "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM", "10");
+				// Keys 3..18 are the tile-cull entry at group dims 10..25.
+				if (d >= 3)
+					Define(a_defines, "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM", std::to_string(d + 7));
 				Define(
 					a_defines,
 					"DFTILEDLIGHTING_VARIANT",
-					std::to_string(d));
+					std::to_string(std::min(d, 3U)));
 				return true;
 			default:
 				return false;
