@@ -33,10 +33,12 @@ namespace cs::engine
 		std::vector<PrioritizedCallback>    g_preDeferredComposite;
 		std::vector<PrioritizedCallback>    g_postDeferredComposite;
 		std::vector<PrioritizedCallback>    g_preFullscreenDeferredLightDraw;
+		std::vector<PrioritizedCallback>    g_postForwardSky;
 		bool g_prePassInstalled            = false;
 		bool g_lightsImplInstalled         = false;
 		bool g_compositeInstalled          = false;
 		bool g_deferredDrawAnchorInstalled = false;
+		bool g_forwardSkyInstalled         = false;
 		bool g_insideDeferredLightsImpl    = false;
 		bool g_insideDeferredComposite     = false;
 
@@ -197,6 +199,33 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// DrawWorld::Forward renders sky batch 7, then cloud group 14; water and alpha follow.
+		struct ForwardSkyGroup_Hook
+		{
+			static void thunk(
+				RE::BSShaderAccumulator* a_accumulator,
+				std::uint32_t a_group,
+				bool a_alpha)
+			{
+				func(a_accumulator, a_group, a_alpha);
+				Dispatch(g_postForwardSky);
+			}
+			static inline REL::Relocation<void(RE::BSShaderAccumulator*, std::uint32_t, bool)> func;
+		};
+
+		void EnsureForwardSkyInstalled()
+		{
+			if (g_forwardSkyInstalled) {
+				return;
+			}
+			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
+			constexpr std::ptrdiff_t offsets[] = { 0x2C9, 0x2D5, 0x2D5 };
+			stl::write_thunk_call<ForwardSkyGroup_Hook>(
+				REL::ID({ 656535, 2318315, 2318315 }).address() + offsets[runtimeIdx]);
+			g_forwardSkyInstalled = true;
+			L->info("Hook installed on DrawWorld::Forward cloud group call (post-sky boundary)");
+		}
+
 		void EnsureDeferredLightsImplInstalled()
 		{
 			if (g_lightsImplInstalled) {
@@ -293,6 +322,14 @@ namespace cs::engine
 		if (!RegistrationAllowed("PostDeferredComposite")) return false;
 		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
 		EnsureDeferredCompositeInstalled();
+		return true;
+	}
+
+	bool RegisterPostForwardSky(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PostForwardSky")) return false;
+		InsertPrioritized(g_postForwardSky, std::move(callback), priority);
+		EnsureForwardSkyInstalled();
 		return true;
 	}
 

@@ -149,7 +149,10 @@ VS_OUTPUT main(VS_INPUT input)
 #ifdef BSWATER_PIXEL_SHADER
 
 #ifdef DYNAMIC_CUBEMAPS
+// FO4 water compiles without upstream's WATER permutation define.
+#define WATER
 #include "DynamicCubemaps/DynamicCubemaps.hlsli"
+SamplerState sampler3 : register(s3);
 #endif
 
 cbuffer PerGeometry : register(b0)
@@ -317,12 +320,28 @@ float3 surfaceColor(
 #if defined(REFLECTIONS)
 #ifdef DYNAMIC_CUBEMAPS
 	if (SharedData::dynamicCubemapsSettings.Enabled != 0) {
-		float3 dynamicCubemap = DynamicCubemaps::SampleDynamicEnvironment(
-			sampler4, reflectionDirection, 0.0);
-		if (any(dynamicCubemap > 0.0)) {
-			float nativeAmount = saturate(cameraDistance / 1024.0);
-			color = lerp(dynamicCubemap, color, nativeAmount);
+		const float skylightingSpecular = 1.0;
+		float3 dynamicCubemap;
+		if (SharedData::InInterior) {
+			dynamicCubemap = DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
+		} else {
+			float3 specularIrradiance = 1.0;
+			if (skylightingSpecular < 1.0)
+				specularIrradiance = DynamicCubemaps::IrradianceToLinear(DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz);
+
+			float3 specularIrradianceReflections = 1.0;
+			if (skylightingSpecular > 0.0)
+				specularIrradianceReflections = DynamicCubemaps::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz);
+
+			dynamicCubemap = DynamicCubemaps::IrradianceToGamma(lerp(specularIrradiance, specularIrradianceReflections, skylightingSpecular));
 		}
+
+		float reflectionAmount = saturate(cameraDistance / 1024.0);
+
+		if (SharedData::HideSky)
+			reflectionAmount = 0.0;
+		// FO4 reflection permutations shade the sky gradient instead of sampling a reflection cube.
+		color = lerp(dynamicCubemap, color, reflectionAmount);
 	}
 #endif
 #ifdef SSLR

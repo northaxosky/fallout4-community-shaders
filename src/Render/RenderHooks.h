@@ -19,6 +19,8 @@ namespace cs::engine
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	bool RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	bool RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+	// After all sky and cloud draws in the main color target, before water and alpha.
+	bool RegisterPostForwardSky(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
 	// Install the post-dirty-state deferred draw anchor.
 	bool EnsureDeferredDrawAnchorInstalled();

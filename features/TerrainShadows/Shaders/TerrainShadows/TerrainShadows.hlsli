@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Common/SharedData.hlsli"
+#include "Common/DeferredPosition.hlsli"
 
 namespace TerrainShadows
 {
@@ -101,48 +102,11 @@ namespace TerrainShadows
 		float4 nearReprojRow3,
 		out float3 viewPosition)
 	{
-		viewPosition = 0.0;
-		uint2 depthDimensions;
-		SceneDepthTexture.GetDimensions(depthDimensions.x, depthDimensions.y);
-		if (any(depthDimensions == 0))
-			return false;
-
-		uint2 depthPixel = min(uint2(pixelPosition), depthDimensions - 1);
-		float rawDepth = SceneDepthTexture.Load(int3(depthPixel, 0));
-		float4 position;
-		float4 reprojRow0;
-		float4 reprojRow1;
-		float4 reprojRow2;
-		float4 reprojRow3;
-		if (rawDepth <= 0.01) {
-			position.z = rawDepth * 100.0;
-			reprojRow0 = nearReprojRow0;
-			reprojRow1 = nearReprojRow1;
-			reprojRow2 = nearReprojRow2;
-			reprojRow3 = nearReprojRow3;
-		} else {
-			position.z = rawDepth * 1.01 - 0.01;
-			reprojRow0 = farReprojRow0;
-			reprojRow1 = farReprojRow1;
-			reprojRow2 = farReprojRow2;
-			reprojRow3 = farReprojRow3;
-		}
-
-		float2 renderUv =
-			pixelPosition * SharedData::BufferDim.zw *
-			SharedData::DynamicResolution.zw;
-		position.xy = float2(renderUv.x, 1.0 - renderUv.y) * 2.0 - 1.0;
-		position.w = 1.0;
-		float4 viewPositionH;
-		viewPositionH.x = dot(reprojRow0, position);
-		viewPositionH.y = dot(reprojRow1, position);
-		viewPositionH.z = dot(reprojRow2, position);
-		viewPositionH.w = dot(reprojRow3, position);
-		if (abs(viewPositionH.w) < 1e-6)
-			return false;
-
-		viewPosition = viewPositionH.xyz / viewPositionH.w;
-		return true;
+		return DeferredPosition::TryGetViewPositionFromScreenPosition(
+			SceneDepthTexture, pixelPosition,
+			float4x4(farReprojRow0, farReprojRow1, farReprojRow2, farReprojRow3),
+			float4x4(nearReprojRow0, nearReprojRow1, nearReprojRow2, nearReprojRow3),
+			viewPosition);
 	}
 
 	float GetTerrainShadowMultFromViewPosition(

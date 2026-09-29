@@ -10,15 +10,22 @@
 #define WETNESS_COMPOSITE_CONSUMER 1
 #include "WetnessEffects/WetnessEffects.hlsli"
 #endif
-#ifdef DYNAMIC_CUBEMAPS
-#include "DynamicCubemaps/DynamicCubemaps.hlsli"
-#define FO4_SAMPLE_ENVIRONMENT(texture, sampler, direction, lod, hasProbe, slice) \
-    DynamicCubemaps::SampleEnvironment(texture, sampler, direction, lod, hasProbe, slice)
-#else
-#define FO4_SAMPLE_ENVIRONMENT(texture, sampler, direction, lod, hasProbe, slice) \
-    texture.SampleLevel(sampler, float4(direction, slice), lod).xyz
-#endif
 #include "Common/DeferredContracts.hlsli"
+
+#define WETNESS_CAMERA_ARGS(cameraAdjust) \
+    float3x4(ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2), cameraAdjust, \
+    float4x4(FarReproj_row0, FarReproj_row1, FarReproj_row2, FarReproj_row3), \
+    float4x4(NearReproj_row0, NearReproj_row1, NearReproj_row2, NearReproj_row3)
+#define WETNESS_CAMERA_ARRAY_ARGS(frame) \
+    float3x4(frame[12], frame[13], frame[14]), frame[35], \
+    float4x4(frame[20], frame[21], frame[22], frame[23]), \
+    float4x4(frame[24], frame[25], frame[26], frame[27])
+
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+#define WETNESS_COMPOSITE_CONSUMER 1
+#include "WetnessEffects/WetnessEffects.hlsli"
+#include "DynamicCubemaps/Composite.hlsli"
+#endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
 
@@ -45,7 +52,7 @@ cbuffer PerFrame_CB12 : register(b12)
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
     float4 cb12_pad_28_29[2];
     float4 cb12_idx30_ibl_desaturation;
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -159,9 +166,9 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
 #ifdef WETNESS_EFFECTS
     WetnessEffects::Surface wetSurface =
-        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        WetnessEffects::GetSurfaceFromScreenPosition(
         input.position.xy,
-        ViewToWorld_row2);
+        WETNESS_CAMERA_ARGS(CameraPosAdjust));
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
@@ -170,8 +177,6 @@ PS_OUTPUT main(PS_INPUT input)
         return output;
     }
 #endif
-    float3 wetIblColor = float3(0, 0, 0);
-    float wetFilmWeight = 0.0;
 #endif
     float2 uv = input.position.xy * ScreenSize.xy;
     float3 shadingData    = g_tGbufferShadingData.SampleLevel(g_sGbufferShadingData, uv, 0).xyw;
@@ -254,12 +259,24 @@ PS_OUTPUT main(PS_INPUT input)
     float glossSquaredScaled = matGlossOrSpec * matGlossOrSpec * 50.0;
     bool  hasIBL = (matSliceFloat > 0.5 / 255.0);
     float3 iblColor = float3(0, 0, 0);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
+    pos.xy = sn * 2.0 - 1.0;
+    pos.w  = 1.0;
+    float3 posViewXYZ = float3(dot(reprojRow0, pos),
+                               dot(reprojRow1, pos),
+                               dot(reprojRow2, pos));
+    float  posViewW   = dot(reprojRow3, pos);
+    pos.xyz = posViewXYZ / posViewW;
+    float3 viewDirNeg = normalize(-pos.xyz);
+#endif
     if (hasIBL)
     {
         float2 enc = g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
         float  encDotEnc = dot(enc, enc);
         float  zRecon = 1.0 - encDotEnc * 0.25;
         float3 normalView = float3(enc * sqrt(zRecon), -(1.0 - encDotEnc * 0.5));
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
         float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
         pos.xy = sn * 2.0 - 1.0;
         pos.w  = 1.0;
@@ -269,6 +286,7 @@ PS_OUTPUT main(PS_INPUT input)
         float  posViewW   = dot(reprojRow3, pos);
         pos.xyz = posViewXYZ / posViewW;
         float3 viewDirNeg = normalize(-pos.xyz);
+#endif
         float  ndotv2     = dot(viewDirNeg, normalView);
         ndotv2 = ndotv2 + ndotv2;
         float3 reflView   = normalView * -ndotv2 + viewDirNeg;
@@ -279,38 +297,10 @@ PS_OUTPUT main(PS_INPUT input)
         float mipLevel = (1.0 - shadingData.x) * 6.0;
         mipLevel = pos.z * 0.001953125 + mipLevel;
         float arraySlice = floor(matSliceFloat * 255.0 - 1.0);
-        float3 cubeSample = FO4_SAMPLE_ENVIRONMENT(
-            g_tIBLProbeCube,
-            g_sIBLProbeCube,
-            reflWorld,
-            mipLevel,
-            hasIBL,
-            arraySlice);
+        float3 cubeSample = g_tIBLProbeCube.SampleLevel(g_sIBLProbeCube, float4(reflWorld, arraySlice), mipLevel).xyz;
         float  luma   = dot(cubeSample, float3(0.299, 0.587, 0.114));
         float  desatW = cb12_idx30_ibl_desaturation.y * 0.9;
         iblColor      = lerp(cubeSample, luma.xxx, desatW);
-#ifdef WETNESS_EFFECTS
-        float3 wetReflView = WetnessEffects::GetFilmReflectionView(
-            wetSurface.normalView, viewDirNeg);
-        float3 wetReflWorld;
-        wetReflWorld.x = dot(ViewToWorld_row0.xyz, wetReflView);
-        wetReflWorld.y = dot(ViewToWorld_row1.xyz, wetReflView);
-        wetReflWorld.z = dot(ViewToWorld_row2.xyz, wetReflView);
-        float wetMipLevel = WetnessEffects::GetFilmMipRoughness(
-            1.0 - shadingData.x, wetSurface.wetness) * 6.0;
-        wetMipLevel = pos.z * 0.001953125 + wetMipLevel;
-        float3 wetCubeSample = FO4_SAMPLE_ENVIRONMENT(
-            g_tIBLProbeCube,
-            g_sIBLProbeCube,
-            wetReflWorld,
-            wetMipLevel,
-            hasIBL,
-            arraySlice);
-        float  wetLuma = dot(wetCubeSample, float3(0.299, 0.587, 0.114));
-        wetIblColor = lerp(wetCubeSample, wetLuma.xxx, desatW);
-        wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
-            wetSurface.normalView, viewDirNeg, wetSurface.wetness);
-#endif
     }
     else
     {
@@ -322,11 +312,6 @@ PS_OUTPUT main(PS_INPUT input)
     float3 iblLitBlend   = lerp(iblColor,
                                  litRaw.xyz * cb0_idx1_lit_scene_weight.x,
                                  litAlpha);
-#ifdef WETNESS_EFFECTS
-    float3 wetIblLitBlend = lerp(wetIblColor,
-                                 litRaw.xyz * cb0_idx1_lit_scene_weight.x,
-                                 litAlpha);
-#endif
     bool isSkin = (abs(shadingData.z * 255.0 - 5.0) < 0.25);
     float3 ambientAccum;
 #if AMBIENT_SUBSURFACE_BLUR
@@ -379,11 +364,7 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     ambientAccum = blurSourceCenter;
 #endif
-#ifdef WETNESS_EFFECTS
-    float3 spec = lerp(iblLitBlend, wetIblLitBlend, wetFilmWeight);
-#else
     float3 spec = iblLitBlend;
-#endif
     spec *= glossFactor;
     spec *= glossSquaredScaled;
     float3 modulated = spec * ambientPairSum + ambientAccum;
@@ -392,20 +373,13 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     const float aoFactor = 1.0;
 #endif
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-#ifdef WETNESS_EFFECTS
-    float3 dynamicSpec = lerp(iblColor, wetIblColor, wetFilmWeight);
-#else
-    float3 dynamicSpec = iblColor;
-#endif
-    float3 dynamicReflectionContribution =
-        dynamicSpec * (1.0 - litAlpha) * glossFactor *
-        glossSquaredScaled * ambientPairSum * aoFactor;
-#endif
     output.color.xyz = modulated * aoFactor;
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-    output.color.xyz = DynamicCubemaps::ApplyFullscreenDebug(
-        output.color.xyz, dynamicReflectionContribution);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    output.color.xyz += DynamicCubemaps::GetWetnessReflection(
+        wetSurface.normalView, viewDirNeg, wetSurface.wetness,
+        wetSurface.waterRoughness,
+        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+        g_sIBLProbeCube);
 #endif
     output.color.w = 1.0;
     return output;
@@ -565,9 +539,9 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
 #ifdef WETNESS_EFFECTS
     WetnessEffects::Surface wetSurface =
-        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        WetnessEffects::GetSurfaceFromScreenPosition(
         input.position.xy,
-        ViewToWorld_row2);
+        WETNESS_CAMERA_ARGS(CameraPosAdjust));
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
@@ -576,8 +550,6 @@ PS_OUTPUT main(PS_INPUT input)
         return output;
     }
 #endif
-    float3 wetIblColor = float3(0.0, 0.0, 0.0);
-    float wetFilmWeight = 0.0;
 #endif
     float2 uv = input.position.xy * ScreenSize.xy;
 
@@ -661,6 +633,17 @@ PS_OUTPUT main(PS_INPUT input)
         g_tGbufferMaterial.SampleLevel(g_sGbufferMaterial, uv, 0);
     bool hasIbl = material.y > (0.5 / 255.0);
     float3 iblColor = float3(0.0, 0.0, 0.0);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    float3 negativePositionView = -positionView;
+    float3 viewDirection =
+        negativePositionView *
+        rsqrt(dot(negativePositionView, negativePositionView));
+    float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
+        wetSurface.normalView, viewDirection, wetSurface.wetness,
+        wetSurface.waterRoughness,
+        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+        g_sIblProbeCube);
+#endif
     if (hasIbl)
     {
         float2 encodedNormal =
@@ -669,10 +652,12 @@ PS_OUTPUT main(PS_INPUT input)
         float3 normalView = float3(
             encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
             -(1.0 - encodedLengthSquared * 0.5));
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
         float3 negativePositionView = -positionView;
         float3 viewDirection =
             negativePositionView *
             rsqrt(dot(negativePositionView, negativePositionView));
+#endif
         float reflectionScale = 2.0 * dot(viewDirection, normalView);
         float3 reflectionView =
             normalView * -reflectionScale + viewDirection;
@@ -684,39 +669,10 @@ PS_OUTPUT main(PS_INPUT input)
         float mipLevel = (1.0 - shadingData.x) * 6.0;
         mipLevel = positionView.z * 0.001953125 + mipLevel;
         float arraySlice = floor(material.y * 255.0 - 1.0);
-        float3 cubeSample = FO4_SAMPLE_ENVIRONMENT(
-            g_tIblProbeCube,
-            g_sIblProbeCube,
-            reflectionWorld,
-            mipLevel,
-            hasIbl,
-            arraySlice);
+        float3 cubeSample = g_tIblProbeCube.SampleLevel(g_sIblProbeCube, float4(reflectionWorld, arraySlice), mipLevel).xyz;
         float luminance = dot(cubeSample, float3(0.299, 0.587, 0.114));
         iblColor = lerp(
             cubeSample, luminance.xxx, IblDesaturation.y * 0.9);
-#ifdef WETNESS_EFFECTS
-        float3 wetReflectionView = WetnessEffects::GetFilmReflectionView(
-            wetSurface.normalView, viewDirection);
-        float3 wetReflectionWorld;
-        wetReflectionWorld.x = dot(ViewToWorld_row0.xyz, wetReflectionView);
-        wetReflectionWorld.y = dot(ViewToWorld_row1.xyz, wetReflectionView);
-        wetReflectionWorld.z = dot(ViewToWorld_row2.xyz, wetReflectionView);
-        float wetMipLevel = WetnessEffects::GetFilmMipRoughness(
-            1.0 - shadingData.x, wetSurface.wetness) * 6.0;
-        wetMipLevel = positionView.z * 0.001953125 + wetMipLevel;
-        float3 wetCubeSample = FO4_SAMPLE_ENVIRONMENT(
-            g_tIblProbeCube,
-            g_sIblProbeCube,
-            wetReflectionWorld,
-            wetMipLevel,
-            hasIbl,
-            arraySlice);
-        float wetLuminance = dot(wetCubeSample, float3(0.299, 0.587, 0.114));
-        wetIblColor = lerp(
-            wetCubeSample, wetLuminance.xxx, IblDesaturation.y * 0.9);
-        wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
-            wetSurface.normalView, viewDirection, wetSurface.wetness);
-#endif
     }
 
     float materialId = shadingData.z * 255.0;
@@ -801,36 +757,16 @@ PS_OUTPUT main(PS_INPUT input)
     float litAlpha = min(litScene.w * LitSceneAlpha.z, 1.0);
     float3 iblLitBlend = lerp(
         iblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
-#ifdef WETNESS_EFFECTS
-    float3 wetIblLitBlend = lerp(
-        wetIblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
-    float3 reflectionBlend = lerp(iblLitBlend, wetIblLitBlend, wetFilmWeight);
-    float3 modulated =
-        ambientAccum + glossFactor * reflectionBlend * glossSquaredScaled * ambientPair;
-#else
     float3 modulated =
         ambientAccum + glossFactor * iblLitBlend * glossSquaredScaled * ambientPair;
-#endif
 #if FO4_AMBIENT_OCCLUSION
     float ao = g_tSsao.Sample(g_sSsao, litSceneUv).x;
 #else
     const float ao = 1.0;
 #endif
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-#ifdef WETNESS_EFFECTS
-    float3 dynamicReflectionBlend =
-        lerp(iblColor, wetIblColor, wetFilmWeight);
-#else
-    float3 dynamicReflectionBlend = iblColor;
-#endif
-    float3 dynamicReflectionContribution =
-        dynamicReflectionBlend * (1.0 - litAlpha) * glossFactor *
-        glossSquaredScaled * ambientPair * ao;
-#endif
     float3 aoColor = modulated * ao;
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-    aoColor = DynamicCubemaps::ApplyFullscreenDebug(
-        aoColor, dynamicReflectionContribution);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    aoColor += wetReflection;
 #endif
 
     float fogPlaneDistance =
@@ -954,7 +890,7 @@ PS_OUTPUT main(PS_INPUT input)
 #define OUTPUTMASK 0
 #endif
 
-#if FOGSTACK || defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if FOGSTACK || defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
 #define AMBIENT_FRAME_COUNT 47
 #else
 #define AMBIENT_FRAME_COUNT 31
@@ -1068,27 +1004,14 @@ float3 sampleDirectLighting(float2 coordinate)
 float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFactor,
                       float gloss, float3 environment, float3 centerColor
 #ifdef WETNESS_EFFECTS
-                      , float3 wetEnvironment, float wetFilmWeight, float wetness
+                      , float wetnessGlossinessAlbedo
+#ifdef DYNAMIC_CUBEMAPS
+                      , float3 wetReflection
+#endif
 #endif
                       )
 {
-#ifdef WETNESS_EFFECTS
-    float3 reflectionBlend = lerp(environment, wetEnvironment, wetFilmWeight);
-#endif
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-#ifdef WETNESS_EFFECTS
-    float3 dynamicReflectionContribution =
-        reflectionBlend * glossFactor * gloss * directLighting;
-#else
-    float3 dynamicReflectionContribution =
-        environment * glossFactor * gloss * directLighting;
-#endif
-#endif
-#ifdef WETNESS_EFFECTS
-    float3 color = reflectionBlend * glossFactor;
-#else
     float3 color = environment * glossFactor;
-#endif
     color *= gloss;
     color = color * directLighting + centerColor;
 #if OUTPUTMASK
@@ -1096,13 +1019,9 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
         outputMaskTexture.Sample(
             outputMaskSampler, min(coordinate, screenSetup[5].xy)).x;
     color *= outputMask;
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-    dynamicReflectionContribution *= outputMask;
 #endif
-#endif
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-    color = DynamicCubemaps::ApplyFullscreenDebug(
-        color, dynamicReflectionContribution);
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    color += wetReflection;
 #endif
     return color;
 }
@@ -1112,16 +1031,14 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float2 coordinate = position.xy * screenSetup[0].xy;
 #ifdef WETNESS_EFFECTS
     WetnessEffects::Surface wetSurface =
-        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        WetnessEffects::GetSurfaceFromScreenPosition(
         position.xy,
-        ambientFrame[14]);
+        WETNESS_CAMERA_ARRAY_ARGS(ambientFrame));
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
         return wetnessDebugColor;
 #endif
-    float3 wetEnvironment = 0.0;
-    float wetFilmWeight = 0.0;
 #endif
     float3 surface = surfaceTexture.SampleLevel(surfaceSampler, coordinate, 0.0).xyw;
 #if !FOGSTACK
@@ -1186,9 +1103,15 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #endif
 #endif
 
-#if FOGSTACK
-
+#if FOGSTACK || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
     float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
+#endif
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
+        wetSurface.normalView, normalize(-viewPosition), wetSurface.wetness,
+        wetSurface.waterRoughness,
+        float3x3(ambientFrame[12].xyz, ambientFrame[13].xyz, ambientFrame[14].xyz),
+        environmentSampler);
 #endif
 
     float3 centerColor = ambientBaseTexture.SampleLevel(ambientBaseSampler, coordinate, 0.0).xyz;
@@ -1209,11 +1132,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float normalLengthSquared = dot(encodedNormal, encodedNormal);
         float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
         float3 normal = float3(encodedNormal * sqrt(normalFactors.x), -normalFactors.y);
-#if !FOGSTACK
-
+#if !FOGSTACK && (!defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS))
         float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
 #endif
-
         float3 reflected = reflect(normalize(-viewPosition), normal);
         float3 environmentCoordinate = float3(
             dot(ambientFrame[12].xyz, reflected),
@@ -1223,40 +1144,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float mipLevel = (1.0 - surface.x) * 6.0;
         mipLevel = viewPosition.z * 0.001953125 + mipLevel;
         float arraySlice = floor(material.x * 255.0 - 1.0);
-        environment = FO4_SAMPLE_ENVIRONMENT(
-            environmentTexture,
-            environmentSampler,
-            environmentCoordinate,
-            mipLevel,
-            true,
-            arraySlice);
+        environment = environmentTexture.SampleLevel(environmentSampler, float4(environmentCoordinate, arraySlice), mipLevel).xyz;
         float luminance = dot(environment, float3(0.299, 0.587, 0.114));
         environment = lerp(environment, luminance.xxx, ambientFrame[30].y * 0.9);
-#ifdef WETNESS_EFFECTS
-        float3 wetViewDirection = normalize(-viewPosition);
-        float3 wetReflected = WetnessEffects::GetFilmReflectionView(
-            wetSurface.normalView, wetViewDirection);
-        float3 wetEnvironmentCoordinate = float3(
-            dot(ambientFrame[12].xyz, wetReflected),
-            dot(ambientFrame[13].xyz, wetReflected),
-            dot(ambientFrame[14].xyz, wetReflected)
-        );
-        float wetMipLevel = WetnessEffects::GetFilmMipRoughness(
-            1.0 - surface.x, wetSurface.wetness) * 6.0;
-        wetMipLevel = viewPosition.z * 0.001953125 + wetMipLevel;
-        wetEnvironment = FO4_SAMPLE_ENVIRONMENT(
-            environmentTexture,
-            environmentSampler,
-            wetEnvironmentCoordinate,
-            wetMipLevel,
-            true,
-            arraySlice);
-        float wetLuminance = dot(wetEnvironment, float3(0.299, 0.587, 0.114));
-        wetEnvironment = lerp(
-            wetEnvironment, wetLuminance.xxx, ambientFrame[30].y * 0.9);
-        wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
-            wetSurface.normalView, wetViewDirection, wetSurface.wetness);
-#endif
     }
 
 #if FOGSTACK
@@ -1317,7 +1207,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #if !FOGSTACK
     return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
 #ifdef WETNESS_EFFECTS
-        , wetEnvironment, wetFilmWeight, wetSurface.wetness
+        , wetSurface.glossinessAlbedo
+#ifdef DYNAMIC_CUBEMAPS
+        , wetReflection
+#endif
 #endif
         ), 1.0);
 #else
@@ -1331,7 +1224,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float gloss = material.y * material.y * 50.0;
         float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
 #ifdef WETNESS_EFFECTS
-            , wetEnvironment, wetFilmWeight, wetSurface.wetness
+            , wetSurface.glossinessAlbedo
+#ifdef DYNAMIC_CUBEMAPS
+            , wetReflection
+#endif
 #endif
             );
 
@@ -1467,16 +1363,14 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
     float2 uv = svpos.xy * g_PixelToUV.xy;
 #ifdef WETNESS_EFFECTS
     WetnessEffects::Surface wetSurface =
-        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        WetnessEffects::GetSurfaceFromScreenPosition(
         svpos.xy,
-        g_PF[14]);
+        WETNESS_CAMERA_ARRAY_ARGS(g_PF));
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
         return wetnessDebugColor;
 #endif
-    float3 wetCube = 0.0;
-    float wetFilmWeight = 0.0;
 #endif
 
     float3 surf  = TexSurface.SampleLevel(SampSurface, uv, 0).xyw;
@@ -1533,6 +1427,14 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
     float2 prm = TexParam.SampleLevel(SampParam, uv, 0).yz;
 
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    float3 v = normalize(-pos.xyz);
+    float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
+        wetSurface.normalView, v, wetSurface.wetness,
+        wetSurface.waterRoughness,
+        float3x3(g_PF[12].xyz, g_PF[13].xyz, g_PF[14].xyz),
+        SampCube);
+#endif
     float3 cube = 0.0;
     if (prm.x > 0.5 / 255.0)
     {
@@ -1543,7 +1445,9 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         nn.xy = nn.xy * sqrt(nn.z);
         nn.z  = -nn.w;
 
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
         float3 v   = normalize(-pos.xyz);
+#endif
         float  ndv = dot(v, nn.xyz);
         ndv = ndv + ndv;
         float3 r = nn.xyz * -ndv + v;
@@ -1556,26 +1460,9 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         lod = pos.z * 0.001953125 + lod;
         float idx = floor(prm.x * 255.0 - 1.0);
 
-        cube = FO4_SAMPLE_ENVIRONMENT(
-            TexCube, SampCube, rw, lod, true, idx);
+        cube = TexCube.SampleLevel(SampCube, float4(rw, idx), lod).xyz;
         float lum = dot(cube, float3(0.299, 0.587, 0.114));
         cube = lerp(cube, lum.xxx, g_PF[30].y * 0.9);
-#ifdef WETNESS_EFFECTS
-        float3 wetR = WetnessEffects::GetFilmReflectionView(
-            wetSurface.normalView, v);
-        float3 wetRw = float3(dot(g_PF[12].xyz, wetR),
-                              dot(g_PF[13].xyz, wetR),
-                              dot(g_PF[14].xyz, wetR));
-        float wetLod = WetnessEffects::GetFilmMipRoughness(
-            1.0 - surf.x, wetSurface.wetness) * 6.0;
-        wetLod = pos.z * 0.001953125 + wetLod;
-        wetCube = FO4_SAMPLE_ENVIRONMENT(
-            TexCube, SampCube, wetRw, wetLod, true, idx);
-        float wetLum = dot(wetCube, float3(0.299, 0.587, 0.114));
-        wetCube = lerp(wetCube, wetLum.xxx, g_PF[30].y * 0.9);
-        wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
-            wetSurface.normalView, v, wetSurface.wetness);
-#endif
     }
 
     float4 result;
@@ -1595,26 +1482,14 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         float s  = min(1.0 / rsqrt(saturate(surf.x - 0.3)), 1.0);
         k = k * s;
         float g2 = (prm.y * prm.y) * 50.0;
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-#ifdef WETNESS_EFFECTS
-        float3 dynamicReflectionContribution =
-            lerp(cube, wetCube, wetFilmWeight) * k * g2 * b3;
-#else
-        float3 dynamicReflectionContribution = cube * k * g2 * b3;
-#endif
-#endif
-#ifdef WETNESS_EFFECTS
-        col = ((lerp(cube, wetCube, wetFilmWeight) * k) * g2) * b3 + col;
-#else
         col = ((cube * k) * g2) * b3 + col;
-#endif
 
 #if OUTPUTMASK
         float mask = TexMask.Sample(SampMask, min(uv, g_UVClamp.xy)).x;
         col = col * mask;
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-        dynamicReflectionContribution *= mask;
 #endif
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+        col += wetReflection;
 #endif
 
         pos.w = 1.0;
@@ -1677,10 +1552,6 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
             result = float4(amt.xxx, 1.0);
         }
 #endif
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-        result.xyz = DynamicCubemaps::ApplyFullscreenDebug(
-            result.xyz, dynamicReflectionContribution);
-#endif
     }
     else
     {
@@ -1697,7 +1568,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -1751,9 +1622,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 {
 #ifdef WETNESS_EFFECTS
     WetnessEffects::Surface wetSurface =
-        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        WetnessEffects::GetSurfaceFromScreenPosition(
         position.xy,
-        ViewToWorld_row2);
+        WETNESS_CAMERA_ARGS(CameraPosAdjust));
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
@@ -1806,7 +1677,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float2 uv = position.xy * screenData[0].xy;
     float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
 #ifdef WETNESS_EFFECTS
-    base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.wetness);
+    base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.glossinessAlbedo);
 #endif
 #ifdef SSGI
     float3 ssgiAlbedo = base.xyz;
@@ -2006,9 +1877,9 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef WETNESS_EFFECTS
     WetnessEffects::Surface wetSurface =
-        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        WetnessEffects::GetSurfaceFromScreenPosition(
         input.position.xy,
-        ViewToWorld_row2);
+        WETNESS_CAMERA_ARGS(CameraPosAdjust_for_fog_height));
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
@@ -2023,7 +1894,7 @@ PS_OUTPUT main(PS_INPUT input)
     float4 baseSample = g_tHdrBaseColor.SampleLevel(g_sBaseColor, uv, 0);
     float3 baseColor = baseSample.xyz;
 #ifdef WETNESS_EFFECTS
-    baseColor = WetnessEffects::WetAlbedo(baseColor, wetSurface.wetness);
+    baseColor = WetnessEffects::WetAlbedo(baseColor, wetSurface.glossinessAlbedo);
 #endif
 #if COMPOSITE_MATERIAL_5
     float matIdRaw =
@@ -2171,7 +2042,7 @@ PS_OUTPUT main(PS_INPUT input)
         float4 baseSample   = g_tHdrBaseColor.SampleLevel(g_sBaseColor, uv, 0);
         float3 baseColor    = baseSample.xyz;
 #ifdef WETNESS_EFFECTS
-        baseColor = WetnessEffects::WetAlbedo(baseColor, wetSurface.wetness);
+        baseColor = WetnessEffects::WetAlbedo(baseColor, wetSurface.glossinessAlbedo);
 #endif
         float3 directDiff   = g_tDirectDiffuse.SampleLevel(g_sDirectDiffuse, uv, 0).xyz;
 #if TILED_LIGHTS
@@ -2376,7 +2247,7 @@ PS_OUTPUT main(PS_INPUT input)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -2404,7 +2275,7 @@ PS_OUTPUT main(PS_INPUT input)
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            ViewToWorld_row2,
+            WETNESS_CAMERA_ARGS(CameraPosAdjust),
             wetnessDebugColor))
     {
         output.color = wetnessDebugColor;
@@ -2466,7 +2337,7 @@ PS_OUTPUT main(PS_INPUT input)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -2493,7 +2364,7 @@ PS_OUTPUT main(PS_INPUT input)
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            ViewToWorld_row2,
+            WETNESS_CAMERA_ARGS(CameraPosAdjust),
             wetnessDebugColor))
     {
         output.color = wetnessDebugColor;
@@ -2566,7 +2437,7 @@ PS_OUTPUT main(PS_INPUT input)
 #ifndef COMPOSITE_CB12_COUNT
 #define COMPOSITE_CB12_COUNT 47
 #endif
-#if (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)) && COMPOSITE_CB12_COUNT < 36
+#if (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(WETNESS_EFFECTS)) && COMPOSITE_CB12_COUNT < 36
 #undef COMPOSITE_CB12_COUNT
 #define COMPOSITE_CB12_COUNT 36
 #endif
@@ -2641,21 +2512,19 @@ float4 main(PSInput input) : SV_Target0
     float2 uv = input.position.xy * screenData[0].xy;
 #ifdef WETNESS_EFFECTS
     WetnessEffects::Surface wetSurface =
-        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        WetnessEffects::GetSurfaceFromScreenPosition(
         input.position.xy,
-        scene[14]);
+        WETNESS_CAMERA_ARRAY_ARGS(scene));
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
         return wetnessDebugColor;
 #endif
-    float3 wetProbeColor = 0.0;
-    float wetFilmWeight = 0.0;
 #endif
 #if !COMPOSITE_MATERIAL_EXCLUSION
     float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
 #ifdef WETNESS_EFFECTS
-    base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.wetness);
+    base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.glossinessAlbedo);
 #endif
 #endif
     float3 typeData = typeTexture.SampleLevel(typeSampler, uv, 0.0).xyw;
@@ -2736,7 +2605,7 @@ float4 main(PSInput input) : SV_Target0
 #endif
 #endif
 
-#if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK
+#if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
     float2 projectedXY = float2(
         uv.x * screenData[0].z,
         1.0 - uv.y * screenData[0].w) * 2.0 - 1.0;
@@ -2750,6 +2619,13 @@ float4 main(PSInput input) : SV_Target0
 #else
     float4 projected;
     float3 worldPosition;
+#endif
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
+        wetSurface.normalView, normalize(-worldPosition), wetSurface.wetness,
+        wetSurface.waterRoughness,
+        float3x3(scene[12].xyz, scene[13].xyz, scene[14].xyz),
+        probeSampler);
 #endif
 
 #if COMPOSITE_MATERIAL_EXCLUSION
@@ -2774,41 +2650,9 @@ float4 main(PSInput input) : SV_Target0
             6.0,
             worldPosition.z * 0.001953125);
         float probeSlice = floor(material.x * 255.0 - 1.0);
-        probeColor = FO4_SAMPLE_ENVIRONMENT(
-            probeTexture,
-            probeSampler,
-            probeDirection,
-            probeLod,
-            true,
-            probeSlice);
+        probeColor = probeTexture.SampleLevel(probeSampler, float4(probeDirection, probeSlice), probeLod).xyz;
         float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
         probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
-#ifdef WETNESS_EFFECTS
-        float3 wetViewDirection = normalize(-worldPosition);
-        float3 wetReflected = WetnessEffects::GetFilmReflectionView(
-            wetSurface.normalView, wetViewDirection);
-        float3 wetProbeDirection = float3(
-            dot(scene[12].xyz, wetReflected),
-            dot(scene[13].xyz, wetReflected),
-            dot(scene[14].xyz, wetReflected));
-        float wetProbeLod = mad(
-            WetnessEffects::GetFilmMipRoughness(
-                1.0 - typeData.x, wetSurface.wetness),
-            6.0,
-            worldPosition.z * 0.001953125);
-        wetProbeColor = FO4_SAMPLE_ENVIRONMENT(
-            probeTexture,
-            probeSampler,
-            wetProbeDirection,
-            wetProbeLod,
-            true,
-            probeSlice);
-        float wetProbeLuma = dot(wetProbeColor, float3(0.299, 0.587, 0.114));
-        wetProbeColor = lerp(
-            wetProbeColor, wetProbeLuma.xxx, scene[30].y * 0.9);
-        wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
-            wetSurface.normalView, wetViewDirection, wetSurface.wetness);
-#endif
     }
 #else
     float2 material;
@@ -2825,7 +2669,7 @@ float4 main(PSInput input) : SV_Target0
 #if COMPOSITE_MATERIAL_EXCLUSION
     float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
 #ifdef WETNESS_EFFECTS
-    base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.wetness);
+    base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.glossinessAlbedo);
 #endif
     float3 diffuse = diffuseTexture.SampleLevel(diffuseSampler, uv, 0.0).xyz;
 #ifdef TILED_LIGHTS
@@ -2895,6 +2739,7 @@ float4 main(PSInput input) : SV_Target0
         float3 normal = float3(
             encodedNormal * normalScale,
             -(1.0 - encodedLengthSquared * 0.5));
+#if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
         float2 projectedXY = float2(
             uv.x * screenData[0].z,
             1.0 - uv.y * screenData[0].w) * 2.0 - 1.0;
@@ -2905,6 +2750,7 @@ float4 main(PSInput input) : SV_Target0
             dot(row2, projected));
         float worldDenominator = dot(row3, projected);
         worldPosition = worldNumerator / worldDenominator;
+#endif
         float3 reflected = reflect(normalize(-worldPosition), normal);
         float3 probeDirection = float3(
             dot(scene[12].xyz, reflected),
@@ -2915,67 +2761,22 @@ float4 main(PSInput input) : SV_Target0
             6.0,
             worldPosition.z * 0.001953125);
         float probeSlice = floor(material.x * 255.0 - 1.0);
-        probeColor = FO4_SAMPLE_ENVIRONMENT(
-            probeTexture,
-            probeSampler,
-            probeDirection,
-            probeLod,
-            true,
-            probeSlice);
+        probeColor = probeTexture.SampleLevel(probeSampler, float4(probeDirection, probeSlice), probeLod).xyz;
         float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
         probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
-#ifdef WETNESS_EFFECTS
-        float3 wetViewDirection = normalize(-worldPosition);
-        float3 wetReflected = WetnessEffects::GetFilmReflectionView(
-            wetSurface.normalView, wetViewDirection);
-        float3 wetProbeDirection = float3(
-            dot(scene[12].xyz, wetReflected),
-            dot(scene[13].xyz, wetReflected),
-            dot(scene[14].xyz, wetReflected));
-        float wetProbeLod = mad(
-            WetnessEffects::GetFilmMipRoughness(
-                1.0 - typeData.x, wetSurface.wetness),
-            6.0,
-            worldPosition.z * 0.001953125);
-        wetProbeColor = FO4_SAMPLE_ENVIRONMENT(
-            probeTexture,
-            probeSampler,
-            wetProbeDirection,
-            wetProbeLod,
-            true,
-            probeSlice);
-        float wetProbeLuma = dot(wetProbeColor, float3(0.299, 0.587, 0.114));
-        wetProbeColor = lerp(
-            wetProbeColor, wetProbeLuma.xxx, scene[30].y * 0.9);
-        wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
-            wetSurface.normalView, wetViewDirection, wetSurface.wetness);
-#endif
     }
 #endif
-#ifdef WETNESS_EFFECTS
-    float3 reflectionColor =
-        lerp(probeColor, wetProbeColor, wetFilmWeight);
-    color = mad(
-        reflectionColor * gloss * specularScale,
-        diffuse,
-        color);
-#else
     float3 reflectionColor = probeColor;
     color = mad(reflectionColor * gloss * specularScale, diffuse, color);
-#endif
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-    float3 dynamicReflectionContribution =
-        reflectionColor * gloss * specularScale * diffuse;
-#endif
 
 #if COMPOSITE_MODULATION
     float2 modulationUV = min(uv, screenData[5].xy);
     float modulation =
         modulationTexture.Sample(modulationSampler, modulationUV).x;
     color *= modulation;
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-    dynamicReflectionContribution *= modulation;
 #endif
+#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+    color += wetReflection;
 #endif
 
 #if COMPOSITE_FOG_STACK
@@ -3059,10 +2860,6 @@ float4 main(PSInput input) : SV_Target0
 #else
         result = float4(color, base.w);
 #endif
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
-        result.xyz = DynamicCubemaps::ApplyFullscreenDebug(
-            result.xyz, dynamicReflectionContribution);
-#endif
 #if COMPOSITE_MATERIAL_EXCLUSION
     }
     else
@@ -3084,7 +2881,7 @@ float4 main(PSInput input) : SV_Target0
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -3127,7 +2924,7 @@ float4 main(PS_INPUT input) : SV_Target0
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            ViewToWorld_row2,
+            WETNESS_CAMERA_ARGS(CameraPosAdjust),
             wetnessDebugColor))
     {
         return wetnessDebugColor;
@@ -3216,7 +3013,7 @@ float4 main(PS_INPUT input) : SV_Target0
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            ViewToWorld_row2,
+            WETNESS_CAMERA_ARGS(CameraPosAdjust),
             wetnessDebugColor))
     {
         return wetnessDebugColor;
@@ -3311,7 +3108,7 @@ float4 main(PS_INPUT input) : SV_Target0
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            ViewToWorld_row2,
+            WETNESS_CAMERA_ARGS(CameraPosAdjust),
             wetnessDebugColor))
     {
         return wetnessDebugColor;
@@ -3404,7 +3201,7 @@ float4 main(PS_INPUT input) : SV_Target0
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            ViewToWorld_row2,
+            WETNESS_CAMERA_ARGS(CameraPosAdjust),
             wetnessDebugColor))
     {
         return wetnessDebugColor;
@@ -3554,7 +3351,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             position.xy,
-            scene[14],
+            WETNESS_CAMERA_ARRAY_ARGS(scene),
             wetnessDebugColor))
     {
         return wetnessDebugColor;
@@ -3792,7 +3589,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #error Unsupported SSS MRT record-normal shape
 #endif
 
-#if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)
+#if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
 #undef WAVE5B_RECORD_NORMAL_CB12_COUNT
 #define WAVE5B_RECORD_NORMAL_CB12_COUNT 36
 #endif
@@ -3921,7 +3718,7 @@ PS_OUTPUT main(PS_INPUT input)
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            cb12[14],
+            WETNESS_CAMERA_ARRAY_ARGS(cb12),
             wetnessDebugColor))
     {
         output.color = wetnessDebugColor;
@@ -3989,10 +3786,11 @@ PS_OUTPUT main(PS_INPUT input)
         dot(decalDirection, reconstructedPosition.xyz),
         dot(recordNormal, reconstructedPosition.xyz));
     localPosition = normalize(localPosition);
-    float2 localDirection = normalize(localPosition.xy);
-    float localRadius = sqrt(dot(localPosition, localPosition) - localPosition.z * localPosition.z);
-    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float facing = dot(recordNormal, viewDirection);
+    float localLengthSq = dot(localPosition, localPosition);
+    float2 localDirection = normalize(localPosition.xy);
+    float localRadius = sqrt(localLengthSq - localPosition.z * localPosition.z);
+    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float maxSteps = min(facing * -56.0 + 72.0, cb2[6].y);
     float inverseMaxSteps = 1.0 / maxSteps;
     float stopCounter = maxSteps + 1.0;
@@ -4018,9 +3816,10 @@ PS_OUTPUT main(PS_INPUT input)
     float previousGap = hit.z - hit.w;
     float currentGap = hit.x - hit.y;
     float denominator = previousGap - currentGap;
-    float fraction = 1.0 - (hit.x * previousGap - currentGap * hit.z) / denominator;
-    fraction = denominator == 0.0 ? 1.0 : fraction;
-    projectedPosition.xy += marchDirection * fraction;
+    bool degenerate = denominator == 0.0;
+    float fraction = 1.0 - (hit.x * previousGap - hit.z * currentGap) / denominator;
+    fraction = degenerate ? 1.0 : fraction;
+    projectedPosition.xy -= -marchDirection * fraction;
 #endif
 
     clip(projectedPosition.xy - uvBounds.xy);
@@ -4038,22 +3837,13 @@ PS_OUTPUT main(PS_INPUT input)
     float surfaceFacing = dot(projectionDirection, surfaceNormal) - 0.3;
     bool surfaceBack = surfaceFacing < 0.0;
 
-#if WAVE5B_SSS_RECORD_NORMAL_SHAPE == 1
-    clip((geometricBack && surfaceBack) ? -1.0 : 1.0);
-#else
-    if (geometricBack && surfaceBack)
-        discard;
-#endif
+    clip((surfaceBack && geometricBack) ? -1.0 : 1.0);
 
     float4 decalColor = g_tDecalColor.SampleLevel(g_sDecalColor, projectedPosition.xy, decalLod);
     float2 auxiliary = g_tDecalAux.SampleLevel(g_sDecalAux, projectedPosition.xy, decalLod).xy;
     float2 decalNormalXy = g_tDecalNormal.SampleLevel(g_sDecalNormal, projectedPosition.xy, decalLod).xy;
     float angleFade = geometricBack ? min(max(surfaceFacing, 0.0), 0.25) : 0.25;
-#if WAVE5B_SSS_RECORD_NORMAL_SHAPE == 1
     float alpha = angleFade * decalColor.w * 4.0;
-#else
-    float alpha = decalColor.w * angleFade * 4.0;
-#endif
     clip(alpha - 4.0 / 255.0);
     alpha *= decalOpacity;
 
@@ -4118,7 +3908,7 @@ PS_OUTPUT main(PS_INPUT input)
 #error Unsupported SSS MRT surface/contact shape
 #endif
 
-#if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)
+#if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
 #undef WAVE5B_SURFACE_CONTACT_CB12_COUNT
 #define WAVE5B_SURFACE_CONTACT_CB12_COUNT 36
 #endif
@@ -4200,6 +3990,9 @@ PS_OUTPUT main(PS_INPUT input)
     float3 recordNormal = g_decalRecords[input.decalIndex].recordNormal.xyz;
 #endif
     float4 uvBounds = g_decalRecords[input.decalIndex].uvBounds;
+#if WAVE5B_SURFACE_CONTACT_HAS_T2
+    float2 shadowStep = g_decalRecords[input.decalIndex].pad0xd0.xy;
+#endif
     float decalOpacity = g_decalRecords[input.decalIndex].pad0xd0.w;
 
     float2 screenUv = input.position.xy * cb2[0].xy;
@@ -4252,7 +4045,7 @@ PS_OUTPUT main(PS_INPUT input)
     float4 wetnessDebugColor;
     if (WetnessEffects::TryGetDebugColorFromScreenPosition(
             input.position.xy,
-            cb12[14],
+            WETNESS_CAMERA_ARRAY_ARGS(cb12),
             wetnessDebugColor))
     {
         output.color = wetnessDebugColor;
@@ -4320,10 +4113,11 @@ PS_OUTPUT main(PS_INPUT input)
         dot(decalDirection, reconstructedPosition.xyz),
         dot(recordNormal, reconstructedPosition.xyz));
     localPosition = normalize(localPosition);
-    float2 localDirection = normalize(localPosition.xy);
-    float localRadius = sqrt(dot(localPosition, localPosition) - localPosition.z * localPosition.z);
-    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float facing = dot(recordNormal, viewDirection);
+    float localLengthSq = dot(localPosition, localPosition);
+    float2 localDirection = normalize(localPosition.xy);
+    float localRadius = sqrt(localLengthSq - localPosition.z * localPosition.z);
+    float2 marchDirection = localDirection * (localRadius / localPosition.z) * cb2[6].x;
     float maxSteps = min(facing * -56.0 + 72.0, cb2[6].y);
     float inverseMaxSteps = 1.0 / maxSteps;
     float stopCounter = maxSteps + 1.0;
@@ -4349,28 +4143,31 @@ PS_OUTPUT main(PS_INPUT input)
     float previousGap = hit.z - hit.w;
     float currentGap = hit.x - hit.y;
     float denominator = previousGap - currentGap;
-    float fraction = 1.0 - (hit.x * previousGap - currentGap * hit.z) / denominator;
-    fraction = denominator == 0.0 ? 1.0 : fraction;
-    projectedPosition.xy += marchDirection * fraction;
+    bool degenerate = denominator == 0.0;
+    float fraction = 1.0 - (hit.x * previousGap - hit.z * currentGap) / denominator;
+    fraction = degenerate ? 1.0 : fraction;
+    projectedPosition.xy -= -marchDirection * fraction;
 #endif
 
 #if WAVE5B_SURFACE_CONTACT_HAS_T2
     const float kTapOffset[7] = { 0.22, 0.1925, 0.165, 0.1375, 0.11, 0.0825, 0.055 };
     const float kTapBias[7] = { 0.88, 0.77, 0.66, 0.55, 0.44, 0.33, 0.22 };
     const float kTapWeight[7] = { 1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0 };
-    float2 shadowStep = g_decalRecords[input.decalIndex].pad0xd0.xy;
     float centerOcclusion =
         g_tMarch.SampleLevel(g_sMarch, projectedPosition.xy, 0.0).x;
-    float contact = 0.0;
+    float tapValues[7];
     [unroll]
     for (int tap = 0; tap < 7; ++tap)
     {
         float2 tapUv = shadowStep * kTapOffset[tap] + projectedPosition.xy;
         float tapValue = g_tMarch.SampleLevel(g_sMarch, tapUv, 0.0).x;
         tapValue = (tapValue - centerOcclusion) - kTapBias[tap];
-        tapValue *= kTapWeight[tap];
-        contact = tap == 0 ? tapValue : max(tapValue, contact);
+        tapValues[tap] = tapValue * kTapWeight[tap];
     }
+    float contact = tapValues[0];
+    [unroll]
+    for (int reduce = 1; reduce < 7; ++reduce)
+        contact = max(contact, tapValues[reduce]);
     float contactShadow =
         saturate(1.0 - contact * cb2[6].x * 10.0) * 0.8 + 0.2;
 #endif
@@ -4390,22 +4187,16 @@ PS_OUTPUT main(PS_INPUT input)
     float surfaceFacing = dot(projectionDirection, surfaceNormal) - 0.3;
     bool surfaceBack = surfaceFacing < 0.0;
 
-#if WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 1
-    clip((geometricBack && surfaceBack) ? -1.0 : 1.0);
-#else
-    if (geometricBack && surfaceBack)
-        discard;
-#endif
+    clip((surfaceBack && geometricBack) ? -1.0 : 1.0);
 
     float4 decalColor = g_tDecalColor.SampleLevel(g_sDecalColor, projectedPosition.xy, decalLod);
+#if WAVE5B_SURFACE_CONTACT_HAS_T2
+    output.color.xyz = decalColor.xyz * contactShadow;
+#endif
     float2 auxiliary = g_tDecalAux.SampleLevel(g_sDecalAux, projectedPosition.xy, decalLod).xy;
     float2 decalNormalXy = g_tDecalNormal.SampleLevel(g_sDecalNormal, projectedPosition.xy, decalLod).xy;
     float angleFade = geometricBack ? min(max(surfaceFacing, 0.0), 0.25) : 0.25;
-#if WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 1
     float alpha = angleFade * decalColor.w * 4.0;
-#else
-    float alpha = decalColor.w * angleFade * 4.0;
-#endif
     clip(alpha - 4.0 / 255.0);
     alpha *= decalOpacity;
 
@@ -4426,7 +4217,7 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
     output.material.w = saturate(cb2[3].y);
 #if WAVE5B_SURFACE_CONTACT_HAS_T2
-    output.color = float4(decalColor.xyz * contactShadow, alpha);
+    output.color.w = alpha;
 #else
     output.color = float4(decalColor.xyz, alpha);
 #endif

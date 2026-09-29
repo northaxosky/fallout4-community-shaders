@@ -46,6 +46,8 @@ namespace cs::features
 		std::function<render::temporal::FrameGenerationRequest()> queryFrameState;
 		std::function<void(ID3D12Device*, HWND)> bindD3D12CaptureTarget;
 		std::function<void(ID3D12Device*)> unbindD3D12CaptureTarget;
+		// The D3D11 device has no swap chain of its own, so game frames end here.
+		std::function<void()> gameFramePresented;
 	};
 
 	class DX12SwapChain : public IDXGISwapChainProxyOwner

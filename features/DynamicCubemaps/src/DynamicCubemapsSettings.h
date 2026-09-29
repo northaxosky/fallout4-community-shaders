@@ -10,6 +10,6 @@ namespace cs::features::dynamic_cubemaps
 	};
 
 	inline constexpr settings::Schema kSchema{
-		std::tuple{ settings::Field{ "enabled", "Enable cubemap capture and deferred reflections.", &Settings::enabled } }
+		std::tuple{ settings::Field{ "enabled", "Enable cubemap capture and dynamic water reflections.", &Settings::enabled } }
 	};
 }

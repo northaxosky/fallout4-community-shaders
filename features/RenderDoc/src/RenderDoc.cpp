@@ -340,7 +340,8 @@ namespace cs::features
 			return false;
 		}
 
-		_api->SetActiveWindow(binding.device.get(), binding.window);
+		if (!FramesEngineCaptureManually())
+			_api->SetActiveWindow(binding.device.get(), binding.window);
 		return true;
 	}
 
@@ -399,6 +400,49 @@ namespace cs::features
 			.Field("folder", _resolvedCaptureFolderUtf8);
 	}
 
+	bool RenderDoc::FramesEngineCaptureManually() const noexcept
+	{
+		// The proxy presents only through D3D12, so RenderDoc never pairs the game device with a window.
+		return _settings.captureTarget == CaptureTarget::kEngineD3D11 &&
+			_d3d12TargetAvailable.load(std::memory_order_acquire);
+	}
+
+	bool RenderDoc::RequestFrames(std::uint32_t a_frames)
+	{
+		if (!BindCaptureTarget(true) || !CheckCaptureDiskSpace())
+			return false;
+		if (FramesEngineCaptureManually()) {
+			_manualFramesPending.store(a_frames, std::memory_order_release);
+		} else if (a_frames == 1) {
+			_api->TriggerCapture();
+		} else {
+			_api->TriggerMultiFrameCapture(a_frames);
+		}
+		return true;
+	}
+
+	void RenderDoc::OnGameFramePresented()
+	{
+		if (!_api)
+			return;
+		if (_manualFrameDevice) {
+			_api->EndFrameCapture(_manualFrameDevice.get(), nullptr);
+			_manualFrameDevice = nullptr;
+		}
+		auto pending = _manualFramesPending.load(std::memory_order_acquire);
+		while (pending && !_manualFramesPending.compare_exchange_weak(
+							  pending, pending - 1, std::memory_order_acq_rel)) {
+		}
+		if (!pending)
+			return;
+		{
+			std::scoped_lock lock(_captureTargetMutex);
+			_manualFrameDevice.copy_from(_device11.get());
+		}
+		if (_manualFrameDevice)
+			_api->StartFrameCapture(_manualFrameDevice.get(), nullptr);
+	}
+
 	void RenderDoc::TriggerCapture()
 	{
 		if (!_settings.enabled) {
@@ -410,12 +454,9 @@ namespace cs::features
 			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
 			return;
 		}
-		if (!BindCaptureTarget(true))
-			return;
-		if (!CheckCaptureDiskSpace())
+		if (!RequestFrames(1))
 			return;
 
-		_api->TriggerCapture();
 		QueuePendingComments(1);
 		_captureCount.fetch_add(1, std::memory_order_relaxed);
 
@@ -434,17 +475,14 @@ namespace cs::features
 			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
 			return;
 		}
-		if (!BindCaptureTarget(true))
-			return;
-		if (!CheckCaptureDiskSpace())
-			return;
 		if (!_api->TriggerMultiFrameCapture) {
 			L->warn("RenderDoc runtime does not expose TriggerMultiFrameCapture");
 			return;
 		}
 
 		const auto frameCount = static_cast<uint32_t>(ClampMultiFrameCount(_settings.multiFrameCount));
-		_api->TriggerMultiFrameCapture(frameCount);
+		if (!RequestFrames(frameCount))
+			return;
 		QueuePendingComments(frameCount);
 		_captureCount.fetch_add(1, std::memory_order_relaxed);
 

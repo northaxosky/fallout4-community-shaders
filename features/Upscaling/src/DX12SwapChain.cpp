@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include <REX/TScopeExit.h>
+
 #include "Log.h"
 #include "Render/Annotation.h"
 #include "Render/RendererContext.h"
@@ -1785,6 +1787,11 @@ namespace cs::features
 			}
 			return result;
 		}
+		const REX::TScopeExit framed{ [this]() noexcept {
+			if (_callbacks.gameFramePresented) {
+				_callbacks.gameFramePresented();
+			}
+		} };
 		try {
 			const HRESULT result =
 				PresentImpl(a_syncInterval, a_flags, a_parameters, a_usePresent1);

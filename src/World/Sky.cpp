@@ -1,8 +1,11 @@
 #include "World/Sky.h"
 
+#include <algorithm>
 #include <cmath>
 
+#include "RE/I/ImageSpaceManager.h"
 #include "RE/N/NiAVObject.h"
+#include "RE/N/NiLight.h"
 #include "RE/S/Sky.h"
 #include "RE/S/Sun.h"
 
@@ -27,5 +30,29 @@ namespace cs::engine
 		outY = y * invLen;
 		outZ = z * invLen;
 		return true;
+	}
+
+	bool TryGetSunLightColor(DirectX::XMFLOAT3& a_color) noexcept
+	{
+		auto* sky = RE::Sky::GetSingleton();
+		if (!sky || !sky->sun || !sky->sun->light)
+			return false;
+
+		// BSDFLightShader::SetupGeometry: pow(diffuse, 2.2) * dimmer * HDR sunlight scale.
+		const auto* light = reinterpret_cast<const RE::NiLight*>(sky->sun->light.get());
+		float scale = light->dimmer;
+		if (const auto* imageSpace = RE::ImageSpaceManager::GetSingleton())
+			scale *= imageSpace->currentEOFData.baseData.hdrData.sunlightScale;
+		const auto linear = [scale](float a_value) {
+			return std::pow(std::max(a_value, 0.0f), 2.2f) * scale;
+		};
+		a_color = { linear(light->diff.r), linear(light->diff.g), linear(light->diff.b) };
+		return std::isfinite(a_color.x) && std::isfinite(a_color.y) && std::isfinite(a_color.z);
+	}
+
+	bool IsSkyHidden() noexcept
+	{
+		const auto* sky = RE::Sky::GetSingleton();
+		return sky && sky->flags.all(RE::Sky::Flags::kHideSky);
 	}
 }

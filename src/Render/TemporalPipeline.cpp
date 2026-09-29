@@ -1257,6 +1257,11 @@ namespace cs::render
 						[](ID3D12Device* a_device) {
 							features::RenderDoc::GetSingleton()
 								->UnbindD3D12CaptureTarget(a_device);
+						},
+					.gameFramePresented =
+						[] {
+							features::RenderDoc::GetSingleton()
+								->OnGameFramePresented();
 						} });
 			if (SUCCEEDED(proxyResult) && provider &&
 				_impl->swapChain.IsFrameGenerationReady()) {

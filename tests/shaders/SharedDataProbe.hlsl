@@ -18,6 +18,9 @@ float4 main() : SV_Target
 	value += SharedData::Timer + SharedData::DeltaTime;
 	value += SharedData::FrameCount;
 	value += BoolValue(SharedData::InInterior);
+	value += dot(SharedData::GetAmbient(float3(0.0, 0.0, 1.0)), 1.0);
+	value += dot(SharedData::DirLightColor, 1.0);
+	value += BoolValue(SharedData::HideSky);
 
 	value += BoolValue(
 		SharedData::screenSpaceShadowsSettings.EnableScreenSpaceShadows);
@@ -36,6 +39,13 @@ float4 main() : SV_Target
 	value += SharedData::wetnessEffectsSettings.MaxRainWetness;
 	value += SharedData::wetnessEffectsSettings.MinRainWetness;
 	value += SharedData::wetnessEffectsSettings.DebugVisualization;
+	value += SharedData::wetnessEffectsSettings.PuddleRadius;
+	value += SharedData::wetnessEffectsSettings.PuddleMaxAngle;
+	value += SharedData::wetnessEffectsSettings.MaxPuddleWetness;
+	value += SharedData::wetnessEffectsSettings.PuddleWetness;
+	value += SharedData::wetnessEffectsSettings.MaxShoreWetness;
+	value += SharedData::wetnessEffectsSettings.ShoreRange;
+	value += dot(SharedData::wetnessEffectsSettings.pad0, 1.0);
 
 	value += BoolValue(
 		SharedData::terrainShadowsSettings.TerrainShadowMode != 0);

@@ -4,16 +4,21 @@
 #define __WETNESS_EFFECTS_DEPENDENCY_HLSL__
 
 #include "Common/SharedData.hlsli"
+#include "Common/Random.hlsli"
+#ifdef WETNESS_COMPOSITE_CONSUMER
+#include "Common/DeferredPosition.hlsli"
+#endif
 
 namespace WetnessEffects
 {
 #ifdef WETNESS_COMPOSITE_CONSUMER
 	// authoritative engine G-buffer normal, rebound per injected composite draw
 	Texture2D<float4> GbufferNormal : register(t25);
+	// FO4 composites without native depth inputs need a scoped scene-depth binding for shore position.
+	Texture2D<float> SceneDepthTexture : register(t36);
 #endif
 
 	static const float FilmF0 = 0.02;
-	static const float MinFilmRoughness = 0.05;
 	static const float MaxFilmSpecularMagnitude = 15.0;
 	// FO4's six reconstructed BSDFLight families normalize traditional specular with pi
 	static const float FilmSpecularScale = 3.1415927;
@@ -22,35 +27,85 @@ namespace WetnessEffects
 	static const uint DebugModeWetnessTerm = 1;
 	static const uint DebugModeWorldUp = 2;
 
+	// FO4 deferred passes use the shading normal because the vertex normal is unavailable.
 	float GetWorldUp(float3 normalView, float4 worldUpView)
 	{
 		return dot(normalView, worldUpView.xyz);
 	}
 
-	float GetWetness(float worldUp, float worldUpValid)
+	struct Surface
 	{
-		float wetness = 0.0;
-		[branch] if (SharedData::wetnessEffectsSettings.Wetness > 0.0
-			&& worldUpValid == 1.0) {
-			float rainFacing = saturate(
-				max(SharedData::wetnessEffectsSettings.MinRainWetness, worldUp));
-			wetness = SharedData::wetnessEffectsSettings.Wetness * rainFacing *
-				SharedData::wetnessEffectsSettings.MaxRainWetness;
+		float3 normalView;
+		float worldUp;
+		float wetness;
+		float waterRoughness;
+		float glossinessAlbedo;
+	};
+
+	// FO4 reconstructs absolute world position from b12 rows and camera adjustment; view Z is forward depth.
+	Surface GetSurface(float3 normalView, float3 viewPosition,
+		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2, float4 cameraPosAdjust)
+	{
+		Surface surface;
+		surface.normalView = normalView;
+		surface.worldUp = GetWorldUp(normalView, viewToWorldRow2);
+		float3 worldPosition = float3(
+			dot(viewToWorldRow0, float4(viewPosition, 1.0)),
+			dot(viewToWorldRow1, float4(viewPosition, 1.0)),
+			dot(viewToWorldRow2, float4(viewPosition, 1.0))) + cameraPosAdjust.xyz;
+		float nearFactor = smoothstep(4096.0 * 2.5, 0.0, viewPosition.z);
+
+		// FO4 publishes the player cell's water plane instead of upstream's per-tile water data.
+		bool hasWater = SharedData::waterEffectsSettings.HasWater != 0;
+		float waterHeight = SharedData::waterEffectsSettings.WaterHeight;
+		// Calculate shore wetness factors
+		float wetnessDistToWater = abs(worldPosition.z - waterHeight);
+		float shoreFactor = hasWater ?
+			saturate(1.0 - (wetnessDistToWater / SharedData::wetnessEffectsSettings.ShoreRange)) : 0.0;
+		float shoreFactorAlbedo = hasWater && worldPosition.z < waterHeight ? 1.0 : shoreFactor;
+
+		// Calculate wetness angle and occlusion
+		float minWetnessValue = SharedData::wetnessEffectsSettings.MinRainWetness;
+		float minWetnessAngle = saturate(max(minWetnessValue, surface.worldUp));
+		// FO4 has no skylighting; these deferred consumers shade world geometry.
+		float wetnessOcclusion = 1.0;
+
+		// Calculate different wetness types
+		float rainWetness = SharedData::wetnessEffectsSettings.Wetness * minWetnessAngle * SharedData::wetnessEffectsSettings.MaxRainWetness;
+		float shoreWetness = shoreFactor * SharedData::wetnessEffectsSettings.MaxShoreWetness;
+		float wetness = max(shoreWetness, rainWetness);
+
+		// Calculate puddle effects
+		float puddleWetness = SharedData::wetnessEffectsSettings.PuddleWetness * minWetnessAngle;
+		float puddle = wetness;
+		if (wetness > 0.0 || puddleWetness > 0.0) {
+			float3 puddleCoords = (worldPosition * 0.5 + 0.5) * 0.01 / SharedData::wetnessEffectsSettings.PuddleRadius;
+			puddle = Random::perlinNoise(puddleCoords) * 0.5 + 0.5;
+			puddle = puddle * ((minWetnessAngle / SharedData::wetnessEffectsSettings.PuddleMaxAngle) * SharedData::wetnessEffectsSettings.MaxPuddleWetness * 0.25) + 0.5;
+			puddle *= lerp(wetness, puddleWetness, saturate(puddle - 0.25));
 		}
-		return wetness;
-	}
 
-	// view-space rain-facing wetness; zero disables every wetness term downstream
-	float GetWetness(float3 normalView, float4 worldUpView)
-	{
-		return GetWetness(
-			GetWorldUp(normalView, worldUpView),
-			worldUpView.w);
-	}
+		// Apply occlusion and distance factors
+		puddle *= saturate(wetnessOcclusion * 2.0) * nearFactor;
 
-	float FilmRoughness(float wetness)
-	{
-		return max(saturate(1.0 - wetness), MinFilmRoughness);
+		// Calculate wetness glossiness factors
+		float wetnessGlossinessAlbedo = max(puddle, shoreFactorAlbedo * SharedData::wetnessEffectsSettings.MaxShoreWetness);
+		wetnessGlossinessAlbedo *= wetnessGlossinessAlbedo;
+
+		float wetnessGlossinessSpecular = puddle;
+		if (hasWater && worldPosition.z < waterHeight) {
+			wetnessGlossinessSpecular *= shoreFactor;
+		}
+
+		// Minimum roughness prevents an extreme retroreflective peak (NdotH→1) for near-zero
+		// roughness puddles. Real water has ripples and surface tension that keep it from being
+		// optically perfect; the ripple normal map adds micro-variation but GGX still peaks
+		// sharply without this floor.
+		static const float wetnessMinPuddleRoughness = 0.05;
+		surface.wetness = wetness;
+		surface.waterRoughness = max(saturate(1.0 - wetnessGlossinessSpecular), wetnessMinPuddleRoughness);
+		surface.glossinessAlbedo = wetnessGlossinessAlbedo;
+		return surface;
 	}
 
 	float FilmStrength(float filmRoughness)
@@ -59,42 +114,34 @@ namespace WetnessEffects
 	}
 
 #ifdef WETNESS_COMPOSITE_CONSUMER
-	struct Surface
-	{
-		float3 normalView;
-		float wetness;
-		float worldUp;
-	};
-
 	// t25 outside the prepass encode domain (including an explicit null bind) is identity
-	Surface GetSurface(float2 screenPosition, float4 worldUpView)
+	Surface GetSurfaceFromScreenPosition(float2 screenPosition,
+		float3x4 viewToWorld, float4 cameraPosAdjust,
+		float4x4 farReprojection, float4x4 nearReprojection)
 	{
 		Surface surface;
 		surface.normalView = float3(0.0, 0.0, -1.0);
 		surface.wetness = 0.0;
 		surface.worldUp = 0.0;
+		surface.waterRoughness = 1.0;
+		surface.glossinessAlbedo = 0.0;
 
 		float2 encoded =
 			GbufferNormal.Load(int3(int2(screenPosition), 0)).xy * 4.0 - 2.0;
 		float encodedLengthSquared = dot(encoded, encoded);
 		// a NaN encoding fails this test and keeps the identity surface
 		[branch] if (encodedLengthSquared <= 4.0) {
-			surface.normalView = float3(
+			float3 normalView = float3(
 				encoded * sqrt(1.0 - encodedLengthSquared * 0.25),
 				-(1.0 - encodedLengthSquared * 0.5));
-			surface.worldUp = GetWorldUp(surface.normalView, worldUpView);
-			surface.wetness = GetWetness(surface.worldUp, worldUpView.w);
+			float3 viewPosition;
+			if (DeferredPosition::TryGetViewPositionFromScreenPosition(
+					SceneDepthTexture, screenPosition, farReprojection, nearReprojection, viewPosition)) {
+				surface = GetSurface(normalView, viewPosition,
+					viewToWorld[0], viewToWorld[1], viewToWorld[2], cameraPosAdjust);
+			}
 		}
 		return surface;
-	}
-
-	Surface GetSurfaceFromViewToWorldRow2(
-		float2 screenPosition,
-		float4 viewToWorldRow2)
-	{
-		return GetSurface(
-			screenPosition,
-			float4(viewToWorldRow2.xyz, 1.0));
 	}
 
 	bool TryGetDebugColor(Surface surface, out float4 color)
@@ -114,23 +161,24 @@ namespace WetnessEffects
 
 	bool TryGetDebugColorFromScreenPosition(
 		float2 screenPosition,
-		float4 viewToWorldRow2,
+		float3x4 viewToWorld, float4 cameraPosAdjust,
+		float4x4 farReprojection, float4x4 nearReprojection,
 		out float4 color)
 	{
 		return TryGetDebugColor(
-			GetSurfaceFromViewToWorldRow2(screenPosition, viewToWorldRow2),
+			GetSurfaceFromScreenPosition(screenPosition,
+				viewToWorld, cameraPosAdjust, farReprojection, nearReprojection),
 			color);
 	}
 #endif
 
 	// upstream substrate darkening with material porosity fixed at 1
-	float3 WetAlbedo(float3 baseColor, float wetness)
+	float3 WetAlbedo(float3 baseColor, float glossinessAlbedo)
 	{
 		float3 wetColor = baseColor;
-		[branch] if (wetness > 0.0) {
-			float albedoAmount = wetness * wetness;
+		[branch] if (glossinessAlbedo > 0.0) {
 			wetColor = lerp(
-				baseColor, pow(abs(baseColor), 1.0 + albedoAmount), 0.5);
+				baseColor, pow(abs(baseColor), 1.0 + glossinessAlbedo), 0.5);
 		}
 		return wetColor;
 	}
@@ -174,11 +222,11 @@ namespace WetnessEffects
 		float3 lightDir,
 		float3 lightColor,
 		float wetness,
+		float roughness,
 		inout float3 diffuse,
 		inout float3 specular)
 	{
 		[branch] if (wetness > 0.0) {
-			float roughness = FilmRoughness(wetness);
 			float strength = FilmStrength(roughness);
 
 			float3 halfVector = viewDir + lightDir;
@@ -206,11 +254,10 @@ namespace WetnessEffects
 	}
 
 	// upstream GetWetnessIndirectLobeWeights: environment-BRDF weighted film Fresnel
-	float GetEnvironmentFilmWeight(float3 normalView, float3 viewDir, float wetness)
+	float GetEnvironmentFilmWeight(float3 normalView, float3 viewDir, float wetness, float roughness)
 	{
 		float weight = 0.0;
 		[branch] if (wetness > 0.0) {
-			float roughness = FilmRoughness(wetness);
 			float NdotV = saturate(abs(dot(normalView, viewDir)) + DotClampEpsilon);
 			float2 environmentBRDF = EnvBRDF(roughness, NdotV);
 			weight = (FilmF0 * environmentBRDF.x + environmentBRDF.y) *
@@ -219,16 +266,19 @@ namespace WetnessEffects
 		return weight;
 	}
 
-	// partial wetness must never blur a more polished native reflection
-	float GetFilmMipRoughness(float nativeRoughness, float wetness)
+#if defined(DYNAMIC_CUBEMAPS)
+	// FO4 evaluates indirect diffuse in light passes rather than upstream's material pass.
+	float GetIndirectDiffuseWeight(float3 normalView, float3 viewDir, float3 viewPosition,
+		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2, float4 cameraPosAdjust)
 	{
-		return min(FilmRoughness(wetness), nativeRoughness);
+		// FO4 toggles Dynamic Cubemaps live, so the film only takes energy while its reflection is supplied.
+		if (SharedData::dynamicCubemapsSettings.Enabled == 0)
+			return 1.0;
+		Surface surface = GetSurface(normalView, viewPosition,
+			viewToWorldRow0, viewToWorldRow1, viewToWorldRow2, cameraPosAdjust);
+		return 1.0 - GetEnvironmentFilmWeight(normalView, viewDir, surface.wetness, surface.waterRoughness);
 	}
-
-	float3 GetFilmReflectionView(float3 normalView, float3 viewDir)
-	{
-		return normalView * -(2.0 * dot(viewDir, normalView)) + viewDir;
-	}
+#endif
 }
 
 #endif  // __WETNESS_EFFECTS_DEPENDENCY_HLSL__

@@ -51,10 +51,22 @@ namespace cs::engine
 			ShaderInjectionDefines& a_defines,
 			const ShaderFamilyDescriptor& a_family)
 		{
-			const auto a_descriptor = a_family.descriptor;
+			auto a_descriptor = a_family.descriptor;
 			const bool tessellatedVertex =
 				a_family.stage == ShaderStage::kVertex
 				&& (a_descriptor & ((1U << 19) | (1U << 20))) != 0;
+			// FO4 vertex normalization is fitted to the pinned AE 1.11.240 route population.
+			if (a_family.stage == ShaderStage::kVertex) {
+				if (!tessellatedVertex && (a_descriptor & 0x220U) == 0)
+					a_descriptor &= ~(1U << 25);
+				if ((a_descriptor & 0x2000U) != 0)
+					a_descriptor &= ~0x18U;
+				else if ((a_descriptor & 0x2U) != 0
+					&& (a_descriptor & 0x4240U) != 0)
+					a_descriptor |= 0x18U;
+				if (tessellatedVertex)
+					a_descriptor &= ~(1U << 10);
+			}
 			DefineBit(a_defines, a_descriptor, 1U << 0, "VC");
 			Define(
 				a_defines,
@@ -123,11 +135,6 @@ namespace cs::engine
 			DefineBit(a_defines, a_descriptor, 1U << 30, "BONE_TINTING");
 			DefineBit(a_defines, a_descriptor, 1U << 31, "FACE");
 			Define(a_defines, "MOTION_VECTORS");
-			if (a_family.stage == ShaderStage::kVertex
-				&& a_defines.contains("GRASS")
-				&& a_defines.contains("SPLINE")) {
-				return false;
-			}
 			return true;
 		}
 
@@ -329,7 +336,7 @@ namespace cs::engine
 					Define(a_defines, "BSLIGHTING_VS_REDUCED");
 				else if ((a_descriptor & 0x2U) != 0)
 					Define(a_defines, "BSLIGHTING_VS_SKINNED");
-				else if ((a_descriptor & 0x100U) != 0)
+				else if ((a_descriptor & 0x500U) == 0x100U)
 					Define(a_defines, "BSLIGHTING_VS_WORLD");
 				else
 					Define(a_defines, "BSLIGHTING_VS_STATIC");
@@ -577,41 +584,29 @@ namespace cs::engine
 			if (a_stage != ShaderStage::kPixel)
 				return false;
 
-			switch (d) {
-			case 0x1000U:
-			case 0x11000U:
-			case 0x81000U:
-			case 0x91000U:
-			case 0x181000U:
-			case 0x191000U:
-				Define(
-					a_defines,
-					"BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT");
-				Define(
-					a_defines,
-					"WAVE5B_SSS_SURFACE_CONTACT_SHAPE",
-					"1");
+			if ((d & 0x1000U) != 0) {
+				// Decal bits the shipped decal composites carry; anything else has no native blob.
+				constexpr std::uint32_t kDecalBits =
+					0x1000U | 0x20U | 0x2000U | 0x10000U | 0x20000U |
+					0x40000U | 0x80000U | 0x100000U;
+				if ((d & ~kDecalBits) != 0)
+					return false;
+				const bool parallax = (d & 0x40000U) != 0;
+				// POM shadows only select the contact root when POM itself is on.
+				const bool recordNormal =
+					(d & 0x2020U) != 0 ||
+					(parallax && (d & 0x80000U) == 0);
+				const auto shape = std::to_string(
+					1U + ((d & 0x20000U) != 0 ? 1U : 0U) + (parallax ? 2U : 0U));
+				if (recordNormal) {
+					Define(a_defines, "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL");
+					Define(a_defines, "WAVE5B_SSS_RECORD_NORMAL_SHAPE", shape);
+				} else {
+					Define(a_defines, "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT");
+					Define(a_defines, "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", shape);
+				}
 				return true;
-			case 0x1020U:
-			case 0x3000U:
-			case 0x11020U:
-			case 0x13000U:
-				Define(
-					a_defines,
-					"BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL");
-				Define(
-					a_defines,
-					"WAVE5B_SSS_RECORD_NORMAL_SHAPE",
-					"1");
-				return true;
-			default:
-				break;
 			}
-
-			// The remaining native SSS MRT families still lack
-			// stock-faithful reconstructions.
-			if ((d & 0x1000U) != 0)
-				return false;
 
 			enum class Family
 			{
@@ -663,7 +658,7 @@ namespace cs::engine
 			if (family == Family::kCubeIbl) {
 				if ((d & ~0x10300U) == 0x860U)
 					family = Family::kAmbientCb47;
-				else if ((d & ~0x70301U) == 0x820U)
+				else if ((d & ~0x70305U) == 0x820U)
 					family = Family::kAmbientCb31;
 				else if ((d & ~0x10240U) == 0x120U)
 					family = Family::kAmbientCompact;
@@ -740,8 +735,7 @@ namespace cs::engine
 				DefineBit(a_defines, d, 0x10000U, "TILELIGHT");
 				return true;
 			case Family::kAmbientCb31:
-				if (((d & 0x50000U) == 0)
-					|| ((d & 0x60000U) == 0x20000U))
+				if ((d & 0x10000U) == 0)
 					Define(a_defines, "AMBIENT_DIFFUSE_SET_B", "0");
 				if ((d & 0x200U) == 0)
 					Define(a_defines, "AMBIENT_SSAO", "0");
@@ -784,8 +778,7 @@ namespace cs::engine
 				Define(
 					a_defines,
 					"WAVE5A_ACCUMULATOR_SHAPE",
-					d == 0x204088U ? "2" :
-					(d & 0x20000U) != 0 ?
+					(d & 0x80U) != 0 ?
 						((d & 0x10000U) != 0 ? "3" : "2") :
 						((d & 0x10000U) != 0 ? "1" : "4"));
 				return true;
@@ -1380,14 +1373,15 @@ namespace cs::engine
 					a_defines, a_descriptor.stage, d);
 			case ShaderInjectionTarget::kDfTiledLighting:
 				if (a_descriptor.stage != ShaderStage::kCompute ||
-					d > 3)
+					d > 0x12)
 					return false;
-				if (d == 3)
-					Define(a_defines, "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM", "10");
+				// Keys 3..18 are the tile-cull entry at group dims 10..25.
+				if (d >= 3)
+					Define(a_defines, "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM", std::to_string(d + 7));
 				Define(
 					a_defines,
 					"DFTILEDLIGHTING_VARIANT",
-					std::to_string(d));
+					std::to_string(std::min(d, 3U)));
 				return true;
 			default:
 				return false;

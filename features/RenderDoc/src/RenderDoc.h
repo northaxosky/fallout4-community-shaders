@@ -46,6 +46,7 @@ namespace cs::features
 		void BindD3D11CaptureTarget(ID3D11Device* a_device, HWND a_window);
 		void BindD3D12CaptureTarget(ID3D12Device* a_device, HWND a_window);
 		void UnbindD3D12CaptureTarget(ID3D12Device* a_device);
+		void OnGameFramePresented();
 		[[nodiscard]] bool CaptureHotkeysEnabled() const noexcept
 		{
 			return IsHealthy() && _settings.enabled && _api;
@@ -74,6 +75,8 @@ namespace cs::features
 		bool CheckCaptureDiskSpace() const;
 		[[nodiscard]] bool BindCaptureTarget(bool a_reportUnavailable);
 		[[nodiscard]] bool CaptureTargetAvailable() const noexcept;
+		[[nodiscard]] bool FramesEngineCaptureManually() const noexcept;
+		[[nodiscard]] bool RequestFrames(std::uint32_t a_frames);
 		void QueuePendingComments(std::uint32_t a_expectedCaptures);
 		void ApplyPendingComments();
 
@@ -101,6 +104,9 @@ namespace cs::features
 		HWND                           _window12 = nullptr;
 		std::atomic_bool               _d3d11TargetAvailable{ false };
 		std::atomic_bool               _d3d12TargetAvailable{ false };
+
+		std::atomic<std::uint32_t>     _manualFramesPending{ 0 };
+		winrt::com_ptr<ID3D11Device>   _manualFrameDevice;
 
 		// Comments apply to a completed capture, so they wait for the file to appear.
 		std::string   _pendingComments;

@@ -2173,8 +2173,10 @@ VertexOutput main(VertexInput input)
     float splineAmp = (splineGust * sin(splineAngle) + splineClock.z) * VERTEX_COLOR.a;
     float2 splineLean;
     sincos(cb2_wind_phase.x, splineLean.y, splineLean.x);
-    float2 splineSway = float2(splineLean.x * splineAmp + splineOrigin.x,
-        splineLean.y * splineAmp + splineOrigin.y);
+    // Keep the lean packed and the translations scalar to preserve the native MAD allocation.
+    float2 splineSway = splineLean * splineAmp;
+    splineSway.x += splineOrigin.x;
+    splineSway.y += splineOrigin.y;
     float previousSeed =
         dot(previousOrigin + cb12_idx36_previous_world_offset.xyz, float3(1.0, 1.0, 1.0)) * 0.001;
     float previousDrift =
@@ -2182,8 +2184,9 @@ VertexOutput main(VertexInput input)
     float previousAngle = splineWeight * previousDrift + splineClock.y;
     previousAngle = splineClock.x * splineBeat.x + previousAngle;
     float previousAmp = (splineGust * sin(previousAngle) + splineClock.z) * VERTEX_COLOR.a;
-    float2 previousSway = float2(splineLean.x * previousAmp + previousOrigin.x,
-        splineLean.y * previousAmp + previousOrigin.y);
+    float2 previousSway = splineLean * previousAmp;
+    previousSway.x += previousOrigin.x;
+    previousSway.y += previousOrigin.y;
 #endif
 
 #if GRASS && !SKINNED

@@ -1,5 +1,5 @@
-#if !defined(DFTILEDLIGHTING_TILE_CULL_GROUP_DIM) || DFTILEDLIGHTING_TILE_CULL_GROUP_DIM != 10
-#error "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM must be 10 for section-12 key 3"
+#if !defined(DFTILEDLIGHTING_TILE_CULL_GROUP_DIM) || DFTILEDLIGHTING_TILE_CULL_GROUP_DIM < 10 || DFTILEDLIGHTING_TILE_CULL_GROUP_DIM > 25
+#error "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM must be 10..25 for section-12 keys 3..18"
 #endif
 
 cbuffer TileCullParameters : register(b0)
@@ -82,7 +82,7 @@ void main(
             float4 planeZ = slope * planeZScale.xyyw;
             planeZScale.xw = -1.0;
             planeZScale.yz = scale.yz;
-            planeZ = planeZ.xzyw * planeZScale.xzyw;
+            planeZ = (planeZ * planeZScale).xzyw;
             float4 planeX =
                 scale * float4(1.0, -1.0, -1.0, 1.0);
             float2 leftPlane = float2(planeX.x, planeZ.x);

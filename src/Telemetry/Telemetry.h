@@ -15,6 +15,11 @@ namespace cs::telemetry
 	{
 	public:
 		Sink& Field(std::string_view a_key, std::string_view a_value);
+		// Literals would otherwise take the pointer-to-bool conversion over string_view.
+		Sink& Field(std::string_view a_key, const char* a_value)
+		{
+			return Field(a_key, std::string_view(a_value ? a_value : ""));
+		}
 		Sink& Field(std::string_view a_key, std::int64_t a_value);
 		Sink& Field(std::string_view a_key, double a_value);
 		Sink& Field(std::string_view a_key, bool a_value);
