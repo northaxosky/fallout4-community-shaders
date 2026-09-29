@@ -74,6 +74,7 @@ def generate(export):
     ))
     require(targets, "no production shader targets found")
     excluded = Counter(dict.fromkeys(("imagespace", "unowned", "unhooked"), 0))
+    tiers = Counter(dict.fromkeys(("exact", "canonical", "unproven"), 0))
     rows = []
     seen = set()
     for route in routes:
@@ -96,7 +97,8 @@ def generate(export):
         expected = (candidate(route, export.parent.parent.parent) if route["tier"] == "canonical"
                     else route["stock_sha1"])
         require(re.fullmatch("[0-9a-f]{40}", expected), f"invalid SHA-1: {key}")
-        rows.append((*key, int(bool(route["early_depth"])), route["tier"], expected))
+        rows.append((*key, int(bool(route["early_depth"])), expected))
+        tiers[route["tier"]] += 1
     compiler = document["compiler"]["d3dcompiler_47"]
     require(compiler["strip"] == "D3DCOMPILER_STRIP_REFLECTION_DATA", "unexpected stripping policy")
     require(re.fullmatch("[0-9a-f]{64}", compiler["sha256"]), "invalid compiler SHA-256")
@@ -104,13 +106,13 @@ def generate(export):
         "export_sha256": hashlib.sha256(raw).hexdigest(),
         **{k: declared["total"][k] for k in ("routes", "exact", "canonical", "unproven")},
         "gated": len(rows),
-        **{f"gated_{k}": sum(row[4] == k for row in rows) for k in ("exact", "canonical", "unproven")},
+        **{f"gated_{k}": v for k, v in tiers.items()},
         **{f"excluded_{k}": v for k, v in excluded.items()},
         "compiler_sha256": compiler["sha256"],
     }
     text = "# " + " ".join(f"{k}={v}" for k, v in header.items()) + "\n"
-    text += "".join(f"{target}\t{stage}\t0x{descriptor:08x}\t{early}\t{tier}\t{sha1}\n"
-                    for target, stage, descriptor, early, tier, sha1 in sorted(rows))
+    text += "".join(f"{target}\t{stage}\t0x{descriptor:08x}\t{early}\t{sha1}\n"
+                    for target, stage, descriptor, early, sha1 in sorted(rows))
     (DATA / "stock-shader-identity.tsv").write_text(text, encoding="utf-8", newline="\n")
     print(text.splitlines()[0])
 
