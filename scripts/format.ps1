@@ -27,7 +27,7 @@ if (-not (Test-Path $executable)) {
 
 Push-Location $root
 try {
-	$files = @(git ls-files '*.h' '*.hpp' '*.c' '*.cpp' '*.hlsl' '*.hlsli' ':!:extern/**' ':!:include/**')
+	$files = @(git ls-files '*.h' '*.hpp' '*.c' '*.cpp' '*.hlsl' '*.hlsli' ':!:extern/**' ':!:include/**' | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
 	$mode = $Check ? @('--dry-run', '--Werror') : @('-i')
 	# Heavily preprocessor-branched shaders take minutes each, so run files in parallel.
 	$failed = $files | ForEach-Object -ThrottleLimit ([Environment]::ProcessorCount) -Parallel {
