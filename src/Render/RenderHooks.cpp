@@ -32,6 +32,7 @@ namespace cs::engine
 		};
 
 		std::vector<PrioritizedCallback> g_postDeferredPrePass;
+		std::vector<PrioritizedCallback> g_preDeferredPrePass;
 		std::vector<PrioritizedCallback> g_preDeferredLightsImpl;
 		std::vector<PrioritizedCallback> g_postDeferredLightsImpl;
 		std::vector<PrioritizedCallback> g_preDeferredComposite;
@@ -140,6 +141,7 @@ namespace cs::engine
 			static void thunk()
 			{
 				MarkRegistrationClosed();
+				Dispatch(g_preDeferredPrePass);
 				func();
 				Dispatch(g_postDeferredPrePass);
 			}
@@ -332,6 +334,15 @@ namespace cs::engine
 		if (!RegistrationAllowed("PostDeferredPrePass"))
 			return false;
 		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
+		EnsureDeferredPrePassInstalled();
+		return true;
+	}
+
+	bool RegisterPreDeferredPrePass(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PreDeferredPrePass"))
+			return false;
+		InsertPrioritized(g_preDeferredPrePass, std::move(callback), priority);
 		EnsureDeferredPrePassInstalled();
 		return true;
 	}

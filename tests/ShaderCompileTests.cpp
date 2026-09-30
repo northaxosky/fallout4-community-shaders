@@ -416,7 +416,7 @@ namespace
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, screenSpaceGISettings),
 			ABI(FO4SharedDataCB, inverseSquareLightingSettings),
-			ABI(FO4SharedDataCB, exponentialHeightFogSettings), ABI(FO4SharedDataCB, WetnessDebugVisualization),
+			ABI(FO4SharedDataCB, exponentialHeightFogSettings), ABI(FO4SharedDataCB, reserved0),
 			ABI(FO4SharedDataCB, padTerrain), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
 			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, pad0)
@@ -709,7 +709,7 @@ namespace
 				{ "WATER_EFFECTS_FULLSCREEN_DEBUG", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
-			.required = { CB(4), CB(5), CB(6), CB(8), Texture(25), Texture(33), Texture(36), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
+			.required = { CB(4), CB(5), CB(6), CB(8), Texture(25), Texture(33), Texture(71), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
 			.forbidden = { CB(7), Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
 
 		for (auto defines : std::vector<ShaderDefines>{
@@ -781,8 +781,8 @@ namespace
 					.profile = "ps_5_0",
 					.description = family,
 					.required = dynamicCubemaps ?
-				                    std::vector<Resource>{ Texture(25), Texture(34), Texture(35), Texture(36) } :
-				                    std::vector<Resource>{ Texture(25), Texture(36) },
+				                    std::vector<Resource>{ CB(8), Texture(25), Texture(34), Texture(35), Texture(71) } :
+				                    std::vector<Resource>{ CB(8), Texture(25), Texture(71) },
 					.forbidden = dynamicCubemaps ?
 				                     std::vector<Resource>{} :
 				                     std::vector<Resource>{ Texture(34), Texture(35) } });
@@ -802,8 +802,8 @@ namespace
 			a_jobs.push_back({ .path = composite,
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
-				.description = "BSDFComposite shore albedo and debug reconstruction",
-				.required = { CB(5), CB(6), CB(7), CB(12), Texture(25), Texture(36) } });
+				.description = "BSDFComposite prepass film and debug",
+				.required = { CB(4), CB(6), CB(8), Texture(25), Texture(71) } });
 		}
 
 		for (auto defines : std::vector<ShaderDefines>{
@@ -853,6 +853,46 @@ namespace
 				.profile = "ps_5_0",
 				.description = "BSDFLight wet direct coat camera reconstruction",
 				.required = { CB(6), CB(12) } });
+		}
+
+		for (const auto& material : std::vector<ShaderDefines>{
+				 {}, { { "SKINNED", "1" }, { "FACE", "1" } },
+				 { { "LANDSCAPE", "1" } }, { { "BLEND", "1" } },
+				 { { "MODELSPACENORMALS", "1" } }, { { "TESSELLATE_DISP_HEIGHT", "1" } },
+				 { { "EYE", "1" } }, { { "TREE_ANIM", "1" } },
+				 { { "LOD_LANDSCAPE", "1" } }, { { "LOD_OBJECT_INSTANCED", "1" } },
+				 { { "LANDSCAPE", "1" }, { "INSTANCED", "1" } },
+				 { { "MERGE_INSTANCED", "1" } },
+				 { { "SKINNED", "1" }, { "MODELSPACENORMALS", "1" } },
+				 { { "MERGE_INSTANCED", "1" }, { "MODELSPACENORMALS", "1" } } }) {
+			auto defines = material;
+			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
+											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "NORMALS", "1" } });
+			a_jobs.push_back({ .path = a_root / "BSDFPrePass.hlsl",
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "Wetness deferred material producer",
+				.required = { CB(4), CB(5), CB(6), CB(8) },
+				.forbidden = { CB(7), Texture(71) } });
+			auto vertexDefines = material;
+			vertexDefines.insert(vertexDefines.end(), { { "BSDFPREPASS_VS_SOURCE", "1" },
+														  { "WETNESS_EFFECTS", "1" }, { "NORMALS", "1" }, { "BINORMAL_TANGENT", "1" }, { "TEXTURE", "1" } });
+			a_jobs.push_back({ .path = a_root / "BSDFPrePass.hlsl",
+				.defines = std::move(vertexDefines),
+				.profile = "vs_5_0",
+				.description = "Wetness deferred geometry interface",
+				.forbidden = { CB(4), CB(5), CB(6), CB(7), CB(8), Texture(71) } });
+		}
+		for (const auto& material : std::vector<ShaderDefines>{
+				 { { "SKINNED", "1" } }, { { "MODELSPACENORMALS", "1" } } }) {
+			auto defines = material;
+			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
+											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TESSELLATE_DISP_HEIGHT", "1" } });
+			a_jobs.push_back({ .path = a_root / "BSDFPrePass.hlsl",
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "Wetness incomplete domain interface retains native material behavior",
+				.forbidden = { CB(4), CB(5), CB(6), CB(7), CB(8), Texture(71) } });
 		}
 
 		const auto tiled = a_root / "DFTiledLighting.hlsl";

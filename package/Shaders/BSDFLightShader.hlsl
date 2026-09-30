@@ -538,8 +538,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #		if defined(AMBIENT_IBL_IN_LIGHT) && defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 	ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-		normalView, viewDirNeg, posView,
-		ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+		normalView, viewDirNeg, input.position.xy);
 #		endif
 
 	bool cascade0Active = (linearizedDepth < cb2_idx10_cascade_range.y);
@@ -1755,9 +1754,7 @@ float2 goboUV = float2(omniUV.x,
 #		endif
 
 #		if defined(WETNESS_EFFECTS) && !defined(ATTENUATION_ONLY)
-		WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-			normalView, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+		WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 		float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 		float3 wetLightColor = LightColor_HDR.xyz * attenuation;
 #			ifdef GOBOPROJECTION
@@ -1766,7 +1763,7 @@ float2 goboUV = float2(omniUV.x,
 		float3 wetDiffuse = attenuation * diffuseAccum;
 		float3 wetSpecular = attenuation * brdfSpecular;
 		WetnessEffects::ApplyDirectCoat(
-			normalView,
+			wetSurface.normalView,
 			wetViewDir,
 			lightDir,
 			wetLightColor,
@@ -2251,8 +2248,7 @@ float2 goboUV = float2(omniUV.x,
 		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 		ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-			normalView, viewDirNeg, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			normalView, viewDirNeg, input.position.xy);
 #		endif
 		float3 ambientSpecular = 0.0;
 		float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -2454,14 +2450,12 @@ float2 goboUV = float2(omniUV.x,
 #	endif
 		float specMix = mad(schlickFres, -0.5, 1.0);
 #	ifdef WETNESS_EFFECTS
-		WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-			normalView, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+		WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 		float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 		float3 wetDiffuse = finalDiffuse * shadow;
 		float3 wetSpecular = (brdfSpecular * specMix) * shadow;
 		WetnessEffects::ApplyDirectCoat(
-			normalView,
+			wetSurface.normalView,
 			wetViewDir,
 			SunDirection.xyz,
 			SunColor_HDR.xyz * shadow
@@ -2904,8 +2898,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 		ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-			normalView, viewDirNeg, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			normalView, viewDirNeg, input.position.xy);
 #		endif
 		float3 ambientSpecular = 0.0;
 #	endif
@@ -3324,14 +3317,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	float specMix = 1.0 - schlickFres * 0.5;
 #	endif
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 			float3 wetDiffuse = finalDiffuse * shadow;
 			float3 wetSpecular = (brdfSpecular * specMix) * shadow;
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				SunDirection.xyz,
 				SunColor_HDR.xyz * shadow
@@ -3994,8 +3985,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normalView, viewDirNeg, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normalView, viewDirNeg, input.position.xy);
 #		endif
 			float3 ambientSpecular = 0.0;
 #	endif
@@ -4305,14 +4295,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 			float3 wetDiffuse = finalDiffuse * shadow;
 			float3 wetSpecular = (brdfSpecular * specMix) * shadow;
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				SunDirection.xyz,
 				SunColor_HDR.xyz * shadow
@@ -4745,9 +4733,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 			diffuseAccum *= cookieRGB;
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 			float3 wetLightColor = (LightColor_HDR.xyz * cookieRGB) * attenuation;
 			float3 wetDiffuse = diffuseAccum * attenuation;
@@ -4757,7 +4743,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float3 wetSpecular = float3(0, 0, 0);
 #		endif
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				lightDir,
 				wetLightColor,
@@ -5314,8 +5300,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			ambientDiffuse = pow(ambientDiffuse, 2.2);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normal, normalize(-posView), posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normal, normalize(-posView), input.position.xy);
 #		endif
 
 			bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
@@ -5727,8 +5712,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normalView, normalize(-posView), posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normalView, normalize(-posView), input.position.xy);
 #		endif
 			float3 ambientSpecular = 0.0;
 #	endif
@@ -6110,9 +6094,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	endif
 
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 #		ifdef POINTOMNI
 			float3 wetLightColor = LightColor_HDR.xyz * attenuation;
@@ -6126,6 +6108,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		// FO4: the coat's separate sun lobe needs the same RGB multiplier.
 		wetLightColor *= causticsMult;
 #			endif
+#			if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+		wetLightColor *= terrainShadowMult;
+#			endif
 		float3 wetDiffuse = finalDiffuse;
 #		endif
 #		ifdef SPECULAR
@@ -6138,7 +6123,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		float3 wetSpecular = float3(0, 0, 0);
 #		endif
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				lightDir,
 				wetLightColor,
@@ -6299,8 +6284,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normalView, viewDirection, positionView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normalView, viewDirection, input.position.xy);
 #	endif
 			float ndotv = dot(normalView, viewDirection);
 			float3 reflectionDirection = 2.0 * ndotv * normalView - viewDirection;

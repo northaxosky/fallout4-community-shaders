@@ -27,7 +27,7 @@ namespace FO4SharedData
 		ScreenSpaceGISettings screenSpaceGISettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
 		ExponentialHeightFogSettings exponentialHeightFogSettings;
-		uint WetnessDebugVisualization;
+		uint reserved0;
 		uint padTerrain;
 		uint DynamicCubemapsDebugVisualization;
 		uint EnabledSSR;

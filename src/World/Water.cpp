@@ -2,6 +2,7 @@
 
 #include "RE/E/EXTERIOR_DATA.h"
 #include "RE/G/GridCellArray.h"
+#include "RE/N/NiAVObject.h"
 #include "RE/S/Sky.h"
 #include "RE/T/TES.h"
 #include "RE/T/TESObjectCELL.h"
@@ -16,6 +17,38 @@ namespace cs::engine
 		constexpr std::size_t kWaterMultiplierColor = 14;
 		std::atomic_uint32_t waterCells{ 0 };
 		std::atomic<float> cameraCellHeight{ kNoWaterHeight };
+		std::function<bool()> suppressRipples;
+
+		struct WaterRippleObject
+		{
+			std::byte pad[0x28];
+			RE::NiAVObject* geometry;
+		};
+		struct WaterRippleSystem
+		{
+			std::byte pad[0x18];
+			WaterRippleObject** objects;
+			std::byte capacity[8];
+			std::uint32_t count;
+		};
+		static_assert(offsetof(WaterRippleSystem, count) == 0x28);
+		static_assert(offsetof(WaterRippleObject, geometry) == 0x28);
+
+		struct ToggleWaterRipples
+		{
+			static void thunk(WaterRippleSystem* a_system, bool a_enabled, float a_fade)
+			{
+				// FO4: preserve the logical active flag that also drives native material wetness.
+				func(a_system, a_enabled, a_fade);
+				const bool hidden = !a_enabled || (suppressRipples && suppressRipples());
+				for (std::uint32_t index = 0; index < a_system->count; ++index) {
+					auto* object = a_system->objects[index];
+					if (object && object->geometry)
+						object->geometry->SetAppCulled(hidden);
+				}
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
 
 		float GetExteriorWaterHeight(const RE::TESObjectCELL& a_cell)
 		{
@@ -50,6 +83,16 @@ namespace cs::engine
 	WaterDataStatus GetWaterDataStatus() noexcept
 	{
 		return { waterCells.load(std::memory_order_relaxed), cameraCellHeight.load(std::memory_order_relaxed) };
+	}
+
+	void InstallWaterRippleVisibilityFilter(std::function<bool()> a_suppress)
+	{
+		suppressRipples = std::move(a_suppress);
+		static bool installed = false;
+		if (!installed) {
+			stl::detour_thunk<ToggleWaterRipples>(REL::ID({ 1074671, 2213956, 2213956 }));
+			installed = true;
+		}
 	}
 
 	void FillWaterData(

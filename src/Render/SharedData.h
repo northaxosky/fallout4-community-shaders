@@ -18,6 +18,7 @@ namespace cs::render
 {
 	void InitializeSharedData(ID3D11Device* a_device, ID3D11DeviceContext* a_context);
 	bool IsSharedDataReady() noexcept;
+	bool IsSharedDataCurrent() noexcept;
 
 	// startup thread only
 	void EnsureSharedDataUpdateInstalled();

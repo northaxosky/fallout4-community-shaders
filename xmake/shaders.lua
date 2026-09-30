@@ -8,7 +8,6 @@ local shader_directories = {
     "features/InverseSquareLighting/Shaders",
     "features/ExponentialHeightFog/Shaders",
     "features/DynamicCubemaps/Shaders",
-    "features/WetnessEffects/Shaders",
     "features/WaterEffects/Shaders"
 }
 
