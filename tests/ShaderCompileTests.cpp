@@ -637,8 +637,9 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFLight feature composition",
 			.required = {
-				CB(4), CB(5), CB(6), CB(7), Texture(45), Texture(60), Texture(65),
-				Sampler(13), Sampler(14) } });
+				CB(4), CB(5), CB(6), Texture(45), Texture(60), Texture(65),
+				Sampler(13), Sampler(14) },
+			.forbidden = { CB(7), Texture(24), Texture(30), Texture(32) } });
 		for (const auto& [family, splits, shadowOnly, blend] : {
 				 std::tuple{ "BSDFLIGHT_PS_DIRSPLITS1", "1", false, false },
 				 std::tuple{ "BSDFLIGHT_PS_DIRSPLITS3", "3", false, false },
@@ -708,8 +709,8 @@ namespace
 				{ "WATER_EFFECTS_FULLSCREEN_DEBUG", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
-			.required = { CB(6), CB(7), Texture(25), Texture(33), Texture(36), Texture(34), Texture(35) },
-			.forbidden = { Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
+			.required = { CB(4), CB(5), CB(6), CB(8), Texture(25), Texture(33), Texture(36), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
+			.forbidden = { CB(7), Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
 
 		for (auto defines : std::vector<ShaderDefines>{
 				 { { "BSDFLIGHT_PS_DIRSPLITS1", "1" }, { "DIRSPLITS", "1" } },
