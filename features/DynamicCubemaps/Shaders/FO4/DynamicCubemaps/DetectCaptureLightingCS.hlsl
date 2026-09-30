@@ -1,4 +1,4 @@
-#include "CaptureCommon.hlsli"
+#include "FO4/DynamicCubemaps/CaptureCommon.hlsli"
 
 groupshared uint3 RegionCounts[4];
 groupshared uint VisibleSamples;

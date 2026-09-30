@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Common/DeferredPosition.hlsli"
-#include "Common/SharedData.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 #ifndef WATER_EFFECTS_FULLSCREEN_DEBUG
 #	include "WaterEffects/WaterCausticsSampler.hlsli"
 #endif

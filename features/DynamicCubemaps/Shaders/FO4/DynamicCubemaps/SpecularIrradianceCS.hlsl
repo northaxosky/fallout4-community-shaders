@@ -4,7 +4,7 @@
 // Pre-filters environment cube map using GGX NDF importance sampling.
 // Part of specular IBL split-sum approximation.
 
-#include "CubemapCommon.hlsli"
+#include "DynamicCubemaps/CubemapCommon.hlsli"
 
 static const float PI = 3.14159265358979323846;
 static const float TAU = 6.28318530717958647692;

@@ -3,9 +3,9 @@
 // Ported from Skyrim Community Shaders d330bf12d.
 // Gathers diffuse radiance and reprojects the previous indirect result.
 
-#include "../Common/Color.hlsli"
-#include "../Common/Math.hlsli"
-#include "common.hlsli"
+#include "ScreenSpaceGI/Common/Color.hlsli"
+#include "ScreenSpaceGI/Common/Math.hlsli"
+#include "ScreenSpaceGI/XeGTAO/common.hlsli"
 
 // Rebuilds the composite's diffuse term; FO4 has no diffuse colour target.
 Texture2D<float3> srcDiffuseLightA : register(t0);

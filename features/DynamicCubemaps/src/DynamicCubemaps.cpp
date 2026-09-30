@@ -41,15 +41,15 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.dynamiccubemaps");
 
 		constexpr const wchar_t* kDetectLightingPath =
-			L"Data\\Shaders\\DynamicCubemaps\\DetectCaptureLightingCS.hlsl";
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\DetectCaptureLightingCS.hlsl";
 		constexpr const wchar_t* kUpdatePath =
-			L"Data\\Shaders\\DynamicCubemaps\\UpdateCubemapCS.hlsl";
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\UpdateCubemapCS.hlsl";
 		constexpr const wchar_t* kInferPath =
-			L"Data\\Shaders\\DynamicCubemaps\\InferCubemapCS.hlsl";
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\InferCubemapCS.hlsl";
 		constexpr const wchar_t* kIrradiancePath =
-			L"Data\\Shaders\\DynamicCubemaps\\SpecularIrradianceCS.hlsl";
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\SpecularIrradianceCS.hlsl";
 		constexpr const wchar_t* kBc6hPath =
-			L"Data\\Shaders\\DynamicCubemaps\\BC6HEncodeCS.hlsl";
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\BC6HEncodeCS.hlsl";
 		constexpr const wchar_t* kPreviewPath =
 			L"Data\\Shaders\\DynamicCubemaps\\CubemapPreviewCS.hlsl";
 		constexpr const wchar_t* kDefaultCubemapPath =

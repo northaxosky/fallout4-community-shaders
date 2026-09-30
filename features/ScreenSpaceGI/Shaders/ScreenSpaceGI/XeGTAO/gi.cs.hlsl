@@ -4,13 +4,13 @@
 //
 // Screen Space Indirect Lighting with Visibility Bitmask: https://arxiv.org/abs/2301.11376
 
-#include "../Common/FastMath.hlsli"
-#include "../Common/Math.hlsli"
+#include "ScreenSpaceGI/Common/FastMath.hlsli"
+#include "ScreenSpaceGI/Common/Math.hlsli"
 #ifdef GI
-#	include "../../Common/SphericalHarmonics.hlsli"
-#	include "../Common/Color.hlsli"
+#	include "Common/SphericalHarmonics.hlsli"
+#	include "ScreenSpaceGI/Common/Color.hlsli"
 #endif
-#include "common.hlsli"
+#include "ScreenSpaceGI/XeGTAO/common.hlsli"
 
 Texture2D<float> srcWorkingDepth : register(t0);
 Texture2D<float2> srcNormal : register(t1);

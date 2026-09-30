@@ -2,7 +2,7 @@
 // Copyright (c) Skyrim Community Shaders contributors
 // Ported from Skyrim Community Shaders.
 
-#include "../Common/SharedData.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 
 cbuffer UpscalingData : register(b0)
 {

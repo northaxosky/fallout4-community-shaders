@@ -46,7 +46,7 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.terrainshadows");
 
 		constexpr const wchar_t* kShadowUpdatePath =
-			L"Data\\Shaders\\TerrainShadows\\ShadowUpdate.cs.hlsl";
+			L"Data\\Shaders\\FO4\\TerrainShadows\\ShadowUpdate.cs.hlsl";
 		constexpr const wchar_t* kShadowStatisticsPath =
 			L"Data\\Shaders\\TerrainShadows\\ShadowStatistics.cs.hlsl";
 		constexpr const wchar_t* kXLodGenRoot = L"Data\\Textures\\Terrain";

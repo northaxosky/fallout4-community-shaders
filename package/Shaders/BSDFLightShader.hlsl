@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-#	include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
+#	include "FO4/ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
 #endif
 
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-#	include "TerrainShadows/TerrainShadows.hlsli"
+#	include "FO4/TerrainShadows/TerrainShadows.hlsli"
 #endif
 
 #ifdef WETNESS_EFFECTS
-#	include "WetnessEffects/WetnessEffects.hlsli"
+#	include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #endif
 
 #ifdef INVERSE_SQUARE_LIGHTING
-#	include "InverseSquareLighting/InverseSquareLighting.hlsli"
+#	include "FO4/InverseSquareLighting/InverseSquareLighting.hlsli"
 #endif
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-#	include "WaterEffects/WaterCaustics.hlsli"
+#	include "FO4/WaterEffects/WaterCaustics.hlsli"
 #endif
 
 #ifdef BSDFLIGHT_PS_DEFERRED

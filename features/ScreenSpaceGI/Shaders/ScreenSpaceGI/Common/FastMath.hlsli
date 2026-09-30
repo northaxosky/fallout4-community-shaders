@@ -21,7 +21,7 @@
 #ifndef SHADER_FAST_MATH_INC_FX
 #define SHADER_FAST_MATH_INC_FX
 
-#include "Math.hlsli"
+#include "ScreenSpaceGI/Common/Math.hlsli"
 
 #define IEEE_INT_SQRT_CONST_NR0 0x1FBD1DF5
 

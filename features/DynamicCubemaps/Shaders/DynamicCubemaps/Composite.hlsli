@@ -1,9 +1,9 @@
 #ifndef DYNAMIC_CUBEMAPS_COMPOSITE_HLSLI
 #define DYNAMIC_CUBEMAPS_COMPOSITE_HLSLI
 
-#include "../Common/SharedData.hlsli"
-#include "../WetnessEffects/WetnessEffects.hlsli"
-#include "CubemapCommon.hlsli"
+#include "DynamicCubemaps/CubemapCommon.hlsli"
+#include "FO4/Common/SharedData.hlsli"
+#include "FO4/WetnessEffects/WetnessEffects.hlsli"
 
 namespace DynamicCubemaps
 {

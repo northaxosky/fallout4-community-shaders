@@ -8,6 +8,70 @@ forces the difference, and where it lives. Each code site also carries a one-lin
 - **Not supported**: upstream behavior that has no Fallout 4 equivalent without new FO4-only machinery.
 - **Pending**: upstream behavior not ported yet.
 
+Kinds distinguish **Forced** engine translations (with engine evidence) from **Chosen**
+architecture or behavior differences and adaptations whose necessity is not yet proven.
+
+## Shared seam edits
+
+Shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`, based on `d330bf12d`.
+FO4 consumes unchanged files through `xmake\shared.lua`; no upstream path can be replaced.
+
+| Kind | File | SHA | Why | Upstream PR status |
+|---|---|---|---|---|
+| Chosen | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies; Phase 3 consumes these rows | In the shared fork; no upstream PR recorded |
+| Forced | `package/Shaders/Common/FrameBuffer.hlsli` | `e305ed0a4` | `FRAMEBUFFER_REGISTER` defaults to b12 and permits host binding at b4; FO4 engine shaders already bind the native per-frame buffer at b12 (`package/Shaders/BSWaterShader.hlsl:3`, `cbuffer PerFrame : register(b12)`) | In the shared fork; no upstream PR recorded |
+
+## Shared consumption boundary
+
+Phase 2A consumes byte-identical RCAS, shader licenses, default cubemap, SSGI noise and water
+caustics assets from the shared pin. Bend's CPU header is identical modulo comments; its
+existing SSS consumer uses the unchanged shared header. PerformanceOverlay uses shared QPC/FPS
+helpers, not the profiler or A/B subsystem. `src/Shared/PerfUtils.h` supplies Windows declarations
+and scopes MSVC C4267 suppression for the upstream vector mean; the global PCH is unchanged.
+
+| Kind | Difference | Where |
+|---|---|---|
+| Chosen | Windows declarations and a scoped C4267 suppression adapt the unchanged portable header to FO4's `/W4 /WX` build | `src/Shared/PerfUtils.h` |
+
+Differing shader implementations remain FO4-owned pending Phase 3 conversion. The following are
+path-only relocations, with include and runtime source references updated; shader behavior is unchanged.
+Paths below are relative to the staged `Shaders` root. The renderer-specific reasons remain in the
+feature tables; this namespace separation is a Chosen ownership policy, not an engine limitation.
+
+| Kind | Upstream destination | FO4-owned destination |
+|---|---|---|
+| Chosen | `Common/Random.hlsli` | `FO4/Common/Random.hlsli` |
+| Chosen | `Common/Shading.hlsli` | `FO4/Common/Shading.hlsli` |
+| Chosen | `Common/SharedData.hlsli` | `FO4/Common/SharedData.hlsli` |
+| Chosen | `DynamicCubemaps/BC6HEncodeCS.hlsl` | `FO4/DynamicCubemaps/BC6HEncodeCS.hlsl` |
+| Chosen | `DynamicCubemaps/CaptureCommon.hlsli` | `FO4/DynamicCubemaps/CaptureCommon.hlsli` |
+| Chosen | `DynamicCubemaps/DetectCaptureLightingCS.hlsl` | `FO4/DynamicCubemaps/DetectCaptureLightingCS.hlsl` |
+| Chosen | `DynamicCubemaps/DynamicCubemaps.hlsli` | `FO4/DynamicCubemaps/DynamicCubemaps.hlsli` |
+| Chosen | `DynamicCubemaps/InferCubemapCS.hlsl` | `FO4/DynamicCubemaps/InferCubemapCS.hlsl` |
+| Chosen | `DynamicCubemaps/SpecularIrradianceCS.hlsl` | `FO4/DynamicCubemaps/SpecularIrradianceCS.hlsl` |
+| Chosen | `DynamicCubemaps/UpdateCubemapCS.hlsl` | `FO4/DynamicCubemaps/UpdateCubemapCS.hlsl` |
+| Chosen | `ExponentialHeightFog/ExponentialHeightFog.hlsli` | `FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli` |
+| Chosen | `InverseSquareLighting/InverseSquareLighting.hlsli` | `FO4/InverseSquareLighting/InverseSquareLighting.hlsli` |
+| Chosen | `ScreenSpaceShadows/RaymarchCS.hlsl` | `FO4/ScreenSpaceShadows/RaymarchCS.hlsl` |
+| Chosen | `ScreenSpaceShadows/ScreenSpaceShadows.hlsli` | `FO4/ScreenSpaceShadows/ScreenSpaceShadows.hlsli` |
+| Chosen | `ScreenSpaceShadows/bend_sss_gpu.hlsli` | `FO4/ScreenSpaceShadows/bend_sss_gpu.hlsli` |
+| Chosen | `TerrainShadows/ShadowUpdate.cs.hlsl` | `FO4/TerrainShadows/ShadowUpdate.cs.hlsl` |
+| Chosen | `TerrainShadows/TerrainShadows.hlsli` | `FO4/TerrainShadows/TerrainShadows.hlsli` |
+| Chosen | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
+| Chosen | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |
+| Chosen | `Upscaling/UpscaleVS.hlsl` | `FO4/Upscaling/UpscaleVS.hlsl` |
+| Chosen | `WaterEffects/WaterCaustics.hlsli` | `FO4/WaterEffects/WaterCaustics.hlsli` |
+| Chosen | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` |
+
+## Upstream PR candidates
+
+- `src/Utils/PerfUtils.h:41`: `Mean` implicitly converts `size_t` to float, raising C4267
+  under FO4's `/W4 /WX`; an explicit float conversion preserves its current arithmetic.
+  FO4 scopes the warning in `src/Shared/PerfUtils.h`, without changing shared behavior.
+- `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104`: the center normal lookup
+  needs `frameScale`. Main's correction remains in `features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/blur.cs.hlsl`;
+  upstream PR is community-shaders/skyrim-community-shaders#2795.
+
 ## Dynamic Cubemaps
 
 Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\BSWaterShader.hlsl`,
@@ -77,11 +141,11 @@ Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package
 
 ### Pending
 
-| Upstream | Notes |
-|---|---|
-| `EnableExperimentalSpecularGI` and specular IL in `SampleSSGISpecular` | Not ported |
-| IBL and Skylighting ambient branches | Port with those features |
-| Blur center normal lookup scaled by `frameScale` | Applied locally; upstream fix is community-shaders/skyrim-community-shaders#2795 |
+| Kind | Upstream | Notes |
+|---|---|---|
+| Chosen | `EnableExperimentalSpecularGI` and specular IL in `SampleSSGISpecular` | Not ported |
+| Chosen | IBL and Skylighting ambient branches | Port with those features |
+| Chosen | Blur center normal lookup scaled by `frameScale` | Main's local correction is retained in `features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/blur.cs.hlsl`; upstream fix is community-shaders/skyrim-community-shaders#2795 |
 
 ## Screen Space Shadows
 

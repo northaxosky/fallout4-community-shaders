@@ -2,7 +2,7 @@
 // Copyright (c) 2026 northaxosky
 #pragma once
 
-#include "Common/SharedData.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 
 namespace InverseSquareLighting
 {

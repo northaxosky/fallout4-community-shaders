@@ -5,6 +5,7 @@
 #include "Utils/ShaderCache/SourceCompile.h"
 
 #include "Utils/ShaderCache/CacheStorage.h"
+#include "Utils/ShaderInclude.h"
 
 #include <algorithm>
 #include <d3dcompiler.h>
@@ -19,29 +20,16 @@ namespace cs::shader_cache
 {
 	namespace
 	{
-		std::filesystem::path ResolveCandidate(
-			const std::filesystem::path& a_directory,
-			const std::filesystem::path& a_name)
-		{
-			std::error_code error;
-			auto candidate = std::filesystem::weakly_canonical(a_directory / a_name, error);
-			if (error || candidate.empty())
-				candidate = (a_directory / a_name).lexically_normal();
-			return candidate;
-		}
-
 		class TracingIncludeHandler final : public ID3DInclude
 		{
 		public:
 			TracingIncludeHandler(
 				const void* a_rootData,
 				std::string a_rootLocator,
-				std::filesystem::path a_rootDirectory,
 				const std::vector<std::filesystem::path>& a_includeRoots,
 				DependencyManifest& a_manifest) :
 				_rootData(a_rootData),
 				_rootLocator(std::move(a_rootLocator)),
-				_rootDirectory(std::move(a_rootDirectory)),
 				_includeRoots(a_includeRoots),
 				_manifest(&a_manifest)
 			{}
@@ -65,20 +53,18 @@ namespace cs::shader_cache
 					resolution.requestedName = a_fileName;
 					resolution.parentLocator = _rootLocator;
 
-					auto includingDirectory = _rootDirectory;
 					if (a_parentData && a_parentData == _rootData) {
 						resolution.parentLocator = _rootLocator;
 					} else if (a_parentData) {
 						const auto parent = _openedFiles.find(a_parentData);
 						if (parent != _openedFiles.end()) {
-							includingDirectory = parent->second.directory;
 							resolution.parentLocator = parent->second.locator;
 						}
 					}
 
 					// preserve the compiler's native include encoding
 					const std::filesystem::path requested(resolution.requestedName);
-					return Resolve(includingDirectory, requested, resolution, a_data, a_bytes);
+					return Resolve(requested, resolution, a_data, a_bytes);
 				} catch (...) {
 					*a_data = nullptr;
 					*a_bytes = 0;
@@ -105,26 +91,23 @@ namespace cs::shader_cache
 			struct OpenedFile
 			{
 				std::unique_ptr<std::uint8_t[]> buffer;
-				std::filesystem::path directory;
 				std::string locator;
 			};
 
 			HRESULT Resolve(
-				const std::filesystem::path& a_includingDirectory,
 				const std::filesystem::path& a_requested,
 				IncludeResolution& a_resolution,
 				LPCVOID* a_data,
 				UINT* a_bytes)
 			{
 				std::vector<std::filesystem::path> candidates;
-				candidates.reserve(_includeRoots.size() + 1);
+				candidates.reserve(_includeRoots.size());
 				const auto addCandidate = [&candidates](std::filesystem::path a_candidate) {
 					if (std::ranges::find(candidates, a_candidate) == candidates.end())
 						candidates.push_back(std::move(a_candidate));
 				};
-				addCandidate(ResolveCandidate(a_includingDirectory, a_requested));
 				for (const auto& root : _includeRoots)
-					addCandidate(ResolveCandidate(root, a_requested));
+					addCandidate(util::ResolveShaderInclude(root, a_requested));
 
 				std::vector<std::uint8_t> bytes;
 				for (const auto& candidate : candidates) {
@@ -160,7 +143,6 @@ namespace cs::shader_cache
 						static_cast<LPCVOID>(data),
 						OpenedFile{
 							std::move(buffer),
-							candidate.parent_path(),
 							std::move(locator) });
 					if (!inserted) {
 						_manifest->includes.push_back(std::move(a_resolution));
@@ -179,7 +161,6 @@ namespace cs::shader_cache
 
 			const void* _rootData;
 			std::string _rootLocator;
-			std::filesystem::path _rootDirectory;
 			std::vector<std::filesystem::path> _includeRoots;
 			DependencyManifest* _manifest;
 			std::unordered_map<LPCVOID, OpenedFile> _openedFiles;
@@ -232,14 +213,9 @@ namespace cs::shader_cache
 			macros.push_back({ name.c_str(), value.c_str() });
 		macros.push_back({ nullptr, nullptr });
 
-		std::filesystem::path rootDirectory = a_recipe.source.parent_path();
-		if (rootDirectory.empty() && !a_recipe.includeRoots.empty())
-			rootDirectory = a_recipe.includeRoots.front();
-
 		TracingIncludeHandler handler(
 			rootBytes.data(),
 			outcome.manifest.rootLocator,
-			rootDirectory,
 			a_recipe.includeRoots,
 			outcome.manifest);
 

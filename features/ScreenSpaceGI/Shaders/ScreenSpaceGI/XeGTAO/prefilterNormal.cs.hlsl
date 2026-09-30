@@ -2,7 +2,7 @@
 // Copyright (C) 2016-2021 Intel Corporation
 // Ported from Skyrim Community Shaders d330bf12d.
 
-#include "common.hlsli"
+#include "ScreenSpaceGI/XeGTAO/common.hlsli"
 // FO4 RT20; encoded into upstream's octahedral normal pyramid.
 Texture2D<float2> srcNormalRoughness : register(t0);
 

@@ -79,9 +79,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           lfs: true
-          submodules: recursive
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Fetch submodules with their declared shallow policy
+        run: git submodule update --init --recursive
 
       - name: Fetch submodule LFS assets
         shell: pwsh

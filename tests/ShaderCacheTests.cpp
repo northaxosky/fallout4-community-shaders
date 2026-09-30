@@ -151,7 +151,8 @@ float4 Wrapped() { return SharedValue(); }
 			a_recipe.profile.c_str(),
 			a_recipe.entryPoint.c_str(),
 			a_recipe.flags1,
-			&error);
+			&error,
+			a_recipe.includeRoots.front());
 		if (!blob) {
 			Fail("direct compilation failed: " + error);
 			return {};
@@ -186,6 +187,7 @@ float4 Wrapped() { return SharedValue(); }
 	{
 		Workspace workspace("hit-invalidation");
 		workspace.WriteDefaultTree();
+		workspace.Write("Sub/Shared.hlsli", "#error Includes must resolve from the shader root\n");
 		auto recipe = workspace.Recipe();
 		const auto primed = Prime(workspace, recipe);
 		Check(

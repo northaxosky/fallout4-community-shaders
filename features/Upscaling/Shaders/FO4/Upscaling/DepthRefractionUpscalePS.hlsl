@@ -2,10 +2,10 @@
 // Copyright (c) Skyrim Community Shaders contributors
 // Ported from Skyrim Community Shaders.
 
-#include "UpscaleVS.hlsl"
+#include "FO4/Upscaling/UpscaleVS.hlsl"
 
 #if defined(PSHADER)
-#	include "../Common/SharedData.hlsli"
+#	include "FO4/Common/SharedData.hlsli"
 
 typedef VS_OUTPUT PS_INPUT;
 

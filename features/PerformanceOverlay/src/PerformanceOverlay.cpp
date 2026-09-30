@@ -17,6 +17,7 @@
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Settings/SettingsPersistence.h"
+#include "Shared/PerfUtils.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -47,10 +48,6 @@ namespace cs::features
 
 	void PerformanceOverlay::Load()
 	{
-		LARGE_INTEGER freq;
-		QueryPerformanceFrequency(&freq);
-		_qpcFreq = static_cast<double>(freq.QuadPart);
-
 		L->info("Loaded: enabled={} preset={} corner={} toggle_hotkey={}",
 			settings.enabled, settings.preset, settings.corner, settings.toggleHotkey);
 	}
@@ -114,9 +111,8 @@ namespace cs::features
 
 	void PerformanceOverlay::TickFrame()
 	{
-		LARGE_INTEGER now;
-		QueryPerformanceCounter(&now);
-		const double nowSec = static_cast<double>(now.QuadPart) / _qpcFreq;
+		// FO4: display cadence and history use the shared monotonic clock.
+		const double nowSec = Util::GetNowSecs();
 
 		if (_lastFrameQpc > 0.0) {
 			const float dtMs = static_cast<float>((nowSec - _lastFrameQpc) * 1000.0);
@@ -134,7 +130,7 @@ namespace cs::features
 		// Cadenced updates prevent per-frame flicker.
 		if (nowSec - _lastDisplayUpdate >= settings.updateInterval) {
 			_displayedFrameMs = _curFrameMs;
-			_displayedFps = _curFrameMs > 0.0f ? 1000.0f / _curFrameMs : 0.0f;
+			_displayedFps = Util::CalcFPS(_curFrameMs);
 
 			RecomputeStats();
 			_lastDisplayUpdate = nowSec;

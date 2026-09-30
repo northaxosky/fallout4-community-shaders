@@ -5,6 +5,7 @@
 #include "Utils/ShaderCompile.h"
 
 #include <algorithm>
+#include <cstring>
 #include <d3dcompiler.h>
 #include <filesystem>
 #include <fstream>
@@ -27,7 +28,7 @@ namespace cs::util
 			HRESULT STDMETHODCALLTYPE Open(
 				[[maybe_unused]] D3D_INCLUDE_TYPE a_includeType,
 				LPCSTR a_fileName,
-				LPCVOID a_parentData,
+				[[maybe_unused]] LPCVOID a_parentData,
 				LPCVOID* a_data,
 				UINT* a_bytes) override
 			{
@@ -37,20 +38,11 @@ namespace cs::util
 				*a_data = nullptr;
 				*a_bytes = 0;
 
-				auto includingDirectory = baseDirectory_;
-				if (a_parentData) {
-					const auto parent = openedFiles_.find(a_parentData);
-					if (parent != openedFiles_.end())
-						includingDirectory = parent->second.directory;
-				}
-
-				const auto result = OpenFrom(includingDirectory, a_fileName, a_data, a_bytes);
-				if (result == OpenResult::kSuccess)
-					return S_OK;
-				if (result != OpenResult::kOpenFailed)
+				try {
+					return OpenFrom(baseDirectory_, a_fileName, a_data, a_bytes) == OpenResult::kSuccess ? S_OK : E_FAIL;
+				} catch (...) {
 					return E_FAIL;
-
-				return OpenFrom(baseDirectory_, a_fileName, a_data, a_bytes) == OpenResult::kSuccess ? S_OK : E_FAIL;
+				}
 			}
 
 			HRESULT STDMETHODCALLTYPE Close(LPCVOID a_data) override
@@ -74,7 +66,6 @@ namespace cs::util
 			struct OpenedFile
 			{
 				std::unique_ptr<char[]> buffer;
-				std::filesystem::path directory;
 			};
 
 			OpenResult OpenFrom(
@@ -83,10 +74,7 @@ namespace cs::util
 				LPCVOID* a_data,
 				UINT* a_bytes)
 			{
-				std::error_code error;
-				const auto resolvedPath = std::filesystem::weakly_canonical(a_directory / a_fileName, error);
-				if (error)
-					return OpenResult::kOpenFailed;
+				const auto resolvedPath = ResolveShaderInclude(a_directory, a_fileName);
 
 				std::ifstream file(resolvedPath, std::ios::binary | std::ios::ate);
 				if (!file.is_open())
@@ -114,7 +102,7 @@ namespace cs::util
 
 				auto* data = buffer.get();
 				const auto [fileIt, inserted] =
-					openedFiles_.emplace(data, OpenedFile{ std::move(buffer), resolvedPath.parent_path() });
+					openedFiles_.emplace(data, OpenedFile{ std::move(buffer) });
 				if (!inserted)
 					return OpenResult::kReadFailed;
 
@@ -128,12 +116,38 @@ namespace cs::util
 		};
 	}
 
+	std::vector<std::pair<const char*, const char*>> UtilityShaderDefines(
+		const std::vector<std::pair<const char*, const char*>>& a_defines,
+		const char* a_programType)
+	{
+		auto defines = a_defines;
+		const std::pair<const char*, const char*> stages[] = {
+			{ "ps_5_0", "PSHADER" },
+			{ "vs_5_0", "VSHADER" },
+			{ "hs_5_0", "HULLSHADER" },
+			{ "ds_5_0", "DOMAINSHADER" },
+			{ "cs_4_0", "COMPUTESHADER" },
+			{ "cs_5_0", "COMPUTESHADER" },
+			{ "cs_5_1", "COMPUTESHADER" }
+		};
+		for (const auto& [profile, name] : stages) {
+			if (_stricmp(a_programType, profile) == 0) {
+				defines.emplace_back(name, "");
+				break;
+			}
+		}
+		defines.emplace_back("WINPC", "");
+		defines.emplace_back("DX11", "");
+		return defines;
+	}
+
 	Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderToBlob(
 		const wchar_t* a_filePath,
 		const std::vector<std::pair<const char*, const char*>>& a_defines,
 		const char* a_programType,
 		const char* a_program,
-		std::string* a_outError)
+		std::string* a_outError,
+		const std::filesystem::path& a_shaderRoot)
 	{
 		const std::uint32_t flags =
 			D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
@@ -143,7 +157,8 @@ namespace cs::util
 			a_programType,
 			a_program,
 			flags,
-			a_outError);
+			a_outError,
+			a_shaderRoot);
 	}
 
 	Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderToBlob(
@@ -152,14 +167,15 @@ namespace cs::util
 		const char* a_programType,
 		const char* a_program,
 		std::uint32_t a_flags,
-		std::string* a_outError)
+		std::string* a_outError,
+		const std::filesystem::path& a_shaderRoot)
 	{
 		if (a_outError)
 			a_outError->clear();
 
 		std::vector<D3D_SHADER_MACRO> macros;
-		macros.reserve(a_defines.size() + 1);
-		for (const auto& define : a_defines)
+		macros.reserve(a_defines.size() + 4);
+		for (const auto& define : UtilityShaderDefines(a_defines, a_programType))
 			macros.push_back({ define.first, define.second });
 		macros.push_back({ nullptr, nullptr });
 
@@ -171,7 +187,7 @@ namespace cs::util
 
 		Microsoft::WRL::ComPtr<ID3DBlob> shaderBlob;
 		Microsoft::WRL::ComPtr<ID3DBlob> shaderErrors;
-		ShaderIncludeHandler includeHandler{ std::filesystem::path{ a_filePath }.parent_path() };
+		ShaderIncludeHandler includeHandler{ a_shaderRoot };
 		const HRESULT result = D3DCompileFromFile(
 			a_filePath,
 			macros.data(),

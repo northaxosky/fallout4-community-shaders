@@ -2,9 +2,9 @@
 // 	https://developer.download.nvidia.com/video/gputechconf/gtc/2020/presentations/s22699-fast-denoising-with-self-stabilizing-recurrent-blurs.pdf
 // Ported from Skyrim Community Shaders d330bf12d.
 
-#include "../Common/FastMath.hlsli"
-#include "../Common/Math.hlsli"
-#include "common.hlsli"
+#include "ScreenSpaceGI/Common/FastMath.hlsli"
+#include "ScreenSpaceGI/Common/Math.hlsli"
+#include "ScreenSpaceGI/XeGTAO/common.hlsli"
 
 Texture2D<float> srcDepth : register(t0);
 // FO4 RT20 normal.

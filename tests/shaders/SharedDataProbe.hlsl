@@ -1,4 +1,4 @@
-#include "Common/SharedData.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 
 float BoolValue(bool value)
 {

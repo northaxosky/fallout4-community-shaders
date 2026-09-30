@@ -36,9 +36,9 @@ namespace cs::render::renderer_detail
 
 	inline auto* L = cs::log::Get("cs.feature.upscaling");
 
-	constexpr const wchar_t* kEncodeTexturesPath = L"Data\\Shaders\\Upscaling\\EncodeTexturesCS.hlsl";
-	constexpr const wchar_t* kDepthRefractionUpscalePath = L"Data\\Shaders\\Upscaling\\DepthRefractionUpscalePS.hlsl";
-	constexpr const wchar_t* kUpscaleVSPath = L"Data\\Shaders\\Upscaling\\UpscaleVS.hlsl";
+	constexpr const wchar_t* kEncodeTexturesPath = L"Data\\Shaders\\FO4\\Upscaling\\EncodeTexturesCS.hlsl";
+	constexpr const wchar_t* kDepthRefractionUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\DepthRefractionUpscalePS.hlsl";
+	constexpr const wchar_t* kUpscaleVSPath = L"Data\\Shaders\\FO4\\Upscaling\\UpscaleVS.hlsl";
 	constexpr const wchar_t* kSpatialFallbackPath =
 		L"Data\\Shaders\\Upscaling\\SpatialFallbackPS.hlsl";
 	constexpr const wchar_t* kCopyDepthForFrameGenerationPath =

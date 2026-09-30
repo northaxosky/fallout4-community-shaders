@@ -1,4 +1,4 @@
-#include "CaptureCommon.hlsli"
+#include "FO4/DynamicCubemaps/CaptureCommon.hlsli"
 
 float smoothbumpstep(float edge0, float edge1, float x)
 {

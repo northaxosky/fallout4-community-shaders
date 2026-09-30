@@ -2,7 +2,7 @@
 #define DEFERRED_POSITION_HLSLI_INCLUDED
 
 #include "Common/DepthPartition.hlsli"
-#include "Common/SharedData.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 
 namespace DeferredPosition
 {

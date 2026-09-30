@@ -5,8 +5,8 @@
 #ifndef XEGTAO_COMMON
 #define XEGTAO_COMMON
 
-#include "../../Common/DepthPartition.hlsli"
-#include "../Common/Math.hlsli"
+#include "Common/DepthPartition.hlsli"
+#include "ScreenSpaceGI/Common/Math.hlsli"
 
 // The layout is unconditional so every permutation reflects the same buffer.
 cbuffer XeGTAOCB : register(b0)

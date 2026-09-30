@@ -176,7 +176,7 @@ namespace
 		variant.stage = a_row.family.stage;
 		variant.defines.assign(request->defines.begin(), request->defines.end());
 		const auto compiled = cs::shader_cache::CompileSourceWithManifest(
-			cs::engine::BuildShaderVariantRecipe(variant));
+			cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot));
 		if (!compiled.succeeded)
 			return "compile-error: " + compiled.error.substr(0, 240);
 		winrt::com_ptr<ID3DBlob> stripped;

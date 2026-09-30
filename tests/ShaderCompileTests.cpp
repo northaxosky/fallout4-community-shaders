@@ -116,7 +116,7 @@ namespace
 		return "?";
 	}
 
-	std::string Compile(const ShaderJob& a_job)
+	std::string Compile(const ShaderJob& a_job, const std::filesystem::path& a_shaderRoot)
 	{
 		std::vector<std::pair<const char*, const char*>> defines;
 		defines.reserve(a_job.defines.size());
@@ -129,7 +129,8 @@ namespace
 			defines,
 			a_job.profile,
 			a_job.entryPoint,
-			&error);
+			&error,
+			a_shaderRoot);
 		if (!blob)
 			return error;
 
@@ -173,7 +174,7 @@ namespace
 				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({}), .description = "upsample.cs.hlsl" });
 		}
 
-		const auto cubemaps = a_root / "DynamicCubemaps";
+		const auto cubemaps = a_root / "FO4" / "DynamicCubemaps";
 		const ShaderDefines substrate{ { "FO4CS_SUBSTRATE", "1" } };
 		for (const char* file : {
 				 "DetectCaptureLightingCS.hlsl",
@@ -195,27 +196,27 @@ namespace
 				 "SpecularIrradianceCS.hlsl",
 				 "BC6HEncodeCS.hlsl",
 				 "CubemapPreviewCS.hlsl" }) {
-			a_jobs.push_back({ .path = cubemaps / file, .defines = substrate, .description = file });
+			a_jobs.push_back({ .path = (std::string_view(file) == "CubemapPreviewCS.hlsl" ? a_root / "DynamicCubemaps" : cubemaps) / file,
+				.defines = substrate,
+				.description = file });
 		}
 
 		const auto terrain = a_root / "TerrainShadows";
-		a_jobs.push_back({ .path = terrain / "ShadowUpdate.cs.hlsl",
+		a_jobs.push_back({ .path = a_root / "FO4" / "TerrainShadows" / "ShadowUpdate.cs.hlsl",
 			.description = "terrain shadow update" });
 		a_jobs.push_back({ .path = terrain / "ShadowStatistics.cs.hlsl",
 			.description = "terrain shadow statistics" });
 
 		const auto upscaling = a_root / "Upscaling";
-		a_jobs.push_back({ .path = upscaling / "EncodeTexturesCS.hlsl",
+		a_jobs.push_back({ .path = a_root / "FO4" / "Upscaling" / "EncodeTexturesCS.hlsl",
 			.defines = { { "FO4CS_SUBSTRATE", "1" } },
 			.description = "temporal input encoding" });
-		a_jobs.push_back({ .path = upscaling / "DepthRefractionUpscalePS.hlsl",
+		a_jobs.push_back({ .path = a_root / "FO4" / "Upscaling" / "DepthRefractionUpscalePS.hlsl",
 			.defines = {
-				{ "PSHADER", "" },
 				{ "FO4CS_SUBSTRATE", "1" } },
 			.profile = "ps_5_0",
 			.description = "depth refraction upscale" });
-		a_jobs.push_back({ .path = upscaling / "UpscaleVS.hlsl",
-			.defines = { { "VSHADER", "" } },
+		a_jobs.push_back({ .path = a_root / "FO4" / "Upscaling" / "UpscaleVS.hlsl",
 			.profile = "vs_5_0",
 			.description = "upscale fullscreen vertex" });
 		a_jobs.push_back({ .path = upscaling / "RCAS" / "RCAS.hlsl",
@@ -490,7 +491,7 @@ int main(int argc, char** argv)
 
 	int failures = 0;
 	for (const auto& job : jobs) {
-		if (const auto error = Compile(job); !error.empty()) {
+		if (const auto error = Compile(job, argv[1]); !error.empty()) {
 			std::printf(
 				"FAIL: %s: %s\n%s\n",
 				job.description,

@@ -66,7 +66,6 @@ namespace cs::features
 
 		double _lastFrameQpc = 0.0;
 		double _lastDisplayUpdate = 0.0;
-		double _qpcFreq = 0.0;
 
 		float _curFrameMs = 0.0f;
 		float _displayedFps = 0.0f;

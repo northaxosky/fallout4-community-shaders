@@ -3,8 +3,8 @@
 #ifndef __WETNESS_EFFECTS_DEPENDENCY_HLSL__
 #define __WETNESS_EFFECTS_DEPENDENCY_HLSL__
 
-#include "Common/Random.hlsli"
-#include "Common/SharedData.hlsli"
+#include "FO4/Common/Random.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 #ifdef WETNESS_COMPOSITE_CONSUMER
 #	include "Common/DeferredPosition.hlsli"
 #endif

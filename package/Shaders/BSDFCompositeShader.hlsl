@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
 #ifdef TERRAIN_SHADOWS
-#	include "TerrainShadows/TerrainShadows.hlsli"
+#	include "FO4/TerrainShadows/TerrainShadows.hlsli"
 #endif
 #ifdef WATER_EFFECTS
-#	include "WaterEffects/WaterCaustics.hlsli"
+#	include "FO4/WaterEffects/WaterCaustics.hlsli"
 #endif
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
 #	define WETNESS_COMPOSITE_CONSUMER 1
-#	include "WetnessEffects/WetnessEffects.hlsli"
+#	include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #endif
 #include "Common/DeferredContracts.hlsli"
 
@@ -24,14 +24,14 @@
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 #	define WETNESS_COMPOSITE_CONSUMER 1
 #	include "DynamicCubemaps/Composite.hlsli"
-#	include "WetnessEffects/WetnessEffects.hlsli"
+#	include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
 
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
 #	ifndef AMBIENT_DIFFUSE_SET_B
@@ -374,10 +374,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 #	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 
 #	ifndef FO4_AMBIENT_OCCLUSION
@@ -839,11 +839,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
 #	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 
 #	ifndef TILELIGHT
@@ -1253,11 +1253,11 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
 #	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 
 #	ifndef OUTPUTMASK
@@ -1515,7 +1515,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 #	ifdef SSGI
 #		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
@@ -1702,10 +1702,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 #	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 #	ifdef SSGI
 #		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
@@ -2337,11 +2337,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
 #	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 #	ifdef SSGI
 #		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
@@ -3158,7 +3158,7 @@ float4 main(PS_INPUT input) : SV_Target0
 #ifdef BSDFCOMPOSITE_PS_NO_T0_FOG
 
 #	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "ExponentialHeightFog/ExponentialHeightFog.hlsli"
+#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 
 #	if !defined(WAVE5A_FOG_SHAPE)

@@ -1,8 +1,8 @@
 #ifndef DYNAMICCUBEMAPS_HLSLI
 #define DYNAMICCUBEMAPS_HLSLI
 
-#include "../Common/SharedData.hlsli"
-#include "CubemapCommon.hlsli"
+#include "DynamicCubemaps/CubemapCommon.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 
 #if defined(SKYLIGHTING)
 #	include "Skylighting/Skylighting.hlsli"

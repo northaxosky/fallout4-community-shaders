@@ -11,6 +11,7 @@
 #include <winrt/base.h>
 
 #include "UpscalingPublication.h"
+#include "Utils/ShaderCompile.h"
 
 namespace
 {
@@ -220,32 +221,28 @@ namespace
 	winrt::com_ptr<ID3DBlob> CompileShader(
 		const std::filesystem::path& a_path,
 		const D3D_SHADER_MACRO* a_defines,
-		const char* a_target)
+		const char* a_target,
+		const std::filesystem::path& a_shaderRoot)
 	{
+		std::vector<std::pair<const char*, const char*>> defines;
+		for (auto* define = a_defines; define && define->Name; ++define)
+			defines.emplace_back(define->Name, define->Definition);
+		std::string error;
+		auto compiled = cs::util::CompileShaderToBlob(
+			a_path.c_str(), defines, a_target, "main", &error, a_shaderRoot);
 		winrt::com_ptr<ID3DBlob> bytecode;
-		winrt::com_ptr<ID3DBlob> errors;
-		if (FAILED(D3DCompileFromFile(
-				a_path.c_str(),
-				a_defines,
-				D3D_COMPILE_STANDARD_FILE_INCLUDE,
-				"main",
-				a_target,
-				0,
-				0,
-				bytecode.put(),
-				errors.put()))) {
-			if (errors) {
-				std::cerr << static_cast<const char*>(errors->GetBufferPointer()) << '\n';
-			}
+		if (!compiled) {
+			std::cerr << error << '\n';
 			return {};
 		}
+		bytecode.attach(compiled.Detach());
 		return bytecode;
 	}
 
 	bool TestFsrEncodeShader(
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context,
-		const std::filesystem::path& a_computeShaderPath)
+		const std::filesystem::path& a_shaderRoot)
 	{
 		const D3D_SHADER_MACRO defines[]{
 			{ "FO4CS_SUBSTRATE", "1" },
@@ -253,7 +250,8 @@ namespace
 			{ "DEPTH_OUTPUT", "1" },
 			{ nullptr, nullptr }
 		};
-		auto bytecode = CompileShader(a_computeShaderPath, defines, "cs_5_0");
+		auto bytecode = CompileShader(a_shaderRoot / "FO4/Upscaling/EncodeTexturesCS.hlsl",
+			defines, "cs_5_0", a_shaderRoot);
 		if (!Check(
 				bytecode.get() != nullptr,
 				"could not compile the production FSR encode shader")) {
@@ -467,17 +465,12 @@ namespace
 	bool TestSpatialFallback(
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context,
-		const std::filesystem::path& a_pixelShaderPath,
-		const std::filesystem::path& a_vertexShaderPath)
+		const std::filesystem::path& a_shaderRoot)
 	{
-		const D3D_SHADER_MACRO vertexDefines[]{
-			{ "VSHADER", "1" },
-			{ nullptr, nullptr }
-		};
 		auto vertexBytecode =
-			CompileShader(a_vertexShaderPath, vertexDefines, "vs_5_0");
+			CompileShader(a_shaderRoot / "FO4/Upscaling/UpscaleVS.hlsl", nullptr, "vs_5_0", a_shaderRoot);
 		auto pixelBytecode =
-			CompileShader(a_pixelShaderPath, nullptr, "ps_5_0");
+			CompileShader(a_shaderRoot / "Upscaling/SpatialFallbackPS.hlsl", nullptr, "ps_5_0", a_shaderRoot);
 		if (!vertexBytecode || !pixelBytecode) {
 			return false;
 		}
@@ -626,8 +619,8 @@ namespace
 int main(int argc, char** argv)
 {
 	if (!Check(
-			argc == 4,
-			"expected spatial fallback pixel/vertex and FSR encode shaders")) {
+			argc == 2,
+			"expected staged shader root")) {
 		return 1;
 	}
 	constexpr D3D_FEATURE_LEVEL featureLevels[]{ D3D_FEATURE_LEVEL_11_0 };
@@ -709,9 +702,9 @@ int main(int argc, char** argv)
 		"successful publication changed OM binding");
 
 	ok &= Check(
-		TestSpatialFallback(device.get(), context.get(), argv[1], argv[2]),
+		TestSpatialFallback(device.get(), context.get(), argv[1]),
 		"spatial recovery sampled stale pixels outside the committed render subrect");
-	ok &= TestFsrEncodeShader(device.get(), context.get(), argv[3]);
+	ok &= TestFsrEncodeShader(device.get(), context.get(), argv[1]);
 
 	context->OMSetRenderTargets(0, nullptr, nullptr);
 	ok &= CheckDepthSnapshot(device.get(), context.get());

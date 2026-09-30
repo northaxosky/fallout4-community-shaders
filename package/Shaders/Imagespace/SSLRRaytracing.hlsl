@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
 #if defined(UPSCALING) || defined(DYNAMIC_CUBEMAPS)
-#	include "../Common/SharedData.hlsli"
+#	include "FO4/Common/SharedData.hlsli"
 #endif
 
 cbuffer SSLRRaytracingConstants : register(b0)

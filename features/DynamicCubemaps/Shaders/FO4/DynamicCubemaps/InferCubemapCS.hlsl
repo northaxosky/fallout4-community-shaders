@@ -1,5 +1,5 @@
-#include "../Common/SharedData.hlsli"
-#include "CubemapCommon.hlsli"
+#include "DynamicCubemaps/CubemapCommon.hlsli"
+#include "FO4/Common/SharedData.hlsli"
 
 TextureCube<float4> EnvCaptureTexture : register(t0);
 TextureCube<float4> ReflectionsTexture : register(t1);

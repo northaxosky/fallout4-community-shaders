@@ -2,7 +2,7 @@
 // Copyright (C) 2016-2021 Intel Corporation
 // Ported from Skyrim Community Shaders d330bf12d.
 
-#include "common.hlsli"
+#include "ScreenSpaceGI/XeGTAO/common.hlsli"
 Texture2D<float3> srcRadiance : register(t0);
 
 RWTexture2D<float3> outRadiance0 : register(u0);

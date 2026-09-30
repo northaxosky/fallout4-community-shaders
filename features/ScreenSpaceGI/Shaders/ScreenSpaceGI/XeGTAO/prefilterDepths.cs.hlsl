@@ -2,7 +2,7 @@
 // Copyright (C) 2016-2021 Intel Corporation
 // Ported from Skyrim Community Shaders d330bf12d.
 
-#include "common.hlsli"
+#include "ScreenSpaceGI/XeGTAO/common.hlsli"
 Texture2D<float> srcNDCDepth : register(t0);
 
 RWTexture2D<float> outDepth0 : register(u0);

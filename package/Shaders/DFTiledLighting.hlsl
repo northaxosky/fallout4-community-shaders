@@ -13,11 +13,11 @@
 #else
 
 #	ifdef INVERSE_SQUARE_LIGHTING
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
+#		include "FO4/InverseSquareLighting/InverseSquareLighting.hlsli"
 #	endif
 
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
 cbuffer TiledLightingParameters : register(b0)

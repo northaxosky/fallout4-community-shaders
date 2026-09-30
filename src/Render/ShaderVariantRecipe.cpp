@@ -23,11 +23,12 @@ namespace cs::engine
 	}
 
 	shader_cache::ShaderRecipe BuildShaderVariantRecipe(
-		const ShaderVariantCompilationRequest& a_request)
+		const ShaderVariantCompilationRequest& a_request,
+		const std::filesystem::path& a_shaderRoot)
 	{
 		shader_cache::ShaderRecipe recipe;
 		recipe.source = a_request.sourcePath;
-		recipe.includeRoots.push_back(a_request.sourcePath.parent_path());
+		recipe.includeRoots.push_back(a_shaderRoot);
 		recipe.defines = a_request.defines;
 		recipe.entryPoint = a_request.entryPoint;
 		recipe.profile = a_request.profile;

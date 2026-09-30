@@ -225,6 +225,9 @@ target(plugin_name, function()
 
     add_headerfiles("src/**.h", "features/*/src/**.h")
     add_includedirs(generated_include, "src", "extern")
+    on_load(function(target)
+        import("xmake.shared", { rootdir = os.projectdir() }).main(target)
+    end)
     for _, feature in ipairs(features) do
         add_includedirs(path.join("features", feature, "src"))
     end
@@ -271,22 +274,12 @@ target(plugin_name, function()
 
     set_pcxxheader("src/PCH.h")
 
-    add_installfiles("package/(**)", { prefixdir = "." })
-    for _, feature in ipairs(features) do
-        if feature == "Upscaling" then
-            add_installfiles(
-                "features/Upscaling/(Shaders/Upscaling/*.hlsl)",
-                "features/Upscaling/(Shaders/Upscaling/RCAS/**)",
-                "features/Upscaling/(Shaders/Upscaling/Streamline/**)",
-                { prefixdir = "." }
-            )
-        else
-            add_installfiles(
-                path.join("features", feature, "(Shaders/**)"),
-                { prefixdir = "." }
-            )
-        end
-    end
+    add_deps("ShaderStage")
+    add_installfiles("package/(**)|Shaders/**", { prefixdir = "." })
+    add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl",
+        { prefixdir = "." })
+    add_installfiles("features/Upscaling/(Shaders/Upscaling/Streamline/**)",
+        { prefixdir = "." })
     add_installfiles("LICENSE", "EXCEPTIONS.md", { prefixdir = "." })
 end)
 
@@ -398,6 +391,7 @@ target("UpscalingPublicationTests", function()
     add_deps(plugin_name .. "Version", "commonlibf4", "ShaderStage")
     add_files(
         "tests/UpscalingPublicationTests.cpp",
+        "src/Utils/ShaderCompile.cpp",
         "src/Render/Annotation.cpp",
         "src/Render/RendererContext.cpp"
     )
@@ -690,20 +684,7 @@ end)
 
 target("UpscalingPublicationTests", function()
     add_tests("UpscalingPublication", {
-        runargs = {
-            path.join(
-                os.projectdir(),
-                "features/Upscaling/Shaders/Upscaling/SpatialFallbackPS.hlsl"
-            ),
-            path.join(
-                os.projectdir(),
-                "features/Upscaling/Shaders/Upscaling/UpscaleVS.hlsl"
-            ),
-            path.join(
-                os.projectdir(),
-                "build/ShaderStage/Shaders/Upscaling/EncodeTexturesCS.hlsl"
-            )
-        }
+        runargs = path.join(os.projectdir(), "build/ShaderStage/Shaders")
     })
 end)
 
