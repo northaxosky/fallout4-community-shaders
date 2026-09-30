@@ -1,14 +1,16 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "Render/PixelShaderSamplerSnapshot.h"
+#include "Utils/CSBuffer.h"
 #include "WaterEffectsMath.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -19,6 +21,10 @@ struct ID3D11DeviceContext;
 struct ID3D11SamplerState;
 struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
+struct ID3D11VertexShader;
+struct ID3D11PixelShader;
+struct ID3D11RasterizerState;
+struct ID3DDeviceContextState;
 struct IDXGIAdapter;
 
 namespace cs::features
@@ -33,8 +39,8 @@ namespace cs::features
 			kSubmersion
 		};
 
-		static constexpr std::uint32_t kCausticsPSSlot = 32;
-		static constexpr std::uint32_t kSceneDepthPSSlot = 33;
+		static constexpr std::uint32_t kCausticsPSSlot = 65;
+		static constexpr std::uint32_t kDebugTexturePSSlot = 33;
 		static constexpr std::uint32_t kCausticsSamplerPSSlot = 14;
 
 		static WaterEffects* GetSingleton();
@@ -61,8 +67,6 @@ namespace cs::features
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 
-		cs::WaterEffectsFeatureData GetCommonBufferData() const;
-
 		using Settings = water_effects::Settings;
 
 	private:
@@ -81,6 +85,8 @@ namespace cs::features
 		void SaveDebugBindings();
 		void BindDebugTextures(ID3D11DeviceContext* a_context);
 		void RestoreDebugBindings();
+		void BuildDebugResources(ID3D11Device* a_device);
+		void RenderDebug(ID3D11DeviceContext* a_context);
 
 		bool CanBind() const noexcept;
 
@@ -92,9 +98,8 @@ namespace cs::features
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _renderCallbacksReady{ false };
 		std::atomic_bool _resourcesReady{ false };
+		std::atomic_bool _debugResourcesReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
-		mutable std::atomic_bool _hasWater{ false };
-		mutable std::atomic<float> _waterHeight{ water_effects::kNoWaterHeight };
 		std::atomic_uint64_t _binds{ 0 };
 		std::atomic_uint64_t _debugBinds{ 0 };
 		std::atomic_uint64_t _debugDepthMissing{ 0 };
@@ -102,10 +107,16 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Texture2D> _causticsTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView> _causticsSrv;
 		winrt::com_ptr<ID3D11SamplerState> _causticsSampler;
+		winrt::com_ptr<ID3DDeviceContextState> _debugContextState;
+		winrt::com_ptr<ID3D11VertexShader> _debugVS;
+		std::array<winrt::com_ptr<ID3D11PixelShader>, 2> _debugPS;
+		winrt::com_ptr<ID3D11RasterizerState> _debugRasterizer;
+		std::unique_ptr<cs::buffer::Texture2D> _debugTexture;
+		bool _debugFrameReady = false;
 
-		cs::render::PixelShaderResourceSnapshot<2> _engineBinding;
+		cs::render::PixelShaderResourceSnapshot<1> _engineBinding;
 		cs::render::PixelShaderSamplerSnapshot<1> _engineSamplerBinding;
-		cs::render::PixelShaderResourceSnapshot<2> _debugBinding;
+		cs::render::PixelShaderResourceSnapshot<1> _debugBinding;
 
 		mutable std::mutex _validationMutex;
 		std::string _validationDetail;

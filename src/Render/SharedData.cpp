@@ -12,6 +12,7 @@
 #include "Render/TemporalRenderer.h"
 #include "Utils/CSBuffer.h"
 #include "World/Sky.h"
+#include "World/Water.h"
 
 #include <DirectXMath.h>
 #include <algorithm>
@@ -89,6 +90,9 @@ namespace cs::render
 
 			data.CameraData = engine::GetCameraDepthParameters(a_camera);
 			data.MipBias = TemporalRenderer::GetSingleton()->GetMipBias();
+			// FO4: heights and tile selection share b4's position-adjust anchor.
+			engine::FillWaterData(data.WaterData, data.WaterSystemHeight,
+				{ a_camera.CameraPosAdjust.x, a_camera.CameraPosAdjust.y, a_camera.CameraPosAdjust.z });
 
 			float sunX = 0.0f;
 			float sunY = 0.0f;
@@ -122,7 +126,6 @@ namespace cs::render
 			fo4.screenSpaceShadowsSettings = a_features.screenSpaceShadowsSettings;
 			fo4.screenSpaceGISettings = a_features.screenSpaceGISettings;
 			fo4.inverseSquareLightingSettings = a_features.inverseSquareLightingSettings;
-			fo4.waterEffectsSettings = a_features.waterEffectsSettings;
 			fo4.exponentialHeightFogSettings = a_features.exponentialHeightFogSettings;
 			fo4.WetnessDebugVisualization = a_features.wetnessEffectsSettings.DebugVisualization;
 			fo4.TerrainShadowMode = a_features.terrainShadowsSettings.TerrainShadowMode;

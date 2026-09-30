@@ -6,7 +6,6 @@
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
 #include "TerrainShadows.h"
-#include "WaterEffects.h"
 #include "WetnessEffects.h"
 
 namespace cs
@@ -40,9 +39,6 @@ namespace cs
 			.inverseSquareLightingSettings =
 				CollectFeatureData<InverseSquareLightingFeatureData>(
 					features::InverseSquareLighting::GetSingleton()),
-			.waterEffectsSettings =
-				CollectFeatureData<WaterEffectsFeatureData>(
-					features::WaterEffects::GetSingleton()),
 			.dynamicCubemapsSettings =
 				CollectFeatureData<DynamicCubemapsFeatureData>(
 					features::DynamicCubemaps::GetSingleton()),

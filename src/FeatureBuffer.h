@@ -58,16 +58,6 @@ namespace cs
 	};
 	static_assert(sizeof(InverseSquareLightingFeatureData) == 16);
 
-	struct alignas(16) WaterEffectsFeatureData
-	{
-		std::uint32_t Mode = 0;
-		std::uint32_t HasWater = 0;
-		// absolute world Z of the player cell's water plane
-		float WaterHeight = 0.0f;
-		float pad0 = 0.0f;
-	};
-	static_assert(sizeof(WaterEffectsFeatureData) == 16);
-
 	struct alignas(16) DynamicCubemapsFeatureData
 	{
 		std::uint32_t Enabled = 0;
@@ -93,11 +83,10 @@ namespace cs
 		WetnessEffectsFeatureData wetnessEffectsSettings;
 		TerrainShadowsFeatureData terrainShadowsSettings;
 		InverseSquareLightingFeatureData inverseSquareLightingSettings;
-		WaterEffectsFeatureData waterEffectsSettings;
 		DynamicCubemapsFeatureData dynamicCubemapsSettings;
 		ExponentialHeightFogFeatureData exponentialHeightFogSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 192);
+	static_assert(sizeof(FeatureDataCB) == 176);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
@@ -124,16 +113,11 @@ namespace cs
 	static_assert(offsetof(InverseSquareLightingFeatureData, ExteriorStrength) == 4);
 	static_assert(offsetof(InverseSquareLightingFeatureData, InteriorStrength) == 8);
 	static_assert(offsetof(InverseSquareLightingFeatureData, NearFieldDistance) == 12);
-	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 144);
-	static_assert(offsetof(WaterEffectsFeatureData, Mode) == 0);
-	static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
-	static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
-	static_assert(offsetof(WaterEffectsFeatureData, pad0) == 12);
-	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 160);
+	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 144);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 4);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 8);
-	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 176);
+	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 160);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, Mode) == 0);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, DensityMultiplier) == 4);
 	static_assert(

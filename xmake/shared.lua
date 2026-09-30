@@ -11,7 +11,8 @@ function main(target)
             "features/Dynamic Cubemaps/Shaders/DynamicCubemaps/defaultcubemap.dds",
             "features/Screen Space GI/Shaders/ScreenSpaceGI/fast_2uges.dds",
             "features/Upscaling/Shaders/Upscaling/RCAS/RCAS.hlsl",
-            "features/Water Effects/Shaders/WaterEffects/watercaustics.dds"
+            "features/Water Effects/Shaders/WaterEffects/watercaustics.dds",
+            "features/Water Effects/Shaders/WaterEffects/WaterCaustics.hlsli"
         },
         sources = {
             "src/Utils/PerfUtils.h",
