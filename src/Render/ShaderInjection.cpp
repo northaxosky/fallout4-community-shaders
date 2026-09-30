@@ -30,6 +30,66 @@ namespace cs::engine
 {
 	namespace
 	{
+		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
+	}
+
+	ScopedPixelShaderInjectionBindings::ScopedPixelShaderInjectionBindings() noexcept :
+		_previous(std::exchange(t_pixelBindings, this))
+	{}
+
+	ScopedPixelShaderInjectionBindings::~ScopedPixelShaderInjectionBindings() noexcept
+	{
+		t_pixelBindings = _previous;
+		if (!_context)
+			return;
+		_substrate.Restore(_context, ShaderStage::kPixel);
+		for (const auto& buffer : _buffers) {
+			_context->PSSetConstantBuffers(buffer.slot, 1, &buffer.value);
+			if (buffer.value)
+				buffer.value->Release();
+		}
+		for (const auto& resource : _resources) {
+			_context->PSSetShaderResources(resource.slot, 1, &resource.value);
+			if (resource.value)
+				resource.value->Release();
+		}
+		for (const auto& sampler : _samplers) {
+			_context->PSSetSamplers(sampler.slot, 1, &sampler.value);
+			if (sampler.value)
+				sampler.value->Release();
+		}
+	}
+
+	void ScopedPixelShaderInjectionBindings::Capture(
+		ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims)
+	{
+		if (!a_context)
+			return;
+		if (!_context) {
+			_context = a_context;
+			_substrate.Save(_context, ShaderStage::kPixel);
+		}
+		for (const auto& claim : a_claims) {
+			if (claim.stage != ShaderStage::kPixel)
+				continue;
+			if (claim.resourceType == ShaderResourceType::kShaderResource &&
+				std::ranges::none_of(_resources, [&](const auto& r) { return r.slot == claim.slot; })) {
+				_resources.push_back({ claim.slot, nullptr });
+				_context->PSGetShaderResources(claim.slot, 1, &_resources.back().value);
+			} else if (claim.resourceType == ShaderResourceType::kSampler &&
+					   std::ranges::none_of(_samplers, [&](const auto& s) { return s.slot == claim.slot; })) {
+				_samplers.push_back({ claim.slot, nullptr });
+				_context->PSGetSamplers(claim.slot, 1, &_samplers.back().value);
+			} else if (claim.resourceType == ShaderResourceType::kConstantBuffer &&
+					   std::ranges::none_of(_buffers, [&](const auto& b) { return b.slot == claim.slot; })) {
+				_buffers.push_back({ claim.slot, nullptr });
+				_context->PSGetConstantBuffers(claim.slot, 1, &_buffers.back().value);
+			}
+		}
+	}
+
+	namespace
+	{
 		constexpr auto& kTargets = kShaderInjectionTargets;
 
 		constexpr std::string_view StageName(ShaderStage a_stage) noexcept
@@ -1233,6 +1293,15 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
+			if (a_stage == ShaderStage::kPixel && t_pixelBindings &&
+				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0) {
+				try {
+					for (const auto& contribution : a_target.contributions)
+						t_pixelBindings->Capture(a_context, contribution.slotClaims);
+				} catch (...) {
+					return;
+				}
+			}
 			if (a_stage != ShaderStage::kCompute &&
 				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0)
 				render::BindSharedData(a_context, a_stage);

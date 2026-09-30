@@ -1,4 +1,7 @@
 #ifdef BSEFFECT_PS_SOURCE
+#	if defined(TERRAIN_SHADOWS) && defined(LIGHTING)
+#		include "FO4/TerrainShadowsConsumer.hlsli"
+#	endif
 #	if defined(ENVCUBE_RAIN) || defined(ENVCUBE_SNOW)
 #		define WEATHER
 #	endif
@@ -132,7 +135,12 @@ struct PSOutput
 };
 
 #	if defined(LIGHTING)
-float3 GetLightingColor(float3 msPosition)
+float3 GetLightingColor(float3 msPosition
+#		ifdef TERRAIN_SHADOWS
+	,
+	float3 screenPosition
+#		endif
+)
 {
 	float4 lightDistX = msPosition.xxxx - PLightPositionX;
 	float4 lightDistY = msPosition.yyyy - PLightPositionY;
@@ -164,6 +172,9 @@ float3 GetLightingColor(float3 msPosition)
 	lightFadeMul *= spotPower;
 
 	float3 color = DLightColor.xyz;
+#		ifdef TERRAIN_SHADOWS
+	color *= TerrainShadows::GetShadowFromScreenPosition(screenPosition);
+#		endif
 	color.x += dot(PLightColorR * lightFadeMul, 1.0.xxxx);
 	color.y += dot(PLightColorG * lightFadeMul, 1.0.xxxx);
 	color.z += dot(PLightColorB * lightFadeMul, 1.0.xxxx);
@@ -729,7 +740,12 @@ PSOutput main(PSInput input)
 #		else
 	float3 propertyColor = PropertyColor.xyz;
 #			if defined(LIGHTING)
-	propertyColor = GetLightingColor(input.MSPosition);
+	propertyColor = GetLightingColor(input.MSPosition
+#				ifdef TERRAIN_SHADOWS
+		,
+		input.Position.xyz
+#				endif
+	);
 #			endif
 	float3 propertyBaseColor = propertyColor;
 	propertyBaseColor *= baseColor.xyz;

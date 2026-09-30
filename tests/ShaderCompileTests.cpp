@@ -417,8 +417,8 @@ namespace
 			ABI(FO4SharedDataCB, screenSpaceGISettings),
 			ABI(FO4SharedDataCB, inverseSquareLightingSettings),
 			ABI(FO4SharedDataCB, exponentialHeightFogSettings), ABI(FO4SharedDataCB, WetnessDebugVisualization),
-			ABI(FO4SharedDataCB, TerrainShadowMode), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
-			ABI(FO4SharedDataCB, EnabledSSR), ABI(FO4SharedDataCB, HeightRange), ABI(FO4SharedDataCB, DebugHeightRange),
+			ABI(FO4SharedDataCB, padTerrain), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
+			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, pad0)
 		};
 		struct Buffer
@@ -552,7 +552,7 @@ namespace
 			.description = "water debug submersion",
 			.required = { CB(4), CB(5), Texture(17) },
 			.forbidden = { CB(7), Texture(65), Sampler(14) } });
-		a_jobs.push_back({ .path = a_root / "FO4" / "TerrainShadows" / "ShadowUpdate.cs.hlsl",
+		a_jobs.push_back({ .path = terrain / "ShadowUpdate.cs.hlsl",
 			.description = "terrain shadow update" });
 		a_jobs.push_back({ .path = terrain / "ShadowStatistics.cs.hlsl",
 			.description = "terrain shadow statistics" });
@@ -621,7 +621,7 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFLight feature off",
 			.forbidden = {
-				CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(45), Texture(30), Texture(65),
+				CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(45), Texture(60), Texture(65),
 				Sampler(13), Sampler(14) } });
 		auto directionalFeatures = directional;
 		directionalFeatures.insert(
@@ -637,7 +637,7 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFLight feature composition",
 			.required = {
-				CB(4), CB(5), CB(6), CB(7), Texture(45), Texture(30), Texture(65),
+				CB(4), CB(5), CB(6), CB(7), Texture(45), Texture(60), Texture(65),
 				Sampler(13), Sampler(14) } });
 		for (const auto& [family, splits, shadowOnly, blend] : {
 				 std::tuple{ "BSDFLIGHT_PS_DIRSPLITS1", "1", false, false },
@@ -702,6 +702,7 @@ namespace
 				{ "WETNESS_EFFECTS", "1" },
 				{ "DYNAMIC_CUBEMAPS", "1" },
 				{ "TERRAIN_SHADOWS", "1" },
+				{ "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", "1" },
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" },
 				{ "WATER_EFFECTS", "1" },
 				{ "WATER_EFFECTS_FULLSCREEN_DEBUG", "1" } },
@@ -871,6 +872,30 @@ namespace
 		}
 
 		const auto water = a_root / "BSWaterShader.hlsl";
+		for (const char* family : { "BSLIGHTING_PS_COLOR", "BSLIGHTING_PS_CORE", "BSLIGHTING_PS_RESOURCE" }) {
+			a_jobs.push_back({ .path = a_root / "BSLightingShader.hlsl",
+				.defines = { { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
+				.profile = "ps_5_0",
+				.description = "BSLighting terrain directional consumer",
+				.required = { CB(4), CB(6), Texture(60), Sampler(13) } });
+		}
+		a_jobs.push_back({ .path = a_root / "BSDistantTreeShader.hlsl",
+			.defines = { { "BSDISTANTTREE_PS_SOURCE", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
+			.profile = "ps_5_0",
+			.description = "BSDistantTree terrain directional consumer",
+			.required = { CB(4), CB(6), Texture(60), Sampler(13) } });
+		a_jobs.push_back({ .path = a_root / "BSEffectShader.hlsl",
+			.defines = { { "BSEFFECT_PS_SOURCE", "1" }, { "LIGHTING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
+			.profile = "ps_5_0",
+			.description = "BSEffect terrain directional consumer",
+			.required = { CB(4), CB(6), Texture(60), Sampler(13) } });
+		for (const char* family : { "LOD", "BSWATER_SURFACE" }) {
+			a_jobs.push_back({ .path = water,
+				.defines = { { "BSWATER_PIXEL_SHADER", "1" }, { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
+				.profile = "ps_5_0",
+				.description = "BSWater terrain directional consumer",
+				.required = { CB(4), CB(6), Texture(60), Sampler(13) } });
+		}
 		const ShaderDefines waterBase{
 			{ "BSWATER_PIXEL_SHADER", "1" },
 			{ "REFLECTIONS", "1" }

@@ -68,6 +68,11 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Performance Overlay** | FPS, frame-time, and latency graphs. |
 | **RenderDoc** | In-game frame capture for debugging. |
 
+Terrain Shadows requires an xLODGen heightmap under `Data\Textures\Terrain\<worldspace>\`
+or a custom map under `Data\Textures\HeightMaps\`. Maps use the upstream filename/height encoding
+contract and native DDS resolution. `[features.TerrainShadows.settings]` uses `EnableTerrainShadow`;
+the legacy `enabled` and `downsample_factor` keys are no longer supported.
+
 ---
 
 ## Feature activation

@@ -2,6 +2,7 @@
 
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjectionTargets.h"
+#include "Render/SharedData.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +20,9 @@ struct ID3D11DeviceChild;
 struct ID3D11DeviceContext;
 struct ID3D11ComputeShader;
 struct ID3D11PixelShader;
+struct ID3D11ShaderResourceView;
+struct ID3D11SamplerState;
+struct ID3D11Buffer;
 namespace RE
 {
 	class BSShader;
@@ -48,6 +52,39 @@ namespace cs::engine
 		std::uint32_t slot = 0;
 
 		auto operator<=>(const ShaderSlotClaim&) const = default;
+	};
+
+	class ScopedPixelShaderInjectionBindings
+	{
+	public:
+		ScopedPixelShaderInjectionBindings() noexcept;
+		~ScopedPixelShaderInjectionBindings() noexcept;
+		ScopedPixelShaderInjectionBindings(const ScopedPixelShaderInjectionBindings&) = delete;
+		ScopedPixelShaderInjectionBindings& operator=(const ScopedPixelShaderInjectionBindings&) = delete;
+		void Capture(ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims);
+
+	private:
+		struct Resource
+		{
+			std::uint32_t slot;
+			ID3D11ShaderResourceView* value;
+		};
+		struct Sampler
+		{
+			std::uint32_t slot;
+			ID3D11SamplerState* value;
+		};
+		struct Buffer
+		{
+			std::uint32_t slot;
+			ID3D11Buffer* value;
+		};
+		ScopedPixelShaderInjectionBindings* _previous;
+		ID3D11DeviceContext* _context = nullptr;
+		render::SubstrateBindingSnapshot _substrate;
+		std::vector<Resource> _resources;
+		std::vector<Sampler> _samplers;
+		std::vector<Buffer> _buffers;
 	};
 
 	using ShaderInjectionDefines = std::map<std::string, std::string, std::less<>>;

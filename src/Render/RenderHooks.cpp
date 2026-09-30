@@ -213,6 +213,16 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		struct TriShapeDrawScope_Hook
+		{
+			static void thunk(RE::BSGraphics::TriShape* a_shape, std::uint32_t a_triangles, std::uint32_t a_start)
+			{
+				const ScopedPixelShaderInjectionBindings bindings;
+				func(a_shape, a_triangles, a_start);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		// DrawWorld::Forward renders sky batch 7, then cloud group 14; water and alpha follow.
 		struct ForwardSkyGroup_Hook
 		{
@@ -289,6 +299,8 @@ namespace cs::engine
 				return;
 			}
 			stl::write_thunk_call<DeferredDrawAnchor_Hook>(*site);
+			// FO4: forward consumers bind after dirty state and restore at the draw boundary.
+			stl::detour_thunk<TriShapeDrawScope_Hook>(kDrawTriShapeSetDirtyStates.function);
 			g_deferredDrawAnchorInstalled = true;
 			L->info("Hook installed on DrawTriShape SetDirtyStates call (deferred draw anchor)");
 		}

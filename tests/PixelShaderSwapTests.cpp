@@ -36,8 +36,8 @@ namespace
 		};
 
 		constexpr std::array cases{
-			TestCase{ false, false, 0, {} },
-			TestCase{ false, false, 2, {} },
+			TestCase{ false, false, 0, { true, false } },
+			TestCase{ false, false, 2, { true, false } },
 			TestCase{ true, false, 0, {} },
 			TestCase{ true, false, 2, { true, true } },
 			TestCase{ false, true, 0, { true, false } },

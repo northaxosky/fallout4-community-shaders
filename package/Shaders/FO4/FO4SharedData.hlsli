@@ -28,11 +28,9 @@ namespace FO4SharedData
 		InverseSquareLightingSettings inverseSquareLightingSettings;
 		ExponentialHeightFogSettings exponentialHeightFogSettings;
 		uint WetnessDebugVisualization;
-		uint TerrainShadowMode;
+		uint padTerrain;
 		uint DynamicCubemapsDebugVisualization;
 		uint EnabledSSR;
-		float2 HeightRange;
-		float2 DebugHeightRange;
 		float DeltaTime;
 		float3 pad0;
 	};

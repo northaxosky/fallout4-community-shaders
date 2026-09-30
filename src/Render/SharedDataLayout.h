@@ -94,15 +94,13 @@ namespace cs::render
 		ScreenSpaceGIFeatureData screenSpaceGISettings{};
 		InverseSquareLightingFeatureData inverseSquareLightingSettings{};
 		ExponentialHeightFogFeatureData exponentialHeightFogSettings{};
-		std::uint32_t WetnessDebugVisualization = 0, TerrainShadowMode = 0;
+		std::uint32_t WetnessDebugVisualization = 0, padTerrain = 0;
 		std::uint32_t DynamicCubemapsDebugVisualization = 0, EnabledSSR = 0;
-		DirectX::XMFLOAT2 HeightRange{}, DebugHeightRange{};
 		float DeltaTime = 0.0f, pad0[3]{};
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 96);
+	static_assert(sizeof(FO4SharedDataCB) == 80);
 	static_assert(offsetof(FO4SharedDataCB, WetnessDebugVisualization) == 48);
-	static_assert(offsetof(FO4SharedDataCB, HeightRange) == 64);
-	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 80);
+	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 64);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

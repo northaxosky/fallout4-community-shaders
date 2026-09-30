@@ -5,7 +5,7 @@
 #endif
 
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-#	include "FO4/TerrainShadows/TerrainShadows.hlsli"
+#	include "FO4/TerrainShadowsConsumer.hlsli"
 #endif
 
 #ifdef WETNESS_EFFECTS

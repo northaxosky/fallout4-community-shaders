@@ -1,8 +1,8 @@
 # Deviations from upstream
 
 Upstream [Skyrim Community Shaders][upstream] is the specification for ported features (see `AGENTS.md`).
-This file lists every place a feature knowingly differs from its pinned upstream revision, why Fallout 4
-forces the difference, and where it lives. Each code site also carries a one-line FO4 marker comment.
+This file lists every place a feature knowingly differs from its pinned upstream revision, the reason,
+and where it lives. Each code site also carries a one-line FO4 marker comment.
 
 - **Translation**: same upstream behavior, re-expressed for a Fallout 4 engine difference.
 - **Not supported**: upstream behavior that has no Fallout 4 equivalent without new FO4-only machinery.
@@ -60,8 +60,11 @@ Retired rows preserve the original Kind and identify replacements consumed uncha
 | Chosen | `DynamicCubemaps/UpdateCubemapCS.hlsl` | `FO4/DynamicCubemaps/UpdateCubemapCS.hlsl` |
 | Chosen | `ExponentialHeightFog/ExponentialHeightFog.hlsli` | `FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli` |
 | Chosen | `InverseSquareLighting/InverseSquareLighting.hlsli` | `FO4/InverseSquareLighting/InverseSquareLighting.hlsli` |
-| Chosen | `TerrainShadows/ShadowUpdate.cs.hlsl` | `FO4/TerrainShadows/ShadowUpdate.cs.hlsl` |
-| Chosen | `TerrainShadows/TerrainShadows.hlsli` | `FO4/TerrainShadows/TerrainShadows.hlsli` |
+| Chosen | `ScreenSpaceShadows/RaymarchCS.hlsl` | `FO4/ScreenSpaceShadows/RaymarchCS.hlsl` (retired; the unchanged upstream shader is consumed directly) |
+| Chosen | `ScreenSpaceShadows/ScreenSpaceShadows.hlsli` | `FO4/ScreenSpaceShadows/ScreenSpaceShadows.hlsli` (retired; the unchanged upstream include is consumed directly) |
+| Chosen | `ScreenSpaceShadows/bend_sss_gpu.hlsli` | `FO4/ScreenSpaceShadows/bend_sss_gpu.hlsli` (retired; the unchanged upstream include is consumed directly) |
+| Chosen | `TerrainShadows/ShadowUpdate.cs.hlsl` | `FO4/TerrainShadows/ShadowUpdate.cs.hlsl` (retired; the unchanged upstream shader is consumed directly) |
+| Chosen | `TerrainShadows/TerrainShadows.hlsli` | `FO4/TerrainShadows/TerrainShadows.hlsli` (retired; the unchanged upstream include is consumed directly) |
 | Chosen | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
 | Chosen | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |
 | Chosen | `Upscaling/UpscaleVS.hlsl` | `FO4/Upscaling/UpscaleVS.hlsl` |
@@ -115,6 +118,9 @@ no substrate, and the binder runs only for contributed stages; native b12 remain
   of -262144 units. At an exact camera cell border, `round` also receives half-integers
   and can select adjacent tiles by ties-to-even. Use `floor(absolutePosition / 4096)`
   minus `floor(CameraPosAdjust.xy / 4096)` plus 2. The shared file remains unchanged.
+- `src/Features/TerrainShadows.cpp:332–336,365–380`: readiness compares the child worldspace
+  editor ID, but loading resolves inherited land to the parent. Resolve the same land identity in
+  both paths. FO4 retains main's parent-readiness correction; no upstream PR recorded.
 
 ## WaterEffects
 
@@ -220,6 +226,43 @@ this implementation makes no additional shared edits.
 - Verify VRAM adapter/local-segment identity and failed-query display against the host.
   Runtime cadence, coverage, GPU state and failure recovery remain unverified here;
   deployment and game launch are outside this worktree task.
+## Terrain Shadows
+
+Upstream pin: `d330bf12d` (shared fork `e305ed0a4`). Both `TerrainShadows/ShadowUpdate.cs.hlsl`
+and `TerrainShadows/TerrainShadows.hlsli` are staged unchanged. Native DDS dimensions, R16G16_UNORM
+shadow heights, 128-thread scans, componentwise penumbra maxima, one-degree softening, half-texel
+offsets, bounded UV, ZBlur, weight-1 full sweeps and weight-0.5 ordinary slices match the pin.
+Settings use `EnableTerrainShadow`; no downsampling setting or resize pass remains.
+
+Classification: **core** — no Chosen rows; Pending rows remain unfinished and do not establish upstream parity.
+
+### Translations
+
+| Kind | Upstream | Fallout 4 / evidence | Where |
+|---|---|---|---|
+| Forced | Camera-relative consumer position plus caller origin | Absolute world position from unchanged b4 FrameBuffer; native b12 is engine-owned (`BSWaterShader.hlsl`, `cbuffer PerFrame : register(b12)`) | `FO4/TerrainShadowsConsumer.hlsli` |
+| Forced | Skyrim light / worldspace accessors | Typed FO4 Sky propagation vector and inherited-land worldspace identity; engine-facts Sun light orientation, `TESWorldSpace::GetParentWorld(kLand)` | `TerrainShadows.cpp`, `World/Sky.cpp` |
+| Forced | Skyrim native directional consumers | Reconstructed BSDFLight, BSLighting, BSDistantTree, BSWater and lit BSEffect directional terms; point/ambient terms stay separate. FO4's deferred and forward shaders are different programs | `package/Shaders/{BSDFLight,BSLighting,BSDistantTree,BSWater,BSEffect}Shader.hlsl` |
+| Forced | Direct world position in forward consumers | Screen/depth reconstruction uses FO4's depth partition, translated at the boundary with canonical t17 and b4 inverse projection; native depth uses `d <= 0.01` / `mad(d,1.01,-0.01)` (`BSDFCompositeShader.hlsl`) | `FO4/TerrainShadowsConsumer.hlsli` |
+| Forced | Engine-owned render-state lifecycle | Bind t60 and caller s13 at the post-dirty DrawTriShape boundary, including OG/NG/AE. Native SetDirtyStates resubmits s0–s15 and otherwise overwrites the caller sampler (engine-facts Shader slots & bindings, Draw state flush call) | `RenderHooks.cpp`, `ShaderInjection.{h,cpp}`, `TerrainShadows.cpp` |
+| Framework | Host activation, settings, UI and shader ownership | Preserve load=false activation, TOML persistence, forwarding-only DearModdingUI, configured ownership and the stock identity gate; unavailable resources publish identity. Restore claimed bindings and unbind high-slot inputs around UAV writes without widening compute cleanup | `TerrainShadows.cpp`, `Feature.h`, `ShaderInjection.{h,cpp}` |
+| Framework | Upstream buffer viewer | Retain the repository's fullscreen debug-view and telemetry contracts for shadow/heightmap views and sampled field statistics; diagnostic b8/t61 is separate from production b6/t60 and removed from b7 | `TerrainShadows.cpp`, `FO4/TerrainShadowsConsumer.hlsli`, `ShadowStatistics.cs.hlsl` |
+| Fix | Child readiness checks its own editor ID | Check readiness against the resolved inherited-land parent, correcting the upstream loading/readiness mismatch listed under Upstream PR candidates | `TerrainShadows.cpp` `ResolveWorldspaceEditorId`, `EnsureLiveResources` |
+
+### Not supported
+
+| Kind | Upstream | Evidence / boundary | Where |
+|---|---|---|---|
+| Forced | Skyrim RunGrass shader family | FO4 has no distinct RunGrass target; grass receives the terrain multiplier through the owned deferred directional BSDFLight routes (`ShaderInjectionTargets.h`) | `BSDFLightShader.hlsl` |
+
+### Pending
+
+| Kind | Upstream | Remaining work / evidence | Where |
+|---|---|---|---|
+| Pending | Console/Papyrus GameHour hooks, fast-travel event and completed celestial generation | FO4 wait/sleep/load/interior-exit events request a full refresh, retained hour-jump polling covers large console/script/travel changes, and refresh waits for Sky's consumed hour. Exact small forward-hour edits and active-light versus Sky transition equivalence still need host hooks/evidence; not an accepted parity exception | `TerrainShadows.cpp` `OnDataLoaded`, `PollGameHourJump`, `OnPostDeferredPrePass` |
+| Pending | Particle and volumetric sunlight | Native FO4 particles currently contain only texture × vertex color × ColorScale (`BSParticleShader.hlsl`); upstream reconstructs particle sunlight/ambient. Complete that lighting input boundary rather than shadowing emissive color. The image-space ownership catalog currently contains SSLR, not volumetric generation; reconstruct/add that consumer | `BSParticleShader.hlsl`, `ShaderInjectionTargets.h` |
+| Pending | Reflections and other secondary views | Forward consumers are wired, but b4 currently publishes the main world camera. Validate secondary-view camera publication and exclusions before claiming reflections/menu parity | `SharedData.cpp`, `FO4/TerrainShadowsConsumer.hlsli` |
+| Pending | Host input/runtime proof | Verify xLODGen orientation/altitude against landscape, active directional light equivalence at transitions, and t60/s13 execution/restoration for every consumer in an authorized batched runtime session; static shader/claim tests alone are insufficient | `TerrainShadows.cpp`, reconstructed consumers |
 
 ## Dynamic Cubemaps
 

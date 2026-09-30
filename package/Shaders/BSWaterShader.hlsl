@@ -147,6 +147,9 @@ VS_OUTPUT main(VS_INPUT input)
 #endif
 
 #ifdef BSWATER_PIXEL_SHADER
+#	ifdef TERRAIN_SHADOWS
+#		include "FO4/TerrainShadowsConsumer.hlsli"
+#	endif
 
 #	ifdef DYNAMIC_CUBEMAPS
 // FO4 water compiles without upstream's WATER permutation define.
@@ -439,6 +442,9 @@ float4 main(PS_INPUT input) : SV_Target0
 	float sunGlare = pow(max(dot(-viewDirection, perGeometry[2].xyz), 0.0), perGeometry[3].w) * perGeometry[2].w;
 
 	float3 lightColor = perGeometry[2].w * perGeometry[3].xyz;
+#		ifdef TERRAIN_SHADOWS
+	lightColor *= TerrainShadows::GetWorldShadow(FrameBuffer::ViewToWorld(input.eyeToPosition));
+#		endif
 	float3 specular = pow(saturate(dot(reflected, perGeometry[2].xyz)), perMaterial[8].x) * lightColor;
 	float3 ambient = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
 	ambient = ambient * perMaterial[10].z;
@@ -756,6 +762,9 @@ float4 main(PS_INPUT input) : SV_Target0
 	fog = lerp(fog, perGeometry[3].xyz, sunGlare);
 #		ifndef INTERIOR
 	float3 lightColor = perGeometry[2].w * perGeometry[3].xyz;
+#			ifdef TERRAIN_SHADOWS
+	lightColor *= TerrainShadows::GetWorldShadow(FrameBuffer::ViewToWorld(input.eyeToPosition));
+#			endif
 	float3 ambient = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
 	ambient = ambient * perMaterial[10].z;
 

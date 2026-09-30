@@ -19,6 +19,8 @@ namespace cs::engine
 	{
 		if (a_insideDeferredComposite)
 			return { true, false };
+		if (!a_insideDeferredLights)
+			return { true, false };
 
 		const bool dispatchLights =
 			a_insideDeferredLights && a_residualR9d == 2;
