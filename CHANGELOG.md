@@ -4,6 +4,7 @@
 
 - Added an in-game changelog.
 - Screen Space Shadows: first-person hands and weapons are no longer darkened.
+- Performance Overlay: now shows by default when loaded.
 - Screen Space GI: ported upstream's GI integration, denoiser, resolution modes and vanilla SSAO toggle; indirect light now composes in linear space where the game forms diffuse light, respects vertex AO, and has a stronger AO default for interiors lit by placed lights.
 - Dynamic Cubemaps: ported upstream's capture pipeline and limited reflections to water and wet surfaces as upstream does, fixing flat silver reflections elsewhere.
 - Wetness Effects: ported upstream rain timing, shore wetness, weather puddles and film roughness.
