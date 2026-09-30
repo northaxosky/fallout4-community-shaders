@@ -2,8 +2,6 @@
 
 #include <DearModdingUI/Client.h>
 #include <DirectXMath.h>
-#include <RE/M/Main.h>
-#include <RE/N/NiCamera.h>
 #include <RE/S/Sky.h>
 #include <d3d11.h>
 
@@ -25,11 +23,13 @@
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
+#include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
+#include "Render/SharedData.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsPersistence.h"
@@ -49,11 +49,35 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.screenspaceshadows");
 
-		constexpr const wchar_t* kRaymarchPath = L"Data\\Shaders\\FO4\\ScreenSpaceShadows\\RaymarchCS.hlsl";
+		constexpr const wchar_t* kRaymarchPath = L"Data\\Shaders\\ScreenSpaceShadows\\RaymarchCS.hlsl";
+		constexpr const wchar_t* kMaskDepthPath = L"Data\\Shaders\\FO4\\ScreenSpaceShadows\\MaskDepthCS.hlsl";
 
 		// Engine depth uses near=0, far=1.
 		constexpr float kFarDepthValue = 1.0f;
 		constexpr float kNearDepthValue = 0.0f;
+
+		std::unique_ptr<cs::buffer::Texture2D> CreateShadowTexture(
+			std::uint32_t a_width, std::uint32_t a_height, DXGI_FORMAT a_format, std::string_view a_name)
+		{
+			D3D11_TEXTURE2D_DESC desc{};
+			desc.Width = a_width;
+			desc.Height = a_height;
+			desc.MipLevels = desc.ArraySize = desc.SampleDesc.Count = 1;
+			desc.Format = a_format;
+			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			auto texture = std::make_unique<cs::buffer::Texture2D>(desc);
+			D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
+			srv.Format = a_format;
+			srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			srv.Texture2D.MipLevels = 1;
+			texture->CreateSRV(srv);
+			D3D11_UNORDERED_ACCESS_VIEW_DESC uav{};
+			uav.Format = a_format;
+			uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+			texture->CreateUAV(uav);
+			texture->SetName(std::format("{}.Texture", a_name), std::format("{}.SRV", a_name), std::format("{}.UAV", a_name));
+			return texture;
+		}
 
 		void GetPixelShaderResource(
 			void* a_context,
@@ -144,6 +168,7 @@ namespace cs::features
 
 	void ScreenSpaceShadows::Load()
 	{
+		// FO4: directional consumers execute inside DeferredLightsImpl under shader ownership.
 		const bool replacementRegistered =
 			cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kBsdfLight,
 				.contributor = "ScreenSpaceShadows",
@@ -169,43 +194,46 @@ namespace cs::features
 		_started.store(true, std::memory_order_release);
 		L->info(
 			"Registered deferred-lights callbacks (enabled={}).",
-			_settings.enabled);
+			_settings.Enable != 0);
 	}
 
 	void ScreenSpaceShadows::CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height)
 	{
-		D3D11_TEXTURE2D_DESC textureDesc{};
-		textureDesc.Width = a_width;
-		textureDesc.Height = a_height;
-		textureDesc.MipLevels = 1;
-		textureDesc.ArraySize = 1;
-		textureDesc.Format = DXGI_FORMAT_R8_UNORM;
-		textureDesc.SampleDesc.Count = 1;
-		textureDesc.Usage = D3D11_USAGE_DEFAULT;
-		textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-
-		auto texture = std::make_unique<cs::buffer::Texture2D>(textureDesc);
-
-		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-		srvDesc.Format = DXGI_FORMAT_R8_UNORM;
-		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		srvDesc.Texture2D.MostDetailedMip = 0;
-		srvDesc.Texture2D.MipLevels = 1;
-		texture->CreateSRV(srvDesc);
-
-		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
-		uavDesc.Format = DXGI_FORMAT_R8_UNORM;
-		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-		uavDesc.Texture2D.MipSlice = 0;
-		texture->CreateUAV(uavDesc);
-		texture->SetName(
-			"ScreenSpaceShadows/Mask.Texture",
-			"ScreenSpaceShadows/Mask.SRV",
-			"ScreenSpaceShadows/Mask.UAV");
-
-		_maskTexture = std::move(texture);
+		_maskTexture = CreateShadowTexture(a_width, a_height, DXGI_FORMAT_R8G8_UNORM, "ScreenSpaceShadows/Mask");
 		_allocWidth = a_width;
 		_allocHeight = a_height;
+	}
+
+	ID3D11ShaderResourceView* ScreenSpaceShadows::PrepareWorldDepth(ID3D11DeviceContext* a_context)
+	{
+		// FO4: mask canonical depth at the boundary, not inside Bend's point samples.
+		auto* canonical = cs::render::GetCanonicalSceneDepthSRV();
+		auto* partitioned = cs::engine::GetSceneDepthSRV();
+		if (!canonical || !partitioned || !_maskDepthCS)
+			return nullptr;
+		winrt::com_ptr<ID3D11Resource> resource;
+		canonical->GetResource(resource.put());
+		const auto texture = resource.try_as<ID3D11Texture2D>();
+		if (!texture)
+			return nullptr;
+		D3D11_TEXTURE2D_DESC desc{};
+		texture->GetDesc(&desc);
+		if (!_worldDepthTexture || _worldDepthTexture->desc.Width != desc.Width || _worldDepthTexture->desc.Height != desc.Height) {
+			_worldDepthTexture = CreateShadowTexture(desc.Width, desc.Height, DXGI_FORMAT_R32_FLOAT, "ScreenSpaceShadows/WorldDepth");
+		}
+		{
+			cs::render::annotation::ScopedEvent annotationScope("ScreenSpaceShadows/MaskDepth");
+			cs::render::ScopedComputeSharedDataBinding substrate(a_context);
+			if (!substrate.IsActive())
+				return nullptr;
+			cs::engine::ComputeOMScope scope(a_context);
+			auto* output = _worldDepthTexture->uav.get();
+			a_context->CSSetShaderResources(0, 1, &partitioned);
+			a_context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
+			a_context->CSSetShader(_maskDepthCS.get(), nullptr, 0);
+			a_context->Dispatch((desc.Width + 7) / 8, (desc.Height + 7) / 8, 1);
+		}
+		return _worldDepthTexture->srv.get();
 	}
 
 	bool ScreenSpaceShadows::TryGetMaskExtents(
@@ -265,7 +293,7 @@ namespace cs::features
 		std::vector<std::uint8_t> white;
 		try {
 			white.assign(
-				pixelCount,
+				pixelCount * 2,
 				sss_mask_binding::kWhiteR8Unorm);
 		} catch (...) {
 			if (L->should_log(spdlog::level::err)) {
@@ -285,15 +313,15 @@ namespace cs::features
 		textureDesc.Height = a_allocation.height;
 		textureDesc.MipLevels = 1;
 		textureDesc.ArraySize = 1;
-		textureDesc.Format = DXGI_FORMAT_R8_UNORM;
+		textureDesc.Format = DXGI_FORMAT_R8G8_UNORM;
 		textureDesc.SampleDesc.Count = 1;
 		textureDesc.Usage = D3D11_USAGE_IMMUTABLE;
 		textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 		D3D11_SUBRESOURCE_DATA initialData{};
 		initialData.pSysMem = white.data();
-		initialData.SysMemPitch = a_allocation.width;
+		initialData.SysMemPitch = a_allocation.width * 2;
 		initialData.SysMemSlicePitch =
-			static_cast<UINT>(pixelCount);
+			static_cast<UINT>(pixelCount * 2);
 
 		winrt::com_ptr<ID3D11Texture2D> texture;
 		if (FAILED(a_device->CreateTexture2D(
@@ -394,8 +422,10 @@ namespace cs::features
 			_realMaskReadyForDraw = false;
 			_raymarchCB.reset();
 			_maskTexture.reset();
+			_worldDepthTexture.reset();
 			_pointBorderSampler = nullptr;
 			_raymarchCS = nullptr;
+			_maskDepthCS = nullptr;
 			_whiteFallbackSRV = nullptr;
 			_allocWidth = 0;
 			_allocHeight = 0;
@@ -442,21 +472,6 @@ namespace cs::features
 		return fallbackReady;
 	}
 
-	cs::ScreenSpaceShadowsFeatureData ScreenSpaceShadows::GetCommonBufferData() const
-	{
-		// cached readiness avoids IsShadowMaskReady allocation
-		if (!_started.load(std::memory_order_acquire) || !_resourcesReady.load(std::memory_order_acquire)) {
-			return {};
-		}
-		return {
-			.EnableScreenSpaceShadows =
-				_settings.enabled ?
-					1u :
-					0u,
-			.ShadowContrast = _settings.shadowContrast
-		};
-	}
-
 	bool ScreenSpaceShadows::EnsureResources()
 	{
 		if (_resourcesReady.load(std::memory_order_acquire)) {
@@ -472,6 +487,11 @@ namespace cs::features
 		}
 
 		try {
+			_maskDepthCS.attach(static_cast<ID3D11ComputeShader*>(
+				cs::util::CompileShader(kMaskDepthPath, {}, "cs_5_0")));
+			if (!_maskDepthCS)
+				throw std::runtime_error("SSS depth boundary shader compilation failed");
+			cs::render::annotation::SetName(_maskDepthCS.get(), "ScreenSpaceShadows/MaskDepth.CS");
 			_raymarchCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<RaymarchCB>());
 			_raymarchCB->SetName("ScreenSpaceShadows/RaymarchConstants.Buffer");
@@ -503,6 +523,7 @@ namespace cs::features
 			return true;
 		} catch (const std::exception& e) {
 			_resourceInitFailed = true;
+			_maskDepthCS = nullptr;
 			_pointBorderSampler = nullptr;
 			_maskTexture.reset();
 			_raymarchCB.reset();
@@ -512,6 +533,7 @@ namespace cs::features
 			return false;
 		} catch (...) {
 			_resourceInitFailed = true;
+			_maskDepthCS = nullptr;
 			_pointBorderSampler = nullptr;
 			_maskTexture.reset();
 			_raymarchCB.reset();
@@ -532,7 +554,7 @@ namespace cs::features
 
 		const float width = static_cast<float>(state->screenWidth) * rtm->GetDynamicWidthRatio();
 		const float height = static_cast<float>(state->screenHeight) * rtm->GetDynamicHeightRatio();
-		return sss_math::ScaleSampleCount(_settings.sampleCount, width, height);
+		return sss_math::ScaleSampleCount(_settings.SampleCount, width, height);
 	}
 
 	ID3D11ComputeShader* ScreenSpaceShadows::GetComputeRaymarch()
@@ -546,7 +568,9 @@ namespace cs::features
 		if (!_raymarchCS) {
 			const auto sampleCount = std::to_string(scaledSampleCount);
 			const std::vector<std::pair<const char*, const char*>> defines{
-				{ "SAMPLE_COUNT", sampleCount.c_str() }
+				{ "SAMPLE_COUNT", sampleCount.c_str() },
+				// FO4: upstream's R32_FLOAT declaration also serves canonical depth.
+				{ "TERRAIN_BLENDING", "" }
 			};
 			_raymarchCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
 				cs::util::CompileShader(kRaymarchPath, defines, "cs_5_0")));
@@ -634,7 +658,7 @@ namespace cs::features
 
 		try {
 			auto* sky = RE::Sky::GetSingleton();
-			auto* shader = (_settings.enabled && sky && sky->mode.get() == RE::Sky::Mode::kFull) ?
+			auto* shader = (_settings.Enable && sky && sky->mode.get() == RE::Sky::Mode::kFull) ?
 			                   GetComputeRaymarch() :
 			                   nullptr;
 
@@ -642,7 +666,7 @@ namespace cs::features
 			float sy = 0.0f;
 			float sz = 0.0f;
 			if (shader && cs::engine::TryGetSunDirectionWS(sx, sy, sz)) {
-				auto* depthSRV = cs::engine::GetSceneDepthSRV();
+				auto* depthSRV = PrepareWorldDepth(context);
 				auto* rtm = cs::engine::GetRenderTargetManager();
 				if (depthSRV && rtm && _raymarchCB && _pointBorderSampler) {
 					const float widthRatio = rtm->GetDynamicWidthRatio();
@@ -663,6 +687,7 @@ namespace cs::features
 						if (!sceneCamera) {
 							return;
 						}
+						// FO4: sun row zero propagates light; Bend projects the toward-light direction.
 						DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sx, -sy, -sz, 0.0f);
 						DirectX::XMMATRIX vp = DirectX::XMLoadFloat4x4(&sceneCamera->ViewProjection);
 						DirectX::XMVECTOR clip = DirectX::XMVector4Transform(sunDir, vp);
@@ -707,9 +732,7 @@ namespace cs::features
 								cb.InvDepthTextureSize[1] = 1.0f / static_cast<float>(viewportSize[1]);
 								cb.DynamicRes[0] = widthRatio;
 								cb.DynamicRes[1] = heightRatio;
-								cb.SurfaceThickness = _settings.surfaceThickness;
-								cb.BilinearThreshold = _settings.bilinearThreshold;
-								cb.ShadowContrast = _settings.shadowContrast;
+								cb.settings = _settings;
 								_raymarchCB->Update(cb);
 								context->Dispatch(
 									static_cast<UINT>(dispatch.WaveCount[0]),
@@ -765,7 +788,7 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnPostDeferredLights()
 	{
-		// Restore plugin-owned t6 to null.
+		// FO4: release only the owned upstream mask slot after deferred consumers.
 		if (!_maskBound.exchange(false, std::memory_order_relaxed)) {
 			return;
 		}
@@ -794,7 +817,7 @@ namespace cs::features
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		a_sink
-			.Field("enabled", _settings.enabled)
+			.Field("enabled", _settings.Enable != 0)
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
 			.Field("white_fallback_ready", _whiteFallbackReady.load(std::memory_order_acquire))
 			.Field(
@@ -839,28 +862,30 @@ namespace cs::features
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
-		constexpr auto surfaceThickness = sss_settings::kSchema.EditRange(&Settings::surfaceThickness);
+		auto enabled = _settings.Enable != 0;
+		if (edit.Discrete(dmui::ui::Checkbox("Enable", &enabled)))
+			_settings.Enable = enabled ? 1u : 0u;
+		constexpr auto surfaceThickness = sss_settings::kSchema.EditRange(&Settings::SurfaceThickness);
 		edit.Continuous(dmui::ui::SliderScalar(
 			"Surface thickness",
-			&_settings.surfaceThickness,
+			&_settings.SurfaceThickness,
 			&surfaceThickness.min,
 			&surfaceThickness.max));
-		constexpr auto bilinearThreshold = sss_settings::kSchema.EditRange(&Settings::bilinearThreshold);
+		constexpr auto bilinearThreshold = sss_settings::kSchema.EditRange(&Settings::BilinearThreshold);
 		edit.Continuous(dmui::ui::SliderScalar(
 			"Bilinear threshold",
-			&_settings.bilinearThreshold,
+			&_settings.BilinearThreshold,
 			&bilinearThreshold.min,
 			&bilinearThreshold.max));
-		constexpr auto shadowContrast = sss_settings::kSchema.EditRange(&Settings::shadowContrast);
+		constexpr auto shadowContrast = sss_settings::kSchema.EditRange(&Settings::ShadowContrast);
 		edit.Continuous(dmui::ui::SliderScalar(
 			"Shadow contrast",
-			&_settings.shadowContrast,
+			&_settings.ShadowContrast,
 			&shadowContrast.min,
 			&shadowContrast.max));
 
-		auto sampleCount = static_cast<int>(_settings.sampleCount);
-		constexpr auto sampleCountRange = sss_settings::kSchema.EditRange(&Settings::sampleCount);
+		auto sampleCount = static_cast<int>(_settings.SampleCount);
+		constexpr auto sampleCountRange = sss_settings::kSchema.EditRange(&Settings::SampleCount);
 		constexpr int sampleCountMin = static_cast<int>(sampleCountRange.min);
 		constexpr int sampleCountMax = static_cast<int>(sampleCountRange.max);
 		if (edit.Continuous(dmui::ui::SliderScalar(
@@ -868,7 +893,7 @@ namespace cs::features
 				&sampleCount,
 				&sampleCountMin,
 				&sampleCountMax))) {
-			_settings.sampleCount = static_cast<std::uint32_t>(sampleCount);
+			_settings.SampleCount = static_cast<std::uint32_t>(sampleCount);
 		}
 
 		dmui::ui::TextDisabled(

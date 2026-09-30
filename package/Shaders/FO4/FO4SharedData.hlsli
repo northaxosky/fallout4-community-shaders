@@ -3,12 +3,6 @@
 
 namespace FO4SharedData
 {
-	struct ScreenSpaceShadowsSettings
-	{
-		bool EnableScreenSpaceShadows;
-		float ShadowContrast;
-		uint2 pad0;
-	};
 	struct ScreenSpaceGISettings
 	{
 		bool EnableScreenSpaceGI;
@@ -37,7 +31,6 @@ namespace FO4SharedData
 	};
 	cbuffer FO4SharedData : register(b7)
 	{
-		ScreenSpaceShadowsSettings screenSpaceShadowsSettings;
 		ScreenSpaceGISettings screenSpaceGISettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
 		WaterEffectsSettings waterEffectsSettings;

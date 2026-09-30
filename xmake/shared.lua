@@ -10,6 +10,9 @@ function main(target)
             "package/Shaders/Common/Spherical Harmonics/LICENSE",
             "features/Dynamic Cubemaps/Shaders/DynamicCubemaps/defaultcubemap.dds",
             "features/Screen Space GI/Shaders/ScreenSpaceGI/fast_2uges.dds",
+            "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/RaymarchCS.hlsl",
+            "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/bend_sss_gpu.hlsli",
+            "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli",
             "features/Upscaling/Shaders/Upscaling/RCAS/RCAS.hlsl",
             "features/Water Effects/Shaders/WaterEffects/watercaustics.dds"
         },

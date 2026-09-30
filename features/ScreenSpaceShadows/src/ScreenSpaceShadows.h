@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "ScreenSpaceShadowsSettings.h"
 #include "SssMaskBinding.h"
@@ -38,8 +37,6 @@ namespace cs::features
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 
-		cs::ScreenSpaceShadowsFeatureData GetCommonBufferData() const;
-
 		using Settings = sss_settings::Settings;
 
 	private:
@@ -51,12 +48,10 @@ namespace cs::features
 			float NearDepthValue;
 			float InvDepthTextureSize[2];
 			float DynamicRes[2];
-			float SurfaceThickness;
-			float BilinearThreshold;
-			float ShadowContrast;
-			float Padding;
+			Settings settings;
 		};
-		static_assert(sizeof(RaymarchCB) % 16 == 0);
+		static_assert(sizeof(RaymarchCB) == 80);
+		static_assert(offsetof(RaymarchCB, settings) == 48);
 
 		ScreenSpaceShadows() = default;
 
@@ -77,11 +72,12 @@ namespace cs::features
 			ID3D11Device* a_device,
 			sss_mask_binding::Extent a_allocation);
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
+		ID3D11ShaderResourceView* PrepareWorldDepth(ID3D11DeviceContext* a_context);
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
 		FeatureDebugTexture GetShadowMaskDebugTexture() const;
 
-		static constexpr uint kMaskPSSlot = 24;
+		static constexpr uint kMaskPSSlot = 45;
 
 		Settings _settings;
 		std::atomic_bool _started{ false };
@@ -115,8 +111,10 @@ namespace cs::features
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _raymarchCB;
 		std::unique_ptr<cs::buffer::Texture2D> _maskTexture;
+		std::unique_ptr<cs::buffer::Texture2D> _worldDepthTexture;
 		winrt::com_ptr<ID3D11SamplerState> _pointBorderSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _raymarchCS;
+		winrt::com_ptr<ID3D11ComputeShader> _maskDepthCS;
 		winrt::com_ptr<ID3D11ShaderResourceView> _whiteFallbackSRV;
 		std::uint32_t _allocWidth = 0;
 		std::uint32_t _allocHeight = 0;

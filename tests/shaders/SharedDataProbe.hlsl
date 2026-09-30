@@ -12,7 +12,7 @@ float4 main(float4 position : SV_Position) : SV_Target
 	float value = FrameBuffer::CameraViewProj[0][0] + FrameBuffer::DynamicResolutionParams2.w;
 	value += SharedData::WaterData[24].w + SharedData::HDRData.w;
 	value += SharedData::grassLightingSettings.Glossiness + SharedData::horizonFixSettings.farWaterDistance;
-	value += FO4SharedData::screenSpaceShadowsSettings.ShadowContrast + FO4SharedData::DeltaTime;
+	value += FO4SharedData::DeltaTime;
 	value += SharedData::DepthTexture.Load(int3(position.xy, 0)).x;
 #	ifdef ABI_SLOT_COLLISION
 	value += CollisionValue;

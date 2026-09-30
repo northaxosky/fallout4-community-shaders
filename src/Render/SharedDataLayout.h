@@ -91,7 +91,6 @@ namespace cs::render
 
 	struct alignas(16) FO4SharedDataCB
 	{
-		ScreenSpaceShadowsFeatureData screenSpaceShadowsSettings{};
 		ScreenSpaceGIFeatureData screenSpaceGISettings{};
 		InverseSquareLightingFeatureData inverseSquareLightingSettings{};
 		WaterEffectsFeatureData waterEffectsSettings{};
@@ -101,10 +100,10 @@ namespace cs::render
 		DirectX::XMFLOAT2 HeightRange{}, DebugHeightRange{};
 		float DeltaTime = 0.0f, pad0[3]{};
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 128);
-	static_assert(offsetof(FO4SharedDataCB, WetnessDebugVisualization) == 80);
-	static_assert(offsetof(FO4SharedDataCB, HeightRange) == 96);
-	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 112);
+	static_assert(sizeof(FO4SharedDataCB) == 112);
+	static_assert(offsetof(FO4SharedDataCB, WetnessDebugVisualization) == 64);
+	static_assert(offsetof(FO4SharedDataCB, HeightRange) == 80);
+	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 96);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

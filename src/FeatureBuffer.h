@@ -6,14 +6,6 @@
 namespace cs
 {
 	// Feature contributors retain host contracts; the substrate packs shared and FO4-only fields.
-	struct alignas(16) ScreenSpaceShadowsFeatureData
-	{
-		std::uint32_t EnableScreenSpaceShadows = 0;
-		float ShadowContrast = 0.0f;
-		std::uint32_t pad0[2]{};
-	};
-	static_assert(sizeof(ScreenSpaceShadowsFeatureData) == 16);
-
 	struct alignas(16) ScreenSpaceGIFeatureData
 	{
 		std::uint32_t EnableScreenSpaceGI = 0;
@@ -88,7 +80,6 @@ namespace cs
 
 	struct alignas(16) FeatureDataCB
 	{
-		ScreenSpaceShadowsFeatureData screenSpaceShadowsSettings;
 		ScreenSpaceGIFeatureData screenSpaceGISettings;
 		WetnessEffectsFeatureData wetnessEffectsSettings;
 		TerrainShadowsFeatureData terrainShadowsSettings;
@@ -97,9 +88,9 @@ namespace cs
 		DynamicCubemapsFeatureData dynamicCubemapsSettings;
 		ExponentialHeightFogFeatureData exponentialHeightFogSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 192);
+	static_assert(sizeof(FeatureDataCB) == 176);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
-	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
+	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 16);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
 	static_assert(offsetof(WetnessEffectsFeatureData, MaxRainWetness) == 4);
 	static_assert(offsetof(WetnessEffectsFeatureData, MinRainWetness) == 8);
@@ -112,28 +103,28 @@ namespace cs
 	static_assert(offsetof(WetnessEffectsFeatureData, ShoreRange) == 36);
 	static_assert(offsetof(WetnessEffectsFeatureData, EnableWetnessEffects) == 40);
 	static_assert(offsetof(WetnessEffectsFeatureData, Active) == 44);
-	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 80);
+	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 64);
 	static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);
 	static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);
 	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
 	static_assert(offsetof(TerrainShadowsFeatureData, HeightRange) == 32);
 	static_assert(offsetof(TerrainShadowsFeatureData, DebugHeightRange) == 40);
-	static_assert(offsetof(FeatureDataCB, inverseSquareLightingSettings) == 128);
+	static_assert(offsetof(FeatureDataCB, inverseSquareLightingSettings) == 112);
 	static_assert(offsetof(InverseSquareLightingFeatureData, Mode) == 0);
 	static_assert(offsetof(InverseSquareLightingFeatureData, ExteriorStrength) == 4);
 	static_assert(offsetof(InverseSquareLightingFeatureData, InteriorStrength) == 8);
 	static_assert(offsetof(InverseSquareLightingFeatureData, NearFieldDistance) == 12);
-	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 144);
+	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 128);
 	static_assert(offsetof(WaterEffectsFeatureData, Mode) == 0);
 	static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
 	static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
 	static_assert(offsetof(WaterEffectsFeatureData, pad0) == 12);
-	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 160);
+	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 144);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 4);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 8);
-	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 176);
+	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 160);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, Mode) == 0);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, DensityMultiplier) == 4);
 	static_assert(

@@ -23,7 +23,7 @@ FO4 consumes unchanged files through `xmake\shared.lua`; no upstream path can be
 
 ## Shared consumption boundary
 
-Phase 2A consumes byte-identical RCAS, shader licenses, default cubemap, SSGI noise and water
+Shared consumption includes byte-identical SSS shaders, RCAS, shader licenses, default cubemap, SSGI noise and water
 caustics assets from the shared pin. Bend's CPU header is identical modulo comments; its
 existing SSS consumer uses the unchanged shared header. PerformanceOverlay uses shared QPC/FPS
 helpers, not the profiler or A/B subsystem. `src/Shared/PerfUtils.h` supplies Windows declarations
@@ -51,9 +51,6 @@ feature tables; this namespace separation is a Chosen ownership policy, not an e
 | Chosen | `DynamicCubemaps/UpdateCubemapCS.hlsl` | `FO4/DynamicCubemaps/UpdateCubemapCS.hlsl` |
 | Chosen | `ExponentialHeightFog/ExponentialHeightFog.hlsli` | `FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli` |
 | Chosen | `InverseSquareLighting/InverseSquareLighting.hlsli` | `FO4/InverseSquareLighting/InverseSquareLighting.hlsli` |
-| Chosen | `ScreenSpaceShadows/RaymarchCS.hlsl` | `FO4/ScreenSpaceShadows/RaymarchCS.hlsl` |
-| Chosen | `ScreenSpaceShadows/ScreenSpaceShadows.hlsli` | `FO4/ScreenSpaceShadows/ScreenSpaceShadows.hlsli` |
-| Chosen | `ScreenSpaceShadows/bend_sss_gpu.hlsli` | `FO4/ScreenSpaceShadows/bend_sss_gpu.hlsli` |
 | Chosen | `TerrainShadows/ShadowUpdate.cs.hlsl` | `FO4/TerrainShadows/ShadowUpdate.cs.hlsl` |
 | Chosen | `TerrainShadows/TerrainShadows.hlsli` | `FO4/TerrainShadows/TerrainShadows.hlsli` |
 | Chosen | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
@@ -82,12 +79,17 @@ Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
 | Chosen | Keep one FO4-only b7 for unmatched modes, debug settings, delta time and player-cell water plane; move equivalent fields to upstream b4/b5/b6 | Main exposes one player-cell plane, not upstream's 25-tile water data. WaterData and WaterSystemHeight retain upstream absent sentinels; the absolute player-cell plane remains a FO4 consumer input. DR and NDC-to-view equivalents use b4, terrain/wetness/cubemap enable fields use b6 | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
 | Chosen | FrameParams is zero; unvalidated celestial/HDR/map/shadow fields retain upstream absent values | No validated FO4 inverse-gamma/frame-flag or corresponding celestial/HDR source is consumed. SunDirection uses toward-light direction, while SunColor remains absent rather than inventing a sky-disc colour; FrameCount follows main's temporal method and AlwaysActive follows engine frame count | `SharedData.cpp` `BuildSharedData`, `SharedDataLayout.h` |
 
-SSS still uses main's partitioned-depth exclusion: first-person geometry neither casts nor receives
-world SSS. It does not switch to canonical depth in this phase. Feature-off engine variants include
+SSS masks canonical depth at its input boundary: first-person geometry neither casts nor receives
+world SSS. Its settings live only in its raymarch cbuffer, not b6 or b7. Feature-off engine variants include
 no substrate, and the binder runs only for contributed stages; native b12 remains owned by the engine.
 
 ## Upstream PR candidates
 
+- `features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:7`:
+  adds 0.5 before truncating pixel-centered `SV_POSITION`, reading the next mask texel in both axes.
+  Bend writes `floor(write_xy)` and the upstream Lighting/DistantTree callers pass `SV_POSITION`
+  unchanged. Investigate removing the extra offset upstream; FO4 retains main's corrected address
+  by subtracting 0.5 in the consumer include before calling the unchanged upstream sampler.
 - `src/Utils/PerfUtils.h:41`: `Mean` implicitly converts `size_t` to float, raising C4267
   under FO4's `/W4 /WX`; an explicit float conversion preserves its current arithmetic.
   FO4 scopes the warning in `src/Shared/PerfUtils.h`, without changing shared behavior.
@@ -177,14 +179,32 @@ Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package
 
 ## Screen Space Shadows
 
+Feature classification: **extension candidate** — Chosen first-person exclusion, pixel-address correction, ownership/fallback/persistence policy, and pending distant-tree/alpha receiver mappings.
+
 Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceShadows`, consumers in
-`package\Shaders\BSDFLightShader.hlsl`.
+`package\Shaders\BSDFLightShader.hlsl` through `FO4/ScreenSpaceShadowConsumer.hlsli`.
+All three upstream shaders and Bend's CPU header are consumed unchanged through `xmake\shared.lua`.
+BendSettings names, keys, defaults and edit ranges match upstream; its own b1 dispatch constants
+carry the settings. The output is upstream's R8G8_UNORM front/back visibility, cleared to white
+each frame, with no history. Canonical t17 remains shared and includes reprojected near depth;
+the SSS boundary masks only its private raymarch input.
 
 ### Translations
 
-| Upstream | Fallout 4 | Why | Where |
-|---|---|---|---|
-| World-only SSS with ordinary projection depth | Both Bend point samples map first-person depth (`raw <= 0.01`) to far depth `1`; world depth becomes `raw * 1.01 - 0.01` | FO4 merges first-person and world projections into deferred depth; the dispatch light coordinate uses the world projection | `RaymarchCS.hlsl` `GetWorldShadowDepth`, `bend_sss_gpu.hlsli` depth reads; shared classification/remap in `Common\DepthPartition.hlsli`, also used by DeferredPosition and SSGI |
-| First-person forward lighting does not consume SSS | First-person pixels remain white in the cleared mask through Bend's far-depth return after its group barrier; consumers stay unchanged | FO4 first person uses deferred lighting, so it must neither receive nor cast world SSS | `bend_sss_gpu.hlsli` `WriteScreenSpaceShadow`, `ScreenSpaceShadows.cpp` white clear |
+| Kind | Upstream | Fallout 4 | Why / evidence | Where |
+|---|---|---|---|---|
+| Forced | Ordinary world-projection scene depth and its matching VP | Read canonical R32_FLOAT at t17 through the substrate binder; dispatch Bend on the masked copy at its unchanged CS t0, using the copied world+jitter record's row-vector ViewProjection | fallout4-re engine-facts Native composite depth partition, b12 near reprojection and World record at PostDeferredPrePass: native world depth is `mad(raw,1.01,-0.01)` and near depth has a different projection. The R32 declaration is selected by upstream's `TERRAIN_BLENDING` define; no terrain feature is implied | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `ScreenSpaceShadows.cpp` `PrepareWorldDepth` / `GetComputeRaymarch` / `OnPreDeferredLights` |
+| Chosen | First-person forward materials do not consume deferred SSS | Retain main e23674fa0: raw depth `<=0.01` becomes far depth in a private boundary pass, so both Bend point reads exclude near casters; the consumer independently returns 1 for near receivers | fallout4-re engine-facts Native composite depth partition and BSLighting forward-pass source prove the partition and deferred first-person route, not a requirement to exclude it. Canonical near reprojection makes inclusion possible; world geometry hidden behind the weapon is unavailable. Exclusion is main's behavior policy, not an unavoidable partition limitation | `FO4/ScreenSpaceShadows/MaskDepthCS.hlsl`, `FO4/ScreenSpaceShadowConsumer.hlsli`, WARP depth-boundary fixture in `ShaderCompileTests.cpp` |
+| Chosen | Consumer adds 0.5 to pixel-centered SV_POSITION before integer conversion | Retain main's corrected pixel address by subtracting 0.5 at the FO4 consumer boundary, then call unchanged upstream sampling | Upstream Lighting.hlsl and FO4 BSDFLightShader.hlsl both pass pixel-centered SV_POSITION; Bend writes floored pixel coordinates. There is no demonstrated rasterization difference, so this is a retained main bug fix, not a Forced translation; see Upstream PR candidates | `FO4/ScreenSpaceShadowConsumer.hlsli` `FO4ScreenSpaceShadowVisibility` |
+| Forced | Normalize and negate the active sun light's propagation direction | Normalize FO4 sun world-rotation row zero and project its negative with w=0 | fallout4-re engine-facts Sun light orientation / Deferred sun constant: row zero is sun-to-scene; native BSDFLight negates that same worldDirection into view-space toward-light b2 c1 | `World/Sky.cpp` `TryGetSunDirectionWS`, `ScreenSpaceShadows.cpp` `OnPreDeferredLights` |
+| Forced | Prepass before material lighting consumers | Clear/dispatch before DeferredLightsImpl, sample unchanged upstream t45 through an FO4 include in directional light and focused shadow families, release the owned binding afterward | fallout4-re engine-facts Sun light passes and BSLighting forward-pass source: FO4 ordinary world/first-person materials are prepass-drawn and lit in deferred light passes. Reconstructed BSDFLight owns native t0–t5, not t45; no consumer-slot translation is needed | `ScreenSpaceShadows.cpp` `Load` / `BindShadowMask` / `OnPostDeferredLights`, `BSDFLightShader.hlsl` directional and shadow-only families |
+| Forced | Lighting.hlsl separates direct visibility x and transmission visibility x/y by facing | Directional split families apply x to their native shared shadow term when front-facing, y to back-facing wrap/transmission; the no-cascade family applies direct and transmission separately | Reconstructed `BSDFLightShader.hlsl` DIRSPLITS1/2/3 combines direct and transmission into finalDiffuse before multiplying the shared shadow, while UNSHADOWED has no shared shadow. Front transmission already receives x through that term, so the extra multiplier is back-facing only; no new shading model is introduced | `FO4/ScreenSpaceShadowConsumer.hlsli` `FO4BackTransmissionScreenSpaceShadow`, `BSDFLightShader.hlsl` `backfaceWrap` / `forwardBlend` and UNSHADOWED directional block |
+| Chosen | Skyrim feature lifecycle, JSON persistence and shader activation | FO4 load=false activation, upstream-cased TOML keys, forwarding-only UI, ownership/hash gate, full-extent white R8G8 fallback with allocation backoff, telemetry and mask preview | Repository lifecycle, persistence and fail-closed renderer policies are host architecture, not engine-imposed algorithm differences. `Enable` toggles generation live; disabled/non-full-sky frames stay white without a shared feature block | `ScreenSpaceShadowsSettings.h`, `ScreenSpaceShadows.cpp`, `SssMaskBinding.{h,cpp}` |
+
+### Pending
+
+| Kind | Upstream | Notes / where |
+|---|---|---|
+| Chosen | DistantTree's 0.8 SSS strength and forward/alpha receiver coverage | Deferred material receivers have no identified distant-tree discriminator; do not invent one or bind the mask to unreached forward routes. fallout4-re engine-facts Stock forward-pass census leaves distant-tree relighting and alpha route coverage for capture proof; `BSDFLightShader.hlsl`, `BSDistantTreeShader.hlsl`, `BSLightingShader.hlsl` |
 
 [upstream]: https://github.com/community-shaders/skyrim-community-shaders

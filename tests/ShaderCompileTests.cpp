@@ -3,15 +3,20 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <compare>
 #include <cstdio>
+#include <cstring>
+#include <d3d11.h>
 #include <d3d11shader.h>
 #include <d3dcompiler.h>
 #include <filesystem>
 #include <optional>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -152,6 +157,111 @@ namespace
 		return {};
 	}
 
+	std::string VerifySSSDepthBoundary(const std::filesystem::path& a_root)
+	{
+		try {
+			const auto checked = [](HRESULT a_result) {
+				if (FAILED(a_result))
+					throw std::runtime_error("D3D11 SSS depth-boundary fixture failed");
+			};
+			Microsoft::WRL::ComPtr<ID3D11Device> device;
+			Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+			checked(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+				D3D11_SDK_VERSION, device.GetAddressOf(), nullptr, context.GetAddressOf()));
+			std::string error;
+			const auto blob = cs::util::CompileShaderToBlob(
+				(a_root / "FO4" / "ScreenSpaceShadows" / "MaskDepthCS.hlsl").c_str(),
+				{}, "cs_5_0", "main", &error, a_root);
+			if (!blob)
+				return error;
+			Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader;
+			checked(device->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, shader.GetAddressOf()));
+			constexpr std::array partitioned{ 0.0f, 0.005f, 0.01f, 0.01001f, 0.5f, 1.0f };
+			constexpr std::array canonical{ 0.2f, 0.4f, 0.6f, 0.0001101f, 0.495f, 1.0f };
+			constexpr std::array expected{ 1.0f, 1.0f, 1.0f, canonical[3], canonical[4], 1.0f };
+			D3D11_TEXTURE2D_DESC desc{};
+			desc.Width = static_cast<UINT>(partitioned.size());
+			desc.Height = desc.MipLevels = desc.ArraySize = desc.SampleDesc.Count = 1;
+			desc.Format = DXGI_FORMAT_R32_FLOAT;
+			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			const auto input = [&](const auto& a_values) {
+				D3D11_SUBRESOURCE_DATA data{};
+				data.pSysMem = a_values.data();
+				data.SysMemPitch = static_cast<UINT>(sizeof(a_values));
+				Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+				checked(device->CreateTexture2D(&desc, &data, texture.GetAddressOf()));
+				Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
+				checked(device->CreateShaderResourceView(texture.Get(), nullptr, view.GetAddressOf()));
+				return view;
+			};
+			const auto raw = input(partitioned);
+			const auto world = input(canonical);
+			desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+			Microsoft::WRL::ComPtr<ID3D11Texture2D> output;
+			checked(device->CreateTexture2D(&desc, nullptr, output.GetAddressOf()));
+			Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> uav;
+			checked(device->CreateUnorderedAccessView(output.Get(), nullptr, uav.GetAddressOf()));
+			auto* rawView = raw.Get();
+			auto* worldView = world.Get();
+			auto* outputView = uav.Get();
+			context->CSSetShaderResources(0, 1, &rawView);
+			context->CSSetShaderResources(17, 1, &worldView);
+			context->CSSetUnorderedAccessViews(0, 1, &outputView, nullptr);
+			context->CSSetShader(shader.Get(), nullptr, 0);
+			context->Dispatch(1, 1, 1);
+			context->ClearState();
+			desc.BindFlags = 0;
+			desc.Usage = D3D11_USAGE_STAGING;
+			desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+			Microsoft::WRL::ComPtr<ID3D11Texture2D> readback;
+			checked(device->CreateTexture2D(&desc, nullptr, readback.GetAddressOf()));
+			const auto read = [&] {
+				context->CopyResource(readback.Get(), output.Get());
+				D3D11_MAPPED_SUBRESOURCE mapped{};
+				checked(context->Map(readback.Get(), 0, D3D11_MAP_READ, 0, &mapped));
+				std::array<float, expected.size()> values{};
+				std::memcpy(values.data(), mapped.pData, sizeof(values));
+				context->Unmap(readback.Get(), 0);
+				return values;
+			};
+			if (read() != expected)
+				return "near samples cast shadows or world canonical depth changed";
+			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			desc.Usage = D3D11_USAGE_DEFAULT;
+			desc.CPUAccessFlags = 0;
+			desc.Format = DXGI_FORMAT_R8G8_UNORM;
+			const auto mask = input(std::array<std::uint8_t, 12>{
+				25, 50, 50, 75, 75, 100, 100, 125, 125, 150, 150, 175 });
+			for (const bool back : { false, true }) {
+				const auto consumer = cs::util::CompileShaderToBlob((a_root / "SSSConsumerProbe.hlsl").c_str(),
+					back ? std::vector<std::pair<const char*, const char*>>{ { "SSS_BACK_TRANSMISSION", "1" } } :
+						   std::vector<std::pair<const char*, const char*>>{},
+					"cs_5_0", "main", &error, a_root);
+				if (!consumer)
+					return error;
+				shader.Reset();
+				checked(device->CreateComputeShader(consumer->GetBufferPointer(), consumer->GetBufferSize(), nullptr, shader.GetAddressOf()));
+				auto* maskView = mask.Get();
+				context->CSSetShaderResources(0, 1, &rawView);
+				context->CSSetShaderResources(45, 1, &maskView);
+				context->CSSetUnorderedAccessViews(0, 1, &outputView, nullptr);
+				context->CSSetShader(shader.Get(), nullptr, 0);
+				context->Dispatch(1, 1, 1);
+				context->ClearState();
+				const auto actual = read();
+				for (std::size_t pixel = 0; pixel < actual.size(); ++pixel) {
+					const auto visibility = pixel < 3 ? 1.0f :
+					                                    (static_cast<float>(100 + (pixel - 3) * 25 + (back ? 25 : 0)) / 255.0f);
+					if (std::abs(actual[pixel] - visibility) > 1e-6f)
+						return "near receiver shadowed, mask pixel shifted, or front/back channel mismatched";
+				}
+			}
+			return {};
+		} catch (const std::exception& a_error) {
+			return a_error.what();
+		}
+	}
+
 	struct ABIField
 	{
 		const char* name;
@@ -233,7 +343,6 @@ namespace
 		const auto pbr = FIELDS(TruePBRSettings, F(VertexAOStrength), F(EnableMicroShadows), F(MicroShadowStrength), F(pad));
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
-		const auto sss = FIELDS(cs::ScreenSpaceShadowsFeatureData, F(EnableScreenSpaceShadows), F(ShadowContrast), F(pad0));
 		const auto gi = FIELDS(cs::ScreenSpaceGIFeatureData, F(EnableScreenSpaceGI), F(pad0));
 		const auto inverse = FIELDS(cs::InverseSquareLightingFeatureData, F(Mode), F(ExteriorStrength), F(InteriorStrength), F(NearFieldDistance));
 		const auto water = FIELDS(cs::WaterEffectsFeatureData, F(Mode), F(HasWater), F(WaterHeight), F(pad0));
@@ -257,7 +366,7 @@ namespace
 			{ 6, "enbSettings", enb }, { 6, "terrainBlendingSettings", blending },
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
-			{ 7, "screenSpaceShadowsSettings", sss }, { 7, "screenSpaceGISettings", gi },
+			{ 7, "screenSpaceGISettings", gi },
 			{ 7, "inverseSquareLightingSettings", inverse }, { 7, "waterEffectsSettings", water },
 			{ 7, "exponentialHeightFogSettings", fo4fog }
 		};
@@ -325,7 +434,7 @@ namespace
 			ABI(SharedFeatureDataCB, skinData), ABI(SharedFeatureDataCB, horizonFixSettings)
 		};
 		const ABIField fo4[]{
-			ABI(FO4SharedDataCB, screenSpaceShadowsSettings), ABI(FO4SharedDataCB, screenSpaceGISettings),
+			ABI(FO4SharedDataCB, screenSpaceGISettings),
 			ABI(FO4SharedDataCB, inverseSquareLightingSettings), ABI(FO4SharedDataCB, waterEffectsSettings),
 			ABI(FO4SharedDataCB, exponentialHeightFogSettings), ABI(FO4SharedDataCB, WetnessDebugVisualization),
 			ABI(FO4SharedDataCB, TerrainShadowMode), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
@@ -443,6 +552,15 @@ namespace
 		}
 
 		const auto terrain = a_root / "TerrainShadows";
+		a_jobs.push_back({ .path = a_root / "ScreenSpaceShadows" / "RaymarchCS.hlsl",
+			.defines = { { "SAMPLE_COUNT", "64" }, { "TERRAIN_BLENDING", "" } },
+			.description = "upstream Bend on R32 canonical world depth",
+			.required = { CB(1), Texture(0), Sampler(0) },
+			.forbidden = { CB(7) } });
+		a_jobs.push_back({ .path = a_root / "FO4" / "ScreenSpaceShadows" / "MaskDepthCS.hlsl",
+			.description = "SSS first-person casting boundary",
+			.required = { Texture(0), Texture(17) },
+			.forbidden = { CB(7) } });
 		a_jobs.push_back({ .path = a_root / "FO4" / "TerrainShadows" / "ShadowUpdate.cs.hlsl",
 			.description = "terrain shadow update" });
 		a_jobs.push_back({ .path = terrain / "ShadowStatistics.cs.hlsl",
@@ -512,7 +630,7 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFLight feature off",
 			.forbidden = {
-				CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(24), Texture(30), Texture(32),
+				CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(45), Texture(30), Texture(32),
 				Sampler(13), Sampler(14) } });
 		auto directionalFeatures = directional;
 		directionalFeatures.insert(
@@ -528,8 +646,43 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFLight feature composition",
 			.required = {
-				CB(6), CB(7), Texture(24), Texture(30), Texture(32),
+				CB(6), CB(7), Texture(45), Texture(30), Texture(32),
 				Sampler(13), Sampler(14) } });
+		for (const auto& [family, splits, shadowOnly, blend] : {
+				 std::tuple{ "BSDFLIGHT_PS_DIRSPLITS1", "1", false, false },
+				 std::tuple{ "BSDFLIGHT_PS_DIRSPLITS3", "3", false, false },
+				 std::tuple{ "BSDFLIGHT_PS_SHADOW_ONLY", "1", true, false },
+				 std::tuple{ "BSDFLIGHT_PS_SHADOW_ONLY_BLEND_SPLIT", "1", true, true } }) {
+			ShaderDefines defines{
+				{ family, "1" }, { "DIRECTIONAL", "1" },
+				{ "SHADOW", "1" }, { "DIRSPLITS", splits }, { "SPECULAR", "1" },
+				{ "RGBSPEC", "1" }, { "FILTER_PCF1", "1" }, { "SCREEN_SPACE_SHADOWS", "1" }
+			};
+			if (shadowOnly)
+				defines.emplace_back("SHADOW_ONLY", "1");
+			if (!blend)
+				defines.emplace_back("LIGHT_TYPE", "1");
+			if (blend)
+				defines.emplace_back("BLENDSPLIT", "1");
+			a_jobs.push_back({ .path = bsdfLight,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = family,
+				.required = { Texture(3), Texture(45) },
+				.forbidden = { CB(7), Texture(24) } });
+		}
+		for (const bool specular : { false, true }) {
+			ShaderDefines defines{ { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRECTIONAL", "1" },
+				{ "LIGHT_TYPE", "1" }, { "DIRSPLITS", "2" }, { "RGBSPEC", "1" }, { "SCREEN_SPACE_SHADOWS", "1" } };
+			if (specular)
+				defines.insert(defines.end(), { { "SPECULAR", "1" }, { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" } });
+			a_jobs.push_back({ .path = bsdfLight,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = specular ? "SSS no-cascade wetness composition" : "SSS directional light without cascades",
+				.required = { Texture(3), Texture(45) },
+				.forbidden = specular ? std::vector<Resource>{ Texture(24) } : std::vector<Resource>{ CB(7), Texture(24) } });
+		}
 
 		const auto composite = a_root / "BSDFCompositeShader.hlsl";
 		// SSGI's vertex-AO write must compile for opaque, vertex-colour and blended prepass bodies.
@@ -738,6 +891,10 @@ int main(int argc, char** argv)
 	int failures = 0;
 	if (const auto error = VerifySubstrateABI(argv[1]); !error.empty()) {
 		std::printf("FAIL: substrate ABI: %s\n", error.c_str());
+		++failures;
+	}
+	if (const auto error = VerifySSSDepthBoundary(argv[1]); !error.empty()) {
+		std::printf("FAIL: SSS depth boundary: %s\n", error.c_str());
 		++failures;
 	}
 	for (const auto& job : jobs) {

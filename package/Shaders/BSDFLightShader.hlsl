@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-#	include "FO4/ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
+#	include "FO4/ScreenSpaceShadowConsumer.hlsli"
 #endif
 
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
@@ -2270,7 +2270,8 @@ float2 goboUV = float2(omniUV.x,
 		shadow = fadeFactor * (shadow - 1.0) + 1.0;
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-		shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
+		shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+		float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 		shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -2433,11 +2434,17 @@ float2 goboUV = float2(omniUV.x,
 		finalDiffuse += SunColor_HDR.xyz * ambientTerm;
 
 		float backfaceWrap = saturate(-NdotL_raw);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+		backfaceWrap *= transmissionContactShadow;
+#	endif
 		finalDiffuse += SunColor_HDR.xyz * (backfaceWrap * albedoPremult);
 
 		float forwardBlend =
 			saturate((NdotL_raw + brdfModulator) / (brdfModulator + 1.0));
 		forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+		forwardBlend *= transmissionContactShadow;
+#	endif
 		finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
 		float specMix = mad(schlickFres, -0.5, 1.0);
@@ -3026,7 +3033,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
+			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -3275,6 +3283,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 			float backfaceWrap = saturate(-NdotL_raw);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			backfaceWrap *= transmissionContactShadow;
+#	endif
 #	ifdef FO4_DS2_REASSOC_ORDER
 			finalDiffuse += SunColor_HDR.xyz * (backfaceWrap * albedoPremult);
 #	else
@@ -3289,6 +3300,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		saturate((brdfModulator + NdotL_raw) / (brdfModulator + 1.0));
 #	endif
 			forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			forwardBlend *= transmissionContactShadow;
+#	endif
 			finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
 #	ifdef FO4_DS2_REASSOC_ORDER
@@ -3980,7 +3994,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float shadow = ComputeDirectionalShadow(posView, linearizedDepth);
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
+			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -4240,6 +4255,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 			float backfaceWrap = saturate(-NdotL_raw);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			backfaceWrap *= transmissionContactShadow;
+#	endif
 #	ifdef FO4_DS3_REASSOC_ORDER
 			finalDiffuse += SunColor_HDR.xyz * (backfaceWrap * albedoPremult);
 #	else
@@ -4254,6 +4272,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		saturate((brdfModulator + NdotL_raw) / (brdfModulator + 1.0));
 #	endif
 			forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			forwardBlend *= transmissionContactShadow;
+#	endif
 			finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
 #	ifdef FO4_DS3_REASSOC_ORDER
@@ -5080,7 +5101,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -5333,7 +5354,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #		endif
 #		if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -5360,7 +5381,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	float splitShadow = shadowBlend + 1.0;
 
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-	splitShadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+	splitShadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #		endif
 #		if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 	splitShadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -5989,7 +6010,19 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	endif
 
 #	ifdef DIRECTIONAL
+#		ifdef SCREEN_SPACE_SHADOWS
+			float2 contactVisibility = FO4ScreenSpaceShadowVisibility(input.position.xyz, depth);
+			float directContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : 1.0;
+			float transmissionContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : contactVisibility.y;
+			finalDiffuse *= directContactShadow;
+#			ifdef SPECULAR
+			brdfSpecular *= directContactShadow;
+#			endif
+#		endif
 			float backfaceWrap = saturate(-NdotL_raw);
+#		ifdef SCREEN_SPACE_SHADOWS
+			backfaceWrap *= transmissionContactShadow;
+#		endif
 #		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
 			finalDiffuse += LightColor_HDR.xyz * (backfaceWrap * albedoPremult);
 #		else
@@ -6004,6 +6037,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			saturate((NdotL_raw + brdfModulator) / (brdfModulator + 1.0));
 #		endif
 			forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+#		ifdef SCREEN_SPACE_SHADOWS
+			forwardBlend *= transmissionContactShadow;
+#		endif
 			finalDiffuse += (forwardBlend * LightColor_HDR.xyz) * albedoSample.xyz;
 #	endif
 
@@ -6039,6 +6075,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 wetDiffuse = finalDiffuse * attenuation;
 #		else
 		float3 wetLightColor = LightColor_HDR.xyz;
+#			if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+		wetLightColor *= directContactShadow;
+#			endif
 #			if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 		// finalDiffuse and brdfSpecular already carry caustics; the coat's own sun
 		// lobe is built from the raw light color, so modulate it too.

@@ -169,6 +169,21 @@ namespace
 		CHECK(clamped.maxShoreWetness == 0.0f && clamped.shoreRange == 1);
 	}
 
+	void TestSSSSettings()
+	{
+		using namespace cs::features::sss_settings;
+		BendSettings value;
+		std::string error;
+		CHECK(Parse(kSchema, toml::parse("[settings]\nEnable = 0\nSampleCount = 4\nShadowContrast = 2.0\n"), value, error));
+		CHECK(value.Enable == 0 && value.SampleCount == 4 && value.ShadowContrast == 2.0f);
+		const auto delta = SerializeDelta(kSchema, value, BendSettings{});
+		BendSettings restored;
+		CHECK(Parse(kSchema, toml::table{ { "settings", delta } }, restored, error));
+		CHECK(restored.Enable == 0 && restored.SampleCount == 4 && restored.ShadowContrast == 2.0f);
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nEnable = true\n"), restored, error));
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nSampleCount = 5\n"), restored, error));
+	}
+
 	void TestRegistry(const Registry& a_registry)
 	{
 		std::set<std::vector<std::string>> paths;
@@ -204,7 +219,7 @@ namespace
 
 		WriteFile(a_path,
 			"[features.ScreenSpaceShadows]\nload = true\n"
-			"[features.ScreenSpaceShadows.settings]\nsurface_thickness = 0.03\ncustom = 1\n"
+			"[features.ScreenSpaceShadows.settings]\nSurfaceThickness = 0.03\ncustom = 1\n"
 			"[unknown]\nvalue = 'kept'\n");
 		CHECK(InitializeAt(a_path, a_registry).error.empty());
 		const auto refreshed = ReadFile(a_path);
@@ -213,17 +228,17 @@ namespace
 		constexpr std::array path{
 			std::string_view("features"), std::string_view("ScreenSpaceShadows"), std::string_view("settings")
 		};
-		CHECK(UpdateOwnedSettingsAt(a_path, path, toml::parse("shadow_contrast = 2.0\n")));
+		CHECK(UpdateOwnedSettingsAt(a_path, path, toml::parse("ShadowContrast = 2.0\n")));
 		auto root = LoadFile(a_path).table;
 		CHECK(root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == true);
-		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["shadow_contrast"].value<double>() == 2.0);
+		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["ShadowContrast"].value<double>() == 2.0);
 		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["custom"].value<std::int64_t>() == 1);
 		CHECK(root["unknown"]["value"].value<std::string>() == "kept");
 
 		CHECK(UpdateOwnedSettingsAt(a_path, path, {}));
 		const auto reset = ReadFile(a_path);
-		CHECK(reset.find("# surface_thickness = 0.02\n") != std::string::npos);
-		CHECK(reset.find("# shadow_contrast = 1.0\n") != std::string::npos);
+		CHECK(reset.find("# SurfaceThickness = 0.02\n") != std::string::npos);
+		CHECK(reset.find("# ShadowContrast = 1.0\n") != std::string::npos);
 
 		// A value where an owned table belongs must still render a parseable document.
 		const auto blocked = RenderDocument(a_registry, toml::parse("[features.ScreenSpaceShadows]\nsettings = false\n"));
@@ -264,6 +279,7 @@ int main()
 		const auto registry = BuildRegistry();
 		TestSchema();
 		TestWetnessSettings();
+		TestSSSSettings();
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");

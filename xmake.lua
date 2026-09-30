@@ -281,7 +281,7 @@ target(plugin_name, function()
         })
     end)
     add_installfiles("package/(**)|Shaders/**", { prefixdir = "." })
-    add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl",
+    add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl|SSSConsumerProbe.hlsl",
         { prefixdir = "." })
     add_installfiles("features/Upscaling/(Shaders/Upscaling/Streamline/**)",
         { prefixdir = "." })
@@ -511,7 +511,7 @@ target("ShaderCompileTests", function()
     )
     add_headerfiles("src/Utils/ShaderCompile.h")
     add_packages("vcpkg::directx-headers", "vcpkg::directxmath")
-    add_syslinks("d3dcompiler")
+    add_syslinks("d3dcompiler", "d3d11")
 end)
 
 target("PixelShaderSwapTests", function()

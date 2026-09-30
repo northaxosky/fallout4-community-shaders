@@ -119,7 +119,6 @@ namespace cs::render
 		void PackFeatures(SubstrateData& a_data, const FeatureDataCB& a_features)
 		{
 			auto& fo4 = a_data.fo4;
-			fo4.screenSpaceShadowsSettings = a_features.screenSpaceShadowsSettings;
 			fo4.screenSpaceGISettings = a_features.screenSpaceGISettings;
 			fo4.inverseSquareLightingSettings = a_features.inverseSquareLightingSettings;
 			fo4.waterEffectsSettings = a_features.waterEffectsSettings;

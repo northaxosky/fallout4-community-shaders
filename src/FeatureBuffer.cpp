@@ -4,7 +4,6 @@
 #include "ExponentialHeightFog.h"
 #include "InverseSquareLighting.h"
 #include "ScreenSpaceGI.h"
-#include "ScreenSpaceShadows.h"
 #include "TerrainShadows.h"
 #include "WaterEffects.h"
 #include "WetnessEffects.h"
@@ -25,9 +24,6 @@ namespace cs
 	FeatureDataCB GetFeatureBufferData()
 	{
 		return {
-			.screenSpaceShadowsSettings =
-				CollectFeatureData<ScreenSpaceShadowsFeatureData>(
-					features::ScreenSpaceShadows::GetSingleton()),
 			.screenSpaceGISettings =
 				CollectFeatureData<ScreenSpaceGIFeatureData>(
 					features::ScreenSpaceGI::GetSingleton()),
