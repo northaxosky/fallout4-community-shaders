@@ -3,7 +3,6 @@
 #include "DynamicCubemaps.h"
 #include "ExponentialHeightFog.h"
 #include "InverseSquareLighting.h"
-#include "ScreenSpaceGI.h"
 #include "TerrainShadows.h"
 #include "WetnessEffects.h"
 
@@ -23,9 +22,6 @@ namespace cs
 	FeatureDataCB GetFeatureBufferData()
 	{
 		return {
-			.screenSpaceGISettings =
-				CollectFeatureData<ScreenSpaceGIFeatureData>(
-					features::ScreenSpaceGI::GetSingleton()),
 			.wetnessEffectsSettings =
 				CollectFeatureData<WetnessEffectsFeatureData>(
 					features::WetnessEffects::GetSingleton()),

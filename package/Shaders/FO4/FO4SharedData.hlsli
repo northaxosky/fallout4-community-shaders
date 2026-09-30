@@ -3,11 +3,6 @@
 
 namespace FO4SharedData
 {
-	struct ScreenSpaceGISettings
-	{
-		bool EnableScreenSpaceGI;
-		uint3 pad0;
-	};
 	struct InverseSquareLightingSettings
 	{
 		uint Mode;
@@ -24,7 +19,6 @@ namespace FO4SharedData
 	};
 	cbuffer FO4SharedData : register(b7)
 	{
-		ScreenSpaceGISettings screenSpaceGISettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
 		ExponentialHeightFogSettings exponentialHeightFogSettings;
 		uint WetnessDebugVisualization;
