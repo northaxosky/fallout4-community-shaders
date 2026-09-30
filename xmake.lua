@@ -311,6 +311,19 @@ target("FeatureConfigTests", function()
     add_packages("vcpkg::tomlplusplus")
 end)
 
+target("RenderDocCaptureServiceTests", function()
+    set_kind("binary")
+    set_default(false)
+    add_files(
+        "tests/RenderDocCaptureServiceTests.cpp",
+        "features/RenderDoc/src/CaptureService.cpp"
+    )
+    add_includedirs("features/RenderDoc/src", "extern/RenderDoc/include")
+    add_tests("RenderDocCaptureService", {
+        runargs = { path.join(os.projectdir(), "build/RenderDocCaptureServiceTests") }
+    })
+end)
+
 target("TemporalPipelineStateTests", function()
     set_kind("binary")
     set_default(false)

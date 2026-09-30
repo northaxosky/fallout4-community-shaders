@@ -247,7 +247,7 @@ namespace cs::host
 		// suggested chords are the same by registering it first.
 		_multiCaptureHotkey = _client.AddHotkeyAction(
 			"dearmodding.cs.renderdoc.multi-capture",
-			"Capture Multiple Frames",
+			"Capture Configured Frames (alternate)",
 			renderDoc->SuggestedMultiCaptureHotkey().c_str(),
 			[this, renderDoc](bool pressed) {
 				if (pressed &&
@@ -272,7 +272,7 @@ namespace cs::host
 
 		_captureHotkey = _client.AddHotkeyAction(
 			"dearmodding.cs.renderdoc.capture",
-			"Capture One Frame",
+			"Capture Configured Frames",
 			renderDoc->SuggestedCaptureHotkey().c_str(),
 			[this, renderDoc](bool pressed) {
 				if (pressed &&
