@@ -24,7 +24,7 @@ namespace cs::features::performance_overlay
 
 	struct Settings
 	{
-		bool enabled = false;
+		bool enabled = true;
 		int preset = static_cast<int>(Preset::Standard);
 		bool showFps = true;
 		bool showFrameTime = true;
