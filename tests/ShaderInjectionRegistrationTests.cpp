@@ -669,11 +669,18 @@ namespace
 			"could not create missing-hook WARP device");
 		if (!device)
 			return;
+		for (const auto& target : GetShaderInjectionTargets()) {
+			Expect(
+				SetBaselineShaderOwnership(target.id, target.BaselineOwnable()),
+				"could not apply baseline ownership");
+		}
 		Expect(
-			SetBaselineShaderOwnership(
-				ShaderInjectionTarget::kDfTiledLighting, true),
-			"could not request compute ownership");
+			SetDeveloperShaderOverride(ShaderInjectionTarget::kImageSpace, DeveloperShaderOverride::kForceOn),
+			"could not set developer override");
 		FreezeAndCompileShaderInjections(device.get());
+		Expect(
+			!GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kImageSpace).requested,
+			"freeze requested a target without a baseline source");
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
 		Expect(

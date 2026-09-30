@@ -48,7 +48,7 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 
 | Upstream | Notes |
 |---|---|
-| `EnabledSSR` setting and `ENABLESSR` gate | Needs the byte-identical `BSImagespaceShaderSSLRRaytracing` reconstruction to own the shader, replacing Upscaling's decompile and hook |
+| `EnabledSSR` setting and `ENABLESSR` gate | Needs a stock-identical SSLR raytracing reconstruction on the retained imagespace injection seam, replacing Upscaling's decompile and hook; baseline imagespace stays stock |
 
 ## Screen Space GI
 

@@ -768,11 +768,11 @@ namespace cs::engine
 				if (developerOverride == DeveloperShaderOverride::kForceOff && !a_developerForceOffEnabled)
 					developerOverride = DeveloperShaderOverride::kAuto;
 				auto requestReasons = ShaderInjectionRequestReason::kNone;
-				if (a_baselineOwnership[targetIndex]) {
+				if (metadata.BaselineOwnable() && a_baselineOwnership[targetIndex]) {
 					requestReasons |=
 						ShaderInjectionRequestReason::kBaselineOwnership;
 				}
-				if (developerOverride == DeveloperShaderOverride::kForceOn) {
+				if (metadata.BaselineOwnable() && developerOverride == DeveloperShaderOverride::kForceOn) {
 					requestReasons |=
 						ShaderInjectionRequestReason::kDeveloperForceOn;
 				}
@@ -1602,7 +1602,8 @@ namespace cs::engine
 		ShaderInjectionTarget a_target,
 		bool a_enabled)
 	{
-		if (!IsValidTarget(a_target)) {
+		const auto* metadata = GetShaderInjectionTarget(a_target);
+		if (!metadata || (a_enabled && !metadata->BaselineOwnable())) {
 			L->error(
 				"Baseline shader ownership rejected: target is not ownable.");
 			return false;

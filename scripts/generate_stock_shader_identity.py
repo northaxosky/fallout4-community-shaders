@@ -68,12 +68,15 @@ def generate(export):
     require(sum(r["imagespace"] is not None for r in routes if r["target"] == "imagespace")
             == declared["imagespace_identity_established"], "imagespace count mismatch")
 
-    targets = set(re.findall(
-        r'\{ ShaderInjectionTarget::\w+, "([^"]+)"',
-        (ROOT / "src/Render/ShaderInjectionTargets.h").read_text()
+    metadata = (ROOT / "src/Render/ShaderInjectionTargets.h").read_text()
+    targets = dict(re.findall(
+        r'\{ ShaderInjectionTarget::\w+, "([^"]+)",\s*"[^"]+",\s*L"([^"]*)"',
+        metadata
     ))
-    require(targets, "no production shader targets found")
-    excluded = Counter(dict.fromkeys(("imagespace", "unowned", "unhooked"), 0))
+    require(targets and set(targets) == set(re.findall(
+        r'\{ ShaderInjectionTarget::\w+, "([^"]+)"', metadata
+    )), "incomplete production shader target metadata")
+    excluded = Counter(dict.fromkeys(("unreconstructed", "unowned", "unhooked"), 0))
     tiers = Counter(dict.fromkeys(("exact", "canonical", "unproven"), 0))
     rows = []
     seen = set()
@@ -81,8 +84,8 @@ def generate(export):
         key = (route["target"], route["stage"], route["descriptor"])
         require(type(route["hooked"]) is bool, f"invalid hooked: {key}")
         reason = (
-            "imagespace" if route["target"] == "imagespace" else
             "unowned" if route["target"] not in targets else
+            "unreconstructed" if not targets[route["target"]] else
             "unhooked" if not route["hooked"] else None
         )
         if reason:

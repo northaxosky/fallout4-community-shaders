@@ -417,7 +417,8 @@ namespace cs::feature_config
 	{
 		ShaderOwnershipParseResult result;
 		result.config.enabled = settings::core::ShaderOwnership{}.enabled;
-		result.config.targets.enabled.fill(settings::core::ShaderTarget{}.enabled);
+		for (const auto& target : engine::GetShaderInjectionTargets())
+			result.config.targets[target.id] = target.BaselineOwnable() && settings::core::ShaderTarget{}.enabled;
 		const auto* ownershipNode = a_root.get("shader_ownership");
 		if (!ownershipNode)
 			return result;
@@ -447,7 +448,7 @@ namespace cs::feature_config
 			settings::core::ShaderTarget value;
 			if (std::string error; !settings::ParseTable(settings::core::ShaderTargetSchema(target->name), *targets, value, error))
 				return fail("shader_ownership.targets." + error);
-			result.config.targets[target->id] = value.enabled;
+			result.config.targets[target->id] = target->BaselineOwnable() && value.enabled;
 		}
 		return result;
 	}

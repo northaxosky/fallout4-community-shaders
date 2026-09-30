@@ -196,6 +196,8 @@ namespace
 		for (std::string line; std::getline(lines, line);)
 			CHECK(line.empty() || line.front() == '#' || line.front() == '[');
 		CHECK(RenderDocument(a_registry, toml::parse(fresh)) == fresh);
+		const auto legacy = ParseShaderOwnership(toml::parse("[shader_ownership.targets]\nimagespace = true\n"));
+		CHECK(legacy.valid && !legacy.config.targets[cs::engine::ShaderInjectionTarget::kImageSpace]);
 
 		CHECK(InitializeAt(a_path, a_registry).error.empty());
 		CHECK(ReadFile(a_path) == fresh);

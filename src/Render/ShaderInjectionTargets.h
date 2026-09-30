@@ -61,6 +61,11 @@ namespace cs::engine
 		std::string_view profile;
 		std::span<const ShaderInjectionDefineMetadata> baseDefines;
 		ShaderStageMask supportedStages = ShaderInjectionTargetStages(id);
+
+		constexpr bool BaselineOwnable() const noexcept
+		{
+			return !sourcePath.empty();
+		}
 	};
 
 	inline constexpr std::array<ShaderInjectionDefineMetadata, 0>
@@ -86,7 +91,7 @@ namespace cs::engine
 				"Distant tree", L"BSDistantTreeShader.hlsl", "main",
 				"ps_5_0", kNoShaderInjectionDefines },
 			{ ShaderInjectionTarget::kImageSpace, "imagespace", "Imagespace",
-				L"BSImagespaceShader.hlsl", "main", "ps_5_0",
+				L"", "", "",
 				kNoShaderInjectionDefines },
 			{ ShaderInjectionTarget::kBsSky, "bssky", "BSSky",
 				L"BSSkyShader.hlsl", "main", "ps_5_0",

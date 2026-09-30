@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Imagespace post-processing now uses the game's own shaders; CS no longer replaces them.
+
 ## 0.2.0
 
 - Added an in-game changelog.

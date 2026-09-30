@@ -88,6 +88,8 @@ namespace cs::settings
 			{ { "preset" }, MakeSchemaView(core::kPreset) }
 		};
 		for (const auto& target : engine::GetShaderInjectionTargets()) {
+			if (!target.BaselineOwnable())
+				continue;
 			auto fields = MakeSchemaView(core::ShaderTargetSchema(target.name));
 			registry[3].fields.push_back(std::move(fields.front()));
 		}
