@@ -93,7 +93,8 @@ namespace SharedData
 	{
 		uint Enabled;
 		uint DebugVisualization;
-		uint2 pad0;
+		uint EnabledSSR;
+		uint pad0;
 	};
 
 	struct ExponentialHeightFogSettings

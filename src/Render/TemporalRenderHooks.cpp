@@ -27,7 +27,6 @@ namespace cs::render
 			CallHook{ &kDrawWorldRenderUIResolve, &stl::write_thunk_call<DrawWorldRenderUI_Resolve> },
 			CallHook{ &kDrawWorldRenderUIRenderEffectRange, &stl::write_thunk_call<DrawWorldRenderUI_RenderEffectRange> },
 			CallHook{ &kDeferredCompositeRenderPass, &stl::write_thunk_call<DeferredComposite_RenderPass> },
-			CallHook{ &kSSLRRaytracingBeginTechnique, &stl::write_thunk_call<SSLRRaytracing_BeginTechnique> },
 			CallHook{ &kVatsSetPixelConstant, &stl::write_thunk_call<Vats_SetPixelConstant> },
 			CallHook{ &kLoadingMenuUpdateTemporalData, &stl::write_thunk_call<LoadingMenu_UpdateTemporalData> },
 			CallHook{ &kRenderPreUIDeferredPrePass, &stl::write_thunk_call<RenderPreUI_DeferredPrePass> },
@@ -451,23 +450,6 @@ namespace cs::render
 				upscaling->dynamicResolution.ResetDepth();
 			});
 		}
-	}
-
-	void TemporalRenderer::SSLRRaytracing_BeginTechnique::thunk(
-		void* a_shader,
-		std::uint32_t a_2,
-		std::uint32_t a_3,
-		std::uint32_t a_4,
-		std::uint32_t a_5)
-	{
-		func(a_shader, a_2, a_3, a_4, a_5);
-
-		auto* upscaling = GetSingleton();
-		GuardedThunkBody("Upscaling SSLR shader patch", [&] {
-			if (upscaling->IsDrivingFrameState() && upscaling->IsUpscalingActive()) {
-				upscaling->PatchSSRShader();
-			}
-		});
 	}
 
 	void TemporalRenderer::Vats_SetPixelConstant::thunk(

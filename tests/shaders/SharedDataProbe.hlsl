@@ -64,7 +64,8 @@ float4 main() : SV_Target
 	value += SharedData::waterEffectsSettings.pad0;
 	value += SharedData::dynamicCubemapsSettings.Enabled;
 	value += SharedData::dynamicCubemapsSettings.DebugVisualization;
-	value += dot(SharedData::dynamicCubemapsSettings.pad0, 1.0);
+	value += SharedData::dynamicCubemapsSettings.EnabledSSR;
+	value += SharedData::dynamicCubemapsSettings.pad0;
 	value += SharedData::exponentialHeightFogSettings.Mode;
 	value += SharedData::exponentialHeightFogSettings.DensityMultiplier;
 	value += SharedData::exponentialHeightFogSettings.HeightFalloffMultiplier;

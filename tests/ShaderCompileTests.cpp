@@ -221,9 +221,6 @@ namespace
 		a_jobs.push_back({ .path = upscaling / "RCAS" / "RCAS.hlsl",
 			.profile = "cs_5_1",
 			.description = "RCAS" });
-		a_jobs.push_back({ .path = upscaling / "BSImagespaceShaderSSLRRaytracing.hlsl",
-			.profile = "ps_5_0",
-			.description = "SSRP imagespace patch" });
 	}
 
 	void AddFeatureConsumers(
@@ -231,6 +228,17 @@ namespace
 		const std::filesystem::path& a_root)
 	{
 		const std::vector<Resource> shared{ CB(5), CB(6) };
+
+		a_jobs.push_back({ .path = a_root / "Imagespace" / "SSLRRaytracing.hlsl",
+			.defines = { { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" } },
+			.profile = "ps_5_0",
+			.description = "SSLR dynamic resolution",
+			.required = { CB(0), CB(5), Texture(0), Texture(1), Texture(2), Texture(3) } });
+		a_jobs.push_back({ .path = a_root / "Imagespace" / "SSLRRaytracing.hlsl",
+			.defines = { { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" } },
+			.profile = "ps_5_0",
+			.description = "SSLR live DC setting with upscaling",
+			.required = { CB(0), CB(5), CB(6), Texture(0), Texture(1), Texture(2), Texture(3) } });
 
 		a_jobs.push_back({ .path = a_root / "SharedDataProbe.hlsl",
 			.profile = "ps_5_0",

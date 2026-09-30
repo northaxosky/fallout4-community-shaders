@@ -36,6 +36,7 @@ namespace cs::engine
 				.entryPoint = a_family.entryPoint,
 				.profile = a_family.profile
 			};
+			request.familyMetadata = a_family.familyMetadata;
 			for (const auto& define : a_target.baseDefines)
 				request.defines.emplace(define.name, define.value);
 

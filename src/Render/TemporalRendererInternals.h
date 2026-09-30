@@ -41,7 +41,6 @@ namespace cs::render::renderer_detail
 	constexpr const wchar_t* kUpscaleVSPath = L"Data\\Shaders\\Upscaling\\UpscaleVS.hlsl";
 	constexpr const wchar_t* kSpatialFallbackPath =
 		L"Data\\Shaders\\Upscaling\\SpatialFallbackPS.hlsl";
-	constexpr const wchar_t* kSSLRRaytracingPath = L"Data\\Shaders\\Upscaling\\BSImagespaceShaderSSLRRaytracing.hlsl";
 	constexpr const wchar_t* kCopyDepthForFrameGenerationPath =
 		L"Data\\Shaders\\FrameGeneration\\CopyDepthForFrameGenerationCS.hlsl";
 

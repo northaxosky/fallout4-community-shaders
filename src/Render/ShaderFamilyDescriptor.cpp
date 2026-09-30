@@ -910,10 +910,33 @@ namespace cs::engine
 		const ShaderFamilyDescriptor& a_descriptor)
 	{
 		const auto* target = GetShaderInjectionTarget(a_descriptor.target);
-		if (!target || !target->BaselineOwnable() || a_descriptor.stage == ShaderStage::kCount)
+		if (!target || !target->BaselineOwnable() || a_descriptor.stage == ShaderStage::kCount ||
+			(target->supportedStages & ShaderStageBit(a_descriptor.stage)) == 0)
 			return std::nullopt;
 
 		ShaderVariantCompilationDescriptor result;
+		if (!target->families.empty()) {
+			for (const auto& family : target->families) {
+				if (family.stage != a_descriptor.stage ||
+					family.descriptor != a_descriptor.descriptor ||
+					family.nativeName != a_descriptor.nativeName ||
+					family.nativeClassName != a_descriptor.nativeClassName ||
+					family.nativeSourceGroup != a_descriptor.nativeSourceGroup ||
+					family.nativeMacros.size() != a_descriptor.nativeMacros.size())
+					continue;
+				if (!std::ranges::all_of(family.nativeMacros, [&](const auto& a_macro) {
+						const auto macro = a_descriptor.nativeMacros.find(a_macro.name);
+						return macro != a_descriptor.nativeMacros.end() && macro->second == a_macro.value;
+					}))
+					continue;
+				result.sourcePath = family.sourcePath;
+				result.entryPoint = family.entryPoint;
+				result.profile = family.profile;
+				result.familyMetadata = &family;
+				return result;
+			}
+			return std::nullopt;
+		}
 		result.sourcePath = target->sourcePath;
 		result.entryPoint = target->entryPoint;
 		result.profile = ProfileForStage(a_descriptor.stage);

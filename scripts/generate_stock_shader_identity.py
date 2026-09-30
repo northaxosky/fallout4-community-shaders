@@ -34,7 +34,15 @@ def candidate(route, export_root):
     raw = (export_root / receipt["path"]).read_bytes()
     require(hashlib.sha256(raw).hexdigest() == receipt["sha256"], "receipt hash mismatch")
     matches = set()
-    for body in json.loads(raw)["bodies"]:
+    document = json.loads(raw)
+    if "bodies" not in document:
+        for native in document["unit"]["pixel_routes"]:
+            if (native["full_dxbc_sha1"] == route["stock_sha1"]
+                    and native["fxp_key"] == route["descriptor"]
+                    and native["fxp_ordinal"] == route["fxp_ordinal"]):
+                require(route["stage"] == "pixel", "receipt stage mismatch")
+                matches.add(document["source"]["routes"][native["selector"]]["residual"]["candidate_sha1"])
+    for body in document.get("bodies", []):
         for container in body["containers"]:
             if container["full_dxbc_sha1"] != route["stock_sha1"]:
                 continue
@@ -68,26 +76,14 @@ def generate(export):
     require(sum(r["imagespace"] is not None for r in routes if r["target"] == "imagespace")
             == declared["imagespace_identity_established"], "imagespace count mismatch")
 
-    metadata = (ROOT / "src/Render/ShaderInjectionTargets.h").read_text()
-    targets = dict(re.findall(
-        r'\{ ShaderInjectionTarget::\w+, "([^"]+)",\s*"[^"]+",\s*L"([^"]*)"',
-        metadata
-    ))
-    require(targets and set(targets) == set(re.findall(
-        r'\{ ShaderInjectionTarget::\w+, "([^"]+)"', metadata
-    )), "incomplete production shader target metadata")
-    excluded = Counter(dict.fromkeys(("unreconstructed", "unowned", "unhooked"), 0))
+    excluded = Counter(dict.fromkeys(("unhooked",), 0))
     tiers = Counter(dict.fromkeys(("exact", "canonical", "unproven"), 0))
     rows = []
     seen = set()
     for route in routes:
-        key = (route["target"], route["stage"], route["descriptor"])
+        key = (route["target"], route["stage"], route["descriptor"], route["fxp_ordinal"])
         require(type(route["hooked"]) is bool, f"invalid hooked: {key}")
-        reason = (
-            "unowned" if route["target"] not in targets else
-            "unreconstructed" if not targets[route["target"]] else
-            "unhooked" if not route["hooked"] else None
-        )
+        reason = "unhooked" if not route["hooked"] else None
         if reason:
             excluded[reason] += 1
             continue
@@ -100,7 +96,17 @@ def generate(export):
         expected = (candidate(route, export.parent.parent.parent) if route["tier"] == "canonical"
                     else route["stock_sha1"])
         require(re.fullmatch("[0-9a-f]{40}", expected), f"invalid SHA-1: {key}")
-        rows.append((*key, int(bool(route["early_depth"])), expected))
+        identity = route["imagespace"]
+        names = [identity[k] if identity else "" for k in ("native_name", "class_name", "source_group")]
+        macros = identity["macros"] if identity else []
+        require(all(isinstance(s, str) for s in names), f"invalid native identity: {key}")
+        require(all(len(m) == 2 and all(isinstance(s, str) for s in m) for m in macros),
+                f"invalid native macros: {key}")
+        quoted = "\t".join(json.dumps(s, ensure_ascii=False) for s in names)
+        quoted += f"\t{len(macros)}"
+        for name, value in macros:
+            quoted += "\t" + json.dumps(name) + "\t" + json.dumps(value)
+        rows.append((*key, int(bool(route["early_depth"])), expected, quoted))
         tiers[route["tier"]] += 1
     compiler = document["compiler"]["d3dcompiler_47"]
     require(compiler["strip"] == "D3DCOMPILER_STRIP_REFLECTION_DATA", "unexpected stripping policy")
@@ -108,14 +114,14 @@ def generate(export):
     header = {
         "export_sha256": hashlib.sha256(raw).hexdigest(),
         **{k: declared["total"][k] for k in ("routes", "exact", "canonical", "unproven")},
-        "gated": len(rows),
-        **{f"gated_{k}": v for k, v in tiers.items()},
+        "rows": len(rows),
+        **{f"rows_{k}": v for k, v in tiers.items()},
         **{f"excluded_{k}": v for k, v in excluded.items()},
         "compiler_sha256": compiler["sha256"],
     }
     text = "# " + " ".join(f"{k}={v}" for k, v in header.items()) + "\n"
-    text += "".join(f"{target}\t{stage}\t0x{descriptor:08x}\t{early}\t{sha1}\n"
-                    for target, stage, descriptor, early, sha1 in sorted(rows))
+    text += "".join(f"{target}\t{stage}\t0x{descriptor:08x}\t{early}\t{sha1}\t{ordinal}\t{identity}\n"
+                    for target, stage, descriptor, ordinal, early, sha1, identity in sorted(rows))
     (DATA / "stock-shader-identity.tsv").write_text(text, encoding="utf-8", newline="\n")
     print(text.splitlines()[0])
 

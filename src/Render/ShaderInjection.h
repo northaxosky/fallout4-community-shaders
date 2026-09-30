@@ -71,6 +71,7 @@ namespace cs::engine
 		std::string entryPoint;
 		std::string profile;
 		ShaderInjectionDefines defines;
+		const ShaderInjectionFamilyMetadata* familyMetadata = nullptr;
 	};
 
 	enum class DeveloperShaderOverride : std::uint8_t

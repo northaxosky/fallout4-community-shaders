@@ -71,7 +71,8 @@ namespace cs
 	{
 		std::uint32_t Enabled = 0;
 		std::uint32_t DebugVisualization = 0;
-		std::uint32_t pad0[2]{};
+		std::uint32_t EnabledSSR = 0;
+		std::uint32_t pad0 = 0;
 	};
 	static_assert(sizeof(DynamicCubemapsFeatureData) == 16);
 
@@ -129,6 +130,7 @@ namespace cs
 	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 160);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 4);
+	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 8);
 	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 176);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, Mode) == 0);
 	static_assert(offsetof(ExponentialHeightFogFeatureData, DensityMultiplier) == 4);

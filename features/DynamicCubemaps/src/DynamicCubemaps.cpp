@@ -213,6 +213,7 @@ namespace cs::features
 		if (!wasEnabled && _settings.enabled) {
 			_queuedReset.store(true, std::memory_order_release);
 		}
+		_enabledSSR.store(_settings.enabledSSR, std::memory_order_release);
 	}
 
 	bool DynamicCubemaps::SaveSettings()
@@ -264,10 +265,13 @@ namespace cs::features
 				cs::engine::ShaderStage::kPixel, 0, 0) ||
 			!registerContribution(
 				cs::engine::ShaderInjectionTarget::kDfTiledLighting,
-				cs::engine::ShaderStage::kCompute, 0, 0)) {
+				cs::engine::ShaderStage::kCompute, 0, 0) ||
+			!registerContribution(
+				cs::engine::ShaderInjectionTarget::kImageSpace,
+				cs::engine::ShaderStage::kPixel, 0, 0)) {
 			FailLoad(
 				"DynamicCubemaps could not register its water, composite, "
-				"or deferred lighting shader contributions");
+				"deferred lighting, or SSLR shader contributions");
 			return;
 		}
 
@@ -1225,6 +1229,8 @@ namespace cs::features
 		if (_injectionsOperational.load(std::memory_order_acquire)) {
 			data.Enabled =
 				_enabled.load(std::memory_order_acquire) ? 1u : 0u;
+			data.EnabledSSR =
+				_enabledSSR.load(std::memory_order_acquire) ? 1u : 0u;
 			data.DebugVisualization = static_cast<std::uint32_t>(
 				_debugVisualization.load(std::memory_order_acquire));
 		}
@@ -1234,9 +1240,11 @@ namespace cs::features
 	void DynamicCubemaps::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
+		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::TextDisabled(
 			"Off restores native water reflections and pauses capture.");
+		changed |= edit.Discrete(dmui::ui::Checkbox("Enable Screen Space Reflections", &_settings.enabledSSR));
+		dmui::ui::TextDisabled("Enable screen-space reflections on all surfaces, including water.");
 		if (changed) {
 			PublishSettings();
 		}

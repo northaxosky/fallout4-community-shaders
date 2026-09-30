@@ -51,6 +51,27 @@ namespace cs::engine
 		std::string_view value;
 	};
 
+	struct ShaderInjectionFamilyMetadata
+	{
+		ShaderStage stage;
+		std::uint32_t descriptor;
+		std::string_view nativeName;
+		std::string_view nativeClassName;
+		std::string_view nativeSourceGroup;
+		std::span<const ShaderInjectionDefineMetadata> nativeMacros;
+		std::wstring_view sourcePath;
+		std::string_view entryPoint;
+		std::string_view profile;
+	};
+
+	inline constexpr std::array<ShaderInjectionDefineMetadata, 0>
+		kNoShaderInjectionDefines{};
+	inline constexpr std::array kImageSpaceShaderFamilies{
+		ShaderInjectionFamilyMetadata{ ShaderStage::kPixel, 0,
+			"ISSSLRRaytracing", "BSImagespaceShaderSSLRRaytracing", "ISSSLRRaytracing",
+			kNoShaderInjectionDefines, L"Imagespace\\SSLRRaytracing.hlsl", "main", "ps_5_0" }
+	};
+
 	struct ShaderInjectionTargetMetadata
 	{
 		ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
@@ -61,15 +82,14 @@ namespace cs::engine
 		std::string_view profile;
 		std::span<const ShaderInjectionDefineMetadata> baseDefines;
 		ShaderStageMask supportedStages = ShaderInjectionTargetStages(id);
+		std::span<const ShaderInjectionFamilyMetadata> families;
 
 		constexpr bool BaselineOwnable() const noexcept
 		{
-			return !sourcePath.empty();
+			return !sourcePath.empty() || !families.empty();
 		}
 	};
 
-	inline constexpr std::array<ShaderInjectionDefineMetadata, 0>
-		kNoShaderInjectionDefines{};
 	inline constexpr std::array<ShaderInjectionTargetMetadata,
 		static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 		kShaderInjectionTargets{ { { ShaderInjectionTarget::kDeferredPrepass, "deferred_prepass",
@@ -92,7 +112,8 @@ namespace cs::engine
 				"ps_5_0", kNoShaderInjectionDefines },
 			{ ShaderInjectionTarget::kImageSpace, "imagespace", "Imagespace",
 				L"", "", "",
-				kNoShaderInjectionDefines },
+				kNoShaderInjectionDefines, ShaderStageBit(ShaderStage::kPixel),
+				kImageSpaceShaderFamilies },
 			{ ShaderInjectionTarget::kBsSky, "bssky", "BSSky",
 				L"BSSkyShader.hlsl", "main", "ps_5_0",
 				kNoShaderInjectionDefines },

@@ -388,27 +388,6 @@ namespace cs::render
 		return spatialFallbackPS.get();
 	}
 
-	ID3D11PixelShader* TemporalRenderer::GetSSLRRaytracingPS()
-	{
-		if (!sslrRaytracingPS) {
-			L->debug("Compiling BSImagespaceShaderSSLRRaytracing.hlsl");
-			sslrRaytracingPS.attach((ID3D11PixelShader*)cs::util::CompileShader(
-				kSSLRRaytracingPath, {}, "ps_5_0"));
-			cs::render::annotation::SetName(
-				sslrRaytracingPS.get(), "Upscaling/SSLRRaytracing.PS");
-		}
-		return sslrRaytracingPS.get();
-	}
-
-	void TemporalRenderer::PatchSSRShader()
-	{
-		auto* context = cs::engine::GetImmediateContext();
-		auto* shader = GetSSLRRaytracingPS();
-		if (context && shader) {
-			context->PSSetShader(shader, nullptr, 0);
-		}
-	}
-
 	void TemporalRenderer::SetupResources()
 	{
 		auto* device = cs::engine::GetDevice();

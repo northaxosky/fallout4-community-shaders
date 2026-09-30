@@ -9,6 +9,8 @@
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
+#include "Render/ShaderInjection.h"
+#include "Render/SharedData.h"
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
@@ -97,6 +99,18 @@ namespace cs::features
 
 	void Upscaling::Load()
 	{
+		if (!cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kImageSpace,
+				.stages = cs::engine::ShaderStageBit(cs::engine::ShaderStage::kPixel),
+				.contributor = "Upscaling",
+				.defines = { { "UPSCALING", "1" } },
+				.isReady = [] { return cs::render::IsSharedDataReady(); } })) {
+			FailLoad("Upscaling could not register its SSLR shader contribution");
+		}
+	}
+
+	bool Upscaling::ValidateShaderInjections(std::string& a_error)
+	{
+		return cs::engine::ValidateShaderInjectionRoutes("Upscaling", a_error);
 	}
 
 	bool Upscaling::StageFromPreset(

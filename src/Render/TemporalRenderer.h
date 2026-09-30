@@ -113,10 +113,6 @@ namespace cs::render
 		winrt::com_ptr<ID3D11PixelShader> spatialFallbackPS;
 		ID3D11PixelShader* GetSpatialFallbackPS();
 
-		winrt::com_ptr<ID3D11PixelShader> sslrRaytracingPS;
-		ID3D11PixelShader* GetSSLRRaytracingPS();
-		void PatchSSRShader();
-
 		winrt::com_ptr<ID3D11DepthStencilState> upscaleDepthStencilState;
 		winrt::com_ptr<ID3D11BlendState> upscaleBlendState;
 		winrt::com_ptr<ID3D11RasterizerState> upscaleRasterizerState;
@@ -324,17 +320,6 @@ namespace cs::render
 		struct LensFlare_RenderLensFlare
 		{
 			static void thunk(RE::NiCamera* a_camera);
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
-		struct SSLRRaytracing_BeginTechnique
-		{
-			static void thunk(
-				void* a_shader,
-				std::uint32_t a_2,
-				std::uint32_t a_3,
-				std::uint32_t a_4,
-				std::uint32_t a_5);
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 

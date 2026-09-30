@@ -35,6 +35,7 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 | Wet reflectance written to a G-buffer target | The composite evaluates the film weight and irradiance itself | FO4 has no reflectance G-buffer | `Composite.hlsli` `GetWetnessReflection` |
 | Wet indirect-diffuse reduction in the material pass | Applied to ambient diffuse in the BSDFLight and DFTiledLighting passes | FO4 evaluates indirect diffuse in light passes | `WetnessEffects.hlsli` `GetIndirectDiffuseWeight` |
 | Always-on feature | `enabled` live toggle; wet diffuse reduction and wet reflection are both gated on it | Repository contract: effects toggle live | `DynamicCubemapsSettings.h`, `WetnessEffects.hlsli`, `Composite.hlsli` |
+| `EnabledSSR = true`, `ENABLESSR` permits raymarching; labeled for water | `enabled_ssr = true`; the static `DYNAMIC_CUBEMAPS` contribution reads DC's live setting from the existing feature buffer and returns zero when DC is enabled and SSR is off; help text states it covers all screen-space reflections | FO4 stock has no SSR gate, and SSLR feeds the second composite (0x800, t14) for surfaces as well as water (t9/t10), so this toggle is global. Baseline and unloaded/disabled DC preserve stock SSR. The runtime gate avoids toggle-driven recompilation and stock fallback; upstream only defines `ENABLESSR` through loaded DC | `DynamicCubemaps.cpp`, `SharedData.hlsli`, `Imagespace\SSLRRaytracing.hlsl` |
 
 ### Not supported
 
@@ -44,11 +45,15 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 | Forward `Lighting.hlsl` sentinel path | FO4 world and first-person accumulators emit no forward BSLighting passes |
 | Dynamic Cubemap Creator (sentinel DDS export) | Nothing in FO4 can consume sentinel cubes |
 
-### Pending
+## Upscaling
 
-| Upstream | Notes |
-|---|---|
-| `EnabledSSR` setting and `ENABLESSR` gate | Needs a stock-identical SSLR raytracing reconstruction on the retained imagespace injection seam, replacing Upscaling's decompile and hook; baseline imagespace stays stock |
+Upstream pin: `d330bf12d`. Consumer: `package\Shaders\Imagespace\SSLRRaytracing.hlsl`.
+
+### Translations
+
+| Upstream | Fallout 4 | Why | Where |
+|---|---|---|---|
+| `FrameBuffer::GetDynamicResolutionAdjustedScreenPosition` and previous-frame samples in `ISReflectionsRayTracing` | SharedData-adjusted, clamped current-frame samples plus scaled pixel dithering and Hi-Z cell counts; b5 preserves the once-per-frame render-scale snapshot through proxy composites | FO4 raytracing uses integer Hi-Z loads and full-target cb0 sizes in a top-left render region, with no previous-frame reflection sample. Upscaling publishes ratios before the deferred prepass; b5 publishes afterward, and SSLR precedes the second composite's temporary ratio neutralization | `SSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp`; fallout4-re `docs\engine-facts.md` Composite pass order / Native SSLR production |
 
 ## Screen Space GI
 

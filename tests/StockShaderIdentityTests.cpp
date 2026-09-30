@@ -12,6 +12,7 @@
 #include <d3dcompiler.h>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <set>
 #include <sstream>
@@ -36,6 +37,11 @@ namespace
 		std::string stage;
 		std::string expected;
 		std::string actual;
+		std::uint32_t ordinal = 0;
+		std::string nativeName;
+		std::string nativeClassName;
+		std::string nativeSourceGroup;
+		bool owned = false;
 	};
 
 	void Require(bool a_condition, const std::string& a_message)
@@ -86,19 +92,28 @@ namespace
 		Require(IsHex(fields.at("compiler_sha256"), 64), "Invalid compiler pin");
 		ReportCompiler(fields.at("compiler_sha256"));
 		std::vector<Row> rows;
-		std::set<std::tuple<std::string, std::string, std::uint32_t>> keys;
+		std::set<std::tuple<std::string, std::string, std::uint32_t, std::uint32_t>> keys;
 		while (std::getline(file, line)) {
 			Row row;
 			unsigned early = 0;
+			unsigned macroCount = 0;
 			std::istringstream input(line);
-			Require(static_cast<bool>(input >> row.target >> row.stage >> std::hex >> row.family.descriptor >> std::dec >> early >> row.expected), "Malformed identity row: " + line);
+			Require(static_cast<bool>(input >> row.target >> row.stage >> std::hex >> row.family.descriptor >> std::dec >> early >> row.expected >> row.ordinal >>
+									  std::quoted(row.nativeName) >> std::quoted(row.nativeClassName) >> std::quoted(row.nativeSourceGroup) >> macroCount),
+				"Malformed identity row: " + line);
+			for (unsigned i = 0; i < macroCount; ++i) {
+				std::string name;
+				std::string value;
+				Require(static_cast<bool>(input >> std::quoted(name) >> std::quoted(value)) &&
+							row.family.nativeMacros.emplace(name, value).second,
+					"Invalid native macros: " + line);
+			}
 			input >> std::ws;
 			Require(input.eof() && early <= 1 && IsHex(row.expected, 40), "Invalid identity row: " + line);
 			for (const auto& target : cs::engine::GetShaderInjectionTargets()) {
 				if (target.name == row.target)
 					row.family.target = target.id;
 			}
-			Require(row.family.target != cs::engine::ShaderInjectionTarget::kCount, "Unknown target: " + row.target);
 			if (row.stage == "vertex")
 				row.family.stage = cs::engine::ShaderStage::kVertex;
 			else if (row.stage == "pixel")
@@ -108,11 +123,41 @@ namespace
 			else
 				throw std::runtime_error("Unknown stage: " + row.stage);
 			row.family.forceEarlyDepthStencil = early != 0;
-			Require(keys.emplace(row.target, row.stage, row.family.descriptor).second, "Duplicate identity row: " + line);
+			Require(keys.emplace(row.target, row.stage, row.family.descriptor, row.ordinal).second, "Duplicate identity row: " + line);
 			rows.push_back(std::move(row));
 		}
-		Require(file.eof() && !rows.empty() && rows.size() == std::stoull(fields.at("gated")), "Identity row count mismatch");
+		Require(file.eof() && !rows.empty() && rows.size() == std::stoull(fields.at("rows")), "Identity row count mismatch");
 		return rows;
+	}
+
+	void CheckCoverage(std::vector<Row>& a_rows)
+	{
+		using namespace cs::engine;
+		std::set<std::tuple<ShaderInjectionTarget, std::wstring, std::string, std::string>> covered;
+		std::set<const ShaderInjectionFamilyMetadata*> coveredNativeFamilies;
+		for (auto& row : a_rows) {
+			row.family.nativeName = row.nativeName;
+			row.family.nativeClassName = row.nativeClassName;
+			row.family.nativeSourceGroup = row.nativeSourceGroup;
+			const auto family = BuildShaderFamilyCompilationDescriptor(row.family);
+			row.owned = family.has_value();
+			if (family)
+				covered.emplace(row.family.target, family->sourcePath, family->entryPoint, family->profile);
+			if (family && family->familyMetadata)
+				coveredNativeFamilies.insert(family->familyMetadata);
+		}
+		const auto requireFamily = [&](ShaderInjectionTarget a_target, std::wstring_view a_source,
+									   std::string_view a_entry, std::string_view a_profile) {
+			Require(covered.contains({ a_target, std::wstring(a_source), std::string(a_entry), std::string(a_profile) }),
+				"Owned shader family has no gated row: " + std::filesystem::path(a_source).string());
+		};
+		for (const auto& target : GetShaderInjectionTargets()) {
+			if (!target.sourcePath.empty())
+				requireFamily(target.id, target.sourcePath, target.entryPoint, target.profile);
+			for (const auto& family : target.families)
+				Require(coveredNativeFamilies.contains(&family),
+					"Owned native shader family has no gated row: " + std::string(family.nativeName));
+		}
 	}
 
 	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot)
@@ -149,6 +194,7 @@ int main(int a_argc, char** a_argv)
 		cs::sha1::Sha1InitOnce();
 		cs::sha256::Sha256InitOnce();
 		auto rows = ReadRows(a_argv[2]);
+		CheckCoverage(rows);
 		const std::filesystem::path shaderRoot(a_argv[1]);
 		const auto start = std::chrono::steady_clock::now();
 		const auto threadCount = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
@@ -158,6 +204,8 @@ int main(int a_argc, char** a_argv)
 			for (unsigned i = 0; i < threadCount; ++i) {
 				workers.emplace_back([&] {
 					for (auto index = next.fetch_add(1); index < rows.size(); index = next.fetch_add(1)) {
+						if (!rows[index].owned)
+							continue;
 						try {
 							rows[index].actual = Compile(rows[index], shaderRoot);
 						} catch (const std::exception& error) {
@@ -169,17 +217,22 @@ int main(int a_argc, char** a_argv)
 		}
 		const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 		std::size_t failed = 0;
+		std::size_t unowned = 0;
 		for (const auto& row : rows) {
+			if (!row.owned) {
+				++unowned;
+				continue;
+			}
 			if (row.actual == row.expected)
 				continue;
 			if (++failed <= 50)
-				std::printf("%s %s 0x%08x expected=%s actual=%s\n",
-					row.target.c_str(), row.stage.c_str(), row.family.descriptor, row.expected.c_str(), row.actual.c_str());
+				std::printf("%s %s 0x%08x ordinal=%u expected=%s actual=%s\n",
+					row.target.c_str(), row.stage.c_str(), row.family.descriptor, row.ordinal, row.expected.c_str(), row.actual.c_str());
 		}
 		if (failed > 50)
 			std::printf("... %zu additional failures omitted\n", failed - 50);
-		std::printf("Stock shader identity: %zu passed, %zu failed, %zu total; %.3fs wall time (%u threads)\n",
-			rows.size() - failed, failed, rows.size(), seconds, threadCount);
+		std::printf("Stock shader identity: %zu passed, %zu failed, %zu unowned, %zu total; %.3fs wall time (%u threads)\n",
+			rows.size() - failed - unowned, failed, unowned, rows.size(), seconds, threadCount);
 		return failed == 0 ? 0 : 1;
 	} catch (const std::exception& error) {
 		std::fprintf(stderr, "Stock shader identity: %s\n", error.what());

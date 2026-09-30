@@ -679,8 +679,8 @@ namespace
 			"could not set developer override");
 		FreezeAndCompileShaderInjections(device.get());
 		Expect(
-			!GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kImageSpace).requested,
-			"freeze requested a target without a baseline source");
+			GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kImageSpace).requested,
+			"freeze did not request a target with reconstructed families");
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
 		Expect(

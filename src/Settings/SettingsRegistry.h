@@ -82,7 +82,7 @@ namespace cs::settings
 			{ { "logging", "channels" }, {}, true },
 			{ { "shader_ownership" }, MakeSchemaView(core::kShaderOwnership) },
 			{ { "shader_ownership", "targets" }, {}, false,
-				"Allow baseline replacement of each shader target. (restart required)" },
+				"Allow baseline replacement of each target's reconstructed families. (restart required)" },
 			{ { "menu" }, MakeSchemaView(core::kMenu) },
 			{ { "menu", "debug_view_previews" }, {}, true },
 			{ { "preset" }, MakeSchemaView(core::kPreset) }

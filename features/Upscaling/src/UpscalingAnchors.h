@@ -63,14 +63,6 @@ namespace cs::features::upscaling_anchors
 	// Lens-flare visibility read samples the main depth buffer.
 	inline constexpr REL::ID kLensFlareRenderLensFlare{ 676108, 2317547, 2317547 };
 
-	// SSLR needs a reconstructed shader for scaled targets.
-	inline constexpr CallSiteAnchor kSSLRRaytracingBeginTechnique{
-		.name = "SSLR raytracing SetupTechnique -> BSShader::BeginTechnique",
-		.function = REL::ID({ 395020, 2317302, 2317302 }),
-		.offset = { 0x1C, 0x1C, 0x1C },
-		.target = REL::ID({ 1041640, 2318876, 2318876 })
-	};
-
 	// VATS outline thickness scales with the dynamic ratio.
 	inline constexpr CallSiteAnchor kVatsSetPixelConstant{
 		.name = "VATS UpdateParams -> ImageSpaceShaderParam::SetPixelConstant",

@@ -26,6 +26,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		std::vector<std::string_view> GetRestartSettings() const override;
 		void RestoreDefaultSettings() override;

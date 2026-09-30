@@ -106,6 +106,10 @@ Community Shaders uses [DearModdingUI](https://github.com/Dear-Modding-FO4/dearm
 
 Without DearModdingUI, settings can be changed through the TOML configuration files.
 
+`[shader_ownership.targets]` controls baseline replacement of reconstructed shader families (restart required).
+`imagespace = true` owns only the SSLR raytracing pixel shader; all other imagespace shaders remain stock.
+Loaded features can request their required families independently of baseline ownership.
+
 ---
 
 ## Building from source
