@@ -2,9 +2,9 @@
 
 ## 0.2.1
 
-- Imagespace post-processing uses the game's own shaders except for SSLR raytracing, whose baseline reconstruction is byte-identical to stock.
-- Dynamic Cubemaps: added upstream's live Screen Space Reflections toggle.
-- Upscaling: SSR now uses the reconstructed shader with dynamic-resolution adjustment; removed the machine decompile and shader-patching hook.
+- Imagespace post-processing now uses the game's own shaders; only screen-space reflections are replaced, with a rebuild that matches vanilla exactly.
+- Dynamic Cubemaps: added upstream's Screen Space Reflections toggle, which turns screen-space reflections off on all surfaces.
+- Upscaling: screen-space reflections use the rebuilt vanilla shader adjusted for render resolution, replacing a decompiled copy, so they fade at screen edges like vanilla; updated Streamline with a fix for an exception in its app denylist check.
 
 ## 0.2.0
 
