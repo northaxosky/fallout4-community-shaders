@@ -78,4 +78,16 @@ Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package
 | IBL and Skylighting ambient branches | Port with those features |
 | Blur center normal lookup scaled by `frameScale` | Applied locally; upstream fix is community-shaders/skyrim-community-shaders#2795 |
 
+## Screen Space Shadows
+
+Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceShadows`, consumers in
+`package\Shaders\BSDFLightShader.hlsl`.
+
+### Translations
+
+| Upstream | Fallout 4 | Why | Where |
+|---|---|---|---|
+| World-only SSS with ordinary projection depth | Both Bend point samples map first-person depth (`raw <= 0.01`) to far depth `1`; world depth becomes `raw * 1.01 - 0.01` | FO4 merges first-person and world projections into deferred depth; the dispatch light coordinate uses the world projection | `RaymarchCS.hlsl` `GetWorldShadowDepth`, `bend_sss_gpu.hlsli` depth reads; shared classification/remap in `Common\DepthPartition.hlsli`, also used by DeferredPosition and SSGI |
+| First-person forward lighting does not consume SSS | First-person pixels remain white in the cleared mask through Bend's far-depth return after its group barrier; consumers stay unchanged | FO4 first person uses deferred lighting, so it must neither receive nor cast world SSS | `bend_sss_gpu.hlsli` `WriteScreenSpaceShadow`, `ScreenSpaceShadows.cpp` white clear |
+
 [upstream]: https://github.com/community-shaders/skyrim-community-shaders

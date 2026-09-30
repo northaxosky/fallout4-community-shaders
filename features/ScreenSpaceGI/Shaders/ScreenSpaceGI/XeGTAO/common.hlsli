@@ -5,6 +5,7 @@
 #ifndef XEGTAO_COMMON
 #define XEGTAO_COMMON
 
+#include "../../Common/DepthPartition.hlsli"
 #include "../Common/Math.hlsli"
 
 // The layout is unconditional so every permutation reflects the same buffer.
@@ -121,11 +122,11 @@ float3 ScreenToViewPosition(const float2 screenPos, const float viewspaceDepth)
 // FO4 raw depth to view depth with the composite's partition split; near is first person.
 float ScreenToViewDepth(const float2 screenPos, const float rawDepth)
 {
-	const bool nearDepth = rawDepth <= 0.01;
+	const bool nearDepth = DepthPartition::IsNear(rawDepth);
 	const float4 ndc = float4(
 		screenPos.x * 2.0 - 1.0,
 		1.0 - screenPos.y * 2.0,
-		nearDepth ? rawDepth * 100.0 : rawDepth * 1.01 - 0.01,
+		DepthPartition::ToProjectionDepth(rawDepth, nearDepth),
 		1.0);
 	return nearDepth ?
 	           dot(NearReprojZ, ndc) / dot(NearReprojW, ndc) :

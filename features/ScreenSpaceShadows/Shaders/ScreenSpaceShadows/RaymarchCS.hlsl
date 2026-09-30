@@ -2,6 +2,14 @@
 // Copyright (c) Skyrim Community Shaders contributors
 // Ported from Skyrim Community Shaders.
 
+#include "../Common/DepthPartition.hlsli"
+
+// FO4 merged depth: exclude first person and restore the dispatch's world projection depth.
+float GetWorldShadowDepth(float rawDepth, float farDepth)
+{
+	return DepthPartition::IsNear(rawDepth) ? farDepth : DepthPartition::ToProjectionDepth(rawDepth, false);
+}
+
 #include "bend_sss_gpu.hlsli"
 
 Texture2D<unorm float> DepthTexture : register(t0);

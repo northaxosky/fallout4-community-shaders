@@ -243,8 +243,9 @@ void WriteScreenSpaceShadow(DispatchParameters inParameters, int3 inGroupID, int
 		half2 coord = read_xy * inParameters.InvDepthTextureSize * inParameters.DynamicRes;
 		half2 coord_with_offset = (read_xy + offset_xy) * inParameters.InvDepthTextureSize * inParameters.DynamicRes;
 
-		depths.x = inParameters.DepthTexture.SampleLevel(inParameters.PointBorderSampler, coord, 0);
-		depths.y = inParameters.DepthTexture.SampleLevel(inParameters.PointBorderSampler, coord_with_offset, 0);
+		// FO4 adapts both point samples before filtering so first person neither casts nor receives.
+		depths.x = GetWorldShadowDepth(inParameters.DepthTexture.SampleLevel(inParameters.PointBorderSampler, coord, 0), inParameters.FarDepthValue);
+		depths.y = GetWorldShadowDepth(inParameters.DepthTexture.SampleLevel(inParameters.PointBorderSampler, coord_with_offset, 0), inParameters.FarDepthValue);
 
 		// Depth thresholds (bilinear/shadow thickness) are based on a fractional ratio of the difference between sampled depth and the far clip depth
 		static const half kDepthThicknessFloor = 1e-4h;  // Prevents division by zero in depth_scale when depth is at the far clip plane
