@@ -29,7 +29,6 @@
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
-#include "Render/SharedData.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsPersistence.h"
@@ -50,7 +49,6 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.screenspaceshadows");
 
 		constexpr const wchar_t* kRaymarchPath = L"Data\\Shaders\\ScreenSpaceShadows\\RaymarchCS.hlsl";
-		constexpr const wchar_t* kMaskDepthPath = L"Data\\Shaders\\FO4\\ScreenSpaceShadows\\MaskDepthCS.hlsl";
 
 		// Engine depth uses near=0, far=1.
 		constexpr float kFarDepthValue = 1.0f;
@@ -202,38 +200,6 @@ namespace cs::features
 		_maskTexture = CreateShadowTexture(a_width, a_height, DXGI_FORMAT_R8G8_UNORM, "ScreenSpaceShadows/Mask");
 		_allocWidth = a_width;
 		_allocHeight = a_height;
-	}
-
-	ID3D11ShaderResourceView* ScreenSpaceShadows::PrepareWorldDepth(ID3D11DeviceContext* a_context)
-	{
-		// FO4: mask canonical depth at the boundary, not inside Bend's point samples.
-		auto* canonical = cs::render::GetCanonicalSceneDepthSRV();
-		auto* partitioned = cs::engine::GetSceneDepthSRV();
-		if (!canonical || !partitioned || !_maskDepthCS)
-			return nullptr;
-		winrt::com_ptr<ID3D11Resource> resource;
-		canonical->GetResource(resource.put());
-		const auto texture = resource.try_as<ID3D11Texture2D>();
-		if (!texture)
-			return nullptr;
-		D3D11_TEXTURE2D_DESC desc{};
-		texture->GetDesc(&desc);
-		if (!_worldDepthTexture || _worldDepthTexture->desc.Width != desc.Width || _worldDepthTexture->desc.Height != desc.Height) {
-			_worldDepthTexture = CreateShadowTexture(desc.Width, desc.Height, DXGI_FORMAT_R32_FLOAT, "ScreenSpaceShadows/WorldDepth");
-		}
-		{
-			cs::render::annotation::ScopedEvent annotationScope("ScreenSpaceShadows/MaskDepth");
-			cs::render::ScopedComputeSharedDataBinding substrate(a_context);
-			if (!substrate.IsActive())
-				return nullptr;
-			cs::engine::ComputeOMScope scope(a_context);
-			auto* output = _worldDepthTexture->uav.get();
-			a_context->CSSetShaderResources(0, 1, &partitioned);
-			a_context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
-			a_context->CSSetShader(_maskDepthCS.get(), nullptr, 0);
-			a_context->Dispatch((desc.Width + 7) / 8, (desc.Height + 7) / 8, 1);
-		}
-		return _worldDepthTexture->srv.get();
 	}
 
 	bool ScreenSpaceShadows::TryGetMaskExtents(
@@ -422,10 +388,8 @@ namespace cs::features
 			_realMaskReadyForDraw = false;
 			_raymarchCB.reset();
 			_maskTexture.reset();
-			_worldDepthTexture.reset();
 			_pointBorderSampler = nullptr;
 			_raymarchCS = nullptr;
-			_maskDepthCS = nullptr;
 			_whiteFallbackSRV = nullptr;
 			_allocWidth = 0;
 			_allocHeight = 0;
@@ -487,11 +451,6 @@ namespace cs::features
 		}
 
 		try {
-			_maskDepthCS.attach(static_cast<ID3D11ComputeShader*>(
-				cs::util::CompileShader(kMaskDepthPath, {}, "cs_5_0")));
-			if (!_maskDepthCS)
-				throw std::runtime_error("SSS depth boundary shader compilation failed");
-			cs::render::annotation::SetName(_maskDepthCS.get(), "ScreenSpaceShadows/MaskDepth.CS");
 			_raymarchCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<RaymarchCB>());
 			_raymarchCB->SetName("ScreenSpaceShadows/RaymarchConstants.Buffer");
@@ -523,7 +482,6 @@ namespace cs::features
 			return true;
 		} catch (const std::exception& e) {
 			_resourceInitFailed = true;
-			_maskDepthCS = nullptr;
 			_pointBorderSampler = nullptr;
 			_maskTexture.reset();
 			_raymarchCB.reset();
@@ -533,7 +491,6 @@ namespace cs::features
 			return false;
 		} catch (...) {
 			_resourceInitFailed = true;
-			_maskDepthCS = nullptr;
 			_pointBorderSampler = nullptr;
 			_maskTexture.reset();
 			_raymarchCB.reset();
@@ -666,7 +623,8 @@ namespace cs::features
 			float sy = 0.0f;
 			float sz = 0.0f;
 			if (shader && cs::engine::TryGetSunDirectionWS(sx, sy, sz)) {
-				auto* depthSRV = PrepareWorldDepth(context);
+				// FO4: canonical depth puts first-person casters in the world projection.
+				auto* depthSRV = cs::render::GetCanonicalSceneDepthSRV();
 				auto* rtm = cs::engine::GetRenderTargetManager();
 				if (depthSRV && rtm && _raymarchCB && _pointBorderSampler) {
 					const float widthRatio = rtm->GetDynamicWidthRatio();

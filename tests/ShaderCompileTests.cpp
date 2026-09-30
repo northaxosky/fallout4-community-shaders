@@ -157,28 +157,19 @@ namespace
 		return {};
 	}
 
-	std::string VerifySSSDepthBoundary(const std::filesystem::path& a_root)
+	std::string VerifySSSReceiverGate(const std::filesystem::path& a_root)
 	{
 		try {
 			const auto checked = [](HRESULT a_result) {
 				if (FAILED(a_result))
-					throw std::runtime_error("D3D11 SSS depth-boundary fixture failed");
+					throw std::runtime_error("D3D11 SSS receiver-gate fixture failed");
 			};
 			Microsoft::WRL::ComPtr<ID3D11Device> device;
 			Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
 			checked(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
 				D3D11_SDK_VERSION, device.GetAddressOf(), nullptr, context.GetAddressOf()));
 			std::string error;
-			const auto blob = cs::util::CompileShaderToBlob(
-				(a_root / "FO4" / "ScreenSpaceShadows" / "MaskDepthCS.hlsl").c_str(),
-				{}, "cs_5_0", "main", &error, a_root);
-			if (!blob)
-				return error;
-			Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader;
-			checked(device->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, shader.GetAddressOf()));
 			constexpr std::array partitioned{ 0.0f, 0.005f, 0.01f, 0.01001f, 0.5f, 1.0f };
-			constexpr std::array canonical{ 0.2f, 0.4f, 0.6f, 0.0001101f, 0.495f, 1.0f };
-			constexpr std::array expected{ 1.0f, 1.0f, 1.0f, canonical[3], canonical[4], 1.0f };
 			D3D11_TEXTURE2D_DESC desc{};
 			desc.Width = static_cast<UINT>(partitioned.size());
 			desc.Height = desc.MipLevels = desc.ArraySize = desc.SampleDesc.Count = 1;
@@ -195,21 +186,13 @@ namespace
 				return view;
 			};
 			const auto raw = input(partitioned);
-			const auto world = input(canonical);
 			desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
 			Microsoft::WRL::ComPtr<ID3D11Texture2D> output;
 			checked(device->CreateTexture2D(&desc, nullptr, output.GetAddressOf()));
 			Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> uav;
 			checked(device->CreateUnorderedAccessView(output.Get(), nullptr, uav.GetAddressOf()));
 			auto* rawView = raw.Get();
-			auto* worldView = world.Get();
 			auto* outputView = uav.Get();
-			context->CSSetShaderResources(0, 1, &rawView);
-			context->CSSetShaderResources(17, 1, &worldView);
-			context->CSSetUnorderedAccessViews(0, 1, &outputView, nullptr);
-			context->CSSetShader(shader.Get(), nullptr, 0);
-			context->Dispatch(1, 1, 1);
-			context->ClearState();
 			desc.BindFlags = 0;
 			desc.Usage = D3D11_USAGE_STAGING;
 			desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
@@ -219,13 +202,11 @@ namespace
 				context->CopyResource(readback.Get(), output.Get());
 				D3D11_MAPPED_SUBRESOURCE mapped{};
 				checked(context->Map(readback.Get(), 0, D3D11_MAP_READ, 0, &mapped));
-				std::array<float, expected.size()> values{};
+				std::array<float, partitioned.size()> values{};
 				std::memcpy(values.data(), mapped.pData, sizeof(values));
 				context->Unmap(readback.Get(), 0);
 				return values;
 			};
-			if (read() != expected)
-				return "near samples cast shadows or world canonical depth changed";
 			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 			desc.Usage = D3D11_USAGE_DEFAULT;
 			desc.CPUAccessFlags = 0;
@@ -239,7 +220,7 @@ namespace
 					"cs_5_0", "main", &error, a_root);
 				if (!consumer)
 					return error;
-				shader.Reset();
+				Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader;
 				checked(device->CreateComputeShader(consumer->GetBufferPointer(), consumer->GetBufferSize(), nullptr, shader.GetAddressOf()));
 				auto* maskView = mask.Get();
 				context->CSSetShaderResources(0, 1, &rawView);
@@ -556,10 +537,6 @@ namespace
 			.defines = { { "SAMPLE_COUNT", "64" }, { "TERRAIN_BLENDING", "" } },
 			.description = "upstream Bend on R32 canonical world depth",
 			.required = { CB(1), Texture(0), Sampler(0) },
-			.forbidden = { CB(7) } });
-		a_jobs.push_back({ .path = a_root / "FO4" / "ScreenSpaceShadows" / "MaskDepthCS.hlsl",
-			.description = "SSS first-person casting boundary",
-			.required = { Texture(0), Texture(17) },
 			.forbidden = { CB(7) } });
 		a_jobs.push_back({ .path = a_root / "FO4" / "TerrainShadows" / "ShadowUpdate.cs.hlsl",
 			.description = "terrain shadow update" });
@@ -893,8 +870,8 @@ int main(int argc, char** argv)
 		std::printf("FAIL: substrate ABI: %s\n", error.c_str());
 		++failures;
 	}
-	if (const auto error = VerifySSSDepthBoundary(argv[1]); !error.empty()) {
-		std::printf("FAIL: SSS depth boundary: %s\n", error.c_str());
+	if (const auto error = VerifySSSReceiverGate(argv[1]); !error.empty()) {
+		std::printf("FAIL: SSS receiver gate: %s\n", error.c_str());
 		++failures;
 	}
 	for (const auto& job : jobs) {

@@ -72,7 +72,6 @@ namespace cs::features
 			ID3D11Device* a_device,
 			sss_mask_binding::Extent a_allocation);
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
-		ID3D11ShaderResourceView* PrepareWorldDepth(ID3D11DeviceContext* a_context);
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
 		FeatureDebugTexture GetShadowMaskDebugTexture() const;
@@ -111,10 +110,8 @@ namespace cs::features
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _raymarchCB;
 		std::unique_ptr<cs::buffer::Texture2D> _maskTexture;
-		std::unique_ptr<cs::buffer::Texture2D> _worldDepthTexture;
 		winrt::com_ptr<ID3D11SamplerState> _pointBorderSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _raymarchCS;
-		winrt::com_ptr<ID3D11ComputeShader> _maskDepthCS;
 		winrt::com_ptr<ID3D11ShaderResourceView> _whiteFallbackSRV;
 		std::uint32_t _allocWidth = 0;
 		std::uint32_t _allocHeight = 0;
