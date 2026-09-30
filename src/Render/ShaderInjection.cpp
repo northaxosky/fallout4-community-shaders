@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -22,6 +23,7 @@
 #include <mutex>
 #include <optional>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -33,57 +35,77 @@ namespace cs::engine
 		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
 	}
 
-	ScopedPixelShaderInjectionBindings::ScopedPixelShaderInjectionBindings() noexcept :
-		_previous(std::exchange(t_pixelBindings, this))
+	ScopedShaderInjectionBindings::ScopedShaderInjectionBindings(ShaderStage a_stage) noexcept :
+		_stage(a_stage),
+		_previous(a_stage == ShaderStage::kPixel ? std::exchange(t_pixelBindings, this) : nullptr)
 	{}
 
-	ScopedPixelShaderInjectionBindings::~ScopedPixelShaderInjectionBindings() noexcept
+	ScopedShaderInjectionBindings::~ScopedShaderInjectionBindings() noexcept
 	{
-		t_pixelBindings = _previous;
+		if (_stage == ShaderStage::kPixel)
+			t_pixelBindings = _previous;
 		if (!_context)
 			return;
-		_substrate.Restore(_context, ShaderStage::kPixel);
+		_substrate.Restore(_context, _stage);
 		for (const auto& buffer : _buffers) {
-			_context->PSSetConstantBuffers(buffer.slot, 1, &buffer.value);
+			if (_stage == ShaderStage::kCompute)
+				_context->CSSetConstantBuffers(buffer.slot, 1, &buffer.value);
+			else
+				_context->PSSetConstantBuffers(buffer.slot, 1, &buffer.value);
 			if (buffer.value)
 				buffer.value->Release();
 		}
 		for (const auto& resource : _resources) {
-			_context->PSSetShaderResources(resource.slot, 1, &resource.value);
+			if (_stage == ShaderStage::kCompute)
+				_context->CSSetShaderResources(resource.slot, 1, &resource.value);
+			else
+				_context->PSSetShaderResources(resource.slot, 1, &resource.value);
 			if (resource.value)
 				resource.value->Release();
 		}
 		for (const auto& sampler : _samplers) {
-			_context->PSSetSamplers(sampler.slot, 1, &sampler.value);
+			if (_stage == ShaderStage::kCompute)
+				_context->CSSetSamplers(sampler.slot, 1, &sampler.value);
+			else
+				_context->PSSetSamplers(sampler.slot, 1, &sampler.value);
 			if (sampler.value)
 				sampler.value->Release();
 		}
 	}
 
-	void ScopedPixelShaderInjectionBindings::Capture(
+	void ScopedShaderInjectionBindings::Capture(
 		ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims)
 	{
 		if (!a_context)
 			return;
 		if (!_context) {
 			_context = a_context;
-			_substrate.Save(_context, ShaderStage::kPixel);
+			_substrate.Save(_context, _stage);
 		}
 		for (const auto& claim : a_claims) {
-			if (claim.stage != ShaderStage::kPixel)
+			if (claim.stage != _stage)
 				continue;
 			if (claim.resourceType == ShaderResourceType::kShaderResource &&
 				std::ranges::none_of(_resources, [&](const auto& r) { return r.slot == claim.slot; })) {
 				_resources.push_back({ claim.slot, nullptr });
-				_context->PSGetShaderResources(claim.slot, 1, &_resources.back().value);
+				if (_stage == ShaderStage::kCompute)
+					_context->CSGetShaderResources(claim.slot, 1, &_resources.back().value);
+				else
+					_context->PSGetShaderResources(claim.slot, 1, &_resources.back().value);
 			} else if (claim.resourceType == ShaderResourceType::kSampler &&
 					   std::ranges::none_of(_samplers, [&](const auto& s) { return s.slot == claim.slot; })) {
 				_samplers.push_back({ claim.slot, nullptr });
-				_context->PSGetSamplers(claim.slot, 1, &_samplers.back().value);
+				if (_stage == ShaderStage::kCompute)
+					_context->CSGetSamplers(claim.slot, 1, &_samplers.back().value);
+				else
+					_context->PSGetSamplers(claim.slot, 1, &_samplers.back().value);
 			} else if (claim.resourceType == ShaderResourceType::kConstantBuffer &&
 					   std::ranges::none_of(_buffers, [&](const auto& b) { return b.slot == claim.slot; })) {
 				_buffers.push_back({ claim.slot, nullptr });
-				_context->PSGetConstantBuffers(claim.slot, 1, &_buffers.back().value);
+				if (_stage == ShaderStage::kCompute)
+					_context->CSGetConstantBuffers(claim.slot, 1, &_buffers.back().value);
+				else
+					_context->PSGetConstantBuffers(claim.slot, 1, &_buffers.back().value);
 			}
 		}
 	}
@@ -1445,6 +1467,10 @@ namespace cs::engine
 					return;
 				}
 				const ActiveVariantScope variantScope(variant.get());
+				// FO4: contribution claims restore exact CS bindings after native dispatch.
+				ScopedShaderInjectionBindings contributionBindings(ShaderStage::kCompute);
+				for (const auto& contribution : target->contributions)
+					contributionBindings.Capture(a_context, contribution.slotClaims);
 				DispatchPublishedTarget(
 					*target,
 					ShaderStage::kCompute,
@@ -1737,6 +1763,47 @@ namespace cs::engine
 			return false;
 		}
 		service.enabled = a_enabled;
+		return true;
+	}
+
+	bool PrepareShaderInjectionVariants(std::span<const ShaderFamilyDescriptor> a_variants,
+		std::string& a_error)
+	{
+		const auto plan = GetService().published.load(std::memory_order_acquire);
+		if (!plan) {
+			a_error = "Shader variants requested before injection publication";
+			return false;
+		}
+		std::vector<std::shared_ptr<ShaderVariantCompilationHandle>> handles;
+		for (const auto& descriptor : a_variants) {
+			const auto* target = FindPublishedTarget(*plan, descriptor.target);
+			const auto variant = target ?
+			                         FindOrPrepareNativeVariant(*plan, *target, MakeNativeVariantKey(descriptor)) :
+			                         nullptr;
+			if (!variant) {
+				a_error = "Required shader variant has no published route";
+				return false;
+			}
+			std::scoped_lock lock(variant->mutex);
+			if (!variant->compilation) {
+				a_error = "Required shader variant has no compilation";
+				return false;
+			}
+			handles.push_back(variant->compilation);
+		}
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+		for (const auto& handle : handles) {
+			while (handle->GetState() == ShaderVariantCompilationState::kPending &&
+				   std::chrono::steady_clock::now() < deadline)
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			if (handle->GetState() != ShaderVariantCompilationState::kReady) {
+				a_error = handle->GetState() == ShaderVariantCompilationState::kFailed ?
+				              handle->GetError() :
+				              "Required shader compilation timed out";
+				return false;
+			}
+		}
+		a_error.clear();
 		return true;
 	}
 

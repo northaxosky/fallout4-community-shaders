@@ -37,6 +37,9 @@ namespace RE
 namespace cs::engine
 {
 	struct ShaderFamilyDescriptor;
+	// Startup barrier for features that mutate inputs consumed by required replacements.
+	bool PrepareShaderInjectionVariants(std::span<const ShaderFamilyDescriptor> a_variants,
+		std::string& a_error);
 	enum class ShaderResourceType : std::uint8_t
 	{
 		kConstantBuffer,
@@ -54,13 +57,13 @@ namespace cs::engine
 		auto operator<=>(const ShaderSlotClaim&) const = default;
 	};
 
-	class ScopedPixelShaderInjectionBindings
+	class ScopedShaderInjectionBindings
 	{
 	public:
-		ScopedPixelShaderInjectionBindings() noexcept;
-		~ScopedPixelShaderInjectionBindings() noexcept;
-		ScopedPixelShaderInjectionBindings(const ScopedPixelShaderInjectionBindings&) = delete;
-		ScopedPixelShaderInjectionBindings& operator=(const ScopedPixelShaderInjectionBindings&) = delete;
+		explicit ScopedShaderInjectionBindings(ShaderStage a_stage = ShaderStage::kPixel) noexcept;
+		~ScopedShaderInjectionBindings() noexcept;
+		ScopedShaderInjectionBindings(const ScopedShaderInjectionBindings&) = delete;
+		ScopedShaderInjectionBindings& operator=(const ScopedShaderInjectionBindings&) = delete;
 		void Capture(ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims);
 
 	private:
@@ -79,13 +82,15 @@ namespace cs::engine
 			std::uint32_t slot;
 			ID3D11Buffer* value;
 		};
-		ScopedPixelShaderInjectionBindings* _previous;
+		ShaderStage _stage;
+		ScopedShaderInjectionBindings* _previous;
 		ID3D11DeviceContext* _context = nullptr;
 		render::SubstrateBindingSnapshot _substrate;
 		std::vector<Resource> _resources;
 		std::vector<Sampler> _samplers;
 		std::vector<Buffer> _buffers;
 	};
+	using ScopedPixelShaderInjectionBindings = ScopedShaderInjectionBindings;
 
 	using ShaderInjectionDefines = std::map<std::string, std::string, std::less<>>;
 	using ShaderInjectionReadyPredicate = std::function<bool()>;

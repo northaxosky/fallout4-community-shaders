@@ -1,7 +1,6 @@
 #include "DynamicCubemapsSettings.h"
 #include "ExponentialHeightFogMath.h"
 #include "FrameGenerationSettings.h"
-#include "InverseSquareLightingMath.h"
 #include "PerformanceOverlaySettings.h"
 #include "Render/TemporalRenderSettings.h"
 #include "RenderDocSettings.h"
@@ -72,7 +71,7 @@ namespace
 		auto registry = BuildCoreRegistry();
 		const std::array features{
 			std::pair{ "ScreenSpaceGI", MakeSchemaView(ssgi_settings::kSchema) },
-			std::pair{ "InverseSquareLighting", MakeSchemaView(inverse_square_lighting::kSchema) },
+			std::pair{ "InverseSquareLighting", SchemaView{} },
 			std::pair{ "ExponentialHeightFog", MakeSchemaView(exponential_height_fog::kSchema) },
 			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },
 			std::pair{ "WetnessEffects", MakeSchemaView(wetness_math::kSchema) },

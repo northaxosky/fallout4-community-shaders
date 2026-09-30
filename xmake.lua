@@ -366,11 +366,16 @@ end)
 target("InverseSquareLightingMathTests", function()
     set_kind("binary")
     set_default(false)
-    add_files("tests/InverseSquareLightingMathTests.cpp")
+    add_files(
+        "tests/InverseSquareLightingMathTests.cpp",
+        "features/InverseSquareLighting/src/LightAuthoring.cpp",
+        "src/Settings/FeatureConfig.cpp"
+    )
     add_headerfiles(
         "features/InverseSquareLighting/src/InverseSquareLightingMath.h"
     )
     add_includedirs("features/InverseSquareLighting/src")
+    add_includedirs("src")
     add_packages("vcpkg::tomlplusplus")
 end)
 
@@ -518,6 +523,7 @@ target("ShaderCompileTests", function()
     add_deps("ShaderStage")
     add_files(
         "tests/ShaderCompileTests.cpp",
+        "tests/InverseSquareLightingGpuTests.cpp",
         "src/Utils/ShaderCompile.cpp"
     )
     add_headerfiles("src/Utils/ShaderCompile.h")

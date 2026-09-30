@@ -1,96 +1,86 @@
 #include "InverseSquareLightingMath.h"
+#include "LightAuthoring.h"
 
-#include <bit>
 #include <cmath>
-#include <cstdint>
 #include <iostream>
-#include <limits>
-
-namespace
-{
-	int failures = 0;
-
-	void Check(bool a_condition, const char* a_message)
-	{
-		if (!a_condition) {
-			std::cerr << "FAIL: " << a_message << '\n';
-			++failures;
-		}
-	}
-
-	void TestIdentityGuards()
-	{
-		using namespace cs::features::inverse_square_lighting;
-		constexpr std::uint32_t vanillaBits = 0x3EAAAAABU;
-		const float vanilla = std::bit_cast<float>(vanillaBits);
-
-		Settings disabled;
-		disabled.enabled = false;
-		Check(
-			std::bit_cast<std::uint32_t>(ApplyAttenuation(
-				vanilla,
-				std::numeric_limits<float>::quiet_NaN(),
-				-1.0f,
-				disabled,
-				false)) == vanillaBits,
-			"disabled mode must preserve the exact native value");
-
-		const Settings enabled;
-		for (const auto [distance, radius] : {
-				 std::pair{ -1.0f, 100.0f },
-				 std::pair{
-					 std::numeric_limits<float>::quiet_NaN(),
-					 100.0f },
-				 std::pair{
-					 std::numeric_limits<float>::infinity(),
-					 100.0f },
-				 std::pair{ 1.0f, 0.0f },
-				 std::pair{
-					 1.0f,
-					 std::numeric_limits<float>::quiet_NaN() } }) {
-			Check(
-				std::bit_cast<std::uint32_t>(ApplyAttenuation(
-					vanilla, distance, radius, enabled, false)) == vanillaBits,
-				"malformed light inputs must preserve native attenuation");
-		}
-
-		auto malformed = enabled;
-		malformed.exteriorStrength =
-			std::numeric_limits<float>::quiet_NaN();
-		Check(
-			std::bit_cast<std::uint32_t>(ApplyAttenuation(
-				vanilla, 1.0f, 100.0f, malformed, false)) == vanillaBits,
-			"malformed settings must preserve native attenuation");
-	}
-
-	void TestFalloffAndCutoff()
-	{
-		using namespace cs::features::inverse_square_lighting;
-		const float nearField = kDefaultNearFieldDistance;
-		const float radius = 1000.0f;
-		const float source =
-			PhysicalAttenuation(0.0f, radius, nearField);
-		const float middle =
-			PhysicalAttenuation(100.0f, radius, nearField);
-		const float far =
-			PhysicalAttenuation(500.0f, radius, nearField);
-		Check(
-			std::isfinite(source) && source > middle && middle > far,
-			"physical attenuation must remain finite and monotonic");
-		Check(
-			PhysicalAttenuation(radius, radius, nearField) == 0.0f && PhysicalAttenuation(
-																		  radius + 1.0f, radius, nearField) == 0.0f,
-			"radius cutoff must reach exact zero");
-		Check(
-			PhysicalAttenuation(
-				radius - 0.001f, radius, nearField) < 1.0e-10f,
-			"cutoff must remain continuous at the light radius");
-	}
-}
 
 int main()
 {
-	TestIdentityGuards();
-	TestFalloffAndCutoff();
-	return failures == 0 ? 0 : 1;
+	using namespace cs::features::inverse_square_lighting;
+	std::vector<LightDefinition> definitions;
+	std::string error;
+	if (!ParseLightDefinitions(toml::parse(R"(
+[[lights]]
+plugin = "Test.esm"
+form_id = 0x800
+inverse_square = true
+linear = true
+cutoff = 0.1
+size = 2.0
+[[references]]
+plugin = "Test.esm"
+form_id = 0x801
+inverse_square = false
+)"),
+			definitions, error) ||
+		definitions.size() != 2) {
+		std::cerr << "Authored light identities did not parse: " << error << '\n';
+		return 1;
+	}
+	auto inherited = definitions[0].data;
+	inherited.Apply(definitions[1].data);
+	if (inherited.inverseSquare != false || inherited.linear != true ||
+		inherited.cutoff != 0.1f || inherited.size != 2.0f) {
+		std::cerr << "Reference opt-out lost its explicit false or inherited fields\n";
+		return 1;
+	}
+	for (const char* invalid : {
+			 R"([[lights]]
+plugin = "Test.esm"
+form_id = 0x1000800
+)",
+			 R"([[lights]]
+plugin = "Test.esm"
+form_id = 0x800
+inverse_square = "true"
+)",
+			 R"([[lights]]
+plugin = "Test.esm"
+form_id = 0x800
+size = nan
+)" }) {
+		if (ParseLightDefinitions(toml::parse(invalid), definitions, error) || definitions.size() != 2) {
+			std::cerr << "Invalid authoring was accepted or partially replaced valid definitions\n";
+			return 1;
+		}
+	}
+	for (const bool shadow : { false, true }) {
+		for (const float cutoffOverride : { 1.0f, 0.1f }) {
+			constexpr float intensity = 4.0f, size = 2.0f;
+			const float radius = CalculateRadius(intensity, shadow, cutoffOverride, size);
+			const float cutoff = cutoffOverride == 1.0f ?
+			                         (shadow ? 0.022f : 0.05f) :
+			                         cutoffOverride;
+			const float atRadius = intensity * 3920.0f /
+			                       (radius * radius + 3920.0f * size * size * 0.5f);
+			if (std::abs(atRadius - cutoff) > 1e-6f) {
+				std::cerr << "Radius does not meet the authored intensity cutoff\n";
+				return 1;
+			}
+		}
+	}
+	if (CalculateRadius(0.01f, false, 1.0f, 50.0f) != 1.0f ||
+		CalculateRadius(1.0f, false, 0.5f, 2.0f) != 0.0f) {
+		std::cerr << "Radius differs from the upstream NaN fallback or balanced zero-radius edge\n";
+		return 1;
+	}
+	const float radius = CalculateRadius(4.0f, false, 1.0f, 2.0f);
+	if (std::abs(GetAttenuation(0, radius, 2) - 0.5f) > 1e-6f ||
+		GetAttenuation(radius, radius, 2) != 0 ||
+		GetAttenuation(radius + 1, radius, 2) != 0 ||
+		GetAttenuation(radius - 1, radius, 2) <= 0) {
+		std::cerr << "Gameplay attenuation disagrees with source-size or fade boundary\n";
+		return 1;
+	}
+	return 0;
 }
