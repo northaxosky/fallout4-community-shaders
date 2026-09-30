@@ -157,6 +157,43 @@ namespace cs::settings
 		T value;
 	};
 
+	template <class Settings>
+	struct Float2Field
+	{
+		using SettingsType = Settings;
+		using ValueType = Float2;
+
+		std::string_view key;
+		std::string_view description;
+		Float2 Settings::* member;
+		ApplyTiming timing = ApplyTiming::kImmediate;
+
+		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
+		{
+			const auto* node = a_table.get(key);
+			if (!node)
+				return true;
+			const auto* values = node->as_array();
+			if (!values || values->size() != 2) {
+				a_error = std::string(key) + ": expected two numbers";
+				return false;
+			}
+			auto candidate = a_value.*member;
+			for (std::size_t i = 0; i < candidate.size(); ++i) {
+				if (!AcceptSetting(feature_config::ReadFloat((*values)[i], candidate[i]), key, "number", a_error))
+					return false;
+			}
+			a_value.*member = candidate;
+			return true;
+		}
+
+		void Write(toml::table& a_table, const Settings& a_value) const
+		{
+			const auto& value = a_value.*member;
+			a_table.insert_or_assign(key, toml::array{ static_cast<double>(value[0]), static_cast<double>(value[1]) });
+		}
+	};
+
 	template <class Settings, class T>
 	struct ChoiceField
 	{
@@ -243,7 +280,7 @@ namespace cs::settings
 	{
 		if constexpr (std::is_enum_v<T>)
 			return EncodeValue(static_cast<std::underlying_type_t<T>>(a_value));
-		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string>)
+		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string> || std::same_as<T, Float2>)
 			return a_value;
 		else if constexpr (std::is_signed_v<T>)
 			return static_cast<std::int64_t>(a_value);

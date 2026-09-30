@@ -72,6 +72,7 @@ namespace cs::features
 			return false;
 		}
 		_settings = wetness_math::Clamp(candidate);
+		_liveSettings = settings::BindLiveSettings(wetness_math::kSchema, _settings);
 		return true;
 	}
 

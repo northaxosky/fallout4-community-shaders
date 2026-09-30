@@ -1,33 +1,177 @@
 #include "PerformanceOverlay.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <filesystem>
-#include <fstream>
-#include <vector>
-
-#include <DearModdingUI/Client.h>
-#include <Windows.h>
-#include <dxgi1_4.h>
-#include <toml++/toml.hpp>
-
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
+#include "Render/FrameProfiler.h"
+#include "Render/RenderHooks.h"
+#include "Render/ShaderSubclassHooks.h"
+#include "Render/TemporalPipeline.h"
 #include "Settings/SettingsPersistence.h"
 #include "Shared/PerfUtils.h"
 #include "Telemetry/Telemetry.h"
+
+#include <DearModdingUI/Client.h>
+
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+#include <sstream>
+#include <stdexcept>
 
 namespace cs::features
 {
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.performanceoverlay");
-	}
 
-	constexpr std::array<float, 3> kFrameTimeReferenceFps{ 30.0f, 60.0f, 120.0f };
+		float Percentage(float a_part, float a_total)
+		{
+			return a_total > 0.0f ? a_part / a_total * 100.0f : 0.0f;
+		}
+
+		float CostPerCall(float a_ms, float a_calls)
+		{
+			return a_calls > 0.0f ? a_ms / a_calls : 0.0f;
+		}
+
+		void SortHeader(std::span<const char* const> a_labels, int& a_column, bool& a_descending)
+		{
+			dmui::ui::TableNextRow();
+			for (std::size_t i = 0; i < a_labels.size(); ++i) {
+				(void)dmui::ui::TableSetColumnIndex(static_cast<int>(i));
+				if (dmui::ui::Selectable(a_labels[i])) {
+					a_descending = a_column == static_cast<int>(i) ? !a_descending : true;
+					a_column = static_cast<int>(i);
+				}
+			}
+		}
+
+		template <class Row, class Metric>
+		void SortRows(std::vector<Row>& a_rows, int a_column, bool a_descending, Metric a_metric)
+		{
+			std::ranges::stable_sort(a_rows, [&](const auto& a, const auto& b) {
+				if constexpr (requires { a.shaderType; }) {
+					if (a.shaderType < 0 || b.shaderType < 0) {
+						if (a.shaderType < 0 && b.shaderType < 0)
+							return a.shaderType < b.shaderType;
+						return a.shaderType >= 0;
+					}
+				}
+				const auto left = a_metric(a), right = a_metric(b);
+				const int order = a_column == 0 ? a.label.compare(b.label) : (left > right) - (left < right);
+				return a_descending ? order > 0 : order < 0;
+			});
+		}
+
+		std::string Milliseconds(float a_value)
+		{
+			if (std::abs(a_value) < 1e-4f)
+				return "0 ms";
+			return a_value < 0.1f ? std::format("{:.3f} ms", a_value) : std::format("{:.2f} ms", a_value);
+		}
+
+		dmui::TextTone MetricTone(float a_value, bool a_costPerCall)
+		{
+			using Settings = performance_overlay::Settings;
+			const float good = a_costPerCall ? Settings::kCostPerCallGoodThreshold : Settings::kFrameTimeGoodThreshold;
+			const float warning = a_costPerCall ? Settings::kCostPerCallWarningThreshold : Settings::kFrameTimeWarningThreshold;
+			return a_value < good ? dmui::TextTone::kSuccess : a_value < warning ? dmui::TextTone::kWarning :
+			                                                                       dmui::TextTone::kError;
+		}
+
+		dmui::TextTone ComparisonTone(float a_left, float a_right)
+		{
+			return a_left < a_right ? dmui::TextTone::kSuccess : a_left > a_right ? dmui::TextTone::kError :
+			                                                                        dmui::TextTone::kInherit;
+		}
+
+		void DrawMilliseconds(float a_value, dmui::TextTone a_tone = dmui::TextTone::kInherit, bool a_microseconds = false)
+		{
+			std::string text;
+			if (a_microseconds && a_value < performance_overlay::Settings::kMicrosecondThreshold)
+				text = std::abs(a_value * 1000.0f) < 1e-4f ? "0 us" : std::format("{:.2f} us", a_value * 1000.0f);
+			else
+				text = Milliseconds(a_value);
+			(void)dmui::DrawStyledText(host::HostClient::Get().Client(), text, { .tone = a_tone });
+		}
+
+		void DrawDelta(float a_baseline, float a_test)
+		{
+			const float delta = a_test - a_baseline;
+			float percent{};
+			if (a_baseline < a_test && a_baseline > 0.0f)
+				percent = 100.0f * (a_test - a_baseline) / a_baseline;
+			else if (a_test < a_baseline && a_test > 0.0f)
+				percent = 100.0f * (a_baseline - a_test) / a_test;
+			auto text = (delta > 0.0f ? "+" : "") + Milliseconds(delta);
+			if (percent >= performance_overlay::Settings::kPercentDisplayThreshold)
+				text += std::format(" (+{:.1f}%)", a_test < a_baseline ? -percent : percent);
+			(void)dmui::DrawStyledText(host::HostClient::Get().Client(), text,
+				{ .tone = ComparisonTone(a_test, a_baseline) });
+		}
+
+		struct TimingRow
+		{
+			std::string label;
+			float average{}, p95{}, p99{}, percent{};
+		};
+
+		void DrawTimingTable(const char* a_id, std::vector<TimingRow> a_rows, int& a_sort, bool& a_descending)
+		{
+			if (!dmui::ui::BeginTable(a_id, 5))
+				return;
+			const char* labels[]{ "Feature / Pass", "Avg", "P95", "P99", "%" };
+			SortHeader(labels, a_sort, a_descending);
+			SortRows(a_rows, a_sort, a_descending, [a_sort](const auto& a_row) {
+				switch (a_sort) {
+				case 2:
+					return a_row.p95;
+				case 3:
+					return a_row.p99;
+				case 4:
+					return a_row.percent;
+				default:
+					return a_row.average;
+				}
+			});
+			for (const auto& row : a_rows) {
+				dmui::ui::TableNextRow();
+				(void)dmui::ui::TableSetColumnIndex(0);
+				dmui::ui::TextUnformatted(row.label.c_str());
+				const float values[]{ row.average, row.p95, row.p99, row.percent };
+				for (int i = 0; i < 4; ++i) {
+					(void)dmui::ui::TableSetColumnIndex(i + 1);
+					if (i == 3)
+						dmui::ui::Text("%.1f%%", values[i]);
+					else
+						DrawMilliseconds(values[i]);
+				}
+			}
+			dmui::ui::EndTable();
+		}
+
+		nlohmann::json SnapshotJson(const std::map<Feature*, toml::table>& a_snapshot)
+		{
+			auto result = nlohmann::json::object();
+			for (const auto& [feature, values] : a_snapshot) {
+				auto& output = result[std::string(feature->GetName())];
+				output = nlohmann::json::object();
+				for (const auto& [key, node] : values) {
+					if (const auto* boolean = node.as_boolean())
+						output[std::string(key.str())] = boolean->get();
+					else if (const auto* integer = node.as_integer())
+						output[std::string(key.str())] = integer->get();
+					else if (const auto* number = node.as_floating_point())
+						output[std::string(key.str())] = number->get();
+					else if (const auto* text = node.as_string())
+						output[std::string(key.str())] = text->get();
+				}
+			}
+			return result;
+		}
+	}
 
 	PerformanceOverlay* PerformanceOverlay::GetSingleton()
 	{
@@ -38,457 +182,617 @@ namespace cs::features
 	bool PerformanceOverlay::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = settings;
-		if (!settings::Parse(performance_overlay::kSchema, a_config, candidate, a_error)) {
+		if (!cs::settings::Parse(performance_overlay::kSchema, a_config, candidate, a_error))
 			return false;
-		}
-
 		settings = candidate;
 		return true;
 	}
 
 	void PerformanceOverlay::Load()
 	{
-		L->info("Loaded: enabled={} preset={} corner={} toggle_hotkey={}",
-			settings.enabled, settings.preset, settings.corner, settings.toggleHotkey);
+		engine::InstallShaderSubclassHooks();
+		if (!engine::EnsureDrawProfilingInstalled())
+			FailLoad("Cannot install shader draw timing boundary");
+		render::profiling::SetEnabled(settings.ShowInOverlay);
+		QueryPerformanceFrequency(&_frequency);
+		QueryPerformanceCounter(&_lastFrame);
+		L->info("Loaded: ShowInOverlay={} FrameHistorySize={} toggle_hotkey={}",
+			settings.ShowInOverlay, settings.FrameHistorySize, settings.toggleHotkey);
+	}
+
+	void PerformanceOverlay::OnDataLoaded()
+	{
+		_baseline = CaptureSettings();
+		QueryPerformanceCounter(&_lastFrame);
+		_history.Resize(static_cast<std::size_t>(settings.FrameHistorySize));
+		_postHistory.Resize(static_cast<std::size_t>(settings.FrameHistorySize));
+		DEVMODEW mode{};
+		mode.dmSize = sizeof(mode);
+		if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode))
+			_refreshHz = std::max(30.0f, static_cast<float>(mode.dmDisplayFrequency));
+	}
+
+	void PerformanceOverlay::OnRuntimeQuarantined() noexcept
+	{
+		render::profiling::SetEnabled(false);
+		AbortTest("Performance Overlay was quarantined; restart required");
+	}
+
+	void PerformanceOverlay::AbortTest(std::string_view a_reason) noexcept
+	{
+		_testError = a_reason;
+		L->error("A/B test stopped: {}", _testError);
+		try {
+			SetTestInterval(0);
+		} catch (const std::exception& error) {
+			_testError += std::format("; TEST restoration failed: {}", error.what());
+			L->error("{}", _testError);
+			_testing = false;
+			_restorePending = true;
+			cs::settings::liveComparisonActive = true;
+			_testInterval = 0;
+			_aggregator.OnTestEnd();
+		}
+		Menu::ShowToast(_testError, 8.0, DMUI_STATUS_SEVERITY_ERROR);
 	}
 
 	bool PerformanceOverlay::SaveSettings()
 	{
-		return settings::SaveDelta(performance_overlay::kSchema, GetConfigKey(), settings, *L);
+		return cs::settings::SaveDelta(performance_overlay::kSchema, GetConfigKey(), settings, *L);
 	}
 
-	void PerformanceOverlay::ApplyPreset(Preset preset)
+	PerformanceOverlay::Snapshot PerformanceOverlay::CaptureSettings()
 	{
-		settings.preset = static_cast<int>(preset);
-		switch (preset) {
-		case Preset::Off:
-			settings.showFps = false;
-			settings.showFrameTime = false;
-			settings.showGraph = false;
-			settings.showVram = false;
-			settings.showStats = false;
-			break;
-		case Preset::Minimal:
-			settings.showFps = true;
-			settings.showFrameTime = false;
-			settings.showGraph = false;
-			settings.showVram = false;
-			settings.showStats = false;
-			break;
-		case Preset::Standard:
-			settings.showFps = true;
-			settings.showFrameTime = true;
-			settings.showGraph = true;
-			settings.showVram = false;
-			settings.showStats = false;
-			break;
-		case Preset::Verbose:
-			settings.showFps = true;
-			settings.showFrameTime = true;
-			settings.showGraph = true;
-			settings.showVram = true;
-			settings.showStats = true;
-			break;
+		Snapshot snapshot;
+		for (auto* feature : FeatureManager::Get().GetAll()) {
+			const auto& access = feature->GetLiveSettingsAccess();
+			if (feature->IsHealthy() && access.snapshot)
+				snapshot.emplace(feature, access.snapshot());
 		}
+		return snapshot;
 	}
 
-	void PerformanceOverlay::EnsureRefreshHz()
+	void PerformanceOverlay::ApplySettings(const Snapshot& a_snapshot, bool a_restoring)
 	{
-		if (_refreshKnown)
-			return;
-		// Display settings provide an adequate refresh estimate.
-		DEVMODEW devMode{};
-		devMode.dmSize = sizeof(devMode);
-		if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &devMode)) {
-			_refreshHz = std::max(30.0f, static_cast<float>(devMode.dmDisplayFrequency));
-			_refreshKnown = true;
-			if (settings.autoThresholds) {
-				settings.fpsGood = _refreshHz * 0.95f;
-				settings.fpsWarn = _refreshHz * 0.5f;
+		std::vector<cs::settings::PreparedLiveSettings> prepared;
+		for (const auto& [feature, values] : a_snapshot) {
+			if (!a_restoring && !feature->IsHealthy())
+				throw std::runtime_error(std::format("{} is no longer healthy", feature->GetName()));
+			std::string error;
+			auto value = feature->GetLiveSettingsAccess().prepare(values, error);
+			if (!value)
+				throw std::runtime_error(std::format("{}: {}", feature->GetName(), error));
+			if (a_restoring && !feature->IsHealthy())
+				value->finalize = {};
+			if (value->finalize) {
+				value->finalize = [feature, finalize = std::move(value->finalize)] {
+					auto& manager = FeatureManager::Get();
+					if (!manager.PrepareRuntimeCallback(*feature, "ABComparison::Finalize"))
+						return;
+					try {
+						finalize();
+					} catch (const std::exception& error) {
+						manager.QuarantineRuntimeCallback(*feature, "ABComparison::Finalize", error.what());
+						manager.FinishRuntimeCallbackPass();
+						throw;
+					} catch (...) {
+						manager.QuarantineRuntimeCallback(*feature, "ABComparison::Finalize", "non-standard exception");
+						manager.FinishRuntimeCallbackPass();
+						throw;
+					}
+				};
 			}
+			prepared.push_back(std::move(*value));
 		}
+		cs::settings::ApplyPreparedLiveSettings(prepared);
 	}
 
-	void PerformanceOverlay::TickFrame()
+	void PerformanceOverlay::SetTestInterval(int a_interval)
 	{
-		// FO4: display cadence and history use the shared monotonic clock.
-		const double nowSec = Util::GetNowSecs();
-
-		if (_lastFrameQpc > 0.0) {
-			const float dtMs = static_cast<float>((nowSec - _lastFrameQpc) * 1000.0);
-			// Ignore pause-length samples.
-			if (dtMs > 0.0f && dtMs < 1000.0f) {
-				_curFrameMs = dtMs;
-				_frameTimesMs[_frameTimesHead] = dtMs;
-				_frameTimesHead = (_frameTimesHead + 1) % settings.historySize;
-				if (_frameTimesCount < settings.historySize)
-					_frameTimesCount++;
+		if (!a_interval) {
+			if (_testing || _restorePending) {
+				ApplySettings(_test, true);
+				_aggregator.OnTestEnd();
 			}
-		}
-		_lastFrameQpc = nowSec;
-
-		// Cadenced updates prevent per-frame flicker.
-		if (nowSec - _lastDisplayUpdate >= settings.updateInterval) {
-			_displayedFrameMs = _curFrameMs;
-			_displayedFps = Util::CalcFPS(_curFrameMs);
-
-			RecomputeStats();
-			_lastDisplayUpdate = nowSec;
-		}
-	}
-
-	void PerformanceOverlay::RecomputeStats()
-	{
-		if (_frameTimesCount == 0)
+			_testing = false;
+			_restorePending = false;
+			cs::settings::liveComparisonActive = false;
+			_testInterval = 0;
 			return;
-		std::vector<float> sorted;
-		sorted.reserve(_frameTimesCount);
-		for (int i = 0; i < _frameTimesCount; ++i)
-			sorted.push_back(_frameTimesMs[i]);
-		std::sort(sorted.begin(), sorted.end());
-
-		double sum = 0.0;
-		for (float v : sorted) sum += v;
-		_avgMs = static_cast<float>(sum / sorted.size());
-
-		double sqDiff = 0.0;
-		for (float v : sorted) {
-			const double d = v - _avgMs;
-			sqDiff += d * d;
 		}
-		_stddevMs = static_cast<float>(std::sqrt(sqDiff / sorted.size()));
-
-		// Lows represent the slow-frame tail.
-		const auto idx99 = static_cast<size_t>(sorted.size() * 99 / 100);
-		const auto idx999 = static_cast<size_t>(sorted.size() * 999 / 1000);
-		_onePctLowMs = sorted[std::min(idx99, sorted.size() - 1)];
-		_pointOnePctLowMs = sorted[std::min(idx999, sorted.size() - 1)];
+		if (_restorePending)
+			throw std::runtime_error("Restore TEST before starting another comparison");
+		if (!_testing) {
+			if (_baseline.empty())
+				throw std::runtime_error("No healthy live-effect settings are available for A/B testing");
+			auto test = CaptureSettings();
+			if (test.size() != _baseline.size())
+				throw std::runtime_error("Loaded features changed; capture a new USER baseline");
+			for (const auto& [feature, values] : test) {
+				(void)values;
+				if (!_baseline.contains(feature))
+					throw std::runtime_error("Loaded features changed; capture a new USER baseline");
+			}
+			if (test == _baseline)
+				throw std::runtime_error("USER and TEST live settings are identical");
+			_test = std::move(test);
+			_aggregator.Clear();
+			_aggregator.SetSettingsA(SnapshotJson(_baseline));
+			_aggregator.SetSettingsB(SnapshotJson(_test));
+			_variantB = true;
+			_aggregator.OnABSwitch(ABVariant::B);
+			_lastSwitch = Util::GetNowSecs();
+			_testing = true;
+			cs::settings::liveComparisonActive = true;
+		}
+		_testInterval = a_interval;
+		_testError.clear();
 	}
 
-	void PerformanceOverlay::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	void PerformanceOverlay::UpdateTest(double a_now)
 	{
-		const auto presetName = [](int p) -> std::string_view {
-			switch (static_cast<Preset>(p)) {
-			case Preset::Off:
-				return "off";
-			case Preset::Minimal:
-				return "minimal";
-			case Preset::Standard:
-				return "standard";
-			case Preset::Verbose:
-				return "verbose";
+		if (!_testing)
+			return;
+		for (const auto& [feature, values] : _test) {
+			(void)values;
+			if (!feature->IsHealthy())
+				throw std::runtime_error(std::format("{} was quarantined", feature->GetName()));
+		}
+		_aggregator.OnFrame(BuildRows());
+		if (a_now - _lastSwitch > static_cast<double>(_testInterval)) {
+			ApplySettings(_variantB ? _baseline : _test);
+			_variantB = !_variantB;
+			_aggregator.OnABSwitch(_variantB ? ABVariant::B : ABVariant::A);
+			_lastSwitch = a_now;
+		}
+	}
+
+	void PerformanceOverlay::UpdateGraphValues()
+	{
+		_history.Resize(static_cast<std::size_t>(settings.FrameHistorySize));
+		_postHistory.Resize(static_cast<std::size_t>(settings.FrameHistorySize));
+		LARGE_INTEGER counter{};
+		QueryPerformanceCounter(&counter);
+		_frameMs = Util::CalcFrameTime(counter.QuadPart - _lastFrame.QuadPart, _frequency.QuadPart);
+		_lastFrame = counter;
+		_fps = Util::CalcFPS(_frameMs);
+		if (_overlayFrequency.QuadPart == 0) {
+			QueryPerformanceFrequency(&_overlayFrequency);
+			QueryPerformanceCounter(&_lastUpdate);
+		}
+		QueryPerformanceCounter(&counter);
+		const float delta = static_cast<float>(counter.QuadPart - _lastUpdate.QuadPart) /
+		                    static_cast<float>(_overlayFrequency.QuadPart);
+		_lastUpdate = counter;
+
+		const float oldFrame = _history.GetData()[_history.GetHeadIdx()];
+		_history.Push(_frameMs);
+		const auto samples = _history.GetData();
+		if (_frameMs > _maxFrameMs)
+			_maxFrameMs = _frameMs;
+		else if (_frameMs < _minFrameMs)
+			_minFrameMs = _frameMs;
+		else if (oldFrame == _minFrameMs)
+			_minFrameMs = *std::ranges::min_element(samples);
+		else if (oldFrame == _maxFrameMs)
+			_maxFrameMs = *std::ranges::max_element(samples);
+		_averageMs = std::accumulate(samples.begin(), samples.end(), 0.0f) / static_cast<float>(samples.size());
+		float variance{};
+		for (float sample : samples) {
+			const float diff = sample - _averageMs;
+			variance += diff * diff;
+		}
+		const float deviation = std::sqrt(variance / static_cast<float>(samples.size()));
+		const float spread = std::clamp(deviation * Settings::kGraphSpreadMultiplier,
+			Settings::kGraphMinSpread, Settings::kGraphMaxSpread);
+		_graphMin += Settings::kSmoothingFactor * (std::max(0.0f, _averageMs - spread) - _graphMin);
+		_graphMax += Settings::kSmoothingFactor * (_averageMs + spread - _graphMax);
+		_frameGeneration = render::TemporalPipeline::Get().GetFrameGenerationDiagnostics(false).active;
+		if (_frameGeneration) {
+			// FO4: the pinned active-FG branch always selects the calculated 2x fallback.
+			const float postMs = _frameMs / Settings::kFrameGenerationMultiplier;
+			if (_updateTimer <= 0.0f) {
+				_postDisplayMs = postMs;
+				_postDisplayFps = _fps * Settings::kFrameGenerationMultiplier;
+			}
+			_postHistory.Push(postMs);
+		}
+		_updateTimer += delta;
+		if (_updateTimer >= settings.UpdateInterval) {
+			_displayMs = _frameMs;
+			_displayFps = _fps;
+			_updateTimer = 0.0f;
+		}
+	}
+
+	void PerformanceOverlay::TickHostFrame(std::uint64_t a_used, std::uint64_t a_budget)
+	{
+		_vramUsed = a_used;
+		_vramBudget = a_budget;
+		render::profiling::SetEnabled(settings.ShowInOverlay || _testing);
+		if (!settings.ShowInOverlay && !_testing) {
+			QueryPerformanceCounter(&_lastFrame);
+			_overlayFrequency = {};
+			return;
+		}
+		// FO4: DearModdingUI supplies the native-frame UI cadence independently of the deferred scene.
+		UpdateGraphValues();
+		try {
+			UpdateTest(Util::GetNowSecs());
+		} catch (const std::exception& error) {
+			AbortTest(error.what());
+		}
+	}
+
+	std::vector<DrawCallRow> PerformanceOverlay::BuildRows() const
+	{
+		std::vector<DrawCallRow> rows;
+		float measured{}, calls{};
+		const auto timings = render::profiling::GetShaderTimings();
+		for (const auto& timing : timings) {
+			measured += timing.milliseconds;
+			calls += timing.calls;
+		}
+		for (const auto& timing : timings) {
+			rows.push_back({ timing.name, timing.type, static_cast<int>(timing.calls),
+				timing.milliseconds, Percentage(timing.milliseconds, measured),
+				CostPerCall(timing.milliseconds, timing.calls),
+				"CPU interval attribution at native draw submission boundaries; not GPU time.",
+				true, {}, {} });
+		}
+		float other = _displayMs - measured;
+		if (std::abs(other) < 1e-4f)
+			other = 0.0f;
+		const float csPasses = render::profiling::GetProfiler().GetTotalTimeMs();
+		const float remainingOther = std::max(0.0f, other - csPasses);
+		rows.push_back({ "CS Passes:", -3, -1, csPasses, Percentage(csPasses, _displayMs), 0.0f,
+			"D3D11 GPU query time for instrumented Community Shaders passes.", true, {}, {} });
+		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, _displayMs), 0.0f,
+			"Frame time not attributed to a shader family or profiled CS pass.", true, {}, {} });
+		rows.push_back({ "Total:", -1, static_cast<int>(calls), _displayMs, 100.0f,
+			CostPerCall(_displayMs, calls), "Total frame time.", true, {}, {} });
+		return rows;
+	}
+
+	void PerformanceOverlay::DrawGraph(const char* a_label, const CircularBuffer<float>& a_history, dmui::ui::Vec4 a_color)
+	{
+		const auto samples = a_history.GetData();
+		dmui::ui::PushStyleColor(dmui::ui::Color::kPlotLines, a_color);
+		dmui::ui::PlotLines(a_label, samples.data(), static_cast<int>(samples.size()),
+			static_cast<int>(a_history.GetHeadIdx()), nullptr, _graphMin, _graphMax, { 600.0f, 50.0f });
+		dmui::ui::PopStyleColor();
+		dmui::ui::TextDisabled("30 FPS: 33.3 ms     60 FPS: 16.7 ms     120 FPS: 8.3 ms");
+	}
+
+	void PerformanceOverlay::DrawDrawCalls(const std::vector<DrawCallRow>& a_rows)
+	{
+		auto rows = a_rows;
+		if (!dmui::ui::BeginTable("ShaderTimings", 4))
+			return;
+		const char* labels[]{ "Shader Type", "Draw Calls", "Frame Time", "Cost/Call" };
+		SortHeader(labels, _drawSort, _drawDescending);
+		SortRows(rows, _drawSort, _drawDescending, [this](const auto& a_row) {
+			switch (_drawSort) {
+			case 1:
+				return static_cast<float>(a_row.drawCalls);
+			case 3:
+				return a_row.costPerCall;
 			default:
-				return "unknown";
+				return a_row.frameTime;
 			}
-		};
-		a_sink
-			.Field("enabled", settings.enabled)
-			.Field("preset", presetName(settings.preset))
-			.Field("fps", static_cast<double>(_displayedFps))
-			.Field("frame_ms", static_cast<double>(_curFrameMs))
-			.Field("avg_ms", static_cast<double>(_avgMs))
-			.Field("low_1pct_ms", static_cast<double>(_onePctLowMs))
-			.Field("refresh_hz", static_cast<double>(_refreshHz))
-			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsedBytes / (1024 * 1024)))
-			.Field("vram_budget_mb", static_cast<std::int64_t>(_vramBudgetBytes / (1024 * 1024)));
+		});
+		for (const auto& row : rows) {
+			dmui::ui::TableNextRow();
+			(void)dmui::ui::TableSetColumnIndex(0);
+			dmui::ui::TextUnformatted(row.label.c_str());
+			if (dmui::ui::IsItemHovered())
+				dmui::ui::SetTooltip("%s", row.tooltip.c_str());
+			(void)dmui::ui::TableSetColumnIndex(1);
+			if (row.drawCalls >= 0)
+				dmui::ui::Text("%d", row.drawCalls);
+			else
+				dmui::ui::TextUnformatted("-");
+			(void)dmui::ui::TableSetColumnIndex(2);
+			DrawMilliseconds(row.frameTime, MetricTone(row.frameTime, false), true);
+			(void)dmui::ui::TableSetColumnIndex(3);
+			if (row.drawCalls >= 0)
+				DrawMilliseconds(row.costPerCall, MetricTone(row.costPerCall, true), true);
+			else
+				dmui::ui::TextUnformatted("-");
+		}
+		dmui::ui::EndTable();
+		dmui::ui::TextDisabled("Shader-family times are CPU interval attribution; CS pass times are D3D11 GPU queries.");
+	}
+
+	void PerformanceOverlay::DrawPasses()
+	{
+		const auto& results = render::profiling::GetProfiler().GetResults();
+		(void)dmui::ui::Checkbox("CPU timings", &_cpuTimings);
+		if (results.empty()) {
+			dmui::ui::TextDisabled("No timing data available (enter game world)");
+			return;
+		}
+		std::map<std::string, TimingRow> groups;
+		std::vector<TimingRow> passes;
+		float total{};
+		for (const auto& result : results) {
+			if (!result.valid)
+				continue;
+			const auto split = result.name.find("::");
+			const auto name = result.name.substr(0, split == std::string::npos ? result.name.find('/') : split);
+			TimingRow row{ result.name,
+				_cpuTimings ? result.cpuAvgMs : result.avgMs,
+				_cpuTimings ? result.cpuP95Ms : result.p95Ms,
+				_cpuTimings ? result.cpuP99Ms : result.p99Ms };
+			auto& group = groups[name];
+			group.label = name;
+			group.average += row.average;
+			group.p95 += row.p95;
+			group.p99 += row.p99;
+			total += row.average;
+			passes.push_back(std::move(row));
+		}
+		std::vector<TimingRow> summary;
+		for (auto& [name, group] : groups) {
+			(void)name;
+			group.percent = Percentage(group.average, total);
+			summary.push_back(group);
+		}
+		for (auto& row : passes)
+			row.percent = Percentage(row.average, total);
+		DrawTimingTable("CSFeatures", std::move(summary), _groupSort, _groupDescending);
+		DrawTimingTable("CSPasses", std::move(passes), _passSort, _passDescending);
+		dmui::ui::Text("CS total: %.3f GPU ms / %.3f CPU ms",
+			render::profiling::GetProfiler().GetTotalTimeMs(),
+			render::profiling::GetProfiler().GetCpuTotalTimeMs());
+		dmui::ui::TextDisabled("D3D11 query timings exclude D3D12 provider execution.");
+	}
+
+	void PerformanceOverlay::DrawTestResults()
+	{
+		if (_testing)
+			dmui::ui::Text("Variant %s: %.1f seconds left",
+				_variantB ? "B (TEST)" : "A (USER)",
+				std::max(0.0, _testInterval - (Util::GetNowSecs() - _lastSwitch)));
+		if (!_test.empty() && dmui::ui::CollapsingHeader("Changes from USER")) {
+			for (const auto& [feature, values] : _test) {
+				const auto baseline = _baseline.find(feature);
+				if (baseline == _baseline.end())
+					continue;
+				for (const auto& [key, value] : values) {
+					const auto* original = baseline->second.get(key);
+					if (original && toml::node_view<const toml::node>{ original } == toml::node_view<const toml::node>{ &value })
+						continue;
+					std::ostringstream text;
+					text << feature->GetName() << "." << key.str() << ": ";
+					if (original)
+						original->visit([&](const auto& node) { text << node; });
+					text << " -> ";
+					value.visit([&](const auto& node) { text << node; });
+					dmui::ui::TextUnformatted(text.str().c_str());
+				}
+			}
+		}
+		if (!_testError.empty())
+			dmui::ui::Text("A/B error: %s", _testError.c_str());
+		if (!_aggregator.HasResults())
+			return;
+		const int frames = _aggregator.GetTotalFrameCount();
+		const float duration = _aggregator.GetTotalTestDuration();
+		int excluded{};
+		for (const auto& interval : _aggregator.GetIntervals())
+			excluded += interval.excludedFrames;
+		const float validPercent = frames + excluded > 0 ? 100.0f * static_cast<float>(frames) / static_cast<float>(frames + excluded) : 0.0f;
+		const char* validity = frames >= kMinimumSamplesForValidity && duration >= kMinimumTestDuration &&
+		                               validPercent >= kMinimumValidFramesPercent ?
+		                           "Valid" :
+		                       frames >= kMinimumSamplesForMarginal && duration >= kMinimumDurationForMarginal ? "Marginal" :
+		                                                                                                         "Insufficient";
+		dmui::ui::Text("%s: %d frames, %.1f seconds, %d excluded, %.1f%% valid", validity, frames, duration, excluded, validPercent);
+		if (!dmui::ui::BeginTable("ABResults", 7))
+			return;
+		const char* labels[]{ "Shader Type", "A Avg", "B Avg", "Delta", "A Median", "B Median", "Median Delta" };
+		SortHeader(labels, _testSort, _testDescending);
+		auto rows = _aggregator.GetAggregatedResults();
+		SortRows(rows, _testSort, _testDescending, [this](const auto& row) {
+			switch (_testSort) {
+			case 1:
+				return row.meanA;
+			case 2:
+				return row.meanB;
+			case 4:
+				return row.medianA;
+			case 5:
+				return row.medianB;
+			case 6:
+				return row.medianB - row.medianA;
+			default:
+				return row.delta;
+			}
+		});
+		for (const auto& row : rows) {
+			dmui::ui::TableNextRow();
+			(void)dmui::ui::TableSetColumnIndex(0);
+			dmui::ui::TextUnformatted(row.label.c_str());
+			const float values[]{ row.meanA, row.meanB, row.delta, row.medianA, row.medianB, row.medianB - row.medianA };
+			for (int i = 0; i < 6; ++i) {
+				(void)dmui::ui::TableSetColumnIndex(i + 1);
+				const bool available = (i == 0 || i == 3) ? row.frameCountA > 0 :
+				                       (i == 1 || i == 4) ? row.frameCountB > 0 :
+				                                            row.frameCountA > 0 && row.frameCountB > 0;
+				if (!available) {
+					dmui::ui::TextUnformatted("-");
+				} else if (i == 2 || i == 5) {
+					DrawDelta(i == 2 ? row.meanA : row.medianA, i == 2 ? row.meanB : row.medianB);
+				} else {
+					const float counterpart = i == 0 ? row.meanB : i == 1 ? row.meanA :
+					                                           i == 3     ? row.medianB :
+					                                                        row.medianA;
+					const auto tone = row.frameCountA > 0 && row.frameCountB > 0 ?
+					                      ComparisonTone(values[i], counterpart) :
+					                      dmui::TextTone::kInherit;
+					DrawMilliseconds(values[i], tone);
+				}
+				if (row.shaderType == -1 && row.frameCountA > 0 && row.frameCountB > 0 && dmui::ui::IsItemHovered())
+					dmui::ui::SetTooltip("A (USER): %.2f FPS; B (TEST): %.2f FPS", Util::CalcFPS(row.meanA), Util::CalcFPS(row.meanB));
+			}
+		}
+		dmui::ui::EndTable();
 	}
 
 	void PerformanceOverlay::DrawOverlay()
 	{
-		if (!settings.enabled || settings.preset == static_cast<int>(Preset::Off))
+		if (!IsOverlayActive())
 			return;
-
-		EnsureRefreshHz();
-
-		const bool wantContent = settings.showFps || settings.showFrameTime ||
-		                         settings.showGraph || settings.showVram || settings.showStats;
-		if (!wantContent)
-			return;
-
-		const dmui::ui::Vec4 good{ 0.20f, 1.00f, 0.20f, 1.00f };
-		const dmui::ui::Vec4 warning{ 1.00f, 0.85f, 0.20f, 1.00f };
-		const dmui::ui::Vec4 bad{ 1.00f, 0.30f, 0.30f, 1.00f };
-		const dmui::ui::Vec4 white{ 1.00f, 1.00f, 1.00f, 1.00f };
-		const auto color = settings.highContrast ?
-		                       white :
-		                       (_displayedFps >= settings.fpsGood ?
-									   good :
-									   (_displayedFps >= settings.fpsWarn ? warning : bad));
-
-		if (settings.showFps) {
-			dmui::ui::PushStyleColor(dmui::ui::Color::kText, color);
-			dmui::ui::Text("[Engine] %.0f FPS", _displayedFps);
-			dmui::ui::PopStyleColor();
-		}
-		if (settings.showFrameTime)
-			dmui::ui::Text("%.2f ms", _displayedFrameMs);
-
-		if (settings.showGraph && _frameTimesCount > 1) {
-			static std::array<float, kHistoryCapacity> linear{};
-			for (int i = 0; i < _frameTimesCount; ++i) {
-				int source =
-					(_frameTimesHead - _frameTimesCount + i + settings.historySize) %
-					settings.historySize;
-				if (source < 0)
-					source += settings.historySize;
-				linear[i] = _frameTimesMs[source];
+		if (settings.ShowInOverlay) {
+			if (settings.ShowFPS) {
+				dmui::ui::Text("%s %.1f FPS (%.2f ms)", _frameGeneration ? "[Pre-FG]" : "[Engine]", _displayFps, _displayMs);
+				const auto samples = _history.GetData();
+				if (std::ranges::all_of(samples, [](float a_sample) { return a_sample > 0.0f; }))
+					dmui::ui::Text("Avg: %.1f FPS", Util::CalcFPS(_averageMs));
+				if (settings.ShowPreFGFrameTimeGraph)
+					DrawGraph("Pre-FG Frame Time", _history, { 0.0f, 1.0f, 0.0f, 1.0f });
+				if (_frameGeneration) {
+					dmui::ui::Text("[Post-FG calculated, 2x] %.1f FPS (%.2f ms)", _postDisplayFps, _postDisplayMs);
+					if (settings.ShowPostFGFrameTimeGraph)
+						DrawGraph("Post-FG Frame Time", _postHistory, { 0.0f, 0.5f, 1.0f, 1.0f });
+				}
 			}
-			const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
-			const float slowestReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
-			const float target = std::max({ refreshMs * 2.0f,
-				_avgMs + 3.0f * _stddevMs,
-				slowestReferenceMs * 1.05f });
-			if (_graphYMaxSmoothed <= 0.0f)
-				_graphYMaxSmoothed = target;
-			else
-				_graphYMaxSmoothed += (target - _graphYMaxSmoothed) * 0.25f;
-
-			std::array<DMUI_PlotReferenceLine, 3> references{};
-			for (std::size_t index = 0; index < references.size(); ++index) {
-				references[index] = {
-					1000.0f / kFrameTimeReferenceFps[index],
-					{ 1.0f, 1.0f, 1.0f, settings.highContrast ? 0.35f : 0.18f }
-				};
+			if (settings.ShowVRAM) {
+				if (_vramBudget) {
+					const float fraction = static_cast<float>(static_cast<double>(_vramUsed) / static_cast<double>(_vramBudget));
+					dmui::ui::Text("VRAM %.2f / %.2f GB (%.1f%%)",
+						_vramUsed / (1024.0 * 1024 * 1024), _vramBudget / (1024.0 * 1024 * 1024), fraction * 100.0f);
+					dmui::ui::ProgressBar(fraction, { 600.0f, 0.0f }, "");
+				} else {
+					dmui::ui::TextDisabled("VRAM unavailable");
+				}
 			}
-			const DMUI_AnnotatedPlotDescriptor plot{
-				DMUI_ANNOTATED_PLOT_DESCRIPTOR_0_1_SIZE,
-				linear.data(),
-				static_cast<std::uint32_t>(_frameTimesCount),
-				0u,
-				0.0f,
-				_graphYMaxSmoothed,
-				{ 440.0f, std::clamp(settings.graphHeightPx, 40.0f, 160.0f) },
-				"Frame Time",
-				references.data(),
-				static_cast<std::uint32_t>(references.size())
-			};
-			(void)host::HostClient::Get().DrawAnnotatedPlot(
-				"performance-frame-time",
-				plot);
+			if (settings.ShowDrawCalls)
+				DrawDrawCalls(BuildRows());
+			if (settings.ShowCSPasses)
+				DrawPasses();
 		}
-		if (settings.showStats) {
-			dmui::ui::Text("avg     %5.2f ms", _avgMs);
-			dmui::ui::Text("1%% low  %5.2f ms", _onePctLowMs);
-			dmui::ui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
-		}
-		if (settings.showVram && _vramBudgetBytes > 0) {
-			dmui::ui::Text(
-				"VRAM %.1f / %.1f GB",
-				_vramUsedBytes / (1024.0 * 1024.0 * 1024.0),
-				_vramBudgetBytes / (1024.0 * 1024.0 * 1024.0));
-		}
+		DrawTestResults();
 	}
 
-	void PerformanceOverlay::TickHostFrame(
-		std::uint64_t a_vramUsedBytes,
-		std::uint64_t a_vramBudgetBytes)
+	void PerformanceOverlay::DrawSettings()
 	{
-		EnsureRefreshHz();
-		TickFrame();
-		_vramUsedBytes = a_vramUsedBytes;
-		_vramBudgetBytes = a_vramBudgetBytes;
+		cs::settings::SettingsEdit edit{ *this };
+		const auto checkbox = [&](const char* label, bool& value) {
+			edit.Discrete(dmui::ui::Checkbox(label, &value));
+		};
+		const auto slider = [&](const char* label, auto member, const char* format) {
+			const auto range = performance_overlay::kSchema.EditRange(member);
+			edit.Continuous(dmui::ui::SliderScalar(label, &(settings.*member), &range.min, &range.max, format,
+				dmui::ui::SliderFlags::kAlwaysClamp));
+		};
+		dmui::ui::TextDisabled("The host owns the overlay hotkey. Suggested default: %s.", settings.toggleHotkey.c_str());
+		checkbox("Show in Overlay", settings.ShowInOverlay);
+		if (settings.ShowInOverlay) {
+			dmui::ui::Separator();
+			checkbox("Show FPS Counter", settings.ShowFPS);
+			checkbox("Show Draw Calls", settings.ShowDrawCalls);
+			checkbox("Show VRAM Usage", settings.ShowVRAM);
+			checkbox("Show CS Render Passes", settings.ShowCSPasses);
+			if (settings.ShowFPS) {
+				checkbox(_frameGeneration ? "Show Pre-FG Frametime Graph" : "Show Frametime Graph", settings.ShowPreFGFrameTimeGraph);
+				if (_frameGeneration)
+					checkbox("Show Post-FG Frametime Graph", settings.ShowPostFGFrameTimeGraph);
+			}
+			dmui::ui::Separator();
+			slider("Text Size", &Settings::TextSize, "%.2f");
+			slider("Background Opacity", &Settings::BackgroundOpacity, "%.2f");
+			checkbox("Show Border", settings.ShowBorder);
+			slider("Update Interval", &Settings::UpdateInterval, "%.2f seconds");
+			slider("Frame History Size", &Settings::FrameHistorySize, "%d");
+			if (edit.Discrete(dmui::ui::Button("Reset Position"))) {
+				settings.Position = { 10.0f, 10.0f };
+				settings.PositionSet = false;
+			}
+		}
+		dmui::ui::Separator();
+		dmui::ui::TextWrapped("A/B compares live-effect settings only. Capture USER before editing TEST; switches stay in memory. The startup configuration is the initial USER baseline. Set the interval to 0 to restore TEST. Activation and shader ownership never change.");
+		if (_restorePending && dmui::ui::Button("Retry TEST Restoration"))
+			AbortTest("Retrying TEST restoration");
+		dmui::ui::BeginDisabled(_testing || _restorePending);
+		if (dmui::ui::Button("Capture USER Baseline")) {
+			_baseline = CaptureSettings();
+			_test.clear();
+			_aggregator.Clear();
+			_testError.clear();
+		}
+		dmui::ui::EndDisabled();
+		int interval = _testInterval;
+		constexpr int minimum = 0, maximum = 10;
+		if (dmui::ui::SliderScalar("A/B Test Interval", &interval, &minimum, &maximum)) {
+			try {
+				SetTestInterval(interval);
+			} catch (const std::exception& error) {
+				_testError = error.what();
+				Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR);
+			}
+		}
+		DrawTestResults();
 	}
 
 	DMUI_ManagedOverlayOptions PerformanceOverlay::ManagedOverlayOptions() const noexcept
 	{
-		const auto anchor = settings.freeDrag ?
-		                        DMUI_OVERLAY_ANCHOR_FREE :
-		                        static_cast<DMUI_OverlayAnchor>(std::clamp(settings.corner, 0, 3));
-		const DMUI_Vec2 offset = settings.freeDrag ?
-		                             DMUI_Vec2{ settings.dragPosX, settings.dragPosY } :
-		                             DMUI_Vec2{ 10.0f, 10.0f };
 		return {
-			DMUI_MANAGED_OVERLAY_OPTIONS_0_1_SIZE,
-			anchor,
-			offset,
-			{ 440.0f, 0.0f },
-			{ 440.0f, 10000.0f },
-			settings.opacity,
-			settings.fontScale,
-			settings.showBorder ? 1u : 0u,
-			settings.showBorder ? 1u : 0u,
-			settings.freeDrag ? 1u : 0u,
-			0u
+			DMUI_MANAGED_OVERLAY_OPTIONS_0_1_SIZE, DMUI_OVERLAY_ANCHOR_FREE,
+			{ settings.Position[0], settings.Position[1] },
+			{ 600.0f, 0.0f }, { 1000.0f, 10000.0f },
+			settings.BackgroundOpacity, settings.TextSize,
+			settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, 0u
 		};
 	}
 
-	void PerformanceOverlay::CommitOverlayPlacement(
-		const DMUI_ManagedOverlayPlacement& a_placement)
+	void PerformanceOverlay::CommitOverlayPlacement(const DMUI_ManagedOverlayPlacement& a_placement)
 	{
-		if (!settings.freeDrag || a_placement.anchor != DMUI_OVERLAY_ANCHOR_FREE)
+		const cs::settings::Float2 position{ a_placement.position.x, a_placement.position.y };
+		if (settings.Position == position && settings.PositionSet)
 			return;
-		if (settings.dragPosX == a_placement.position.x &&
-			settings.dragPosY == a_placement.position.y)
-			return;
-		settings.dragPosX = a_placement.position.x;
-		settings.dragPosY = a_placement.position.y;
+		settings.Position = position;
+		settings.PositionSet = true;
 		SaveSettings();
 	}
 
 	void PerformanceOverlay::RestoreDefaultSettings()
 	{
+		SetTestInterval(0);
 		settings = Settings{};
+		_history.Resize(600);
+		_postHistory.Resize(600);
+		_displayMs = _displayFps = _postDisplayMs = _postDisplayFps = 0.0f;
+		_graphMin = 0.0f;
+		_graphMax = 50.0f;
+		_minFrameMs = 1000.0f;
+		_maxFrameMs = 0.0f;
 		SaveSettings();
-		cs::Menu::ShowToast("Performance Overlay reset to defaults", 2.5);
 	}
 
-	void PerformanceOverlay::DrawSettings()
+	void PerformanceOverlay::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		settings::SettingsEdit edit{ *this };
-		dmui::ui::TextDisabled(
-			"The host owns the overlay hotkey. Suggested default: %s.",
-			settings.toggleHotkey.c_str());
-
-		edit.Discrete(dmui::ui::Checkbox("Enabled", &settings.enabled));
-
-		dmui::ui::Separator();
-
-		static const std::array presetOptions{
-			dmui::ChoiceOption<int>{ 0, "Off", "off" },
-			dmui::ChoiceOption<int>{ 1, "Minimal", "minimal" },
-			dmui::ChoiceOption<int>{ 2, "Standard", "standard" },
-			dmui::ChoiceOption<int>{ 3, "Verbose", "verbose" }
-		};
-		const auto preset = dmui::DrawChoice<int>(
-			"performance-overlay-preset",
-			settings.preset,
-			std::span<const dmui::ChoiceOption<int>>{ presetOptions },
-			"Unavailable",
-			"Preset");
-		if (edit.Discrete(preset.changed)) {
-			ApplyPreset(static_cast<Preset>(*preset.selected));
-		}
-
-		if (dmui::ui::CollapsingHeader("Sections")) {
-			edit.Discrete(dmui::ui::Checkbox("FPS", &settings.showFps));
-			edit.Discrete(dmui::ui::Checkbox("Frame time (ms)", &settings.showFrameTime));
-			edit.Discrete(dmui::ui::Checkbox("Frame time graph", &settings.showGraph));
-			edit.Discrete(dmui::ui::Checkbox("VRAM", &settings.showVram));
-			edit.Discrete(dmui::ui::Checkbox("Frame stats (avg / 1%% low / 0.1%% low)", &settings.showStats));
-		}
-
-		if (dmui::ui::CollapsingHeader("Position")) {
-			static const std::array cornerOptions{
-				dmui::ChoiceOption<int>{ 0, "Top-left", "top-left" },
-				dmui::ChoiceOption<int>{ 1, "Top-right", "top-right" },
-				dmui::ChoiceOption<int>{ 2, "Bottom-left", "bottom-left" },
-				dmui::ChoiceOption<int>{ 3, "Bottom-right", "bottom-right" }
-			};
-			const auto corner = dmui::DrawChoice<int>(
-				"performance-overlay-corner",
-				settings.corner,
-				std::span<const dmui::ChoiceOption<int>>{ cornerOptions },
-				"Unavailable",
-				"Corner");
-			if (edit.Discrete(corner.changed)) {
-				settings.corner = *corner.selected;
-			}
-			edit.Discrete(dmui::ui::Checkbox("Free-drag (override corner snap)", &settings.freeDrag));
-		}
-
-		if (dmui::ui::CollapsingHeader("Style")) {
-			const auto opacityRange = performance_overlay::kSchema.EditRange(&Settings::opacity);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Background opacity",
-				&settings.opacity,
-				&opacityRange.min,
-				&opacityRange.max,
-				"%.2f"));
-			if (dmui::ui::IsItemDeactivatedAfterEdit()) {
-				settings.opacity = std::clamp(settings.opacity, opacityRange.min, opacityRange.max);
-			}
-			edit.Discrete(dmui::ui::Checkbox("Show border", &settings.showBorder));
-			const auto fontScaleRange = performance_overlay::kSchema.EditRange(&Settings::fontScale);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Font scale",
-				&settings.fontScale,
-				&fontScaleRange.min,
-				&fontScaleRange.max,
-				"%.2fx"));
-			if (dmui::ui::IsItemDeactivatedAfterEdit()) {
-				settings.fontScale = std::clamp(settings.fontScale, fontScaleRange.min, fontScaleRange.max);
-			}
-			edit.Discrete(dmui::ui::Checkbox("High contrast (force white text)", &settings.highContrast));
-		}
-
-		if (dmui::ui::CollapsingHeader("Color thresholds")) {
-			if (edit.Discrete(dmui::ui::Checkbox("Auto-seed from monitor refresh rate", &settings.autoThresholds))) {
-				if (settings.autoThresholds) {
-					_refreshKnown = false;
-					EnsureRefreshHz();
-				}
-			}
-			dmui::ui::TextDisabled("Detected refresh: %.0f Hz", _refreshHz);
-			dmui::ui::BeginDisabled(settings.autoThresholds);
-			const auto goodFpsRange = performance_overlay::kSchema.EditRange(&Settings::fpsGood);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Good (>= FPS)",
-				&settings.fpsGood,
-				&goodFpsRange.min,
-				&goodFpsRange.max,
-				"%.0f"));
-			const auto warnFpsRange = performance_overlay::kSchema.EditRange(&Settings::fpsWarn);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Warn (>= FPS)",
-				&settings.fpsWarn,
-				&warnFpsRange.min,
-				&warnFpsRange.max,
-				"%.0f"));
-			dmui::ui::EndDisabled();
-		}
-
-		if (dmui::ui::CollapsingHeader("Tracking")) {
-			const auto updateIntervalRange = performance_overlay::kSchema.EditRange(&Settings::updateInterval);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Update interval (s)",
-				&settings.updateInterval,
-				&updateIntervalRange.min,
-				&updateIntervalRange.max,
-				"%.2f"));
-			const bool intervalCommitted = dmui::ui::IsItemDeactivatedAfterEdit();
-			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
-				tooltip.Visible()) {
-				dmui::ui::Text(
-					"%s",
-					"How often the displayed FPS/frametime number refreshes. "
-					"The history graph updates every frame.");
-			}
-			const auto historySizeRange = performance_overlay::kSchema.EditRange(&Settings::historySize);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"History size (frames)",
-				&settings.historySize,
-				&historySizeRange.min,
-				&historySizeRange.max));
-			const bool historyCommitted = dmui::ui::IsItemDeactivatedAfterEdit();
-			const auto graphHeightRange = performance_overlay::kSchema.EditRange(&Settings::graphHeightPx);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Graph height (px)",
-				&settings.graphHeightPx,
-				&graphHeightRange.min,
-				&graphHeightRange.max,
-				"%.0f"));
-			const bool graphHeightCommitted = dmui::ui::IsItemDeactivatedAfterEdit();
-			if (intervalCommitted || historyCommitted || graphHeightCommitted) {
-				settings.updateInterval = std::clamp(settings.updateInterval, 0.05f, 5.0f);
-				settings.historySize = std::clamp(settings.historySize, 30, kHistoryCapacity);
-				settings.graphHeightPx = std::clamp(settings.graphHeightPx, 40.0f, 160.0f);
-				if (historyCommitted) {
-					// History-size changes invalidate existing samples.
-					_frameTimesHead = 0;
-					_frameTimesCount = 0;
-				}
-			}
-		}
+		a_sink.Field("enabled", settings.ShowInOverlay)
+			.Field("fps", static_cast<double>(_displayFps))
+			.Field("frame_ms", static_cast<double>(_frameMs))
+			.Field("avg_ms", static_cast<double>(_averageMs))
+			.Field("refresh_hz", static_cast<double>(_refreshHz))
+			.Field("frame_history_size", static_cast<std::int64_t>(settings.FrameHistorySize))
+			.Field("engine_frame_sequence", static_cast<std::int64_t>(render::profiling::FrameSequence()))
+			.Field("ab_testing", _testing)
+			.Field("ab_restore_pending", _restorePending)
+			.Field("post_fg_calculated", _frameGeneration)
+			.Field("vram_available", _vramBudget > 0)
+			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsed / (1024 * 1024)))
+			.Field("vram_budget_mb", static_cast<std::int64_t>(_vramBudget / (1024 * 1024)));
 	}
 
 	namespace
 	{
 		struct AutoRegister
 		{
-			AutoRegister()
-			{
-				cs::FeatureManager::Get().Register(PerformanceOverlay::GetSingleton());
-			}
+			AutoRegister() { FeatureManager::Get().Register(PerformanceOverlay::GetSingleton()); }
 		};
 		static AutoRegister _autoRegister;
 	}

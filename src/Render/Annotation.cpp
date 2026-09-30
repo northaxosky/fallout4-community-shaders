@@ -13,6 +13,8 @@ namespace cs::render::annotation
 	{
 		constexpr std::size_t kWideNameCapacity = 256;
 		winrt::com_ptr<ID3DUserDefinedAnnotation> annotation;
+		BeginPassCallback beginPass{};
+		EndPassCallback endPass{};
 
 		std::wstring_view ToWide(
 			std::string_view a_name,
@@ -52,8 +54,15 @@ namespace cs::render::annotation
 		}
 	}
 
-	ScopedEvent::ScopedEvent(std::string_view a_name) noexcept
+	void SetProfilerCallbacks(BeginPassCallback a_begin, EndPassCallback a_end) noexcept
 	{
+		beginPass = a_begin;
+		endPass = a_end;
+	}
+
+	ScopedEvent::ScopedEvent(std::string_view a_name, bool a_profile) noexcept
+	{
+		_profile = a_profile && beginPass && endPass && beginPass(a_name);
 		if (!annotation || !annotation->GetStatus())
 			return;
 
@@ -84,6 +93,8 @@ namespace cs::render::annotation
 
 	ScopedEvent::~ScopedEvent() noexcept
 	{
+		if (_profile)
+			endPass();
 		if (_d3d11)
 			_d3d11->EndEvent();
 		if (_d3d12)

@@ -9,6 +9,7 @@
 #include "ScreenSpaceShadowsSettings.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
+#include "Settings/LiveSettings.h"
 #include "Settings/SettingsRegistry.h"
 #include "TerrainShadowsSettings.h"
 #include "WaterEffectsMath.h"
@@ -278,6 +279,71 @@ namespace
 		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = -1\n"), restored, error));
 		CHECK(restored.captureFrameCount == 1);
 	}
+
+	void TestLiveSettings()
+	{
+		constexpr Schema schema{ std::tuple{
+			Field{ "enabled", "Enable.", &TestSettings::enabled },
+			Field{ "count", "Startup resource count.", &TestSettings::count, Range{ 1u, 4u }, ApplyTiming::kNextLaunch },
+			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } } } };
+		TestSettings value;
+		float published = value.thickness;
+		auto access = BindLiveSettings(schema, value, [&] {
+			published = value.thickness;
+			if (!value.enabled)
+				throw std::runtime_error("Effect finalization failed");
+		});
+		const auto baseline = access.snapshot();
+		CHECK(!baseline.contains("count"));
+		std::string error;
+		const auto before = value;
+		CHECK(!access.prepare(toml::parse("enabled = false\nthickness = nan"), error));
+		CHECK(value == before);
+		auto prepared = access.prepare(toml::parse("enabled = false\nthickness = 0.04\ncount = 4\nload = false"), error);
+		CHECK(prepared.has_value());
+		if (!prepared)
+			return;
+		value.count = 3;
+		std::array transaction{ std::move(*prepared) };
+		try {
+			ApplyPreparedLiveSettings(transaction);
+			CHECK(false);
+		} catch (const std::runtime_error&) {
+			CHECK(value.enabled && value.thickness == before.thickness && value.count == 3);
+			CHECK(published == before.thickness);
+		}
+		prepared = access.prepare(toml::parse("thickness = 0.03\ncount = 1"), error);
+		CHECK(prepared.has_value());
+		if (!prepared)
+			return;
+		std::array successful{ std::move(*prepared) };
+		ApplyPreparedLiveSettings(successful);
+		CHECK(value.count == 3 && value.thickness == 0.03f && published == 0.03f);
+		prepared = access.prepare(baseline, error);
+		if (prepared) {
+			std::array restore{ std::move(*prepared) };
+			ApplyPreparedLiveSettings(restore);
+		}
+		CHECK(value.count == 3 && value.thickness == before.thickness && published == before.thickness);
+	}
+
+	void TestOverlayPosition()
+	{
+		using namespace cs::features::performance_overlay;
+		Settings value;
+		std::string error;
+		CHECK(Parse(kSchema, toml::parse("[settings]\nPosition = [300.5, 700.25]\nPositionSet = true\nFrameHistorySize = 1800"), value, error));
+		std::ostringstream serialized;
+		serialized << toml::table{ { "settings", SerializeFull(kSchema, value) } };
+		Settings restored;
+		CHECK(Parse(kSchema, toml::parse(serialized.str()), restored, error));
+		CHECK(restored.Position == value.Position && restored.PositionSet && restored.FrameHistorySize == 1800);
+		const auto validPosition = restored.Position;
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nPosition = [10.0, nan]"), restored, error));
+		CHECK(restored.Position == validPosition);
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nPosition = [10.0]"), restored, error));
+		CHECK(restored.Position == validPosition);
+	}
 }
 
 int main()
@@ -294,6 +360,8 @@ int main()
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");
 		TestRestartTiming();
+		TestLiveSettings();
+		TestOverlayPosition();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
 		++failures;

@@ -577,8 +577,12 @@ namespace cs::host
 						a_feature, "DearModdingUI::DrawSettings"))
 					return;
 				CS_FEATURE_ZONE(&a_feature, "DrawSettings");
+				const bool comparing = settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
 				try {
-					a_feature.DrawSettings();
+					{
+						const dmui::DisabledScope disabled{ comparing };
+						a_feature.DrawSettings();
+					}
 					a_feature.FlushSettings(true);
 				} catch (const std::exception& error) {
 					FeatureManager::Get().QuarantineRuntimeCallback(
@@ -623,7 +627,7 @@ namespace cs::host
 						"non-standard exception");
 					throw;
 				}
-				const auto reset = row.End(resettable, resettable);
+				const auto reset = row.End(resettable && !comparing, resettable && !comparing);
 				if (!reset) {
 					LogFailure("end feature controls row");
 					return;

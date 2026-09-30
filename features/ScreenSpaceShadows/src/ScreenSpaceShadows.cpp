@@ -156,6 +156,7 @@ namespace cs::features
 		}
 
 		_settings = candidate;
+		_liveSettings = settings::BindLiveSettings(sss_settings::kSchema, _settings);
 		return true;
 	}
 

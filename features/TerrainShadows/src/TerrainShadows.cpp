@@ -212,6 +212,11 @@ namespace cs::features
 			return false;
 		}
 		_settings = candidate;
+		_liveSettings = settings::BindLiveSettings(ts::kSchema, _settings, [this] { PublishSettings(); }, {}, [](const auto& a_value, std::string& a_error) {
+				if (ts::IsValidDownsampleFactor(a_value.downsampleFactor))
+					return true;
+				a_error = "downsample_factor: expected one of 1, 2, or 4";
+				return false; });
 		PublishSettings();
 		return true;
 	}

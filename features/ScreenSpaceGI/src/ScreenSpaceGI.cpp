@@ -317,6 +317,8 @@ namespace cs::features
 		}
 
 		_settings = candidate;
+		_liveSettings = settings::BindLiveSettings(ssgi_settings::kSchema, _settings,
+			[this] { _queuedHistoryReset.store(true, std::memory_order_release); });
 		return true;
 	}
 
@@ -921,7 +923,7 @@ namespace cs::features
 			}
 
 			cs::render::annotation::ScopedEvent annotationScope(
-				"ScreenSpaceGI/Generate");
+				"ScreenSpaceGI/Generate", false);
 			const float texWidth = static_cast<float>(_allocW);
 			const float texHeight = static_cast<float>(_allocH);
 			const float frameWidth = static_cast<float>(frameW);

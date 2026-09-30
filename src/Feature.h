@@ -3,6 +3,7 @@
 #include "DebugView.h"
 #include "FeatureCategories.h"
 #include "FeatureState.h"
+#include "Settings/LiveSettings.h"
 #include "Settings/SettingsMetadata.h"
 
 #include <optional>
@@ -51,6 +52,7 @@ namespace cs
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
+		virtual void OnRuntimeQuarantined() noexcept {}
 
 		// Defer wrappers until every feature loads.
 		virtual void OnPostPostLoad() {}
@@ -66,6 +68,7 @@ namespace cs
 		// False keeps recorded edits pending for a later flush.
 		virtual bool SaveSettings() { return true; }
 		virtual settings::SchemaView GetSettingsSchema() const { return {}; }
+		const settings::LiveSettingsAccess& GetLiveSettingsAccess() const noexcept { return _liveSettings; }
 
 		// Persists edits recorded by settings::SettingsEdit, optionally only once an edit completes.
 		void FlushSettings(bool a_completedOnly = false)
@@ -135,6 +138,9 @@ namespace cs
 
 		// Empty output opts out of saving.
 		virtual void ExportToPreset(toml::table&) {}
+
+	protected:
+		settings::LiveSettingsAccess _liveSettings;
 
 	private:
 		friend class settings::SettingsEdit;
