@@ -34,6 +34,7 @@ namespace cs
 		void OnHostDeviceReady() noexcept;
 
 		void RequestClearShaderCache() noexcept;
+		void RequestClearRenderDocCaptures() noexcept;
 		void ReleaseDebugImages() noexcept;
 
 		static void ShowToast(
@@ -48,6 +49,7 @@ namespace cs
 		{
 			kNone,
 			kClearCache,
+			kClearRenderDocCaptures,
 			kSavePresetAs,
 			kDeletePreset
 		};
@@ -63,6 +65,7 @@ namespace cs
 			std::string presetIdentity;
 			std::string presetName;
 			std::filesystem::path presetPath;
+			std::filesystem::path capturePath;
 		};
 
 		struct DebugImage
@@ -110,7 +113,7 @@ namespace cs
 		std::unordered_map<std::string, DebugImage> _debugImages;
 		std::unordered_map<std::string, DMUI_Result> _hostCallFailures;
 		DialogState _dialog;
-		std::atomic_bool _clearCacheRequested{};
+		std::atomic<DialogOperation> _clearRequested{ DialogOperation::kNone };
 		std::uint64_t _hostFrameSerial{};
 		std::uint64_t _debugImageGeneration{};
 	};

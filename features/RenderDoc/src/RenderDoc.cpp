@@ -9,11 +9,11 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <memory>
 #include <system_error>
 
 #include "F4SE/API.h"
+#include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
@@ -30,9 +30,6 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.renderdoc");
 	}
 
-	constexpr double kBytesPerGiB = 1024.0 * 1024.0 * 1024.0;
-	using renderdoc_settings::kMaxMultiFrameCount;
-	using renderdoc_settings::kMinMultiFrameCount;
 	constexpr std::string_view kLegacyCaptureFolder = "Data\\F4SE\\Plugins\\RenderDoc\\captures";
 	using renderdoc_settings::kEngineD3D11Target;
 	using renderdoc_settings::kTemporalD3D12Target;
@@ -45,16 +42,21 @@ namespace cs::features
 
 	namespace
 	{
-		int ClampMultiFrameCount(int64_t a_value)
+		int ClampCaptureFrameCount(int a_value)
 		{
-			return static_cast<int>(std::clamp(a_value,
-				static_cast<int64_t>(kMinMultiFrameCount),
-				static_cast<int64_t>(kMaxMultiFrameCount)));
+			return std::clamp(a_value, renderdoc::kMinCaptureFrameCount, renderdoc::kMaxCaptureFrameCount);
 		}
 
-		double ClampMinFreeDiskGiB(double a_value)
+		std::string RuntimeName()
 		{
-			return a_value >= 0.0 ? a_value : RenderDoc::Settings{}.minFreeDiskGiB;
+			switch (REX::FModule::GetRuntimeIndex()) {
+			case REX::FModule::Runtime::kOG:
+				return "OG";
+			case REX::FModule::Runtime::kNG:
+				return "NG";
+			default:
+				return "AE";
+			}
 		}
 
 		std::string_view CaptureTargetConfigName(RenderDoc::CaptureTarget a_target)
@@ -88,6 +90,19 @@ namespace cs::features
 			return a_path.string();
 		}
 
+		// FO4: the host owns native external opening, including failure reporting.
+		void OpenCaptureLocation(const std::filesystem::path& a_path, DMUI_ExternalTargetKind a_kind)
+		{
+			const auto utf8 = PathToUtf8(std::filesystem::absolute(a_path));
+			auto& client = host::HostClient::Get().Client();
+			std::uint32_t nativeError{};
+			if (!client.OpenExternal({ .targetKind = a_kind, .target = utf8.c_str() }, &nativeError)) {
+				L->warn("Failed to open '{}': {} (native error {})",
+					utf8, DMUI_ResultToString(client.LastResult()), nativeError);
+				cs::Menu::ShowToast("Could not open the capture location; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR);
+			}
+		}
+
 		std::filesystem::path ExpandPathEnvironment(const std::wstring& a_configured)
 		{
 			const auto requiredSize = REX::W32::ExpandEnvironmentStringsW(a_configured.c_str(), nullptr, 0);
@@ -106,7 +121,7 @@ namespace cs::features
 			return expanded;
 		}
 
-		// The installer registers qrenderdoc.exe as the .rdc handler; renderdoc.dll sits beside it.
+		// FO4: the registered .rdc handler locates renderdoc.dll beside qrenderdoc.exe.
 		std::filesystem::path InstalledRuntimePath()
 		{
 			constexpr auto* key = L"RenderDoc.RDCCapture.1\\shell\\open\\command";
@@ -151,6 +166,7 @@ namespace cs::features
 
 		std::filesystem::path ResolveCaptureFolder(const std::string& a_configured)
 		{
+			// FO4: captures follow the F4SE save-folder identity rather than the game Data tree.
 			if (!a_configured.empty()) {
 				return ExpandCaptureFolderEnvironment(a_configured);
 			}
@@ -183,7 +199,7 @@ namespace cs::features
 	bool RenderDoc::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!settings::Parse(renderdoc_settings::kSchema, a_config, candidate, a_error)) {
+		if (!renderdoc_settings::Parse(a_config, candidate, a_error)) {
 			return false;
 		}
 
@@ -194,13 +210,13 @@ namespace cs::features
 
 	void RenderDoc::Load()
 	{
-		L->info("Settings: dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={} capture_target={} capture={} multi_capture={}",
+		L->info("Settings: dll={} folder={} capture_frame_count={} capture_target={} capture={} alternate_capture={}",
 			_settings.dllPath, _settings.captureFolder,
-			_settings.minFreeDiskGiB, _settings.multiFrameCount,
+			_settings.captureFrameCount,
 			CaptureTargetConfigName(_settings.captureTarget),
 			_settings.captureHotkey, _settings.multiCaptureHotkey);
 
-		// Load before D3D initialization.
+		// FO4: startup feature loading is the only runtime enable switch.
 		std::string error;
 		if (!TryLoadRuntime(error))
 			FailLoad(std::move(error));
@@ -262,7 +278,8 @@ namespace cs::features
 			L->warn("renderdoc.dll rejected NvAPI passthrough; captures may remove the device");
 
 		ApplyCapturePath();
-		_lastCaptureCount = _api->GetNumCaptures();
+		_captures.Attach(_api);
+		_captureCount.store(_captures.Count(), std::memory_order_relaxed);
 		L->info("RenderDoc runtime loaded from '{}'", pathUtf8);
 		return true;
 	}
@@ -278,42 +295,31 @@ namespace cs::features
 
 		std::error_code ec;
 		std::filesystem::create_directories(_resolvedCaptureFolder, ec);
-		auto pathTemplate = PathToUtf8(_resolvedCaptureFolder / "FO4");
+		if (ec)
+			L->warn("Failed to prepare RenderDoc capture folder: {}", ec.message());
+		_captures.SetDirectory(_resolvedCaptureFolder);
+		// FO4: runtime identity comes from CommonLibF4 rather than Skyrim's module.
+		auto pathTemplate = PathToUtf8(_resolvedCaptureFolder /
+									   std::format("Fallout4_{}_{}", RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string(".")));
 		_api->SetCaptureFilePathTemplate(pathTemplate.c_str());
 	}
 
-	bool RenderDoc::CheckCaptureDiskSpace() const
+	bool RenderDoc::CheckCaptureDiskSpace(int a_frames) const
 	{
-		const auto& captureDir = _resolvedCaptureFolder;
-
-		std::error_code ec;
-		std::filesystem::create_directories(captureDir, ec);
-		if (ec) {
-			L->warn("RenderDoc capture aborted: failed to prepare capture folder {}: {}",
-				captureDir.string(), ec.message());
-			cs::Menu::ShowToast(
-				"RenderDoc capture aborted: capture folder unavailable",
-				4.0,
-				DMUI_STATUS_SEVERITY_ERROR);
-			return false;
-		}
-
 		try {
-			const auto availableBytes = std::filesystem::space(captureDir).available;
-			const double availableGiB = static_cast<double>(availableBytes) / kBytesPerGiB;
-			const double requiredGiB = ClampMinFreeDiskGiB(_settings.minFreeDiskGiB);
-			if (availableGiB < requiredGiB) {
-				L->warn("RenderDoc capture aborted: {:.2f} GiB free in {} below configured {:.2f} GiB",
-					availableGiB, captureDir.string(), requiredGiB);
+			if (!_captures.HasSufficientDiskSpace(a_frames)) {
+				const auto requiredMiB = renderdoc::RequiredSpaceBytes(a_frames) / (1024 * 1024);
+				L->warn("RenderDoc capture aborted: at least {} MiB free required in {}",
+					requiredMiB, _resolvedCaptureFolderUtf8);
 				cs::Menu::ShowToast(
-					"RenderDoc capture aborted: low disk space",
+					std::format("RenderDoc capture aborted: at least {} MiB free required.", requiredMiB),
 					4.0,
 					DMUI_STATUS_SEVERITY_WARNING);
 				return false;
 			}
 		} catch (const std::filesystem::filesystem_error& e) {
 			L->warn("RenderDoc capture aborted: failed to query free disk space for {}: {}",
-				captureDir.string(), e.what());
+				_resolvedCaptureFolderUtf8, e.what());
 			cs::Menu::ShowToast(
 				"RenderDoc capture aborted: disk check failed",
 				4.0,
@@ -391,38 +397,36 @@ namespace cs::features
 		return true;
 	}
 
-	void RenderDoc::QueuePendingComments(std::uint32_t a_expectedCaptures)
-	{
-		if (!_commentsBuf[0])
-			return;
-
-		_pendingComments = _commentsBuf.data();
-		_pendingCaptures = a_expectedCaptures;
-		_commentsBuf[0] = 0;
-	}
-
 	void RenderDoc::ApplyPendingComments()
 	{
 		if (!_api)
 			return;
 
-		const auto count = _api->GetNumCaptures();
-		if (count == _lastCaptureCount)
-			return;
+		const auto count = _captures.Count();
+		if (count != _captureCount.load(std::memory_order_relaxed))
+			_captures.Poll(BuildAutomaticCaptureComments());
+		_captureCount.store(count, std::memory_order_relaxed);
+	}
 
-		for (auto i = _lastCaptureCount; i < count && _pendingCaptures > 0; ++i, --_pendingCaptures) {
-			std::uint32_t length = 0;
-			if (!_api->GetCapture(i, nullptr, &length, nullptr) || length == 0)
-				continue;
-
-			std::string path(length, '\0');
-			if (_api->GetCapture(i, path.data(), &length, nullptr))
-				_api->SetCaptureFileComments(path.c_str(), _pendingComments.c_str());
+	std::string RenderDoc::BuildAutomaticCaptureComments(std::string_view a_userComments) const
+	{
+		// FO4: the host supplies identity and loaded-feature metadata to the capture service.
+		auto comments = std::format("Fallout 4 {} {}\nCommunity Shaders {}\n",
+			RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string("."), Plugin::VERSION.string("."));
+		std::vector<std::string> features;
+		for (const auto* feature : FeatureManager::Get().GetAll()) {
+			if (feature->IsLoaded())
+				features.push_back(std::format("{} ({})", feature->GetName(), Plugin::VERSION.string(".")));
 		}
-
-		if (_pendingCaptures == 0)
-			_pendingComments.clear();
-		_lastCaptureCount = count;
+		std::ranges::sort(features);
+		if (!features.empty()) {
+			comments += "Enabled Features:\n";
+			for (const auto& feature : features)
+				comments += std::format("- {}\n", feature);
+		}
+		if (!a_userComments.empty())
+			comments += std::format("\nUser Comments:\n{}", a_userComments);
+		return comments;
 	}
 
 	void RenderDoc::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -441,27 +445,29 @@ namespace cs::features
 				"temporal_d3d12_available",
 				_d3d12TargetAvailable.load(std::memory_order_relaxed))
 			.Field("captures", static_cast<std::int64_t>(_captureCount.load(std::memory_order_relaxed)))
-			.Field("multi_frames", static_cast<std::int64_t>(_settings.multiFrameCount))
+			.Field("capture_frames", static_cast<std::int64_t>(_settings.captureFrameCount))
 			.Field("folder", _resolvedCaptureFolderUtf8);
 	}
 
 	bool RenderDoc::FramesEngineCaptureManually() const noexcept
 	{
-		// The proxy presents only through D3D12, so RenderDoc never pairs the game device with a window.
+		// FO4: the temporal proxy presents through D3D12, so game-device captures need explicit frame boundaries.
 		return _settings.captureTarget == CaptureTarget::kEngineD3D11 &&
 		       _d3d12TargetAvailable.load(std::memory_order_acquire);
 	}
 
 	bool RenderDoc::RequestFrames(std::uint32_t a_frames)
 	{
-		if (!BindCaptureTarget(true) || !CheckCaptureDiskSpace())
+		if (!BindCaptureTarget(true) || !CheckCaptureDiskSpace(static_cast<int>(a_frames)))
 			return false;
+		if (_commentsBuf[0]) {
+			_captures.QueueComments(BuildAutomaticCaptureComments(_commentsBuf.data()));
+			_commentsBuf[0] = 0;
+		}
 		if (FramesEngineCaptureManually()) {
 			_manualFramesPending.store(a_frames, std::memory_order_release);
-		} else if (a_frames == 1) {
-			_api->TriggerCapture();
 		} else {
-			_api->TriggerMultiFrameCapture(a_frames);
+			_captures.Trigger(static_cast<int>(a_frames));
 		}
 		return true;
 	}
@@ -495,38 +501,21 @@ namespace cs::features
 			L->warn("RenderDoc runtime not loaded; install RenderDoc or fix dll_path, then restart with the feature loaded");
 			return;
 		}
-		if (!RequestFrames(1))
+		const auto frameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
+		if (!RequestFrames(static_cast<std::uint32_t>(frameCount)))
 			return;
 
-		QueuePendingComments(1);
-		_captureCount.fetch_add(1, std::memory_order_relaxed);
-
-		L->info(
-			"Single-frame capture triggered for {}",
-			CaptureTargetDisplayName(_settings.captureTarget));
+		L->info("Capture triggered for {}: {} frames", CaptureTargetDisplayName(_settings.captureTarget), frameCount);
 	}
 
 	void RenderDoc::TriggerMultiFrameCapture()
 	{
-		if (!_api) {
-			L->warn("RenderDoc runtime not loaded; install RenderDoc or fix dll_path, then restart with the feature loaded");
-			return;
-		}
-		if (!_api->TriggerMultiFrameCapture) {
-			L->warn("RenderDoc runtime does not expose TriggerMultiFrameCapture");
-			return;
-		}
+		TriggerCapture();
+	}
 
-		const auto frameCount = static_cast<uint32_t>(ClampMultiFrameCount(_settings.multiFrameCount));
-		if (!RequestFrames(frameCount))
-			return;
-		QueuePendingComments(frameCount);
-		_captureCount.fetch_add(1, std::memory_order_relaxed);
-
-		L->info(
-			"Multi-frame capture triggered for {}: {} frames",
-			CaptureTargetDisplayName(_settings.captureTarget),
-			frameCount);
+	void RenderDoc::ClearCaptures()
+	{
+		_captures.ClearCaptures();
 	}
 
 	void RenderDoc::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
@@ -590,6 +579,7 @@ namespace cs::features
 
 	void RenderDoc::DrawSettings()
 	{
+		// FO4: visible controls and native dialogs are owned by the forwarding host.
 		settings::SettingsEdit edit{ *this };
 
 		dmui::ui::TextDisabled(
@@ -642,24 +632,15 @@ namespace cs::features
 			ApplyCapturePath();
 		}
 
-		const double diskStep = 0.25;
-		const double diskFastStep = 1.0;
-		if (edit.Continuous(dmui::ui::InputScalar(
-				"Minimum free disk (GiB)",
-				&_settings.minFreeDiskGiB,
-				&diskStep,
-				&diskFastStep,
-				"%.2f")))
-			_settings.minFreeDiskGiB = ClampMinFreeDiskGiB(_settings.minFreeDiskGiB);
-		const auto frameRange = renderdoc_settings::kSchema.EditRange(&Settings::multiFrameCount);
+		const auto frameRange = renderdoc_settings::kSchema.EditRange(&Settings::captureFrameCount);
 		(void)edit.Continuous(dmui::ui::SliderScalar(
-			"Multi-frame count",
-			&_settings.multiFrameCount,
+			"Capture Frame Count",
+			&_settings.captureFrameCount,
 			&frameRange.min,
 			&frameRange.max));
-		if (dmui::ui::IsItemDeactivatedAfterEdit()) {
-			_settings.multiFrameCount = ClampMultiFrameCount(_settings.multiFrameCount);
-		}
+		_settings.captureFrameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
+		dmui::ui::TextDisabled("Both capture bindings use this count. Required free space: %llu MiB.",
+			renderdoc::RequiredSpaceBytes(_settings.captureFrameCount) / (1024 * 1024));
 
 		(void)dmui::ui::InputTextMultiline("Comments (embedded in next .rdc)",
 			_commentsBuf.data(), _commentsBuf.size(),
@@ -668,13 +649,82 @@ namespace cs::features
 		dmui::ui::BeginDisabled(!_api || !CaptureTargetAvailable());
 		if (dmui::ui::Button("Trigger Capture"))
 			TriggerCapture();
-		dmui::ui::SameLine();
-		if (dmui::ui::Button("Trigger Multi-Frame"))
-			TriggerMultiFrameCapture();
 		dmui::ui::EndDisabled();
+		dmui::ui::TextWrapped(
+			"RenderDoc is loaded and may severely impact performance. Disable startup loading and restart to unload it. "
+			"Upscaling and frame generation may be incompatible with captures.");
+
+		try {
+			if (dmui::ui::Button("Open Capture Directory"))
+				OpenCaptureLocation(_resolvedCaptureFolder, DMUI_EXTERNAL_TARGET_DIRECTORY);
+			dmui::ui::SameLine();
+			if (dmui::ui::Button("Copy Directory Path"))
+				dmui::ui::SetClipboardText(_resolvedCaptureFolderUtf8.c_str());
+			dmui::ui::TextDisabled("Capture Directory: %s", _resolvedCaptureFolderUtf8.c_str());
+			const auto usageMiB = _captures.DiskUsageBytes() / (1024 * 1024);
+			dmui::ui::Text("Capture Size: %.2f GiB", static_cast<double>(usageMiB) / 1024.0);
+			if (usageMiB > 0 && dmui::ui::Button("Clear All Captures"))
+				Menu::Get().RequestClearRenderDocCaptures();
+			DrawCaptureFiles();
+		} catch (const std::filesystem::filesystem_error& error) {
+			dmui::ui::TextWrapped("Capture directory unavailable: %s", error.what());
+		}
 
 		if (!_api)
 			dmui::ui::TextDisabled("Runtime load failed - install RenderDoc or fix the DLL path, then restart.");
+	}
+
+	void RenderDoc::DrawCaptureFiles()
+	{
+		const bool refresh = dmui::ui::Button("Refresh List");
+		auto files = _captures.Inventory(refresh);
+		dmui::ui::SameLine();
+		dmui::ui::TextDisabled("(%zu files)", files.size());
+		if (files.empty()) {
+			dmui::ui::TextDisabled("No capture files found.");
+			return;
+		}
+		// FO4: forwarded headers expose sort buttons instead of ImGui sort specs or double clicks.
+		if (!dmui::ui::BeginTable("renderdoc-captures", 3,
+				dmui::ui::TableFlags::kBorders | dmui::ui::TableFlags::kRowBg))
+			return;
+		dmui::ui::TableNextRow(dmui::ui::TableRowFlags::kHeaders);
+		const std::array headers{ "Filename", "Size", "Created" };
+		for (int column = 0; column < 3; ++column) {
+			(void)dmui::ui::TableSetColumnIndex(column);
+			if (dmui::ui::Button(headers[column])) {
+				_fileSortDescending = _fileSort == column ? !_fileSortDescending : column == 2;
+				_fileSort = column;
+			}
+		}
+		std::ranges::sort(files, [this](const auto& a, const auto& b) {
+			const auto comparison = _fileSort == 0 ? a.path.filename().compare(b.path.filename()) :
+			                        _fileSort == 1 ? (a.bytes > b.bytes) - (a.bytes < b.bytes) :
+			                                         (a.modified > b.modified) - (a.modified < b.modified);
+			return _fileSortDescending ? comparison > 0 : comparison < 0;
+		});
+		for (const auto& file : files) {
+			const auto filename = PathToUtf8(file.path.filename());
+			const auto path = PathToUtf8(file.path);
+			dmui::ui::PushID(path.c_str());
+			dmui::ui::TableNextRow();
+			(void)dmui::ui::TableSetColumnIndex(0);
+			if (dmui::ui::Button(filename.c_str()))
+				OpenCaptureLocation(file.path, DMUI_EXTERNAL_TARGET_VIRTUAL_FILE);
+			if (dmui::ui::IsItemHovered())
+				dmui::ui::SetTooltip("%s", path.c_str());
+			if (!file.deletionError.empty())
+				dmui::ui::TextWrapped("Deletion failed: %s", file.deletionError.c_str());
+			(void)dmui::ui::TableSetColumnIndex(1);
+			dmui::ui::Text("%.1f %s",
+				static_cast<float>(file.bytes) / (file.bytes >= 1024 * 1024 ? 1024 * 1024 : 1024),
+				file.bytes >= 1024 * 1024 ? "MB" : "KB");
+			(void)dmui::ui::TableSetColumnIndex(2);
+			const auto created = std::format("{:%F %R}", std::chrono::clock_cast<std::chrono::system_clock>(file.modified));
+			dmui::ui::TextUnformatted(created.c_str());
+			dmui::ui::PopID();
+		}
+		dmui::ui::EndTable();
 	}
 
 	std::vector<std::string_view> RenderDoc::GetRestartSettings() const

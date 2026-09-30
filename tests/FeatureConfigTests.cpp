@@ -250,8 +250,18 @@ namespace
 		current.dllPath = "C:\\RenderDoc\\renderdoc.dll";
 		CHECK(RestartRequired(kSchema, boot, current).size() == 1);
 		current = boot;
-		current.multiFrameCount = 10;
+		current.captureFrameCount = 10;
 		CHECK(RestartRequired(kSchema, boot, current).empty());
+		Settings restored;
+		std::string error;
+		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = 120\n"), restored, error));
+		CHECK(restored.captureFrameCount == 120);
+		const auto serialized = SerializeDelta(kSchema, restored, Settings{});
+		CHECK(serialized["Capture Frame Count"].value<int>() == 120);
+		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = 9223372036854775807\n"), restored, error));
+		CHECK(restored.captureFrameCount == 120);
+		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = -1\n"), restored, error));
+		CHECK(restored.captureFrameCount == 1);
 	}
 }
 
