@@ -125,17 +125,15 @@ namespace cs::render
 			fo4.waterEffectsSettings = a_features.waterEffectsSettings;
 			fo4.exponentialHeightFogSettings = a_features.exponentialHeightFogSettings;
 			fo4.WetnessDebugVisualization = a_features.wetnessEffectsSettings.DebugVisualization;
-			fo4.TerrainShadowMode = a_features.terrainShadowsSettings.TerrainShadowMode;
-			fo4.HeightRange = DirectX::XMFLOAT2(a_features.terrainShadowsSettings.HeightRange);
-			fo4.DebugHeightRange = DirectX::XMFLOAT2(a_features.terrainShadowsSettings.DebugHeightRange);
 			fo4.DynamicCubemapsDebugVisualization = a_features.dynamicCubemapsSettings.DebugVisualization;
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
 			a_data.feature.cubemapCreatorSettings.Enabled = a_features.dynamicCubemapsSettings.Enabled;
 			auto& terrain = a_data.feature.terraOccSettings;
-			terrain.EnableTerrainShadow = fo4.TerrainShadowMode != 0;
+			terrain.EnableTerrainShadow = a_features.terrainShadowsSettings.EnableTerrainShadow;
 			std::ranges::copy(a_features.terrainShadowsSettings.Scale, terrain.Scale);
 			std::ranges::copy(a_features.terrainShadowsSettings.ZRange, terrain.ZRange);
 			std::ranges::copy(a_features.terrainShadowsSettings.Offset, terrain.Offset);
+			terrain.ZBlur = a_features.terrainShadowsSettings.ZBlur;
 			auto& wetness = a_data.feature.wetnessEffectsSettings;
 			const auto& source = a_features.wetnessEffectsSettings;
 			if (source.Active) {

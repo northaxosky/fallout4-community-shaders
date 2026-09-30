@@ -23,9 +23,6 @@ namespace cs::features::terrain_shadows
 
 	inline constexpr float kGameHourJumpThreshold = 0.25f;
 
-	inline constexpr std::array<std::uint32_t, 3> kDownsampleFactors{ 1u, 2u, 4u };
-	inline constexpr std::uint32_t kDefaultDownsampleFactor = 4u;
-
 	enum class HeightMapSource : std::uint8_t
 	{
 		kXLodGen,
@@ -165,24 +162,6 @@ namespace cs::features::terrain_shadows
 		return metadata;
 	}
 
-	[[nodiscard]] inline bool IsValidDownsampleFactor(std::uint64_t a_factor) noexcept
-	{
-		return std::ranges::any_of(
-			kDownsampleFactors,
-			[a_factor](std::uint32_t a_candidate) {
-				return static_cast<std::uint64_t>(a_candidate) == a_factor;
-			});
-	}
-
-	[[nodiscard]] inline std::uint32_t ApplyDownsample(
-		std::uint32_t a_dimension,
-		std::uint32_t a_factor) noexcept
-	{
-		if (a_factor <= 1 || a_dimension == 0)
-			return a_dimension;
-		return std::max(1u, a_dimension / a_factor);
-	}
-
 	struct VramCost
 	{
 		std::uint64_t heightBytes = 0;
@@ -276,11 +255,15 @@ namespace cs::features::terrain_shadows
 		std::array<float, 3> scale{};
 		std::array<float, 2> zRange{};
 		std::array<float, 2> offset{};
+		float zBlur = 0.0f;
 	};
 
 	[[nodiscard]] inline FeatureBlock BuildFeatureBlock(
 		const HeightMapMetadata& a_metadata,
-		bool a_enabled) noexcept
+		bool a_enabled,
+		std::uint32_t a_width,
+		std::uint32_t a_height,
+		std::array<float, 2> a_lightDeltaZ) noexcept
 	{
 		FeatureBlock block;
 		block.enableTerrainShadow = a_enabled ? 1u : 0u;
@@ -291,9 +274,10 @@ namespace cs::features::terrain_shadows
 		};
 		for (std::size_t axis = 0; axis < 3; ++axis)
 			block.scale[axis] = invScale[axis] != 0.0f ? 1.0f / invScale[axis] : 0.0f;
-		block.offset[0] = -a_metadata.pos0[0] * block.scale[0];
-		block.offset[1] = -a_metadata.pos0[1] * block.scale[1];
+		block.offset[0] = -a_metadata.pos0[0] * block.scale[0] + 0.5f / static_cast<float>(a_width);
+		block.offset[1] = -a_metadata.pos0[1] * block.scale[1] - 0.5f / static_cast<float>(a_height);
 		block.zRange = a_metadata.zRange;
+		block.zBlur = -0.5f * (a_lightDeltaZ[0] + a_lightDeltaZ[1]) * (block.zRange[1] - block.zRange[0]);
 		return block;
 	}
 
@@ -313,7 +297,6 @@ namespace cs::features::terrain_shadows
 	inline constexpr float kPi = 3.14159265358979323846f;
 	inline constexpr float kShadowSofteningRadians = kPi / 180.0f;
 	inline constexpr float kHalfPi = kPi / 2.0f;
-	inline constexpr float kMinHorizontalLength = 1e-4f;
 
 	[[nodiscard]] inline DdaPlan BuildDdaPlan(
 		const std::array<float, 3>& a_sunDirection,
@@ -330,18 +313,17 @@ namespace cs::features::terrain_shadows
 
 		const float horizontalLength = std::sqrt(
 			a_sunDirection[0] * a_sunDirection[0] + a_sunDirection[1] * a_sunDirection[1]);
-		if (horizontalLength < kMinHorizontalLength)
-			return plan;
-
 		const std::array<float, 3> invScale{
 			a_metadata.pos1[0] - a_metadata.pos0[0],
 			a_metadata.pos1[1] - a_metadata.pos0[1],
 			a_metadata.zRange[1] - a_metadata.zRange[0]
 		};
-		const std::array<float, 2> pixelDir{
+		std::array<float, 2> pixelDir{
 			a_sunDirection[0] / invScale[0] * static_cast<float>(a_width),
 			a_sunDirection[1] / invScale[1] * static_cast<float>(a_height)
 		};
+		if (pixelDir[0] == 0.0f && pixelDir[1] == 0.0f)
+			pixelDir = { 1.0f, 0.0f };
 
 		const bool horizontalMajor =
 			std::abs(pixelDir[0]) >= std::abs(pixelDir[1]);
@@ -362,11 +344,11 @@ namespace cs::features::terrain_shadows
 		plan.lightPxDir = { pixelDir[0] * stepMult, pixelDir[1] * stepMult };
 
 		const float lightAngle = std::atan2(-a_sunDirection[2], horizontalLength);
-		const float upperAngle = std::max(0.0f, lightAngle - kShadowSofteningRadians);
-		const float lowerAngle = std::min(
-			kHalfPi - 1e-2f,
-			lightAngle + kShadowSofteningRadians);
-		const float deltaScale = -(horizontalLength / invScale[2]) * stepMult;
+		const float upperAngle = std::clamp(lightAngle - kShadowSofteningRadians, 0.0f, kHalfPi - 1e-2f);
+		const float lowerAngle = std::clamp(lightAngle + kShadowSofteningRadians, 0.0f, kHalfPi - 1e-2f);
+		const float stepX = plan.lightPxDir[0] * invScale[0] / static_cast<float>(a_width);
+		const float stepY = plan.lightPxDir[1] * invScale[1] / static_cast<float>(a_height);
+		const float deltaScale = -std::sqrt(stepX * stepX + stepY * stepY) / invScale[2];
 		plan.lightDeltaZ = {
 			deltaScale * std::tan(upperAngle),
 			deltaScale * std::tan(lowerAngle)

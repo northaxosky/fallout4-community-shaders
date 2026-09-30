@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
+#ifdef TERRAIN_SHADOWS
+#	include "FO4/TerrainShadowsConsumer.hlsli"
+#endif
 
 #ifdef BSLIGHTING_PS_COLOR
 
@@ -246,6 +249,11 @@ PSOutput main(PSInput input)
 		viewDirection, geometryData[0].xyz, normal,
 		NdotLSat, NdotVSat, specularPower, specularScale);
 	float3 lightsSpecular = shadow * (NdotLSat * (specular * geometryData[1].xyz));
+#	ifdef TERRAIN_SHADOWS
+	float terrainShadow = TerrainShadows::GetShadowFromScreenPosition(input.position.xyz);
+	lightsDiffuse *= terrainShadow;
+	lightsSpecular *= terrainShadow;
+#	endif
 
 	float lightCount =
 		max(min(pointLightColor[0].w - frac(pointLightColor[0].w), 20.0), 0.0);
@@ -567,6 +575,11 @@ PSOutput main(PSInput input)
 		viewDirection, geometryData[0].xyz, normal,
 		NdotLSat, NdotVSat, specularPower, specularScale);
 	float3 lightsSpecular = shadow * (NdotLSat * (specular * geometryData[1].xyz));
+#	ifdef TERRAIN_SHADOWS
+	float terrainShadow = TerrainShadows::GetShadowFromScreenPosition(input.position.xyz);
+	lightsDiffuse *= terrainShadow;
+	lightsSpecular *= terrainShadow;
+#	endif
 
 	float lightCount =
 		max(min(pointLightColor[0].w - frac(pointLightColor[0].w), 20.0), 0.0);
@@ -917,6 +930,11 @@ PSOutput main(PSInput input)
 		viewDirection, geometryData[0].xyz, normal,
 		NdotLSat, NdotVSat, specularPower, specularScale);
 	float3 lightsSpecular = shadow * (NdotLSat * (specular * geometryData[1].xyz));
+#	ifdef TERRAIN_SHADOWS
+	float terrainShadow = TerrainShadows::GetShadowFromScreenPosition(input.position.xyz);
+	lightsDiffuse *= terrainShadow;
+	lightsSpecular *= terrainShadow;
+#	endif
 
 	float lightCount =
 		max(min(pointLightColor[0].w - frac(pointLightColor[0].w), 20.0), 0.0);

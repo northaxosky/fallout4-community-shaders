@@ -19,7 +19,6 @@
 
 #include <toml++/toml.hpp>
 
-#include "HeightMapResize.h"
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "LogThrottle.h"
@@ -32,6 +31,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
+#include "Render/SharedFeatureData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -46,7 +46,7 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.terrainshadows");
 
 		constexpr const wchar_t* kShadowUpdatePath =
-			L"Data\\Shaders\\FO4\\TerrainShadows\\ShadowUpdate.cs.hlsl";
+			L"Data\\Shaders\\TerrainShadows\\ShadowUpdate.cs.hlsl";
 		constexpr const wchar_t* kShadowStatisticsPath =
 			L"Data\\Shaders\\TerrainShadows\\ShadowStatistics.cs.hlsl";
 		constexpr const wchar_t* kXLodGenRoot = L"Data\\Textures\\Terrain";
@@ -54,6 +54,68 @@ namespace cs::features
 
 		constexpr std::uint32_t kMissingMapLogIntervalMs = 30000;
 		constexpr std::uint32_t kShadowStatsGridSize = 256;
+		std::atomic_uint32_t refreshGeneration{ 0 };
+
+		class ScopedShadowHeightBindings
+		{
+		public:
+			explicit ScopedShadowHeightBindings(ID3D11DeviceContext* a_context, bool a_saveFeatureBuffer = false) :
+				_context(a_context), _saveFeatureBuffer(a_saveFeatureBuffer)
+			{
+				_context->PSGetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, _pixel.put());
+				_context->CSGetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, _compute.put());
+				ID3D11ShaderResourceView* nullSRV = nullptr;
+				_context->PSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &nullSRV);
+				_context->CSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &nullSRV);
+				if (_saveFeatureBuffer)
+					_context->CSGetConstantBuffers(6, 1, _featureBuffer.put());
+			}
+			~ScopedShadowHeightBindings()
+			{
+				ID3D11ShaderResourceView* pixel = _pixel.get();
+				ID3D11ShaderResourceView* compute = _compute.get();
+				_context->PSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &pixel);
+				_context->CSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &compute);
+				if (_saveFeatureBuffer) {
+					ID3D11Buffer* buffer = _featureBuffer.get();
+					_context->CSSetConstantBuffers(6, 1, &buffer);
+				}
+			}
+
+		private:
+			ID3D11DeviceContext* _context;
+			bool _saveFeatureBuffer;
+			winrt::com_ptr<ID3D11ShaderResourceView> _pixel, _compute;
+			winrt::com_ptr<ID3D11Buffer> _featureBuffer;
+		};
+
+		template <class Event>
+		class RefreshEventSink final : public RE::BSTEventSink<Event>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const Event& a_event, RE::BSTEventSource<Event>*) override
+			{
+				if constexpr (std::is_same_v<Event, RE::BGSActorCellEvent>) {
+					if (!a_event.flags.any(RE::BGSActorCellEvent::CellFlag::kLeave))
+						return RE::BSEventNotifyControl::kContinue;
+					const auto* cell = RE::TESForm::GetFormByID<RE::TESObjectCELL>(a_event.cellID);
+					if (!cell || cell->IsExterior())
+						return RE::BSEventNotifyControl::kContinue;
+				}
+				refreshGeneration.fetch_add(1, std::memory_order_release);
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
+		template <class Event>
+		void RegisterRefreshEvent(RE::BSTEventSource<Event>* a_source)
+		{
+			static RefreshEventSink<Event> sink;
+			if (a_source)
+				a_source->RegisterSink(&sink);
+			else
+				L->error("Terrain shadow time-change event source is unavailable.");
+		}
 		struct VariantFamily
 		{
 			std::string_view define;
@@ -207,10 +269,6 @@ namespace cs::features
 		auto candidate = _settings;
 		if (!settings::Parse(ts::kSchema, a_config, candidate, a_error))
 			return false;
-		if (!ts::IsValidDownsampleFactor(candidate.downsampleFactor)) {
-			a_error = "settings.downsample_factor: expected one of 1, 2, or 4";
-			return false;
-		}
 		_settings = candidate;
 		PublishSettings();
 		return true;
@@ -218,12 +276,17 @@ namespace cs::features
 
 	void TerrainShadows::PublishSettings()
 	{
-		_enabled.store(_settings.enabled, std::memory_order_release);
-		_requestedDownsampleFactor.store(
-			ts::IsValidDownsampleFactor(_settings.downsampleFactor) ?
-				_settings.downsampleFactor :
-				ts::kDefaultDownsampleFactor,
-			std::memory_order_release);
+		_enabled.store(_settings.EnableTerrainShadow, std::memory_order_release);
+	}
+
+	void TerrainShadows::OnDataLoaded()
+	{
+		// FO4: native completion events translate upstream time-jump requests.
+		RegisterRefreshEvent(RE::TESWaitStopEvent::GetEventSource());
+		RegisterRefreshEvent(RE::TESSleepStopEvent::GetEventSource());
+		RegisterRefreshEvent(RE::TESLoadGameEvent::GetEventSource());
+		RegisterRefreshEvent(static_cast<RE::BSTEventSource<RE::BGSActorCellEvent>*>(
+			RE::PlayerCharacter::GetSingleton()));
 	}
 
 	bool TerrainShadows::SaveSettings()
@@ -245,13 +308,16 @@ namespace cs::features
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
 					.slot = kShadowHeightPSSlot },
 				{ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kSceneDepthPSSlot },
-				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kSampler,
 					.slot = kShadowHeightSamplerPSSlot }
 			};
 			if (a_fullscreenDebug) {
+				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+					.slot = kDebugHeightPSSlot });
+				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+					.resourceType = cs::engine::ShaderResourceType::kConstantBuffer,
+					.slot = 8 });
 				defines.emplace(
 					cs::engine::shader_injection_defines::kTerrainShadowsFullscreenDebug,
 					"1");
@@ -277,6 +343,15 @@ namespace cs::features
 				"registering that replacement failed, so there is no delivery path");
 			return;
 		}
+		for (const auto target : { cs::engine::ShaderInjectionTarget::kBsLighting,
+				 cs::engine::ShaderInjectionTarget::kDistantTree,
+				 cs::engine::ShaderInjectionTarget::kBsWater,
+				 cs::engine::ShaderInjectionTarget::kEffect }) {
+			if (!registerContribution(target, [this](ID3D11DeviceContext* a_context) { BindShadowHeights(a_context); }, false)) {
+				FailLoad("Terrain shadow forward-light contribution registration failed.");
+				return;
+			}
+		}
 		if (!registerContribution(
 				cs::engine::ShaderInjectionTarget::kBsdfComposite,
 				[this](ID3D11DeviceContext* a_context) {
@@ -292,7 +367,7 @@ namespace cs::features
 
 		if (!cs::engine::RegisterPostDeferredPrePass(
 				[] { TerrainShadows::GetSingleton()->OnPostDeferredPrePass(); },
-				cs::engine::HookPriority::Default)) {
+				static_cast<cs::engine::HookPriority>(-200))) {
 			FailLoad(
 				"Terrain shadows update after the deferred prepass; registering that "
 				"anchor failed");
@@ -320,12 +395,11 @@ namespace cs::features
 		L->info(
 			"Terrain shadows installed: hooks=post_deferred_prepass+deferred_lights+"
 			"deferred_composite, consumers=BSDFLight+BSDFComposite t{}+t{}/s{}, "
-			"enabled={}, downsample_factor={}, debug_views=shadow_term+heightmap.",
+			"enabled={}, debug_views=shadow_term+heightmap.",
 			kShadowHeightPSSlot,
-			kSceneDepthPSSlot,
+			kDebugHeightPSSlot,
 			kShadowHeightSamplerPSSlot,
-			_settings.enabled,
-			_settings.downsampleFactor);
+			_settings.EnableTerrainShadow);
 	}
 
 	terrain_shadows::BootstrapReadiness
@@ -444,6 +518,8 @@ namespace cs::features
 			cs::render::annotation::SetName(
 				_shadowUpdateCB.get(), "TerrainShadows/UpdateConstants.Buffer");
 			_constantBufferReady.store(true, std::memory_order_release);
+			const auto debugDesc = cs::buffer::ConstantBufferDesc<DebugCB>();
+			DX::ThrowIfFailed(a_device->CreateBuffer(&debugDesc, nullptr, _debugCB.put()));
 
 			D3D11_SAMPLER_DESC samplerDesc{};
 			samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -522,6 +598,8 @@ namespace cs::features
 				cs::buffer::ConstantBufferDesc<ShadowStatisticsCB>();
 			DX::ThrowIfFailed(a_device->CreateBuffer(
 				&statsCBDesc, nullptr, _shadowStatsCB.put()));
+			const auto featureDesc = cs::buffer::ConstantBufferDesc<cs::render::SharedFeatureDataCB>();
+			DX::ThrowIfFailed(a_device->CreateBuffer(&featureDesc, nullptr, _shadowStatsFeatureCB.put()));
 			cs::render::annotation::SetName(
 				_shadowStatsCB.get(), "TerrainShadows/StatisticsConstants.Buffer");
 
@@ -644,7 +722,6 @@ namespace cs::features
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context,
 		const HeightMapRecord& a_record,
-		std::uint32_t a_factor,
 		std::string& a_error)
 	{
 		a_error.clear();
@@ -666,12 +743,6 @@ namespace cs::features
 			a_error = "the DDS is not a single 2D image";
 			return false;
 		}
-		if (metadata.format != DXGI_FORMAT_R16_UNORM) {
-			a_error = std::format(
-				"expected DXGI_FORMAT_R16_UNORM after DDS decode; saw DXGI format {}",
-				static_cast<std::uint32_t>(metadata.format));
-			return false;
-		}
 		if (metadata.width == 0 || metadata.height == 0 || metadata.width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || metadata.height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
 			a_error = "the DDS extent is outside the D3D11 texture limits";
 			return false;
@@ -679,66 +750,24 @@ namespace cs::features
 
 		const auto sourceWidth = static_cast<std::uint32_t>(metadata.width);
 		const auto sourceHeight = static_cast<std::uint32_t>(metadata.height);
-		auto effectiveWidth = ts::ApplyDownsample(sourceWidth, a_factor);
-		auto effectiveHeight = ts::ApplyDownsample(sourceHeight, a_factor);
+		const auto effectiveWidth = sourceWidth;
+		const auto effectiveHeight = sourceHeight;
 
 		const auto* mip0 = loaded.GetImage(0, 0, 0);
 		if (!mip0) {
 			a_error = "the DDS carries no base image";
 			return false;
 		}
-		const auto expectedRowPitch =
-			static_cast<std::size_t>(sourceWidth) * sizeof(std::uint16_t);
-		const auto expectedSlicePitch =
-			expectedRowPitch * static_cast<std::size_t>(sourceHeight);
-		if (mip0->rowPitch != expectedRowPitch || mip0->slicePitch < expectedSlicePitch) {
-			a_error = std::format(
-				"unexpected R16 layout: row pitch {} (expected {}), "
-				"slice pitch {} (expected at least {})",
-				mip0->rowPitch,
-				expectedRowPitch,
-				mip0->slicePitch,
-				expectedSlicePitch);
-			return false;
-		}
-
-		DirectX::ScratchImage resized;
-		ts::HeightMapDownsample downsample{};
-		if (effectiveWidth != sourceWidth || effectiveHeight != sourceHeight) {
-			downsample = ts::DownsampleHeightMap(
-				*mip0, effectiveWidth, effectiveHeight, resized);
-			if (FAILED(downsample.hr) || !downsample.image) {
-				a_error = std::format(
-					"the heightmap could not be downsampled {}x{} -> {}x{} "
-					"(HRESULT 0x{:08X})",
-					sourceWidth,
-					sourceHeight,
-					effectiveWidth,
-					effectiveHeight,
-					static_cast<std::uint32_t>(downsample.hr));
-				return false;
-			}
-			mip0 = downsample.image;
-		}
-
-		DirectX::TexMetadata single = metadata;
-		single.width = effectiveWidth;
-		single.height = effectiveHeight;
-		single.depth = 1;
-		single.arraySize = 1;
-		single.mipLevels = 1;
-
-		const auto percentileRange = ts::ComputeHeightPercentileRange(
-			mip0->pixels,
-			mip0->rowPitch,
-			effectiveWidth,
-			effectiveHeight,
-			a_record.metadata.pos0[2],
-			a_record.metadata.pos1[2]);
+		const auto percentileRange = metadata.format == DXGI_FORMAT_R16_UNORM ?
+		                                 ts::ComputeHeightPercentileRange(
+											 mip0->pixels, mip0->rowPitch,
+											 effectiveWidth, effectiveHeight,
+											 a_record.metadata.pos0[2], a_record.metadata.pos1[2]) :
+		                                 ts::HeightPercentileRange{ a_record.metadata.pos0[2], a_record.metadata.pos1[2] };
 
 		winrt::com_ptr<ID3D11Resource> resource;
 		const auto createResult = DirectX::CreateTexture(
-			a_device, mip0, 1, single, resource.put());
+			a_device, loaded.GetImages(), loaded.GetImageCount(), metadata, resource.put());
 		if (FAILED(createResult)) {
 			a_error = std::format(
 				"the heightmap texture could not be created (HRESULT 0x{:08X})",
@@ -810,26 +839,28 @@ namespace cs::features
 		_shadowTexture = std::move(shadow);
 		_loadedMetadata = a_record.metadata;
 		_loadedWorldspace = a_record.metadata.worldspace;
-		_appliedFactor = a_factor;
 		_shadowUpdateIndex = 0;
 		_slicesSinceRebuild = 0;
 		_pendingFullRefresh = true;
 		_plan = {};
 		_debugHeightRange = { percentileRange.p01, percentileRange.p99 };
 
-		const auto cost = ts::ComputeVramCost(effectiveWidth, effectiveHeight);
+		auto cost = ts::ComputeVramCost(effectiveWidth, effectiveHeight);
+		cost.heightBytes = 0;
+		for (std::size_t index = 0; index < loaded.GetImageCount(); ++index)
+			cost.heightBytes += loaded.GetImages()[index].slicePitch;
+		cost.totalBytes = cost.heightBytes + cost.shadowBytes;
 		_sourceWidth.store(sourceWidth, std::memory_order_relaxed);
 		_sourceHeight.store(sourceHeight, std::memory_order_relaxed);
 		_effectiveWidth.store(effectiveWidth, std::memory_order_relaxed);
 		_effectiveHeight.store(effectiveHeight, std::memory_order_relaxed);
-		_appliedFactorTelemetry.store(a_factor, std::memory_order_relaxed);
 		_allocatedBytes.store(cost.totalBytes, std::memory_order_relaxed);
 		_mapLoaded.store(true, std::memory_order_release);
 		_shadowResourcesReady.store(true, std::memory_order_release);
 
 		L->info(
 			"Loaded {} heightmap for '{}': source={}x{}, effective={}x{}, "
-			"downsample_factor={}, filter={} ({} halvings), height={:.2f} MiB, "
+			"height={:.2f} MiB, "
 			"shadow={:.2f} MiB, total={:.2f} MiB.",
 			ts::SourceName(a_record.metadata.source),
 			a_record.metadata.worldspace,
@@ -837,9 +868,6 @@ namespace cs::features
 			sourceHeight,
 			effectiveWidth,
 			effectiveHeight,
-			a_factor,
-			ts::DescribeDownsampleFilter(downsample),
-			downsample.halvings,
 			ts::BytesToMiB(cost.heightBytes),
 			ts::BytesToMiB(cost.shadowBytes),
 			ts::BytesToMiB(cost.totalBytes));
@@ -850,14 +878,13 @@ namespace cs::features
 	{
 		const auto worldspace = ResolveWorldspaceEditorId();
 		if (worldspace.empty()) {
-			if (_shadowResourcesReady.load(std::memory_order_acquire))
-				ReleaseLiveResources(a_context);
+			_mapLoaded.store(false, std::memory_order_release);
 			PublishStatus({}, "no exterior worldspace");
 			return;
 		}
 
-		const auto factor = _requestedDownsampleFactor.load(std::memory_order_acquire);
-		if (_shadowResourcesReady.load(std::memory_order_acquire) && _loadedWorldspace == worldspace && _appliedFactor == factor) {
+		if (_shadowResourcesReady.load(std::memory_order_acquire) && _loadedWorldspace == worldspace) {
+			_mapLoaded.store(true, std::memory_order_release);
 			PublishStatus(worldspace, "loaded");
 			return;
 		}
@@ -871,8 +898,7 @@ namespace cs::features
 					"No terrain heightmap for worldspace '{}'; terrain shadows publish identity.",
 					worldspace);
 			}
-			if (_shadowResourcesReady.load(std::memory_order_acquire))
-				ReleaseLiveResources(a_context);
+			_mapLoaded.store(false, std::memory_order_release);
 			return;
 		}
 
@@ -882,7 +908,7 @@ namespace cs::features
 			return;
 		}
 		// Do not retry the same failed DDS every frame.
-		if (_failedWorldspace == worldspace && _failedFactor == factor) {
+		if (_failedWorldspace == worldspace) {
 			PublishStatus(worldspace, _failedDetail, StatusSeverity::kFailure);
 			return;
 		}
@@ -891,7 +917,7 @@ namespace cs::features
 		bool built = false;
 		try {
 			built = BuildHeightResources(
-				device, a_context, record->second, factor, error);
+				device, a_context, record->second, error);
 		} catch (const std::exception& e) {
 			error = e.what();
 		} catch (...) {
@@ -899,11 +925,9 @@ namespace cs::features
 		}
 		if (!built) {
 			_failedWorldspace = worldspace;
-			_failedFactor = factor;
 			_failedDetail = std::format(
-				"'{}' at downsample factor {} failed: {}",
+				"'{}' failed: {}",
 				record->second.path.filename().string(),
-				factor,
 				error);
 			PublishStatus(worldspace, _failedDetail, StatusSeverity::kFailure);
 			CS_LOG_EVERY_MS(
@@ -913,7 +937,7 @@ namespace cs::features
 				"Terrain heightmap {} for worldspace '{}'; terrain shadows are inactive there.",
 				_failedDetail,
 				worldspace);
-			ReleaseLiveResources(a_context);
+			_mapLoaded.store(false, std::memory_order_release);
 			return;
 		}
 		_failedWorldspace.clear();
@@ -974,6 +998,7 @@ namespace cs::features
 			a_refreshImmediately ? _plan.maxUpdates : 1u;
 		cs::render::annotation::ScopedEvent annotationScope(
 			"TerrainShadows/Update");
+		const ScopedShadowHeightBindings shadowBindings(a_context);
 		cs::engine::ComputeOMScope scope(a_context, 1, 0, 1, 1);
 		ID3D11ShaderResourceView* srvs[1] = { _heightTexture->srv.get() };
 		ID3D11UnorderedAccessView* uavs[1] = { _shadowTexture->uav.get() };
@@ -1018,7 +1043,7 @@ namespace cs::features
 
 	void TerrainShadows::UpdateShadowStatistics(ID3D11DeviceContext* a_context)
 	{
-		if (!a_context || !_shadowStatsCS || !_shadowStatsBuffer || !_shadowStatsUav || !_shadowStatsStaging || !_shadowStatsCB) {
+		if (!a_context || !_shadowStatsCS || !_shadowStatsBuffer || !_shadowStatsUav || !_shadowStatsStaging || !_shadowStatsCB || !_shadowStatsFeatureCB) {
 			return;
 		}
 
@@ -1076,7 +1101,7 @@ namespace cs::features
 			return;
 		}
 
-		if (!cs::telemetry::pump::Enabled() || !_enabled.load(std::memory_order_acquire) || !_injectionsOperational.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_heightTexture || !_heightTexture->srv || !_shadowTexture || !_shadowTexture->srv) {
+		if (!cs::telemetry::pump::Enabled() || !_enabled.load(std::memory_order_acquire) || !_injectionsOperational.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_heightTexture || !_heightTexture->srv || !_shadowTexture || !_shadowTexture->srv) {
 			return;
 		}
 		const auto interval = std::chrono::seconds(
@@ -1098,6 +1123,18 @@ namespace cs::features
 		}
 		std::memcpy(cbMapped.pData, &cbData, sizeof(cbData));
 		a_context->Unmap(_shadowStatsCB.get(), 0);
+		cs::render::SharedFeatureDataCB feature{};
+		const auto terrain = ts::BuildFeatureBlock(_loadedMetadata, true,
+			_heightTexture->desc.Width, _heightTexture->desc.Height, _plan.lightDeltaZ);
+		feature.terraOccSettings.EnableTerrainShadow = terrain.enableTerrainShadow;
+		std::ranges::copy(terrain.scale, feature.terraOccSettings.Scale);
+		std::ranges::copy(terrain.zRange, feature.terraOccSettings.ZRange);
+		std::ranges::copy(terrain.offset, feature.terraOccSettings.Offset);
+		feature.terraOccSettings.ZBlur = terrain.zBlur;
+		if (FAILED(a_context->Map(_shadowStatsFeatureCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped)))
+			return;
+		std::memcpy(cbMapped.pData, &feature, sizeof(feature));
+		a_context->Unmap(_shadowStatsFeatureCB.get(), 0);
 
 		const std::array<std::uint32_t, 8> initialStats{
 			0, 0, 0, 0, 0, 0, 65535, 0
@@ -1108,13 +1145,18 @@ namespace cs::features
 		{
 			cs::render::annotation::ScopedEvent annotationScope(
 				"TerrainShadows/Statistics");
-			cs::ComputeScope scope(a_context, 2, 0, 1, 1);
-			ID3D11ShaderResourceView* srvs[2] = {
-				_heightTexture->srv.get(), _shadowTexture->srv.get()
-			};
+			const ScopedShadowHeightBindings shadowBindings(a_context, true);
+			cs::ComputeScope scope(a_context, 1, 1, 1, 1);
+			ID3D11ShaderResourceView* height = _heightTexture->srv.get();
+			ID3D11ShaderResourceView* shadow = _shadowTexture->srv.get();
 			ID3D11UnorderedAccessView* uavs[1] = { _shadowStatsUav.get() };
 			ID3D11Buffer* buffers[1] = { _shadowStatsCB.get() };
-			a_context->CSSetShaderResources(0, 2, srvs);
+			a_context->CSSetShaderResources(0, 1, &height);
+			a_context->CSSetShaderResources(kShadowHeightPSSlot, 1, &shadow);
+			ID3D11SamplerState* sampler = _linearClampSampler.get();
+			a_context->CSSetSamplers(0, 1, &sampler);
+			ID3D11Buffer* featureBuffer = _shadowStatsFeatureCB.get();
+			a_context->CSSetConstantBuffers(6, 1, &featureBuffer);
 			a_context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 			a_context->CSSetConstantBuffers(0, 1, buffers);
 			a_context->CSSetShader(_shadowStatsCS.get(), nullptr, 0);
@@ -1142,19 +1184,24 @@ namespace cs::features
 
 		// Render hooks do not catch callback exceptions.
 		try {
-			const bool timeJump = PollGameHourJump();
+			if (PollGameHourJump())
+				refreshGeneration.fetch_add(1, std::memory_order_release);
+			const auto requestedRefresh = refreshGeneration.load(std::memory_order_acquire);
+			const bool timeJump = requestedRefresh != _handledRefreshGeneration;
+			const auto* sky = RE::Sky::GetSingleton();
+			// FO4: a time-jump refresh waits for the sky to consume the requested hour.
+			const bool celestialReady = !timeJump || (sky && std::abs(sky->currentGameHour - _lastGameHour) < 1e-4f);
 			EnsureLiveResources(context);
 
 			const bool enabled = _enabled.load(std::memory_order_acquire) && _injectionsOperational.load(std::memory_order_acquire);
-			const bool becameEnabled = enabled && !_wasEnabledLastFrame;
-			_wasEnabledLastFrame = enabled;
-			if (enabled && _shadowResourcesReady.load(std::memory_order_acquire)) {
-				const bool refresh = _pendingFullRefresh || timeJump || becameEnabled;
-				if (UpdateShadow(context, refresh))
+			if (enabled && celestialReady && _mapLoaded.load(std::memory_order_acquire) && _shadowResourcesReady.load(std::memory_order_acquire)) {
+				const bool refresh = _pendingFullRefresh || timeJump;
+				if (UpdateShadow(context, refresh)) {
 					_pendingFullRefresh = false;
-				else
+					_handledRefreshGeneration = requestedRefresh;
+				} else
 					_pendingFullRefresh = _pendingFullRefresh || refresh;
-			} else if (timeJump || becameEnabled) {
+			} else if (timeJump) {
 				_pendingFullRefresh = true;
 			}
 			UpdateShadowStatistics(context);
@@ -1186,11 +1233,11 @@ namespace cs::features
 				spdlog::level::err,
 				"Terrain shadow t{}-t{} binding scopes overlap; preserving the active snapshot.",
 				kShadowHeightPSSlot,
-				kSceneDepthPSSlot);
+				kDebugHeightPSSlot);
 		}
 		_engineSamplerBinding.Save(context, kShadowHeightSamplerPSSlot);
-		ID3D11ShaderResourceView* nullSRVs[2]{};
-		context->PSSetShaderResources(kShadowHeightPSSlot, 2, nullSRVs);
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		context->PSSetShaderResources(kShadowHeightPSSlot, 1, &nullSRV);
 		ID3D11SamplerState* nullSampler = nullptr;
 		context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &nullSampler);
 	}
@@ -1200,16 +1247,13 @@ namespace cs::features
 		if (!a_context || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_shadowTexture || !_shadowTexture->srv || !_linearClampSampler) {
 			return;
 		}
-		auto* depthSrv = cs::engine::GetSceneDepthSRV();
-		ID3D11ShaderResourceView* srvs[2]{ _shadowTexture->srv.get(), depthSrv };
-		a_context->PSSetShaderResources(kShadowHeightPSSlot, 2, srvs);
+		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
+		a_context->PSSetShaderResources(kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
 		a_context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
 		_samplerBinds.fetch_add(1, std::memory_order_relaxed);
 		if (cs::telemetry::pump::Enabled()) {
-			if (!depthSrv)
-				_consumerDepthMissing.fetch_add(1, std::memory_order_relaxed);
 			const auto* defines =
 				cs::engine::GetActiveShaderInjectionVariantDefines(
 					cs::engine::ShaderInjectionTarget::kBsdfLight);
@@ -1239,6 +1283,10 @@ namespace cs::features
 			return;
 		_debugShadowBinding.Save(context, kShadowHeightPSSlot);
 		_debugSamplerBinding.Save(context, kShadowHeightSamplerPSSlot);
+		if (!_debugCBSaved) {
+			context->PSGetConstantBuffers(8, 1, _savedDebugCB.put());
+			_debugCBSaved = true;
+		}
 		ID3D11ShaderResourceView* nullSRVs[2]{};
 		context->PSSetShaderResources(kShadowHeightPSSlot, 2, nullSRVs);
 		ID3D11SamplerState* nullSampler = nullptr;
@@ -1251,14 +1299,25 @@ namespace cs::features
 			_debugVisualization.load(std::memory_order_acquire);
 		const bool heightmap =
 			visualization == DebugVisualization::kHeightmap;
-		if (!a_context || visualization == DebugVisualization::kOff || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || (!heightmap && !_shadowPopulated.load(std::memory_order_acquire)) || (heightmap ? (!_heightTexture || !_heightTexture->srv) : (!_shadowTexture || !_shadowTexture->srv)) || !_linearClampSampler) {
+		if (!a_context || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || (!heightmap && !_shadowPopulated.load(std::memory_order_acquire)) || (heightmap ? (!_heightTexture || !_heightTexture->srv) : (!_shadowTexture || !_shadowTexture->srv)) || !_linearClampSampler) {
 			return;
 		}
-		ID3D11ShaderResourceView* srv = heightmap ?
-		                                    _heightTexture->srv.get() :
-		                                    _shadowTexture->srv.get();
-		auto* depthSrv = cs::engine::GetSceneDepthSRV();
-		ID3D11ShaderResourceView* srvs[2]{ srv, depthSrv };
+		DebugCB debug{};
+		debug.Mode = static_cast<std::uint32_t>(visualization);
+		debug.HeightRange[0] = _loadedMetadata.pos0[2];
+		debug.HeightRange[1] = _loadedMetadata.pos1[2];
+		debug.DebugHeightRange[0] = _debugHeightRange[0];
+		debug.DebugHeightRange[1] = _debugHeightRange[1];
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		if (FAILED(a_context->Map(_debugCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+			return;
+		std::memcpy(mapped.pData, &debug, sizeof(debug));
+		a_context->Unmap(_debugCB.get(), 0);
+		ID3D11Buffer* debugBuffer = _debugCB.get();
+		a_context->PSSetConstantBuffers(8, 1, &debugBuffer);
+		if (visualization == DebugVisualization::kOff)
+			return;
+		ID3D11ShaderResourceView* srvs[2]{ _shadowTexture->srv.get(), _heightTexture->srv.get() };
 		a_context->PSSetShaderResources(kShadowHeightPSSlot, 2, srvs);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
 		a_context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &sampler);
@@ -1273,8 +1332,6 @@ namespace cs::features
 			} else {
 				_compositeInertFamilyBinds.fetch_add(1, std::memory_order_relaxed);
 			}
-			if (!depthSrv)
-				_debugDepthMissing.fetch_add(1, std::memory_order_relaxed);
 		}
 	}
 
@@ -1283,20 +1340,24 @@ namespace cs::features
 		auto* context = GetImmediateContext();
 		_debugSamplerBinding.Restore(context);
 		_debugShadowBinding.Restore(context);
+		if (context && _debugCBSaved) {
+			ID3D11Buffer* saved = _savedDebugCB.get();
+			context->PSSetConstantBuffers(8, 1, &saved);
+			_savedDebugCB = nullptr;
+			_debugCBSaved = false;
+		}
 	}
 
 	cs::TerrainShadowsFeatureData TerrainShadows::GetCommonBufferData() const
 	{
-		const auto debugVisualization =
-			_debugVisualization.load(std::memory_order_acquire);
-		if (!_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || (debugVisualization != DebugVisualization::kHeightmap && !_shadowPopulated.load(std::memory_order_acquire))) {
+		if (!_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire)) {
 			return {};
 		}
 
-		const auto block = ts::BuildFeatureBlock(_loadedMetadata, true);
+		const auto block = ts::BuildFeatureBlock(_loadedMetadata, true,
+			_heightTexture->desc.Width, _heightTexture->desc.Height, _plan.lightDeltaZ);
 		cs::TerrainShadowsFeatureData data{};
-		data.TerrainShadowMode =
-			static_cast<std::uint32_t>(debugVisualization) + 1;
+		data.EnableTerrainShadow = block.enableTerrainShadow;
 		data.Scale[0] = block.scale[0];
 		data.Scale[1] = block.scale[1];
 		data.Scale[2] = block.scale[2];
@@ -1304,10 +1365,7 @@ namespace cs::features
 		data.ZRange[1] = block.zRange[1];
 		data.Offset[0] = block.offset[0];
 		data.Offset[1] = block.offset[1];
-		data.HeightRange[0] = _loadedMetadata.pos0[2];
-		data.HeightRange[1] = _loadedMetadata.pos1[2];
-		data.DebugHeightRange[0] = _debugHeightRange[0];
-		data.DebugHeightRange[1] = _debugHeightRange[1];
+		data.ZBlur = block.zBlur;
 		return data;
 	}
 
@@ -1356,10 +1414,6 @@ namespace cs::features
 				"effective",
 				_effectiveWidth.load(std::memory_order_relaxed),
 				_effectiveHeight.load(std::memory_order_relaxed))
-			.Field(
-				"downsample_factor",
-				static_cast<std::int64_t>(
-					_appliedFactorTelemetry.load(std::memory_order_relaxed)))
 			.Field(
 				"allocated_mib",
 				ts::BytesToMiB(_allocatedBytes.load(std::memory_order_relaxed)))
@@ -1455,36 +1509,8 @@ namespace cs::features
 	void TerrainShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
+		bool changed = edit.Discrete(dmui::ui::Checkbox("Enable Terrain Shadow", &_settings.EnableTerrainShadow));
 		dmui::ui::TextDisabled("Off publishes zero terrain shadow, which is shader identity.");
-
-		static const std::array factorOptions{
-			dmui::ChoiceOption<std::uint32_t>{
-				1,
-				"1 (full resolution)",
-				"full-resolution" },
-			dmui::ChoiceOption<std::uint32_t>{
-				2,
-				"2 (quarter memory)",
-				"quarter-memory" },
-			dmui::ChoiceOption<std::uint32_t>{
-				4,
-				"4 (sixteenth memory)",
-				"sixteenth-memory" }
-		};
-		const auto factor = dmui::DrawChoice<std::uint32_t>(
-			"terrain-shadows-downsample-factor",
-			_settings.downsampleFactor,
-			std::span<const dmui::ChoiceOption<std::uint32_t>>{
-				factorOptions },
-			"Unavailable",
-			"Downsample factor");
-		if (edit.Discrete(factor.changed)) {
-			_settings.downsampleFactor = *factor.selected;
-			changed = true;
-		}
-		dmui::ui::TextDisabled(
-			"Factor 4 is the low-VRAM default; the map reloads in place.");
 
 		if (changed) {
 			PublishSettings();
@@ -1504,7 +1530,7 @@ namespace cs::features
 			auto& client = host::HostClient::Get().Client();
 			const auto warning = std::format(
 				"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
-				"are doing nothing; try another downsample factor or regenerate "
+				"are doing nothing; regenerate "
 				"the map.",
 				worldspace.empty() ? "none" : worldspace,
 				detail.empty() ? "unknown failure" : detail);

@@ -329,19 +329,6 @@ target("TerrainShadowsMathTests", function()
     add_includedirs("features/TerrainShadows/src")
 end)
 
-target("TerrainShadowsResizeTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files(
-        "tests/TerrainShadowsResizeTests.cpp",
-        "features/TerrainShadows/src/HeightMapResize.cpp"
-    )
-    add_headerfiles("features/TerrainShadows/src/HeightMapResize.h")
-    add_includedirs("features/TerrainShadows/src")
-    add_packages("vcpkg::directxtex")
-    add_syslinks("ole32")
-end)
-
 target("WetnessEffectsMathTests", function()
     set_kind("binary")
     set_default(false)
@@ -661,10 +648,6 @@ end)
 
 target("TerrainShadowsMathTests", function()
     add_tests("TerrainShadowsMath")
-end)
-
-target("TerrainShadowsResizeTests", function()
-    add_tests("TerrainShadowsResize")
 end)
 
 target("WetnessEffectsMathTests", function()

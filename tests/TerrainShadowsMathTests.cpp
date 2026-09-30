@@ -152,7 +152,12 @@ namespace
 
 		const auto overhead = ts::BuildDdaPlan(
 			{ 0.0f, 0.0f, -1.0f }, metadata, width, height);
-		Check(!overhead.valid, "a zero-horizontal sun is rejected");
+		Check(overhead.valid, "an overhead sun uses the upstream XY fallback");
+		CheckNear(overhead.lightPxDir[0], 1.0, 1e-6, "overhead sweep advances along X");
+		CheckNear(overhead.lightDeltaZ[0], -(128.0 / 4000.0) * std::tan(ts::kHalfPi - ts::kShadowSofteningRadians),
+			1e-3, "overhead upper envelope keeps one-degree softening");
+		CheckNear(overhead.lightDeltaZ[1], -(128.0 / 4000.0) * std::tan(ts::kHalfPi - 1e-2f),
+			1e-3, "overhead lower envelope clamps below ninety degrees");
 
 		const auto degenerate = ts::BuildDdaPlan(
 			{ 0.8f, 0.0f, -0.6f }, metadata, 0, height);
@@ -165,6 +170,11 @@ namespace
 		Check(
 			northward.signDir == -1,
 			"a northward sun sweeps toward the top of the image");
+
+		const auto block = ts::BuildFeatureBlock(metadata, true, width, height, eastward.lightDeltaZ);
+		CheckNear(block.offset[0], 0.5 + 0.5 / width, 1e-6, "X offset includes the half-texel correction");
+		CheckNear(block.offset[1], 0.5 - 0.5 / height, 1e-6, "Y offset includes the reversed half-texel correction");
+		CheckNear(block.zBlur, -0.5 * (eastward.lightDeltaZ[0] + eastward.lightDeltaZ[1]) * (metadata.zRange[1] - metadata.zRange[0]), 1e-3, "Z blur spans one step of light descent");
 	}
 
 	void TestGameHourJump()

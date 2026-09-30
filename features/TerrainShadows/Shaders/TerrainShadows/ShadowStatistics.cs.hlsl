@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "Common/SharedData.hlsli"
+#include "TerrainShadows/TerrainShadows.hlsli"
 Texture2D<float> TexHeight : register(t0);
-Texture2D<float2> TexShadow : register(t1);
+SamplerState TerrainSampler : register(s0);
 RWByteAddressBuffer StatsOut : register(u0);
 
 cbuffer ShadowStatisticsCB : register(b0)
@@ -20,15 +22,8 @@ static const float kFixedPointScale = 65535.0;
 	uint2 heightPx = min(uint2(uv * heightDims), heightDims - 1);
 	float surfaceZ = lerp(PosRange.x, PosRange.y, TexHeight[heightPx]);
 
-	uint2 shadowDims;
-	TexShadow.GetDimensions(shadowDims.x, shadowDims.y);
-	uint2 shadowPx = min(uint2(uv * shadowDims), shadowDims - 1);
-	float2 shadowRaw = TexShadow[shadowPx];
-	// Same decode and -256 bias as TerrainShadows::GetTerrainZ.
-	float2 shadowHeight = lerp(ZRange.xx, ZRange.yy, shadowRaw) - 256.0;
-
-	float penumbra = max(shadowHeight.x - shadowHeight.y, 1e-3);
-	float term = saturate((surfaceZ - shadowHeight.y) / penumbra);
+	float2 worldXY = (uv - SharedData::terraOccSettings.Offset) / SharedData::terraOccSettings.Scale.xy;
+	float term = TerrainShadows::GetTerrainShadow(float3(worldXY, surfaceZ), TerrainSampler);
 	uint fixedTerm = uint(round(term * kFixedPointScale));
 
 	StatsOut.InterlockedAdd(0, 1);

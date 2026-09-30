@@ -40,12 +40,12 @@ namespace cs
 
 	struct alignas(16) TerrainShadowsFeatureData
 	{
-		std::uint32_t TerrainShadowMode = 0;
+		std::uint32_t EnableTerrainShadow = 0;
 		float Scale[3]{};
 		float ZRange[2]{};
 		float Offset[2]{};
-		float HeightRange[2]{};
-		float DebugHeightRange[2]{};
+		float ZBlur = 0.0f;
+		float pad0[3]{};
 	};
 	static_assert(sizeof(TerrainShadowsFeatureData) == 48);
 
@@ -113,12 +113,11 @@ namespace cs
 	static_assert(offsetof(WetnessEffectsFeatureData, EnableWetnessEffects) == 40);
 	static_assert(offsetof(WetnessEffectsFeatureData, Active) == 44);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 80);
-	static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
+	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);
 	static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);
 	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
-	static_assert(offsetof(TerrainShadowsFeatureData, HeightRange) == 32);
-	static_assert(offsetof(TerrainShadowsFeatureData, DebugHeightRange) == 40);
+	static_assert(offsetof(TerrainShadowsFeatureData, ZBlur) == 32);
 	static_assert(offsetof(FeatureDataCB, inverseSquareLightingSettings) == 128);
 	static_assert(offsetof(InverseSquareLightingFeatureData, Mode) == 0);
 	static_assert(offsetof(InverseSquareLightingFeatureData, ExteriorStrength) == 4);

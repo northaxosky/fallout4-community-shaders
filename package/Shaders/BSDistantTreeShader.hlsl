@@ -1,4 +1,7 @@
 #if defined(BSDISTANTTREE_PS_SOURCE)
+#	if defined(TERRAIN_SHADOWS) && !defined(RENDER_DEPTH)
+#		include "FO4/TerrainShadowsConsumer.hlsli"
+#	endif
 // SPDX-License-Identifier: GPL-3.0-or-later
 // AE 1.11.240, shaders011.fxp ordinals 6-7.
 
@@ -39,7 +42,13 @@ PS_OUTPUT main(PS_INPUT input)
 #	else
 	float4 baseColor = TexDiffuse.Sample(SampDiffuse, input.TexCoord.xy);
 	float3 diffuseColor =
+#		ifdef TERRAIN_SHADOWS
+		baseColor.xyz * (input.TexCoord.z * DiffuseColor *
+								TerrainShadows::GetShadowFromScreenPosition(input.HPosition.xyz) +
+							AmbientColor.xyz);
+#		else
 		baseColor.xyz * (input.TexCoord.z * DiffuseColor + AmbientColor.xyz);
+#		endif
 	float3 color =
 		lerp(diffuseColor, input.FogParam.xyz, input.FogParam.w);
 	psout.Color.xyz = color * AmbientColor.w;

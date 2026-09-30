@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
 #ifdef TERRAIN_SHADOWS
-#	include "FO4/TerrainShadows/TerrainShadows.hlsli"
+#	include "FO4/TerrainShadowsConsumer.hlsli"
 #endif
 #ifdef WATER_EFFECTS
 #	include "FO4/WaterEffects/WaterCaustics.hlsli"
