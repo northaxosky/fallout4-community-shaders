@@ -37,6 +37,7 @@ namespace cs::engine
 				.profile = a_family.profile
 			};
 			request.familyMetadata = a_family.familyMetadata;
+			request.defines.emplace("FRAMEBUFFER_REGISTER", "b4");
 			for (const auto& define : a_target.baseDefines)
 				request.defines.emplace(define.name, define.value);
 

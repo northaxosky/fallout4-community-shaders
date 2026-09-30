@@ -42,7 +42,6 @@ feature tables; this namespace separation is a Chosen ownership policy, not an e
 |---|---|---|
 | Chosen | `Common/Random.hlsli` | `FO4/Common/Random.hlsli` |
 | Chosen | `Common/Shading.hlsli` | `FO4/Common/Shading.hlsli` |
-| Chosen | `Common/SharedData.hlsli` | `FO4/Common/SharedData.hlsli` |
 | Chosen | `DynamicCubemaps/BC6HEncodeCS.hlsl` | `FO4/DynamicCubemaps/BC6HEncodeCS.hlsl` |
 | Chosen | `DynamicCubemaps/CaptureCommon.hlsli` | `FO4/DynamicCubemaps/CaptureCommon.hlsli` |
 | Chosen | `DynamicCubemaps/DetectCaptureLightingCS.hlsl` | `FO4/DynamicCubemaps/DetectCaptureLightingCS.hlsl` |
@@ -63,6 +62,30 @@ feature tables; this namespace separation is a Chosen ownership policy, not an e
 | Chosen | `WaterEffects/WaterCaustics.hlsli` | `FO4/WaterEffects/WaterCaustics.hlsli` |
 | Chosen | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` |
 
+## Substrate
+
+Shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`. FrameBuffer, SharedData,
+SphericalHarmonics and its Math dependency are staged byte-for-byte. The pinned b6 ABI contains
+**20** blocks, including HorizonFixSettings; all 20 are mirrored in upstream order, and absent
+features leave zero blocks. The relocated `FO4/Common/SharedData.hlsli` is deleted.
+
+Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
+
+| Kind | Difference | Evidence / reason | Where |
+|---|---|---|---|
+| Forced | Current world+jitter cache record supplies every rendering camera; b12 Map/Unmap is only a telemetry cross-check | Camera, matrices & world offsets: cache ownership and main preparation; cache +0x140, stride +0x250, keys +0x238/+0x240 on OG/NG/AE. AE proof: 5,614 prepass-record/b12 comparisons, maximum relative difference 0. Cache growth requires reacquiring and copying each call | `FrameBuffer.cpp` `GetWorldCameraRecord`, camera consumers, `Telemetry.cpp` |
+| Forced | Engine row-vector matrices are transposed into upstream's `row_major mul(Matrix,v)` b4 contract | Per-frame buffer sources: native forward/inverse upload transposes; registers 37–40 are unjittered, not the jittered VP | `SharedDataLayout.h` `PackFrameData`, `FrameBufferTests.cpp` projection-equivalence test |
+| Forced | FrameBuffer binds at b4 instead of upstream's default b12 | FO4 reconstructed shaders own b12 (`BSWaterShader.hlsl` native PerFrame); the shared register seam leaves their bytecode unchanged. b4/b7 are unused by reconstructed/native injection targets; stock DXBC identity, feature-off reflection and slot-clash tests enforce this | `SubstrateSlots.h`, utility compiler, injection compile request and cache recipe |
+| Forced | One R32_FLOAT boundary pass publishes canonical world-projection depth at t17; near pixels reproject through shadow +0x8A0, world pixels use `mad(d,1.01,-0.01)`, sky uses 1 | Depth & units / Per-frame buffer sources: FO4 combines first-person and world projections; prepass OG/NG/AE writes transpose(inverse(first-person jittered projection)) at shadow +0x8A0. Native targets use t0–t15, not t17 | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `FO4/Depth.hlsli`, `Engine.h` near accessor |
+| Chosen | Preserve upstream's scalar X clamp offset and Y clamp-to-ratio; snapshot current/previous ratios once per substrate update | Dynamic-resolution history: native clamp is `r−0.5/size` on NG/AE and `(trunc(size·r)−1)/size` on OG, size from logical target 1. Main clamped both axes, but upstream has one offset and clamps Y to ratio; parity takes precedence over a local fork. Substrate history is per-frame rather than effect-update history | `SharedData.cpp`, unchanged `Common/FrameBuffer.hlsli` |
+| Forced | Pack world-channel DALC into pre-power SH, then apply FO4's 2.2 power once at linear consumer boundaries | Directional ambient transform/evaluation rows: native world-channel columns include transform scale and bias; native lighting evaluates power 2.2. SH is `(b/Y00,−ay/Y1,az/Y1,−ax/Y1)` with Y00=0.2820948, Y1=0.4886025. Upstream State.cpp does not gamma-convert before packing; unchanged GetAmbient is pre-power | `Engine.h` `TryGetDirectionalAmbientRows`, `SharedDataLayout.h` `PackAmbientSH`, `FO4/FO4ShaderData.hlsli` `GetAmbientLinear` |
+| Chosen | Keep one FO4-only b7 for unmatched modes, debug settings, delta time and player-cell water plane; move equivalent fields to upstream b4/b5/b6 | Main exposes one player-cell plane, not upstream's 25-tile water data. WaterData and WaterSystemHeight retain upstream absent sentinels; the absolute player-cell plane remains a FO4 consumer input. DR and NDC-to-view equivalents use b4, terrain/wetness/cubemap enable fields use b6 | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
+| Chosen | FrameParams is zero; unvalidated celestial/HDR/map/shadow fields retain upstream absent values | No validated FO4 inverse-gamma/frame-flag or corresponding celestial/HDR source is consumed. SunDirection uses toward-light direction, while SunColor remains absent rather than inventing a sky-disc colour; FrameCount follows main's temporal method and AlwaysActive follows engine frame count | `SharedData.cpp` `BuildSharedData`, `SharedDataLayout.h` |
+
+SSS still uses main's partitioned-depth exclusion: first-person geometry neither casts nor receives
+world SSS. It does not switch to canonical depth in this phase. Feature-off engine variants include
+no substrate, and the binder runs only for contributed stages; native b12 remains owned by the engine.
+
 ## Upstream PR candidates
 
 - `src/Utils/PerfUtils.h:41`: `Mean` implicitly converts `size_t` to float, raising C4267
@@ -71,6 +94,10 @@ feature tables; this namespace separation is a Chosen ownership policy, not an e
 - `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104`: the center normal lookup
   needs `frameScale`. Main's correction remains in `features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/blur.cs.hlsl`;
   upstream PR is community-shaders/skyrim-community-shaders#2795.
+- `package/Shaders/Common/FrameBuffer.hlsli:53,119`: clamp helpers bound X to a texel-edge
+  clamp but Y to the raw ratio. An axis-specific clamp ABI could avoid bottom-edge reads on
+  reduced-resolution allocations. This is a candidate for upstream investigation, not a proven
+  defect; FO4 preserves the pinned behavior and checks edges in runtime validation.
 
 ## Dynamic Cubemaps
 
@@ -80,26 +107,26 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 
 ### Translations
 
-| Upstream | Fallout 4 | Why | Where |
-|---|---|---|---|
-| Capture before the deferred composite | Capture and publication run after the Forward cloud group (`RegisterPostForwardSky`) | FO4 draws the sky inside `DrawWorld::Forward`, after the composite | `DynamicCubemaps.cpp` `Load` |
-| Capture the main color target | Geometry radiance is rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky pixels come from scene color | FO4 has no diffuse-only target; scene color contains specular, probe and SSLR reflections, which made the cube view-dependent | `CaptureCommon.hlsli` |
-| Sky depth reconstructs a finite far-plane position | Sky depth `1.0` is placed on the camera far plane | FO4's world projection has an infinite far plane | `CaptureCommon.hlsli` `SampleCapture` |
-| `FrameBuffer::WorldToView(-s)` with `z < 0` | View-space test `z > 0` on `s` | FO4 views down +Z; both select the same screen texel | `CaptureCommon.hlsli` `SampleCapture` |
-| Skyrim frame-buffer camera | Validated b12 world camera plus world-scene inverse projection | FO4 publishes the camera through b12 | `CaptureCommon.hlsli` `UpdateData` |
-| `IrradianceToLinear`/`IrradianceToGamma`, `ReflectionNormalisationScale` | Upstream's linear-lighting branch: identity, scale `1.0` | FO4 lights in linear HDR | `CubemapCommon.hlsli` |
-| `Color::Ambient(SharedData::GetAmbient(R))` | FO4 directional ambient transform, already linear | FO4 has no SH ambient; its directional-ambient transform lives in `BSShaderManager::State` (OG `+0xB8`, NG/AE `+0xC0`) | `SharedData.hlsli` `GetAmbient`, `Engine.h` `TryGetDirectionalAmbientRows` |
-| Lighting-change detection from Skyrim directional light | SharedData publishes FO4 sun radiance as the deferred sun pass receives it | Different engine light source | `DetectCaptureLightingCS.hlsl` |
-| `activeReflections` from Skyrim's reflections prepass | Exterior water always uses the reflections variant | FO4 exterior water always renders its REFLECTIONS technique | `DynamicCubemaps.cpp` `ResolveReflectionMode` |
-| Active variant infers uncaptured directions from the engine reflection cube | Without the engine cube, sky is captured from the scene and kept with the fake variant's history persistence | FO4's engine reflection cube is off by default (`bUseCubeMapReflections`) | `DynamicCubemaps.cpp` `UpdateShader`, `InferShader` |
-| Water blends the dynamic cube with `CubeMapTex` | Blends with the water's sky-gradient reflection color | FO4 reflection permutations shade a sky gradient instead of sampling a cube | `BSWaterShader.hlsl` `surfaceColor` |
-| `WATER` permutation define | Defined locally when Dynamic Cubemaps is contributed | FO4 water compiles without it | `BSWaterShader.hlsl` |
-| Deferred consumers read `ReflectanceTexture` and cubes at CS t5–t7 with `LinearSampler` | Cubes at PS t34–t35, sampled with each family's native probe sampler | FO4 composite texture slots below t34 and all sampler slots are occupied | `Composite.hlsli`, `DynamicCubemaps.cpp` |
-| Compile-time `INTERIOR` | Runtime `SharedData::InInterior` | FO4 shares composite permutations across interiors and exteriors | `Composite.hlsli` |
-| Wet reflectance written to a G-buffer target | The composite evaluates the film weight and irradiance itself | FO4 has no reflectance G-buffer | `Composite.hlsli` `GetWetnessReflection` |
-| Wet indirect-diffuse reduction in the material pass | Applied to ambient diffuse in the BSDFLight and DFTiledLighting passes | FO4 evaluates indirect diffuse in light passes | `WetnessEffects.hlsli` `GetIndirectDiffuseWeight` |
-| Always-on feature | `enabled` live toggle; wet diffuse reduction and wet reflection are both gated on it | Repository contract: effects toggle live | `DynamicCubemapsSettings.h`, `WetnessEffects.hlsli`, `Composite.hlsli` |
-| `EnabledSSR = true`, `ENABLESSR` permits raymarching; labeled for water | `enabled_ssr = true`; the static `DYNAMIC_CUBEMAPS` contribution reads DC's live setting from the existing feature buffer and returns zero when DC is enabled and SSR is off; help text states it covers all screen-space reflections | FO4 stock has no SSR gate, and SSLR feeds the second composite (0x800, t14) for surfaces as well as water (t9/t10), so this toggle is global. Baseline and unloaded/disabled DC preserve stock SSR. The runtime gate avoids toggle-driven recompilation and stock fallback; upstream only defines `ENABLESSR` through loaded DC | `DynamicCubemaps.cpp`, `SharedData.hlsli`, `Imagespace\SSLRRaytracing.hlsl` |
+| Kind | Upstream | Fallout 4 | Why | Where |
+|---|---|---|---|---|
+| Forced | Capture before the deferred composite | Capture and publication run after the Forward cloud group (`RegisterPostForwardSky`) | FO4 draws the sky inside `DrawWorld::Forward`, after the composite; engine-facts Secondary scene views | `DynamicCubemaps.cpp` `Load` |
+| Forced | Capture the main color target | Geometry radiance is rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky pixels come from scene color | FO4 has no diffuse-only target; engine-facts Deferred composition | `CaptureCommon.hlsli` |
+| Chosen | Sky depth reconstructs a finite far-plane position | Sky depth `1.0` is placed on the camera far-plane direction | Explicit sky handling bypasses near/world partition reconstruction | `CaptureCommon.hlsli` `SampleCapture` |
+| Forced | `FrameBuffer::WorldToView(-s)` with `z < 0` | View-space test `z > 0` on `s` | FO4 views down +Z; engine-facts Camera matrix builder | `CaptureCommon.hlsli` `SampleCapture` |
+| Forced | Skyrim frame-buffer camera | Copied current world+jitter cache record and its inverse projection | Engine-facts Camera cache ownership / Per-frame buffer sources; b12 is diagnostic only | `FrameBuffer.cpp`, `DynamicCubemaps.cpp` `UpdateData` |
+| Chosen | `IrradianceToLinear`/`IrradianceToGamma`, `ReflectionNormalisationScale` | Upstream's linear-lighting branch: identity, scale `1.0` | Preserve main's linear HDR consumer policy | `CubemapCommon.hlsli` |
+| Forced | `Color::Ambient(SharedData::GetAmbient(R))` | Upstream pre-power GetAmbient, followed by FO4 linear boundary conversion | Engine-facts Directional ambient evaluation power 2.2; see Substrate | `FO4ShaderData.hlsli` `GetAmbientLinear`, `Engine.h` `TryGetDirectionalAmbientRows` |
+| Forced | Lighting-change detection from Skyrim directional light | SharedData publishes FO4 sun radiance as the deferred sun pass receives it | Engine-facts Sun/light sources | `DetectCaptureLightingCS.hlsl` |
+| Chosen | `activeReflections` from Skyrim's reflections prepass | Exterior water always uses the reflections variant | Retain main's exterior-water technique policy | `DynamicCubemaps.cpp` `ResolveReflectionMode` |
+| Chosen | Active variant infers uncaptured directions from the engine reflection cube | Without the engine cube, retain scene sky with fake-variant persistence | Engine cube is optional (`bUseCubeMapReflections`); fallback policy is FO4-owned | `DynamicCubemaps.cpp` `UpdateShader`, `InferShader` |
+| Forced | Water blends the dynamic cube with `CubeMapTex` | Blends with water's sky-gradient reflection color | FO4 reconstructed reflection permutations shade a sky gradient | `BSWaterShader.hlsl` `surfaceColor` |
+| Forced | `WATER` permutation define | Defined locally for contributed Dynamic Cubemaps | FO4 reconstructed water compiles without it | `BSWaterShader.hlsl` |
+| Forced | Deferred cubes at CS t5–t7 with LinearSampler | PS t34–t35 with native probe samplers | FO4 composite declarations occupy lower slots and samplers | `Composite.hlsli`, `DynamicCubemaps.cpp` |
+| Forced | Compile-time `INTERIOR` | Runtime `SharedData::InInterior` | FO4 reconstructed permutations serve both cell types | `Composite.hlsli` |
+| Forced | Wet reflectance written to G-buffer | Composite evaluates film weight and irradiance | FO4 G-buffer has no reflectance channel; engine-facts Render targets | `Composite.hlsli` `GetWetnessReflection` |
+| Forced | Wet indirect-diffuse reduction in material pass | Applied in BSDFLight and DFTiledLighting | FO4 reconstructed light passes evaluate indirect diffuse | `WetnessEffects.hlsli` `GetIndirectDiffuseWeight` |
+| Chosen | Always-on feature | Live enabled toggle gates wet diffuse/reflection | Repository live-toggle contract | `DynamicCubemapsSettings.h`, `WetnessEffects.hlsli`, `Composite.hlsli` |
+| Chosen | Loaded DC defines ENABLESSR, labeled for water | Live enabled_ssr gates all SSLR when DC is enabled; baseline remains stock | Main's global toggle avoids recompilation; SSLR feeds surfaces and water in reconstructed shaders | `DynamicCubemaps.cpp`, `FO4SharedData.hlsli`, `Imagespace/SSLRRaytracing.hlsl` |
 
 ### Not supported
 
@@ -112,12 +139,13 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 ## Upscaling
 
 Upstream pin: `d330bf12d`. Consumer: `package\Shaders\Imagespace\SSLRRaytracing.hlsl`.
+Feature classification: **core (doodlum FO4 release lineage)**.
 
 ### Translations
 
-| Upstream | Fallout 4 | Why | Where |
-|---|---|---|---|
-| `FrameBuffer::GetDynamicResolutionAdjustedScreenPosition` and previous-frame samples in `ISReflectionsRayTracing` | SharedData-adjusted, clamped current-frame samples plus scaled pixel dithering and Hi-Z cell counts; b5 preserves the once-per-frame render-scale snapshot through proxy composites | FO4 raytracing uses integer Hi-Z loads and full-target cb0 sizes in a top-left render region, with no previous-frame reflection sample. Upscaling publishes ratios before the deferred prepass; b5 publishes afterward, and SSLR precedes the second composite's temporary ratio neutralization | `SSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp`; fallout4-re `docs\engine-facts.md` Composite pass order / Native SSLR production |
+| Kind | Upstream | Fallout 4 | Why | Where |
+|---|---|---|---|---|
+| Forced | FrameBuffer-adjusted current/previous samples in ISReflectionsRayTracing | Unchanged upstream b4 current-frame clamp plus scaled pixel dithering/Hi-Z counts; snapshot survives proxy composites | FO4 integer Hi-Z loads use full-target cb0 sizes and top-left active region with no previous-frame reflection sample; engine-facts Composite pass order / Native SSLR production | `SSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp` |
 
 ## Screen Space GI
 
@@ -126,18 +154,18 @@ Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package
 
 ### Translations
 
-| Upstream | Fallout 4 | Why | Where |
-|---|---|---|---|
-| Compose in `DeferredCompositeCS` | Compose in the composite families that form diffuse light: 2D accumulator, 2D fog and cube IBL | FO4 has no single deferred composite; each family forms `3 · albedo · (diffuse A + diffuse B) + emissive` itself | `BSDFCompositeShader.hlsl`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
-| Radiance from the diffuse target | Rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive` | FO4 has no diffuse-only target | `radianceDisocc.cs.hlsl` |
-| Directional ambient: `Color::Ambient(GetAmbient(N)) · albedo` with luma from `Masks.z` | `SharedData::GetAmbient(N) · albedo`, clamped to the diffuse term | FO4 light passes fold ambient into the diffuse accumulators and write no ambient mask | `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
-| Vertex AO in `Masks2.x`, written by `Lighting.hlsl` | `1 − vertexAO` in emissive target alpha (logical 31), written by the injected prepass; blended hair writes 0 | FO4 has no spare G-buffer channel; 31.a is unread by stock shaders | `BSDFPrePass.hlsl` |
-| G-buffer normal | FO4 sphere-map view normal (RT20), encoded into upstream's octahedral pyramid | Different G-buffer encoding | `prefilterNormal.cs.hlsl`, `common.hlsli` |
-| `ScreenToViewDepth` from the NDC depth buffer | Raw depth decoded with the composite's far/near reprojection rows | FO4 renders first person into a separate near depth partition | `common.hlsli` |
-| Skyrim frame-buffer camera | Validated b12 world camera and reprojection rows | FO4 publishes the camera through b12 | `common.hlsli`, `ScreenSpaceGI.cpp` |
-| `IrradianceToLinear`/`IrradianceToGamma` | Upstream's linear-lighting branch: identity | FO4 lights in linear HDR | `Common\Color.hlsli` |
-| Skyrim SSAO toggle | Per frame after the deferred prepass, write SAO_CS active (`+0x08`) and applied (`+0x121`); applied comes from the startup `bSAOEnable` snapshot | The composite's AO bit reads SAO_CS `+0x121`, which DrawModel and console commands rewrite | `ScreenSpaceGI.cpp` `ApplyVanillaSSAO`, `Engine.h` `GetScalableAOComputeState` |
-| `AOPower` default 1, range 0–6 | Default 4, range 0–12 | FO4 interiors get most of their light from placed lights, which receive only `sqrt(AO)`; directional ambient is about 7% of occluded diffuse in a measured interior | `ScreenSpaceGISettings.h` |
+| Kind | Upstream | Fallout 4 | Why | Where |
+|---|---|---|---|---|
+| Forced | Compose in DeferredCompositeCS | Compose in 2D accumulator, 2D fog and cube IBL families | FO4 reconstructed families form diffuse light independently; engine-facts Deferred composition | `BSDFCompositeShader.hlsl`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
+| Forced | Diffuse-target radiance | Rebuild `3 · albedo · (diffuse A + diffuse B) + emissive` | FO4 has no diffuse-only target; engine-facts Render targets | `radianceDisocc.cs.hlsl` |
+| Forced | Color::Ambient(GetAmbient(N)) with Masks.z | Upstream GetAmbient followed by FO4 power boundary, multiplied by albedo and clamped to diffuse | Reconstructed light passes fold ambient into diffuse and write no mask; engine-facts Directional ambient evaluation | `FO4ShaderData.hlsli`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
+| Chosen | Masks2.x vertex AO | `1−vertexAO` in emissive target 31.a; blended hair writes 0 | Main's FO4 G-buffer allocation policy; reconstructed stock shaders leave 31.a unread | `BSDFPrePass.hlsl` |
+| Forced | G-buffer normal | Sphere-map view normal converted to octahedral pyramid | FO4 reconstructed G-buffer uses a different encoding | `prefilterNormal.cs.hlsl`, `common.hlsli` |
+| Forced | NDC depth reconstruction | FO4Depth decode with record inverse world projection and typed shadow +0x8A0 near inverse | Engine-facts Depth & units / Per-frame buffer sources; first-person partition | `common.hlsli`, `ScreenSpaceGI.cpp`, `Engine.h` |
+| Forced | Skyrim frame-buffer camera | Current copied world+jitter camera record | Engine-facts Camera cache ownership; b12 is diagnostic only | `FrameBuffer.cpp`, `ScreenSpaceGI.cpp` |
+| Chosen | Irradiance colour conversions | Identity linear-lighting branch | Preserve main's linear HDR consumer policy | `Common/Color.hlsli` |
+| Forced | Skyrim SSAO toggle | Per-frame SAO_CS active +0x08 and applied +0x121; startup bSAOEnable snapshot | Engine-facts AO state: native DrawModel/console rewrite the composite's applied bit | `ScreenSpaceGI.cpp` `ApplyVanillaSSAO`, `Engine.h` |
+| Chosen | AOPower default 1, range 0–6 | Default 4, range 0–12 | Main's lighting calibration for placed-light-dominated interiors | `ScreenSpaceGISettings.h` |
 
 ### Pending
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Common/DeferredPosition.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 #ifndef WATER_EFFECTS_FULLSCREEN_DEBUG
 #	include "WaterEffects/WaterCausticsSampler.hlsli"
 #endif
@@ -122,13 +122,13 @@ namespace WaterEffects
 	// FO4's directional terms are scalars, so take the undispersed center tap.
 	float GetCausticsMult(float3 worldPosition)
 	{
-		if (SharedData::waterEffectsSettings.Mode == MODE_DISABLED ||
-			SharedData::waterEffectsSettings.HasWater == 0 ||
+		if (FO4SharedData::waterEffectsSettings.Mode == MODE_DISABLED ||
+			FO4SharedData::waterEffectsSettings.HasWater == 0 ||
 			!CausticsTextureReady()) {
 			return 1.0;
 		}
 		return ComputeCaustics(
-			SharedData::waterEffectsSettings.WaterHeight, worldPosition)
+			FO4SharedData::waterEffectsSettings.WaterHeight, worldPosition)
 		    .y;
 	}
 
@@ -186,14 +186,14 @@ namespace WaterEffects
 	bool TryGetDebugValue(float3 worldPosition, out float value)
 	{
 		value = 0.0;
-		uint mode = SharedData::waterEffectsSettings.Mode;
+		uint mode = FO4SharedData::waterEffectsSettings.Mode;
 		if (mode != MODE_CAUSTICS && mode != MODE_SUBMERSION)
 			return false;
-		if (SharedData::waterEffectsSettings.HasWater == 0)
+		if (FO4SharedData::waterEffectsSettings.HasWater == 0)
 			return true;
 
 		float distToWater =
-			SharedData::waterEffectsSettings.WaterHeight - worldPosition.z;
+			FO4SharedData::waterEffectsSettings.WaterHeight - worldPosition.z;
 		if (distToWater <= 0.0)
 			return true;
 
@@ -204,7 +204,7 @@ namespace WaterEffects
 
 		value = saturate(
 			ComputeCaustics(
-				SharedData::waterEffectsSettings.WaterHeight, worldPosition)
+				FO4SharedData::waterEffectsSettings.WaterHeight, worldPosition)
 				.y *
 			0.25);
 		return true;
@@ -219,7 +219,7 @@ namespace WaterEffects
 		out float4 color)
 	{
 		color = 0.0;
-		uint mode = SharedData::waterEffectsSettings.Mode;
+		uint mode = FO4SharedData::waterEffectsSettings.Mode;
 		if (mode != MODE_CAUSTICS && mode != MODE_SUBMERSION)
 			return false;
 

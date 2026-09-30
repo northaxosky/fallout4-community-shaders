@@ -218,7 +218,9 @@ namespace cs::features
 			.MaxPuddleWetness = _settings.maxPuddleWetness,
 			.PuddleWetness = puddleWetness,
 			.MaxShoreWetness = _settings.enabled ? _settings.maxShoreWetness : 0.0f,
-			.ShoreRange = _settings.shoreRange
+			.ShoreRange = _settings.shoreRange,
+			.EnableWetnessEffects = _settings.enabled ? 1u : 0u,
+			.Active = 1u
 		};
 	}
 

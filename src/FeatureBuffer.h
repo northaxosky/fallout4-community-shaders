@@ -5,7 +5,7 @@
 
 namespace cs
 {
-	// mirrors HLSL FeatureData at b6; blocks exist even when unloaded
+	// Feature contributors retain host contracts; the substrate packs shared and FO4-only fields.
 	struct alignas(16) ScreenSpaceShadowsFeatureData
 	{
 		std::uint32_t EnableScreenSpaceShadows = 0;
@@ -33,7 +33,8 @@ namespace cs
 		float PuddleWetness = 0.0f;
 		float MaxShoreWetness = 0.0f;
 		std::uint32_t ShoreRange = 32;
-		std::uint32_t pad0[2]{};
+		std::uint32_t EnableWetnessEffects = 0;
+		std::uint32_t Active = 0;
 	};
 	static_assert(sizeof(WetnessEffectsFeatureData) == 48);
 
@@ -109,7 +110,8 @@ namespace cs
 	static_assert(offsetof(WetnessEffectsFeatureData, PuddleWetness) == 28);
 	static_assert(offsetof(WetnessEffectsFeatureData, MaxShoreWetness) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, ShoreRange) == 36);
-	static_assert(offsetof(WetnessEffectsFeatureData, pad0) == 40);
+	static_assert(offsetof(WetnessEffectsFeatureData, EnableWetnessEffects) == 40);
+	static_assert(offsetof(WetnessEffectsFeatureData, Active) == 44);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 80);
 	static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);

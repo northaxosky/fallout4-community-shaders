@@ -2,6 +2,10 @@ function main(target)
     local shared = {
         root = "extern/community-shaders-shared",
         shaders = {
+            "package/Shaders/Common/FrameBuffer.hlsli",
+            "package/Shaders/Common/Math.hlsli",
+            "package/Shaders/Common/SharedData.hlsli",
+            "package/Shaders/Common/Spherical Harmonics/SphericalHarmonics.hlsli",
             "package/Shaders/LICENSE",
             "package/Shaders/Common/Spherical Harmonics/LICENSE",
             "features/Dynamic Cubemaps/Shaders/DynamicCubemaps/defaultcubemap.dds",

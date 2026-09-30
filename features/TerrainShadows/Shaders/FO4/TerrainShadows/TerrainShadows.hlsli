@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Common/DeferredPosition.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 namespace TerrainShadows
 {
@@ -15,16 +15,16 @@ namespace TerrainShadows
 
 	float2 GetTerrainShadowUV(float2 xy)
 	{
-		return xy * SharedData::terrainShadowsSettings.Scale.xy +
-		       SharedData::terrainShadowsSettings.Offset.xy;
+		return xy * SharedData::terraOccSettings.Scale.xy +
+		       SharedData::terraOccSettings.Offset.xy;
 	}
 
 	// Upstream height bias.
 	float GetTerrainZ(float normalizedZ)
 	{
 		float z = lerp(
-			SharedData::terrainShadowsSettings.ZRange.x,
-			SharedData::terrainShadowsSettings.ZRange.y,
+			SharedData::terraOccSettings.ZRange.x,
+			SharedData::terraOccSettings.ZRange.y,
 			normalizedZ);
 		return z - 256;
 	}
@@ -36,7 +36,7 @@ namespace TerrainShadows
 
 	float GetTerrainShadowMult(float3 worldPosition, SamplerState textureSampler)
 	{
-		if (SharedData::terrainShadowsSettings.TerrainShadowMode == MODE_DISABLED)
+		if (FO4SharedData::TerrainShadowMode == MODE_DISABLED)
 			return 1.0;
 		float2 shadowHeight = GetTerrainZ(
 			ShadowHeightTexture.SampleLevel(
@@ -52,7 +52,7 @@ namespace TerrainShadows
 		out float value)
 	{
 		value = 0.0;
-		uint mode = SharedData::terrainShadowsSettings.TerrainShadowMode;
+		uint mode = FO4SharedData::TerrainShadowMode;
 		if (mode == MODE_SHADOW_TERM) {
 			value = GetTerrainShadowMult(worldPosition, textureSampler);
 			return true;
@@ -62,11 +62,11 @@ namespace TerrainShadows
 												  textureSampler, GetTerrainShadowUV(worldPosition.xy), 0)
 			                   .x;
 			height = lerp(
-				SharedData::terrainShadowsSettings.HeightRange.x,
-				SharedData::terrainShadowsSettings.HeightRange.y,
+				FO4SharedData::HeightRange.x,
+				FO4SharedData::HeightRange.y,
 				height);
-			float p01 = SharedData::terrainShadowsSettings.DebugHeightRange.x;
-			float p99 = SharedData::terrainShadowsSettings.DebugHeightRange.y;
+			float p01 = FO4SharedData::DebugHeightRange.x;
+			float p99 = FO4SharedData::DebugHeightRange.y;
 			value = saturate((height - p01) / max(p99 - p01, 1e-3));
 			return true;
 		}
@@ -138,7 +138,7 @@ namespace TerrainShadows
 		out float4 color)
 	{
 		color = 0.0;
-		uint mode = SharedData::terrainShadowsSettings.TerrainShadowMode;
+		uint mode = FO4SharedData::TerrainShadowMode;
 		if (mode != MODE_SHADOW_TERM && mode != MODE_HEIGHTMAP)
 			return false;
 

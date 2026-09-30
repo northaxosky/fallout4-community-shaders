@@ -2,7 +2,7 @@
 // Copyright (c) 2026 northaxosky
 #pragma once
 
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 namespace InverseSquareLighting
 {
@@ -18,23 +18,23 @@ namespace InverseSquareLighting
 		float radius,
 		float pixelPositionX)
 	{
-		uint mode = SharedData::inverseSquareLightingSettings.Mode;
+		uint mode = FO4SharedData::inverseSquareLightingSettings.Mode;
 		if ((mode & MODE_ENABLED) == 0)
 			return vanilla;
 
 		float strength = SharedData::InInterior ?
-		                     SharedData::inverseSquareLightingSettings.InteriorStrength :
-		                     SharedData::inverseSquareLightingSettings.ExteriorStrength;
+		                     FO4SharedData::inverseSquareLightingSettings.InteriorStrength :
+		                     FO4SharedData::inverseSquareLightingSettings.ExteriorStrength;
 		if (!isfinite(strength) || strength <= 0.0)
 			return vanilla;
 		strength = saturate(strength);
 
-		if ((mode & MODE_COMPARISON_DEBUG) != 0 && pixelPositionX < SharedData::BufferDim.x * SharedData::DynamicResolution.x * 0.5) {
+		if ((mode & MODE_COMPARISON_DEBUG) != 0 && pixelPositionX < SharedData::BufferDim.x * FrameBuffer::DynamicResolutionParams1.x * 0.5) {
 			return vanilla;
 		}
 
 		float nearFieldDistance =
-			SharedData::inverseSquareLightingSettings.NearFieldDistance;
+			FO4SharedData::inverseSquareLightingSettings.NearFieldDistance;
 		if (!isfinite(vanilla) || !isfinite(distance) || distance < 0.0 || distance > MAX_SAFE_SQUARE_INPUT || !isfinite(radius) || radius <= 0.0 || !isfinite(nearFieldDistance) || nearFieldDistance <= 0.0 || nearFieldDistance > MAX_SAFE_SQUARE_INPUT) {
 			return vanilla;
 		}

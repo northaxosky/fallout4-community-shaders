@@ -89,6 +89,9 @@ namespace cs::engine
 		// Written and consumed on the render thread.
 		FrameBufferSnapshot g_latestSnapshot{};
 		FrameBufferSnapshot g_worldSnapshot{};
+		std::optional<WorldCameraRecord> g_prepassCamera;
+		std::atomic_uint64_t g_cameraComparisons{ 0 }, g_cameraMismatches{ 0 };
+		std::atomic<float> g_cameraMaximumRelativeDifference{ 0.0f };
 		AnchorFrameState g_anchorFrame{};
 		const void* g_mapped = nullptr;
 
@@ -502,16 +505,12 @@ namespace cs::engine
 		}
 
 		[[nodiscard]] FrameBufferRejectReason ValidateLatestSnapshot(
-			std::uint32_t a_frame,
-			bool a_allowPreviousFrame) noexcept
+			std::uint32_t a_frame) noexcept
 		{
 			if (g_latestSnapshot.sequence == 0) {
 				return FrameBufferRejectReason::kMissingSnapshot;
 			}
-			const bool currentFrame = g_latestSnapshot.frameCount == a_frame;
-			const bool previousFrame =
-				g_latestSnapshot.frameCount + 1u == a_frame;
-			if (!currentFrame && (!a_allowPreviousFrame || !previousFrame)) {
+			if (g_latestSnapshot.frameCount != a_frame) {
 				return FrameBufferRejectReason::kStaleSnapshot;
 			}
 			if (!g_latestSnapshot.valid || g_byteWidth.load(std::memory_order_relaxed) < kMinimumByteWidth) {
@@ -541,7 +540,7 @@ namespace cs::engine
 			BeginAnchorFrame(frame);
 			g_fullscreenLightAnchorsThisFrame.fetch_add(1, std::memory_order_relaxed);
 
-			const auto rejection = ValidateLatestSnapshot(frame, false);
+			const auto rejection = ValidateLatestSnapshot(frame);
 			if (rejection != FrameBufferRejectReason::kNone) {
 				if (rejection == FrameBufferRejectReason::kNearZeroOrigin) {
 					g_nearZeroOriginRejections.fetch_add(1, std::memory_order_relaxed);
@@ -569,6 +568,43 @@ namespace cs::engine
 			g_worldSnapshot = g_latestSnapshot;
 			g_worldSnapshot.source = FrameBufferPublishSource::kFullscreenLightDraw;
 			g_worldSnapshot.valid = true;
+			if (g_prepassCamera && g_prepassCamera->frameCount == frame) {
+				float maximum = 0.0f;
+				const auto compare = [&maximum](float a_record, float a_mirror) {
+					const float relative = std::abs(a_record - a_mirror) /
+					                       std::max({ 1.0f, std::abs(a_record), std::abs(a_mirror) });
+					maximum = std::isfinite(relative) ? std::max(maximum, relative) : std::numeric_limits<float>::infinity();
+				};
+				const auto compareMatrix = [&compare](const DirectX::XMFLOAT4X4& a_matrix, std::size_t a_register) {
+					for (std::size_t row = 0; row < 4; ++row) {
+						const auto& mirror = FrameBufferRegister(g_worldSnapshot.data, a_register + row);
+						const float values[]{ mirror.x, mirror.y, mirror.z, mirror.w };
+						for (std::size_t column = 0; column < 4; ++column)
+							compare(a_matrix.m[column][row], values[column]);
+					}
+				};
+				compareMatrix(g_prepassCamera->View, 0);
+				compareMatrix(g_prepassCamera->Projection, 4);
+				compareMatrix(g_prepassCamera->ViewProjection, 8);
+				compareMatrix(g_prepassCamera->ViewInverse, 12);
+				compareMatrix(g_prepassCamera->ViewProjectionInverse, 16);
+				compareMatrix(g_prepassCamera->ProjectionInverse, 20);
+				compareMatrix(g_prepassCamera->PreviousViewProjectionUnjittered, 31);
+				compareMatrix(g_prepassCamera->ViewProjectionUnjittered, 37);
+				const auto comparePosition = [&compare](const DirectX::XMFLOAT4& a_record, const DirectX::XMFLOAT4& a_mirror) {
+					compare(a_record.x, a_mirror.x);
+					compare(a_record.y, a_mirror.y);
+					compare(a_record.z, a_mirror.z);
+				};
+				comparePosition(g_prepassCamera->CameraPosAdjust, g_worldSnapshot.data.CameraPosAdjust);
+				comparePosition(g_prepassCamera->CameraPreviousPosAdjust, g_worldSnapshot.data.CameraPreviousPosAdjust);
+				g_cameraComparisons.fetch_add(1, std::memory_order_relaxed);
+				if (maximum > 1e-5f)
+					g_cameraMismatches.fetch_add(1, std::memory_order_relaxed);
+				g_cameraMaximumRelativeDifference.store(std::max(maximum,
+															g_cameraMaximumRelativeDifference.load(std::memory_order_relaxed)),
+					std::memory_order_relaxed);
+			}
 			g_publicationsThisFrame.fetch_add(1, std::memory_order_relaxed);
 			g_lastRejectReason.store(
 				FrameBufferRejectReason::kNone,
@@ -589,7 +625,10 @@ namespace cs::engine
 		g_installed = true;
 
 		const bool registered = RegisterPostDeferredPrePass(
-			ResolveIdentity,
+			[] {
+				g_prepassCamera = GetWorldCameraRecord();
+				ResolveIdentity();
+			},
 			HookPriority::Late);
 		if (!registered) {
 			L->error(
@@ -659,6 +698,34 @@ namespace cs::engine
 		}
 	}
 
+	std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept
+	{
+		const auto* state = GetGraphicsState();
+		const auto* camera = RE::Main::WorldRootCamera();
+		if (!state || !camera)
+			return std::nullopt;
+		// Cache +0x140 and record stride/key +0x250/+0x238/+0x240 match OG, NG and AE.
+		static_assert(offsetof(RE::BSGraphics::State, cameraDataCache) == 0x140);
+		static_assert(sizeof(RE::BSGraphics::CameraStateData) == 0x250);
+		static_assert(offsetof(RE::BSGraphics::CameraStateData, referenceCamera) == 0x238);
+		static_assert(offsetof(RE::BSGraphics::CameraStateData, useJitter) == 0x240);
+		for (const auto& entry : state->cameraDataCache) {
+			if (entry.referenceCamera != camera || !entry.useJitter)
+				continue;
+			WorldCameraRecord record{};
+			std::memcpy(&record.View, entry.camViewData.viewMat, sizeof(record.View));
+			std::memcpy(&record.Projection, entry.camViewData.projMat, sizeof(record.Projection));
+			std::memcpy(&record.ViewProjection, entry.camViewData.viewProjMat, sizeof(record.ViewProjection));
+			std::memcpy(&record.ViewProjectionUnjittered, entry.camViewData.viewProjUnjittered, sizeof(record.ViewProjectionUnjittered));
+			std::memcpy(&record.PreviousViewProjectionUnjittered, entry.camViewData.previousViewProjUnjittered, sizeof(record.PreviousViewProjectionUnjittered));
+			record.CameraPosAdjust = { entry.posAdjust.x, entry.posAdjust.y, entry.posAdjust.z, 0 };
+			record.CameraPreviousPosAdjust = { entry.previousPosAdjust.x, entry.previousPosAdjust.y, entry.previousPosAdjust.z, 0 };
+			record.frameCount = state->frameCount;
+			return PrepareWorldCameraRecord(record) ? std::optional{ record } : std::nullopt;
+		}
+		return std::nullopt;
+	}
+
 	const FrameBufferSnapshot& GetFrameBuffer() noexcept
 	{
 		return g_worldSnapshot;
@@ -669,22 +736,14 @@ namespace cs::engine
 		return g_latestSnapshot;
 	}
 
-	FrameBufferSnapshotQuery GetValidatedLatestFrameBuffer(
-		std::uint32_t a_frame) noexcept
+	std::optional<FogRamps> GetFogRamps() noexcept
 	{
-		const auto rejection = ValidateLatestSnapshot(a_frame, true);
-		if (rejection != FrameBufferRejectReason::kNone) {
-			return {
-				.snapshot = nullptr,
-				.rejectReason = rejection,
-				.previousFrame = false
-			};
-		}
-		return {
-			.snapshot = &g_latestSnapshot,
-			.rejectReason = FrameBufferRejectReason::kNone,
-			.previousFrame = g_latestSnapshot.frameCount != a_frame
-		};
+		const auto* state = GetGraphicsState();
+		if (!state)
+			return std::nullopt;
+		const auto& range = state->fogState.rangeData;
+		const auto& height = state->fogState.highLowRangeData;
+		return BuildFogRamps({ range.x, range.y, range.z, range.w }, { height.x, height.y, height.z, height.w });
 	}
 
 	FrameBufferStatus GetFrameBufferStatus() noexcept
@@ -703,6 +762,9 @@ namespace cs::engine
 		status.cpuAccessFlags = g_cpuAccessFlags.load(std::memory_order_relaxed);
 		status.bindFlags = g_bindFlags.load(std::memory_order_relaxed);
 		status.snapshots = g_snapshots.load(std::memory_order_relaxed);
+		status.cameraComparisons = g_cameraComparisons.load(std::memory_order_relaxed);
+		status.cameraMismatches = g_cameraMismatches.load(std::memory_order_relaxed);
+		status.cameraMaximumRelativeDifference = g_cameraMaximumRelativeDifference.load(std::memory_order_relaxed);
 		status.mapCalls = g_mapCalls.load(std::memory_order_relaxed);
 		status.unmapCalls = g_unmapCalls.load(std::memory_order_relaxed);
 		status.matchingMaps = g_matchingMaps.load(std::memory_order_relaxed);

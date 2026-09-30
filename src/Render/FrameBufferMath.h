@@ -4,9 +4,45 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 
 namespace cs::engine
 {
+	struct WorldCameraRecord
+	{
+		DirectX::XMFLOAT4X4 View{}, Projection{}, ViewProjection{};
+		DirectX::XMFLOAT4X4 ViewProjectionUnjittered{}, PreviousViewProjectionUnjittered{};
+		DirectX::XMFLOAT4X4 ProjectionUnjittered{}, ProjectionInverse{}, ProjectionUnjitteredInverse{};
+		DirectX::XMFLOAT4X4 ViewInverse{}, ViewProjectionInverse{};
+		DirectX::XMFLOAT4 ViewToWorld[3]{};
+		DirectX::XMFLOAT4 CameraPosAdjust{}, CameraPreviousPosAdjust{};
+		std::uint32_t frameCount = 0;
+	};
+
+	struct FogRamps
+	{
+		DirectX::XMFLOAT4 distance{}, height{};
+	};
+
+	[[nodiscard]] inline FogRamps BuildFogRamps(
+		const DirectX::XMFLOAT4& a_range,
+		const DirectX::XMFLOAT4& a_height) noexcept
+	{
+		const auto ramp = [](float a_start, float a_end) {
+			if (a_start == 0.0f && a_end == 0.0f) {
+				a_start = 1.0e8f;
+				a_end = 1.0e9f;
+			}
+			const float scale = 1.0f / (a_end - a_start);
+			return DirectX::XMFLOAT2{ scale, a_start * scale };
+		};
+		const auto distance = ramp(a_range.x, a_range.y);
+		const auto low = ramp(a_height.x - a_height.y, a_height.x + a_height.y);
+		const auto high = ramp(a_height.z - a_height.w, a_height.z + a_height.w);
+		return { { distance.x, low.x, distance.y, low.y }, { low.x, high.x, low.y, high.y } };
+	}
+
 	// Fallout 4 binds its per-frame constant buffer at HLSL register(b12).
 	inline constexpr std::size_t kFrameBufferRegisters = 47;
 	inline constexpr float kMinimumWorldCameraOriginMagnitude = 1.0f;
@@ -16,23 +52,23 @@ namespace cs::engine
 	// The trailing comment on each member is its b12 float4 register index.
 	struct alignas(16) FrameBuffer
 	{
-		DirectX::XMFLOAT4 cb12_pad_0_11[12];         // 0-11
-		DirectX::XMFLOAT4 ViewToWorld[3];            // 12-14
-		DirectX::XMFLOAT4 cb12_pad_15_19[5];         // 15-19
-		DirectX::XMFLOAT4 FarReproj[4];              // 20-23
-		DirectX::XMFLOAT4 NearReproj[4];             // 24-27
-		DirectX::XMFLOAT4 cb12_pad_28_29[2];         // 28-29
-		DirectX::XMFLOAT4 IblDesaturation;           // 30
-		DirectX::XMFLOAT4 PrevFrameWorldToClip[4];   // 31-34
-		DirectX::XMFLOAT4 CameraPosAdjust;           // 35
-		DirectX::XMFLOAT4 CameraPreviousPosAdjust;   // 36
-		DirectX::XMFLOAT4 CurrFrameWorldToClip[4];   // 37-40
-		DirectX::XMFLOAT4 FogDistanceRamp;           // 41
-		DirectX::XMFLOAT4 FogNearLowColorAndPower;   // 42
-		DirectX::XMFLOAT4 FogNearHighColorAndClamp;  // 43
-		DirectX::XMFLOAT4 FogFarLowColorAndDensity;  // 44
-		DirectX::XMFLOAT4 FogFarHighColor;           // 45
-		DirectX::XMFLOAT4 FogHeightRamp;             // 46
+		DirectX::XMFLOAT4 cb12_pad_0_11[12];                    // 0-11
+		DirectX::XMFLOAT4 ViewToWorld[3];                       // 12-14
+		DirectX::XMFLOAT4 cb12_pad_15_19[5];                    // 15-19
+		DirectX::XMFLOAT4 FarReproj[4];                         // 20-23
+		DirectX::XMFLOAT4 NearReproj[4];                        // 24-27
+		DirectX::XMFLOAT4 cb12_pad_28_29[2];                    // 28-29
+		DirectX::XMFLOAT4 IblDesaturation;                      // 30
+		DirectX::XMFLOAT4 PreviousViewProjectionUnjittered[4];  // 31-34
+		DirectX::XMFLOAT4 CameraPosAdjust;                      // 35
+		DirectX::XMFLOAT4 CameraPreviousPosAdjust;              // 36
+		DirectX::XMFLOAT4 ViewProjectionUnjittered[4];          // 37-40
+		DirectX::XMFLOAT4 FogDistanceRamp;                      // 41
+		DirectX::XMFLOAT4 FogNearLowColorAndPower;              // 42
+		DirectX::XMFLOAT4 FogNearHighColorAndClamp;             // 43
+		DirectX::XMFLOAT4 FogFarLowColorAndDensity;             // 44
+		DirectX::XMFLOAT4 FogFarHighColor;                      // 45
+		DirectX::XMFLOAT4 FogHeightRamp;                        // 46
 	};
 
 	inline constexpr std::size_t kFrameBufferRegisterSize = sizeof(DirectX::XMFLOAT4);
@@ -43,15 +79,16 @@ namespace cs::engine
 	static_assert(offsetof(FrameBuffer, FarReproj) == 20 * kFrameBufferRegisterSize);
 	static_assert(offsetof(FrameBuffer, NearReproj) == 24 * kFrameBufferRegisterSize);
 	static_assert(offsetof(FrameBuffer, IblDesaturation) == 30 * kFrameBufferRegisterSize);
-	static_assert(offsetof(FrameBuffer, PrevFrameWorldToClip) == 31 * kFrameBufferRegisterSize);
+	static_assert(offsetof(FrameBuffer, PreviousViewProjectionUnjittered) == 31 * kFrameBufferRegisterSize);
 	static_assert(offsetof(FrameBuffer, CameraPosAdjust) == 35 * kFrameBufferRegisterSize);
 	static_assert(offsetof(FrameBuffer, CameraPreviousPosAdjust) == 36 * kFrameBufferRegisterSize);
-	static_assert(offsetof(FrameBuffer, CurrFrameWorldToClip) == 37 * kFrameBufferRegisterSize);
+	static_assert(offsetof(FrameBuffer, ViewProjectionUnjittered) == 37 * kFrameBufferRegisterSize);
 	static_assert(offsetof(FrameBuffer, FogDistanceRamp) == 41 * kFrameBufferRegisterSize);
 	static_assert(offsetof(FrameBuffer, FogHeightRamp) == 46 * kFrameBufferRegisterSize);
 
+	template <class Camera>
 	[[nodiscard]] inline DirectX::XMFLOAT3 CameraWorldOrigin(
-		const FrameBuffer& a_frameBuffer) noexcept
+		const Camera& a_frameBuffer) noexcept
 	{
 		return {
 			a_frameBuffer.ViewToWorld[0].w + a_frameBuffer.CameraPosAdjust.x,
@@ -60,8 +97,9 @@ namespace cs::engine
 		};
 	}
 
+	template <class Camera>
 	[[nodiscard]] inline DirectX::XMFLOAT3 CameraPreviousWorldOrigin(
-		const FrameBuffer& a_frameBuffer) noexcept
+		const Camera& a_frameBuffer) noexcept
 	{
 		return {
 			a_frameBuffer.CameraPreviousPosAdjust.x,
@@ -131,8 +169,9 @@ namespace cs::engine
 	};
 
 	// world = R * view, so camera axes are R's columns.
+	template <class Camera>
 	[[nodiscard]] inline CameraWorldBasis GetCameraWorldBasis(
-		const FrameBuffer& a_frameBuffer) noexcept
+		const Camera& a_frameBuffer) noexcept
 	{
 		const auto* rows = a_frameBuffer.ViewToWorld;
 		return {
@@ -183,7 +222,8 @@ namespace cs::engine
 		return std::isfinite(fieldOfView) ? fieldOfView : 0.0f;
 	}
 
-	[[nodiscard]] inline bool HasUsableCameraBasis(const FrameBuffer& a_frameBuffer) noexcept
+	template <class Camera>
+	[[nodiscard]] inline bool HasUsableCameraBasis(const Camera& a_frameBuffer) noexcept
 	{
 		for (const auto& row : a_frameBuffer.ViewToWorld) {
 			const float magnitude =
@@ -197,12 +237,12 @@ namespace cs::engine
 
 	[[nodiscard]] inline bool HasFiniteWorldToClip(const FrameBuffer& a_frameBuffer) noexcept
 	{
-		for (const auto& row : a_frameBuffer.CurrFrameWorldToClip) {
+		for (const auto& row : a_frameBuffer.ViewProjectionUnjittered) {
 			if (!std::isfinite(row.x) || !std::isfinite(row.y) || !std::isfinite(row.z) || !std::isfinite(row.w)) {
 				return false;
 			}
 		}
-		return IsPerspectiveProjection(a_frameBuffer.CurrFrameWorldToClip[3]);
+		return IsPerspectiveProjection(a_frameBuffer.ViewProjectionUnjittered[3]);
 	}
 
 	[[nodiscard]] inline bool HasUsableWorldCamera(const FrameBuffer& a_frameBuffer) noexcept
@@ -223,5 +263,75 @@ namespace cs::engine
 			origin.x * origin.x + origin.y * origin.y + origin.z * origin.z;
 		return std::isfinite(magnitudeSquared) && magnitudeSquared >=
 		                                              kMinimumWorldCameraOriginMagnitude * kMinimumWorldCameraOriginMagnitude;
+	}
+
+	[[nodiscard]] inline bool HasFiniteMatrix(const DirectX::XMFLOAT4X4& a_matrix) noexcept
+	{
+		for (const auto& row : a_matrix.m)
+			for (const auto value : row)
+				if (!std::isfinite(value))
+					return false;
+		return true;
+	}
+
+	[[nodiscard]] inline DirectX::XMFLOAT4 GetCameraDepthParameters(const WorldCameraRecord& a_camera) noexcept
+	{
+		const auto& projection = a_camera.Projection;
+		const float nearZ = -projection._43 / projection._33;
+		const float farZ = -projection._43 / (projection._33 - 1.0f);
+		return { farZ, nearZ, farZ - nearZ, farZ * nearZ };
+	}
+
+	[[nodiscard]] inline bool PrepareWorldCameraRecord(WorldCameraRecord& a_camera) noexcept
+	{
+		using namespace DirectX;
+		const auto view = XMLoadFloat4x4(&a_camera.View);
+		const auto projection = XMLoadFloat4x4(&a_camera.Projection);
+		XMVECTOR determinant;
+		const auto inverseView = XMMatrixInverse(&determinant, view);
+		if (!std::isfinite(XMVectorGetX(determinant)) || std::abs(XMVectorGetX(determinant)) < 1e-8f)
+			return false;
+		XMFLOAT4X4 inverseViewRows;
+		XMStoreFloat4x4(&inverseViewRows, XMMatrixTranspose(inverseView));
+		for (std::size_t row = 0; row < 3; ++row)
+			a_camera.ViewToWorld[row] = XMFLOAT4(inverseViewRows.m[row]);
+		const auto unjittered = inverseView * XMLoadFloat4x4(&a_camera.ViewProjectionUnjittered);
+		XMStoreFloat4x4(&a_camera.ViewInverse, inverseView);
+		XMStoreFloat4x4(&a_camera.ViewProjectionInverse, XMMatrixInverse(nullptr, XMLoadFloat4x4(&a_camera.ViewProjection)));
+		XMStoreFloat4x4(&a_camera.ProjectionUnjittered, unjittered);
+		XMStoreFloat4x4(&a_camera.ProjectionInverse, XMMatrixInverse(nullptr, projection));
+		XMStoreFloat4x4(&a_camera.ProjectionUnjitteredInverse, XMMatrixInverse(nullptr, unjittered));
+		for (const auto* matrix : {
+				 &a_camera.View, &a_camera.Projection, &a_camera.ViewProjection,
+				 &a_camera.ViewProjectionUnjittered, &a_camera.PreviousViewProjectionUnjittered,
+				 &a_camera.ProjectionUnjittered, &a_camera.ProjectionInverse,
+				 &a_camera.ProjectionUnjitteredInverse, &a_camera.ViewInverse, &a_camera.ViewProjectionInverse }) {
+			const float matrixDeterminant = XMVectorGetX(XMMatrixDeterminant(XMLoadFloat4x4(matrix)));
+			if (!HasFiniteMatrix(*matrix) || !std::isfinite(matrixDeterminant) || matrixDeterminant == 0.0f)
+				return false;
+		}
+		const auto& vp = a_camera.ViewProjectionUnjittered;
+		const auto previous = CameraPreviousWorldOrigin(a_camera);
+		const auto depth = GetCameraDepthParameters(a_camera);
+		return HasUsableCameraBasis(a_camera) &&
+		       IsPerspectiveProjection({ vp._14, vp._24, vp._34, vp._44 }) &&
+		       std::isfinite(depth.x) && std::isfinite(depth.y) && depth.y > 0.0f && depth.x > depth.y &&
+		       std::isfinite(previous.x) && std::isfinite(previous.y) && std::isfinite(previous.z);
+	}
+
+	inline void GetWorldSceneProjection(const WorldCameraRecord& a_camera,
+		DirectX::XMFLOAT4X4& a_projection, DirectX::XMFLOAT4X4& a_inverse,
+		DirectX::XMFLOAT4& a_mul, DirectX::XMFLOAT4& a_add) noexcept
+	{
+		using namespace DirectX;
+		a_projection = a_camera.Projection;
+		a_inverse = a_camera.ProjectionInverse;
+		const auto inverse = XMLoadFloat4x4(&a_inverse);
+		auto topLeft = XMVector4Transform(XMVectorSet(-1, 1, 1, 1), inverse);
+		auto bottomRight = XMVector4Transform(XMVectorSet(1, -1, 1, 1), inverse);
+		topLeft = XMVectorScale(topLeft, 1.0f / XMVectorGetZ(topLeft));
+		bottomRight = XMVectorScale(bottomRight, 1.0f / XMVectorGetZ(bottomRight));
+		XMStoreFloat4(&a_add, XMVectorSet(XMVectorGetX(topLeft), XMVectorGetY(topLeft), 0, 0));
+		XMStoreFloat4(&a_mul, XMVectorSet(XMVectorGetX(bottomRight - topLeft), XMVectorGetY(bottomRight - topLeft), 0, 0));
 	}
 }

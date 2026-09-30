@@ -3,6 +3,7 @@
 #endif
 
 #include "Utils/ShaderCompile.h"
+#include "Utils/ShaderBufferBindings.h"
 
 #include <algorithm>
 #include <cstring>
@@ -138,6 +139,7 @@ namespace cs::util
 		}
 		defines.emplace_back("WINPC", "");
 		defines.emplace_back("DX11", "");
+		defines.emplace_back("FRAMEBUFFER_REGISTER", "b4");
 		return defines;
 	}
 
@@ -215,6 +217,11 @@ namespace cs::util
 			return {};
 		}
 
+		if (const auto error = ValidateSubstrateSlots(shaderBlob.Get()); !error.empty()) {
+			if (a_outError)
+				*a_outError = error;
+			return {};
+		}
 		return shaderBlob;
 	}
 }

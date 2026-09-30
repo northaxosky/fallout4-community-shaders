@@ -65,7 +65,8 @@ groupshared uint VisibleSamples;
 		}
 
 		// FO4 host lighting: SharedData publishes linear directional ambient and the deferred sun radiance.
-		float3 ambient = DynamicCubemaps::IrradianceToLinear(max(0.0, SharedData::GetAmbient(0.0)));
+		// FO4 capture lighting consumes linear DALC.
+		float3 ambient = DynamicCubemaps::IrradianceToLinear(FO4SharedData::GetAmbientLinear(0.0));
 		float3 directional = DynamicCubemaps::IrradianceToLinear(max(0.0, SharedData::DirLightColor.rgb));
 		float lightingLuminance = max(DynamicCubemaps::RGBToLuminance(ambient + directional), 0.0001);
 		bool lightingChanged = state.Initialized != 0 && abs(log2(lightingLuminance / max(state.ReferenceLuminance, 0.0001))) >= 1.0;

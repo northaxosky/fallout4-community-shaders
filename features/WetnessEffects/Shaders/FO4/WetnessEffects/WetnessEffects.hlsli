@@ -4,7 +4,7 @@
 #define __WETNESS_EFFECTS_DEPENDENCY_HLSL__
 
 #include "FO4/Common/Random.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 #ifdef WETNESS_COMPOSITE_CONSUMER
 #	include "Common/DeferredPosition.hlsli"
 #endif
@@ -57,8 +57,8 @@ namespace WetnessEffects
 		float nearFactor = smoothstep(4096.0 * 2.5, 0.0, viewPosition.z);
 
 		// FO4 publishes the player cell's water plane instead of upstream's per-tile water data.
-		bool hasWater = SharedData::waterEffectsSettings.HasWater != 0;
-		float waterHeight = SharedData::waterEffectsSettings.WaterHeight;
+		bool hasWater = FO4SharedData::waterEffectsSettings.HasWater != 0;
+		float waterHeight = FO4SharedData::waterEffectsSettings.WaterHeight;
 		// Calculate shore wetness factors
 		float wetnessDistToWater = abs(worldPosition.z - waterHeight);
 		float shoreFactor = hasWater ?
@@ -150,7 +150,7 @@ namespace WetnessEffects
 	bool TryGetDebugColor(Surface surface, out float4 color)
 	{
 		color = 0.0;
-		uint mode = SharedData::wetnessEffectsSettings.DebugVisualization;
+		uint mode = FO4SharedData::WetnessDebugVisualization;
 		if (mode == DebugModeWetnessTerm) {
 			color = float4(surface.wetness.xxx, 1.0);
 			return true;
@@ -278,7 +278,7 @@ namespace WetnessEffects
 		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2, float4 cameraPosAdjust)
 	{
 		// FO4 toggles Dynamic Cubemaps live, so the film only takes energy while its reflection is supplied.
-		if (SharedData::dynamicCubemapsSettings.Enabled == 0)
+		if (SharedData::cubemapCreatorSettings.Enabled == 0)
 			return 1.0;
 		Surface surface = GetSurface(normalView, viewPosition,
 			viewToWorldRow0, viewToWorldRow1, viewToWorldRow2, cameraPosAdjust);

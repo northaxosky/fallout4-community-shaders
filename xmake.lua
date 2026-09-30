@@ -274,7 +274,12 @@ target(plugin_name, function()
 
     set_pcxxheader("src/PCH.h")
 
-    add_deps("ShaderStage")
+    add_deps("ShaderStage", "ShaderCompileTests")
+    after_build(function (target)
+        os.vrunv(target:dep("ShaderCompileTests"):targetfile(), {
+            path.join(os.projectdir(), "build/ShaderStage/Shaders")
+        })
+    end)
     add_installfiles("package/(**)|Shaders/**", { prefixdir = "." })
     add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl",
         { prefixdir = "." })
@@ -505,7 +510,7 @@ target("ShaderCompileTests", function()
         "src/Utils/ShaderCompile.cpp"
     )
     add_headerfiles("src/Utils/ShaderCompile.h")
-    add_packages("vcpkg::directx-headers")
+    add_packages("vcpkg::directx-headers", "vcpkg::directxmath")
     add_syslinks("d3dcompiler")
 end)
 

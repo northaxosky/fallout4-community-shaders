@@ -813,9 +813,9 @@ namespace cs::features
 		}
 
 		auto* rtm = cs::engine::GetRenderTargetManager();
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
-		const bool cameraReady =
-			frameBuffer.valid && cs::engine::HasUsableWorldCamera(frameBuffer.data);
+		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
+		const auto nearInverse = cs::engine::GetPrepassFirstPersonProjectionInverse();
+		const bool cameraReady = frameBuffer.has_value() && nearInverse.has_value();
 		_cameraReadyLastFrame.store(cameraReady, std::memory_order_relaxed);
 		DirectX::XMFLOAT4X4 worldProj{};
 		DirectX::XMFLOAT4X4 worldInvProj{};
@@ -883,18 +883,18 @@ namespace cs::features
 
 		CameraTransform camera{};
 		for (std::size_t row = 0; row < 3; ++row) {
-			const auto& entry = frameBuffer.data.ViewToWorld[row];
+			const auto& entry = frameBuffer->ViewToWorld[row];
 			camera.rows[row * 4 + 0] = entry.x;
 			camera.rows[row * 4 + 1] = entry.y;
 			camera.rows[row * 4 + 2] = entry.z;
 			camera.rows[row * 4 + 3] = 0.0f;
 		}
-		const auto cameraOrigin = cs::engine::CameraWorldOrigin(frameBuffer.data);
+		const auto cameraOrigin = cs::engine::CameraWorldOrigin(*frameBuffer);
 		_cameraOriginXLastFrame.store(cameraOrigin.x, std::memory_order_relaxed);
 		_cameraOriginYLastFrame.store(cameraOrigin.y, std::memory_order_relaxed);
 		_cameraOriginZLastFrame.store(cameraOrigin.z, std::memory_order_relaxed);
 		const auto previousCameraOrigin =
-			cs::engine::CameraPreviousWorldOrigin(frameBuffer.data);
+			cs::engine::CameraPreviousWorldOrigin(*frameBuffer);
 		_cameraPreviousOriginXLastFrame.store(
 			previousCameraOrigin.x,
 			std::memory_order_relaxed);
@@ -995,10 +995,12 @@ namespace cs::features
 				a_out[2] = a_row.z;
 				a_out[3] = a_row.w;
 			};
-			copyRow(xegtaoCB.FarReprojZ, frameBuffer.data.FarReproj[2]);
-			copyRow(xegtaoCB.FarReprojW, frameBuffer.data.FarReproj[3]);
-			copyRow(xegtaoCB.NearReprojZ, frameBuffer.data.NearReproj[2]);
-			copyRow(xegtaoCB.NearReprojW, frameBuffer.data.NearReproj[3]);
+			DirectX::XMFLOAT4X4 farInverse;
+			DirectX::XMStoreFloat4x4(&farInverse, DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(&frameBuffer->ProjectionInverse)));
+			copyRow(xegtaoCB.FarReprojZ, DirectX::XMFLOAT4(farInverse.m[2]));
+			copyRow(xegtaoCB.FarReprojW, DirectX::XMFLOAT4(farInverse.m[3]));
+			copyRow(xegtaoCB.NearReprojZ, DirectX::XMFLOAT4(nearInverse->m[2]));
+			copyRow(xegtaoCB.NearReprojW, DirectX::XMFLOAT4(nearInverse->m[3]));
 			_xegtaoCB->Update(xegtaoCB);
 
 			ComputePass pass(

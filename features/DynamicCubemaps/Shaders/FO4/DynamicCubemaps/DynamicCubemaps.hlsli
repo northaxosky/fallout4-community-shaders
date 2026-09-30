@@ -2,7 +2,7 @@
 #define DYNAMICCUBEMAPS_HLSLI
 
 #include "DynamicCubemaps/CubemapCommon.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 #if defined(SKYLIGHTING)
 #	include "Skylighting/Skylighting.hlsli"
@@ -35,7 +35,8 @@ namespace DynamicCubemaps
 		float3 finalIrradiance = 0;
 
 		// FO4 directional ambient is already linear, so upstream's Color::Ambient is identity.
-		float directionalAmbientColorSpecular = RGBToLuminance(max(0, SharedData::GetAmbient(R))) *
+		// FO4 reflection normalization consumes linear DALC.
+		float directionalAmbientColorSpecular = RGBToLuminance(FO4SharedData::GetAmbientLinear(R)) *
 		                                        ReflectionNormalisationScale;
 
 #		if defined(IBL) && defined(LIGHTING)

@@ -1,5 +1,5 @@
 #include "DynamicCubemaps/CubemapCommon.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 TextureCube<float4> EnvCaptureTexture : register(t0);
 TextureCube<float4> ReflectionsTexture : register(t1);
@@ -67,7 +67,8 @@ float3 GetSamplingVector(uint3 ThreadID, in RWTexture2DArray<float4> OutputTextu
 	color.rgb = lerp(color.rgb, DynamicCubemaps::IrradianceToLinear(ReflectionsTexture.SampleLevel(LinearSampler, uv, 0.0).rgb), saturate(mipLevel / 8.0));
 #else
 	if (color.a <= 0.0001)
-		color.rgb = DynamicCubemaps::IrradianceToLinear(max(0.0, SharedData::GetAmbient(uv)));
+		// FO4 cubemap inference consumes linear DALC.
+		color.rgb = DynamicCubemaps::IrradianceToLinear(FO4SharedData::GetAmbientLinear(uv));
 	color.rgb = lerp(color.rgb, color.rgb * DefaultCubemap.SampleLevel(LinearSampler, uv, 0.0).xyz, saturate(mipLevel / 8.0));
 #endif
 

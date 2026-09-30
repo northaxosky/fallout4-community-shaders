@@ -2,7 +2,8 @@
 #define DYNAMIC_CUBEMAPS_CAPTURE_COMMON_HLSLI
 
 #include "DynamicCubemaps/CubemapCommon.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/Depth.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 RWTexture2DArray<float4> DynamicCubemap : register(u0);
 RWTexture2DArray<float4> DynamicCubemapRaw : register(u1);
@@ -79,7 +80,7 @@ float3 ViewToWorldDirection(float3 direction)
 
 float2 ViewToUV(float3 viewDirection)
 {
-	return (viewDirection.xy / viewDirection.z - SharedData::NDCToViewAdd.xy) / SharedData::NDCToViewMul.xy;
+	return FrameBuffer::ViewToUV(viewDirection);
 }
 
 bool IsOutsideFrame(float2 uv)
@@ -97,13 +98,12 @@ bool SampleCapture(uint3 texel, out float3 position, out float3 color, out float
 	if (viewDirection.z <= 0.0 || !all(isfinite(uv)) || IsOutsideFrame(uv))
 		return false;
 
-	float2 sampleUV = SharedData::GetDynamicResolutionAdjustedScreenPosition(uv);
+	float2 sampleUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(uv);
 	float depth = DepthTexture.SampleLevel(LinearSampler, sampleUV, 0);
-	// Depth at or below 0.01 is the first-person partition; world depth decodes as mad(depth, 1.01, -0.01).
 #if defined(REFLECTIONS)
-	if (depth <= 0.01)
+	if (FO4Depth::IsFirstPerson(depth))
 #else
-	if (depth == 1.0 || depth <= 0.01)
+	if (depth == 1.0 || FO4Depth::IsFirstPerson(depth))
 #endif
 		return false;
 
@@ -112,7 +112,7 @@ bool SampleCapture(uint3 texel, out float3 position, out float3 color, out float
 	if (depth >= 1.0) {
 		positionView = viewDirection / viewDirection.z * SharedData::CameraData.x;
 	} else {
-		float4 positionCS = mul(float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), mad(depth, 1.01, -0.01), 1.0), InvProj);
+		float4 positionCS = mul(float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), FO4Depth::ProjectionDepth(depth, false), 1.0), InvProj);
 		positionView = positionCS.xyz / positionCS.w;
 	}
 	if (positionView.z <= 16.5)

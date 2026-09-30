@@ -2,7 +2,7 @@
 #define DYNAMIC_CUBEMAPS_COMPOSITE_HLSLI
 
 #include "DynamicCubemaps/CubemapCommon.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 #include "FO4/WetnessEffects/WetnessEffects.hlsli"
 
 namespace DynamicCubemaps
@@ -18,7 +18,8 @@ namespace DynamicCubemaps
 		float level = roughness * 8.0;
 		float3 finalIrradiance = 0;
 		// FO4 directional ambient is already linear, so upstream's Color::Ambient is identity.
-		float directionalAmbientColorSpecular = RGBToLuminance(max(0, SharedData::GetAmbient(R))) * ReflectionNormalisationScale;
+		// FO4 reflection normalization consumes linear DALC.
+		float directionalAmbientColorSpecular = RGBToLuminance(FO4SharedData::GetAmbientLinear(R)) * ReflectionNormalisationScale;
 
 		// Fallback without IBL: normalize-by-luminance with DALC
 		// FO4 shares composite permutations across interiors and exteriors, so INTERIOR becomes SharedData::InInterior.
@@ -41,7 +42,7 @@ namespace DynamicCubemaps
 		float3x3 viewToWorld, SamplerState probeSampler)
 	{
 		float3 color = 0;
-		if (SharedData::dynamicCubemapsSettings.Enabled == 0)
+		if (SharedData::cubemapCreatorSettings.Enabled == 0)
 			return color;
 		float reflectance = WetnessEffects::GetEnvironmentFilmWeight(normalView, viewDir, wetness, roughness);
 		if (reflectance > 0.0) {

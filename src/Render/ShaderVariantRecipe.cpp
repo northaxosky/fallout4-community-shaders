@@ -1,5 +1,6 @@
 #include "Render/ShaderVariantRecipe.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace cs::engine
@@ -30,6 +31,8 @@ namespace cs::engine
 		recipe.source = a_request.sourcePath;
 		recipe.includeRoots.push_back(a_shaderRoot);
 		recipe.defines = a_request.defines;
+		if (std::ranges::none_of(recipe.defines, [](const auto& a_define) { return a_define.first == "FRAMEBUFFER_REGISTER"; }))
+			recipe.defines.emplace_back("FRAMEBUFFER_REGISTER", "b4");
 		recipe.entryPoint = a_request.entryPoint;
 		recipe.profile = a_request.profile;
 		recipe.stage = ToCacheStage(a_request.stage);

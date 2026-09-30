@@ -4,7 +4,7 @@
 
 namespace cs::engine
 {
-	// Returns false without a usable exterior sun.
+	// Normalized light propagation direction, away from the sun.
 	bool TryGetSunDirectionWS(float& outX, float& outY, float& outZ) noexcept;
 
 	// Linear sun radiance as the deferred sun pass receives it.

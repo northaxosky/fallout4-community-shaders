@@ -279,14 +279,14 @@ namespace cs::features
 			return;
 		}
 
-		const auto& snapshot = cs::engine::GetLatestFrameBuffer();
-		if (!snapshot.valid) {
+		const auto ramps = cs::engine::GetFogRamps();
+		if (!ramps) {
 			SetObservationStatus(ObservationStatus::kFrameBufferUnavailable);
 			return;
 		}
 
-		const auto& distance = snapshot.data.FogDistanceRamp;
-		const auto& height = snapshot.data.FogHeightRamp;
+		const auto& distance = ramps->distance;
+		const auto& height = ramps->height;
 		const auto derived = ehf::DeriveParameters(
 			distance.x,
 			distance.z,

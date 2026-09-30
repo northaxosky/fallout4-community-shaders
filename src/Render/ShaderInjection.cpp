@@ -632,17 +632,15 @@ namespace cs::engine
 			return std::nullopt;
 		}
 
-		// substrate reserves b5/b6 on active stages
+		// Engine and feature claims cannot occupy substrate bindings.
 		std::optional<ShaderSlotClaim> FindSubstrateReservation(
 			std::span<const ShaderSlotClaim> a_claims)
 		{
 			for (const auto& claim : a_claims) {
-				if (claim.resourceType != ShaderResourceType::kConstantBuffer)
-					continue;
-				if (claim.slot != render::kSharedDataSlot && claim.slot != render::kFeatureDataSlot) {
-					continue;
-				}
-				return claim;
+				if ((claim.resourceType == ShaderResourceType::kConstantBuffer &&
+						claim.slot >= render::kFrameDataSlot && claim.slot <= render::kFO4SharedDataSlot) ||
+					(claim.resourceType == ShaderResourceType::kShaderResource && claim.slot == render::kCanonicalDepthSlot))
+					return claim;
 			}
 			return std::nullopt;
 		}
@@ -1235,7 +1233,8 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
-			if (a_stage == ShaderStage::kPixel)
+			if (a_stage != ShaderStage::kCompute &&
+				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0)
 				render::BindSharedData(a_context, a_stage);
 
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
@@ -1570,7 +1569,7 @@ namespace cs::engine
 				return false;
 		}
 
-		// active substrate requires current b5/b6 data
+		// Active substrate uses b4-b7 and canonical scene depth at t17.
 		render::EnsureSharedDataUpdateInstalled();
 		// a bind callback without its draw anchor would never run
 		if (installsPreDrawHook && !EnsureDeferredDrawAnchorInstalled()) {

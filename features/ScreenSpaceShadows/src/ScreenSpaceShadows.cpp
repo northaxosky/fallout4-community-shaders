@@ -659,15 +659,13 @@ namespace cs::features
 							"ScreenSpaceShadows/Raymarch");
 						cs::engine::ComputeOMScope scope(context);
 
-						// Negate sunlight; transpose WorldRootCamera, not camViewData.
-						auto* sceneCamera = cs::engine::GetWorldRootCamera();
+						const auto sceneCamera = cs::engine::GetWorldCameraRecord();
 						if (!sceneCamera) {
 							return;
 						}
 						DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sx, -sy, -sz, 0.0f);
-						DirectX::XMMATRIX vp = DirectX::XMLoadFloat4x4(
-							reinterpret_cast<const DirectX::XMFLOAT4X4*>(&sceneCamera->worldToCam));
-						DirectX::XMVECTOR clip = DirectX::XMVector4Transform(sunDir, DirectX::XMMatrixTranspose(vp));
+						DirectX::XMMATRIX vp = DirectX::XMLoadFloat4x4(&sceneCamera->ViewProjection);
+						DirectX::XMVECTOR clip = DirectX::XMVector4Transform(sunDir, vp);
 						float lightProj[4] = {
 							DirectX::XMVectorGetX(clip),
 							DirectX::XMVectorGetY(clip),

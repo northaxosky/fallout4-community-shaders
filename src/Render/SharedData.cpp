@@ -4,13 +4,17 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Annotation.h"
+#include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
+#include "Render/SharedDataLayout.h"
+#include "Render/TemporalRenderer.h"
 #include "Utils/CSBuffer.h"
 #include "World/Sky.h"
 
 #include <DirectXMath.h>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -25,35 +29,23 @@ namespace cs::render
 	namespace
 	{
 		auto* L = cs::log::Get("cs.render.shareddata");
-		// mirrors HLSL SharedData at b5
-		struct alignas(16) SharedDataCB
+		struct SubstrateData
 		{
-			DirectX::XMFLOAT4 CameraData{};
-			DirectX::XMFLOAT4 BufferDim{};
-			DirectX::XMFLOAT4 DynamicResolution{};
-			DirectX::XMFLOAT4 NDCToViewMul{};
-			DirectX::XMFLOAT4 NDCToViewAdd{};
-			DirectX::XMFLOAT4 SunDirection{};
-			float Timer = 0.0f;
-			float DeltaTime = 0.0f;
-			std::uint32_t FrameCount = 0;
-			std::uint32_t InInterior = 0;
-			DirectX::XMFLOAT4 DirectionalAmbient[3]{};
-			DirectX::XMFLOAT4 DirLightColor{};
-			std::uint32_t HideSky = 0;
-			std::uint32_t pad0[3]{};
+			FrameDataCB frame{};
+			SharedDataCB shared{};
+			SharedFeatureDataCB feature{};
+			FO4SharedDataCB fo4{};
 		};
-		static_assert(sizeof(SharedDataCB) == 192);
-		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
 		struct SubstrateState
 		{
-			winrt::com_ptr<ID3D11Buffer> sharedDataCB;
-			winrt::com_ptr<ID3D11Buffer> featureDataCB;
+			std::array<winrt::com_ptr<ID3D11Buffer>, kSubstrateBufferCount> buffers;
 			std::atomic_bool ready{ false };
 			std::atomic_uint32_t lastFrame{ UINT32_MAX };
-			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
-				savedPixelBuffers;
+			SubstrateBindingSnapshot savedPixelBindings;
+			SubstrateBindingSnapshot savedVertexBindings;
+			DirectX::XMFLOAT2 previousRatio{ 1.0f, 1.0f };
+			bool hasResolutionHistory = false;
 			// Render thread only.
 			float timer = 0.0f;
 			bool updateInstalled = false;
@@ -80,12 +72,10 @@ namespace cs::render
 		}
 
 		SharedDataCB BuildSharedData(
-			float a_deltaTime,
 			float a_timer,
-			const RE::NiCamera* a_sceneCamera)
+			const engine::WorldCameraRecord& a_camera)
 		{
 			SharedDataCB data{};
-			data.DeltaTime = a_deltaTime;
 			data.Timer = a_timer;
 
 			auto* graphicsState = engine::GetGraphicsState();
@@ -93,52 +83,29 @@ namespace cs::render
 				const auto width = static_cast<float>(graphicsState->screenWidth);
 				const auto height = static_cast<float>(graphicsState->screenHeight);
 				data.BufferDim = { width, height, Reciprocal(width), Reciprocal(height) };
-				data.FrameCount = graphicsState->frameCount;
+				data.FrameCount = TemporalRenderer::GetSingleton()->IsTemporalActive() ? graphicsState->frameCount : 0;
+				data.FrameCountAlwaysActive = graphicsState->frameCount;
 			}
 
-			if (auto* renderTargetManager = engine::GetRenderTargetManager()) {
-				const auto widthRatio = renderTargetManager->GetDynamicWidthRatio();
-				const auto heightRatio = renderTargetManager->GetDynamicHeightRatio();
-				data.DynamicResolution = {
-					widthRatio,
-					heightRatio,
-					Reciprocal(widthRatio),
-					Reciprocal(heightRatio)
-				};
-			}
-
-			if (a_sceneCamera) {
-				DirectX::XMFLOAT4X4 projection;
-				DirectX::XMFLOAT4X4 inverseProjection;
-				DirectX::XMFLOAT4 ndcToViewMul;
-				DirectX::XMFLOAT4 ndcToViewAdd;
-				// structured binding avoids legacy near/far macros
-				const auto& [left, right, top, bottom, nearZ, farZ, ortho] =
-					a_sceneCamera->viewFrustum;
-				if (RE::BuildPerspectiveFromFrustum(
-						a_sceneCamera->viewFrustum,
-						projection,
-						inverseProjection,
-						ndcToViewMul,
-						ndcToViewAdd)) {
-					data.CameraData = { farZ, nearZ, farZ - nearZ, farZ * nearZ };
-					data.NDCToViewMul = ndcToViewMul;
-					data.NDCToViewAdd = ndcToViewAdd;
-				}
-			}
+			data.CameraData = engine::GetCameraDepthParameters(a_camera);
+			data.MipBias = TemporalRenderer::GetSingleton()->GetMipBias();
 
 			float sunX = 0.0f;
 			float sunY = 0.0f;
 			float sunZ = 0.0f;
-			if (engine::TryGetSunDirectionWS(sunX, sunY, sunZ))
-				data.SunDirection = { sunX, sunY, sunZ, 1.0f };
+			if (engine::TryGetSunDirectionWS(sunX, sunY, sunZ)) {
+				data.DirLightDirection = { -sunX, -sunY, -sunZ, 0.0f };
+				data.SunDirection = data.DirLightDirection;
+			}
 
 			DirectX::XMFLOAT3 sunColor{};
 			if (engine::TryGetSunLightColor(sunColor))
 				data.DirLightColor = { sunColor.x, sunColor.y, sunColor.z, 1.0f };
-			if (!engine::TryGetDirectionalAmbientRows(data.DirectionalAmbient)) {
-				for (auto& row : data.DirectionalAmbient)
-					row = {};
+			DirectX::XMFLOAT4 ambient[3]{};
+			if (engine::TryGetDirectionalAmbientRows(ambient)) {
+				data.AmbientSHR = PackAmbientSH(ambient[0]);
+				data.AmbientSHG = PackAmbientSH(ambient[1]);
+				data.AmbientSHB = PackAmbientSH(ambient[2]);
 			}
 			data.HideSky = engine::IsSkyHidden() ? 1u : 0u;
 
@@ -148,6 +115,48 @@ namespace cs::render
 
 			return data;
 		}
+
+		void PackFeatures(SubstrateData& a_data, const FeatureDataCB& a_features)
+		{
+			auto& fo4 = a_data.fo4;
+			fo4.screenSpaceShadowsSettings = a_features.screenSpaceShadowsSettings;
+			fo4.screenSpaceGISettings = a_features.screenSpaceGISettings;
+			fo4.inverseSquareLightingSettings = a_features.inverseSquareLightingSettings;
+			fo4.waterEffectsSettings = a_features.waterEffectsSettings;
+			fo4.exponentialHeightFogSettings = a_features.exponentialHeightFogSettings;
+			fo4.WetnessDebugVisualization = a_features.wetnessEffectsSettings.DebugVisualization;
+			fo4.TerrainShadowMode = a_features.terrainShadowsSettings.TerrainShadowMode;
+			fo4.HeightRange = DirectX::XMFLOAT2(a_features.terrainShadowsSettings.HeightRange);
+			fo4.DebugHeightRange = DirectX::XMFLOAT2(a_features.terrainShadowsSettings.DebugHeightRange);
+			fo4.DynamicCubemapsDebugVisualization = a_features.dynamicCubemapsSettings.DebugVisualization;
+			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
+			a_data.feature.cubemapCreatorSettings.Enabled = a_features.dynamicCubemapsSettings.Enabled;
+			auto& terrain = a_data.feature.terraOccSettings;
+			terrain.EnableTerrainShadow = fo4.TerrainShadowMode != 0;
+			std::ranges::copy(a_features.terrainShadowsSettings.Scale, terrain.Scale);
+			std::ranges::copy(a_features.terrainShadowsSettings.ZRange, terrain.ZRange);
+			std::ranges::copy(a_features.terrainShadowsSettings.Offset, terrain.Offset);
+			auto& wetness = a_data.feature.wetnessEffectsSettings;
+			const auto& source = a_features.wetnessEffectsSettings;
+			if (source.Active) {
+				wetness.EnableWetnessEffects = source.EnableWetnessEffects;
+				wetness.Wetness = source.Wetness;
+				wetness.PuddleWetness = source.PuddleWetness;
+				wetness.MaxRainWetness = source.MaxRainWetness;
+				wetness.MaxPuddleWetness = source.MaxPuddleWetness;
+				wetness.MaxShoreWetness = source.MaxShoreWetness;
+				wetness.ShoreRange = source.ShoreRange;
+				wetness.PuddleRadius = source.PuddleRadius;
+				wetness.PuddleMaxAngle = source.PuddleMaxAngle;
+				wetness.MinRainWetness = source.MinRainWetness;
+			}
+		}
+
+		constexpr std::array<std::size_t, kSubstrateBufferCount> kBufferSizes{
+			sizeof(FrameDataCB), sizeof(SharedDataCB), sizeof(SharedFeatureDataCB), sizeof(FO4SharedDataCB)
+		};
+
+		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data) noexcept;
 
 		bool WriteConstantBuffer(
 			ID3D11DeviceContext* a_context,
@@ -192,12 +201,8 @@ namespace cs::render
 			if (!context || !IsSharedDataReady())
 				return;
 
-			for (auto& buffer : state.savedPixelBuffers)
-				buffer = nullptr;
-			ID3D11Buffer* buffers[2]{};
-			context->PSGetConstantBuffers(kSharedDataSlot, 2, buffers);
-			for (std::size_t index = 0; index < state.savedPixelBuffers.size(); ++index)
-				state.savedPixelBuffers[index].attach(buffers[index]);
+			state.savedPixelBindings.Save(context, engine::ShaderStage::kPixel);
+			state.savedVertexBindings.Save(context, engine::ShaderStage::kVertex);
 			state.pixelBindingDepth = 1;
 		}
 
@@ -212,14 +217,9 @@ namespace cs::render
 			}
 
 			if (auto* context = GetImmediateContext()) {
-				ID3D11Buffer* buffers[2] = {
-					state.savedPixelBuffers[0].get(),
-					state.savedPixelBuffers[1].get()
-				};
-				context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+				state.savedPixelBindings.Restore(context, engine::ShaderStage::kPixel);
+				state.savedVertexBindings.Restore(context, engine::ShaderStage::kVertex);
 			}
-			for (auto& buffer : state.savedPixelBuffers)
-				buffer = nullptr;
 			state.pixelBindingDepth = 0;
 		}
 
@@ -244,8 +244,8 @@ namespace cs::render
 			auto* graphicsState = engine::GetGraphicsState();
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
-			auto* sceneCamera = engine::GetWorldRootCamera();
-			if (!graphicsState || !context)
+			const auto camera = engine::GetWorldCameraRecord();
+			if (!graphicsState || !context || !camera)
 				return;
 
 			const auto frame = graphicsState->frameCount;
@@ -255,19 +255,30 @@ namespace cs::render
 			try {
 				const auto delta = GetRealTimeDelta();
 				const auto nextTimer = state.timer + delta;
-				const auto sharedData =
-					BuildSharedData(delta, nextTimer, sceneCamera);
-				const auto featureData = GetFeatureBufferData();
-				if (!WriteConstantBuffer(
-						context,
-						state.sharedDataCB.get(),
-						&sharedData,
-						sizeof(sharedData)) ||
-					!WriteConstantBuffer(
-						context,
-						state.featureDataCB.get(),
-						&featureData,
-						sizeof(featureData))) {
+				SubstrateData data{};
+				data.shared = BuildSharedData(nextTimer, *camera);
+				const auto* manager = engine::GetRenderTargetManager();
+				const DirectX::XMFLOAT2 ratio{
+					manager ? manager->GetDynamicWidthRatio() : 1.0f,
+					manager ? manager->GetDynamicHeightRatio() : 1.0f
+				};
+				if (!(ratio.x > 0.0f) || !(ratio.y > 0.0f))
+					return;
+				const auto previousRatio = state.hasResolutionHistory ? state.previousRatio : ratio;
+				const auto* clampTarget = engine::ResolveRenderTarget(engine::RenderTarget::kMainTemp);
+				if (!clampTarget || !clampTarget->texture)
+					return;
+				D3D11_TEXTURE2D_DESC clampDesc{};
+				reinterpret_cast<ID3D11Texture2D*>(clampTarget->texture)->GetDesc(&clampDesc);
+				const float size = static_cast<float>(clampDesc.Width);
+				if (!(size > 0.0f))
+					return;
+				const float clamp = REX::FModule::IsRuntimeOG() ? (std::trunc(size * ratio.x) - 1.0f) / size : ratio.x - 0.5f / size;
+				data.frame = PackFrameData(*camera, ratio, previousRatio, ratio.x - clamp);
+				PackFeatures(data, GetFeatureBufferData());
+				data.fo4.DeltaTime = delta;
+				UpdateCanonicalDepth(context, *camera);
+				if (!WriteSubstrate(context, data)) {
 					CS_LOG_EVERY_MS(
 						L,
 						2000,
@@ -276,6 +287,8 @@ namespace cs::render
 					return;
 				}
 				state.timer = nextTimer;
+				state.previousRatio = ratio;
+				state.hasResolutionHistory = true;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
@@ -291,6 +304,16 @@ namespace cs::render
 					spdlog::level::err,
 					"Shared substrate update failed.");
 			}
+		}
+
+		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data) noexcept
+		{
+			const void* sources[]{ &a_data.frame, &a_data.shared, &a_data.feature, &a_data.fo4 };
+			auto& state = GetSubstrateState();
+			for (std::size_t index = 0; index < kSubstrateBufferCount; ++index)
+				if (!WriteConstantBuffer(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index]))
+					return false;
+			return true;
 		}
 	}
 
@@ -310,39 +333,28 @@ namespace cs::render
 			return;
 		}
 
-		const auto sharedDesc = cs::buffer::ConstantBufferDesc<SharedDataCB>();
-		const auto featureDesc = cs::buffer::ConstantBufferDesc<FeatureDataCB>();
-		DX::ThrowIfFailed(
-			a_device->CreateBuffer(&sharedDesc, nullptr, state.sharedDataCB.put()));
-		DX::ThrowIfFailed(
-			a_device->CreateBuffer(&featureDesc, nullptr, state.featureDataCB.put()));
-		annotation::SetName(state.sharedDataCB.get(), "Render/SharedData.Buffer");
-		annotation::SetName(state.featureDataCB.get(), "Render/FeatureData.Buffer");
+		const char* names[]{ "Render/FrameData", "Render/SharedData", "Render/FeatureData", "Render/FO4SharedData" };
+		for (std::size_t index = 0; index < kSubstrateBufferCount; ++index) {
+			D3D11_BUFFER_DESC desc{};
+			desc.ByteWidth = static_cast<UINT>(kBufferSizes[index]);
+			desc.Usage = D3D11_USAGE_DYNAMIC;
+			desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+			DX::ThrowIfFailed(a_device->CreateBuffer(&desc, nullptr, state.buffers[index].put()));
+			annotation::SetName(state.buffers[index].get(), names[index]);
+		}
+		InitializeCanonicalDepth(a_device);
 
 		// engine state is unavailable during D3D bootstrap
-		const SharedDataCB sharedData{};
-		const FeatureDataCB featureData{};
-		if (!WriteConstantBuffer(
-				a_context,
-				state.sharedDataCB.get(),
-				&sharedData,
-				sizeof(sharedData)) ||
-			!WriteConstantBuffer(
-				a_context,
-				state.featureDataCB.get(),
-				&featureData,
-				sizeof(featureData))) {
-			state.sharedDataCB = nullptr;
-			state.featureDataCB = nullptr;
+		if (!WriteSubstrate(a_context, SubstrateData{})) {
+			for (auto& buffer : state.buffers)
+				buffer = nullptr;
 			throw std::runtime_error("Shared substrate constant-buffer seeding failed.");
 		}
 		state.ready.store(true, std::memory_order_release);
 		L->info(
-			"Shared substrate ready: b{} shared_data={} bytes, b{} feature_data={} bytes.",
-			kSharedDataSlot,
-			sizeof(SharedDataCB),
-			kFeatureDataSlot,
-			sizeof(FeatureDataCB));
+			"Shared substrate ready: b4/b5/b6/b7 sizes={}/{}/{}/{} bytes; canonical depth at t17.",
+			kBufferSizes[0], kBufferSizes[1], kBufferSizes[2], kBufferSizes[3]);
 	}
 
 	bool IsSharedDataReady() noexcept
@@ -358,7 +370,7 @@ namespace cs::render
 			return;
 		if (!engine::RegisterPostDeferredPrePass(
 				[] { UpdateSharedData(); },
-				engine::HookPriority::Late)) {
+				engine::HookPriority::Early)) {
 			state.updateInstallFailed = true;
 			state.ready.store(false, std::memory_order_release);
 			L->error("Shared substrate per-frame update registration failed.");
@@ -401,32 +413,22 @@ namespace cs::render
 		if (!a_context || !IsSharedDataReady())
 			return;
 
-		if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
-			UpdateSharedData();
-			if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
-				const auto* graphicsState = engine::GetGraphicsState();
-				const auto frame = graphicsState ? graphicsState->frameCount : UINT32_MAX;
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Shared substrate first bind has no published frame data at frame {}; binding the zero seed.",
-					frame);
-			}
-		}
-
-		ID3D11Buffer* buffers[2] = {
-			state.sharedDataCB.get(),
-			state.featureDataCB.get()
-		};
+		ID3D11Buffer* buffers[kSubstrateBufferCount]{};
+		for (std::size_t index = 0; index < kSubstrateBufferCount; ++index)
+			buffers[index] = state.buffers[index].get();
+		auto* depth = GetCanonicalSceneDepthSRV();
 		switch (a_stage) {
 		case engine::ShaderStage::kVertex:
-			a_context->VSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			a_context->VSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
+			a_context->VSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kPixel:
-			a_context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			a_context->PSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
+			a_context->PSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kCompute:
-			a_context->CSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			a_context->CSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
+			a_context->CSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kCount:
 			break;

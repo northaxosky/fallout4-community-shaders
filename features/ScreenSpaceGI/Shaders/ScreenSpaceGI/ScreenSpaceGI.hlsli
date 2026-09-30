@@ -5,7 +5,7 @@
 #define __SCREEN_SPACE_GI_DEPENDENCY_HLSL__
 
 #include "FO4/Common/Shading.hlsli"
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 #include "Common/SphericalHarmonics.hlsli"
 #include "ScreenSpaceGI/Common/Color.hlsli"
@@ -37,7 +37,7 @@ namespace ScreenSpaceGI
 		float3 diffuseColor,
 		float vertexAOStore)
 	{
-		if (!SharedData::screenSpaceGISettings.EnableScreenSpaceGI)
+		if (!FO4SharedData::screenSpaceGISettings.EnableScreenSpaceGI)
 			return diffuseColor;
 
 		int3 texel = int3(int2(screenPosition), 0);
@@ -57,7 +57,8 @@ namespace ScreenSpaceGI
 		float3 multiBounceSSGIAo = Shading::MultiBounceAO(linAlbedo, ssgiAo);
 
 		// FO4 directional ambient is already linear, so upstream's Color::Ambient is identity.
-		float3 directionalAmbientColor = max(0, SharedData::GetAmbient(normalWS)) * albedo;
+		// FO4 diffuse ambient evaluates pre-power DALC with exponent 2.2.
+		float3 directionalAmbientColor = FO4SharedData::GetAmbientLinear(normalWS) * albedo;
 
 		float maxScale = 1.0;
 		if (directionalAmbientColor.x > 0.0)

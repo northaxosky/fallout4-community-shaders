@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
 #if defined(UPSCALING) || defined(DYNAMIC_CUBEMAPS)
-#	include "FO4/Common/SharedData.hlsli"
+#	include "FO4/FO4ShaderData.hlsli"
 #endif
 
 cbuffer SSLRRaytracingConstants : register(b0)
@@ -52,15 +52,15 @@ float4 main(PS_INPUT input) : SV_Target0
 {
 #ifdef DYNAMIC_CUBEMAPS
 	// FO4 stock enables SSR without DC, so read DC's live setting instead of upstream's compile-time ENABLESSR.
-	if (SharedData::dynamicCubemapsSettings.Enabled != 0 && SharedData::dynamicCubemapsSettings.EnabledSSR == 0)
+	if (SharedData::cubemapCreatorSettings.Enabled != 0 && FO4SharedData::EnabledSSR == 0)
 		return 0.0;
 #endif
 	float2 targetSize = TargetSizeNearFar.xy;
 	float2 sampleUV = input.TexCoord;
 #ifdef UPSCALING
 	// FO4 uses Hi-Z integer loads and full-RT cb0 sizes; scale traversal as well as FrameBuffer-style samples.
-	targetSize *= SharedData::DynamicResolution.xy;
-	sampleUV = SharedData::GetDynamicResolutionAdjustedScreenPosition(sampleUV);
+	targetSize *= FrameBuffer::DynamicResolutionParams1.xy;
+	sampleUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(sampleUV);
 #endif
 	float4 color = 0.0;
 	float surfaceDepth =
@@ -159,7 +159,7 @@ float4 main(PS_INPUT input) : SV_Target0
 		if (!(OutsideView(ray) || iterations == 32 || blocked)) {
 			float2 hitUV = ray.xy;
 #ifdef UPSCALING
-			hitUV = SharedData::GetDynamicResolutionAdjustedScreenPosition(hitUV);
+			hitUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(hitUV);
 #endif
 			color = float4(
 				SceneColor.SampleLevel(SceneColorSampler, hitUV, 0).xyz,

@@ -8,6 +8,10 @@ struct ID3D11DeviceContext;
 
 namespace cs::engine
 {
+	// Render thread only; copies the current world+jitter cache entry from PostDeferredPrePass onward.
+	[[nodiscard]] std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept;
+	[[nodiscard]] std::optional<FogRamps> GetFogRamps() noexcept;
+
 	enum class FrameBufferPublishSource : std::uint8_t
 	{
 		kNone,
@@ -34,14 +38,6 @@ namespace cs::engine
 		std::uint32_t frameCount = 0;
 		FrameBufferPublishSource source = FrameBufferPublishSource::kNone;
 		bool valid = false;
-	};
-
-	struct FrameBufferSnapshotQuery
-	{
-		const FrameBufferSnapshot* snapshot = nullptr;
-		FrameBufferRejectReason rejectReason =
-			FrameBufferRejectReason::kMissingSnapshot;
-		bool previousFrame = false;
 	};
 
 	struct FrameBufferStatus
@@ -84,6 +80,9 @@ namespace cs::engine
 		std::uint64_t publicationFrames = 0;
 		std::uint64_t noPublicationFrames = 0;
 		std::uint64_t nearZeroOriginRejections = 0;
+		std::uint64_t cameraComparisons = 0;
+		std::uint64_t cameraMismatches = 0;
+		float cameraMaximumRelativeDifference = 0.0f;
 		FrameBufferPublishSource publishSource = FrameBufferPublishSource::kNone;
 		FrameBufferRejectReason lastRejectReason = FrameBufferRejectReason::kNone;
 		FrameBufferSnapshot fullscreenLight{};
@@ -97,15 +96,11 @@ namespace cs::engine
 	// Native context state changes may replace its inline dispatch table between frames.
 	void RefreshFrameBufferContextHooks();
 
-	// Render thread only. Returns the world-camera snapshot published at an exact draw.
+	// Render thread only; the b12 mirror is diagnostic, not a rendering camera source.
 	[[nodiscard]] const FrameBufferSnapshot& GetFrameBuffer() noexcept;
 
 	// Render thread only. Raw latest Unmap snapshot for diagnostics.
 	[[nodiscard]] const FrameBufferSnapshot& GetLatestFrameBuffer() noexcept;
-
-	// Render thread only. Validated latest snapshot, allowing one previous frame.
-	[[nodiscard]] FrameBufferSnapshotQuery GetValidatedLatestFrameBuffer(
-		std::uint32_t a_frame) noexcept;
 
 	[[nodiscard]] FrameBufferStatus GetFrameBufferStatus() noexcept;
 	[[nodiscard]] const char* FrameBufferPublishSourceName(

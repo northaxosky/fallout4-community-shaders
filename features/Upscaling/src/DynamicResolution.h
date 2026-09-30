@@ -49,13 +49,13 @@ namespace cs::features
 		void UpdateRenderTarget(cs::engine::RenderTarget a_target, float a_widthRatio, float a_heightRatio);
 		void OverrideRenderTarget(cs::engine::RenderTarget a_target, bool a_doCopy);
 		void ResetRenderTarget(cs::engine::RenderTarget a_target, bool a_doCopy);
-		void CopyDepth();
+		bool CopyDepth();
 		void ReleaseProxy(cs::engine::RenderTarget a_target);
 
 		ID3D11ComputeShader* GetOverrideDepthCS();
 		ID3D11ComputeShader* GetOverrideLinearDepthCS();
 		cs::buffer::ConstantBuffer* GetUpscalingCB();
-		void UpdateAndBindUpscalingCB(
+		bool UpdateAndBindUpscalingCB(
 			ID3D11DeviceContext* a_context,
 			float2 a_screenSize,
 			float2 a_renderSize);

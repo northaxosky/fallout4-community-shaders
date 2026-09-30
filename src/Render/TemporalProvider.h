@@ -13,7 +13,7 @@
 
 namespace cs::engine
 {
-	struct FrameBufferSnapshot;
+	struct WorldCameraRecord;
 }
 
 namespace cs::render::temporal
@@ -190,7 +190,7 @@ namespace cs::render::temporal
 	};
 
 	[[nodiscard]] FrameGenerationCamera
-	BuildFrameGenerationCamera(const engine::FrameBufferSnapshot& a_snapshot,
+	BuildFrameGenerationCamera(const std::optional<engine::WorldCameraRecord>& a_snapshot,
 		std::uint32_t a_outputWidth,
 		std::uint32_t a_outputHeight) noexcept;
 

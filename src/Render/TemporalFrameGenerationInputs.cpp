@@ -242,7 +242,7 @@ namespace cs::render
 		}
 		const auto [renderWidth, renderHeight] = GetRenderSize();
 		const auto* timer = RE::BSTimer::GetSingleton();
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
+		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
 		pipeline.FreezeFrameConstants(
 			capture.frameSlot,
 			{ .realFrame =

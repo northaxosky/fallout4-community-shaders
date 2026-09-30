@@ -804,11 +804,8 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			cs::engine::RenderTarget::kMainTemp);
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
-		const bool cameraReady =
-			frameBuffer.valid &&
-			frameBuffer.frameCount == state->frameCount &&
-			cs::engine::HasUsableWorldCamera(frameBuffer.data);
+		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
+		const bool cameraReady = frameBuffer.has_value();
 		_cameraReadyLastFrame.store(cameraReady, std::memory_order_relaxed);
 		if (!context || !depthSRV || !colorSRV || !cameraReady) {
 			return;
@@ -879,12 +876,12 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			cs::engine::RenderTarget::kMainTemp);
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
+		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
 		DirectX::XMFLOAT4X4 projection{};
 		DirectX::XMFLOAT4X4 inverseProjection{};
 		DirectX::XMFLOAT4 ndcToViewMul{};
 		DirectX::XMFLOAT4 ndcToViewAdd{};
-		if (!context || !depthSRV || !colorSRV ||
+		if (!context || !depthSRV || !colorSRV || !frameBuffer ||
 			!cs::engine::TryGetWorldSceneProjection(
 				projection,
 				inverseProjection,
@@ -898,7 +895,7 @@ namespace cs::features
 			std::chrono::steady_clock::now().time_since_epoch())
 		                       .count();
 		const auto cameraOrigin =
-			cs::engine::CameraWorldOrigin(frameBuffer.data);
+			cs::engine::CameraWorldOrigin(*frameBuffer);
 
 		UpdateCubemapCB constants{};
 		constants.CameraPreviousPosAdjust = _cameraPreviousPosAdjust[index];
@@ -908,7 +905,7 @@ namespace cs::features
 		constants.ResetCapture = _resetCapture[index] ? 1u : 0u;
 		constants.CameraPosAdjust = { cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, 0.0f };
 		for (std::size_t row = 0; row < 3; ++row) {
-			const auto& source = frameBuffer.data.ViewToWorld[row];
+			const auto& source = frameBuffer->ViewToWorld[row];
 			constants.ViewToWorld[row] = { source.x, source.y, source.z, 0.0f };
 		}
 		constants.InvProj = inverseProjection;

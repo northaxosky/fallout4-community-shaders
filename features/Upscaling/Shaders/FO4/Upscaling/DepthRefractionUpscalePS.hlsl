@@ -5,7 +5,7 @@
 #include "FO4/Upscaling/UpscaleVS.hlsl"
 
 #if defined(PSHADER)
-#	include "FO4/Common/SharedData.hlsli"
+#	include "FO4/FO4ShaderData.hlsli"
 
 typedef VS_OUTPUT PS_INPUT;
 
@@ -31,11 +31,11 @@ PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT psout;
 
-	float2 originalUV = SharedData::GetDynamicResolutionAdjustedScreenPosition(input.TexCoord);
+	float2 originalUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(input.TexCoord);
 
 	float2 uv = originalUV - (jitter * SharedData::BufferDim.zw);
 
-	uv = SharedData::ClampDynamicResolutionAdjustedScreenPosition(uv, input.TexCoord);
+	uv = FrameBuffer::ClampDynamicResolutionAdjustedScreenPosition(uv, input.TexCoord);
 
 	psout.RefractionNormals = RefractionNormals.SampleLevel(LinearSampler, uv, 0);
 	psout.Depth = DepthTex.SampleLevel(LinearSampler, uv, 0);

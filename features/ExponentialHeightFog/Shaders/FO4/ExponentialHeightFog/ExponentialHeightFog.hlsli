@@ -2,7 +2,7 @@
 // Copyright (c) 2026 northaxosky
 #pragma once
 
-#include "FO4/Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 namespace ExponentialHeightFog
 {
@@ -14,12 +14,12 @@ namespace ExponentialHeightFog
 
 	bool IsActive()
 	{
-		return (SharedData::exponentialHeightFogSettings.Mode & MODE_ENABLED) != 0 && !SharedData::InInterior;
+		return (FO4SharedData::exponentialHeightFogSettings.Mode & MODE_ENABLED) != 0 && !SharedData::InInterior;
 	}
 
 	bool IsFogFactorDebug()
 	{
-		return IsActive() && (SharedData::exponentialHeightFogSettings.Mode & MODE_FOG_FACTOR_DEBUG) != 0;
+		return IsActive() && (FO4SharedData::exponentialHeightFogSettings.Mode & MODE_FOG_FACTOR_DEBUG) != 0;
 	}
 
 	bool TryHeightFactor(
@@ -61,9 +61,9 @@ namespace ExponentialHeightFog
 			return false;
 
 		float densityMultiplier =
-			SharedData::exponentialHeightFogSettings.DensityMultiplier;
+			FO4SharedData::exponentialHeightFogSettings.DensityMultiplier;
 		float heightMultiplier =
-			SharedData::exponentialHeightFogSettings.HeightFalloffMultiplier;
+			FO4SharedData::exponentialHeightFogSettings.HeightFalloffMultiplier;
 		if (!isfinite(distance) || !isfinite(distanceRamp.x) || !isfinite(distanceRamp.z) || !isfinite(densityMultiplier) || abs(distanceRamp.x) <= MINIMUM_SLOPE || !(densityMultiplier > 0.0)) {
 			return false;
 		}

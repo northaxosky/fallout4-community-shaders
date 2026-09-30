@@ -26,7 +26,8 @@ namespace
 	std::uint32_t sharedDataBindCount = 0;
 	std::uint32_t computeContributionBindCount = 0;
 	std::optional<bool> activeComputeVariantDefine;
-	std::array<winrt::com_ptr<ID3D11Buffer>, 2> publishedComputeBuffers;
+	std::array<winrt::com_ptr<ID3D11Buffer>, cs::render::kSubstrateBufferCount> publishedComputeBuffers;
+	winrt::com_ptr<ID3D11ShaderResourceView> publishedDepth;
 
 	class TestCompilationHandle final :
 		public cs::engine::ShaderVariantCompilationHandle
@@ -80,16 +81,18 @@ namespace
 			}
 
 			constexpr std::string_view source =
+				"cbuffer PerFrame : register(b4) { uint FrameValue; };"
 				"cbuffer SharedData : register(b5) { uint SharedValue; };"
 				"cbuffer FeatureData : register(b6) { uint FeatureValue; };"
-				"cbuffer NativeData : register(b7) { uint NativeValue; };"
+				"cbuffer FO4SharedData : register(b7) { uint FO4Value; };"
+				"Texture2D<uint> CanonicalDepth : register(t17);"
 				"Texture2D<uint> NativeTexture : register(t3);"
 				"RWStructuredBuffer<uint> Output : register(u0);"
 				"[numthreads(1,1,1)] void main() {"
 				"InterlockedAdd(Output[0], 1);"
-				"Output[1] = SharedValue;"
+				"Output[1] = SharedValue + FrameValue;"
 				"Output[2] = FeatureValue;"
-				"Output[3] = NativeValue;"
+				"Output[3] = FO4Value + CanonicalDepth.Load(int3(0,0,0));"
 				"Output[4] = NativeTexture.Load(int3(0,0,0));"
 				"}";
 			winrt::com_ptr<ID3DBlob> bytecode;
@@ -168,12 +171,13 @@ namespace cs::render
 			return;
 
 		++sharedDataBindCount;
-		ID3D11Buffer* buffers[]{
-			publishedComputeBuffers[0].get(),
-			publishedComputeBuffers[1].get()
-		};
+		ID3D11Buffer* buffers[cs::render::kSubstrateBufferCount]{};
+		for (std::size_t index = 0; index < publishedComputeBuffers.size(); ++index)
+			buffers[index] = publishedComputeBuffers[index].get();
 		a_context->CSSetConstantBuffers(
-			cs::render::kSharedDataSlot, 2, buffers);
+			cs::render::kFrameDataSlot, cs::render::kSubstrateBufferCount, buffers);
+		ID3D11ShaderResourceView* depth = publishedDepth.get();
+		a_context->CSSetShaderResources(cs::render::kCanonicalDepthSlot, 1, &depth);
 	}
 
 	bool IsDeferredLightsActive() noexcept
@@ -305,7 +309,8 @@ namespace
 			"conflicting define claim was accepted");
 
 		for (const auto slot :
-			{ cs::render::kSharedDataSlot, cs::render::kFeatureDataSlot }) {
+			{ cs::render::kFrameDataSlot, cs::render::kSharedDataSlot,
+				cs::render::kFeatureDataSlot, cs::render::kFO4SharedDataSlot }) {
 			ShaderReplacementRegistration reserved;
 			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
 			reserved.contributor = "ledger-reserved-slot";
@@ -314,8 +319,15 @@ namespace
 				.slot = slot } };
 			Expect(
 				!RegisterReplacement(std::move(reserved)),
-				"reserved b5/b6 claim was accepted");
+				"reserved b4-b7 claim was accepted");
 		}
+		ShaderReplacementRegistration reservedDepth;
+		reservedDepth.targetId = ShaderInjectionTarget::kBsdfComposite;
+		reservedDepth.contributor = "ledger-reserved-depth";
+		reservedDepth.slotClaims = { { .stage = ShaderStage::kPixel,
+			.resourceType = ShaderResourceType::kShaderResource,
+			.slot = cs::render::kCanonicalDepthSlot } };
+		Expect(!RegisterReplacement(std::move(reservedDepth)), "reserved t17 claim was accepted");
 
 		drawAnchorInstallFails = true;
 		ShaderReplacementRegistration rejectedAnchor;
@@ -453,7 +465,8 @@ namespace
 
 	struct NativeComputeInputs
 	{
-		std::array<winrt::com_ptr<ID3D11Buffer>, 3> buffers;
+		std::array<winrt::com_ptr<ID3D11Buffer>, cs::render::kSubstrateBufferCount> buffers;
+		winrt::com_ptr<ID3D11ShaderResourceView> depth;
 		winrt::com_ptr<ID3D11ShaderResourceView> srv;
 		winrt::com_ptr<ID3D11Buffer> highBuffer;
 		winrt::com_ptr<ID3D11ShaderResourceView> highSrv;
@@ -464,9 +477,10 @@ namespace
 		NativeComputeInputs inputs;
 		for (std::size_t index = 0; index < inputs.buffers.size(); ++index) {
 			inputs.buffers[index] = CreateUintConstantBuffer(
-				a_device, static_cast<std::uint32_t>(index + 5));
+				a_device, static_cast<std::uint32_t>(index + 4));
 		}
 		inputs.srv = CreateUintSrv(a_device, 9);
+		inputs.depth = CreateUintSrv(a_device, 170);
 		inputs.highBuffer = CreateUintConstantBuffer(a_device, 88);
 		inputs.highSrv = CreateUintSrv(a_device, 44);
 		return inputs;
@@ -479,13 +493,13 @@ namespace
 		ID3D11UnorderedAccessView* a_uav)
 	{
 		a_context->CSSetShader(a_shader, nullptr, 0);
-		ID3D11Buffer* buffers[]{
-			a_inputs.buffers[0].get(),
-			a_inputs.buffers[1].get(),
-			a_inputs.buffers[2].get()
-		};
+		ID3D11Buffer* buffers[cs::render::kSubstrateBufferCount]{};
+		for (std::size_t index = 0; index < a_inputs.buffers.size(); ++index)
+			buffers[index] = a_inputs.buffers[index].get();
 		a_context->CSSetConstantBuffers(
-			cs::render::kSharedDataSlot, 3, buffers);
+			cs::render::kFrameDataSlot, cs::render::kSubstrateBufferCount, buffers);
+		ID3D11ShaderResourceView* depth = a_inputs.depth.get();
+		a_context->CSSetShaderResources(cs::render::kCanonicalDepthSlot, 1, &depth);
 		ID3D11Buffer* highBuffer = a_inputs.highBuffer.get();
 		a_context->CSSetConstantBuffers(8, 1, &highBuffer);
 		ID3D11ShaderResourceView* srv = a_inputs.srv.get();
@@ -500,9 +514,11 @@ namespace
 		const NativeComputeInputs& a_inputs,
 		ID3D11UnorderedAccessView* a_uav)
 	{
-		ID3D11Buffer* buffers[3]{};
+		ID3D11Buffer* buffers[cs::render::kSubstrateBufferCount]{};
 		a_context->CSGetConstantBuffers(
-			cs::render::kSharedDataSlot, 3, buffers);
+			cs::render::kFrameDataSlot, cs::render::kSubstrateBufferCount, buffers);
+		ID3D11ShaderResourceView* depth = nullptr;
+		a_context->CSGetShaderResources(cs::render::kCanonicalDepthSlot, 1, &depth);
 		ID3D11Buffer* highBuffer = nullptr;
 		a_context->CSGetConstantBuffers(8, 1, &highBuffer);
 		ID3D11ShaderResourceView* srv = nullptr;
@@ -512,7 +528,9 @@ namespace
 		ID3D11UnorderedAccessView* uav = nullptr;
 		a_context->CSGetUnorderedAccessViews(0, 1, &uav);
 		const bool matches =
-			buffers[0] == a_inputs.buffers[0].get() && buffers[1] == a_inputs.buffers[1].get() && buffers[2] == a_inputs.buffers[2].get() && highBuffer == a_inputs.highBuffer.get() && srv == a_inputs.srv.get() && highSrv == a_inputs.highSrv.get() && uav == a_uav;
+			buffers[0] == a_inputs.buffers[0].get() && buffers[1] == a_inputs.buffers[1].get() && buffers[2] == a_inputs.buffers[2].get() && buffers[3] == a_inputs.buffers[3].get() && depth == a_inputs.depth.get() && highBuffer == a_inputs.highBuffer.get() && srv == a_inputs.srv.get() && highSrv == a_inputs.highSrv.get() && uav == a_uav;
+		if (depth)
+			depth->Release();
 		for (auto* buffer : buffers) {
 			if (buffer)
 				buffer->Release();
@@ -738,12 +756,12 @@ namespace
 			"could not register compute contribution");
 		FreezeAndCompileShaderInjections(device.get());
 
-		publishedComputeBuffers[0] =
-			CreateUintConstantBuffer(device.get(), 50);
-		publishedComputeBuffers[1] =
-			CreateUintConstantBuffer(device.get(), 60);
+		for (std::size_t index = 0; index < publishedComputeBuffers.size(); ++index)
+			publishedComputeBuffers[index] = CreateUintConstantBuffer(
+				device.get(), static_cast<std::uint32_t>((index + 4) * 10));
+		publishedDepth = CreateUintSrv(device.get(), 17);
 		Expect(
-			publishedComputeBuffers[0] && publishedComputeBuffers[1],
+			publishedComputeBuffers[0] && publishedComputeBuffers[1] && publishedComputeBuffers[2] && publishedComputeBuffers[3] && publishedDepth,
 			"could not create shared compute buffers");
 
 		RE::BSGraphics::ComputeShader nativeWrapper{};
@@ -775,14 +793,15 @@ namespace
 		Expect(
 			NativeComputeInputsMatch(
 				context.get(), inputs, output.uav.get()),
-			"compute bridge did not restore b5-b8/t3-t4/u0");
+			"compute bridge did not restore b4-b8/t3-t4/t17/u0");
 		Expect(
-			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 50, 60, 7, 9 },
+			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 9 },
 			"replacement did not execute with shared and native inputs");
 		Expect(
 			sharedDataBindCount == 1 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
 			"active compute contribution state was not exposed exactly once");
 		publishedComputeBuffers = {};
+		publishedDepth = {};
 	}
 }
 

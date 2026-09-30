@@ -103,6 +103,11 @@ namespace cs::render
 		return _mipBias.load(std::memory_order_relaxed);
 	}
 
+	bool TemporalRenderer::IsTemporalActive() const
+	{
+		return GetUpscaleMethod() != UpscaleMethod::kNONE;
+	}
+
 	void TemporalRenderer::ConfigureTAA()
 	{
 		auto upscaleMethod = GetUpscaleMethod();

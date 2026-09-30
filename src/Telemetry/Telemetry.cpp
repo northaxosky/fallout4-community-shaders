@@ -245,53 +245,36 @@ namespace cs::telemetry
 					TomlVector3(position.x, position.y, position.z));
 			}
 
-			const auto& camera = cs::engine::GetFrameBuffer();
-			a_root.insert_or_assign("camera_snapshot_valid", camera.valid);
+			const auto camera = cs::engine::GetWorldCameraRecord();
+			a_root.insert_or_assign("camera_snapshot_valid", camera.has_value());
 			a_root.insert_or_assign(
 				"camera_orientation_source",
-				"published_frame_buffer_b12");
-			if (!camera.valid)
+				"world_jitter_camera_record");
+			if (!camera)
 				return;
 
-			const auto origin = cs::engine::CameraWorldOrigin(camera.data);
+			const auto origin = cs::engine::CameraWorldOrigin(*camera);
 			a_root.insert_or_assign(
 				"camera_origin",
 				TomlVector3(origin.x, origin.y, origin.z));
 			a_root.insert_or_assign(
 				"camera_view_to_world_row0",
 				TomlVector3(
-					camera.data.ViewToWorld[0].x,
-					camera.data.ViewToWorld[0].y,
-					camera.data.ViewToWorld[0].z));
+					camera->ViewToWorld[0].x,
+					camera->ViewToWorld[0].y,
+					camera->ViewToWorld[0].z));
 			a_root.insert_or_assign(
 				"camera_view_to_world_row1",
 				TomlVector3(
-					camera.data.ViewToWorld[1].x,
-					camera.data.ViewToWorld[1].y,
-					camera.data.ViewToWorld[1].z));
+					camera->ViewToWorld[1].x,
+					camera->ViewToWorld[1].y,
+					camera->ViewToWorld[1].z));
 			a_root.insert_or_assign(
 				"camera_view_to_world_row2",
 				TomlVector3(
-					camera.data.ViewToWorld[2].x,
-					camera.data.ViewToWorld[2].y,
-					camera.data.ViewToWorld[2].z));
-		}
-
-		[[nodiscard]] bool IsIdentity(const __m128 (&a_matrix)[4]) noexcept
-		{
-			alignas(16) float rows[4][4]{};
-			for (std::size_t row = 0; row < 4; ++row) {
-				_mm_store_ps(rows[row], a_matrix[row]);
-			}
-			for (std::size_t row = 0; row < 4; ++row) {
-				for (std::size_t column = 0; column < 4; ++column) {
-					const float expected = row == column ? 1.0f : 0.0f;
-					if (std::abs(rows[row][column] - expected) > 1e-5f) {
-						return false;
-					}
-				}
-			}
-			return true;
+					camera->ViewToWorld[2].x,
+					camera->ViewToWorld[2].y,
+					camera->ViewToWorld[2].z));
 		}
 
 		void CollectFrameBuffer(Sink& a_sink)
@@ -314,6 +297,9 @@ namespace cs::telemetry
 				.Field("cpu_access_flags", static_cast<std::int64_t>(status.cpuAccessFlags))
 				.Field("bind_flags", static_cast<std::int64_t>(status.bindFlags))
 				.Field("snapshots", TomlInteger(status.snapshots))
+				.Field("camera_comparisons", TomlInteger(status.cameraComparisons))
+				.Field("camera_mismatches", TomlInteger(status.cameraMismatches))
+				.Field("camera_maximum_relative_difference", static_cast<double>(status.cameraMaximumRelativeDifference))
 				.Field("map_calls", TomlInteger(status.mapCalls))
 				.Field("unmap_calls", TomlInteger(status.unmapCalls))
 				.Field("matching_maps", TomlInteger(status.matchingMaps))
@@ -334,7 +320,7 @@ namespace cs::telemetry
 				.Field("latest_frame", static_cast<std::int64_t>(status.latestFrameCount))
 				.Field(
 					"latest_is_perspective",
-					cs::engine::IsPerspectiveProjection(latest.data.CurrFrameWorldToClip[3]))
+					cs::engine::IsPerspectiveProjection(latest.data.ViewProjectionUnjittered[3]))
 				.Field("latest_camera_pos_adjust", FormatFloat4(latest.data.CameraPosAdjust))
 				.Field("latest_view_to_world_row0", FormatFloat4(latest.data.ViewToWorld[0]))
 				.Field("latest_view_to_world_row1", FormatFloat4(latest.data.ViewToWorld[1]))
@@ -380,7 +366,7 @@ namespace cs::telemetry
 				.Field(
 					"published_is_perspective",
 					cs::engine::IsPerspectiveProjection(
-						published.data.CurrFrameWorldToClip[3]))
+						published.data.ViewProjectionUnjittered[3]))
 				.Field(
 					"published_camera_origin",
 					FormatVector3(
@@ -419,26 +405,24 @@ namespace cs::telemetry
 					"fullscreen_light_row2",
 					FormatFloat4(status.fullscreenLight.data.ViewToWorld[2]));
 
-			// The engine-struct reads exist only to be compared against the snapshot.
-			auto* state = cs::engine::GetGraphicsState();
-			if (!state) {
+			const auto camera = cs::engine::GetWorldCameraRecord();
+			a_sink.Field("camera_record_valid", camera.has_value());
+			if (!camera) {
 				return;
 			}
-			const auto& cameraState = state->cameraState;
 			a_sink
 				.Field(
-					"state_pos_adjust",
+					"record_pos_adjust",
 					FormatVector3(
-						cameraState.posAdjust.x,
-						cameraState.posAdjust.y,
-						cameraState.posAdjust.z))
+						camera->CameraPosAdjust.x,
+						camera->CameraPosAdjust.y,
+						camera->CameraPosAdjust.z))
 				.Field(
-					"state_prev_pos_adjust",
+					"record_prev_pos_adjust",
 					FormatVector3(
-						cameraState.previousPosAdjust.x,
-						cameraState.previousPosAdjust.y,
-						cameraState.previousPosAdjust.z))
-				.Field("state_view_mat_identity", IsIdentity(cameraState.camViewData.viewMat));
+						camera->CameraPreviousPosAdjust.x,
+						camera->CameraPreviousPosAdjust.y,
+						camera->CameraPreviousPosAdjust.z));
 		}
 
 		void CollectFrameBufferRegisters(Sink& a_sink)

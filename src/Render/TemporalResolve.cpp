@@ -122,7 +122,7 @@ namespace cs::render
 				render::TemporalPipeline::Get().SuperResolutionResetPending();
 			const auto* timer = RE::BSTimer::GetSingleton();
 			const auto realFrame = render::TemporalPipeline::Get().CurrentRealFrame();
-			const auto& snapshot = cs::engine::GetFrameBuffer();
+			const auto snapshot = cs::engine::GetWorldCameraRecord();
 			const auto camera = render::temporal::BuildFrameGenerationCamera(
 				snapshot, state->screenWidth, state->screenHeight);
 			render::temporal::SuperResolutionRequest request{
