@@ -49,7 +49,7 @@ namespace cs::features
 		void OnGameFramePresented();
 		[[nodiscard]] bool CaptureHotkeysEnabled() const noexcept
 		{
-			return IsHealthy() && _settings.enabled && _api;
+			return IsHealthy() && _api;
 		}
 		[[nodiscard]] const std::string& SuggestedCaptureHotkey() const noexcept
 		{
@@ -70,7 +70,7 @@ namespace cs::features
 
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(renderdoc_settings::kSchema); }
-		bool TryLoadRuntime();
+		bool TryLoadRuntime(std::string& a_error);
 		void ApplyCapturePath();
 		bool CheckCaptureDiskSpace() const;
 		[[nodiscard]] bool BindCaptureTarget(bool a_reportUnavailable);

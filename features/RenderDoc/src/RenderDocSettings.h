@@ -21,8 +21,7 @@ namespace cs::features::renderdoc_settings
 
 	struct Settings
 	{
-		bool enabled = false;
-		std::string dllPath = "Data\\F4SE\\Plugins\\RenderDoc\\renderdoc.dll";
+		std::string dllPath = "";
 		std::string captureFolder = "";
 		double minFreeDiskGiB = 1.0;
 		int multiFrameCount = 5;
@@ -34,8 +33,7 @@ namespace cs::features::renderdoc_settings
 
 	inline constexpr settings::Schema kSchema{
 		std::tuple{
-			settings::Field{ "enabled", "Enable RenderDoc capture; enabling loads renderdoc.dll.", &Settings::enabled, {}, settings::ApplyTiming::kNextLaunchOnEnable },
-			settings::Field{ "dll_path", "Path to renderdoc.dll.", &Settings::dllPath, {}, settings::ApplyTiming::kNextLaunch },
+			settings::Field{ "dll_path", "Path to renderdoc.dll; empty uses the registered RenderDoc installation, then %ProgramFiles%\\RenderDoc\\renderdoc.dll.", &Settings::dllPath, {}, settings::ApplyTiming::kNextLaunch },
 			settings::Field{ "capture_folder", "Capture folder; empty uses captures beside the F4SE log, with environment variables expanded.", &Settings::captureFolder },
 			settings::Field{ "min_free_disk_gib", "Minimum free disk space in GiB before capture.", &Settings::minFreeDiskGiB, settings::Range{ 0.0, std::numeric_limits<double>::max() } },
 			settings::Field{ "multi_frame_count", "Number of frames in a multi-frame capture.", &Settings::multiFrameCount, settings::Range{ kMinMultiFrameCount, kMaxMultiFrameCount } },

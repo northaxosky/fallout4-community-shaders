@@ -124,7 +124,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 - Upscaling (except TAA) and frame generation require borderless windowed mode.
 - Supported upscaling and frame-generation methods can change while playing; switching may briefly pause rendering.
 - Terrain Shadows requires an xLODGen terrain heightmap export.
-- RenderDoc capture requires an external RenderDoc runtime.
+- RenderDoc capture requires an installed RenderDoc, found automatically; `dll_path` overrides it.
 
 ---
 

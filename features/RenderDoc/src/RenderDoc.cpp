@@ -11,6 +11,7 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <system_error>
 
 #include "F4SE/API.h"
 #include "Log.h"
@@ -87,6 +88,51 @@ namespace cs::features
 			return a_path.string();
 		}
 
+		std::filesystem::path ExpandPathEnvironment(const std::wstring& a_configured)
+		{
+			const auto requiredSize = REX::W32::ExpandEnvironmentStringsW(a_configured.c_str(), nullptr, 0);
+			if (requiredSize == 0)
+				throw std::system_error(static_cast<int>(REX::W32::GetLastError()), std::system_category());
+
+			std::wstring expanded(requiredSize, L'\0');
+			const auto expandedSize = REX::W32::ExpandEnvironmentStringsW(
+				a_configured.c_str(), expanded.data(), requiredSize);
+			if (expandedSize == 0)
+				throw std::system_error(static_cast<int>(REX::W32::GetLastError()), std::system_category());
+			if (expandedSize > requiredSize)
+				throw std::runtime_error("environment changed during path expansion");
+
+			expanded.resize(expandedSize - 1);
+			return expanded;
+		}
+
+		// The installer registers qrenderdoc.exe as the .rdc handler; renderdoc.dll sits beside it.
+		std::filesystem::path InstalledRuntimePath()
+		{
+			constexpr auto* key = L"RenderDoc.RDCCapture.1\\shell\\open\\command";
+			DWORD bytes = 0;
+			if (::RegGetValueW(HKEY_CLASSES_ROOT, key, nullptr, RRF_RT_REG_SZ, nullptr, nullptr, &bytes) == ERROR_SUCCESS) {
+				std::wstring command(bytes / sizeof(wchar_t), L'\0');
+				if (::RegGetValueW(HKEY_CLASSES_ROOT, key, nullptr, RRF_RT_REG_SZ, nullptr, command.data(), &bytes) == ERROR_SUCCESS &&
+					command.starts_with(L'"')) {
+					const std::filesystem::path editor(command.substr(1, command.find(L'"', 1) - 1));
+					if (editor.is_absolute())
+						return editor.parent_path() / L"renderdoc.dll";
+				}
+			}
+			return ExpandPathEnvironment(L"%ProgramFiles%\\RenderDoc\\renderdoc.dll");
+		}
+
+		std::filesystem::path ResolveRuntimePath(const std::string& a_configured)
+		{
+			if (a_configured.empty())
+				return InstalledRuntimePath();
+			std::wstring configured;
+			if (!REX::UTF8_TO_UTF16(a_configured, configured))
+				throw std::invalid_argument("DLL path is not valid UTF-8");
+			return std::filesystem::absolute(ExpandPathEnvironment(configured)).lexically_normal();
+		}
+
 		std::filesystem::path ExpandCaptureFolderEnvironment(const std::string& a_configured)
 		{
 			std::wstring configured;
@@ -95,22 +141,12 @@ namespace cs::features
 				return a_configured;
 			}
 
-			const auto requiredSize = REX::W32::ExpandEnvironmentStringsW(configured.c_str(), nullptr, 0);
-			if (requiredSize == 0) {
+			try {
+				return ExpandPathEnvironment(configured);
+			} catch (const std::exception&) {
 				L->warn("Failed to expand environment variables in RenderDoc capture folder; using the configured path");
 				return configured;
 			}
-
-			std::wstring expanded(requiredSize, L'\0');
-			const auto expandedSize = REX::W32::ExpandEnvironmentStringsW(
-				configured.c_str(), expanded.data(), requiredSize);
-			if (expandedSize == 0 || expandedSize > requiredSize) {
-				L->warn("Failed to expand environment variables in RenderDoc capture folder; using the configured path");
-				return configured;
-			}
-
-			expanded.resize(expandedSize - 1);
-			return expanded;
 		}
 
 		std::filesystem::path ResolveCaptureFolder(const std::string& a_configured)
@@ -158,19 +194,16 @@ namespace cs::features
 
 	void RenderDoc::Load()
 	{
-		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={} capture_target={} capture={} multi_capture={}",
-			_settings.enabled, _settings.dllPath, _settings.captureFolder,
+		L->info("Settings: dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={} capture_target={} capture={} multi_capture={}",
+			_settings.dllPath, _settings.captureFolder,
 			_settings.minFreeDiskGiB, _settings.multiFrameCount,
 			CaptureTargetConfigName(_settings.captureTarget),
 			_settings.captureHotkey, _settings.multiCaptureHotkey);
 
-		if (!_settings.enabled)
-			return;
 		// Load before D3D initialization.
-		if (!TryLoadRuntime()) {
-			FailLoad("RenderDoc runtime load failed for settings.dll_path '" + _settings.dllPath + "'; verify the path and RenderDoc 1.7 API compatibility");
-			return;
-		}
+		std::string error;
+		if (!TryLoadRuntime(error))
+			FailLoad(std::move(error));
 	}
 
 	bool RenderDoc::SaveSettings()
@@ -178,7 +211,7 @@ namespace cs::features
 		return settings::SaveDelta(renderdoc_settings::kSchema, GetConfigKey(), _settings, *L);
 	}
 
-	bool RenderDoc::TryLoadRuntime()
+	bool RenderDoc::TryLoadRuntime(std::string& a_error)
 	{
 		if (_api)
 			return true;
@@ -186,23 +219,34 @@ namespace cs::features
 			return false;
 		_attemptedLoad = true;
 
+		std::filesystem::path path;
+		try {
+			path = ResolveRuntimePath(_settings.dllPath);
+		} catch (const std::exception& error) {
+			a_error = std::format("RenderDoc runtime path resolution failed for settings.dll_path '{}': {}", _settings.dllPath, error.what());
+			return false;
+		}
+		const auto pathUtf8 = PathToUtf8(path);
 		// Post-D3D loading can crash.
-		_module = LoadLibraryA(_settings.dllPath.c_str());
+		_module = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!_module) {
-			L->warn("LoadLibrary({}) failed: {:#x}", _settings.dllPath, GetLastError());
+			const auto error = GetLastError();
+			auto reason = std::system_category().message(static_cast<int>(error));
+			reason.erase(reason.find_last_not_of("\r\n") + 1);
+			a_error = std::format("RenderDoc runtime load failed for '{}': LoadLibraryExW error {} ({})", pathUtf8, error, reason);
 			return false;
 		}
 
 		auto getApi = reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(_module, "RENDERDOC_GetAPI"));
 		if (!getApi) {
-			L->warn("RENDERDOC_GetAPI not found in {}", _settings.dllPath);
+			a_error = std::format("RenderDoc runtime load failed for '{}': missing RENDERDOC_GetAPI export", pathUtf8);
 			FreeLibrary(_module);
 			_module = nullptr;
 			return false;
 		}
 
 		if (getApi(eRENDERDOC_API_Version_1_7_0, reinterpret_cast<void**>(&_api)) != 1 || !_api) {
-			L->warn("RENDERDOC_GetAPI returned no API for version 1.7.0");
+			a_error = std::format("RenderDoc runtime load failed for '{}': RENDERDOC_GetAPI rejected API version 1.7.0", pathUtf8);
 			_api = nullptr;
 			FreeLibrary(_module);
 			_module = nullptr;
@@ -219,7 +263,7 @@ namespace cs::features
 
 		ApplyCapturePath();
 		_lastCaptureCount = _api->GetNumCaptures();
-		L->info("RenderDoc runtime loaded");
+		L->info("RenderDoc runtime loaded from '{}'", pathUtf8);
 		return true;
 	}
 
@@ -384,7 +428,6 @@ namespace cs::features
 	void RenderDoc::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		a_sink
-			.Field("enabled", _settings.enabled)
 			.Field("loaded", _api != nullptr)
 			.Field("attempted", _attemptedLoad)
 			.Field(
@@ -447,13 +490,9 @@ namespace cs::features
 
 	void RenderDoc::TriggerCapture()
 	{
-		if (!_settings.enabled) {
-			L->warn("TriggerCapture called while feature disabled");
-			return;
-		}
 		// Failed startup loads require a restart.
 		if (!_api) {
-			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
+			L->warn("RenderDoc runtime not loaded; install RenderDoc or fix dll_path, then restart with the feature loaded");
 			return;
 		}
 		if (!RequestFrames(1))
@@ -469,12 +508,8 @@ namespace cs::features
 
 	void RenderDoc::TriggerMultiFrameCapture()
 	{
-		if (!_settings.enabled) {
-			L->warn("TriggerMultiFrameCapture called while feature disabled");
-			return;
-		}
 		if (!_api) {
-			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
+			L->warn("RenderDoc runtime not loaded; install RenderDoc or fix dll_path, then restart with the feature loaded");
 			return;
 		}
 		if (!_api->TriggerMultiFrameCapture) {
@@ -556,13 +591,6 @@ namespace cs::features
 	void RenderDoc::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		bool prevEnabled = _settings.enabled;
-		if (edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled))) {
-			if (_settings.enabled && !_api)
-				L->warn("Enabled at runtime; restart the game to load renderdoc.dll safely");
-			else if (!_settings.enabled && prevEnabled)
-				L->info("Disabled; runtime stays loaded until process exit");
-		}
 
 		dmui::ui::TextDisabled(
 			"The host owns capture bindings. Suggested defaults: %s and %s.",
@@ -604,6 +632,7 @@ namespace cs::features
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
 		if (edit.Continuous(dmui::ui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf))))
 			_settings.dllPath = dllPathBuf;
+		dmui::ui::TextDisabled("Empty uses the installed RenderDoc. DLL path changes require a restart.");
 
 		char folderBuf[260];
 		strncpy_s(folderBuf, _settings.captureFolder.c_str(), _TRUNCATE);
@@ -644,8 +673,8 @@ namespace cs::features
 			TriggerMultiFrameCapture();
 		dmui::ui::EndDisabled();
 
-		if (!_api && _settings.enabled)
-			dmui::ui::TextDisabled("Runtime load failed - fix the DLL path then restart the game.");
+		if (!_api)
+			dmui::ui::TextDisabled("Runtime load failed - install RenderDoc or fix the DLL path, then restart.");
 	}
 
 	std::vector<std::string_view> RenderDoc::GetRestartSettings() const

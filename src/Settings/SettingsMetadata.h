@@ -15,8 +15,7 @@ namespace cs::settings
 	enum class ApplyTiming
 	{
 		kImmediate,
-		kNextLaunch,
-		kNextLaunchOnEnable
+		kNextLaunch
 	};
 
 	using Value = std::variant<bool, std::int64_t, std::uint64_t, float, double, std::string>;

@@ -8,7 +8,7 @@
 - Wetness Effects: ported upstream rain timing, shore wetness, weather puddles and film roughness.
 - Upscaling: restored the depth and refraction upscale pass, which was silently skipped.
 - Fixed several reconstructed engine shaders that did not match vanilla output, including decals, static objects, grass, tiled lighting and sunlight with Screen Space Shadows disabled.
-- RenderDoc now captures the game frame when Frame Generation is loaded.
+- RenderDoc: captures the game frame when Frame Generation is loaded, loads with the feature and finds the installed RenderDoc automatically.
 - OG and NG runtimes: every engine path now has addresses; still untested, only 1.11.240 is supported.
 
 ## 0.1.1

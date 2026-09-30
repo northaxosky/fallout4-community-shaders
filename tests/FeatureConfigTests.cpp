@@ -245,10 +245,11 @@ namespace
 		using namespace cs::features::renderdoc_settings;
 		const Settings boot;
 		auto current = boot;
-		current.enabled = true;
+		current.dllPath = "C:\\RenderDoc\\renderdoc.dll";
 		CHECK(RestartRequired(kSchema, boot, current).size() == 1);
-		// Disabling an enable-only restart setting applies live.
-		CHECK(RestartRequired(kSchema, current, boot).empty());
+		current = boot;
+		current.multiFrameCount = 10;
+		CHECK(RestartRequired(kSchema, boot, current).empty());
 	}
 }
 

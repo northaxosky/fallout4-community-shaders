@@ -311,10 +311,6 @@ namespace cs::settings
 				if (field.timing == ApplyTiming::kImmediate ||
 					a_boot.*field.member == a_current.*field.member)
 					return;
-				if constexpr (std::same_as<typename std::remove_cvref_t<decltype(field)>::ValueType, bool>) {
-					if (field.timing == ApplyTiming::kNextLaunchOnEnable && !(a_current.*field.member))
-						return;
-				}
 				result.push_back(field.description);
 			};
 			(check(a_fields), ...);
