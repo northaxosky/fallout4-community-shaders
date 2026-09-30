@@ -1,3 +1,4 @@
+// FO4 debug preview is display-only and does not modify capture radiance.
 TextureCube<float3> InputCubemap : register(t0);
 RWTexture2D<float4> OutputTexture : register(u0);
 SamplerState LinearSampler : register(s0);

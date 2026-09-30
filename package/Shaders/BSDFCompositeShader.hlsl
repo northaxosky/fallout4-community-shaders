@@ -23,7 +23,7 @@
 
 #if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 #	define WETNESS_COMPOSITE_CONSUMER 1
-#	include "DynamicCubemaps/Composite.hlsli"
+#	include "FO4/DynamicCubemaps/Composite.hlsli"
 #	include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #endif
 

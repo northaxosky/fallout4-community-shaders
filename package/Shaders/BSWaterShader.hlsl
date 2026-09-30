@@ -330,13 +330,13 @@ float3 surfaceColor(
 		} else {
 			float3 specularIrradiance = 1.0;
 			if (skylightingSpecular < 1.0)
-				specularIrradiance = DynamicCubemaps::IrradianceToLinear(DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz);
+				specularIrradiance = Color::IrradianceToLinear(DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz);
 
 			float3 specularIrradianceReflections = 1.0;
 			if (skylightingSpecular > 0.0)
-				specularIrradianceReflections = DynamicCubemaps::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz);
+				specularIrradianceReflections = Color::IrradianceToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz);
 
-			dynamicCubemap = DynamicCubemaps::IrradianceToGamma(lerp(specularIrradiance, specularIrradianceReflections, skylightingSpecular));
+			dynamicCubemap = Color::IrradianceToGamma(lerp(specularIrradiance, specularIrradianceReflections, skylightingSpecular));
 		}
 
 		float reflectionAmount = saturate(cameraDistance / 1024.0);

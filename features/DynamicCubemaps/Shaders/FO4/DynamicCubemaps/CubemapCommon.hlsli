@@ -3,34 +3,7 @@
 
 namespace DynamicCubemaps
 {
-	// FO4 lights in linear HDR, so upstream's linear-lighting branch applies: irradiance conversions are identity.
-	float IrradianceToLinear(float color)
-	{
-		return color;
-	}
-
-	float IrradianceToGamma(float color)
-	{
-		return color;
-	}
-
-	float3 IrradianceToLinear(float3 color)
-	{
-		return color;
-	}
-
-	float3 IrradianceToGamma(float3 color)
-	{
-		return color;
-	}
-
-	static const float ReflectionNormalisationScale = 1.0;
-
-	float RGBToLuminance(float3 color)
-	{
-		return dot(color, float3(0.2125, 0.7154, 0.0721));
-	}
-
+	// FO4 capture preparation uses the shared kernels' native cube-face orientation.
 	float3 CubeFaceDirection(uint face, float2 uv)
 	{
 		float3 direction = 0.0;
