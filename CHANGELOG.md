@@ -1,8 +1,15 @@
 # Changelog
 
-## 0.1.2
+## 0.2.0
 
 - Added an in-game changelog.
+- Screen Space GI: ported upstream's GI integration, denoiser, resolution modes and vanilla SSAO toggle; indirect light now composes in linear space where the game forms diffuse light, respects vertex AO, and has a stronger AO default for interiors lit by placed lights.
+- Dynamic Cubemaps: ported upstream's capture pipeline and limited reflections to water and wet surfaces as upstream does, fixing flat silver reflections elsewhere.
+- Wetness Effects: ported upstream rain timing, shore wetness, weather puddles and film roughness.
+- Upscaling: restored the depth and refraction upscale pass, which was silently skipped.
+- Fixed several reconstructed engine shaders that did not match vanilla output, including decals, static objects, grass, tiled lighting and sunlight with Screen Space Shadows disabled.
+- RenderDoc now captures the game frame when Frame Generation is loaded.
+- OG and NG runtimes: every engine path now has addresses; still untested, only 1.11.240 is supported.
 
 ## 0.1.1
 
