@@ -65,7 +65,7 @@ Every feature ships turned off. Enable the ones you want in Dear Modding UI, the
 NG should work but is untested. OG is unsupported.
 
 [b]Does it work on Linux / Steam Deck (Proton)?[/b]
-Proton's built-in shader compiler cannot build the shaders, so only upscaling and frame generation work. Place a Windows 10 [b]d3dcompiler_47.dll[/b] in the prefix's [b]system32[/b] or next to Fallout4.exe, then delete [b]Data\ShaderCache[/b]. The log's compiler version should then start with 10.0.
+Proton's built-in shader compiler cannot build the shaders, so only upscaling and frame generation work. Place a Windows 10 [b]d3dcompiler_47.dll[/b] in the prefix's [b]system32[/b] or next to Fallout4.exe.
 
 [b]Which upscaler should I use?[/b]
 DLSS on NVIDIA RTX cards and FSR 4 on compatible AMD Radeon cards. TAA and FSR 3 work on other DX12-capable GPUs.
@@ -78,9 +78,6 @@ It needs a terrain heightmap exported with xLODGen.
 
 [b]Why is the first launch slow?[/b]
 Shaders compile after installing or updating. Later launches load them from the cache.
-
-[b]The game froze for a moment when I changed upscalers.[/b]
-That's expected. Switching upscaling or frame-generation methods briefly pauses rendering.
 
 [b]Can I add or remove it mid-playthrough?[/b]
 Yes. It has no plugin file and writes nothing to your saves.
