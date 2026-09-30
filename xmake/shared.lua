@@ -14,6 +14,12 @@ function main(target)
             "features/Water Effects/Shaders/WaterEffects/watercaustics.dds"
         },
         sources = {
+            "src/Profiler.h",
+            "src/Profiler.cpp",
+            "src/Features/PerformanceOverlay/DrawCallRow.h",
+            "src/Features/PerformanceOverlay/CircularBuffer.h",
+            "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.h",
+            "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.cpp",
             "src/Utils/PerfUtils.h",
             "src/Features/ScreenSpaceShadows/bend_sss_cpu.h"
         },
@@ -45,7 +51,12 @@ function main(target)
         assert(extension == ".h" or extension == ".hpp" or extension == ".cpp",
             "unsupported shared C++ entry: " .. entry)
         if target then
-            target:add(extension == ".cpp" and "files" or "headerfiles", source)
+            if entry == "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.cpp" then
+                -- FO4: scope the upstream size_t-to-float mean warning to this unchanged source.
+                target:add("files", source, { cxxflags = { "/wd4267" } })
+            else
+                target:add(extension == ".cpp" and "files" or "headerfiles", source)
+            end
         end
     end
     for _, entry in ipairs(shared.includedirs) do
@@ -53,6 +64,9 @@ function main(target)
         if target then
             target:add("includedirs", directory)
         end
+    end
+    if target then
+        target:add("sysincludedirs", path.join(os.projectdir(), "extern/Streamline/external/json/include"))
     end
     return shared
 end

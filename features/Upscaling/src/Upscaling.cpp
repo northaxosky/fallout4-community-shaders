@@ -82,6 +82,10 @@ namespace cs::features
 			static_cast<std::uint32_t>(UpscaleMethod::kNONE);
 		settings = candidate;
 		_bootSettings = candidate;
+		_liveSettings = cs::settings::BindLiveSettings(render::temporal::kSchema, settings, [this] {
+			settings.enabled = settings.upscaleMethod != static_cast<std::uint32_t>(UpscaleMethod::kNONE);
+			render::TemporalPipeline::Get().SubmitLiveConfiguration();
+		});
 		return true;
 	}
 

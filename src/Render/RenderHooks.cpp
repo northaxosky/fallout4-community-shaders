@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "Render/DeferredDrawAnchor.h"
 #include "Render/EngineCallSite.h"
+#include "Render/FrameProfiler.h"
 #include "Render/ShaderInjection.h"
 
 #include <algorithm>
@@ -202,6 +203,16 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		struct DrawProfiling_Hook
+		{
+			static void thunk(bool a_force, bool a_clear)
+			{
+				func(a_force, a_clear);
+				render::profiling::RecordDraw();
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		// DrawWorld::Forward renders sky batch 7, then cloud group 14; water and alpha follow.
 		struct ForwardSkyGroup_Hook
 		{
@@ -289,6 +300,19 @@ namespace cs::engine
 			return false;
 		InstallDeferredDrawAnchor();
 		return g_deferredDrawAnchorInstalled;
+	}
+
+	bool EnsureDrawProfilingInstalled()
+	{
+		static bool installed{};
+		if (installed)
+			return true;
+		if (!RegistrationAllowed("DrawProfiling"))
+			return false;
+		// FO4: SetDirtyStates is the shared native draw submission boundary on OG/NG/AE.
+		stl::detour_thunk<DrawProfiling_Hook>(REL::ID({ 1557284, 2277017, 2277017 }));
+		installed = true;
+		return true;
 	}
 
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)

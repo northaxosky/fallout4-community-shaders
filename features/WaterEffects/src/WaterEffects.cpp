@@ -99,6 +99,7 @@ namespace cs::features
 		if (!settings::Parse(we::kSchema, a_config, candidate, a_error))
 			return false;
 		_settings = we::Clamp(candidate);
+		_liveSettings = settings::BindLiveSettings(we::kSchema, _settings, [this] { PublishSettings(); });
 		if (!a_config.contains("settings"))
 			PublishSettings();
 		return true;

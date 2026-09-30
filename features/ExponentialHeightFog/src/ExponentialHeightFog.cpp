@@ -66,6 +66,7 @@ namespace cs::features
 		if (!settings::Parse(ehf::kSchema, a_config, candidate, a_error))
 			return false;
 		_settings = ehf::Clamp(candidate);
+		_liveSettings = settings::BindLiveSettings(ehf::kSchema, _settings, [this] { PublishSettings(); });
 		return true;
 	}
 

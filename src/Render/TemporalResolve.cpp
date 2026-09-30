@@ -246,7 +246,7 @@ namespace cs::render
 
 	bool TemporalRenderer::PerformUpscaling()
 	{
-		cs::render::annotation::ScopedEvent upscaleScope("Upscaling/SuperResolution");
+		cs::render::annotation::ScopedEvent upscaleScope("Upscaling/SuperResolution", false);
 		_upscaledThisFrame = false;
 		_spatialFallbackThisFrame.store(false, std::memory_order_release);
 		_superResolutionSubmissionUnsafe = false;

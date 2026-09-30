@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -18,7 +19,8 @@ namespace cs::settings
 		kNextLaunch
 	};
 
-	using Value = std::variant<bool, std::int64_t, std::uint64_t, float, double, std::string>;
+	using Float2 = std::array<float, 2>;
+	using Value = std::variant<bool, std::int64_t, std::uint64_t, float, double, std::string, Float2>;
 
 	struct FieldView
 	{

@@ -203,6 +203,7 @@ namespace cs::features
 			return false;
 		}
 		_settings = candidate;
+		_liveSettings = settings::BindLiveSettings(dynamic_cubemaps::kSchema, _settings, [this] { PublishSettings(); });
 		return true;
 	}
 
@@ -940,6 +941,9 @@ namespace cs::features
 		ID3D11SamplerState* sampler = _computeSampler.get();
 		context->CSSetSamplers(0, 1, &sampler);
 
+		cs::render::annotation::ScopedEvent timing(a_reflections ?
+													   "DynamicCubemaps::UpdateReflections" :
+													   "DynamicCubemaps::Update");
 		context->CSSetShader(_detectLightingCS.get(), nullptr, 0);
 		context->Dispatch(1, 1, 1);
 
@@ -958,6 +962,9 @@ namespace cs::features
 			return;
 		}
 		auto& stream = Stream(a_reflections);
+		cs::render::annotation::ScopedEvent timing(a_reflections ?
+													   "DynamicCubemaps::InferReflections" :
+													   "DynamicCubemaps::Infer");
 		context->GenerateMips(stream.color.srv.get());
 
 		std::array<ID3D11ShaderResourceView*, 3> srvs{
@@ -987,6 +994,7 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent timing("DynamicCubemaps::Irradiance");
 		if (a_doSetup) {
 			for (std::uint32_t face = 0; face < 6; ++face) {
 				const std::uint32_t subresource =
@@ -1042,6 +1050,9 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent timing(a_reflections ?
+													   "DynamicCubemaps::CompressReflections" :
+													   "DynamicCubemaps::Compress");
 
 		ID3D11ShaderResourceView* source = _filteredArraySRV.get();
 		context->CSSetShaderResources(0, 1, &source);

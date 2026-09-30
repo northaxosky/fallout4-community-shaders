@@ -69,6 +69,7 @@ namespace cs::features
 		if (!settings::Parse(isl::kSchema, a_config, candidate, a_error))
 			return false;
 		_settings = isl::Clamp(candidate);
+		_liveSettings = settings::BindLiveSettings(isl::kSchema, _settings, [this] { PublishSettings(); });
 		return true;
 	}
 

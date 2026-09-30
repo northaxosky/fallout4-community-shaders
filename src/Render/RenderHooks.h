@@ -4,6 +4,7 @@
 
 namespace cs::engine
 {
+	bool EnsureDrawProfilingInstalled();
 	using RenderHookCallback = std::function<void()>;
 
 	// Late priority keeps additive lights after darkening.
