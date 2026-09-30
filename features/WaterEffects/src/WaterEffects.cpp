@@ -16,13 +16,18 @@
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
+#include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
+#include "Render/ScopedContextState.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/CSUtil.h"
+#include "World/Water.h"
 
 namespace cs::features
 {
@@ -34,11 +39,6 @@ namespace cs::features
 
 		constexpr const wchar_t* kCausticsPath =
 			L"Data\\Shaders\\WaterEffects\\watercaustics.dds";
-
-		constexpr std::uint32_t kModeDisabled = 0;
-		constexpr std::uint32_t kModeNormal = 1;
-		constexpr std::uint32_t kModeCaustics = 2;
-		constexpr std::uint32_t kModeSubmersion = 3;
 
 		constexpr std::array<FeatureDebugView, 2> kDebugViews{ { { "water_caustics",
 																	 "Caustics multiplier on submerged surfaces",
@@ -119,6 +119,7 @@ namespace cs::features
 	{
 		PublishSettings();
 
+		// FO4: only owned, validated routes may activate a live contribution.
 		const auto registerContribution = [this](
 											  cs::engine::ShaderInjectionTarget a_target,
 											  cs::engine::ShaderInjectionBindCallback a_bind,
@@ -129,17 +130,13 @@ namespace cs::features
 			std::vector<cs::engine::ShaderSlotClaim> slotClaims{
 				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kCausticsPSSlot },
-				{ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kSceneDepthPSSlot }
+					.slot = a_fullscreenDebug ? kDebugTexturePSSlot : kCausticsPSSlot }
 			};
 			if (a_fullscreenDebug) {
 				defines.emplace(
 					cs::engine::shader_injection_defines::kWaterEffectsFullscreenDebug,
 					"1");
 			} else {
-				// See WaterCausticsSampler.hlsli.
 				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kSampler,
 					.slot = kCausticsSamplerPSSlot });
@@ -200,7 +197,7 @@ namespace cs::features
 			"Water caustics installed: hooks=deferred_lights+deferred_composite, "
 			"consumers=BSDFLight+BSDFComposite t{}+t{}/s{}, enabled={}.",
 			kCausticsPSSlot,
-			kSceneDepthPSSlot,
+			kDebugTexturePSSlot,
 			kCausticsSamplerPSSlot,
 			_settings.enabled);
 	}
@@ -300,6 +297,104 @@ namespace cs::features
 		}
 		_resourcesReady.store(true, std::memory_order_release);
 		L->info("Water caustics texture and sampler ready.");
+		try {
+			BuildDebugResources(a_device);
+			_debugResourcesReady.store(_debugVS && _debugPS[0] && _debugPS[1], std::memory_order_release);
+		} catch (const std::exception& e) {
+			L->warn("Water debug resources unavailable: {}", e.what());
+		}
+	}
+
+	void WaterEffects::BuildDebugResources(ID3D11Device* a_device)
+	{
+		winrt::com_ptr<ID3D11Device1> device;
+		DX::ThrowIfFailed(a_device->QueryInterface(IID_PPV_ARGS(device.put())));
+		const auto level = a_device->GetFeatureLevel();
+		D3D_FEATURE_LEVEL selected{};
+		DX::ThrowIfFailed(device->CreateDeviceContextState(
+			0, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), &selected,
+			_debugContextState.put()));
+		_debugVS.attach(static_cast<ID3D11VertexShader*>(cs::util::CompileShader(
+			L"Data\\Shaders\\FO4\\WaterEffects\\Debug.hlsl", {}, "vs_5_0")));
+		for (std::size_t index = 0; index < _debugPS.size(); ++index) {
+			std::vector<std::pair<const char*, const char*>> defines{ { "FO4CS_SUBSTRATE", "1" } };
+			if (index == 1)
+				defines.emplace_back("WATER_SUBMERSION_DEBUG", "1");
+			_debugPS[index].attach(static_cast<ID3D11PixelShader*>(cs::util::CompileShader(
+				L"Data\\Shaders\\FO4\\WaterEffects\\Debug.hlsl", defines, "ps_5_0")));
+		}
+		D3D11_RASTERIZER_DESC rasterizer{};
+		rasterizer.FillMode = D3D11_FILL_SOLID;
+		rasterizer.CullMode = D3D11_CULL_NONE;
+		rasterizer.DepthClipEnable = true;
+		DX::ThrowIfFailed(a_device->CreateRasterizerState(&rasterizer, _debugRasterizer.put()));
+	}
+
+	void WaterEffects::RenderDebug(ID3D11DeviceContext* a_context)
+	{
+		_debugFrameReady = false;
+		const auto mode = _debugVisualization.load(std::memory_order_acquire);
+		if (!CanBind() || mode == DebugVisualization::kOff ||
+			!_debugResourcesReady.load(std::memory_order_acquire))
+			return;
+		if (!cs::render::GetCanonicalSceneDepthSRV()) {
+			_debugDepthMissing.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+		const auto* graphics = cs::engine::GetGraphicsState();
+		if (!graphics)
+			return;
+		const auto extent = cs::render::GetActiveExtent(graphics->screenWidth, graphics->screenHeight);
+		if (!extent.width || !extent.height)
+			return;
+		try {
+			if (!_debugTexture || _debugTexture->desc.Width != graphics->screenWidth ||
+				_debugTexture->desc.Height != graphics->screenHeight) {
+				D3D11_TEXTURE2D_DESC desc{};
+				desc.Width = graphics->screenWidth;
+				desc.Height = graphics->screenHeight;
+				desc.MipLevels = 1;
+				desc.ArraySize = 1;
+				desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+				desc.SampleDesc.Count = 1;
+				desc.Usage = D3D11_USAGE_DEFAULT;
+				desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+				auto texture = std::make_unique<cs::buffer::Texture2D>(desc);
+				winrt::com_ptr<ID3D11Device> device;
+				a_context->GetDevice(device.put());
+				DX::ThrowIfFailed(device->CreateShaderResourceView(
+					texture->resource.get(), nullptr, texture->srv.put()));
+				DX::ThrowIfFailed(device->CreateRenderTargetView(
+					texture->resource.get(), nullptr, texture->rtv.put()));
+				texture->SetName("WaterEffects/Debug.Texture", "WaterEffects/Debug.SRV", "", "WaterEffects/Debug.RTV");
+				_debugTexture = std::move(texture);
+			}
+			// FO4: restore the complete context because native bindings are shadow-cached.
+			cs::render::ScopedContextState state(a_context, _debugContextState.get());
+			if (!state.IsActive())
+				return;
+			cs::render::annotation::ScopedEvent annotation("WaterEffects/Debug");
+			a_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			a_context->VSSetShader(_debugVS.get(), nullptr, 0);
+			a_context->PSSetShader(_debugPS[mode == DebugVisualization::kSubmersion ? 1 : 0].get(), nullptr, 0);
+			a_context->RSSetState(_debugRasterizer.get());
+			const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(extent.width),
+				static_cast<float>(extent.height), 0, 1 };
+			a_context->RSSetViewports(1, &viewport);
+			auto* target = _debugTexture->rtv.get();
+			a_context->OMSetRenderTargets(1, &target, nullptr);
+			const float clear[4]{ 0, 0, 0, 1 };
+			a_context->ClearRenderTargetView(target, clear);
+			cs::render::BindSharedData(a_context, cs::engine::ShaderStage::kPixel);
+			auto* texture = _causticsSrv.get();
+			auto* sampler = _causticsSampler.get();
+			a_context->PSSetShaderResources(kCausticsPSSlot, 1, &texture);
+			a_context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &sampler);
+			a_context->Draw(3, 0);
+			_debugFrameReady = true;
+		} catch (const std::exception& e) {
+			L->warn("Water debug rendering failed: {}", e.what());
+		}
 	}
 
 	void WaterEffects::SetValidationDetail(std::string a_detail)
@@ -337,7 +432,7 @@ namespace cs::features
 		}
 		if (!cs::render::IsSharedDataReady()) {
 			a_error =
-				"the shared substrate is unavailable, so b6 carries no water plane";
+				"the shared substrate is unavailable, so b5 carries no water grid";
 			SetValidationDetail(a_error);
 			return false;
 		}
@@ -365,8 +460,8 @@ namespace cs::features
 			return;
 		_engineBinding.Save(context, kCausticsPSSlot);
 		_engineSamplerBinding.Save(context, kCausticsSamplerPSSlot);
-		ID3D11ShaderResourceView* nullSRVs[2]{};
-		context->PSSetShaderResources(kCausticsPSSlot, 2, nullSRVs);
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		context->PSSetShaderResources(kCausticsPSSlot, 1, &nullSRV);
 		ID3D11SamplerState* nullSampler = nullptr;
 		context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &nullSampler);
 	}
@@ -375,8 +470,8 @@ namespace cs::features
 	{
 		if (!a_context || !CanBind())
 			return;
-		ID3D11ShaderResourceView* srvs[2]{ _causticsSrv.get(), nullptr };
-		a_context->PSSetShaderResources(kCausticsPSSlot, 2, srvs);
+		auto* srv = _causticsSrv.get();
+		a_context->PSSetShaderResources(kCausticsPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _causticsSampler.get();
 		a_context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
@@ -391,28 +486,23 @@ namespace cs::features
 
 	void WaterEffects::SaveDebugBindings()
 	{
-		if (_debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff) {
-			return;
-		}
 		auto* context = GetImmediateContext();
 		if (!context)
 			return;
-		_debugBinding.Save(context, kCausticsPSSlot);
-		ID3D11ShaderResourceView* nullSRVs[2]{};
-		context->PSSetShaderResources(kCausticsPSSlot, 2, nullSRVs);
+		RenderDebug(context);
+		_debugBinding.Save(context, kDebugTexturePSSlot);
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		context->PSSetShaderResources(kDebugTexturePSSlot, 1, &nullSRV);
 	}
 
 	void WaterEffects::BindDebugTextures(ID3D11DeviceContext* a_context)
 	{
-		if (!a_context || _debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff || !CanBind()) {
+		if (!a_context || _debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff || !CanBind() || !_debugFrameReady) {
 			return;
 		}
-		auto* depthSrv = cs::engine::GetSceneDepthSRV();
-		ID3D11ShaderResourceView* srvs[2]{ _causticsSrv.get(), depthSrv };
-		a_context->PSSetShaderResources(kCausticsPSSlot, 2, srvs);
+		auto* texture = _debugTexture->srv.get();
+		a_context->PSSetShaderResources(kDebugTexturePSSlot, 1, &texture);
 		_debugBinds.fetch_add(1, std::memory_order_relaxed);
-		if (!depthSrv)
-			_debugDepthMissing.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void WaterEffects::RestoreDebugBindings()
@@ -421,56 +511,19 @@ namespace cs::features
 		_debugBinding.Restore(context);
 	}
 
-	cs::WaterEffectsFeatureData WaterEffects::GetCommonBufferData() const
-	{
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		const auto* cell = player ? player->GetParentCell() : nullptr;
-		bool hasWater = cell && cell->HasWater();
-		// Cells that inherit water height from the worldspace store a sentinel
-		// in waterHeight; the engine's own accessor resolves the inheritance.
-		float waterHeight = hasWater ? player->GetRelevantWaterHeight() : we::kNoWaterHeight;
-		if (hasWater && !we::IsUsableWaterHeight(waterHeight)) {
-			hasWater = false;
-			waterHeight = we::kNoWaterHeight;
-		}
-		_hasWater.store(hasWater, std::memory_order_relaxed);
-		_waterHeight.store(waterHeight, std::memory_order_relaxed);
-
-		// Same predicate as the bind path: publishing a live mode while the
-		// texture stays unbound would multiply sunlight by zero.
-		if (!CanBind())
-			return {};
-
-		std::uint32_t mode = kModeNormal;
-		switch (_debugVisualization.load(std::memory_order_acquire)) {
-		case DebugVisualization::kCaustics:
-			mode = kModeCaustics;
-			break;
-		case DebugVisualization::kSubmersion:
-			mode = kModeSubmersion;
-			break;
-		default:
-			break;
-		}
-
-		return {
-			.Mode = mode,
-			.HasWater = hasWater ? 1U : 0U,
-			.WaterHeight = waterHeight
-		};
-	}
-
 	void WaterEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
+		const auto water = cs::engine::GetWaterDataStatus();
 		const auto lightSnapshot = cs::engine::GetShaderInjectionTargetSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfLight);
 		const auto detail = GetValidationDetail();
 		a_sink
 			.Field("configured_enabled", _enabled.load(std::memory_order_relaxed))
-			.Field("has_water", _hasWater.load(std::memory_order_relaxed))
+			.Field("has_water", water.cameraCellHeight != cs::engine::kNoWaterHeight)
 			.Field(
 				"water_height",
-				static_cast<double>(_waterHeight.load(std::memory_order_relaxed)))
+				static_cast<double>(water.cameraCellHeight))
+			.Field("water_cells", static_cast<std::int64_t>(water.waterCells))
 			.Field(
 				"debug_mode",
 				DebugVisualizationName(
@@ -482,6 +535,7 @@ namespace cs::features
 				"render_callbacks_ready",
 				_renderCallbacksReady.load(std::memory_order_relaxed))
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_relaxed))
+			.Field("debug_resources_ready", _debugResourcesReady.load(std::memory_order_relaxed))
 			.Field("shared_data_ready", cs::render::IsSharedDataReady())
 			.Field(
 				"injection_operational",
@@ -521,10 +575,11 @@ namespace cs::features
 			"Upstream ships no caustics tunables; every constant is fixed.");
 
 		if (_injectionsOperational.load(std::memory_order_relaxed)) {
-			if (_hasWater.load(std::memory_order_relaxed)) {
+			const auto water = cs::engine::GetWaterDataStatus();
+			if (water.cameraCellHeight != cs::engine::kNoWaterHeight) {
 				dmui::ui::TextDisabled(
 					"Cell water plane: z = %.1f",
-					_waterHeight.load(std::memory_order_relaxed));
+					water.cameraCellHeight);
 			} else {
 				dmui::ui::TextDisabled("Current cell has no water plane.");
 			}
@@ -542,9 +597,8 @@ namespace cs::features
 			tooltip.Visible()) {
 			dmui::ui::Text(
 				"%s",
-				"Debug views fetch the caustics texture manually because the "
-				"composite has no free sampler slot, so they do not reproduce "
-				"the light path's mip selection.");
+				"Caustics uses the production shader and sampler in an isolated pass. "
+				"Submersion shows depth below each cell's water plane.");
 		}
 	}
 

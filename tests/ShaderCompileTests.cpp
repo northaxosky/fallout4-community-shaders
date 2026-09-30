@@ -326,7 +326,6 @@ namespace
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
 		const auto gi = FIELDS(cs::ScreenSpaceGIFeatureData, F(EnableScreenSpaceGI), F(pad0));
 		const auto inverse = FIELDS(cs::InverseSquareLightingFeatureData, F(Mode), F(ExteriorStrength), F(InteriorStrength), F(NearFieldDistance));
-		const auto water = FIELDS(cs::WaterEffectsFeatureData, F(Mode), F(HasWater), F(WaterHeight), F(pad0));
 		const auto fo4fog = FIELDS(cs::ExponentialHeightFogFeatureData, F(Mode), F(DensityMultiplier), F(HeightFalloffMultiplier), F(pad0));
 #undef FIELDS
 #undef F
@@ -348,7 +347,7 @@ namespace
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
 			{ 7, "screenSpaceGISettings", gi },
-			{ 7, "inverseSquareLightingSettings", inverse }, { 7, "waterEffectsSettings", water },
+			{ 7, "inverseSquareLightingSettings", inverse },
 			{ 7, "exponentialHeightFogSettings", fo4fog }
 		};
 		D3D11_SHADER_DESC shader{};
@@ -416,7 +415,7 @@ namespace
 		};
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, screenSpaceGISettings),
-			ABI(FO4SharedDataCB, inverseSquareLightingSettings), ABI(FO4SharedDataCB, waterEffectsSettings),
+			ABI(FO4SharedDataCB, inverseSquareLightingSettings),
 			ABI(FO4SharedDataCB, exponentialHeightFogSettings), ABI(FO4SharedDataCB, WetnessDebugVisualization),
 			ABI(FO4SharedDataCB, TerrainShadowMode), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
 			ABI(FO4SharedDataCB, EnabledSSR), ABI(FO4SharedDataCB, HeightRange), ABI(FO4SharedDataCB, DebugHeightRange),
@@ -538,6 +537,21 @@ namespace
 			.description = "upstream Bend on R32 canonical world depth",
 			.required = { CB(1), Texture(0), Sampler(0) },
 			.forbidden = { CB(7) } });
+		a_jobs.push_back({ .path = a_root / "FO4" / "WaterEffects" / "Debug.hlsl",
+			.profile = "vs_5_0",
+			.description = "water debug fullscreen vertex" });
+		a_jobs.push_back({ .path = a_root / "FO4" / "WaterEffects" / "Debug.hlsl",
+			.defines = { { "FO4CS_SUBSTRATE", "1" } },
+			.profile = "ps_5_0",
+			.description = "water debug upstream caustics",
+			.required = { CB(4), CB(5), Texture(17), Texture(65), Sampler(14) },
+			.forbidden = { CB(7) } });
+		a_jobs.push_back({ .path = a_root / "FO4" / "WaterEffects" / "Debug.hlsl",
+			.defines = { { "FO4CS_SUBSTRATE", "1" }, { "WATER_SUBMERSION_DEBUG", "1" } },
+			.profile = "ps_5_0",
+			.description = "water debug submersion",
+			.required = { CB(4), CB(5), Texture(17) },
+			.forbidden = { CB(7), Texture(65), Sampler(14) } });
 		a_jobs.push_back({ .path = a_root / "FO4" / "TerrainShadows" / "ShadowUpdate.cs.hlsl",
 			.description = "terrain shadow update" });
 		a_jobs.push_back({ .path = terrain / "ShadowStatistics.cs.hlsl",
@@ -607,7 +621,7 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFLight feature off",
 			.forbidden = {
-				CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(45), Texture(30), Texture(32),
+				CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(45), Texture(30), Texture(65),
 				Sampler(13), Sampler(14) } });
 		auto directionalFeatures = directional;
 		directionalFeatures.insert(
@@ -623,7 +637,7 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSDFLight feature composition",
 			.required = {
-				CB(6), CB(7), Texture(45), Texture(30), Texture(32),
+				CB(4), CB(5), CB(6), CB(7), Texture(45), Texture(30), Texture(65),
 				Sampler(13), Sampler(14) } });
 		for (const auto& [family, splits, shadowOnly, blend] : {
 				 std::tuple{ "BSDFLIGHT_PS_DIRSPLITS1", "1", false, false },
@@ -688,11 +702,34 @@ namespace
 				{ "WETNESS_EFFECTS", "1" },
 				{ "DYNAMIC_CUBEMAPS", "1" },
 				{ "TERRAIN_SHADOWS", "1" },
-				{ "EXPONENTIAL_HEIGHT_FOG", "1" } },
+				{ "EXPONENTIAL_HEIGHT_FOG", "1" },
+				{ "WATER_EFFECTS", "1" },
+				{ "WATER_EFFECTS_FULLSCREEN_DEBUG", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
-			.required = { CB(6), CB(7), Texture(25), Texture(36), Texture(34), Texture(35) },
-			.forbidden = { Texture(26), Texture(27), Texture(28), Texture(29) } });
+			.required = { CB(6), CB(7), Texture(25), Texture(33), Texture(36), Texture(34), Texture(35) },
+			.forbidden = { Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
+
+		for (auto defines : std::vector<ShaderDefines>{
+				 { { "BSDFLIGHT_PS_DIRSPLITS1", "1" }, { "DIRSPLITS", "1" } },
+				 { { "BSDFLIGHT_PS_DIRSPLITS3", "1" }, { "DIRSPLITS", "3" } },
+				 { { "BSDFLIGHT_PS_SHADOW_ONLY", "1" }, { "DIRSPLITS", "1" }, { "SHADOW_ONLY", "1" } },
+				 { { "BSDFLIGHT_PS_SHADOW_ONLY_BLEND_SPLIT", "1" }, { "DIRSPLITS", "1" }, { "SHADOW_ONLY", "1" }, { "BLENDSPLIT", "1" }, { "AMBIENT", "1" } },
+				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRSPLITS", "2" } } }) {
+			const bool unshadowed = defines.front().first == "BSDFLIGHT_PS_UNSHADOWED";
+			defines.insert(defines.end(), { { "DIRECTIONAL", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
+											  { "FO4CS_SUBSTRATE", "1" }, { "WATER_EFFECTS", "1" }, { "WETNESS_EFFECTS", "1" } });
+			if (!unshadowed) {
+				defines.emplace_back("SHADOW", "1");
+				defines.emplace_back("FILTER_PCF1", "1");
+			}
+			a_jobs.push_back({ .path = bsdfLight,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "water RGB directional and coat consumer",
+				.required = { CB(4), CB(5), Texture(65), Sampler(14) },
+				.forbidden = { Texture(32) } });
+		}
 		// SSGI composes where diffuse light meets albedo.
 		const std::pair<const char*, ShaderDefines> ssgiFamilies[] = {
 			{ "2D accumulator SSGI", { { "BSDFCOMPOSITE_PS_2D_ACCUMULATOR", "1" },

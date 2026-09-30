@@ -17,7 +17,8 @@
 #endif
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-#	include "FO4/WaterEffects/WaterCaustics.hlsli"
+// FO4: directional RGB accumulators carry upstream's chromatic multiplier.
+#	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
 
 #ifdef BSDFLIGHT_PS_DEFERRED
@@ -2283,7 +2284,7 @@ float2 goboUV = float2(omniUV.x,
 			CameraPosAdjust);
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-		shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+		float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 			posView,
 			ViewToWorld_row0,
 			ViewToWorld_row1,
@@ -2447,6 +2448,10 @@ float2 goboUV = float2(omniUV.x,
 #	endif
 		finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
+#	ifdef WATER_EFFECTS
+		finalDiffuse *= causticsMult;
+		brdfSpecular *= causticsMult;
+#	endif
 		float specMix = mad(schlickFres, -0.5, 1.0);
 #	ifdef WETNESS_EFFECTS
 		WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
@@ -2459,7 +2464,11 @@ float2 goboUV = float2(omniUV.x,
 			normalView,
 			wetViewDir,
 			SunDirection.xyz,
-			SunColor_HDR.xyz * shadow,
+			SunColor_HDR.xyz * shadow
+#		ifdef WATER_EFFECTS
+				* causticsMult
+#		endif
+			,
 			wetSurface.wetness,
 			wetSurface.waterRoughness,
 			wetDiffuse,
@@ -3046,7 +3055,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
 				ViewToWorld_row1,
@@ -3305,6 +3314,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 			finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
+#	ifdef WATER_EFFECTS
+			finalDiffuse *= causticsMult;
+			brdfSpecular *= causticsMult;
+#	endif
 #	ifdef FO4_DS2_REASSOC_ORDER
 			float specMix = mad(schlickFres, -0.5, 1.0);
 #	else
@@ -3321,7 +3334,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				normalView,
 				wetViewDir,
 				SunDirection.xyz,
-				SunColor_HDR.xyz * shadow,
+				SunColor_HDR.xyz * shadow
+#		ifdef WATER_EFFECTS
+					* causticsMult
+#		endif
+				,
 				wetSurface.wetness,
 				wetSurface.waterRoughness,
 				wetDiffuse,
@@ -4007,7 +4024,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
 				ViewToWorld_row1,
@@ -4277,6 +4294,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 			finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
+#	ifdef WATER_EFFECTS
+			finalDiffuse *= causticsMult;
+			brdfSpecular *= causticsMult;
+#	endif
 #	ifdef FO4_DS3_REASSOC_ORDER
 			float specMix = mad(schlickFres, -0.5, 1.0);
 #	else
@@ -4294,7 +4315,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				normalView,
 				wetViewDir,
 				SunDirection.xyz,
-				SunColor_HDR.xyz * shadow,
+				SunColor_HDR.xyz * shadow
+#		ifdef WATER_EFFECTS
+					* causticsMult
+#		endif
+				,
 				wetSurface.wetness,
 				wetSurface.waterRoughness,
 				wetDiffuse,
@@ -5113,6 +5138,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+			float shadowAlpha = result.z;
 			result *= WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
@@ -5121,7 +5147,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 
-			output.diffuse = result.zzzz;
+#	ifdef WATER_EFFECTS
+			output.diffuse = float4(result.xyz, shadowAlpha);
+#	else
+	output.diffuse = result.zzzz;
+#	endif
 			output.specular = float4(result.xyz, 1.0);
 			return output;
 		}
@@ -5366,6 +5396,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #		endif
 #		if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+			float shadowAlpha = result.z;
 			result *= WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
@@ -5374,11 +5405,19 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #		endif
 
-			output.diffuse = result.zzzz;
+#		ifdef WATER_EFFECTS
+			output.diffuse = float4(result.xyz, shadowAlpha);
+#		else
+		output.diffuse = result.zzzz;
+#		endif
 			output.specular = float4(result.xyz, 1.0);
 #	else
 	float shadowBlend = fadeFactor * (shadow - 1.0);
+#		ifdef WATER_EFFECTS
+	float3 splitShadow = (shadowBlend + 1.0).xxx;
+#		else
 	float splitShadow = shadowBlend + 1.0;
+#		endif
 
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 	splitShadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
@@ -5420,8 +5459,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		ambientSpecular = (fresnel * pow(ambientReflected, 2.2)) * material.y;
 	}
 
+#		ifdef WATER_EFFECTS
+	output.specular = float4(splitShadow, 1.0) + float4(ambientSpecular, 0.0);
+	output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow, shadowBlend);
+#		else
 	output.specular = float4(splitShadow.xxx, 1.0) + float4(ambientSpecular, 0.0);
 	output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow.xxx, shadowBlend);
+#		endif
 #	endif
 			return output;
 		}
@@ -6055,7 +6099,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			brdfSpecular *= terrainShadowMult;
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			float causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
+			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
 				ViewToWorld_row1,
@@ -6079,8 +6123,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		wetLightColor *= directContactShadow;
 #			endif
 #			if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-		// finalDiffuse and brdfSpecular already carry caustics; the coat's own sun
-		// lobe is built from the raw light color, so modulate it too.
+		// FO4: the coat's separate sun lobe needs the same RGB multiplier.
 		wetLightColor *= causticsMult;
 #			endif
 		float3 wetDiffuse = finalDiffuse;

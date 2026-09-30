@@ -15,13 +15,6 @@ namespace FO4SharedData
 		float InteriorStrength;
 		float NearFieldDistance;
 	};
-	struct WaterEffectsSettings
-	{
-		uint Mode;
-		uint HasWater;
-		float WaterHeight;
-		float pad0;
-	};
 	struct ExponentialHeightFogSettings
 	{
 		uint Mode;
@@ -33,7 +26,6 @@ namespace FO4SharedData
 	{
 		ScreenSpaceGISettings screenSpaceGISettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
-		WaterEffectsSettings waterEffectsSettings;
 		ExponentialHeightFogSettings exponentialHeightFogSettings;
 		uint WetnessDebugVisualization;
 		uint TerrainShadowMode;

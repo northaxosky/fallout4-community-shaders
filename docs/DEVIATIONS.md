@@ -33,7 +33,7 @@ FO4 consumes unchanged files through `xmake\shared.lua`; no upstream path can be
 Shared consumption includes byte-identical SSS shaders, RCAS, shader licenses, default cubemap, SSGI noise and water
 caustics assets from the shared pin. Bend's CPU header is identical modulo comments; its
 existing SSS consumer uses the unchanged shared header. PerformanceOverlay uses shared QPC/FPS
-helpers, not the profiler or A/B subsystem. `src/Shared/PerfUtils.h` supplies Windows declarations
+helpers, the profiler and the A/B aggregator. `src/Shared/PerfUtils.h` supplies Windows declarations
 and scopes MSVC C4267 suppression for the upstream vector mean; the global PCH is unchanged.
 
 | Kind | Difference | Where |
@@ -45,6 +45,7 @@ not scheduled for upstream conversion. The following are
 path-only relocations, with include and runtime source references updated; shader behavior is unchanged.
 Paths below are relative to the staged `Shaders` root. The renderer-specific reasons remain in the
 feature tables; this namespace separation is a Chosen ownership policy, not an engine limitation.
+Retired rows preserve the original Kind and identify replacements consumed unchanged.
 
 | Kind | Upstream destination | FO4-owned destination |
 |---|---|---|
@@ -64,7 +65,7 @@ feature tables; this namespace separation is a Chosen ownership policy, not an e
 | Chosen | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
 | Chosen | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |
 | Chosen | `Upscaling/UpscaleVS.hlsl` | `FO4/Upscaling/UpscaleVS.hlsl` |
-| Chosen | `WaterEffects/WaterCaustics.hlsli` | `FO4/WaterEffects/WaterCaustics.hlsli` |
+| Chosen | `WaterEffects/WaterCaustics.hlsli` | `FO4/WaterEffects/WaterCaustics.hlsli` (retired; the unchanged upstream include is consumed directly) |
 | Chosen | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` |
 
 ## Substrate
@@ -84,7 +85,8 @@ Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
 | Forced | One R32_FLOAT boundary pass publishes canonical world-projection depth at t17; near pixels reproject through shadow +0x8A0, world pixels use `mad(d,1.01,-0.01)`, sky uses 1 | Depth & units / Per-frame buffer sources: FO4 combines first-person and world projections; prepass OG/NG/AE writes transpose(inverse(first-person jittered projection)) at shadow +0x8A0. Native targets use t0–t15, not t17 | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `FO4/Depth.hlsli`, `Engine.h` near accessor |
 | Chosen | Preserve upstream's scalar X clamp offset and Y clamp-to-ratio; snapshot current/previous ratios once per substrate update | Dynamic-resolution history: native clamp is `r−0.5/size` on NG/AE and `(trunc(size·r)−1)/size` on OG, size from logical target 1. Main clamped both axes, but upstream has one offset and clamps Y to ratio; parity takes precedence over a local fork. Substrate history is per-frame rather than effect-update history | `SharedData.cpp`, unchanged `Common/FrameBuffer.hlsli` |
 | Forced | Pack world-channel DALC into pre-power SH, then apply FO4's 2.2 power once at linear consumer boundaries | Directional ambient transform/evaluation rows: native world-channel columns include transform scale and bias; native lighting evaluates power 2.2. SH is `(b/Y00,−ay/Y1,az/Y1,−ax/Y1)` with Y00=0.2820948, Y1=0.4886025. Upstream State.cpp does not gamma-convert before packing; unchanged GetAmbient is pre-power | `Engine.h` `TryGetDirectionalAmbientRows`, `SharedDataLayout.h` `PackAmbientSH`, `FO4/FO4ShaderData.hlsli` `GetAmbientLinear` |
-| Chosen | Keep one FO4-only b7 for unmatched modes, debug settings, delta time and player-cell water plane; move equivalent fields to upstream b4/b5/b6 | Main exposes one player-cell plane, not upstream's 25-tile water data. WaterData and WaterSystemHeight retain upstream absent sentinels; the absolute player-cell plane remains a FO4 consumer input. DR and NDC-to-view equivalents use b4, terrain/wetness/cubemap enable fields use b6 | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
+| Chosen | Retired player-cell water plane in the FO4-only b7; equivalent fields move to upstream b4/b5/b6 | The original single-plane design is replaced by WaterEffects' 25-tile b5 grid; its b7 block is removed. This row retains the original design's Kind for audit | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
+| Framework | Keep one FO4-only b7 for unmatched modes, debug settings and delta time; move equivalent fields to upstream b4/b5/b6 | Repository-wide single-substrate ABI. WaterEffects publishes the 25-tile grid in b5 and has no b7 block. DR and NDC-to-view equivalents use b4, terrain/wetness/cubemap enable fields use b6 | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
 | Chosen | FrameParams is zero; unvalidated celestial/HDR/map/shadow fields retain upstream absent values | No validated FO4 inverse-gamma/frame-flag or corresponding celestial/HDR source is consumed. SunDirection uses toward-light direction, while SunColor remains absent rather than inventing a sky-disc colour; FrameCount follows main's temporal method and AlwaysActive follows engine frame count | `SharedData.cpp` `BuildSharedData`, `SharedDataLayout.h` |
 
 SSS reads canonical depth directly: first-person geometry casts as upstream does but never receives
@@ -108,6 +110,45 @@ no substrate, and the binder runs only for contributed stages; native b12 remain
   clamp but Y to the raw ratio. An axis-specific clamp ABI could avoid bottom-edge reads on
   reduced-resolution allocations. This is a candidate for upstream investigation, not a proven
   defect; FO4 preserves the pinned behavior and checks edges in runtime validation.
+- `package/Shaders/Common/SharedData.hlsli:423–430`: `GetWaterData` assumes coordinates
+  become positive after adding 64 cells; `modf` returns a negative fraction west/south
+  of -262144 units. At an exact camera cell border, `round` also receives half-integers
+  and can select adjacent tiles by ties-to-even. Use `floor(absolutePosition / 4096)`
+  minus `floor(CameraPosAdjust.xy / 4096)` plus 2. The shared file remains unchanged.
+
+## WaterEffects
+
+Upstream pin: `d330bf12d` (shared pin `e305ed0a4`). `WaterCaustics.hlsli` and
+`watercaustics.dds` are staged unchanged through `xmake/shared.lua`; the FO4 caustics
+kernel and CPU shader mirror are deleted. There are no caustics quality knobs.
+Feature classification: **extension candidate**. Chosen rows: camera-cell
+`WaterSystemHeight` publication; fullscreen caustics/submersion diagnostics.
+
+### Translations
+
+| Kind | Upstream | Fallout 4 | Why / evidence | Where |
+|---|---|---|---|---|
+| Forced | Skyrim cell lookup and water form | Loaded FO4 `GridCellArray` cells populate the eye-centred 5×5, 4096-unit b5 grid; `GetExteriorWaterHeight` resolves inherited heights; `GetWaterType` supplies averaged shallow/deep RGB times sky water multiplier | fallout4-re engine-facts Water height, forms, and camera-underwater state / Water Address Library table: cell bits +0x40, height +0x60, worldspace +0xC8; accessor IDs `{1457825,2200267,2200267}`; form/material packer data +0xB0. No reference/player-height query | `src/World/Water.cpp`, `WaterData.h`, `SharedData.cpp` `BuildSharedData` |
+| Forced | Camera-relative world position and water height | b4 `CameraViewInverse` reconstructs positions relative to `CameraPosAdjust`; b5 heights subtract the same anchor Z; unchanged kernel adds anchor XY once | engine-facts Camera, matrices & world offsets / Per-frame buffer sources; native light positions are view-space | `FO4/WaterEffectsConsumer.hlsli`, `SharedData.cpp` |
+| Forced | `SampColorSampler` and t65 | Linear-wrap s14 in BSDFLight, unchanged t65; composite only reads an isolated diagnostic texture at t33 | Native composite s14 is occupied by scene colour (`BSDFCompositeShader.hlsl` `g_sLitScene`); terrain owns s13. State scopes restore exact SRV/sampler/context bindings | `WaterEffects.cpp`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl`, `ScopedContextState.h` |
+| Forced | RGB caustics multiply directional light colour in Lighting.hlsl | RGB direct diffuse/specular and wet coat in all directional BSDFLight families; shadow-only RGB retains independent alpha; ambient/local light is unaffected | engine-facts Raster light accumulation / Base composite equation: FO4 accumulates direct light separately in RGB targets rather than Skyrim's Lighting.hlsl | `BSDFLightShader.hlsl` |
+| Forced | Shore consumers read b5 water data | Existing FO4 wetness shore consumer translates b5 cell height back to its absolute-position contract | Removing WaterEffects b7 requires its shore reader to use the shared per-cell source; native positions/anchor are described in engine-facts Per-frame buffer sources | `features/WetnessEffects/Shaders/FO4/WetnessEffects/WetnessEffects.hlsli` `GetSurface` |
+| Chosen | Pinned State.cpp leaves `WaterSystemHeight` absent | Publish the camera cell's resolved plane relative to b4, or -FLT_MAX; this is not a water-mesh intersection query | Requested host input; engine-facts Exterior cell height establishes the value, not arbitrary-position water intersections | `Water.cpp` `FillWaterData` |
+| Framework | Always-loaded upstream feature | Preserve FO4 activation, load/ownership/readiness guards, persisted live enabled toggle and cached water telemetry | Repository activation, TOML persistence, shader ownership/identity, telemetry and fail-closed contracts; disabled/unready texture yields the identity multiplier | `WaterEffects.{h,cpp}`, `WaterEffectsMath.h`, `FO4/WaterEffectsConsumer.hlsli` |
+| Chosen | No upstream fullscreen caustics/submersion views | Optional fullscreen diagnostics execute the same kernel/filter in an isolated pass, not manual level-zero sampling | Feature-specific visualization beyond upstream behavior; sampler isolation is the Forced binding translation above | `WaterEffects.{h,cpp}`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl` |
+
+### Not supported
+
+| Kind | Upstream | Why / evidence | Where |
+|---|---|---|---|
+| Forced | WaterParallax three normal-alpha height layers, including FLOWMAP variants | v1 `ba1bad9f` finding, recorded in `INGAME-CHECKLIST-v1.md` WaterEffects: vanilla normals have no height alpha. fallout4-re `docs/bswater-promotion.md` Shore Effects runtime evidence contract records the absent height signal; native `BSWaterShader.hlsl` `normalSlope` reads only XY. No height assets are invented and the BSWater consumer remains stock. Archive channel evidence was not replayed in this task | `BSWaterShader.hlsl`; upstream `WaterParallax.hlsli` is not staged |
+| Forced | Interior cell water height | FO4's exterior-height accessor explicitly rejects interior cells; engine-facts Exterior cell height. The table retains -FLT_MAX rather than borrowing the player's cached plane. Placed-water mesh intersections are outside the upstream cell-height approximation | `Water.cpp` `CellWaterData` |
+
+### Pending
+
+| Kind | Upstream | Notes |
+|---|---|---|
+| Pending | Secondary mode-0/21 BSLighting caustics | World and first-person accumulators issue no BSLighting passes (engine-facts BSLighting forward-pass source), so their caustics are deferred. Secondary-view BSLighting execution and camera/resource lifetime are not validated or integrated; do not classify that missing adapter as an engine limitation |
 
 ## Performance Overlay
 

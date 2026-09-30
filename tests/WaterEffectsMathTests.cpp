@@ -1,13 +1,11 @@
-#include "WaterEffectsMath.h"
+#include "World/WaterData.h"
 
-#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
 
 namespace
 {
-	using namespace cs::features::water_effects;
 	int failures = 0;
 
 	void Check(bool a_condition, const char* a_message)
@@ -18,86 +16,49 @@ namespace
 		}
 	}
 
-	bool Near(float a_left, float a_right, float a_epsilon = 1.0e-4f)
+	void TestCellSelection()
 	{
-		return std::abs(a_left - a_right) <= a_epsilon;
+		using cs::engine::WaterTileIndex;
+		Check(WaterTileIndex(-1, -1, -0.5f, -0.5f) == 12,
+			"negative coordinates must floor into the camera cell");
+		Check(WaterTileIndex(-3, 1, -0.5f, -0.5f) == 20,
+			"loaded cells must map x fastest into the 5x5 table");
+		Check(WaterTileIndex(2, -1, -0.5f, -0.5f) == -1,
+			"cells outside the eye-centred table must not overwrite edge tiles");
+		Check(WaterTileIndex(0, 0, 4095.5f, 1.0f) == 12 &&
+				  WaterTileIndex(0, 0, 4096.5f, 1.0f) == 11,
+			"crossing a cell border must reindex the same loaded cell");
 	}
 
-	void TestCausticsMultiplier()
+	void TestRelativeHeight()
 	{
-		const auto flat = [](std::array<float, 2>) { return 0.25f; };
-		Check(
-			Near(ComputeCausticsMult(
-					 0.0f, { 0.0f, 0.0f, 10.0f }, 0.0f, flat),
-				1.0f),
-			"geometry above water must remain unchanged");
-		Check(
-			Near(ComputeCausticsMult(
-					 0.0f, { 0.0f, 0.0f, -200.0f }, 0.0f, flat),
-				1.0f),
-			"fully submerged flat samples must remain stable");
-
-		const auto bright = [](std::array<float, 2>) { return 0.5f; };
-		Check(
-			Near(ComputeCausticsMult(
-					 0.0f, { 0.0f, 0.0f, -32.0f }, 0.0f, bright),
-				1.5f),
-			"shore transition must blend toward caustics");
-		Check(
-			Near(ComputeCausticsMult(
-					 0.0f, { 0.0f, 0.0f, -4096.0f }, 0.0f, bright),
-				2.0f),
-			"deep water must retain the low-frequency caustics layer");
-	}
-
-	void TestWorldLock()
-	{
-		const std::array<float, 3> world{ 1000.0f, 2000.0f, -500.0f };
-		const std::array<float, 4> row0{ 1.0f, 0.0f, 0.0f, 0.0f };
-		const std::array<float, 4> row1{ 0.0f, 1.0f, 0.0f, 0.0f };
-		const std::array<float, 4> row2{ 0.0f, 0.0f, 1.0f, 0.0f };
-		const auto uvSeenFrom = [&](std::array<float, 3> a_camera) {
-			const std::array<float, 3> view{
-				world[0] - a_camera[0],
-				world[1] - a_camera[1],
-				world[2] - a_camera[2]
-			};
-			const auto reconstructed =
-				ViewToWorldPosition(view, row0, row1, row2, a_camera);
-			std::array<float, 2> uv{};
-			ComputeCausticsMult(
-				0.0f,
-				reconstructed,
-				0.0f,
-				[&](std::array<float, 2> a_uv) {
-					uv = a_uv;
-					return 0.25f;
-				});
-			return uv;
+		using namespace cs::engine;
+		const float absoluteWater = 200.0f, absoluteSurface = 150.0f;
+		const auto distance = [&](float a_origin) {
+			return RelativeWaterHeight(absoluteWater, a_origin) - (absoluteSurface - a_origin);
 		};
-
-		const auto near = uvSeenFrom({ 900.0f, 1900.0f, 100.0f });
-		const auto far = uvSeenFrom({ -40000.0f, 65000.0f, 3000.0f });
-		Check(
-			Near(near[0], far[0], 1.0e-3f) && Near(near[1], far[1], 1.0e-3f),
-			"caustics must remain locked to world space across camera motion");
+		Check(distance(-6000.0f) == 50.0f && distance(8000.0f) == 50.0f,
+			"camera motion must preserve submersion distance");
+		Check(RelativeWaterHeight(kNoWaterHeight, 1000.0f) == kNoWaterHeight &&
+				  RelativeWaterHeight(std::numeric_limits<float>::quiet_NaN(), 1000.0f) == kNoWaterHeight &&
+				  RelativeWaterHeight(std::numeric_limits<float>::infinity(), 1000.0f) == kNoWaterHeight,
+			"engine absent/nonfinite water must remain inert");
 	}
 
-	void TestWaterHeightSanitization()
+	void TestPackedColor()
 	{
-		Check(
-			IsUsableWaterHeight(0.0f) && IsUsableWaterHeight(-4096.0f),
-			"finite water planes must remain usable");
-		Check(
-			!IsUsableWaterHeight(kNoWaterHeight) && !IsUsableWaterHeight(-3.4e38f) && !IsUsableWaterHeight(std::numeric_limits<float>::quiet_NaN()) && !IsUsableWaterHeight(std::numeric_limits<float>::infinity()),
-			"sentinel and non-finite water planes must be rejected");
+		using cs::engine::WaterColorChannel;
+		Check(std::abs(WaterColorChannel(0x00102040, 0x00806020, 0) - 48.0f / 255.0f) < 1.0e-6f &&
+				  std::abs(WaterColorChannel(0x00102040, 0x00806020, 8) - 64.0f / 255.0f) < 1.0e-6f &&
+				  std::abs(WaterColorChannel(0x00102040, 0x00806020, 16) - 72.0f / 255.0f) < 1.0e-6f,
+			"water-form bytes must average shallow/deep RGB without a gamma conversion");
 	}
 }
 
 int main()
 {
-	TestCausticsMultiplier();
-	TestWorldLock();
-	TestWaterHeightSanitization();
+	TestCellSelection();
+	TestRelativeHeight();
+	TestPackedColor();
 	return failures == 0 ? 0 : 1;
 }

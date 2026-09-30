@@ -56,9 +56,10 @@ namespace WetnessEffects
 		                       cameraPosAdjust.xyz;
 		float nearFactor = smoothstep(4096.0 * 2.5, 0.0, viewPosition.z);
 
-		// FO4 publishes the player cell's water plane instead of upstream's per-tile water data.
-		bool hasWater = FO4SharedData::waterEffectsSettings.HasWater != 0;
-		float waterHeight = FO4SharedData::waterEffectsSettings.WaterHeight;
+		// FO4: shore consumers translate b5's relative cell height to their absolute position.
+		float4 waterData = SharedData::GetWaterData(FrameBuffer::ViewToWorld(viewPosition));
+		bool hasWater = waterData.w > -2147483648.0;
+		float waterHeight = waterData.w + FrameBuffer::CameraPosAdjust.z;
 		// Calculate shore wetness factors
 		float wetnessDistToWater = abs(worldPosition.z - waterHeight);
 		float shoreFactor = hasWater ?

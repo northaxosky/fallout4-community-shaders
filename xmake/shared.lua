@@ -14,7 +14,8 @@ function main(target)
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/bend_sss_gpu.hlsli",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli",
             "features/Upscaling/Shaders/Upscaling/RCAS/RCAS.hlsl",
-            "features/Water Effects/Shaders/WaterEffects/watercaustics.dds"
+            "features/Water Effects/Shaders/WaterEffects/watercaustics.dds",
+            "features/Water Effects/Shaders/WaterEffects/WaterCaustics.hlsli"
         },
         sources = {
             "src/Profiler.h",

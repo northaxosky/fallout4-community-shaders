@@ -4,7 +4,7 @@
 #	include "FO4/TerrainShadows/TerrainShadows.hlsli"
 #endif
 #ifdef WATER_EFFECTS
-#	include "FO4/WaterEffects/WaterCaustics.hlsli"
+#	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
 #	define WETNESS_COMPOSITE_CONSUMER 1
