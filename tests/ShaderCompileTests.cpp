@@ -1259,6 +1259,39 @@ namespace
 			.profile = "ps_5_0",
 			.description = "BSWater dynamic cubemaps",
 			.required = { CB(5), CB(6), Texture(30), Texture(31), Sampler(3) } });
+
+		a_jobs.push_back({ .path = composite,
+			.defines = { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" }, { "FO4CS_SUBSTRATE", "1" },
+				{ "SSGI", "1" }, { "WETNESS_EFFECTS", "1" }, { "DYNAMIC_CUBEMAPS", "1" },
+				{ "EXPONENTIAL_HEIGHT_FOG", "1" } },
+			.profile = "ps_5_0",
+			.description = "SSGI wet cubemap and fog composition",
+			.required = { CB(6), CB(10), Texture(19), Texture(26), Texture(34), Texture(38), Texture(71) },
+			.forbidden = { CB(7) } });
+		a_jobs.push_back({ .path = bsdfLight,
+			.defines = { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "LIGHT_TYPE", "3" }, { "SPOT", "1" },
+				{ "SPECULAR", "1" }, { "RGBSPEC", "1" }, { "DIRSPLITS", "2" },
+				{ "FO4CS_SUBSTRATE", "1" }, { "INVERSE_SQUARE_LIGHTING", "1" },
+				{ "WETNESS_EFFECTS", "1" }, { "DYNAMIC_CUBEMAPS", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } },
+			.profile = "ps_5_0",
+			.description = "ISL wet coat with fog and cubemap consumers",
+			.required = { CB(6), CB(11) },
+			.forbidden = { CB(7) } });
+		a_jobs.push_back({ .path = prepass,
+			.defines = { { "BSDFPREPASS_PS_SOURCE", "1" }, { "FO4CS_SUBSTRATE", "1" },
+				{ "NORMALS", "1" }, { "VC", "1" }, { "SSGI", "1" }, { "WETNESS_EFFECTS", "1" } },
+			.profile = "ps_5_0",
+			.description = "Wet material and SSGI vertex AO producer",
+			.required = { CB(6), CB(8) },
+			.forbidden = { CB(7) } });
+		a_jobs.push_back({ .path = water,
+			.defines = { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" },
+				{ "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" },
+				{ "EXPONENTIAL_HEIGHT_FOG", "1" }, { "TERRAIN_SHADOWS", "1" } },
+			.profile = "ps_5_0",
+			.description = "Water cubemap fog and terrain composition",
+			.required = { CB(6), Texture(19), Texture(30), Texture(31), Texture(60) },
+			.forbidden = { CB(7) } });
 	}
 }
 
