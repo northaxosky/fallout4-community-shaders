@@ -64,8 +64,6 @@ upstream conversion; renderer-specific reasons remain in the feature tables.
 
 | Kind | Upstream destination | FO4-owned destination |
 |---|---|---|
-| Tweak | `Common/Random.hlsli` | `FO4/Common/Random.hlsli` retains the upstream Perlin subset without a different algorithm |
-| Tweak | `Common/Shading.hlsli` | `FO4/Common/Shading.hlsli` exposes upstream MultiBounceAO in the Shading namespace without changing its arithmetic |
 | Forced | `DynamicCubemaps/DynamicCubemaps.hlsli` | `FO4/DynamicCubemaps/DynamicCubemaps.hlsli` is a consumer include; the custom-consumer guard lets callers supply native samplers to shared functions |
 | Divergence | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
 | Divergence | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |

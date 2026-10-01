@@ -1,13 +1,20 @@
 #ifndef FO4_EXPONENTIAL_HEIGHT_FOG_CONSUMER
 #define FO4_EXPONENTIAL_HEIGHT_FOG_CONSUMER
 
+#include "Common/Random.hlsli"
 #include "FO4/Depth.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
-#ifndef FO4_FOG_SAMPLER
-#	define FO4_FOG_SAMPLER s13
-#endif
+#if !defined(FO4_FOG_SAMPLER) && defined(TERRAIN_SHADOWS)
+// The runtime's shared linear-clamp s13 claim must also use one HLSL declaration.
+#	include "FO4/TerrainShadowsConsumer.hlsli"
+#	define SampColorSampler TerrainShadows::TerrainShadowsSampler
+#else
+#	ifndef FO4_FOG_SAMPLER
+#		define FO4_FOG_SAMPLER s13
+#	endif
 SamplerState FO4FogSampler : register(FO4_FOG_SAMPLER);
-#define SampColorSampler FO4FogSampler
+#	define SampColorSampler FO4FogSampler
+#endif
 #ifdef DYNAMIC_CUBEMAPS
 // FO4: the dynamic-cubemap provider is pending conversion to the upstream consumer contract.
 #	undef DYNAMIC_CUBEMAPS

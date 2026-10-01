@@ -778,7 +778,12 @@ PSOutput main(PSInput input)
 #			endif
 	}
 #			if defined(ADDBLEND)
+#				if defined(PIPBOY_SCREEN)
+	float addBlendFade = (1 - vanillaFogFactor) * (1 - heightFog.w);
+	float3 blendedColor = lightColor * addBlendFade;
+#				else
 	float3 blendedColor = lightColor * (1 - vanillaFogFactor) * (1 - heightFog.w);
+#				endif
 #			elif defined(MULTBLEND)
 	float3 blendedColor = lerp(lightColor, 1.0.xxx, saturate(1.5 * vanillaFogFactor));
 	blendedColor = lerp(blendedColor, 1.0.xxx, saturate(1.5 * heightFog.w));
