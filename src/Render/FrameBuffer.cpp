@@ -618,6 +618,16 @@ namespace cs::engine
 		{
 			BeginAnchorFrame(CurrentEngineFrame());
 		}
+
+		void CaptureWorldCamera() noexcept
+		{
+			std::scoped_lock lock(g_prepassCameraMutex);
+			const auto frame = CurrentEngineFrame();
+			if (g_prepassFrame != frame || !g_prepassCamera) {
+				g_prepassCamera = GetWorldCameraRecord();
+				g_prepassFrame = frame;
+			}
+		}
 	}
 
 	void InstallFrameBuffer()
@@ -627,19 +637,15 @@ namespace cs::engine
 		}
 		g_installed = true;
 
-		const bool registered = RegisterPostDeferredPrePass(
-			[] {
-				{
-					std::scoped_lock lock(g_prepassCameraMutex);
-					const auto frame = CurrentEngineFrame();
-					if (g_prepassFrame != frame) {
-						g_prepassCamera = GetWorldCameraRecord();
-						g_prepassFrame = frame;
-					}
-				}
-				ResolveIdentity();
-			},
-			static_cast<HookPriority>(-200));
+		// MainRenderSetup publishes world+jitter before prepass material draws need b4.
+		const auto priority = static_cast<HookPriority>(-200);
+		const bool registered = RegisterPreDeferredPrePass(CaptureWorldCamera, priority) &&
+		                        RegisterPostDeferredPrePass(
+									[] {
+										CaptureWorldCamera();
+										ResolveIdentity();
+									},
+									priority);
 		if (!registered) {
 			L->error(
 				"Per-frame constant buffer identity resolution disabled: "

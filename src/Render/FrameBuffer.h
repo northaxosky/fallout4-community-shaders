@@ -8,9 +8,9 @@ struct ID3D11DeviceContext;
 
 namespace cs::engine
 {
-	// Render thread only; copies the current world+jitter cache entry from PostDeferredPrePass onward.
+	// Render thread only; world+jitter is current after MainRenderSetup, before DeferredPrePass.
 	[[nodiscard]] std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept;
-	// Owned prepass copy; pass the frame for rendering, omit it only for diagnostics.
+	// Captured before prepass draws; pass the frame for rendering, omit it only for diagnostics.
 	[[nodiscard]] std::optional<WorldCameraRecord> GetCapturedWorldCameraRecord(
 		std::optional<std::uint64_t> a_frame = std::nullopt) noexcept;
 	[[nodiscard]] std::optional<FogRamps> GetFogRamps() noexcept;

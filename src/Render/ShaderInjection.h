@@ -175,10 +175,13 @@ namespace cs::engine
 		ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
 		std::string name;
 		bool requested = false;
+		bool enabled = false;
 		bool published = false;
 		bool slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 		std::size_t contributors = 0;
+		std::size_t observedComputeShaders = 0;
+		std::uint64_t computeBindCalls = 0;
 		ShaderInjectionDefines defines;
 		std::string publicationError;
 		std::uint64_t matches = 0;

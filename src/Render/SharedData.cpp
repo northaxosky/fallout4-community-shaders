@@ -179,7 +179,7 @@ namespace cs::render
 			sizeof(FrameDataCB), sizeof(SharedDataCB), sizeof(SharedFeatureDataCB), sizeof(FO4SharedDataCB)
 		};
 
-		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data) noexcept;
+		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data, std::size_t a_firstBuffer = 0) noexcept;
 
 		bool WriteConstantBuffer(
 			ID3D11DeviceContext* a_context,
@@ -271,22 +271,28 @@ namespace cs::render
 			const bool current = state.lastFrame.load(std::memory_order_relaxed) == frame;
 			if (!a_updateDepth && (current || state.lastAttemptFrame == frame))
 				return;
-			state.lastAttemptFrame = frame;
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
 			const auto camera = engine::GetCapturedWorldCameraRecord(frame);
 			if (!context || !camera)
 				return;
+			// Early draws can precede the camera capture; a miss must not poison the prepass attempt.
+			state.lastAttemptFrame = frame;
 
 			if (a_updateDepth)
 				UpdateCanonicalDepth(context, *camera);
-			if (current)
-				return;
-
 			try {
+				SubstrateData data{};
+				data.fo4 = state.fo4;
+				PackFeatures(data, GetFeatureBufferData());
+				if (current) {
+					// Fog and terrain prepare after material draws; refresh b6/b7 without advancing camera history twice.
+					if (!WriteSubstrate(context, data, kFeatureDataSlot - kFrameDataSlot))
+						CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared feature constant-buffer map failed.");
+					return;
+				}
 				const auto delta = GetRealTimeDelta();
 				const auto nextTimer = state.timer + delta;
-				SubstrateData data{};
 				data.shared = BuildSharedData(nextTimer, *camera);
 				const auto* manager = engine::GetRenderTargetManager();
 				const DirectX::XMFLOAT2 ratio{
@@ -306,7 +312,6 @@ namespace cs::render
 					return;
 				const float clamp = REX::FModule::IsRuntimeOG() ? (std::trunc(size * ratio.x) - 1.0f) / size : ratio.x - 0.5f / size;
 				data.frame = PackFrameData(*camera, ratio, previousRatio, ratio.x - clamp);
-				PackFeatures(data, GetFeatureBufferData());
 				data.fo4.DeltaTime = delta;
 				if (!WriteSubstrate(context, data)) {
 					CS_LOG_EVERY_MS(
@@ -337,11 +342,11 @@ namespace cs::render
 			}
 		}
 
-		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data) noexcept
+		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data, std::size_t a_firstBuffer) noexcept
 		{
 			const void* sources[]{ &a_data.frame, &a_data.shared, &a_data.feature, &a_data.fo4 };
 			auto& state = GetSubstrateState();
-			for (std::size_t index = 0; index < kSubstrateBufferCount; ++index)
+			for (std::size_t index = a_firstBuffer; index < kSubstrateBufferCount; ++index)
 				if (!WriteConstantBuffer(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index]))
 					return false;
 			state.fo4 = a_data.fo4;

@@ -757,6 +757,9 @@ target("ShaderInjectionRegistrationTests", function()
     add_tests("ShaderInjectionPixelBindings", {
         runargs = "--pixel-bindings"
     })
+    add_tests("ShaderInjectionNativeFamilies", {
+        runargs = {"--native-families", path.join(os.projectdir(), "package/Shaders")}
+    })
     add_tests("ShaderInjectionClaimLedger", {
         runargs = "--claim-ledger"
     })

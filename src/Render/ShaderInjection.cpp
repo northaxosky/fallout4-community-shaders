@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Engine.h"
+#include "Render/NativeShaderFamily.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderFamilyDescriptor.h"
@@ -371,6 +372,7 @@ namespace cs::engine
 			std::atomic<bool> requested{ false };
 			std::atomic<bool> slotCollision{ false };
 			std::atomic<std::size_t> contributors{ 0 };
+			std::atomic<std::uint64_t> computeBindCalls{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
@@ -624,42 +626,10 @@ namespace cs::engine
 		std::optional<ShaderInjectionTarget> ResolveNativeShaderTarget(
 			const RE::BSShader& a_shader)
 		{
-			using Type = RE::BSShaderManager::ShaderEnum;
-			switch (static_cast<Type>(native::ShaderType(&a_shader))) {
-			case Type::kEffect:
-				return ShaderInjectionTarget::kEffect;
-			case Type::kUtility:
-				return ShaderInjectionTarget::kUtility;
-			case Type::kDistantTree:
-				return ShaderInjectionTarget::kDistantTree;
-			case Type::kParticle:
-				return ShaderInjectionTarget::kParticle;
-			case Type::kDFPrepass:
-				{
-					// FO4's DFPrepass and DFLight constructors both store type 4.
-					const auto* filename = NativeShaderFilename(&a_shader);
-					const std::string_view name = filename ? filename : "";
-					if (name == "DFLight")
-						return ShaderInjectionTarget::kBsdfLight;
-					if (name == "DFPrepass")
-						return ShaderInjectionTarget::kDeferredPrepass;
-					return std::nullopt;
-				}
-			case Type::kDFComposite:
-				return ShaderInjectionTarget::kBsdfComposite;
-			case Type::kBloodSpatter:
-				return ShaderInjectionTarget::kBloodSplatter;
-			case Type::kImageSpace:
-				return ShaderInjectionTarget::kImageSpace;
-			case Type::kSky:
-				return ShaderInjectionTarget::kBsSky;
-			case Type::kWater:
-				return ShaderInjectionTarget::kBsWater;
-			case Type::kLighting:
-				return ShaderInjectionTarget::kBsLighting;
-			default:
-				return std::nullopt;
-			}
+			const auto* name = NativeShaderFilename(&a_shader);
+			return ResolveGraphicsShaderTarget(
+				static_cast<RE::BSShaderManager::ShaderEnum>(native::ShaderType(&a_shader)),
+				name ? name : "");
 		}
 
 		struct NativeShaderFamilyContext
@@ -2471,7 +2441,10 @@ namespace cs::engine
 				if (found != service.nativeComputeOwners.end())
 					owner = found->second;
 			}
-			if (!owner || !ShaderEnabled(owner->target))
+			if (!owner)
+				return a_nativeCompute;
+			GetService().runtime[ToIndex(owner->target)].computeBindCalls.fetch_add(1, std::memory_order_relaxed);
+			if (!ShaderEnabled(owner->target))
 				return a_nativeCompute;
 			const auto* target =
 				FindPublishedTarget(*plan, owner->target);
@@ -2682,6 +2655,7 @@ namespace cs::engine
 			const auto plan =
 				service.published.load(std::memory_order_acquire);
 			snapshot.id = a_target;
+			snapshot.enabled = ShaderEnabled(a_target);
 			snapshot.name = metadata.name;
 			snapshot.requested =
 				runtime.requested.load(std::memory_order_relaxed);
@@ -2712,6 +2686,12 @@ namespace cs::engine
 			}
 			snapshot.dispatches =
 				runtime.dispatches.load(std::memory_order_relaxed);
+			snapshot.computeBindCalls = runtime.computeBindCalls.load(std::memory_order_relaxed);
+		}
+		if ((SupportedStages(a_target) & ShaderStageBit(ShaderStage::kCompute)) != 0) {
+			std::scoped_lock lock(service.nativeVariantMutex);
+			snapshot.observedComputeShaders = static_cast<std::size_t>(std::ranges::count_if(
+				service.nativeComputeOwners, [&](const auto& entry) { return entry.second.target == a_target; }));
 		}
 		return snapshot;
 	}

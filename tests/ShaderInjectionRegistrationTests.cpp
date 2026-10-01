@@ -1,4 +1,6 @@
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
+#include "Render/NativeShaderFamily.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderInjection.h"
@@ -724,6 +726,64 @@ namespace
 			"compute ownership did not fail closed without the bridge");
 	}
 
+	void CheckNativeFamilyOwnership(const std::filesystem::path& a_shaderRoot)
+	{
+		using namespace cs::engine;
+		using Type = RE::BSShaderManager::ShaderEnum;
+		struct Family
+		{
+			ShaderInjectionTarget target;
+			Type type;
+			const char* name;
+		};
+		constexpr std::array families{
+			Family{ ShaderInjectionTarget::kDeferredPrepass, Type::kDFPrepass, "DFPrepass" },
+			Family{ ShaderInjectionTarget::kBsdfLight, Type::kDFPrepass, "DFLight" },
+			Family{ ShaderInjectionTarget::kBsdfComposite, Type::kDFComposite, "DFComposite" },
+			Family{ ShaderInjectionTarget::kEffect, Type::kEffect, "Effect" },
+			Family{ ShaderInjectionTarget::kDistantTree, Type::kDistantTree, "DistantTree" },
+			Family{ ShaderInjectionTarget::kBsLighting, Type::kLighting, "Lighting" },
+			Family{ ShaderInjectionTarget::kBsWater, Type::kWater, "Water" },
+			Family{ ShaderInjectionTarget::kImageSpace, Type::kImageSpace, "ISSSLRRaytracing" },
+			Family{ ShaderInjectionTarget::kDfTiledLighting, Type::kTotal, "DFTiledLighting" }
+		};
+		for (const auto& contribution : GetFeatureShaderContributions()) {
+			const auto family = std::ranges::find(families, contribution.targetId, &Family::target);
+			Expect(family != families.end(), "contributor lacks a native-family fixture");
+			if (family == families.end())
+				continue;
+			const auto target = family->type == Type::kTotal ?
+			                        ResolveStandaloneComputeTarget(family->name) :
+			                        ResolveGraphicsShaderTarget(family->type, family->name);
+			Expect(target == contribution.targetId, "native family routed to the wrong contribution target");
+			Expect(IsShaderSourceAvailable(a_shaderRoot, family->name), "contributor's engine-named source is missing");
+			for (const auto stage : { ShaderStage::kVertex, ShaderStage::kPixel, ShaderStage::kCompute }) {
+				if ((contribution.stages & ShaderStageBit(stage)) == 0)
+					continue;
+				const auto descriptor = BuildShaderFamilyCompilationDescriptor(
+					{ .target = contribution.targetId, .stage = stage, .nativeName = family->name });
+				Expect(descriptor && descriptor->sourcePath == GetShaderPath(family->name).wstring(),
+					"native family did not compile from its engine name");
+				if (descriptor) {
+					Expect(BuildEffectiveShaderCompileRequest(*GetShaderInjectionTarget(contribution.targetId),
+							   stage, *descriptor, GetFeatureShaderContributions())
+							   .has_value(),
+						"native family rejected its feature contributions");
+				}
+			}
+		}
+		Expect(!ResolveGraphicsShaderTarget(Type::kDFPrepass, "Unknown"), "ambiguous type 4 did not fail closed");
+		Expect(!ResolveStandaloneComputeTarget("Unknown"), "unknown standalone compute did not fail closed");
+		Expect(ResolveStandaloneComputeTarget("IndexBufferOffsetCS") == ShaderInjectionTarget::kImageSpace,
+			"unowned standalone compute observation was lost");
+		const auto wetness = std::ranges::find_if(GetFeatureShaderContributions(), [](const auto& contribution) {
+			return contribution.targetId == ShaderInjectionTarget::kDeferredPrepass && contribution.contributor == "WetnessEffects";
+		});
+		Expect(wetness != GetFeatureShaderContributions().end() && wetness->requiresGraphicsPair &&
+				   wetness->stages == (ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel)),
+			"wetness producer lost its required VS/PS pair");
+	}
+
 	void CheckPixelBindings()
 	{
 		using namespace cs::engine;
@@ -882,10 +942,12 @@ namespace
 				   SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, false),
 			"could not start with shader ownership disabled");
 		ObserveNativeComputeShaderForTesting(
-			ShaderInjectionTarget::kDfTiledLighting,
+			*ResolveStandaloneComputeTarget("DFTiledLighting"),
 			1,
 			"DFTiledLighting",
 			stock.get());
+		Expect(GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kDfTiledLighting).observedComputeShaders == 1,
+			"compute owner observation was not recorded");
 
 		ShaderReplacementRegistration contribution;
 		contribution.targetId = ShaderInjectionTarget::kDfTiledLighting;
@@ -946,6 +1008,8 @@ namespace
 		deferredLightsActive = true;
 		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper,
 			"boot-disabled ownership selected a replacement");
+		Expect(GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kDfTiledLighting).computeBindCalls == 1,
+			"disabled ownership hid the native compute invocation");
 		Expect(SetShaderInjectionEnabled(true) &&
 				   SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, true),
 			"could not enable boot-disabled shader ownership");
@@ -1009,6 +1073,8 @@ int main(int argc, char** argv)
 		CheckContributorConflict();
 	else if (mode == "--compute-hooks-missing")
 		CheckComputeMissingHookFailsClosed();
+	else if (mode == "--native-families" && argc > 2)
+		CheckNativeFamilyOwnership(argv[2]);
 	else if (mode == "--compute-phase" && argc > 2)
 		CheckComputePhaseAndStateRestoration(argv[2]);
 	else if (mode == "--pixel-bindings")

@@ -190,6 +190,13 @@ namespace cs::telemetry
 					.Field(
 						target.name + "_dispatches",
 						TomlInteger(target.dispatches));
+				if ((cs::engine::ShaderInjectionTargetStages(target.id) &
+						cs::engine::ShaderStageBit(cs::engine::ShaderStage::kCompute)) != 0) {
+					a_sink
+						.Field(target.name + "_enabled", target.enabled)
+						.Field(target.name + "_observed_compute_shaders", TomlInteger(target.observedComputeShaders))
+						.Field(target.name + "_compute_bind_calls", TomlInteger(target.computeBindCalls));
+				}
 			}
 		}
 

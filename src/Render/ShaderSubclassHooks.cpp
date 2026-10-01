@@ -4,6 +4,7 @@
 #include "PCH.h"
 #include "Render/Engine.h"
 #include "Render/FrameProfiler.h"
+#include "Render/NativeShaderFamily.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassContext.h"
 
@@ -166,18 +167,12 @@ namespace cs::engine
 					native::StandaloneComputeOwnerName(a_owner) ?
 						native::StandaloneComputeOwnerName(a_owner) :
 						"";
-				if (name == "DFTiledLighting") {
+				if (const auto target = ResolveStandaloneComputeTarget(name)) {
 					ObserveNativeComputeOwner(
 						a_owner,
-						ShaderInjectionTarget::kDfTiledLighting,
+						*target,
 						name,
-						hasPayload);
-				} else if (name == "IndexBufferOffsetCS") {
-					ObserveNativeComputeOwner(
-						a_owner,
-						ShaderInjectionTarget::kImageSpace,
-						name,
-						false);
+						hasPayload && *target == ShaderInjectionTarget::kDfTiledLighting);
 				}
 				return result;
 			}
