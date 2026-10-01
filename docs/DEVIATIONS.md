@@ -93,6 +93,64 @@ The gate checks every owned route, including passthrough VS ordinal 3881
 (`89e56423886dc05ed3b2d1445a70f386c651ac38`) and PS ordinal 3882. Compile failures remain
 runtime stock fallbacks but fail the identity gate; they are not reclassified as unowned.
 
+## Shader contribution
+
+Upstream pin: `d330bf12d`, `Feature.h:60–77`, `ShaderCache.cpp` define builders,
+`Deferred.cpp:211–296/730–740`, `State.cpp` `Draw`, and `ScreenSpaceShadows.cpp` `Prepass`.
+Loaded features declare their define, options and consumer families. Live effect settings and GPU
+readiness do not change those defines. Per-feature declarations also drive the offline variant sweep
+and wetness VS/PS linkage check; no second consumer-family list is maintained.
+
+| Kind | Translation | Evidence / boundary | Code |
+|---|---|---|---|
+| Forced | FO4 deferred prepass/light/composite/tiled families replace Skyrim forward Lighting consumers | Native `DFPrepass`, `DFLight`, `DFComposite` and `DFTiledLighting` receipts; engine-facts shader-family/pass census | Per-feature `ShaderDefines.h`, `ShaderInjectionCompileRequest.cpp` |
+| Forced | Bind persistent resources after Begin's ClearState, at the first world prepass; rebind after producer RTV/UAV use and compute cleanup | AE `Main::Swap` calls Begin at `0xC3328E`; engine-facts high-slot writer census finds no mid-frame engine PS/VS/CS t16+ or PS/CS b3–b11 writes. D3D11 removes SRVs aliasing output resources | `Feature::Prepass`, `SharedData.cpp`, feature producer callbacks, `ComputeScope.cpp` |
+| Forced | Keep VS substrate at b4–b7; never use VS b10/b11 | Engine-facts VS constant-buffer census: b10/b11 are rewritten mid-frame | `SharedData.cpp`, `SubstrateSlots.h` |
+| Forced | Wetness RT6, independent blend state and PS t71 producer-presence marker remain per draw; restore OM/blend afterward | Native deferred prepass owns six MRTs; accepted and rejected material draws need distinct presence markers | `WetnessEffects.cpp` `BindFilmOutput`, DrawTriShape/SetDirtyStates anchor |
+| Forced | ISL PS b11 remains per light; CS t8 is bound/restored at native tiled dispatch | Raster geometry selects each light; the engine owns low CS inputs and rebuilds the dense tiled list | `InverseSquareLighting.cpp`, `ShaderInjection.cpp` compute bridge |
+| Framework | Fullscreen-debug options apply only to composite consumers; static declarations and runtime features share the same define interface | Host debug-owner contract; WaterEffects' debug-only include excludes light-consumer functions, as the feature-on sweep verifies | `ShaderDefineProvider.h`, `Feature.h`, `FeatureShaderDeclarations.h` |
+| Framework | Stock identity, shader ownership and post-freeze delivery validation remain independent of define selection | Repository shader-delivery contract; a resource failure does not silently compile a different feature set | `ShaderInjection.cpp`, `Feature.cpp` |
+
+Sampler verdicts are **forced per-draw binds**, not family-native reuse:
+
+| Consumer | Slot / required mode | Native evidence |
+|---|---|---|
+| Fog composite | s13, linear clamp | `DFComposite.hlsl` declares native s0–s12/s14/s15, not s13 |
+| Fog water/effect/distant tree | s15, linear clamp | `Water.hlsl` native samplers are s1–s7/s9/s10; `Effect.hlsl` s0–s2/s4–s7; `DistantTree.hlsl` s0 |
+| Terrain light/composite/water/effect/distant tree | s13, linear clamp | None of these reconstructed families declares a native s13 |
+| Water caustics, light | s14, linear wrap | `DFLight.hlsl` declares s0–s5/s7, not s14 |
+
+Engine-facts “Invalidate dirties all PS slots” and “PS sampler shadow inputs” show why undeclared
+samplers are not reliable defaults: AE `Invalidate` at `0x182B030` dirties s0–s15, and
+`SetDirtyStates` at `0x18247F6–0x1824829` reissues retained address/filter/selector values.
+The narrow draw scope saves/restores these low samplers. No runtime slot claims or write batching
+remain; the feature-on shader sweep checks overlapping shader registers.
+
+No chosen shader-contribution behavior divergence remains. Producer compute scopes still preserve
+their temporary inputs; these are not consumer-draw snapshots. `shader_injection` reports completed
+`draw_frame`, `frame_binding_checks`, `frame_binding_lost`, `frame_binding_lost_slots` (for example
+`ps_t45,vs_b4`) and cumulative `frame_binding_lost_total`. Verification samples the first consumer
+per family/stage after each publication, never repairs state, and preserves failed-frame counts.
+An authorized game/RenderDoc run must still verify zero losses, wetness producer acceptance,
+forward consumers, and godrays/HBAO+ save/restore behavior.
+
+## Feature loading
+
+Upstream pin: `d330bf12d`, `Feature.cpp` `Load`, `State.cpp` `Load`/`Setup`,
+`Menu.cpp` `DrawDisableAtBootSettings`, and `ShaderCache.cpp` `ValidateDiskCache`.
+
+| Kind | Upstream | Fallout 4 | Boundary / code |
+|---|---|---|---|
+| Framework | Installed/version-compatible features load unless “Disable at Boot” applies; changes take effect after restart | TOML `load` selects activation at startup; shipped defaults remain false and edits require restart | `FeatureManager::PrepareAll`/`ActivateAll`, `FeatureConfig.cpp`; no live load/unload operation is added |
+| Framework | Loaded features use live settings for effect enable/disable, not compile-time readiness predicates | Live settings update shader/producer inputs without removing feature defines or resources; runtime health/quarantine remains separate from successful startup loading | `Feature.h`, `FeatureBuffer.cpp`, per-feature settings |
+| Tweak | Plugin/feature validation in `ShaderCache/Info.ini` invalidates the entire disk cache | Recipe keys include effective defines and source dependencies; a different loaded set gets different keys without wiping unrelated entries | `ShaderVariantRecipe.cpp`, `Utils/ShaderCache/ShaderRecipe.cpp`; equivalent shader identity, different cache organization |
+| Framework | Loaded features run `SetupResources` after renderer initialization; feature resources persist and are recreated as needed, not unloaded by live off | `OnD3D11ReadyAll` initializes GPU resources; feature-owned RAII resources handle replacement; live off does not uninstall hooks or unload features | `Feature.cpp`, `D3D11Bootstrap.cpp`; callback failures quarantine rather than tearing down partial hooks |
+| Framework | JSON layering: Default → User → Overrides → User Overrides; settings are saved separately from feature installation | Canonical TOML deep-merges the sibling User TOML; live edits save deltas and preserve startup-only fields | `FeatureConfig.cpp`, `SettingsPersistence.h`, `LiveSettings.h` |
+| Framework | Restart-field introspection and “available after restart” UI | `GetRestartSettings`, pending load markers and forwarding-only DearModdingUI rows expose the same restart boundary | `Feature.h`, `HostClient.cpp` |
+
+The normal upstream settings workflow does not live-load features. Its diagnostic RemoteControl
+bridge can flip `Feature::loaded`; that is not resource setup/teardown and is not a loading API to port.
+
 ## Substrate
 
 Shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`. FrameBuffer, SharedData,
@@ -118,16 +176,10 @@ Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
 
 SSS reads canonical depth directly: first-person geometry casts as upstream does but never receives
 SSS. Its settings live only in its raymarch cbuffer, not b6 or b7. Feature-off engine variants include
-no substrate, and the binder runs only for contributed stages; native b12 remains owned by the engine.
-
-Pixel injection callbacks batch contiguous writes through `BindInjection*`; only overwritten
-t0-t15/s0-s15 and b0-b2/b12/b13 are captured per draw. Output-changing callbacks capture OM state
-before changing it. Plugin-owned high slots remain resident, with producer-side alias cleanup
-and existing deferred-pass scopes; compute dispatches retain exact restoration. Engine-facts rows
-"Engine-bindable PS slot range" and "Engine constant-buffer slots" establish that boundary.
-No binding cache spans draws: ClearState/ResetState/Invalidate and direct context writes are not
-all hooked. Substrate uploads and debug selection are frame-cached; debug producers invalidate
-their packet when its resources change.
+no substrate reads. The frame binder publishes b4–b7/t17 to VS/PS/CS and debug t61 to PS after
+ClearState and producer boundaries; native b12 remains engine-owned. Only forced low-slot and OM
+overrides use draw scopes. Substrate uploads and debug selection are frame-cached; producers refresh
+their packet and bindings when resources change. See Shader contribution for the binding census.
 
 ## Upstream PR candidates
 
@@ -232,7 +284,7 @@ Camera-cell `WaterSystemHeight` and fullscreen diagnostics are minor FO4 adjustm
 |---|---|---|---|---|
 | Forced | Skyrim cell lookup and water form | Loaded FO4 `GridCellArray` cells populate the eye-centred 5×5, 4096-unit b5 grid; `GetExteriorWaterHeight` resolves inherited heights; `GetWaterType` supplies averaged shallow/deep RGB times sky water multiplier | fallout4-re engine-facts Water height, forms, and camera-underwater state / Water Address Library table: cell bits +0x40, height +0x60, worldspace +0xC8; accessor IDs `{1457825,2200267,2200267}`; form/material packer data +0xB0. No reference/player-height query | `src/World/Water.cpp`, `WaterData.h`, `SharedData.cpp` `BuildSharedData` |
 | Forced | Camera-relative world position and water height | b4 `CameraViewInverse` reconstructs positions relative to `CameraPosAdjust`; b5 heights subtract the same anchor Z; unchanged kernel adds anchor XY once | engine-facts Camera, matrices & world offsets / Per-frame buffer sources; native light positions are view-space | `FO4/WaterEffectsConsumer.hlsli`, `SharedData.cpp` |
-| Forced | `SampColorSampler` and t65 | Linear-wrap s14 in BSDFLight, unchanged t65; composite reads the isolated diagnostic result through host t61 and b7 | Native composite s14 is occupied by scene colour (`DFComposite.hlsl` `g_sLitScene`); terrain owns s13. State scopes restore exact SRV/sampler/context bindings | `WaterEffects.cpp`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl`, `ScopedContextState.h` |
+| Forced | `SampColorSampler` and t65 | Linear-wrap s14 in BSDFLight, persistent t65; composite reads the isolated diagnostic result through host t61 and b7 | Native composite s14 is occupied by scene colour (`DFComposite.hlsl` `g_sLitScene`); light has no native s14 contract. Draw scopes restore the low sampler; debug production preserves its context | `WaterEffects.cpp`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl`, `ScopedContextState.h` |
 | Forced | RGB caustics multiply directional light colour in Lighting.hlsl | RGB direct diffuse/specular and wet coat in all directional BSDFLight families; shadow-only RGB retains independent alpha; ambient/local light is unaffected | engine-facts Raster light accumulation / Base composite equation: FO4 accumulates direct light separately in RGB targets rather than Skyrim's Lighting.hlsl | `DFLight.hlsl` |
 | Forced | Shore consumers read b5 water data | Wetness material production reads the unchanged shared per-cell lookup with camera-relative position | Removing WaterEffects b7 requires its shore reader to use the shared per-cell source; native positions/anchor are described in engine-facts Per-frame buffer sources | `FO4/WetnessMaterial.hlsli` `PrepareMaterial` |
 | Tweak | Pinned State.cpp leaves `WaterSystemHeight` absent | Publish the camera cell's resolved plane relative to b4, or -FLT_MAX; this is not a water-mesh intersection query | Simplified data source; engine-facts Exterior cell height establishes the value, not arbitrary-position water intersections | `Water.cpp` `FillWaterData` |
@@ -275,7 +327,7 @@ Pending rows prevent a claim of complete parity.
 | Forced | Suppress native ripple geometry after ToggleWaterRipples while preserving its logical enabled flag | Engine-facts ToggleWaterRipples `{1074671,2213956,2213956}`: water objects +0x18/count +0x28, ripple geometry +0x28, active flag +0xBF. Passing false into the FO4 native function also changes the wetness predicate; upstream's observable visual suppression therefore requires the geometry-only filter | `World/Water.cpp`, `WetnessEffects.cpp` ripple predicate |
 | Forced | Normalize traditional light color by Color::PBRLightingScale before unchanged EvaluateWetnessLighting | Upstream LightingEval multiplies traditional wet specular by PI×0.65; reconstructed FO4 BSDF light accumulation uses PI without Skyrim's material-brightness scale. The boundary removes that host scale without changing the upstream BRDF | `FO4/WetnessEffectsConsumer.hlsli` `ApplyDirectCoat` |
 | Framework | Preserve load=false activation, existing snake_case TOML keys, forwarding-only UI, live enable, debug views, ownership and telemetry | Repository host contracts; settings/defaults/climates retain upstream values. Debug uses host b7. Null t71 makes consumers dry; a non-aliasing t71 presence marker preserves native wetness on rejected producer draws, without b8 | `WetnessEffects.{h,cpp}`, `DFPrepass.hlsl`, `WetnessMath.h`, `FeatureBuffer.h`, `SharedDataLayout.h` |
-| Framework | Reject stale/unavailable substrate or unexpected MRTs; restore exact OM/blend/SRV/buffer state and require an atomic VS/PS replacement pair | Repository fail-closed/state-preservation contract. Feature interpolators cannot use a replacement PS with a stock VS while asynchronous compilation is incomplete | `SharedData.cpp` `IsSharedDataCurrent`, `ShaderInjection.{h,cpp}`, `WetnessEffects.cpp` |
+| Framework | Reject stale/unavailable substrate or unexpected MRTs; restore OM/blend state and require an atomic VS/PS replacement pair | Repository fail-closed/state-preservation contract. Feature interpolators cannot use a replacement PS with a stock VS while asynchronous compilation is incomplete; film SRVs publish after the producer pass | `SharedData.cpp` `IsSharedDataCurrent`, `ShaderInjection.{h,cpp}`, `WetnessEffects.cpp` |
 
 ### Pending
 
@@ -318,9 +370,9 @@ or verification work, not engine incompatibilities or a claim of full enabled-fe
 | Forced | Fog sees the already-composed main-view sky | Exclude sky depth from composite EHF; fog the final logical MainTemp sky once after native forward sky, preserving geometry and inactive allocation pixels | FO4 sky group follows deferred composite; `RenderHooks.cpp` post-forward-sky boundary and existing DynamicCubemaps capture at logical MainTemp. Per-layer affine fog cannot preserve additive sun/stars or mask composition | `VolumetricFog.cpp` `PrepareSky`, `CompositeSky`; `FO4/ExponentialHeightFog/SkyCompositeCS.hlsl` |
 | Forced | Sunlight attenuation in upstream lighting consumers | Attenuate all directional BSDFLight families and separate wet-coat sun lobes; leave ambient/local light and independent shadow alpha untouched | engine-facts Raster light accumulation / Base composite equation: FO4 stores direct light separately from ambient and surface composition | `DFLight.hlsl`, forward consumers |
 | Forced | Native fog color passed to upstream `originalFogColorAmount` | Pass reconstructed near/far, low/high native color before sun/grayscale coloration | Six native composite bodies explicitly evaluate these colors; this proves the shader boundary, not the TESWeather-to-b12 uploader | `DFComposite.hlsl`, water/effect/tree consumers |
-| Forced | Upstream `SampColorSampler` and volume t19 | Composite uses linear-clamp s13; forward consumers use s15; volume stays t19; CS high-slot snapshots preserve all providers | Native composite s14 is occupied by scene color; water s14 can hold caustics. Terrain's s13 descriptor is identical and can share an immutable sampler contract | `ExponentialHeightFog.cpp` `Load`, `VolumetricFog.cpp` `ScatteringInputs`; consumer include |
+| Forced | Upstream `SampColorSampler` and volume t19 | Composite uses linear-clamp s13; forward consumers use s15; volume persists at t19; producer CS snapshots preserve temporary provider inputs | Native composite s14 is occupied by scene color. Fog and terrain use the same linear-clamp s13 descriptor; neither consumer family guarantees it natively | `ExponentialHeightFog.cpp`, `VolumetricFog.cpp` `ScatteringInputs`; consumer include |
 | Forced | Skyrim weather form identity/transition | FO4 `Sky.currentWeather`, `lastWeather`, `currentWeatherPct` select normalized plugin-local weather profiles | Typed CommonLibF4 `Sky` fields and existing `SnapshotWeather`; light plugins use 12-bit local IDs and ordinary plugins use 24-bit local IDs | `ExponentialHeightFog.cpp` `PrepareFrame`, `World/Weather.cpp` |
-| Framework | Upstream JSON, ImGui and always-loaded lifecycle | Retain load=false, ownership/freeze validation, TOML deltas, live settings, forwarding-only UI, fog-factor debug view through host b7 and telemetry | Repository activation, persistence, UI, measured stock identity and fail-closed contracts; colors extend the existing typed float-array mechanism | `ExponentialHeightFog.{h,cpp}`, `ExponentialHeightFogSettings.h`, settings schema/registry, shader sampler ledger |
+| Framework | Upstream JSON, ImGui and startup loading | Retain load=false, ownership/delivery validation, TOML deltas, live settings, forwarding-only UI, fog-factor debug view through host b7 and telemetry | Repository activation, persistence, UI, measured stock identity and fail-closed contracts; colors extend the existing typed float-array mechanism | `ExponentialHeightFog.{h,cpp}`, `ExponentialHeightFogSettings.h`, settings schema/registry |
 | Framework | Weather variable registry integration | TOML weather open-map uses the upstream 23 variable names, opt-in `__enabled`, float/RGBA interpolation, integer switching above 0.5 and missing-key user-setting fallback | Repository typed TOML contract replaces upstream JSON; declared settings/defaults/edit ranges remain unchanged | `World/WeatherVariableRegistry.h`, `ExponentialHeightFogSettings.h`, `SettingsRegistry.h` |
 | Framework | Failure handling | Camera, substrate, sky-resource or nonfinite dispatch-input failure keeps native fog; failed volume allocation can retain analytic fog; frame-count gaps and resource changes invalidate volume history | Repository runtime-safety contract; compute detaches/restores OM and restores b4–b7/t17 plus owned high slots. The pinned slice formula is unchanged; its singularity is an upstream PR candidate | `ExponentialHeightFog.cpp`, `VolumetricFog.cpp`, `ComputeOMScope`, `ScopedComputeSharedDataBinding` |
 
@@ -444,7 +496,7 @@ Pending rows remain unfinished and do not establish upstream parity.
 | Forced | Skyrim native directional consumers | Reconstructed BSDFLight, BSDistantTree, BSWater and lit BSEffect directional terms; point/ambient terms stay separate. FO4's deferred and forward shaders are different programs | `package/Shaders/{DFLight,DistantTree,Water,Effect}.hlsl` |
 | Forced | Direct world position in forward consumers | Screen/depth reconstruction uses FO4's depth partition, translated at the boundary with canonical t17 and b4 inverse projection; native depth uses `d <= 0.01` / `mad(d,1.01,-0.01)` (`DFComposite.hlsl`) | `FO4/TerrainShadowsConsumer.hlsli` |
 | Forced | Engine-owned render-state lifecycle | Bind t60 and caller s13 at the post-dirty DrawTriShape boundary, including OG/NG/AE. Native SetDirtyStates resubmits s0–s15 and otherwise overwrites the caller sampler (engine-facts Shader slots & bindings, Draw state flush call) | `RenderHooks.cpp`, `ShaderInjection.{h,cpp}`, `TerrainShadows.cpp` |
-| Framework | Host activation, settings, UI and shader ownership | Preserve load=false activation, TOML persistence, forwarding-only DearModdingUI, configured ownership and the stock identity gate; unavailable resources publish identity. Restore claimed bindings and unbind high-slot inputs around UAV writes without widening compute cleanup | `TerrainShadows.cpp`, `Feature.h`, `ShaderInjection.{h,cpp}` |
+| Framework | Host activation, settings, UI and shader ownership | Preserve load=false activation, TOML persistence, forwarding-only DearModdingUI, configured ownership and the stock identity gate; unavailable resources publish identity. Rebind t60 after UAV production and restore the per-draw low sampler without widening compute cleanup | `TerrainShadows.cpp`, `Feature.h`, `ShaderInjection.{h,cpp}` |
 | Framework | Upstream buffer viewer | Retain fullscreen shadow/heightmap views and sampled field statistics; host b7/t61 supplies debug constants/texture, separate from production b6/t60, without a feature-owned debug CB | `TerrainShadows.cpp`, `FO4/TerrainShadowsConsumer.hlsli`, `ShadowStatistics.cs.hlsl` |
 | Fix | Child readiness checks its own editor ID | Check readiness against the resolved inherited-land parent, correcting the upstream loading/readiness mismatch listed under Upstream PR candidates | `TerrainShadows.cpp` `ResolveWorldspaceEditorId`, `EnsureLiveResources` |
 
@@ -461,7 +513,7 @@ Pending rows remain unfinished and do not establish upstream parity.
 | Pending | Console/Papyrus GameHour hooks, fast-travel event and completed celestial generation | FO4 wait/sleep/load/interior-exit events request a full refresh, retained hour-jump polling covers large console/script/travel changes, and refresh waits for Sky's consumed hour. Exact small forward-hour edits and active-light versus Sky transition equivalence still need host hooks/evidence; not an accepted parity exception | `TerrainShadows.cpp` `OnDataLoaded`, `PollGameHourJump`, `OnPostDeferredPrePass` |
 | Pending | Particle and volumetric sunlight | Native FO4 particles contain only texture × vertex color × ColorScale; upstream reconstructs particle sunlight/ambient. Complete that lighting input boundary rather than shadowing emissive color. No particle source is shipped. Imagespace currently supplies SSLR, not volumetric generation; reconstruct/add that consumer | Native Particle family; `ShaderInjectionTargets.h` |
 | Pending | Reflections and other secondary views | BSLighting remains stock: secondary views need their own camera/depth publication. Engine-facts BSLighting forward-pass source limits these passes to modes 0/21; b4/t17 publish the main view | `SharedData.cpp`, `FO4/TerrainShadowsConsumer.hlsli` |
-| Pending | Host input/runtime proof | Verify xLODGen orientation/altitude against landscape, active directional light equivalence at transitions, and t60/s13 execution/restoration for every consumer in an authorized batched runtime session; static shader/claim tests alone are insufficient | `TerrainShadows.cpp`, reconstructed consumers |
+| Pending | Host input/runtime proof | Verify xLODGen orientation/altitude against landscape, active directional light equivalence at transitions, persistent t60 and per-draw s13 for every consumer in an authorized batched runtime session; static shader tests alone are insufficient | `TerrainShadows.cpp`, reconstructed consumers |
 
 ## Dynamic Cubemaps
 
@@ -723,7 +775,7 @@ Source/shader validation does not establish runtime parity.
 | Forced | Irradiance/albedo consumer conversions | Keep main's native-linear consumer algebra; prepare radiance using unchanged Color helpers paired with upstream `RadianceToLinear` | fallout4-re `docs\engine-facts.md`, Format numbering / Main and scene-intermediate identity / Base composite equation: sRGB albedo is decoded before lighting and accumulators compose into float HDR. With the LinearLighting feature absent, the host still sets neutral b6 `enableLinearLighting=1`, `colorGamma=1` and unit multipliers, making the relevant shared Color conversions identities; it does not use the nonidentity `ENABLE_LL=0` branch. Combined material-provider behavior remains unverified | `SharedData.cpp` `PackFeatures`, unchanged `Common/Color.hlsli`, `FO4/ScreenSpaceGI/Prepare.cs.hlsl`, `FO4/ScreenSpaceGIConsumer.hlsli` |
 | Tweak | AOPower default 1, edit range 0–6 | Default 4, edit range 0–12 | Main `06032303` deliberately calibrates placed-light-dominated interiors; no engine fact forces this choice | `ScreenSpaceGISettings.h`, forwarding UI |
 | Fix | Blur center normal lacks frameScale | Apply main's center-UV correction as a one-line shared seam | Half/quarter-resolution dynamic-resolution center and neighbor taps must use the same extent. This lookup is internal to blur, so an input/consumer adapter cannot repair it without changing neighbor samples; upstream #2795 | Shared `blur.cs.hlsl:104`, seam `13d9d2e2d` |
-| Framework | Skyrim lifecycle, JSON/UI and deferred bindings | Preserve load=false, TOML/live settings, forwarding-only UI, presets, ownership/hash gates, telemetry, AO preview, readiness/reset guards and exact binding scopes | Repository host contracts; upstream-cased keys and Float2 DepthFadeRange replace legacy keys. b1 carries all SSGI settings; no b6 or b7 SSGI block. PS t26–29/t38 and b10 are owned/snapshotted; CS t8–9/b10 are scoped without widening low-slot cleanup | `ScreenSpaceGI.{h,cpp}`, `ScreenSpaceGISettings.h`, `FO4/ScreenSpaceGI/Contracts.hlsli`, substrate packing and tests |
+| Framework | Skyrim lifecycle, JSON/UI and deferred bindings | Preserve load=false, TOML/live settings, forwarding-only UI, presets, ownership/hash gates, telemetry, AO preview and readiness/reset guards | Repository host contracts; b1 carries SSGI settings, with no b6/b7 SSGI block. PS t26–29/t38 and b10 persist after production; temporary producer CS t8–9/b10 remain scoped without widening low-slot cleanup | `ScreenSpaceGI.{h,cpp}`, `ScreenSpaceGISettings.h`, `FO4/ScreenSpaceGI/Contracts.hlsli`, substrate packing and tests |
 
 ### Pending
 
