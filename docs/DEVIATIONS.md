@@ -69,7 +69,7 @@ Retired rows preserve the original Kind and identify replacements consumed uncha
 | Chosen | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |
 | Chosen | `Upscaling/UpscaleVS.hlsl` | `FO4/Upscaling/UpscaleVS.hlsl` |
 | Chosen | `WaterEffects/WaterCaustics.hlsli` | `FO4/WaterEffects/WaterCaustics.hlsli` (retired; the unchanged upstream include is consumed directly) |
-| Chosen | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` |
+| Chosen | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` (copied implementation retired; this path only forwards to the FO4 consumer of the unchanged upstream include) |
 
 ## Substrate
 
@@ -128,6 +128,14 @@ no substrate, and the binder runs only for contributed stages; native b12 remain
 - `src/Features/TerrainShadows.cpp:332–336,365–380`: readiness compares the child worldspace
   editor ID, but loading resolves inherited land to the parent. Resolve the same land identity in
   both paths. FO4 retains main's parent-readiness correction; no upstream PR recorded.
+- `src/Features/WetnessEffects.cpp:557–558,940` and
+  `features/Wetness Effects/Shaders/WetnessEffects/WetnessEffects.hlsli`: the UI permits
+  zero ripple breadth/lifetime, but the CPU/shader takes their reciprocals. Define the
+  zero-value meaning upstream or use positive bounds; FO4 preserves the pinned behavior.
+- `src/Features/WetnessEffects.cpp:505,571` and `Common/SharedData.hlsli`:
+  `RaindropFxRange` and `WeatherTransitionSpeed` are exposed and published, but the pinned
+  wetness shader/material computation does not read them. Wire the intended controls
+  upstream or remove dead settings there; FO4 retains their defaults, persistence and UI.
 
 ## InverseSquareLighting
 
@@ -186,7 +194,7 @@ Feature classification: **extension candidate**. Chosen rows: camera-cell
 | Forced | Camera-relative world position and water height | b4 `CameraViewInverse` reconstructs positions relative to `CameraPosAdjust`; b5 heights subtract the same anchor Z; unchanged kernel adds anchor XY once | engine-facts Camera, matrices & world offsets / Per-frame buffer sources; native light positions are view-space | `FO4/WaterEffectsConsumer.hlsli`, `SharedData.cpp` |
 | Forced | `SampColorSampler` and t65 | Linear-wrap s14 in BSDFLight, unchanged t65; composite only reads an isolated diagnostic texture at t33 | Native composite s14 is occupied by scene colour (`BSDFCompositeShader.hlsl` `g_sLitScene`); terrain owns s13. State scopes restore exact SRV/sampler/context bindings | `WaterEffects.cpp`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl`, `ScopedContextState.h` |
 | Forced | RGB caustics multiply directional light colour in Lighting.hlsl | RGB direct diffuse/specular and wet coat in all directional BSDFLight families; shadow-only RGB retains independent alpha; ambient/local light is unaffected | engine-facts Raster light accumulation / Base composite equation: FO4 accumulates direct light separately in RGB targets rather than Skyrim's Lighting.hlsl | `BSDFLightShader.hlsl` |
-| Forced | Shore consumers read b5 water data | Existing FO4 wetness shore consumer translates b5 cell height back to its absolute-position contract | Removing WaterEffects b7 requires its shore reader to use the shared per-cell source; native positions/anchor are described in engine-facts Per-frame buffer sources | `features/WetnessEffects/Shaders/FO4/WetnessEffects/WetnessEffects.hlsli` `GetSurface` |
+| Forced | Shore consumers read b5 water data | Wetness material production reads the unchanged shared per-cell lookup with camera-relative position | Removing WaterEffects b7 requires its shore reader to use the shared per-cell source; native positions/anchor are described in engine-facts Per-frame buffer sources | `FO4/WetnessMaterial.hlsli` `PrepareMaterial` |
 | Chosen | Pinned State.cpp leaves `WaterSystemHeight` absent | Publish the camera cell's resolved plane relative to b4, or -FLT_MAX; this is not a water-mesh intersection query | Requested host input; engine-facts Exterior cell height establishes the value, not arbitrary-position water intersections | `Water.cpp` `FillWaterData` |
 | Framework | Always-loaded upstream feature | Preserve FO4 activation, load/ownership/readiness guards, persisted live enabled toggle and cached water telemetry | Repository activation, TOML persistence, shader ownership/identity, telemetry and fail-closed contracts; disabled/unready texture yields the identity multiplier | `WaterEffects.{h,cpp}`, `WaterEffectsMath.h`, `FO4/WaterEffectsConsumer.hlsli` |
 | Chosen | No upstream fullscreen caustics/submersion views | Optional fullscreen diagnostics execute the same kernel/filter in an isolated pass, not manual level-zero sampling | Feature-specific visualization beyond upstream behavior; sampler isolation is the Forced binding translation above | `WaterEffects.{h,cpp}`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl` |
@@ -203,6 +211,50 @@ Feature classification: **extension candidate**. Chosen rows: camera-cell
 | Kind | Upstream | Notes |
 |---|---|---|
 | Pending | Secondary mode-0/21 BSLighting caustics | World and first-person accumulators issue no BSLighting passes (engine-facts BSLighting forward-pass source), so their caustics are deferred. Secondary-view BSLighting execution and camera/resource lifetime are not validated or integrated; do not classify that missing adapter as an engine limitation |
+
+## WetnessEffects
+
+Upstream pin: `d330bf12d`; shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`.
+Both upstream `WetnessEffects/*.hlsli` files and the required Common lighting includes
+are staged unchanged. The copied FO4 implementation is deleted. The exact upstream
+192-byte settings block is published in b6, with no wetness block in b7.
+Feature classification: **core**. There are no Chosen rows; Pending rows prevent a
+claim of complete parity.
+
+### Translations
+
+| Kind | Difference | Evidence / reason | Where |
+|---|---|---|---|
+| Forced | Produce darkened albedo, film normal and roughness in the deferred material prepass; evaluate unchanged upstream direct/indirect wetness functions in raster/tiled lighting and composite | FO4 separates material production from lighting; engine-facts Deferred prepass MRT layout and Raster light accumulation. Later passes lack the original skinned/model-space material inputs. The consumer mirrors upstream Lighting.hlsl wet material orchestration without replacing an upstream path | `BSDFPrePass.hlsl`, `FO4/WetnessMaterial.hlsli`, `FO4/WetnessEffectsConsumer.hlsli`, `BSDFLightShader.hlsl`, `DFTiledLighting.hlsl`, `BSDFCompositeShader.hlsl` |
+| Forced | Add an RGBA16F film target at checked-unused MRT6 and sample it at t71; preserve all six native targets and their blend state | Engine-facts Deferred prepass MRT layout: all native channels have material/emissive/velocity consumers; MRT2.z is environment strength, not roughness, and no universal spare film-normal channel is established. Film stores upstream octahedral world normal, roughness and validity | `WetnessEffects.cpp` `BeginPrepass`, `BindFilmOutput`; `BSDFPrePass.hlsl` |
+| Forced | Set native global wetness g to zero only in ready, supported owned material variants | Engine-facts Native material wetness: ShadowSceneNode+0x2F8 is b12[30].x. Keeping it would apply native darkening/specular modification before the upstream film. Unsupported/unready/disabled variants retain native behavior | `BSDFPrePass.hlsl` `native_global_fade`, `wetnessOwned` |
+| Forced | Supply original model position and authored geometry normal through paired non-tessellated VS/PS interpolators | Reconstructed prepass VS skins the model position and MODELSPACENORMALS replaces the normal basis with model axes before native PS interpolation. Upstream GetRainDrops uses original model position on skinned materials and puddles use geometry normal rather than the mapped normal | `BSDFPrePass.hlsl` `wetModelPosition`, `wetGeometryNormal` |
+| Forced | Environment porosity uses the native environment-enabled bit and decoded dry environment strength | Engine-facts Ordinary environment-strength encoding / Prepass texture and envmap constants: slot-map byte108 supplies enabled and dry scale E; MRT2.z encodes sqrt(E×0.02) when g=0. The FO4 envmap loader does not load a separate per-pixel mask, so no mask texture is invented | `BSDFPrePass.hlsl` `environmentMapped`, `environmentMask`; `FO4/WetnessMaterial.hlsli` |
+| Forced | Read weather flags/fade bytes, full-sky state, precipitation geometry and SPGD type/density; publish the native occlusion matrix and bind precipitation DS8 at t70 | Engine-facts Precipitation/native wetness: DATA rainy=0x04, snow=0x08, SPGD indices 9/11, strict native rain type0, intensity min(density/3,1). Occlusion matrix RVAs OG 0x6732B30, NG 0x3CB5C30, AE 0x3E71540; BSEffect negates row1. The unchanged upstream shader declares t70 but does not sample it | `World/Weather.cpp`, `WetnessEffects.cpp` `GetCommonBufferData`, `BindFilmOutput` |
+| Forced | Read shore heights from b5 WaterData using the same camera-relative anchor as b4 | Engine-facts Exterior cell height and Per-frame buffer sources; WaterEffects already owns the upstream per-cell grid. No player-plane or b7 fallback | `FO4/WetnessMaterial.hlsli` `PrepareMaterial` |
+| Forced | Suppress native ripple geometry after ToggleWaterRipples while preserving its logical enabled flag | Engine-facts ToggleWaterRipples `{1074671,2213956,2213956}`: water objects +0x18/count +0x28, ripple geometry +0x28, active flag +0xBF. Passing false into the FO4 native function also changes the wetness predicate; upstream's observable visual suppression therefore requires the geometry-only filter | `World/Water.cpp`, `WetnessEffects.cpp` ripple predicate |
+| Forced | Normalize traditional light color by Color::PBRLightingScale before unchanged EvaluateWetnessLighting | Upstream LightingEval multiplies traditional wet specular by PI×0.65; reconstructed FO4 BSDF light accumulation uses PI without Skyrim's material-brightness scale. The boundary removes that host scale without changing the upstream BRDF | `FO4/WetnessEffectsConsumer.hlsli` `ApplyDirectCoat` |
+| Framework | Preserve load=false activation, existing snake_case TOML keys, forwarding-only UI, live enable, debug views, ownership and telemetry | Repository host contracts; settings/defaults/climates retain upstream values. Debug/readiness use host b8 rather than a wetness b7 block | `WetnessEffects.{h,cpp}`, `WetnessMath.h`, `FeatureBuffer.h`, `SharedDataLayout.h` |
+| Framework | Reject stale/unavailable substrate or unexpected MRTs; restore exact OM/blend/SRV/buffer state and require an atomic VS/PS replacement pair | Repository fail-closed/state-preservation contract. Feature interpolators cannot use a replacement PS with a stock VS while asynchronous compilation is incomplete | `SharedData.cpp` `IsSharedDataCurrent`, `ShaderInjection.{h,cpp}`, `WetnessEffects.cpp` |
+
+### Pending
+
+| Kind | Upstream behavior | Remaining work |
+|---|---|---|
+| Pending | Original inputs for tessellated skinned/model-space materials and model-space variants without an authored normal in the native VS signature | Hull/domain stages are not injectable through the current stage interface. Add their typed ownership/routing and preserve original inputs, and reconstruct missing vertex attributes. These variants deliberately retain native g and produce no upstream film; missing adapters are not engine limitations |
+| Pending | Secondary forward BSLighting material consumers and optional upstream Skin/TruePBR integrations | World/first-person accumulation is deferred (engine-facts BSLighting forward-pass source). Secondary-view consumers and corresponding optional feature inputs are not integrated; no absence of execution or parity is claimed |
+| Pending | Runtime proof of material producer, weather, resources and consumer coverage | No deployment/game launch is authorized for this task. Confirm current camera cache freshness during prepass draws, MRT6 format/blends/restoration, original inputs and paired compilation fallback in RenderDoc |
+
+### Batched in-game checks
+
+- Rain start/end, clear/rain/snow/radstorm transitions, full-sky versus interior,
+  overrides/climates, pause/freeze and shoreline cell-height changes.
+- Ordinary, skin/face/hair, model-space normal, eye, tree, terrain, blend and
+  tessellated draws; original geometry normals/model positions; native g applied once.
+- Film MRT6 validity, depth/order/blends and exact state restoration; raster/tiled
+  local/directional coat and indirect reduction; existing wet cubemap sampling unchanged.
+- Live disable, unavailable resources/camera, asynchronous VS/PS readiness,
+  dynamic resolution and camera motion; vanilla ripple suppression with +0xBF unchanged.
 
 ## Performance Overlay
 

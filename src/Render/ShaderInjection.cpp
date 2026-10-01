@@ -46,6 +46,17 @@ namespace cs::engine
 			t_pixelBindings = _previous;
 		if (!_context)
 			return;
+		if (_outputCaptured) {
+			_context->OMSetRenderTargets(8, _targets, _depth);
+			_context->OMSetBlendState(_blend, _blendFactor, _sampleMask);
+			for (auto* target : _targets)
+				if (target)
+					target->Release();
+			if (_depth)
+				_depth->Release();
+			if (_blend)
+				_blend->Release();
+		}
 		_substrate.Restore(_context, _stage);
 		for (const auto& buffer : _buffers) {
 			if (_stage == ShaderStage::kCompute)
@@ -85,6 +96,11 @@ namespace cs::engine
 		for (const auto& claim : a_claims) {
 			if (claim.stage != _stage)
 				continue;
+			if (claim.resourceType == ShaderResourceType::kRenderTarget && !_outputCaptured) {
+				_context->OMGetRenderTargets(8, _targets, &_depth);
+				_context->OMGetBlendState(&_blend, _blendFactor, &_sampleMask);
+				_outputCaptured = true;
+			}
 			if (claim.resourceType == ShaderResourceType::kShaderResource &&
 				std::ranges::none_of(_resources, [&](const auto& r) { return r.slot == claim.slot; })) {
 				_resources.push_back({ claim.slot, nullptr });
@@ -1645,6 +1661,12 @@ namespace cs::engine
 					a_candidate.stages);
 				return false;
 			}
+			constexpr auto graphicsStages = ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel);
+			if (a_candidate.requiresGraphicsPair && a_candidate.stages != graphicsStages) {
+				L->error("Replacement registration '{}' rejected: paired graphics stages require a vertex/pixel contribution.",
+					a_candidate.contributor);
+				return false;
+			}
 			if (RegistrationHasDuplicateClaims(a_candidate)) {
 				L->error(
 					"Replacement registration '{}' for '{}' rejected: duplicate slot claim.",
@@ -2229,6 +2251,7 @@ namespace cs::engine
 			if (!IsValidTarget(a_family.target))
 				return result;
 
+			bool requiresGraphicsPair = false;
 			try {
 				const auto plan =
 					GetService().published.load(std::memory_order_acquire);
@@ -2236,6 +2259,9 @@ namespace cs::engine
 					plan ? FindPublishedTarget(*plan, a_family.target) : nullptr;
 				if (!target)
 					return result;
+				requiresGraphicsPair = std::ranges::any_of(target->contributions, [](const auto& contribution) {
+					return contribution.requiresGraphicsPair;
+				});
 
 				auto& runtime =
 					GetService().runtime[ToIndex(a_family.target)];
@@ -2253,8 +2279,6 @@ namespace cs::engine
 									a_vertexShaderId),
 								a_nativeVertex)) {
 						result.vertex = replacement;
-						runtime.substitutions.fetch_add(
-							1, std::memory_order_relaxed);
 					}
 				}
 
@@ -2274,8 +2298,6 @@ namespace cs::engine
 										a_nativePixel)),
 								a_nativePixel)) {
 						result.pixel = replacement;
-						runtime.substitutions.fetch_add(
-							1, std::memory_order_relaxed);
 					}
 				}
 			} catch (const std::exception& e) {
@@ -2292,6 +2314,12 @@ namespace cs::engine
 					spdlog::level::warn,
 					"Native shader descriptor routing failed.");
 			}
+			// Host-added interpolators cannot pair a replacement stage with its native counterpart.
+			if (requiresGraphicsPair && (result.vertex == a_nativeVertex || result.pixel == a_nativePixel)) {
+				result = { a_nativeVertex, a_nativePixel };
+			}
+			GetService().runtime[ToIndex(a_family.target)].substitutions.fetch_add(
+				(result.vertex != a_nativeVertex) + (result.pixel != a_nativePixel), std::memory_order_relaxed);
 			return result;
 		}
 	}

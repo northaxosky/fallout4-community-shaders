@@ -125,7 +125,6 @@ namespace cs::render
 			auto& fo4 = a_data.fo4;
 			fo4.screenSpaceGISettings = a_features.screenSpaceGISettings;
 			fo4.exponentialHeightFogSettings = a_features.exponentialHeightFogSettings;
-			fo4.WetnessDebugVisualization = a_features.wetnessEffectsSettings.DebugVisualization;
 			fo4.DynamicCubemapsDebugVisualization = a_features.dynamicCubemapsSettings.DebugVisualization;
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
 			a_data.feature.cubemapCreatorSettings.Enabled = a_features.dynamicCubemapsSettings.Enabled;
@@ -135,20 +134,7 @@ namespace cs::render
 			std::ranges::copy(a_features.terrainShadowsSettings.ZRange, terrain.ZRange);
 			std::ranges::copy(a_features.terrainShadowsSettings.Offset, terrain.Offset);
 			terrain.ZBlur = a_features.terrainShadowsSettings.ZBlur;
-			auto& wetness = a_data.feature.wetnessEffectsSettings;
-			const auto& source = a_features.wetnessEffectsSettings;
-			if (source.Active) {
-				wetness.EnableWetnessEffects = source.EnableWetnessEffects;
-				wetness.Wetness = source.Wetness;
-				wetness.PuddleWetness = source.PuddleWetness;
-				wetness.MaxRainWetness = source.MaxRainWetness;
-				wetness.MaxPuddleWetness = source.MaxPuddleWetness;
-				wetness.MaxShoreWetness = source.MaxShoreWetness;
-				wetness.ShoreRange = source.ShoreRange;
-				wetness.PuddleRadius = source.PuddleRadius;
-				wetness.PuddleMaxAngle = source.PuddleMaxAngle;
-				wetness.MinRainWetness = source.MinRainWetness;
-			}
+			a_data.feature.wetnessEffectsSettings = a_features.wetnessEffectsSettings;
 		}
 
 		constexpr std::array<std::size_t, kSubstrateBufferCount> kBufferSizes{
@@ -234,7 +220,7 @@ namespace cs::render
 			GetSubstrateState().inDeferredLights = false;
 		}
 
-		void UpdateSharedData() noexcept
+		void UpdateSharedData(bool a_updateDepth = true) noexcept
 		{
 			auto& state = GetSubstrateState();
 			if (!state.ready.load(std::memory_order_acquire))
@@ -247,6 +233,8 @@ namespace cs::render
 			if (!graphicsState || !context || !camera)
 				return;
 
+			if (a_updateDepth)
+				UpdateCanonicalDepth(context, *camera);
 			const auto frame = graphicsState->frameCount;
 			if (state.lastFrame.load(std::memory_order_relaxed) == frame)
 				return;
@@ -276,7 +264,6 @@ namespace cs::render
 				data.frame = PackFrameData(*camera, ratio, previousRatio, ratio.x - clamp);
 				PackFeatures(data, GetFeatureBufferData());
 				data.fo4.DeltaTime = delta;
-				UpdateCanonicalDepth(context, *camera);
 				if (!WriteSubstrate(context, data)) {
 					CS_LOG_EVERY_MS(
 						L,
@@ -412,6 +399,8 @@ namespace cs::render
 		if (!a_context || !IsSharedDataReady())
 			return;
 
+		// FO4: material draws run after the current world+jitter cache record is written.
+		UpdateSharedData(false);
 		ID3D11Buffer* buffers[kSubstrateBufferCount]{};
 		for (std::size_t index = 0; index < kSubstrateBufferCount; ++index)
 			buffers[index] = state.buffers[index].get();
@@ -432,5 +421,12 @@ namespace cs::render
 		case engine::ShaderStage::kCount:
 			break;
 		}
+	}
+
+	bool IsSharedDataCurrent() noexcept
+	{
+		const auto* graphicsState = engine::GetGraphicsState();
+		return IsSharedDataReady() && graphicsState &&
+		       GetSubstrateState().lastFrame.load(std::memory_order_relaxed) == graphicsState->frameCount;
 	}
 }

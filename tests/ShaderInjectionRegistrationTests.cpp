@@ -277,6 +277,16 @@ namespace
 			};
 		};
 
+		ShaderReplacementRegistration incompletePair;
+		incompletePair.targetId = ShaderInjectionTarget::kDeferredPrepass;
+		incompletePair.requiresGraphicsPair = true;
+		Expect(!RegisterReplacement(std::move(incompletePair)), "pixel-only paired contribution was accepted");
+		ShaderReplacementRegistration completePair;
+		completePair.targetId = ShaderInjectionTarget::kDeferredPrepass;
+		completePair.stages = ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel);
+		completePair.requiresGraphicsPair = true;
+		Expect(RegisterReplacement(std::move(completePair)), "paired vertex/pixel contribution was rejected");
+
 		ShaderReplacementRegistration first;
 		first.targetId = ShaderInjectionTarget::kBsdfComposite;
 		first.contributor = "ledger-first";

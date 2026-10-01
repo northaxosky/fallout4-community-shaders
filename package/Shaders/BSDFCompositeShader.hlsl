@@ -967,13 +967,9 @@ float3 sampleDirectLighting(float2 coordinate)
 
 float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFactor,
 	float gloss, float3 environment, float3 centerColor
-#	ifdef WETNESS_EFFECTS
-	,
-	float wetnessGlossinessAlbedo
-#		ifdef DYNAMIC_CUBEMAPS
+#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 	,
 	float3 wetReflection
-#		endif
 #	endif
 )
 {
@@ -1156,13 +1152,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #	if !FOGSTACK
 	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
-#		ifdef WETNESS_EFFECTS
-					  ,
-					  wetSurface.glossinessAlbedo
-#			ifdef DYNAMIC_CUBEMAPS
+#		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 					  ,
 					  wetReflection
-#			endif
 #		endif
 					  ),
 		1.0);
@@ -1175,13 +1167,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		glossFactor *= roughFactor;
 		float gloss = material.y * material.y * 50.0;
 		float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
-#		ifdef WETNESS_EFFECTS
-			,
-			wetSurface.glossinessAlbedo
-#			ifdef DYNAMIC_CUBEMAPS
+#		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			,
 			wetReflection
-#			endif
 #		endif
 		);
 
@@ -1612,9 +1600,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	endif
 	float2 uv = position.xy * screenData[0].xy;
 	float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
-#	ifdef WETNESS_EFFECTS
-	base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.glossinessAlbedo);
-#	endif
 #	ifdef SSGI
 	float3 ssgiAlbedo = base.xyz;
 #	endif
@@ -1828,9 +1813,6 @@ PS_OUTPUT main(PS_INPUT input)
 #	if !COMPOSITE_HAS_TYPE || COMPOSITE_MATERIAL_5
 	float4 baseSample = g_tHdrBaseColor.SampleLevel(g_sBaseColor, uv, 0);
 	float3 baseColor = baseSample.xyz;
-#		ifdef WETNESS_EFFECTS
-	baseColor = WetnessEffects::WetAlbedo(baseColor, wetSurface.glossinessAlbedo);
-#		endif
 #		if COMPOSITE_MATERIAL_5
 	float matIdRaw =
 		g_tMaterialIdBuffer.SampleLevel(g_sMaterialId, uv, 0).w;
@@ -1973,9 +1955,6 @@ PS_OUTPUT main(PS_INPUT input)
 #	if COMPOSITE_HAS_TYPE && !COMPOSITE_MATERIAL_5
 		float4 baseSample = g_tHdrBaseColor.SampleLevel(g_sBaseColor, uv, 0);
 		float3 baseColor = baseSample.xyz;
-#		ifdef WETNESS_EFFECTS
-		baseColor = WetnessEffects::WetAlbedo(baseColor, wetSurface.glossinessAlbedo);
-#		endif
 		float3 directDiff = g_tDirectDiffuse.SampleLevel(g_sDirectDiffuse, uv, 0).xyz;
 #		if TILED_LIGHTS
 		float3 directSpec = g_tDirectSpecular.SampleLevel(g_sDirectSpecular, uv, 0).xyz;
@@ -2436,9 +2415,6 @@ float4 main(PSInput input) : SV_Target0
 #	endif
 #	if !COMPOSITE_MATERIAL_EXCLUSION
 	float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
-#		ifdef WETNESS_EFFECTS
-	base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.glossinessAlbedo);
-#		endif
 #	endif
 	float3 typeData = typeTexture.SampleLevel(typeSampler, uv, 0.0).xyw;
 #	if !COMPOSITE_MATERIAL_EXCLUSION
@@ -2578,9 +2554,6 @@ float4 main(PSInput input) : SV_Target0
 
 #	if COMPOSITE_MATERIAL_EXCLUSION
 		float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
-#		ifdef WETNESS_EFFECTS
-		base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.glossinessAlbedo);
-#		endif
 		float3 diffuse = diffuseTexture.SampleLevel(diffuseSampler, uv, 0.0).xyz;
 #		ifdef TILED_LIGHTS
 		diffuse += tileDiffuseTexture.SampleLevel(tileDiffuseSampler, uv, 0.0).xyz;

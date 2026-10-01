@@ -17,7 +17,7 @@
 StructuredBuffer<FO4InverseSquareLighting::PerLightData> InverseSquareLights : register(t8);
 #	endif
 
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+#	if defined(WETNESS_EFFECTS)
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
@@ -143,8 +143,7 @@ float3 EvaluateAmbientGradient(float3 direction)
 	diffuseAccum = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 	diffuseAccum *= WetnessEffects::GetIndirectDiffuseWeight(
-		normalView, viewDirection, positionView,
-		PerFrame[12], PerFrame[13], PerFrame[14], CameraPosAdjust);
+		normalView, viewDirection, pixel);
 #		endif
 
 	float normalDotView = dot(normalView, viewDirection);
@@ -473,6 +472,14 @@ float3 EvaluateAmbientGradient(float3 direction)
 				lightData, sqrt(distanceSquared), attenuation);
 #	endif
 
+#	ifdef WETNESS_EFFECTS
+			if ((light.Flags & 8u) == 0) {
+				WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(pixel, normalView);
+				WetnessEffects::ApplyDirectCoat(wetSurface.normalView, viewDirection,
+					toLight * rsqrt(distanceSquared), light.Color,
+					wetSurface.wetness, wetSurface.waterRoughness, diffuse, specular);
+			}
+#	endif
 			diffuseAccum += diffuse * attenuation;
 			specularAccum += specular * attenuation;
 		}

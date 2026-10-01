@@ -3,6 +3,7 @@
 #include "Settings/SettingsSchema.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -18,6 +19,29 @@ namespace cs::features::wetness_math
 		float maxPuddleWetness = 1.5f;
 		float maxShoreWetness = 1.0f;
 		std::uint32_t shoreRange = 32;
+		float puddleMinWetness = 0.85f;
+		float skinWetness = 0.95f;
+		float weatherTransitionSpeed = 3.0f;
+		bool enableRaindropFx = true;
+		bool enableSplashes = true;
+		bool enableRipples = true;
+		bool enableVanillaRipples = false;
+		float raindropFxRange = 1000.0f;
+		float raindropGridSize = 4.0f;
+		float raindropInterval = 1.0f;
+		float raindropChance = 1.0f;
+		float splashesLifetime = 10.0f;
+		float splashesStrength = 1.05f;
+		float splashesMinRadius = 0.3f;
+		float splashesMaxRadius = 0.5f;
+		float rippleStrength = 1.0f;
+		float rippleRadius = 1.0f;
+		float rippleBreadth = 0.5f;
+		float rippleLifetime = 0.5f;
+		bool enableWetnessOverride = false, enablePuddleOverride = false, enableRainOverride = false, enableIntExOverride = false;
+		float wetnessOverrideInterior = 0.0f, wetnessOverrideExterior = 0.0f;
+		float puddleOverrideInterior = 0.0f, puddleOverrideExterior = 0.0f;
+		float rainOverrideInterior = 0.0f, rainOverrideExterior = 0.0f;
 	};
 
 	inline constexpr float kMaxRainWetnessMin = 0.0f;
@@ -44,7 +68,36 @@ namespace cs::features::wetness_math
 			settings::Field{ "puddle_max_angle", "How flat a surface needs to be for puddles to form on it.", &Settings::puddleMaxAngle, settings::Range{ kPuddleMaxAngleMin, kPuddleMaxAngleMax } },
 			settings::Field{ "max_puddle_wetness", "Puddle Wetness", &Settings::maxPuddleWetness, settings::Range{ kMaxPuddleWetnessMin, kMaxPuddleWetnessMax } },
 			settings::Field{ "max_shore_wetness", "Shore Wetness", &Settings::maxShoreWetness, settings::Range{ kMaxShoreWetnessMin, kMaxShoreWetnessMax } },
-			settings::Field{ "shore_range", "The maximum distance from a body of water that Shore Wetness affects", &Settings::shoreRange, settings::Range{ kShoreRangeMin, kShoreRangeMax } } }
+			settings::Field{ "shore_range", "The maximum distance from a body of water that Shore Wetness affects", &Settings::shoreRange, settings::Range{ kShoreRangeMin, kShoreRangeMax } },
+			settings::Field{ "puddle_min_wetness", "Puddle minimum wetness", &Settings::puddleMinWetness, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "skin_wetness", "Skin wetness", &Settings::skinWetness, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "weather_transition_speed", "Weather transition speed", &Settings::weatherTransitionSpeed, settings::Range{ 0.2f, 8.0f } },
+			settings::Field{ "enable_raindrop_fx", "Enable raindrop effects", &Settings::enableRaindropFx },
+			settings::Field{ "enable_splashes", "Enable splashes", &Settings::enableSplashes },
+			settings::Field{ "enable_ripples", "Enable ripples", &Settings::enableRipples },
+			settings::Field{ "enable_vanilla_ripples", "Enable vanilla ripples", &Settings::enableVanillaRipples },
+			settings::Field{ "raindrop_fx_range", "Raindrop effect range", &Settings::raindropFxRange, settings::Range{ 100.0f, 2000.0f } },
+			settings::Field{ "raindrop_grid_size", "Raindrop grid size", &Settings::raindropGridSize, settings::Range{ 1.0f, 10.0f } },
+			settings::Field{ "raindrop_interval", "Raindrop interval", &Settings::raindropInterval, settings::Range{ 0.1f, 2.0f } },
+			settings::Field{ "raindrop_chance", "Raindrop chance", &Settings::raindropChance, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "splashes_lifetime", "Splash lifetime", &Settings::splashesLifetime, settings::Range{ 0.1f, 20.0f } },
+			settings::Field{ "splashes_strength", "Splash strength", &Settings::splashesStrength, settings::Range{ 0.0f, 2.0f } },
+			settings::Field{ "splashes_min_radius", "Splash minimum radius", &Settings::splashesMinRadius, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "splashes_max_radius", "Splash maximum radius", &Settings::splashesMaxRadius, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "ripple_strength", "Ripple strength", &Settings::rippleStrength, settings::Range{ 0.0f, 2.0f } },
+			settings::Field{ "ripple_radius", "Ripple radius", &Settings::rippleRadius, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "ripple_breadth", "Ripple breadth", &Settings::rippleBreadth, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "ripple_lifetime", "Ripple lifetime", &Settings::rippleLifetime, settings::Range{ 0.0f, 2.0f } },
+			settings::Field{ "enable_wetness_override", "Override wetness", &Settings::enableWetnessOverride },
+			settings::Field{ "enable_puddle_override", "Override puddles", &Settings::enablePuddleOverride },
+			settings::Field{ "enable_rain_override", "Override rain", &Settings::enableRainOverride },
+			settings::Field{ "enable_interior_exterior_override", "Separate interior overrides", &Settings::enableIntExOverride },
+			settings::Field{ "wetness_override_interior", "Interior wetness", &Settings::wetnessOverrideInterior, settings::Range{ 0.0f, 2.0f } },
+			settings::Field{ "wetness_override_exterior", "Exterior wetness", &Settings::wetnessOverrideExterior, settings::Range{ 0.0f, 2.0f } },
+			settings::Field{ "puddle_override_interior", "Interior puddles", &Settings::puddleOverrideInterior, settings::Range{ 0.0f, 2.0f } },
+			settings::Field{ "puddle_override_exterior", "Exterior puddles", &Settings::puddleOverrideExterior, settings::Range{ 0.0f, 2.0f } },
+			settings::Field{ "rain_override_interior", "Interior rain", &Settings::rainOverrideInterior, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "rain_override_exterior", "Exterior rain", &Settings::rainOverrideExterior, settings::Range{ 0.0f, 1.0f } } }
 	};
 
 	inline Settings Clamp(Settings a_settings) noexcept
@@ -64,6 +117,44 @@ namespace cs::features::wetness_math
 		a_settings.shoreRange = std::clamp(
 			a_settings.shoreRange, kShoreRangeMin, kShoreRangeMax);
 		return a_settings;
+	}
+
+	struct Climate
+	{
+		const char* name;
+		float wetness, puddles, transition, chance, grid, interval;
+	};
+	inline constexpr std::array kClimates{
+		Climate{ "Custom", 0, 0, 0, 0, 0, 0 },
+		Climate{ "Legacy", 1, 1, 1, 0.3f, 4, 0.5f },
+		Climate{ "Nordic (Default)", 1, 1, 1, 1, 3, 1 },
+		Climate{ "Arctic Tundra", 0.5f, 0.3f, 0.5f, 0.3f, 3.5f, 0.4f },
+		Climate{ "Temperate Coastal", 1.5f, 1.7f, 1.7f, 0.8f, 2.5f, 0.25f },
+		Climate{ "Monsoon/Extreme", 2, 2.5f, 2, 1, 2, 0.2f }
+	};
+	inline void ApplyClimate(Settings& a_settings, std::size_t a_index)
+	{
+		const auto& climate = kClimates[a_index];
+		const Settings defaults{};
+		a_settings.maxRainWetness = defaults.maxRainWetness * climate.wetness;
+		a_settings.maxPuddleWetness = defaults.maxPuddleWetness * climate.puddles;
+		a_settings.weatherTransitionSpeed = defaults.weatherTransitionSpeed * climate.transition;
+		a_settings.raindropChance = climate.chance;
+		a_settings.raindropGridSize = climate.grid;
+		a_settings.raindropInterval = climate.interval;
+	}
+	inline std::size_t DetectClimate(const Settings& a_settings)
+	{
+		for (std::size_t index = 1; index < kClimates.size(); ++index) {
+			Settings expected{};
+			ApplyClimate(expected, index);
+			if (std::abs(a_settings.maxRainWetness - expected.maxRainWetness) < 0.001f &&
+				std::abs(a_settings.maxPuddleWetness - expected.maxPuddleWetness) < 0.001f &&
+				std::abs(a_settings.weatherTransitionSpeed - expected.weatherTransitionSpeed) < 0.001f &&
+				std::abs(a_settings.raindropChance - expected.raindropChance) < 0.001f)
+				return index;
+		}
+		return 0;
 	}
 
 	struct WeatherWetnessResult
@@ -124,7 +215,7 @@ namespace cs::features::wetness_math
 		std::uint8_t a_currentBeginPrecip,
 		float a_transitionPct) noexcept
 	{
-		// FO4 uses the exterior cell check instead of Skyrim's full-sky mode.
+		// The caller supplies the host's full-sky state.
 		if (!a_isExterior)
 			return {};
 		const float transition = std::isfinite(a_transitionPct) ?
@@ -142,5 +233,12 @@ namespace cs::features::wetness_math
 	inline constexpr float PublishedWetness(bool a_enabled, float a_weatherWetness) noexcept
 	{
 		return a_enabled ? a_weatherWetness : 0.0f;
+	}
+
+	inline float ComputeRaining(float a_currentDensity, std::uint8_t a_begin,
+		float a_previousDensity, std::uint8_t a_end, float a_progress) noexcept
+	{
+		return a_currentDensity * LinearStep(a_begin / 255.0f, 1.0f, a_progress) +
+		       a_previousDensity * (1.0f - LinearStep(0.0f, a_end / 255.0f, a_progress));
 	}
 }

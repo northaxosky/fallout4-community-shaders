@@ -23,6 +23,9 @@ struct ID3D11PixelShader;
 struct ID3D11ShaderResourceView;
 struct ID3D11SamplerState;
 struct ID3D11Buffer;
+struct ID3D11RenderTargetView;
+struct ID3D11DepthStencilView;
+struct ID3D11BlendState;
 namespace RE
 {
 	class BSShader;
@@ -45,7 +48,8 @@ namespace cs::engine
 		kConstantBuffer,
 		kSampler,
 		kShaderResource,
-		kUnorderedAccess
+		kUnorderedAccess,
+		kRenderTarget
 	};
 
 	struct ShaderSlotClaim
@@ -89,6 +93,12 @@ namespace cs::engine
 		std::vector<Resource> _resources;
 		std::vector<Sampler> _samplers;
 		std::vector<Buffer> _buffers;
+		ID3D11RenderTargetView* _targets[8]{};
+		ID3D11DepthStencilView* _depth = nullptr;
+		ID3D11BlendState* _blend = nullptr;
+		float _blendFactor[4]{};
+		std::uint32_t _sampleMask = 0;
+		bool _outputCaptured = false;
 	};
 	using ScopedPixelShaderInjectionBindings = ScopedShaderInjectionBindings;
 
@@ -105,6 +115,7 @@ namespace cs::engine
 		ShaderInjectionReadyPredicate isReady;
 		ShaderInjectionBindCallback bind;
 		std::vector<ShaderSlotClaim> slotClaims;
+		bool requiresGraphicsPair = false;
 	};
 
 	struct ShaderVariantCompilationDescriptor
