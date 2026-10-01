@@ -20,6 +20,8 @@
 #include <utility>
 #include <vector>
 
+std::string CheckInverseSquareTileOverflow(const std::filesystem::path& a_root);
+
 namespace
 {
 	using ShaderDefines =
@@ -29,6 +31,7 @@ namespace
 	{
 		kConstantBuffer,
 		kTexture,
+		kStructuredBuffer,
 		kSampler
 	};
 
@@ -66,6 +69,11 @@ namespace
 		return { ResourceKind::kSampler, a_slot };
 	}
 
+	constexpr Resource StructuredBuffer(UINT a_slot)
+	{
+		return { ResourceKind::kStructuredBuffer, a_slot };
+	}
+
 	std::set<Resource> ReflectResources(ID3DBlob* a_blob, std::string& a_error)
 	{
 		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
@@ -95,6 +103,8 @@ namespace
 				kind = ResourceKind::kConstantBuffer;
 			else if (binding.Type == D3D_SIT_TEXTURE)
 				kind = ResourceKind::kTexture;
+			else if (binding.Type == D3D_SIT_STRUCTURED)
+				kind = ResourceKind::kStructuredBuffer;
 			else if (binding.Type == D3D_SIT_SAMPLER)
 				kind = ResourceKind::kSampler;
 			if (!kind)
@@ -115,6 +125,7 @@ namespace
 		case ResourceKind::kConstantBuffer:
 			return "b";
 		case ResourceKind::kTexture:
+		case ResourceKind::kStructuredBuffer:
 			return "t";
 		case ResourceKind::kSampler:
 			return "s";
@@ -325,7 +336,6 @@ namespace
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
 		const auto gi = FIELDS(cs::ScreenSpaceGIFeatureData, F(EnableScreenSpaceGI), F(pad0));
-		const auto inverse = FIELDS(cs::InverseSquareLightingFeatureData, F(Mode), F(ExteriorStrength), F(InteriorStrength), F(NearFieldDistance));
 		const auto fo4fog = FIELDS(cs::ExponentialHeightFogFeatureData, F(Mode), F(DensityMultiplier), F(HeightFalloffMultiplier), F(pad0));
 #undef FIELDS
 #undef F
@@ -347,7 +357,6 @@ namespace
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
 			{ 7, "screenSpaceGISettings", gi },
-			{ 7, "inverseSquareLightingSettings", inverse },
 			{ 7, "exponentialHeightFogSettings", fo4fog }
 		};
 		D3D11_SHADER_DESC shader{};
@@ -415,7 +424,6 @@ namespace
 		};
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, screenSpaceGISettings),
-			ABI(FO4SharedDataCB, inverseSquareLightingSettings),
 			ABI(FO4SharedDataCB, exponentialHeightFogSettings), ABI(FO4SharedDataCB, WetnessDebugVisualization),
 			ABI(FO4SharedDataCB, padTerrain), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
 			ABI(FO4SharedDataCB, EnabledSSR),
@@ -869,7 +877,35 @@ namespace
 					{ "DYNAMIC_CUBEMAPS", "1" },
 					{ "INVERSE_SQUARE_LIGHTING", "1" } },
 				.description = variant[0] == '1' ? "DFTiled final 1 inverse square" : "DFTiled final 2 inverse square",
-				.required = { CB(5), CB(7) } });
+				.required = { CB(6), StructuredBuffer(6), StructuredBuffer(7), StructuredBuffer(8) } });
+		}
+		for (int dimension = 10; dimension <= 25; ++dimension) {
+			a_jobs.push_back({ .path = tiled,
+				.defines = {
+					{ "DFTILEDLIGHTING_VARIANT", "3" },
+					{ "DFTILEDLIGHTING_TILE_CULL_GROUP_DIM", std::to_string(dimension) },
+					{ "INVERSE_SQUARE_LIGHTING", "1" } },
+				.description = "ISL guarded tile producer",
+				.required = { StructuredBuffer(6) },
+				.forbidden = reserved });
+		}
+		for (const ShaderDefines& local : {
+				 ShaderDefines{ { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "POINTOMNI", "1" }, { "SPECULAR", "1" } },
+				 ShaderDefines{ { "BSDFLIGHT_PS_GOBO", "1" }, { "POINTOMNI", "1" }, { "SPECULAR", "1" }, { "GOBOPROJECTION", "1" } },
+				 ShaderDefines{ { "BSDFLIGHT_PS_ATTENUATION_ONLY", "1" }, { "POINTOMNI", "1" }, { "ATTENUATION_ONLY", "1" } },
+				 ShaderDefines{ { "BSDFLIGHT_PS_DEFERRED", "1" }, { "POINTOMNI", "1" }, { "LIGHT_TYPE", "2" }, { "SPECULAR", "1" } },
+				 ShaderDefines{ { "BSDFLIGHT_PS_DEFERRED", "1" }, { "SPOT", "1" }, { "LIGHT_TYPE", "3" }, { "SPECULAR", "1" } },
+				 ShaderDefines{ { "BSDFLIGHT_PS_DEFERRED", "1" }, { "POINTSPOT", "1" }, { "LIGHT_TYPE", "3" },
+					 { "SHADOW", "1" }, { "FILTER_PCF1", "1" }, { "SPECULAR", "1" } } }) {
+			auto defines = local;
+			defines.insert(defines.end(), { { "DIRSPLITS", "2" }, { "RGBSPEC", "1" },
+											  { "FO4CS_SUBSTRATE", "1" }, { "INVERSE_SQUARE_LIGHTING", "1" } });
+			a_jobs.push_back({ .path = bsdfLight,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "ISL raster light consumer",
+				.required = { CB(6), CB(11) },
+				.forbidden = { CB(4), CB(5), CB(7) } });
 		}
 
 		const auto water = a_root / "BSWaterShader.hlsl";
@@ -929,6 +965,10 @@ int main(int argc, char** argv)
 	AddStandaloneFeatureShaders(jobs, argv[1]);
 
 	int failures = 0;
+	if (const auto error = CheckInverseSquareTileOverflow(argv[1]); !error.empty()) {
+		std::printf("FAIL: ISL tile overflow: %s\n", error.c_str());
+		++failures;
+	}
 	if (const auto error = VerifySubstrateABI(argv[1]); !error.empty()) {
 		std::printf("FAIL: substrate ABI: %s\n", error.c_str());
 		++failures;

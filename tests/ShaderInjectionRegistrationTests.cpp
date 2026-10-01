@@ -506,6 +506,7 @@ namespace
 		a_context->CSSetShaderResources(3, 1, &srv);
 		ID3D11ShaderResourceView* highSrv = a_inputs.highSrv.get();
 		a_context->CSSetShaderResources(4, 1, &highSrv);
+		a_context->CSSetShaderResources(8, 1, &highSrv);
 		a_context->CSSetUnorderedAccessViews(0, 1, &a_uav, nullptr);
 	}
 
@@ -525,10 +526,12 @@ namespace
 		a_context->CSGetShaderResources(3, 1, &srv);
 		ID3D11ShaderResourceView* highSrv = nullptr;
 		a_context->CSGetShaderResources(4, 1, &highSrv);
+		ID3D11ShaderResourceView* metadata = nullptr;
+		a_context->CSGetShaderResources(8, 1, &metadata);
 		ID3D11UnorderedAccessView* uav = nullptr;
 		a_context->CSGetUnorderedAccessViews(0, 1, &uav);
 		const bool matches =
-			buffers[0] == a_inputs.buffers[0].get() && buffers[1] == a_inputs.buffers[1].get() && buffers[2] == a_inputs.buffers[2].get() && buffers[3] == a_inputs.buffers[3].get() && depth == a_inputs.depth.get() && highBuffer == a_inputs.highBuffer.get() && srv == a_inputs.srv.get() && highSrv == a_inputs.highSrv.get() && uav == a_uav;
+			buffers[0] == a_inputs.buffers[0].get() && buffers[1] == a_inputs.buffers[1].get() && buffers[2] == a_inputs.buffers[2].get() && buffers[3] == a_inputs.buffers[3].get() && depth == a_inputs.depth.get() && highBuffer == a_inputs.highBuffer.get() && srv == a_inputs.srv.get() && highSrv == a_inputs.highSrv.get() && metadata == a_inputs.highSrv.get() && uav == a_uav;
 		if (depth)
 			depth->Release();
 		for (auto* buffer : buffers) {
@@ -541,6 +544,8 @@ namespace
 			srv->Release();
 		if (highSrv)
 			highSrv->Release();
+		if (metadata)
+			metadata->Release();
 		if (uav)
 			uav->Release();
 		return matches;
@@ -744,7 +749,10 @@ namespace
 		contribution.stages = ShaderStageBit(ShaderStage::kCompute);
 		contribution.contributor = "compute-phase";
 		contribution.defines = { { "COMPUTE_PHASE_TEST", "1" } };
-		contribution.bind = [](ID3D11DeviceContext*) {
+		contribution.slotClaims = { { ShaderStage::kCompute, ShaderResourceType::kShaderResource, 8 } };
+		contribution.bind = [](ID3D11DeviceContext* a_context) {
+			auto* metadata = publishedDepth.get();
+			a_context->CSSetShaderResources(8, 1, &metadata);
 			++computeContributionBindCount;
 			activeComputeVariantDefine =
 				ActiveShaderInjectionVariantHasDefine(
@@ -793,7 +801,7 @@ namespace
 		Expect(
 			NativeComputeInputsMatch(
 				context.get(), inputs, output.uav.get()),
-			"compute bridge did not restore b4-b8/t3-t4/t17/u0");
+			"compute bridge did not restore b4-b8/t3-t4/t8/t17/u0");
 		Expect(
 			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 9 },
 			"replacement did not execute with shared and native inputs");

@@ -13,7 +13,8 @@
 #else
 
 #	ifdef INVERSE_SQUARE_LIGHTING
-#		include "FO4/InverseSquareLighting/InverseSquareLighting.hlsli"
+#		include "FO4/InverseSquareLightingConsumer.hlsli"
+StructuredBuffer<FO4InverseSquareLighting::PerLightData> InverseSquareLights : register(t8);
 #	endif
 
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
@@ -252,6 +253,10 @@ float3 EvaluateAmbientGradient(float3 direction)
 		[loop] for (uint i = 0; i < lightCount; ++i)
 		{
 			TiledLight light = Lights[TileLists[tileIndex].Indices[i]];
+#	ifdef INVERSE_SQUARE_LIGHTING
+			FO4InverseSquareLighting::PerLightData lightData = InverseSquareLights[TileLists[tileIndex].Indices[i]];
+			light.Color = FO4InverseSquareLighting::GetColor(light.Color, lightData);
+#	endif
 			float3 toLight = light.PositionRadius.xyz - positionView;
 			float distanceSquared = dot(toLight, toLight);
 			float3 diffuse = light.Color;
@@ -463,12 +468,9 @@ float3 EvaluateAmbientGradient(float3 direction)
 			float attenuation =
 				exp2(log2(1.0 - falloff) * 2.2);
 #	ifdef INVERSE_SQUARE_LIGHTING
-			// FO4 forced divergence: tiled lights have no verified per-light eligibility flag.
-			attenuation = InverseSquareLighting::GetAttenuation(
-				attenuation,
-				sqrt(distanceSquared),
-				light.PositionRadius.w,
-				pixel.x);
+			// FO4: t8 uses the same accepted-append index as native t6.
+			attenuation = FO4InverseSquareLighting::GetAttenuation(
+				lightData, sqrt(distanceSquared), attenuation);
 #	endif
 
 			diffuseAccum += diffuse * attenuation;

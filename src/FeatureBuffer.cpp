@@ -2,7 +2,6 @@
 
 #include "DynamicCubemaps.h"
 #include "ExponentialHeightFog.h"
-#include "InverseSquareLighting.h"
 #include "ScreenSpaceGI.h"
 #include "TerrainShadows.h"
 #include "WetnessEffects.h"
@@ -32,9 +31,6 @@ namespace cs
 			.terrainShadowsSettings =
 				CollectFeatureData<TerrainShadowsFeatureData>(
 					features::TerrainShadows::GetSingleton()),
-			.inverseSquareLightingSettings =
-				CollectFeatureData<InverseSquareLightingFeatureData>(
-					features::InverseSquareLighting::GetSingleton()),
 			.dynamicCubemapsSettings =
 				CollectFeatureData<DynamicCubemapsFeatureData>(
 					features::DynamicCubemaps::GetSingleton()),

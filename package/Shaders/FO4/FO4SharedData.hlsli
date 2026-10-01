@@ -8,13 +8,6 @@ namespace FO4SharedData
 		bool EnableScreenSpaceGI;
 		uint3 pad0;
 	};
-	struct InverseSquareLightingSettings
-	{
-		uint Mode;
-		float ExteriorStrength;
-		float InteriorStrength;
-		float NearFieldDistance;
-	};
 	struct ExponentialHeightFogSettings
 	{
 		uint Mode;
@@ -25,7 +18,6 @@ namespace FO4SharedData
 	cbuffer FO4SharedData : register(b7)
 	{
 		ScreenSpaceGISettings screenSpaceGISettings;
-		InverseSquareLightingSettings inverseSquareLightingSettings;
 		ExponentialHeightFogSettings exponentialHeightFogSettings;
 		uint WetnessDebugVisualization;
 		uint padTerrain;

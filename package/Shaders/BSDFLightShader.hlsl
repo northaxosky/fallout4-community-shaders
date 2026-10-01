@@ -12,9 +12,7 @@
 #	include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #endif
 
-#ifdef INVERSE_SQUARE_LIGHTING
-#	include "FO4/InverseSquareLighting/InverseSquareLighting.hlsli"
-#endif
+#include "FO4/InverseSquareLightingRaster.hlsli"
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 // FO4: directional RGB accumulators carry upstream's chromatic multiplier.
@@ -842,12 +840,9 @@ PS_OUTPUT main(PS_INPUT input)
 	float dPowZ = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
 	float falloffLin = saturate(cb2_idx3_attenuation_curve.y * dPowZ + cb2_idx3_attenuation_curve.x);
 	float attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
-#		ifdef INVERSE_SQUARE_LIGHTING
-	attenuation = InverseSquareLighting::GetAttenuation(
-		attenuation, d, LightPos_and_Radius.w, input.position.x);
-#		endif
+	attenuation = FO4LocalLightAttenuation(d, attenuation);
 
-	bool nearZero = (attenuation <= 0.001);
+	bool nearZero = FO4LocalLightNegligible(attenuation);
 
 	if (nearZero) {
 		output.diffuse = float4(0, 0, 0, 0);
@@ -901,7 +896,7 @@ PS_OUTPUT main(PS_INPUT input)
 			exp2(log2(vis2) * cb12_idx28_sss_params.y) *
 			cb12_idx28_sss_params.x;
 
-		brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
+		brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
 	} else {
 		float specExp = exp2(matSample.x * 10.0 + 1.0);
 		float NdotV_raw = dot(viewDirNeg, normalView);
@@ -959,7 +954,7 @@ PS_OUTPUT main(PS_INPUT input)
 		specMag *= 3.141593;
 
 		brdfSpecular =
-			NdotL_clamped * (specMag * LightColor_HDR.xyz);
+			NdotL_clamped * (specMag * FO4LocalLightColor(LightColor_HDR.xyz));
 	}
 
 	float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -967,8 +962,8 @@ PS_OUTPUT main(PS_INPUT input)
 	float toLightDotView = saturate(dot(viewDirNeg, -lightDir));
 	float ambientTerm = toLightDotView * edge * NdotL_clamped * roughness01;
 
-	float3 diffuseAccum = LightColor_HDR.xyz * ambientTerm;
-	diffuseAccum += LightColor_HDR.xyz * brdfShadowMix;
+	float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
+	diffuseAccum += FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
 
 	float4 posViewHomog = float4(posView, 1.0);
 	float3 lsDir;
@@ -1186,10 +1181,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float dPowZ = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
 	float falloffLin = saturate(cb2_idx3_attenuation_curve.y * dPowZ + cb2_idx3_attenuation_curve.x);
 	float attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
-#		ifdef INVERSE_SQUARE_LIGHTING
-	attenuation = InverseSquareLighting::GetAttenuation(
-		attenuation, d, LightPos_and_Radius.w, input.position.x);
-#		endif
+	attenuation = FO4LocalLightAttenuation(d, attenuation);
 
 #		ifdef SPOT
 
@@ -1213,7 +1205,7 @@ PS_OUTPUT main(PS_INPUT input)
 #			endif
 #		endif
 
-	bool nearZero = (attenuation <= 0.001);
+	bool nearZero = FO4LocalLightNegligible(attenuation);
 
 	if (nearZero) {
 		output.diffuse = float4(0, 0, 0, 0);
@@ -1530,9 +1522,9 @@ attenuation = attenuation * shadowFactor;
 				cb12_idx28_sss_params.x;
 
 #				ifdef FO4_DEFERRED_SPEC_ORDER
-			brdfSpecular = (pow2 * LightColor_HDR.xyz) * NdotL_clamped;
+			brdfSpecular = (pow2 * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #				else
-	brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
+	brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
 #				endif
 #			endif
 		} else {
@@ -1661,9 +1653,9 @@ attenuation = attenuation * shadowFactor;
 			specMag *= 3.1415927;
 
 #				ifdef FO4_DEFERRED_SPEC_ORDER
-			brdfSpecular = (specMag * LightColor_HDR.xyz) * NdotL_clamped;
+			brdfSpecular = (specMag * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #				else
-	brdfSpecular = NdotL_clamped * (specMag * LightColor_HDR.xyz);
+	brdfSpecular = NdotL_clamped * (specMag * FO4LocalLightColor(LightColor_HDR.xyz));
 #				endif
 #			endif
 		}
@@ -1673,7 +1665,7 @@ attenuation = attenuation * shadowFactor;
 		float NdotL_clamped = saturate(NdotL_raw);
 #			endif
 #			ifndef FO4_DEFERRED_PACKED_RIM
-		float3 diffuseAccum = LightColor_HDR.xyz * brdfShadowMix;
+		float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
 #			endif
 
 #			if !defined(IGNORERIM) && !defined(IGNOREROUGHNESS)
@@ -1689,15 +1681,15 @@ attenuation = attenuation * shadowFactor;
 float ambientTerm = toLightDotView * edge * NdotL_clamped * roughness01;
 #				endif
 #				ifdef FO4_DEFERRED_PACKED_RIM
-		float3 diffuseAccum = LightColor_HDR.xyz * brdfShadowMix;
-		diffuseAccum += LightColor_HDR.xyz * ambientTerm;
+		float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
+		diffuseAccum += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
 #				else
-diffuseAccum = LightColor_HDR.xyz * ambientTerm + diffuseAccum;
+diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm + diffuseAccum;
 #				endif
 #			endif
 #		else
 
-	float3 diffuseAccum = LightColor_HDR.xyz;
+	float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz);
 	float3 brdfSpecular = float3(0, 0, 0);
 #		endif
 
@@ -1759,7 +1751,7 @@ float2 goboUV = float2(omniUV.x,
 			normalView, posView,
 			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 		float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
-		float3 wetLightColor = LightColor_HDR.xyz * attenuation;
+		float3 wetLightColor = FO4LocalLightColor(LightColor_HDR.xyz) * attenuation;
 #			ifdef GOBOPROJECTION
 		wetLightColor *= cookieRGB;
 #			endif
@@ -1903,18 +1895,15 @@ float2 goboUV = float2(omniUV.x,
 		float attenuation = pow(
 			asfloat(0x3f800000) - biased,
 			asfloat(0x400ccccd));
-#	ifdef INVERSE_SQUARE_LIGHTING
-		attenuation = InverseSquareLighting::GetAttenuation(
-			attenuation, distance, LightPos_and_Radius.w, input.position.x);
-#	endif
+		attenuation = FO4LocalLightAttenuation(distance, attenuation);
 
-		if (attenuation <= asfloat(0x3a83126f)) {
+		if (FO4LocalLightNegligible(attenuation)) {
 			output.diffuse = float4(0, 0, 0, 0);
 			output.specular = float4(0, 0, 0, 0);
 			return output;
 		}
 
-		output.diffuse = float4(LightColor_HDR.xyz, 0.0);
+		output.diffuse = float4(FO4LocalLightColor(LightColor_HDR.xyz), 0.0);
 		output.diffuse *= attenuation;
 		output.diffuse /= 3.0;
 		output.specular = float4(0, 0, 0, asfloat(0x3f800000));
@@ -4558,12 +4547,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float dPowZ = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
 			float falloffLin = saturate(cb2_idx3_attenuation_curve.y * dPowZ + cb2_idx3_attenuation_curve.x);
 			float attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
-#	ifdef INVERSE_SQUARE_LIGHTING
-			attenuation = InverseSquareLighting::GetAttenuation(
-				attenuation, d, LightPos_and_Radius.w, input.position.x);
-#	endif
+			attenuation = FO4LocalLightAttenuation(d, attenuation);
 
-			if (attenuation <= 0.001) {
+			if (FO4LocalLightNegligible(attenuation)) {
 				output.diffuse = float4(0, 0, 0, 0);
 				output.specular = float4(0, 0, 0, 0);
 				return output;
@@ -4621,7 +4607,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				float vis2 = max(rot2 * skinNdotV + rot2Perp * sinScaleV, 0.0);
 				float pow2 = exp2(log2(vis2) * cb12_idx28_sss_params.y) *
 				             cb12_idx28_sss_params.x;
-				brdfSpecular = (pow2 * LightColor_HDR.xyz) * NdotL_clamped;
+				brdfSpecular = (pow2 * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #	endif
 			} else {
 #	ifdef SPECULAR
@@ -4707,7 +4693,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				specMag = min(specMag, 15.0);
 				specMag *= matSample.y;
 				specMag *= 3.1415927;
-				brdfSpecular = (specMag * LightColor_HDR.xyz) * NdotL_clamped;
+				brdfSpecular = (specMag * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #	endif
 			}
 
@@ -4731,8 +4717,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	else
 	float ambientTerm = 0.0;
 #	endif
-			float3 diffuseAccum = LightColor_HDR.xyz * brdfShadowMix;
-			diffuseAccum += LightColor_HDR.xyz * ambientTerm;
+			float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
+			diffuseAccum += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
 
 			float4 posViewHomog = float4(posView, 1.0);
 			float4 lsDir;
@@ -4749,7 +4735,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				normalView, posView,
 				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
-			float3 wetLightColor = (LightColor_HDR.xyz * cookieRGB) * attenuation;
+			float3 wetLightColor = (FO4LocalLightColor(LightColor_HDR.xyz) * cookieRGB) * attenuation;
 			float3 wetDiffuse = diffuseAccum * attenuation;
 #		ifdef SPECULAR
 			float3 wetSpecular = (brdfSpecular * cookieRGB) * attenuation;
@@ -5690,12 +5676,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float falloff = exp2(log2(distNorm) * LightAttenuation.z);
 			float attenBase = saturate(LightAttenuation.y * falloff + LightAttenuation.x);
 			float attenuation = exp2(log2(1.0 - attenBase) * 2.2);
-#		ifdef INVERSE_SQUARE_LIGHTING
-			attenuation = InverseSquareLighting::GetAttenuation(
-				attenuation, sqrt(distSq), LightVector.w, input.position.x);
-#		endif
+			attenuation = FO4LocalLightAttenuation(sqrt(distSq), attenuation);
 
-			if (attenuation <= 0.001) {
+			if (FO4LocalLightNegligible(attenuation)) {
 				output.diffuse = float4(0, 0, 0, 0);
 				output.specular = float4(0, 0, 0, 0);
 				return output;
@@ -5825,7 +5808,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #		endif
 				float pow2 = exp2(log2(vis2) * cb12_idx28_hair_spec_params.y) * cb12_idx28_hair_spec_params.x;
 
-				brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
+				brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
 #	endif
 			} else {
 #	if defined(DIRECTIONAL) && !defined(AMBIENT)
@@ -6020,7 +6003,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				specMag *= matSample.y;
 				specMag *= FO4_SPECULAR_SCALE;
 
-				brdfSpecular = (specMag * LightColor_HDR.xyz) * NdotL_clamped;
+				brdfSpecular = (specMag * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #	endif
 
 #	if defined(DIRECTIONAL) && defined(AMBIENT) && !defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
@@ -6033,7 +6016,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float NdotL_clamped = saturate(NdotL_raw);
 #	endif
 
-			float3 finalDiffuse = LightColor_HDR.xyz * brdfShadowMix;
+			float3 finalDiffuse = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
 
 #	if !defined(IGNOREROUGHNESS) && !defined(IGNORERIM)
 
@@ -6050,7 +6033,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 #		endif
 
-			finalDiffuse += LightColor_HDR.xyz * ambientTerm;
+			finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
 #	endif
 
 #	ifdef DIRECTIONAL
@@ -6068,9 +6051,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			backfaceWrap *= transmissionContactShadow;
 #		endif
 #		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
-			finalDiffuse += LightColor_HDR.xyz * (backfaceWrap * albedoPremult);
+			finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
 #		else
-		finalDiffuse += LightColor_HDR.xyz * (backfaceWrap * albedoPremult);
+		finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
 #		endif
 
 #		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
@@ -6084,7 +6067,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #		ifdef SCREEN_SPACE_SHADOWS
 			forwardBlend *= transmissionContactShadow;
 #		endif
-			finalDiffuse += (forwardBlend * LightColor_HDR.xyz) * albedoSample.xyz;
+			finalDiffuse += (forwardBlend * FO4LocalLightColor(LightColor_HDR.xyz)) * albedoSample.xyz;
 #	endif
 
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
@@ -6115,10 +6098,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 #		ifdef POINTOMNI
-			float3 wetLightColor = LightColor_HDR.xyz * attenuation;
+			float3 wetLightColor = FO4LocalLightColor(LightColor_HDR.xyz) * attenuation;
 			float3 wetDiffuse = finalDiffuse * attenuation;
 #		else
-		float3 wetLightColor = LightColor_HDR.xyz;
+		float3 wetLightColor = FO4LocalLightColor(LightColor_HDR.xyz);
 #			if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 		wetLightColor *= directContactShadow;
 #			endif
