@@ -6,8 +6,6 @@
 
 float2 FO4ScreenSpaceShadowVisibility(float3 position, float rawDepth)
 {
-	// FO4: pixel-centered SV_POSITION needs no extra half-pixel before integer mask lookup.
-	position.xy -= 0.5;
 	// FO4: gate deferred first-person receivers to match forward-lit first person.
 	return !FO4Depth::IsFirstPerson(rawDepth) ? ScreenSpaceShadows::GetScreenSpaceShadows(position, 0.0.xx, 0.0) : 1.0.xx;
 }

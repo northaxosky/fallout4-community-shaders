@@ -31,7 +31,7 @@ Core classification is not a claim of complete parity; Pending work remains unfi
 
 ## Shared seam edits
 
-Shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`, based on `d330bf12d`.
+Shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`, based on `d330bf12d`.
 FO4 consumes unchanged files through `xmake\shared.lua`; shared include paths cannot be replaced.
 The native entry-point naming boundary is documented under Shader replacement.
 
@@ -40,6 +40,7 @@ The native entry-point naming boundary is documented under Shader replacement.
 | Framework | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies; Phase 3 consumes these rows | In the shared fork; upstream PR candidate, not filed |
 | Forced | `package/Shaders/Common/FrameBuffer.hlsli` | `e305ed0a4` | `FRAMEBUFFER_REGISTER` defaults to b12 and permits host binding at b4; FO4 engine shaders already bind the native per-frame buffer at b12 (`package/Shaders/Water.hlsl:3`, `cbuffer PerFrame : register(b12)`) | In the shared fork; no upstream PR recorded |
 | Fix | `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104` | `13d9d2e2d` | Scale the center-normal UV by `frameScale`, matching the neighbor lookups in half/quarter-resolution dynamic-resolution frames | community-shaders/skyrim-community-shaders#2795 |
+| Fix | `features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:7` | `6f81ebc25` | Remove the extra half-pixel offset from pixel-centered SV_POSITION before integer mask lookup | In the shared fork; upstream PR candidate, not filed |
 | Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/CaptureCommon.hlsli` | `83efe1ad9` | Optional prepared position/color/UV inputs, geometry/sky tags and capture origin isolate FO4's +Z, partitioned depth, infinite far plane and diffuse reconstruction; default Skyrim sampling/history are unchanged | In the shared fork; upstream PR candidate, not filed |
 | Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/DynamicCubemaps.hlsli` | `83efe1ad9` | Optional cube registers/custom-consumer guard and extracted explicit-sampler normalization let native FO4 deferred slots/samplers call shared arithmetic; default Skyrim registers/consumers are unchanged | In the shared fork; upstream PR candidate, not filed |
 
@@ -94,7 +95,7 @@ runtime stock fallbacks but fail the identity gate; they are not reclassified as
 
 ## Substrate
 
-Shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`. FrameBuffer, SharedData,
+Shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`. FrameBuffer, SharedData,
 SphericalHarmonics and its Math dependency are staged byte-for-byte. The pinned b6 ABI contains
 **20** blocks, including HorizonFixSettings; all 20 are mirrored in upstream order, and absent
 features leave zero blocks, except the host's neutral linear-color policy in the upstream
@@ -138,10 +139,11 @@ their packet when its resources change.
   behavior; no upstream PR or local correction is recorded.
 
 - `features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:7`:
-  adds 0.5 before truncating pixel-centered `SV_POSITION`, reading the next mask texel in both axes.
-  Bend writes `floor(write_xy)` and the upstream Lighting/DistantTree callers pass `SV_POSITION`
-  unchanged. Investigate removing the extra offset upstream; FO4 retains main's corrected address
-  by subtracting 0.5 in the consumer include before calling the unchanged upstream sampler.
+  shared-fork fix `6f81ebc25` removes the extra 0.5 before truncating pixel-centered `SV_POSITION`.
+  Upstream Lighting, DistantTree and all three RunGrass callers pass SV_POSITION unchanged;
+  Bend writes `floor(pixel_xy)`. The offset reads the next mask texel in both axes in Skyrim
+  and FO4. FO4 uses the corrected shared sampler without a counter-offset; the WARP mask
+  fixture verifies texel selection. Upstream PR candidate, not filed.
 - `src/Utils/PerfUtils.h:41`: `Mean` implicitly converts `size_t` to float, raising C4267
   under FO4's `/W4 /WX`; an explicit float conversion preserves its current arithmetic.
   FO4 scopes the warning in `src/Shared/PerfUtils.h`, without changing shared behavior.
@@ -177,7 +179,7 @@ their packet when its resources change.
 
 ## InverseSquareLighting
 
-Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
+Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 ISL, `LightLimitFix/Common.hlsli`, `Common/Game.hlsli` and `Common/Color.hlsli`
 are staged unchanged. The global replacement, global settings, comparison
 view and b7 ISL block are deleted. CPU radius/luminance math matches the pin,
@@ -218,7 +220,7 @@ Skyrim's literal record/runtime overlay is replaced, not partially emulated.
 
 ## WaterEffects
 
-Upstream pin: `d330bf12d` (shared pin `83efe1ad991b91bba22ad121b7ebab763880fa3b`). `WaterCaustics.hlsli` and
+Upstream pin: `d330bf12d` (shared pin `6f81ebc2512da5564f37e728a65037b4c45e2a67`). `WaterCaustics.hlsli` and
 `watercaustics.dds` are staged unchanged through `xmake/shared.lua`; the FO4 caustics
 kernel and CPU shader mirror are deleted. There are no caustics quality knobs.
 Feature classification: **core** (rule 2: upstream water-effects algorithm and design).
@@ -252,7 +254,7 @@ Camera-cell `WaterSystemHeight` and fullscreen diagnostics are minor FO4 adjustm
 
 ## WetnessEffects
 
-Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
+Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 Both upstream `WetnessEffects/*.hlsli` files and the required Common lighting includes
 are staged unchanged. The copied FO4 implementation is deleted. The exact upstream
 192-byte settings block is published in b6, with no wetness block in b7.
@@ -296,7 +298,7 @@ Pending rows prevent a claim of complete parity.
 
 ## ExponentialHeightFog
 
-Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
+Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 All seven `ExponentialHeightFog` shaders, plus their Random, Color, Shading, IBL and Skylighting
 includes, are staged unchanged. The ramp-derived FO4 kernel and its b7 block are deleted.
 The 192-byte settings block occupies upstream b6 offset 992; feature-owned b0 volume constants
@@ -355,7 +357,7 @@ or verification work, not engine incompatibilities or a claim of full enabled-fe
 
 ## Performance Overlay
 
-Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
+Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 `Profiler.{h,cpp}`, `CircularBuffer`, `DrawCallRow` and `ABTestAggregator` are consumed
 unchanged through `xmake\shared.lua`, including the three-frame query ring, 128 timers,
 300-sample pass histories, 60-frame retirement, 600-sample default frame histories,
@@ -425,7 +427,7 @@ this implementation makes no additional shared edits.
   deployment and game launch are outside this worktree task.
 ## Terrain Shadows
 
-Upstream pin: `d330bf12d` (shared fork `e305ed0a4`). Both `TerrainShadows/ShadowUpdate.cs.hlsl`
+Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`. Both `TerrainShadows/ShadowUpdate.cs.hlsl`
 and `TerrainShadows/TerrainShadows.hlsli` are staged unchanged. Native DDS dimensions, R16G16_UNORM
 shadow heights, 128-thread scans, componentwise penumbra maxima, one-degree softening, half-texel
 offsets, bounded UV, ZBlur, weight-1 full sweeps and weight-0.5 ordinary slices match the pin.
@@ -695,7 +697,7 @@ evidence limits, not relabeled as proven bugs. A suspected upstream typed-depth 
 
 ## Screen Space GI
 
-Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
+Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 The entire upstream `features/Screen Space GI/Shaders/ScreenSpaceGI` directory is staged
 unchanged through `xmake\shared.lua`; all local XeGTAO copies are deleted. The blur correction
 is the single SSGI seam edit above. Settings, full/half/quarter modes, formats, noise, pass order,
@@ -750,7 +752,7 @@ Bend reads it directly at CS t0, so first person casts as upstream does.
 |---|---|---|---|---|
 | Forced | Ordinary world-projection scene depth and its matching VP | Bind canonical R32_FLOAT (`GetCanonicalSceneDepthSRV()`, t17 content) directly to Bend's unchanged CS t0, using the copied world+jitter record's row-vector ViewProjection; reprojected first-person depth remains eligible to cast | fallout4-re engine-facts Native composite depth partition, b12 near reprojection and World record at PostDeferredPrePass: native world depth is `mad(raw,1.01,-0.01)` and near depth has a different projection. The R32 declaration is selected by upstream's `TERRAIN_BLENDING` define; no terrain feature is implied | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `ScreenSpaceShadows.cpp` `GetComputeRaymarch` / `OnPreDeferredLights` |
 | Forced | First-person forward materials never receive SSS | Explicit receiver gate returns 1 for raw depth `<=0.01` in FO4's shared deferred light passes; first person casts as upstream does through canonical depth, with no caster exclusion | Upstream `Lighting.hlsl:2224–2231` guards the consumer with `SCREEN_SPACE_SHADOWS && DEFERRED`; `deferredPass` is cleared by `EndDeferred` (`Deferred.cpp:449`, called inside RenderWorld at `693–695`) before RenderFirstPersonView. Upstream's Z-prepass depth copy contains first-person depth and Bend has no caster exclusion (see `sss-first-person-caster.md` research evidence). FO4 lights world and first person in shared deferred passes (fallout4-re engine-facts Native composite depth partition, BSLighting forward-pass source), requiring this receiver gate | `FO4/ScreenSpaceShadowConsumer.hlsli`, WARP receiver-gate fixture in `ShaderCompileTests.cpp` |
-| Fix | Consumer adds 0.5 to pixel-centered SV_POSITION before integer conversion | Retain main's corrected pixel address by subtracting 0.5 at the FO4 consumer boundary, then call unchanged upstream sampling | Upstream Lighting.hlsl and FO4 DFLight.hlsl both pass pixel-centered SV_POSITION; Bend writes floored pixel coordinates. There is no demonstrated rasterization difference, so this is a retained main bug fix, not a Forced translation; see Upstream PR candidates | `FO4/ScreenSpaceShadowConsumer.hlsli` `FO4ScreenSpaceShadowVisibility` |
+| Fix | Consumer adds 0.5 to pixel-centered SV_POSITION before integer conversion | Shared-fork seam `6f81ebc25` samples the pixel directly; no FO4 counter-offset | Upstream Lighting, DistantTree and RunGrass pass pixel-centered SV_POSITION just like FO4 DFLight; Bend writes floored pixel coordinates. Upstream PR candidate listed above | Shared `ScreenSpaceShadows/ScreenSpaceShadows.hlsli` |
 | Forced | Normalize and negate the active sun light's propagation direction | Normalize FO4 sun world-rotation row zero and project its negative with w=0 | fallout4-re engine-facts Sun light orientation / Deferred sun constant: row zero is sun-to-scene; native BSDFLight negates that same worldDirection into view-space toward-light b2 c1 | `World/Sky.cpp` `TryGetSunDirectionWS`, `ScreenSpaceShadows.cpp` `OnPreDeferredLights` |
 | Forced | Prepass before material lighting consumers | Clear/dispatch before DeferredLightsImpl, sample unchanged upstream t45 through an FO4 include in directional light and focused shadow families, release the owned binding afterward | fallout4-re engine-facts Sun light passes and BSLighting forward-pass source: FO4 ordinary world/first-person materials are prepass-drawn and lit in deferred light passes. Reconstructed BSDFLight owns native t0–t5, not t45; no consumer-slot translation is needed | `ScreenSpaceShadows.cpp` `Load` / `BindShadowMask` / `OnPostDeferredLights`, `DFLight.hlsl` directional and shadow-only families |
 | Forced | Lighting.hlsl separates direct visibility x and transmission visibility x/y by facing | Directional split families apply x to their native shared shadow term when front-facing, y to back-facing wrap/transmission; the no-cascade family applies direct and transmission separately | Reconstructed `DFLight.hlsl` DIRSPLITS1/2/3 combines direct and transmission into finalDiffuse before multiplying the shared shadow, while UNSHADOWED has no shared shadow. Front transmission already receives x through that term, so the extra multiplier is back-facing only; no new shading model is introduced | `FO4/ScreenSpaceShadowConsumer.hlsli` `FO4BackTransmissionScreenSpaceShadow`, `DFLight.hlsl` `backfaceWrap` / `forwardBlend` and UNSHADOWED directional block |
