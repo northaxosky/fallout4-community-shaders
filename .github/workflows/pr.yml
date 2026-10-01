@@ -82,15 +82,9 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Fetch submodules with their declared shallow policy
-        run: git submodule update --init --recursive
-
-      - name: Fetch submodule LFS assets
+      - name: Fetch FO4 submodules and LFS assets
         shell: pwsh
-        run: |
-          git lfs install --local
-          git lfs pull
-          git submodule foreach --recursive "git lfs install --local && git lfs pull"
+        run: ./scripts/fetch-submodules.ps1
 
       - name: Set up xmake
         uses: xmake-io/github-action-setup-xmake@v1

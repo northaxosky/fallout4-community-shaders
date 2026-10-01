@@ -15,11 +15,14 @@ validation as well as a successful build.
 
 ```powershell
 git lfs install
-git clone --recursive https://github.com/northaxosky/fallout4-community-shaders.git
+git clone https://github.com/northaxosky/fallout4-community-shaders.git
 cd fallout4-community-shaders
-git lfs pull
-git submodule foreach --recursive "git lfs install --local && git lfs pull"
+pwsh scripts\fetch-submodules.ps1
 ```
+
+Use this script instead of `--recursive`: it keeps `community-shaders-shared` shallow
+without its unused Skyrim dependencies, while fetching CommonLibF4/Streamline recursively
+and pulling LFS assets.
 
 ## Upstream sync
 
