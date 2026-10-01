@@ -123,6 +123,36 @@ namespace cs::render
 
 		void PackFeatures(SubstrateData& a_data, const FeatureDataCB& a_features)
 		{
+			// FO4 HDR and sun radiance are linear; DALC alone requires its native power 2.2.
+			a_data.feature.linearLightingSettings = {
+				.enableLinearLighting = 1,
+				.isDirLightLinear = 1,
+				.dirLightMult = 1.0f,
+				.lightGamma = 1.0f,
+				.colorGamma = 1.0f,
+				.emitColorGamma = 1.0f,
+				.glowmapGamma = 1.0f,
+				.ambientGamma = 2.2f,
+				.fogGamma = 1.0f,
+				.fogAlphaGamma = 1.0f,
+				.effectGamma = 1.0f,
+				.effectAlphaGamma = 1.0f,
+				.skyGamma = 1.0f,
+				.waterGamma = 1.0f,
+				.vlGamma = 1.0f,
+				.vanillaDiffuseColorMult = 1.0f,
+				.directionalLightMult = 1.0f,
+				.pointLightMult = 1.0f,
+				.ambientMult = 1.0f,
+				.emitColorMult = 1.0f,
+				.glowmapMult = 1.0f,
+				.effectLightingMult = 1.0f,
+				.membraneEffectMult = 1.0f,
+				.bloodEffectMult = 1.0f,
+				.projectedEffectMult = 1.0f,
+				.deferredEffectMult = 1.0f,
+				.otherEffectMult = 1.0f
+			};
 			auto& fo4 = a_data.fo4;
 			if (auto* fog = features::ExponentialHeightFog::GetSingleton(); fog->IsLoaded())
 				a_data.feature.exponentialHeightFogSettings = fog->GetCommonBufferData();

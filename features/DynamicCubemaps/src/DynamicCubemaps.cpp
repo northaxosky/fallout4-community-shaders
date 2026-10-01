@@ -41,17 +41,19 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.dynamiccubemaps");
 
 		constexpr const wchar_t* kDetectLightingPath =
-			L"Data\\Shaders\\FO4\\DynamicCubemaps\\DetectCaptureLightingCS.hlsl";
+			L"Data\\Shaders\\DynamicCubemaps\\DetectCaptureLightingCS.hlsl";
+		constexpr const wchar_t* kPreparePath =
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\PrepareCaptureCS.hlsl";
 		constexpr const wchar_t* kUpdatePath =
-			L"Data\\Shaders\\FO4\\DynamicCubemaps\\UpdateCubemapCS.hlsl";
+			L"Data\\Shaders\\DynamicCubemaps\\UpdateCubemapCS.hlsl";
 		constexpr const wchar_t* kInferPath =
-			L"Data\\Shaders\\FO4\\DynamicCubemaps\\InferCubemapCS.hlsl";
+			L"Data\\Shaders\\DynamicCubemaps\\InferCubemapCS.hlsl";
 		constexpr const wchar_t* kIrradiancePath =
-			L"Data\\Shaders\\FO4\\DynamicCubemaps\\SpecularIrradianceCS.hlsl";
+			L"Data\\Shaders\\DynamicCubemaps\\SpecularIrradianceCS.hlsl";
 		constexpr const wchar_t* kBc6hPath =
-			L"Data\\Shaders\\FO4\\DynamicCubemaps\\BC6HEncodeCS.hlsl";
+			L"Data\\Shaders\\DynamicCubemaps\\BC6HEncodeCS.hlsl";
 		constexpr const wchar_t* kPreviewPath =
-			L"Data\\Shaders\\DynamicCubemaps\\CubemapPreviewCS.hlsl";
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\CubemapPreviewCS.hlsl";
 		constexpr const wchar_t* kDefaultCubemapPath =
 			L"Data\\Shaders\\DynamicCubemaps\\defaultcubemap.dds";
 
@@ -380,11 +382,14 @@ namespace cs::features
 				cs::render::annotation::SetName(a_target.get(), a_name);
 			};
 
-			compile(_detectLightingCS, kDetectLightingPath, {}, "DynamicCubemaps/DetectLighting.CS");
-			compile(_updateCS, kUpdatePath, {}, "DynamicCubemaps/Update.CS");
-			compile(_updateReflectionsCS, kUpdatePath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/UpdateReflections.CS");
-			compile(_updateFakeReflectionsCS, kUpdatePath, { { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateFakeReflections.CS");
-			compile(_updateSkyReflectionsCS, kUpdatePath, { { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateSkyReflections.CS");
+			// FO4 capture preparation translates native inputs without replacing upstream accumulation.
+			compile(_prepareCS, kPreparePath, {}, "DynamicCubemaps/Prepare.CS");
+			compile(_prepareReflectionsCS, kPreparePath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/PrepareReflections.CS");
+			compile(_detectLightingCS, kDetectLightingPath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, "DynamicCubemaps/DetectLighting.CS");
+			compile(_updateCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, "DynamicCubemaps/Update.CS");
+			compile(_updateReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" } }, "DynamicCubemaps/UpdateReflections.CS");
+			compile(_updateFakeReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateFakeReflections.CS");
+			compile(_updateSkyReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateSkyReflections.CS");
 			compile(_inferCS, kInferPath, {}, "DynamicCubemaps/Infer.CS");
 			compile(_inferReflectionsCS, kInferPath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/InferReflections.CS");
 			compile(_inferFakeReflectionsCS, kInferPath, { { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/InferFakeReflections.CS");
@@ -418,11 +423,12 @@ namespace cs::features
 									DXGI_FORMAT a_format,
 									bool a_generateMips,
 									bool a_mipUavs,
-									std::string_view a_name) {
+									std::string_view a_name,
+									std::uint32_t a_mipLevels = kMipLevels) {
 			D3D11_TEXTURE2D_DESC textureDesc{};
 			textureDesc.Width = kCubemapSize;
 			textureDesc.Height = kCubemapSize;
-			textureDesc.MipLevels = kMipLevels;
+			textureDesc.MipLevels = a_mipLevels;
 			textureDesc.ArraySize = 6;
 			textureDesc.Format = a_format;
 			textureDesc.SampleDesc.Count = 1;
@@ -442,7 +448,7 @@ namespace cs::features
 			srvDesc.Format = a_format;
 			srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
 			srvDesc.TextureCube.MostDetailedMip = 0;
-			srvDesc.TextureCube.MipLevels = kMipLevels;
+			srvDesc.TextureCube.MipLevels = a_mipLevels;
 			DX::ThrowIfFailed(a_device->CreateShaderResourceView(
 				a_cube.texture.get(), &srvDesc, a_cube.srv.put()));
 
@@ -494,6 +500,25 @@ namespace cs::features
 		createCube(_filtered, DXGI_FORMAT_R11G11B10_FLOAT, true, true, "DynamicCubemaps/Filtered");
 		createCube(_environment, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Environment");
 		createCube(_reflections, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Reflections");
+		createCube(_preparedPosition, DXGI_FORMAT_R32G32B32A32_FLOAT, false, false, "DynamicCubemaps/PreparedPosition", 1);
+		createCube(_preparedColor, DXGI_FORMAT_R32G32B32A32_FLOAT, false, false, "DynamicCubemaps/PreparedColor", 1);
+		createCube(_preparedUV, DXGI_FORMAT_R32G32_FLOAT, false, false, "DynamicCubemaps/PreparedUV", 1);
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC preparedSrvDesc{};
+		preparedSrvDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		preparedSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+		preparedSrvDesc.Texture2DArray.MipLevels = 1;
+		preparedSrvDesc.Texture2DArray.ArraySize = 6;
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			_preparedPosition.texture.get(), &preparedSrvDesc, _preparedPositionArraySRV.put()));
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			_preparedColor.texture.get(), &preparedSrvDesc, _preparedColorArraySRV.put()));
+		cs::render::annotation::SetName(_preparedPositionArraySRV.get(), "DynamicCubemaps/PreparedPosition.ArraySRV");
+		cs::render::annotation::SetName(_preparedColorArraySRV.get(), "DynamicCubemaps/PreparedColor.ArraySRV");
+		preparedSrvDesc.Format = DXGI_FORMAT_R32G32_FLOAT;
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			_preparedUV.texture.get(), &preparedSrvDesc, _preparedUVArraySRV.put()));
+		cs::render::annotation::SetName(_preparedUVArraySRV.get(), "DynamicCubemaps/PreparedUV.ArraySRV");
 
 		// The BC6H encoder loads through a Texture2DArray view.
 		D3D11_SHADER_RESOURCE_VIEW_DESC arraySrvDesc{};
@@ -640,6 +665,11 @@ namespace cs::features
 			&bufferDesc, nullptr, _updateBuffer.put()));
 		cs::render::annotation::SetName(
 			_updateBuffer.get(), "DynamicCubemaps/Update.Buffer");
+		bufferDesc = cs::buffer::ConstantBufferDesc<PrepareCaptureCB>();
+		DX::ThrowIfFailed(a_device->CreateBuffer(
+			&bufferDesc, nullptr, _prepareBuffer.put()));
+		cs::render::annotation::SetName(
+			_prepareBuffer.get(), "DynamicCubemaps/Prepare.Buffer");
 		bufferDesc =
 			cs::buffer::ConstantBufferDesc<SpecularMapFilterSettingsCB>();
 		DX::ThrowIfFailed(a_device->CreateBuffer(
@@ -904,16 +934,14 @@ namespace cs::features
 		constants.CaptureDeltaTime = static_cast<float>(
 			std::max(0.0, now - _previousCaptureTime[index]));
 		constants.ResetCapture = _resetCapture[index] ? 1u : 0u;
-		constants.CameraPosAdjust = { cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, 0.0f };
-		for (std::size_t row = 0; row < 3; ++row) {
-			const auto& source = frameBuffer->ViewToWorld[row];
-			constants.ViewToWorld[row] = { source.x, source.y, source.z, 0.0f };
-		}
-		constants.InvProj = inverseProjection;
+		// FO4 prepared positions are eye-relative, not relative to the engine's position-adjust anchor.
+		constants.CaptureCameraOrigin = { cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, 0.0f };
 		_previousCaptureTime[index] = now;
 		_resetCapture[index] = false;
 		_cameraPreviousPosAdjust[index] = cameraOrigin;
 		UpdateBuffer(context, _updateBuffer.get(), &constants, sizeof(constants));
+		const PrepareCaptureCB preparation{ inverseProjection };
+		UpdateBuffer(context, _prepareBuffer.get(), &preparation, sizeof(preparation));
 
 		auto& stream = Stream(a_reflections);
 		const auto* tiledSetting = RE::GetINISetting("bComputeShaderDeferredTiledLighting:Display");
@@ -935,8 +963,11 @@ namespace cs::features
 			_lightingStateUAV.get()
 		};
 		context->CSSetShaderResources(0, static_cast<UINT>(srvs.size()), srvs.data());
-		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(uavs.size()), uavs.data(), nullptr);
-		ID3D11Buffer* buffer = _updateBuffer.get();
+		std::array<ID3D11UnorderedAccessView*, 3> preparedUavs{
+			_preparedPosition.mip0Uav.get(), _preparedColor.mip0Uav.get(), _preparedUV.mip0Uav.get()
+		};
+		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(preparedUavs.size()), preparedUavs.data(), nullptr);
+		ID3D11Buffer* buffer = _prepareBuffer.get();
 		context->CSSetConstantBuffers(0, 1, &buffer);
 		ID3D11SamplerState* sampler = _computeSampler.get();
 		context->CSSetSamplers(0, 1, &sampler);
@@ -944,6 +975,18 @@ namespace cs::features
 		cs::render::annotation::ScopedEvent timing(a_reflections ?
 													   "DynamicCubemaps::UpdateReflections" :
 													   "DynamicCubemaps::Update");
+		const bool captureSky = a_reflections && !_fakeReflections.load(std::memory_order_relaxed);
+		context->CSSetShader(captureSky ? _prepareReflectionsCS.get() : _prepareCS.get(), nullptr, 0);
+		context->Dispatch(DispatchGroups(kCubemapSize), DispatchGroups(kCubemapSize), 6);
+		UnbindCompute(context);
+
+		std::array<ID3D11ShaderResourceView*, 3> preparedSrvs{
+			_preparedPositionArraySRV.get(), _preparedColorArraySRV.get(), _preparedUVArraySRV.get()
+		};
+		context->CSSetShaderResources(0, static_cast<UINT>(preparedSrvs.size()), preparedSrvs.data());
+		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(uavs.size()), uavs.data(), nullptr);
+		buffer = _updateBuffer.get();
+		context->CSSetConstantBuffers(0, 1, &buffer);
 		context->CSSetShader(_detectLightingCS.get(), nullptr, 0);
 		context->Dispatch(1, 1, 1);
 

@@ -255,6 +255,150 @@ namespace
 		}
 	}
 
+	std::string VerifyCubemapCaptureBoundary(const std::filesystem::path& a_root)
+	{
+		using namespace DirectX;
+		using Microsoft::WRL::ComPtr;
+		try {
+			const auto checked = [](HRESULT a_result) {
+				if (FAILED(a_result))
+					throw std::runtime_error("cubemap capture WARP fixture failed");
+			};
+			ComPtr<ID3D11Device> device;
+			ComPtr<ID3D11DeviceContext> context;
+			checked(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+				D3D11_SDK_VERSION, device.GetAddressOf(), nullptr, context.GetAddressOf()));
+			D3D11_TEXTURE2D_DESC desc{};
+			desc.Width = desc.Height = desc.MipLevels = desc.ArraySize = desc.SampleDesc.Count = 1;
+			desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			const auto input = [&](const XMFLOAT4& a_value) {
+				D3D11_SUBRESOURCE_DATA data{ &a_value, sizeof(a_value), 0 };
+				ComPtr<ID3D11Texture2D> texture;
+				ComPtr<ID3D11ShaderResourceView> view;
+				checked(device->CreateTexture2D(&desc, &data, texture.GetAddressOf()));
+				checked(device->CreateShaderResourceView(texture.Get(), nullptr, view.GetAddressOf()));
+				return view;
+			};
+			const auto scene = input({ 2.0f, 3.0f, 4.0f, 1.0f });
+			const auto albedo = input({ 0.2f, 0.3f, 0.4f, 1.0f });
+			const auto diffuse = input({ 0.5f, 0.4f, 0.3f, 1.0f });
+			const auto tiled = input({ 0.1f, 0.2f, 0.3f, 1.0f });
+			const auto emissive = input({ 0.01f, 0.02f, 0.03f, 1.0f });
+			ComPtr<ID3D11Texture2D> depth;
+			ComPtr<ID3D11ShaderResourceView> depthView;
+			desc.Format = DXGI_FORMAT_R32_FLOAT;
+			checked(device->CreateTexture2D(&desc, nullptr, depth.GetAddressOf()));
+			checked(device->CreateShaderResourceView(depth.Get(), nullptr, depthView.GetAddressOf()));
+
+			desc.Width = desc.Height = 8;
+			desc.ArraySize = 6;
+			desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+			desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+			std::array<ComPtr<ID3D11Texture2D>, 3> output;
+			std::array<ComPtr<ID3D11UnorderedAccessView>, 3> outputViews;
+			std::array<ComPtr<ID3D11Texture2D>, 3> readback;
+			for (std::size_t index = 0; index < output.size(); ++index) {
+				desc.Format = index == 2 ? DXGI_FORMAT_R32G32_FLOAT : DXGI_FORMAT_R32G32B32A32_FLOAT;
+				desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+				desc.Usage = D3D11_USAGE_DEFAULT;
+				desc.CPUAccessFlags = 0;
+				checked(device->CreateTexture2D(&desc, nullptr, output[index].GetAddressOf()));
+				checked(device->CreateUnorderedAccessView(output[index].Get(), nullptr, outputViews[index].GetAddressOf()));
+				desc.BindFlags = 0;
+				desc.Usage = D3D11_USAGE_STAGING;
+				desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+				checked(device->CreateTexture2D(&desc, nullptr, readback[index].GetAddressOf()));
+			}
+			const auto read = [&](std::size_t a_output, UINT a_face) {
+				context->CopyResource(readback[a_output].Get(), output[a_output].Get());
+				D3D11_MAPPED_SUBRESOURCE mapped{};
+				checked(context->Map(readback[a_output].Get(), a_face, D3D11_MAP_READ, 0, &mapped));
+				XMFLOAT4 value{};
+				const auto stride = a_output == 2 ? sizeof(XMFLOAT2) : sizeof(value);
+				std::memcpy(&value, static_cast<const std::byte*>(mapped.pData) + mapped.RowPitch * 4 + stride * 4, stride);
+				context->Unmap(readback[a_output].Get(), a_face);
+				return value;
+			};
+			const auto buffer = [&](const auto& a_value) {
+				D3D11_BUFFER_DESC bufferDesc{};
+				bufferDesc.ByteWidth = static_cast<UINT>(sizeof(a_value));
+				bufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+				D3D11_SUBRESOURCE_DATA data{ &a_value, 0, 0 };
+				ComPtr<ID3D11Buffer> result;
+				checked(device->CreateBuffer(&bufferDesc, &data, result.GetAddressOf()));
+				return result;
+			};
+			cs::render::FrameDataCB frame{};
+			const auto view = XMMatrixRotationY(-XM_PIDIV2);
+			const XMMATRIX projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, -10, 0);
+			XMStoreFloat4x4(&frame.CameraView, XMMatrixTranspose(view));
+			XMStoreFloat4x4(&frame.CameraViewInverse, XMMatrixTranspose(XMMatrixInverse(nullptr, view)));
+			XMStoreFloat4x4(&frame.CameraProj, XMMatrixTranspose(projection));
+			frame.DynamicResolutionParams1 = frame.DynamicResolutionParams2 = { 1, 1, 1, 1 };
+			XMFLOAT4X4 inverseProjection;
+			XMStoreFloat4x4(&inverseProjection, XMMatrixInverse(nullptr, projection));
+			cs::render::SharedDataCB shared{};
+			shared.CameraData.x = 1000;
+			const auto prepareBuffer = buffer(inverseProjection);
+			const auto frameBuffer = buffer(frame);
+			const auto sharedBuffer = buffer(shared);
+			D3D11_SAMPLER_DESC samplerDesc{};
+			samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			samplerDesc.AddressU = samplerDesc.AddressV = samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+			samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+			ComPtr<ID3D11SamplerState> sampler;
+			checked(device->CreateSamplerState(&samplerDesc, sampler.GetAddressOf()));
+			for (bool reflections : { false, true }) {
+				std::string error;
+				const auto blob = cs::util::CompileShaderToBlob((a_root / "FO4" / "DynamicCubemaps" / "PrepareCaptureCS.hlsl").c_str(),
+					reflections ? std::vector<std::pair<const char*, const char*>>{ { "REFLECTIONS", "1" } } :
+								  std::vector<std::pair<const char*, const char*>>{},
+					"cs_5_0", "main", &error, a_root);
+				if (!blob)
+					return error;
+				ComPtr<ID3D11ComputeShader> shader;
+				checked(device->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, shader.GetAddressOf()));
+				for (float depthValue : { 0.005f, 0.02f, 0.5f, 1.0f }) {
+					context->UpdateSubresource(depth.Get(), 0, nullptr, &depthValue, sizeof(depthValue), 0);
+					std::array<ID3D11ShaderResourceView*, 6> inputs{ depthView.Get(), scene.Get(), albedo.Get(), diffuse.Get(), tiled.Get(), emissive.Get() };
+					std::array<ID3D11UnorderedAccessView*, 3> uavs{ outputViews[0].Get(), outputViews[1].Get(), outputViews[2].Get() };
+					auto* prepare = prepareBuffer.Get();
+					auto* camera = frameBuffer.Get();
+					auto* data = sharedBuffer.Get();
+					auto* linear = sampler.Get();
+					context->CSSetShaderResources(0, static_cast<UINT>(inputs.size()), inputs.data());
+					context->CSSetUnorderedAccessViews(0, static_cast<UINT>(uavs.size()), uavs.data(), nullptr);
+					context->CSSetConstantBuffers(0, 1, &prepare);
+					context->CSSetConstantBuffers(4, 1, &camera);
+					context->CSSetConstantBuffers(5, 1, &data);
+					context->CSSetSamplers(0, 1, &linear);
+					context->CSSetShader(shader.Get(), nullptr, 0);
+					context->Dispatch(1, 1, 6);
+					context->ClearState();
+					const auto position = read(0, 0);
+					const bool valid = depthValue == 0.5f || (reflections && depthValue == 1.0f);
+					if ((position.w > 0) != valid || read(0, 1).w > 0)
+						return "first-person/near/sky exclusion or positive-Z cube orientation mismatch";
+					if (!valid)
+						continue;
+					const float distance = depthValue == 1 ? 1.0f : 0.01f / (1.0f - (depthValue * 1.01f - 0.01f));
+					const auto color = read(1, 0);
+					const auto uv = read(2, 0);
+					const XMFLOAT3 radiance = depthValue == 1 ? XMFLOAT3{ 2, 3, 4 } : XMFLOAT3{ 0.37f, 0.56f, 0.75f };
+					if (std::abs(position.x - distance) > 1e-5f || std::abs(position.y + distance * 0.125f) > 1e-5f ||
+						std::abs(position.z + distance * 0.125f) > 1e-5f || position.w != (depthValue == 1 ? 2.0f : 1.0f) ||
+						std::abs(color.x - radiance.x) > 1e-5f || std::abs(color.y - radiance.y) > 1e-5f ||
+						std::abs(color.z - radiance.z) > 1e-5f || std::abs(uv.x - 0.5625f) > 1e-5f || std::abs(uv.y - 0.5625f) > 1e-5f)
+						return "capture radiance, camera rotation, depth reconstruction or packed screen coordinates mismatch";
+				}
+			}
+			return {};
+		} catch (const std::exception& a_error) {
+			return a_error.what();
+		}
+	}
+
 	struct ABIField
 	{
 		const char* name;
@@ -555,8 +699,14 @@ namespace
 			.required = { CB(1), CB(10), Texture(0), Texture(5) },
 			.forbidden = { CB(7) } });
 
-		const auto cubemaps = a_root / "FO4" / "DynamicCubemaps";
+		const auto cubemaps = a_root / "DynamicCubemaps";
+		const auto cubemapBoundary = a_root / "FO4" / "DynamicCubemaps";
 		const ShaderDefines substrate{ { "FO4CS_SUBSTRATE", "1" } };
+		for (const char* file : { "DetectCaptureLightingCS.hlsl", "UpdateCubemapCS.hlsl" }) {
+			a_jobs.push_back({ .path = cubemaps / file,
+				.defines = substrate,
+				.description = "Dynamic Cubemaps default upstream capture input" });
+		}
 		for (const char* file : {
 				 "DetectCaptureLightingCS.hlsl",
 				 "UpdateCubemapCS.hlsl",
@@ -567,6 +717,8 @@ namespace
 					 { { "FAKEREFLECTIONS", "" } },
 					 { { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } } }) {
 				auto defines = substrate;
+				if (std::string_view(file) != "InferCubemapCS.hlsl")
+					defines.emplace_back("DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1");
 				defines.insert(defines.end(), variant.begin(), variant.end());
 				a_jobs.push_back({ .path = cubemaps / file,
 					.defines = std::move(defines),
@@ -577,9 +729,19 @@ namespace
 				 "SpecularIrradianceCS.hlsl",
 				 "BC6HEncodeCS.hlsl",
 				 "CubemapPreviewCS.hlsl" }) {
-			a_jobs.push_back({ .path = (std::string_view(file) == "CubemapPreviewCS.hlsl" ? a_root / "DynamicCubemaps" : cubemaps) / file,
+			a_jobs.push_back({ .path = (std::string_view(file) == "CubemapPreviewCS.hlsl" ? cubemapBoundary : cubemaps) / file,
 				.defines = substrate,
 				.description = file });
+		}
+		for (bool reflections : { false, true }) {
+			auto defines = substrate;
+			if (reflections)
+				defines.emplace_back("REFLECTIONS", "1");
+			a_jobs.push_back({ .path = cubemapBoundary / "PrepareCaptureCS.hlsl",
+				.defines = std::move(defines),
+				.description = "Dynamic Cubemaps native capture preparation",
+				.required = { CB(0), CB(4), Texture(0), Texture(1), Texture(2), Texture(3), Texture(4), Texture(5), Sampler(0) },
+				.forbidden = { CB(7), CB(12) } });
 		}
 
 		const auto terrain = a_root / "TerrainShadows";
@@ -1126,6 +1288,10 @@ int main(int argc, char** argv)
 	}
 	if (const auto error = VerifySSGIABI(argv[1]); !error.empty()) {
 		std::printf("FAIL: SSGI ABI: %s\n", error.c_str());
+		++failures;
+	}
+	if (const auto error = VerifyCubemapCaptureBoundary(argv[1]); !error.empty()) {
+		std::printf("FAIL: cubemap capture boundary: %s\n", error.c_str());
 		++failures;
 	}
 	for (const auto& job : jobs) {

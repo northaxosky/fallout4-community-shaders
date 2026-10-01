@@ -20,14 +20,16 @@ A feature is **core** when it has no Chosen rows.
 
 ## Shared seam edits
 
-Shared pin: `7c607d7b91d3e3e8d66b87a134bec90275670fde`, based on `d330bf12d`.
+Shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`, based on `d330bf12d`.
 FO4 consumes unchanged files through `xmake\shared.lua`; no upstream path can be replaced.
 
 | Kind | File | SHA | Why | Upstream PR status |
 |---|---|---|---|---|
 | Chosen | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies; Phase 3 consumes these rows | In the shared fork; no upstream PR recorded |
 | Forced | `package/Shaders/Common/FrameBuffer.hlsli` | `e305ed0a4` | `FRAMEBUFFER_REGISTER` defaults to b12 and permits host binding at b4; FO4 engine shaders already bind the native per-frame buffer at b12 (`package/Shaders/BSWaterShader.hlsl:3`, `cbuffer PerFrame : register(b12)`) | In the shared fork; no upstream PR recorded |
-| Fix | `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104` | `7c607d7b91d3e3e8d66b87a134bec90275670fde` | Scale the center-normal UV by `frameScale`, matching the neighbor lookups in half/quarter-resolution dynamic-resolution frames | community-shaders/skyrim-community-shaders#2795 |
+| Fix | `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104` | `13d9d2e2d` | Scale the center-normal UV by `frameScale`, matching the neighbor lookups in half/quarter-resolution dynamic-resolution frames | community-shaders/skyrim-community-shaders#2795 |
+| Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/CaptureCommon.hlsli` | `83efe1ad9` | Optional prepared position/color/UV inputs, geometry/sky tags and capture origin isolate FO4's +Z, partitioned depth, infinite far plane and diffuse reconstruction; default Skyrim sampling/history are unchanged | In the shared fork; upstream PR candidate, not filed |
+| Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/DynamicCubemaps.hlsli` | `83efe1ad9` | Optional cube registers/custom-consumer guard and extracted explicit-sampler normalization let native FO4 deferred slots/samplers call shared arithmetic; default Skyrim registers/consumers are unchanged | In the shared fork; upstream PR candidate, not filed |
 
 ## Shared consumption boundary
 
@@ -55,13 +57,13 @@ Retired rows preserve the original Kind and identify replacements consumed uncha
 |---|---|---|
 | Chosen | `Common/Random.hlsli` | `FO4/Common/Random.hlsli` |
 | Chosen | `Common/Shading.hlsli` | `FO4/Common/Shading.hlsli` |
-| Chosen | `DynamicCubemaps/BC6HEncodeCS.hlsl` | `FO4/DynamicCubemaps/BC6HEncodeCS.hlsl` |
-| Chosen | `DynamicCubemaps/CaptureCommon.hlsli` | `FO4/DynamicCubemaps/CaptureCommon.hlsli` |
-| Chosen | `DynamicCubemaps/DetectCaptureLightingCS.hlsl` | `FO4/DynamicCubemaps/DetectCaptureLightingCS.hlsl` |
-| Chosen | `DynamicCubemaps/DynamicCubemaps.hlsli` | `FO4/DynamicCubemaps/DynamicCubemaps.hlsli` |
-| Chosen | `DynamicCubemaps/InferCubemapCS.hlsl` | `FO4/DynamicCubemaps/InferCubemapCS.hlsl` |
-| Chosen | `DynamicCubemaps/SpecularIrradianceCS.hlsl` | `FO4/DynamicCubemaps/SpecularIrradianceCS.hlsl` |
-| Chosen | `DynamicCubemaps/UpdateCubemapCS.hlsl` | `FO4/DynamicCubemaps/UpdateCubemapCS.hlsl` |
+| Chosen | `DynamicCubemaps/BC6HEncodeCS.hlsl` | Retired; unchanged shared kernel |
+| Chosen | `DynamicCubemaps/CaptureCommon.hlsli` | Retired; shared prepared-capture seam and `FO4/DynamicCubemaps/PrepareCaptureCS.hlsl` |
+| Chosen | `DynamicCubemaps/DetectCaptureLightingCS.hlsl` | Retired; unchanged shared kernel |
+| Chosen | `DynamicCubemaps/DynamicCubemaps.hlsli` | `FO4/DynamicCubemaps/DynamicCubemaps.hlsli` is a consumer include, not a copy; calls shared functions |
+| Chosen | `DynamicCubemaps/InferCubemapCS.hlsl` | Retired; unchanged shared kernel |
+| Chosen | `DynamicCubemaps/SpecularIrradianceCS.hlsl` | Retired; unchanged shared kernel |
+| Chosen | `DynamicCubemaps/UpdateCubemapCS.hlsl` | Retired; unchanged shared kernel |
 | Chosen | `ExponentialHeightFog/ExponentialHeightFog.hlsli` | `FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli` (retired; the unchanged upstream include and four compute passes are consumed directly) |
 | Chosen | `InverseSquareLighting/InverseSquareLighting.hlsli` | `FO4/InverseSquareLighting/InverseSquareLighting.hlsli` (retired; the unchanged upstream include is consumed directly) |
 | Chosen | `ScreenSpaceShadows/RaymarchCS.hlsl` | `FO4/ScreenSpaceShadows/RaymarchCS.hlsl` (retired; the unchanged upstream shader is consumed directly) |
@@ -77,10 +79,11 @@ Retired rows preserve the original Kind and identify replacements consumed uncha
 
 ## Substrate
 
-Shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`. FrameBuffer, SharedData,
+Shared pin: `c6c9c6a0f7caf6153c30b29bee7107219f1b0bad`. FrameBuffer, SharedData,
 SphericalHarmonics and its Math dependency are staged byte-for-byte. The pinned b6 ABI contains
 **20** blocks, including HorizonFixSettings; all 20 are mirrored in upstream order, and absent
-features leave zero blocks. The relocated `FO4/Common/SharedData.hlsli` is deleted.
+features leave zero blocks, except the host's neutral linear-color policy in the upstream
+LinearLighting block. The relocated `FO4/Common/SharedData.hlsli` is deleted.
 
 Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
 
@@ -92,6 +95,7 @@ Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
 | Forced | One R32_FLOAT boundary pass publishes canonical world-projection depth at t17; near pixels reproject through shadow +0x8A0, world pixels use `mad(d,1.01,-0.01)`, sky uses 1 | Depth & units / Per-frame buffer sources: FO4 combines first-person and world projections; prepass OG/NG/AE writes transpose(inverse(first-person jittered projection)) at shadow +0x8A0. Native targets use t0–t15, not t17 | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `FO4/Depth.hlsli`, `Engine.h` near accessor |
 | Chosen | Preserve upstream's scalar X clamp offset and Y clamp-to-ratio; snapshot current/previous ratios once per substrate update | Dynamic-resolution history: native clamp is `r−0.5/size` on NG/AE and `(trunc(size·r)−1)/size` on OG, size from logical target 1. Main clamped both axes, but upstream has one offset and clamps Y to ratio; parity takes precedence over a local fork. Substrate history is per-frame rather than effect-update history | `SharedData.cpp`, unchanged `Common/FrameBuffer.hlsli` |
 | Forced | Pack world-channel DALC into pre-power SH, then apply FO4's 2.2 power once at linear consumer boundaries | Directional ambient transform/evaluation rows: native world-channel columns include transform scale and bias; native lighting evaluates power 2.2. SH is `(b/Y00,−ay/Y1,az/Y1,−ax/Y1)` with Y00=0.2820948, Y1=0.4886025. Upstream State.cpp does not gamma-convert before packing; unchanged GetAmbient is pre-power | `Engine.h` `TryGetDirectionalAmbientRows`, `SharedDataLayout.h` `PackAmbientSH`, `FO4/FO4ShaderData.hlsli` `GetAmbientLinear` |
+| Forced | b6 publishes neutral linear-lighting inputs, with native DALC power 2.2 and an already-linear sun | FO4 deferred HDR/sun inputs are linear; directional ambient alone is pre-power. These host inputs let unchanged Color/cubemap kernels consume the same encoding as the reconstructed consumers | `SharedData.cpp` `PackFeatures`, Dynamic Cubemaps translations |
 | Chosen | Keep one FO4-only b7 for unmatched modes, debug settings, delta time and player-cell water plane; move equivalent fields to upstream b4/b5/b6 | Retired single-plane design: WaterEffects now publishes the 25-tile grid in b5 and its b7 block is removed. This row retains the original design's Kind for audit | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
 | Framework | Keep one FO4-only b7 for unmatched modes, debug settings and delta time; move equivalent fields to upstream b4/b5/b6 | Repository-wide single-substrate ABI. WaterEffects publishes the 25-tile grid in b5 and has no b7 block. DR and NDC-to-view equivalents use b4, terrain/wetness/cubemap enable fields use b6 | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
 | Chosen | FrameParams is zero; unvalidated celestial/HDR/map/shadow fields retain upstream absent values | No validated FO4 inverse-gamma/frame-flag or corresponding celestial/HDR source is consumed. SunDirection uses toward-light direction, while SunColor remains absent rather than inventing a sky-disc colour; FrameCount follows main's temporal method and AlwaysActive follows engine frame count | `SharedData.cpp` `BuildSharedData`, `SharedDataLayout.h` |
@@ -437,38 +441,71 @@ Classification: **core** — no Chosen rows; Pending rows remain unfinished and 
 
 Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\BSWaterShader.hlsl`,
 `package\Shaders\BSDFCompositeShader.hlsl`, `package\Shaders\BSDFLightShader.hlsl` and
-`package\Shaders\DFTiledLighting.hlsl`.
+`package\Shaders\DFTiledLighting.hlsl`. Feature classification: **extension candidate**.
+Chosen rows: exterior reflection availability; missing-engine-cube fallback; global SSLR toggle;
+display-only cubemap preview.
+
+All files in upstream `features/Dynamic Cubemaps/Shaders/DynamicCubemaps` are staged unchanged
+from the shared fork. Only `CaptureCommon.hlsli` and `DynamicCubemaps.hlsli` have the generic seams
+listed above; accumulation, lighting-change detection, inference, 16-sample GGX and BC6H remain
+shared. Prepared samples explicitly distinguish geometry/sky, so the default lighting detector
+still excludes sky while reflection accumulation includes it. FO4 has no local kernel copies.
+Inference/filter texel addressing, roughness × 8 on
+seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; no new Fix is applied.
 
 ### Translations
 
 | Kind | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|---|
 | Forced | Capture before the deferred composite | Capture and publication run after the Forward cloud group (`RegisterPostForwardSky`) | FO4 draws the sky inside `DrawWorld::Forward`, after the composite; engine-facts Secondary scene views | `DynamicCubemaps.cpp` `Load` |
-| Forced | Capture the main color target | Geometry radiance is rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky pixels come from scene color | FO4 has no diffuse-only target; engine-facts Deferred composition | `CaptureCommon.hlsli` |
-| Chosen | Sky depth reconstructs a finite far-plane position | Sky depth `1.0` is placed on the camera far-plane direction | Explicit sky handling bypasses near/world partition reconstruction | `CaptureCommon.hlsli` `SampleCapture` |
-| Forced | `FrameBuffer::WorldToView(-s)` with `z < 0` | View-space test `z > 0` on `s` | FO4 views down +Z; engine-facts Camera matrix builder | `CaptureCommon.hlsli` `SampleCapture` |
-| Forced | Skyrim frame-buffer camera | Copied current world+jitter cache record and its inverse projection | Engine-facts Camera cache ownership / Per-frame buffer sources; b12 is diagnostic only | `FrameBuffer.cpp`, `DynamicCubemaps.cpp` `UpdateData` |
-| Chosen | `IrradianceToLinear`/`IrradianceToGamma`, `ReflectionNormalisationScale` | Upstream's linear-lighting branch: identity, scale `1.0` | Preserve main's linear HDR consumer policy | `CubemapCommon.hlsli` |
-| Forced | `Color::Ambient(SharedData::GetAmbient(R))` | Upstream pre-power GetAmbient, followed by FO4 linear boundary conversion | Engine-facts Directional ambient evaluation power 2.2; see Substrate | `FO4ShaderData.hlsli` `GetAmbientLinear`, `Engine.h` `TryGetDirectionalAmbientRows` |
-| Forced | Lighting-change detection from Skyrim directional light | SharedData publishes FO4 sun radiance as the deferred sun pass receives it | Engine-facts Sun/light sources | `DetectCaptureLightingCS.hlsl` |
+| Forced | Capture the main color target | Preparation rebuilds geometry as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky comes from scene color | FO4 has no diffuse-only target; engine-facts Deferred composition; reconstructed `BSDFCompositeShader.hlsl` diffuse/emissive composition | `FO4/DynamicCubemaps/PrepareCaptureCS.hlsl` |
+| Forced | Sky depth reconstructs a finite far-plane position | Preparation places depth `1.0` on the camera far-plane direction | FO4's world projection has an infinite far plane; inverse projection at 1 has zero homogeneous w. A finite history position preserves upstream sky capture; engine-facts Camera matrix builder and `Engine.h` `TryGetWorldSceneProjection` | `PrepareCaptureCS.hlsl` |
+| Forced | Single world projection and near cutoff 16.5 | Decode native world partition, exclude first-person pixels, preserve 16.5 and bilinear sampling | Engine-facts Depth & units: first-person occupies the near partition; unchanged capture cannot interpret the two projections | `PrepareCaptureCS.hlsl`, `FO4/Depth.hlsli` |
+| Forced | `FrameBuffer::WorldToView(-s)` with `z < 0` | Preparation tests `z > 0` on `s`, retaining native cube-face orientation | FO4 views down +Z; engine-facts Camera matrix builder | `PrepareCaptureCS.hlsl`, `FO4/DynamicCubemaps/CubemapCommon.hlsli` |
+| Forced | Skyrim frame-buffer camera and capture origin | b4 world+jitter camera; preparation receives only the native inverse projection; prepared capture receives the eye origin and per-stream previous eye origin | Engine-facts Camera cache ownership / Per-frame buffer sources: camera origin includes inverse-view translation plus position-adjust anchor; b12 is diagnostic only | `FrameBuffer.cpp`, `DynamicCubemaps.cpp` `UpdateCubemapCapture`, shared `CaptureCommon.hlsli` prepared seam |
+| Forced | `IrradianceToLinear`/`IrradianceToGamma`, `ReflectionNormalisationScale` | b6 selects unchanged Color's linear-lighting branch, identity conversions and scale `1.0` | FO4 native HDR is working-linear; engine-facts Deferred composition. Neutral host lighting inputs avoid a second gamma conversion | `SharedData.cpp` `PackFeatures`, unchanged `Common/Color.hlsli` |
+| Forced | `Color::Ambient(SharedData::GetAmbient(R))` | b5 pre-power DALC SH plus b6 `ambientGamma=2.2`, `ambientMult=1` | Engine-facts Directional ambient evaluation power 2.2; no local GetAmbient rows or normalization implementation | `Engine.h` `TryGetDirectionalAmbientRows`, `SharedDataLayout.h` `PackAmbientSH`, `SharedData.cpp` |
+| Forced | Lighting-change detection from Skyrim directional light | b5 FO4 sun radiance, b6 `isDirLightLinear=1`; unchanged upstream detection | Engine-facts Sun/light sources: the deferred sun input is already linear | `SharedData.cpp`, shared `DetectCaptureLightingCS.hlsl` |
 | Chosen | `activeReflections` from Skyrim's reflections prepass | Exterior water always uses the reflections variant | Retain main's exterior-water technique policy | `DynamicCubemaps.cpp` `ResolveReflectionMode` |
 | Chosen | Active variant infers uncaptured directions from the engine reflection cube | Without the engine cube, retain scene sky with fake-variant persistence | Engine cube is optional (`bUseCubeMapReflections`); fallback policy is FO4-owned | `DynamicCubemaps.cpp` `UpdateShader`, `InferShader` |
 | Forced | Water blends the dynamic cube with `CubeMapTex` | Blends with water's sky-gradient reflection color | FO4 reconstructed reflection permutations shade a sky gradient | `BSWaterShader.hlsl` `surfaceColor` |
 | Forced | `WATER` permutation define | Defined locally for contributed Dynamic Cubemaps | FO4 reconstructed water compiles without it | `BSWaterShader.hlsl` |
-| Forced | Deferred cubes at CS t5–t7 with LinearSampler | PS t34–t35 with native probe samplers | FO4 composite declarations occupy lower slots and samplers | `Composite.hlsli`, `DynamicCubemaps.cpp` |
-| Forced | Compile-time `INTERIOR` | Runtime `SharedData::InInterior` | FO4 reconstructed permutations serve both cell types | `Composite.hlsli` |
-| Forced | Wet reflectance written to G-buffer | Composite evaluates film weight and irradiance | FO4 G-buffer has no reflectance channel; engine-facts Render targets | `Composite.hlsli` `GetWetnessReflection` |
+| Forced | Deferred cubes at CS t5–t7 with LinearSampler | Shared register seam: PS t34–t35, native probe samplers; water keeps t30–t31 | FO4 composite declarations occupy lower slots and samplers; reconstructed `BSDFCompositeShader.hlsl` resource declarations | `FO4/DynamicCubemaps/Composite.hlsli`, `DynamicCubemaps.cpp` |
+| Forced | Compile-time `INTERIOR` selects deferred base/reflection cube | Runtime b5 `InInterior` selects the cube, then calls shared normalized irradiance | FO4 reconstructed permutations serve both cell types | `FO4/DynamicCubemaps/Composite.hlsli` `GetFinalIrradiance` |
+| Forced | Wet reflectance written to G-buffer | Existing composite film/view-space adapter calls upstream cubemap normalization | FO4 G-buffer has no reflectance channel; engine-facts Render targets. Wetness-specific code stays in the existing adapter | `FO4/DynamicCubemaps/Composite.hlsli` `GetWetnessReflection` |
 | Forced | Wet indirect-diffuse reduction in material pass | Applied in BSDFLight and DFTiledLighting | FO4 reconstructed light passes evaluate indirect diffuse | `WetnessEffects.hlsli` `GetIndirectDiffuseWeight` |
-| Chosen | Always-on feature | Live enabled toggle gates wet diffuse/reflection | Repository live-toggle contract | `DynamicCubemapsSettings.h`, `WetnessEffects.hlsli`, `Composite.hlsli` |
+| Framework | Always-on feature with JSON/ImGui configuration | load=false, TOML/live enabled, forwarding-only UI, ownership/stock identity, telemetry and fail-closed GPU scopes | Repository activation, persistence and runtime-safety contracts; live enable gates wet diffuse/reflection | `DynamicCubemapsSettings.h`, `DynamicCubemaps.cpp`, `FO4/DynamicCubemaps/Composite.hlsli` |
 | Chosen | Loaded DC defines ENABLESSR, labeled for water | Live enabled_ssr gates all SSLR when DC is enabled; baseline remains stock | Main's global toggle avoids recompilation; SSLR feeds surfaces and water in reconstructed shaders | `DynamicCubemaps.cpp`, `FO4SharedData.hlsli`, `Imagespace/SSLRRaytracing.hlsl` |
+| Chosen | No equirectangular display preview shader | FO4-only capture/filtered Reinhard preview at a non-colliding path | Additional display-only diagnostic, not shared capture behavior | `FO4/DynamicCubemaps/CubemapPreviewCS.hlsl`, `DynamicCubemaps.cpp` `RenderCubemapPreview` |
 
 ### Not supported
 
-| Upstream | Why |
-|---|---|
-| Dynamic reflections on deferred materials through sentinel cubes, TruePBR and complex materials (`Reflectance` target) | FO4's deferred cube array rejects cubes narrower than 128 px, so 1×1 sentinels never reach the composite; the G-buffer has no F0/reflectance channel. Needs new prepass machinery and a render target |
-| Forward `Lighting.hlsl` sentinel path | FO4 world and first-person accumulators emit no forward BSLighting passes |
-| Dynamic Cubemap Creator (sentinel DDS export) | Nothing in FO4 can consume sentinel cubes |
+| Kind | Upstream | Why / evidence | Where |
+|---|---|---|---|
+| Forced | Forward `Lighting.hlsl` sentinel path | FO4 world and first-person accumulators emit no forward BSLighting passes; engine-facts DrawWorld pass ownership. No forward consumer is silently substituted | `BSLightingShader.hlsl`, native deferred consumer catalog |
+
+### Pending
+
+| Kind | Upstream behavior | Remaining work | Where |
+|---|---|---|---|
+| Pending | Deferred sentinel cubes, TruePBR/complex material reflectance | FO4 cube-array registration rejects widths below 128; its G-buffer has no F0/reflectance channel. Complete a sentinel/material metadata boundary rather than claim unsupported parity | `BSDFCompositeShader.hlsl`, engine-facts Cubemap and Render targets |
+| Pending | Dynamic Cubemap Creator sentinel DDS export | Export/authoring workflow needs the deferred sentinel consumer; absence of that consumer is unfinished work, not a forced exception | `DynamicCubemaps.cpp`, upstream `DynamicCubemaps.cpp` creator/export path |
+| Pending | IBL and Skylighting feature consumers | Their providers are not converted here; retain shared implementations and complete host inputs when those features are added | shared `DynamicCubemaps.hlsli`, b6 IBL/Skylighting blocks |
+| Pending | Runtime equivalence | Authorized DevBench/RenderDoc batch must verify prepared radiance/positions, cube orientation under rotation/translation, sky/infinite-far handling, interior/base and exterior/reflection selection, dynamic resolution, wet reflections, reset/time transitions and native bindings/restoration | `PrepareCaptureCS.hlsl`, `DynamicCubemaps.cpp`, water/composite consumers |
+
+### Upstream PR candidates
+
+- `CaptureCommon.hlsli`: prepared per-face inputs and explicit capture origin allow different host
+  cameras/radiance sources without duplicating accumulation or lighting-change detection. Generic
+  seam only; Skyrim defaults are unchanged. No PR filed.
+- `DynamicCubemaps.hlsli`: configurable cube registers and extracted explicit-sampler normalized
+  irradiance preserve existing arithmetic while supporting native deferred consumers. No PR filed.
+- `InferCubemapCS.hlsl:22`, `SpecularIrradianceCS.hlsl` `GetSamplingVector`: integer texel/extent
+  addresses cube edges rather than centers. Retained exactly; candidate fix is adding 0.5.
+- `DynamicCubemaps.hlsli` roughness × 8: compressed publication has seven mips, so high roughness
+  clamps before the intended nine-mip filter chain. Retained; align BC6H publication and consumer LOD.
+- `CaptureCommon.hlsli` `SampleCapture`: bilinear depth can blend foreground/sky or projection
+  partitions into a nonexistent surface. Retained; evaluate point depth or geometry-aware sampling.
 
 ## RenderDoc
 
