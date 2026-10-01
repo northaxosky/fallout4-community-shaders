@@ -185,7 +185,7 @@ namespace cs::util
 		{
 			shader_cache::ShaderRecipe recipe;
 			recipe.source = a_filePath;
-			recipe.includeRoots.push_back(recipe.source.parent_path());
+			recipe.includeRoots.push_back(kDefaultShaderRoot);
 			recipe.defines.reserve(a_defines.size());
 			for (const auto& [name, value] : a_defines)
 				recipe.defines.emplace_back(name, value);
