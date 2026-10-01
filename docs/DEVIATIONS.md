@@ -79,7 +79,7 @@ Retired rows preserve the original Kind and identify replacements consumed uncha
 
 ## Substrate
 
-Shared pin: `c6c9c6a0f7caf6153c30b29bee7107219f1b0bad`. FrameBuffer, SharedData,
+Shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`. FrameBuffer, SharedData,
 SphericalHarmonics and its Math dependency are staged byte-for-byte. The pinned b6 ABI contains
 **20** blocks, including HorizonFixSettings; all 20 are mirrored in upstream order, and absent
 features leave zero blocks, except the host's neutral linear-color policy in the upstream
@@ -122,7 +122,7 @@ no substrate, and the binder runs only for contributed stages; native b12 remain
   under FO4's `/W4 /WX`; an explicit float conversion preserves its current arithmetic.
   FO4 scopes the warning in `src/Shared/PerfUtils.h`, without changing shared behavior.
 - `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104`: the center normal lookup
-  needs `frameScale`. Main's correction is retained as shared seam `7c607d7b9`; upstream PR is
+  needs `frameScale`. Main's correction is retained as shared seam `13d9d2e2d`; upstream PR is
   community-shaders/skyrim-community-shaders#2795. No FO4 shader copy remains.
 - `features/Screen Space GI/Shaders/ScreenSpaceGI/gi.cs.hlsl:232`: the experimental specular
   half-angle calculation has inconsistent angular units; upstream issue/PR #2792 records it.
@@ -153,7 +153,7 @@ no substrate, and the binder runs only for contributed stages; native b12 remain
 
 ## InverseSquareLighting
 
-Upstream pin: `d330bf12d`; shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`.
+Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
 ISL, `LightLimitFix/Common.hlsli`, `Common/Game.hlsli` and `Common/Color.hlsli`
 are staged unchanged. The global replacement, global settings, comparison
 view and b7 ISL block are deleted. CPU radius/luminance math matches the pin,
@@ -194,7 +194,7 @@ Skyrim's literal record/runtime overlay is replaced, not partially emulated.
 
 ## WaterEffects
 
-Upstream pin: `d330bf12d` (shared pin `e305ed0a4`). `WaterCaustics.hlsli` and
+Upstream pin: `d330bf12d` (shared pin `83efe1ad991b91bba22ad121b7ebab763880fa3b`). `WaterCaustics.hlsli` and
 `watercaustics.dds` are staged unchanged through `xmake/shared.lua`; the FO4 caustics
 kernel and CPU shader mirror are deleted. There are no caustics quality knobs.
 Feature classification: **extension candidate**. Chosen rows: camera-cell
@@ -228,7 +228,7 @@ Feature classification: **extension candidate**. Chosen rows: camera-cell
 
 ## WetnessEffects
 
-Upstream pin: `d330bf12d`; shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`.
+Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
 Both upstream `WetnessEffects/*.hlsli` files and the required Common lighting includes
 are staged unchanged. The copied FO4 implementation is deleted. The exact upstream
 192-byte settings block is published in b6, with no wetness block in b7.
@@ -272,7 +272,7 @@ claim of complete parity.
 
 ## ExponentialHeightFog
 
-Upstream pin: `d330bf12d`; shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`.
+Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
 All seven `ExponentialHeightFog` shaders, plus their Random, Color, Shading, IBL and Skylighting
 includes, are staged unchanged. The ramp-derived FO4 kernel and its b7 block are deleted.
 The 192-byte settings block occupies upstream b6 offset 992; feature-owned b0 volume constants
@@ -331,7 +331,7 @@ or verification work, not engine incompatibilities or a claim of full enabled-fe
 
 ## Performance Overlay
 
-Upstream pin: `d330bf12d`; shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`.
+Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
 `Profiler.{h,cpp}`, `CircularBuffer`, `DrawCallRow` and `ABTestAggregator` are consumed
 unchanged through `xmake\shared.lua`, including the three-frame query ring, 128 timers,
 300-sample pass histories, 60-frame retirement, 600-sample default frame histories,
@@ -664,7 +664,7 @@ evidence limits, not relabeled as proven bugs. A suspected upstream typed-depth 
 
 ## Screen Space GI
 
-Upstream pin: `d330bf12d`; shared pin: `7c607d7b91d3e3e8d66b87a134bec90275670fde`.
+Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b`.
 The entire upstream `features/Screen Space GI/Shaders/ScreenSpaceGI` directory is staged
 unchanged through `xmake\shared.lua`; all local XeGTAO copies are deleted. The blur correction
 is the single SSGI seam edit above. Settings, full/half/quarter modes, formats, noise, pass order,
@@ -688,9 +688,9 @@ Source/shader validation does not establish runtime parity.
 | Forced | Color::Ambient(GetAmbient(N)) with Masks.z | Powered FO4 DALC times albedo, clamped to native diffuse before upstream sqrt-direct/full-ambient AO and diffuse bounce | engine-facts Directional ambient evaluation and reconstructed lighting/composite: FO4 folds powered 2.2 DALC into diffuse without upstream Masks.z. Preserve main's ambient/direct separation at the consumer, not inside GI kernels | `FO4/FO4ShaderData.hlsli`, `FO4/ScreenSpaceGIConsumer.hlsli` `ComposeDiffuse` |
 | Forced | Skyrim SSAO generation toggle | Per-frame native SAO_CS active/applied bits with the existing baseline snapshot | engine-facts AO state: native DrawModel/console rewrite active +0x08 and applied +0x121; the host must control generation as well as composition | `ScreenSpaceGI.cpp` `ApplyVanillaSSAO`, `Engine.h` |
 | Chosen | Masks2.x vertex AO | `1−vertexAO` in emissive logical 31.a; blended hair writes 0 | Preserve main's allocation/blend policy; reconstructed stock shaders leave this alpha unread. The allocation is not an engine-imposed choice | `BSDFPrePass.hlsl`, consumer `vertexAOStore` |
-| Chosen | Irradiance/albedo consumer conversions | Keep main's native-linear consumer algebra; gamma encode only the prepared radiance input using unchanged Color helpers | Preserve main's linear HDR policy without enabling a global b6 LinearLighting feature or forking Common/Color. Combined linear-lighting/material-provider behavior remains unverified | `FO4/ScreenSpaceGI/Prepare.cs.hlsl`, `FO4/ScreenSpaceGIConsumer.hlsli` |
+| Chosen | Irradiance/albedo consumer conversions | Keep main's native-linear consumer algebra; prepare radiance using unchanged Color helpers paired with upstream `RadianceToLinear` | The shared neutral b6 LinearLighting inputs make both conversions identities, preserving FO4's linear HDR policy without forking Common/Color. Combined material-provider behavior remains unverified | `SharedData.cpp` `PackFeatures`, `FO4/ScreenSpaceGI/Prepare.cs.hlsl`, `FO4/ScreenSpaceGIConsumer.hlsli` |
 | Chosen | AOPower default 1, edit range 0–6 | Default 4, edit range 0–12 | Main `06032303` deliberately calibrates placed-light-dominated interiors; no engine fact forces this choice | `ScreenSpaceGISettings.h`, forwarding UI |
-| Fix | Blur center normal lacks frameScale | Apply main's center-UV correction as a one-line shared seam | Half/quarter-resolution dynamic-resolution center and neighbor taps must use the same extent. This lookup is internal to blur, so an input/consumer adapter cannot repair it without changing neighbor samples; upstream #2795 | Shared `blur.cs.hlsl:104`, seam `7c607d7b9` |
+| Fix | Blur center normal lacks frameScale | Apply main's center-UV correction as a one-line shared seam | Half/quarter-resolution dynamic-resolution center and neighbor taps must use the same extent. This lookup is internal to blur, so an input/consumer adapter cannot repair it without changing neighbor samples; upstream #2795 | Shared `blur.cs.hlsl:104`, seam `13d9d2e2d` |
 | Framework | Skyrim lifecycle, JSON/UI and deferred bindings | Preserve load=false, TOML/live settings, forwarding-only UI, presets, ownership/hash gates, telemetry, AO preview, readiness/reset guards and exact binding scopes | Repository host contracts; upstream-cased keys and Float2 DepthFadeRange replace legacy keys. b1 carries all SSGI settings; no b6 or b7 SSGI block. PS t26–29/t38 and b10 are owned/snapshotted; CS t8–9/b10 are scoped without widening low-slot cleanup | `ScreenSpaceGI.{h,cpp}`, `ScreenSpaceGISettings.h`, `FO4/ScreenSpaceGI/Contracts.hlsli`, substrate packing and tests |
 
 ### Pending
