@@ -27,6 +27,7 @@
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderStage.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -914,8 +915,7 @@ namespace cs::features
 		UpdateBuffer(context, _prepareBuffer.get(), &preparation, sizeof(preparation));
 
 		auto& stream = Stream(a_reflections);
-		const auto* tiledSetting = RE::GetINISetting("bComputeShaderDeferredTiledLighting:Display");
-		const bool tiledLighting = tiledSetting && tiledSetting->GetBinary();
+		const bool tiledLighting = cs::engine::QueryTiledLightingEnabled();
 		std::array<ID3D11ShaderResourceView*, 6> srvs{
 			depthSRV,
 			colorSRV,
