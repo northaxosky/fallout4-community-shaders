@@ -8,6 +8,7 @@
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
+#include "Settings/FeatureConfig.h"
 
 #include <algorithm>
 #include <array>
@@ -18,6 +19,7 @@
 #include <exception>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -63,21 +65,6 @@ namespace cs::engine
 			std::unreachable();
 		}
 
-		constexpr std::string_view ProfileForStage(
-			ShaderStage a_stage) noexcept
-		{
-			switch (a_stage) {
-			case ShaderStage::kVertex:
-				return "vs_5_0";
-			case ShaderStage::kPixel:
-				return "ps_5_0";
-			case ShaderStage::kCompute:
-				return "cs_5_0";
-			default:
-				return {};
-			}
-		}
-
 		constexpr ShaderStageMask kValidShaderStages =
 			ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel) | ShaderStageBit(ShaderStage::kCompute);
 
@@ -95,7 +82,6 @@ namespace cs::engine
 		{
 			std::atomic<bool> requested{ false };
 			std::atomic<bool> slotCollision{ false };
-			std::atomic<std::uint8_t> requestReasons{ 0 };
 			std::atomic<std::size_t> contributors{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
@@ -178,19 +164,11 @@ namespace cs::engine
 
 		struct NativeVariant
 		{
-			enum class State : std::uint8_t
-			{
-				kResolving,
-				kUnsupported,
-				kCompilation
-			};
-
 			mutable std::mutex mutex;
 			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
 			ShaderInjectionDefines effectiveDefines;
 			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
 			ShaderStage stage = ShaderStage::kPixel;
-			std::atomic<State> state{ State::kResolving };
 			std::atomic<bool> failureObserved{ false };
 			std::atomic<bool> pendingObserved{ false };
 		};
@@ -234,12 +212,18 @@ namespace cs::engine
 
 		struct Service
 		{
+			Service()
+			{
+				for (auto& target : baselineOwnership)
+					target.store(true, std::memory_order_relaxed);
+			}
+
 			std::mutex mutex;
 			Lifecycle lifecycle = Lifecycle::kCollecting;
-			bool enabled = true;
+			std::atomic_bool enabled = true;
 			bool developerForceOffEnabled = false;
 			std::wstring developerSourceRoot;
-			std::array<bool,
+			std::array<std::atomic_bool,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				baselineOwnership{};
 			std::array<DeveloperShaderOverride,
@@ -254,6 +238,8 @@ namespace cs::engine
 				runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
 			std::mutex nativeVariantMutex;
+			std::map<std::pair<std::filesystem::path, std::string>, bool>
+				shaderSourceAvailability;
 			std::unordered_map<NativeVariantKey, std::shared_ptr<NativeVariant>,
 				NativeVariantKeyHash>
 				nativeVariants;
@@ -334,6 +320,14 @@ namespace cs::engine
 			return ToIndex(a_target) < kTargets.size();
 		}
 
+		bool ShaderEnabled(ShaderInjectionTarget a_target)
+		{
+			auto& service = GetService();
+			return IsValidTarget(a_target) &&
+			       service.enabled.load(std::memory_order_relaxed) &&
+			       service.baselineOwnership[ToIndex(a_target)].load(std::memory_order_relaxed);
+		}
+
 		const char* NativeShaderFilename(const RE::BSShader* a_shader)
 		{
 			return native::FxpFilename(a_shader);
@@ -342,44 +336,42 @@ namespace cs::engine
 		std::optional<ShaderInjectionTarget> ResolveNativeShaderTarget(
 			const RE::BSShader& a_shader)
 		{
-			if (native::ShaderType(&a_shader) == 0xC)
-				return ShaderInjectionTarget::kImageSpace;
-			const auto filename = NativeShaderFilename(&a_shader);
-			if (!filename)
-				return std::nullopt;
-			std::string name(filename);
-			std::ranges::transform(
-				name, name.begin(), [](unsigned char a_character) {
-					return static_cast<char>(std::tolower(a_character));
-				});
-
-			if (name.contains("prepass"))
-				return ShaderInjectionTarget::kDeferredPrepass;
-			if (name.contains("tiledlighting"))
-				return ShaderInjectionTarget::kDfTiledLighting;
-			if (name.contains("composite"))
-				return ShaderInjectionTarget::kBsdfComposite;
-			if (name.contains("bsdflight") || name == "dflight")
-				return ShaderInjectionTarget::kBsdfLight;
-			if (name.contains("utility"))
-				return ShaderInjectionTarget::kUtility;
-			if (name.contains("particle"))
-				return ShaderInjectionTarget::kParticle;
-			if (name.contains("effect"))
+			using Type = RE::BSShaderManager::ShaderEnum;
+			switch (static_cast<Type>(native::ShaderType(&a_shader))) {
+			case Type::kEffect:
 				return ShaderInjectionTarget::kEffect;
-			if (name.contains("blood"))
-				return ShaderInjectionTarget::kBloodSplatter;
-			if (name.contains("distanttree"))
+			case Type::kUtility:
+				return ShaderInjectionTarget::kUtility;
+			case Type::kDistantTree:
 				return ShaderInjectionTarget::kDistantTree;
-			if (name.starts_with("is") || name.contains("imagespace"))
+			case Type::kParticle:
+				return ShaderInjectionTarget::kParticle;
+			case Type::kDFPrepass:
+				{
+					// FO4's DFPrepass and DFLight constructors both store type 4.
+					const auto* filename = NativeShaderFilename(&a_shader);
+					const std::string_view name = filename ? filename : "";
+					if (name == "DFLight")
+						return ShaderInjectionTarget::kBsdfLight;
+					if (name == "DFPrepass")
+						return ShaderInjectionTarget::kDeferredPrepass;
+					return std::nullopt;
+				}
+			case Type::kDFComposite:
+				return ShaderInjectionTarget::kBsdfComposite;
+			case Type::kBloodSpatter:
+				return ShaderInjectionTarget::kBloodSplatter;
+			case Type::kImageSpace:
 				return ShaderInjectionTarget::kImageSpace;
-			if (name.contains("sky"))
+			case Type::kSky:
 				return ShaderInjectionTarget::kBsSky;
-			if (name.contains("water"))
+			case Type::kWater:
 				return ShaderInjectionTarget::kBsWater;
-			if (name.contains("lighting"))
+			case Type::kLighting:
 				return ShaderInjectionTarget::kBsLighting;
-			return std::nullopt;
+			default:
+				return std::nullopt;
+			}
 		}
 
 		struct NativeShaderFamilyContext
@@ -591,21 +583,11 @@ namespace cs::engine
 
 		bool HasDefineConflict(
 			const ShaderReplacementRegistration& a_registration,
-			const ShaderInjectionTargetMetadata& a_target,
 			std::span<const ShaderReplacementRegistration> a_contributions,
 			std::string_view& a_conflictingName,
 			std::string_view& a_existingValue)
 		{
 			for (const auto& [name, value] : a_registration.defines) {
-				const auto baseDefine = std::ranges::find(
-					a_target.baseDefines,
-					name,
-					&ShaderInjectionDefineMetadata::name);
-				if (baseDefine != a_target.baseDefines.end() && baseDefine->value != value) {
-					a_conflictingName = name;
-					a_existingValue = baseDefine->value;
-					return true;
-				}
 				for (const auto& contribution : a_contributions) {
 					if ((contribution.stages & a_registration.stages) == 0)
 						continue;
@@ -688,20 +670,6 @@ namespace cs::engine
 				return false;
 			}
 			for (const auto& [name, value] : a_registration.defines) {
-				const auto baseDefine = std::ranges::find(
-					a_target.baseDefines,
-					name,
-					&ShaderInjectionDefineMetadata::name);
-				if (baseDefine != a_target.baseDefines.end() && baseDefine->value != value) {
-					L->error(
-						"Replacement registration '{}' for '{}' rejected: {}={} conflicts with the target base define {}.",
-						a_registration.contributor,
-						a_target.name,
-						name,
-						value,
-						baseDefine->value);
-					return false;
-				}
 				bool conflict = false;
 				std::string_view conflictingValue;
 				ForEachStage(
@@ -748,9 +716,6 @@ namespace cs::engine
 		std::vector<FrozenTarget> FreezeTargets(
 			const std::vector<ShaderReplacementRegistration>& a_registrations,
 			bool a_developerForceOffEnabled,
-			const std::array<bool,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>&
-				a_baselineOwnership,
 			const std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>& a_developerOverrides)
 		{
@@ -760,22 +725,10 @@ namespace cs::engine
 			for (const auto& metadata : kTargets) {
 				FrozenTarget target;
 				target.metadata = &metadata;
-				for (const auto& define : metadata.baseDefines)
-					target.defines.emplace(define.name, define.value);
-
 				const auto targetIndex = ToIndex(metadata.id);
 				auto developerOverride = a_developerOverrides[targetIndex];
 				if (developerOverride == DeveloperShaderOverride::kForceOff && !a_developerForceOffEnabled)
 					developerOverride = DeveloperShaderOverride::kAuto;
-				auto requestReasons = ShaderInjectionRequestReason::kNone;
-				if (metadata.BaselineOwnable() && a_baselineOwnership[targetIndex]) {
-					requestReasons |=
-						ShaderInjectionRequestReason::kBaselineOwnership;
-				}
-				if (metadata.BaselineOwnable() && developerOverride == DeveloperShaderOverride::kForceOn) {
-					requestReasons |=
-						ShaderInjectionRequestReason::kDeveloperForceOn;
-				}
 				std::vector<ShaderSlotClaim> claimedSlots;
 
 				for (std::size_t registrationIndex = 0;
@@ -803,7 +756,6 @@ namespace cs::engine
 					std::string_view existingValue;
 					if (HasDefineConflict(
 							registration,
-							metadata,
 							target.contributions,
 							conflictingName,
 							existingValue)) {
@@ -845,8 +797,6 @@ namespace cs::engine
 						continue;
 					}
 
-					requestReasons |=
-						ShaderInjectionRequestReason::kFeatureContributor;
 					++target.contributors;
 					target.defines.insert(registration.defines.begin(), registration.defines.end());
 					target.contributions.push_back(registration);
@@ -860,11 +810,8 @@ namespace cs::engine
 					}
 				}
 
-				if (developerOverride == DeveloperShaderOverride::kForceOff) {
-					requestReasons = ShaderInjectionRequestReason::kNone;
-				}
 				const bool requested =
-					requestReasons != ShaderInjectionRequestReason::kNone;
+					developerOverride != DeveloperShaderOverride::kForceOff;
 
 				for (const auto& contribution : target.contributions) {
 					const bool stageMatched =
@@ -880,9 +827,6 @@ namespace cs::engine
 				auto& runtime = GetService().runtime[targetIndex];
 				runtime.requested.store(requested, std::memory_order_relaxed);
 				runtime.slotCollision.store(target.slotCollision, std::memory_order_relaxed);
-				runtime.requestReasons.store(
-					static_cast<std::uint8_t>(requestReasons),
-					std::memory_order_relaxed);
 				runtime.contributors.store(target.contributors, std::memory_order_relaxed);
 				runtime.developerOverride = developerOverride;
 				runtime.defines = target.defines;
@@ -893,16 +837,13 @@ namespace cs::engine
 			return frozen;
 		}
 
-		std::filesystem::path ResolveSourcePath(
-			const std::wstring& a_sourcePath,
+		std::filesystem::path ResolveShaderRoot(
 			DeveloperShaderOverride a_developerOverride,
 			const std::wstring& a_developerSourceRoot)
 		{
 			const bool useDeveloperRoot =
 				a_developerOverride == DeveloperShaderOverride::kForceOn && !a_developerSourceRoot.empty();
-			const std::filesystem::path root =
-				useDeveloperRoot ? a_developerSourceRoot : kDefaultShaderRoot;
-			return root / a_sourcePath;
+			return useDeveloperRoot ? a_developerSourceRoot : kDefaultShaderRoot;
 		}
 
 		const PublishedTarget* FindPublishedTarget(
@@ -922,24 +863,30 @@ namespace cs::engine
 			const NativeVariantKey& a_key)
 		{
 			auto& service = GetService();
-			auto candidate = std::make_shared<NativeVariant>();
-			candidate->target = a_key.target;
-			candidate->stage = a_key.stage;
+			const auto shaderRoot = ResolveShaderRoot(
+				service.runtime[ToIndex(a_key.target)].developerOverride,
+				a_plan.developerSourceRoot);
+			std::shared_ptr<NativeVariant> candidate;
 			{
 				std::scoped_lock lock(service.nativeVariantMutex);
-				const auto [entry, inserted] =
-					service.nativeVariants.emplace(a_key, candidate);
-				if (!inserted)
+				const auto entry = service.nativeVariants.find(a_key);
+				if (entry != service.nativeVariants.end())
 					return entry->second;
+				const auto [source, inserted] = service.shaderSourceAvailability.try_emplace(
+					std::make_pair(shaderRoot, a_key.nativeName), false);
+				if (inserted)
+					source->second = IsShaderSourceAvailable(shaderRoot, a_key.nativeName);
+				if (!source->second)
+					return nullptr;
+				candidate = std::make_shared<NativeVariant>();
+				candidate->target = a_key.target;
+				candidate->stage = a_key.stage;
+				service.nativeVariants.emplace(a_key, candidate);
 			}
 
 			const auto descriptor = DescribeNativeVariant(a_key);
-			auto family =
-				BuildShaderFamilyCompilationDescriptor(descriptor);
+			auto family = BuildShaderFamilyCompilationDescriptor(descriptor);
 			if (!family) {
-				candidate->state.store(
-					NativeVariant::State::kUnsupported,
-					std::memory_order_release);
 				bool reportUnsupported = false;
 				if (IsValidTarget(descriptor.target)) {
 					std::scoped_lock lock(service.nativeVariantMutex);
@@ -966,9 +913,6 @@ namespace cs::engine
 			const auto* metadata =
 				GetShaderInjectionTarget(descriptor.target);
 			if (!metadata) {
-				candidate->state.store(
-					NativeVariant::State::kUnsupported,
-					std::memory_order_release);
 				return candidate;
 			}
 			auto effective = BuildEffectiveShaderCompileRequest(
@@ -978,9 +922,6 @@ namespace cs::engine
 				a_target.contributions,
 				&error);
 			if (!effective) {
-				candidate->state.store(
-					NativeVariant::State::kUnsupported,
-					std::memory_order_release);
 				L->error(
 					"Native descriptor compile request rejected for '{}/{}/{:#010x}': {}",
 					metadata->name,
@@ -992,11 +933,7 @@ namespace cs::engine
 
 			ShaderVariantCompilationRequest request;
 			request.device = a_plan.device;
-			request.sourcePath = ResolveSourcePath(
-				effective->sourcePath,
-				service.runtime[ToIndex(descriptor.target)]
-					.developerOverride,
-				a_plan.developerSourceRoot);
+			request.sourcePath = shaderRoot / effective->sourcePath;
 			request.entryPoint = effective->entryPoint;
 			request.profile = effective->profile;
 			request.stage = descriptor.stage;
@@ -1018,9 +955,6 @@ namespace cs::engine
 			auto compilation =
 				a_plan.compilationCache->Request(std::move(request));
 			if (!compilation) {
-				candidate->state.store(
-					NativeVariant::State::kUnsupported,
-					std::memory_order_release);
 				L->error(
 					"Native descriptor compile failed for '{}/{}/{:#010x}': {}",
 					metadata->name,
@@ -1039,9 +973,6 @@ namespace cs::engine
 				candidate->effectiveDefines =
 					std::move(effective->defines);
 			}
-			candidate->state.store(
-				NativeVariant::State::kCompilation,
-				std::memory_order_release);
 			return candidate;
 		}
 
@@ -1602,20 +1533,14 @@ namespace cs::engine
 		ShaderInjectionTarget a_target,
 		bool a_enabled)
 	{
-		const auto* metadata = GetShaderInjectionTarget(a_target);
-		if (!metadata || (a_enabled && !metadata->BaselineOwnable())) {
+		if (!IsValidTarget(a_target)) {
 			L->error(
-				"Baseline shader ownership rejected: target is not ownable.");
+				"Shader ownership rejected: unknown target.");
 			return false;
 		}
 
 		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Baseline shader ownership");
-			return false;
-		}
-		service.baselineOwnership[ToIndex(a_target)] = a_enabled;
+		service.baselineOwnership[ToIndex(a_target)].store(a_enabled, std::memory_order_relaxed);
 		return true;
 	}
 
@@ -1657,19 +1582,23 @@ namespace cs::engine
 			return false;
 		}
 		service.developerSourceRoot = std::move(a_sourceRoot);
+		std::scoped_lock variantLock(service.nativeVariantMutex);
+		service.shaderSourceAvailability.clear();
 		return true;
 	}
 
 	bool SetShaderInjectionEnabled(bool a_enabled)
 	{
 		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Shader-injection kill switch");
-			return false;
-		}
-		service.enabled = a_enabled;
+		service.enabled.store(a_enabled, std::memory_order_relaxed);
 		return true;
+	}
+
+	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config)
+	{
+		SetShaderInjectionEnabled(a_config.enableShaders);
+		for (const auto& target : GetShaderInjectionTargets())
+			SetBaselineShaderOwnership(target.id, a_config.targets[target.id]);
 	}
 
 	bool ValidateShaderInjectionRoutes(
@@ -1682,11 +1611,6 @@ namespace cs::engine
 			a_error = std::string(a_contributor) + " routes were validated before injection publication";
 			return false;
 		}
-		if (!service.enabled) {
-			a_error = std::string(a_contributor) + " routes are disabled by the shader-injection core kill switch";
-			return false;
-		}
-
 		const auto plan =
 			service.published.load(std::memory_order_acquire);
 		if (!plan || !plan->device) {
@@ -1714,14 +1638,6 @@ namespace cs::engine
 
 			const auto& runtime =
 				service.runtime[ToIndex(registration.targetId)];
-			if (!runtime.requested.load(std::memory_order_relaxed) || !HasShaderInjectionRequestReason(
-																		  static_cast<ShaderInjectionRequestReason>(
-																			  runtime.requestReasons.load(
-																				  std::memory_order_relaxed)),
-																		  ShaderInjectionRequestReason::kFeatureContributor)) {
-				a_error = "'" + std::string(metadata->name) + "' did not freeze feature ownership for contributor '" + std::string(a_contributor) + "'";
-				return false;
-			}
 			if (runtime.slotCollision.load(std::memory_order_relaxed)) {
 				a_error = "'" + std::string(metadata->name) + "' cannot deliver contributor '" + std::string(a_contributor) + "' because its slot or define claims conflict";
 				return false;
@@ -1875,21 +1791,15 @@ namespace cs::engine
 		std::array<DeveloperShaderOverride,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 			developerOverrides{};
-		std::array<bool,
-			static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
-			baselineOwnership{};
 		std::wstring developerSourceRoot;
 		bool developerForceOffEnabled = false;
-		bool enabled = false;
 
 		{
 			std::scoped_lock lock(service.mutex);
 			if (service.lifecycle != Lifecycle::kCollecting)
 				return;
 			service.lifecycle = Lifecycle::kFrozen;
-			enabled = service.enabled;
 			developerForceOffEnabled = service.developerForceOffEnabled;
-			baselineOwnership = service.baselineOwnership;
 			developerOverrides = service.developerOverrides;
 			developerSourceRoot = service.developerSourceRoot;
 			registrations = service.registrations;
@@ -1901,18 +1811,12 @@ namespace cs::engine
 		plan->device.copy_from(a_device);
 		plan->developerSourceRoot = developerSourceRoot;
 		std::size_t publishedTargets = 0;
-		std::vector<FrozenTarget> frozenTargets;
-		if (enabled) {
-			frozenTargets = FreezeTargets(
-				registrations,
-				developerForceOffEnabled,
-				baselineOwnership,
-				developerOverrides);
-		}
+		auto frozenTargets = FreezeTargets(
+			registrations,
+			developerForceOffEnabled,
+			developerOverrides);
 
-		if (!enabled) {
-			L->warn("Shader injection disabled by core kill switch.");
-		} else if (!a_device) {
+		if (!a_device) {
 			L->error("Shader injection freeze failed: no D3D11 device.");
 			for (const auto& frozenTarget : frozenTargets) {
 				service.runtime[ToIndex(frozenTarget.metadata->id)]
@@ -1949,7 +1853,6 @@ namespace cs::engine
 			}
 		}
 		service.published.store(plan, std::memory_order_release);
-		service.published.store(plan, std::memory_order_release);
 		{
 			std::scoped_lock lock(service.mutex);
 			service.lifecycle = Lifecycle::kPublished;
@@ -1961,12 +1864,9 @@ namespace cs::engine
 		}
 		const auto summary = GetShaderInjectionSummary();
 		L->info(
-			"Shader injection freeze: targets requested={} published={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); native variants compile asynchronously from observed descriptors.",
+			"Shader injection freeze: targets requested={} published={}; native variants compile asynchronously from observed descriptors.",
 			summary.requested,
-			summary.published,
-			summary.requestedByFeatureContributor,
-			summary.requestedByBaselineOwnership,
-			summary.requestedByDeveloperForceOn);
+			summary.published);
 	}
 
 	void InvalidateNativeShaderVariantCompilations() noexcept
@@ -1980,6 +1880,7 @@ namespace cs::engine
 		plan->compilationCache->Invalidate();
 		std::scoped_lock lock(service.nativeVariantMutex);
 		service.nativeVariants.clear();
+		service.shaderSourceAvailability.clear();
 		service.unsupportedNativeVariantReported.fill(false);
 		service.nativeShaderIdentities.clear();
 	}
@@ -2091,7 +1992,7 @@ namespace cs::engine
 				.vertex = a_nativeVertex,
 				.pixel = a_nativePixel
 			};
-			if (!IsValidTarget(a_family.target))
+			if (!ShaderEnabled(a_family.target))
 				return result;
 
 			try {
@@ -2204,7 +2105,7 @@ namespace cs::engine
 				if (found != service.nativeComputeOwners.end())
 					owner = found->second;
 			}
-			if (!owner)
+			if (!owner || !ShaderEnabled(owner->target))
 				return a_nativeCompute;
 			const auto* target =
 				FindPublishedTarget(*plan, owner->target);
@@ -2316,109 +2217,6 @@ namespace cs::engine
 	}
 
 #ifdef FO4CS_SHADER_INJECTION_TESTING
-	std::optional<NativeShaderMetadataForTesting>
-	GetObservedNativeShaderMetadataForTesting(
-		ID3D11DeviceChild* a_shader) noexcept
-	{
-		if (!a_shader)
-			return std::nullopt;
-		auto& service = GetService();
-		std::scoped_lock lock(service.nativeVariantMutex);
-		const auto metadata = service.nativeShaderMetadata.find(a_shader);
-		if (metadata == service.nativeShaderMetadata.end())
-			return std::nullopt;
-		return NativeShaderMetadataForTesting{
-			.forceEarlyDepthStencil =
-				metadata->second.forceEarlyDepthStencil
-		};
-	}
-
-	ID3D11DeviceChild* PrepareNativeShaderVariantForTesting(
-		const ShaderFamilyDescriptor& a_descriptor) noexcept
-	{
-		try {
-			const auto plan =
-				GetService().published.load(std::memory_order_acquire);
-			const auto* target =
-				plan ? FindPublishedTarget(*plan, a_descriptor.target) : nullptr;
-			if (!target)
-				return nullptr;
-			switch (a_descriptor.stage) {
-			case ShaderStage::kVertex:
-				return AcquireNativeReplacement<ID3D11VertexShader>(
-					*plan,
-					*target,
-					MakeNativeVariantKey(a_descriptor));
-			case ShaderStage::kPixel:
-				return AcquireNativeReplacement<ID3D11PixelShader>(
-					*plan,
-					*target,
-					MakeNativeVariantKey(a_descriptor));
-			case ShaderStage::kCompute:
-				return AcquireNativeReplacement<ID3D11ComputeShader>(
-					*plan,
-					*target,
-					MakeNativeVariantKey(a_descriptor));
-			default:
-				return nullptr;
-			}
-		} catch (...) {
-			return nullptr;
-		}
-	}
-
-	NativeGraphicsShaderBinding
-	ResolveNativeGraphicsShaderBindingForTesting(
-		ShaderInjectionTarget a_target,
-		std::string_view a_nativeName,
-		std::uint32_t a_vertexShaderId,
-		std::uint32_t a_pixelShaderId,
-		RE::BSGraphics::VertexShader* a_nativeVertex,
-		RE::BSGraphics::PixelShader* a_nativePixel) noexcept
-	{
-		return ResolveNativeGraphicsShaderBindingImpl(
-			{ .target = a_target,
-				.nativeName = a_nativeName },
-			a_vertexShaderId,
-			a_pixelShaderId,
-			a_nativeVertex,
-			a_nativePixel);
-	}
-
-	RE::BSGraphics::VertexShader*
-	CacheNativeVertexReplacementWrapperForTesting(
-		RE::BSGraphics::VertexShader* a_nativeVertex,
-		ID3D11VertexShader* a_replacement) noexcept
-	{
-		return CacheNativeReplacementWrapper(
-			a_nativeVertex, a_replacement);
-	}
-
-	NativeVariantCacheStatsForTesting
-	GetNativeVariantCacheStatsForTesting() noexcept
-	{
-		NativeVariantCacheStatsForTesting result;
-		auto& service = GetService();
-		std::scoped_lock lock(service.nativeVariantMutex);
-		result.entries = service.nativeVariants.size();
-		for (const auto& [key, variant] : service.nativeVariants) {
-			(void)key;
-			if (!variant)
-				continue;
-			switch (variant->state.load(std::memory_order_acquire)) {
-			case NativeVariant::State::kUnsupported:
-				++result.unsupported;
-				break;
-			case NativeVariant::State::kCompilation:
-				++result.compilation;
-				break;
-			case NativeVariant::State::kResolving:
-				break;
-			}
-		}
-		return result;
-	}
-
 	void ObserveNativeComputeShaderForTesting(
 		ShaderInjectionTarget a_target,
 		std::uint32_t a_descriptor,
@@ -2526,10 +2324,6 @@ namespace cs::engine
 			snapshot.slotCollision =
 				runtime.slotCollision.load(std::memory_order_relaxed);
 			snapshot.developerOverride = runtime.developerOverride;
-			snapshot.requestReasons =
-				static_cast<ShaderInjectionRequestReason>(
-					runtime.requestReasons.load(
-						std::memory_order_relaxed));
 			snapshot.contributors =
 				runtime.contributors.load(std::memory_order_relaxed);
 			snapshot.defines = runtime.defines;
@@ -2568,28 +2362,6 @@ namespace cs::engine
 			for (const auto& runtime : service.runtime) {
 				if (runtime.requested.load(std::memory_order_relaxed))
 					++summary.requested;
-				const auto requestReasons =
-					static_cast<ShaderInjectionRequestReason>(
-						runtime.requestReasons.load(
-							std::memory_order_relaxed));
-				if (HasShaderInjectionRequestReason(
-						requestReasons,
-						ShaderInjectionRequestReason::
-							kFeatureContributor)) {
-					++summary.requestedByFeatureContributor;
-				}
-				if (HasShaderInjectionRequestReason(
-						requestReasons,
-						ShaderInjectionRequestReason::
-							kBaselineOwnership)) {
-					++summary.requestedByBaselineOwnership;
-				}
-				if (HasShaderInjectionRequestReason(
-						requestReasons,
-						ShaderInjectionRequestReason::
-							kDeveloperForceOn)) {
-					++summary.requestedByDeveloperForceOn;
-				}
 				summary.matches += runtime.matches.load(std::memory_order_relaxed);
 				summary.substitutions += runtime.substitutions.load(std::memory_order_relaxed);
 				summary.passthroughCompileFail +=

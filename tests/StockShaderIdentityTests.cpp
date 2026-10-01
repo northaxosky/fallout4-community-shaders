@@ -127,36 +127,20 @@ namespace
 			rows.push_back(std::move(row));
 		}
 		Require(file.eof() && !rows.empty() && rows.size() == std::stoull(fields.at("rows")), "Identity row count mismatch");
+		Require(static_cast<std::size_t>(std::ranges::count_if(rows, [](const auto& row) { return row.nativeName.empty(); })) ==
+					std::stoull(fields.at("rows_unnamed")),
+			"Unnamed identity row count mismatch");
 		return rows;
 	}
 
-	void CheckCoverage(std::vector<Row>& a_rows)
+	void ResolveOwnership(std::vector<Row>& a_rows, const std::filesystem::path& a_shaderRoot)
 	{
-		using namespace cs::engine;
-		std::set<std::tuple<ShaderInjectionTarget, std::wstring, std::string, std::string>> covered;
-		std::set<const ShaderInjectionFamilyMetadata*> coveredNativeFamilies;
+		Require(std::filesystem::is_directory(a_shaderRoot), "Shader root is not a directory: " + a_shaderRoot.string());
 		for (auto& row : a_rows) {
 			row.family.nativeName = row.nativeName;
 			row.family.nativeClassName = row.nativeClassName;
 			row.family.nativeSourceGroup = row.nativeSourceGroup;
-			const auto family = BuildShaderFamilyCompilationDescriptor(row.family);
-			row.owned = family.has_value();
-			if (family)
-				covered.emplace(row.family.target, family->sourcePath, family->entryPoint, family->profile);
-			if (family && family->familyMetadata)
-				coveredNativeFamilies.insert(family->familyMetadata);
-		}
-		const auto requireFamily = [&](ShaderInjectionTarget a_target, std::wstring_view a_source,
-									   std::string_view a_entry, std::string_view a_profile) {
-			Require(covered.contains({ a_target, std::wstring(a_source), std::string(a_entry), std::string(a_profile) }),
-				"Owned shader family has no gated row: " + std::filesystem::path(a_source).string());
-		};
-		for (const auto& target : GetShaderInjectionTargets()) {
-			if (!target.sourcePath.empty())
-				requireFamily(target.id, target.sourcePath, target.entryPoint, target.profile);
-			for (const auto& family : target.families)
-				Require(coveredNativeFamilies.contains(&family),
-					"Owned native shader family has no gated row: " + std::string(family.nativeName));
+			row.owned = cs::engine::IsShaderSourceAvailable(a_shaderRoot, row.family.nativeName);
 		}
 	}
 
@@ -194,8 +178,8 @@ int main(int a_argc, char** a_argv)
 		cs::sha1::Sha1InitOnce();
 		cs::sha256::Sha256InitOnce();
 		auto rows = ReadRows(a_argv[2]);
-		CheckCoverage(rows);
 		const std::filesystem::path shaderRoot(a_argv[1]);
+		ResolveOwnership(rows, shaderRoot);
 		const auto start = std::chrono::steady_clock::now();
 		const auto threadCount = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
 		std::atomic_size_t next = 0;
@@ -226,8 +210,8 @@ int main(int a_argc, char** a_argv)
 			if (row.actual == row.expected)
 				continue;
 			if (++failed <= 50)
-				std::printf("%s %s 0x%08x ordinal=%u expected=%s actual=%s\n",
-					row.target.c_str(), row.stage.c_str(), row.family.descriptor, row.ordinal, row.expected.c_str(), row.actual.c_str());
+				std::printf("%s %s %s 0x%08x ordinal=%u expected=%s actual=%s\n",
+					row.target.c_str(), row.nativeName.c_str(), row.stage.c_str(), row.family.descriptor, row.ordinal, row.expected.c_str(), row.actual.c_str());
 		}
 		if (failed > 50)
 			std::printf("... %zu additional failures omitted\n", failed - 50);

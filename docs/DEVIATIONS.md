@@ -8,10 +8,28 @@ forces the difference, and where it lives. Each code site also carries a one-lin
 - **Not supported**: upstream behavior that has no Fallout 4 equivalent without new FO4-only machinery.
 - **Pending**: upstream behavior not ported yet.
 
+## Shader replacement
+
+Upstream pin: `d330bf12d` (`ShaderCache`, `Hooks`, `State`, `AdvancedSettingsRenderer`).
+Source paths follow the native fxp name; entry point is `main`, profile follows the stage,
+and live type/master switches suppress the entire replacement, including feature contributions.
+
+| Upstream | Fallout 4 translation | Engine evidence / boundary | Code |
+|---|---|---|---|
+| `BSShader::shaderType` identifies each shader class | Use CommonLibF4's `BSShaderManager::ShaderEnum`; disambiguate type 4 by exact `DFPrepass` / `DFLight` fxp name | fallout4-re `docs\engine-facts.md`, “Batch index is shader type”: both constructors write 4 at `BSShader+0x18`, although CommonLibF4's enum lists DFLight as 5. `harness\shaders\section_partition\native.py` records the exact names. Standalone compute uses its existing loader-recorded name and target | `ShaderInjection.cpp` `ResolveNativeShaderTarget` |
+| Source presence determines ownership | The existing developer force-on root remains the effective source root | Repository developer override contract; no additional source lookup path | `ShaderInjection.cpp` `ResolveShaderRoot`, `ShaderFamilyDescriptor.cpp` `IsShaderSourceAvailable` |
+| No stock reconstruction identity gate | FO4CS-only CI compares reconstructed routes against measured stock bytecode | Schema-2 fallout4-re export supplies native names; the gate shares runtime source-presence ownership and compilation with all type toggles on. Unnamed routes remain unowned; unhooked HS/DS routes are excluded | `StockShaderIdentityTests.cpp`, `generate_stock_shader_identity.py` |
+
+Stage selection uses upstream `VSHADER` / `PSHADER` / `CSHADER` defines. SSLR supplies both
+stages through upstream `Common\DummyVSTexCoord.hlsl`, as `ISReflectionsRayTracing` does.
+The gate therefore owns 1,512 routes, including passthrough VS ordinal 3881
+(`89e56423886dc05ed3b2d1445a70f386c651ac38`) and PS ordinal 3882. Compile failures remain
+runtime stock fallbacks but fail the identity gate; they are not reclassified as unowned.
+
 ## Dynamic Cubemaps
 
-Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\BSWaterShader.hlsl`,
-`package\Shaders\BSDFCompositeShader.hlsl`, `package\Shaders\BSDFLightShader.hlsl` and
+Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\Water.hlsl`,
+`package\Shaders\DFComposite.hlsl`, `package\Shaders\DFLight.hlsl` and
 `package\Shaders\DFTiledLighting.hlsl`.
 
 ### Translations
@@ -28,14 +46,14 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 | Lighting-change detection from Skyrim directional light | SharedData publishes FO4 sun radiance as the deferred sun pass receives it | Different engine light source | `DetectCaptureLightingCS.hlsl` |
 | `activeReflections` from Skyrim's reflections prepass | Exterior water always uses the reflections variant | FO4 exterior water always renders its REFLECTIONS technique | `DynamicCubemaps.cpp` `ResolveReflectionMode` |
 | Active variant infers uncaptured directions from the engine reflection cube | Without the engine cube, sky is captured from the scene and kept with the fake variant's history persistence | FO4's engine reflection cube is off by default (`bUseCubeMapReflections`) | `DynamicCubemaps.cpp` `UpdateShader`, `InferShader` |
-| Water blends the dynamic cube with `CubeMapTex` | Blends with the water's sky-gradient reflection color | FO4 reflection permutations shade a sky gradient instead of sampling a cube | `BSWaterShader.hlsl` `surfaceColor` |
-| `WATER` permutation define | Defined locally when Dynamic Cubemaps is contributed | FO4 water compiles without it | `BSWaterShader.hlsl` |
+| Water blends the dynamic cube with `CubeMapTex` | Blends with the water's sky-gradient reflection color | FO4 reflection permutations shade a sky gradient instead of sampling a cube | `Water.hlsl` `surfaceColor` |
+| `WATER` permutation define | Defined locally when Dynamic Cubemaps is contributed | FO4 water compiles without it | `Water.hlsl` |
 | Deferred consumers read `ReflectanceTexture` and cubes at CS t5–t7 with `LinearSampler` | Cubes at PS t34–t35, sampled with each family's native probe sampler | FO4 composite texture slots below t34 and all sampler slots are occupied | `Composite.hlsli`, `DynamicCubemaps.cpp` |
 | Compile-time `INTERIOR` | Runtime `SharedData::InInterior` | FO4 shares composite permutations across interiors and exteriors | `Composite.hlsli` |
 | Wet reflectance written to a G-buffer target | The composite evaluates the film weight and irradiance itself | FO4 has no reflectance G-buffer | `Composite.hlsli` `GetWetnessReflection` |
 | Wet indirect-diffuse reduction in the material pass | Applied to ambient diffuse in the BSDFLight and DFTiledLighting passes | FO4 evaluates indirect diffuse in light passes | `WetnessEffects.hlsli` `GetIndirectDiffuseWeight` |
 | Always-on feature | `enabled` live toggle; wet diffuse reduction and wet reflection are both gated on it | Repository contract: effects toggle live | `DynamicCubemapsSettings.h`, `WetnessEffects.hlsli`, `Composite.hlsli` |
-| `EnabledSSR = true`, `ENABLESSR` permits raymarching; labeled for water | `enabled_ssr = true`; the static `DYNAMIC_CUBEMAPS` contribution reads DC's live setting from the existing feature buffer and returns zero when DC is enabled and SSR is off; help text states it covers all screen-space reflections | FO4 stock has no SSR gate, and SSLR feeds the second composite (0x800, t14) for surfaces as well as water (t9/t10), so this toggle is global. Baseline and unloaded/disabled DC preserve stock SSR. The runtime gate avoids toggle-driven recompilation and stock fallback; upstream only defines `ENABLESSR` through loaded DC | `DynamicCubemaps.cpp`, `SharedData.hlsli`, `Imagespace\SSLRRaytracing.hlsl` |
+| `EnabledSSR = true`, `ENABLESSR` permits raymarching; labeled for water | `enabled_ssr = true`; the static `DYNAMIC_CUBEMAPS` contribution reads DC's live setting from the existing feature buffer and returns zero when DC is enabled and SSR is off; help text states it covers all screen-space reflections | FO4 stock has no SSR gate, and SSLR feeds the second composite (0x800, t14) for surfaces as well as water (t9/t10), so this toggle is global. Baseline and unloaded/disabled DC preserve stock SSR. The runtime gate avoids toggle-driven recompilation and stock fallback; upstream only defines `ENABLESSR` through loaded DC | `DynamicCubemaps.cpp`, `SharedData.hlsli`, `ISSSLRRaytracing.hlsl` |
 
 ### Not supported
 
@@ -47,27 +65,27 @@ Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `packa
 
 ## Upscaling
 
-Upstream pin: `d330bf12d`. Consumer: `package\Shaders\Imagespace\SSLRRaytracing.hlsl`.
+Upstream pin: `d330bf12d`. Consumer: `package\Shaders\ISSSLRRaytracing.hlsl`.
 
 ### Translations
 
 | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|
-| `FrameBuffer::GetDynamicResolutionAdjustedScreenPosition` and previous-frame samples in `ISReflectionsRayTracing` | SharedData-adjusted, clamped current-frame samples plus scaled pixel dithering and Hi-Z cell counts; b5 preserves the once-per-frame render-scale snapshot through proxy composites | FO4 raytracing uses integer Hi-Z loads and full-target cb0 sizes in a top-left render region, with no previous-frame reflection sample. Upscaling publishes ratios before the deferred prepass; b5 publishes afterward, and SSLR precedes the second composite's temporary ratio neutralization | `SSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp`; fallout4-re `docs\engine-facts.md` Composite pass order / Native SSLR production |
+| `FrameBuffer::GetDynamicResolutionAdjustedScreenPosition` and previous-frame samples in `ISReflectionsRayTracing` | SharedData-adjusted, clamped current-frame samples plus scaled pixel dithering and Hi-Z cell counts; b5 preserves the once-per-frame render-scale snapshot through proxy composites | FO4 raytracing uses integer Hi-Z loads and full-target cb0 sizes in a top-left render region, with no previous-frame reflection sample. Upscaling publishes ratios before the deferred prepass; b5 publishes afterward, and SSLR precedes the second composite's temporary ratio neutralization | `ISSSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp`; fallout4-re `docs\engine-facts.md` Composite pass order / Native SSLR production |
 
 ## Screen Space GI
 
-Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package\Shaders\BSDFCompositeShader.hlsl` and
-`package\Shaders\BSDFPrePass.hlsl`.
+Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package\Shaders\DFComposite.hlsl` and
+`package\Shaders\DFPrepass.hlsl`.
 
 ### Translations
 
 | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|
-| Compose in `DeferredCompositeCS` | Compose in the composite families that form diffuse light: 2D accumulator, 2D fog and cube IBL | FO4 has no single deferred composite; each family forms `3 · albedo · (diffuse A + diffuse B) + emissive` itself | `BSDFCompositeShader.hlsl`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
+| Compose in `DeferredCompositeCS` | Compose in the composite families that form diffuse light: 2D accumulator, 2D fog and cube IBL | FO4 has no single deferred composite; each family forms `3 · albedo · (diffuse A + diffuse B) + emissive` itself | `DFComposite.hlsl`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
 | Radiance from the diffuse target | Rebuilt as `3 · albedo · (diffuse A + diffuse B) + emissive` | FO4 has no diffuse-only target | `radianceDisocc.cs.hlsl` |
 | Directional ambient: `Color::Ambient(GetAmbient(N)) · albedo` with luma from `Masks.z` | `SharedData::GetAmbient(N) · albedo`, clamped to the diffuse term | FO4 light passes fold ambient into the diffuse accumulators and write no ambient mask | `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
-| Vertex AO in `Masks2.x`, written by `Lighting.hlsl` | `1 − vertexAO` in emissive target alpha (logical 31), written by the injected prepass; blended hair writes 0 | FO4 has no spare G-buffer channel; 31.a is unread by stock shaders | `BSDFPrePass.hlsl` |
+| Vertex AO in `Masks2.x`, written by `Lighting.hlsl` | `1 − vertexAO` in emissive target alpha (logical 31), written by the injected prepass; blended hair writes 0 | FO4 has no spare G-buffer channel; 31.a is unread by stock shaders | `DFPrepass.hlsl` |
 | G-buffer normal | FO4 sphere-map view normal (RT20), encoded into upstream's octahedral pyramid | Different G-buffer encoding | `prefilterNormal.cs.hlsl`, `common.hlsli` |
 | `ScreenToViewDepth` from the NDC depth buffer | Raw depth decoded with the composite's far/near reprojection rows | FO4 renders first person into a separate near depth partition | `common.hlsli` |
 | Skyrim frame-buffer camera | Validated b12 world camera and reprojection rows | FO4 publishes the camera through b12 | `common.hlsli`, `ScreenSpaceGI.cpp` |
@@ -86,7 +104,7 @@ Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package
 ## Screen Space Shadows
 
 Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceShadows`, consumers in
-`package\Shaders\BSDFLightShader.hlsl`.
+`package\Shaders\DFLight.hlsl`.
 
 ### Translations
 

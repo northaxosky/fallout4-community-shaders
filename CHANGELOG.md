@@ -1,7 +1,8 @@
 # Changelog
 
-## 0.2.2
+## 0.3.0
 
+- Shader ownership toggles are editable in Advanced settings and apply immediately, including to feature shader contributions.
 - Effect, utility, forward lighting, sky, particle, blood splatter and distant tree shaders are no longer replaced; no feature used them and the rebuilds matched vanilla exactly, so nothing looks different.
 
 ## 0.2.1

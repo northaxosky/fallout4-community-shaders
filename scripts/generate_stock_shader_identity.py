@@ -61,7 +61,7 @@ def generate(export):
     raw = export.read_bytes()
     document = json.loads(raw)
     require(document["schema"] == "fo4re.consumer-stock-identity"
-            and document["schema_version"] == 1, "unsupported export schema/version")
+            and document["schema_version"] == 2, "unsupported export schema/version")
     routes = document["routes"]
     declared = document["counts"]
     require(counts(routes) == declared["total"], "total counts mismatch")
@@ -79,9 +79,14 @@ def generate(export):
     excluded = Counter(dict.fromkeys(("unhooked",), 0))
     tiers = Counter(dict.fromkeys(("exact", "canonical", "unproven"), 0))
     rows = []
+    unnamed = 0
     seen = set()
     for route in routes:
         key = (route["target"], route["stage"], route["descriptor"], route["fxp_ordinal"])
+        native_name = route["native_name"]
+        require(native_name is None or (
+            isinstance(native_name, str) and re.fullmatch("[A-Za-z][A-Za-z0-9_]{0,63}", native_name)
+        ), f"invalid native name: {key}")
         require(type(route["hooked"]) is bool, f"invalid hooked: {key}")
         reason = "unhooked" if not route["hooked"] else None
         if reason:
@@ -97,7 +102,11 @@ def generate(export):
                     else route["stock_sha1"])
         require(re.fullmatch("[0-9a-f]{40}", expected), f"invalid SHA-1: {key}")
         identity = route["imagespace"]
-        names = [identity[k] if identity else "" for k in ("native_name", "class_name", "source_group")]
+        require(not identity or identity["native_name"] == native_name,
+                f"native identity mismatch: {key}")
+        names = [native_name or "", *(
+            identity[k] if identity else "" for k in ("class_name", "source_group")
+        )]
         macros = identity["macros"] if identity else []
         require(all(isinstance(s, str) for s in names), f"invalid native identity: {key}")
         require(all(len(m) == 2 and all(isinstance(s, str) for s in m) for m in macros),
@@ -107,6 +116,7 @@ def generate(export):
         for name, value in macros:
             quoted += "\t" + json.dumps(name) + "\t" + json.dumps(value)
         rows.append((*key, int(bool(route["early_depth"])), expected, quoted))
+        unnamed += native_name is None
         tiers[route["tier"]] += 1
     compiler = document["compiler"]["d3dcompiler_47"]
     require(compiler["strip"] == "D3DCOMPILER_STRIP_REFLECTION_DATA", "unexpected stripping policy")
@@ -116,6 +126,7 @@ def generate(export):
         **{k: declared["total"][k] for k in ("routes", "exact", "canonical", "unproven")},
         "rows": len(rows),
         **{f"rows_{k}": v for k, v in tiers.items()},
+        "rows_unnamed": unnamed,
         **{f"excluded_{k}": v for k, v in excluded.items()},
         "compiler_sha256": compiler["sha256"],
     }

@@ -106,11 +106,12 @@ Community Shaders uses [DearModdingUI](https://github.com/Dear-Modding-FO4/dearm
 
 Without DearModdingUI, settings can be changed through the TOML configuration files.
 
-`[shader_ownership.targets]` controls baseline replacement of reconstructed shader families (restart required).
-Only deferred prepass, water, deferred light, deferred composite, tiled lighting and SSLR raytracing have baseline replacements.
-Effect, utility, forward lighting, sky, particle, blood splatter and distant tree shaders remain stock.
-`imagespace = true` owns only the SSLR raytracing pixel shader; all other imagespace shaders remain stock.
-Loaded features can request their required families independently of baseline ownership.
+Shader ownership follows Skyrim Community Shaders: a supported type is replaced only when its
+`[shader_ownership.targets]` toggle is on and `Data\Shaders\{engine fxp name}.hlsl` exists.
+All type toggles default on; missing source files leave the native shaders stock. Imagespace effects
+use their own engine names, so only `ISSSLRRaytracing.hlsl` currently supplies an imagespace replacement.
+The Advanced menu's type toggles and `[shader_ownership] enable_shaders` master are checked at shader bind time.
+Off binds the game's shader for that type, including feature changes to it. Feature loading still requires a restart.
 
 ---
 

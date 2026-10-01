@@ -229,13 +229,13 @@ namespace
 	{
 		const std::vector<Resource> shared{ CB(5), CB(6) };
 
-		a_jobs.push_back({ .path = a_root / "Imagespace" / "SSLRRaytracing.hlsl",
-			.defines = { { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" } },
+		a_jobs.push_back({ .path = a_root / "ISSSLRRaytracing.hlsl",
+			.defines = { { "PSHADER", "1" }, { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" } },
 			.profile = "ps_5_0",
 			.description = "SSLR dynamic resolution",
 			.required = { CB(0), CB(5), Texture(0), Texture(1), Texture(2), Texture(3) } });
-		a_jobs.push_back({ .path = a_root / "Imagespace" / "SSLRRaytracing.hlsl",
-			.defines = { { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" } },
+		a_jobs.push_back({ .path = a_root / "ISSSLRRaytracing.hlsl",
+			.defines = { { "PSHADER", "1" }, { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" } },
 			.profile = "ps_5_0",
 			.description = "SSLR live DC setting with upscaling",
 			.required = { CB(0), CB(5), CB(6), Texture(0), Texture(1), Texture(2), Texture(3) } });
@@ -250,7 +250,7 @@ namespace
 			.description = "shared data b5/b6",
 			.required = shared });
 
-		const auto bsdfLight = a_root / "BSDFLightShader.hlsl";
+		const auto bsdfLight = a_root / "DFLight.hlsl";
 		const ShaderDefines directional{
 			{ "BSDFLIGHT_PS_DIRSPLITS2", "1" },
 			{ "RGBSPEC", "1" },
@@ -284,9 +284,9 @@ namespace
 				CB(6), Texture(24), Texture(30), Texture(32),
 				Sampler(13), Sampler(14) } });
 
-		const auto composite = a_root / "BSDFCompositeShader.hlsl";
+		const auto composite = a_root / "DFComposite.hlsl";
 		// SSGI's vertex-AO write must compile for opaque, vertex-colour and blended prepass bodies.
-		const auto prepass = a_root / "BSDFPrePass.hlsl";
+		const auto prepass = a_root / "DFPrepass.hlsl";
 		for (const ShaderDefines& defines : {
 				 ShaderDefines{ { "BSDFPREPASS_PS_SOURCE", "1" }, { "SSGI", "1" } },
 				 ShaderDefines{ { "BSDFPREPASS_PS_SOURCE", "1" }, { "SSGI", "1" }, { "VC", "1" } },
@@ -456,7 +456,7 @@ namespace
 				.required = shared });
 		}
 
-		const auto water = a_root / "BSWaterShader.hlsl";
+		const auto water = a_root / "Water.hlsl";
 		const ShaderDefines waterBase{
 			{ "BSWATER_PIXEL_SHADER", "1" },
 			{ "REFLECTIONS", "1" }

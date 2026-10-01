@@ -45,93 +45,34 @@ namespace cs::engine
 		}
 	}
 
-	struct ShaderInjectionDefineMetadata
-	{
-		std::string_view name;
-		std::string_view value;
-	};
-
-	struct ShaderInjectionFamilyMetadata
-	{
-		ShaderStage stage;
-		std::uint32_t descriptor;
-		std::string_view nativeName;
-		std::string_view nativeClassName;
-		std::string_view nativeSourceGroup;
-		std::span<const ShaderInjectionDefineMetadata> nativeMacros;
-		std::wstring_view sourcePath;
-		std::string_view entryPoint;
-		std::string_view profile;
-	};
-
-	inline constexpr std::array<ShaderInjectionDefineMetadata, 0>
-		kNoShaderInjectionDefines{};
-	inline constexpr std::array kImageSpaceShaderFamilies{
-		ShaderInjectionFamilyMetadata{ ShaderStage::kPixel, 0,
-			"ISSSLRRaytracing", "BSImagespaceShaderSSLRRaytracing", "ISSSLRRaytracing",
-			kNoShaderInjectionDefines, L"Imagespace\\SSLRRaytracing.hlsl", "main", "ps_5_0" }
-	};
-
 	struct ShaderInjectionTargetMetadata
 	{
 		ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
 		std::string_view name;
 		std::string_view label;
-		std::wstring_view sourcePath;
-		std::string_view entryPoint;
-		std::string_view profile;
-		std::span<const ShaderInjectionDefineMetadata> baseDefines;
 		ShaderStageMask supportedStages = ShaderInjectionTargetStages(id);
-		std::span<const ShaderInjectionFamilyMetadata> families;
-
-		constexpr bool BaselineOwnable() const noexcept
-		{
-			return !sourcePath.empty() || !families.empty();
-		}
 	};
 
 	inline constexpr std::array<ShaderInjectionTargetMetadata,
 		static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 		kShaderInjectionTargets{ { { ShaderInjectionTarget::kDeferredPrepass, "deferred_prepass",
-									   "Deferred prepass", L"BSDFPrePass.hlsl", "main", "ps_5_0",
-									   kNoShaderInjectionDefines },
-			{ ShaderInjectionTarget::kUtility, "utility", "Utility",
-				L"", "", "",
-				kNoShaderInjectionDefines },
-			{ ShaderInjectionTarget::kParticle, "particle", "Particle",
-				L"", "", "",
-				kNoShaderInjectionDefines },
-			{ ShaderInjectionTarget::kEffect, "effect", "Effect",
-				L"", "", "",
-				kNoShaderInjectionDefines },
+									   "Deferred prepass" },
+			{ ShaderInjectionTarget::kUtility, "utility", "Utility" },
+			{ ShaderInjectionTarget::kParticle, "particle", "Particle" },
+			{ ShaderInjectionTarget::kEffect, "effect", "Effect" },
 			{ ShaderInjectionTarget::kBloodSplatter, "blood_splatter",
-				"Blood splatter", L"", "", "",
-				kNoShaderInjectionDefines },
+				"Blood splatter" },
 			{ ShaderInjectionTarget::kDistantTree, "distant_tree",
-				"Distant tree", L"", "", "",
-				kNoShaderInjectionDefines },
-			{ ShaderInjectionTarget::kImageSpace, "imagespace", "Imagespace",
-				L"", "", "",
-				kNoShaderInjectionDefines, ShaderStageBit(ShaderStage::kPixel),
-				kImageSpaceShaderFamilies },
-			{ ShaderInjectionTarget::kBsSky, "bssky", "BSSky",
-				L"", "", "",
-				kNoShaderInjectionDefines },
-			{ ShaderInjectionTarget::kBsWater, "bswater", "BSWater",
-				L"BSWaterShader.hlsl", "main", "ps_5_0",
-				kNoShaderInjectionDefines },
-			{ ShaderInjectionTarget::kBsLighting, "bslighting", "BSLighting",
-				L"", "", "",
-				kNoShaderInjectionDefines },
-			{ ShaderInjectionTarget::kBsdfLight, "bsdf_light", "BSDF light",
-				L"BSDFLightShader.hlsl", "main", "ps_5_0",
-				kNoShaderInjectionDefines },
+				"Distant tree" },
+			{ ShaderInjectionTarget::kImageSpace, "imagespace", "Imagespace" },
+			{ ShaderInjectionTarget::kBsSky, "bssky", "BSSky" },
+			{ ShaderInjectionTarget::kBsWater, "bswater", "BSWater" },
+			{ ShaderInjectionTarget::kBsLighting, "bslighting", "BSLighting" },
+			{ ShaderInjectionTarget::kBsdfLight, "bsdf_light", "BSDF light" },
 			{ ShaderInjectionTarget::kBsdfComposite, "bsdf_composite",
-				"BSDF composite", L"BSDFCompositeShader.hlsl", "main",
-				"ps_5_0", kNoShaderInjectionDefines },
+				"BSDF composite" },
 			{ ShaderInjectionTarget::kDfTiledLighting, "df_tiled_lighting",
-				"DFTiledLighting", L"DFTiledLighting.hlsl", "main", "cs_5_0",
-				kNoShaderInjectionDefines } } };
+				"DFTiledLighting" } } };
 
 	inline std::span<const ShaderInjectionTargetMetadata>
 	GetShaderInjectionTargets() noexcept

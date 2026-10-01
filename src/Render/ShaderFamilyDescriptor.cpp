@@ -31,20 +31,6 @@ namespace cs::engine
 				Define(a_defines, a_name);
 		}
 
-		std::string ProfileForStage(ShaderStage a_stage)
-		{
-			switch (a_stage) {
-			case ShaderStage::kVertex:
-				return "vs_5_0";
-			case ShaderStage::kPixel:
-				return "ps_5_0";
-			case ShaderStage::kCompute:
-				return "cs_5_0";
-			default:
-				return {};
-			}
-		}
-
 		bool AddPrepassDefines(
 			ShaderInjectionDefines& a_defines,
 			const ShaderFamilyDescriptor& a_family)
@@ -640,8 +626,11 @@ namespace cs::engine
 					"DFTILEDLIGHTING_VARIANT",
 					std::to_string(std::min(d, 3U)));
 				return true;
+			case ShaderInjectionTarget::kImageSpace:
+				a_defines = a_descriptor.nativeMacros;
+				return true;
 			default:
-				return false;
+				return true;
 			}
 		}
 
@@ -649,6 +638,19 @@ namespace cs::engine
 			ShaderInjectionDefines& a_defines,
 			const ShaderFamilyDescriptor& a_descriptor)
 		{
+			switch (a_descriptor.stage) {
+			case ShaderStage::kVertex:
+				Define(a_defines, "VSHADER");
+				break;
+			case ShaderStage::kPixel:
+				Define(a_defines, "PSHADER");
+				break;
+			case ShaderStage::kCompute:
+				Define(a_defines, "CSHADER");
+				break;
+			default:
+				break;
+			}
 			std::string_view define;
 			switch (a_descriptor.target) {
 			case ShaderInjectionTarget::kDeferredPrepass:
@@ -669,40 +671,45 @@ namespace cs::engine
 		}
 	}
 
+	std::string ProfileForStage(ShaderStage a_stage)
+	{
+		switch (a_stage) {
+		case ShaderStage::kVertex:
+			return "vs_5_0";
+		case ShaderStage::kPixel:
+			return "ps_5_0";
+		case ShaderStage::kCompute:
+			return "cs_5_0";
+		default:
+			return {};
+		}
+	}
+
+	std::filesystem::path GetShaderPath(std::string_view a_nativeName)
+	{
+		return std::filesystem::path(a_nativeName).concat(".hlsl");
+	}
+
+	bool IsShaderSourceAvailable(
+		const std::filesystem::path& a_shaderRoot, std::string_view a_nativeName)
+	{
+		std::error_code error;
+		return !a_nativeName.empty() &&
+		       std::filesystem::is_regular_file(a_shaderRoot / GetShaderPath(a_nativeName), error);
+	}
+
 	std::optional<ShaderVariantCompilationDescriptor>
 	BuildShaderFamilyCompilationDescriptor(
 		const ShaderFamilyDescriptor& a_descriptor)
 	{
 		const auto* target = GetShaderInjectionTarget(a_descriptor.target);
-		if (!target || !target->BaselineOwnable() || a_descriptor.stage == ShaderStage::kCount ||
+		if (!target || a_descriptor.nativeName.empty() || a_descriptor.stage == ShaderStage::kCount ||
 			(target->supportedStages & ShaderStageBit(a_descriptor.stage)) == 0)
 			return std::nullopt;
 
 		ShaderVariantCompilationDescriptor result;
-		if (!target->families.empty()) {
-			for (const auto& family : target->families) {
-				if (family.stage != a_descriptor.stage ||
-					family.descriptor != a_descriptor.descriptor ||
-					family.nativeName != a_descriptor.nativeName ||
-					family.nativeClassName != a_descriptor.nativeClassName ||
-					family.nativeSourceGroup != a_descriptor.nativeSourceGroup ||
-					family.nativeMacros.size() != a_descriptor.nativeMacros.size())
-					continue;
-				if (!std::ranges::all_of(family.nativeMacros, [&](const auto& a_macro) {
-						const auto macro = a_descriptor.nativeMacros.find(a_macro.name);
-						return macro != a_descriptor.nativeMacros.end() && macro->second == a_macro.value;
-					}))
-					continue;
-				result.sourcePath = family.sourcePath;
-				result.entryPoint = family.entryPoint;
-				result.profile = family.profile;
-				result.familyMetadata = &family;
-				return result;
-			}
-			return std::nullopt;
-		}
-		result.sourcePath = target->sourcePath;
-		result.entryPoint = target->entryPoint;
+		result.sourcePath = GetShaderPath(a_descriptor.nativeName).wstring();
+		result.entryPoint = "main";
 		result.profile = ProfileForStage(a_descriptor.stage);
 		if (result.profile.empty())
 			return std::nullopt;

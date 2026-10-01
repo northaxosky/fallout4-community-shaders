@@ -239,7 +239,7 @@ namespace
 			return;
 
 		const ShaderVariantCompilationDescriptor family{
-			.sourcePath = std::wstring(target->sourcePath),
+			.sourcePath = GetShaderPath("DFLight").wstring(),
 			.entryPoint = "main",
 			.profile = "ps_5_0",
 			.defines = { { "CONFLICT", "family" } },
@@ -669,20 +669,7 @@ namespace
 			"could not create missing-hook WARP device");
 		if (!device)
 			return;
-		for (const auto& target : GetShaderInjectionTargets()) {
-			Expect(
-				SetBaselineShaderOwnership(target.id, target.BaselineOwnable()),
-				"could not apply baseline ownership");
-			Expect(
-				SetDeveloperShaderOverride(target.id, DeveloperShaderOverride::kForceOn),
-				"could not set developer override");
-		}
 		FreezeAndCompileShaderInjections(device.get());
-		for (const auto& target : GetShaderInjectionTargets()) {
-			Expect(
-				GetShaderInjectionTargetSnapshot(target.id).requested == target.BaselineOwnable(),
-				"freeze requests do not match targets with reconstructed families");
-		}
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
 		Expect(
@@ -690,7 +677,8 @@ namespace
 			"compute ownership did not fail closed without the bridge");
 	}
 
-	void CheckComputePhaseAndStateRestoration()
+	void CheckComputePhaseAndStateRestoration(
+		const std::filesystem::path& a_shaderRoot)
 	{
 		using namespace cs::engine;
 		winrt::com_ptr<ID3D11Device> device;
@@ -717,6 +705,13 @@ namespace
 		if (!stock || !output.uav)
 			return;
 
+		Expect(SetDeveloperShaderOverride(ShaderInjectionTarget::kDfTiledLighting,
+				   DeveloperShaderOverride::kForceOn) &&
+				   SetDeveloperShaderSourceRoot(a_shaderRoot.wstring()),
+			"could not set shader source root");
+		Expect(SetShaderInjectionEnabled(false) &&
+				   SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, false),
+			"could not start with shader ownership disabled");
 		ObserveNativeComputeShaderForTesting(
 			ShaderInjectionTarget::kDfTiledLighting,
 			1,
@@ -754,6 +749,12 @@ namespace
 			reinterpret_cast<REX::W32::ID3D11ComputeShader*>(
 				stock.get());
 
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper,
+			"boot-disabled ownership selected a replacement");
+		Expect(SetShaderInjectionEnabled(true) &&
+				   SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, true),
+			"could not enable boot-disabled shader ownership");
+
 		deferredLightsActive = false;
 		BindNativeComputeInputs(
 			context.get(), stock.get(), inputs, output.uav.get());
@@ -770,8 +771,9 @@ namespace
 		ResetComputeOutput(context.get(), output);
 		BindNativeComputeInputs(
 			context.get(), stock.get(), inputs, output.uav.get());
+		auto* replacement = BindResolvedComputeShader(context.get(), nativeWrapper);
 		Expect(
-			BindResolvedComputeShader(context.get(), nativeWrapper) != &nativeWrapper,
+			replacement != &nativeWrapper,
 			"active phase did not select the replacement");
 		bridge.Dispatch(context.get(), 3, 1, 1);
 		Expect(
@@ -784,6 +786,12 @@ namespace
 		Expect(
 			sharedDataBindCount == 1 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
 			"active compute contribution state was not exposed exactly once");
+		Expect(SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, false),
+			"live target disable was rejected");
+		Expect(SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, true),
+			"live target enable was rejected");
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == replacement,
+			"re-enabled target did not reuse its replacement");
 		publishedComputeBuffers = {};
 	}
 }
@@ -797,8 +805,8 @@ int main(int argc, char** argv)
 		CheckContributorConflict();
 	else if (mode == "--compute-hooks-missing")
 		CheckComputeMissingHookFailsClosed();
-	else if (mode == "--compute-phase")
-		CheckComputePhaseAndStateRestoration();
+	else if (mode == "--compute-phase" && argc > 2)
+		CheckComputePhaseAndStateRestoration(argv[2]);
 	else {
 		std::cerr << "Unknown test mode\n";
 		return 2;

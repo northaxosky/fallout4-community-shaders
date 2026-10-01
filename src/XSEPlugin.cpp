@@ -15,18 +15,6 @@
 namespace
 {
 	auto* L = cs::log::Get("cs");
-
-	bool ApplyShaderOwnershipConfig(
-		const cs::feature_config::ShaderOwnershipConfig& a_config)
-	{
-		bool applied = true;
-		for (const auto& target : cs::engine::GetShaderInjectionTargets()) {
-			applied &= cs::engine::SetBaselineShaderOwnership(
-				target.id,
-				a_config.enabled && a_config.targets[target.id]);
-		}
-		return applied;
-	}
 }
 
 extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface*, F4SE::PluginInfo* a_info)
@@ -97,12 +85,10 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 		cs::feature_config::ParseShaderOwnership(config.root);
 	if (!shaderOwnership.valid) {
 		L->error(
-			"Invalid [shader_ownership] configuration; baseline shader ownership disabled: {}",
+			"Invalid [shader_ownership] configuration; shader replacements disabled: {}",
 			shaderOwnership.error);
-	} else if (!ApplyShaderOwnershipConfig(shaderOwnership.config)) {
-		L->error(
-			"Baseline shader ownership configuration was rejected; all unclaimed targets remain stock");
 	}
+	cs::engine::ApplyShaderOwnershipConfig(shaderOwnership.config);
 	cs::env::DetectENB();
 
 	L->info("FO4CommunityShaders v{}.{}.{} loaded (build {}, commit {})",

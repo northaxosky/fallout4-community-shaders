@@ -30,6 +30,19 @@ namespace
 	constexpr std::string_view kPresetRoot =
 		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
 	constexpr std::uint64_t kImageRetryFrames = 60;
+	void SaveShaderOwnership(const cs::feature_config::ShaderOwnershipConfig& a_config)
+	{
+		toml::table targets;
+		for (const auto& target : cs::engine::GetShaderInjectionTargets())
+			targets.insert(target.name, a_config.targets[target.id]);
+		const auto saved = cs::feature_config::UpdateTopLevelSection(
+			"shader_ownership", toml::table{ { "enable_shaders", a_config.enableShaders }, { "targets", std::move(targets) } });
+		if (saved)
+			cs::engine::ApplyShaderOwnershipConfig(a_config);
+		else
+			L->warn("Failed to save shader ownership: {}", saved.error);
+	}
+
 	const std::array kLogLevelOptions{
 		dmui::ChoiceOption<spdlog::level::level_enum>{
 			spdlog::level::trace, "Trace", "trace" },
@@ -556,12 +569,20 @@ namespace cs
 
 	void Menu::DrawShaderSettings(dmui::Client& a_client)
 	{
-		const auto ownership =
+		auto ownership =
 			feature_config::ParseShaderOwnership(feature_config::GetRoot());
 		if (!CheckHostResult(
 				a_client,
 				a_client.DrawSectionHeader("Shader Ownership"),
 				"draw shader ownership section"))
+			return;
+		if (!CheckHostResult(
+				a_client,
+				dmui::DrawStyledText(
+					a_client,
+					"Off binds the game's shader for that type, including feature changes to it.",
+					{ .wrapped = true }),
+				"draw shader ownership help"))
 			return;
 		{
 			dmui::SettingsTableScope table{ a_client, "advanced-shader-ownership" };
@@ -574,27 +595,16 @@ namespace cs
 					dmui::SettingsRowScope status{
 						a_client,
 						"shader-ownership-status",
-						"Status",
-						"Applied at boot only when the stock shader hash matches."
+						"Use Custom Shaders",
+						""
 					};
 					if (status.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader ownership status row");
 						return;
 					}
 					if (status.Visible()) {
-						const auto severity = ownership.config.enabled ?
-						                          DMUI_STATUS_SEVERITY_SUCCESS :
-						                          DMUI_STATUS_SEVERITY_INFO;
-						if (!CheckHostResult(
-								a_client,
-								dmui::DrawStyledText(
-									a_client,
-									ownership.config.enabled ?
-										"Enabled" :
-										"Disabled",
-									{ .tone = StatusTone(severity) }),
-								"draw shader ownership status"))
-							return;
+						if (dmui::ui::Checkbox("##enable-shaders", &ownership.config.enableShaders))
+							SaveShaderOwnership(ownership.config);
 					}
 					if (!status.End()) {
 						CheckHostResult(a_client, false, "end shader ownership status row");
@@ -607,16 +617,15 @@ namespace cs
 						a_client,
 						target.name.data(),
 						target.label.data(),
-						"Read-only boot configuration from the unified TOML."
+						""
 					};
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader ownership target row");
 						return;
 					}
 					if (row.Visible()) {
-						auto enabled = ownership.config.targets[target.id];
-						const dmui::DisabledScope disabled;
-						(void)dmui::ui::Checkbox("##enabled", &enabled);
+						if (dmui::ui::Checkbox("##enabled", &ownership.config.targets[target.id]))
+							SaveShaderOwnership(ownership.config);
 					}
 					if (!row.End()) {
 						CheckHostResult(a_client, false, "end shader ownership target row");
