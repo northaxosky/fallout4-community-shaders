@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <d3d11shader.h>
 #include <d3dcompiler.h>
 #include <filesystem>
 #include <fstream>
@@ -174,31 +175,71 @@ namespace
 		return std::string(a_error.substr(0, std::min(a_error.find_first_of("\r\n"), std::size_t{ 300 })));
 	}
 
-	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn)
+	auto CompileStage(const cs::engine::ShaderFamilyDescriptor& a_descriptor, const std::filesystem::path& a_shaderRoot, bool a_featuresOn)
 	{
-		const auto family = cs::engine::BuildShaderFamilyCompilationDescriptor(a_row.family);
-		if (!family)
-			return "unresolved";
+		const auto family = cs::engine::BuildShaderFamilyCompilationDescriptor(a_descriptor);
+		Require(family.has_value(), "unresolved");
 		std::string error;
 		const auto contributions = a_featuresOn ?
 		                               std::span<const cs::engine::ShaderReplacementRegistration>(cs::engine::GetFeatureShaderContributions()) :
 		                               std::span<const cs::engine::ShaderReplacementRegistration>{};
 		const auto request = cs::engine::BuildEffectiveShaderCompileRequest(
-			*cs::engine::GetShaderInjectionTarget(a_row.family.target), a_row.family.stage, *family, contributions, &error);
-		if (!request)
-			return "invalid-compile-request: " + error;
+			*cs::engine::GetShaderInjectionTarget(a_descriptor.target), a_descriptor.stage, *family, contributions, &error);
+		Require(request.has_value(), "invalid-compile-request: " + error);
 		cs::engine::ShaderVariantCompilationRequest variant;
 		variant.sourcePath = a_shaderRoot / request->sourcePath;
 		variant.entryPoint = request->entryPoint;
 		variant.profile = request->profile;
-		variant.stage = a_row.family.stage;
+		variant.stage = a_descriptor.stage;
 		variant.defines.assign(request->defines.begin(), request->defines.end());
 		const auto recipe = cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot);
-		const auto compiled = cs::shader_cache::CompileSourceWithManifest(recipe);
-		if (!compiled.succeeded)
-			return "compile-error: " + FirstErrorLine(compiled.error);
-		if (a_featuresOn)
+		auto compiled = cs::shader_cache::CompileSourceWithManifest(recipe);
+		Require(compiled.succeeded, "compile-error: " + FirstErrorLine(compiled.error));
+		return compiled;
+	}
+
+	auto ReflectSignature(const auto& a_bytecode, bool a_input)
+	{
+		winrt::com_ptr<ID3D11ShaderReflection> reflection;
+		Require(SUCCEEDED(D3DReflect(a_bytecode.data(), a_bytecode.size(), IID_PPV_ARGS(reflection.put()))), "D3DReflect failed");
+		D3D11_SHADER_DESC desc{};
+		Require(SUCCEEDED(reflection->GetDesc(&desc)), "Signature description failed");
+		std::vector<std::tuple<UINT, std::string, UINT, BYTE>> signature;
+		for (UINT i = 0; i < (a_input ? desc.InputParameters : desc.OutputParameters); ++i) {
+			D3D11_SIGNATURE_PARAMETER_DESC parameter{};
+			Require(SUCCEEDED(a_input ? reflection->GetInputParameterDesc(i, &parameter) : reflection->GetOutputParameterDesc(i, &parameter)),
+				"Signature parameter failed");
+			if (a_input && parameter.SystemValueType == D3D_NAME_IS_FRONT_FACE)
+				continue;
+			signature.emplace_back(parameter.Register, parameter.SemanticName, parameter.SemanticIndex, parameter.Mask);
+		}
+		return signature;
+	}
+
+	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn)
+	{
+		const auto compiled = CompileStage(a_row.family, a_shaderRoot, a_featuresOn);
+		if (a_featuresOn) {
+			if (a_row.family.stage != cs::engine::ShaderStage::kCompute &&
+				std::ranges::any_of(cs::engine::GetFeatureShaderContributions(), [&](const auto& contribution) {
+					return contribution.targetId == a_row.family.target && contribution.requiresGraphicsPair;
+				})) {
+				const bool isVertex = a_row.family.stage == cs::engine::ShaderStage::kVertex;
+				auto paired = a_row.family;
+				paired.stage = isVertex ? cs::engine::ShaderStage::kPixel : cs::engine::ShaderStage::kVertex;
+				// Tessellated prepass variants use the native domain stage and add no wetness interpolators.
+				if (cs::engine::BuildShaderFamilyCompilationDescriptor(a_row.family)->defines.contains("TESSELLATE_DISP_HEIGHT"))
+					return {};
+				const auto pairedCompiled = CompileStage(paired, a_shaderRoot, true);
+				const auto outputs = ReflectSignature(isVertex ? compiled.bytecode : pairedCompiled.bytecode, false);
+				for (const auto& input : ReflectSignature(isVertex ? pairedCompiled.bytecode : compiled.bytecode, true)) {
+					Require(std::ranges::find(outputs, input) != outputs.end(),
+						"Graphics pair signature mismatch: " + std::get<1>(input) + std::to_string(std::get<2>(input)) +
+							" at register " + std::to_string(std::get<0>(input)));
+				}
+			}
 			return {};
+		}
 		winrt::com_ptr<ID3DBlob> stripped;
 		if (FAILED(D3DStripShader(compiled.bytecode.data(), compiled.bytecode.size(),
 				D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.put())))

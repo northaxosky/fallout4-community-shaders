@@ -343,11 +343,11 @@ SamplerState g_sLandNormalNoise : register(s15);
 
 struct PS_INPUT
 {
+	float4 position: SV_POSITION;
 #	if defined(WETNESS_EFFECTS) && !TESSELLATE_DISP_HEIGHT
 	float4 wetGeometryNormal: TEXCOORD10;
 	float3 wetModelPosition: TEXCOORD11;
 #	endif
-	float4 position: SV_POSITION;
 #	if TESSELLATE_DISP_HEIGHT
 	float2 uv: TEXCOORD0;
 #	endif
