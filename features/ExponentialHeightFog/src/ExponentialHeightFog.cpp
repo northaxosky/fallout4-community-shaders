@@ -159,7 +159,7 @@ namespace cs::features
 					.stages = engine::ShaderStageBit(engine::ShaderStage::kPixel),
 					.contributor = "ExponentialHeightFog",
 					.defines = std::move(defines),
-					.isReady = [this] { return CanBind(); },
+					.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); },
 					.bind = [this, sampler](ID3D11DeviceContext* a_context) { Bind(a_context, sampler); },
 					.slotClaims = std::move(claims) })) {
 				FailLoad("Exponential height fog shader registration failed.");
@@ -171,7 +171,7 @@ namespace cs::features
 					.stages = engine::ShaderStageBit(engine::ShaderStage::kPixel),
 					.contributor = "ExponentialHeightFog",
 					.defines = { { engine::shader_injection_defines::kExponentialHeightFog, "1" } },
-					.isReady = [this] { return CanBind(); } })) {
+					.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); } })) {
 				FailLoad("Fog sunlight attenuation registration failed.");
 				return;
 			}
