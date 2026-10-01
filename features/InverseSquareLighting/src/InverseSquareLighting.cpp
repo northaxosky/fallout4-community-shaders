@@ -197,7 +197,7 @@ namespace cs::features
 		// FO4: the callback supplies provenance for dense, double-buffered t6 append order.
 		struct TiledCallback
 		{
-			static bool thunk(void* a_callback, RE::BSLight** a_light, bool* a_remove)
+			static std::uint32_t thunk(void* a_callback, RE::BSLight** a_light, bool* a_remove)
 			{
 				if (*a_light) {
 					if (auto* light = native::Light(**a_light)) {

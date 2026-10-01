@@ -217,10 +217,14 @@ namespace cs::engine
 
 		struct TriShapeDrawScope_Hook
 		{
-			static void thunk(RE::BSGraphics::TriShape* a_shape, std::uint32_t a_triangles, std::uint32_t a_start)
+			static void thunk(
+				RE::BSGraphics::Renderer* a_this,
+				RE::BSGraphics::TriShape* a_shape,
+				std::uint32_t a_start,
+				std::uint32_t a_triangles)
 			{
 				const ScopedPixelShaderInjectionBindings bindings;
-				func(a_shape, a_triangles, a_start);
+				func(a_this, a_shape, a_start, a_triangles);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
