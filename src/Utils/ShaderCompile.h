@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Utils/ShaderDefines.h"
 #include "Utils/ShaderInclude.h"
 
 #include <d3dcommon.h>

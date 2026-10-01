@@ -189,7 +189,7 @@ namespace cs::util
 			recipe.defines.reserve(a_defines.size());
 			for (const auto& [name, value] : a_defines)
 				recipe.defines.emplace_back(name, value);
-			recipe.defines.emplace_back("FRAMEBUFFER_REGISTER", "b4");
+			AppendStandardShaderDefines(recipe.defines, a_programType);
 			recipe.entryPoint = a_program;
 			recipe.profile = a_programType;
 			recipe.stage = a_stage;

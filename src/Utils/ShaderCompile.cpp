@@ -122,24 +122,8 @@ namespace cs::util
 		const char* a_programType)
 	{
 		auto defines = a_defines;
-		const std::pair<const char*, const char*> stages[] = {
-			{ "ps_5_0", "PSHADER" },
-			{ "vs_5_0", "VSHADER" },
-			{ "hs_5_0", "HULLSHADER" },
-			{ "ds_5_0", "DOMAINSHADER" },
-			{ "cs_4_0", "COMPUTESHADER" },
-			{ "cs_5_0", "COMPUTESHADER" },
-			{ "cs_5_1", "COMPUTESHADER" }
-		};
-		for (const auto& [profile, name] : stages) {
-			if (_stricmp(a_programType, profile) == 0) {
-				defines.emplace_back(name, "");
-				break;
-			}
-		}
-		defines.emplace_back("WINPC", "");
-		defines.emplace_back("DX11", "");
-		defines.emplace_back("FRAMEBUFFER_REGISTER", "b4");
+		for (const auto& define : StandardShaderDefines(a_programType ? a_programType : ""))
+			defines.push_back(define);
 		return defines;
 	}
 

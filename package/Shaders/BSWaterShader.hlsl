@@ -157,7 +157,9 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	ifdef DYNAMIC_CUBEMAPS
 // FO4 water compiles without upstream's WATER permutation define.
-#		define WATER
+#		ifndef WATER
+#			define WATER
+#		endif
 #		include "FO4/DynamicCubemaps/DynamicCubemaps.hlsli"
 SamplerState sampler3 : register(s3);
 #	endif
