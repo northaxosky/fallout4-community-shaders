@@ -686,8 +686,15 @@ namespace cs::engine
 			const std::vector<ShaderSlotClaim>& a_claimedSlots)
 		{
 			for (const auto& claim : a_registration.slotClaims) {
-				if (std::ranges::find(a_claimedSlots, claim) != a_claimedSlots.end())
-					return claim;
+				for (const auto& occupied : a_claimedSlots) {
+					if (occupied.stage != claim.stage || occupied.resourceType != claim.resourceType || occupied.slot != claim.slot)
+						continue;
+					// FO4: identical immutable linear-clamp samplers may share scarce PS slots.
+					if (claim.resourceType != ShaderResourceType::kSampler ||
+						claim.samplerContract == ShaderSamplerContract::kExclusive ||
+						claim.samplerContract != occupied.samplerContract)
+						return claim;
+				}
 			}
 			return std::nullopt;
 		}

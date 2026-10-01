@@ -58,7 +58,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Terrain Shadows** | Long-range shadows from terrain. |
 | **Screen Space GI** | Ambient occlusion and indirect lighting. |
 | **Inverse Square Lighting** | More natural light falloff. |
-| **Exponential Height Fog** | Weather-driven fog with height falloff. |
+| **[Exponential Height Fog](features/ExponentialHeightFog/README.md)** | Analytic and volumetric fog with weather profiles; provider coverage is pending. |
 | **Dynamic Cubemaps** | Reflections that respond to the surrounding scene. |
 | **Wetness Effects** | Rain-darkened surfaces and wet reflections. |
 | **Water Effects** | Sunlight caustics on submerged surfaces. |

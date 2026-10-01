@@ -1,14 +1,13 @@
 #pragma once
 
-#include "ExponentialHeightFogMath.h"
+#include "ExponentialHeightFogSettings.h"
 #include "Feature.h"
-#include "FeatureBuffer.h"
-#include "FeatureCategories.h"
+#include "Render/SharedFeatureData.h"
+#include "VolumetricFog.h"
+#include "World/WeatherVariableRegistry.h"
 
 #include <atomic>
-#include <cstdint>
 #include <mutex>
-#include <string>
 
 namespace cs::features
 {
@@ -16,95 +15,42 @@ namespace cs::features
 	{
 	public:
 		static ExponentialHeightFog* GetSingleton();
-
+		using Settings = exponential_height_fog::Settings;
 		std::string_view GetName() const override { return "ExponentialHeightFog"; }
-		std::string_view GetDisplayName() const override
-		{
-			return "Exponential Height Fog";
-		}
+		std::string_view GetDisplayName() const override { return "Exponential Height Fog"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
-		std::string GetFeatureSummary() const override
-		{
-			return "Fits exponential distance extinction and height falloff to Fallout 4's weather fog ramps.";
-		}
-
-		bool Configure(const toml::table& a_config, std::string& a_error) override;
+		std::string GetFeatureSummary() const override { return "Analytic height fog and temporally accumulated volumetric scattering."; }
+		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
-		bool ValidateShaderInjections(std::string& a_error) override;
+		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
+		bool ValidateShaderInjections(std::string&) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
-
 		bool ProducesTelemetry() const override { return true; }
-		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		void CollectTelemetry(telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
-		void SetDebugView(std::string_view a_view) noexcept override;
-
-		cs::ExponentialHeightFogFeatureData GetCommonBufferData() const;
-
-		using Settings = exponential_height_fog::Settings;
+		void SetDebugView(std::string_view) noexcept override;
+		render::ExponentialHeightFogSettings GetCommonBufferData() const;
 
 	private:
-		enum class ObservationStatus : std::uint8_t
-		{
-			kNeverCalled,
-			kInjectionUnavailable,
-			kDisabled,
-			kLocationUnavailable,
-			kInterior,
-			kFrameBufferUnavailable,
-			kNonFiniteDistanceRamp,
-			kDistanceSlopeNearZero,
-			kDistancePlaneOrder,
-			kNonFiniteHeightRamp,
-			kHeightSlopeXNearZero,
-			kHeightSlopeYNearZero,
-			kNonFiniteDerived,
-			kUsingDerived
-		};
-
-		ExponentialHeightFog() = default;
-
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(exponential_height_fog::kSchema); }
-		void PublishSettings() noexcept;
-		void ObserveConsumerBind() noexcept;
-		void SetObservationStatus(ObservationStatus a_status) noexcept;
-		void SetValidationDetail(std::string a_detail) const;
-		std::string GetValidationDetail() const;
-		static ObservationStatus ToObservationStatus(
-			exponential_height_fog::FitStatus a_status) noexcept;
-		static const char* ObservationStatusName(
-			ObservationStatus a_status) noexcept;
-
-		Settings _settings;
-		std::atomic_bool _enabled{ true };
-		std::atomic<float> _densityMultiplier{ 1.0f };
-		std::atomic<float> _heightFalloffMultiplier{ 1.0f };
-		std::atomic_bool _fogFactorDebug{ false };
-		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
-		mutable std::atomic_bool _locationResolved{ false };
-		mutable std::atomic_bool _inInterior{ false };
-		mutable std::atomic_bool _publishedActive{ false };
-		mutable std::atomic_uint64_t _sharedDataPublishCalls{ 0 };
-		std::atomic<ObservationStatus> _observationStatus{
-			ObservationStatus::kNeverCalled
-		};
-		std::atomic<ObservationStatus> _lastFallbackReason{
-			ObservationStatus::kNeverCalled
-		};
-		std::atomic_uint64_t _fallbackFrames{ 0 };
-		std::atomic_uint64_t _lastFallbackFrame{ UINT64_MAX };
-		std::atomic_uint32_t _consecutiveRejectedFrames{ 0 };
-		std::atomic_uint32_t _warnedFallbackReasons{ 0 };
-		std::atomic_bool _derivedParametersInUse{ false };
-		std::atomic<float> _derivedDensity{ 0.0f };
-		std::atomic<float> _derivedHeightFalloffX{ 0.0f };
-		std::atomic<float> _derivedHeightFalloffY{ 0.0f };
-		std::atomic<float> _derivedNearDistance{ 0.0f };
-		std::atomic<float> _derivedFarDistance{ 0.0f };
-		mutable std::mutex _validationMutex;
-		mutable std::string _validationDetail;
+		void PublishSettings();
+		bool CanBind() const;
+		void PrepareFrame();
+		void RenderFrame();
+		void Bind(ID3D11DeviceContext*, std::uint32_t);
+		Settings _settings{}, _published{}, _frameSettings{};
+		weather::VariableRegistry<std::remove_cv_t<decltype(exponential_height_fog::kSchema)>> _weather;
+		std::string _previousWeather;
+		exponential_height_fog::VolumetricFog _volume;
+		std::unique_ptr<buffer::ConstantBuffer> _debugConstants;
+		std::atomic_bool _debugFogFactor{ false };
+		mutable std::mutex _settingsMutex;
+		std::atomic_bool _resourcesReady{ false }, _operational{ false }, _frameReady{ false };
+		std::atomic_bool _enabled{ false }, _volumetricActive{ false };
+		std::atomic_uint32_t _width{ 0 }, _height{ 0 }, _slices{ 0 };
+		std::atomic_uint64_t _dispatches{ 0 }, _binds{ 0 }, _failures{ 0 };
 	};
 }

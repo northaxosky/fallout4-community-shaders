@@ -157,15 +157,15 @@ namespace cs::settings
 		T value;
 	};
 
-	template <class Settings>
-	struct Float2Field
+	template <class Settings, std::size_t N>
+	struct FloatArrayField
 	{
 		using SettingsType = Settings;
-		using ValueType = Float2;
+		using ValueType = std::array<float, N>;
 
 		std::string_view key;
 		std::string_view description;
-		Float2 Settings::* member;
+		ValueType Settings::* member;
 		ApplyTiming timing = ApplyTiming::kImmediate;
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
@@ -174,8 +174,8 @@ namespace cs::settings
 			if (!node)
 				return true;
 			const auto* values = node->as_array();
-			if (!values || values->size() != 2) {
-				a_error = std::string(key) + ": expected two numbers";
+			if (!values || values->size() != N) {
+				a_error = std::string(key) + ": expected " + std::to_string(N) + " numbers";
 				return false;
 			}
 			auto candidate = a_value.*member;
@@ -189,10 +189,17 @@ namespace cs::settings
 
 		void Write(toml::table& a_table, const Settings& a_value) const
 		{
-			const auto& value = a_value.*member;
-			a_table.insert_or_assign(key, toml::array{ static_cast<double>(value[0]), static_cast<double>(value[1]) });
+			toml::array values;
+			for (float value : a_value.*member)
+				values.push_back(static_cast<double>(value));
+			a_table.insert_or_assign(key, std::move(values));
 		}
 	};
+
+	template <class Settings>
+	using Float2Field = FloatArrayField<Settings, 2>;
+	template <class Settings>
+	using ColorField = FloatArrayField<Settings, 4>;
 
 	template <class Settings, class T>
 	struct ChoiceField
@@ -280,7 +287,7 @@ namespace cs::settings
 	{
 		if constexpr (std::is_enum_v<T>)
 			return EncodeValue(static_cast<std::underlying_type_t<T>>(a_value));
-		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string> || std::same_as<T, Float2>)
+		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string> || std::same_as<T, Float2> || std::same_as<T, Color4>)
 			return a_value;
 		else if constexpr (std::is_signed_v<T>)
 			return static_cast<std::int64_t>(a_value);

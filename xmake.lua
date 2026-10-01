@@ -377,11 +377,12 @@ end)
 target("ExponentialHeightFogMathTests", function()
     set_kind("binary")
     set_default(false)
-    add_files("tests/ExponentialHeightFogMathTests.cpp")
+    add_files("tests/ExponentialHeightFogMathTests.cpp", "src/Settings/FeatureConfig.cpp")
     add_headerfiles(
         "features/ExponentialHeightFog/src/ExponentialHeightFogMath.h"
     )
     add_includedirs("features/ExponentialHeightFog/src")
+    add_includedirs("src")
     add_packages("vcpkg::tomlplusplus")
 end)
 

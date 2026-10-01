@@ -11,6 +11,10 @@
 #	include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #endif
 #include "Common/DeferredContracts.hlsli"
+#ifdef EXPONENTIAL_HEIGHT_FOG
+// FO4: native fog colors cross the analytic/volume boundary before the final blend.
+#	include "FO4/ExponentialHeightFogConsumer.hlsli"
+#endif
 
 #define WETNESS_CAMERA_ARGS(cameraAdjust)                                         \
 	float3x4(ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2), cameraAdjust, \
@@ -375,9 +379,6 @@ PS_OUTPUT main(PS_INPUT input)
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 
 #	ifndef FO4_AMBIENT_OCCLUSION
@@ -751,20 +752,6 @@ PS_OUTPUT main(PS_INPUT input)
 		float distanceFactor = saturate(distanceRamp);
 		float2 fogRemapPair =
 			saturate(fogPlaneDistance.xx * FogHeightRamp.xy - FogHeightRamp.zw);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		float exponentialDistance;
-		float2 exponentialHeight;
-		bool exponentialValid = ExponentialHeightFog::TryEvaluate(
-			sqrt(positionLengthSquared),
-			fogPlaneDistance,
-			FogDistanceRamp,
-			FogHeightRamp,
-			exponentialDistance,
-			exponentialHeight);
-		if (exponentialValid) {
-			fogRemapPair = exponentialHeight;
-		}
-#	endif
 		float fogBlend = lerp(
 			fogRemapPair.x, fogRemapPair.y, distanceFactor);
 
@@ -782,11 +769,6 @@ PS_OUTPUT main(PS_INPUT input)
 		float nearEscape =
 			distanceRamp < 0.015 ? distanceFactor * 66.666672 : 1.0;
 		float distancePow = pow(distanceFactor, FogNearLowColorAndPower.w);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (exponentialValid) {
-			distancePow = exponentialDistance;
-		}
-#	endif
 		float fogIntensity = min(distancePow, fogIntensityClamp);
 		float unfoggedWeight = 1.0 - fogBlend;
 		float fogBlendWeight = mad(
@@ -820,13 +802,11 @@ PS_OUTPUT main(PS_INPUT input)
 			sunlitFog + grayscale * (grayscale.xxx - sunlitFog);
 		float3 colorStack = useGrayscale ? grayscaleStack : sunlitFog;
 
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+		FO4Fog::Replace(input.position.xy, fogColor, colorStack, fogMixFactor);
+#	endif
 		output.color.xyz = lerp(aoColor, colorStack, fogMixFactor);
 		output.color.w = 1.0;
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (ExponentialHeightFog::IsFogFactorDebug()) {
-			output.color = float4(fogMixFactor.xxx, 1.0);
-		}
-#	endif
 	} else {
 		output.color = float4(0.0, 0.0, 0.0, 0.0);
 	}
@@ -840,10 +820,6 @@ PS_OUTPUT main(PS_INPUT input)
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
-
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 
 #	ifndef TILELIGHT
@@ -1191,20 +1167,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float distanceCoordinate = distance * ambientFrame[41].x - ambientFrame[41].z;
 		float distanceSaturated = saturate(distanceCoordinate);
 		float2 heightWeights = saturate(height * ambientFrame[46].xy - ambientFrame[46].zw);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		float exponentialDistance;
-		float2 exponentialHeight;
-		bool exponentialValid = ExponentialHeightFog::TryEvaluate(
-			distance,
-			height,
-			ambientFrame[41],
-			ambientFrame[46],
-			exponentialDistance,
-			exponentialHeight);
-		if (exponentialValid) {
-			heightWeights = exponentialHeight;
-		}
-#		endif
 		float heightWeight = lerp(heightWeights.x, heightWeights.y, distanceSaturated);
 
 		float fogLimit = ambientFrame[43].w;
@@ -1215,15 +1177,13 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		}
 		float nearDistanceScale = distanceCoordinate < 0.015 ? distanceSaturated * 66.666672 : 1.0;
 		float fogCurve = min(pow(distanceSaturated, ambientFrame[42].w), fogLimit);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		if (exponentialValid) {
-			fogCurve = min(exponentialDistance, fogLimit);
-		}
-#		endif
 		float heightAlpha = 1.0 - heightWeight + heightWeight * ambientFrame[44].w;
 		float3 lowFog = lerp(ambientFrame[42].xyz, ambientFrame[44].xyz, fogCurve);
 		float3 highFog = lerp(ambientFrame[43].xyz, ambientFrame[45].xyz, fogCurve);
 		float3 fogColor = lerp(lowFog, highFog, heightWeight);
+#		ifdef EXPONENTIAL_HEIGHT_FOG
+		float3 originalFogColor = fogColor;
+#		endif
 		float fogAmount = fogCurve * heightAlpha;
 		fogAmount *= nearDistanceScale;
 
@@ -1235,12 +1195,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 			fogColor = lerp(fogColor, gray.xxx, gray);
 		}
 
-		output = float4(lerp(color, fogColor, fogAmount), 1.0);
 #		ifdef EXPONENTIAL_HEIGHT_FOG
-		if (ExponentialHeightFog::IsFogFactorDebug()) {
-			output = float4(fogAmount.xxx, 1.0);
-		}
+		FO4Fog::Replace(position.xy, originalFogColor, fogColor, fogAmount);
 #		endif
+		output = float4(lerp(color, fogColor, fogAmount), 1.0);
 	} else {
 		output = 0.0;
 	}
@@ -1254,10 +1212,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
-
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 
 #	ifndef OUTPUTMASK
@@ -1443,31 +1397,12 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		float dist = sqrt(dd) * g_PF[41].x - g_PF[41].z;
 		float ds = saturate(dist);
 		float2 hh = saturate(h * g_PF[46].xy - g_PF[46].zw);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		float exponentialDistance;
-		float2 exponentialHeight;
-		bool exponentialValid = ExponentialHeightFog::TryEvaluate(
-			sqrt(dd),
-			h,
-			g_PF[41],
-			g_PF[46],
-			exponentialDistance,
-			exponentialHeight);
-		if (exponentialValid) {
-			hh = exponentialHeight;
-		}
-#	endif
 		float fogH = ds * (hh.y - hh.x) + hh.x;
 
 		float w43 = g_PF[43].w;
 		float t1v = (0.75 < dist) ? min(((ds - 0.75) * 4.0) * (1.0 - w43) + w43, 1.0) : w43;
 		float t2v = (dist < 0.015) ? (ds * 66.666672) : 1.0;
 		float fk = min(pow(ds, g_PF[42].w), t1v);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (exponentialValid) {
-			fk = min(exponentialDistance, t1v);
-		}
-#	endif
 
 		float alpha = 1.0 - fogH;
 		alpha = fogH * g_PF[44].w + alpha;
@@ -1475,6 +1410,9 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		float3 cA = lerp(g_PF[42].xyz, g_PF[44].xyz, fk);
 		float3 cB = lerp(g_PF[43].xyz, g_PF[45].xyz, fk);
 		float3 fogC = lerp(cA, cB, fogH);
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+		float3 originalFogColor = fogC;
+#	endif
 		float amt = (fk * alpha) * t2v;
 
 		float3 dir = pos.xyz * rsqrt(dd);
@@ -1486,12 +1424,10 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 			fogC = lerp(fogC, lum2.xxx, lum2);
 		}
 
-		result = float4(lerp(col, fogC, amt), 0.5);
 #	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (ExponentialHeightFog::IsFogFactorDebug()) {
-			result = float4(amt.xxx, 1.0);
-		}
+		FO4Fog::Replace(svpos.xy, originalFogColor, fogC, amt);
 #	endif
+		result = float4(lerp(col, fogC, amt), 0.5);
 	} else {
 		result = float4(0.0, 0.0, 0.0, 0.0);
 	}
@@ -1703,9 +1639,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	ifdef WETNESS_EFFECTS
 #		define WETNESS_COMPOSITE_CONSUMER 1
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
 #	endif
 #	ifdef SSGI
 #		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
@@ -2048,20 +1981,6 @@ PS_OUTPUT main(PS_INPUT input)
 		float distanceFactor = saturate(distanceRamp);
 
 		float2 fogRemapPair = saturate(fogPlaneDistance.xx * FogHeightRampScaleBiasPair.xy - FogHeightRampScaleBiasPair.zw);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		float exponentialDistance;
-		float2 exponentialHeight;
-		bool exponentialValid = ExponentialHeightFog::TryEvaluate(
-			posViewLen,
-			fogPlaneDistance,
-			FogDistanceRamp_and_lowHeightRamp,
-			FogHeightRampScaleBiasPair,
-			exponentialDistance,
-			exponentialHeight);
-		if (exponentialValid) {
-			fogRemapPair = exponentialHeight;
-		}
-#	endif
 		float fogBlend = lerp(fogRemapPair.x, fogRemapPair.y, distanceFactor);
 
 		float fogIntensityClamp;
@@ -2076,11 +1995,6 @@ PS_OUTPUT main(PS_INPUT input)
 		float nearEscape = (distanceRamp < 0.015) ? (distanceFactor * 66.666672) : 1.0;
 
 		float distancePow = pow(distanceFactor, FogNearLowColor_and_power.w);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (exponentialValid) {
-			distancePow = exponentialDistance;
-		}
-#	endif
 		float fogIntensity = min(distancePow, fogIntensityClamp);
 
 		float unfoggedWeight = 1.0 - fogBlend;
@@ -2127,6 +2041,9 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 selectedFog =
 			useGraySaturated ? graySaturated : sunlitFogColor;
 
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+		FO4Fog::Replace(input.position.xy, fogColor, selectedFog, fogMixFactor);
+#	endif
 #	if COMPOSITE_SCENE_BLEND
 		output.color.xyz = lerp(ambientWeighted, selectedFog, fogMixFactor);
 #		if COMPOSITE_ALPHA_ONE
@@ -2137,11 +2054,6 @@ PS_OUTPUT main(PS_INPUT input)
 #	else
 		output.color.xyz = selectedFog;
 		output.color.w = fogMixFactor;
-#	endif
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (ExponentialHeightFog::IsFogFactorDebug()) {
-			output.color = float4(fogMixFactor.xxx, 1.0);
-		}
 #	endif
 	}
 #	if COMPOSITE_MATERIAL_EXCLUSION
@@ -2340,9 +2252,6 @@ PS_OUTPUT main(PS_INPUT input)
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
-#	endif
 #	ifdef SSGI
 #		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
 #	endif
@@ -2700,20 +2609,6 @@ float4 main(PSInput input) : SV_Target0
 		float distanceSaturated = saturate(distanceCoordinate);
 		float2 heightWeights =
 			saturate(height * scene[46].xy - scene[46].zw);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		float exponentialDistance;
-		float2 exponentialHeight;
-		bool exponentialValid = ExponentialHeightFog::TryEvaluate(
-			distance,
-			height,
-			scene[41],
-			scene[46],
-			exponentialDistance,
-			exponentialHeight);
-		if (exponentialValid) {
-			heightWeights = exponentialHeight;
-		}
-#		endif
 		float heightWeight =
 			lerp(heightWeights.x, heightWeights.y, distanceSaturated);
 
@@ -2727,11 +2622,6 @@ float4 main(PSInput input) : SV_Target0
 		float nearDistanceScale = distanceCoordinate < 0.015 ? distanceSaturated * 66.666672 : 1.0;
 		float fogCurve =
 			min(pow(distanceSaturated, scene[42].w), fogLimit);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		if (exponentialValid) {
-			fogCurve = min(exponentialDistance, fogLimit);
-		}
-#		endif
 		float heightAlpha =
 			1.0 - heightWeight + heightWeight * scene[44].w;
 		float3 lowFog =
@@ -2739,6 +2629,9 @@ float4 main(PSInput input) : SV_Target0
 		float3 highFog =
 			lerp(scene[43].xyz, scene[45].xyz, fogCurve);
 		float3 fogColor = lerp(lowFog, highFog, heightWeight);
+#		ifdef EXPONENTIAL_HEIGHT_FOG
+		float3 originalFogColor = fogColor;
+#		endif
 		float fogAmount = fogCurve * heightAlpha * nearDistanceScale;
 
 		float3 worldDirection = normalize(worldPosition);
@@ -2753,12 +2646,10 @@ float4 main(PSInput input) : SV_Target0
 			fogColor = lerp(fogColor, gray.xxx, gray);
 		}
 
-		color = lerp(color, fogColor, fogAmount);
 #		ifdef EXPONENTIAL_HEIGHT_FOG
-		if (ExponentialHeightFog::IsFogFactorDebug()) {
-			color = fogAmount.xxx;
-		}
+		FO4Fog::Replace(input.position.xy, originalFogColor, fogColor, fogAmount);
 #		endif
+		color = lerp(color, fogColor, fogAmount);
 #	endif
 
 #	ifdef COMPOSITE_ALPHA_ONE
@@ -3157,10 +3048,6 @@ float4 main(PS_INPUT input) : SV_Target0
 
 #ifdef BSDFCOMPOSITE_PS_NO_T0_FOG
 
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		include "FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli"
-#	endif
-
 #	if !defined(WAVE5A_FOG_SHAPE)
 #		error WAVE5A_FOG_SHAPE is required
 #	endif
@@ -3371,20 +3258,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float distanceRampRaw = sqrt(distanceSquared) * scene[41].x - scene[41].z;
 		float distanceRamp = saturate(distanceRampRaw);
 		float2 heightRemaps = saturate(fogPlane * scene[46].xy - scene[46].zw);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		float exponentialDistance;
-		float2 exponentialHeight;
-		bool exponentialValid = ExponentialHeightFog::TryEvaluate(
-			sqrt(distanceSquared),
-			fogPlane,
-			scene[41],
-			scene[46],
-			exponentialDistance,
-			exponentialHeight);
-		if (exponentialValid) {
-			heightRemaps = exponentialHeight;
-		}
-#	endif
 		float heightFactor = lerp(heightRemaps.x, heightRemaps.y, distanceRamp);
 
 		float fogLimit = scene[43].w;
@@ -3396,11 +3269,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 		float nearEscape = distanceRampRaw < 0.015 ? distanceRamp * 66.666672 : 1.0;
 		float fogCurve = min(pow(distanceRamp, scene[42].w), fogLimit);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (exponentialValid) {
-			fogCurve = min(exponentialDistance, fogLimit);
-		}
-#	endif
 		float heightScale = 1.0 - heightFactor + heightFactor * scene[44].w;
 		float3 lowFog = lerp(scene[42].xyz, scene[44].xyz, fogCurve);
 		float3 highFog = lerp(scene[43].xyz, scene[45].xyz, fogCurve);
@@ -3414,13 +3282,11 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float gray = dot(composite, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
 		float3 graySaturated = sunlitFog + gray * (gray - sunlitFog);
 		float3 selectedFog = useGrayFog ? graySaturated : sunlitFog;
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+		FO4Fog::Replace(position.xy, fogColor, selectedFog, fogMix);
+#	endif
 		float3 outputColor = lerp(composite, selectedFog, fogMix);
 		result = float4(outputColor, 0.5);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		if (ExponentialHeightFog::IsFogFactorDebug()) {
-			result = float4(fogMix.xxx, 1.0);
-		}
-#	endif
 	} else {
 		result = float4(0.0, 0.0, 0.0, 0.0);
 	}

@@ -1,7 +1,6 @@
 #include "FeatureBuffer.h"
 
 #include "DynamicCubemaps.h"
-#include "ExponentialHeightFog.h"
 #include "InverseSquareLighting.h"
 #include "ScreenSpaceGI.h"
 #include "TerrainShadows.h"
@@ -37,10 +36,7 @@ namespace cs
 					features::InverseSquareLighting::GetSingleton()),
 			.dynamicCubemapsSettings =
 				CollectFeatureData<DynamicCubemapsFeatureData>(
-					features::DynamicCubemaps::GetSingleton()),
-			.exponentialHeightFogSettings =
-				CollectFeatureData<ExponentialHeightFogFeatureData>(
-					features::ExponentialHeightFog::GetSingleton())
+					features::DynamicCubemaps::GetSingleton())
 		};
 	}
 }

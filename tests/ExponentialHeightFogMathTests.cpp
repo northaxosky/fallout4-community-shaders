@@ -1,137 +1,81 @@
 #include "ExponentialHeightFogMath.h"
+#include "ExponentialHeightFogSettings.h"
+#include "World/WeatherVariableRegistry.h"
 
-#include <cmath>
 #include <iostream>
-#include <limits>
 
 namespace
 {
 	int failures = 0;
-
-#define CHECK(expr)                                                     \
-	do {                                                                \
-		if (!(expr)) {                                                  \
-			std::cerr << "FAIL " << __FILE__ << ':' << __LINE__ << ": " \
-					  << #expr << '\n';                                 \
-			++failures;                                                 \
-		}                                                               \
-	} while (false)
-
-	bool Near(float a_left, float a_right, float a_tolerance = 1.0e-5f)
+	void Check(bool a_condition, const char* a_message)
 	{
-		return std::abs(a_left - a_right) <= a_tolerance;
+		if (!a_condition) {
+			std::cerr << a_message << '\n';
+			++failures;
+		}
 	}
 
-	void TestDistanceFit()
+	void TestVolumetricCoordinates()
 	{
 		using namespace cs::features::exponential_height_fog;
-		const auto fit = DeriveParameters(
-			0.001f,
-			1.0f,
-			0.01f,
-			-0.02f,
-			10.0f,
-			-40.0f,
-			1.0f,
-			1.0f);
-		CHECK(fit.IsValid());
-		CHECK(Near(fit.distanceNear, 1000.0f, 1.0e-3f));
-		CHECK(Near(fit.distanceFar, 2000.0f, 1.0e-3f));
-		CHECK(Near(EvaluateDistanceExtinction(fit, 999.0f), 0.0f));
-		CHECK(Near(
-			EvaluateDistanceExtinction(fit, fit.distanceFar),
-			kReferenceExtinction,
-			1.0e-6f));
-		CHECK(EvaluateDistanceExtinction(fit, 3000.0f) > kReferenceExtinction);
-
-		const auto stronger = DeriveParameters(
-			0.001f,
-			1.0f,
-			0.01f,
-			-0.02f,
-			10.0f,
-			-40.0f,
-			2.0f,
-			1.0f);
-		CHECK(Near(stronger.density, fit.density * 2.0f));
+		Check(Halton(1, 2) == 0.5f && Halton(2, 2) == 0.25f &&
+				  Halton(1, 3) == 1.0f / 3.0f && Halton(1, 5) == 0.2f,
+			"Halton bases diverge from the upstream volume sequence");
+		const auto parameters = GridZParameters(5.0f, 0.0f, 60000.0f, 8.0f, 64);
+		const auto depth = [&](float a_slice) { return (std::exp2(a_slice / parameters[2]) - parameters[1]) / parameters[0]; };
+		Check(std::abs(depth(0) - 14.5f) < 0.001f && std::abs(depth(64) - 60000.0f) < 0.1f,
+			"Froxel near-offset/far boundary no longer match the upstream distribution");
+		const auto stretched = GridZParameters(5.0f, 1200.0f, 200000.0f, 1.0f, 160);
+		Check(std::isfinite(stretched[0]) && std::isfinite(stretched[1]) &&
+				  stretched[2] == 160.0f / 120.0f,
+			"High slice counts must bound the depth exponent");
 	}
 
-	void TestHeightFit()
+	void TestWeatherTransitions()
 	{
 		using namespace cs::features::exponential_height_fog;
-		const auto fit = DeriveParameters(
-			0.001f,
-			0.0f,
-			0.01f,
-			-0.02f,
-			10.0f,
-			-40.0f,
-			1.0f,
-			1.0f);
-		CHECK(fit.IsValid());
-		CHECK(Near(fit.heightZeroX, 1000.0f));
-		CHECK(Near(fit.heightZeroY, 2000.0f));
-		CHECK(fit.heightDirectionX == 1.0f);
-		CHECK(fit.heightDirectionY == -1.0f);
-		CHECK(Near(
-			EvaluateHeightFactor(
-				1100.0f,
-				fit.heightZeroX,
-				fit.heightDirectionX,
-				fit.heightFalloffX),
-			kReferenceExtinction,
-			1.0e-6f));
-		CHECK(Near(
-			EvaluateHeightFactor(
-				1950.0f,
-				fit.heightZeroY,
-				fit.heightDirectionY,
-				fit.heightFalloffY),
-			kReferenceExtinction,
-			1.0e-6f));
+		cs::weather::VariableRegistry<std::remove_cv_t<decltype(kSchema)>> registry;
+		auto config = toml::parse(R"(
+["0x123~Example.esp"]
+__enabled = true
+fogDensity = 0.2
+fogInscatteringColor = [0.4, 0.5, 0.6, 1.0]
+volumetricFogEnabled = 1
+["0x456~Example.esp"]
+__enabled = true
+fogDensity = 0.6
+fogInscatteringColor = [0.8, 0.9, 1.0, 1.0]
+volumetricFogEnabled = 0
+)");
+		std::string error;
+		Check(registry.Configure(kSchema, kWeatherVariables, &config, error), "Valid fog weather profile rejected");
+		Settings base;
+		const auto from = decltype(registry)::Key(0x123, "Example.esp");
+		const auto to = decltype(registry)::Key(0x456, "Example.esp");
+		const auto blend = registry.Evaluate(kSchema, base, from, to, 0.5f);
+		Check(std::abs(blend.fogDensity - 0.4f) < 0.0001f && blend.volumetricFogEnabled == 1 &&
+				  std::abs(blend.fogInscatteringColor[0] - 0.6f) < 0.0001f,
+			"Weather values must interpolate; integer toggles switch strictly above 0.5");
+		Check(registry.Evaluate(kSchema, base, from, to, 0.51f).volumetricFogEnabled == 0, "Weather toggle did not switch");
+		const auto restored = registry.Evaluate(kSchema, base, to, "missing", 1.0f);
+		Check(restored.fogDensity == base.fogDensity && restored.fogInscatteringColor == base.fogInscatteringColor,
+			"Transition into an unconfigured weather must restore user settings");
+		auto invalid = toml::parse(R"(["0x123~Example.esp"]
+__enabled = true
+volumetricGridSizeZ = 32)");
+		Check(!registry.Configure(kSchema, kWeatherVariables, &invalid, error),
+			"Grid sizing is not an upstream weather variable");
+		invalid = toml::parse(R"(["0x123~Example.esp"]
+__enabled = true
+fogInscatteringColor = [0.1, nan, 0.3, 1.0])");
+		Check(!registry.Configure(kSchema, kWeatherVariables, &invalid, error),
+			"Nonfinite weather color must not reach the shader buffers");
 	}
-
-	void TestDegenerateFallbacks()
-	{
-		using namespace cs::features::exponential_height_fog;
-		const auto make = [](float a_distanceScale,
-							  float a_heightScaleX,
-							  float a_heightScaleY) {
-			return DeriveParameters(
-				a_distanceScale,
-				0.0f,
-				a_heightScaleX,
-				a_heightScaleY,
-				0.0f,
-				0.0f,
-				1.0f,
-				1.0f);
-		};
-		CHECK(make(0.0f, 1.0f, 1.0f).status == FitStatus::kDistanceSlopeNearZero);
-		CHECK(make(-1.0f, 1.0f, 1.0f).status == FitStatus::kDistancePlaneOrder);
-		CHECK(make(1.0f, 0.0f, 1.0f).status == FitStatus::kHeightSlopeXNearZero);
-		CHECK(make(1.0f, 1.0f, 0.0f).status == FitStatus::kHeightSlopeYNearZero);
-		CHECK(DeriveParameters(
-				  std::numeric_limits<float>::quiet_NaN(),
-				  0.0f,
-				  1.0f,
-				  1.0f,
-				  0.0f,
-				  0.0f,
-				  1.0f,
-				  1.0f)
-				  .status == FitStatus::kNonFiniteDistanceRamp);
-	}
-
 }
 
 int main()
 {
-	TestDistanceFit();
-	TestHeightFit();
-	TestDegenerateFallbacks();
-	if (failures != 0)
-		return 1;
-	std::cout << "PASS: exponential height fog fit tests\n";
-	return 0;
+	TestVolumetricCoordinates();
+	TestWeatherTransitions();
+	return failures ? 1 : 0;
 }

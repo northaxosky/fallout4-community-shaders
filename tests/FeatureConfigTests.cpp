@@ -1,5 +1,5 @@
 #include "DynamicCubemapsSettings.h"
-#include "ExponentialHeightFogMath.h"
+#include "ExponentialHeightFogSettings.h"
 #include "FrameGenerationSettings.h"
 #include "InverseSquareLightingMath.h"
 #include "PerformanceOverlaySettings.h"

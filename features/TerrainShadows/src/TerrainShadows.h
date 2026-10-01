@@ -64,6 +64,7 @@ namespace cs::features
 		void SetDebugView(std::string_view a_view) noexcept override;
 
 		cs::TerrainShadowsFeatureData GetCommonBufferData() const;
+		ID3D11ShaderResourceView* GetShadowHeightSRV() const;
 
 		using Settings = terrain_shadows::Settings;
 

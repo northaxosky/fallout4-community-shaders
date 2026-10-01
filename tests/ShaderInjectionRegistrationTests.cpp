@@ -300,6 +300,20 @@ namespace
 			RegisterReplacement(std::move(otherTarget)),
 			"same slot on another target was rejected");
 
+		const auto sampler = [](const char* a_name, ShaderSamplerContract a_contract) {
+			ShaderReplacementRegistration registration;
+			registration.targetId = ShaderInjectionTarget::kBsdfComposite;
+			registration.contributor = a_name;
+			registration.slotClaims = { { ShaderStage::kPixel, ShaderResourceType::kSampler, 13, a_contract } };
+			return registration;
+		};
+		Expect(RegisterReplacement(sampler("ledger-linear-first", ShaderSamplerContract::kLinearClamp)),
+			"linear-clamp sampler claim was rejected");
+		Expect(RegisterReplacement(sampler("ledger-linear-shared", ShaderSamplerContract::kLinearClamp)),
+			"matching immutable sampler contracts must share a slot");
+		Expect(!RegisterReplacement(sampler("ledger-exclusive", ShaderSamplerContract::kExclusive)),
+			"exclusive sampler claim overlapped a shared sampler");
+
 		ShaderReplacementRegistration conflictingDefine;
 		conflictingDefine.targetId = ShaderInjectionTarget::kBsdfComposite;
 		conflictingDefine.contributor = "ledger-conflicting-define";

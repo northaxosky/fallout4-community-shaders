@@ -15,18 +15,10 @@ namespace FO4SharedData
 		float InteriorStrength;
 		float NearFieldDistance;
 	};
-	struct ExponentialHeightFogSettings
-	{
-		uint Mode;
-		float DensityMultiplier;
-		float HeightFalloffMultiplier;
-		float pad0;
-	};
 	cbuffer FO4SharedData : register(b7)
 	{
 		ScreenSpaceGISettings screenSpaceGISettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
-		ExponentialHeightFogSettings exponentialHeightFogSettings;
 		uint WetnessDebugVisualization;
 		uint padTerrain;
 		uint DynamicCubemapsDebugVisualization;

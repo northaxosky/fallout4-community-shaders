@@ -310,7 +310,8 @@ namespace cs::features
 					.slot = kShadowHeightPSSlot },
 				{ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kSampler,
-					.slot = kShadowHeightSamplerPSSlot }
+					.slot = kShadowHeightSamplerPSSlot,
+					.samplerContract = cs::engine::ShaderSamplerContract::kLinearClamp }
 			};
 			if (a_fullscreenDebug) {
 				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
@@ -1368,6 +1369,12 @@ namespace cs::features
 		data.Offset[1] = block.offset[1];
 		data.ZBlur = block.zBlur;
 		return data;
+	}
+
+	ID3D11ShaderResourceView* TerrainShadows::GetShadowHeightSRV() const
+	{
+		// FO4: volumetric scattering consumes the same validated terrain field as materials.
+		return GetCommonBufferData().EnableTerrainShadow && _shadowTexture ? _shadowTexture->srv.get() : nullptr;
 	}
 
 	void TerrainShadows::PublishStatus(

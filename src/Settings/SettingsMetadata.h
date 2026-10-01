@@ -20,7 +20,8 @@ namespace cs::settings
 	};
 
 	using Float2 = std::array<float, 2>;
-	using Value = std::variant<bool, std::int64_t, std::uint64_t, float, double, std::string, Float2>;
+	using Color4 = std::array<float, 4>;
+	using Value = std::variant<bool, std::int64_t, std::uint64_t, float, double, std::string, Float2, Color4>;
 
 	struct FieldView
 	{

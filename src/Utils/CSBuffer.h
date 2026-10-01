@@ -74,6 +74,25 @@ namespace cs::buffer
 		D3D11_BUFFER_DESC desc;
 	};
 
+	class Texture3D
+	{
+	public:
+		Texture3D(ID3D11Device* a_device, const D3D11_TEXTURE3D_DESC& a_desc, bool a_writable)
+		{
+			DX::ThrowIfFailed(a_device->CreateTexture3D(&a_desc, nullptr, resource.put()));
+			DX::ThrowIfFailed(a_device->CreateShaderResourceView(resource.get(), nullptr, srv.put()));
+			if (a_writable)
+				DX::ThrowIfFailed(a_device->CreateUnorderedAccessView(resource.get(), nullptr, uav.put()));
+		}
+		void SetName(std::string_view a_name) const
+		{
+			cs::render::annotation::SetName(resource.get(), a_name);
+		}
+		winrt::com_ptr<ID3D11Texture3D> resource;
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		winrt::com_ptr<ID3D11UnorderedAccessView> uav;
+	};
+
 	class Texture2D
 	{
 	public:
