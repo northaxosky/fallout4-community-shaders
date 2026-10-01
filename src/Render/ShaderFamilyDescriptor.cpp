@@ -3,7 +3,6 @@
 #include "Log.h"
 
 #include <algorithm>
-#include <array>
 #include <string>
 
 namespace cs::engine
@@ -133,75 +132,6 @@ namespace cs::engine
 			return true;
 		}
 
-		bool AddEffectDefines(
-			ShaderInjectionDefines& a_defines,
-			std::uint32_t a_descriptor)
-		{
-			static constexpr std::array<std::string_view, 31> names{
-				"VC", "SKINNED", "TEXTURE", "INDEXED_TEXTURE", "FALLOFF",
-				"ADDBLEND", "MULTBLEND", "PARTICLES", "STRIP_PARTICLES",
-				"MEMBRANE", "LIGHTING", "PROJECTED_UV", "SOFT",
-				"GRAYSCALE_TO_COLOR", "GRAYSCALE_TO_ALPHA",
-				"IGNORE_TEX_ALPHA", "MULTBLEND_DECAL", "ALPHA_TEST",
-				"SKY_OBJECT", "ENVMAP", "PIPBOY_SCREEN", "RGB_FALLOFF",
-				"PARTICLE_DISTORTION", "NORMALS", "ENVCUBE_RAIN",
-				"ENVCUBE_SNOW", "EYE", "UI_MASK_RECTS", "DECAL",
-				"MERGE_INSTANCED", "PREMULTIPLY_ALPHA"
-			};
-			for (std::uint32_t bit = 0; bit < names.size(); ++bit)
-				DefineBit(a_defines, a_descriptor, 1U << bit, names[bit]);
-			return true;
-		}
-
-		bool AddUtilityDefines(
-			ShaderInjectionDefines& a_defines,
-			std::uint32_t d)
-		{
-			DefineBit(a_defines, d, 1U << 0, "VC");
-			DefineBit(a_defines, d, 1U << 1, "TEXTURE");
-			DefineBit(a_defines, d, 1U << 2, "SKINNED");
-			DefineBit(a_defines, d, 1U << 3, "NORMALS");
-			DefineBit(a_defines, d, 1U << 4, "BINORMAL_TANGENT");
-			DefineBit(a_defines, d, 1U << 6, "EYE");
-			DefineBit(a_defines, d, 1U << 7, "ALPHA_TEST");
-			if ((d & (1U << 9)) != 0 && (d & (1U << 12)) == 0)
-				Define(a_defines, "RENDER_NORMAL");
-			DefineBit(a_defines, d, 1U << 10, "RENDER_NORMAL_FALLOFF");
-			DefineBit(a_defines, d, 1U << 11, "RENDER_NORMAL_CLAMP");
-			if ((d & (1U << 12)) != 0 && (d & (1U << 9)) == 0)
-				Define(a_defines, "RENDER_NORMAL_CLEAR");
-			DefineBit(a_defines, d, 1U << 13, "RENDER_DEPTH");
-			if ((d & 0x1C000U) != 0)
-				Define(a_defines, "RENDER_SHADOWMAP");
-			DefineBit(a_defines, d, 1U << 15, "RENDER_SHADOWMAP_CLAMPED");
-			DefineBit(a_defines, d, 1U << 16, "RENDER_SHADOWMAP_PB");
-			if ((d & 0x4A0000U) != 0)
-				Define(a_defines, "DEBUG_COLOR");
-			DefineBit(a_defines, d, 1U << 18, "DEBUG_SHADOWSPLIT");
-			DefineBit(a_defines, d, 1U << 20, "GRAYSCALE_MASK");
-			DefineBit(a_defines, d, 1U << 25, "RENDER_BASE_TEXTURE");
-			DefineBit(a_defines, d, 1U << 26, "TREE_ANIM");
-			DefineBit(a_defines, d, 1U << 27, "LOD_OBJECT");
-			DefineBit(a_defines, d, 1U << 24, "VATS_MASK");
-			if ((d & (1U << 9)) != 0 && (d & (1U << 12)) != 0)
-				Define(a_defines, "STENCIL_ABOVE_WATER");
-			DefineBit(a_defines, d, 1U << 30, "SPLINE");
-			if ((d & (1U << 23)) != 0) {
-				if ((d & (1U << 21)) != 0)
-					Define(a_defines, "MERGE_INSTANCED");
-				else {
-					Define(a_defines, "INSTANCED");
-					Define(a_defines, "WIN32_MAX_BATCH_INSTANCES", "455");
-				}
-			} else {
-				DefineBit(a_defines, d, 1U << 21, "COMBINED");
-			}
-			DefineBit(a_defines, d, 1U << 28, "ADDITIONAL_ALPHA_MASK");
-			DefineBit(a_defines, d, 1U << 29, "VATS_DEBUG_COLOR");
-			DefineBit(a_defines, d, 1U << 8, "CLIP_VOLUME");
-			return true;
-		}
-
 		bool AddWaterDefines(
 			ShaderInjectionDefines& a_defines,
 			std::uint32_t d)
@@ -247,121 +177,6 @@ namespace cs::engine
 				}
 				break;
 			}
-			return true;
-		}
-
-		bool AddSkyDefines(
-			ShaderInjectionDefines& a_defines,
-			std::uint32_t a_descriptor)
-		{
-			switch (a_descriptor & 0xFFU) {
-			case 0:
-				Define(a_defines, "OCCLUSION");
-				break;
-			case 1:
-				Define(a_defines, "DITHER");
-				break;
-			case 2:
-				Define(a_defines, "TEX");
-				Define(a_defines, "MOONMASK");
-				break;
-			case 3:
-				Define(a_defines, "HORIZFADE");
-				break;
-			case 4:
-				Define(a_defines, "TEX");
-				break;
-			case 5:
-				Define(a_defines, "TEX");
-				Define(a_defines, "CLOUDS");
-				break;
-			case 6:
-				Define(a_defines, "TEX");
-				Define(a_defines, "CLOUDS");
-				Define(a_defines, "TEXLERP");
-				break;
-			case 7:
-				Define(a_defines, "TEX");
-				Define(a_defines, "CLOUDS");
-				if (a_descriptor == 7)
-					Define(a_defines, "TEXFADE");
-				break;
-			case 8:
-				Define(a_defines, "TEX");
-				Define(a_defines, "DITHER");
-				break;
-			default:
-				return false;
-			}
-			return true;
-		}
-
-		bool AddParticleDefines(
-			ShaderInjectionDefines& a_defines,
-			ShaderStage a_stage,
-			std::uint32_t a_descriptor)
-		{
-			if (a_descriptor > 5)
-				return false;
-			if (a_stage == ShaderStage::kPixel) {
-				if (a_descriptor == 1 || a_descriptor == 3)
-					Define(a_defines, "GRAYSCALE_TO_COLOR");
-				if (a_descriptor == 2 || a_descriptor == 3)
-					Define(a_defines, "GRAYSCALE_TO_ALPHA");
-			} else if (a_stage == ShaderStage::kVertex) {
-				if (a_descriptor == 4 || a_descriptor == 5) {
-					Define(a_defines, "ENVCUBE");
-					Define(a_defines, a_descriptor == 4 ? "SNOW" : "RAIN");
-				}
-			} else {
-				return false;
-			}
-			return true;
-		}
-
-		bool AddLightingDefines(
-			ShaderInjectionDefines& a_defines,
-			ShaderStage a_stage,
-			std::uint32_t a_descriptor)
-		{
-			if (a_stage == ShaderStage::kVertex) {
-				if ((a_descriptor & 0x800U) != 0)
-					Define(a_defines, "BSLIGHTING_VS_DISPLACED");
-				else if ((a_descriptor & 0x4U) != 0)
-					Define(a_defines, "BSLIGHTING_VS_REDUCED");
-				else if ((a_descriptor & 0x2U) != 0)
-					Define(a_defines, "BSLIGHTING_VS_SKINNED");
-				else if ((a_descriptor & 0x500U) == 0x100U)
-					Define(a_defines, "BSLIGHTING_VS_WORLD");
-				else
-					Define(a_defines, "BSLIGHTING_VS_STATIC");
-				DefineBit(a_defines, a_descriptor, 0x1U, "BSL_VERTEX_COLOR");
-				return true;
-			}
-			if (a_stage != ShaderStage::kPixel)
-				return false;
-
-			if ((a_descriptor & 0xC0U) != 0)
-				Define(a_defines, "BSLIGHTING_PS_RESOURCE");
-			else if ((a_descriptor & 0x400U) != 0)
-				Define(a_defines, "BSLIGHTING_PS_COLOR");
-			else
-				Define(a_defines, "BSLIGHTING_PS_CORE");
-			DefineBit(a_defines, a_descriptor, 0x40U, "BSL_BASE_LUT");
-			DefineBit(a_defines, a_descriptor, 0x80U, "BSL_OVERLAY");
-			if ((a_descriptor & 0xC00U) == 0xC00U) {
-				Define(a_defines, "BSL_NO_VERTEX_ALPHA");
-			} else if ((a_descriptor & 0x600U) == 0x600U) {
-				Define(a_defines, "BSL_VERTEX_TINT");
-			} else if ((a_descriptor & 0x500U) == 0x500U) {
-				Define(a_defines, "BSL_BASE_BLEND");
-				Define(a_defines, "BSL_BASE_BLEND_TINT");
-			} else {
-				DefineBit(a_defines, a_descriptor, 0x100U, "BSL_ENVMAP");
-				DefineBit(a_defines, a_descriptor, 0x200U, "BSL_GLOWMAP");
-				DefineBit(a_defines, a_descriptor, 0x400U, "BSL_BASE_BLEND");
-			}
-			DefineBit(a_defines, a_descriptor, 0x4U, "BSL_REDUCED_NORMAL");
 			return true;
 		}
 
@@ -805,29 +620,8 @@ namespace cs::engine
 					Define(a_defines, "EARLYDEPTH");
 				}
 				return true;
-			case ShaderInjectionTarget::kUtility:
-				return AddUtilityDefines(a_defines, d);
-			case ShaderInjectionTarget::kParticle:
-				return AddParticleDefines(a_defines, a_descriptor.stage, d);
-			case ShaderInjectionTarget::kEffect:
-				return AddEffectDefines(a_defines, d);
-			case ShaderInjectionTarget::kBloodSplatter:
-				if (d > 1)
-					return false;
-				Define(a_defines, d == 0 ? "SPLATTER" : "FLARE");
-				return true;
-			case ShaderInjectionTarget::kDistantTree:
-				if (d > 1)
-					return false;
-				DefineBit(a_defines, d, 1, "RENDER_DEPTH");
-				return true;
-			case ShaderInjectionTarget::kBsSky:
-				return AddSkyDefines(a_defines, d);
 			case ShaderInjectionTarget::kBsWater:
 				return AddWaterDefines(a_defines, d);
-			case ShaderInjectionTarget::kBsLighting:
-				return AddLightingDefines(
-					a_defines, a_descriptor.stage, d);
 			case ShaderInjectionTarget::kBsdfLight:
 				return AddBsdfLightDefines(
 					a_defines, a_descriptor.stage, d);
@@ -861,36 +655,6 @@ namespace cs::engine
 				define = a_descriptor.stage == ShaderStage::kVertex ?
 				             "BSDFPREPASS_VS_SOURCE" :
 				             "BSDFPREPASS_PS_SOURCE";
-				break;
-			case ShaderInjectionTarget::kUtility:
-				define = a_descriptor.stage == ShaderStage::kVertex ?
-				             "BSUTILITY_VS_SOURCE" :
-				             "BSUTILITY_PS_SOURCE";
-				break;
-			case ShaderInjectionTarget::kParticle:
-				define = a_descriptor.stage == ShaderStage::kVertex ?
-				             "PARTICLE_VS_SOURCE" :
-				             "PARTICLE_PS_SOURCE";
-				break;
-			case ShaderInjectionTarget::kEffect:
-				define = a_descriptor.stage == ShaderStage::kVertex ?
-				             "BSEFFECT_VS_SOURCE" :
-				             "BSEFFECT_PS_SOURCE";
-				break;
-			case ShaderInjectionTarget::kBloodSplatter:
-				define = a_descriptor.stage == ShaderStage::kVertex ?
-				             "BSBLOODSPLATTER_VS_SOURCE" :
-				             "BSBLOODSPLATTER_PS_SOURCE";
-				break;
-			case ShaderInjectionTarget::kDistantTree:
-				define = a_descriptor.stage == ShaderStage::kVertex ?
-				             "BSDISTANTTREE_VS_SOURCE" :
-				             "BSDISTANTTREE_PS_SOURCE";
-				break;
-			case ShaderInjectionTarget::kBsSky:
-				define = a_descriptor.stage == ShaderStage::kVertex ?
-				             "BSSKY_VERTEX_SHADER" :
-				             "BSSKY_PIXEL_SHADER";
 				break;
 			case ShaderInjectionTarget::kBsWater:
 				define = a_descriptor.stage == ShaderStage::kVertex ?

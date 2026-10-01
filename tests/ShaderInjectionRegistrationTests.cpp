@@ -233,19 +233,19 @@ namespace
 	{
 		using namespace cs::engine;
 		const auto* target =
-			GetShaderInjectionTarget(ShaderInjectionTarget::kBsLighting);
-		Expect(target != nullptr, "BSLighting target metadata is missing");
+			GetShaderInjectionTarget(ShaderInjectionTarget::kBsdfLight);
+		Expect(target != nullptr, "BSDF light target metadata is missing");
 		if (!target)
 			return;
 
 		const ShaderVariantCompilationDescriptor family{
-			.sourcePath = L"BSLightingShader.hlsl",
+			.sourcePath = std::wstring(target->sourcePath),
 			.entryPoint = "main",
 			.profile = "ps_5_0",
 			.defines = { { "CONFLICT", "family" } },
 		};
 		const ShaderReplacementRegistration contribution{
-			.targetId = ShaderInjectionTarget::kBsLighting,
+			.targetId = target->id,
 			.stages = ShaderStageBit(ShaderStage::kPixel),
 			.contributor = "test",
 			.defines = { { "CONFLICT", "feature" } },
@@ -673,14 +673,16 @@ namespace
 			Expect(
 				SetBaselineShaderOwnership(target.id, target.BaselineOwnable()),
 				"could not apply baseline ownership");
+			Expect(
+				SetDeveloperShaderOverride(target.id, DeveloperShaderOverride::kForceOn),
+				"could not set developer override");
 		}
-		Expect(
-			SetDeveloperShaderOverride(ShaderInjectionTarget::kImageSpace, DeveloperShaderOverride::kForceOn),
-			"could not set developer override");
 		FreezeAndCompileShaderInjections(device.get());
-		Expect(
-			GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kImageSpace).requested,
-			"freeze did not request a target with reconstructed families");
+		for (const auto& target : GetShaderInjectionTargets()) {
+			Expect(
+				GetShaderInjectionTargetSnapshot(target.id).requested == target.BaselineOwnable(),
+				"freeze requests do not match targets with reconstructed families");
+		}
 		const auto snapshot = GetShaderInjectionTargetSnapshot(
 			ShaderInjectionTarget::kDfTiledLighting);
 		Expect(

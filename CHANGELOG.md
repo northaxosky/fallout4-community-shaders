@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Effect, utility, forward lighting, sky, particle, blood splatter and distant tree shaders are no longer replaced; no feature used them and the rebuilds matched vanilla exactly, so nothing looks different.
+
 ## 0.2.1
 
 - Imagespace post-processing now uses the game's own shaders; only screen-space reflections are replaced, with a rebuild that matches vanilla exactly.
