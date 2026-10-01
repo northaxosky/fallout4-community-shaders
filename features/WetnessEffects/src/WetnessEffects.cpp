@@ -66,6 +66,12 @@ namespace cs::features
 		_debugVisualization.store(visualization, std::memory_order_release);
 	}
 
+	FullscreenDebugData WetnessEffects::GetFullscreenDebugData() const noexcept
+	{
+		return { .owner = FullscreenDebugOwner::WetnessEffects,
+			.mode = static_cast<std::uint32_t>(_debugVisualization.load(std::memory_order_acquire)) };
+	}
+
 	bool WetnessEffects::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
@@ -97,7 +103,7 @@ namespace cs::features
 				.defines = {
 					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" } },
 				.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire) && _hostBuffer;
+					return _registrationsReady.load(std::memory_order_acquire) && _filmAvailabilitySRV;
 				}
 			};
 			const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
@@ -115,9 +121,6 @@ namespace cs::features
 				.resourceType = cs::engine::ShaderResourceType::kShaderResource,
 				.slot = 71 });
 			if (!compute) {
-				registration.slotClaims.push_back({ .stage = stage,
-					.resourceType = cs::engine::ShaderResourceType::kConstantBuffer,
-					.slot = 8 });
 				registration.slotClaims.push_back({ .stage = stage,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
 					.slot = 70 });
@@ -223,9 +226,19 @@ namespace cs::features
 
 	void WetnessEffects::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		const auto desc = cs::buffer::ConstantBufferDesc(16u);
-		DX::ThrowIfFailed(a_device->CreateBuffer(&desc, nullptr, _hostBuffer.put()));
-		cs::render::annotation::SetName(_hostBuffer.get(), "WetnessEffects::Host");
+		// A non-aliasing t71 presence marker preserves native wetness on rejected producer draws.
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = desc.Height = desc.MipLevels = desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_IMMUTABLE;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		const std::uint8_t value = 0;
+		const D3D11_SUBRESOURCE_DATA initial{ &value, 1, 0 };
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		DX::ThrowIfFailed(a_device->CreateTexture2D(&desc, &initial, texture.put()));
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(texture.get(), nullptr, _filmAvailabilitySRV.put()));
+		cs::render::annotation::SetName(_filmAvailabilitySRV.get(), "WetnessEffects::Film availability");
 	}
 
 	void WetnessEffects::BeginPrepass()
@@ -263,22 +276,6 @@ namespace cs::features
 		const float dry[]{ 0.5f, 0.5f, 1.0f, 0.0f };
 		context->ClearRenderTargetView(_filmRTV.get(), dry);
 		_filmReady.store(true, std::memory_order_relaxed);
-	}
-
-	void WetnessEffects::UploadHost(ID3D11DeviceContext* a_context, bool a_producer)
-	{
-		const std::array<std::uint32_t, 4> data{
-			static_cast<std::uint32_t>(_debugVisualization.load(std::memory_order_acquire)),
-			a_producer ? 1u : 0u, 0, 0
-		};
-		D3D11_MAPPED_SUBRESOURCE mapped{};
-		ID3D11Buffer* buffer = nullptr;
-		if (SUCCEEDED(a_context->Map(_hostBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-			std::memcpy(mapped.pData, data.data(), sizeof(data));
-			a_context->Unmap(_hostBuffer.get(), 0);
-			buffer = _hostBuffer.get();
-		}
-		a_context->PSSetConstantBuffers(8, 1, &buffer);
 	}
 
 	void WetnessEffects::BindFilmOutput(ID3D11DeviceContext* a_context)
@@ -338,7 +335,8 @@ namespace cs::features
 		for (auto* target : targets)
 			if (target)
 				target->Release();
-		UploadHost(a_context, bound);
+		auto* availability = bound ? _filmAvailabilitySRV.get() : nullptr;
+		a_context->PSSetShaderResources(71, 1, &availability);
 		(bound ? _producerDraws : _producerRejected).fetch_add(1, std::memory_order_relaxed);
 	}
 
@@ -351,7 +349,6 @@ namespace cs::features
 			a_context->PSSetShaderResources(71, 1, &view);
 			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
 			a_context->PSSetShaderResources(70, 1, &precip);
-			UploadHost(a_context, false);
 		}
 	}
 
@@ -448,7 +445,6 @@ namespace cs::features
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		// a null bind reads outside the encode domain, which is wetness identity
 		a_context->PSSetShaderResources(kGbufferNormalPSSlot, 1, &srv);
-		UploadHost(a_context, false);
 		if (srv) {
 			_normalBinds.fetch_add(1, std::memory_order_relaxed);
 		} else {
@@ -459,8 +455,6 @@ namespace cs::features
 	void WetnessEffects::SaveCompositeBindings()
 	{
 		auto* context = GetImmediateContext();
-		if (context && !_engineBindings[0].IsSaved())
-			context->PSGetConstantBuffers(8, 1, _engineHostBinding.put());
 		for (std::size_t i = 0; i < kCompositePSSlots.size(); ++i) {
 			if (!_engineBindings[i].Save(context, kCompositePSSlots[i]) && _engineBindings[i].IsSaved()) {
 				CS_LOG_ONCE(
@@ -474,14 +468,8 @@ namespace cs::features
 	void WetnessEffects::RestoreCompositeBindings()
 	{
 		auto* context = GetImmediateContext();
-		const bool saved = _engineBindings[0].IsSaved();
 		for (auto& binding : _engineBindings)
 			binding.Restore(context);
-		if (saved && context) {
-			auto* buffer = _engineHostBinding.get();
-			context->PSSetConstantBuffers(8, 1, &buffer);
-			_engineHostBinding = nullptr;
-		}
 	}
 
 	void WetnessEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const

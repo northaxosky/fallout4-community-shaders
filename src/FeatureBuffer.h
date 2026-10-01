@@ -23,9 +23,8 @@ namespace cs
 	struct alignas(16) DynamicCubemapsFeatureData
 	{
 		std::uint32_t Enabled = 0;
-		std::uint32_t DebugVisualization = 0;
 		std::uint32_t EnabledSSR = 0;
-		std::uint32_t pad0 = 0;
+		std::uint32_t pad0[2]{};
 	};
 	static_assert(sizeof(DynamicCubemapsFeatureData) == 16);
 
@@ -46,8 +45,7 @@ namespace cs
 	static_assert(offsetof(TerrainShadowsFeatureData, ZBlur) == 32);
 	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 240);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
-	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 4);
-	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 8);
+	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 4);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

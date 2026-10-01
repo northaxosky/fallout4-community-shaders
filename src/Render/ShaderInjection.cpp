@@ -744,7 +744,8 @@ namespace cs::engine
 			for (const auto& claim : a_claims) {
 				if ((claim.resourceType == ShaderResourceType::kConstantBuffer &&
 						claim.slot >= render::kFrameDataSlot && claim.slot <= render::kFO4SharedDataSlot) ||
-					(claim.resourceType == ShaderResourceType::kShaderResource && claim.slot == render::kCanonicalDepthSlot))
+					(claim.resourceType == ShaderResourceType::kShaderResource &&
+						(claim.slot == render::kCanonicalDepthSlot || claim.slot == render::kFullscreenDebugTextureSlot)))
 					return claim;
 			}
 			return std::nullopt;

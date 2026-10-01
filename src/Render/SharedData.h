@@ -36,6 +36,7 @@ namespace cs::render
 	private:
 		std::array<winrt::com_ptr<ID3D11Buffer>, kSubstrateBufferCount> _buffers;
 		winrt::com_ptr<ID3D11ShaderResourceView> _depth;
+		winrt::com_ptr<ID3D11ShaderResourceView> _debugTexture;
 	};
 
 	// Preserve the substrate around one engine dispatch.

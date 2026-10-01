@@ -87,6 +87,8 @@ namespace cs
 
 		virtual std::span<const FeatureDebugView> GetDebugViews() const noexcept { return {}; }
 		virtual void SetDebugView(std::string_view) noexcept {}
+		// Render thread only; the texture is borrowed until the next render callback.
+		virtual FullscreenDebugData GetFullscreenDebugData() const noexcept { return {}; }
 
 		virtual void RestoreDefaultSettings() {}
 
@@ -215,11 +217,13 @@ namespace cs
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
 		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }
 		bool ApplyDebugViews(std::span<const FeatureDebugSelection> a_selections);
+		Feature* GetFullscreenDebugFeature() const noexcept { return _fullscreenDebugFeature.load(std::memory_order_acquire); }
 
 	private:
 		FeatureManager() = default;
 		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _loadedFeatures;
+		std::atomic<Feature*> _fullscreenDebugFeature{ nullptr };
 		bool _d3d11ReadyDone = false;
 	};
 }

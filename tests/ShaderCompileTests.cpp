@@ -564,10 +564,9 @@ namespace
 			ABI(SharedFeatureDataCB, skinData), ABI(SharedFeatureDataCB, horizonFixSettings)
 		};
 		const ABIField fo4[]{
-			ABI(FO4SharedDataCB, reserved0),
-			ABI(FO4SharedDataCB, padTerrain), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
+			ABI(FO4SharedDataCB, DebugOwner), ABI(FO4SharedDataCB, DebugMode),
 			ABI(FO4SharedDataCB, EnabledSSR),
-			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, pad0)
+			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams)
 		};
 		struct Buffer
 		{
@@ -915,7 +914,7 @@ namespace
 				 { { "BSDFCOMPOSITE_PS_NO_T0_FOG", "1" }, { "WAVE5A_FOG_SHAPE", "1" } } }) {
 			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" },
 											  { "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", "1" } });
-			a_jobs.push_back({ .path = composite, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog composite consumer", .required = { CB(4), CB(5), CB(6), Texture(17), Texture(19), Sampler(13) }, .forbidden = { CB(7) } });
+			a_jobs.push_back({ .path = composite, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog composite consumer", .required = { CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(19), Sampler(13) }, .forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
 		}
 		for (auto defines : std::vector<ShaderDefines>{
 				 { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "AMBIENT_IBL_IN_LIGHT", "1" } },
@@ -965,7 +964,7 @@ namespace
 				{ "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature off",
-			.forbidden = { CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(25), Texture(26), Texture(27), Texture(28), Texture(29), Texture(34), Texture(35), Texture(36) } });
+			.forbidden = { CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(25), Texture(26), Texture(27), Texture(28), Texture(29), Texture(33), Texture(34), Texture(35), Texture(36), Texture(61) } });
 		a_jobs.push_back({ .path = composite,
 			.defines = {
 				{ "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY", "1" },
@@ -976,12 +975,14 @@ namespace
 				{ "TERRAIN_SHADOWS", "1" },
 				{ "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", "1" },
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" },
+				{ "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", "1" },
+				{ "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" },
 				{ "WATER_EFFECTS", "1" },
 				{ "WATER_EFFECTS_FULLSCREEN_DEBUG", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
-			.required = { CB(4), CB(5), CB(6), CB(13), Texture(25), Texture(33), Texture(71), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
-			.forbidden = { CB(7), Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
+			.required = { CB(4), CB(5), CB(6), CB(7), Texture(25), Texture(71), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
+			.forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
 
 		for (auto defines : std::vector<ShaderDefines>{
 				 { { "BSDFLIGHT_PS_DIRSPLITS1", "1" }, { "DIRSPLITS", "1" } },
@@ -1058,11 +1059,11 @@ namespace
 					.profile = "ps_5_0",
 					.description = family,
 					.required = dynamicCubemaps ?
-				                    std::vector<Resource>{ CB(8), Texture(25), Texture(34), Texture(35), Texture(71) } :
-				                    std::vector<Resource>{ CB(8), Texture(25), Texture(71) },
+				                    std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
+				                    std::vector<Resource>{ CB(7), Texture(25), Texture(71) },
 					.forbidden = dynamicCubemaps ?
-				                     std::vector<Resource>{} :
-				                     std::vector<Resource>{ Texture(34), Texture(35) } });
+				                     std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
+				                     std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35) } });
 			}
 		}
 
@@ -1080,7 +1081,8 @@ namespace
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
 				.description = "BSDFComposite prepass film and debug",
-				.required = { CB(4), CB(6), CB(8), Texture(25), Texture(71) } });
+				.required = { CB(4), CB(6), CB(7), Texture(25), Texture(71) },
+				.forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
 		}
 
 		for (auto defines : std::vector<ShaderDefines>{
@@ -1149,8 +1151,8 @@ namespace
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
 				.description = "Wetness deferred material producer",
-				.required = { CB(4), CB(5), CB(6), CB(8) },
-				.forbidden = { CB(7), Texture(71) } });
+				.required = { CB(4), CB(5), CB(6), Texture(71) },
+				.forbidden = { CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
 			auto vertexDefines = material;
 			vertexDefines.insert(vertexDefines.end(), { { "BSDFPREPASS_VS_SOURCE", "1" },
 														  { "WETNESS_EFFECTS", "1" }, { "NORMALS", "1" }, { "BINORMAL_TANGENT", "1" }, { "TEXTURE", "1" } });
@@ -1282,8 +1284,8 @@ namespace
 				{ "NORMALS", "1" }, { "VC", "1" }, { "SSGI", "1" }, { "WETNESS_EFFECTS", "1" } },
 			.profile = "ps_5_0",
 			.description = "Wet material and SSGI vertex AO producer",
-			.required = { CB(6), CB(8) },
-			.forbidden = { CB(7) } });
+			.required = { CB(6), Texture(71) },
+			.forbidden = { CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
 		a_jobs.push_back({ .path = water,
 			.defines = { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" },
 				{ "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" },

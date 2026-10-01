@@ -16,6 +16,8 @@ namespace cs::render
 		case engine::ShaderStage::kPixel:
 			a_context->PSGetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
 			a_context->PSGetShaderResources(kCanonicalDepthSlot, 1, &depth);
+			_debugTexture = nullptr;
+			a_context->PSGetShaderResources(kFullscreenDebugTextureSlot, 1, _debugTexture.put());
 			break;
 		case engine::ShaderStage::kCompute:
 			a_context->CSGetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
@@ -35,6 +37,7 @@ namespace cs::render
 		for (std::size_t index = 0; index < _buffers.size(); ++index)
 			buffers[index] = _buffers[index].get();
 		auto* depth = _depth.get();
+		auto* debugTexture = _debugTexture.get();
 		switch (a_stage) {
 		case engine::ShaderStage::kVertex:
 			a_context->VSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
@@ -43,6 +46,7 @@ namespace cs::render
 		case engine::ShaderStage::kPixel:
 			a_context->PSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
 			a_context->PSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
+			a_context->PSSetShaderResources(kFullscreenDebugTextureSlot, 1, &debugTexture);
 			break;
 		case engine::ShaderStage::kCompute:
 			a_context->CSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
@@ -54,6 +58,7 @@ namespace cs::render
 		for (auto& buffer : _buffers)
 			buffer = nullptr;
 		_depth = nullptr;
+		_debugTexture = nullptr;
 	}
 
 	ScopedComputeSharedDataBinding::ScopedComputeSharedDataBinding(

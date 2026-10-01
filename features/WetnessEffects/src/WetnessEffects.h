@@ -46,6 +46,7 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		cs::WetnessEffectsFeatureData GetCommonBufferData() const;
 
@@ -62,7 +63,6 @@ namespace cs::features
 		void BeginPrepass();
 		void BindFilmOutput(ID3D11DeviceContext*);
 		void BindFilmInput(ID3D11DeviceContext*, bool a_compute);
-		void UploadHost(ID3D11DeviceContext*, bool a_producer);
 
 		static constexpr std::uint32_t kGbufferNormalPSSlot = 25;
 		static constexpr std::array kCompositePSSlots{ kGbufferNormalPSSlot, 70u, 71u };
@@ -85,10 +85,10 @@ namespace cs::features
 
 		// render thread only
 		std::array<cs::render::PixelShaderResourceSnapshot<1>, kCompositePSSlots.size()> _engineBindings;
-		winrt::com_ptr<ID3D11Buffer> _hostBuffer, _engineHostBinding;
 		winrt::com_ptr<ID3D11Texture2D> _filmTexture;
 		winrt::com_ptr<ID3D11RenderTargetView> _filmRTV;
 		winrt::com_ptr<ID3D11ShaderResourceView> _filmSRV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _filmAvailabilitySRV;
 		struct FilmBlend
 		{
 			winrt::com_ptr<ID3D11BlendState> native, film;

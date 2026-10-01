@@ -40,7 +40,6 @@ namespace cs::features
 		};
 
 		static constexpr std::uint32_t kCausticsPSSlot = 65;
-		static constexpr std::uint32_t kDebugTexturePSSlot = 33;
 		static constexpr std::uint32_t kCausticsSamplerPSSlot = 14;
 
 		static WaterEffects* GetSingleton();
@@ -66,6 +65,7 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		using Settings = water_effects::Settings;
 
@@ -82,9 +82,6 @@ namespace cs::features
 		void SaveEngineBindings();
 		void BindCaustics(ID3D11DeviceContext* a_context);
 		void RestoreEngineBindings();
-		void SaveDebugBindings();
-		void BindDebugTextures(ID3D11DeviceContext* a_context);
-		void RestoreDebugBindings();
 		void BuildDebugResources(ID3D11Device* a_device);
 		void RenderDebug(ID3D11DeviceContext* a_context);
 
@@ -101,7 +98,7 @@ namespace cs::features
 		std::atomic_bool _debugResourcesReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
 		std::atomic_uint64_t _binds{ 0 };
-		std::atomic_uint64_t _debugBinds{ 0 };
+		std::atomic_uint64_t _debugFrames{ 0 };
 		std::atomic_uint64_t _debugDepthMissing{ 0 };
 
 		winrt::com_ptr<ID3D11Texture2D> _causticsTexture;
@@ -116,7 +113,6 @@ namespace cs::features
 
 		cs::render::PixelShaderResourceSnapshot<1> _engineBinding;
 		cs::render::PixelShaderSamplerSnapshot<1> _engineSamplerBinding;
-		cs::render::PixelShaderResourceSnapshot<1> _debugBinding;
 
 		mutable std::mutex _validationMutex;
 		std::string _validationDetail;

@@ -28,16 +28,16 @@ namespace WaterEffects
 	}
 #else
 	// FO4: composite s14 belongs to scene colour; sample the isolated debug result.
-	Texture2D<float4> DebugTexture : register(t33);
-
 	bool TryGetDebugColor(float2 pixelPosition, out float4 color)
 	{
 		color = 0.0;
+		if (FO4SharedData::DebugOwner != FullscreenDebugOwner::WaterEffects || FO4SharedData::DebugMode == 0)
+			return false;
 		uint2 dimensions;
-		DebugTexture.GetDimensions(dimensions.x, dimensions.y);
+		FO4SharedData::DebugTexture.GetDimensions(dimensions.x, dimensions.y);
 		if (any(dimensions == 0))
 			return false;
-		color = DebugTexture.Load(int3(min(uint2(pixelPosition), dimensions - 1), 0));
+		color = FO4SharedData::DebugTexture.Load(int3(min(uint2(pixelPosition), dimensions - 1), 0));
 		return true;
 	}
 

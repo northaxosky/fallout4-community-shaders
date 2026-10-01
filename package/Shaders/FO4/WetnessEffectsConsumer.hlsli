@@ -10,12 +10,6 @@
 namespace WetnessEffects
 {
 	Texture2D<float4> Film : register(t71);
-	cbuffer WetnessHost : register(b8)
-	{
-		uint DebugVisualization;
-		uint ProducerReady;
-		uint2 HostPadding;
-	};
 
 	struct Surface
 	{
@@ -59,11 +53,13 @@ namespace WetnessEffects
 	bool TryGetDebugColor(Surface surface, out float4 color)
 	{
 		color = 0;
-		if (DebugVisualization == 1) {
+		if (FO4SharedData::DebugOwner != FullscreenDebugOwner::WetnessEffects)
+			return false;
+		if (FO4SharedData::DebugMode == 1) {
 			color = float4(surface.wetness.xxx, 1);
 			return true;
 		}
-		if (DebugVisualization == 2) {
+		if (FO4SharedData::DebugMode == 2) {
 			color = float4(saturate(surface.worldUp).xxx, 1);
 			return true;
 		}

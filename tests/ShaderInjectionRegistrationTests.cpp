@@ -345,13 +345,13 @@ namespace
 				!RegisterReplacement(std::move(reserved)),
 				"reserved b4-b7 claim was accepted");
 		}
-		ShaderReplacementRegistration reservedDepth;
-		reservedDepth.targetId = ShaderInjectionTarget::kBsdfComposite;
-		reservedDepth.contributor = "ledger-reserved-depth";
-		reservedDepth.slotClaims = { { .stage = ShaderStage::kPixel,
-			.resourceType = ShaderResourceType::kShaderResource,
-			.slot = cs::render::kCanonicalDepthSlot } };
-		Expect(!RegisterReplacement(std::move(reservedDepth)), "reserved t17 claim was accepted");
+		for (auto slot : { cs::render::kCanonicalDepthSlot, cs::render::kFullscreenDebugTextureSlot }) {
+			ShaderReplacementRegistration reserved;
+			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
+			reserved.contributor = "ledger-reserved-texture";
+			reserved.slotClaims = { textureClaim(slot) };
+			Expect(!RegisterReplacement(std::move(reserved)), "reserved substrate texture claim was accepted");
+		}
 
 		drawAnchorInstallFails = true;
 		ShaderReplacementRegistration rejectedAnchor;
@@ -795,6 +795,28 @@ namespace
 		Expect(
 			publishedComputeBuffers[0] && publishedComputeBuffers[1] && publishedComputeBuffers[2] && publishedComputeBuffers[3] && publishedDepth,
 			"could not create shared compute buffers");
+
+		// Pixel substrate scopes must restore the shared debug slot, including a null native binding.
+		for (auto* original : { inputs.srv.get(), static_cast<ID3D11ShaderResourceView*>(nullptr) }) {
+			const auto slot = cs::render::kFullscreenDebugTextureSlot;
+			context->PSSetShaderResources(slot, 1, &original);
+			cs::render::SubstrateBindingSnapshot outer;
+			outer.Save(context.get(), ShaderStage::kPixel);
+			auto* debug = publishedDepth.get();
+			context->PSSetShaderResources(slot, 1, &debug);
+			cs::render::SubstrateBindingSnapshot inner;
+			inner.Save(context.get(), ShaderStage::kPixel);
+			ID3D11ShaderResourceView* nullView = nullptr;
+			context->PSSetShaderResources(slot, 1, &nullView);
+			inner.Restore(context.get(), ShaderStage::kPixel);
+			winrt::com_ptr<ID3D11ShaderResourceView> restored;
+			context->PSGetShaderResources(slot, 1, restored.put());
+			Expect(restored.get() == debug, "nested substrate scope lost the active debug texture");
+			outer.Restore(context.get(), ShaderStage::kPixel);
+			restored = nullptr;
+			context->PSGetShaderResources(slot, 1, restored.put());
+			Expect(restored.get() == original, "substrate scope leaked t61 into the native pixel state");
+		}
 
 		RE::BSGraphics::ComputeShader nativeWrapper{};
 		nativeWrapper.id = 1;

@@ -48,28 +48,22 @@ namespace TerrainShadows
 	}
 
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
-	Texture2D<float> DebugHeightTexture : register(t61);
-	// FO4: diagnostic data is separate from upstream b6 and transitional b7.
-	cbuffer TerrainShadowsDebug : register(b13)
-	{
-		uint DebugMode;
-		float3 DebugPadding;
-		float2 HeightRange;
-		float2 DebugHeightRange;
-	};
-
 	bool TryGetDebugColorFromViewPosition(
 		float3 viewPosition, SamplerState textureSampler,
 		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2,
 		float4 cameraPosAdjust, out float4 color)
 	{
 		color = 0.0;
-		if (!SharedData::terraOccSettings.EnableTerrainShadow || DebugMode == 0)
+		if (FO4SharedData::DebugOwner != FullscreenDebugOwner::TerrainShadows)
+			return false;
+		if (!SharedData::terraOccSettings.EnableTerrainShadow || FO4SharedData::DebugMode == 0)
 			return false;
 		float3 worldPosition = FrameBuffer::ViewToWorld(viewPosition) + FrameBuffer::CameraPosAdjust.xyz;
 		float value = GetTerrainShadow(worldPosition, textureSampler);
-		if (DebugMode == 2) {
-			float height = DebugHeightTexture.SampleLevel(textureSampler, GetTerrainShadowUV(worldPosition.xy), 0);
+		if (FO4SharedData::DebugMode == 2) {
+			float2 HeightRange = FO4SharedData::DebugParams.xy;
+			float2 DebugHeightRange = FO4SharedData::DebugParams.zw;
+			float height = FO4SharedData::DebugTexture.SampleLevel(textureSampler, GetTerrainShadowUV(worldPosition.xy), 0).x;
 			height = lerp(HeightRange.x, HeightRange.y, height);
 			value = saturate((height - DebugHeightRange.x) / max(DebugHeightRange.y - DebugHeightRange.x, 1e-3));
 		}

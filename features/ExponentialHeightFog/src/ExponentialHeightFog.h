@@ -31,6 +31,7 @@ namespace cs::features
 		void CollectTelemetry(telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 		render::ExponentialHeightFogSettings GetCommonBufferData() const;
 
 	private:
@@ -45,7 +46,6 @@ namespace cs::features
 		weather::VariableRegistry<std::remove_cv_t<decltype(exponential_height_fog::kSchema)>> _weather;
 		std::string _previousWeather;
 		exponential_height_fog::VolumetricFog _volume;
-		std::unique_ptr<buffer::ConstantBuffer> _debugConstants;
 		std::atomic_bool _debugFogFactor{ false };
 		mutable std::mutex _settingsMutex;
 		std::atomic_bool _resourcesReady{ false }, _operational{ false }, _frameReady{ false };

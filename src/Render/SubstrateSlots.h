@@ -10,4 +10,5 @@ namespace cs::render
 	inline constexpr std::uint32_t kFO4SharedDataSlot = 7;
 	inline constexpr std::uint32_t kSubstrateBufferCount = 4;
 	inline constexpr std::uint32_t kCanonicalDepthSlot = 17;
+	inline constexpr std::uint32_t kFullscreenDebugTextureSlot = 61;
 }

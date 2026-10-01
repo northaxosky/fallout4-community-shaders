@@ -1282,8 +1282,6 @@ namespace cs::features
 				_enabled.load(std::memory_order_acquire) ? 1u : 0u;
 			data.EnabledSSR =
 				_enabledSSR.load(std::memory_order_acquire) ? 1u : 0u;
-			data.DebugVisualization = static_cast<std::uint32_t>(
-				_debugVisualization.load(std::memory_order_acquire));
 		}
 		return data;
 	}

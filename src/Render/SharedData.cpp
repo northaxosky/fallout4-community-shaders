@@ -1,6 +1,7 @@
 #include "Render/SharedData.h"
 
 #include "ExponentialHeightFog.h"
+#include "Feature.h"
 #include "FeatureBuffer.h"
 #include "Log.h"
 #include "LogThrottle.h"
@@ -46,6 +47,7 @@ namespace cs::render
 			std::atomic_uint32_t lastFrame{ UINT32_MAX };
 			SubstrateBindingSnapshot savedPixelBindings;
 			SubstrateBindingSnapshot savedVertexBindings;
+			FO4SharedDataCB fo4{};
 			DirectX::XMFLOAT2 previousRatio{ 1.0f, 1.0f };
 			bool hasResolutionHistory = false;
 			// Render thread only.
@@ -156,7 +158,6 @@ namespace cs::render
 			auto& fo4 = a_data.fo4;
 			if (auto* fog = features::ExponentialHeightFog::GetSingleton(); fog->IsLoaded())
 				a_data.feature.exponentialHeightFogSettings = fog->GetCommonBufferData();
-			fo4.DynamicCubemapsDebugVisualization = a_features.dynamicCubemapsSettings.DebugVisualization;
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
 			a_data.feature.cubemapCreatorSettings.Enabled = a_features.dynamicCubemapsSettings.Enabled;
 			auto& terrain = a_data.feature.terraOccSettings;
@@ -330,7 +331,28 @@ namespace cs::render
 			for (std::size_t index = 0; index < kSubstrateBufferCount; ++index)
 				if (!WriteConstantBuffer(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index]))
 					return false;
+			state.fo4 = a_data.fo4;
 			return true;
+		}
+
+		ID3D11ShaderResourceView* UpdateFullscreenDebugData(ID3D11DeviceContext* a_context) noexcept
+		{
+			auto* feature = FeatureManager::Get().GetFullscreenDebugFeature();
+			auto debug = feature ? feature->GetFullscreenDebugData() : FullscreenDebugData{};
+			if (debug.mode == 0)
+				debug = {};
+			auto& state = GetSubstrateState();
+			auto fo4 = state.fo4;
+			fo4.DebugOwner = debug.owner;
+			fo4.DebugMode = debug.mode;
+			fo4.DebugParams = { debug.params[0], debug.params[1], debug.params[2], debug.params[3] };
+			// The selected owner and its resources may change after the per-frame upload.
+			if (std::memcmp(&fo4, &state.fo4, sizeof(fo4)) != 0) {
+				if (!WriteConstantBuffer(a_context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), &fo4, sizeof(fo4)))
+					return nullptr;
+				state.fo4 = fo4;
+			}
+			return debug.texture;
 		}
 	}
 
@@ -432,6 +454,7 @@ namespace cs::render
 
 		// FO4: material draws run after the current world+jitter cache record is written.
 		UpdateSharedData(false);
+		auto* debugTexture = UpdateFullscreenDebugData(a_context);
 		ID3D11Buffer* buffers[kSubstrateBufferCount]{};
 		for (std::size_t index = 0; index < kSubstrateBufferCount; ++index)
 			buffers[index] = state.buffers[index].get();
@@ -444,6 +467,7 @@ namespace cs::render
 		case engine::ShaderStage::kPixel:
 			a_context->PSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
 			a_context->PSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
+			a_context->PSSetShaderResources(kFullscreenDebugTextureSlot, 1, &debugTexture);
 			break;
 		case engine::ShaderStage::kCompute:
 			a_context->CSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);

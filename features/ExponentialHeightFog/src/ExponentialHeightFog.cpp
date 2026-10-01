@@ -112,6 +112,12 @@ namespace cs::features
 		_debugFogFactor.store(a_view == "fog_factor", std::memory_order_release);
 	}
 
+	FullscreenDebugData ExponentialHeightFog::GetFullscreenDebugData() const noexcept
+	{
+		return { .owner = FullscreenDebugOwner::ExponentialHeightFog,
+			.mode = _debugFogFactor.load(std::memory_order_acquire) ? 1u : 0u };
+	}
+
 	bool ExponentialHeightFog::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
@@ -148,7 +154,6 @@ namespace cs::features
 			};
 			if (target == engine::ShaderInjectionTarget::kBsdfComposite) {
 				defines.emplace("EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", "1");
-				claims.push_back({ engine::ShaderStage::kPixel, engine::ShaderResourceType::kConstantBuffer, 9 });
 			}
 			if (!engine::RegisterReplacement({ .targetId = target,
 					.stages = engine::ShaderStageBit(engine::ShaderStage::kPixel),
@@ -196,8 +201,6 @@ namespace cs::features
 
 	void ExponentialHeightFog::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		_debugConstants = std::make_unique<buffer::ConstantBuffer>(buffer::ConstantBufferDesc<DirectX::XMUINT4>());
-		_debugConstants->SetName("ExponentialHeightFog/Debug");
 		_resourcesReady.store(_volume.Initialize(a_device), std::memory_order_release);
 		if (!_resourcesReady.load())
 			L->error("Exponential height fog compute compilation failed.");
@@ -285,7 +288,6 @@ namespace cs::features
 			return;
 		}
 		try {
-			_debugConstants->Update(DirectX::XMUINT4{ _debugFogFactor.load(std::memory_order_acquire) ? 1u : 0u, 0, 0, 0 });
 			if (!_volume.Dispatch(reinterpret_cast<ID3D11DeviceContext*>(renderer->context),
 					_frameSettings, *camera, graphics->frameCount, *engine::GetTemporalAAEnableGlobal() != 0)) {
 				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Fog dispatch inputs are unavailable; retaining native fog.");
@@ -324,10 +326,6 @@ namespace cs::features
 		auto* sampler = _volume.Sampler();
 		a_context->PSSetShaderResources(19, 1, &volume);
 		a_context->PSSetSamplers(a_sampler, 1, &sampler);
-		if (a_sampler == 13) {
-			auto* debug = _debugConstants->CB();
-			a_context->PSSetConstantBuffers(9, 1, &debug);
-		}
 		_binds.fetch_add(1, std::memory_order_relaxed);
 	}
 

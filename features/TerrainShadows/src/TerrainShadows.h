@@ -28,8 +28,6 @@ namespace cs::features
 	{
 	public:
 		static constexpr std::uint32_t kShadowHeightPSSlot = 60;
-		static constexpr std::uint32_t kDebugHeightPSSlot = 61;
-		static constexpr std::uint32_t kDebugConstantsPSSlot = 13;
 		static constexpr std::uint32_t kShadowHeightSamplerPSSlot = 13;
 
 		enum class DebugVisualization : std::uint32_t
@@ -63,6 +61,7 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		cs::TerrainShadowsFeatureData GetCommonBufferData() const;
 		ID3D11ShaderResourceView* GetShadowHeightSRV() const;
@@ -96,15 +95,6 @@ namespace cs::features
 			terrain_shadows::HeightMapMetadata metadata;
 			std::filesystem::path path;
 		};
-
-		struct alignas(16) DebugCB
-		{
-			std::uint32_t Mode = 0;
-			float pad0[3]{};
-			float HeightRange[2]{};
-			float DebugHeightRange[2]{};
-		};
-		static_assert(sizeof(DebugCB) == 32);
 
 		enum class StatusSeverity
 		{
@@ -145,9 +135,7 @@ namespace cs::features
 		void SaveEngineBindings();
 		void BindShadowHeights(ID3D11DeviceContext* a_context);
 		void RestoreEngineBindings();
-		void SaveDebugBindings();
-		void BindDebugTexture(ID3D11DeviceContext* a_context);
-		void RestoreDebugBindings();
+		void BindCompositeResources(ID3D11DeviceContext* a_context);
 
 		void PublishStatus(
 			const std::string& a_worldspace,
@@ -238,9 +226,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Buffer> _shadowUpdateCB;
 		winrt::com_ptr<ID3D11ComputeShader> _shadowUpdateCS;
 		winrt::com_ptr<ID3D11SamplerState> _linearClampSampler;
-		winrt::com_ptr<ID3D11Buffer> _debugCB;
-		winrt::com_ptr<ID3D11Buffer> _savedDebugCB;
-		bool _debugCBSaved = false;
 		winrt::com_ptr<ID3D11ComputeShader> _shadowStatsCS;
 		winrt::com_ptr<ID3D11Buffer> _shadowStatsCB;
 		winrt::com_ptr<ID3D11Buffer> _shadowStatsFeatureCB;
@@ -250,7 +235,5 @@ namespace cs::features
 
 		cs::render::PixelShaderResourceSnapshot<1> _engineShadowBinding;
 		cs::render::PixelShaderSamplerSnapshot<1> _engineSamplerBinding;
-		cs::render::PixelShaderResourceSnapshot<2> _debugShadowBinding;
-		cs::render::PixelShaderSamplerSnapshot<1> _debugSamplerBinding;
 	};
 }

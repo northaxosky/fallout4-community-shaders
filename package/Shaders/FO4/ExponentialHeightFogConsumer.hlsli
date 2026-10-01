@@ -22,12 +22,6 @@ SamplerState FO4FogSampler : register(FO4_FOG_SAMPLER);
 
 namespace FO4Fog
 {
-#ifdef EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG
-	cbuffer Debug : register(b9)
-	{
-		uint4 DebugMode;
-	};
-#endif
 	float4 Evaluate(float3 screenPosition, float3 originalColor)
 	{
 		if (!SharedData::exponentialHeightFogSettings.enabled)
@@ -52,7 +46,7 @@ namespace FO4Fog
 			opacity = combinedOpacity;
 		}
 #ifdef EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG
-		if (DebugMode.x != 0) {
+		if (FO4SharedData::DebugOwner == FullscreenDebugOwner::ExponentialHeightFog && FO4SharedData::DebugMode != 0) {
 			color = fog.a.xxx;
 			opacity = 1;
 		}

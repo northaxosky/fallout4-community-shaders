@@ -314,12 +314,6 @@ namespace cs::features
 					.samplerContract = cs::engine::ShaderSamplerContract::kLinearClamp }
 			};
 			if (a_fullscreenDebug) {
-				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kDebugHeightPSSlot });
-				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kConstantBuffer,
-					.slot = kDebugConstantsPSSlot });
 				defines.emplace(
 					cs::engine::shader_injection_defines::kTerrainShadowsFullscreenDebug,
 					"1");
@@ -357,7 +351,7 @@ namespace cs::features
 		if (!registerContribution(
 				cs::engine::ShaderInjectionTarget::kBsdfComposite,
 				[this](ID3D11DeviceContext* a_context) {
-					BindDebugTexture(a_context);
+					BindCompositeResources(a_context);
 				},
 				true)) {
 			FailLoad(
@@ -382,10 +376,13 @@ namespace cs::features
 			[] { TerrainShadows::GetSingleton()->RestoreEngineBindings(); },
 			cs::engine::HookPriority::Late);
 		if (!cs::engine::RegisterPreDeferredComposite(
-				[] { TerrainShadows::GetSingleton()->SaveDebugBindings(); },
+				[this] {
+					if (_debugVisualization.load(std::memory_order_acquire) != DebugVisualization::kOff)
+						SaveEngineBindings();
+				},
 				cs::engine::HookPriority::Early) ||
 			!cs::engine::RegisterPostDeferredComposite(
-				[] { TerrainShadows::GetSingleton()->RestoreDebugBindings(); },
+				[] { TerrainShadows::GetSingleton()->RestoreEngineBindings(); },
 				cs::engine::HookPriority::Late)) {
 			FailLoad(
 				"Terrain shadow debug views need a deferred-composite binding scope");
@@ -396,10 +393,9 @@ namespace cs::features
 
 		L->info(
 			"Terrain shadows installed: hooks=post_deferred_prepass+deferred_lights+"
-			"deferred_composite, consumers=BSDFLight+BSDFComposite t{}+t{}/s{}, "
+			"deferred_composite, consumers=BSDFLight+BSDFComposite t{}/s{}+host debug, "
 			"enabled={}, debug_views=shadow_term+heightmap.",
 			kShadowHeightPSSlot,
-			kDebugHeightPSSlot,
 			kShadowHeightSamplerPSSlot,
 			_settings.EnableTerrainShadow);
 	}
@@ -520,8 +516,6 @@ namespace cs::features
 			cs::render::annotation::SetName(
 				_shadowUpdateCB.get(), "TerrainShadows/UpdateConstants.Buffer");
 			_constantBufferReady.store(true, std::memory_order_release);
-			const auto debugDesc = cs::buffer::ConstantBufferDesc<DebugCB>();
-			DX::ThrowIfFailed(a_device->CreateBuffer(&debugDesc, nullptr, _debugCB.put()));
 
 			D3D11_SAMPLER_DESC samplerDesc{};
 			samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -1233,9 +1227,8 @@ namespace cs::features
 			CS_LOG_ONCE(
 				L,
 				spdlog::level::err,
-				"Terrain shadow t{}-t{} binding scopes overlap; preserving the active snapshot.",
-				kShadowHeightPSSlot,
-				kDebugHeightPSSlot);
+				"Terrain shadow t{} binding scopes overlap; preserving the active snapshot.",
+				kShadowHeightPSSlot);
 		}
 		_engineSamplerBinding.Save(context, kShadowHeightSamplerPSSlot);
 		ID3D11ShaderResourceView* nullSRV = nullptr;
@@ -1275,52 +1268,27 @@ namespace cs::features
 		_engineShadowBinding.Restore(context);
 	}
 
-	void TerrainShadows::SaveDebugBindings()
-	{
-		if (_debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff) {
-			return;
-		}
-		auto* context = GetImmediateContext();
-		if (!context)
-			return;
-		_debugShadowBinding.Save(context, kShadowHeightPSSlot);
-		_debugSamplerBinding.Save(context, kShadowHeightSamplerPSSlot);
-		if (!_debugCBSaved) {
-			context->PSGetConstantBuffers(kDebugConstantsPSSlot, 1, _savedDebugCB.put());
-			_debugCBSaved = true;
-		}
-		ID3D11ShaderResourceView* nullSRVs[2]{};
-		context->PSSetShaderResources(kShadowHeightPSSlot, 2, nullSRVs);
-		ID3D11SamplerState* nullSampler = nullptr;
-		context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &nullSampler);
-	}
-
-	void TerrainShadows::BindDebugTexture(ID3D11DeviceContext* a_context)
+	FullscreenDebugData TerrainShadows::GetFullscreenDebugData() const noexcept
 	{
 		const auto visualization =
 			_debugVisualization.load(std::memory_order_acquire);
 		const bool heightmap =
 			visualization == DebugVisualization::kHeightmap;
-		if (!a_context || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || (!heightmap && !_shadowPopulated.load(std::memory_order_acquire)) || (heightmap ? (!_heightTexture || !_heightTexture->srv) : (!_shadowTexture || !_shadowTexture->srv)) || !_linearClampSampler) {
-			return;
+		if (!_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || (!heightmap && !_shadowPopulated.load(std::memory_order_acquire)) || (heightmap ? (!_heightTexture || !_heightTexture->srv) : (!_shadowTexture || !_shadowTexture->srv)) || !_linearClampSampler) {
+			return {};
 		}
-		DebugCB debug{};
-		debug.Mode = static_cast<std::uint32_t>(visualization);
-		debug.HeightRange[0] = _loadedMetadata.pos0[2];
-		debug.HeightRange[1] = _loadedMetadata.pos1[2];
-		debug.DebugHeightRange[0] = _debugHeightRange[0];
-		debug.DebugHeightRange[1] = _debugHeightRange[1];
-		D3D11_MAPPED_SUBRESOURCE mapped{};
-		if (FAILED(a_context->Map(_debugCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+		return { .owner = FullscreenDebugOwner::TerrainShadows,
+			.mode = static_cast<std::uint32_t>(visualization),
+			.params = { _loadedMetadata.pos0[2], _loadedMetadata.pos1[2], _debugHeightRange[0], _debugHeightRange[1] },
+			.texture = heightmap ? _heightTexture->srv.get() : nullptr };
+	}
+
+	void TerrainShadows::BindCompositeResources(ID3D11DeviceContext* a_context)
+	{
+		if (!a_context || GetFullscreenDebugData().mode == 0)
 			return;
-		std::memcpy(mapped.pData, &debug, sizeof(debug));
-		a_context->Unmap(_debugCB.get(), 0);
-		ID3D11Buffer* debugBuffer = _debugCB.get();
-		a_context->PSSetConstantBuffers(kDebugConstantsPSSlot, 1, &debugBuffer);
-		if (visualization == DebugVisualization::kOff)
-			return;
-		ID3D11ShaderResourceView* srvs[2]{ _shadowTexture->srv.get(), _heightTexture->srv.get() };
-		a_context->PSSetShaderResources(kShadowHeightPSSlot, 2, srvs);
+		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
+		a_context->PSSetShaderResources(kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
 		a_context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &sampler);
 		_debugBinds.fetch_add(1, std::memory_order_relaxed);
@@ -1334,19 +1302,6 @@ namespace cs::features
 			} else {
 				_compositeInertFamilyBinds.fetch_add(1, std::memory_order_relaxed);
 			}
-		}
-	}
-
-	void TerrainShadows::RestoreDebugBindings()
-	{
-		auto* context = GetImmediateContext();
-		_debugSamplerBinding.Restore(context);
-		_debugShadowBinding.Restore(context);
-		if (context && _debugCBSaved) {
-			ID3D11Buffer* saved = _savedDebugCB.get();
-			context->PSSetConstantBuffers(kDebugConstantsPSSlot, 1, &saved);
-			_savedDebugCB = nullptr;
-			_debugCBSaved = false;
 		}
 	}
 

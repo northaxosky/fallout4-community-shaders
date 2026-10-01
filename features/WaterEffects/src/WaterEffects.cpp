@@ -127,16 +127,15 @@ namespace cs::features
 			cs::engine::ShaderInjectionDefines defines{
 				{ cs::engine::shader_injection_defines::kWaterEffects, "1" }
 			};
-			std::vector<cs::engine::ShaderSlotClaim> slotClaims{
-				{ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = a_fullscreenDebug ? kDebugTexturePSSlot : kCausticsPSSlot }
-			};
+			std::vector<cs::engine::ShaderSlotClaim> slotClaims;
 			if (a_fullscreenDebug) {
 				defines.emplace(
 					cs::engine::shader_injection_defines::kWaterEffectsFullscreenDebug,
 					"1");
 			} else {
+				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+					.slot = kCausticsPSSlot });
 				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kSampler,
 					.slot = kCausticsSamplerPSSlot });
@@ -164,9 +163,7 @@ namespace cs::features
 		}
 		if (!registerContribution(
 				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				[this](ID3D11DeviceContext* a_context) {
-					BindDebugTextures(a_context);
-				},
+				{},
 				true)) {
 			FailLoad(
 				"Water caustics debug views replace BSDFComposite output; "
@@ -182,22 +179,21 @@ namespace cs::features
 			[] { WaterEffects::GetSingleton()->RestoreEngineBindings(); },
 			cs::engine::HookPriority::Late);
 		if (!cs::engine::RegisterPreDeferredComposite(
-				[] { WaterEffects::GetSingleton()->SaveDebugBindings(); },
-				cs::engine::HookPriority::Early) ||
-			!cs::engine::RegisterPostDeferredComposite(
-				[] { WaterEffects::GetSingleton()->RestoreDebugBindings(); },
-				cs::engine::HookPriority::Late)) {
+				[this] {
+					if (auto* context = GetImmediateContext())
+						RenderDebug(context);
+				},
+				cs::engine::HookPriority::Early)) {
 			FailLoad(
-				"Water caustics debug views need a deferred-composite binding scope");
+				"Water caustics debug views need a deferred-composite producer");
 			return;
 		}
 		_renderCallbacksReady.store(true, std::memory_order_release);
 
 		L->info(
 			"Water caustics installed: hooks=deferred_lights+deferred_composite, "
-			"consumers=BSDFLight+BSDFComposite t{}+t{}/s{}, enabled={}.",
+			"consumers=BSDFLight+BSDFComposite t{}/s{}+host debug, enabled={}.",
 			kCausticsPSSlot,
-			kDebugTexturePSSlot,
 			kCausticsSamplerPSSlot,
 			_settings.enabled);
 	}
@@ -392,6 +388,7 @@ namespace cs::features
 			a_context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &sampler);
 			a_context->Draw(3, 0);
 			_debugFrameReady = true;
+			_debugFrames.fetch_add(1, std::memory_order_relaxed);
 		} catch (const std::exception& e) {
 			L->warn("Water debug rendering failed: {}", e.what());
 		}
@@ -484,31 +481,13 @@ namespace cs::features
 		_engineBinding.Restore(context);
 	}
 
-	void WaterEffects::SaveDebugBindings()
+	FullscreenDebugData WaterEffects::GetFullscreenDebugData() const noexcept
 	{
-		auto* context = GetImmediateContext();
-		if (!context)
-			return;
-		RenderDebug(context);
-		_debugBinding.Save(context, kDebugTexturePSSlot);
-		ID3D11ShaderResourceView* nullSRV = nullptr;
-		context->PSSetShaderResources(kDebugTexturePSSlot, 1, &nullSRV);
-	}
-
-	void WaterEffects::BindDebugTextures(ID3D11DeviceContext* a_context)
-	{
-		if (!a_context || _debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kOff || !CanBind() || !_debugFrameReady) {
-			return;
-		}
-		auto* texture = _debugTexture->srv.get();
-		a_context->PSSetShaderResources(kDebugTexturePSSlot, 1, &texture);
-		_debugBinds.fetch_add(1, std::memory_order_relaxed);
-	}
-
-	void WaterEffects::RestoreDebugBindings()
-	{
-		auto* context = GetImmediateContext();
-		_debugBinding.Restore(context);
+		if (!CanBind() || !_debugFrameReady)
+			return {};
+		return { .owner = FullscreenDebugOwner::WaterEffects,
+			.mode = static_cast<std::uint32_t>(_debugVisualization.load(std::memory_order_acquire)),
+			.texture = _debugTexture->srv.get() };
 	}
 
 	void WaterEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -551,10 +530,7 @@ namespace cs::features
 			.Field(
 				"caustics_binds",
 				static_cast<std::int64_t>(_binds.load(std::memory_order_relaxed)))
-			.Field(
-				"debug_binds",
-				static_cast<std::int64_t>(
-					_debugBinds.load(std::memory_order_relaxed)))
+			.Field("debug_frames", static_cast<std::int64_t>(_debugFrames.load(std::memory_order_relaxed)))
 			.Field(
 				"debug_depth_missing",
 				static_cast<std::int64_t>(

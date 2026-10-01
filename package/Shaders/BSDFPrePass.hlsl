@@ -437,7 +437,9 @@ struct PS_OUTPUT
 		PS_OUTPUT output;
 		float4 cb12_idx30_global_fade = native_global_fade;
 #	ifdef WETNESS_EFFECTS
-		bool wetnessOwned = WetnessEffects::ProducerReady && SharedData::wetnessEffectsSettings.EnableWetnessEffects;
+		uint2 filmDimensions;
+		WetnessEffects::Film.GetDimensions(filmDimensions.x, filmDimensions.y);
+		bool wetnessOwned = all(filmDimensions > 0) && SharedData::wetnessEffectsSettings.EnableWetnessEffects;
 #		if MODELSPACENORMALS && !TESSELLATE_DISP_HEIGHT
 		wetnessOwned = wetnessOwned && input.wetGeometryNormal.w > 0.0;
 #		elif TESSELLATE_DISP_HEIGHT && (SKINNED || MODELSPACENORMALS)
