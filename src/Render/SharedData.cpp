@@ -124,7 +124,6 @@ namespace cs::render
 		void PackFeatures(SubstrateData& a_data, const FeatureDataCB& a_features)
 		{
 			auto& fo4 = a_data.fo4;
-			fo4.screenSpaceGISettings = a_features.screenSpaceGISettings;
 			if (auto* fog = features::ExponentialHeightFog::GetSingleton(); fog->IsLoaded())
 				a_data.feature.exponentialHeightFogSettings = fog->GetCommonBufferData();
 			fo4.DynamicCubemapsDebugVisualization = a_features.dynamicCubemapsSettings.DebugVisualization;

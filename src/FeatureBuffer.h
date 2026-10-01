@@ -7,13 +7,6 @@
 namespace cs
 {
 	// Feature contributors retain host contracts; the substrate packs shared and FO4-only fields.
-	struct alignas(16) ScreenSpaceGIFeatureData
-	{
-		std::uint32_t EnableScreenSpaceGI = 0;
-		std::uint32_t pad0[3]{};
-	};
-	static_assert(sizeof(ScreenSpaceGIFeatureData) == 16);
-
 	using WetnessEffectsFeatureData = render::WetnessEffectsSettings;
 
 	struct alignas(16) TerrainShadowsFeatureData
@@ -38,21 +31,20 @@ namespace cs
 
 	struct alignas(16) FeatureDataCB
 	{
-		ScreenSpaceGIFeatureData screenSpaceGISettings;
 		WetnessEffectsFeatureData wetnessEffectsSettings;
 		TerrainShadowsFeatureData terrainShadowsSettings;
 		DynamicCubemapsFeatureData dynamicCubemapsSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 272);
+	static_assert(sizeof(FeatureDataCB) == 256);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
-	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 16);
-	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 208);
+	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 0);
+	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 192);
 	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);
 	static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);
 	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
 	static_assert(offsetof(TerrainShadowsFeatureData, ZBlur) == 32);
-	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 256);
+	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 240);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 4);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 8);

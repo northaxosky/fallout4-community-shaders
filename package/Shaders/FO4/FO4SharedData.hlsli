@@ -3,14 +3,8 @@
 
 namespace FO4SharedData
 {
-	struct ScreenSpaceGISettings
-	{
-		bool EnableScreenSpaceGI;
-		uint3 pad0;
-	};
 	cbuffer FO4SharedData : register(b7)
 	{
-		ScreenSpaceGISettings screenSpaceGISettings;
 		uint reserved0;
 		uint padTerrain;
 		uint DynamicCubemapsDebugVisualization;

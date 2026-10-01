@@ -1,4 +1,5 @@
 #include "Render/SharedDataLayout.h"
+#include "ScreenSpaceGIConstants.h"
 #include "Utils/ShaderCompile.h"
 
 #include <algorithm>
@@ -335,7 +336,6 @@ namespace
 		const auto pbr = FIELDS(TruePBRSettings, F(VertexAOStrength), F(EnableMicroShadows), F(MicroShadowStrength), F(pad));
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
-		const auto gi = FIELDS(cs::ScreenSpaceGIFeatureData, F(EnableScreenSpaceGI), F(pad0));
 #undef FIELDS
 #undef F
 		struct Block
@@ -354,8 +354,7 @@ namespace
 			{ 6, "extendedTranslucencySettings", translucency }, { 6, "linearLightingSettings", linear },
 			{ 6, "enbSettings", enb }, { 6, "terrainBlendingSettings", blending },
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
-			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
-			{ 7, "screenSpaceGISettings", gi }
+			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon }
 		};
 		D3D11_SHADER_DESC shader{};
 		a_reflection->GetDesc(&shader);
@@ -421,7 +420,6 @@ namespace
 			ABI(SharedFeatureDataCB, skinData), ABI(SharedFeatureDataCB, horizonFixSettings)
 		};
 		const ABIField fo4[]{
-			ABI(FO4SharedDataCB, screenSpaceGISettings),
 			ABI(FO4SharedDataCB, reserved0),
 			ABI(FO4SharedDataCB, padTerrain), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
 			ABI(FO4SharedDataCB, EnabledSSR),
@@ -485,16 +483,57 @@ namespace
 		}
 		return CheckSubstrateBlocks(reflection.Get());
 	}
+	std::string VerifySSGIABI(const std::filesystem::path& a_root)
+	{
+		using Constants = cs::features::ssgi::Constants;
+		const ABIField fields[]{
+			ABI(Constants, PrevInvViewMat), ABI(Constants, NDCToViewMul), ABI(Constants, NDCToViewAdd),
+			ABI(Constants, TexDim), ABI(Constants, RcpTexDim), ABI(Constants, FrameDim), ABI(Constants, RcpFrameDim),
+			ABI(Constants, FrameIndex), ABI(Constants, NumSlices), ABI(Constants, NumSteps), ABI(Constants, MinScreenRadius),
+			ABI(Constants, AORadius), ABI(Constants, GIRadius), ABI(Constants, EffectRadius), ABI(Constants, Thickness),
+			ABI(Constants, DepthFadeRange), ABI(Constants, DepthFadeScaleConst), ABI(Constants, GISaturation),
+			ABI(Constants, GIDistanceCompensation), ABI(Constants, GICompensationMaxDist), ABI(Constants, pad1),
+			ABI(Constants, AOPower), ABI(Constants, GIStrength), ABI(Constants, DepthDisocclusion), ABI(Constants, NormalDisocclusion),
+			ABI(Constants, MaxAccumFrames), ABI(Constants, BlurRadius), ABI(Constants, DistanceNormalisation), ABI(Constants, pad)
+		};
+		std::string error;
+		auto blob = cs::util::CompileShaderToBlob((a_root / "ScreenSpaceGI/gi.cs.hlsl").c_str(),
+			{ { "GI", "1" }, { "GI_SPECULAR", "1" }, { "TEMPORAL_DENOISER", "1" }, { "HALF_RES", "1" } },
+			"cs_5_0", "main", &error, a_root);
+		if (!blob)
+			return error;
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(reflection.GetAddressOf()))))
+			return "SSGI ABI reflection failed";
+		D3D11_SHADER_INPUT_BIND_DESC binding{};
+		if (FAILED(reflection->GetResourceBindingDescByName("SSGICB", &binding)) || binding.BindPoint != 1)
+			return "SSGICB: ABI slot mismatch";
+		auto* cb = reflection->GetConstantBufferByName("SSGICB");
+		D3D11_SHADER_BUFFER_DESC desc{};
+		if (FAILED(cb->GetDesc(&desc)) || desc.Size != sizeof(Constants) || desc.Variables != std::size(fields))
+			return "SSGICB: ABI buffer size/member count mismatch";
+		for (const auto& field : fields) {
+			auto* variable = cb->GetVariableByName(field.name);
+			D3D11_SHADER_VARIABLE_DESC value{};
+			if (FAILED(variable->GetDesc(&value)) || value.StartOffset != field.offset || value.Size != field.size)
+				return std::string("SSGICB.") + field.name + ": ABI offset/size mismatch";
+		}
+		D3D11_SHADER_TYPE_DESC matrix{};
+		if (FAILED(cb->GetVariableByName("PrevInvViewMat")->GetType()->GetDesc(&matrix)) || matrix.Class != D3D_SVC_MATRIX_COLUMNS)
+			return "SSGICB.PrevInvViewMat: expected column-major storage";
+		return {};
+	}
 #undef ABI
 
 	void AddStandaloneFeatureShaders(
 		std::vector<ShaderJob>& a_jobs,
 		const std::filesystem::path& a_root)
 	{
-		const auto ssgi = a_root / "ScreenSpaceGI" / "XeGTAO";
+		const auto ssgi = a_root / "ScreenSpaceGI";
 		// Runtime resolution, GI and temporal permutations.
 		for (const char* resolution : { "", "HALF_RES", "QUARTER_RES" }) {
 			const auto withResolution = [&](ShaderDefines a_defines) {
+				a_defines.push_back({ "FO4CS_SUBSTRATE", "1" });
 				if (*resolution)
 					a_defines.push_back({ resolution, "1" });
 				return a_defines;
@@ -505,10 +544,16 @@ namespace
 			for (const char* file : { "radianceDisocc.cs.hlsl", "gi.cs.hlsl", "blur.cs.hlsl" }) {
 				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" } }), .description = file });
 				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } }), .description = file });
+				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" }, { "GI_SPECULAR", "1" }, { "TEMPORAL_DENOISER", "1" } }), .description = file });
 			}
 			if (*resolution)
-				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({}), .description = "upsample.cs.hlsl" });
+				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({ { "GI", "1" }, { "GI_SPECULAR", "1" } }), .description = "upsample.cs.hlsl" });
 		}
+		a_jobs.push_back({ .path = a_root / "FO4" / "ScreenSpaceGI" / "Prepare.cs.hlsl",
+			.defines = { { "FO4CS_SUBSTRATE", "1" } },
+			.description = "SSGI native normal/radiance input boundary",
+			.required = { CB(1), CB(10), Texture(0), Texture(5) },
+			.forbidden = { CB(7) } });
 
 		const auto cubemaps = a_root / "FO4" / "DynamicCubemaps";
 		const ShaderDefines substrate{ { "FO4CS_SUBSTRATE", "1" } };
@@ -811,7 +856,10 @@ namespace
 											{ "COMPOSITE_HAS_TYPE", "1" },
 											{ "COMPOSITE_MATERIAL_5", "1" },
 											{ "COMPOSITE_HAS_LIGHT", "1" } } },
-			{ "cube IBL SSGI", { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" } } }
+			{ "cube IBL SSGI", { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" } } },
+			{ "cube IBL unfogged SSGI", { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" },
+											{ "COMPOSITE_MATERIAL_EXCLUSION", "0" },
+											{ "COMPOSITE_FOG_STACK", "0" } } }
 		};
 		for (const auto& [description, defines] : ssgiFamilies) {
 			auto familyDefines = defines;
@@ -822,7 +870,10 @@ namespace
 				.profile = "ps_5_0",
 				.description = description,
 				.required = {
-					CB(5), CB(7), Texture(26), Texture(27), Texture(28), Texture(29) } });
+					CB(5), CB(10), Texture(26), Texture(27), Texture(28), Texture(29) },
+				.forbidden = { CB(7) } });
+			if (defines.front().first == "BSDFCOMPOSITE_PS_CUBE_IBL")
+				a_jobs.back().required.push_back(Texture(38));
 		}
 
 		for (const char* family : {
@@ -1071,6 +1122,10 @@ int main(int argc, char** argv)
 	}
 	if (const auto error = VerifySSSReceiverGate(argv[1]); !error.empty()) {
 		std::printf("FAIL: SSS receiver gate: %s\n", error.c_str());
+		++failures;
+	}
+	if (const auto error = VerifySSGIABI(argv[1]); !error.empty()) {
+		std::printf("FAIL: SSGI ABI: %s\n", error.c_str());
 		++failures;
 	}
 	for (const auto& job : jobs) {

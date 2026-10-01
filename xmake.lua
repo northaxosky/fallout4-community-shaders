@@ -508,16 +508,6 @@ target("FrameGenerationRetirementGpuTests", function()
     add_syslinks("d3d11", "d3d12", "dxgi", "ole32", "version")
 end)
 
-target("ScreenSpaceGIHistoryTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files("tests/ScreenSpaceGIHistoryTests.cpp")
-    add_headerfiles(
-        "features/ScreenSpaceGI/src/ScreenSpaceGIHistory.h"
-    )
-    add_includedirs("features/ScreenSpaceGI/src")
-end)
-
 target("ShaderCompileTests", function()
     set_kind("binary")
     set_default(false)
@@ -528,6 +518,7 @@ target("ShaderCompileTests", function()
         "src/Utils/ShaderCompile.cpp"
     )
     add_headerfiles("src/Utils/ShaderCompile.h")
+    add_includedirs("features/ScreenSpaceGI/src")
     add_packages("vcpkg::directx-headers", "vcpkg::directxmath")
     add_syslinks("d3dcompiler", "d3d11")
 end)
@@ -734,10 +725,6 @@ target("FrameGenerationRetirementGpuTests", function()
             )
         }
     })
-end)
-
-target("ScreenSpaceGIHistoryTests", function()
-    add_tests("ScreenSpaceGIHistory")
 end)
 
 target("ShaderCompileTests", function()

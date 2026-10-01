@@ -73,6 +73,12 @@ or a custom map under `Data\Textures\HeightMaps\`. Maps use the upstream filenam
 contract and native DDS resolution. `[features.TerrainShadows.settings]` uses `EnableTerrainShadow`;
 the legacy `enabled` and `downsample_factor` keys are no longer supported.
 
+Screen Space GI settings use upstream-cased keys, including `Enabled`, `EnableGI`,
+`EnableExperimentalSpecularGI`, `ResolutionMode`, and the two-number `DepthFadeRange`
+array. Legacy snake_case keys are no longer supported. `AOPower` retains the FO4 default
+of 4 and edit range 0–12. See [deviations](docs/DEVIATIONS.md#screen-space-gi) for
+composition coverage and validation limits.
+
 ---
 
 ## Feature activation

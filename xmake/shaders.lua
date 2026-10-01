@@ -1,6 +1,5 @@
 local shader_directories = {
     "package/Shaders",
-    "features/ScreenSpaceGI/Shaders",
     "features/ScreenSpaceShadows/Shaders",
     "features/TerrainShadows/Shaders",
     "features/Upscaling/Shaders",

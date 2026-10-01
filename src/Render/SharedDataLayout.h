@@ -91,14 +91,13 @@ namespace cs::render
 
 	struct alignas(16) FO4SharedDataCB
 	{
-		ScreenSpaceGIFeatureData screenSpaceGISettings{};
 		std::uint32_t reserved0 = 0, padTerrain = 0;
 		std::uint32_t DynamicCubemapsDebugVisualization = 0, EnabledSSR = 0;
 		float DeltaTime = 0.0f, pad0[3]{};
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 48);
-	static_assert(offsetof(FO4SharedDataCB, reserved0) == 16);
-	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 32);
+	static_assert(sizeof(FO4SharedDataCB) == 32);
+	static_assert(offsetof(FO4SharedDataCB, reserved0) == 0);
+	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 16);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

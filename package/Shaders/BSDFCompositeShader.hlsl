@@ -1442,7 +1442,7 @@ cbuffer PerFrame_CB12 : register(b12)
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 #	ifdef SSGI
-#		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
+#		include "FO4/ScreenSpaceGIConsumer.hlsli"
 #	endif
 
 cbuffer ScreenData : register(b2)
@@ -1626,7 +1626,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 #	ifdef SSGI
-#		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
+#		include "FO4/ScreenSpaceGIConsumer.hlsli"
 #	endif
 
 cbuffer PerFrame_CB12 : register(b12)
@@ -2232,7 +2232,7 @@ PS_OUTPUT main(PS_INPUT input)
 #	endif
 
 #	ifdef SSGI
-#		include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
+#		include "FO4/ScreenSpaceGIConsumer.hlsli"
 #	endif
 
 #	ifndef COMPOSITE_CB12_COUNT
@@ -2400,7 +2400,7 @@ float4 main(PSInput input) : SV_Target0
 #		endif
 #	endif
 
-#	if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
+#	if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || defined(SSGI) || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
 	float2 projectedXY = float2(
 							 uv.x * screenData[0].z,
 							 1.0 - uv.y * screenData[0].w) *
@@ -2561,6 +2561,16 @@ float4 main(PSInput input) : SV_Target0
 	}
 #	endif
 		float3 reflectionColor = probeColor;
+#	ifdef SSGI
+		// FO4: compose native cube irradiance before material/probe weighting.
+		reflectionColor = ScreenSpaceGI::ComposeSpecular(
+			input.position.xy,
+			float3x3(scene[12].xyz, scene[13].xyz, scene[14].xyz),
+			normalize(-worldPosition),
+			reflectionColor,
+			typeData.x,
+			ambientTexture.Sample(ambientSampler, uv).w);
+#	endif
 		color = mad(reflectionColor * gloss * specularScale, diffuse, color);
 
 #	if COMPOSITE_MODULATION

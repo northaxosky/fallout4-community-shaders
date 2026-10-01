@@ -326,6 +326,33 @@ namespace
 		CHECK(value.count == 3 && value.thickness == before.thickness && published == before.thickness);
 	}
 
+	void TestSSGISettings()
+	{
+		using namespace cs::features::ssgi_settings;
+		Settings value;
+		std::string error;
+		CHECK(Parse(kSchema, toml::parse("[settings]\nEnabled = false\nEnableExperimentalSpecularGI = true\nResolutionMode = 2\nDepthFadeRange = [25000, 45000]\nAOPower = 8.0"), value, error));
+		CHECK(!value.enabled && value.enableExperimentalSpecularGI && value.resolutionMode == 2);
+		CHECK(value.depthFadeRange[0] == 25000.0f && value.depthFadeRange[1] == 45000.0f && value.aoPower == 8.0f);
+		std::ostringstream document;
+		document << toml::table{ { "settings", SerializeDelta(kSchema, value, Settings{}) } };
+		Settings restored;
+		CHECK(Parse(kSchema, toml::parse(document.str()), restored, error));
+		CHECK(restored.depthFadeRange == value.depthFadeRange && restored.enableExperimentalSpecularGI);
+		const auto before = restored.depthFadeRange;
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nDepthFadeRange = [10000, nan]"), restored, error));
+		CHECK(restored.depthFadeRange == before);
+		int resets = 0;
+		auto live = BindLiveSettings(kSchema, restored, [&] { ++resets; });
+		auto prepared = live.prepare(toml::parse("EnableExperimentalSpecularGI = false\nDepthFadeRange = [30000, 50000]"), error);
+		CHECK(prepared.has_value());
+		if (prepared) {
+			std::array updates{ std::move(*prepared) };
+			ApplyPreparedLiveSettings(updates);
+		}
+		CHECK(!restored.enableExperimentalSpecularGI && restored.depthFadeRange[0] == 30000.0f && resets == 1);
+	}
+
 	void TestOverlayPosition()
 	{
 		using namespace cs::features::performance_overlay;
@@ -360,6 +387,7 @@ int main()
 		TestInvalidDocument(registry, directory / "invalid.toml");
 		TestRestartTiming();
 		TestLiveSettings();
+		TestSSGISettings();
 		TestOverlayPosition();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';

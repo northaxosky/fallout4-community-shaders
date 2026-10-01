@@ -20,19 +20,22 @@ A feature is **core** when it has no Chosen rows.
 
 ## Shared seam edits
 
-Shared pin: `e305ed0a4b0200e767dae05d46975808a33280cc`, based on `d330bf12d`.
+Shared pin: `7c607d7b91d3e3e8d66b87a134bec90275670fde`, based on `d330bf12d`.
 FO4 consumes unchanged files through `xmake\shared.lua`; no upstream path can be replaced.
 
 | Kind | File | SHA | Why | Upstream PR status |
 |---|---|---|---|---|
 | Chosen | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies; Phase 3 consumes these rows | In the shared fork; no upstream PR recorded |
 | Forced | `package/Shaders/Common/FrameBuffer.hlsli` | `e305ed0a4` | `FRAMEBUFFER_REGISTER` defaults to b12 and permits host binding at b4; FO4 engine shaders already bind the native per-frame buffer at b12 (`package/Shaders/BSWaterShader.hlsl:3`, `cbuffer PerFrame : register(b12)`) | In the shared fork; no upstream PR recorded |
+| Fix | `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104` | `7c607d7b91d3e3e8d66b87a134bec90275670fde` | Scale the center-normal UV by `frameScale`, matching the neighbor lookups in half/quarter-resolution dynamic-resolution frames | community-shaders/skyrim-community-shaders#2795 |
 
 ## Shared consumption boundary
 
-Shared consumption includes byte-identical SSS shaders, RCAS, shader licenses, default cubemap, SSGI noise and water
-caustics assets from the shared pin, plus all seven ExponentialHeightFog shaders and their unchanged
-Random, Color, Shading, IBL and Skylighting includes. Bend's CPU header is identical modulo comments; its
+Shared consumption includes byte-identical SSS shaders, RCAS, shader licenses, default cubemap, the
+entire ScreenSpaceGI shader/noise directory and water caustics assets from the shared pin.
+All seven ExponentialHeightFog shaders and the Color, FastMath, GBuffer, Shading, Random,
+IBL and Skylighting dependencies are also staged unchanged.
+Bend's CPU header is identical modulo comments; its
 existing SSS consumer uses the unchanged shared header. PerformanceOverlay uses shared QPC/FPS
 helpers, the profiler and the A/B aggregator. `src/Shared/PerfUtils.h` supplies Windows declarations
 and scopes MSVC C4267 suppression for the upstream vector mean; the global PCH is unchanged.
@@ -115,8 +118,14 @@ no substrate, and the binder runs only for contributed stages; native b12 remain
   under FO4's `/W4 /WX`; an explicit float conversion preserves its current arithmetic.
   FO4 scopes the warning in `src/Shared/PerfUtils.h`, without changing shared behavior.
 - `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104`: the center normal lookup
-  needs `frameScale`. Main's correction remains in `features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/blur.cs.hlsl`;
-  upstream PR is community-shaders/skyrim-community-shaders#2795.
+  needs `frameScale`. Main's correction is retained as shared seam `7c607d7b9`; upstream PR is
+  community-shaders/skyrim-community-shaders#2795. No FO4 shader copy remains.
+- `features/Screen Space GI/Shaders/ScreenSpaceGI/gi.cs.hlsl:232`: the experimental specular
+  half-angle calculation has inconsistent angular units; upstream issue/PR #2792 records it.
+  The pinned behavior remains unchanged.
+- `src/Deferred.cpp:362–364`: experimental HQ specular binds null diffuse Y/CoCg SRVs although
+  `DeferredCompositeCS.hlsl:46–56` still samples them. FO4 retains that binding; settle the intended
+  diffuse/HQ combination upstream rather than silently changing it in the host.
 - `package/Shaders/Common/FrameBuffer.hlsli:53,119`: clamp helpers bound X to a texel-edge
   clamp but Y to the raw ratio. An axis-specific clamp ABI could avoid bottom-edge reads on
   reduced-resolution allocations. This is a candidate for upstream investigation, not a proven
@@ -618,31 +627,41 @@ evidence limits, not relabeled as proven bugs. A suspected upstream typed-depth 
 
 ## Screen Space GI
 
-Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceGI`, consumers in `package\Shaders\BSDFCompositeShader.hlsl` and
-`package\Shaders\BSDFPrePass.hlsl`.
+Upstream pin: `d330bf12d`; shared pin: `7c607d7b91d3e3e8d66b87a134bec90275670fde`.
+The entire upstream `features/Screen Space GI/Shaders/ScreenSpaceGI` directory is staged
+unchanged through `xmake\shared.lua`; all local XeGTAO copies are deleted. The blur correction
+is the single SSGI seam edit above. Settings, full/half/quarter modes, formats, noise, pass order,
+independent AO/GI/accumulation ping-pong, SH/YCoCg, blur and upsample use the pinned contracts.
+The unchanged `readHistory` uses the current `RCP_OUT_FRAME_DIM`; main's reverted previous-extent
+correction (`e9d16c20`) is not reintroduced. The #2792 half-angle behavior is also unchanged.
+
+Feature classification: **extension candidate**. Chosen rows: MRT4 vertex-AO allocation/hair
+blend policy, native-linear consumer policy, and AOPower default/range calibration.
+Source/shader validation does not establish runtime parity.
 
 ### Translations
 
-| Kind | Upstream | Fallout 4 | Why | Where |
+| Kind | Upstream | Fallout 4 | Why / evidence | Where |
 |---|---|---|---|---|
-| Forced | Compose in DeferredCompositeCS | Compose in 2D accumulator, 2D fog and cube IBL families | FO4 reconstructed families form diffuse light independently; engine-facts Deferred composition | `BSDFCompositeShader.hlsl`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
-| Forced | Diffuse-target radiance | Rebuild `3 · albedo · (diffuse A + diffuse B) + emissive` | FO4 has no diffuse-only target; engine-facts Render targets | `radianceDisocc.cs.hlsl` |
-| Forced | Color::Ambient(GetAmbient(N)) with Masks.z | Upstream GetAmbient followed by FO4 power boundary, multiplied by albedo and clamped to diffuse | Reconstructed light passes fold ambient into diffuse and write no mask; engine-facts Directional ambient evaluation | `FO4ShaderData.hlsli`, `ScreenSpaceGI.hlsli` `ComposeDiffuse` |
-| Chosen | Masks2.x vertex AO | `1−vertexAO` in emissive target 31.a; blended hair writes 0 | Main's FO4 G-buffer allocation policy; reconstructed stock shaders leave 31.a unread | `BSDFPrePass.hlsl` |
-| Forced | G-buffer normal | Sphere-map view normal converted to octahedral pyramid | FO4 reconstructed G-buffer uses a different encoding | `prefilterNormal.cs.hlsl`, `common.hlsli` |
-| Forced | NDC depth reconstruction | FO4Depth decode with record inverse world projection and typed shadow +0x8A0 near inverse | Engine-facts Depth & units / Per-frame buffer sources; first-person partition | `common.hlsli`, `ScreenSpaceGI.cpp`, `Engine.h` |
-| Forced | Skyrim frame-buffer camera | Current copied world+jitter camera record | Engine-facts Camera cache ownership; b12 is diagnostic only | `FrameBuffer.cpp`, `ScreenSpaceGI.cpp` |
-| Chosen | Irradiance colour conversions | Identity linear-lighting branch | Preserve main's linear HDR consumer policy | `Common/Color.hlsli` |
-| Forced | Skyrim SSAO toggle | Per-frame SAO_CS active +0x08 and applied +0x121; startup bSAOEnable snapshot | Engine-facts AO state: native DrawModel/console rewrite the composite's applied bit | `ScreenSpaceGI.cpp` `ApplyVanillaSSAO`, `Engine.h` |
-| Chosen | AOPower default 1, range 0–6 | Default 4, range 0–12 | Main's lighting calibration for placed-light-dominated interiors | `ScreenSpaceGISettings.h` |
+| Forced | Compose in DeferredCompositeCS | Compose diffuse in native 2D accumulator, 2D fog and cube IBL families; cube specular samples the same SH/HQ data before native material weighting | FO4 composes separate diffuse/specular accumulators rather than upstream MainRW/reflectance. Reconstructed `BSDFCompositeShader.hlsl` cube equation applies `gloss * material.z² * 50`; upstream composition citations are attached to both helpers | `BSDFCompositeShader.hlsl`, `FO4/ScreenSpaceGIConsumer.hlsli` `ComposeDiffuse` / `ComposeSpecular` |
+| Forced | Current shaded diffuse radiance | Prepare `3 · albedo · (logical 33 + logical 35 if tiled) + emissive`; encode at the unchanged RadianceToLinear input | engine-facts Render targets / Base composite equation and reconstructed diffuse accumulation: native targets contain unshaded linear lighting, not upstream forwardRenderTargets[0]. The ×3 packing and emissive are retained, not prior-frame scene colour or specular target 34 | `FO4/ScreenSpaceGI/Prepare.cs.hlsl`, typed `GetRenderTargetSRV` bindings in `ScreenSpaceGI.cpp` |
+| Forced | G-buffer normal/glossiness input | Decode native spherical view normal, encode with unchanged GBuffer::EncodeNormal, and copy native material.x glossiness into upstream normal.z | `BSDFPrePass.hlsl` normal encoder and `Engine.h` logical 27/30 contracts; upstream expects negated octahedral encoding. No kernel substitutes float3 normals | `FO4/ScreenSpaceGI/Contracts.hlsli`, `FO4/ScreenSpaceGI/Prepare.cs.hlsl` |
+| Forced | Single-projection depth | Supply canonical world-projection depth directly to unchanged prefilterDepths | engine-facts Depth & units / Per-frame buffer sources: FO4 world `mad(d,1.01,-0.01)` and near shadow +0x8A0 projection. The shared boundary includes near geometry; no SSGI exclusion or decode fork | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `ScreenSpaceGI.cpp` |
+| Forced | Skyrim camera and b1 host constants | Re-acquire the world+jitter record, fill all 224 bytes of b1, and retain its previous inverse view; substrate b4/b5/b6 supplies the other camera data | engine-facts Camera cache ownership / Per-frame buffer sources: native row-vector inverse view is uploaded into column-major b1, while b4 uses its existing transpose. b12 is diagnostic only | `ScreenSpaceGIConstants.h`, `ScreenSpaceGI.cpp` `UpdateConstants`; reflected b1 ABI test |
+| Forced | Color::Ambient(GetAmbient(N)) with Masks.z | Powered FO4 DALC times albedo, clamped to native diffuse before upstream sqrt-direct/full-ambient AO and diffuse bounce | engine-facts Directional ambient evaluation and reconstructed lighting/composite: FO4 folds powered 2.2 DALC into diffuse without upstream Masks.z. Preserve main's ambient/direct separation at the consumer, not inside GI kernels | `FO4/FO4ShaderData.hlsli`, `FO4/ScreenSpaceGIConsumer.hlsli` `ComposeDiffuse` |
+| Forced | Skyrim SSAO generation toggle | Per-frame native SAO_CS active/applied bits with the existing baseline snapshot | engine-facts AO state: native DrawModel/console rewrite active +0x08 and applied +0x121; the host must control generation as well as composition | `ScreenSpaceGI.cpp` `ApplyVanillaSSAO`, `Engine.h` |
+| Chosen | Masks2.x vertex AO | `1−vertexAO` in emissive logical 31.a; blended hair writes 0 | Preserve main's allocation/blend policy; reconstructed stock shaders leave this alpha unread. The allocation is not an engine-imposed choice | `BSDFPrePass.hlsl`, consumer `vertexAOStore` |
+| Chosen | Irradiance/albedo consumer conversions | Keep main's native-linear consumer algebra; gamma encode only the prepared radiance input using unchanged Color helpers | Preserve main's linear HDR policy without enabling a global b6 LinearLighting feature or forking Common/Color. Combined linear-lighting/material-provider behavior remains unverified | `FO4/ScreenSpaceGI/Prepare.cs.hlsl`, `FO4/ScreenSpaceGIConsumer.hlsli` |
+| Chosen | AOPower default 1, edit range 0–6 | Default 4, edit range 0–12 | Main `06032303` deliberately calibrates placed-light-dominated interiors; no engine fact forces this choice | `ScreenSpaceGISettings.h`, forwarding UI |
+| Fix | Blur center normal lacks frameScale | Apply main's center-UV correction as a one-line shared seam | Half/quarter-resolution dynamic-resolution center and neighbor taps must use the same extent. This lookup is internal to blur, so an input/consumer adapter cannot repair it without changing neighbor samples; upstream #2795 | Shared `blur.cs.hlsl:104`, seam `7c607d7b9` |
+| Framework | Skyrim lifecycle, JSON/UI and deferred bindings | Preserve load=false, TOML/live settings, forwarding-only UI, presets, ownership/hash gates, telemetry, AO preview, readiness/reset guards and exact binding scopes | Repository host contracts; upstream-cased keys and Float2 DepthFadeRange replace legacy keys. b1 carries all SSGI settings; no b6 or b7 SSGI block. PS t26–29/t38 and b10 are owned/snapshotted; CS t8–9/b10 are scoped without widening low-slot cleanup | `ScreenSpaceGI.{h,cpp}`, `ScreenSpaceGISettings.h`, `FO4/ScreenSpaceGI/Contracts.hlsli`, substrate packing and tests |
 
 ### Pending
 
-| Kind | Upstream | Notes |
+| Kind | Upstream | Notes / where |
 |---|---|---|
-| Chosen | `EnableExperimentalSpecularGI` and specular IL in `SampleSSGISpecular` | Not ported |
-| Chosen | IBL and Skylighting ambient branches | Port with those features |
-| Chosen | Blur center normal lookup scaled by `frameScale` | Main's local correction is retained in `features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/blur.cs.hlsl`; upstream fix is community-shaders/skyrim-community-shaders#2795 |
+| Pending | IBL/Skylighting ambient branches and remaining specular consumer families | Native cube SH/HQ composition is present; ambient-IBL variants and combined DynamicCubemaps/wetness/IBL/Skylighting provider coverage still need adapters and resource-value proof. Missing consumers are not an engine incompatibility |
+| Pending | Material/glossiness coverage and batched runtime proof | Validate native hair/eye/material routes, radiance packing, first person, normal basis, vertex AO, SSAO state, full/half/quarter resolution, dynamic-size history, loading reset and saved/live settings through authorized DevBench/RenderDoc. No deployment or game session was run in this task |
 
 ## Screen Space Shadows
 
