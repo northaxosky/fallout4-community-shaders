@@ -761,16 +761,6 @@ namespace cs::engine
 		return g_latestSnapshot;
 	}
 
-	std::optional<FogRamps> GetFogRamps() noexcept
-	{
-		const auto* state = GetGraphicsState();
-		if (!state)
-			return std::nullopt;
-		const auto& range = state->fogState.rangeData;
-		const auto& height = state->fogState.highLowRangeData;
-		return BuildFogRamps({ range.x, range.y, range.z, range.w }, { height.x, height.y, height.z, height.w });
-	}
-
 	FrameBufferStatus GetFrameBufferStatus() noexcept
 	{
 		FrameBufferStatus status;

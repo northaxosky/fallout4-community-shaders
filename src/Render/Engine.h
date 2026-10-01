@@ -280,11 +280,6 @@ namespace cs::engine
 		};
 	}
 
-	[[nodiscard]] inline RE::NiCamera* GetWorldRootCamera()
-	{
-		return RE::Main::WorldRootCamera();
-	}
-
 	inline void SetDynamicResolutionRatios(float a_widthRatio, float a_heightRatio)
 	{
 		if (auto* renderTargetManager = GetRenderTargetManager()) {
@@ -307,19 +302,6 @@ namespace cs::engine
 	{
 		static REL::Relocation<std::uint32_t*> global{ REL::ID({ 460417, 2704658, 2704658 }) };
 		return global.get();
-	}
-
-	// Native setup globals; rendering uses GetCameraDepthParameters().
-	[[nodiscard]] inline float GetCameraNear()
-	{
-		static REL::Relocation<float*> near_{ REL::ID({ 57985, 2712882, 2712882 }) };
-		return *near_.get();
-	}
-
-	[[nodiscard]] inline float GetCameraFar()
-	{
-		static REL::Relocation<float*> far_{ REL::ID({ 958877, 2712883, 2712883 }) };
-		return *far_.get();
 	}
 
 	[[nodiscard]] inline bool TryGetWorldSceneProjection(

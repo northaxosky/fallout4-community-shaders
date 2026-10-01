@@ -13,7 +13,6 @@ namespace cs::engine
 	// Captured before prepass draws; pass the frame for rendering, omit it only for diagnostics.
 	[[nodiscard]] std::optional<WorldCameraRecord> GetCapturedWorldCameraRecord(
 		std::optional<std::uint64_t> a_frame = std::nullopt) noexcept;
-	[[nodiscard]] std::optional<FogRamps> GetFogRamps() noexcept;
 
 	enum class FrameBufferPublishSource : std::uint8_t
 	{

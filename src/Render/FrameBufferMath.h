@@ -20,29 +20,6 @@ namespace cs::engine
 		std::uint32_t frameCount = 0;
 	};
 
-	struct FogRamps
-	{
-		DirectX::XMFLOAT4 distance{}, height{};
-	};
-
-	[[nodiscard]] inline FogRamps BuildFogRamps(
-		const DirectX::XMFLOAT4& a_range,
-		const DirectX::XMFLOAT4& a_height) noexcept
-	{
-		const auto ramp = [](float a_start, float a_end) {
-			if (a_start == 0.0f && a_end == 0.0f) {
-				a_start = 1.0e8f;
-				a_end = 1.0e9f;
-			}
-			const float scale = 1.0f / (a_end - a_start);
-			return DirectX::XMFLOAT2{ scale, a_start * scale };
-		};
-		const auto distance = ramp(a_range.x, a_range.y);
-		const auto low = ramp(a_height.x - a_height.y, a_height.x + a_height.y);
-		const auto high = ramp(a_height.z - a_height.w, a_height.z + a_height.w);
-		return { { distance.x, low.x, distance.y, low.y }, { low.x, high.x, low.y, high.y } };
-	}
-
 	// Fallout 4 binds its per-frame constant buffer at HLSL register(b12).
 	inline constexpr std::size_t kFrameBufferRegisters = 47;
 	inline constexpr float kMinimumWorldCameraOriginMagnitude = 1.0f;
