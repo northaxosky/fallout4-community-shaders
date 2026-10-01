@@ -4,3 +4,8 @@
 [submodule "extern/Streamline"]
 	path = extern/Streamline
 	url = https://github.com/northaxosky/Streamline.git
+[submodule "extern/community-shaders-shared"]
+	path = extern/community-shaders-shared
+	url = https://github.com/northaxosky/community-shaders-shared.git
+	branch = main
+	shallow = true

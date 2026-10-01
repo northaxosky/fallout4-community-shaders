@@ -14,12 +14,13 @@
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
+#include "World/Water.h"
 #include "World/Weather.h"
 
 namespace cs::features
@@ -65,6 +66,12 @@ namespace cs::features
 		_debugVisualization.store(visualization, std::memory_order_release);
 	}
 
+	FullscreenDebugData WetnessEffects::GetFullscreenDebugData() const noexcept
+	{
+		return { .owner = FullscreenDebugOwner::WetnessEffects,
+			.mode = static_cast<std::uint32_t>(_debugVisualization.load(std::memory_order_acquire)) };
+	}
+
 	bool WetnessEffects::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
@@ -72,6 +79,7 @@ namespace cs::features
 			return false;
 		}
 		_settings = wetness_math::Clamp(candidate);
+		_liveSettings = settings::BindLiveSettings(wetness_math::kSchema, _settings);
 		return true;
 	}
 
@@ -82,53 +90,56 @@ namespace cs::features
 
 	void WetnessEffects::Load()
 	{
-		const auto registerContribution = [this](
-											  cs::engine::ShaderInjectionTarget a_target,
-											  bool a_bindsComposite) {
-			cs::engine::ShaderReplacementRegistration registration{
-				.targetId = a_target,
-				.stages = cs::engine::ShaderStageBit(
-					a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting ?
-						cs::engine::ShaderStage::kCompute :
-						cs::engine::ShaderStage::kPixel),
-				.contributor = "WetnessEffects",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" } },
-				.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire);
-				}
-			};
-			if (a_bindsComposite) {
-				registration.defines.emplace(
-					cs::engine::shader_injection_defines::
-						kWetnessEffectsFullscreenDebug,
-					"1");
-				registration.bind = [this](ID3D11DeviceContext* a_context) {
-					BindCompositeResources(a_context);
+		if (!cs::engine::RegisterFeatureShaderContributions("WetnessEffects", [this](cs::engine::ShaderReplacementRegistration& registration) {
+				const auto a_target = registration.targetId;
+				const bool a_bindsComposite = a_target == cs::engine::ShaderInjectionTarget::kBsdfComposite;
+				registration.isReady = [this] {
+					return _registrationsReady.load(std::memory_order_acquire) && _filmAvailabilitySRV;
 				};
-				for (const auto slot : kCompositePSSlots) {
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+				const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
+				const bool compute = a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting;
+				const auto stage = compute ? cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel;
+				registration.bind = [this, producer, compute, a_bindsComposite](ID3D11DeviceContext* context) {
+					if (producer)
+						BindFilmOutput(context);
+					else
+						BindFilmInput(context, compute);
+					if (a_bindsComposite)
+						BindCompositeResources(context);
+				};
+				registration.slotClaims.push_back({ .stage = stage,
+					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+					.slot = 71 });
+				if (!compute) {
+					registration.slotClaims.push_back({ .stage = stage,
 						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = slot });
+						.slot = 70 });
 				}
-			}
-			return cs::engine::RegisterReplacement(std::move(registration));
-		};
-
-		if (!registerContribution(cs::engine::ShaderInjectionTarget::kBsdfLight, false)) {
-			FailLoad(
-				"Wetness shades through the reconstructed BSDFLight shader; "
-				"registering that replacement failed, so there is no delivery path");
+				if (producer) {
+					registration.slotClaims.push_back({ .stage = stage,
+						.resourceType = cs::engine::ShaderResourceType::kRenderTarget,
+						.slot = 6 });
+				}
+				if (a_bindsComposite) {
+					for (const auto slot : std::array{ kGbufferNormalPSSlot }) {
+						registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+							.slot = slot });
+					}
+				}
+			})) {
+			FailLoad("Wetness shader contribution registration failed.");
 			return;
 		}
-		if (!registerContribution(cs::engine::ShaderInjectionTarget::kDfTiledLighting, false)) {
-			FailLoad("Wetness could not register its tiled lighting shader contribution");
-			return;
-		}
-		if (!registerContribution(cs::engine::ShaderInjectionTarget::kBsdfComposite, true)) {
-			FailLoad(
-				"Wetness composes through the reconstructed BSDFComposite shader and owns "
-				"the authoritative normal at t25 and depth at t36; registering that replacement failed");
+		if (!cs::engine::RegisterPreDeferredPrePass([this] { BeginPrepass(); }) ||
+			!cs::engine::RegisterPostDeferredPrePass([this] {
+				_inPrepass = false;
+				if (auto* context = GetImmediateContext()) {
+					ID3D11ShaderResourceView* empty[2]{};
+					context->PSSetShaderResources(70, 2, empty);
+				}
+			})) {
+			FailLoad("Wetness could not register its deferred material producer");
 			return;
 		}
 		// restore first: a failed save then leaves the restore a no-op
@@ -150,6 +161,11 @@ namespace cs::features
 		}
 
 		_registrationsReady.store(true, std::memory_order_release);
+		cs::engine::RegisterPreDeferredLightsImpl([this] { SaveCompositeBindings(); }, cs::engine::HookPriority::Early);
+		cs::engine::RegisterPostDeferredLightsImpl([this] { RestoreCompositeBindings(); }, cs::engine::HookPriority::Late);
+		cs::engine::InstallWaterRippleVisibilityFilter([this] {
+			return _suppressRipples.load(std::memory_order_relaxed);
+		});
 		L->info(
 			"Registered wetness shader contributions (enabled={}, max_rain_wetness={:.2f}, min_rain_wetness={:.2f}).",
 			_settings.enabled,
@@ -182,16 +198,155 @@ namespace cs::features
 		return true;
 	}
 
+	void WetnessEffects::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
+	{
+		// A non-aliasing t71 presence marker preserves native wetness on rejected producer draws.
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = desc.Height = desc.MipLevels = desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_IMMUTABLE;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		const std::uint8_t value = 0;
+		const D3D11_SUBRESOURCE_DATA initial{ &value, 1, 0 };
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		DX::ThrowIfFailed(a_device->CreateTexture2D(&desc, &initial, texture.put()));
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(texture.get(), nullptr, _filmAvailabilitySRV.put()));
+		cs::render::annotation::SetName(_filmAvailabilitySRV.get(), "WetnessEffects::Film availability");
+	}
+
+	void WetnessEffects::BeginPrepass()
+	{
+		_inPrepass = true;
+		_filmReady.store(false, std::memory_order_relaxed);
+		auto* context = GetImmediateContext();
+		auto* device = cs::engine::GetDevice();
+		auto* source = cs::engine::GetRenderTargetTexture(cs::engine::RenderTarget::kGbufferNormal);
+		if (!context || !device || !source)
+			return;
+		ID3D11ShaderResourceView* empty = nullptr;
+		context->PSSetShaderResources(71, 1, &empty);
+		D3D11_TEXTURE2D_DESC desc{}, current{};
+		source->GetDesc(&desc);
+		if (_filmTexture)
+			_filmTexture->GetDesc(&current);
+		if (!_filmTexture || !_filmRTV || !_filmSRV || desc.Width != current.Width || desc.Height != current.Height ||
+			desc.SampleDesc.Count != current.SampleDesc.Count) {
+			_filmRTV = nullptr;
+			_filmSRV = nullptr;
+			_filmTexture = nullptr;
+			// FO4: the six native MRTs have no universal spare film-normal or roughness channel.
+			desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+			desc.MipLevels = 1;
+			desc.ArraySize = 1;
+			desc.MiscFlags = 0;
+			if (FAILED(device->CreateTexture2D(&desc, nullptr, _filmTexture.put())) ||
+				FAILED(device->CreateRenderTargetView(_filmTexture.get(), nullptr, _filmRTV.put())) ||
+				FAILED(device->CreateShaderResourceView(_filmTexture.get(), nullptr, _filmSRV.put())))
+				return;
+			cs::render::annotation::SetName(_filmTexture.get(), "WetnessEffects::Film");
+			cs::render::annotation::SetName(_filmRTV.get(), "WetnessEffects::Film RTV");
+			cs::render::annotation::SetName(_filmSRV.get(), "WetnessEffects::Film SRV");
+		}
+		const float dry[]{ 0.5f, 0.5f, 1.0f, 0.0f };
+		context->ClearRenderTargetView(_filmRTV.get(), dry);
+		_filmReady.store(true, std::memory_order_relaxed);
+	}
+
+	void WetnessEffects::BindFilmOutput(ID3D11DeviceContext* a_context)
+	{
+		auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
+		cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
+		ID3D11RenderTargetView* targets[8]{};
+		winrt::com_ptr<ID3D11DepthStencilView> depth;
+		const bool ready = _inPrepass && _filmReady.load(std::memory_order_relaxed) && cs::render::IsSharedDataCurrent();
+		if (ready)
+			a_context->OMGetRenderTargets(8, targets, depth.put());
+		const bool valid = ready &&
+		                   targets[0] == cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kGbufferAlbedo) &&
+		                   targets[1] == cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kGbufferNormal) &&
+		                   !targets[6] && !targets[7];
+		bool bound = false;
+		if (valid) {
+			winrt::com_ptr<ID3D11BlendState> native;
+			float factors[4]{};
+			UINT mask{};
+			a_context->OMGetBlendState(native.put(), factors, &mask);
+			auto blends = std::span(_filmBlends).first(_filmBlendCount);
+			const auto found = std::ranges::find_if(blends, [&](const auto& entry) { return entry.native == native; });
+			FilmBlend* film = found == blends.end() ? nullptr : &*found;
+			if (!film) {
+				D3D11_BLEND_DESC desc{};
+				if (native)
+					native->GetDesc(&desc);
+				else {
+					for (auto& rt : desc.RenderTarget) {
+						rt.SrcBlend = rt.SrcBlendAlpha = D3D11_BLEND_ONE;
+						rt.DestBlend = rt.DestBlendAlpha = D3D11_BLEND_ZERO;
+						rt.BlendOp = rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+						rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+					}
+				}
+				if (!desc.IndependentBlendEnable)
+					for (auto& rt : desc.RenderTarget) rt = desc.RenderTarget[0];
+				desc.IndependentBlendEnable = TRUE;
+				desc.RenderTarget[6] = desc.RenderTarget[1];
+				desc.RenderTarget[6].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+				FilmBlend entry{ native, {} };
+				if (_filmBlendCount < _filmBlends.size() &&
+					SUCCEEDED(cs::engine::GetDevice()->CreateBlendState(&desc, entry.film.put()))) {
+					cs::render::annotation::SetName(entry.film.get(), "WetnessEffects::Film blend");
+					film = &_filmBlends[_filmBlendCount++];
+					*film = std::move(entry);
+				} else {
+					CS_LOG_EVERY_MS(Log(), 2000, spdlog::level::err, "Wetness film blend creation failed or device blend-state limit reached.");
+				}
+			}
+			if (film) {
+				cs::engine::CaptureShaderInjectionOutputs(a_context);
+				ID3D11ShaderResourceView* nullView = nullptr;
+				cs::engine::BindInjectionShaderResources(a_context, 71, 1, &nullView);
+				cs::engine::FlushShaderInjectionBindings();
+				targets[6] = _filmRTV.get();
+				a_context->OMSetRenderTargets(7, targets, depth.get());
+				a_context->OMSetBlendState(film->film.get(), factors, mask);
+				cs::engine::RecordShaderInjectionD3DBinds(2);
+				targets[6] = nullptr;
+				bound = true;
+			}
+		}
+		for (auto* target : targets)
+			if (target)
+				target->Release();
+		auto* availability = bound ? _filmAvailabilitySRV.get() : nullptr;
+		cs::engine::BindInjectionShaderResources(a_context, 71, 1, &availability);
+		(bound ? _producerDraws : _producerRejected).fetch_add(1, std::memory_order_relaxed);
+	}
+
+	void WetnessEffects::BindFilmInput(ID3D11DeviceContext* a_context, bool a_compute)
+	{
+		auto* view = _filmReady.load(std::memory_order_relaxed) ? _filmSRV.get() : nullptr;
+		if (a_compute) {
+			a_context->CSSetShaderResources(71, 1, &view);
+		} else {
+			cs::engine::BindInjectionShaderResources(a_context, 71, 1, &view);
+			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
+			cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
+		}
+	}
+
 	cs::WetnessEffectsFeatureData WetnessEffects::GetCommonBufferData() const
 	{
+		_suppressRipples.store(_injectionsOperational.load(std::memory_order_acquire) &&
+								   _settings.enabled && !_settings.enableVanillaRipples,
+			std::memory_order_relaxed);
 		if (!_injectionsOperational.load(std::memory_order_acquire)) {
 			return {};
 		}
 
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		const auto* cell = player ? player->GetParentCell() : nullptr;
-		const bool isExterior = cell && cell->IsExterior();
 		const auto weather = cs::engine::SnapshotWeather();
+		const bool isExterior = weather.fullSky;
 		const auto weatherWetness = wetness_math::ComputeWeatherWetness(
 			isExterior,
 			weather.previousIsRain,
@@ -199,26 +354,68 @@ namespace cs::features
 			weather.currentIsRain,
 			weather.currentBeginPrecip,
 			weather.transitionPct);
-		const float wetness = wetness_math::PublishedWetness(
+		float wetness = wetness_math::PublishedWetness(
 			_settings.enabled, weatherWetness.wetness);
-		const float puddleWetness = wetness_math::PublishedWetness(
+		float puddleWetness = wetness_math::PublishedWetness(
 			_settings.enabled, weatherWetness.puddleWetness);
+		float raining = _settings.enabled && isExterior ? wetness_math::ComputeRaining(
+															  weather.currentRainDensity, weather.currentBeginPrecip,
+															  weather.previousRainDensity, weather.previousEndPrecip, weather.transitionPct) :
+		                                                  0.0f;
+		if (_settings.enabled && weather.available) {
+			const bool interior = !isExterior && _settings.enableIntExOverride;
+			if (_settings.enableWetnessOverride)
+				wetness = interior ? _settings.wetnessOverrideInterior : _settings.wetnessOverrideExterior;
+			if (_settings.enablePuddleOverride)
+				puddleWetness = interior ? _settings.puddleOverrideInterior : _settings.puddleOverrideExterior;
+			if (_settings.enableRainOverride)
+				raining = interior ? _settings.rainOverrideInterior : _settings.rainOverrideExterior;
+		}
+		if (const auto* state = cs::engine::GetGraphicsState(); state && state->frameCount != _timerFrame) {
+			const auto* main = RE::Main::GetSingleton();
+			const auto* timer = RE::BSTimer::GetSingleton();
+			if (main && !main->inMenuMode && !main->freezeTime && timer)
+				_rainTimer += static_cast<std::uint64_t>(timer->realTimeDelta * 1000.0f);
+			_timerFrame = state->frameCount;
+		}
 
 		_isExterior.store(isExterior, std::memory_order_relaxed);
 		_weatherWetness.store(weatherWetness.wetness, std::memory_order_relaxed);
 		_wetness.store(wetness, std::memory_order_relaxed);
 		return {
+			.OcclusionViewProj = weather.occlusionViewProj,
+			.Time = static_cast<float>(_rainTimer) / 1000.0f,
+			.Raining = raining,
 			.Wetness = wetness,
+			.PuddleWetness = puddleWetness,
+			.EnableWetnessEffects = _settings.enabled ? 1u : 0u,
 			.MaxRainWetness = _settings.maxRainWetness,
-			.MinRainWetness = _settings.minRainWetness,
-			.DebugVisualization = static_cast<std::uint32_t>(
-				_debugVisualization.load(std::memory_order_acquire)),
+			.MaxPuddleWetness = _settings.maxPuddleWetness,
+			.MaxShoreWetness = _settings.enabled ? _settings.maxShoreWetness : 0.0f,
+			.ShoreRange = _settings.shoreRange,
 			.PuddleRadius = _settings.puddleRadius,
 			.PuddleMaxAngle = _settings.puddleMaxAngle,
-			.MaxPuddleWetness = _settings.maxPuddleWetness,
-			.PuddleWetness = puddleWetness,
-			.MaxShoreWetness = _settings.enabled ? _settings.maxShoreWetness : 0.0f,
-			.ShoreRange = _settings.shoreRange
+			.PuddleMinWetness = _settings.puddleMinWetness,
+			.MinRainWetness = _settings.minRainWetness,
+			.SkinWetness = _settings.skinWetness,
+			.WeatherTransitionSpeed = _settings.weatherTransitionSpeed,
+			.EnableRaindropFx = _settings.enableRaindropFx ? 1u : 0u,
+			.EnableSplashes = _settings.enableSplashes ? 1u : 0u,
+			.EnableRipples = _settings.enableRipples ? 1u : 0u,
+			.EnableVanillaRipples = _settings.enableVanillaRipples ? 1u : 0u,
+			.RaindropFxRange = _settings.raindropFxRange,
+			.RaindropGridSizeRcp = 1.0f / _settings.raindropGridSize,
+			.RaindropIntervalRcp = 1.0f / _settings.raindropInterval,
+			.RaindropChance = _settings.raindropChance * raining * raining,
+			.SplashesLifetime = _settings.splashesLifetime,
+			.SplashesStrength = _settings.splashesStrength,
+			.SplashesMinRadius = _settings.splashesMinRadius,
+			.SplashesMaxRadius = _settings.splashesMaxRadius,
+			.RippleStrength = _settings.rippleStrength,
+			.RippleRadius = _settings.rippleRadius,
+			.RippleBreadth = _settings.rippleBreadth,
+			.RippleLifetimeRcp = _settings.raindropInterval / _settings.rippleLifetime,
+			.pad0 = 0.0f
 		};
 	}
 
@@ -231,9 +428,7 @@ namespace cs::features
 		auto* srv =
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		// a null bind reads outside the encode domain, which is wetness identity
-		a_context->PSSetShaderResources(kGbufferNormalPSSlot, 1, &srv);
-		auto* depth = cs::engine::GetSceneDepthSRV();
-		a_context->PSSetShaderResources(kSceneDepthPSSlot, 1, &depth);
+		cs::engine::BindInjectionShaderResources(a_context, kGbufferNormalPSSlot, 1, &srv);
 		if (srv) {
 			_normalBinds.fetch_add(1, std::memory_order_relaxed);
 		} else {
@@ -269,6 +464,9 @@ namespace cs::features
 			cs::engine::ShaderInjectionTarget::kBsdfComposite);
 		a_sink
 			.Field("enabled", _settings.enabled)
+			.Field("material_producer_ready", _filmReady.load(std::memory_order_relaxed))
+			.Field("material_producer_draws", _producerDraws.load(std::memory_order_relaxed))
+			.Field("material_producer_rejected", _producerRejected.load(std::memory_order_relaxed))
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("is_exterior", _isExterior.load(std::memory_order_relaxed))
 			.Field(
@@ -312,27 +510,30 @@ namespace cs::features
 	void WetnessEffects::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto slider = [&](const char* a_label, float Settings::* a_member) {
-			const auto range = wetness_math::kSchema.EditRange(a_member);
-			return edit.Continuous(dmui::ui::SliderScalar(
-				a_label, &(_settings.*a_member), &range.min, &range.max, "%.2f"));
-		};
-		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
-		dmui::ui::TextDisabled("Off publishes zero wetness, which is shader identity.");
-		changed |= slider("Max rain wetness", &Settings::maxRainWetness);
-		dmui::ui::TextDisabled("Wetness of surfaces facing straight up.");
-		changed |= slider("Min rain wetness", &Settings::minRainWetness);
-		dmui::ui::TextDisabled("Wetness floor for surfaces facing away from the sky.");
-		changed |= slider("Puddle Wetness", &Settings::maxPuddleWetness);
-		changed |= slider("Shore Wetness", &Settings::maxShoreWetness);
-		constexpr auto shoreRange = wetness_math::kSchema.EditRange(&Settings::shoreRange);
-		changed |= edit.Continuous(dmui::ui::SliderScalar(
-			"Shore Range", &_settings.shoreRange, &shoreRange.min, &shoreRange.max));
-		changed |= slider("Puddle Radius", &Settings::puddleRadius);
-		changed |= slider("Puddle Max Angle", &Settings::puddleMaxAngle);
-		if (changed) {
-			_settings = wetness_math::Clamp(_settings);
-		}
+		std::array<dmui::ChoiceOption<std::size_t>, wetness_math::kClimates.size()> choices;
+		for (std::size_t index = 0; index < choices.size(); ++index)
+			choices[index] = { index, wetness_math::kClimates[index].name, wetness_math::kClimates[index].name };
+		const auto selection = dmui::DrawChoice<std::size_t>("wetness-climate", wetness_math::DetectClimate(_settings),
+			std::span<const dmui::ChoiceOption<std::size_t>>{ choices }, "Custom", "Climate Preset");
+		if (edit.Discrete(selection.changed) && *selection.selected != 0)
+			wetness_math::ApplyClimate(_settings, *selection.selected);
+		std::apply([&](const auto&... fields) {
+			const auto draw = [&](const auto& field) {
+				auto& value = _settings.*field.member;
+				const std::string label = std::string(field.description) + "##" + std::string(field.key);
+				if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, bool>)
+					edit.Discrete(dmui::ui::Checkbox(label.c_str(), &value));
+				else {
+					auto range = wetness_math::kSchema.EditRange(field.member);
+					if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, float>)
+						if (field.member == &Settings::rippleLifetime)
+							range.max = _settings.raindropInterval;
+					edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &value, &range.min, &range.max));
+				}
+			};
+			(draw(fields), ...);
+		},
+			wetness_math::kSchema.fields);
 
 		const bool operational = _injectionsOperational.load(std::memory_order_relaxed);
 		if (operational && _settings.enabled) {

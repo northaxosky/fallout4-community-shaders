@@ -19,9 +19,10 @@ namespace cs::engine
 	{
 		if (a_insideDeferredComposite)
 			return { true, false };
+		if (!a_insideDeferredLights)
+			return { true, false };
 
-		const bool dispatchLights =
-			a_insideDeferredLights && a_residualR9d == 2;
-		return { dispatchLights, dispatchLights };
+		// Focused-volume shaders need bindings too; only fullscreen callbacks depend on r9d.
+		return { true, a_residualR9d == 2 };
 	}
 }

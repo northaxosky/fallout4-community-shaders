@@ -27,8 +27,7 @@ namespace cs::features
 	class TerrainShadows : public Feature
 	{
 	public:
-		static constexpr std::uint32_t kShadowHeightPSSlot = 30;
-		static constexpr std::uint32_t kSceneDepthPSSlot = 31;
+		static constexpr std::uint32_t kShadowHeightPSSlot = 60;
 		static constexpr std::uint32_t kShadowHeightSamplerPSSlot = 13;
 
 		enum class DebugVisualization : std::uint32_t
@@ -51,6 +50,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
@@ -61,8 +61,10 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		cs::TerrainShadowsFeatureData GetCommonBufferData() const;
+		ID3D11ShaderResourceView* GetShadowHeightSRV() const;
 
 		using Settings = terrain_shadows::Settings;
 
@@ -125,7 +127,6 @@ namespace cs::features
 			ID3D11Device* a_device,
 			ID3D11DeviceContext* a_context,
 			const HeightMapRecord& a_record,
-			std::uint32_t a_factor,
 			std::string& a_error);
 		bool UpdateShadow(ID3D11DeviceContext* a_context, bool a_refreshImmediately);
 		void ReleaseLiveResources(ID3D11DeviceContext* a_context);
@@ -134,9 +135,7 @@ namespace cs::features
 		void SaveEngineBindings();
 		void BindShadowHeights(ID3D11DeviceContext* a_context);
 		void RestoreEngineBindings();
-		void SaveDebugBindings();
-		void BindDebugTexture(ID3D11DeviceContext* a_context);
-		void RestoreDebugBindings();
+		void BindCompositeResources(ID3D11DeviceContext* a_context);
 
 		void PublishStatus(
 			const std::string& a_worldspace,
@@ -147,9 +146,6 @@ namespace cs::features
 
 		Settings _settings;
 		std::atomic_bool _enabled{ true };
-		std::atomic_uint32_t _requestedDownsampleFactor{
-			terrain_shadows::kDefaultDownsampleFactor
-		};
 		std::atomic<DebugVisualization> _debugVisualization{
 			DebugVisualization::kOff
 		};
@@ -170,7 +166,6 @@ namespace cs::features
 		std::atomic_uint32_t _sourceHeight{ 0 };
 		std::atomic_uint32_t _effectiveWidth{ 0 };
 		std::atomic_uint32_t _effectiveHeight{ 0 };
-		std::atomic_uint32_t _appliedFactorTelemetry{ 1 };
 		std::atomic_uint64_t _allocatedBytes{ 0 };
 		std::atomic_uint64_t _dispatches{ 0 };
 		std::atomic_uint64_t _updates{ 0 };
@@ -214,12 +209,10 @@ namespace cs::features
 		std::string _missingMapWorldspace;
 		std::string _failedWorldspace;
 		std::string _failedDetail;
-		std::uint32_t _failedFactor = 0;
-		std::uint32_t _appliedFactor = 1;
+		std::uint32_t _handledRefreshGeneration = 0;
 		std::uint32_t _shadowUpdateIndex = 0;
 		std::uint32_t _slicesSinceRebuild = 0;
 		bool _pendingFullRefresh = false;
-		bool _wasEnabledLastFrame = false;
 		bool _gameHourSeeded = false;
 		float _lastGameHour = 0.0f;
 		bool _resourceInitFailed = false;
@@ -235,13 +228,12 @@ namespace cs::features
 		winrt::com_ptr<ID3D11SamplerState> _linearClampSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _shadowStatsCS;
 		winrt::com_ptr<ID3D11Buffer> _shadowStatsCB;
+		winrt::com_ptr<ID3D11Buffer> _shadowStatsFeatureCB;
 		winrt::com_ptr<ID3D11Buffer> _shadowStatsBuffer;
 		winrt::com_ptr<ID3D11UnorderedAccessView> _shadowStatsUav;
 		winrt::com_ptr<ID3D11Buffer> _shadowStatsStaging;
 
-		cs::render::PixelShaderResourceSnapshot<2> _engineShadowBinding;
+		cs::render::PixelShaderResourceSnapshot<1> _engineShadowBinding;
 		cs::render::PixelShaderSamplerSnapshot<1> _engineSamplerBinding;
-		cs::render::PixelShaderResourceSnapshot<2> _debugShadowBinding;
-		cs::render::PixelShaderSamplerSnapshot<1> _debugSamplerBinding;
 	};
 }

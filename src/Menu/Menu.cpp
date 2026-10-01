@@ -6,6 +6,7 @@
 #include "Plugin.h"
 #include "Render/Engine.h"
 #include "Render/ShaderInjection.h"
+#include "RenderDoc.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Settings/SettingsRegistry.h"
@@ -1314,24 +1315,30 @@ namespace cs
 	{
 		++_hostFrameSerial;
 		ProcessDialog(a_client);
-		if (!_clearCacheRequested.exchange(false, std::memory_order_acq_rel))
+		const auto operation = _clearRequested.exchange(DialogOperation::kNone, std::memory_order_acq_rel);
+		if (operation == DialogOperation::kNone)
 			return;
 		if (_dialog.operation != DialogOperation::kNone) {
-			ShowToast("Finish the current dialog before clearing the shader cache.", 4.0);
+			ShowToast("Finish the current dialog before deleting files.", 4.0);
 			return;
 		}
+		const bool captures = operation == DialogOperation::kClearRenderDocCaptures;
+		// FO4: capture deletion shares native confirmation and submission tracking with cache deletion.
 		const DMUI_DialogDescriptor descriptor{
 			DMUI_DIALOG_DESCRIPTOR_0_1_SIZE,
 			DMUI_DIALOG_KIND_CONFIRM,
-			"Clear Shader Cache",
-			"This deletes every compiled shader record on disk. Shaders are recompiled the next time they are needed.",
+			captures ? "Clear RenderDoc Captures" : "Clear Shader Cache",
+			captures ? "This permanently deletes every regular file in the configured capture directory, not only .rdc files." :
+					   "This deletes every compiled shader record on disk. Shaders are recompiled the next time they are needed.",
 			"Clear",
 			"Cancel",
 			nullptr,
 			nullptr,
 			1u
 		};
-		StartDialog(a_client, DialogOperation::kClearCache, descriptor);
+		StartDialog(a_client, operation, descriptor);
+		if (captures && _dialog.operation == operation)
+			_dialog.capturePath = features::RenderDoc::GetSingleton()->CaptureDirectory();
 	}
 
 	void Menu::OnHostDeviceReady() noexcept
@@ -1411,6 +1418,17 @@ namespace cs
 		switch (_dialog.operation) {
 		case DialogOperation::kClearCache:
 			accepted = ClearShaderCache(error);
+			break;
+		case DialogOperation::kClearRenderDocCaptures:
+			{
+				auto* renderDoc = features::RenderDoc::GetSingleton();
+				if (_dialog.capturePath != renderDoc->CaptureDirectory()) {
+					error = "The capture directory changed; cancel and request deletion again.";
+					break;
+				}
+				renderDoc->ClearCaptures();
+				accepted = true;
+			}
 			break;
 		case DialogOperation::kSavePresetAs:
 			if (!ValidatePresetName(a_text, presets.List(), error)) {
@@ -1539,7 +1557,12 @@ namespace cs
 
 	void Menu::RequestClearShaderCache() noexcept
 	{
-		_clearCacheRequested.store(true, std::memory_order_release);
+		_clearRequested.store(DialogOperation::kClearCache, std::memory_order_release);
+	}
+
+	void Menu::RequestClearRenderDocCaptures() noexcept
+	{
+		_clearRequested.store(DialogOperation::kClearRenderDocCaptures, std::memory_order_release);
 	}
 
 	bool Menu::CheckHostResult(

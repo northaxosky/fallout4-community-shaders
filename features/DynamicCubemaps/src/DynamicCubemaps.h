@@ -115,8 +115,12 @@ namespace cs::features
 			float CaptureDeltaTime = 0.0f;
 			std::uint32_t ResetCapture = 0;
 			std::uint32_t pad0[2]{};
-			DirectX::XMFLOAT4 CameraPosAdjust;
-			DirectX::XMFLOAT4 ViewToWorld[3];
+			DirectX::XMFLOAT4 CaptureCameraOrigin{};
+		};
+		static_assert(sizeof(UpdateCubemapCB) == 48);
+
+		struct alignas(16) PrepareCaptureCB
+		{
 			DirectX::XMFLOAT4X4 InvProj;
 		};
 
@@ -207,6 +211,12 @@ namespace cs::features
 		CubeTexture _filtered;
 		CubeTexture _environment;
 		CubeTexture _reflections;
+		CubeTexture _preparedPosition;
+		CubeTexture _preparedColor;
+		CubeTexture _preparedUV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _preparedPositionArraySRV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _preparedColorArraySRV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _preparedUVArraySRV;
 		cs::render::PixelShaderResourceSnapshot<kCompositionPSSlotCount> _compositionBindingSnapshot;
 		CompressedCube _environmentBC6H;
 		CompressedCube _reflectionsBC6H;
@@ -226,9 +236,12 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ShaderResourceView> _defaultCubemap;
 		winrt::com_ptr<ID3D11SamplerState> _computeSampler;
 		winrt::com_ptr<ID3D11Buffer> _updateBuffer;
+		winrt::com_ptr<ID3D11Buffer> _prepareBuffer;
 		winrt::com_ptr<ID3D11Buffer> _filterBuffer;
 		winrt::com_ptr<ID3D11Buffer> _bc6hBuffer;
 		winrt::com_ptr<ID3D11ComputeShader> _detectLightingCS;
+		winrt::com_ptr<ID3D11ComputeShader> _prepareCS;
+		winrt::com_ptr<ID3D11ComputeShader> _prepareReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateFakeReflectionsCS;

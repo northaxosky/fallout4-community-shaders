@@ -106,10 +106,13 @@
 #		define DISMEMBERMENT_MEATCUFF 0
 #	endif
 
+#	ifdef WETNESS_EFFECTS
+#		include "FO4/WetnessMaterial.hlsli"
+#	endif
 cbuffer PerFrame_CB12 : register(b12)
 {
 	float4 cb12_pad_0_29[30];
-	float4 cb12_idx30_global_fade;
+	float4 native_global_fade;
 
 	float4 PrevFrame_WorldToClip_row0;
 	float4 PrevFrame_WorldToClip_row1;
@@ -341,6 +344,10 @@ SamplerState g_sLandNormalNoise : register(s15);
 struct PS_INPUT
 {
 	float4 position: SV_POSITION;
+#	if defined(WETNESS_EFFECTS) && !TESSELLATE_DISP_HEIGHT
+	float4 wetGeometryNormal: TEXCOORD10;
+	float3 wetModelPosition: TEXCOORD11;
+#	endif
 #	if TESSELLATE_DISP_HEIGHT
 	float2 uv: TEXCOORD0;
 #	endif
@@ -402,6 +409,9 @@ struct PS_INPUT
 
 struct PS_OUTPUT
 {
+#	ifdef WETNESS_EFFECTS
+	float4 wetFilm: SV_Target6;
+#	endif
 	float4 albedo: SV_Target0;
 #	if BLEND
 	float4 normalOct: SV_Target1;
@@ -425,6 +435,21 @@ struct PS_OUTPUT
 #	endif
 	PS_OUTPUT main(PS_INPUT input) {
 		PS_OUTPUT output;
+		float4 cb12_idx30_global_fade = native_global_fade;
+#	ifdef WETNESS_EFFECTS
+		uint2 filmDimensions;
+		WetnessEffects::Film.GetDimensions(filmDimensions.x, filmDimensions.y);
+		bool wetnessOwned = all(filmDimensions > 0) && SharedData::wetnessEffectsSettings.EnableWetnessEffects;
+#		if MODELSPACENORMALS && !TESSELLATE_DISP_HEIGHT
+		wetnessOwned = wetnessOwned && input.wetGeometryNormal.w > 0.0;
+#		elif TESSELLATE_DISP_HEIGHT && (SKINNED || MODELSPACENORMALS)
+		wetnessOwned = false;
+#		endif
+		// FO4: native g must not darken or modify specular before the upstream film.
+		if (wetnessOwned)
+			cb12_idx30_global_fade.x = 0.0;
+		output.wetFilm = float4(0.5, 0.5, 1.0, 0.0);
+#	endif
 
 #	if TESSELLATE_DISP_HEIGHT
 		float2 uv = input.uv;
@@ -1245,6 +1270,44 @@ struct PS_OUTPUT
 
 		output.motionVec = (currNDC - prevNDC) * float2(-0.5, 0.5);
 #	endif
+#	ifdef WETNESS_EFFECTS
+		if (wetnessOwned) {
+			FO4Wetness::MaterialInput wetInput;
+			wetInput.cameraRelativePosition = input.curr_pos_u.xyz;
+#		if !TESSELLATE_DISP_HEIGHT
+			wetInput.modelPosition = input.wetModelPosition;
+#		else
+			wetInput.modelPosition = input.curr_pos_u.xyz + FrameBuffer::CameraPosAdjust.xyz;
+#		endif
+			float3 vertexView = float3(input.tangent.z, input.bitangent.z, input.normal.z);
+			float3 shadingView = normalize(float3(axisX, axisY, axisZ));
+#		if TESSELLATE_DISP_HEIGHT
+			vertexView = FrameBuffer::WorldToView(FO4Wetness::TessellatedDirectionToWorld(vertexView), false);
+			float3 projectedNormal = float3(dot(input.tangent, nts), dot(input.bitangent, nts), dot(input.normal, nts));
+			shadingView = FrameBuffer::WorldToView(FO4Wetness::TessellatedDirectionToWorld(projectedNormal), false);
+#		endif
+#		if MODELSPACENORMALS && !TESSELLATE_DISP_HEIGHT
+			vertexView = input.wetGeometryNormal.xyz;
+#		endif
+			wetInput.vertexNormal = normalize(FrameBuffer::ViewToWorld(vertexView, false));
+			wetInput.shadingNormal = normalize(FrameBuffer::ViewToWorld(shadingView, false));
+			wetInput.viewDepth = FrameBuffer::WorldToView(input.curr_pos_u.xyz).z;
+			wetInput.environmentMapped = cb2_material_id_and_smoothness.y != 0.0;
+			wetInput.environmentMask = saturate(50.0 * output.material.z * output.material.z);
+#		if SKINNED
+			wetInput.skinned = true;
+#		else
+			wetInput.skinned = false;
+#		endif
+			wetInput.skinOrHair = SKIN_TINT || FACE || HAIR;
+			wetInput.excludeDarkening = SKIN_TINT || FACE || EYE;
+			wetInput.inWorld = true;
+			output.wetFilm = FO4Wetness::PrepareMaterial(wetInput, output.albedo.xyz);
+		}
+#		if BLEND
+		output.wetFilm.w *= output.normalOct.w;
+#		endif
+#	endif
 		return output;
 	}
 #elif defined(BSDFPREPASS_VS_SOURCE)
@@ -1638,6 +1701,10 @@ struct VertexOutput
 struct VertexOutput
 {
 	float4 position: SV_POSITION;
+#		ifdef WETNESS_EFFECTS
+	float4 wetGeometryNormal: TEXCOORD10;
+	float3 wetModelPosition: TEXCOORD11;
+#		endif
 	float3 tangentRow0: TEXCOORD0;
 #		if FACE
 	// The face lane packs into the spare component of the first tangent row.
@@ -2360,6 +2427,29 @@ VertexOutput main(VertexInput input)
 	output.tangentRow0 = ProjectBasis(viewRow0, tangent, binormal, normal);
 	output.tangentRow1 = ProjectBasis(viewRow1, tangent, binormal, normal);
 	output.tangentRow2 = ProjectBasis(viewRow2, tangent, binormal, normal);
+#		endif
+#		ifdef WETNESS_EFFECTS
+	output.wetModelPosition = position.xyz;
+#			if MODELSPACENORMALS && NORMALS
+	// FO4: native model-space basis rows discard the authored vertex normal.
+#				if MERGE_INSTANCED
+	float3 authoredNormal = normalize(TurnMerged(merged, UnpackSigned3(mergedNormalPacked)));
+#				else
+	float3 authoredNormal = normalize(INPUT_NORMAL.xyz * 2.0 - 1.0);
+#				endif
+#				if SKINNED
+	float3 authoredWorldNormal = normalize(SkinDirection(authoredNormal, skin));
+	output.wetGeometryNormal = float4(dot(cb12_idx0_view_row0.xyz, authoredWorldNormal),
+		dot(cb12_idx1_view_row1.xyz, authoredWorldNormal),
+		dot(cb12_idx2_view_row2.xyz, authoredWorldNormal), 1.0);
+#				else
+	output.wetGeometryNormal = float4(dot(viewRow0, authoredNormal), dot(viewRow1, authoredNormal), dot(viewRow2, authoredNormal), 1.0);
+#				endif
+#			elif MODELSPACENORMALS
+	output.wetGeometryNormal = 0.0;
+#			else
+	output.wetGeometryNormal = float4(output.tangentRow0.z, output.tangentRow1.z, output.tangentRow2.z, 1.0);
+#			endif
 #		endif
 #		if STRUCTURED_TERRAIN
 	float2 texcoord = gridTexcoord;

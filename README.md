@@ -57,8 +57,8 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Screen Space Shadows** | Contact shadows and finer shadow detail. |
 | **Terrain Shadows** | Long-range shadows from terrain. |
 | **Screen Space GI** | Ambient occlusion and indirect lighting. |
-| **Inverse Square Lighting** | More natural light falloff. |
-| **Exponential Height Fog** | Weather-driven fog with height falloff. |
+| **Inverse Square Lighting** | Opt-in per-light falloff; requires [authored light TOML files](features/InverseSquareLighting/README.md). Existing lights stay unchanged. |
+| **[Exponential Height Fog](features/ExponentialHeightFog/README.md)** | Analytic and volumetric fog with weather profiles; provider coverage is pending. |
 | **Dynamic Cubemaps** | Reflections that respond to the surrounding scene. |
 | **Wetness Effects** | Rain-darkened surfaces and wet reflections. |
 | **Water Effects** | Sunlight caustics on submerged surfaces. |
@@ -67,6 +67,17 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Frame Generation** | FSR 3/4, DLSS, and supported Multi Frame Generation modes. |
 | **Performance Overlay** | FPS, frame-time, and latency graphs. |
 | **RenderDoc** | In-game frame capture for debugging. |
+
+Terrain Shadows requires an xLODGen heightmap under `Data\Textures\Terrain\<worldspace>\`
+or a custom map under `Data\Textures\HeightMaps\`. Maps use the upstream filename/height encoding
+contract and native DDS resolution. `[features.TerrainShadows.settings]` uses `EnableTerrainShadow`;
+the legacy `enabled` and `downsample_factor` keys are no longer supported.
+
+Screen Space GI settings use upstream-cased keys, including `Enabled`, `EnableGI`,
+`EnableExperimentalSpecularGI`, `ResolutionMode`, and the two-number `DepthFadeRange`
+array. Legacy snake_case keys are no longer supported. `AOPower` retains the FO4 default
+of 4 and edit range 0–12. See [deviations](docs/DEVIATIONS.md#screen-space-gi) for
+composition coverage and validation limits.
 
 ---
 
@@ -98,6 +109,12 @@ Default hotkeys registered with DearModdingUI:
 
 Key bindings can be customized through the DearModdingUI menu.
 
+The `component=shader_injection` telemetry line reports the previous completed draw frame in
+`draw_frame`: `draw_scope_cpu_us` measures accumulated CPU time inside the injection draw scopes
+(including native draw submission), and `draw_scopes`, `draw_captures`, `draw_restores`, and
+`draw_d3d_binds` count scopes, state-save calls, restore calls, and injection D3D state-setting calls.
+These fields are per-frame; the existing `dispatches` counter is cumulative and counts contributor callbacks.
+
 ---
 
 ## In-game Menu
@@ -112,6 +129,8 @@ All type toggles default on; missing source files leave the native shaders stock
 use their own engine names, so only `ISSSLRRaytracing.hlsl` currently supplies an imagespace replacement.
 The Advanced menu's type toggles and `[shader_ownership] enable_shaders` master are checked at shader bind time.
 Off binds the game's shader for that type, including feature changes to it. Feature loading still requires a restart.
+Effect, distant tree and forward lighting sources remain for fog and terrain-shadow consumers.
+Utility, sky, particle and blood splatter have no replacement sources and remain stock.
 
 ---
 

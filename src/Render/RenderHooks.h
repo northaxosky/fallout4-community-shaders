@@ -4,6 +4,7 @@
 
 namespace cs::engine
 {
+	bool EnsureDrawProfilingInstalled();
 	using RenderHookCallback = std::function<void()>;
 
 	// Late priority keeps additive lights after darkening.
@@ -16,6 +17,7 @@ namespace cs::engine
 
 	// Register only during Load or OnPostPostLoad.
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+	bool RegisterPreDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	bool RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);

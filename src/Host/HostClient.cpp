@@ -247,7 +247,7 @@ namespace cs::host
 		// suggested chords are the same by registering it first.
 		_multiCaptureHotkey = _client.AddHotkeyAction(
 			"dearmodding.cs.renderdoc.multi-capture",
-			"Capture Multiple Frames",
+			"Capture Configured Frames (alternate)",
 			renderDoc->SuggestedMultiCaptureHotkey().c_str(),
 			[this, renderDoc](bool pressed) {
 				if (pressed &&
@@ -272,7 +272,7 @@ namespace cs::host
 
 		_captureHotkey = _client.AddHotkeyAction(
 			"dearmodding.cs.renderdoc.capture",
-			"Capture One Frame",
+			"Capture Configured Frames",
 			renderDoc->SuggestedCaptureHotkey().c_str(),
 			[this, renderDoc](bool pressed) {
 				if (pressed &&
@@ -577,8 +577,12 @@ namespace cs::host
 						a_feature, "DearModdingUI::DrawSettings"))
 					return;
 				CS_FEATURE_ZONE(&a_feature, "DrawSettings");
+				const bool comparing = settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
 				try {
-					a_feature.DrawSettings();
+					{
+						const dmui::DisabledScope disabled{ comparing };
+						a_feature.DrawSettings();
+					}
 					a_feature.FlushSettings(true);
 				} catch (const std::exception& error) {
 					FeatureManager::Get().QuarantineRuntimeCallback(
@@ -623,7 +627,7 @@ namespace cs::host
 						"non-standard exception");
 					throw;
 				}
-				const auto reset = row.End(resettable, resettable);
+				const auto reset = row.End(resettable && !comparing, resettable && !comparing);
 				if (!reset) {
 					LogFailure("end feature controls row");
 					return;

@@ -1,42 +1,99 @@
 #include "ExponentialHeightFog.h"
 
 #include <DearModdingUI/Client.h>
-
-#include <array>
-#include <format>
-#include <string>
-#include <string_view>
-
-#include <toml++/toml.hpp>
+#include <bit>
+#include <cmath>
 
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
+#include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
-#include "Render/FrameBuffer.h"
+#include "Render/FeatureShaderContributions.h"
+#include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
+#include "World/Weather.h"
 
 namespace cs::features
 {
 	namespace ehf = exponential_height_fog;
-
+#define FOG_ABI(member) static_assert(offsetof(ehf::Settings, member) == offsetof(render::ExponentialHeightFogSettings, member))
+	FOG_ABI(enabled);
+	FOG_ABI(useDynamicCubemaps);
+	FOG_ABI(startDistance);
+	FOG_ABI(fogHeight);
+	FOG_ABI(fogHeightFalloff);
+	FOG_ABI(fogDensity);
+	FOG_ABI(directionalInscatteringMultiplier);
+	FOG_ABI(directionalInscatteringAnisotropy);
+	FOG_ABI(inscatteringTint);
+	FOG_ABI(cubemapMipLevel);
+	FOG_ABI(sunlightAttenuationAmount);
+	FOG_ABI(respectVanillaFogFade);
+	FOG_ABI(disableVanillaFog);
+	FOG_ABI(fogInscatteringColor);
+	FOG_ABI(originalFogColorAmount);
+	FOG_ABI(volumetricFogEnabled);
+	FOG_ABI(volumetricGridPixelSize);
+	FOG_ABI(volumetricGridSizeZ);
+	FOG_ABI(volumetricFogDistance);
+	FOG_ABI(volumetricFogStartDistance);
+	FOG_ABI(volumetricFogNearFadeInDistance);
+	FOG_ABI(volumetricFogExtinctionScale);
+	FOG_ABI(volumetricFogAlbedo);
+	FOG_ABI(volumetricFogEmissive);
+	FOG_ABI(volumetricDirectionalScatteringIntensity);
+	FOG_ABI(volumetricShadowBias);
+	FOG_ABI(volumetricDepthDistributionScale);
+	FOG_ABI(volumetricSkyLightingIntensity);
+	FOG_ABI(volumetricFogScatteringDistribution);
+	FOG_ABI(volumetricHistoryWeight);
+	FOG_ABI(volumetricHistoryMissSampleCount);
+	FOG_ABI(volumetricSampleJitterMultiplier);
+	FOG_ABI(volumetricUpsampleJitterMultiplier);
+	FOG_ABI(volumetricLocalLightScatteringIntensity);
+	FOG_ABI(pad0);
+#undef FOG_ABI
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.exponentialheightfog");
+		constexpr FeatureDebugView kDebugViews[]{
+			{ "fog_factor", "Fog Factor" }
+		};
 
-		constexpr std::uint32_t kEnabledFlag = 1U << 0;
-		constexpr std::uint32_t kFogFactorDebugFlag = 1U << 1;
-		// Load transitions publish a few frames of unpopulated fog ramps.
-		constexpr std::uint32_t kPersistentRejectionFrames = 60;
-		constexpr std::array<FeatureDebugView, 1> kDebugViews{ { { "fog_factor",
-			"Fog factor (final pre-colour-mix greyscale)",
-			FeatureDebugViewKind::kFullscreen } } };
+		void Tooltip(std::string_view a_key)
+		{
+			const char* text = nullptr;
+			if (a_key == "directionalInscatteringAnisotropy")
+				text = "Controls the asymmetry of inscattering via the Henyey-Greenstein phase function.\nPositive values produce forward scattering (glow around sun).\nZero is isotropic. Negative values produce back scattering.";
+			else if (a_key == "disableVanillaFog")
+				text = "Disables the vanilla fog entirely. Only exponential height fog will be applied.";
+			else if (a_key == "respectVanillaFogFade")
+				text = "Applies vanilla fade brightness to exponential height fog.\nFO4 fade-brightness mapping is not available.";
+			else if (a_key == "volumetricSampleJitterMultiplier")
+				text = "Matches UE's r.VolumetricFog.LightScatteringSampleJitterMultiplier.\nAdds per-voxel random offset on top of the Halton sequence.\n0 = UE default; nonzero values need stronger temporal filtering.";
+			else if (a_key == "volumetricUpsampleJitterMultiplier")
+				text = "Matches UE's r.VolumetricFog.UpsampleJitterMultiplier.\nJitters the final 3D fog lookup in screen space to hide\nlow-resolution froxel pixelization. 0 = UE default.";
+			if (text && dmui::ui::IsItemHovered())
+				dmui::ui::SetTooltip("%s", text);
+		}
 
+		const char* FloatFormat(std::string_view a_key)
+		{
+			if (a_key == "volumetricShadowBias")
+				return "%.4f";
+			if (a_key == "fogHeightFalloff" || a_key == "fogDensity" || a_key == "directionalInscatteringAnisotropy")
+				return "%.3f";
+			if (a_key == "startDistance" || a_key == "fogHeight" || a_key == "cubemapMipLevel" || a_key == "volumetricDepthDistributionScale")
+				return "%.1f";
+			if (a_key == "volumetricFogDistance" || a_key == "volumetricFogStartDistance" || a_key == "volumetricFogNearFadeInDistance")
+				return "%.0f";
+			return "%.2f";
+		}
 	}
 
 	ExponentialHeightFog* ExponentialHeightFog::GetSingleton()
@@ -45,38 +102,37 @@ namespace cs::features
 		return &instance;
 	}
 
-	std::span<const FeatureDebugView>
-	ExponentialHeightFog::GetDebugViews() const noexcept
+	std::span<const FeatureDebugView> ExponentialHeightFog::GetDebugViews() const noexcept
 	{
 		return kDebugViews;
 	}
 
-	void ExponentialHeightFog::SetDebugView(
-		std::string_view a_view) noexcept
+	void ExponentialHeightFog::SetDebugView(std::string_view a_view) noexcept
 	{
-		_fogFactorDebug.store(
-			a_view == "fog_factor", std::memory_order_release);
+		_debugFogFactor.store(a_view == "fog_factor", std::memory_order_release);
 	}
 
-	bool ExponentialHeightFog::Configure(
-		const toml::table& a_config,
-		std::string& a_error)
+	FullscreenDebugData ExponentialHeightFog::GetFullscreenDebugData() const noexcept
+	{
+		return { .owner = FullscreenDebugOwner::ExponentialHeightFog,
+			.mode = _debugFogFactor.load(std::memory_order_acquire) ? 1u : 0u };
+	}
+
+	bool ExponentialHeightFog::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
-		if (!settings::Parse(ehf::kSchema, a_config, candidate, a_error))
+		if (!settings::Parse(ehf::kSchema, a_config, candidate, a_error) ||
+			!_weather.Configure(ehf::kSchema, ehf::kWeatherVariables, a_config.get("weather"), a_error))
 			return false;
-		_settings = ehf::Clamp(candidate);
+		_settings = candidate;
+		_liveSettings = settings::BindLiveSettings(ehf::kSchema, _settings, [this] { PublishSettings(); });
 		return true;
 	}
 
-	void ExponentialHeightFog::PublishSettings() noexcept
+	void ExponentialHeightFog::PublishSettings()
 	{
-		_settings = ehf::Clamp(_settings);
-		_enabled.store(_settings.enabled, std::memory_order_release);
-		_densityMultiplier.store(
-			_settings.densityMultiplier, std::memory_order_release);
-		_heightFalloffMultiplier.store(
-			_settings.heightFalloffMultiplier, std::memory_order_release);
+		const std::lock_guard lock(_settingsMutex);
+		_published = _settings;
 	}
 
 	bool ExponentialHeightFog::SaveSettings()
@@ -87,439 +143,261 @@ namespace cs::features
 	void ExponentialHeightFog::Load()
 	{
 		PublishSettings();
-		const bool registered = cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
-			.stages = cs::engine::ShaderStageBit(
-				cs::engine::ShaderStage::kPixel),
-			.contributor = "ExponentialHeightFog",
-			.defines = { { cs::engine::shader_injection_defines::
-							   kExponentialHeightFog,
-				"1" } },
-			.isReady = [this] { return _registrationsReady.load(std::memory_order_acquire) && cs::render::IsSharedDataReady(); },
-			.bind = [this](ID3D11DeviceContext*) { ObserveConsumerBind(); } });
-		if (!registered) {
-			FailLoad(
-				"Exponential height fog requires the reconstructed "
-				"BSDFComposite pixel shader; registering it failed");
+		if (!engine::RegisterFeatureShaderContributions("ExponentialHeightFog", [this](engine::ShaderReplacementRegistration& registration) {
+				registration.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); };
+				const auto target = registration.targetId;
+				if (target == engine::ShaderInjectionTarget::kBsLighting || target == engine::ShaderInjectionTarget::kBsdfLight)
+					return;
+				const std::uint32_t sampler = target == engine::ShaderInjectionTarget::kBsdfComposite ? 13u : 15u;
+				registration.slotClaims = {
+					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kShaderResource, 19 },
+					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kSampler, sampler,
+						engine::ShaderSamplerContract::kLinearClamp }
+				};
+				registration.bind = [this, sampler](ID3D11DeviceContext* a_context) { Bind(a_context, sampler); };
+			})) {
+			FailLoad("Exponential height fog shader registration failed.");
 			return;
 		}
-
-		_registrationsReady.store(true, std::memory_order_release);
-		L->info(
-			"Registered analytic fog contribution (enabled={}, "
-			"density_multiplier={:.2f}, height_falloff_multiplier={:.2f}).",
-			_settings.enabled,
-			_settings.densityMultiplier,
-			_settings.heightFalloffMultiplier);
+		// FO4: prepare before b6 publication, dispatch after canonical depth and terrain updates.
+		if (!engine::RegisterPostDeferredPrePass([this] { PrepareFrame(); }, static_cast<engine::HookPriority>(-150))) {
+			FailLoad("Exponential height fog shader or prepass registration failed.");
+			return;
+		}
+		engine::RegisterPreDeferredLightsImpl([this] { RenderFrame(); }, engine::HookPriority::Late);
+		if (!engine::RegisterPostForwardSky([this] {
+				if (!CanBind() || !_enabled.load(std::memory_order_acquire))
+					return;
+				auto* renderer = RE::BSGraphics::GetRendererData();
+				if (!renderer)
+					return;
+				try {
+					_volume.CompositeSky(reinterpret_cast<ID3D11DeviceContext*>(renderer->context));
+				} catch (const std::exception& e) {
+					_failures.fetch_add(1, std::memory_order_relaxed);
+					CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Sky fog composition failed: {}", e.what());
+				}
+			},
+				engine::HookPriority::Late))
+			FailLoad("Exponential height fog sky-composition registration failed.");
 	}
 
-	void ExponentialHeightFog::SetValidationDetail(
-		std::string a_detail) const
+	void ExponentialHeightFog::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		const std::lock_guard lock(_validationMutex);
-		_validationDetail = std::move(a_detail);
+		_resourcesReady.store(_volume.Initialize(a_device), std::memory_order_release);
+		if (!_resourcesReady.load())
+			L->error("Exponential height fog compute compilation failed.");
 	}
 
-	std::string ExponentialHeightFog::GetValidationDetail() const
+	bool ExponentialHeightFog::ValidateShaderInjections(std::string& a_error)
 	{
-		const std::lock_guard lock(_validationMutex);
-		return _validationDetail;
-	}
-
-	bool ExponentialHeightFog::ValidateShaderInjections(
-		std::string& a_error)
-	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "the BSDFComposite fog contribution did not register";
-			SetValidationDetail(a_error);
+		if (!_resourcesReady.load() || !render::IsSharedDataReady()) {
+			a_error = "Exponential height fog resources or shared substrate are unavailable.";
 			return false;
 		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error =
-				"the shared substrate is unavailable, so b6 cannot carry "
-				"analytic fog controls";
-			SetValidationDetail(a_error);
+		if (!engine::ValidateShaderInjectionRoutes("ExponentialHeightFog", a_error))
 			return false;
-		}
-
-		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"ExponentialHeightFog", a_error)) {
-			SetValidationDetail(a_error);
-			return false;
-		}
-
-		_injectionsOperational.store(true, std::memory_order_release);
-		SetValidationDetail({});
-		L->info("Analytic fog BSDFComposite route is eligible and published.");
+		_operational.store(true, std::memory_order_release);
+		L->warn("Fog directional cascade input is unavailable: world-to-shadow transform/split contract needs RE. IBL, Skylighting, CloudShadows and local-light providers are absent.");
 		return true;
 	}
 
-	cs::ExponentialHeightFogFeatureData
-	ExponentialHeightFog::GetCommonBufferData() const
+	void ExponentialHeightFog::PrepareFrame()
 	{
-		_sharedDataPublishCalls.fetch_add(1, std::memory_order_relaxed);
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		const auto* cell = player ? player->GetParentCell() : nullptr;
-		const bool locationResolved = cell != nullptr;
-		const bool inInterior = locationResolved && !cell->IsExterior();
-		_locationResolved.store(locationResolved, std::memory_order_relaxed);
-		_inInterior.store(inInterior, std::memory_order_relaxed);
-
-		const bool active =
-			_injectionsOperational.load(std::memory_order_acquire) && _enabled.load(std::memory_order_acquire) && locationResolved && !inInterior;
-		_publishedActive.store(active, std::memory_order_release);
-
-		std::uint32_t mode = active ? kEnabledFlag : 0;
-		if (active && _fogFactorDebug.load(std::memory_order_acquire))
-			mode |= kFogFactorDebugFlag;
-		return {
-			.Mode = mode,
-			.DensityMultiplier =
-				_densityMultiplier.load(std::memory_order_acquire),
-			.HeightFalloffMultiplier =
-				_heightFalloffMultiplier.load(std::memory_order_acquire)
+		_frameReady.store(false, std::memory_order_release);
+		_volumetricActive.store(false, std::memory_order_relaxed);
+		if (!_operational.load(std::memory_order_acquire))
+			return;
+		render::annotation::ScopedEvent event("ExponentialHeightFog/prepare");
+		Settings settings;
+		{
+			const std::lock_guard lock(_settingsMutex);
+			settings = _published;
+		}
+		const auto weather = engine::SnapshotWeather();
+		const auto key = [](const RE::TESWeather* value) {
+			if (value) {
+				if (auto* file = value->GetFile(0))
+					return decltype(_weather)::Key(value->GetFormID() & (file->IsLight() ? 0xFFFu : 0xFFFFFFu), file->GetFilename());
+			}
+			return std::string{};
 		};
-	}
-
-	ExponentialHeightFog::ObservationStatus
-	ExponentialHeightFog::ToObservationStatus(
-		ehf::FitStatus a_status) noexcept
-	{
-		switch (a_status) {
-		case ehf::FitStatus::kNonFiniteDistanceRamp:
-			return ObservationStatus::kNonFiniteDistanceRamp;
-		case ehf::FitStatus::kDistanceSlopeNearZero:
-			return ObservationStatus::kDistanceSlopeNearZero;
-		case ehf::FitStatus::kDistancePlaneOrder:
-			return ObservationStatus::kDistancePlaneOrder;
-		case ehf::FitStatus::kNonFiniteHeightRamp:
-			return ObservationStatus::kNonFiniteHeightRamp;
-		case ehf::FitStatus::kHeightSlopeXNearZero:
-			return ObservationStatus::kHeightSlopeXNearZero;
-		case ehf::FitStatus::kHeightSlopeYNearZero:
-			return ObservationStatus::kHeightSlopeYNearZero;
-		case ehf::FitStatus::kNonFiniteDerived:
-			return ObservationStatus::kNonFiniteDerived;
-		default:
-			return ObservationStatus::kUsingDerived;
-		}
-	}
-
-	void ExponentialHeightFog::SetObservationStatus(
-		ObservationStatus a_status) noexcept
-	{
-		_observationStatus.store(a_status, std::memory_order_release);
-		if (a_status == ObservationStatus::kUsingDerived) {
-			_consecutiveRejectedFrames.store(0, std::memory_order_relaxed);
+		const auto current = key(weather.current);
+		if (weather.previous)
+			_previousWeather = key(weather.previous);
+		const auto& previous = _previousWeather;
+		_frameSettings = _weather.Evaluate(ehf::kSchema, settings, previous, current, weather.transitionPct);
+		_enabled.store(_frameSettings.enabled != 0, std::memory_order_relaxed);
+		auto* graphics = engine::GetGraphicsState();
+		auto* manager = engine::GetRenderTargetManager();
+		if (!graphics || !engine::GetWorldCameraRecord()) {
+			_volume.Reset();
+			_frameSettings.enabled = 0;
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Fog is waiting for the validated world camera.");
 			return;
 		}
-
-		_lastFallbackReason.store(a_status, std::memory_order_release);
-		const auto* graphicsState = cs::engine::GetGraphicsState();
-		const auto frame = graphicsState ?
-		                       static_cast<std::uint64_t>(graphicsState->frameCount) :
-		                       static_cast<std::uint64_t>(UINT32_MAX);
-		const bool newFrame =
-			_lastFallbackFrame.exchange(frame, std::memory_order_relaxed) != frame;
-		if (newFrame)
-			_fallbackFrames.fetch_add(1, std::memory_order_relaxed);
-
-		bool warn = false;
-		switch (a_status) {
-		case ObservationStatus::kInjectionUnavailable:
-			warn = true;
-			break;
-		case ObservationStatus::kNonFiniteDistanceRamp:
-		case ObservationStatus::kDistanceSlopeNearZero:
-		case ObservationStatus::kDistancePlaneOrder:
-		case ObservationStatus::kNonFiniteHeightRamp:
-		case ObservationStatus::kHeightSlopeXNearZero:
-		case ObservationStatus::kHeightSlopeYNearZero:
-		case ObservationStatus::kNonFiniteDerived:
-			warn = newFrame && _consecutiveRejectedFrames.fetch_add(1, std::memory_order_relaxed) + 1 >= kPersistentRejectionFrames;
-			break;
-		default:
-			// Disabled, interior, and unresolved-location frames are expected states.
-			_consecutiveRejectedFrames.store(0, std::memory_order_relaxed);
-			break;
+		const float widthRatio = manager ? manager->GetDynamicWidthRatio() : 1.0f;
+		const float heightRatio = manager ? manager->GetDynamicHeightRatio() : 1.0f;
+		try {
+			_volume.Prepare(_frameSettings,
+				static_cast<std::uint32_t>(std::ceil(static_cast<float>(graphics->screenWidth) * widthRatio)),
+				static_cast<std::uint32_t>(std::ceil(static_cast<float>(graphics->screenHeight) * heightRatio)));
+		} catch (const std::exception& e) {
+			_volume.Reset();
+			_frameSettings.volumetricFogEnabled = 0;
+			_failures.fetch_add(1, std::memory_order_relaxed);
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Fog allocation failed; retaining {} fog: {}",
+				_volume.SkyReady() ? "analytic" : "native", e.what());
 		}
-		if (!warn)
-			return;
+		if (!_volume.SkyReady())
+			_frameSettings.enabled = 0;
+		_enabled.store(_frameSettings.enabled != 0, std::memory_order_relaxed);
+		if (!_volume.Integrated())
+			_frameSettings.volumetricFogEnabled = 0;
+		const auto grid = _volume.Grid();
+		_width.store(grid.x);
+		_height.store(grid.y);
+		_slices.store(grid.z);
+	}
 
-		const auto reasonBit =
-			std::uint32_t{ 1 } << static_cast<std::uint8_t>(a_status);
-		if ((_warnedFallbackReasons.fetch_or(
-				 reasonBit, std::memory_order_relaxed) &
-				reasonBit) == 0) {
-			L->warn(
-				"Analytic fog target bind rejected: {}. The shader keeps "
-				"the vanilla fog path.",
-				ObservationStatusName(a_status));
+	void ExponentialHeightFog::RenderFrame()
+	{
+		if (!_operational.load(std::memory_order_acquire))
+			return;
+		const auto camera = engine::GetWorldCameraRecord();
+		auto* graphics = engine::GetGraphicsState();
+		auto* renderer = RE::BSGraphics::GetRendererData();
+		if (!camera || !graphics || !renderer || !render::GetCanonicalSceneDepthSRV()) {
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Fog is waiting for current-frame camera, renderer, and canonical depth.");
+			return;
+		}
+		try {
+			if (!_volume.Dispatch(reinterpret_cast<ID3D11DeviceContext*>(renderer->context),
+					_frameSettings, *camera, graphics->frameCount, *engine::GetTemporalAAEnableGlobal() != 0)) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Fog dispatch inputs are unavailable; retaining native fog.");
+				return;
+			}
+			if (_frameSettings.enabled && _frameSettings.volumetricFogEnabled && _frameSettings.fogDensity > 0)
+				_dispatches.fetch_add(4, std::memory_order_relaxed);
+			_volumetricActive.store(_frameSettings.enabled && _frameSettings.volumetricFogEnabled &&
+										_frameSettings.fogDensity > 0,
+				std::memory_order_relaxed);
+			_frameReady.store(true, std::memory_order_release);
+		} catch (const std::exception& e) {
+			_volume.Reset();
+			_failures.fetch_add(1, std::memory_order_relaxed);
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Fog dispatch failed; retaining native fog: {}", e.what());
 		}
 	}
 
-	void ExponentialHeightFog::ObserveConsumerBind() noexcept
+	render::ExponentialHeightFogSettings ExponentialHeightFog::GetCommonBufferData() const
 	{
-		_derivedParametersInUse.store(false, std::memory_order_relaxed);
-
-		if (!_injectionsOperational.load(std::memory_order_acquire)) {
-			SetObservationStatus(ObservationStatus::kInjectionUnavailable);
-			return;
-		}
-		if (!_enabled.load(std::memory_order_acquire)) {
-			SetObservationStatus(ObservationStatus::kDisabled);
-			return;
-		}
-		if (!_locationResolved.load(std::memory_order_acquire)) {
-			SetObservationStatus(ObservationStatus::kLocationUnavailable);
-			return;
-		}
-		if (_inInterior.load(std::memory_order_acquire) || !_publishedActive.load(std::memory_order_acquire)) {
-			SetObservationStatus(ObservationStatus::kInterior);
-			return;
-		}
-
-		const auto& snapshot = cs::engine::GetLatestFrameBuffer();
-		if (!snapshot.valid) {
-			SetObservationStatus(ObservationStatus::kFrameBufferUnavailable);
-			return;
-		}
-
-		const auto& distance = snapshot.data.FogDistanceRamp;
-		const auto& height = snapshot.data.FogHeightRamp;
-		const auto derived = ehf::DeriveParameters(
-			distance.x,
-			distance.z,
-			height.x,
-			height.y,
-			height.z,
-			height.w,
-			_densityMultiplier.load(std::memory_order_acquire),
-			_heightFalloffMultiplier.load(std::memory_order_acquire));
-		if (!derived.IsValid()) {
-			SetObservationStatus(ToObservationStatus(derived.status));
-			return;
-		}
-
-		_derivedDensity.store(derived.density, std::memory_order_relaxed);
-		_derivedHeightFalloffX.store(
-			derived.heightFalloffX, std::memory_order_relaxed);
-		_derivedHeightFalloffY.store(
-			derived.heightFalloffY, std::memory_order_relaxed);
-		_derivedNearDistance.store(
-			derived.distanceNear, std::memory_order_relaxed);
-		_derivedFarDistance.store(
-			derived.distanceFar, std::memory_order_relaxed);
-		_derivedParametersInUse.store(true, std::memory_order_release);
-		SetObservationStatus(ObservationStatus::kUsingDerived);
+		static_assert(sizeof(Settings) == sizeof(render::ExponentialHeightFogSettings));
+		if (!_operational.load(std::memory_order_acquire))
+			return {};
+		return std::bit_cast<render::ExponentialHeightFogSettings>(_frameSettings);
 	}
 
-	const char* ExponentialHeightFog::ObservationStatusName(
-		ObservationStatus a_status) noexcept
+	bool ExponentialHeightFog::CanBind() const
 	{
-		switch (a_status) {
-		case ObservationStatus::kInjectionUnavailable:
-			return "injection_unavailable";
-		case ObservationStatus::kDisabled:
-			return "disabled";
-		case ObservationStatus::kLocationUnavailable:
-			return "location_unavailable";
-		case ObservationStatus::kInterior:
-			return "interior";
-		case ObservationStatus::kFrameBufferUnavailable:
-			return "frame_buffer_unavailable";
-		case ObservationStatus::kNonFiniteDistanceRamp:
-			return "non_finite_distance_ramp";
-		case ObservationStatus::kDistanceSlopeNearZero:
-			return "distance_slope_near_zero";
-		case ObservationStatus::kDistancePlaneOrder:
-			return "distance_plane_order";
-		case ObservationStatus::kNonFiniteHeightRamp:
-			return "non_finite_height_ramp";
-		case ObservationStatus::kHeightSlopeXNearZero:
-			return "height_slope_x_near_zero";
-		case ObservationStatus::kHeightSlopeYNearZero:
-			return "height_slope_y_near_zero";
-		case ObservationStatus::kNonFiniteDerived:
-			return "non_finite_derived";
-		case ObservationStatus::kUsingDerived:
-			return "using_derived";
-		default:
-			return "never_called";
-		}
+		return _frameReady.load(std::memory_order_acquire) && render::IsSharedDataReady() &&
+		       render::GetCanonicalSceneDepthSRV() != nullptr;
 	}
 
-	void ExponentialHeightFog::CollectTelemetry(
-		cs::telemetry::Sink& a_sink) const
+	void ExponentialHeightFog::Bind(ID3D11DeviceContext* a_context, std::uint32_t a_sampler)
 	{
-		const auto injection = cs::engine::GetShaderInjectionTargetSnapshot(
-			cs::engine::ShaderInjectionTarget::kBsdfComposite);
-		const auto define = injection.defines.find(
-			cs::engine::shader_injection_defines::kExponentialHeightFog);
-		const bool contributed =
-			define != injection.defines.end() && define->second == "1";
-		const auto detail = GetValidationDetail();
-		const auto status =
-			_observationStatus.load(std::memory_order_acquire);
+		auto* volume = _volume.Integrated();
+		auto* sampler = _volume.Sampler();
+		engine::BindInjectionShaderResources(a_context, 19, 1, &volume);
+		engine::BindInjectionSamplers(a_context, a_sampler, 1, &sampler);
+		_binds.fetch_add(1, std::memory_order_relaxed);
+	}
 
-		a_sink
-			.Field("enabled", _enabled.load(std::memory_order_relaxed))
-			.Field(
-				"density_multiplier",
-				static_cast<double>(
-					_densityMultiplier.load(std::memory_order_relaxed)))
-			.Field(
-				"height_falloff_multiplier",
-				static_cast<double>(
-					_heightFalloffMultiplier.load(std::memory_order_relaxed)))
-			.Field(
-				"fog_factor_debug",
-				_fogFactorDebug.load(std::memory_order_relaxed))
-			.Field(
-				"location_resolved",
-				_locationResolved.load(std::memory_order_relaxed))
-			.Field(
-				"in_interior", _inInterior.load(std::memory_order_relaxed))
-			.Field(
-				"published_active",
-				_publishedActive.load(std::memory_order_relaxed))
-			.Field("shared_data_ready", cs::render::IsSharedDataReady())
-			.Field(
-				"shared_data_published",
-				cs::render::IsSharedDataReady() && _sharedDataPublishCalls.load(
-													   std::memory_order_relaxed) != 0)
-			.Field(
-				"shared_data_publish_calls",
-				static_cast<std::int64_t>(
-					_sharedDataPublishCalls.load(std::memory_order_relaxed)))
-			.Field("consumer_status", ObservationStatusName(status))
-			.Field(
-				"fallback_frames",
-				static_cast<std::int64_t>(
-					_fallbackFrames.load(std::memory_order_relaxed)))
-			.Field(
-				"fallback_reason",
-				ObservationStatusName(
-					_lastFallbackReason.load(std::memory_order_acquire)))
-			.Field(
-				"derived_parameters_in_use",
-				_derivedParametersInUse.load(std::memory_order_relaxed))
-			.Field(
-				"derived_density",
-				static_cast<double>(
-					_derivedDensity.load(std::memory_order_relaxed)))
-			.Field(
-				"derived_height_falloff_x",
-				static_cast<double>(
-					_derivedHeightFalloffX.load(std::memory_order_relaxed)))
-			.Field(
-				"derived_height_falloff_y",
-				static_cast<double>(
-					_derivedHeightFalloffY.load(std::memory_order_relaxed)))
-			.Field(
-				"derived_near_distance",
-				static_cast<double>(
-					_derivedNearDistance.load(std::memory_order_relaxed)))
-			.Field(
-				"derived_far_distance",
-				static_cast<double>(
-					_derivedFarDistance.load(std::memory_order_relaxed)))
-			.Field(
-				"registrations_ready",
-				_registrationsReady.load(std::memory_order_relaxed))
-			.Field(
-				"injection_operational",
-				_injectionsOperational.load(std::memory_order_relaxed))
-			.Field("define_contributed", contributed)
-			.Field("injection_requested", injection.requested)
-			.Field(
-				"injection_published", injection.published)
-			.Field("injection_slot_collision", injection.slotCollision)
-			.Field(
-				"injection_matches",
-				static_cast<std::int64_t>(injection.matches))
-			.Field(
-				"injection_substitutions",
-				static_cast<std::int64_t>(injection.substitutions))
-			.Field(
-				"injection_dispatches",
-				static_cast<std::int64_t>(injection.dispatches))
-			.Field(
-				"injection_passthrough_compile_failed",
-				static_cast<std::int64_t>(
-					injection.passthroughCompileFail))
-			.Field(
-				"injection_passthrough_not_ready",
-				static_cast<std::int64_t>(
-					injection.passthroughNotReady))
-			.Field(
-				"injection_passthrough_disabled",
-				static_cast<std::int64_t>(
-					injection.passthroughDisabled))
-			.Field(
-				"validation_detail",
-				detail.empty() ? "operational" : detail);
+	void ExponentialHeightFog::CollectTelemetry(telemetry::Sink& a_sink) const
+	{
+		a_sink.Field("enabled", _enabled.load())
+			.Field("injection_operational", _operational.load())
+			.Field("published_active", _frameReady.load())
+			.Field("volumetric_active", _volumetricActive.load())
+			.Field("directional_shadows_available", false)
+			.Field("debug_fog_factor", _debugFogFactor.load())
+			.Field("dispatches", static_cast<std::int64_t>(_dispatches.load()))
+			.Field("consumer_binds", static_cast<std::int64_t>(_binds.load()))
+			.Field("failures", static_cast<std::int64_t>(_failures.load()))
+			.Dimensions("volume", _width.load(), _height.load())
+			.Field("depth_slices", static_cast<std::int64_t>(_slices.load()));
+		_volume.CollectTelemetry(a_sink);
 	}
 
 	void ExponentialHeightFog::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
-		dmui::ui::TextDisabled(
-			"Off takes the exact vanilla fog math path.");
-		const auto densityRange = ehf::kSchema.EditRange(&Settings::densityMultiplier);
-		changed |= edit.Continuous(dmui::ui::SliderScalar(
-			"Density multiplier",
-			&_settings.densityMultiplier,
-			&densityRange.min,
-			&densityRange.max,
-			"%.2f"));
-		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
-			tooltip.Visible()) {
-			dmui::ui::Text(
-				"%s",
-				"Scales the extinction fitted from the current weather's "
-				"near and far fog distances. 1.0 is neutral.");
-		}
-		const auto heightFalloffRange = ehf::kSchema.EditRange(&Settings::heightFalloffMultiplier);
-		changed |= edit.Continuous(dmui::ui::SliderScalar(
-			"Height-falloff multiplier",
-			&_settings.heightFalloffMultiplier,
-			&heightFalloffRange.min,
-			&heightFalloffRange.max,
-			"%.2f"));
-		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
-			tooltip.Visible()) {
-			dmui::ui::Text(
-				"%s",
-				"Scales both exponential height curves fitted from the "
-				"current weather's height ramps. 1.0 is neutral.");
-		}
-		dmui::ui::TextDisabled(
-			"Interiors deliberately retain their separate vanilla fog path.");
-		if (changed) {
-			_settings = ehf::Clamp(_settings);
+		bool changed = false, volume = false, debug = false, showDebug = false;
+		std::apply([&](const auto&... fields) {
+			const auto draw = [&](const auto& field) {
+				if (field.key == "volumetricFogEnabled") {
+					dmui::ui::Separator();
+					dmui::ui::Text("Volumetric Fog");
+					volume = true;
+				}
+				if (field.key == "volumetricGridPixelSize") {
+					debug = true;
+					if (_settings.volumetricFogEnabled)
+						showDebug = dmui::ui::CollapsingHeader("Debug");
+				}
+				if ((volume && field.key != "volumetricFogEnabled" && !_settings.volumetricFogEnabled) || (debug && !showDebug))
+					return;
+				auto& value = _settings.*field.member;
+				const auto label = std::string(field.description);
+				using T = typename std::remove_cvref_t<decltype(field)>::ValueType;
+				if constexpr (std::same_as<T, settings::Color4>) {
+					// The forwarding ABI exposes scalar inputs but no color editor.
+					constexpr const char* components[]{ "R", "G", "B", "A" };
+					dmui::ui::Text("%s", label.c_str());
+					for (std::size_t i = 0; i < value.size(); ++i) {
+						const std::string component = std::string(components[i]) + "##" + std::string(field.key);
+						float candidate = value[i];
+						const bool edited = dmui::ui::InputScalar(component.c_str(), &candidate);
+						if (edited && !std::isfinite(candidate)) {
+							L->warn("Rejected non-finite {} component {}", field.key, components[i]);
+						} else {
+							if (edited)
+								value[i] = candidate;
+							changed |= edit.Continuous(edited);
+						}
+					}
+				} else {
+					if constexpr (std::same_as<T, std::uint32_t>) {
+						if (field.edit.max == 1) {
+							bool enabled = value != 0;
+							const bool toggled = dmui::ui::Checkbox(label.c_str(), &enabled);
+							if (toggled)
+								value = enabled ? 1u : 0u;
+							changed |= edit.Discrete(toggled);
+							Tooltip(field.key);
+							return;
+						}
+					}
+					const char* format = "%u";
+					if constexpr (std::floating_point<T>)
+						format = FloatFormat(field.key);
+					changed |= edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &value, &field.edit.min, &field.edit.max,
+						format, debug ? dmui::ui::SliderFlags::kAlwaysClamp : dmui::ui::SliderFlags::kNone));
+					Tooltip(field.key);
+				}
+			};
+			(draw(fields), ...);
+		},
+			ehf::kSchema.fields);
+		if (changed)
 			PublishSettings();
-		}
-
-		if (_derivedParametersInUse.load(std::memory_order_relaxed)) {
-			dmui::ui::TextDisabled(
-				"Live fit: density %.8f | height %.8f / %.8f",
-				_derivedDensity.load(std::memory_order_relaxed),
-				_derivedHeightFalloffX.load(std::memory_order_relaxed),
-				_derivedHeightFalloffY.load(std::memory_order_relaxed));
-		} else {
-			dmui::ui::TextDisabled(
-				"Live fit: %s",
-				ObservationStatusName(
-					_observationStatus.load(std::memory_order_relaxed)));
-		}
 		Menu::Get().DrawDebugViewSelector(*this);
+		dmui::ui::TextDisabled("Directional cascade scattering, IBL, Skylighting, CloudShadows and local lights are unavailable.");
 	}
 
 	void ExponentialHeightFog::RestoreDefaultSettings()
 	{
-		_settings = Settings{};
+		_settings = {};
 		PublishSettings();
 		SaveSettings();
 	}
@@ -528,11 +406,7 @@ namespace cs::features
 	{
 		struct AutoRegister
 		{
-			AutoRegister()
-			{
-				cs::FeatureManager::Get().Register(
-					ExponentialHeightFog::GetSingleton());
-			}
+			AutoRegister() { FeatureManager::Get().Register(ExponentialHeightFog::GetSingleton()); }
 		};
 		static AutoRegister _autoRegister;
 	}

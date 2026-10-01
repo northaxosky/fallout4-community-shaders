@@ -426,7 +426,8 @@ namespace cs::features
 		if (a_doCopy) {
 			const std::uint64_t frame = cs::engine::GetGraphicsState() ? cs::engine::GetGraphicsState()->frameCount : 0;
 			if (_depthCopyFrame != frame) {
-				CopyDepth();
+				if (!CopyDepth())
+					return;
 				_depthCopyFrame = frame;
 			}
 		}
@@ -448,25 +449,25 @@ namespace cs::features
 		}
 	}
 
-	void DynamicResolution::CopyDepth()
+	bool DynamicResolution::CopyDepth()
 	{
 		auto* context = cs::engine::GetImmediateContext();
 		auto* state = cs::engine::GetGraphicsState();
 		if (!context || !state || !_depthOverrideTexture) {
-			return;
+			return false;
 		}
 
 		auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kMain);
 		auto* linearDepthUAV = cs::engine::GetRenderTargetUAV(cs::engine::RenderTarget::kMainDepthMips);
 		auto* depthUAV = _depthOverrideTexture->uav.get();
 		if (!depthSRV || !linearDepthUAV || !depthUAV) {
-			return;
+			return false;
 		}
 
 		auto* linearDepthCS = GetOverrideLinearDepthCS();
 		auto* overrideDepthCS = GetOverrideDepthCS();
 		if (!linearDepthCS || !overrideDepthCS) {
-			return;
+			return false;
 		}
 
 		const float2 screenSize{ static_cast<float>(state->screenWidth), static_cast<float>(state->screenHeight) };
@@ -479,7 +480,8 @@ namespace cs::features
 		cs::engine::OMScope omScope(context);
 		cs::ComputeScope computeScope(context);
 
-		UpdateAndBindUpscalingCB(context, screenSize, renderSize);
+		if (!UpdateAndBindUpscalingCB(context, screenSize, renderSize))
+			return false;
 
 		{
 			cs::render::annotation::ScopedEvent annotationScope(
@@ -508,6 +510,7 @@ namespace cs::features
 				static_cast<std::uint32_t>(std::ceil(renderSize.y / 8.0f)),
 				1);
 		}
+		return true;
 	}
 
 	void DynamicResolution::Release()
@@ -597,27 +600,30 @@ namespace cs::features
 		return _upscalingCB.get();
 	}
 
-	void DynamicResolution::UpdateAndBindUpscalingCB(
+	bool DynamicResolution::UpdateAndBindUpscalingCB(
 		ID3D11DeviceContext* a_context,
 		float2 a_screenSize,
 		float2 a_renderSize)
 	{
-		const float cameraNear = cs::engine::GetCameraNear();
-		const float cameraFar = cs::engine::GetCameraFar();
+		const auto camera = cs::engine::GetWorldCameraRecord();
+		if (!camera)
+			return false;
+		const auto depth = cs::engine::GetCameraDepthParameters(*camera);
 
 		UpscalingCB data{};
 		data.ScreenSize[0] = static_cast<std::uint32_t>(a_screenSize.x);
 		data.ScreenSize[1] = static_cast<std::uint32_t>(a_screenSize.y);
 		data.RenderSize[0] = static_cast<std::uint32_t>(a_renderSize.x);
 		data.RenderSize[1] = static_cast<std::uint32_t>(a_renderSize.y);
-		data.CameraData[0] = cameraFar;
-		data.CameraData[1] = cameraNear;
-		data.CameraData[2] = cameraFar - cameraNear;
-		data.CameraData[3] = cameraFar * cameraNear;
+		data.CameraData[0] = depth.x;
+		data.CameraData[1] = depth.y;
+		data.CameraData[2] = depth.z;
+		data.CameraData[3] = depth.w;
 
 		auto* upscalingCB = GetUpscalingCB();
 		upscalingCB->Update(data);
 		auto* buffer = upscalingCB->CB();
 		a_context->CSSetConstantBuffers(0, 1, &buffer);
+		return true;
 	}
 }

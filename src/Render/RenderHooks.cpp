@@ -2,7 +2,9 @@
 
 #include "Log.h"
 #include "Render/DeferredDrawAnchor.h"
+#include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
+#include "Render/FrameProfiler.h"
 #include "Render/ShaderInjection.h"
 
 #include <algorithm>
@@ -31,6 +33,7 @@ namespace cs::engine
 		};
 
 		std::vector<PrioritizedCallback> g_postDeferredPrePass;
+		std::vector<PrioritizedCallback> g_preDeferredPrePass;
 		std::vector<PrioritizedCallback> g_preDeferredLightsImpl;
 		std::vector<PrioritizedCallback> g_postDeferredLightsImpl;
 		std::vector<PrioritizedCallback> g_preDeferredComposite;
@@ -139,6 +142,7 @@ namespace cs::engine
 			static void thunk()
 			{
 				MarkRegistrationClosed();
+				Dispatch(g_preDeferredPrePass);
 				func();
 				Dispatch(g_postDeferredPrePass);
 			}
@@ -198,6 +202,32 @@ namespace cs::engine
 					func();
 				}
 				Dispatch(g_postDeferredComposite);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DrawProfiling_Hook
+		{
+			static void thunk(bool a_force, bool a_clear)
+			{
+				func(a_force, a_clear);
+				render::profiling::RecordDraw();
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct TriShapeDrawScope_Hook
+		{
+			static void thunk(
+				RE::BSGraphics::Renderer* a_this,
+				RE::BSGraphics::TriShape* a_shape,
+				std::uint32_t a_start,
+				std::uint32_t a_triangles)
+			{
+				if (const auto* state = GetGraphicsState())
+					BeginShaderInjectionFrame(state->frameCount);
+				const ScopedPixelShaderInjectionBindings bindings;
+				func(a_this, a_shape, a_start, a_triangles);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -278,6 +308,8 @@ namespace cs::engine
 				return;
 			}
 			stl::write_thunk_call<DeferredDrawAnchor_Hook>(*site);
+			// FO4: forward consumers bind after dirty state and restore at the draw boundary.
+			stl::detour_thunk<TriShapeDrawScope_Hook>(kDrawTriShapeSetDirtyStates.function);
 			g_deferredDrawAnchorInstalled = true;
 			L->info("Hook installed on DrawTriShape SetDirtyStates call (deferred draw anchor)");
 		}
@@ -291,11 +323,33 @@ namespace cs::engine
 		return g_deferredDrawAnchorInstalled;
 	}
 
+	bool EnsureDrawProfilingInstalled()
+	{
+		static bool installed{};
+		if (installed)
+			return true;
+		if (!RegistrationAllowed("DrawProfiling"))
+			return false;
+		// FO4: SetDirtyStates is the shared native draw submission boundary on OG/NG/AE.
+		stl::detour_thunk<DrawProfiling_Hook>(REL::ID({ 1557284, 2277017, 2277017 }));
+		installed = true;
+		return true;
+	}
+
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
 	{
 		if (!RegistrationAllowed("PostDeferredPrePass"))
 			return false;
 		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
+		EnsureDeferredPrePassInstalled();
+		return true;
+	}
+
+	bool RegisterPreDeferredPrePass(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PreDeferredPrePass"))
+			return false;
+		InsertPrioritized(g_preDeferredPrePass, std::move(callback), priority);
 		EnsureDeferredPrePassInstalled();
 		return true;
 	}

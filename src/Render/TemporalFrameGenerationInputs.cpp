@@ -11,6 +11,7 @@ namespace cs::render
 		InvalidateFirstPersonAlphaState();
 		if (!_resourcesReady.load(std::memory_order_acquire) ||
 			!ShouldUseFrameGenerationThisFrame() ||
+			!cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame()) ||
 			!_copyDepthForFrameGenerationCS ||
 			!_frameGenerationCopyCB) {
 			return;
@@ -229,6 +230,11 @@ namespace cs::render
 	{
 		BeginFrameGenerationCaptureState();
 		auto& pipeline = render::TemporalPipeline::Get();
+		const auto frameBuffer = cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame());
+		if (!frameBuffer) {
+			pipeline.SkipWorldFrame();
+			return;
+		}
 		const bool resetHistory =
 			pipeline.FrameGenerationResetPending();
 		if (pipeline.ArmFrameGenerationReset()) {
@@ -242,7 +248,6 @@ namespace cs::render
 		}
 		const auto [renderWidth, renderHeight] = GetRenderSize();
 		const auto* timer = RE::BSTimer::GetSingleton();
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
 		pipeline.FreezeFrameConstants(
 			capture.frameSlot,
 			{ .realFrame =

@@ -29,42 +29,42 @@
 namespace cs::render::temporal
 {
 	FrameGenerationCamera
-	BuildFrameGenerationCamera(const engine::FrameBufferSnapshot& a_snapshot,
+	BuildFrameGenerationCamera(const std::optional<engine::WorldCameraRecord>& a_snapshot,
 		std::uint32_t a_outputWidth,
 		std::uint32_t a_outputHeight) noexcept
 	{
 		FrameGenerationCamera camera;
-		if (!a_snapshot.valid) {
+		if (!a_snapshot) {
 			return camera;
 		}
 
-		std::memcpy(camera.currentWorldToClip, a_snapshot.data.CurrFrameWorldToClip,
-			sizeof(camera.currentWorldToClip));
-		std::memcpy(camera.previousWorldToClip, a_snapshot.data.PrevFrameWorldToClip,
-			sizeof(camera.previousWorldToClip));
-		std::memcpy(camera.viewToWorld, a_snapshot.data.ViewToWorld,
-			sizeof(a_snapshot.data.ViewToWorld));
+		DirectX::XMFLOAT4X4 current, previous;
+		DirectX::XMStoreFloat4x4(&current, DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(&a_snapshot->ViewProjectionUnjittered)));
+		DirectX::XMStoreFloat4x4(&previous, DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(&a_snapshot->PreviousViewProjectionUnjittered)));
+		std::memcpy(camera.currentWorldToClip, &current, sizeof(current));
+		std::memcpy(camera.previousWorldToClip, &previous, sizeof(previous));
+		std::memcpy(camera.viewToWorld, a_snapshot->ViewToWorld, sizeof(a_snapshot->ViewToWorld));
 		camera.viewToWorld[15] = 1.0f;
-		const auto basis = engine::GetCameraWorldBasis(a_snapshot.data);
-		const auto position = engine::CameraWorldOrigin(a_snapshot.data);
+		const auto basis = engine::GetCameraWorldBasis(*a_snapshot);
+		const auto position = engine::CameraWorldOrigin(*a_snapshot);
 		const auto previousPosition =
-			engine::CameraPreviousWorldOrigin(a_snapshot.data);
+			engine::CameraPreviousWorldOrigin(*a_snapshot);
 		std::memcpy(camera.right, &basis.right, sizeof(camera.right));
 		std::memcpy(camera.up, &basis.up, sizeof(camera.up));
 		std::memcpy(camera.forward, &basis.forward, sizeof(camera.forward));
 		std::memcpy(camera.position, &position, sizeof(camera.position));
 		std::memcpy(camera.previousPosition, &previousPosition,
 			sizeof(camera.previousPosition));
-		camera.nearPlane = engine::GetCameraNear();
-		camera.farPlane = engine::GetCameraFar();
+		const auto depth = engine::GetCameraDepthParameters(*a_snapshot);
+		camera.nearPlane = depth.y;
+		camera.farPlane = depth.x;
 		camera.verticalFov = engine::VerticalFieldOfViewFromWorldToClip(
-			a_snapshot.data.CurrFrameWorldToClip);
+			reinterpret_cast<const DirectX::XMFLOAT4*>(&current));
 		camera.aspectRatio = a_outputHeight ? static_cast<float>(a_outputWidth) /
 		                                          static_cast<float>(a_outputHeight) :
 		                                      0.0f;
-		camera.engineFrame = a_snapshot.frameCount;
-		camera.valid = engine::HasUsableWorldCamera(a_snapshot.data) &&
-		               camera.verticalFov > 0.0f && camera.nearPlane > 0.0f &&
+		camera.engineFrame = a_snapshot->frameCount;
+		camera.valid = camera.verticalFov > 0.0f && camera.nearPlane > 0.0f &&
 		               camera.farPlane > camera.nearPlane;
 		return camera;
 	}
@@ -1154,13 +1154,15 @@ namespace cs::render
 							const auto* upscaling = &TemporalPipeline::Get().Renderer();
 							const auto [width, height] = upscaling->GetRenderSize();
 							const auto jitter = upscaling->GetAppliedJitter();
+							const auto realFrame = CurrentRealFrame();
 							temporal::FrameGenerationRequest result;
 							bool frozen = false;
 							const auto slot = _impl->swapChain.GetFrameSlot();
 							{
 								std::scoped_lock lock(_impl->mutex);
 								if (slot < _impl->frozenFrameConstants.size() &&
-									_impl->frozenFrameConstants[slot]) {
+									_impl->frozenFrameConstants[slot] &&
+									_impl->frozenFrameConstants[slot]->realFrame == realFrame) {
 									result =
 										*_impl->frozenFrameConstants[slot];
 									frozen = true;
@@ -1169,8 +1171,7 @@ namespace cs::render
 									_impl->topology.Effective()
 										.frameGenerationConfiguration;
 							}
-							result.realFrame =
-								TemporalPipeline::Get().CurrentRealFrame();
+							result.realFrame = realFrame;
 							result.renderWidth = width;
 							result.renderHeight = height;
 							if (!frozen) {
@@ -1182,6 +1183,7 @@ namespace cs::render
 																  0.0f;
 							}
 							result.enabled =
+								frozen && result.camera.valid &&
 								upscaling->ShouldUseFrameGenerationThisFrame();
 							if (!frozen) {
 								result.resetHistory =
@@ -1206,17 +1208,6 @@ namespace cs::render
 									.exposure =
 										temporal::ExposureMode::kAutomatic
 								};
-							}
-							if (!result.camera.valid) {
-								const auto& snapshot =
-									cs::engine::GetFrameBuffer();
-								const auto* graphics =
-									cs::engine::GetGraphicsState();
-								result.camera =
-									temporal::BuildFrameGenerationCamera(
-										snapshot,
-										graphics ? graphics->screenWidth : 0,
-										graphics ? graphics->screenHeight : 0);
 							}
 							return result;
 						},
@@ -1567,6 +1558,14 @@ namespace cs::render
 		_impl->resetEpochs.RequestSuperResolution();
 	}
 
+	void TemporalPipeline::SkipWorldFrame() noexcept
+	{
+		_impl->renderer.ClearFrameGenerationCaptureState();
+		std::scoped_lock lock(_impl->mutex);
+		_impl->resetEpochs.RequestSuperResolution();
+		_impl->resetEpochs.RequestFrameGeneration();
+	}
+
 	void TemporalPipeline::RequestFrameGenerationReset() noexcept
 	{
 		std::scoped_lock lock(_impl->mutex);
@@ -1863,15 +1862,14 @@ namespace cs::render
 			cpuTimings = {};
 		}
 		const auto* state = a_includeLiveEngineState ? cs::engine::GetGraphicsState() : nullptr;
-		const auto& camera = a_includeLiveEngineState ? cs::engine::GetFrameBuffer() : engine::FrameBufferSnapshot{};
-		const float fov =
-			camera.valid ? cs::engine::VerticalFieldOfViewFromWorldToClip(
-							   camera.data.CurrFrameWorldToClip) :
-						   0.0f;
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord();
+		const float fov = temporal::BuildFrameGenerationCamera(camera,
+			state ? state->screenWidth : 0, state ? state->screenHeight : 0)
+		                      .verticalFov;
 		const std::int64_t frameDelta =
-			camera.valid && state ? static_cast<std::int64_t>(state->frameCount) -
-										static_cast<std::int64_t>(camera.frameCount) :
-									0;
+			camera && state ? static_cast<std::int64_t>(state->frameCount) -
+								  static_cast<std::int64_t>(camera->frameCount) :
+							  0;
 		bool ready = false;
 		bool active = false;
 		temporal::PresentInputRetirementDiagnostics retirementDiagnostics;
@@ -1917,7 +1915,7 @@ namespace cs::render
 				_impl->streamline.GetDLSSGCapabilities(),
 			.failures =
 				_impl->frameGenerationFailures.load(std::memory_order_relaxed),
-			.cameraValid = camera.valid && fov > 0.0f,
+			.cameraValid = camera.has_value() && fov > 0.0f,
 			.cameraFrameDelta = frameDelta,
 			.cameraFovDegrees =
 				static_cast<double>(fov) * 180.0 /

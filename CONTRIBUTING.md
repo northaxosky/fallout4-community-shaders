@@ -15,11 +15,23 @@ validation as well as a successful build.
 
 ```powershell
 git lfs install
-git clone --recursive https://github.com/northaxosky/fallout4-community-shaders.git
+git clone https://github.com/northaxosky/fallout4-community-shaders.git
 cd fallout4-community-shaders
-git lfs pull
-git submodule foreach --recursive "git lfs install --local && git lfs pull"
+pwsh scripts\fetch-submodules.ps1
 ```
+
+Use this script instead of `--recursive`: it keeps `community-shaders-shared` shallow
+without its unused Skyrim dependencies, while fetching CommonLibF4/Streamline recursively
+and pulling LFS assets.
+
+## Upstream sync
+
+Fetch in `extern\community-shaders-shared`, merge the desired upstream tag/SHA into its
+`main`, and push that shared repository. Bump the FO4 CS submodule pin and validate the
+DLL build, all tests, formatting, and package. Review changes to consumed manifest paths with
+`git -C extern\community-shaders-shared log <old>..<new> -- <paths>`.
+FO4 never replaces an upstream shader path: consume unchanged files through `xmake\shared.lua`;
+host translations belong under `Shaders\FO4\` or in a minimal shared seam commit.
 
 ## Stage SDK runtimes
 

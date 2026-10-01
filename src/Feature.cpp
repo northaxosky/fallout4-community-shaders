@@ -144,6 +144,7 @@ namespace cs
 		}
 
 		a_feature.SetRuntimeStateOnly(FeatureRuntimeState::kDegraded);
+		a_feature.OnRuntimeQuarantined();
 		const auto featureName = a_feature.GetName();
 		if (featureName == "FrameGeneration" || featureName == "Upscaling") {
 			render::TemporalPipeline::Get().PostFailure(
@@ -215,6 +216,7 @@ namespace cs
 			selected.emplace(*featureIt, selection.view);
 		}
 
+		_fullscreenDebugFeature.store(nullptr, std::memory_order_release);
 		for (auto* feature : _registeredFeatures) {
 			if (!feature)
 				continue;
@@ -224,6 +226,7 @@ namespace cs
 					std::string_view{} :
 					selection->second);
 		}
+		_fullscreenDebugFeature.store(fullscreen, std::memory_order_release);
 		return true;
 	}
 

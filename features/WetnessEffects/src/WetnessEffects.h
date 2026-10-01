@@ -4,6 +4,7 @@
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/PixelShaderResourceSnapshot.h"
+#include "Utils/CSBuffer.h"
 #include "WetnessMath.h"
 
 #include <array>
@@ -35,6 +36,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
@@ -44,6 +46,7 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		cs::WetnessEffectsFeatureData GetCommonBufferData() const;
 
@@ -57,10 +60,12 @@ namespace cs::features
 		void BindCompositeResources(ID3D11DeviceContext* a_context);
 		void SaveCompositeBindings();
 		void RestoreCompositeBindings();
+		void BeginPrepass();
+		void BindFilmOutput(ID3D11DeviceContext*);
+		void BindFilmInput(ID3D11DeviceContext*, bool a_compute);
 
 		static constexpr std::uint32_t kGbufferNormalPSSlot = 25;
-		static constexpr std::uint32_t kSceneDepthPSSlot = 36;
-		static constexpr std::array kCompositePSSlots{ kGbufferNormalPSSlot, kSceneDepthPSSlot };
+		static constexpr std::array kCompositePSSlots{ kGbufferNormalPSSlot, 70u, 71u };
 
 		Settings _settings;
 		// every contribution and hook of the pair must register before any of them runs
@@ -80,5 +85,21 @@ namespace cs::features
 
 		// render thread only
 		std::array<cs::render::PixelShaderResourceSnapshot<1>, kCompositePSSlots.size()> _engineBindings;
+		winrt::com_ptr<ID3D11Texture2D> _filmTexture;
+		winrt::com_ptr<ID3D11RenderTargetView> _filmRTV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _filmSRV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _filmAvailabilitySRV;
+		struct FilmBlend
+		{
+			winrt::com_ptr<ID3D11BlendState> native, film;
+		};
+		std::array<FilmBlend, D3D11_REQ_BLEND_OBJECT_COUNT_PER_DEVICE> _filmBlends;
+		std::size_t _filmBlendCount = 0;
+		std::atomic_bool _filmReady{ false };
+		mutable std::atomic_bool _suppressRipples{ false };
+		std::atomic_uint32_t _producerDraws{ 0 }, _producerRejected{ 0 };
+		bool _inPrepass = false;
+		mutable std::uint64_t _rainTimer = 0;
+		mutable std::uint32_t _timerFrame = ~0u;
 	};
 }

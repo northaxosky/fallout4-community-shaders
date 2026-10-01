@@ -21,12 +21,13 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderStage.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -42,6 +43,8 @@ namespace cs::features
 
 		constexpr const wchar_t* kDetectLightingPath =
 			L"Data\\Shaders\\DynamicCubemaps\\DetectCaptureLightingCS.hlsl";
+		constexpr const wchar_t* kPreparePath =
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\PrepareCaptureCS.hlsl";
 		constexpr const wchar_t* kUpdatePath =
 			L"Data\\Shaders\\DynamicCubemaps\\UpdateCubemapCS.hlsl";
 		constexpr const wchar_t* kInferPath =
@@ -51,7 +54,7 @@ namespace cs::features
 		constexpr const wchar_t* kBc6hPath =
 			L"Data\\Shaders\\DynamicCubemaps\\BC6HEncodeCS.hlsl";
 		constexpr const wchar_t* kPreviewPath =
-			L"Data\\Shaders\\DynamicCubemaps\\CubemapPreviewCS.hlsl";
+			L"Data\\Shaders\\FO4\\DynamicCubemaps\\CubemapPreviewCS.hlsl";
 		constexpr const wchar_t* kDefaultCubemapPath =
 			L"Data\\Shaders\\DynamicCubemaps\\defaultcubemap.dds";
 
@@ -203,6 +206,7 @@ namespace cs::features
 			return false;
 		}
 		_settings = candidate;
+		_liveSettings = settings::BindLiveSettings(dynamic_cubemaps::kSchema, _settings, [this] { PublishSettings(); });
 		return true;
 	}
 
@@ -224,51 +228,21 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		const auto registerContribution = [this](
-											  cs::engine::ShaderInjectionTarget a_target,
-											  cs::engine::ShaderStage a_stage,
-											  std::uint32_t a_firstSlot,
-											  std::uint32_t a_slotCount,
-											  cs::engine::ShaderInjectionBindCallback a_bind = {}) {
-			std::vector<cs::engine::ShaderSlotClaim> slotClaims;
-			for (std::uint32_t offset = 0; offset < a_slotCount; ++offset) {
-				slotClaims.push_back({ .stage = a_stage,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = a_firstSlot + offset });
-			}
-			return cs::engine::RegisterReplacement({ .targetId = a_target,
-				.stages = cs::engine::ShaderStageBit(a_stage),
-				.contributor = "DynamicCubemaps",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" } },
-				.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire);
-				},
-				.bind = std::move(a_bind),
-				.slotClaims = std::move(slotClaims) });
-		};
-		if (!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsWater,
-				cs::engine::ShaderStage::kPixel,
-				kDynamicCubemapPSSlot,
-				kDynamicCubemapPSSlotCount) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				cs::engine::ShaderStage::kPixel,
-				kCompositionPSSlot,
-				kCompositionPSSlotCount,
-				[this](ID3D11DeviceContext* a_context) {
-					BindComposition(a_context);
-				}) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfLight,
-				cs::engine::ShaderStage::kPixel, 0, 0) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kDfTiledLighting,
-				cs::engine::ShaderStage::kCompute, 0, 0) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kImageSpace,
-				cs::engine::ShaderStage::kPixel, 0, 0)) {
+		if (!cs::engine::RegisterFeatureShaderContributions("DynamicCubemaps", [this](cs::engine::ShaderReplacementRegistration& registration) {
+				registration.isReady = [this] { return _registrationsReady.load(std::memory_order_acquire); };
+				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
+				if (!composite && registration.targetId != cs::engine::ShaderInjectionTarget::kBsWater)
+					return;
+				const auto firstSlot = composite ? kCompositionPSSlot : kDynamicCubemapPSSlot;
+				const auto slotCount = composite ? kCompositionPSSlotCount : kDynamicCubemapPSSlotCount;
+				for (std::uint32_t offset = 0; offset < slotCount; ++offset) {
+					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+						.slot = firstSlot + offset });
+				}
+				if (composite)
+					registration.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); };
+			})) {
 			FailLoad(
 				"DynamicCubemaps could not register its water, composite, "
 				"deferred lighting, or SSLR shader contributions");
@@ -330,7 +304,7 @@ namespace cs::features
 									   nullptr) :
 			                   resources[0];
 		}
-		a_context->PSSetShaderResources(
+		cs::engine::BindInjectionShaderResources(a_context,
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
 	}
 
@@ -379,11 +353,14 @@ namespace cs::features
 				cs::render::annotation::SetName(a_target.get(), a_name);
 			};
 
-			compile(_detectLightingCS, kDetectLightingPath, {}, "DynamicCubemaps/DetectLighting.CS");
-			compile(_updateCS, kUpdatePath, {}, "DynamicCubemaps/Update.CS");
-			compile(_updateReflectionsCS, kUpdatePath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/UpdateReflections.CS");
-			compile(_updateFakeReflectionsCS, kUpdatePath, { { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateFakeReflections.CS");
-			compile(_updateSkyReflectionsCS, kUpdatePath, { { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateSkyReflections.CS");
+			// FO4 capture preparation translates native inputs without replacing upstream accumulation.
+			compile(_prepareCS, kPreparePath, {}, "DynamicCubemaps/Prepare.CS");
+			compile(_prepareReflectionsCS, kPreparePath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/PrepareReflections.CS");
+			compile(_detectLightingCS, kDetectLightingPath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, "DynamicCubemaps/DetectLighting.CS");
+			compile(_updateCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, "DynamicCubemaps/Update.CS");
+			compile(_updateReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" } }, "DynamicCubemaps/UpdateReflections.CS");
+			compile(_updateFakeReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateFakeReflections.CS");
+			compile(_updateSkyReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateSkyReflections.CS");
 			compile(_inferCS, kInferPath, {}, "DynamicCubemaps/Infer.CS");
 			compile(_inferReflectionsCS, kInferPath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/InferReflections.CS");
 			compile(_inferFakeReflectionsCS, kInferPath, { { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/InferFakeReflections.CS");
@@ -417,11 +394,12 @@ namespace cs::features
 									DXGI_FORMAT a_format,
 									bool a_generateMips,
 									bool a_mipUavs,
-									std::string_view a_name) {
+									std::string_view a_name,
+									std::uint32_t a_mipLevels = kMipLevels) {
 			D3D11_TEXTURE2D_DESC textureDesc{};
 			textureDesc.Width = kCubemapSize;
 			textureDesc.Height = kCubemapSize;
-			textureDesc.MipLevels = kMipLevels;
+			textureDesc.MipLevels = a_mipLevels;
 			textureDesc.ArraySize = 6;
 			textureDesc.Format = a_format;
 			textureDesc.SampleDesc.Count = 1;
@@ -441,7 +419,7 @@ namespace cs::features
 			srvDesc.Format = a_format;
 			srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
 			srvDesc.TextureCube.MostDetailedMip = 0;
-			srvDesc.TextureCube.MipLevels = kMipLevels;
+			srvDesc.TextureCube.MipLevels = a_mipLevels;
 			DX::ThrowIfFailed(a_device->CreateShaderResourceView(
 				a_cube.texture.get(), &srvDesc, a_cube.srv.put()));
 
@@ -493,6 +471,25 @@ namespace cs::features
 		createCube(_filtered, DXGI_FORMAT_R11G11B10_FLOAT, true, true, "DynamicCubemaps/Filtered");
 		createCube(_environment, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Environment");
 		createCube(_reflections, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Reflections");
+		createCube(_preparedPosition, DXGI_FORMAT_R32G32B32A32_FLOAT, false, false, "DynamicCubemaps/PreparedPosition", 1);
+		createCube(_preparedColor, DXGI_FORMAT_R32G32B32A32_FLOAT, false, false, "DynamicCubemaps/PreparedColor", 1);
+		createCube(_preparedUV, DXGI_FORMAT_R32G32_FLOAT, false, false, "DynamicCubemaps/PreparedUV", 1);
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC preparedSrvDesc{};
+		preparedSrvDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		preparedSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+		preparedSrvDesc.Texture2DArray.MipLevels = 1;
+		preparedSrvDesc.Texture2DArray.ArraySize = 6;
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			_preparedPosition.texture.get(), &preparedSrvDesc, _preparedPositionArraySRV.put()));
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			_preparedColor.texture.get(), &preparedSrvDesc, _preparedColorArraySRV.put()));
+		cs::render::annotation::SetName(_preparedPositionArraySRV.get(), "DynamicCubemaps/PreparedPosition.ArraySRV");
+		cs::render::annotation::SetName(_preparedColorArraySRV.get(), "DynamicCubemaps/PreparedColor.ArraySRV");
+		preparedSrvDesc.Format = DXGI_FORMAT_R32G32_FLOAT;
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			_preparedUV.texture.get(), &preparedSrvDesc, _preparedUVArraySRV.put()));
+		cs::render::annotation::SetName(_preparedUVArraySRV.get(), "DynamicCubemaps/PreparedUV.ArraySRV");
 
 		// The BC6H encoder loads through a Texture2DArray view.
 		D3D11_SHADER_RESOURCE_VIEW_DESC arraySrvDesc{};
@@ -639,6 +636,11 @@ namespace cs::features
 			&bufferDesc, nullptr, _updateBuffer.put()));
 		cs::render::annotation::SetName(
 			_updateBuffer.get(), "DynamicCubemaps/Update.Buffer");
+		bufferDesc = cs::buffer::ConstantBufferDesc<PrepareCaptureCB>();
+		DX::ThrowIfFailed(a_device->CreateBuffer(
+			&bufferDesc, nullptr, _prepareBuffer.put()));
+		cs::render::annotation::SetName(
+			_prepareBuffer.get(), "DynamicCubemaps/Prepare.Buffer");
 		bufferDesc =
 			cs::buffer::ConstantBufferDesc<SpecularMapFilterSettingsCB>();
 		DX::ThrowIfFailed(a_device->CreateBuffer(
@@ -804,11 +806,8 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			cs::engine::RenderTarget::kMainTemp);
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
-		const bool cameraReady =
-			frameBuffer.valid &&
-			frameBuffer.frameCount == state->frameCount &&
-			cs::engine::HasUsableWorldCamera(frameBuffer.data);
+		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
+		const bool cameraReady = frameBuffer.has_value();
 		_cameraReadyLastFrame.store(cameraReady, std::memory_order_relaxed);
 		if (!context || !depthSRV || !colorSRV || !cameraReady) {
 			return;
@@ -879,12 +878,12 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			cs::engine::RenderTarget::kMainTemp);
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
+		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
 		DirectX::XMFLOAT4X4 projection{};
 		DirectX::XMFLOAT4X4 inverseProjection{};
 		DirectX::XMFLOAT4 ndcToViewMul{};
 		DirectX::XMFLOAT4 ndcToViewAdd{};
-		if (!context || !depthSRV || !colorSRV ||
+		if (!context || !depthSRV || !colorSRV || !frameBuffer ||
 			!cs::engine::TryGetWorldSceneProjection(
 				projection,
 				inverseProjection,
@@ -898,7 +897,7 @@ namespace cs::features
 			std::chrono::steady_clock::now().time_since_epoch())
 		                       .count();
 		const auto cameraOrigin =
-			cs::engine::CameraWorldOrigin(frameBuffer.data);
+			cs::engine::CameraWorldOrigin(*frameBuffer);
 
 		UpdateCubemapCB constants{};
 		constants.CameraPreviousPosAdjust = _cameraPreviousPosAdjust[index];
@@ -906,20 +905,17 @@ namespace cs::features
 		constants.CaptureDeltaTime = static_cast<float>(
 			std::max(0.0, now - _previousCaptureTime[index]));
 		constants.ResetCapture = _resetCapture[index] ? 1u : 0u;
-		constants.CameraPosAdjust = { cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, 0.0f };
-		for (std::size_t row = 0; row < 3; ++row) {
-			const auto& source = frameBuffer.data.ViewToWorld[row];
-			constants.ViewToWorld[row] = { source.x, source.y, source.z, 0.0f };
-		}
-		constants.InvProj = inverseProjection;
+		// FO4 prepared positions are eye-relative, not relative to the engine's position-adjust anchor.
+		constants.CaptureCameraOrigin = { cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, 0.0f };
 		_previousCaptureTime[index] = now;
 		_resetCapture[index] = false;
 		_cameraPreviousPosAdjust[index] = cameraOrigin;
 		UpdateBuffer(context, _updateBuffer.get(), &constants, sizeof(constants));
+		const PrepareCaptureCB preparation{ inverseProjection };
+		UpdateBuffer(context, _prepareBuffer.get(), &preparation, sizeof(preparation));
 
 		auto& stream = Stream(a_reflections);
-		const auto* tiledSetting = RE::GetINISetting("bComputeShaderDeferredTiledLighting:Display");
-		const bool tiledLighting = tiledSetting && tiledSetting->GetBinary();
+		const bool tiledLighting = cs::engine::QueryTiledLightingEnabled();
 		std::array<ID3D11ShaderResourceView*, 6> srvs{
 			depthSRV,
 			colorSRV,
@@ -937,12 +933,30 @@ namespace cs::features
 			_lightingStateUAV.get()
 		};
 		context->CSSetShaderResources(0, static_cast<UINT>(srvs.size()), srvs.data());
-		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(uavs.size()), uavs.data(), nullptr);
-		ID3D11Buffer* buffer = _updateBuffer.get();
+		std::array<ID3D11UnorderedAccessView*, 3> preparedUavs{
+			_preparedPosition.mip0Uav.get(), _preparedColor.mip0Uav.get(), _preparedUV.mip0Uav.get()
+		};
+		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(preparedUavs.size()), preparedUavs.data(), nullptr);
+		ID3D11Buffer* buffer = _prepareBuffer.get();
 		context->CSSetConstantBuffers(0, 1, &buffer);
 		ID3D11SamplerState* sampler = _computeSampler.get();
 		context->CSSetSamplers(0, 1, &sampler);
 
+		cs::render::annotation::ScopedEvent timing(a_reflections ?
+													   "DynamicCubemaps::UpdateReflections" :
+													   "DynamicCubemaps::Update");
+		const bool captureSky = a_reflections && !_fakeReflections.load(std::memory_order_relaxed);
+		context->CSSetShader(captureSky ? _prepareReflectionsCS.get() : _prepareCS.get(), nullptr, 0);
+		context->Dispatch(DispatchGroups(kCubemapSize), DispatchGroups(kCubemapSize), 6);
+		UnbindCompute(context);
+
+		std::array<ID3D11ShaderResourceView*, 3> preparedSrvs{
+			_preparedPositionArraySRV.get(), _preparedColorArraySRV.get(), _preparedUVArraySRV.get()
+		};
+		context->CSSetShaderResources(0, static_cast<UINT>(preparedSrvs.size()), preparedSrvs.data());
+		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(uavs.size()), uavs.data(), nullptr);
+		buffer = _updateBuffer.get();
+		context->CSSetConstantBuffers(0, 1, &buffer);
 		context->CSSetShader(_detectLightingCS.get(), nullptr, 0);
 		context->Dispatch(1, 1, 1);
 
@@ -961,6 +975,9 @@ namespace cs::features
 			return;
 		}
 		auto& stream = Stream(a_reflections);
+		cs::render::annotation::ScopedEvent timing(a_reflections ?
+													   "DynamicCubemaps::InferReflections" :
+													   "DynamicCubemaps::Infer");
 		context->GenerateMips(stream.color.srv.get());
 
 		std::array<ID3D11ShaderResourceView*, 3> srvs{
@@ -990,6 +1007,7 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent timing("DynamicCubemaps::Irradiance");
 		if (a_doSetup) {
 			for (std::uint32_t face = 0; face < 6; ++face) {
 				const std::uint32_t subresource =
@@ -1045,6 +1063,9 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent timing(a_reflections ?
+													   "DynamicCubemaps::CompressReflections" :
+													   "DynamicCubemaps::Compress");
 
 		ID3D11ShaderResourceView* source = _filteredArraySRV.get();
 		context->CSSetShaderResources(0, 1, &source);
@@ -1231,8 +1252,6 @@ namespace cs::features
 				_enabled.load(std::memory_order_acquire) ? 1u : 0u;
 			data.EnabledSSR =
 				_enabledSSR.load(std::memory_order_acquire) ? 1u : 0u;
-			data.DebugVisualization = static_cast<std::uint32_t>(
-				_debugVisualization.load(std::memory_order_acquire));
 		}
 		return data;
 	}

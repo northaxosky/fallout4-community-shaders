@@ -3,6 +3,8 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/Engine.h"
+#include "Render/FrameProfiler.h"
+#include "Render/NativeShaderFamily.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassContext.h"
 
@@ -79,12 +81,18 @@ namespace cs::engine
 					.pixelShaderId = a_pixelShaderId
 				};
 				const ActiveBeginTechniqueScope scope(active);
-				return func(
+				const bool result = func(
 					a_shader,
 					a_vertexShaderId,
 					a_hullShaderId,
 					a_domainShaderId,
 					a_pixelShaderId);
+				// FO4: family IDs come from the native binder, not Skyrim enum indices.
+				if (result) {
+					const auto* name = native::FxpFilename(a_shader);
+					render::profiling::SetShaderFamily(native::ShaderType(a_shader), name ? name : "Unknown");
+				}
+				return result;
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -159,18 +167,12 @@ namespace cs::engine
 					native::StandaloneComputeOwnerName(a_owner) ?
 						native::StandaloneComputeOwnerName(a_owner) :
 						"";
-				if (name == "DFTiledLighting") {
+				if (const auto target = ResolveStandaloneComputeTarget(name)) {
 					ObserveNativeComputeOwner(
 						a_owner,
-						ShaderInjectionTarget::kDfTiledLighting,
+						*target,
 						name,
-						hasPayload);
-				} else if (name == "IndexBufferOffsetCS") {
-					ObserveNativeComputeOwner(
-						a_owner,
-						ShaderInjectionTarget::kImageSpace,
-						name,
-						false);
+						hasPayload && *target == ShaderInjectionTarget::kDfTiledLighting);
 				}
 				return result;
 			}

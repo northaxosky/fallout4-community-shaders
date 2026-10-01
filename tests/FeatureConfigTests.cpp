@@ -1,7 +1,6 @@
 #include "DynamicCubemapsSettings.h"
-#include "ExponentialHeightFogMath.h"
+#include "ExponentialHeightFogSettings.h"
 #include "FrameGenerationSettings.h"
-#include "InverseSquareLightingMath.h"
 #include "PerformanceOverlaySettings.h"
 #include "Render/TemporalRenderSettings.h"
 #include "RenderDocSettings.h"
@@ -9,9 +8,10 @@
 #include "ScreenSpaceShadowsSettings.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
+#include "Settings/LiveSettings.h"
 #include "Settings/SettingsRegistry.h"
 #include "TerrainShadowsSettings.h"
-#include "WaterEffectsMath.h"
+#include "WaterEffectsSettings.h"
 #include "WetnessMath.h"
 
 #include <filesystem>
@@ -71,7 +71,7 @@ namespace
 		auto registry = BuildCoreRegistry();
 		const std::array features{
 			std::pair{ "ScreenSpaceGI", MakeSchemaView(ssgi_settings::kSchema) },
-			std::pair{ "InverseSquareLighting", MakeSchemaView(inverse_square_lighting::kSchema) },
+			std::pair{ "InverseSquareLighting", SchemaView{} },
 			std::pair{ "ExponentialHeightFog", MakeSchemaView(exponential_height_fog::kSchema) },
 			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },
 			std::pair{ "WetnessEffects", MakeSchemaView(wetness_math::kSchema) },
@@ -169,6 +169,21 @@ namespace
 		CHECK(clamped.maxShoreWetness == 0.0f && clamped.shoreRange == 1);
 	}
 
+	void TestSSSSettings()
+	{
+		using namespace cs::features::sss_settings;
+		BendSettings value;
+		std::string error;
+		CHECK(Parse(kSchema, toml::parse("[settings]\nEnable = 0\nSampleCount = 4\nShadowContrast = 2.0\n"), value, error));
+		CHECK(value.Enable == 0 && value.SampleCount == 4 && value.ShadowContrast == 2.0f);
+		const auto delta = SerializeDelta(kSchema, value, BendSettings{});
+		BendSettings restored;
+		CHECK(Parse(kSchema, toml::table{ { "settings", delta } }, restored, error));
+		CHECK(restored.Enable == 0 && restored.SampleCount == 4 && restored.ShadowContrast == 2.0f);
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nEnable = true\n"), restored, error));
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nSampleCount = 5\n"), restored, error));
+	}
+
 	void TestRegistry(const Registry& a_registry)
 	{
 		std::set<std::vector<std::string>> paths;
@@ -207,7 +222,7 @@ namespace
 
 		WriteFile(a_path,
 			"[features.ScreenSpaceShadows]\nload = true\n"
-			"[features.ScreenSpaceShadows.settings]\nsurface_thickness = 0.03\ncustom = 1\n"
+			"[features.ScreenSpaceShadows.settings]\nSurfaceThickness = 0.03\ncustom = 1\n"
 			"[unknown]\nvalue = 'kept'\n");
 		CHECK(InitializeAt(a_path, a_registry).error.empty());
 		const auto refreshed = ReadFile(a_path);
@@ -216,17 +231,17 @@ namespace
 		constexpr std::array path{
 			std::string_view("features"), std::string_view("ScreenSpaceShadows"), std::string_view("settings")
 		};
-		CHECK(UpdateOwnedSettingsAt(a_path, path, toml::parse("shadow_contrast = 2.0\n")));
+		CHECK(UpdateOwnedSettingsAt(a_path, path, toml::parse("ShadowContrast = 2.0\n")));
 		auto root = LoadFile(a_path).table;
 		CHECK(root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == true);
-		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["shadow_contrast"].value<double>() == 2.0);
+		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["ShadowContrast"].value<double>() == 2.0);
 		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["custom"].value<std::int64_t>() == 1);
 		CHECK(root["unknown"]["value"].value<std::string>() == "kept");
 
 		CHECK(UpdateOwnedSettingsAt(a_path, path, {}));
 		const auto reset = ReadFile(a_path);
-		CHECK(reset.find("# surface_thickness = 0.02\n") != std::string::npos);
-		CHECK(reset.find("# shadow_contrast = 1.0\n") != std::string::npos);
+		CHECK(reset.find("# SurfaceThickness = 0.02\n") != std::string::npos);
+		CHECK(reset.find("# ShadowContrast = 1.0\n") != std::string::npos);
 
 		// A value where an owned table belongs must still render a parseable document.
 		const auto blocked = RenderDocument(a_registry, toml::parse("[features.ScreenSpaceShadows]\nsettings = false\n"));
@@ -253,8 +268,110 @@ namespace
 		current.dllPath = "C:\\RenderDoc\\renderdoc.dll";
 		CHECK(RestartRequired(kSchema, boot, current).size() == 1);
 		current = boot;
-		current.multiFrameCount = 10;
+		current.captureFrameCount = 10;
 		CHECK(RestartRequired(kSchema, boot, current).empty());
+		Settings restored;
+		std::string error;
+		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = 120\n"), restored, error));
+		CHECK(restored.captureFrameCount == 120);
+		const auto serialized = SerializeDelta(kSchema, restored, Settings{});
+		CHECK(serialized["Capture Frame Count"].value<int>() == 120);
+		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = 9223372036854775807\n"), restored, error));
+		CHECK(restored.captureFrameCount == 120);
+		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = -1\n"), restored, error));
+		CHECK(restored.captureFrameCount == 1);
+	}
+
+	void TestLiveSettings()
+	{
+		constexpr Schema schema{ std::tuple{
+			Field{ "enabled", "Enable.", &TestSettings::enabled },
+			Field{ "count", "Startup resource count.", &TestSettings::count, Range{ 1u, 4u }, ApplyTiming::kNextLaunch },
+			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } } } };
+		TestSettings value;
+		float published = value.thickness;
+		auto access = BindLiveSettings(schema, value, [&] {
+			published = value.thickness;
+			if (!value.enabled)
+				throw std::runtime_error("Effect finalization failed");
+		});
+		const auto baseline = access.snapshot();
+		CHECK(!baseline.contains("count"));
+		std::string error;
+		const auto before = value;
+		CHECK(!access.prepare(toml::parse("enabled = false\nthickness = nan"), error));
+		CHECK(value == before);
+		auto prepared = access.prepare(toml::parse("enabled = false\nthickness = 0.04\ncount = 4\nload = false"), error);
+		CHECK(prepared.has_value());
+		if (!prepared)
+			return;
+		value.count = 3;
+		std::array transaction{ std::move(*prepared) };
+		try {
+			ApplyPreparedLiveSettings(transaction);
+			CHECK(false);
+		} catch (const std::runtime_error&) {
+			CHECK(value.enabled && value.thickness == before.thickness && value.count == 3);
+			CHECK(published == before.thickness);
+		}
+		prepared = access.prepare(toml::parse("thickness = 0.03\ncount = 1"), error);
+		CHECK(prepared.has_value());
+		if (!prepared)
+			return;
+		std::array successful{ std::move(*prepared) };
+		ApplyPreparedLiveSettings(successful);
+		CHECK(value.count == 3 && value.thickness == 0.03f && published == 0.03f);
+		prepared = access.prepare(baseline, error);
+		if (prepared) {
+			std::array restore{ std::move(*prepared) };
+			ApplyPreparedLiveSettings(restore);
+		}
+		CHECK(value.count == 3 && value.thickness == before.thickness && published == before.thickness);
+	}
+
+	void TestSSGISettings()
+	{
+		using namespace cs::features::ssgi_settings;
+		Settings value;
+		std::string error;
+		CHECK(Parse(kSchema, toml::parse("[settings]\nEnabled = false\nEnableExperimentalSpecularGI = true\nResolutionMode = 2\nDepthFadeRange = [25000, 45000]\nAOPower = 8.0"), value, error));
+		CHECK(!value.enabled && value.enableExperimentalSpecularGI && value.resolutionMode == 2);
+		CHECK(value.depthFadeRange[0] == 25000.0f && value.depthFadeRange[1] == 45000.0f && value.aoPower == 8.0f);
+		std::ostringstream document;
+		document << toml::table{ { "settings", SerializeDelta(kSchema, value, Settings{}) } };
+		Settings restored;
+		CHECK(Parse(kSchema, toml::parse(document.str()), restored, error));
+		CHECK(restored.depthFadeRange == value.depthFadeRange && restored.enableExperimentalSpecularGI);
+		const auto before = restored.depthFadeRange;
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nDepthFadeRange = [10000, nan]"), restored, error));
+		CHECK(restored.depthFadeRange == before);
+		int resets = 0;
+		auto live = BindLiveSettings(kSchema, restored, [&] { ++resets; });
+		auto prepared = live.prepare(toml::parse("EnableExperimentalSpecularGI = false\nDepthFadeRange = [30000, 50000]"), error);
+		CHECK(prepared.has_value());
+		if (prepared) {
+			std::array updates{ std::move(*prepared) };
+			ApplyPreparedLiveSettings(updates);
+		}
+		CHECK(!restored.enableExperimentalSpecularGI && restored.depthFadeRange[0] == 30000.0f && resets == 1);
+	}
+
+	void TestOverlayPosition()
+	{
+		using namespace cs::features::performance_overlay;
+		Settings value;
+		std::string error;
+		CHECK(Parse(kSchema, toml::parse("[settings]\nPosition = [300.5, 700.25]\nPositionSet = true\nFrameHistorySize = 1800"), value, error));
+		std::ostringstream serialized;
+		serialized << toml::table{ { "settings", SerializeFull(kSchema, value) } };
+		Settings restored;
+		CHECK(Parse(kSchema, toml::parse(serialized.str()), restored, error));
+		CHECK(restored.Position == value.Position && restored.PositionSet && restored.FrameHistorySize == 1800);
+		const auto validPosition = restored.Position;
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nPosition = [10.0, nan]"), restored, error));
+		CHECK(restored.Position == validPosition);
+		CHECK(!Parse(kSchema, toml::parse("[settings]\nPosition = [10.0]"), restored, error));
+		CHECK(restored.Position == validPosition);
 	}
 }
 
@@ -267,10 +384,14 @@ int main()
 		const auto registry = BuildRegistry();
 		TestSchema();
 		TestWetnessSettings();
+		TestSSSSettings();
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");
 		TestRestartTiming();
+		TestLiveSettings();
+		TestSSGISettings();
+		TestOverlayPosition();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
 		++failures;

@@ -1,5 +1,8 @@
 #pragma once
 
+#include "../package/Shaders/FO4/DebugViewOwners.h"
+
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -15,6 +18,14 @@ namespace cs
 	{
 		kTexturePreview,
 		kFullscreen
+	};
+
+	struct FullscreenDebugData
+	{
+		std::uint32_t owner = FullscreenDebugOwner::None;
+		std::uint32_t mode = 0;
+		std::array<float, 4> params{};
+		ID3D11ShaderResourceView* texture = nullptr;
 	};
 
 	struct FeatureDebugTexture

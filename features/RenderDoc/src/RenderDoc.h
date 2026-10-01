@@ -62,6 +62,8 @@ namespace cs::features
 
 		void TriggerCapture();
 		void TriggerMultiFrameCapture();
+		void ClearCaptures();
+		[[nodiscard]] const std::filesystem::path& CaptureDirectory() const noexcept { return _resolvedCaptureFolder; }
 
 		using Settings = renderdoc_settings::Settings;
 
@@ -72,13 +74,14 @@ namespace cs::features
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(renderdoc_settings::kSchema); }
 		bool TryLoadRuntime(std::string& a_error);
 		void ApplyCapturePath();
-		bool CheckCaptureDiskSpace() const;
+		bool CheckCaptureDiskSpace(int a_frames) const;
 		[[nodiscard]] bool BindCaptureTarget(bool a_reportUnavailable);
 		[[nodiscard]] bool CaptureTargetAvailable() const noexcept;
 		[[nodiscard]] bool FramesEngineCaptureManually() const noexcept;
 		[[nodiscard]] bool RequestFrames(std::uint32_t a_frames);
-		void QueuePendingComments(std::uint32_t a_expectedCaptures);
 		void ApplyPendingComments();
+		[[nodiscard]] std::string BuildAutomaticCaptureComments(std::string_view a_userComments = {}) const;
+		void DrawCaptureFiles();
 
 		struct CaptureBinding
 		{
@@ -96,6 +99,7 @@ namespace cs::features
 		RENDERDOC_API_1_7_0* _api = nullptr;
 		bool _attemptedLoad = false;
 		std::atomic<std::uint32_t> _captureCount{ 0 };
+		renderdoc::CaptureService _captures;
 
 		mutable std::mutex _captureTargetMutex;
 		winrt::com_ptr<ID3D11Device> _device11;
@@ -108,11 +112,8 @@ namespace cs::features
 		std::atomic<std::uint32_t> _manualFramesPending{ 0 };
 		winrt::com_ptr<ID3D11Device> _manualFrameDevice;
 
-		// Comments apply to a completed capture, so they wait for the file to appear.
-		std::string _pendingComments;
-		std::uint32_t _pendingCaptures = 0;
-		std::uint32_t _lastCaptureCount = 0;
-
 		std::array<char, 1024> _commentsBuf{};
+		int _fileSort = 2;
+		bool _fileSortDescending = true;
 	};
 }

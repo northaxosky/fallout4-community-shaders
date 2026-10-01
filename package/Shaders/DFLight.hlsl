@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-#	include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
+#	include "FO4/ScreenSpaceShadowConsumer.hlsli"
 #endif
 
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-#	include "TerrainShadows/TerrainShadows.hlsli"
+#	include "FO4/TerrainShadowsConsumer.hlsli"
+#endif
+#ifdef EXPONENTIAL_HEIGHT_FOG
+#	include "FO4/ExponentialHeightFogConsumer.hlsli"
 #endif
 
 #ifdef WETNESS_EFFECTS
-#	include "WetnessEffects/WetnessEffects.hlsli"
+#	include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #endif
 
-#ifdef INVERSE_SQUARE_LIGHTING
-#	include "InverseSquareLighting/InverseSquareLighting.hlsli"
-#endif
+#include "FO4/InverseSquareLightingRaster.hlsli"
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-#	include "WaterEffects/WaterCaustics.hlsli"
+// FO4: directional RGB accumulators carry upstream's chromatic multiplier.
+#	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
 
 #ifdef BSDFLIGHT_PS_DEFERRED
@@ -537,8 +539,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #		if defined(AMBIENT_IBL_IN_LIGHT) && defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 	ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-		normalView, viewDirNeg, posView,
-		ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+		normalView, viewDirNeg, input.position.xy);
 #		endif
 
 	bool cascade0Active = (linearizedDepth < cb2_idx10_cascade_range.y);
@@ -708,6 +709,9 @@ PS_OUTPUT main(PS_INPUT input)
 	finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
 	float specMix = (1.0 - schlickFres * 0.5);
+#		ifdef EXPONENTIAL_HEIGHT_FOG
+	shadowPcf *= FO4Fog::SunlightView(posView);
+#		endif
 	output.specular.xyz = shadowPcf * specMix * brdfSpecular;
 #		ifdef AMBIENT_IBL_IN_LIGHT
 	output.specular.xyz += ambientSpecular;
@@ -841,12 +845,9 @@ PS_OUTPUT main(PS_INPUT input)
 	float dPowZ = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
 	float falloffLin = saturate(cb2_idx3_attenuation_curve.y * dPowZ + cb2_idx3_attenuation_curve.x);
 	float attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
-#		ifdef INVERSE_SQUARE_LIGHTING
-	attenuation = InverseSquareLighting::GetAttenuation(
-		attenuation, d, LightPos_and_Radius.w, input.position.x);
-#		endif
+	attenuation = FO4LocalLightAttenuation(d, attenuation);
 
-	bool nearZero = (attenuation <= 0.001);
+	bool nearZero = FO4LocalLightNegligible(attenuation);
 
 	if (nearZero) {
 		output.diffuse = float4(0, 0, 0, 0);
@@ -900,7 +901,7 @@ PS_OUTPUT main(PS_INPUT input)
 			exp2(log2(vis2) * cb12_idx28_sss_params.y) *
 			cb12_idx28_sss_params.x;
 
-		brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
+		brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
 	} else {
 		float specExp = exp2(matSample.x * 10.0 + 1.0);
 		float NdotV_raw = dot(viewDirNeg, normalView);
@@ -958,7 +959,7 @@ PS_OUTPUT main(PS_INPUT input)
 		specMag *= 3.141593;
 
 		brdfSpecular =
-			NdotL_clamped * (specMag * LightColor_HDR.xyz);
+			NdotL_clamped * (specMag * FO4LocalLightColor(LightColor_HDR.xyz));
 	}
 
 	float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -966,8 +967,8 @@ PS_OUTPUT main(PS_INPUT input)
 	float toLightDotView = saturate(dot(viewDirNeg, -lightDir));
 	float ambientTerm = toLightDotView * edge * NdotL_clamped * roughness01;
 
-	float3 diffuseAccum = LightColor_HDR.xyz * ambientTerm;
-	diffuseAccum += LightColor_HDR.xyz * brdfShadowMix;
+	float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
+	diffuseAccum += FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
 
 	float4 posViewHomog = float4(posView, 1.0);
 	float3 lsDir;
@@ -1185,10 +1186,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float dPowZ = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
 	float falloffLin = saturate(cb2_idx3_attenuation_curve.y * dPowZ + cb2_idx3_attenuation_curve.x);
 	float attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
-#		ifdef INVERSE_SQUARE_LIGHTING
-	attenuation = InverseSquareLighting::GetAttenuation(
-		attenuation, d, LightPos_and_Radius.w, input.position.x);
-#		endif
+	attenuation = FO4LocalLightAttenuation(d, attenuation);
 
 #		ifdef SPOT
 
@@ -1212,7 +1210,7 @@ PS_OUTPUT main(PS_INPUT input)
 #			endif
 #		endif
 
-	bool nearZero = (attenuation <= 0.001);
+	bool nearZero = FO4LocalLightNegligible(attenuation);
 
 	if (nearZero) {
 		output.diffuse = float4(0, 0, 0, 0);
@@ -1529,9 +1527,9 @@ attenuation = attenuation * shadowFactor;
 				cb12_idx28_sss_params.x;
 
 #				ifdef FO4_DEFERRED_SPEC_ORDER
-			brdfSpecular = (pow2 * LightColor_HDR.xyz) * NdotL_clamped;
+			brdfSpecular = (pow2 * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #				else
-	brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
+	brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
 #				endif
 #			endif
 		} else {
@@ -1660,9 +1658,9 @@ attenuation = attenuation * shadowFactor;
 			specMag *= 3.1415927;
 
 #				ifdef FO4_DEFERRED_SPEC_ORDER
-			brdfSpecular = (specMag * LightColor_HDR.xyz) * NdotL_clamped;
+			brdfSpecular = (specMag * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #				else
-	brdfSpecular = NdotL_clamped * (specMag * LightColor_HDR.xyz);
+	brdfSpecular = NdotL_clamped * (specMag * FO4LocalLightColor(LightColor_HDR.xyz));
 #				endif
 #			endif
 		}
@@ -1672,7 +1670,7 @@ attenuation = attenuation * shadowFactor;
 		float NdotL_clamped = saturate(NdotL_raw);
 #			endif
 #			ifndef FO4_DEFERRED_PACKED_RIM
-		float3 diffuseAccum = LightColor_HDR.xyz * brdfShadowMix;
+		float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
 #			endif
 
 #			if !defined(IGNORERIM) && !defined(IGNOREROUGHNESS)
@@ -1688,15 +1686,15 @@ attenuation = attenuation * shadowFactor;
 float ambientTerm = toLightDotView * edge * NdotL_clamped * roughness01;
 #				endif
 #				ifdef FO4_DEFERRED_PACKED_RIM
-		float3 diffuseAccum = LightColor_HDR.xyz * brdfShadowMix;
-		diffuseAccum += LightColor_HDR.xyz * ambientTerm;
+		float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
+		diffuseAccum += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
 #				else
-diffuseAccum = LightColor_HDR.xyz * ambientTerm + diffuseAccum;
+diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm + diffuseAccum;
 #				endif
 #			endif
 #		else
 
-	float3 diffuseAccum = LightColor_HDR.xyz;
+	float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz);
 	float3 brdfSpecular = float3(0, 0, 0);
 #		endif
 
@@ -1754,18 +1752,16 @@ float2 goboUV = float2(omniUV.x,
 #		endif
 
 #		if defined(WETNESS_EFFECTS) && !defined(ATTENUATION_ONLY)
-		WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-			normalView, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+		WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 		float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
-		float3 wetLightColor = LightColor_HDR.xyz * attenuation;
+		float3 wetLightColor = FO4LocalLightColor(LightColor_HDR.xyz) * attenuation;
 #			ifdef GOBOPROJECTION
 		wetLightColor *= cookieRGB;
 #			endif
 		float3 wetDiffuse = attenuation * diffuseAccum;
 		float3 wetSpecular = attenuation * brdfSpecular;
 		WetnessEffects::ApplyDirectCoat(
-			normalView,
+			wetSurface.normalView,
 			wetViewDir,
 			lightDir,
 			wetLightColor,
@@ -1902,18 +1898,15 @@ float2 goboUV = float2(omniUV.x,
 		float attenuation = pow(
 			asfloat(0x3f800000) - biased,
 			asfloat(0x400ccccd));
-#	ifdef INVERSE_SQUARE_LIGHTING
-		attenuation = InverseSquareLighting::GetAttenuation(
-			attenuation, distance, LightPos_and_Radius.w, input.position.x);
-#	endif
+		attenuation = FO4LocalLightAttenuation(distance, attenuation);
 
-		if (attenuation <= asfloat(0x3a83126f)) {
+		if (FO4LocalLightNegligible(attenuation)) {
 			output.diffuse = float4(0, 0, 0, 0);
 			output.specular = float4(0, 0, 0, 0);
 			return output;
 		}
 
-		output.diffuse = float4(LightColor_HDR.xyz, 0.0);
+		output.diffuse = float4(FO4LocalLightColor(LightColor_HDR.xyz), 0.0);
 		output.diffuse *= attenuation;
 		output.diffuse /= 3.0;
 		output.specular = float4(0, 0, 0, asfloat(0x3f800000));
@@ -2250,8 +2243,7 @@ float2 goboUV = float2(omniUV.x,
 		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 		ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-			normalView, viewDirNeg, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			normalView, viewDirNeg, input.position.xy);
 #		endif
 		float3 ambientSpecular = 0.0;
 		float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -2270,7 +2262,11 @@ float2 goboUV = float2(omniUV.x,
 		shadow = fadeFactor * (shadow - 1.0) + 1.0;
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-		shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
+		shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+		float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+#	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+		shadow *= FO4Fog::SunlightView(posView);
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 		shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -2282,7 +2278,7 @@ float2 goboUV = float2(omniUV.x,
 			CameraPosAdjust);
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-		shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+		float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 			posView,
 			ViewToWorld_row0,
 			ViewToWorld_row1,
@@ -2433,26 +2429,38 @@ float2 goboUV = float2(omniUV.x,
 		finalDiffuse += SunColor_HDR.xyz * ambientTerm;
 
 		float backfaceWrap = saturate(-NdotL_raw);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+		backfaceWrap *= transmissionContactShadow;
+#	endif
 		finalDiffuse += SunColor_HDR.xyz * (backfaceWrap * albedoPremult);
 
 		float forwardBlend =
 			saturate((NdotL_raw + brdfModulator) / (brdfModulator + 1.0));
 		forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+		forwardBlend *= transmissionContactShadow;
+#	endif
 		finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
+#	ifdef WATER_EFFECTS
+		finalDiffuse *= causticsMult;
+		brdfSpecular *= causticsMult;
+#	endif
 		float specMix = mad(schlickFres, -0.5, 1.0);
 #	ifdef WETNESS_EFFECTS
-		WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-			normalView, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+		WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 		float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 		float3 wetDiffuse = finalDiffuse * shadow;
 		float3 wetSpecular = (brdfSpecular * specMix) * shadow;
 		WetnessEffects::ApplyDirectCoat(
-			normalView,
+			wetSurface.normalView,
 			wetViewDir,
 			SunDirection.xyz,
-			SunColor_HDR.xyz * shadow,
+			SunColor_HDR.xyz * shadow
+#		ifdef WATER_EFFECTS
+				* causticsMult
+#		endif
+			,
 			wetSurface.wetness,
 			wetSurface.waterRoughness,
 			wetDiffuse,
@@ -2888,8 +2896,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 		ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-			normalView, viewDirNeg, posView,
-			ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			normalView, viewDirNeg, input.position.xy);
 #		endif
 		float3 ambientSpecular = 0.0;
 #	endif
@@ -3026,7 +3033,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
+			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+#	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			shadow *= FO4Fog::SunlightView(posView);
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -3038,7 +3049,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
 				ViewToWorld_row1,
@@ -3275,6 +3286,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 			float backfaceWrap = saturate(-NdotL_raw);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			backfaceWrap *= transmissionContactShadow;
+#	endif
 #	ifdef FO4_DS2_REASSOC_ORDER
 			finalDiffuse += SunColor_HDR.xyz * (backfaceWrap * albedoPremult);
 #	else
@@ -3289,25 +3303,34 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		saturate((brdfModulator + NdotL_raw) / (brdfModulator + 1.0));
 #	endif
 			forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			forwardBlend *= transmissionContactShadow;
+#	endif
 			finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
+#	ifdef WATER_EFFECTS
+			finalDiffuse *= causticsMult;
+			brdfSpecular *= causticsMult;
+#	endif
 #	ifdef FO4_DS2_REASSOC_ORDER
 			float specMix = mad(schlickFres, -0.5, 1.0);
 #	else
 	float specMix = 1.0 - schlickFres * 0.5;
 #	endif
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 			float3 wetDiffuse = finalDiffuse * shadow;
 			float3 wetSpecular = (brdfSpecular * specMix) * shadow;
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				SunDirection.xyz,
-				SunColor_HDR.xyz * shadow,
+				SunColor_HDR.xyz * shadow
+#		ifdef WATER_EFFECTS
+					* causticsMult
+#		endif
+				,
 				wetSurface.wetness,
 				wetSurface.waterRoughness,
 				wetDiffuse,
@@ -3963,8 +3986,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normalView, viewDirNeg, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normalView, viewDirNeg, input.position.xy);
 #		endif
 			float3 ambientSpecular = 0.0;
 #	endif
@@ -3980,7 +4002,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float shadow = ComputeDirectionalShadow(posView, linearizedDepth);
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy, dot(normalView, SunDirection.xyz));
+			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+#	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			shadow *= FO4Fog::SunlightView(posView);
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -3992,7 +4018,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
 				ViewToWorld_row1,
@@ -4240,6 +4266,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 			float backfaceWrap = saturate(-NdotL_raw);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			backfaceWrap *= transmissionContactShadow;
+#	endif
 #	ifdef FO4_DS3_REASSOC_ORDER
 			finalDiffuse += SunColor_HDR.xyz * (backfaceWrap * albedoPremult);
 #	else
@@ -4254,8 +4283,15 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		saturate((brdfModulator + NdotL_raw) / (brdfModulator + 1.0));
 #	endif
 			forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+			forwardBlend *= transmissionContactShadow;
+#	endif
 			finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
+#	ifdef WATER_EFFECTS
+			finalDiffuse *= causticsMult;
+			brdfSpecular *= causticsMult;
+#	endif
 #	ifdef FO4_DS3_REASSOC_ORDER
 			float specMix = mad(schlickFres, -0.5, 1.0);
 #	else
@@ -4263,17 +4299,19 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 			float3 wetDiffuse = finalDiffuse * shadow;
 			float3 wetSpecular = (brdfSpecular * specMix) * shadow;
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				SunDirection.xyz,
-				SunColor_HDR.xyz * shadow,
+				SunColor_HDR.xyz * shadow
+#		ifdef WATER_EFFECTS
+					* causticsMult
+#		endif
+				,
 				wetSurface.wetness,
 				wetSurface.waterRoughness,
 				wetDiffuse,
@@ -4512,12 +4550,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float dPowZ = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
 			float falloffLin = saturate(cb2_idx3_attenuation_curve.y * dPowZ + cb2_idx3_attenuation_curve.x);
 			float attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
-#	ifdef INVERSE_SQUARE_LIGHTING
-			attenuation = InverseSquareLighting::GetAttenuation(
-				attenuation, d, LightPos_and_Radius.w, input.position.x);
-#	endif
+			attenuation = FO4LocalLightAttenuation(d, attenuation);
 
-			if (attenuation <= 0.001) {
+			if (FO4LocalLightNegligible(attenuation)) {
 				output.diffuse = float4(0, 0, 0, 0);
 				output.specular = float4(0, 0, 0, 0);
 				return output;
@@ -4575,7 +4610,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				float vis2 = max(rot2 * skinNdotV + rot2Perp * sinScaleV, 0.0);
 				float pow2 = exp2(log2(vis2) * cb12_idx28_sss_params.y) *
 				             cb12_idx28_sss_params.x;
-				brdfSpecular = (pow2 * LightColor_HDR.xyz) * NdotL_clamped;
+				brdfSpecular = (pow2 * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #	endif
 			} else {
 #	ifdef SPECULAR
@@ -4661,7 +4696,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				specMag = min(specMag, 15.0);
 				specMag *= matSample.y;
 				specMag *= 3.1415927;
-				brdfSpecular = (specMag * LightColor_HDR.xyz) * NdotL_clamped;
+				brdfSpecular = (specMag * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #	endif
 			}
 
@@ -4685,8 +4720,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	else
 	float ambientTerm = 0.0;
 #	endif
-			float3 diffuseAccum = LightColor_HDR.xyz * brdfShadowMix;
-			diffuseAccum += LightColor_HDR.xyz * ambientTerm;
+			float3 diffuseAccum = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
+			diffuseAccum += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
 
 			float4 posViewHomog = float4(posView, 1.0);
 			float4 lsDir;
@@ -4699,11 +4734,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 			diffuseAccum *= cookieRGB;
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
-			float3 wetLightColor = (LightColor_HDR.xyz * cookieRGB) * attenuation;
+			float3 wetLightColor = (FO4LocalLightColor(LightColor_HDR.xyz) * cookieRGB) * attenuation;
 			float3 wetDiffuse = diffuseAccum * attenuation;
 #		ifdef SPECULAR
 			float3 wetSpecular = (brdfSpecular * cookieRGB) * attenuation;
@@ -4711,7 +4744,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float3 wetSpecular = float3(0, 0, 0);
 #		endif
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				lightDir,
 				wetLightColor,
@@ -5080,7 +5113,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -5091,6 +5124,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				ViewToWorld_row2,
 				CameraPosAdjust);
 #	endif
+#	if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
+			float shadowAlpha = result.z;
+#	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			result *= FO4Fog::SunlightView(posView);
+#	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			result *= WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
@@ -5100,7 +5139,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 
-			output.diffuse = result.zzzz;
+#	if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
+			output.diffuse = float4(result.xyz, shadowAlpha);
+#	else
+	output.diffuse = result.zzzz;
+#	endif
 			output.specular = float4(result.xyz, 1.0);
 			return output;
 		}
@@ -5263,8 +5306,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			ambientDiffuse = pow(ambientDiffuse, 2.2);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normal, normalize(-posView), posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normal, normalize(-posView), input.position.xy);
 #		endif
 
 			bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
@@ -5333,7 +5375,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #		endif
 #		if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -5344,6 +5386,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				ViewToWorld_row2,
 				CameraPosAdjust);
 #		endif
+#		if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
+			float shadowAlpha = result.z;
+#		endif
+#		if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			result *= FO4Fog::SunlightView(posView);
+#		endif
 #		if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			result *= WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
@@ -5353,14 +5401,25 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #		endif
 
-			output.diffuse = result.zzzz;
+#		if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
+			output.diffuse = float4(result.xyz, shadowAlpha);
+#		else
+		output.diffuse = result.zzzz;
+#		endif
 			output.specular = float4(result.xyz, 1.0);
 #	else
 	float shadowBlend = fadeFactor * (shadow - 1.0);
+#		ifdef WATER_EFFECTS
+	float3 splitShadow = (shadowBlend + 1.0).xxx;
+#		else
 	float splitShadow = shadowBlend + 1.0;
+#		endif
 
+#		if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+	splitShadow *= FO4Fog::SunlightView(posView);
+#		endif
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-	splitShadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+	splitShadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #		endif
 #		if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 	splitShadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -5399,8 +5458,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		ambientSpecular = (fresnel * pow(ambientReflected, 2.2)) * material.y;
 	}
 
+#		ifdef WATER_EFFECTS
+	output.specular = float4(splitShadow, 1.0) + float4(ambientSpecular, 0.0);
+	output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow, shadowBlend);
+#		else
 	output.specular = float4(splitShadow.xxx, 1.0) + float4(ambientSpecular, 0.0);
 	output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow.xxx, shadowBlend);
+#		endif
 #	endif
 			return output;
 		}
@@ -5625,12 +5689,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float falloff = exp2(log2(distNorm) * LightAttenuation.z);
 			float attenBase = saturate(LightAttenuation.y * falloff + LightAttenuation.x);
 			float attenuation = exp2(log2(1.0 - attenBase) * 2.2);
-#		ifdef INVERSE_SQUARE_LIGHTING
-			attenuation = InverseSquareLighting::GetAttenuation(
-				attenuation, sqrt(distSq), LightVector.w, input.position.x);
-#		endif
+			attenuation = FO4LocalLightAttenuation(sqrt(distSq), attenuation);
 
-			if (attenuation <= 0.001) {
+			if (FO4LocalLightNegligible(attenuation)) {
 				output.diffuse = float4(0, 0, 0, 0);
 				output.specular = float4(0, 0, 0, 0);
 				return output;
@@ -5662,8 +5723,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normalView, normalize(-posView), posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normalView, normalize(-posView), input.position.xy);
 #		endif
 			float3 ambientSpecular = 0.0;
 #	endif
@@ -5760,7 +5820,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #		endif
 				float pow2 = exp2(log2(vis2) * cb12_idx28_hair_spec_params.y) * cb12_idx28_hair_spec_params.x;
 
-				brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
+				brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
 #	endif
 			} else {
 #	if defined(DIRECTIONAL) && !defined(AMBIENT)
@@ -5955,7 +6015,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				specMag *= matSample.y;
 				specMag *= FO4_SPECULAR_SCALE;
 
-				brdfSpecular = (specMag * LightColor_HDR.xyz) * NdotL_clamped;
+				brdfSpecular = (specMag * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #	endif
 
 #	if defined(DIRECTIONAL) && defined(AMBIENT) && !defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
@@ -5968,7 +6028,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float NdotL_clamped = saturate(NdotL_raw);
 #	endif
 
-			float3 finalDiffuse = LightColor_HDR.xyz * brdfShadowMix;
+			float3 finalDiffuse = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
 
 #	if !defined(IGNOREROUGHNESS) && !defined(IGNORERIM)
 
@@ -5985,15 +6045,27 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 #		endif
 
-			finalDiffuse += LightColor_HDR.xyz * ambientTerm;
+			finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
 #	endif
 
 #	ifdef DIRECTIONAL
+#		ifdef SCREEN_SPACE_SHADOWS
+			float2 contactVisibility = FO4ScreenSpaceShadowVisibility(input.position.xyz, depth);
+			float directContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : 1.0;
+			float transmissionContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : contactVisibility.y;
+			finalDiffuse *= directContactShadow;
+#			ifdef SPECULAR
+			brdfSpecular *= directContactShadow;
+#			endif
+#		endif
 			float backfaceWrap = saturate(-NdotL_raw);
+#		ifdef SCREEN_SPACE_SHADOWS
+			backfaceWrap *= transmissionContactShadow;
+#		endif
 #		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
-			finalDiffuse += LightColor_HDR.xyz * (backfaceWrap * albedoPremult);
+			finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
 #		else
-		finalDiffuse += LightColor_HDR.xyz * (backfaceWrap * albedoPremult);
+		finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
 #		endif
 
 #		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
@@ -6004,9 +6076,17 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			saturate((NdotL_raw + brdfModulator) / (brdfModulator + 1.0));
 #		endif
 			forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
-			finalDiffuse += (forwardBlend * LightColor_HDR.xyz) * albedoSample.xyz;
+#		ifdef SCREEN_SPACE_SHADOWS
+			forwardBlend *= transmissionContactShadow;
+#		endif
+			finalDiffuse += (forwardBlend * FO4LocalLightColor(LightColor_HDR.xyz)) * albedoSample.xyz;
 #	endif
 
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			float sunlightFogMult = FO4Fog::SunlightView(posView);
+			finalDiffuse *= sunlightFogMult;
+			brdfSpecular *= sunlightFogMult;
+#	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			float terrainShadowMult = TerrainShadows::GetTerrainShadowMultFromViewPosition(
 				posView,
@@ -6019,7 +6099,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			brdfSpecular *= terrainShadowMult;
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			float causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
+			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
 				ViewToWorld_row1,
@@ -6030,19 +6110,25 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	endif
 
 #	ifdef WETNESS_EFFECTS
-			WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-				normalView, posView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+			WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(input.position.xy, normalView);
 			float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 #		ifdef POINTOMNI
-			float3 wetLightColor = LightColor_HDR.xyz * attenuation;
+			float3 wetLightColor = FO4LocalLightColor(LightColor_HDR.xyz) * attenuation;
 			float3 wetDiffuse = finalDiffuse * attenuation;
 #		else
-		float3 wetLightColor = LightColor_HDR.xyz;
+		float3 wetLightColor = FO4LocalLightColor(LightColor_HDR.xyz);
+#			if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+		wetLightColor *= sunlightFogMult;
+#			endif
+#			if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+		wetLightColor *= directContactShadow;
+#			endif
 #			if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-		// finalDiffuse and brdfSpecular already carry caustics; the coat's own sun
-		// lobe is built from the raw light color, so modulate it too.
+		// FO4: the coat's separate sun lobe needs the same RGB multiplier.
 		wetLightColor *= causticsMult;
+#			endif
+#			if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+		wetLightColor *= terrainShadowMult;
 #			endif
 		float3 wetDiffuse = finalDiffuse;
 #		endif
@@ -6056,7 +6142,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		float3 wetSpecular = float3(0, 0, 0);
 #		endif
 			WetnessEffects::ApplyDirectCoat(
-				normalView,
+				wetSurface.normalView,
 				wetViewDir,
 				lightDir,
 				wetLightColor,
@@ -6217,8 +6303,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			ambientDiffuse *= WetnessEffects::GetIndirectDiffuseWeight(
-				normalView, viewDirection, positionView,
-				ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust);
+				normalView, viewDirection, input.position.xy);
 #	endif
 			float ndotv = dot(normalView, viewDirection);
 			float3 reflectionDirection = 2.0 * ndotv * normalView - viewDirection;

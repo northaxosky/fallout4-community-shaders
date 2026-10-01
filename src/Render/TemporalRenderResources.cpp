@@ -349,7 +349,6 @@ namespace cs::render
 		if (!depthRefractionUpscalePS) {
 			L->debug("Compiling DepthRefractionUpscalePS.hlsl");
 			std::vector<std::pair<const char*, const char*>> defines = {
-				{ "PSHADER", "" },
 				{ "FO4CS_SUBSTRATE", "1" }
 			};
 			depthRefractionUpscalePS.attach(
@@ -367,7 +366,7 @@ namespace cs::render
 		if (!upscaleVS) {
 			L->debug("Compiling UpscaleVS.hlsl");
 			upscaleVS.attach(
-				(ID3D11VertexShader*)cs::util::CompileShader(kUpscaleVSPath, { { "VSHADER", "" } }, "vs_5_0"));
+				(ID3D11VertexShader*)cs::util::CompileShader(kUpscaleVSPath, {}, "vs_5_0"));
 			cs::render::annotation::SetName(
 				upscaleVS.get(), "Upscaling/Fullscreen.VS");
 		}

@@ -1,4 +1,6 @@
 #include "Render/FrameBufferMath.h"
+#include "Render/SharedDataLayout.h"
+#include <algorithm>
 
 #include <cmath>
 #include <cstddef>
@@ -133,23 +135,57 @@ namespace
 		Check(
 			cs::engine::HasUsableCameraBasis(frameBuffer),
 			"a populated basis is accepted");
-		frameBuffer.CurrFrameWorldToClip[3] = { 0.0f, 0.0f, -1.0f, 0.0f };
+		frameBuffer.ViewProjectionUnjittered[3] = { 0.0f, 0.0f, -1.0f, 0.0f };
 		Check(
 			cs::engine::HasUsableWorldCamera(frameBuffer),
 			"a finite basis, origin, and perspective projection are accepted");
-
 		frameBuffer.CameraPosAdjust.x = std::numeric_limits<float>::quiet_NaN();
 		Check(
 			!cs::engine::HasUsableCameraBasis(frameBuffer),
 			"a non-finite position adjustment is rejected");
 		frameBuffer.CameraPosAdjust.x = 0.0f;
-		frameBuffer.CameraPreviousPosAdjust.z =
-			std::numeric_limits<float>::quiet_NaN();
+		frameBuffer.CameraPreviousPosAdjust.z = std::numeric_limits<float>::quiet_NaN();
 		Check(
 			!cs::engine::HasUsableWorldCamera(frameBuffer),
 			"a non-finite previous position adjustment is rejected");
 	}
+	void TestSubstrateProjection()
+	{
+		using namespace DirectX;
+		cs::engine::WorldCameraRecord camera{};
+		const auto view = XMMatrixRotationRollPitchYaw(0.23f, -0.71f, 0.19f);
+		auto projection = XMMatrixPerspectiveOffCenterLH(-0.7f, 1.1f, -0.6f, 0.9f, 0.5f, 7000.0f);
+		XMStoreFloat4x4(&camera.View, view);
+		XMStoreFloat4x4(&camera.Projection, projection);
+		XMStoreFloat4x4(&camera.ViewProjection, view * projection);
+		camera.ViewProjectionUnjittered = camera.PreviousViewProjectionUnjittered = camera.ViewProjection;
+		Check(cs::engine::PrepareWorldCameraRecord(camera), "asymmetric camera record is usable");
+		const auto packed = cs::render::PackFrameData(camera, { 0.67f, 0.63f }, { 0.75f, 0.7f }, 0.00026f);
+		const auto point = XMVectorSet(2.1f, -1.7f, 8.3f, 1.0f);
+		XMFLOAT4 engineClip;
+		XMStoreFloat4(&engineClip, XMVector4Transform(point, view * projection));
+		const float pointValues[]{ 2.1f, -1.7f, 8.3f, 1.0f };
+		const float expected[]{ engineClip.x, engineClip.y, engineClip.z, engineClip.w };
+		for (std::size_t row = 0; row < 4; ++row) {
+			float shaderClip = 0.0f;
+			for (std::size_t column = 0; column < 4; ++column)
+				shaderClip += packed.CameraViewProj.m[row][column] * pointValues[column];
+			CheckNear(shaderClip, expected[row], 1e-5, "b4 mul(Matrix, point) equals engine row-vector projection");
+		}
+	}
 
+	void TestAmbientSHBoundary()
+	{
+		const DirectX::XMFLOAT4 row{ 0.17f, -0.21f, 0.31f, 0.6f };
+		const auto sh = cs::render::PackAmbientSH(row);
+		const DirectX::XMFLOAT3 direction{ -0.36f, 0.48f, 0.8f };
+		const float unprojected = sh.x * 0.2820948f - sh.y * 0.4886025f * direction.y +
+		                          sh.z * 0.4886025f * direction.z - sh.w * 0.4886025f * direction.x;
+		const float native = row.x * direction.x + row.y * direction.y + row.z * direction.z + row.w;
+		CheckNear(unprojected, native, 1e-6, "world-channel DALC and pre-power SH agree");
+		CheckNear(std::pow(std::max(unprojected, 0.0f), 2.2f), std::pow(native, 2.2f), 1e-6,
+			"consumer boundary preserves native power");
+	}
 }
 
 int main()
@@ -159,6 +195,8 @@ int main()
 	TestDirectionReconstruction();
 	TestProjectionClassifier();
 	TestCameraBasisGuard();
+	TestSubstrateProjection();
+	TestAmbientSHBoundary();
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

@@ -333,6 +333,10 @@ namespace cs
 
 	bool PresetManager::Apply(const PresetMeta& a_meta, std::string& a_err)
 	{
+		if (settings::liveComparisonActive) {
+			a_err = "Stop the A/B comparison before applying a preset";
+			return false;
+		}
 		toml::table table;
 		try {
 			table = toml::parse_file(a_meta.path.string());
@@ -530,6 +534,10 @@ namespace cs
 		std::string& a_err,
 		bool a_allowOverwrite)
 	{
+		if (settings::liveComparisonActive) {
+			a_err = "Stop the A/B comparison before saving a preset";
+			return false;
+		}
 		if (!a_allowOverwrite && std::filesystem::exists(a_path)) {
 			std::ostringstream oss;
 			oss << "preset file already exists at " << a_path.string();

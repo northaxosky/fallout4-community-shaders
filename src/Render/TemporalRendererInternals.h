@@ -1,4 +1,5 @@
 #pragma once
+#include "Render/RenderExtents.h"
 
 #include "Render/TemporalRenderer.h"
 
@@ -36,9 +37,9 @@ namespace cs::render::renderer_detail
 
 	inline auto* L = cs::log::Get("cs.feature.upscaling");
 
-	constexpr const wchar_t* kEncodeTexturesPath = L"Data\\Shaders\\Upscaling\\EncodeTexturesCS.hlsl";
-	constexpr const wchar_t* kDepthRefractionUpscalePath = L"Data\\Shaders\\Upscaling\\DepthRefractionUpscalePS.hlsl";
-	constexpr const wchar_t* kUpscaleVSPath = L"Data\\Shaders\\Upscaling\\UpscaleVS.hlsl";
+	constexpr const wchar_t* kEncodeTexturesPath = L"Data\\Shaders\\FO4\\Upscaling\\EncodeTexturesCS.hlsl";
+	constexpr const wchar_t* kDepthRefractionUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\DepthRefractionUpscalePS.hlsl";
+	constexpr const wchar_t* kUpscaleVSPath = L"Data\\Shaders\\FO4\\Upscaling\\UpscaleVS.hlsl";
 	constexpr const wchar_t* kSpatialFallbackPath =
 		L"Data\\Shaders\\Upscaling\\SpatialFallbackPS.hlsl";
 	constexpr const wchar_t* kCopyDepthForFrameGenerationPath =
@@ -120,39 +121,6 @@ namespace cs::render::renderer_detail
 		}
 		texture->GetDesc(&a_desc);
 		return a_desc.Width > 0 && a_desc.Height > 0;
-	}
-
-	inline std::uint32_t ScaledExtent(std::uint32_t a_extent, float a_ratio) noexcept
-	{
-		if (!std::isfinite(a_ratio) || a_ratio <= 0.0f) {
-			return 0;
-		}
-		return std::min(
-			a_extent,
-			static_cast<std::uint32_t>(
-				static_cast<double>(a_extent) * a_ratio));
-	}
-
-	struct ActiveExtentSnapshot
-	{
-		std::uint32_t width = 0;
-		std::uint32_t height = 0;
-		float widthRatio = 1.0f;
-		float heightRatio = 1.0f;
-	};
-
-	inline ActiveExtentSnapshot GetActiveExtent(
-		std::uint32_t a_fullWidth,
-		std::uint32_t a_fullHeight) noexcept
-	{
-		ActiveExtentSnapshot snapshot;
-		if (const auto* manager = cs::engine::GetRenderTargetManager()) {
-			snapshot.widthRatio = manager->GetDynamicWidthRatio();
-			snapshot.heightRatio = manager->GetDynamicHeightRatio();
-		}
-		snapshot.width = ScaledExtent(a_fullWidth, snapshot.widthRatio);
-		snapshot.height = ScaledExtent(a_fullHeight, snapshot.heightRatio);
-		return snapshot;
 	}
 
 	inline std::int32_t GetJitterPhaseCount(std::int32_t a_renderWidth, std::int32_t a_displayWidth)

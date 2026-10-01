@@ -110,7 +110,11 @@ groupshared uint VisibleCount;
 		if (visible) {
 			uint slot;
 			InterlockedAdd(VisibleCount, 1, slot);
-			TileLists[tileIndex].Indices[slot] = lightIndex;
+#ifdef INVERSE_SQUARE_LIGHTING
+			// FO4: expanded authored radii must not overrun the native 127-index tile.
+			if (slot < 127)
+#endif
+				TileLists[tileIndex].Indices[slot] = lightIndex;
 		}
 	}
 

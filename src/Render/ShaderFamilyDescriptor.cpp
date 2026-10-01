@@ -3,6 +3,7 @@
 #include "Log.h"
 
 #include <algorithm>
+#include <array>
 #include <string>
 
 namespace cs::engine
@@ -115,6 +116,26 @@ namespace cs::engine
 			DefineBit(a_defines, a_descriptor, 1U << 30, "BONE_TINTING");
 			DefineBit(a_defines, a_descriptor, 1U << 31, "FACE");
 			Define(a_defines, "MOTION_VECTORS");
+			return true;
+		}
+
+		bool AddEffectDefines(
+			ShaderInjectionDefines& a_defines,
+			std::uint32_t a_descriptor)
+		{
+			static constexpr std::array<std::string_view, 31> names{
+				"VC", "SKINNED", "TEXTURE", "INDEXED_TEXTURE", "FALLOFF",
+				"ADDBLEND", "MULTBLEND", "PARTICLES", "STRIP_PARTICLES",
+				"MEMBRANE", "LIGHTING", "PROJECTED_UV", "SOFT",
+				"GRAYSCALE_TO_COLOR", "GRAYSCALE_TO_ALPHA",
+				"IGNORE_TEX_ALPHA", "MULTBLEND_DECAL", "ALPHA_TEST",
+				"SKY_OBJECT", "ENVMAP", "PIPBOY_SCREEN", "RGB_FALLOFF",
+				"PARTICLE_DISTORTION", "NORMALS", "ENVCUBE_RAIN",
+				"ENVCUBE_SNOW", "EYE", "UI_MASK_RECTS", "DECAL",
+				"MERGE_INSTANCED", "PREMULTIPLY_ALPHA"
+			};
+			for (std::uint32_t bit = 0; bit < names.size(); ++bit)
+				DefineBit(a_defines, a_descriptor, 1U << bit, names[bit]);
 			return true;
 		}
 
@@ -606,6 +627,13 @@ namespace cs::engine
 					Define(a_defines, "EARLYDEPTH");
 				}
 				return true;
+			case ShaderInjectionTarget::kEffect:
+				return AddEffectDefines(a_defines, d);
+			case ShaderInjectionTarget::kDistantTree:
+				if (d > 1)
+					return false;
+				DefineBit(a_defines, d, 1, "RENDER_DEPTH");
+				return true;
 			case ShaderInjectionTarget::kBsWater:
 				return AddWaterDefines(a_defines, d);
 			case ShaderInjectionTarget::kBsdfLight:
@@ -657,6 +685,16 @@ namespace cs::engine
 				define = a_descriptor.stage == ShaderStage::kVertex ?
 				             "BSDFPREPASS_VS_SOURCE" :
 				             "BSDFPREPASS_PS_SOURCE";
+				break;
+			case ShaderInjectionTarget::kEffect:
+				define = a_descriptor.stage == ShaderStage::kVertex ?
+				             "BSEFFECT_VS_SOURCE" :
+				             "BSEFFECT_PS_SOURCE";
+				break;
+			case ShaderInjectionTarget::kDistantTree:
+				define = a_descriptor.stage == ShaderStage::kVertex ?
+				             "BSDISTANTTREE_VS_SOURCE" :
+				             "BSDISTANTTREE_PS_SOURCE";
 				break;
 			case ShaderInjectionTarget::kBsWater:
 				define = a_descriptor.stage == ShaderStage::kVertex ?

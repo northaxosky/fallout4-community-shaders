@@ -5,6 +5,8 @@
 #include "RE/I/ImageSpaceEffect.h"
 #include "RE/I/ImageSpaceManager.h"
 #include "RE/S/SceneGraph.h"
+#include "Render/FrameBuffer.h"
+#include "Render/RendererContext.h"
 
 #include <DirectXMath.h>
 #include <d3d11.h>
@@ -278,12 +280,6 @@ namespace cs::engine
 		};
 	}
 
-	[[nodiscard]] inline RE::NiCamera* GetWorldRootCamera()
-	{
-		auto* worldRoot = RE::Main::GetWorldRootNode();
-		return worldRoot ? worldRoot->camera.get() : nullptr;
-	}
-
 	inline void SetDynamicResolutionRatios(float a_widthRatio, float a_heightRatio)
 	{
 		if (auto* renderTargetManager = GetRenderTargetManager()) {
@@ -308,38 +304,35 @@ namespace cs::engine
 		return global.get();
 	}
 
-	// Prefer viewFrustum; setup mirrors use these globals.
-	[[nodiscard]] inline float GetCameraNear()
-	{
-		static REL::Relocation<float*> near_{ REL::ID({ 57985, 2712882, 2712882 }) };
-		return *near_.get();
-	}
-
-	[[nodiscard]] inline float GetCameraFar()
-	{
-		static REL::Relocation<float*> far_{ REL::ID({ 958877, 2712883, 2712883 }) };
-		return *far_.get();
-	}
-
 	[[nodiscard]] inline bool TryGetWorldSceneProjection(
 		DirectX::XMFLOAT4X4& a_outProj,
 		DirectX::XMFLOAT4X4& a_outInvProj,
 		DirectX::XMFLOAT4& a_outNdcToViewMul,
 		DirectX::XMFLOAT4& a_outNdcToViewAdd)
 	{
-		auto* sceneCamera = GetWorldRootCamera();
-		if (!sceneCamera) {
+		const auto camera = GetWorldCameraRecord();
+		if (!camera) {
 			return false;
 		}
 
-		// viewFrustum survives first-person projection overrides.
-		const auto& frustum = sceneCamera->viewFrustum;
-		return RE::BuildPerspectiveFromFrustum(
-			frustum,
-			a_outProj,
-			a_outInvProj,
-			a_outNdcToViewMul,
-			a_outNdcToViewAdd);
+		GetWorldSceneProjection(*camera, a_outProj, a_outInvProj, a_outNdcToViewMul, a_outNdcToViewAdd);
+		return true;
+	}
+
+	// OG/NG/AE prepass 2850CB0/2096710/21F38B0 writes the transposed near inverse at shadow +0x8A0.
+	[[nodiscard]] inline std::optional<DirectX::XMFLOAT4X4> GetPrepassFirstPersonProjectionInverse() noexcept
+	{
+		static_assert(offsetof(RE::BSGraphics::RendererShadowState, cameraData) +
+						  offsetof(RE::BSGraphics::ViewData, inv1stPersonProjMat) ==
+					  0x8A0);
+		const auto* context = GetActiveContext();
+		if (!context)
+			return std::nullopt;
+		DirectX::XMFLOAT4X4 result{};
+		std::memcpy(&result, context->shadowState.cameraData.inv1stPersonProjMat, sizeof(result));
+		const auto matrix = DirectX::XMLoadFloat4x4(&result);
+		const float determinant = DirectX::XMVectorGetX(DirectX::XMMatrixDeterminant(matrix));
+		return HasFiniteMatrix(result) && std::isfinite(determinant) && determinant != 0.0f ? std::optional{ result } : std::nullopt;
 	}
 
 	// Logical RenderTargetManager IDs; recreation reassigns their physical pool slots.

@@ -99,5 +99,7 @@ namespace cs::settings
 		a_registry.push_back({ { "features", std::string(a_key) }, MakeSchemaView(core::kActivation) });
 		if (!a_schema.empty())
 			a_registry.push_back({ { "features", std::string(a_key), "settings" }, std::move(a_schema) });
+		if (a_key == "ExponentialHeightFog")
+			a_registry.push_back({ { "features", std::string(a_key), "weather" }, {}, true });
 	}
 }

@@ -3,6 +3,7 @@
 #include "DebugView.h"
 #include "FeatureCategories.h"
 #include "FeatureState.h"
+#include "Settings/LiveSettings.h"
 #include "Settings/SettingsMetadata.h"
 
 #include <optional>
@@ -51,6 +52,7 @@ namespace cs
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
+		virtual void OnRuntimeQuarantined() noexcept {}
 
 		// Defer wrappers until every feature loads.
 		virtual void OnPostPostLoad() {}
@@ -66,6 +68,7 @@ namespace cs
 		// False keeps recorded edits pending for a later flush.
 		virtual bool SaveSettings() { return true; }
 		virtual settings::SchemaView GetSettingsSchema() const { return {}; }
+		const settings::LiveSettingsAccess& GetLiveSettingsAccess() const noexcept { return _liveSettings; }
 
 		// Persists edits recorded by settings::SettingsEdit, optionally only once an edit completes.
 		void FlushSettings(bool a_completedOnly = false)
@@ -84,6 +87,8 @@ namespace cs
 
 		virtual std::span<const FeatureDebugView> GetDebugViews() const noexcept { return {}; }
 		virtual void SetDebugView(std::string_view) noexcept {}
+		// Render thread only; the texture is borrowed until the next render callback.
+		virtual FullscreenDebugData GetFullscreenDebugData() const noexcept { return {}; }
 
 		virtual void RestoreDefaultSettings() {}
 
@@ -135,6 +140,9 @@ namespace cs
 
 		// Empty output opts out of saving.
 		virtual void ExportToPreset(toml::table&) {}
+
+	protected:
+		settings::LiveSettingsAccess _liveSettings;
 
 	private:
 		friend class settings::SettingsEdit;
@@ -209,11 +217,13 @@ namespace cs
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
 		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }
 		bool ApplyDebugViews(std::span<const FeatureDebugSelection> a_selections);
+		Feature* GetFullscreenDebugFeature() const noexcept { return _fullscreenDebugFeature.load(std::memory_order_acquire); }
 
 	private:
 		FeatureManager() = default;
 		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _loadedFeatures;
+		std::atomic<Feature*> _fullscreenDebugFeature{ nullptr };
 		bool _d3d11ReadyDone = false;
 	};
 }

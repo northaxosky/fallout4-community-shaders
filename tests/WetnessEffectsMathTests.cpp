@@ -6,6 +6,7 @@
 int main()
 {
 	using cs::features::wetness_math::CalculateWeatherWetness;
+	using cs::features::wetness_math::ComputeRaining;
 	using cs::features::wetness_math::ComputeWeatherWetness;
 	int failures = 0;
 	const auto check = [&](bool a_condition, const char* a_message) {
@@ -15,6 +16,10 @@ int main()
 		}
 	};
 
+	check(ComputeRaining(1.0f, 128, 0.0f, 128, 0.49f) == 0.0f &&
+			  std::abs(ComputeRaining(1.0f, 128, 0.0f, 128, 191.5f / 255.0f) - 0.5f) < 1e-5f &&
+			  ComputeRaining(0.0f, 128, 1.0f, 128, 0.75f) == 0.0f,
+		"procedural rain must track precipitation visibility, independently of retained wetness");
 	const auto interior = ComputeWeatherWetness(false, true, 128, true, 128, 0.75f);
 	check(interior.wetness == 0.0f && interior.puddleWetness == 0.0f,
 		"interiors must suppress rain and puddles");

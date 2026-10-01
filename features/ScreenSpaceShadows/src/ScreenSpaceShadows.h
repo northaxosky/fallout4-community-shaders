@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "ScreenSpaceShadowsSettings.h"
 #include "SssMaskBinding.h"
@@ -38,8 +37,6 @@ namespace cs::features
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 
-		cs::ScreenSpaceShadowsFeatureData GetCommonBufferData() const;
-
 		using Settings = sss_settings::Settings;
 
 	private:
@@ -51,12 +48,10 @@ namespace cs::features
 			float NearDepthValue;
 			float InvDepthTextureSize[2];
 			float DynamicRes[2];
-			float SurfaceThickness;
-			float BilinearThreshold;
-			float ShadowContrast;
-			float Padding;
+			Settings settings;
 		};
-		static_assert(sizeof(RaymarchCB) % 16 == 0);
+		static_assert(sizeof(RaymarchCB) == 80);
+		static_assert(offsetof(RaymarchCB, settings) == 48);
 
 		ScreenSpaceShadows() = default;
 
@@ -81,7 +76,7 @@ namespace cs::features
 		ID3D11ComputeShader* GetComputeRaymarch();
 		FeatureDebugTexture GetShadowMaskDebugTexture() const;
 
-		static constexpr uint kMaskPSSlot = 24;
+		static constexpr uint kMaskPSSlot = 45;
 
 		Settings _settings;
 		std::atomic_bool _started{ false };

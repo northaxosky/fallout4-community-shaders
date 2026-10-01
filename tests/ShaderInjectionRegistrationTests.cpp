@@ -1,4 +1,6 @@
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
+#include "Render/NativeShaderFamily.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderInjection.h"
@@ -26,7 +28,8 @@ namespace
 	std::uint32_t sharedDataBindCount = 0;
 	std::uint32_t computeContributionBindCount = 0;
 	std::optional<bool> activeComputeVariantDefine;
-	std::array<winrt::com_ptr<ID3D11Buffer>, 2> publishedComputeBuffers;
+	std::array<winrt::com_ptr<ID3D11Buffer>, cs::render::kSubstrateBufferCount> publishedComputeBuffers;
+	winrt::com_ptr<ID3D11ShaderResourceView> publishedDepth;
 
 	class TestCompilationHandle final :
 		public cs::engine::ShaderVariantCompilationHandle
@@ -80,16 +83,18 @@ namespace
 			}
 
 			constexpr std::string_view source =
+				"cbuffer PerFrame : register(b4) { uint FrameValue; };"
 				"cbuffer SharedData : register(b5) { uint SharedValue; };"
 				"cbuffer FeatureData : register(b6) { uint FeatureValue; };"
-				"cbuffer NativeData : register(b7) { uint NativeValue; };"
+				"cbuffer FO4SharedData : register(b7) { uint FO4Value; };"
+				"Texture2D<uint> CanonicalDepth : register(t17);"
 				"Texture2D<uint> NativeTexture : register(t3);"
 				"RWStructuredBuffer<uint> Output : register(u0);"
 				"[numthreads(1,1,1)] void main() {"
 				"InterlockedAdd(Output[0], 1);"
-				"Output[1] = SharedValue;"
+				"Output[1] = SharedValue + FrameValue;"
 				"Output[2] = FeatureValue;"
-				"Output[3] = NativeValue;"
+				"Output[3] = FO4Value + CanonicalDepth.Load(int3(0,0,0));"
 				"Output[4] = NativeTexture.Load(int3(0,0,0));"
 				"}";
 			winrt::com_ptr<ID3DBlob> bytecode;
@@ -168,12 +173,13 @@ namespace cs::render
 			return;
 
 		++sharedDataBindCount;
-		ID3D11Buffer* buffers[]{
-			publishedComputeBuffers[0].get(),
-			publishedComputeBuffers[1].get()
-		};
+		ID3D11Buffer* buffers[cs::render::kSubstrateBufferCount]{};
+		for (std::size_t index = 0; index < publishedComputeBuffers.size(); ++index)
+			buffers[index] = publishedComputeBuffers[index].get();
 		a_context->CSSetConstantBuffers(
-			cs::render::kSharedDataSlot, 2, buffers);
+			cs::render::kFrameDataSlot, cs::render::kSubstrateBufferCount, buffers);
+		ID3D11ShaderResourceView* depth = publishedDepth.get();
+		a_context->CSSetShaderResources(cs::render::kCanonicalDepthSlot, 1, &depth);
 	}
 
 	bool IsDeferredLightsActive() noexcept
@@ -233,19 +239,19 @@ namespace
 	{
 		using namespace cs::engine;
 		const auto* target =
-			GetShaderInjectionTarget(ShaderInjectionTarget::kBsdfLight);
-		Expect(target != nullptr, "BSDF light target metadata is missing");
+			GetShaderInjectionTarget(ShaderInjectionTarget::kBsLighting);
+		Expect(target != nullptr, "BSLighting target metadata is missing");
 		if (!target)
 			return;
 
 		const ShaderVariantCompilationDescriptor family{
-			.sourcePath = GetShaderPath("DFLight").wstring(),
+			.sourcePath = GetShaderPath("Lighting").wstring(),
 			.entryPoint = "main",
 			.profile = "ps_5_0",
 			.defines = { { "CONFLICT", "family" } },
 		};
 		const ShaderReplacementRegistration contribution{
-			.targetId = target->id,
+			.targetId = ShaderInjectionTarget::kBsLighting,
 			.stages = ShaderStageBit(ShaderStage::kPixel),
 			.contributor = "test",
 			.defines = { { "CONFLICT", "feature" } },
@@ -273,6 +279,16 @@ namespace
 			};
 		};
 
+		ShaderReplacementRegistration incompletePair;
+		incompletePair.targetId = ShaderInjectionTarget::kDeferredPrepass;
+		incompletePair.requiresGraphicsPair = true;
+		Expect(!RegisterReplacement(std::move(incompletePair)), "pixel-only paired contribution was accepted");
+		ShaderReplacementRegistration completePair;
+		completePair.targetId = ShaderInjectionTarget::kDeferredPrepass;
+		completePair.stages = ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel);
+		completePair.requiresGraphicsPair = true;
+		Expect(RegisterReplacement(std::move(completePair)), "paired vertex/pixel contribution was rejected");
+
 		ShaderReplacementRegistration first;
 		first.targetId = ShaderInjectionTarget::kBsdfComposite;
 		first.contributor = "ledger-first";
@@ -296,6 +312,20 @@ namespace
 			RegisterReplacement(std::move(otherTarget)),
 			"same slot on another target was rejected");
 
+		const auto sampler = [](const char* a_name, ShaderSamplerContract a_contract) {
+			ShaderReplacementRegistration registration;
+			registration.targetId = ShaderInjectionTarget::kBsdfComposite;
+			registration.contributor = a_name;
+			registration.slotClaims = { { ShaderStage::kPixel, ShaderResourceType::kSampler, 13, a_contract } };
+			return registration;
+		};
+		Expect(RegisterReplacement(sampler("ledger-linear-first", ShaderSamplerContract::kLinearClamp)),
+			"linear-clamp sampler claim was rejected");
+		Expect(RegisterReplacement(sampler("ledger-linear-shared", ShaderSamplerContract::kLinearClamp)),
+			"matching immutable sampler contracts must share a slot");
+		Expect(!RegisterReplacement(sampler("ledger-exclusive", ShaderSamplerContract::kExclusive)),
+			"exclusive sampler claim overlapped a shared sampler");
+
 		ShaderReplacementRegistration conflictingDefine;
 		conflictingDefine.targetId = ShaderInjectionTarget::kBsdfComposite;
 		conflictingDefine.contributor = "ledger-conflicting-define";
@@ -305,7 +335,8 @@ namespace
 			"conflicting define claim was accepted");
 
 		for (const auto slot :
-			{ cs::render::kSharedDataSlot, cs::render::kFeatureDataSlot }) {
+			{ cs::render::kFrameDataSlot, cs::render::kSharedDataSlot,
+				cs::render::kFeatureDataSlot, cs::render::kFO4SharedDataSlot }) {
 			ShaderReplacementRegistration reserved;
 			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
 			reserved.contributor = "ledger-reserved-slot";
@@ -314,7 +345,14 @@ namespace
 				.slot = slot } };
 			Expect(
 				!RegisterReplacement(std::move(reserved)),
-				"reserved b5/b6 claim was accepted");
+				"reserved b4-b7 claim was accepted");
+		}
+		for (auto slot : { cs::render::kCanonicalDepthSlot, cs::render::kFullscreenDebugTextureSlot }) {
+			ShaderReplacementRegistration reserved;
+			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
+			reserved.contributor = "ledger-reserved-texture";
+			reserved.slotClaims = { textureClaim(slot) };
+			Expect(!RegisterReplacement(std::move(reserved)), "reserved substrate texture claim was accepted");
 		}
 
 		drawAnchorInstallFails = true;
@@ -453,7 +491,8 @@ namespace
 
 	struct NativeComputeInputs
 	{
-		std::array<winrt::com_ptr<ID3D11Buffer>, 3> buffers;
+		std::array<winrt::com_ptr<ID3D11Buffer>, cs::render::kSubstrateBufferCount> buffers;
+		winrt::com_ptr<ID3D11ShaderResourceView> depth;
 		winrt::com_ptr<ID3D11ShaderResourceView> srv;
 		winrt::com_ptr<ID3D11Buffer> highBuffer;
 		winrt::com_ptr<ID3D11ShaderResourceView> highSrv;
@@ -464,9 +503,10 @@ namespace
 		NativeComputeInputs inputs;
 		for (std::size_t index = 0; index < inputs.buffers.size(); ++index) {
 			inputs.buffers[index] = CreateUintConstantBuffer(
-				a_device, static_cast<std::uint32_t>(index + 5));
+				a_device, static_cast<std::uint32_t>(index + 4));
 		}
 		inputs.srv = CreateUintSrv(a_device, 9);
+		inputs.depth = CreateUintSrv(a_device, 170);
 		inputs.highBuffer = CreateUintConstantBuffer(a_device, 88);
 		inputs.highSrv = CreateUintSrv(a_device, 44);
 		return inputs;
@@ -479,19 +519,20 @@ namespace
 		ID3D11UnorderedAccessView* a_uav)
 	{
 		a_context->CSSetShader(a_shader, nullptr, 0);
-		ID3D11Buffer* buffers[]{
-			a_inputs.buffers[0].get(),
-			a_inputs.buffers[1].get(),
-			a_inputs.buffers[2].get()
-		};
+		ID3D11Buffer* buffers[cs::render::kSubstrateBufferCount]{};
+		for (std::size_t index = 0; index < a_inputs.buffers.size(); ++index)
+			buffers[index] = a_inputs.buffers[index].get();
 		a_context->CSSetConstantBuffers(
-			cs::render::kSharedDataSlot, 3, buffers);
+			cs::render::kFrameDataSlot, cs::render::kSubstrateBufferCount, buffers);
+		ID3D11ShaderResourceView* depth = a_inputs.depth.get();
+		a_context->CSSetShaderResources(cs::render::kCanonicalDepthSlot, 1, &depth);
 		ID3D11Buffer* highBuffer = a_inputs.highBuffer.get();
 		a_context->CSSetConstantBuffers(8, 1, &highBuffer);
 		ID3D11ShaderResourceView* srv = a_inputs.srv.get();
 		a_context->CSSetShaderResources(3, 1, &srv);
 		ID3D11ShaderResourceView* highSrv = a_inputs.highSrv.get();
 		a_context->CSSetShaderResources(4, 1, &highSrv);
+		a_context->CSSetShaderResources(8, 1, &highSrv);
 		a_context->CSSetUnorderedAccessViews(0, 1, &a_uav, nullptr);
 	}
 
@@ -500,19 +541,25 @@ namespace
 		const NativeComputeInputs& a_inputs,
 		ID3D11UnorderedAccessView* a_uav)
 	{
-		ID3D11Buffer* buffers[3]{};
+		ID3D11Buffer* buffers[cs::render::kSubstrateBufferCount]{};
 		a_context->CSGetConstantBuffers(
-			cs::render::kSharedDataSlot, 3, buffers);
+			cs::render::kFrameDataSlot, cs::render::kSubstrateBufferCount, buffers);
+		ID3D11ShaderResourceView* depth = nullptr;
+		a_context->CSGetShaderResources(cs::render::kCanonicalDepthSlot, 1, &depth);
 		ID3D11Buffer* highBuffer = nullptr;
 		a_context->CSGetConstantBuffers(8, 1, &highBuffer);
 		ID3D11ShaderResourceView* srv = nullptr;
 		a_context->CSGetShaderResources(3, 1, &srv);
 		ID3D11ShaderResourceView* highSrv = nullptr;
 		a_context->CSGetShaderResources(4, 1, &highSrv);
+		ID3D11ShaderResourceView* metadata = nullptr;
+		a_context->CSGetShaderResources(8, 1, &metadata);
 		ID3D11UnorderedAccessView* uav = nullptr;
 		a_context->CSGetUnorderedAccessViews(0, 1, &uav);
 		const bool matches =
-			buffers[0] == a_inputs.buffers[0].get() && buffers[1] == a_inputs.buffers[1].get() && buffers[2] == a_inputs.buffers[2].get() && highBuffer == a_inputs.highBuffer.get() && srv == a_inputs.srv.get() && highSrv == a_inputs.highSrv.get() && uav == a_uav;
+			buffers[0] == a_inputs.buffers[0].get() && buffers[1] == a_inputs.buffers[1].get() && buffers[2] == a_inputs.buffers[2].get() && buffers[3] == a_inputs.buffers[3].get() && depth == a_inputs.depth.get() && highBuffer == a_inputs.highBuffer.get() && srv == a_inputs.srv.get() && highSrv == a_inputs.highSrv.get() && metadata == a_inputs.highSrv.get() && uav == a_uav;
+		if (depth)
+			depth->Release();
 		for (auto* buffer : buffers) {
 			if (buffer)
 				buffer->Release();
@@ -523,6 +570,8 @@ namespace
 			srv->Release();
 		if (highSrv)
 			highSrv->Release();
+		if (metadata)
+			metadata->Release();
 		if (uav)
 			uav->Release();
 		return matches;
@@ -677,8 +726,188 @@ namespace
 			"compute ownership did not fail closed without the bridge");
 	}
 
-	void CheckComputePhaseAndStateRestoration(
-		const std::filesystem::path& a_shaderRoot)
+	void CheckNativeFamilyOwnership(const std::filesystem::path& a_shaderRoot)
+	{
+		using namespace cs::engine;
+		using Type = RE::BSShaderManager::ShaderEnum;
+		struct Family
+		{
+			ShaderInjectionTarget target;
+			Type type;
+			const char* name;
+		};
+		constexpr std::array families{
+			Family{ ShaderInjectionTarget::kDeferredPrepass, Type::kDFPrepass, "DFPrepass" },
+			Family{ ShaderInjectionTarget::kBsdfLight, Type::kDFPrepass, "DFLight" },
+			Family{ ShaderInjectionTarget::kBsdfComposite, Type::kDFComposite, "DFComposite" },
+			Family{ ShaderInjectionTarget::kEffect, Type::kEffect, "Effect" },
+			Family{ ShaderInjectionTarget::kDistantTree, Type::kDistantTree, "DistantTree" },
+			Family{ ShaderInjectionTarget::kBsWater, Type::kWater, "Water" },
+			Family{ ShaderInjectionTarget::kImageSpace, Type::kImageSpace, "ISSSLRRaytracing" },
+			Family{ ShaderInjectionTarget::kDfTiledLighting, Type::kTotal, "DFTiledLighting" }
+		};
+		for (const auto& contribution : GetFeatureShaderContributions()) {
+			const auto family = std::ranges::find(families, contribution.targetId, &Family::target);
+			Expect(family != families.end(), "contributor lacks a native-family fixture");
+			if (family == families.end())
+				continue;
+			const auto target = family->type == Type::kTotal ?
+			                        ResolveStandaloneComputeTarget(family->name) :
+			                        ResolveGraphicsShaderTarget(family->type, family->name);
+			Expect(target == contribution.targetId, "native family routed to the wrong contribution target");
+			Expect(IsShaderSourceAvailable(a_shaderRoot, family->name), "contributor's engine-named source is missing");
+			for (const auto stage : { ShaderStage::kVertex, ShaderStage::kPixel, ShaderStage::kCompute }) {
+				if ((contribution.stages & ShaderStageBit(stage)) == 0)
+					continue;
+				const auto descriptor = BuildShaderFamilyCompilationDescriptor(
+					{ .target = contribution.targetId, .stage = stage, .nativeName = family->name });
+				Expect(descriptor && descriptor->sourcePath == GetShaderPath(family->name).wstring(),
+					"native family did not compile from its engine name");
+				if (descriptor) {
+					Expect(BuildEffectiveShaderCompileRequest(*GetShaderInjectionTarget(contribution.targetId),
+							   stage, *descriptor, GetFeatureShaderContributions())
+							   .has_value(),
+						"native family rejected its feature contributions");
+				}
+			}
+		}
+		Expect(!ResolveGraphicsShaderTarget(Type::kDFPrepass, "Unknown"), "ambiguous type 4 did not fail closed");
+		Expect(!IsShaderSourceAvailable(a_shaderRoot, "Lighting"), "secondary-view Lighting must remain stock");
+		Expect(!ResolveStandaloneComputeTarget("Unknown"), "unknown standalone compute did not fail closed");
+		Expect(ResolveStandaloneComputeTarget("IndexBufferOffsetCS") == ShaderInjectionTarget::kImageSpace,
+			"unowned standalone compute observation was lost");
+		const auto wetness = std::ranges::find_if(GetFeatureShaderContributions(), [](const auto& contribution) {
+			return contribution.targetId == ShaderInjectionTarget::kDeferredPrepass && contribution.contributor == "WetnessEffects";
+		});
+		Expect(wetness != GetFeatureShaderContributions().end() && wetness->requiresGraphicsPair &&
+				   wetness->stages == (ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel)),
+			"wetness producer lost its required VS/PS pair");
+	}
+
+	void CheckPixelBindings()
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(CreateWarpDevice(device, context), "could not create pixel binding WARP device");
+		if (!device || !context)
+			return;
+		auto originalBuffer = CreateUintConstantBuffer(device.get(), 1);
+		auto injectedBuffer = CreateUintConstantBuffer(device.get(), 2);
+		auto originalTexture = CreateUintSrv(device.get(), 1);
+		auto injectedTexture = CreateUintSrv(device.get(), 2);
+		winrt::com_ptr<ID3D11SamplerState> sampler;
+		D3D11_SAMPLER_DESC samplerDesc{};
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		samplerDesc.AddressU = samplerDesc.AddressV = samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+		Expect(SUCCEEDED(device->CreateSamplerState(&samplerDesc, sampler.put())), "could not create pixel sampler");
+		if (!originalBuffer || !injectedBuffer || !originalTexture || !injectedTexture || !sampler)
+			return;
+
+		ShaderReplacementRegistration contribution;
+		contribution.targetId = ShaderInjectionTarget::kBsdfLight;
+		contribution.contributor = "pixel-bindings";
+		contribution.slotClaims = {
+			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 1 },
+			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 2 },
+			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 10 },
+			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 3 },
+			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 24 },
+			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 25 },
+			{ ShaderStage::kPixel, ShaderResourceType::kSampler, 1 }
+		};
+		contribution.bind = [&](ID3D11DeviceContext* ctx) {
+			auto* buffer = injectedBuffer.get();
+			auto* texture = injectedTexture.get();
+			auto* state = sampler.get();
+			BindInjectionConstantBuffers(ctx, 1, 1, &buffer);
+			BindInjectionConstantBuffers(ctx, 10, 1, &buffer);
+			BindInjectionShaderResources(ctx, 3, 1, &texture);
+			BindInjectionShaderResources(ctx, 24, 1, &texture);
+			BindInjectionShaderResources(ctx, 25, 1, &texture);
+			BindInjectionSamplers(ctx, 1, 1, &state);
+			BindInjectionSamplers(ctx, 1, 1, &state);
+		};
+		Expect(RegisterReplacement(std::move(contribution)), "could not register pixel bindings");
+		FreezeAndCompileShaderInjections(device.get());
+		Expect(GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kBsdfLight).published, "pixel bindings were not published");
+		BeginShaderInjectionFrame(10);
+		auto* originalCB = originalBuffer.get();
+		auto* originalSRV = originalTexture.get();
+		context->PSSetConstantBuffers(1, 1, &originalCB);
+		context->PSSetShaderResources(3, 1, &originalSRV);
+		{
+			ScopedPixelShaderInjectionBindings outer;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get());
+			winrt::com_ptr<ID3D11ShaderResourceView> actual;
+			context->PSGetShaderResources(25, 1, actual.put());
+			Expect(actual == injectedTexture, "batched high resources were not bound before the draw");
+			{
+				ScopedPixelShaderInjectionBindings inner;
+				ID3D11ShaderResourceView* empty = nullptr;
+				BindInjectionShaderResources(context.get(), 3, 1, &empty);
+			}
+			actual = nullptr;
+			context->PSGetShaderResources(3, 1, actual.put());
+			Expect(actual == injectedTexture, "nested pixel scope did not restore its parent's low resource");
+		}
+		winrt::com_ptr<ID3D11Buffer> actualBuffer;
+		winrt::com_ptr<ID3D11ShaderResourceView> actualTexture;
+		winrt::com_ptr<ID3D11SamplerState> actualSampler;
+		context->PSGetConstantBuffers(1, 1, actualBuffer.put());
+		context->PSGetShaderResources(3, 1, actualTexture.put());
+		context->PSGetSamplers(1, 1, actualSampler.put());
+		Expect(actualBuffer == originalBuffer && actualTexture == originalTexture && !actualSampler,
+			"pixel scope leaked into engine-owned low slots");
+		actualBuffer = nullptr;
+		actualTexture = nullptr;
+		context->PSGetConstantBuffers(10, 1, actualBuffer.put());
+		context->PSGetShaderResources(25, 1, actualTexture.put());
+		Expect(actualBuffer == injectedBuffer && actualTexture == injectedTexture,
+			"pixel scope unnecessarily restored plugin-owned slots");
+		BeginShaderInjectionFrame(11);
+		const auto metrics = GetShaderInjectionSummary().draw;
+		Expect(metrics.frame == 10 && metrics.scopes == 1 && metrics.captures == 4 && metrics.restores == 4 &&
+				   metrics.d3dBinds == 10 && metrics.scopeNanoseconds > 0,
+			"draw counters did not count batching, nested restoration, or the completed frame");
+		context->ClearState();
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get());
+			actualTexture = nullptr;
+			context->PSGetShaderResources(25, 1, actualTexture.put());
+			Expect(actualTexture == injectedTexture, "engine ClearState left a stale injection binding cache");
+		}
+		BeginShaderInjectionFrame(12);
+		const auto next = GetShaderInjectionSummary().draw;
+		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 8,
+			"per-frame counters accumulated earlier draws");
+
+		winrt::com_ptr<ID3D11Texture2D> output;
+		winrt::com_ptr<ID3D11RenderTargetView> target;
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = desc.Height = desc.ArraySize = desc.MipLevels = desc.SampleDesc.Count = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+		Expect(SUCCEEDED(device->CreateTexture2D(&desc, nullptr, output.put())) &&
+				   SUCCEEDED(device->CreateRenderTargetView(output.get(), nullptr, target.put())),
+			"could not create pixel output fixture");
+		if (!target)
+			return;
+		auto* nativeTarget = target.get();
+		context->OMSetRenderTargets(1, &nativeTarget, nullptr);
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			CaptureShaderInjectionOutputs(context.get());
+			context->OMSetRenderTargets(0, nullptr, nullptr);
+		}
+		winrt::com_ptr<ID3D11RenderTargetView> restoredTarget;
+		context->OMGetRenderTargets(1, restoredTarget.put(), nullptr);
+		Expect(restoredTarget == target, "pixel output override leaked into the engine draw");
+	}
+
+	void CheckComputePhaseAndStateRestoration(const std::filesystem::path& a_shaderRoot)
 	{
 		using namespace cs::engine;
 		winrt::com_ptr<ID3D11Device> device;
@@ -713,17 +942,22 @@ namespace
 				   SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, false),
 			"could not start with shader ownership disabled");
 		ObserveNativeComputeShaderForTesting(
-			ShaderInjectionTarget::kDfTiledLighting,
+			*ResolveStandaloneComputeTarget("DFTiledLighting"),
 			1,
 			"DFTiledLighting",
 			stock.get());
+		Expect(GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kDfTiledLighting).observedComputeShaders == 1,
+			"compute owner observation was not recorded");
 
 		ShaderReplacementRegistration contribution;
 		contribution.targetId = ShaderInjectionTarget::kDfTiledLighting;
 		contribution.stages = ShaderStageBit(ShaderStage::kCompute);
 		contribution.contributor = "compute-phase";
 		contribution.defines = { { "COMPUTE_PHASE_TEST", "1" } };
-		contribution.bind = [](ID3D11DeviceContext*) {
+		contribution.slotClaims = { { ShaderStage::kCompute, ShaderResourceType::kShaderResource, 8 } };
+		contribution.bind = [](ID3D11DeviceContext* a_context) {
+			auto* metadata = publishedDepth.get();
+			a_context->CSSetShaderResources(8, 1, &metadata);
 			++computeContributionBindCount;
 			activeComputeVariantDefine =
 				ActiveShaderInjectionVariantHasDefine(
@@ -735,13 +969,35 @@ namespace
 			"could not register compute contribution");
 		FreezeAndCompileShaderInjections(device.get());
 
-		publishedComputeBuffers[0] =
-			CreateUintConstantBuffer(device.get(), 50);
-		publishedComputeBuffers[1] =
-			CreateUintConstantBuffer(device.get(), 60);
+		for (std::size_t index = 0; index < publishedComputeBuffers.size(); ++index)
+			publishedComputeBuffers[index] = CreateUintConstantBuffer(
+				device.get(), static_cast<std::uint32_t>((index + 4) * 10));
+		publishedDepth = CreateUintSrv(device.get(), 17);
 		Expect(
-			publishedComputeBuffers[0] && publishedComputeBuffers[1],
+			publishedComputeBuffers[0] && publishedComputeBuffers[1] && publishedComputeBuffers[2] && publishedComputeBuffers[3] && publishedDepth,
 			"could not create shared compute buffers");
+
+		// Pixel substrate scopes must restore the shared debug slot, including a null native binding.
+		for (auto* original : { inputs.srv.get(), static_cast<ID3D11ShaderResourceView*>(nullptr) }) {
+			const auto slot = cs::render::kFullscreenDebugTextureSlot;
+			context->PSSetShaderResources(slot, 1, &original);
+			cs::render::SubstrateBindingSnapshot outer;
+			outer.Save(context.get(), ShaderStage::kPixel);
+			auto* debug = publishedDepth.get();
+			context->PSSetShaderResources(slot, 1, &debug);
+			cs::render::SubstrateBindingSnapshot inner;
+			inner.Save(context.get(), ShaderStage::kPixel);
+			ID3D11ShaderResourceView* nullView = nullptr;
+			context->PSSetShaderResources(slot, 1, &nullView);
+			inner.Restore(context.get(), ShaderStage::kPixel);
+			winrt::com_ptr<ID3D11ShaderResourceView> restored;
+			context->PSGetShaderResources(slot, 1, restored.put());
+			Expect(restored.get() == debug, "nested substrate scope lost the active debug texture");
+			outer.Restore(context.get(), ShaderStage::kPixel);
+			restored = nullptr;
+			context->PSGetShaderResources(slot, 1, restored.put());
+			Expect(restored.get() == original, "substrate scope leaked t61 into the native pixel state");
+		}
 
 		RE::BSGraphics::ComputeShader nativeWrapper{};
 		nativeWrapper.id = 1;
@@ -749,8 +1005,11 @@ namespace
 			reinterpret_cast<REX::W32::ID3D11ComputeShader*>(
 				stock.get());
 
+		deferredLightsActive = true;
 		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper,
 			"boot-disabled ownership selected a replacement");
+		Expect(GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kDfTiledLighting).computeBindCalls == 1,
+			"disabled ownership hid the native compute invocation");
 		Expect(SetShaderInjectionEnabled(true) &&
 				   SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, true),
 			"could not enable boot-disabled shader ownership");
@@ -779,20 +1038,29 @@ namespace
 		Expect(
 			NativeComputeInputsMatch(
 				context.get(), inputs, output.uav.get()),
-			"compute bridge did not restore b5-b8/t3-t4/u0");
+			"compute bridge did not restore b4-b8/t3-t4/t8/t17/u0");
 		Expect(
-			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 50, 60, 7, 9 },
+			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 9 },
 			"replacement did not execute with shared and native inputs");
 		Expect(
 			sharedDataBindCount == 1 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
 			"active compute contribution state was not exposed exactly once");
 		Expect(SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, false),
 			"live target disable was rejected");
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper,
+			"disabled target still selected its feature replacement");
 		Expect(SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, true),
 			"live target enable was rejected");
 		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == replacement,
 			"re-enabled target did not reuse its replacement");
+		Expect(SetShaderInjectionEnabled(false), "live master disable was rejected");
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper,
+			"disabled master still selected a feature replacement");
+		Expect(SetShaderInjectionEnabled(true), "live master enable was rejected");
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == replacement,
+			"re-enabled master did not reuse its replacement");
 		publishedComputeBuffers = {};
+		publishedDepth = {};
 	}
 }
 
@@ -805,8 +1073,12 @@ int main(int argc, char** argv)
 		CheckContributorConflict();
 	else if (mode == "--compute-hooks-missing")
 		CheckComputeMissingHookFailsClosed();
+	else if (mode == "--native-families" && argc > 2)
+		CheckNativeFamilyOwnership(argv[2]);
 	else if (mode == "--compute-phase" && argc > 2)
 		CheckComputePhaseAndStateRestoration(argv[2]);
+	else if (mode == "--pixel-bindings")
+		CheckPixelBindings();
 	else {
 		std::cerr << "Unknown test mode\n";
 		return 2;

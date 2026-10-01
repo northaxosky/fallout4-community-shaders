@@ -62,6 +62,8 @@ namespace cs::render
 		bool ShouldUseFrameGenerationThisFrame() const noexcept;
 		[[nodiscard]] std::pair<std::uint32_t, std::uint32_t> GetRenderSize() const noexcept;
 		[[nodiscard]] float2 GetAppliedJitter() const noexcept { return jitter; }
+		[[nodiscard]] float GetMipBias() const;
+		[[nodiscard]] bool IsTemporalActive() const;
 		std::pair<float, bool> GetReadiness() const noexcept
 		{
 			return { resolutionScale.x, _resourcesReady.load(std::memory_order_acquire) };
@@ -95,8 +97,6 @@ namespace cs::render
 		bool IsFrameGenerationDx12PathActive() const noexcept;
 		bool IsFrameGenerationActive() const noexcept;
 		UpscaleMethod GetUpscaleMethod() const;
-
-		float GetMipBias() const;
 
 		bool CheckResources(UpscaleMethod a_upscalemethod);
 		bool CreateUpscalingTextureResources(UpscaleMethod a_upscalemethod);

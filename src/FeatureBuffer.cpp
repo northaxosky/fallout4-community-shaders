@@ -2,11 +2,7 @@
 
 #include "DynamicCubemaps.h"
 #include "ExponentialHeightFog.h"
-#include "InverseSquareLighting.h"
-#include "ScreenSpaceGI.h"
-#include "ScreenSpaceShadows.h"
 #include "TerrainShadows.h"
-#include "WaterEffects.h"
 #include "WetnessEffects.h"
 
 namespace cs
@@ -25,29 +21,17 @@ namespace cs
 	FeatureDataCB GetFeatureBufferData()
 	{
 		return {
-			.screenSpaceShadowsSettings =
-				CollectFeatureData<ScreenSpaceShadowsFeatureData>(
-					features::ScreenSpaceShadows::GetSingleton()),
-			.screenSpaceGISettings =
-				CollectFeatureData<ScreenSpaceGIFeatureData>(
-					features::ScreenSpaceGI::GetSingleton()),
 			.wetnessEffectsSettings =
 				CollectFeatureData<WetnessEffectsFeatureData>(
 					features::WetnessEffects::GetSingleton()),
 			.terrainShadowsSettings =
 				CollectFeatureData<TerrainShadowsFeatureData>(
 					features::TerrainShadows::GetSingleton()),
-			.inverseSquareLightingSettings =
-				CollectFeatureData<InverseSquareLightingFeatureData>(
-					features::InverseSquareLighting::GetSingleton()),
-			.waterEffectsSettings =
-				CollectFeatureData<WaterEffectsFeatureData>(
-					features::WaterEffects::GetSingleton()),
 			.dynamicCubemapsSettings =
 				CollectFeatureData<DynamicCubemapsFeatureData>(
 					features::DynamicCubemaps::GetSingleton()),
 			.exponentialHeightFogSettings =
-				CollectFeatureData<ExponentialHeightFogFeatureData>(
+				CollectFeatureData<render::ExponentialHeightFogSettings>(
 					features::ExponentialHeightFog::GetSingleton())
 		};
 	}

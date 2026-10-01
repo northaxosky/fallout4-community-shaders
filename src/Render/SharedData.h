@@ -1,4 +1,5 @@
 #pragma once
+#include "Render/SubstrateSlots.h"
 
 #include <d3d11.h>
 #include <winrt/base.h>
@@ -15,13 +16,11 @@ namespace cs::engine
 
 namespace cs::render
 {
-	// reserved on every contributed stage
-	inline constexpr std::uint32_t kSharedDataSlot = 5;
-	inline constexpr std::uint32_t kFeatureDataSlot = 6;
-	static_assert(kFeatureDataSlot == kSharedDataSlot + 1);
-
 	void InitializeSharedData(ID3D11Device* a_device, ID3D11DeviceContext* a_context);
 	bool IsSharedDataReady() noexcept;
+	bool IsSharedDataCurrent() noexcept;
+	// Debug producers invalidate the cached packet when replacing or updating its texture.
+	void InvalidateFullscreenDebugData() noexcept;
 
 	// startup thread only
 	void EnsureSharedDataUpdateInstalled();
@@ -30,7 +29,19 @@ namespace cs::render
 		ID3D11DeviceContext* a_context,
 		engine::ShaderStage a_stage) noexcept;
 
-	// Preserve only b5-b6 around one engine dispatch.
+	class SubstrateBindingSnapshot
+	{
+	public:
+		void Save(ID3D11DeviceContext* a_context, engine::ShaderStage a_stage) noexcept;
+		void Restore(ID3D11DeviceContext* a_context, engine::ShaderStage a_stage) noexcept;
+
+	private:
+		std::array<winrt::com_ptr<ID3D11Buffer>, kSubstrateBufferCount> _buffers;
+		winrt::com_ptr<ID3D11ShaderResourceView> _depth;
+		winrt::com_ptr<ID3D11ShaderResourceView> _debugTexture;
+	};
+
+	// Preserve the substrate around one engine dispatch.
 	class ScopedComputeSharedDataBinding
 	{
 	public:
@@ -51,7 +62,7 @@ namespace cs::render
 
 	private:
 		ID3D11DeviceContext* _context = nullptr;
-		std::array<winrt::com_ptr<ID3D11Buffer>, 2> _buffers;
+		SubstrateBindingSnapshot _bindings;
 		bool _active = false;
 	};
 

@@ -21,7 +21,7 @@ namespace cs::engine
 		auto* lightObj = reinterpret_cast<RE::NiAVObject*>(sky->sun->light.get());
 		auto& rot = lightObj->world.rotate;
 
-		// Sun direction is world matrix row zero.
+		// World rotation row zero is the light's propagation direction.
 		float x = rot.entry[0].x;
 		float y = rot.entry[0].y;
 		float z = rot.entry[0].z;

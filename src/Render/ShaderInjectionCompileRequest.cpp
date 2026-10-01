@@ -36,6 +36,7 @@ namespace cs::engine
 				.entryPoint = a_family.entryPoint,
 				.profile = a_family.profile
 			};
+			request.defines.emplace("FRAMEBUFFER_REGISTER", "b4");
 			const auto stage = ShaderStageBit(a_stage);
 			bool substrateActive = false;
 			for (const auto& contribution : a_contributions) {

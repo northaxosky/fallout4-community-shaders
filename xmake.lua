@@ -225,6 +225,9 @@ target(plugin_name, function()
 
     add_headerfiles("src/**.h", "features/*/src/**.h")
     add_includedirs(generated_include, "src", "extern")
+    on_load(function(target)
+        import("xmake.shared", { rootdir = os.projectdir() }).main(target)
+    end)
     for _, feature in ipairs(features) do
         add_includedirs(path.join("features", feature, "src"))
     end
@@ -271,22 +274,17 @@ target(plugin_name, function()
 
     set_pcxxheader("src/PCH.h")
 
-    add_installfiles("package/(**)", { prefixdir = "." })
-    for _, feature in ipairs(features) do
-        if feature == "Upscaling" then
-            add_installfiles(
-                "features/Upscaling/(Shaders/Upscaling/*.hlsl)",
-                "features/Upscaling/(Shaders/Upscaling/RCAS/**)",
-                "features/Upscaling/(Shaders/Upscaling/Streamline/**)",
-                { prefixdir = "." }
-            )
-        else
-            add_installfiles(
-                path.join("features", feature, "(Shaders/**)"),
-                { prefixdir = "." }
-            )
-        end
-    end
+    add_deps("ShaderStage", "ShaderCompileTests")
+    after_build(function (target)
+        os.vrunv(target:dep("ShaderCompileTests"):targetfile(), {
+            path.join(os.projectdir(), "build/ShaderStage/Shaders")
+        })
+    end)
+    add_installfiles("package/(**)|Shaders/**", { prefixdir = "." })
+    add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl|SSSConsumerProbe.hlsl",
+        { prefixdir = "." })
+    add_installfiles("features/Upscaling/(Shaders/Upscaling/Streamline/**)",
+        { prefixdir = "." })
     add_installfiles("LICENSE", "EXCEPTIONS.md", { prefixdir = "." })
 end)
 
@@ -313,6 +311,31 @@ target("FeatureConfigTests", function()
     add_packages("vcpkg::tomlplusplus")
 end)
 
+target("RenderDocCaptureServiceTests", function()
+    set_kind("binary")
+    set_default(false)
+    add_files(
+        "tests/RenderDocCaptureServiceTests.cpp",
+        "features/RenderDoc/src/CaptureService.cpp"
+    )
+    add_includedirs("features/RenderDoc/src", "extern/RenderDoc/include")
+    add_tests("RenderDocCaptureService", {
+        runargs = { path.join(os.projectdir(), "build/RenderDocCaptureServiceTests") }
+    })
+end)
+
+target("PerformanceOverlayTests", function()
+    set_kind("binary")
+    set_default(false)
+    add_files("tests/PerformanceOverlayTests.cpp")
+    add_defines("NOMINMAX", "WIN32_LEAN_AND_MEAN")
+    add_syslinks("d3d11", "ole32")
+    on_load(function(target)
+        import("xmake.shared", { rootdir = os.projectdir() }).main(target)
+    end)
+    add_tests("PerformanceOverlay")
+end)
+
 target("TemporalPipelineStateTests", function()
     set_kind("binary")
     set_default(false)
@@ -331,19 +354,6 @@ target("TerrainShadowsMathTests", function()
     add_includedirs("features/TerrainShadows/src")
 end)
 
-target("TerrainShadowsResizeTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files(
-        "tests/TerrainShadowsResizeTests.cpp",
-        "features/TerrainShadows/src/HeightMapResize.cpp"
-    )
-    add_headerfiles("features/TerrainShadows/src/HeightMapResize.h")
-    add_includedirs("features/TerrainShadows/src")
-    add_packages("vcpkg::directxtex")
-    add_syslinks("ole32")
-end)
-
 target("WetnessEffectsMathTests", function()
     set_kind("binary")
     set_default(false)
@@ -356,22 +366,28 @@ end)
 target("InverseSquareLightingMathTests", function()
     set_kind("binary")
     set_default(false)
-    add_files("tests/InverseSquareLightingMathTests.cpp")
+    add_files(
+        "tests/InverseSquareLightingMathTests.cpp",
+        "features/InverseSquareLighting/src/LightAuthoring.cpp",
+        "src/Settings/FeatureConfig.cpp"
+    )
     add_headerfiles(
         "features/InverseSquareLighting/src/InverseSquareLightingMath.h"
     )
     add_includedirs("features/InverseSquareLighting/src")
+    add_includedirs("src")
     add_packages("vcpkg::tomlplusplus")
 end)
 
 target("ExponentialHeightFogMathTests", function()
     set_kind("binary")
     set_default(false)
-    add_files("tests/ExponentialHeightFogMathTests.cpp")
+    add_files("tests/ExponentialHeightFogMathTests.cpp", "src/Settings/FeatureConfig.cpp")
     add_headerfiles(
         "features/ExponentialHeightFog/src/ExponentialHeightFogMath.h"
     )
     add_includedirs("features/ExponentialHeightFog/src")
+    add_includedirs("src")
     add_packages("vcpkg::tomlplusplus")
 end)
 
@@ -379,9 +395,8 @@ target("WaterEffectsMathTests", function()
     set_kind("binary")
     set_default(false)
     add_files("tests/WaterEffectsMathTests.cpp")
-    add_headerfiles("features/WaterEffects/src/WaterEffectsMath.h")
-    add_includedirs("features/WaterEffects/src")
-    add_packages("vcpkg::tomlplusplus")
+    add_headerfiles("src/World/WaterData.h")
+    add_includedirs("src")
 end)
 
 target("EngineCallSiteTests", function()
@@ -398,6 +413,7 @@ target("UpscalingPublicationTests", function()
     add_deps(plugin_name .. "Version", "commonlibf4", "ShaderStage")
     add_files(
         "tests/UpscalingPublicationTests.cpp",
+        "src/Utils/ShaderCompile.cpp",
         "src/Render/Annotation.cpp",
         "src/Render/RendererContext.cpp"
     )
@@ -492,27 +508,19 @@ target("FrameGenerationRetirementGpuTests", function()
     add_syslinks("d3d11", "d3d12", "dxgi", "ole32", "version")
 end)
 
-target("ScreenSpaceGIHistoryTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files("tests/ScreenSpaceGIHistoryTests.cpp")
-    add_headerfiles(
-        "features/ScreenSpaceGI/src/ScreenSpaceGIHistory.h"
-    )
-    add_includedirs("features/ScreenSpaceGI/src")
-end)
-
 target("ShaderCompileTests", function()
     set_kind("binary")
     set_default(false)
     add_deps("ShaderStage")
     add_files(
         "tests/ShaderCompileTests.cpp",
+        "tests/InverseSquareLightingGpuTests.cpp",
         "src/Utils/ShaderCompile.cpp"
     )
     add_headerfiles("src/Utils/ShaderCompile.h")
-    add_packages("vcpkg::directx-headers")
-    add_syslinks("d3dcompiler")
+    add_includedirs("features/ScreenSpaceGI/src")
+    add_packages("vcpkg::directx-headers", "vcpkg::directxmath")
+    add_syslinks("d3dcompiler", "d3d11")
 end)
 
 target("PixelShaderSwapTests", function()
@@ -562,6 +570,14 @@ target("StockShaderIdentityTests", function()
         runargs = {
             path.join(os.projectdir(), "build/ShaderStage/Shaders"),
             path.join(os.projectdir(), "tests/data/stock-shader-identity.tsv")
+        },
+        run_timeout = 600000
+    })
+    add_tests("FeatureShaderCompile", {
+        runargs = {
+            path.join(os.projectdir(), "build/ShaderStage/Shaders"),
+            path.join(os.projectdir(), "tests/data/stock-shader-identity.tsv"),
+            "--features-on"
         },
         run_timeout = 600000
     })
@@ -664,10 +680,6 @@ target("TerrainShadowsMathTests", function()
     add_tests("TerrainShadowsMath")
 end)
 
-target("TerrainShadowsResizeTests", function()
-    add_tests("TerrainShadowsResize")
-end)
-
 target("WetnessEffectsMathTests", function()
     add_tests("WetnessEffectsMath")
 end)
@@ -690,20 +702,7 @@ end)
 
 target("UpscalingPublicationTests", function()
     add_tests("UpscalingPublication", {
-        runargs = {
-            path.join(
-                os.projectdir(),
-                "features/Upscaling/Shaders/Upscaling/SpatialFallbackPS.hlsl"
-            ),
-            path.join(
-                os.projectdir(),
-                "features/Upscaling/Shaders/Upscaling/UpscaleVS.hlsl"
-            ),
-            path.join(
-                os.projectdir(),
-                "build/ShaderStage/Shaders/Upscaling/EncodeTexturesCS.hlsl"
-            )
-        }
+        runargs = path.join(os.projectdir(), "build/ShaderStage/Shaders")
     })
 end)
 
@@ -736,10 +735,6 @@ target("FrameGenerationRetirementGpuTests", function()
     })
 end)
 
-target("ScreenSpaceGIHistoryTests", function()
-    add_tests("ScreenSpaceGIHistory")
-end)
-
 target("ShaderCompileTests", function()
     add_tests("ShaderCompile", {
         runargs = path.join(os.projectdir(), "build/ShaderStage/Shaders")
@@ -759,6 +754,12 @@ target("ShaderVariantCompilationTests", function()
 end)
 
 target("ShaderInjectionRegistrationTests", function()
+    add_tests("ShaderInjectionPixelBindings", {
+        runargs = "--pixel-bindings"
+    })
+    add_tests("ShaderInjectionNativeFamilies", {
+        runargs = {"--native-families", path.join(os.projectdir(), "package/Shaders")}
+    })
     add_tests("ShaderInjectionClaimLedger", {
         runargs = "--claim-ledger"
     })

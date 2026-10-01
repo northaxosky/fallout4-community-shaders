@@ -13,11 +13,12 @@
 #else
 
 #	ifdef INVERSE_SQUARE_LIGHTING
-#		include "InverseSquareLighting/InverseSquareLighting.hlsli"
+#		include "FO4/InverseSquareLightingConsumer.hlsli"
+StructuredBuffer<FO4InverseSquareLighting::PerLightData> InverseSquareLights : register(t8);
 #	endif
 
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-#		include "WetnessEffects/WetnessEffects.hlsli"
+#	if defined(WETNESS_EFFECTS)
+#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
 #	endif
 
 cbuffer TiledLightingParameters : register(b0)
@@ -142,8 +143,7 @@ float3 EvaluateAmbientGradient(float3 direction)
 	diffuseAccum = EvaluateAmbientGradient(normalView);
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 	diffuseAccum *= WetnessEffects::GetIndirectDiffuseWeight(
-		normalView, viewDirection, positionView,
-		PerFrame[12], PerFrame[13], PerFrame[14], CameraPosAdjust);
+		normalView, viewDirection, pixel);
 #		endif
 
 	float normalDotView = dot(normalView, viewDirection);
@@ -252,6 +252,10 @@ float3 EvaluateAmbientGradient(float3 direction)
 		[loop] for (uint i = 0; i < lightCount; ++i)
 		{
 			TiledLight light = Lights[TileLists[tileIndex].Indices[i]];
+#	ifdef INVERSE_SQUARE_LIGHTING
+			FO4InverseSquareLighting::PerLightData lightData = InverseSquareLights[TileLists[tileIndex].Indices[i]];
+			light.Color = FO4InverseSquareLighting::GetColor(light.Color, lightData);
+#	endif
 			float3 toLight = light.PositionRadius.xyz - positionView;
 			float distanceSquared = dot(toLight, toLight);
 			float3 diffuse = light.Color;
@@ -463,14 +467,19 @@ float3 EvaluateAmbientGradient(float3 direction)
 			float attenuation =
 				exp2(log2(1.0 - falloff) * 2.2);
 #	ifdef INVERSE_SQUARE_LIGHTING
-			// FO4 forced divergence: tiled lights have no verified per-light eligibility flag.
-			attenuation = InverseSquareLighting::GetAttenuation(
-				attenuation,
-				sqrt(distanceSquared),
-				light.PositionRadius.w,
-				pixel.x);
+			// FO4: t8 uses the same accepted-append index as native t6.
+			attenuation = FO4InverseSquareLighting::GetAttenuation(
+				lightData, sqrt(distanceSquared), attenuation);
 #	endif
 
+#	ifdef WETNESS_EFFECTS
+			if ((light.Flags & 8u) == 0) {
+				WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(pixel, normalView);
+				WetnessEffects::ApplyDirectCoat(wetSurface.normalView, viewDirection,
+					toLight * rsqrt(distanceSquared), light.Color,
+					wetSurface.wetness, wetSurface.waterRoughness, diffuse, specular);
+			}
+#	endif
 			diffuseAccum += diffuse * attenuation;
 			specularAccum += specular * attenuation;
 		}

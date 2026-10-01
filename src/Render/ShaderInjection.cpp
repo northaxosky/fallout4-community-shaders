@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Engine.h"
+#include "Render/NativeShaderFamily.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderFamilyDescriptor.h"
@@ -13,6 +14,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bitset>
+#include <cassert>
+#include <chrono>
 #include <cstring>
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -24,12 +28,297 @@
 #include <mutex>
 #include <optional>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 
 namespace cs::engine
 {
+	namespace
+	{
+		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
+		thread_local ShaderInjectionDrawMetrics t_drawMetrics;
+		thread_local bool t_drawFrameStarted = false;
+		thread_local bool t_dispatchingBindings = false;
+		std::mutex g_drawMetricsMutex;
+		ShaderInjectionDrawMetrics g_completedDrawMetrics;
+
+		void CapturePixelBindings(ID3D11DeviceContext* a_context, ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
+		{
+			if (!t_pixelBindings)
+				return;
+			for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
+				const ShaderSlotClaim claim{ ShaderStage::kPixel, a_type, slot };
+				t_pixelBindings->Capture(a_context, std::span(&claim, 1));
+			}
+		}
+
+		template <class T, std::size_t N>
+		struct BindingBatch
+		{
+			std::array<T*, N> values;
+			std::bitset<N> dirty;
+			UINT first = static_cast<UINT>(N);
+			UINT last = 0;
+
+			void Set(UINT a_start, UINT a_count, T* const* a_values) noexcept
+			{
+				assert(a_start + a_count <= N);
+				for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
+					values[slot] = a_values[slot - a_start];
+					dirty.set(slot);
+				}
+				first = std::min(first, a_start);
+				last = std::max(last, a_start + a_count);
+			}
+
+			template <class Set>
+			void Flush(Set a_set) noexcept
+			{
+				for (UINT slot = first; slot < last;) {
+					if (!dirty.test(slot)) {
+						++slot;
+						continue;
+					}
+					const auto start = slot++;
+					while (slot < last && dirty.test(slot))
+						++slot;
+					a_set(start, slot - start, values.data() + start);
+					RecordShaderInjectionD3DBinds();
+				}
+				dirty.reset();
+				first = static_cast<UINT>(N);
+				last = 0;
+			}
+		};
+
+		class PixelBindingBatch;
+		thread_local PixelBindingBatch* t_bindingBatch = nullptr;
+
+		class PixelBindingBatch
+		{
+		public:
+			explicit PixelBindingBatch(ID3D11DeviceContext* a_context) noexcept :
+				context(a_context), previous(std::exchange(t_bindingBatch, this)),
+				wasDispatching(std::exchange(t_dispatchingBindings, true))
+			{}
+			~PixelBindingBatch() noexcept
+			{
+				Flush();
+				t_bindingBatch = previous;
+				t_dispatchingBindings = wasDispatching;
+			}
+			void Flush() noexcept
+			{
+				buffers.Flush([this](UINT start, UINT count, auto values) {
+					CapturePixelBindings(context, ShaderResourceType::kConstantBuffer, start, count);
+					context->PSSetConstantBuffers(start, count, values);
+				});
+				resources.Flush([this](UINT start, UINT count, auto values) {
+					CapturePixelBindings(context, ShaderResourceType::kShaderResource, start, count);
+					context->PSSetShaderResources(start, count, values);
+				});
+				samplers.Flush([this](UINT start, UINT count, auto values) {
+					CapturePixelBindings(context, ShaderResourceType::kSampler, start, count);
+					context->PSSetSamplers(start, count, values);
+				});
+			}
+
+			ID3D11DeviceContext* context;
+			PixelBindingBatch* previous;
+			bool wasDispatching;
+			BindingBatch<ID3D11Buffer, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT> buffers;
+			BindingBatch<ID3D11ShaderResourceView, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> resources;
+			BindingBatch<ID3D11SamplerState, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> samplers;
+		};
+	}
+
+	void BindInjectionShaderResources(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11ShaderResourceView* const* a_values) noexcept
+	{
+		if (t_bindingBatch && t_bindingBatch->context == a_context)
+			t_bindingBatch->resources.Set(a_start, a_count, a_values);
+		else {
+			CapturePixelBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
+			a_context->PSSetShaderResources(a_start, a_count, a_values);
+			RecordShaderInjectionD3DBinds();
+		}
+	}
+
+	void BindInjectionSamplers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11SamplerState* const* a_values) noexcept
+	{
+		if (t_bindingBatch && t_bindingBatch->context == a_context)
+			t_bindingBatch->samplers.Set(a_start, a_count, a_values);
+		else {
+			CapturePixelBindings(a_context, ShaderResourceType::kSampler, a_start, a_count);
+			a_context->PSSetSamplers(a_start, a_count, a_values);
+			RecordShaderInjectionD3DBinds();
+		}
+	}
+
+	void BindInjectionConstantBuffers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11Buffer* const* a_values) noexcept
+	{
+		if (t_bindingBatch && t_bindingBatch->context == a_context)
+			t_bindingBatch->buffers.Set(a_start, a_count, a_values);
+		else {
+			CapturePixelBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
+			a_context->PSSetConstantBuffers(a_start, a_count, a_values);
+			RecordShaderInjectionD3DBinds();
+		}
+	}
+
+	void FlushShaderInjectionBindings() noexcept
+	{
+		if (t_bindingBatch)
+			t_bindingBatch->Flush();
+	}
+
+	void CaptureShaderInjectionOutputs(ID3D11DeviceContext* a_context) noexcept
+	{
+		CapturePixelBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
+	}
+
+	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept
+	{
+		if (t_drawFrameStarted && t_drawMetrics.frame == a_frame)
+			return;
+		{
+			std::scoped_lock lock(g_drawMetricsMutex);
+			g_completedDrawMetrics = t_drawMetrics;
+		}
+		t_drawMetrics = { .frame = a_frame };
+		t_drawFrameStarted = true;
+	}
+
+	void RecordShaderInjectionD3DBinds(std::uint32_t a_count) noexcept
+	{
+		if (t_pixelBindings || t_dispatchingBindings)
+			t_drawMetrics.d3dBinds += a_count;
+	}
+
+	ScopedShaderInjectionBindings::ScopedShaderInjectionBindings(ShaderStage a_stage) noexcept :
+		_stage(a_stage),
+		_previous(a_stage == ShaderStage::kPixel ? std::exchange(t_pixelBindings, this) : nullptr),
+		_started(std::chrono::steady_clock::now())
+	{}
+
+	ScopedShaderInjectionBindings::~ScopedShaderInjectionBindings() noexcept
+	{
+		const auto finish = [this] {
+			if (_stage == ShaderStage::kPixel) {
+				t_pixelBindings = _previous;
+				if (!_previous) {
+					++t_drawMetrics.scopes;
+					t_drawMetrics.scopeNanoseconds += static_cast<std::uint64_t>(
+						std::chrono::duration_cast<std::chrono::nanoseconds>(
+							std::chrono::steady_clock::now() - _started)
+							.count());
+				}
+			}
+		};
+		const auto restores = _bufferCount + _resourceCount + _samplerCount + (_outputCaptured ? 2u : 0u);
+		if (_stage == ShaderStage::kPixel) {
+			t_drawMetrics.restores += restores;
+			t_drawMetrics.d3dBinds += restores;
+		}
+		if (!_context) {
+			finish();
+			return;
+		}
+		if (_outputCaptured) {
+			_context->OMSetRenderTargets(8, _targets, _depth);
+			_context->OMSetBlendState(_blend, _blendFactor, _sampleMask);
+			for (auto* target : _targets)
+				if (target)
+					target->Release();
+			if (_depth)
+				_depth->Release();
+			if (_blend)
+				_blend->Release();
+		}
+		for (const auto& buffer : std::span(_buffers).first(_bufferCount)) {
+			if (_stage == ShaderStage::kCompute)
+				_context->CSSetConstantBuffers(buffer.slot, 1, &buffer.value);
+			else
+				_context->PSSetConstantBuffers(buffer.slot, 1, &buffer.value);
+			if (buffer.value)
+				buffer.value->Release();
+		}
+		for (const auto& resource : std::span(_resources).first(_resourceCount)) {
+			if (_stage == ShaderStage::kCompute)
+				_context->CSSetShaderResources(resource.slot, 1, &resource.value);
+			else
+				_context->PSSetShaderResources(resource.slot, 1, &resource.value);
+			if (resource.value)
+				resource.value->Release();
+		}
+		for (const auto& sampler : std::span(_samplers).first(_samplerCount)) {
+			if (_stage == ShaderStage::kCompute)
+				_context->CSSetSamplers(sampler.slot, 1, &sampler.value);
+			else
+				_context->PSSetSamplers(sampler.slot, 1, &sampler.value);
+			if (sampler.value)
+				sampler.value->Release();
+		}
+		finish();
+	}
+
+	void ScopedShaderInjectionBindings::Capture(
+		ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims) noexcept
+	{
+		if (!a_context)
+			return;
+		if (!_context)
+			_context = a_context;
+		for (const auto& claim : a_claims) {
+			if (claim.stage != _stage)
+				continue;
+			// Engine-facts: PS shadow state owns t0-t15/s0-s15 and b0-b2/b12/b13 only.
+			if (_stage == ShaderStage::kPixel &&
+				((claim.resourceType == ShaderResourceType::kShaderResource && claim.slot >= 16) ||
+					(claim.resourceType == ShaderResourceType::kConstantBuffer && claim.slot > 2 && claim.slot != 12 && claim.slot != 13)))
+				continue;
+			if (claim.resourceType == ShaderResourceType::kRenderTarget && !_outputCaptured) {
+				_context->OMGetRenderTargets(8, _targets, &_depth);
+				_context->OMGetBlendState(&_blend, _blendFactor, &_sampleMask);
+				_outputCaptured = true;
+				if (_stage == ShaderStage::kPixel)
+					t_drawMetrics.captures += 2;
+			}
+			if (claim.resourceType == ShaderResourceType::kShaderResource &&
+				std::ranges::none_of(std::span(_resources).first(_resourceCount), [&](const auto& r) { return r.slot == claim.slot; })) {
+				auto& resource = _resources[_resourceCount++];
+				resource = { claim.slot, nullptr };
+				if (_stage == ShaderStage::kPixel)
+					++t_drawMetrics.captures;
+				if (_stage == ShaderStage::kCompute)
+					_context->CSGetShaderResources(claim.slot, 1, &resource.value);
+				else
+					_context->PSGetShaderResources(claim.slot, 1, &resource.value);
+			} else if (claim.resourceType == ShaderResourceType::kSampler &&
+					   std::ranges::none_of(std::span(_samplers).first(_samplerCount), [&](const auto& s) { return s.slot == claim.slot; })) {
+				auto& sampler = _samplers[_samplerCount++];
+				sampler = { claim.slot, nullptr };
+				if (_stage == ShaderStage::kPixel)
+					++t_drawMetrics.captures;
+				if (_stage == ShaderStage::kCompute)
+					_context->CSGetSamplers(claim.slot, 1, &sampler.value);
+				else
+					_context->PSGetSamplers(claim.slot, 1, &sampler.value);
+			} else if (claim.resourceType == ShaderResourceType::kConstantBuffer &&
+					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == claim.slot; })) {
+				auto& buffer = _buffers[_bufferCount++];
+				buffer = { claim.slot, nullptr };
+				if (_stage == ShaderStage::kPixel)
+					++t_drawMetrics.captures;
+				if (_stage == ShaderStage::kCompute)
+					_context->CSGetConstantBuffers(claim.slot, 1, &buffer.value);
+				else
+					_context->PSGetConstantBuffers(claim.slot, 1, &buffer.value);
+			}
+		}
+	}
+
 	namespace
 	{
 		constexpr auto& kTargets = kShaderInjectionTargets;
@@ -83,6 +372,7 @@ namespace cs::engine
 			std::atomic<bool> requested{ false };
 			std::atomic<bool> slotCollision{ false };
 			std::atomic<std::size_t> contributors{ 0 };
+			std::atomic<std::uint64_t> computeBindCalls{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
@@ -336,42 +626,10 @@ namespace cs::engine
 		std::optional<ShaderInjectionTarget> ResolveNativeShaderTarget(
 			const RE::BSShader& a_shader)
 		{
-			using Type = RE::BSShaderManager::ShaderEnum;
-			switch (static_cast<Type>(native::ShaderType(&a_shader))) {
-			case Type::kEffect:
-				return ShaderInjectionTarget::kEffect;
-			case Type::kUtility:
-				return ShaderInjectionTarget::kUtility;
-			case Type::kDistantTree:
-				return ShaderInjectionTarget::kDistantTree;
-			case Type::kParticle:
-				return ShaderInjectionTarget::kParticle;
-			case Type::kDFPrepass:
-				{
-					// FO4's DFPrepass and DFLight constructors both store type 4.
-					const auto* filename = NativeShaderFilename(&a_shader);
-					const std::string_view name = filename ? filename : "";
-					if (name == "DFLight")
-						return ShaderInjectionTarget::kBsdfLight;
-					if (name == "DFPrepass")
-						return ShaderInjectionTarget::kDeferredPrepass;
-					return std::nullopt;
-				}
-			case Type::kDFComposite:
-				return ShaderInjectionTarget::kBsdfComposite;
-			case Type::kBloodSpatter:
-				return ShaderInjectionTarget::kBloodSplatter;
-			case Type::kImageSpace:
-				return ShaderInjectionTarget::kImageSpace;
-			case Type::kSky:
-				return ShaderInjectionTarget::kBsSky;
-			case Type::kWater:
-				return ShaderInjectionTarget::kBsWater;
-			case Type::kLighting:
-				return ShaderInjectionTarget::kBsLighting;
-			default:
-				return std::nullopt;
-			}
+			const auto* name = NativeShaderFilename(&a_shader);
+			return ResolveGraphicsShaderTarget(
+				static_cast<RE::BSShaderManager::ShaderEnum>(native::ShaderType(&a_shader)),
+				name ? name : "");
 		}
 
 		struct NativeShaderFamilyContext
@@ -608,23 +866,29 @@ namespace cs::engine
 			const std::vector<ShaderSlotClaim>& a_claimedSlots)
 		{
 			for (const auto& claim : a_registration.slotClaims) {
-				if (std::ranges::find(a_claimedSlots, claim) != a_claimedSlots.end())
-					return claim;
+				for (const auto& occupied : a_claimedSlots) {
+					if (occupied.stage != claim.stage || occupied.resourceType != claim.resourceType || occupied.slot != claim.slot)
+						continue;
+					// FO4: identical immutable linear-clamp samplers may share scarce PS slots.
+					if (claim.resourceType != ShaderResourceType::kSampler ||
+						claim.samplerContract == ShaderSamplerContract::kExclusive ||
+						claim.samplerContract != occupied.samplerContract)
+						return claim;
+				}
 			}
 			return std::nullopt;
 		}
 
-		// substrate reserves b5/b6 on active stages
+		// Engine and feature claims cannot occupy substrate bindings.
 		std::optional<ShaderSlotClaim> FindSubstrateReservation(
 			std::span<const ShaderSlotClaim> a_claims)
 		{
 			for (const auto& claim : a_claims) {
-				if (claim.resourceType != ShaderResourceType::kConstantBuffer)
-					continue;
-				if (claim.slot != render::kSharedDataSlot && claim.slot != render::kFeatureDataSlot) {
-					continue;
-				}
-				return claim;
+				if ((claim.resourceType == ShaderResourceType::kConstantBuffer &&
+						claim.slot >= render::kFrameDataSlot && claim.slot <= render::kFO4SharedDataSlot) ||
+					(claim.resourceType == ShaderResourceType::kShaderResource &&
+						(claim.slot == render::kCanonicalDepthSlot || claim.slot == render::kFullscreenDebugTextureSlot)))
+					return claim;
 			}
 			return std::nullopt;
 		}
@@ -646,6 +910,17 @@ namespace cs::engine
 			const ShaderReplacementRegistration& a_registration,
 			const ShaderInjectionTargetMetadata& a_target)
 		{
+			for (const auto& claim : a_registration.slotClaims) {
+				const std::uint32_t limit = claim.resourceType == ShaderResourceType::kShaderResource ? D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT :
+				                            claim.resourceType == ShaderResourceType::kSampler        ? D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT :
+				                            claim.resourceType == ShaderResourceType::kConstantBuffer ? D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT :
+				                                                                                        D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;
+				if (claim.slot >= limit) {
+					L->error("Replacement registration '{}' for '{}' rejected: type={} slot={} exceeds the D3D11 slot range.",
+						a_registration.contributor, a_target.name, static_cast<unsigned>(claim.resourceType), claim.slot);
+					return false;
+				}
+			}
 			if (const auto reserved =
 					FindSubstrateReservation(a_registration.slotClaims)) {
 				L->error(
@@ -1166,7 +1441,11 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
+			std::optional<PixelBindingBatch> bindings;
 			if (a_stage == ShaderStage::kPixel)
+				bindings.emplace(a_context);
+			if (a_stage != ShaderStage::kCompute &&
+				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0)
 				render::BindSharedData(a_context, a_stage);
 
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
@@ -1308,6 +1587,10 @@ namespace cs::engine
 					return;
 				}
 				const ActiveVariantScope variantScope(variant.get());
+				// FO4: contribution claims restore exact CS bindings after native dispatch.
+				ScopedShaderInjectionBindings contributionBindings(ShaderStage::kCompute);
+				for (const auto& contribution : target->contributions)
+					contributionBindings.Capture(a_context, contribution.slotClaims);
 				DispatchPublishedTarget(
 					*target,
 					ShaderStage::kCompute,
@@ -1482,6 +1765,12 @@ namespace cs::engine
 					a_candidate.stages);
 				return false;
 			}
+			constexpr auto graphicsStages = ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel);
+			if (a_candidate.requiresGraphicsPair && a_candidate.stages != graphicsStages) {
+				L->error("Replacement registration '{}' rejected: paired graphics stages require a vertex/pixel contribution.",
+					a_candidate.contributor);
+				return false;
+			}
 			if (RegistrationHasDuplicateClaims(a_candidate)) {
 				L->error(
 					"Replacement registration '{}' for '{}' rejected: duplicate slot claim.",
@@ -1501,7 +1790,7 @@ namespace cs::engine
 				return false;
 		}
 
-		// active substrate requires current b5/b6 data
+		// Active substrate uses b4-b7 and canonical scene depth at t17.
 		render::EnsureSharedDataUpdateInstalled();
 		// a bind callback without its draw anchor would never run
 		if (installsPreDrawHook && !EnsureDeferredDrawAnchorInstalled()) {
@@ -1591,6 +1880,47 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		service.enabled.store(a_enabled, std::memory_order_relaxed);
+		return true;
+	}
+
+	bool PrepareShaderInjectionVariants(std::span<const ShaderFamilyDescriptor> a_variants,
+		std::string& a_error)
+	{
+		const auto plan = GetService().published.load(std::memory_order_acquire);
+		if (!plan) {
+			a_error = "Shader variants requested before injection publication";
+			return false;
+		}
+		std::vector<std::shared_ptr<ShaderVariantCompilationHandle>> handles;
+		for (const auto& descriptor : a_variants) {
+			const auto* target = FindPublishedTarget(*plan, descriptor.target);
+			const auto variant = target ?
+			                         FindOrPrepareNativeVariant(*plan, *target, MakeNativeVariantKey(descriptor)) :
+			                         nullptr;
+			if (!variant) {
+				a_error = "Required shader variant has no published route";
+				return false;
+			}
+			std::scoped_lock lock(variant->mutex);
+			if (!variant->compilation) {
+				a_error = "Required shader variant has no compilation";
+				return false;
+			}
+			handles.push_back(variant->compilation);
+		}
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+		for (const auto& handle : handles) {
+			while (handle->GetState() == ShaderVariantCompilationState::kPending &&
+				   std::chrono::steady_clock::now() < deadline)
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			if (handle->GetState() != ShaderVariantCompilationState::kReady) {
+				a_error = handle->GetState() == ShaderVariantCompilationState::kFailed ?
+				              handle->GetError() :
+				              "Required shader compilation timed out";
+				return false;
+			}
+		}
+		a_error.clear();
 		return true;
 	}
 
@@ -1995,6 +2325,7 @@ namespace cs::engine
 			if (!ShaderEnabled(a_family.target))
 				return result;
 
+			bool requiresGraphicsPair = false;
 			try {
 				const auto plan =
 					GetService().published.load(std::memory_order_acquire);
@@ -2002,6 +2333,9 @@ namespace cs::engine
 					plan ? FindPublishedTarget(*plan, a_family.target) : nullptr;
 				if (!target)
 					return result;
+				requiresGraphicsPair = std::ranges::any_of(target->contributions, [](const auto& contribution) {
+					return contribution.requiresGraphicsPair;
+				});
 
 				auto& runtime =
 					GetService().runtime[ToIndex(a_family.target)];
@@ -2019,8 +2353,6 @@ namespace cs::engine
 									a_vertexShaderId),
 								a_nativeVertex)) {
 						result.vertex = replacement;
-						runtime.substitutions.fetch_add(
-							1, std::memory_order_relaxed);
 					}
 				}
 
@@ -2040,8 +2372,6 @@ namespace cs::engine
 										a_nativePixel)),
 								a_nativePixel)) {
 						result.pixel = replacement;
-						runtime.substitutions.fetch_add(
-							1, std::memory_order_relaxed);
 					}
 				}
 			} catch (const std::exception& e) {
@@ -2058,6 +2388,12 @@ namespace cs::engine
 					spdlog::level::warn,
 					"Native shader descriptor routing failed.");
 			}
+			// Host-added interpolators cannot pair a replacement stage with its native counterpart.
+			if (requiresGraphicsPair && (result.vertex == a_nativeVertex || result.pixel == a_nativePixel)) {
+				result = { a_nativeVertex, a_nativePixel };
+			}
+			GetService().runtime[ToIndex(a_family.target)].substitutions.fetch_add(
+				(result.vertex != a_nativeVertex) + (result.pixel != a_nativePixel), std::memory_order_relaxed);
 			return result;
 		}
 	}
@@ -2105,7 +2441,10 @@ namespace cs::engine
 				if (found != service.nativeComputeOwners.end())
 					owner = found->second;
 			}
-			if (!owner || !ShaderEnabled(owner->target))
+			if (!owner)
+				return a_nativeCompute;
+			GetService().runtime[ToIndex(owner->target)].computeBindCalls.fetch_add(1, std::memory_order_relaxed);
+			if (!ShaderEnabled(owner->target))
 				return a_nativeCompute;
 			const auto* target =
 				FindPublishedTarget(*plan, owner->target);
@@ -2316,6 +2655,7 @@ namespace cs::engine
 			const auto plan =
 				service.published.load(std::memory_order_acquire);
 			snapshot.id = a_target;
+			snapshot.enabled = ShaderEnabled(a_target);
 			snapshot.name = metadata.name;
 			snapshot.requested =
 				runtime.requested.load(std::memory_order_relaxed);
@@ -2346,6 +2686,12 @@ namespace cs::engine
 			}
 			snapshot.dispatches =
 				runtime.dispatches.load(std::memory_order_relaxed);
+			snapshot.computeBindCalls = runtime.computeBindCalls.load(std::memory_order_relaxed);
+		}
+		if ((SupportedStages(a_target) & ShaderStageBit(ShaderStage::kCompute)) != 0) {
+			std::scoped_lock lock(service.nativeVariantMutex);
+			snapshot.observedComputeShaders = static_cast<std::size_t>(std::ranges::count_if(
+				service.nativeComputeOwners, [&](const auto& entry) { return entry.second.target == a_target; }));
 		}
 		return snapshot;
 	}
@@ -2377,6 +2723,10 @@ namespace cs::engine
 			}
 		}
 		summary.computeBridge = GetComputeDispatchBridgeStatus();
+		{
+			std::scoped_lock lock(g_drawMetricsMutex);
+			summary.draw = g_completedDrawMetrics;
+		}
 		return summary;
 	}
 

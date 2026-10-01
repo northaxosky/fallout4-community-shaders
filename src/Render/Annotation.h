@@ -8,11 +8,14 @@
 namespace cs::render::annotation
 {
 	void Initialize(ID3D11DeviceContext* a_context) noexcept;
+	using BeginPassCallback = bool (*)(std::string_view);
+	using EndPassCallback = void (*)();
+	void SetProfilerCallbacks(BeginPassCallback a_begin, EndPassCallback a_end) noexcept;
 
 	class ScopedEvent
 	{
 	public:
-		explicit ScopedEvent(std::string_view a_name) noexcept;
+		explicit ScopedEvent(std::string_view a_name, bool a_profile = true) noexcept;
 		ScopedEvent(
 			ID3D12GraphicsCommandList* a_commandList,
 			std::string_view a_name) noexcept;
@@ -26,6 +29,7 @@ namespace cs::render::annotation
 	private:
 		ID3DUserDefinedAnnotation* _d3d11{};
 		ID3D12GraphicsCommandList* _d3d12{};
+		bool _profile{};
 	};
 
 	void SetMarker(std::string_view a_name) noexcept;

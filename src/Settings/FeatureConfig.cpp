@@ -15,7 +15,15 @@ namespace cs::settings
 	{
 		return std::visit([](const auto& value) -> std::string {
 			using T = std::remove_cvref_t<decltype(value)>;
-			if constexpr (std::same_as<T, bool> || std::same_as<T, std::string>) {
+			if constexpr (std::same_as<T, Float2> || std::same_as<T, Color4>) {
+				std::string text = "[";
+				for (float component : value) {
+					if (text.size() > 1)
+						text += ", ";
+					text += FormatValue(component);
+				}
+				return text + "]";
+			} else if constexpr (std::same_as<T, bool> || std::same_as<T, std::string>) {
 				std::ostringstream output;
 				output << toml::value{ value };
 				return output.str();

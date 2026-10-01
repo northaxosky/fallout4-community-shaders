@@ -122,7 +122,7 @@ namespace cs::render
 				render::TemporalPipeline::Get().SuperResolutionResetPending();
 			const auto* timer = RE::BSTimer::GetSingleton();
 			const auto realFrame = render::TemporalPipeline::Get().CurrentRealFrame();
-			const auto& snapshot = cs::engine::GetFrameBuffer();
+			const auto snapshot = cs::engine::GetCapturedWorldCameraRecord(frameCount);
 			const auto camera = render::temporal::BuildFrameGenerationCamera(
 				snapshot, state->screenWidth, state->screenHeight);
 			render::temporal::SuperResolutionRequest request{
@@ -246,7 +246,7 @@ namespace cs::render
 
 	bool TemporalRenderer::PerformUpscaling()
 	{
-		cs::render::annotation::ScopedEvent upscaleScope("Upscaling/SuperResolution");
+		cs::render::annotation::ScopedEvent upscaleScope("Upscaling/SuperResolution", false);
 		_upscaledThisFrame = false;
 		_spatialFallbackThisFrame.store(false, std::memory_order_release);
 		_superResolutionSubmissionUnsafe = false;
@@ -286,7 +286,11 @@ namespace cs::render
 				context, upscalingTexture->resource.get(), frameBuffer.get());
 		}
 
-		if (!Upscale()) {
+		const bool worldFrame = cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame()).has_value();
+		if (!worldFrame) {
+			render::TemporalPipeline::Get().SkipWorldFrame();
+		}
+		if (!worldFrame || !Upscale()) {
 			if (_superResolutionSubmissionUnsafe) {
 				return finish(false);
 			}
@@ -301,10 +305,12 @@ namespace cs::render
 			}
 			_spatialFallbacks.fetch_add(1, std::memory_order_relaxed);
 			_spatialFallbackThisFrame.store(true, std::memory_order_release);
-			L->warn(
-				"spatial fallback published after provider evaluation failure; "
-				"native TAA begins next frame.");
-			ScheduleNativeSuperResolutionFallback();
+			if (worldFrame) {
+				L->warn(
+					"spatial fallback published after provider evaluation failure; "
+					"native TAA begins next frame.");
+				ScheduleNativeSuperResolutionFallback();
+			}
 			UpscaleDepth();
 			return finish(true, false);
 		}

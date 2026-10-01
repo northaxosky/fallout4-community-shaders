@@ -2,7 +2,7 @@
 #define DEFERRED_POSITION_HLSLI_INCLUDED
 
 #include "Common/DepthPartition.hlsli"
-#include "Common/SharedData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 
 namespace DeferredPosition
 {
@@ -24,7 +24,7 @@ namespace DeferredPosition
 		float rawDepth = sceneDepth.Load(int3(depthPixel, 0));
 		bool isNear = DepthPartition::IsNear(rawDepth);
 		float2 renderUv =
-			pixelPosition * SharedData::BufferDim.zw * SharedData::DynamicResolution.zw;
+			pixelPosition * SharedData::BufferDim.zw * FrameBuffer::DynamicResolutionParams2.xy;
 		float4 position = float4(
 			float2(renderUv.x, 1.0 - renderUv.y) * 2.0 - 1.0,
 			DepthPartition::ToProjectionDepth(rawDepth, isNear),
