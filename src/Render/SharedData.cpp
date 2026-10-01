@@ -261,7 +261,7 @@ namespace cs::render
 			auto* graphicsState = engine::GetGraphicsState();
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
-			const auto camera = engine::GetWorldCameraRecord();
+			const auto camera = graphicsState ? engine::GetCapturedWorldCameraRecord(graphicsState->frameCount) : std::nullopt;
 			if (!graphicsState || !context || !camera)
 				return;
 

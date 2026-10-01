@@ -14,6 +14,7 @@
 #include <cstring>
 #include <d3d11_4.h>
 #include <limits>
+#include <mutex>
 #include <winrt/base.h>
 
 namespace cs::engine
@@ -90,6 +91,8 @@ namespace cs::engine
 		FrameBufferSnapshot g_latestSnapshot{};
 		FrameBufferSnapshot g_worldSnapshot{};
 		std::optional<WorldCameraRecord> g_prepassCamera;
+		std::optional<std::uint32_t> g_prepassFrame;
+		std::mutex g_prepassCameraMutex;
 		std::atomic_uint64_t g_cameraComparisons{ 0 }, g_cameraMismatches{ 0 };
 		std::atomic<float> g_cameraMaximumRelativeDifference{ 0.0f };
 		AnchorFrameState g_anchorFrame{};
@@ -626,10 +629,17 @@ namespace cs::engine
 
 		const bool registered = RegisterPostDeferredPrePass(
 			[] {
-				g_prepassCamera = GetWorldCameraRecord();
+				{
+					std::scoped_lock lock(g_prepassCameraMutex);
+					const auto frame = CurrentEngineFrame();
+					if (g_prepassFrame != frame) {
+						g_prepassCamera = GetWorldCameraRecord();
+						g_prepassFrame = frame;
+					}
+				}
 				ResolveIdentity();
 			},
-			HookPriority::Late);
+			static_cast<HookPriority>(-200));
 		if (!registered) {
 			L->error(
 				"Per-frame constant buffer identity resolution disabled: "
@@ -724,6 +734,15 @@ namespace cs::engine
 			return PrepareWorldCameraRecord(record) ? std::optional{ record } : std::nullopt;
 		}
 		return std::nullopt;
+	}
+
+	std::optional<WorldCameraRecord> GetCapturedWorldCameraRecord(
+		std::optional<std::uint64_t> a_frame) noexcept
+	{
+		std::scoped_lock lock(g_prepassCameraMutex);
+		if (!g_prepassCamera || (a_frame && g_prepassCamera->frameCount != *a_frame))
+			return std::nullopt;
+		return g_prepassCamera;
 	}
 
 	const FrameBufferSnapshot& GetFrameBuffer() noexcept

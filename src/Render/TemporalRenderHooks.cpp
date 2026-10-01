@@ -327,6 +327,10 @@ namespace cs::render
 		func(a_this);
 
 		GuardedThunkBody("Upscaling Render_UI completion", [&] {
+			if (!cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame())) {
+				render::TemporalPipeline::Get().SkipWorldFrame();
+				return;
+			}
 			const bool resolveSeen =
 				upscaling->_resolveSeamSeen.load(std::memory_order_acquire);
 			if (resolveRequired && !resolveSeen) {

@@ -1154,13 +1154,15 @@ namespace cs::render
 							const auto* upscaling = &TemporalPipeline::Get().Renderer();
 							const auto [width, height] = upscaling->GetRenderSize();
 							const auto jitter = upscaling->GetAppliedJitter();
+							const auto realFrame = CurrentRealFrame();
 							temporal::FrameGenerationRequest result;
 							bool frozen = false;
 							const auto slot = _impl->swapChain.GetFrameSlot();
 							{
 								std::scoped_lock lock(_impl->mutex);
 								if (slot < _impl->frozenFrameConstants.size() &&
-									_impl->frozenFrameConstants[slot]) {
+									_impl->frozenFrameConstants[slot] &&
+									_impl->frozenFrameConstants[slot]->realFrame == realFrame) {
 									result =
 										*_impl->frozenFrameConstants[slot];
 									frozen = true;
@@ -1169,8 +1171,7 @@ namespace cs::render
 									_impl->topology.Effective()
 										.frameGenerationConfiguration;
 							}
-							result.realFrame =
-								TemporalPipeline::Get().CurrentRealFrame();
+							result.realFrame = realFrame;
 							result.renderWidth = width;
 							result.renderHeight = height;
 							if (!frozen) {
@@ -1182,6 +1183,7 @@ namespace cs::render
 																  0.0f;
 							}
 							result.enabled =
+								frozen && result.camera.valid &&
 								upscaling->ShouldUseFrameGenerationThisFrame();
 							if (!frozen) {
 								result.resetHistory =
@@ -1206,17 +1208,6 @@ namespace cs::render
 									.exposure =
 										temporal::ExposureMode::kAutomatic
 								};
-							}
-							if (!result.camera.valid) {
-								const auto& snapshot =
-									cs::engine::GetWorldCameraRecord();
-								const auto* graphics =
-									cs::engine::GetGraphicsState();
-								result.camera =
-									temporal::BuildFrameGenerationCamera(
-										snapshot,
-										graphics ? graphics->screenWidth : 0,
-										graphics ? graphics->screenHeight : 0);
 							}
 							return result;
 						},
@@ -1567,6 +1558,14 @@ namespace cs::render
 		_impl->resetEpochs.RequestSuperResolution();
 	}
 
+	void TemporalPipeline::SkipWorldFrame() noexcept
+	{
+		_impl->renderer.ClearFrameGenerationCaptureState();
+		std::scoped_lock lock(_impl->mutex);
+		_impl->resetEpochs.RequestSuperResolution();
+		_impl->resetEpochs.RequestFrameGeneration();
+	}
+
 	void TemporalPipeline::RequestFrameGenerationReset() noexcept
 	{
 		std::scoped_lock lock(_impl->mutex);
@@ -1863,7 +1862,7 @@ namespace cs::render
 			cpuTimings = {};
 		}
 		const auto* state = a_includeLiveEngineState ? cs::engine::GetGraphicsState() : nullptr;
-		const auto camera = a_includeLiveEngineState ? cs::engine::GetWorldCameraRecord() : std::nullopt;
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord();
 		const float fov = temporal::BuildFrameGenerationCamera(camera,
 			state ? state->screenWidth : 0, state ? state->screenHeight : 0)
 		                      .verticalFov;
