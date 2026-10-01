@@ -8,7 +8,6 @@ function main(target)
             "package/Shaders/Common/Color.hlsli",
             "package/Shaders/Common/SharedData.hlsli",
             "package/Shaders/Common/BRDF.hlsli",
-            "package/Shaders/Common/Color.hlsli",
             "package/Shaders/Common/GBuffer.hlsli",
             "package/Shaders/Common/LightingCommon.hlsli",
             "package/Shaders/Common/LightingEval.hlsli",
