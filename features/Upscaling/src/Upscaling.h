@@ -3,12 +3,13 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/TemporalRenderSettings.h"
+#include "ShaderDefines.h"
 
 #include <optional>
 
 namespace cs::features
 {
-	class Upscaling : public Feature
+	class Upscaling : public ShaderFeature<upscaling::kShaderDefines>
 	{
 	public:
 		using UpscaleMethod = render::temporal::UpscaleMethod;

@@ -3,6 +3,7 @@
 #include "ExponentialHeightFogSettings.h"
 #include "Feature.h"
 #include "Render/SharedFeatureData.h"
+#include "ShaderDefines.h"
 #include "VolumetricFog.h"
 #include "World/WeatherVariableRegistry.h"
 
@@ -11,7 +12,7 @@
 
 namespace cs::features
 {
-	class ExponentialHeightFog : public Feature
+	class ExponentialHeightFog : public ShaderFeature<fog_shader::kShaderDefines>
 	{
 	public:
 		static ExponentialHeightFog* GetSingleton();

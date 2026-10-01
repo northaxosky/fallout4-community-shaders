@@ -353,6 +353,7 @@ namespace cs
 					L->error("Feature {} reported a load failure: {}", feature->GetName(), result.GetDetail());
 					break;
 				case ActivationOutcome::kActive:
+					feature->_loaded = true;
 					_loadedFeatures.push_back(feature);
 					break;
 				case ActivationOutcome::kDegraded:

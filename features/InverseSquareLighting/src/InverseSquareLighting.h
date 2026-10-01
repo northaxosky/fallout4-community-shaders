@@ -1,10 +1,11 @@
 #pragma once
 
 #include "Feature.h"
+#include "ShaderDefines.h"
 
 namespace cs::features
 {
-	class InverseSquareLighting : public Feature
+	class InverseSquareLighting : public ShaderFeature<isl::kShaderDefines>
 	{
 	public:
 		static InverseSquareLighting* GetSingleton();

@@ -26,7 +26,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -297,7 +297,7 @@ namespace cs::features
 
 	void TerrainShadows::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderContributions("TerrainShadows", [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings("TerrainShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				registration.slotClaims = {
 					{ .stage = cs::engine::ShaderStage::kPixel,
 						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
@@ -307,7 +307,6 @@ namespace cs::features
 						.slot = kShadowHeightSamplerPSSlot,
 						.samplerContract = cs::engine::ShaderSamplerContract::kLinearClamp }
 				};
-				registration.isReady = [this] { return ts::IsReadyForInjectionFreeze(GetBootstrapReadiness()); };
 				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
 				registration.bind = [this, composite](ID3D11DeviceContext* a_context) {
 					if (composite)

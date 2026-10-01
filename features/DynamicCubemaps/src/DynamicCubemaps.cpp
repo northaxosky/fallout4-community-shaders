@@ -21,7 +21,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
@@ -228,8 +228,7 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		if (!cs::engine::RegisterFeatureShaderContributions("DynamicCubemaps", [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [this] { return _registrationsReady.load(std::memory_order_acquire); };
+		if (!cs::engine::RegisterFeatureShaderBindings("DynamicCubemaps", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
 				if (!composite && registration.targetId != cs::engine::ShaderInjectionTarget::kBsWater)
 					return;

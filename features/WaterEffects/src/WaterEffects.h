@@ -4,6 +4,7 @@
 #include "FeatureCategories.h"
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "Render/PixelShaderSamplerSnapshot.h"
+#include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 #include "WaterEffectsSettings.h"
 
@@ -29,7 +30,7 @@ struct IDXGIAdapter;
 
 namespace cs::features
 {
-	class WaterEffects : public Feature
+	class WaterEffects : public ShaderFeature<water_effects::kShaderDefines>
 	{
 	public:
 		enum class DebugVisualization : std::uint32_t

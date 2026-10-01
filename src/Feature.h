@@ -3,6 +3,7 @@
 #include "DebugView.h"
 #include "FeatureCategories.h"
 #include "FeatureState.h"
+#include "Render/ShaderDefineProvider.h"
 #include "Settings/LiveSettings.h"
 #include "Settings/SettingsMetadata.h"
 
@@ -30,7 +31,7 @@ namespace cs
 		class Sink;
 	}
 
-	class Feature
+	class Feature : public engine::ShaderDefineProvider
 	{
 	public:
 		virtual ~Feature() = default;
@@ -45,7 +46,7 @@ namespace cs
 		bool IsActive() const noexcept { return _state.IsActive(); }
 		bool IsDegraded() const noexcept { return _state.IsDegraded(); }
 		bool IsHealthy() const noexcept { return _state.IsHealthy(); }
-		bool IsLoaded() const noexcept { return IsHealthy(); }
+		bool IsLoaded() const noexcept override { return _loaded; }
 
 		// Configure must remain side-effect-free.
 		virtual bool Configure(const toml::table&, std::string&) { return true; }
@@ -166,9 +167,20 @@ namespace cs
 		FeatureState _state;
 		mutable spdlog::logger* _log = nullptr;
 		bool _loadFailed = false;
+		bool _loaded = false;
 		bool _settingsSavePending = false;
 		bool _settingsEditCompleted = false;
 		std::string _loadFailureReason;
+	};
+
+	template <const engine::ShaderDefineDeclaration& Declaration>
+	class ShaderFeature : public Feature
+	{
+	public:
+		std::string_view GetShaderDefineName() const override { return Declaration.GetShaderDefineName(); }
+		engine::ShaderDefineOptions GetShaderDefineOptions(engine::ShaderInjectionTarget a_target = engine::ShaderInjectionTarget::kCount) const override { return Declaration.GetShaderDefineOptions(a_target); }
+		bool HasShaderDefine(engine::ShaderInjectionTarget a_target) const override { return Declaration.HasShaderDefine(a_target); }
+		bool RequiresShaderGraphicsPair(engine::ShaderInjectionTarget a_target) const override { return Declaration.RequiresShaderGraphicsPair(a_target); }
 	};
 
 #ifdef TRACY_SUPPORT

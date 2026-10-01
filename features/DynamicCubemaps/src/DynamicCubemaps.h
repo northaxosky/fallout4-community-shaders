@@ -5,6 +5,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/PixelShaderResourceSnapshot.h"
+#include "ShaderDefines.h"
 
 #include <DirectXMath.h>
 #include <array>
@@ -33,7 +34,7 @@ namespace cs
 namespace cs::features
 {
 	class DynamicCubemaps :
-		public Feature,
+		public ShaderFeature<dc::kShaderDefines>,
 		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 	public:

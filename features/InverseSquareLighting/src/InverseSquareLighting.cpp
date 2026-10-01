@@ -11,7 +11,7 @@
 #include <mutex>
 #include <utility>
 
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/LocalLights.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Telemetry/Telemetry.h"
@@ -346,10 +346,9 @@ namespace cs::features
 			FailLoad(error);
 			return;
 		}
-		if (!engine::RegisterFeatureShaderContributions("InverseSquareLighting", [](engine::ShaderReplacementRegistration& registration) {
+		if (!engine::RegisterFeatureShaderBindings("InverseSquareLighting", *this, [](engine::ShaderReplacementRegistration& registration) {
 				const bool compute = registration.targetId == engine::ShaderInjectionTarget::kDfTiledLighting;
 				const auto stage = compute ? engine::ShaderStage::kCompute : engine::ShaderStage::kPixel;
-				registration.isReady = [] { return g_state.resources.load(); };
 				registration.bind = [compute](ID3D11DeviceContext* context) {
 						if (compute) {
 							auto* view = Enabled() ? g_state.views[g_state.uploadedSide].get() : nullptr;

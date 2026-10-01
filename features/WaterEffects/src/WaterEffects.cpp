@@ -18,7 +18,7 @@
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/ScopedContextState.h"
@@ -120,10 +120,7 @@ namespace cs::features
 		PublishSettings();
 
 		// FO4: only owned, validated routes may activate a live contribution.
-		if (!cs::engine::RegisterFeatureShaderContributions("WaterEffects", [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && cs::render::IsSharedDataReady();
-				};
+		if (!cs::engine::RegisterFeatureShaderBindings("WaterEffects", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfLight) {
 					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 						.resourceType = cs::engine::ShaderResourceType::kShaderResource,

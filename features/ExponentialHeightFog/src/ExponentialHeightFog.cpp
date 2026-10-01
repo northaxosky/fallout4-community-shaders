@@ -10,7 +10,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -143,8 +143,7 @@ namespace cs::features
 	void ExponentialHeightFog::Load()
 	{
 		PublishSettings();
-		if (!engine::RegisterFeatureShaderContributions("ExponentialHeightFog", [this](engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); };
+		if (!engine::RegisterFeatureShaderBindings("ExponentialHeightFog", *this, [this](engine::ShaderReplacementRegistration& registration) {
 				const auto target = registration.targetId;
 				if (target == engine::ShaderInjectionTarget::kBsLighting || target == engine::ShaderInjectionTarget::kBsdfLight)
 					return;

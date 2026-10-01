@@ -6,6 +6,7 @@
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "ScreenSpaceGIConstants.h"
 #include "ScreenSpaceGISettings.h"
+#include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 
 #include <array>
@@ -16,7 +17,7 @@
 namespace cs::features
 {
 	class ScreenSpaceGI :
-		public Feature,
+		public ShaderFeature<ssgi::kShaderDefines>,
 		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 	public:

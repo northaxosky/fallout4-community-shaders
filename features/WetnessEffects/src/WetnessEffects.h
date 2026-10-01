@@ -4,6 +4,7 @@
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/PixelShaderResourceSnapshot.h"
+#include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 #include "WetnessMath.h"
 
@@ -16,7 +17,7 @@ struct ID3D11DeviceContext;
 
 namespace cs::features
 {
-	class WetnessEffects : public Feature
+	class WetnessEffects : public ShaderFeature<wetness::kShaderDefines>
 	{
 	public:
 		enum class DebugVisualization : std::uint32_t

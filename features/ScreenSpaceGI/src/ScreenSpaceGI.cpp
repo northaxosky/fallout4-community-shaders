@@ -14,7 +14,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -144,7 +144,7 @@ namespace cs::features
 		claims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 			.resourceType = cs::engine::ShaderResourceType::kShaderResource,
 			.slot = kSpecularSlot });
-		if (!cs::engine::RegisterFeatureShaderContributions("ScreenSpaceGI", [this, &claims](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings("ScreenSpaceGI", *this, [this, &claims](cs::engine::ShaderReplacementRegistration& registration) {
 				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite) {
 					registration.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); };
 					registration.slotClaims = std::move(claims);

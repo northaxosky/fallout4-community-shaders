@@ -815,42 +815,30 @@ namespace cs::engine
 			return std::ranges::adjacent_find(claims) != claims.end();
 		}
 
-		bool IsReady(
-			const ShaderReplacementRegistration& a_registration,
-			std::size_t a_registrationIndex)
+		ShaderInjectionDefines GetDefines(const ShaderReplacementRegistration& a_registration)
 		{
-			if (!a_registration.isReady)
-				return true;
-
-			try {
-				return a_registration.isReady();
-			} catch (const std::exception& e) {
-				L->warn(
-					"Readiness predicate for '{}' on '{}' failed: {}; contributor skipped.",
-					ContributorName(a_registration, a_registrationIndex),
-					kTargets[ToIndex(a_registration.targetId)].name,
-					e.what());
-			} catch (...) {
-				L->warn(
-					"Readiness predicate for '{}' on '{}' failed; contributor skipped.",
-					ContributorName(a_registration, a_registrationIndex),
-					kTargets[ToIndex(a_registration.targetId)].name);
-			}
-			return false;
+			const auto* feature = a_registration.feature;
+			if (!feature || !feature->IsLoaded() || !feature->HasShaderDefine(a_registration.targetId))
+				return {};
+			ShaderInjectionDefines defines{ { std::string(feature->GetShaderDefineName()), "1" } };
+			for (const auto& [name, value] : feature->GetShaderDefineOptions(a_registration.targetId))
+				defines.emplace(name, value);
+			return defines;
 		}
 
 		bool HasDefineConflict(
 			const ShaderReplacementRegistration& a_registration,
 			std::span<const ShaderReplacementRegistration> a_contributions,
-			std::string_view& a_conflictingName,
-			std::string_view& a_existingValue)
+			std::string& a_conflictingName,
+			std::string& a_existingValue)
 		{
-			for (const auto& [name, value] : a_registration.defines) {
+			for (const auto& [name, value] : GetDefines(a_registration)) {
 				for (const auto& contribution : a_contributions) {
 					if ((contribution.stages & a_registration.stages) == 0)
 						continue;
-					const auto existing = contribution.defines.find(name);
-					if (existing != contribution.defines.end() && existing->second != value) {
+					const auto defines = GetDefines(contribution);
+					const auto existing = defines.find(name);
+					if (existing != defines.end() && existing->second != value) {
 						a_conflictingName = name;
 						a_existingValue = existing->second;
 						return true;
@@ -944,7 +932,7 @@ namespace cs::engine
 					collision->slot);
 				return false;
 			}
-			for (const auto& [name, value] : a_registration.defines) {
+			for (const auto& [name, value] : GetDefines(a_registration)) {
 				bool conflict = false;
 				std::string_view conflictingValue;
 				ForEachStage(
@@ -982,9 +970,8 @@ namespace cs::engine
 			ForEachStage(
 				a_registration.stages,
 				[&](std::size_t a_stage) {
-					a_ledger.defines[a_stage].insert(
-						a_registration.defines.begin(),
-						a_registration.defines.end());
+					const auto defines = GetDefines(a_registration);
+					a_ledger.defines[a_stage].insert(defines.begin(), defines.end());
 				});
 		}
 
@@ -1012,23 +999,12 @@ namespace cs::engine
 					const auto& registration = a_registrations[registrationIndex];
 					if (registration.targetId != metadata.id)
 						continue;
-					if (!render::IsSharedDataReady()) {
-						L->error(
-							"Contributor '{}' for '{}' dropped because the shared substrate is unavailable.",
-							ContributorName(registration, registrationIndex),
-							metadata.name);
-						continue;
-					}
-					if (!IsReady(registration, registrationIndex)) {
-						L->warn(
-							"Contributor '{}' was not ready at freeze; '{}' will run stock for this session (injection readiness is frozen once at startup).",
-							registration.contributor,
-							metadata.name);
+					if (registration.feature && !registration.feature->IsLoaded()) {
 						continue;
 					}
 
-					std::string_view conflictingName;
-					std::string_view existingValue;
+					std::string conflictingName;
+					std::string existingValue;
 					if (HasDefineConflict(
 							registration,
 							target.contributions,
@@ -1040,7 +1016,7 @@ namespace cs::engine
 							metadata.name,
 							conflictingName,
 							existingValue,
-							registration.defines.find(conflictingName)->second);
+							GetDefines(registration).at(conflictingName));
 						target.slotCollision = true;
 						continue;
 					}
@@ -1073,7 +1049,8 @@ namespace cs::engine
 					}
 
 					++target.contributors;
-					target.defines.insert(registration.defines.begin(), registration.defines.end());
+					const auto defines = GetDefines(registration);
+					target.defines.insert(defines.begin(), defines.end());
 					target.contributions.push_back(registration);
 					claimedSlots.insert(
 						claimedSlots.end(),
@@ -1987,7 +1964,7 @@ namespace cs::engine
 			const auto contribution = std::ranges::find_if(
 				published->contributions,
 				[&](const ShaderReplacementRegistration& a_candidate) {
-					return a_candidate.contributor == a_contributor && a_candidate.targetId == registration.targetId && a_candidate.stages == registration.stages && a_candidate.defines == registration.defines && a_candidate.slotClaims == registration.slotClaims && !std::ranges::contains(matched, std::addressof(a_candidate));
+					return a_candidate.contributor == a_contributor && a_candidate.targetId == registration.targetId && a_candidate.stages == registration.stages && a_candidate.feature == registration.feature && a_candidate.slotClaims == registration.slotClaims && !std::ranges::contains(matched, std::addressof(a_candidate));
 				});
 			if (contribution == published->contributions.end()) {
 				a_error = "'" + std::string(metadata->name) + "' lost a registered route for contributor '" + std::string(a_contributor) + "'";

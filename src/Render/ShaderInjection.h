@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderDefineProvider.h"
 #include "Render/ShaderInjectionTargets.h"
 #include "Render/SharedData.h"
 
@@ -140,7 +141,6 @@ namespace cs::engine
 	using ScopedPixelShaderInjectionBindings = ScopedShaderInjectionBindings;
 
 	using ShaderInjectionDefines = std::map<std::string, std::string, std::less<>>;
-	using ShaderInjectionReadyPredicate = std::function<bool()>;
 	using ShaderInjectionBindCallback = std::function<void(ID3D11DeviceContext*)>;
 
 	struct ShaderReplacementRegistration
@@ -148,8 +148,7 @@ namespace cs::engine
 		ShaderInjectionTarget targetId = ShaderInjectionTarget::kCount;
 		ShaderStageMask stages = ShaderStageBit(ShaderStage::kPixel);
 		std::string contributor;
-		ShaderInjectionDefines defines;
-		ShaderInjectionReadyPredicate isReady;
+		const ShaderDefineProvider* feature = nullptr;
 		ShaderInjectionBindCallback bind;
 		std::vector<ShaderSlotClaim> slotClaims;
 		bool requiresGraphicsPair = false;

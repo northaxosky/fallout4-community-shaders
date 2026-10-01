@@ -25,7 +25,7 @@
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -170,8 +170,7 @@ namespace cs::features
 	{
 		// FO4: directional consumers execute inside DeferredLightsImpl under shader ownership.
 		const bool replacementRegistered =
-			cs::engine::RegisterFeatureShaderContributions("ScreenSpaceShadows", [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [this] { return IsShadowMaskReady(); };
+			cs::engine::RegisterFeatureShaderBindings("ScreenSpaceShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				registration.bind = [this](ID3D11DeviceContext* a_context) { BindShadowMask(a_context); };
 				registration.slotClaims = { { .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,

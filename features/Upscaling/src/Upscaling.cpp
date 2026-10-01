@@ -9,7 +9,7 @@
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
@@ -103,8 +103,7 @@ namespace cs::features
 
 	void Upscaling::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderContributions("Upscaling", [](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [] { return cs::render::IsSharedDataReady(); };
+		if (!cs::engine::RegisterFeatureShaderBindings("Upscaling", *this, [](cs::engine::ShaderReplacementRegistration&) {
 			})) {
 			FailLoad("Upscaling could not register its SSLR shader contribution");
 		}

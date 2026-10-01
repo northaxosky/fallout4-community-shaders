@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "ScreenSpaceShadowsSettings.h"
+#include "ShaderDefines.h"
 #include "SssMaskBinding.h"
 #include "Utils/CSBuffer.h"
 
@@ -14,7 +15,7 @@
 
 namespace cs::features
 {
-	class ScreenSpaceShadows : public Feature
+	class ScreenSpaceShadows : public ShaderFeature<sss::kShaderDefines>
 	{
 	public:
 		static ScreenSpaceShadows* GetSingleton();

@@ -5,6 +5,7 @@
 #include "FeatureCategories.h"
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "Render/PixelShaderSamplerSnapshot.h"
+#include "ShaderDefines.h"
 #include "TerrainShadowsMath.h"
 #include "TerrainShadowsSettings.h"
 #include "Utils/CSBuffer.h"
@@ -24,7 +25,7 @@
 
 namespace cs::features
 {
-	class TerrainShadows : public Feature
+	class TerrainShadows : public ShaderFeature<terrain_shader::kShaderDefines>
 	{
 	public:
 		static constexpr std::uint32_t kShadowHeightPSSlot = 60;

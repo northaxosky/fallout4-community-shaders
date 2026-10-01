@@ -14,7 +14,7 @@
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -90,12 +90,9 @@ namespace cs::features
 
 	void WetnessEffects::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderContributions("WetnessEffects", [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings("WetnessEffects", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				const auto a_target = registration.targetId;
 				const bool a_bindsComposite = a_target == cs::engine::ShaderInjectionTarget::kBsdfComposite;
-				registration.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire) && _filmAvailabilitySRV;
-				};
 				const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
 				const bool compute = a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting;
 				const auto stage = compute ? cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel;

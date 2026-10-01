@@ -1,5 +1,5 @@
+#include "FeatureShaderDeclarations.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
 #include "Render/NativeShaderFamily.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderFamilyDescriptor.h"
@@ -250,11 +250,12 @@ namespace
 			.profile = "ps_5_0",
 			.defines = { { "CONFLICT", "family" } },
 		};
+		const ShaderDefineDeclaration definition{ "CONFLICT", { ShaderInjectionTarget::kBsLighting } };
 		const ShaderReplacementRegistration contribution{
 			.targetId = ShaderInjectionTarget::kBsLighting,
 			.stages = ShaderStageBit(ShaderStage::kPixel),
 			.contributor = "test",
-			.defines = { { "CONFLICT", "feature" } },
+			.feature = &definition,
 		};
 		std::string error;
 		Expect(
@@ -292,7 +293,8 @@ namespace
 		ShaderReplacementRegistration first;
 		first.targetId = ShaderInjectionTarget::kBsdfComposite;
 		first.contributor = "ledger-first";
-		first.defines = { { "LEDGER_TEST", "1" } };
+		static const ShaderDefineDeclaration firstDefinition{ "LEDGER_TEST", { ShaderInjectionTarget::kBsdfComposite } };
+		first.feature = &firstDefinition;
 		first.slotClaims = { textureClaim(25) };
 		Expect(RegisterReplacement(std::move(first)), "first claim was rejected");
 
@@ -329,7 +331,14 @@ namespace
 		ShaderReplacementRegistration conflictingDefine;
 		conflictingDefine.targetId = ShaderInjectionTarget::kBsdfComposite;
 		conflictingDefine.contributor = "ledger-conflicting-define";
-		conflictingDefine.defines = { { "LEDGER_TEST", "2" } };
+		struct ConflictDefinition : ShaderDefineProvider
+		{
+			std::string_view GetShaderDefineName() const override { return "SECOND"; }
+			ShaderDefineOptions GetShaderDefineOptions(ShaderInjectionTarget) const override { return { { "LEDGER_TEST", "2" } }; }
+			bool HasShaderDefine(ShaderInjectionTarget) const override { return true; }
+		};
+		static const ConflictDefinition conflictDefinition;
+		conflictingDefine.feature = &conflictDefinition;
 		Expect(
 			!RegisterReplacement(std::move(conflictingDefine)),
 			"conflicting define claim was accepted");
@@ -359,7 +368,6 @@ namespace
 		ShaderReplacementRegistration rejectedAnchor;
 		rejectedAnchor.targetId = ShaderInjectionTarget::kBsdfComposite;
 		rejectedAnchor.contributor = "ledger-rejected-anchor";
-		rejectedAnchor.defines = { { "LEDGER_ANCHOR", "1" } };
 		rejectedAnchor.bind = [](ID3D11DeviceContext*) {};
 		rejectedAnchor.slotClaims = { textureClaim(31) };
 		Expect(
@@ -370,7 +378,6 @@ namespace
 		ShaderReplacementRegistration reuseAnchor;
 		reuseAnchor.targetId = ShaderInjectionTarget::kBsdfComposite;
 		reuseAnchor.contributor = "ledger-anchor-reuse";
-		reuseAnchor.defines = { { "LEDGER_ANCHOR", "2" } };
 		reuseAnchor.slotClaims = { textureClaim(31) };
 		Expect(
 			RegisterReplacement(std::move(reuseAnchor)),
@@ -953,7 +960,8 @@ namespace
 		contribution.targetId = ShaderInjectionTarget::kDfTiledLighting;
 		contribution.stages = ShaderStageBit(ShaderStage::kCompute);
 		contribution.contributor = "compute-phase";
-		contribution.defines = { { "COMPUTE_PHASE_TEST", "1" } };
+		static const ShaderDefineDeclaration computeDefinition{ "COMPUTE_PHASE_TEST", { ShaderInjectionTarget::kDfTiledLighting } };
+		contribution.feature = &computeDefinition;
 		contribution.slotClaims = { { ShaderStage::kCompute, ShaderResourceType::kShaderResource, 8 } };
 		contribution.bind = [](ID3D11DeviceContext* a_context) {
 			auto* metadata = publishedDepth.get();
