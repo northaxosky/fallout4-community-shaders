@@ -6,6 +6,7 @@
 #include "RE/I/ImageSpaceManager.h"
 #include "RE/S/SceneGraph.h"
 #include "Render/FrameBuffer.h"
+#include "Render/RendererContext.h"
 
 #include <DirectXMath.h>
 #include <d3d11.h>
@@ -342,11 +343,11 @@ namespace cs::engine
 		static_assert(offsetof(RE::BSGraphics::RendererShadowState, cameraData) +
 						  offsetof(RE::BSGraphics::ViewData, inv1stPersonProjMat) ==
 					  0x8A0);
-		const auto* renderer = RE::BSGraphics::GetRendererData();
-		if (!renderer || !renderer->shadowState)
+		const auto* context = GetActiveContext();
+		if (!context)
 			return std::nullopt;
 		DirectX::XMFLOAT4X4 result{};
-		std::memcpy(&result, renderer->shadowState->cameraData.inv1stPersonProjMat, sizeof(result));
+		std::memcpy(&result, context->shadowState.cameraData.inv1stPersonProjMat, sizeof(result));
 		const auto matrix = DirectX::XMLoadFloat4x4(&result);
 		const float determinant = DirectX::XMVectorGetX(DirectX::XMMatrixDeterminant(matrix));
 		return HasFiniteMatrix(result) && std::isfinite(determinant) && determinant != 0.0f ? std::optional{ result } : std::nullopt;
