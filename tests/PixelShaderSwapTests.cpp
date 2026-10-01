@@ -38,7 +38,7 @@ namespace
 		constexpr std::array cases{
 			TestCase{ false, false, 0, { true, false } },
 			TestCase{ false, false, 2, { true, false } },
-			TestCase{ true, false, 0, {} },
+			TestCase{ true, false, 0, { true, false } },
 			TestCase{ true, false, 2, { true, true } },
 			TestCase{ false, true, 0, { true, false } },
 			TestCase{ false, true, 2, { true, false } },
@@ -53,8 +53,8 @@ namespace
 				"deferred draw anchor decision truth table mismatch");
 		}
 		Check(
-			SelectDeferredDrawAnchorDecision(true, false, UINT32_MAX) == DeferredDrawAnchorDecision{},
-			"lights phase accepted an unrelated residual r9d value");
+			SelectDeferredDrawAnchorDecision(true, false, UINT32_MAX) == DeferredDrawAnchorDecision{ true, false },
+			"non-fullscreen light draws must bind contributions without fullscreen callbacks");
 	}
 
 	struct PipelineFixture
