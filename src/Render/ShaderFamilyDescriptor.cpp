@@ -139,52 +139,6 @@ namespace cs::engine
 			return true;
 		}
 
-		bool AddLightingDefines(
-			ShaderInjectionDefines& a_defines,
-			ShaderStage a_stage,
-			std::uint32_t a_descriptor)
-		{
-			if (a_stage == ShaderStage::kVertex) {
-				if ((a_descriptor & 0x800U) != 0)
-					Define(a_defines, "BSLIGHTING_VS_DISPLACED");
-				else if ((a_descriptor & 0x4U) != 0)
-					Define(a_defines, "BSLIGHTING_VS_REDUCED");
-				else if ((a_descriptor & 0x2U) != 0)
-					Define(a_defines, "BSLIGHTING_VS_SKINNED");
-				else if ((a_descriptor & 0x500U) == 0x100U)
-					Define(a_defines, "BSLIGHTING_VS_WORLD");
-				else
-					Define(a_defines, "BSLIGHTING_VS_STATIC");
-				DefineBit(a_defines, a_descriptor, 0x1U, "BSL_VERTEX_COLOR");
-				return true;
-			}
-			if (a_stage != ShaderStage::kPixel)
-				return false;
-
-			if ((a_descriptor & 0xC0U) != 0)
-				Define(a_defines, "BSLIGHTING_PS_RESOURCE");
-			else if ((a_descriptor & 0x400U) != 0)
-				Define(a_defines, "BSLIGHTING_PS_COLOR");
-			else
-				Define(a_defines, "BSLIGHTING_PS_CORE");
-			DefineBit(a_defines, a_descriptor, 0x40U, "BSL_BASE_LUT");
-			DefineBit(a_defines, a_descriptor, 0x80U, "BSL_OVERLAY");
-			if ((a_descriptor & 0xC00U) == 0xC00U) {
-				Define(a_defines, "BSL_NO_VERTEX_ALPHA");
-			} else if ((a_descriptor & 0x600U) == 0x600U) {
-				Define(a_defines, "BSL_VERTEX_TINT");
-			} else if ((a_descriptor & 0x500U) == 0x500U) {
-				Define(a_defines, "BSL_BASE_BLEND");
-				Define(a_defines, "BSL_BASE_BLEND_TINT");
-			} else {
-				DefineBit(a_defines, a_descriptor, 0x100U, "BSL_ENVMAP");
-				DefineBit(a_defines, a_descriptor, 0x200U, "BSL_GLOWMAP");
-				DefineBit(a_defines, a_descriptor, 0x400U, "BSL_BASE_BLEND");
-			}
-			DefineBit(a_defines, a_descriptor, 0x4U, "BSL_REDUCED_NORMAL");
-			return true;
-		}
-
 		bool AddWaterDefines(
 			ShaderInjectionDefines& a_defines,
 			std::uint32_t d)
@@ -680,8 +634,6 @@ namespace cs::engine
 					return false;
 				DefineBit(a_defines, d, 1, "RENDER_DEPTH");
 				return true;
-			case ShaderInjectionTarget::kBsLighting:
-				return AddLightingDefines(a_defines, a_descriptor.stage, d);
 			case ShaderInjectionTarget::kBsWater:
 				return AddWaterDefines(a_defines, d);
 			case ShaderInjectionTarget::kBsdfLight:

@@ -929,13 +929,6 @@ namespace
 											  { "WATER_EFFECTS", "1" }, { "WETNESS_EFFECTS", "1" }, { "TERRAIN_SHADOWS", "1" } });
 			a_jobs.push_back({ .path = bsdfLight, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog directional and coat consumer", .required = { CB(4), CB(5), CB(6) }, .forbidden = { Texture(19) } });
 		}
-		for (const char* family : { "BSLIGHTING_PS_COLOR", "BSLIGHTING_PS_CORE", "BSLIGHTING_PS_RESOURCE" })
-			a_jobs.push_back({ .path = a_root / "Lighting.hlsl",
-				.defines = { { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } },
-				.profile = "ps_5_0",
-				.description = "ExponentialHeightFog secondary sunlight consumer",
-				.required = { CB(4), CB(5), CB(6) },
-				.forbidden = { Texture(19), CB(7) } });
 		for (const auto& [file, defines] : std::vector<std::pair<const char*, ShaderDefines>>{
 				 { "Water.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" } } },
 				 { "Water.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "LOD", "1" } } },
@@ -1220,13 +1213,6 @@ namespace
 		}
 
 		const auto water = a_root / "Water.hlsl";
-		for (const char* family : { "BSLIGHTING_PS_COLOR", "BSLIGHTING_PS_CORE", "BSLIGHTING_PS_RESOURCE" }) {
-			a_jobs.push_back({ .path = a_root / "Lighting.hlsl",
-				.defines = { { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
-				.profile = "ps_5_0",
-				.description = "BSLighting terrain directional consumer",
-				.required = { CB(4), CB(6), Texture(60), Sampler(13) } });
-		}
 		a_jobs.push_back({ .path = a_root / "DistantTree.hlsl",
 			.defines = { { "BSDISTANTTREE_PS_SOURCE", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
 			.profile = "ps_5_0",

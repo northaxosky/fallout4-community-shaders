@@ -3,7 +3,7 @@
 ## 0.3.0
 
 - Shader ownership toggles are editable in Advanced settings and apply immediately, including to feature shader contributions.
-- Utility, sky, particle and blood splatter shaders remain stock. Effect, distant tree and forward lighting replacements remain available for fog and terrain-shadow consumers.
+- Utility, sky, particle, blood splatter and secondary-view lighting shaders remain stock. Effect and distant tree replacements remain available for fog and terrain-shadow consumers.
 
 ## 0.2.1
 

@@ -742,7 +742,6 @@ namespace
 			Family{ ShaderInjectionTarget::kBsdfComposite, Type::kDFComposite, "DFComposite" },
 			Family{ ShaderInjectionTarget::kEffect, Type::kEffect, "Effect" },
 			Family{ ShaderInjectionTarget::kDistantTree, Type::kDistantTree, "DistantTree" },
-			Family{ ShaderInjectionTarget::kBsLighting, Type::kLighting, "Lighting" },
 			Family{ ShaderInjectionTarget::kBsWater, Type::kWater, "Water" },
 			Family{ ShaderInjectionTarget::kImageSpace, Type::kImageSpace, "ISSSLRRaytracing" },
 			Family{ ShaderInjectionTarget::kDfTiledLighting, Type::kTotal, "DFTiledLighting" }
@@ -773,6 +772,7 @@ namespace
 			}
 		}
 		Expect(!ResolveGraphicsShaderTarget(Type::kDFPrepass, "Unknown"), "ambiguous type 4 did not fail closed");
+		Expect(!IsShaderSourceAvailable(a_shaderRoot, "Lighting"), "secondary-view Lighting must remain stock");
 		Expect(!ResolveStandaloneComputeTarget("Unknown"), "unknown standalone compute did not fail closed");
 		Expect(ResolveStandaloneComputeTarget("IndexBufferOffsetCS") == ShaderInjectionTarget::kImageSpace,
 			"unowned standalone compute observation was lost");

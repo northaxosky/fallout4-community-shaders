@@ -36,15 +36,14 @@ namespace cs::engine
 			add("ScreenSpaceShadows", kScreenSpaceShadows, { kBsdfLight });
 			add("ScreenSpaceGI", kScreenSpaceGi, { kBsdfComposite, kDeferredPrepass });
 			add("InverseSquareLighting", kInverseSquareLighting, { kBsdfLight, kDfTiledLighting });
-			// Effect, DistantTree and Lighting sources remain for these upstream forward consumers.
 			add("ExponentialHeightFog", kExponentialHeightFog,
-				{ kBsdfComposite, kBsWater, kEffect, kDistantTree, kBsLighting, kBsdfLight },
+				{ kBsdfComposite, kBsWater, kEffect, kDistantTree, kBsdfLight },
 				"EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG");
 			add("DynamicCubemaps", kDynamicCubemaps, { kBsWater, kBsdfComposite, kBsdfLight, kDfTiledLighting, kImageSpace });
 			add("WetnessEffects", kWetnessEffects, { kDeferredPrepass }, nullptr, true);
 			add("WetnessEffects", kWetnessEffects, { kBsdfLight, kDfTiledLighting, kBsdfComposite },
 				kWetnessEffectsFullscreenDebug);
-			add("TerrainShadows", kTerrainShadows, { kBsdfLight, kBsLighting, kDistantTree, kBsWater, kEffect, kBsdfComposite },
+			add("TerrainShadows", kTerrainShadows, { kBsdfLight, kDistantTree, kBsWater, kEffect, kBsdfComposite },
 				kTerrainShadowsFullscreenDebug);
 			add("WaterEffects", kWaterEffects, { kBsdfLight, kBsdfComposite }, kWaterEffectsFullscreenDebug);
 			add("Upscaling", "UPSCALING", { kImageSpace });
