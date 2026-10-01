@@ -397,7 +397,8 @@ namespace
 
 	winrt::com_ptr<ID3D11ShaderResourceView> CreateUintSrv(
 		ID3D11Device* a_device,
-		std::uint32_t a_value)
+		std::uint32_t a_value,
+		UINT a_bindFlags = D3D11_BIND_SHADER_RESOURCE)
 	{
 		D3D11_TEXTURE2D_DESC desc{};
 		desc.Width = 1;
@@ -407,7 +408,7 @@ namespace
 		desc.Format = DXGI_FORMAT_R32_UINT;
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
-		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		desc.BindFlags = a_bindFlags;
 		D3D11_SUBRESOURCE_DATA initial{ &a_value, sizeof(a_value) };
 		winrt::com_ptr<ID3D11Texture2D> texture;
 		if (FAILED(a_device->CreateTexture2D(
@@ -839,7 +840,7 @@ namespace
 		Expect(CreateWarpDevice(device, context), "could not create frame binding WARP device");
 		if (!context)
 			return;
-		auto texture = CreateUintSrv(device.get(), 1);
+		auto texture = CreateUintSrv(device.get(), 1, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET);
 		auto buffer = CreateUintConstantBuffer(device.get(), 1);
 		auto* view = texture.get();
 		auto* cb = buffer.get();
@@ -868,6 +869,25 @@ namespace
 		Expect(GetShaderInjectionSummary().draw.frameBindings.lost == 3 &&
 				   GetFrameBindingMetrics().lost == 0 && GetFrameBindingMetrics().lostTotal == 3,
 			"completed-frame binding evidence was not retained");
+
+		winrt::com_ptr<ID3D11Resource> resource;
+		texture->GetResource(resource.put());
+		winrt::com_ptr<ID3D11RenderTargetView> target;
+		const auto created = device->CreateRenderTargetView(resource.get(), nullptr, target.put());
+		Expect(SUCCEEDED(created), "could not create frame binding producer RTV");
+		if (FAILED(created))
+			return;
+		auto* output = target.get();
+		context->OMSetRenderTargets(1, &output, nullptr);
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 25, 1, &view);
+		VerifyFrameBindings(context.get(), ShaderStage::kPixel, ShaderInjectionTarget::kBsdfComposite);
+		Expect(GetFrameBindingMetrics().lost == 1 && GetFrameBindingMetrics().resources[1].test(25),
+			"publication before native G-buffer output retirement was not detected");
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 25, 1, &view);
+		VerifyFrameBindings(context.get(), ShaderStage::kPixel, ShaderInjectionTarget::kBsdfComposite);
+		Expect(GetFrameBindingMetrics().checks == 2 && GetFrameBindingMetrics().lost == 1,
+			"publication after the native producer boundary did not restore the frame binding");
 	}
 
 	void CheckComputePhaseAndStateRestoration(const std::filesystem::path& a_shaderRoot)

@@ -104,8 +104,11 @@ namespace cs::features
 			!cs::engine::RegisterPostDeferredPrePass([this] {
 				_inPrepass = false;
 				Prepass();
+			}) ||
+			!cs::engine::RegisterPreDeferredComposite([this] {
+				BindCompositeResources(GetImmediateContext());
 			})) {
-			FailLoad("Wetness could not register its deferred material producer");
+			FailLoad("Wetness could not register its deferred resource boundaries");
 			return;
 		}
 		_registrationsReady.store(true, std::memory_order_release);
@@ -278,7 +281,6 @@ namespace cs::features
 		} else {
 			BindFilmInput(context, false);
 			BindFilmInput(context, true);
-			BindCompositeResources(context);
 		}
 	}
 

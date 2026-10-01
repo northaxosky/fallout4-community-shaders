@@ -319,18 +319,7 @@ namespace cs
 
 	void FeatureManager::PrepassAll()
 	{
-		for (auto* feature : _loadedFeatures) {
-			if (!PrepareRuntimeCallback(*feature, "Prepass"))
-				continue;
-			try {
-				feature->Prepass();
-			} catch (const std::exception& e) {
-				QuarantineRuntimeCallback(*feature, "Prepass", e.what());
-			} catch (...) {
-				QuarantineRuntimeCallback(*feature, "Prepass", "Non-standard exception");
-			}
-		}
-		FinishRuntimeCallbackPass();
+		DispatchRuntimeCallbacks(*this, "Prepass", [](Feature& a_feature) { a_feature.Prepass(); });
 	}
 
 	void FeatureManager::ActivateAll()
