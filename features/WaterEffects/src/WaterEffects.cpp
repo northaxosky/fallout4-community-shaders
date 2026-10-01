@@ -296,6 +296,7 @@ namespace cs::features
 	void WaterEffects::RenderDebug(ID3D11DeviceContext* a_context)
 	{
 		_debugFrameReady = false;
+		cs::render::InvalidateFullscreenDebugData();
 		const auto mode = _debugVisualization.load(std::memory_order_acquire);
 		if (!CanBind() || mode == DebugVisualization::kOff ||
 			!_debugResourcesReady.load(std::memory_order_acquire))
@@ -355,6 +356,7 @@ namespace cs::features
 			a_context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &sampler);
 			a_context->Draw(3, 0);
 			_debugFrameReady = true;
+			cs::render::InvalidateFullscreenDebugData();
 			_debugFrames.fetch_add(1, std::memory_order_relaxed);
 		} catch (const std::exception& e) {
 			L->warn("Water debug rendering failed: {}", e.what());
@@ -435,9 +437,9 @@ namespace cs::features
 		if (!a_context || !CanBind())
 			return;
 		auto* srv = _causticsSrv.get();
-		a_context->PSSetShaderResources(kCausticsPSSlot, 1, &srv);
+		cs::engine::BindInjectionShaderResources(a_context, kCausticsPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _causticsSampler.get();
-		a_context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &sampler);
+		cs::engine::BindInjectionSamplers(a_context, kCausticsSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
 	}
 

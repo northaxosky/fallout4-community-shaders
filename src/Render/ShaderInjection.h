@@ -4,6 +4,7 @@
 #include "Render/ShaderInjectionTargets.h"
 #include "Render/SharedData.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -68,6 +69,27 @@ namespace cs::engine
 		auto operator<=>(const ShaderSlotClaim&) const = default;
 	};
 
+	struct ShaderInjectionDrawMetrics
+	{
+		std::uint32_t frame = 0;
+		std::uint64_t scopes = 0;
+		std::uint64_t scopeNanoseconds = 0;
+		std::uint64_t captures = 0;
+		std::uint64_t restores = 0;
+		std::uint64_t d3dBinds = 0;
+	};
+
+	// Render thread: publish the completed frame, including forward draws after composite.
+	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept;
+	void RecordShaderInjectionD3DBinds(std::uint32_t a_count = 1) noexcept;
+	// Pixel callbacks use these setters: batch contiguous writes and capture only overwritten engine slots.
+	void BindInjectionShaderResources(ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*) noexcept;
+	void BindInjectionSamplers(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*) noexcept;
+	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
+	void CaptureShaderInjectionOutputs(ID3D11DeviceContext*) noexcept;
+	// Flush before observing context state or changing outputs that may alias queued SRVs.
+	void FlushShaderInjectionBindings() noexcept;
+
 	class ScopedShaderInjectionBindings
 	{
 	public:
@@ -75,7 +97,7 @@ namespace cs::engine
 		~ScopedShaderInjectionBindings() noexcept;
 		ScopedShaderInjectionBindings(const ScopedShaderInjectionBindings&) = delete;
 		ScopedShaderInjectionBindings& operator=(const ScopedShaderInjectionBindings&) = delete;
-		void Capture(ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims);
+		void Capture(ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims) noexcept;
 
 	private:
 		struct Resource
@@ -96,16 +118,19 @@ namespace cs::engine
 		ShaderStage _stage;
 		ScopedShaderInjectionBindings* _previous;
 		ID3D11DeviceContext* _context = nullptr;
-		render::SubstrateBindingSnapshot _substrate;
-		std::vector<Resource> _resources;
-		std::vector<Sampler> _samplers;
-		std::vector<Buffer> _buffers;
+		std::array<Resource, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> _resources;
+		std::array<Sampler, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> _samplers;
+		std::array<Buffer, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT> _buffers;
+		std::uint32_t _resourceCount = 0;
+		std::uint32_t _samplerCount = 0;
+		std::uint32_t _bufferCount = 0;
 		ID3D11RenderTargetView* _targets[8]{};
 		ID3D11DepthStencilView* _depth = nullptr;
 		ID3D11BlendState* _blend = nullptr;
 		float _blendFactor[4]{};
 		std::uint32_t _sampleMask = 0;
 		bool _outputCaptured = false;
+		std::chrono::steady_clock::time_point _started;
 	};
 	using ScopedPixelShaderInjectionBindings = ScopedShaderInjectionBindings;
 
@@ -224,6 +249,7 @@ namespace cs::engine
 		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
 		ComputeDispatchBridgeStatus computeBridge;
+		ShaderInjectionDrawMetrics draw;
 	};
 
 	std::string DescribeShaderInjectionDefines(

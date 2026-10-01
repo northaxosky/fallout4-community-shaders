@@ -93,7 +93,8 @@ namespace cs::features
 		{
 			winrt::com_ptr<ID3D11BlendState> native, film;
 		};
-		std::vector<FilmBlend> _filmBlends;
+		std::array<FilmBlend, D3D11_REQ_BLEND_OBJECT_COUNT_PER_DEVICE> _filmBlends;
+		std::size_t _filmBlendCount = 0;
 		std::atomic_bool _filmReady{ false };
 		mutable std::atomic_bool _suppressRipples{ false };
 		std::atomic_uint32_t _producerDraws{ 0 }, _producerRejected{ 0 };

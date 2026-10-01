@@ -82,6 +82,7 @@ namespace cs::features
 			std::uint32_t a_slot,
 			ID3D11ShaderResourceView** a_view) noexcept
 		{
+			cs::engine::FlushShaderInjectionBindings();
 			static_cast<ID3D11DeviceContext*>(a_context)->PSGetShaderResources(
 				static_cast<UINT>(a_slot),
 				1,
@@ -93,7 +94,7 @@ namespace cs::features
 			std::uint32_t a_slot,
 			ID3D11ShaderResourceView* a_view) noexcept
 		{
-			static_cast<ID3D11DeviceContext*>(a_context)->PSSetShaderResources(
+			cs::engine::BindInjectionShaderResources(static_cast<ID3D11DeviceContext*>(a_context),
 				static_cast<UINT>(a_slot),
 				1,
 				&a_view);

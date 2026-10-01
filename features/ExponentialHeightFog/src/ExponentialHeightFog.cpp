@@ -308,8 +308,8 @@ namespace cs::features
 	{
 		auto* volume = _volume.Integrated();
 		auto* sampler = _volume.Sampler();
-		a_context->PSSetShaderResources(19, 1, &volume);
-		a_context->PSSetSamplers(a_sampler, 1, &sampler);
+		engine::BindInjectionShaderResources(a_context, 19, 1, &volume);
+		engine::BindInjectionSamplers(a_context, a_sampler, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
 	}
 

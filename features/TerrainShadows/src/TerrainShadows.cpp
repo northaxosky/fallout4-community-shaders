@@ -1203,9 +1203,9 @@ namespace cs::features
 			return;
 		}
 		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
-		a_context->PSSetShaderResources(kShadowHeightPSSlot, 1, &srv);
+		cs::engine::BindInjectionShaderResources(a_context, kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
-		a_context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &sampler);
+		cs::engine::BindInjectionSamplers(a_context, kShadowHeightSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
 		_samplerBinds.fetch_add(1, std::memory_order_relaxed);
 		if (cs::telemetry::pump::Enabled()) {
@@ -1248,9 +1248,9 @@ namespace cs::features
 		if (!a_context || GetFullscreenDebugData().mode == 0)
 			return;
 		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
-		a_context->PSSetShaderResources(kShadowHeightPSSlot, 1, &srv);
+		cs::engine::BindInjectionShaderResources(a_context, kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
-		a_context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &sampler);
+		cs::engine::BindInjectionSamplers(a_context, kShadowHeightSamplerPSSlot, 1, &sampler);
 		_debugBinds.fetch_add(1, std::memory_order_relaxed);
 		if (cs::telemetry::pump::Enabled()) {
 			const auto* defines =

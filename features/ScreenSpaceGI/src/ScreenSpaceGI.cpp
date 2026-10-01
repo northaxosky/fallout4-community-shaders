@@ -240,6 +240,7 @@ namespace cs::features
 		try {
 			_constants = std::make_unique<cs::buffer::ConstantBuffer>(cs::buffer::ConstantBufferDesc<SSGICB>());
 			_consumer = std::make_unique<cs::buffer::ConstantBuffer>(cs::buffer::ConstantBufferDesc<ConsumerCB>());
+			_consumerData.reset();
 			_constants->SetName("SSGI/Constants.Buffer");
 			_consumer->SetName("SSGI/Consumer.Buffer");
 			_prepare.attach(reinterpret_cast<ID3D11ComputeShader*>(
@@ -442,7 +443,7 @@ namespace cs::features
 			UpdateConstants(*camera, width, height, state->frameCount);
 			auto* cb = _constants->CB();
 			context->CSSetConstantBuffers(1, 1, &cb);
-			_consumer->Update(ConsumerCB{ 1, tiled, {} });
+			UpdateConsumer(true, tiled);
 			ID3D11SamplerState* samplers[]{ _pointSampler.get(), _linearSampler.get() };
 			context->CSSetSamplers(0, 2, samplers);
 			Passes pass(context, kConsumerSlot, _consumer->CB());
@@ -518,15 +519,24 @@ namespace cs::features
 		}
 	}
 
+	void ScreenSpaceGI::UpdateConsumer(bool a_enabled, bool a_tiled)
+	{
+		const ConsumerCB data{ a_enabled, a_tiled, {} };
+		if (_consumerData && _consumerData->Enabled == data.Enabled && _consumerData->Tiled == data.Tiled)
+			return;
+		_consumer->Update(data);
+		_consumerData = data;
+	}
+
 	void ScreenSpaceGI::BindComposition(ID3D11DeviceContext* a_context)
 	{
 		if (!a_context || !_consumer)
 			return;
 		const auto* state = cs::engine::GetGraphicsState();
 		const bool ready = _settings.enabled && _produced && state && _hasFrame && _lastFrame == state->frameCount;
-		_consumer->Update(ConsumerCB{ ready, _tiled, {} });
+		UpdateConsumer(ready, _tiled);
 		auto* cb = _consumer->CB();
-		a_context->PSSetConstantBuffers(kConsumerSlot, 1, &cb);
+		cs::engine::BindInjectionConstantBuffers(a_context, kConsumerSlot, 1, &cb);
 		ID3D11ShaderResourceView* views[kCompositionCount]{};
 		if (ready) {
 			auto& t = _textures;
@@ -537,9 +547,9 @@ namespace cs::features
 			views[2] = hq ? nullptr : t.chroma[_outputGI]->srv.get();
 			views[3] = t.normalGloss->srv.get();
 		}
-		a_context->PSSetShaderResources(kCompositionSlot, kCompositionCount, views);
+		cs::engine::BindInjectionShaderResources(a_context, kCompositionSlot, kCompositionCount, views);
 		auto* specular = ready && _settings.enableExperimentalSpecularGI ? _textures.specular[_outputAO]->srv.get() : nullptr;
-		a_context->PSSetShaderResources(kSpecularSlot, 1, &specular);
+		cs::engine::BindInjectionShaderResources(a_context, kSpecularSlot, 1, &specular);
 		++_binds;
 	}
 

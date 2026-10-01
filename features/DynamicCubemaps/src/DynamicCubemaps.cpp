@@ -303,7 +303,7 @@ namespace cs::features
 									   nullptr) :
 			                   resources[0];
 		}
-		a_context->PSSetShaderResources(
+		cs::engine::BindInjectionShaderResources(a_context,
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
 	}
 

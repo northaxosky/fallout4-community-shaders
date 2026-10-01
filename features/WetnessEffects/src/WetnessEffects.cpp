@@ -132,7 +132,13 @@ namespace cs::features
 			return;
 		}
 		if (!cs::engine::RegisterPreDeferredPrePass([this] { BeginPrepass(); }) ||
-			!cs::engine::RegisterPostDeferredPrePass([this] { _inPrepass = false; })) {
+			!cs::engine::RegisterPostDeferredPrePass([this] {
+				_inPrepass = false;
+				if (auto* context = GetImmediateContext()) {
+					ID3D11ShaderResourceView* empty[2]{};
+					context->PSSetShaderResources(70, 2, empty);
+				}
+			})) {
 			FailLoad("Wetness could not register its deferred material producer");
 			return;
 		}
@@ -218,6 +224,8 @@ namespace cs::features
 		auto* source = cs::engine::GetRenderTargetTexture(cs::engine::RenderTarget::kGbufferNormal);
 		if (!context || !device || !source)
 			return;
+		ID3D11ShaderResourceView* empty = nullptr;
+		context->PSSetShaderResources(71, 1, &empty);
 		D3D11_TEXTURE2D_DESC desc{}, current{};
 		source->GetDesc(&desc);
 		if (_filmTexture)
@@ -249,13 +257,13 @@ namespace cs::features
 	void WetnessEffects::BindFilmOutput(ID3D11DeviceContext* a_context)
 	{
 		auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
-		a_context->PSSetShaderResources(70, 1, &precip);
+		cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
 		ID3D11RenderTargetView* targets[8]{};
 		winrt::com_ptr<ID3D11DepthStencilView> depth;
-		a_context->OMGetRenderTargets(8, targets, depth.put());
-		const bool valid = _inPrepass && _filmReady.load(std::memory_order_relaxed) &&
-		                   cs::render::IsSharedDataCurrent() &&
-		                   cs::engine::GetWorldCameraRecord().has_value() &&
+		const bool ready = _inPrepass && _filmReady.load(std::memory_order_relaxed) && cs::render::IsSharedDataCurrent();
+		if (ready)
+			a_context->OMGetRenderTargets(8, targets, depth.put());
+		const bool valid = ready &&
 		                   targets[0] == cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kGbufferAlbedo) &&
 		                   targets[1] == cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kGbufferNormal) &&
 		                   !targets[6] && !targets[7];
@@ -265,8 +273,10 @@ namespace cs::features
 			float factors[4]{};
 			UINT mask{};
 			a_context->OMGetBlendState(native.put(), factors, &mask);
-			auto found = std::ranges::find_if(_filmBlends, [&](const auto& entry) { return entry.native == native; });
-			if (found == _filmBlends.end()) {
+			auto blends = std::span(_filmBlends).first(_filmBlendCount);
+			const auto found = std::ranges::find_if(blends, [&](const auto& entry) { return entry.native == native; });
+			FilmBlend* film = found == blends.end() ? nullptr : &*found;
+			if (!film) {
 				D3D11_BLEND_DESC desc{};
 				if (native)
 					native->GetDesc(&desc);
@@ -284,18 +294,24 @@ namespace cs::features
 				desc.RenderTarget[6] = desc.RenderTarget[1];
 				desc.RenderTarget[6].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 				FilmBlend entry{ native, {} };
-				if (SUCCEEDED(cs::engine::GetDevice()->CreateBlendState(&desc, entry.film.put()))) {
+				if (_filmBlendCount < _filmBlends.size() &&
+					SUCCEEDED(cs::engine::GetDevice()->CreateBlendState(&desc, entry.film.put()))) {
 					cs::render::annotation::SetName(entry.film.get(), "WetnessEffects::Film blend");
-					_filmBlends.push_back(std::move(entry));
-					found = std::prev(_filmBlends.end());
+					film = &_filmBlends[_filmBlendCount++];
+					*film = std::move(entry);
+				} else {
+					CS_LOG_EVERY_MS(Log(), 2000, spdlog::level::err, "Wetness film blend creation failed or device blend-state limit reached.");
 				}
 			}
-			if (found != _filmBlends.end()) {
+			if (film) {
+				cs::engine::CaptureShaderInjectionOutputs(a_context);
 				ID3D11ShaderResourceView* nullView = nullptr;
-				a_context->PSSetShaderResources(71, 1, &nullView);
+				cs::engine::BindInjectionShaderResources(a_context, 71, 1, &nullView);
+				cs::engine::FlushShaderInjectionBindings();
 				targets[6] = _filmRTV.get();
 				a_context->OMSetRenderTargets(7, targets, depth.get());
-				a_context->OMSetBlendState(found->film.get(), factors, mask);
+				a_context->OMSetBlendState(film->film.get(), factors, mask);
+				cs::engine::RecordShaderInjectionD3DBinds(2);
 				targets[6] = nullptr;
 				bound = true;
 			}
@@ -304,7 +320,7 @@ namespace cs::features
 			if (target)
 				target->Release();
 		auto* availability = bound ? _filmAvailabilitySRV.get() : nullptr;
-		a_context->PSSetShaderResources(71, 1, &availability);
+		cs::engine::BindInjectionShaderResources(a_context, 71, 1, &availability);
 		(bound ? _producerDraws : _producerRejected).fetch_add(1, std::memory_order_relaxed);
 	}
 
@@ -314,9 +330,9 @@ namespace cs::features
 		if (a_compute) {
 			a_context->CSSetShaderResources(71, 1, &view);
 		} else {
-			a_context->PSSetShaderResources(71, 1, &view);
+			cs::engine::BindInjectionShaderResources(a_context, 71, 1, &view);
 			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
-			a_context->PSSetShaderResources(70, 1, &precip);
+			cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
 		}
 	}
 
@@ -412,7 +428,7 @@ namespace cs::features
 		auto* srv =
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		// a null bind reads outside the encode domain, which is wetness identity
-		a_context->PSSetShaderResources(kGbufferNormalPSSlot, 1, &srv);
+		cs::engine::BindInjectionShaderResources(a_context, kGbufferNormalPSSlot, 1, &srv);
 		if (srv) {
 			_normalBinds.fetch_add(1, std::memory_order_relaxed);
 		} else {

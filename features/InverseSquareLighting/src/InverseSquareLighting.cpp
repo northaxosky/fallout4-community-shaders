@@ -7,6 +7,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstring>
 #include <mutex>
 #include <utility>
 
@@ -35,6 +36,7 @@ namespace cs::features
 			std::array<winrt::com_ptr<ID3D11Buffer>, 2> buffers;
 			std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 2> views;
 			winrt::com_ptr<ID3D11Buffer> raster;
+			std::optional<PerLightData> uploadedRaster;
 			winrt::com_ptr<ID3D11DeviceContext> context;
 			std::uint32_t uploadedSide = 0;
 			std::atomic<bool> resources{ false }, validated{ false }, hooks{ false }, dataLoaded{ false };
@@ -354,14 +356,16 @@ namespace cs::features
 							context->CSSetShaderResources(kTiledSlot, 1, &view);
 						} else {
 							const PerLightData data = Enabled() ? g_rasterData : PerLightData{};
-							if (WriteBuffer(context, g_state.raster.get(), &data, sizeof(data))) {
+							if ((g_state.uploadedRaster && std::memcmp(&*g_state.uploadedRaster, &data, sizeof(data)) == 0) ||
+								WriteBuffer(context, g_state.raster.get(), &data, sizeof(data))) {
+								g_state.uploadedRaster = data;
 								auto* buffer = g_state.raster.get();
-								context->PSSetConstantBuffers(kRasterSlot, 1, &buffer);
+								engine::BindInjectionConstantBuffers(context, kRasterSlot, 1, &buffer);
 								if (IsInverseSquare(data))
 									++g_state.rasterDraws;
 							} else {
 								ID3D11Buffer* empty = nullptr;
-								context->PSSetConstantBuffers(kRasterSlot, 1, &empty);
+								engine::BindInjectionConstantBuffers(context, kRasterSlot, 1, &empty);
 							}
 						} };
 				registration.slotClaims = { { stage, compute ? engine::ShaderResourceType::kShaderResource : engine::ShaderResourceType::kConstantBuffer, compute ? kTiledSlot : kRasterSlot } };
@@ -427,6 +431,7 @@ namespace cs::features
 				throw std::runtime_error("Unable to create ISL tiled metadata resources");
 		}
 		desc.ByteWidth = sizeof(PerLightData);
+		g_state.uploadedRaster.reset();
 		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 		desc.MiscFlags = 0;
 		desc.StructureByteStride = 0;

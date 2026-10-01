@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bitset>
+#include <cassert>
 #include <chrono>
 #include <cstring>
 #include <d3d11.h>
@@ -33,19 +35,193 @@ namespace cs::engine
 	namespace
 	{
 		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
+		thread_local ShaderInjectionDrawMetrics t_drawMetrics;
+		thread_local bool t_drawFrameStarted = false;
+		thread_local bool t_dispatchingBindings = false;
+		std::mutex g_drawMetricsMutex;
+		ShaderInjectionDrawMetrics g_completedDrawMetrics;
+
+		void CapturePixelBindings(ID3D11DeviceContext* a_context, ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
+		{
+			if (!t_pixelBindings)
+				return;
+			for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
+				const ShaderSlotClaim claim{ ShaderStage::kPixel, a_type, slot };
+				t_pixelBindings->Capture(a_context, std::span(&claim, 1));
+			}
+		}
+
+		template <class T, std::size_t N>
+		struct BindingBatch
+		{
+			std::array<T*, N> values;
+			std::bitset<N> dirty;
+			UINT first = static_cast<UINT>(N);
+			UINT last = 0;
+
+			void Set(UINT a_start, UINT a_count, T* const* a_values) noexcept
+			{
+				assert(a_start + a_count <= N);
+				for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
+					values[slot] = a_values[slot - a_start];
+					dirty.set(slot);
+				}
+				first = std::min(first, a_start);
+				last = std::max(last, a_start + a_count);
+			}
+
+			template <class Set>
+			void Flush(Set a_set) noexcept
+			{
+				for (UINT slot = first; slot < last;) {
+					if (!dirty.test(slot)) {
+						++slot;
+						continue;
+					}
+					const auto start = slot++;
+					while (slot < last && dirty.test(slot))
+						++slot;
+					a_set(start, slot - start, values.data() + start);
+					RecordShaderInjectionD3DBinds();
+				}
+				dirty.reset();
+				first = static_cast<UINT>(N);
+				last = 0;
+			}
+		};
+
+		class PixelBindingBatch;
+		thread_local PixelBindingBatch* t_bindingBatch = nullptr;
+
+		class PixelBindingBatch
+		{
+		public:
+			explicit PixelBindingBatch(ID3D11DeviceContext* a_context) noexcept :
+				context(a_context), previous(std::exchange(t_bindingBatch, this)),
+				wasDispatching(std::exchange(t_dispatchingBindings, true))
+			{}
+			~PixelBindingBatch() noexcept
+			{
+				Flush();
+				t_bindingBatch = previous;
+				t_dispatchingBindings = wasDispatching;
+			}
+			void Flush() noexcept
+			{
+				buffers.Flush([this](UINT start, UINT count, auto values) {
+					CapturePixelBindings(context, ShaderResourceType::kConstantBuffer, start, count);
+					context->PSSetConstantBuffers(start, count, values);
+				});
+				resources.Flush([this](UINT start, UINT count, auto values) {
+					CapturePixelBindings(context, ShaderResourceType::kShaderResource, start, count);
+					context->PSSetShaderResources(start, count, values);
+				});
+				samplers.Flush([this](UINT start, UINT count, auto values) {
+					CapturePixelBindings(context, ShaderResourceType::kSampler, start, count);
+					context->PSSetSamplers(start, count, values);
+				});
+			}
+
+			ID3D11DeviceContext* context;
+			PixelBindingBatch* previous;
+			bool wasDispatching;
+			BindingBatch<ID3D11Buffer, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT> buffers;
+			BindingBatch<ID3D11ShaderResourceView, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> resources;
+			BindingBatch<ID3D11SamplerState, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> samplers;
+		};
+	}
+
+	void BindInjectionShaderResources(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11ShaderResourceView* const* a_values) noexcept
+	{
+		if (t_bindingBatch && t_bindingBatch->context == a_context)
+			t_bindingBatch->resources.Set(a_start, a_count, a_values);
+		else {
+			CapturePixelBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
+			a_context->PSSetShaderResources(a_start, a_count, a_values);
+			RecordShaderInjectionD3DBinds();
+		}
+	}
+
+	void BindInjectionSamplers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11SamplerState* const* a_values) noexcept
+	{
+		if (t_bindingBatch && t_bindingBatch->context == a_context)
+			t_bindingBatch->samplers.Set(a_start, a_count, a_values);
+		else {
+			CapturePixelBindings(a_context, ShaderResourceType::kSampler, a_start, a_count);
+			a_context->PSSetSamplers(a_start, a_count, a_values);
+			RecordShaderInjectionD3DBinds();
+		}
+	}
+
+	void BindInjectionConstantBuffers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11Buffer* const* a_values) noexcept
+	{
+		if (t_bindingBatch && t_bindingBatch->context == a_context)
+			t_bindingBatch->buffers.Set(a_start, a_count, a_values);
+		else {
+			CapturePixelBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
+			a_context->PSSetConstantBuffers(a_start, a_count, a_values);
+			RecordShaderInjectionD3DBinds();
+		}
+	}
+
+	void FlushShaderInjectionBindings() noexcept
+	{
+		if (t_bindingBatch)
+			t_bindingBatch->Flush();
+	}
+
+	void CaptureShaderInjectionOutputs(ID3D11DeviceContext* a_context) noexcept
+	{
+		CapturePixelBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
+	}
+
+	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept
+	{
+		if (t_drawFrameStarted && t_drawMetrics.frame == a_frame)
+			return;
+		{
+			std::scoped_lock lock(g_drawMetricsMutex);
+			g_completedDrawMetrics = t_drawMetrics;
+		}
+		t_drawMetrics = { .frame = a_frame };
+		t_drawFrameStarted = true;
+	}
+
+	void RecordShaderInjectionD3DBinds(std::uint32_t a_count) noexcept
+	{
+		if (t_pixelBindings || t_dispatchingBindings)
+			t_drawMetrics.d3dBinds += a_count;
 	}
 
 	ScopedShaderInjectionBindings::ScopedShaderInjectionBindings(ShaderStage a_stage) noexcept :
 		_stage(a_stage),
-		_previous(a_stage == ShaderStage::kPixel ? std::exchange(t_pixelBindings, this) : nullptr)
+		_previous(a_stage == ShaderStage::kPixel ? std::exchange(t_pixelBindings, this) : nullptr),
+		_started(std::chrono::steady_clock::now())
 	{}
 
 	ScopedShaderInjectionBindings::~ScopedShaderInjectionBindings() noexcept
 	{
-		if (_stage == ShaderStage::kPixel)
-			t_pixelBindings = _previous;
-		if (!_context)
+		const auto finish = [this] {
+			if (_stage == ShaderStage::kPixel) {
+				t_pixelBindings = _previous;
+				if (!_previous) {
+					++t_drawMetrics.scopes;
+					t_drawMetrics.scopeNanoseconds += static_cast<std::uint64_t>(
+						std::chrono::duration_cast<std::chrono::nanoseconds>(
+							std::chrono::steady_clock::now() - _started)
+							.count());
+				}
+			}
+		};
+		const auto restores = _bufferCount + _resourceCount + _samplerCount + (_outputCaptured ? 2u : 0u);
+		if (_stage == ShaderStage::kPixel) {
+			t_drawMetrics.restores += restores;
+			t_drawMetrics.d3dBinds += restores;
+		}
+		if (!_context) {
+			finish();
 			return;
+		}
 		if (_outputCaptured) {
 			_context->OMSetRenderTargets(8, _targets, _depth);
 			_context->OMSetBlendState(_blend, _blendFactor, _sampleMask);
@@ -57,8 +233,7 @@ namespace cs::engine
 			if (_blend)
 				_blend->Release();
 		}
-		_substrate.Restore(_context, _stage);
-		for (const auto& buffer : _buffers) {
+		for (const auto& buffer : std::span(_buffers).first(_bufferCount)) {
 			if (_stage == ShaderStage::kCompute)
 				_context->CSSetConstantBuffers(buffer.slot, 1, &buffer.value);
 			else
@@ -66,7 +241,7 @@ namespace cs::engine
 			if (buffer.value)
 				buffer.value->Release();
 		}
-		for (const auto& resource : _resources) {
+		for (const auto& resource : std::span(_resources).first(_resourceCount)) {
 			if (_stage == ShaderStage::kCompute)
 				_context->CSSetShaderResources(resource.slot, 1, &resource.value);
 			else
@@ -74,7 +249,7 @@ namespace cs::engine
 			if (resource.value)
 				resource.value->Release();
 		}
-		for (const auto& sampler : _samplers) {
+		for (const auto& sampler : std::span(_samplers).first(_samplerCount)) {
 			if (_stage == ShaderStage::kCompute)
 				_context->CSSetSamplers(sampler.slot, 1, &sampler.value);
 			else
@@ -82,46 +257,61 @@ namespace cs::engine
 			if (sampler.value)
 				sampler.value->Release();
 		}
+		finish();
 	}
 
 	void ScopedShaderInjectionBindings::Capture(
-		ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims)
+		ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims) noexcept
 	{
 		if (!a_context)
 			return;
-		if (!_context) {
+		if (!_context)
 			_context = a_context;
-			_substrate.Save(_context, _stage);
-		}
 		for (const auto& claim : a_claims) {
 			if (claim.stage != _stage)
+				continue;
+			// Engine-facts: PS shadow state owns t0-t15/s0-s15 and b0-b2/b12/b13 only.
+			if (_stage == ShaderStage::kPixel &&
+				((claim.resourceType == ShaderResourceType::kShaderResource && claim.slot >= 16) ||
+					(claim.resourceType == ShaderResourceType::kConstantBuffer && claim.slot > 2 && claim.slot != 12 && claim.slot != 13)))
 				continue;
 			if (claim.resourceType == ShaderResourceType::kRenderTarget && !_outputCaptured) {
 				_context->OMGetRenderTargets(8, _targets, &_depth);
 				_context->OMGetBlendState(&_blend, _blendFactor, &_sampleMask);
 				_outputCaptured = true;
+				if (_stage == ShaderStage::kPixel)
+					t_drawMetrics.captures += 2;
 			}
 			if (claim.resourceType == ShaderResourceType::kShaderResource &&
-				std::ranges::none_of(_resources, [&](const auto& r) { return r.slot == claim.slot; })) {
-				_resources.push_back({ claim.slot, nullptr });
+				std::ranges::none_of(std::span(_resources).first(_resourceCount), [&](const auto& r) { return r.slot == claim.slot; })) {
+				auto& resource = _resources[_resourceCount++];
+				resource = { claim.slot, nullptr };
+				if (_stage == ShaderStage::kPixel)
+					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetShaderResources(claim.slot, 1, &_resources.back().value);
+					_context->CSGetShaderResources(claim.slot, 1, &resource.value);
 				else
-					_context->PSGetShaderResources(claim.slot, 1, &_resources.back().value);
+					_context->PSGetShaderResources(claim.slot, 1, &resource.value);
 			} else if (claim.resourceType == ShaderResourceType::kSampler &&
-					   std::ranges::none_of(_samplers, [&](const auto& s) { return s.slot == claim.slot; })) {
-				_samplers.push_back({ claim.slot, nullptr });
+					   std::ranges::none_of(std::span(_samplers).first(_samplerCount), [&](const auto& s) { return s.slot == claim.slot; })) {
+				auto& sampler = _samplers[_samplerCount++];
+				sampler = { claim.slot, nullptr };
+				if (_stage == ShaderStage::kPixel)
+					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetSamplers(claim.slot, 1, &_samplers.back().value);
+					_context->CSGetSamplers(claim.slot, 1, &sampler.value);
 				else
-					_context->PSGetSamplers(claim.slot, 1, &_samplers.back().value);
+					_context->PSGetSamplers(claim.slot, 1, &sampler.value);
 			} else if (claim.resourceType == ShaderResourceType::kConstantBuffer &&
-					   std::ranges::none_of(_buffers, [&](const auto& b) { return b.slot == claim.slot; })) {
-				_buffers.push_back({ claim.slot, nullptr });
+					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == claim.slot; })) {
+				auto& buffer = _buffers[_bufferCount++];
+				buffer = { claim.slot, nullptr };
+				if (_stage == ShaderStage::kPixel)
+					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetConstantBuffers(claim.slot, 1, &_buffers.back().value);
+					_context->CSGetConstantBuffers(claim.slot, 1, &buffer.value);
 				else
-					_context->PSGetConstantBuffers(claim.slot, 1, &_buffers.back().value);
+					_context->PSGetConstantBuffers(claim.slot, 1, &buffer.value);
 			}
 		}
 	}
@@ -768,6 +958,17 @@ namespace cs::engine
 			const ShaderReplacementRegistration& a_registration,
 			const ShaderInjectionTargetMetadata& a_target)
 		{
+			for (const auto& claim : a_registration.slotClaims) {
+				const std::uint32_t limit = claim.resourceType == ShaderResourceType::kShaderResource ? D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT :
+				                            claim.resourceType == ShaderResourceType::kSampler        ? D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT :
+				                            claim.resourceType == ShaderResourceType::kConstantBuffer ? D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT :
+				                                                                                        D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;
+				if (claim.slot >= limit) {
+					L->error("Replacement registration '{}' for '{}' rejected: type={} slot={} exceeds the D3D11 slot range.",
+						a_registration.contributor, a_target.name, static_cast<unsigned>(claim.resourceType), claim.slot);
+					return false;
+				}
+			}
 			if (const auto reserved =
 					FindSubstrateReservation(a_registration.slotClaims)) {
 				L->error(
@@ -1339,15 +1540,9 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
-			if (a_stage == ShaderStage::kPixel && t_pixelBindings &&
-				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0) {
-				try {
-					for (const auto& contribution : a_target.contributions)
-						t_pixelBindings->Capture(a_context, contribution.slotClaims);
-				} catch (...) {
-					return;
-				}
-			}
+			std::optional<PixelBindingBatch> bindings;
+			if (a_stage == ShaderStage::kPixel)
+				bindings.emplace(a_context);
 			if (a_stage != ShaderStage::kCompute &&
 				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0)
 				render::BindSharedData(a_context, a_stage);
@@ -2776,6 +2971,10 @@ namespace cs::engine
 			}
 		}
 		summary.computeBridge = GetComputeDispatchBridgeStatus();
+		{
+			std::scoped_lock lock(g_drawMetricsMutex);
+			summary.draw = g_completedDrawMetrics;
+		}
 		return summary;
 	}
 

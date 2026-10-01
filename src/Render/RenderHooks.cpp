@@ -2,6 +2,7 @@
 
 #include "Log.h"
 #include "Render/DeferredDrawAnchor.h"
+#include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameProfiler.h"
 #include "Render/ShaderInjection.h"
@@ -223,6 +224,8 @@ namespace cs::engine
 				std::uint32_t a_start,
 				std::uint32_t a_triangles)
 			{
+				if (const auto* state = GetGraphicsState())
+					BeginShaderInjectionFrame(state->frameCount);
 				const ScopedPixelShaderInjectionBindings bindings;
 				func(a_this, a_shape, a_start, a_triangles);
 			}

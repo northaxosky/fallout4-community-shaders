@@ -72,6 +72,7 @@ namespace cs::features
 		void SaveCompositionBindings();
 		void RestoreCompositionBindings();
 		void BindComposition(ID3D11DeviceContext*);
+		void UpdateConsumer(bool a_enabled, bool a_tiled);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
 		// FO4: native composite inputs occupy low slots; retain main's t26-t29 boundary.
@@ -83,6 +84,7 @@ namespace cs::features
 		Settings _settings;
 		Resources _textures;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
+		std::optional<ConsumerCB> _consumerData;
 		winrt::com_ptr<ID3D11ShaderResourceView> _noise;
 		winrt::com_ptr<ID3D11SamplerState> _pointSampler, _linearSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _prepare;

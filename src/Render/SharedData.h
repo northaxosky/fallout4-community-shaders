@@ -19,6 +19,8 @@ namespace cs::render
 	void InitializeSharedData(ID3D11Device* a_device, ID3D11DeviceContext* a_context);
 	bool IsSharedDataReady() noexcept;
 	bool IsSharedDataCurrent() noexcept;
+	// Debug producers invalidate the cached packet when replacing or updating its texture.
+	void InvalidateFullscreenDebugData() noexcept;
 
 	// startup thread only
 	void EnsureSharedDataUpdateInstalled();

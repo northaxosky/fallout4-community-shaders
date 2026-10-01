@@ -754,6 +754,9 @@ target("ShaderVariantCompilationTests", function()
 end)
 
 target("ShaderInjectionRegistrationTests", function()
+    add_tests("ShaderInjectionPixelBindings", {
+        runargs = "--pixel-bindings"
+    })
     add_tests("ShaderInjectionClaimLedger", {
         runargs = "--claim-ledger"
     })

@@ -286,6 +286,9 @@ namespace cs::features::exponential_height_fog
 			if (!UpdateCamera(a_camera, history ? _previousRatio : ratio))
 				return false;
 		}
+		// Material consumers leave the integrated volume resident until its next producer.
+		ID3D11ShaderResourceView* noVolume = nullptr;
+		a_context->PSSetShaderResources(19, 1, &noVolume);
 		engine::ComputeOMScope scope(a_context, 5, 2, 1, 1);
 		render::ScopedComputeSharedDataBinding shared(a_context);
 		if (!shared.IsActive())

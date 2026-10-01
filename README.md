@@ -109,6 +109,12 @@ Default hotkeys registered with DearModdingUI:
 
 Key bindings can be customized through the DearModdingUI menu.
 
+The `component=shader_injection` telemetry line reports the previous completed draw frame in
+`draw_frame`: `draw_scope_cpu_us` measures accumulated CPU time inside the injection draw scopes
+(including native draw submission), and `draw_scopes`, `draw_captures`, `draw_restores`, and
+`draw_d3d_binds` count scopes, state-save calls, restore calls, and injection D3D state-setting calls.
+These fields are per-frame; the existing `dispatches` counter is cumulative and counts contributor callbacks.
+
 ---
 
 ## In-game Menu

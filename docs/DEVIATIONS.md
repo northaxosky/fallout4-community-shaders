@@ -96,6 +96,15 @@ SSS reads canonical depth directly: first-person geometry casts as upstream does
 SSS. Its settings live only in its raymarch cbuffer, not b6 or b7. Feature-off engine variants include
 no substrate, and the binder runs only for contributed stages; native b12 remains owned by the engine.
 
+Pixel injection callbacks batch contiguous writes through `BindInjection*`; only overwritten
+t0-t15/s0-s15 and b0-b2/b12/b13 are captured per draw. Output-changing callbacks capture OM state
+before changing it. Plugin-owned high slots remain resident, with producer-side alias cleanup
+and existing deferred-pass scopes; compute dispatches retain exact restoration. Engine-facts rows
+"Engine-bindable PS slot range" and "Engine constant-buffer slots" establish that boundary.
+No binding cache spans draws: ClearState/ResetState/Invalidate and direct context writes are not
+all hooked. Substrate uploads and debug selection are frame-cached; debug producers invalidate
+their packet when its resources change.
+
 ## Upstream PR candidates
 
 - `src/Features/InverseSquareLighting.cpp:76–95`: balanced intensity/cutoff/size

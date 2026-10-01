@@ -735,6 +735,129 @@ namespace
 			"compute ownership did not fail closed without the bridge");
 	}
 
+	void CheckPixelBindings()
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(CreateWarpDevice(device, context), "could not create pixel binding WARP device");
+		if (!device || !context)
+			return;
+		auto originalBuffer = CreateUintConstantBuffer(device.get(), 1);
+		auto injectedBuffer = CreateUintConstantBuffer(device.get(), 2);
+		auto originalTexture = CreateUintSrv(device.get(), 1);
+		auto injectedTexture = CreateUintSrv(device.get(), 2);
+		winrt::com_ptr<ID3D11SamplerState> sampler;
+		D3D11_SAMPLER_DESC samplerDesc{};
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		samplerDesc.AddressU = samplerDesc.AddressV = samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+		Expect(SUCCEEDED(device->CreateSamplerState(&samplerDesc, sampler.put())), "could not create pixel sampler");
+		if (!originalBuffer || !injectedBuffer || !originalTexture || !injectedTexture || !sampler)
+			return;
+
+		ShaderReplacementRegistration contribution;
+		contribution.targetId = ShaderInjectionTarget::kBsdfLight;
+		contribution.contributor = "pixel-bindings";
+		contribution.slotClaims = {
+			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 1 },
+			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 2 },
+			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 10 },
+			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 3 },
+			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 24 },
+			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 25 },
+			{ ShaderStage::kPixel, ShaderResourceType::kSampler, 1 }
+		};
+		contribution.bind = [&](ID3D11DeviceContext* ctx) {
+			auto* buffer = injectedBuffer.get();
+			auto* texture = injectedTexture.get();
+			auto* state = sampler.get();
+			BindInjectionConstantBuffers(ctx, 1, 1, &buffer);
+			BindInjectionConstantBuffers(ctx, 10, 1, &buffer);
+			BindInjectionShaderResources(ctx, 3, 1, &texture);
+			BindInjectionShaderResources(ctx, 24, 1, &texture);
+			BindInjectionShaderResources(ctx, 25, 1, &texture);
+			BindInjectionSamplers(ctx, 1, 1, &state);
+			BindInjectionSamplers(ctx, 1, 1, &state);
+		};
+		Expect(RegisterReplacement(std::move(contribution)), "could not register pixel bindings");
+		FreezeAndCompileShaderInjections(device.get());
+		Expect(GetShaderInjectionTargetSnapshot(ShaderInjectionTarget::kBsdfLight).published, "pixel bindings were not published");
+		BeginShaderInjectionFrame(10);
+		auto* originalCB = originalBuffer.get();
+		auto* originalSRV = originalTexture.get();
+		context->PSSetConstantBuffers(1, 1, &originalCB);
+		context->PSSetShaderResources(3, 1, &originalSRV);
+		{
+			ScopedPixelShaderInjectionBindings outer;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get());
+			winrt::com_ptr<ID3D11ShaderResourceView> actual;
+			context->PSGetShaderResources(25, 1, actual.put());
+			Expect(actual == injectedTexture, "batched high resources were not bound before the draw");
+			{
+				ScopedPixelShaderInjectionBindings inner;
+				ID3D11ShaderResourceView* empty = nullptr;
+				BindInjectionShaderResources(context.get(), 3, 1, &empty);
+			}
+			actual = nullptr;
+			context->PSGetShaderResources(3, 1, actual.put());
+			Expect(actual == injectedTexture, "nested pixel scope did not restore its parent's low resource");
+		}
+		winrt::com_ptr<ID3D11Buffer> actualBuffer;
+		winrt::com_ptr<ID3D11ShaderResourceView> actualTexture;
+		winrt::com_ptr<ID3D11SamplerState> actualSampler;
+		context->PSGetConstantBuffers(1, 1, actualBuffer.put());
+		context->PSGetShaderResources(3, 1, actualTexture.put());
+		context->PSGetSamplers(1, 1, actualSampler.put());
+		Expect(actualBuffer == originalBuffer && actualTexture == originalTexture && !actualSampler,
+			"pixel scope leaked into engine-owned low slots");
+		actualBuffer = nullptr;
+		actualTexture = nullptr;
+		context->PSGetConstantBuffers(10, 1, actualBuffer.put());
+		context->PSGetShaderResources(25, 1, actualTexture.put());
+		Expect(actualBuffer == injectedBuffer && actualTexture == injectedTexture,
+			"pixel scope unnecessarily restored plugin-owned slots");
+		BeginShaderInjectionFrame(11);
+		const auto metrics = GetShaderInjectionSummary().draw;
+		Expect(metrics.frame == 10 && metrics.scopes == 1 && metrics.captures == 4 && metrics.restores == 4 &&
+				   metrics.d3dBinds == 10 && metrics.scopeNanoseconds > 0,
+			"draw counters did not count batching, nested restoration, or the completed frame");
+		context->ClearState();
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get());
+			actualTexture = nullptr;
+			context->PSGetShaderResources(25, 1, actualTexture.put());
+			Expect(actualTexture == injectedTexture, "engine ClearState left a stale injection binding cache");
+		}
+		BeginShaderInjectionFrame(12);
+		const auto next = GetShaderInjectionSummary().draw;
+		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 8,
+			"per-frame counters accumulated earlier draws");
+
+		winrt::com_ptr<ID3D11Texture2D> output;
+		winrt::com_ptr<ID3D11RenderTargetView> target;
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = desc.Height = desc.ArraySize = desc.MipLevels = desc.SampleDesc.Count = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+		Expect(SUCCEEDED(device->CreateTexture2D(&desc, nullptr, output.put())) &&
+				   SUCCEEDED(device->CreateRenderTargetView(output.get(), nullptr, target.put())),
+			"could not create pixel output fixture");
+		if (!target)
+			return;
+		auto* nativeTarget = target.get();
+		context->OMSetRenderTargets(1, &nativeTarget, nullptr);
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			CaptureShaderInjectionOutputs(context.get());
+			context->OMSetRenderTargets(0, nullptr, nullptr);
+		}
+		winrt::com_ptr<ID3D11RenderTargetView> restoredTarget;
+		context->OMGetRenderTargets(1, restoredTarget.put(), nullptr);
+		Expect(restoredTarget == target, "pixel output override leaked into the engine draw");
+	}
+
 	void CheckComputePhaseAndStateRestoration()
 	{
 		using namespace cs::engine;
@@ -870,6 +993,8 @@ int main(int argc, char** argv)
 		CheckComputeMissingHookFailsClosed();
 	else if (mode == "--compute-phase")
 		CheckComputePhaseAndStateRestoration();
+	else if (mode == "--pixel-bindings")
+		CheckPixelBindings();
 	else {
 		std::cerr << "Unknown test mode\n";
 		return 2;

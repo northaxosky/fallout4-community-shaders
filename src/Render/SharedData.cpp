@@ -10,6 +10,7 @@
 #include "Render/Engine.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
+#include "Render/ShaderInjection.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalRenderer.h"
 #include "Utils/CSBuffer.h"
@@ -45,6 +46,7 @@ namespace cs::render
 			std::array<winrt::com_ptr<ID3D11Buffer>, kSubstrateBufferCount> buffers;
 			std::atomic_bool ready{ false };
 			std::atomic_uint32_t lastFrame{ UINT32_MAX };
+			std::uint32_t lastAttemptFrame = UINT32_MAX;
 			SubstrateBindingSnapshot savedPixelBindings;
 			SubstrateBindingSnapshot savedVertexBindings;
 			FO4SharedDataCB fo4{};
@@ -56,6 +58,10 @@ namespace cs::render
 			bool updateInstallFailed = false;
 			bool inDeferredLights = false;
 			std::uint32_t pixelBindingDepth = 0;
+			std::uint32_t debugFrame = UINT32_MAX;
+			std::uint32_t debugSelectionFrame = UINT32_MAX;
+			Feature* debugFeature = nullptr;
+			winrt::com_ptr<ID3D11ShaderResourceView> debugTexture;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -259,16 +265,22 @@ namespace cs::render
 				return;
 
 			auto* graphicsState = engine::GetGraphicsState();
+			if (!graphicsState)
+				return;
+			const auto frame = graphicsState->frameCount;
+			const bool current = state.lastFrame.load(std::memory_order_relaxed) == frame;
+			if (!a_updateDepth && (current || state.lastAttemptFrame == frame))
+				return;
+			state.lastAttemptFrame = frame;
 			auto* rendererData = RE::BSGraphics::GetRendererData();
 			auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
-			const auto camera = graphicsState ? engine::GetCapturedWorldCameraRecord(graphicsState->frameCount) : std::nullopt;
-			if (!graphicsState || !context || !camera)
+			const auto camera = engine::GetCapturedWorldCameraRecord(frame);
+			if (!context || !camera)
 				return;
 
 			if (a_updateDepth)
 				UpdateCanonicalDepth(context, *camera);
-			const auto frame = graphicsState->frameCount;
-			if (state.lastFrame.load(std::memory_order_relaxed) == frame)
+			if (current)
 				return;
 
 			try {
@@ -308,6 +320,7 @@ namespace cs::render
 				state.previousRatio = ratio;
 				state.hasResolutionHistory = true;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
+				state.debugFrame = UINT32_MAX;
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
 					L,
@@ -335,24 +348,35 @@ namespace cs::render
 			return true;
 		}
 
-		ID3D11ShaderResourceView* UpdateFullscreenDebugData(ID3D11DeviceContext* a_context) noexcept
+		void UpdateFullscreenDebugData(ID3D11DeviceContext* a_context, bool a_refresh = false) noexcept
 		{
-			auto* feature = FeatureManager::Get().GetFullscreenDebugFeature();
-			auto debug = feature ? feature->GetFullscreenDebugData() : FullscreenDebugData{};
+			auto& state = GetSubstrateState();
+			const auto* graphics = engine::GetGraphicsState();
+			if (!graphics || !a_context || !IsSharedDataReady())
+				return;
+			if (state.debugFrame == graphics->frameCount && !a_refresh)
+				return;
+			if (state.debugSelectionFrame != graphics->frameCount) {
+				state.debugFeature = FeatureManager::Get().GetFullscreenDebugFeature();
+				state.debugSelectionFrame = graphics->frameCount;
+			}
+			auto debug = state.debugFeature ? state.debugFeature->GetFullscreenDebugData() : FullscreenDebugData{};
 			if (debug.mode == 0)
 				debug = {};
-			auto& state = GetSubstrateState();
 			auto fo4 = state.fo4;
 			fo4.DebugOwner = debug.owner;
 			fo4.DebugMode = debug.mode;
 			fo4.DebugParams = { debug.params[0], debug.params[1], debug.params[2], debug.params[3] };
-			// The selected owner and its resources may change after the per-frame upload.
+			// Producers can change debug resources between lighting and composite, not between draws.
 			if (std::memcmp(&fo4, &state.fo4, sizeof(fo4)) != 0) {
-				if (!WriteConstantBuffer(a_context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), &fo4, sizeof(fo4)))
-					return nullptr;
+				if (!WriteConstantBuffer(a_context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), &fo4, sizeof(fo4))) {
+					CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared debug constant-buffer map failed.");
+					return;
+				}
 				state.fo4 = fo4;
 			}
-			return debug.texture;
+			state.debugTexture.copy_from(debug.texture);
+			state.debugFrame = graphics->frameCount;
 		}
 	}
 
@@ -421,6 +445,12 @@ namespace cs::render
 		engine::RegisterPostDeferredLightsImpl(
 			[] { RestoreDeferredLightBindings(); },
 			engine::HookPriority::Late);
+		engine::RegisterPreDeferredLightsImpl(
+			[] { UpdateFullscreenDebugData(GetImmediateContext(), true); },
+			engine::HookPriority::Late);
+		engine::RegisterPreDeferredComposite(
+			[] { UpdateFullscreenDebugData(GetImmediateContext(), true); },
+			engine::HookPriority::Late);
 		// FO4 shadow-caches state; it won't reissue clobbered bindings.
 		const bool compositeScopeInstalled =
 			engine::RegisterPreDeferredComposite(
@@ -444,6 +474,11 @@ namespace cs::render
 		return GetSubstrateState().inDeferredLights;
 	}
 
+	void InvalidateFullscreenDebugData() noexcept
+	{
+		GetSubstrateState().debugFrame = UINT32_MAX;
+	}
+
 	void BindSharedData(
 		ID3D11DeviceContext* a_context,
 		engine::ShaderStage a_stage) noexcept
@@ -454,7 +489,8 @@ namespace cs::render
 
 		// FO4: material draws run after the current world+jitter cache record is written.
 		UpdateSharedData(false);
-		auto* debugTexture = UpdateFullscreenDebugData(a_context);
+		UpdateFullscreenDebugData(a_context);
+		auto* debugTexture = state.debugTexture.get();
 		ID3D11Buffer* buffers[kSubstrateBufferCount]{};
 		for (std::size_t index = 0; index < kSubstrateBufferCount; ++index)
 			buffers[index] = state.buffers[index].get();
@@ -465,9 +501,9 @@ namespace cs::render
 			a_context->VSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kPixel:
-			a_context->PSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->PSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
-			a_context->PSSetShaderResources(kFullscreenDebugTextureSlot, 1, &debugTexture);
+			engine::BindInjectionConstantBuffers(a_context, kFrameDataSlot, kSubstrateBufferCount, buffers);
+			engine::BindInjectionShaderResources(a_context, kCanonicalDepthSlot, 1, &depth);
+			engine::BindInjectionShaderResources(a_context, kFullscreenDebugTextureSlot, 1, &debugTexture);
 			break;
 		case engine::ShaderStage::kCompute:
 			a_context->CSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
