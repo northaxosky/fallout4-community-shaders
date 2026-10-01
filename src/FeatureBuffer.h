@@ -33,8 +33,9 @@ namespace cs
 		WetnessEffectsFeatureData wetnessEffectsSettings;
 		TerrainShadowsFeatureData terrainShadowsSettings;
 		DynamicCubemapsFeatureData dynamicCubemapsSettings;
+		render::ExponentialHeightFogSettings exponentialHeightFogSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 256);
+	static_assert(sizeof(FeatureDataCB) == 448);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 0);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 192);
@@ -44,6 +45,7 @@ namespace cs
 	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
 	static_assert(offsetof(TerrainShadowsFeatureData, ZBlur) == 32);
 	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 240);
+	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 256);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 4);
 

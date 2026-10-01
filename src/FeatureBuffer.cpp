@@ -1,6 +1,7 @@
 #include "FeatureBuffer.h"
 
 #include "DynamicCubemaps.h"
+#include "ExponentialHeightFog.h"
 #include "TerrainShadows.h"
 #include "WetnessEffects.h"
 
@@ -28,7 +29,10 @@ namespace cs
 					features::TerrainShadows::GetSingleton()),
 			.dynamicCubemapsSettings =
 				CollectFeatureData<DynamicCubemapsFeatureData>(
-					features::DynamicCubemaps::GetSingleton())
+					features::DynamicCubemaps::GetSingleton()),
+			.exponentialHeightFogSettings =
+				CollectFeatureData<render::ExponentialHeightFogSettings>(
+					features::ExponentialHeightFog::GetSingleton())
 		};
 	}
 }

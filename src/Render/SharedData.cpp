@@ -1,6 +1,5 @@
 #include "Render/SharedData.h"
 
-#include "ExponentialHeightFog.h"
 #include "Feature.h"
 #include "FeatureBuffer.h"
 #include "Log.h"
@@ -162,8 +161,7 @@ namespace cs::render
 				.otherEffectMult = 1.0f
 			};
 			auto& fo4 = a_data.fo4;
-			if (auto* fog = features::ExponentialHeightFog::GetSingleton(); fog->IsLoaded())
-				a_data.feature.exponentialHeightFogSettings = fog->GetCommonBufferData();
+			a_data.feature.exponentialHeightFogSettings = a_features.exponentialHeightFogSettings;
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
 			fo4.EnabledDynamicCubemaps = a_features.dynamicCubemapsSettings.Enabled;
 			auto& terrain = a_data.feature.terraOccSettings;
