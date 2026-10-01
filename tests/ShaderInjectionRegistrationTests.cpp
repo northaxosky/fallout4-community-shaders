@@ -269,17 +269,9 @@ namespace
 			"conflicting contributor defines were accepted");
 	}
 
-	void CheckClaimLedger()
+	void CheckRegistration()
 	{
 		using namespace cs::engine;
-		const auto textureClaim = [](std::uint32_t a_slot) {
-			return ShaderSlotClaim{
-				.stage = ShaderStage::kPixel,
-				.resourceType = ShaderResourceType::kShaderResource,
-				.slot = a_slot
-			};
-		};
-
 		ShaderReplacementRegistration incompletePair;
 		incompletePair.targetId = ShaderInjectionTarget::kDeferredPrepass;
 		incompletePair.requiresGraphicsPair = true;
@@ -290,86 +282,11 @@ namespace
 		completePair.requiresGraphicsPair = true;
 		Expect(RegisterReplacement(std::move(completePair)), "paired vertex/pixel contribution was rejected");
 
-		ShaderReplacementRegistration first;
-		first.targetId = ShaderInjectionTarget::kBsdfComposite;
-		first.contributor = "ledger-first";
-		static const ShaderDefineDeclaration firstDefinition{ "LEDGER_TEST", { ShaderInjectionTarget::kBsdfComposite } };
-		first.feature = &firstDefinition;
-		first.slotClaims = { textureClaim(25) };
-		Expect(RegisterReplacement(std::move(first)), "first claim was rejected");
-
-		ShaderReplacementRegistration duplicate;
-		duplicate.targetId = ShaderInjectionTarget::kBsdfComposite;
-		duplicate.contributor = "ledger-duplicate";
-		duplicate.slotClaims = { textureClaim(25) };
-		Expect(
-			!RegisterReplacement(std::move(duplicate)),
-			"duplicate target/slot claim was accepted");
-
-		ShaderReplacementRegistration otherTarget;
-		otherTarget.targetId = ShaderInjectionTarget::kBsdfLight;
-		otherTarget.contributor = "ledger-other-target";
-		otherTarget.slotClaims = { textureClaim(25) };
-		Expect(
-			RegisterReplacement(std::move(otherTarget)),
-			"same slot on another target was rejected");
-
-		const auto sampler = [](const char* a_name, ShaderSamplerContract a_contract) {
-			ShaderReplacementRegistration registration;
-			registration.targetId = ShaderInjectionTarget::kBsdfComposite;
-			registration.contributor = a_name;
-			registration.slotClaims = { { ShaderStage::kPixel, ShaderResourceType::kSampler, 13, a_contract } };
-			return registration;
-		};
-		Expect(RegisterReplacement(sampler("ledger-linear-first", ShaderSamplerContract::kLinearClamp)),
-			"linear-clamp sampler claim was rejected");
-		Expect(RegisterReplacement(sampler("ledger-linear-shared", ShaderSamplerContract::kLinearClamp)),
-			"matching immutable sampler contracts must share a slot");
-		Expect(!RegisterReplacement(sampler("ledger-exclusive", ShaderSamplerContract::kExclusive)),
-			"exclusive sampler claim overlapped a shared sampler");
-
-		ShaderReplacementRegistration conflictingDefine;
-		conflictingDefine.targetId = ShaderInjectionTarget::kBsdfComposite;
-		conflictingDefine.contributor = "ledger-conflicting-define";
-		struct ConflictDefinition : ShaderDefineProvider
-		{
-			std::string_view GetShaderDefineName() const override { return "SECOND"; }
-			ShaderDefineOptions GetShaderDefineOptions(ShaderInjectionTarget) const override { return { { "LEDGER_TEST", "2" } }; }
-			bool HasShaderDefine(ShaderInjectionTarget) const override { return true; }
-		};
-		static const ConflictDefinition conflictDefinition;
-		conflictingDefine.feature = &conflictDefinition;
-		Expect(
-			!RegisterReplacement(std::move(conflictingDefine)),
-			"conflicting define claim was accepted");
-
-		for (const auto slot :
-			{ cs::render::kFrameDataSlot, cs::render::kSharedDataSlot,
-				cs::render::kFeatureDataSlot, cs::render::kFO4SharedDataSlot }) {
-			ShaderReplacementRegistration reserved;
-			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
-			reserved.contributor = "ledger-reserved-slot";
-			reserved.slotClaims = { { .stage = ShaderStage::kPixel,
-				.resourceType = ShaderResourceType::kConstantBuffer,
-				.slot = slot } };
-			Expect(
-				!RegisterReplacement(std::move(reserved)),
-				"reserved b4-b7 claim was accepted");
-		}
-		for (auto slot : { cs::render::kCanonicalDepthSlot, cs::render::kFullscreenDebugTextureSlot }) {
-			ShaderReplacementRegistration reserved;
-			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
-			reserved.contributor = "ledger-reserved-texture";
-			reserved.slotClaims = { textureClaim(slot) };
-			Expect(!RegisterReplacement(std::move(reserved)), "reserved substrate texture claim was accepted");
-		}
-
 		drawAnchorInstallFails = true;
 		ShaderReplacementRegistration rejectedAnchor;
 		rejectedAnchor.targetId = ShaderInjectionTarget::kBsdfComposite;
 		rejectedAnchor.contributor = "ledger-rejected-anchor";
 		rejectedAnchor.bind = [](ID3D11DeviceContext*) {};
-		rejectedAnchor.slotClaims = { textureClaim(31) };
 		Expect(
 			!RegisterReplacement(std::move(rejectedAnchor)),
 			"registration with a failed draw anchor was accepted");
@@ -378,10 +295,9 @@ namespace
 		ShaderReplacementRegistration reuseAnchor;
 		reuseAnchor.targetId = ShaderInjectionTarget::kBsdfComposite;
 		reuseAnchor.contributor = "ledger-anchor-reuse";
-		reuseAnchor.slotClaims = { textureClaim(31) };
 		Expect(
 			RegisterReplacement(std::move(reuseAnchor)),
-			"failed registration retained its claims");
+			"registration failed after the draw anchor became available");
 	}
 
 	class ExecutableDispatchFixture
@@ -815,15 +731,6 @@ namespace
 		ShaderReplacementRegistration contribution;
 		contribution.targetId = ShaderInjectionTarget::kBsdfLight;
 		contribution.contributor = "pixel-bindings";
-		contribution.slotClaims = {
-			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 1 },
-			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 2 },
-			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 10 },
-			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 3 },
-			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 24 },
-			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 25 },
-			{ ShaderStage::kPixel, ShaderResourceType::kSampler, 1 }
-		};
 		contribution.bind = [&](ID3D11DeviceContext* ctx) {
 			auto* buffer = injectedBuffer.get();
 			auto* texture = injectedTexture.get();
@@ -849,7 +756,7 @@ namespace
 			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get());
 			winrt::com_ptr<ID3D11ShaderResourceView> actual;
 			context->PSGetShaderResources(25, 1, actual.put());
-			Expect(actual == injectedTexture, "batched high resources were not bound before the draw");
+			Expect(actual == injectedTexture, "high resources were not bound before the draw");
 			{
 				ScopedPixelShaderInjectionBindings inner;
 				ID3D11ShaderResourceView* empty = nullptr;
@@ -876,8 +783,8 @@ namespace
 		BeginShaderInjectionFrame(11);
 		const auto metrics = GetShaderInjectionSummary().draw;
 		Expect(metrics.frame == 10 && metrics.scopes == 1 && metrics.captures == 4 && metrics.restores == 4 &&
-				   metrics.d3dBinds == 10 && metrics.scopeNanoseconds > 0,
-			"draw counters did not count batching, nested restoration, or the completed frame");
+				   metrics.d3dBinds == 12 && metrics.scopeNanoseconds > 0,
+			"draw counters did not count writes, nested restoration, or the completed frame");
 		context->ClearState();
 		{
 			ScopedPixelShaderInjectionBindings scope;
@@ -888,7 +795,7 @@ namespace
 		}
 		BeginShaderInjectionFrame(12);
 		const auto next = GetShaderInjectionSummary().draw;
-		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 8,
+		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 10,
 			"per-frame counters accumulated earlier draws");
 
 		winrt::com_ptr<ID3D11Texture2D> output;
@@ -962,7 +869,6 @@ namespace
 		contribution.contributor = "compute-phase";
 		static const ShaderDefineDeclaration computeDefinition{ "COMPUTE_PHASE_TEST", { ShaderInjectionTarget::kDfTiledLighting } };
 		contribution.feature = &computeDefinition;
-		contribution.slotClaims = { { ShaderStage::kCompute, ShaderResourceType::kShaderResource, 8 } };
 		contribution.bind = [](ID3D11DeviceContext* a_context) {
 			auto* metadata = publishedDepth.get();
 			a_context->CSSetShaderResources(8, 1, &metadata);
@@ -1078,8 +984,8 @@ namespace
 int main(int argc, char** argv)
 {
 	const std::string mode = argc > 1 ? argv[1] : "";
-	if (mode == "--claim-ledger")
-		CheckClaimLedger();
+	if (mode == "--registration")
+		CheckRegistration();
 	else if (mode == "--contributor-conflict")
 		CheckContributorConflict();
 	else if (mode == "--compute-hooks-missing")

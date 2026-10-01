@@ -61,7 +61,6 @@ namespace cs::features
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(sss_settings::kSchema); }
 		void OnPreDeferredLights();
 		void BindShadowMask(ID3D11DeviceContext* a_context);
-		void OnPostDeferredLights();
 		bool EnsureResources();
 		bool TryGetMaskExtents(
 			sss_mask_binding::Extent& a_required,
@@ -85,7 +84,6 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _whiteFallbackReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
-		std::atomic_bool _maskBound{ false };
 		std::atomic_bool _maskBoundLastFrame{ false };
 		std::atomic_bool _debugPreviewEnabled{ false };
 		std::atomic<float> _sunX{ 0.0f };

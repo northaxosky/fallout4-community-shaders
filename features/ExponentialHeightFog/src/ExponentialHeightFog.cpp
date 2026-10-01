@@ -148,11 +148,6 @@ namespace cs::features
 				if (target == engine::ShaderInjectionTarget::kBsLighting || target == engine::ShaderInjectionTarget::kBsdfLight)
 					return;
 				const std::uint32_t sampler = target == engine::ShaderInjectionTarget::kBsdfComposite ? 13u : 15u;
-				registration.slotClaims = {
-					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kShaderResource, 19 },
-					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kSampler, sampler,
-						engine::ShaderSamplerContract::kLinearClamp }
-				};
 				registration.bind = [this, sampler](ID3D11DeviceContext* a_context) { Bind(a_context, sampler); };
 			})) {
 			FailLoad("Exponential height fog shader registration failed.");

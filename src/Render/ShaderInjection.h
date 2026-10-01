@@ -59,22 +59,6 @@ namespace cs::engine
 		kRenderTarget
 	};
 
-	enum class ShaderSamplerContract : std::uint8_t
-	{
-		kExclusive,
-		kLinearClamp
-	};
-
-	struct ShaderSlotClaim
-	{
-		ShaderStage stage = ShaderStage::kPixel;
-		ShaderResourceType resourceType = ShaderResourceType::kShaderResource;
-		std::uint32_t slot = 0;
-		ShaderSamplerContract samplerContract = ShaderSamplerContract::kExclusive;
-
-		auto operator<=>(const ShaderSlotClaim&) const = default;
-	};
-
 	struct ShaderInjectionDrawMetrics
 	{
 		std::uint32_t frame = 0;
@@ -88,13 +72,11 @@ namespace cs::engine
 	// Render thread: publish the completed frame, including forward draws after composite.
 	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept;
 	void RecordShaderInjectionD3DBinds(std::uint32_t a_count = 1) noexcept;
-	// Pixel callbacks use these setters: batch contiguous writes and capture only overwritten engine slots.
+	// Pixel callbacks capture only overwritten engine slots.
 	void BindInjectionShaderResources(ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*) noexcept;
 	void BindInjectionSamplers(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*) noexcept;
 	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
 	void CaptureShaderInjectionOutputs(ID3D11DeviceContext*) noexcept;
-	// Flush before observing context state or changing outputs that may alias queued SRVs.
-	void FlushShaderInjectionBindings() noexcept;
 
 	class ScopedShaderInjectionBindings
 	{
@@ -103,7 +85,7 @@ namespace cs::engine
 		~ScopedShaderInjectionBindings() noexcept;
 		ScopedShaderInjectionBindings(const ScopedShaderInjectionBindings&) = delete;
 		ScopedShaderInjectionBindings& operator=(const ScopedShaderInjectionBindings&) = delete;
-		void Capture(ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims) noexcept;
+		void Capture(ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept;
 
 	private:
 		struct Resource
@@ -124,7 +106,7 @@ namespace cs::engine
 		ShaderStage _stage;
 		ScopedShaderInjectionBindings* _previous;
 		ID3D11DeviceContext* _context = nullptr;
-		std::array<Resource, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> _resources;
+		std::array<Resource, 16> _resources;
 		std::array<Sampler, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> _samplers;
 		std::array<Buffer, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT> _buffers;
 		std::uint32_t _resourceCount = 0;
@@ -150,7 +132,6 @@ namespace cs::engine
 		std::string contributor;
 		const ShaderDefineProvider* feature = nullptr;
 		ShaderInjectionBindCallback bind;
-		std::vector<ShaderSlotClaim> slotClaims;
 		bool requiresGraphicsPair = false;
 	};
 
@@ -176,7 +157,6 @@ namespace cs::engine
 		bool requested = false;
 		bool enabled = false;
 		bool published = false;
-		bool slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 		std::size_t contributors = 0;
 		std::size_t observedComputeShaders = 0;

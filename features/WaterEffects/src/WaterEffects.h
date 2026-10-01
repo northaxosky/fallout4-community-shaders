@@ -2,8 +2,6 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "Render/PixelShaderResourceSnapshot.h"
-#include "Render/PixelShaderSamplerSnapshot.h"
 #include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 #include "WaterEffectsSettings.h"
@@ -81,9 +79,7 @@ namespace cs::features
 		void SetValidationDetail(std::string a_detail);
 		std::string GetValidationDetail() const;
 
-		void SaveEngineBindings();
 		void BindCaustics(ID3D11DeviceContext* a_context);
-		void RestoreEngineBindings();
 		void BuildDebugResources(ID3D11Device* a_device);
 		void RenderDebug(ID3D11DeviceContext* a_context);
 
@@ -112,9 +108,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11RasterizerState> _debugRasterizer;
 		std::unique_ptr<cs::buffer::Texture2D> _debugTexture;
 		bool _debugFrameReady = false;
-
-		cs::render::PixelShaderResourceSnapshot<1> _engineBinding;
-		cs::render::PixelShaderSamplerSnapshot<1> _engineSamplerBinding;
 
 		mutable std::mutex _validationMutex;
 		std::string _validationDetail;

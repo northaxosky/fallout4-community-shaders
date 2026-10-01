@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <bitset>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -40,7 +39,6 @@ namespace cs::engine
 		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
 		thread_local ShaderInjectionDrawMetrics t_drawMetrics;
 		thread_local bool t_drawFrameStarted = false;
-		thread_local bool t_dispatchingBindings = false;
 		std::mutex g_drawMetricsMutex;
 		ShaderInjectionDrawMetrics g_completedDrawMetrics;
 
@@ -49,128 +47,30 @@ namespace cs::engine
 			if (!t_pixelBindings)
 				return;
 			for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
-				const ShaderSlotClaim claim{ ShaderStage::kPixel, a_type, slot };
-				t_pixelBindings->Capture(a_context, std::span(&claim, 1));
+				t_pixelBindings->Capture(a_context, a_type, slot);
 			}
 		}
-
-		template <class T, std::size_t N>
-		struct BindingBatch
-		{
-			std::array<T*, N> values;
-			std::bitset<N> dirty;
-			UINT first = static_cast<UINT>(N);
-			UINT last = 0;
-
-			void Set(UINT a_start, UINT a_count, T* const* a_values) noexcept
-			{
-				assert(a_start + a_count <= N);
-				for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
-					values[slot] = a_values[slot - a_start];
-					dirty.set(slot);
-				}
-				first = std::min(first, a_start);
-				last = std::max(last, a_start + a_count);
-			}
-
-			template <class Set>
-			void Flush(Set a_set) noexcept
-			{
-				for (UINT slot = first; slot < last;) {
-					if (!dirty.test(slot)) {
-						++slot;
-						continue;
-					}
-					const auto start = slot++;
-					while (slot < last && dirty.test(slot))
-						++slot;
-					a_set(start, slot - start, values.data() + start);
-					RecordShaderInjectionD3DBinds();
-				}
-				dirty.reset();
-				first = static_cast<UINT>(N);
-				last = 0;
-			}
-		};
-
-		class PixelBindingBatch;
-		thread_local PixelBindingBatch* t_bindingBatch = nullptr;
-
-		class PixelBindingBatch
-		{
-		public:
-			explicit PixelBindingBatch(ID3D11DeviceContext* a_context) noexcept :
-				context(a_context), previous(std::exchange(t_bindingBatch, this)),
-				wasDispatching(std::exchange(t_dispatchingBindings, true))
-			{}
-			~PixelBindingBatch() noexcept
-			{
-				Flush();
-				t_bindingBatch = previous;
-				t_dispatchingBindings = wasDispatching;
-			}
-			void Flush() noexcept
-			{
-				buffers.Flush([this](UINT start, UINT count, auto values) {
-					CapturePixelBindings(context, ShaderResourceType::kConstantBuffer, start, count);
-					context->PSSetConstantBuffers(start, count, values);
-				});
-				resources.Flush([this](UINT start, UINT count, auto values) {
-					CapturePixelBindings(context, ShaderResourceType::kShaderResource, start, count);
-					context->PSSetShaderResources(start, count, values);
-				});
-				samplers.Flush([this](UINT start, UINT count, auto values) {
-					CapturePixelBindings(context, ShaderResourceType::kSampler, start, count);
-					context->PSSetSamplers(start, count, values);
-				});
-			}
-
-			ID3D11DeviceContext* context;
-			PixelBindingBatch* previous;
-			bool wasDispatching;
-			BindingBatch<ID3D11Buffer, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT> buffers;
-			BindingBatch<ID3D11ShaderResourceView, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> resources;
-			BindingBatch<ID3D11SamplerState, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> samplers;
-		};
 	}
 
 	void BindInjectionShaderResources(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11ShaderResourceView* const* a_values) noexcept
 	{
-		if (t_bindingBatch && t_bindingBatch->context == a_context)
-			t_bindingBatch->resources.Set(a_start, a_count, a_values);
-		else {
-			CapturePixelBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
-			a_context->PSSetShaderResources(a_start, a_count, a_values);
-			RecordShaderInjectionD3DBinds();
-		}
+		CapturePixelBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
+		a_context->PSSetShaderResources(a_start, a_count, a_values);
+		RecordShaderInjectionD3DBinds();
 	}
 
 	void BindInjectionSamplers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11SamplerState* const* a_values) noexcept
 	{
-		if (t_bindingBatch && t_bindingBatch->context == a_context)
-			t_bindingBatch->samplers.Set(a_start, a_count, a_values);
-		else {
-			CapturePixelBindings(a_context, ShaderResourceType::kSampler, a_start, a_count);
-			a_context->PSSetSamplers(a_start, a_count, a_values);
-			RecordShaderInjectionD3DBinds();
-		}
+		CapturePixelBindings(a_context, ShaderResourceType::kSampler, a_start, a_count);
+		a_context->PSSetSamplers(a_start, a_count, a_values);
+		RecordShaderInjectionD3DBinds();
 	}
 
 	void BindInjectionConstantBuffers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11Buffer* const* a_values) noexcept
 	{
-		if (t_bindingBatch && t_bindingBatch->context == a_context)
-			t_bindingBatch->buffers.Set(a_start, a_count, a_values);
-		else {
-			CapturePixelBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
-			a_context->PSSetConstantBuffers(a_start, a_count, a_values);
-			RecordShaderInjectionD3DBinds();
-		}
-	}
-
-	void FlushShaderInjectionBindings() noexcept
-	{
-		if (t_bindingBatch)
-			t_bindingBatch->Flush();
+		CapturePixelBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
+		a_context->PSSetConstantBuffers(a_start, a_count, a_values);
+		RecordShaderInjectionD3DBinds();
 	}
 
 	void CaptureShaderInjectionOutputs(ID3D11DeviceContext* a_context) noexcept
@@ -192,7 +92,7 @@ namespace cs::engine
 
 	void RecordShaderInjectionD3DBinds(std::uint32_t a_count) noexcept
 	{
-		if (t_pixelBindings || t_dispatchingBindings)
+		if (t_pixelBindings)
 			t_drawMetrics.d3dBinds += a_count;
 	}
 
@@ -264,57 +164,55 @@ namespace cs::engine
 	}
 
 	void ScopedShaderInjectionBindings::Capture(
-		ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims) noexcept
+		ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept
 	{
 		if (!a_context)
 			return;
 		if (!_context)
 			_context = a_context;
-		for (const auto& claim : a_claims) {
-			if (claim.stage != _stage)
-				continue;
+		{
 			// Engine-facts: PS shadow state owns t0-t15/s0-s15 and b0-b2/b12/b13 only.
 			if (_stage == ShaderStage::kPixel &&
-				((claim.resourceType == ShaderResourceType::kShaderResource && claim.slot >= 16) ||
-					(claim.resourceType == ShaderResourceType::kConstantBuffer && claim.slot > 2 && claim.slot != 12 && claim.slot != 13)))
-				continue;
-			if (claim.resourceType == ShaderResourceType::kRenderTarget && !_outputCaptured) {
+				((a_type == ShaderResourceType::kShaderResource && a_slot >= 16) ||
+					(a_type == ShaderResourceType::kConstantBuffer && a_slot > 2 && a_slot != 12 && a_slot != 13)))
+				return;
+			if (a_type == ShaderResourceType::kRenderTarget && !_outputCaptured) {
 				_context->OMGetRenderTargets(8, _targets, &_depth);
 				_context->OMGetBlendState(&_blend, _blendFactor, &_sampleMask);
 				_outputCaptured = true;
 				if (_stage == ShaderStage::kPixel)
 					t_drawMetrics.captures += 2;
 			}
-			if (claim.resourceType == ShaderResourceType::kShaderResource &&
-				std::ranges::none_of(std::span(_resources).first(_resourceCount), [&](const auto& r) { return r.slot == claim.slot; })) {
+			if (a_type == ShaderResourceType::kShaderResource &&
+				std::ranges::none_of(std::span(_resources).first(_resourceCount), [&](const auto& r) { return r.slot == a_slot; })) {
 				auto& resource = _resources[_resourceCount++];
-				resource = { claim.slot, nullptr };
+				resource = { a_slot, nullptr };
 				if (_stage == ShaderStage::kPixel)
 					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetShaderResources(claim.slot, 1, &resource.value);
+					_context->CSGetShaderResources(a_slot, 1, &resource.value);
 				else
-					_context->PSGetShaderResources(claim.slot, 1, &resource.value);
-			} else if (claim.resourceType == ShaderResourceType::kSampler &&
-					   std::ranges::none_of(std::span(_samplers).first(_samplerCount), [&](const auto& s) { return s.slot == claim.slot; })) {
+					_context->PSGetShaderResources(a_slot, 1, &resource.value);
+			} else if (a_type == ShaderResourceType::kSampler &&
+					   std::ranges::none_of(std::span(_samplers).first(_samplerCount), [&](const auto& s) { return s.slot == a_slot; })) {
 				auto& sampler = _samplers[_samplerCount++];
-				sampler = { claim.slot, nullptr };
+				sampler = { a_slot, nullptr };
 				if (_stage == ShaderStage::kPixel)
 					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetSamplers(claim.slot, 1, &sampler.value);
+					_context->CSGetSamplers(a_slot, 1, &sampler.value);
 				else
-					_context->PSGetSamplers(claim.slot, 1, &sampler.value);
-			} else if (claim.resourceType == ShaderResourceType::kConstantBuffer &&
-					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == claim.slot; })) {
+					_context->PSGetSamplers(a_slot, 1, &sampler.value);
+			} else if (a_type == ShaderResourceType::kConstantBuffer &&
+					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == a_slot; })) {
 				auto& buffer = _buffers[_bufferCount++];
-				buffer = { claim.slot, nullptr };
+				buffer = { a_slot, nullptr };
 				if (_stage == ShaderStage::kPixel)
 					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetConstantBuffers(claim.slot, 1, &buffer.value);
+					_context->CSGetConstantBuffers(a_slot, 1, &buffer.value);
 				else
-					_context->PSGetConstantBuffers(claim.slot, 1, &buffer.value);
+					_context->PSGetConstantBuffers(a_slot, 1, &buffer.value);
 			}
 		}
 	}
@@ -370,7 +268,6 @@ namespace cs::engine
 		struct TargetRuntimeState
 		{
 			std::atomic<bool> requested{ false };
-			std::atomic<bool> slotCollision{ false };
 			std::atomic<std::size_t> contributors{ 0 };
 			std::atomic<std::uint64_t> computeBindCalls{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
@@ -396,7 +293,6 @@ namespace cs::engine
 			};
 			std::vector<Bind> binds;
 			std::size_t contributors = 0;
-			bool slotCollision = false;
 		};
 
 		struct PublishedTarget
@@ -492,14 +388,6 @@ namespace cs::engine
 		};
 
 		// first claimant wins, in feature-registration order
-		struct TargetClaimLedger
-		{
-			std::vector<ShaderSlotClaim> slots;
-			std::array<ShaderInjectionDefines,
-				static_cast<std::size_t>(ShaderStage::kCount)>
-				defines;
-		};
-
 		struct Service
 		{
 			Service()
@@ -520,9 +408,6 @@ namespace cs::engine
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
-			std::array<TargetClaimLedger,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
-				ledgers;
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				runtime;
@@ -790,29 +675,9 @@ namespace cs::engine
 			return counts;
 		}
 
-		std::string_view ContributorName(
-			const ShaderReplacementRegistration& a_registration,
-			std::size_t a_registrationIndex)
-		{
-			if (!a_registration.contributor.empty())
-				return a_registration.contributor;
-
-			thread_local std::string generated;
-			generated = "registration#" + std::to_string(a_registrationIndex);
-			return generated;
-		}
-
 		void LogLateMutation(std::string_view a_operation)
 		{
 			L->warn("{} rejected after shader-injection freeze; restart required.", a_operation);
-		}
-
-		template <class Registration>
-		bool RegistrationHasDuplicateClaims(const Registration& a_registration)
-		{
-			auto claims = a_registration.slotClaims;
-			std::ranges::sort(claims);
-			return std::ranges::adjacent_find(claims) != claims.end();
 		}
 
 		ShaderInjectionDefines GetDefines(const ShaderReplacementRegistration& a_registration)
@@ -824,155 +689,6 @@ namespace cs::engine
 			for (const auto& [name, value] : feature->GetShaderDefineOptions(a_registration.targetId))
 				defines.emplace(name, value);
 			return defines;
-		}
-
-		bool HasDefineConflict(
-			const ShaderReplacementRegistration& a_registration,
-			std::span<const ShaderReplacementRegistration> a_contributions,
-			std::string& a_conflictingName,
-			std::string& a_existingValue)
-		{
-			for (const auto& [name, value] : GetDefines(a_registration)) {
-				for (const auto& contribution : a_contributions) {
-					if ((contribution.stages & a_registration.stages) == 0)
-						continue;
-					const auto defines = GetDefines(contribution);
-					const auto existing = defines.find(name);
-					if (existing != defines.end() && existing->second != value) {
-						a_conflictingName = name;
-						a_existingValue = existing->second;
-						return true;
-					}
-				}
-			}
-			return false;
-		}
-
-		template <class Registration>
-		std::optional<ShaderSlotClaim> FindSlotCollision(
-			const Registration& a_registration,
-			const std::vector<ShaderSlotClaim>& a_claimedSlots)
-		{
-			for (const auto& claim : a_registration.slotClaims) {
-				for (const auto& occupied : a_claimedSlots) {
-					if (occupied.stage != claim.stage || occupied.resourceType != claim.resourceType || occupied.slot != claim.slot)
-						continue;
-					// FO4: identical immutable linear-clamp samplers may share scarce PS slots.
-					if (claim.resourceType != ShaderResourceType::kSampler ||
-						claim.samplerContract == ShaderSamplerContract::kExclusive ||
-						claim.samplerContract != occupied.samplerContract)
-						return claim;
-				}
-			}
-			return std::nullopt;
-		}
-
-		// Engine and feature claims cannot occupy substrate bindings.
-		std::optional<ShaderSlotClaim> FindSubstrateReservation(
-			std::span<const ShaderSlotClaim> a_claims)
-		{
-			for (const auto& claim : a_claims) {
-				if ((claim.resourceType == ShaderResourceType::kConstantBuffer &&
-						claim.slot >= render::kFrameDataSlot && claim.slot <= render::kFO4SharedDataSlot) ||
-					(claim.resourceType == ShaderResourceType::kShaderResource &&
-						(claim.slot == render::kCanonicalDepthSlot || claim.slot == render::kFullscreenDebugTextureSlot)))
-					return claim;
-			}
-			return std::nullopt;
-		}
-
-		template <class Visitor>
-		void ForEachStage(ShaderStageMask a_stages, Visitor&& a_visitor)
-		{
-			for (std::size_t stage = 0;
-				stage < static_cast<std::size_t>(ShaderStage::kCount);
-				++stage) {
-				if ((a_stages & ShaderStageBit(static_cast<ShaderStage>(stage))) != 0)
-					a_visitor(stage);
-			}
-		}
-
-		// registration-time ledger admission; freeze only reasserts the invariant
-		bool ClaimsAvailable(
-			const TargetClaimLedger& a_ledger,
-			const ShaderReplacementRegistration& a_registration,
-			const ShaderInjectionTargetMetadata& a_target)
-		{
-			for (const auto& claim : a_registration.slotClaims) {
-				const std::uint32_t limit = claim.resourceType == ShaderResourceType::kShaderResource ? D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT :
-				                            claim.resourceType == ShaderResourceType::kSampler        ? D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT :
-				                            claim.resourceType == ShaderResourceType::kConstantBuffer ? D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT :
-				                                                                                        D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;
-				if (claim.slot >= limit) {
-					L->error("Replacement registration '{}' for '{}' rejected: type={} slot={} exceeds the D3D11 slot range.",
-						a_registration.contributor, a_target.name, static_cast<unsigned>(claim.resourceType), claim.slot);
-					return false;
-				}
-			}
-			if (const auto reserved =
-					FindSubstrateReservation(a_registration.slotClaims)) {
-				L->error(
-					"Replacement registration '{}' for '{}' rejected: stage={} constant buffer b{} is reserved for the shared substrate (b{} and b{}).",
-					a_registration.contributor,
-					a_target.name,
-					static_cast<unsigned>(reserved->stage),
-					reserved->slot,
-					render::kSharedDataSlot,
-					render::kFeatureDataSlot);
-				return false;
-			}
-			if (const auto collision =
-					FindSlotCollision(a_registration, a_ledger.slots)) {
-				L->error(
-					"Replacement registration '{}' for '{}' rejected: stage={} type={} slot={} is already claimed.",
-					a_registration.contributor,
-					a_target.name,
-					static_cast<unsigned>(collision->stage),
-					static_cast<unsigned>(collision->resourceType),
-					collision->slot);
-				return false;
-			}
-			for (const auto& [name, value] : GetDefines(a_registration)) {
-				bool conflict = false;
-				std::string_view conflictingValue;
-				ForEachStage(
-					a_registration.stages,
-					[&](std::size_t a_stage) {
-						const auto existing =
-							a_ledger.defines[a_stage].find(name);
-						if (existing != a_ledger.defines[a_stage].end() && existing->second != value) {
-							conflict = true;
-							conflictingValue = existing->second;
-						}
-					});
-				if (conflict) {
-					L->error(
-						"Replacement registration '{}' for '{}' rejected: {}={} conflicts with the claimed value {}.",
-						a_registration.contributor,
-						a_target.name,
-						name,
-						value,
-						conflictingValue);
-					return false;
-				}
-			}
-			return true;
-		}
-
-		void CommitClaims(
-			TargetClaimLedger& a_ledger,
-			const ShaderReplacementRegistration& a_registration)
-		{
-			a_ledger.slots.insert(
-				a_ledger.slots.end(),
-				a_registration.slotClaims.begin(),
-				a_registration.slotClaims.end());
-			ForEachStage(
-				a_registration.stages,
-				[&](std::size_t a_stage) {
-					const auto defines = GetDefines(a_registration);
-					a_ledger.defines[a_stage].insert(defines.begin(), defines.end());
-				});
 		}
 
 		std::vector<FrozenTarget> FreezeTargets(
@@ -991,7 +707,6 @@ namespace cs::engine
 				auto developerOverride = a_developerOverrides[targetIndex];
 				if (developerOverride == DeveloperShaderOverride::kForceOff && !a_developerForceOffEnabled)
 					developerOverride = DeveloperShaderOverride::kAuto;
-				std::vector<ShaderSlotClaim> claimedSlots;
 
 				for (std::size_t registrationIndex = 0;
 					registrationIndex < a_registrations.size();
@@ -1003,59 +718,10 @@ namespace cs::engine
 						continue;
 					}
 
-					std::string conflictingName;
-					std::string existingValue;
-					if (HasDefineConflict(
-							registration,
-							target.contributions,
-							conflictingName,
-							existingValue)) {
-						L->error(
-							"Contributor '{}' for '{}' conflicts on {}={} (requested {}) after registration admitted it; contributor dropped.",
-							ContributorName(registration, registrationIndex),
-							metadata.name,
-							conflictingName,
-							existingValue,
-							GetDefines(registration).at(conflictingName));
-						target.slotCollision = true;
-						continue;
-					}
-
-					// registration already rejected these; a hit here is a broker invariant break
-					if (const auto reserved = FindSubstrateReservation(
-							registration.slotClaims)) {
-						L->error(
-							"Substrate slot collision on '{}' (stage={}, constant buffer b{}) from '{}'; b{} and b{} are reserved for the shared substrate; contributor dropped.",
-							metadata.name,
-							static_cast<unsigned>(reserved->stage),
-							reserved->slot,
-							ContributorName(registration, registrationIndex),
-							render::kSharedDataSlot,
-							render::kFeatureDataSlot);
-						target.slotCollision = true;
-						continue;
-					}
-
-					if (const auto collision = FindSlotCollision(registration, claimedSlots)) {
-						L->error(
-							"Slot collision on '{}' (stage={}, type={}, slot={}) from '{}'; contributor dropped.",
-							metadata.name,
-							static_cast<unsigned>(collision->stage),
-							static_cast<unsigned>(collision->resourceType),
-							collision->slot,
-							ContributorName(registration, registrationIndex));
-						target.slotCollision = true;
-						continue;
-					}
-
 					++target.contributors;
 					const auto defines = GetDefines(registration);
 					target.defines.insert(defines.begin(), defines.end());
 					target.contributions.push_back(registration);
-					claimedSlots.insert(
-						claimedSlots.end(),
-						registration.slotClaims.begin(),
-						registration.slotClaims.end());
 					if (registration.bind) {
 						target.binds.push_back({ registration.stages,
 							registration.bind });
@@ -1078,7 +744,6 @@ namespace cs::engine
 
 				auto& runtime = GetService().runtime[targetIndex];
 				runtime.requested.store(requested, std::memory_order_relaxed);
-				runtime.slotCollision.store(target.slotCollision, std::memory_order_relaxed);
 				runtime.contributors.store(target.contributors, std::memory_order_relaxed);
 				runtime.developerOverride = developerOverride;
 				runtime.defines = target.defines;
@@ -1418,10 +1083,6 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
-			std::optional<PixelBindingBatch> bindings;
-			if (a_stage == ShaderStage::kPixel)
-				bindings.emplace(a_context);
-
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
 			for (const auto& bind : a_target.binds) {
 				if ((bind.stages & ShaderStageBit(a_stage)) == 0)
@@ -1560,10 +1221,10 @@ namespace cs::engine
 					return;
 				}
 				const ActiveVariantScope variantScope(variant.get());
-				// FO4: contribution claims restore exact CS bindings after native dispatch.
+				// FO4 rebuilds the native low-slot inputs for each tiled dispatch.
 				ScopedShaderInjectionBindings contributionBindings(ShaderStage::kCompute);
-				for (const auto& contribution : target->contributions)
-					contributionBindings.Capture(a_context, contribution.slotClaims);
+				if (!target->binds.empty())
+					contributionBindings.Capture(a_context, ShaderResourceType::kShaderResource, 8);
 				DispatchPublishedTarget(
 					*target,
 					ShaderStage::kCompute,
@@ -1744,17 +1405,7 @@ namespace cs::engine
 					a_candidate.contributor);
 				return false;
 			}
-			if (RegistrationHasDuplicateClaims(a_candidate)) {
-				L->error(
-					"Replacement registration '{}' for '{}' rejected: duplicate slot claim.",
-					a_candidate.contributor,
-					metadata.name);
-				return false;
-			}
-			return ClaimsAvailable(
-				service.ledgers[ToIndex(a_candidate.targetId)],
-				a_candidate,
-				metadata);
+			return true;
 		};
 
 		{
@@ -1777,9 +1428,6 @@ namespace cs::engine
 		std::scoped_lock lock(service.mutex);
 		if (!admissible(a_registration))
 			return false;
-		CommitClaims(
-			service.ledgers[ToIndex(a_registration.targetId)],
-			a_registration);
 		service.registrations.push_back(std::move(a_registration));
 		return true;
 	}
@@ -1941,11 +1589,6 @@ namespace cs::engine
 
 			const auto& runtime =
 				service.runtime[ToIndex(registration.targetId)];
-			if (runtime.slotCollision.load(std::memory_order_relaxed)) {
-				a_error = "'" + std::string(metadata->name) + "' cannot deliver contributor '" + std::string(a_contributor) + "' because its slot or define claims conflict";
-				return false;
-			}
-
 			const auto* published =
 				FindPublishedTarget(*plan, registration.targetId);
 			if (!published) {
@@ -1960,7 +1603,7 @@ namespace cs::engine
 			const auto contribution = std::ranges::find_if(
 				published->contributions,
 				[&](const ShaderReplacementRegistration& a_candidate) {
-					return a_candidate.contributor == a_contributor && a_candidate.targetId == registration.targetId && a_candidate.stages == registration.stages && a_candidate.feature == registration.feature && a_candidate.slotClaims == registration.slotClaims && !std::ranges::contains(matched, std::addressof(a_candidate));
+					return a_candidate.contributor == a_contributor && a_candidate.targetId == registration.targetId && a_candidate.stages == registration.stages && a_candidate.feature == registration.feature && !std::ranges::contains(matched, std::addressof(a_candidate));
 				});
 			if (contribution == published->contributions.end()) {
 				a_error = "'" + std::string(metadata->name) + "' lost a registered route for contributor '" + std::string(a_contributor) + "'";
@@ -2634,8 +2277,6 @@ namespace cs::engine
 				runtime.requested.load(std::memory_order_relaxed);
 			snapshot.published =
 				plan && FindPublishedTarget(*plan, a_target);
-			snapshot.slotCollision =
-				runtime.slotCollision.load(std::memory_order_relaxed);
 			snapshot.developerOverride = runtime.developerOverride;
 			snapshot.contributors =
 				runtime.contributors.load(std::memory_order_relaxed);

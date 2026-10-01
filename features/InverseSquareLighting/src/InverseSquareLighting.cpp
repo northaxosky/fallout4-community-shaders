@@ -348,7 +348,6 @@ namespace cs::features
 		}
 		if (!engine::RegisterFeatureShaderBindings("InverseSquareLighting", *this, [](engine::ShaderReplacementRegistration& registration) {
 				const bool compute = registration.targetId == engine::ShaderInjectionTarget::kDfTiledLighting;
-				const auto stage = compute ? engine::ShaderStage::kCompute : engine::ShaderStage::kPixel;
 				registration.bind = [compute](ID3D11DeviceContext* context) {
 						if (compute) {
 							auto* view = Enabled() ? g_state.views[g_state.uploadedSide].get() : nullptr;
@@ -367,7 +366,6 @@ namespace cs::features
 								engine::BindInjectionConstantBuffers(context, kRasterSlot, 1, &empty);
 							}
 						} };
-				registration.slotClaims = { { stage, compute ? engine::ShaderResourceType::kShaderResource : engine::ShaderResourceType::kConstantBuffer, compute ? kTiledSlot : kRasterSlot } };
 			})) {
 			FailLoad("Unable to register the ISL consumers");
 			return;

@@ -760,8 +760,8 @@ target("ShaderInjectionRegistrationTests", function()
     add_tests("ShaderInjectionNativeFamilies", {
         runargs = {"--native-families", path.join(os.projectdir(), "package/Shaders")}
     })
-    add_tests("ShaderInjectionClaimLedger", {
-        runargs = "--claim-ledger"
+    add_tests("ShaderInjectionRegistration", {
+        runargs = "--registration"
     })
     add_tests("ShaderInjectionComputeHooksMissing", {
         runargs = "--compute-hooks-missing"

@@ -4,7 +4,6 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "Render/PixelShaderResourceSnapshot.h"
 #include "ShaderDefines.h"
 
 #include <DirectXMath.h>
@@ -219,7 +218,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ShaderResourceView> _preparedPositionArraySRV;
 		winrt::com_ptr<ID3D11ShaderResourceView> _preparedColorArraySRV;
 		winrt::com_ptr<ID3D11ShaderResourceView> _preparedUVArraySRV;
-		cs::render::PixelShaderResourceSnapshot<kCompositionPSSlotCount> _compositionBindingSnapshot;
 		CompressedCube _environmentBC6H;
 		CompressedCube _reflectionsBC6H;
 		winrt::com_ptr<ID3D11ShaderResourceView> _filteredArraySRV;

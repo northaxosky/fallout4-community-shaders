@@ -298,15 +298,6 @@ namespace cs::features
 	void TerrainShadows::Load()
 	{
 		if (!cs::engine::RegisterFeatureShaderBindings("TerrainShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.slotClaims = {
-					{ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = kShadowHeightPSSlot },
-					{ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kSampler,
-						.slot = kShadowHeightSamplerPSSlot,
-						.samplerContract = cs::engine::ShaderSamplerContract::kLinearClamp }
-				};
 				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
 				registration.bind = [this, composite](ID3D11DeviceContext* a_context) {
 					if (composite)
@@ -1158,25 +1149,6 @@ namespace cs::features
 		}
 	}
 
-	void TerrainShadows::SaveEngineBindings()
-	{
-		auto* context = GetImmediateContext();
-		if (!context)
-			return;
-		if (!_engineShadowBinding.Save(context, kShadowHeightPSSlot) && _engineShadowBinding.IsSaved()) {
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::err,
-				"Terrain shadow t{} binding scopes overlap; preserving the active snapshot.",
-				kShadowHeightPSSlot);
-		}
-		_engineSamplerBinding.Save(context, kShadowHeightSamplerPSSlot);
-		ID3D11ShaderResourceView* nullSRV = nullptr;
-		context->PSSetShaderResources(kShadowHeightPSSlot, 1, &nullSRV);
-		ID3D11SamplerState* nullSampler = nullptr;
-		context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &nullSampler);
-	}
-
 	void TerrainShadows::Prepass()
 	{
 		if (auto* context = GetImmediateContext()) {
@@ -1205,13 +1177,6 @@ namespace cs::features
 				_lightInertBinds.fetch_add(1, std::memory_order_relaxed);
 			}
 		}
-	}
-
-	void TerrainShadows::RestoreEngineBindings()
-	{
-		auto* context = GetImmediateContext();
-		_engineSamplerBinding.Restore(context);
-		_engineShadowBinding.Restore(context);
 	}
 
 	FullscreenDebugData TerrainShadows::GetFullscreenDebugData() const noexcept

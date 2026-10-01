@@ -133,9 +133,4 @@ namespace cs::features::sss_mask_binding
 		ID3D11ShaderResourceView* a_whiteFallback,
 		Extent a_whiteFallbackExtent,
 		Extent a_requiredExtent) noexcept;
-	bool RestoreNullIfOwned(
-		const Api& a_api,
-		std::uint32_t a_slot,
-		ID3D11ShaderResourceView* a_realMask,
-		ID3D11ShaderResourceView* a_whiteFallback) noexcept;
 }

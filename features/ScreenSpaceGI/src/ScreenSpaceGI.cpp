@@ -479,25 +479,6 @@ namespace cs::features
 		}
 	}
 
-	void ScreenSpaceGI::SaveCompositionBindings()
-	{
-		auto* context = cs::engine::GetImmediateContext();
-		_specularSnapshot.Save(context, kSpecularSlot);
-		if (_compositionSnapshot.Save(context, kCompositionSlot))
-			context->PSGetConstantBuffers(kConsumerSlot, 1, _consumerSnapshot.put());
-	}
-
-	void ScreenSpaceGI::RestoreCompositionBindings()
-	{
-		auto* context = cs::engine::GetImmediateContext();
-		_specularSnapshot.Restore(context);
-		if (_compositionSnapshot.Restore(context) && !_compositionSnapshot.IsSaved()) {
-			auto* cb = _consumerSnapshot.get();
-			context->PSSetConstantBuffers(kConsumerSlot, 1, &cb);
-			_consumerSnapshot = nullptr;
-		}
-	}
-
 	void ScreenSpaceGI::UpdateConsumer(bool a_enabled, bool a_tiled)
 	{
 		const ConsumerCB data{ a_enabled, a_tiled, {} };

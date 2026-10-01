@@ -3,7 +3,6 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
-#include "Render/PixelShaderResourceSnapshot.h"
 #include "ScreenSpaceGIConstants.h"
 #include "ScreenSpaceGISettings.h"
 #include "ShaderDefines.h"
@@ -71,8 +70,6 @@ namespace cs::features
 		void QueueReset(const char*) noexcept;
 		void OnPostDeferredLights();
 		void ApplyVanillaSSAO();
-		void SaveCompositionBindings();
-		void RestoreCompositionBindings();
 		void BindComposition(ID3D11DeviceContext*);
 		void UpdateConsumer(bool a_enabled, bool a_tiled);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
@@ -91,9 +88,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11SamplerState> _pointSampler, _linearSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _prepare;
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 7> _shaders;
-		cs::render::PixelShaderResourceSnapshot<kCompositionCount> _compositionSnapshot;
-		cs::render::PixelShaderResourceSnapshot<1> _specularSnapshot;
-		winrt::com_ptr<ID3D11Buffer> _consumerSnapshot;
 		DirectX::XMFLOAT4X4 _previousViewInverse{};
 		std::optional<bool> _vanillaSSAOSnapshot;
 		std::atomic_bool _started{ false }, _resourcesReady{ false }, _produced{ false };

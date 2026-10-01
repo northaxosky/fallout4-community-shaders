@@ -3,7 +3,6 @@
 #include "Feature.h"
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
-#include "Render/PixelShaderResourceSnapshot.h"
 #include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 #include "WetnessMath.h"
@@ -60,14 +59,11 @@ namespace cs::features
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(wetness_math::kSchema); }
 		void BindCompositeResources(ID3D11DeviceContext* a_context);
-		void SaveCompositeBindings();
-		void RestoreCompositeBindings();
 		void BeginPrepass();
 		void BindFilmOutput(ID3D11DeviceContext*);
 		void BindFilmInput(ID3D11DeviceContext*, bool a_compute);
 
 		static constexpr std::uint32_t kGbufferNormalPSSlot = 25;
-		static constexpr std::array kCompositePSSlots{ kGbufferNormalPSSlot, 70u, 71u };
 
 		Settings _settings;
 		// every contribution and hook of the pair must register before any of them runs
@@ -86,7 +82,6 @@ namespace cs::features
 		std::atomic_uint32_t _normalBindsNull{ 0 };
 
 		// render thread only
-		std::array<cs::render::PixelShaderResourceSnapshot<1>, kCompositePSSlots.size()> _engineBindings;
 		winrt::com_ptr<ID3D11Texture2D> _filmTexture;
 		winrt::com_ptr<ID3D11RenderTargetView> _filmRTV;
 		winrt::com_ptr<ID3D11ShaderResourceView> _filmSRV;

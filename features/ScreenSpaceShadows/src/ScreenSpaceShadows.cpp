@@ -82,7 +82,6 @@ namespace cs::features
 			std::uint32_t a_slot,
 			ID3D11ShaderResourceView** a_view) noexcept
 		{
-			cs::engine::FlushShaderInjectionBindings();
 			static_cast<ID3D11DeviceContext*>(a_context)->PSGetShaderResources(
 				static_cast<UINT>(a_slot),
 				1,
@@ -387,7 +386,6 @@ namespace cs::features
 			_lastCompiledSampleCount = 0;
 			_whiteFallbackExtent = {};
 			_whiteFallbackBackoff.RecordSuccess();
-			_maskBound.store(false, std::memory_order_relaxed);
 		}
 		sss_mask_binding::Extent required;
 		sss_mask_binding::Extent allocation;
@@ -736,37 +734,8 @@ namespace cs::features
 			_whiteFallbackExtent.allocated,
 			_requiredMaskExtent);
 		if (result.validBinding) {
-			_maskBound.store(true, std::memory_order_relaxed);
 			_maskBoundLastFrame.store(true, std::memory_order_relaxed);
 		}
-	}
-
-	void ScreenSpaceShadows::OnPostDeferredLights()
-	{
-		// FO4: release only the owned upstream mask slot after deferred consumers.
-		if (!_maskBound.exchange(false, std::memory_order_relaxed)) {
-			return;
-		}
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return;
-		}
-		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-		if (!context) {
-			return;
-		}
-		const sss_mask_binding::Api api{
-			.context = context,
-			.get = &GetPixelShaderResource,
-			.set = &SetPixelShaderResource
-		};
-		auto* realMask =
-			_maskTexture && _maskTexture->srv ? _maskTexture->srv.get() : nullptr;
-		(void)sss_mask_binding::RestoreNullIfOwned(
-			api,
-			kMaskPSSlot,
-			realMask,
-			_whiteFallbackSRV.get());
 	}
 
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const

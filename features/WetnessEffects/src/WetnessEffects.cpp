@@ -95,12 +95,6 @@ namespace cs::features
 				const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
 				if (producer) {
 					registration.bind = [this](ID3D11DeviceContext* context) { BindFilmOutput(context); };
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = 71 });
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kRenderTarget,
-						.slot = 6 });
 				}
 			})) {
 			FailLoad("Wetness shader contribution registration failed.");
@@ -257,7 +251,6 @@ namespace cs::features
 				cs::engine::CaptureShaderInjectionOutputs(a_context);
 				ID3D11ShaderResourceView* nullView = nullptr;
 				cs::engine::BindInjectionShaderResources(a_context, 71, 1, &nullView);
-				cs::engine::FlushShaderInjectionBindings();
 				targets[6] = _filmRTV.get();
 				a_context->OMSetRenderTargets(7, targets, depth.get());
 				a_context->OMSetBlendState(film->film.get(), factors, mask);
@@ -399,26 +392,6 @@ namespace cs::features
 		} else {
 			_normalBindsNull.fetch_add(1, std::memory_order_relaxed);
 		}
-	}
-
-	void WetnessEffects::SaveCompositeBindings()
-	{
-		auto* context = GetImmediateContext();
-		for (std::size_t i = 0; i < kCompositePSSlots.size(); ++i) {
-			if (!_engineBindings[i].Save(context, kCompositePSSlots[i]) && _engineBindings[i].IsSaved()) {
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Wetness binding scopes overlap; preserving the active snapshot.");
-			}
-		}
-	}
-
-	void WetnessEffects::RestoreCompositeBindings()
-	{
-		auto* context = GetImmediateContext();
-		for (auto& binding : _engineBindings)
-			binding.Restore(context);
 	}
 
 	void WetnessEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const
