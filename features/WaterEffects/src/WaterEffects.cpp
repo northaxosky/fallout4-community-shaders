@@ -98,7 +98,7 @@ namespace cs::features
 		auto candidate = _settings;
 		if (!settings::Parse(we::kSchema, a_config, candidate, a_error))
 			return false;
-		_settings = we::Clamp(candidate);
+		_settings = candidate;
 		_liveSettings = settings::BindLiveSettings(we::kSchema, _settings, [this] { PublishSettings(); });
 		if (!a_config.contains("settings"))
 			PublishSettings();
@@ -513,7 +513,6 @@ namespace cs::features
 	{
 		settings::SettingsEdit edit{ *this };
 		if (edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled))) {
-			_settings = we::Clamp(_settings);
 			PublishSettings();
 		}
 		dmui::ui::TextDisabled(

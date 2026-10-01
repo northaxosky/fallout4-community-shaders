@@ -5,7 +5,7 @@
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "Render/PixelShaderSamplerSnapshot.h"
 #include "Utils/CSBuffer.h"
-#include "WaterEffectsMath.h"
+#include "WaterEffectsSettings.h"
 
 #include <array>
 #include <atomic>

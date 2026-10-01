@@ -11,7 +11,7 @@
 #include "Settings/LiveSettings.h"
 #include "Settings/SettingsRegistry.h"
 #include "TerrainShadowsSettings.h"
-#include "WaterEffectsMath.h"
+#include "WaterEffectsSettings.h"
 #include "WetnessMath.h"
 
 #include <filesystem>
