@@ -25,8 +25,8 @@ namespace cs::features::renderdoc_settings
 		int captureFrameCount = 1;
 		CaptureTarget captureTarget = CaptureTarget::kEngineD3D11;
 		// Suggested host defaults. Host overrides are authoritative.
-		std::string captureHotkey = "F12";
-		std::string multiCaptureHotkey = "PrintScreen";
+		std::string captureHotkey = "F11";
+		std::string multiCaptureHotkey = "Shift+F11";
 	};
 
 	inline constexpr settings::Schema kSchema{
