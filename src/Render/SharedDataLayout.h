@@ -94,13 +94,17 @@ namespace cs::render
 		std::uint32_t DebugOwner = 0, DebugMode = 0, EnabledSSR = 0;
 		float DeltaTime = 0.0f;
 		DirectX::XMFLOAT4 DebugParams{};
+		std::uint32_t EnabledDynamicCubemaps = 0;
+		std::uint32_t pad0[3]{};
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 32);
+	static_assert(sizeof(FO4SharedDataCB) == 48);
 	static_assert(offsetof(FO4SharedDataCB, DebugOwner) == 0);
 	static_assert(offsetof(FO4SharedDataCB, DebugMode) == 4);
 	static_assert(offsetof(FO4SharedDataCB, EnabledSSR) == 8);
 	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 12);
 	static_assert(offsetof(FO4SharedDataCB, DebugParams) == 16);
+	static_assert(offsetof(FO4SharedDataCB, EnabledDynamicCubemaps) == 32);
+	static_assert(offsetof(FO4SharedDataCB, pad0) == 36);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

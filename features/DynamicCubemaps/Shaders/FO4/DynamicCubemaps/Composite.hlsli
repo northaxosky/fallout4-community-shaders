@@ -28,7 +28,7 @@ namespace DynamicCubemaps
 		float3x3 viewToWorld, SamplerState probeSampler)
 	{
 		float3 color = 0;
-		if (SharedData::cubemapCreatorSettings.Enabled == 0)
+		if (FO4SharedData::EnabledDynamicCubemaps == 0)
 			return color;
 		float reflectance = WetnessEffects::GetEnvironmentFilmWeight(normalView, viewDir, wetness, roughness);
 		if (reflectance > 0.0) {

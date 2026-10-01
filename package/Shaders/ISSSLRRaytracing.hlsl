@@ -51,7 +51,7 @@ float4 main(PS_INPUT input) : SV_Target0
 {
 #	ifdef DYNAMIC_CUBEMAPS
 	// FO4 stock enables SSR without DC, so read DC's live setting instead of upstream's compile-time ENABLESSR.
-	if (SharedData::cubemapCreatorSettings.Enabled != 0 && FO4SharedData::EnabledSSR == 0)
+	if (FO4SharedData::EnabledDynamicCubemaps != 0 && FO4SharedData::EnabledSSR == 0)
 		return 0.0;
 #	endif
 	float2 targetSize = TargetSizeNearFar.xy;

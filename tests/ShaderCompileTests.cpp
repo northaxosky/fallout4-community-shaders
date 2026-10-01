@@ -566,7 +566,8 @@ namespace
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, DebugOwner), ABI(FO4SharedDataCB, DebugMode),
 			ABI(FO4SharedDataCB, EnabledSSR),
-			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams)
+			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams),
+			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, pad0)
 		};
 		struct Buffer
 		{
@@ -802,7 +803,8 @@ namespace
 			.defines = { { "PSHADER", "1" }, { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" } },
 			.profile = "ps_5_0",
 			.description = "SSLR live DC setting with upscaling",
-			.required = { CB(0), CB(4), CB(6), CB(7), Texture(0), Texture(1), Texture(2), Texture(3) } });
+			.required = { CB(0), CB(4), CB(7), Texture(0), Texture(1), Texture(2), Texture(3) },
+			.forbidden = { CB(6) } });
 
 		a_jobs.push_back({ .path = a_root / "SharedDataProbe.hlsl",
 			.profile = "ps_5_0",
@@ -1254,8 +1256,7 @@ namespace
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" } },
 			.profile = "ps_5_0",
 			.description = "SSGI wet cubemap and fog composition",
-			.required = { CB(6), CB(10), Texture(19), Texture(26), Texture(34), Texture(38), Texture(71) },
-			.forbidden = { CB(7) } });
+			.required = { CB(6), CB(7), CB(10), Texture(19), Texture(26), Texture(34), Texture(38), Texture(71) } });
 		a_jobs.push_back({ .path = bsdfLight,
 			.defines = { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "LIGHT_TYPE", "3" }, { "SPOT", "1" },
 				{ "SPECULAR", "1" }, { "RGBSPEC", "1" }, { "DIRSPLITS", "2" },
@@ -1278,8 +1279,7 @@ namespace
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" }, { "TERRAIN_SHADOWS", "1" } },
 			.profile = "ps_5_0",
 			.description = "Water cubemap fog and terrain composition",
-			.required = { CB(6), Texture(19), Texture(30), Texture(31), Texture(60) },
-			.forbidden = { CB(7) } });
+			.required = { CB(6), CB(7), Texture(19), Texture(30), Texture(31), Texture(60) } });
 	}
 }
 

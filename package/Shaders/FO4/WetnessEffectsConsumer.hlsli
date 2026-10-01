@@ -102,7 +102,7 @@ namespace WetnessEffects
 
 	float GetIndirectDiffuseWeight(float3 normalView, float3 viewDir, float2 screenPosition)
 	{
-		if (SharedData::cubemapCreatorSettings.Enabled == 0)
+		if (FO4SharedData::EnabledDynamicCubemaps == 0)
 			return 1.0;
 		Surface surface = ReadSurface(screenPosition, normalView);
 		return 1.0 - GetEnvironmentFilmWeight(surface.normalView, viewDir, surface.wetness, surface.waterRoughness);

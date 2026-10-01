@@ -328,7 +328,7 @@ float3 surfaceColor(
 	color = lerp(color, perMaterial[5].xyz, saturate(slope * 1.9 + 0.35));
 #	if defined(REFLECTIONS)
 #		ifdef DYNAMIC_CUBEMAPS
-	if (SharedData::cubemapCreatorSettings.Enabled != 0) {
+	if (FO4SharedData::EnabledDynamicCubemaps != 0) {
 		const float skylightingSpecular = 1.0;
 		float3 dynamicCubemap;
 		if (SharedData::InInterior) {

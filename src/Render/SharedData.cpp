@@ -165,7 +165,7 @@ namespace cs::render
 			if (auto* fog = features::ExponentialHeightFog::GetSingleton(); fog->IsLoaded())
 				a_data.feature.exponentialHeightFogSettings = fog->GetCommonBufferData();
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
-			a_data.feature.cubemapCreatorSettings.Enabled = a_features.dynamicCubemapsSettings.Enabled;
+			fo4.EnabledDynamicCubemaps = a_features.dynamicCubemapsSettings.Enabled;
 			auto& terrain = a_data.feature.terraOccSettings;
 			terrain.EnableTerrainShadow = a_features.terrainShadowsSettings.EnableTerrainShadow;
 			std::ranges::copy(a_features.terrainShadowsSettings.Scale, terrain.Scale);
