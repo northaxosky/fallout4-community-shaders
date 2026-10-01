@@ -18,11 +18,11 @@
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/ScopedContextState.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -120,54 +120,21 @@ namespace cs::features
 		PublishSettings();
 
 		// FO4: only owned, validated routes may activate a live contribution.
-		const auto registerContribution = [this](
-											  cs::engine::ShaderInjectionTarget a_target,
-											  cs::engine::ShaderInjectionBindCallback a_bind,
-											  bool a_fullscreenDebug) {
-			cs::engine::ShaderInjectionDefines defines{
-				{ cs::engine::shader_injection_defines::kWaterEffects, "1" }
-			};
-			std::vector<cs::engine::ShaderSlotClaim> slotClaims;
-			if (a_fullscreenDebug) {
-				defines.emplace(
-					cs::engine::shader_injection_defines::kWaterEffectsFullscreenDebug,
-					"1");
-			} else {
-				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kCausticsPSSlot });
-				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kSampler,
-					.slot = kCausticsSamplerPSSlot });
-			}
-			return cs::engine::RegisterReplacement({ .targetId = a_target,
-				.contributor = "WaterEffects",
-				.defines = std::move(defines),
-				.isReady = [this] {
+		if (!cs::engine::RegisterFeatureShaderContributions("WaterEffects", [this](cs::engine::ShaderReplacementRegistration& registration) {
+				registration.isReady = [this] {
 					return _registrationsReady.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && cs::render::IsSharedDataReady();
-				},
-				.bind = std::move(a_bind),
-				.slotClaims = std::move(slotClaims) });
-		};
-
-		if (!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfLight,
-				[this](ID3D11DeviceContext* a_context) {
-					BindCaustics(a_context);
-				},
-				false)) {
-			FailLoad(
-				"Water caustics multiply through the reconstructed BSDFLight shader; "
-				"registering that replacement failed, so there is no delivery path");
-			return;
-		}
-		if (!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				{},
-				true)) {
-			FailLoad(
-				"Water caustics debug views replace BSDFComposite output; "
-				"registering that replacement failed");
+				};
+				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfLight) {
+					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+						.slot = kCausticsPSSlot });
+					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kSampler,
+						.slot = kCausticsSamplerPSSlot });
+					registration.bind = [this](ID3D11DeviceContext* a_context) { BindCaustics(a_context); };
+				}
+			})) {
+			FailLoad("Water caustics shader contribution registration failed.");
 			return;
 		}
 		_registrationsReady.store(true, std::memory_order_release);

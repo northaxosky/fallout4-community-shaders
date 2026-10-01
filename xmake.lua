@@ -573,6 +573,14 @@ target("StockShaderIdentityTests", function()
         },
         run_timeout = 600000
     })
+    add_tests("FeatureShaderCompile", {
+        runargs = {
+            path.join(os.projectdir(), "build/ShaderStage/Shaders"),
+            path.join(os.projectdir(), "tests/data/stock-shader-identity.tsv"),
+            "--features-on"
+        },
+        run_timeout = 600000
+    })
 end)
 
 target("ShaderCacheTests", function()

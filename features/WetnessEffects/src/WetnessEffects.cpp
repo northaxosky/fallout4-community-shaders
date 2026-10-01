@@ -14,9 +14,9 @@
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -90,82 +90,50 @@ namespace cs::features
 
 	void WetnessEffects::Load()
 	{
-		const auto registerContribution = [this](
-											  cs::engine::ShaderInjectionTarget a_target,
-											  bool a_bindsComposite) {
-			cs::engine::ShaderReplacementRegistration registration{
-				.targetId = a_target,
-				.stages = cs::engine::ShaderStageBit(
-					a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting ?
-						cs::engine::ShaderStage::kCompute :
-						cs::engine::ShaderStage::kPixel),
-				.contributor = "WetnessEffects",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kWetnessEffects, "1" } },
-				.isReady = [this] {
+		if (!cs::engine::RegisterFeatureShaderContributions("WetnessEffects", [this](cs::engine::ShaderReplacementRegistration& registration) {
+				const auto a_target = registration.targetId;
+				const bool a_bindsComposite = a_target == cs::engine::ShaderInjectionTarget::kBsdfComposite;
+				registration.isReady = [this] {
 					return _registrationsReady.load(std::memory_order_acquire) && _filmAvailabilitySRV;
-				}
-			};
-			const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
-			const bool compute = a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting;
-			const auto stage = compute ? cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel;
-			registration.bind = [this, producer, compute, a_bindsComposite](ID3D11DeviceContext* context) {
-				if (producer)
-					BindFilmOutput(context);
-				else
-					BindFilmInput(context, compute);
-				if (a_bindsComposite)
-					BindCompositeResources(context);
-			};
-			registration.slotClaims.push_back({ .stage = stage,
-				.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-				.slot = 71 });
-			if (!compute) {
+				};
+				const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
+				const bool compute = a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting;
+				const auto stage = compute ? cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel;
+				registration.bind = [this, producer, compute, a_bindsComposite](ID3D11DeviceContext* context) {
+					if (producer)
+						BindFilmOutput(context);
+					else
+						BindFilmInput(context, compute);
+					if (a_bindsComposite)
+						BindCompositeResources(context);
+				};
 				registration.slotClaims.push_back({ .stage = stage,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = 70 });
-			}
-			if (producer) {
-				registration.stages |= cs::engine::ShaderStageBit(cs::engine::ShaderStage::kVertex);
-				registration.requiresGraphicsPair = true;
-				registration.slotClaims.push_back({ .stage = stage,
-					.resourceType = cs::engine::ShaderResourceType::kRenderTarget,
-					.slot = 6 });
-			}
-			if (a_bindsComposite) {
-				registration.defines.emplace(
-					cs::engine::shader_injection_defines::
-						kWetnessEffectsFullscreenDebug,
-					"1");
-				for (const auto slot : std::array{ kGbufferNormalPSSlot }) {
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+					.slot = 71 });
+				if (!compute) {
+					registration.slotClaims.push_back({ .stage = stage,
 						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = slot });
+						.slot = 70 });
 				}
-			}
-			return cs::engine::RegisterReplacement(std::move(registration));
-		};
-
-		if (!registerContribution(cs::engine::ShaderInjectionTarget::kDeferredPrepass, false) ||
-			!cs::engine::RegisterPreDeferredPrePass([this] { BeginPrepass(); }) ||
+				if (producer) {
+					registration.slotClaims.push_back({ .stage = stage,
+						.resourceType = cs::engine::ShaderResourceType::kRenderTarget,
+						.slot = 6 });
+				}
+				if (a_bindsComposite) {
+					for (const auto slot : std::array{ kGbufferNormalPSSlot }) {
+						registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+							.slot = slot });
+					}
+				}
+			})) {
+			FailLoad("Wetness shader contribution registration failed.");
+			return;
+		}
+		if (!cs::engine::RegisterPreDeferredPrePass([this] { BeginPrepass(); }) ||
 			!cs::engine::RegisterPostDeferredPrePass([this] { _inPrepass = false; })) {
 			FailLoad("Wetness could not register its deferred material producer");
-			return;
-		}
-		if (!registerContribution(cs::engine::ShaderInjectionTarget::kBsdfLight, false)) {
-			FailLoad(
-				"Wetness shades through the reconstructed BSDFLight shader; "
-				"registering that replacement failed, so there is no delivery path");
-			return;
-		}
-		if (!registerContribution(cs::engine::ShaderInjectionTarget::kDfTiledLighting, false)) {
-			FailLoad("Wetness could not register its tiled lighting shader contribution");
-			return;
-		}
-		if (!registerContribution(cs::engine::ShaderInjectionTarget::kBsdfComposite, true)) {
-			FailLoad(
-				"Wetness composes through the reconstructed BSDFComposite shader and owns "
-				"the authoritative normal at t25 and film at t71; registering that replacement failed");
 			return;
 		}
 		// restore first: a failed save then leaves the restore a no-op

@@ -26,10 +26,10 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Render/SharedFeatureData.h"
 #include "Settings/SettingsPersistence.h"
@@ -297,66 +297,26 @@ namespace cs::features
 
 	void TerrainShadows::Load()
 	{
-		const auto registerContribution = [this](
-											  cs::engine::ShaderInjectionTarget a_target,
-											  cs::engine::ShaderInjectionBindCallback a_bind,
-											  bool a_fullscreenDebug) {
-			cs::engine::ShaderInjectionDefines defines{
-				{ cs::engine::shader_injection_defines::kTerrainShadows, "1" }
-			};
-			std::vector<cs::engine::ShaderSlotClaim> slotClaims{
-				{ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kShadowHeightPSSlot },
-				{ .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kSampler,
-					.slot = kShadowHeightSamplerPSSlot,
-					.samplerContract = cs::engine::ShaderSamplerContract::kLinearClamp }
-			};
-			if (a_fullscreenDebug) {
-				defines.emplace(
-					cs::engine::shader_injection_defines::kTerrainShadowsFullscreenDebug,
-					"1");
-			}
-			return cs::engine::RegisterReplacement({ .targetId = a_target,
-				.contributor = "TerrainShadows",
-				.defines = std::move(defines),
-				.isReady = [this] {
-					return ts::IsReadyForInjectionFreeze(GetBootstrapReadiness());
-				},
-				.bind = std::move(a_bind),
-				.slotClaims = std::move(slotClaims) });
-		};
-
-		if (!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfLight,
-				[this](ID3D11DeviceContext* a_context) {
-					BindShadowHeights(a_context);
-				},
-				false)) {
-			FailLoad(
-				"Terrain shadows multiply through the reconstructed BSDFLight shader; "
-				"registering that replacement failed, so there is no delivery path");
-			return;
-		}
-		for (const auto target : { cs::engine::ShaderInjectionTarget::kBsLighting,
-				 cs::engine::ShaderInjectionTarget::kDistantTree,
-				 cs::engine::ShaderInjectionTarget::kBsWater,
-				 cs::engine::ShaderInjectionTarget::kEffect }) {
-			if (!registerContribution(target, [this](ID3D11DeviceContext* a_context) { BindShadowHeights(a_context); }, false)) {
-				FailLoad("Terrain shadow forward-light contribution registration failed.");
-				return;
-			}
-		}
-		if (!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				[this](ID3D11DeviceContext* a_context) {
-					BindCompositeResources(a_context);
-				},
-				true)) {
-			FailLoad(
-				"Terrain shadow debug views replace BSDFComposite output; "
-				"registering that replacement failed");
+		if (!cs::engine::RegisterFeatureShaderContributions("TerrainShadows", [this](cs::engine::ShaderReplacementRegistration& registration) {
+				registration.slotClaims = {
+					{ .stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+						.slot = kShadowHeightPSSlot },
+					{ .stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kSampler,
+						.slot = kShadowHeightSamplerPSSlot,
+						.samplerContract = cs::engine::ShaderSamplerContract::kLinearClamp }
+				};
+				registration.isReady = [this] { return ts::IsReadyForInjectionFreeze(GetBootstrapReadiness()); };
+				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
+				registration.bind = [this, composite](ID3D11DeviceContext* a_context) {
+					if (composite)
+						BindCompositeResources(a_context);
+					else
+						BindShadowHeights(a_context);
+				};
+			})) {
+			FailLoad("Terrain shadow shader contribution registration failed.");
 			return;
 		}
 		_registrationsReady.store(true, std::memory_order_release);

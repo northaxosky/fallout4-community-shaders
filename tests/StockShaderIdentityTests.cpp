@@ -1,4 +1,5 @@
 #include "Log.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantRecipe.h"
 #include "Utils/CSSha1.h"
@@ -42,6 +43,7 @@ namespace
 		std::string nativeClassName;
 		std::string nativeSourceGroup;
 		bool owned = false;
+		bool contributed = false;
 	};
 
 	void Require(bool a_condition, const std::string& a_message)
@@ -141,6 +143,9 @@ namespace
 			row.family.nativeSourceGroup = row.nativeSourceGroup;
 			const auto family = BuildShaderFamilyCompilationDescriptor(row.family);
 			row.owned = family.has_value();
+			row.contributed = std::ranges::any_of(GetFeatureShaderContributions(), [&](const auto& contribution) {
+				return contribution.targetId == row.family.target;
+			});
 			if (family)
 				covered.emplace(row.family.target, family->sourcePath, family->entryPoint, family->profile);
 			if (family && family->familyMetadata)
@@ -158,27 +163,57 @@ namespace
 				Require(coveredNativeFamilies.contains(&family),
 					"Owned native shader family has no gated row: " + std::string(family.nativeName));
 		}
+		for (const auto& contribution : GetFeatureShaderContributions()) {
+			for (const auto stage : { ShaderStage::kVertex, ShaderStage::kPixel, ShaderStage::kCompute }) {
+				if ((contribution.stages & ShaderStageBit(stage)) == 0)
+					continue;
+				Require(std::ranges::any_of(a_rows, [&](const Row& row) {
+					return row.owned && row.family.target == contribution.targetId && row.family.stage == stage;
+				}),
+					"Feature contribution has no gated row: " + contribution.contributor + " / " + std::string(GetShaderInjectionTarget(contribution.targetId)->name));
+			}
+		}
 	}
 
-	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot)
+	std::string FirstErrorLine(std::string_view a_error)
+	{
+		const auto error = a_error.find(": error ");
+		if (error != a_error.npos) {
+			const auto line = a_error.rfind('\n', error);
+			a_error.remove_prefix(line == a_error.npos ? 0 : line + 1);
+		}
+		const auto start = a_error.find_first_not_of("\r\n");
+		if (start == a_error.npos)
+			return "no compiler diagnostic";
+		a_error.remove_prefix(start);
+		return std::string(a_error.substr(0, std::min(a_error.find_first_of("\r\n"), std::size_t{ 300 })));
+	}
+
+	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn)
 	{
 		const auto family = cs::engine::BuildShaderFamilyCompilationDescriptor(a_row.family);
 		if (!family)
 			return "unresolved";
+		std::string error;
+		const auto contributions = a_featuresOn ?
+		                               std::span<const cs::engine::ShaderReplacementRegistration>(cs::engine::GetFeatureShaderContributions()) :
+		                               std::span<const cs::engine::ShaderReplacementRegistration>{};
 		const auto request = cs::engine::BuildEffectiveShaderCompileRequest(
-			*cs::engine::GetShaderInjectionTarget(a_row.family.target), a_row.family.stage, *family, {});
+			*cs::engine::GetShaderInjectionTarget(a_row.family.target), a_row.family.stage, *family, contributions, &error);
 		if (!request)
-			return "invalid-compile-request";
+			return "invalid-compile-request: " + error;
 		cs::engine::ShaderVariantCompilationRequest variant;
 		variant.sourcePath = a_shaderRoot / request->sourcePath;
 		variant.entryPoint = request->entryPoint;
 		variant.profile = request->profile;
 		variant.stage = a_row.family.stage;
 		variant.defines.assign(request->defines.begin(), request->defines.end());
-		const auto compiled = cs::shader_cache::CompileSourceWithManifest(
-			cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot));
+		const auto recipe = cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot);
+		const auto compiled = cs::shader_cache::CompileSourceWithManifest(recipe);
 		if (!compiled.succeeded)
-			return "compile-error: " + compiled.error.substr(0, 240);
+			return "compile-error: " + FirstErrorLine(compiled.error);
+		if (a_featuresOn)
+			return {};
 		winrt::com_ptr<ID3DBlob> stripped;
 		if (FAILED(D3DStripShader(compiled.bytecode.data(), compiled.bytecode.size(),
 				D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.put())))
@@ -190,11 +225,17 @@ namespace
 int main(int a_argc, char** a_argv)
 {
 	try {
-		Require(a_argc == 3, "Usage: StockShaderIdentityTests <shader-root> <identity-table>");
+		Require(a_argc == 3 || (a_argc == 4 && std::string_view(a_argv[3]) == "--features-on"),
+			"Usage: StockShaderIdentityTests <shader-root> <identity-table> [--features-on]");
+		const bool featuresOn = a_argc == 4;
 		cs::sha1::Sha1InitOnce();
 		cs::sha256::Sha256InitOnce();
 		auto rows = ReadRows(a_argv[2]);
 		CheckCoverage(rows);
+		const auto total = featuresOn ?
+		                       static_cast<std::size_t>(std::ranges::count(rows, true, &Row::contributed)) :
+		                       rows.size();
+		Require(total != 0, "No contributor targets in the identity corpus");
 		const std::filesystem::path shaderRoot(a_argv[1]);
 		const auto start = std::chrono::steady_clock::now();
 		const auto threadCount = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
@@ -204,12 +245,12 @@ int main(int a_argc, char** a_argv)
 			for (unsigned i = 0; i < threadCount; ++i) {
 				workers.emplace_back([&] {
 					for (auto index = next.fetch_add(1); index < rows.size(); index = next.fetch_add(1)) {
-						if (!rows[index].owned)
+						if (!rows[index].owned || (featuresOn && !rows[index].contributed))
 							continue;
 						try {
-							rows[index].actual = Compile(rows[index], shaderRoot);
+							rows[index].actual = Compile(rows[index], shaderRoot, featuresOn);
 						} catch (const std::exception& error) {
-							rows[index].actual = "error: " + std::string(error.what()).substr(0, 240);
+							rows[index].actual = "error: " + FirstErrorLine(error.what());
 						}
 					}
 				});
@@ -218,21 +259,36 @@ int main(int a_argc, char** a_argv)
 		const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 		std::size_t failed = 0;
 		std::size_t unowned = 0;
+		std::map<std::tuple<std::string, std::string, std::string>, std::pair<const Row*, std::size_t>> featureFailures;
 		for (const auto& row : rows) {
+			if (featuresOn && !row.contributed)
+				continue;
 			if (!row.owned) {
 				++unowned;
 				continue;
 			}
-			if (row.actual == row.expected)
+			if (featuresOn ? row.actual.empty() : row.actual == row.expected)
 				continue;
-			if (++failed <= 50)
+			++failed;
+			if (featuresOn) {
+				auto& group = featureFailures[{ row.target, row.stage, row.actual }];
+				group.first = group.first ? group.first : &row;
+				++group.second;
+			} else if (failed <= 50) {
 				std::printf("%s %s 0x%08x ordinal=%u expected=%s actual=%s\n",
 					row.target.c_str(), row.stage.c_str(), row.family.descriptor, row.ordinal, row.expected.c_str(), row.actual.c_str());
+			}
 		}
-		if (failed > 50)
+		for (const auto& [key, group] : featureFailures) {
+			const auto& row = *group.first;
+			std::printf("%s %s first=0x%08x ordinal=%u (%zu variants): %s\n",
+				row.target.c_str(), row.stage.c_str(), row.family.descriptor, row.ordinal, group.second, row.actual.c_str());
+		}
+		if (!featuresOn && failed > 50)
 			std::printf("... %zu additional failures omitted\n", failed - 50);
-		std::printf("Stock shader identity: %zu passed, %zu failed, %zu unowned, %zu total; %.3fs wall time (%u threads)\n",
-			rows.size() - failed - unowned, failed, unowned, rows.size(), seconds, threadCount);
+		std::printf("%s: %zu passed, %zu failed, %zu unowned, %zu total; %.3fs wall time (%u threads)\n",
+			featuresOn ? "Feature-on shader corpus" : "Stock shader identity",
+			total - failed - unowned, failed, unowned, total, seconds, threadCount);
 		return failed == 0 ? 0 : 1;
 	} catch (const std::exception& error) {
 		std::fprintf(stderr, "Stock shader identity: %s\n", error.what());

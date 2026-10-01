@@ -21,11 +21,11 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderStage.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
@@ -227,51 +227,21 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		const auto registerContribution = [this](
-											  cs::engine::ShaderInjectionTarget a_target,
-											  cs::engine::ShaderStage a_stage,
-											  std::uint32_t a_firstSlot,
-											  std::uint32_t a_slotCount,
-											  cs::engine::ShaderInjectionBindCallback a_bind = {}) {
-			std::vector<cs::engine::ShaderSlotClaim> slotClaims;
-			for (std::uint32_t offset = 0; offset < a_slotCount; ++offset) {
-				slotClaims.push_back({ .stage = a_stage,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = a_firstSlot + offset });
-			}
-			return cs::engine::RegisterReplacement({ .targetId = a_target,
-				.stages = cs::engine::ShaderStageBit(a_stage),
-				.contributor = "DynamicCubemaps",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kDynamicCubemaps, "1" } },
-				.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire);
-				},
-				.bind = std::move(a_bind),
-				.slotClaims = std::move(slotClaims) });
-		};
-		if (!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsWater,
-				cs::engine::ShaderStage::kPixel,
-				kDynamicCubemapPSSlot,
-				kDynamicCubemapPSSlotCount) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				cs::engine::ShaderStage::kPixel,
-				kCompositionPSSlot,
-				kCompositionPSSlotCount,
-				[this](ID3D11DeviceContext* a_context) {
-					BindComposition(a_context);
-				}) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kBsdfLight,
-				cs::engine::ShaderStage::kPixel, 0, 0) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kDfTiledLighting,
-				cs::engine::ShaderStage::kCompute, 0, 0) ||
-			!registerContribution(
-				cs::engine::ShaderInjectionTarget::kImageSpace,
-				cs::engine::ShaderStage::kPixel, 0, 0)) {
+		if (!cs::engine::RegisterFeatureShaderContributions("DynamicCubemaps", [this](cs::engine::ShaderReplacementRegistration& registration) {
+				registration.isReady = [this] { return _registrationsReady.load(std::memory_order_acquire); };
+				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
+				if (!composite && registration.targetId != cs::engine::ShaderInjectionTarget::kBsWater)
+					return;
+				const auto firstSlot = composite ? kCompositionPSSlot : kDynamicCubemapPSSlot;
+				const auto slotCount = composite ? kCompositionPSSlotCount : kDynamicCubemapPSSlotCount;
+				for (std::uint32_t offset = 0; offset < slotCount; ++offset) {
+					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+						.slot = firstSlot + offset });
+				}
+				if (composite)
+					registration.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); };
+			})) {
 			FailLoad(
 				"DynamicCubemaps could not register its water, composite, "
 				"deferred lighting, or SSLR shader contributions");

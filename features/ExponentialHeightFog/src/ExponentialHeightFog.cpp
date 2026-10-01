@@ -10,9 +10,9 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -143,38 +143,21 @@ namespace cs::features
 	void ExponentialHeightFog::Load()
 	{
 		PublishSettings();
-		for (auto target : { engine::ShaderInjectionTarget::kBsdfComposite, engine::ShaderInjectionTarget::kBsWater,
-				 engine::ShaderInjectionTarget::kEffect, engine::ShaderInjectionTarget::kDistantTree }) {
-			const std::uint32_t sampler = target == engine::ShaderInjectionTarget::kBsdfComposite ? 13u : 15u;
-			engine::ShaderInjectionDefines defines{ { engine::shader_injection_defines::kExponentialHeightFog, "1" } };
-			std::vector<engine::ShaderSlotClaim> claims{
-				{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kShaderResource, 19 },
-				{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kSampler, sampler,
-					engine::ShaderSamplerContract::kLinearClamp }
-			};
-			if (target == engine::ShaderInjectionTarget::kBsdfComposite) {
-				defines.emplace("EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", "1");
-			}
-			if (!engine::RegisterReplacement({ .targetId = target,
-					.stages = engine::ShaderStageBit(engine::ShaderStage::kPixel),
-					.contributor = "ExponentialHeightFog",
-					.defines = std::move(defines),
-					.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); },
-					.bind = [this, sampler](ID3D11DeviceContext* a_context) { Bind(a_context, sampler); },
-					.slotClaims = std::move(claims) })) {
-				FailLoad("Exponential height fog shader registration failed.");
-				return;
-			}
-		}
-		for (auto target : { engine::ShaderInjectionTarget::kBsLighting, engine::ShaderInjectionTarget::kBsdfLight }) {
-			if (!engine::RegisterReplacement({ .targetId = target,
-					.stages = engine::ShaderStageBit(engine::ShaderStage::kPixel),
-					.contributor = "ExponentialHeightFog",
-					.defines = { { engine::shader_injection_defines::kExponentialHeightFog, "1" } },
-					.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); } })) {
-				FailLoad("Fog sunlight attenuation registration failed.");
-				return;
-			}
+		if (!engine::RegisterFeatureShaderContributions("ExponentialHeightFog", [this](engine::ShaderReplacementRegistration& registration) {
+				registration.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); };
+				const auto target = registration.targetId;
+				if (target == engine::ShaderInjectionTarget::kBsLighting || target == engine::ShaderInjectionTarget::kBsdfLight)
+					return;
+				const std::uint32_t sampler = target == engine::ShaderInjectionTarget::kBsdfComposite ? 13u : 15u;
+				registration.slotClaims = {
+					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kShaderResource, 19 },
+					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kSampler, sampler,
+						engine::ShaderSamplerContract::kLinearClamp }
+				};
+				registration.bind = [this, sampler](ID3D11DeviceContext* a_context) { Bind(a_context, sampler); };
+			})) {
+			FailLoad("Exponential height fog shader registration failed.");
+			return;
 		}
 		// FO4: prepare before b6 publication, dispatch after canonical depth and terrain updates.
 		if (!engine::RegisterPostDeferredPrePass([this] { PrepareFrame(); }, static_cast<engine::HookPriority>(-150))) {

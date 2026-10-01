@@ -14,10 +14,10 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
@@ -144,19 +144,13 @@ namespace cs::features
 		claims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 			.resourceType = cs::engine::ShaderResourceType::kShaderResource,
 			.slot = kSpecularSlot });
-		if (!cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				.contributor = "ScreenSpaceGI",
-				.defines = { { cs::engine::shader_injection_defines::kScreenSpaceGi, "1" } },
-				.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); },
-				.slotClaims = std::move(claims) })) {
-			FailLoad("SSGI composite replacement registration failed.");
-			return;
-		}
-		// FO4: MRT4 alpha supplies upstream's 1 - vertexAO mask.
-		if (!cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kDeferredPrepass,
-				.contributor = "ScreenSpaceGI",
-				.defines = { { cs::engine::shader_injection_defines::kScreenSpaceGi, "1" } } })) {
-			FailLoad("SSGI vertex AO prepass replacement registration failed.");
+		if (!cs::engine::RegisterFeatureShaderContributions("ScreenSpaceGI", [this, &claims](cs::engine::ShaderReplacementRegistration& registration) {
+				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite) {
+					registration.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); };
+					registration.slotClaims = std::move(claims);
+				}
+			})) {
+			FailLoad("SSGI shader contribution registration failed.");
 			return;
 		}
 		if (!cs::engine::RegisterPreDeferredComposite([] { GetSingleton()->SaveCompositionBindings(); }, cs::engine::HookPriority::Early) ||

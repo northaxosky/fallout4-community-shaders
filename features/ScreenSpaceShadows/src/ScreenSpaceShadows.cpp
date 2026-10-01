@@ -25,10 +25,10 @@
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
+#include "Render/FeatureShaderContributions.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsPersistence.h"
@@ -169,16 +169,13 @@ namespace cs::features
 	{
 		// FO4: directional consumers execute inside DeferredLightsImpl under shader ownership.
 		const bool replacementRegistered =
-			cs::engine::RegisterReplacement({ .targetId = cs::engine::ShaderInjectionTarget::kBsdfLight,
-				.contributor = "ScreenSpaceShadows",
-				.defines = { { cs::engine::shader_injection_defines::
-								   kScreenSpaceShadows,
-					"1" } },
-				.isReady = [this] { return IsShadowMaskReady(); },
-				.bind = [this](ID3D11DeviceContext* a_context) { BindShadowMask(a_context); },
-				.slotClaims = { { .stage = cs::engine::ShaderStage::kPixel,
+			cs::engine::RegisterFeatureShaderContributions("ScreenSpaceShadows", [this](cs::engine::ShaderReplacementRegistration& registration) {
+				registration.isReady = [this] { return IsShadowMaskReady(); };
+				registration.bind = [this](ID3D11DeviceContext* a_context) { BindShadowMask(a_context); };
+				registration.slotClaims = { { .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kMaskPSSlot } } });
+					.slot = kMaskPSSlot } };
+			});
 		if (!replacementRegistered) {
 			FailLoad("Failed to register the ScreenSpaceShadows BSDF light shader replacement");
 			return;

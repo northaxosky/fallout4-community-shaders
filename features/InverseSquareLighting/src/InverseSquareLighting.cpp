@@ -10,9 +10,9 @@
 #include <mutex>
 #include <utility>
 
+#include "Render/FeatureShaderContributions.h"
 #include "Render/LocalLights.h"
 #include "Render/ShaderFamilyDescriptor.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -344,15 +344,11 @@ namespace cs::features
 			FailLoad(error);
 			return;
 		}
-		for (const auto stage : { engine::ShaderStage::kPixel, engine::ShaderStage::kCompute }) {
-			const bool compute = stage == engine::ShaderStage::kCompute;
-			if (!engine::RegisterReplacement({ .targetId = compute ? engine::ShaderInjectionTarget::kDfTiledLighting :
-			                                                         engine::ShaderInjectionTarget::kBsdfLight,
-					.stages = engine::ShaderStageBit(stage),
-					.contributor = "InverseSquareLighting",
-					.defines = { { engine::shader_injection_defines::kInverseSquareLighting, "1" } },
-					.isReady = [] { return g_state.resources.load(); },
-					.bind = [compute](ID3D11DeviceContext* context) {
+		if (!engine::RegisterFeatureShaderContributions("InverseSquareLighting", [](engine::ShaderReplacementRegistration& registration) {
+				const bool compute = registration.targetId == engine::ShaderInjectionTarget::kDfTiledLighting;
+				const auto stage = compute ? engine::ShaderStage::kCompute : engine::ShaderStage::kPixel;
+				registration.isReady = [] { return g_state.resources.load(); };
+				registration.bind = [compute](ID3D11DeviceContext* context) {
 						if (compute) {
 							auto* view = Enabled() ? g_state.views[g_state.uploadedSide].get() : nullptr;
 							context->CSSetShaderResources(kTiledSlot, 1, &view);
@@ -367,11 +363,11 @@ namespace cs::features
 								ID3D11Buffer* empty = nullptr;
 								context->PSSetConstantBuffers(kRasterSlot, 1, &empty);
 							}
-						} },
-					.slotClaims = { { stage, compute ? engine::ShaderResourceType::kShaderResource : engine::ShaderResourceType::kConstantBuffer, compute ? kTiledSlot : kRasterSlot } } })) {
-				FailLoad("Unable to register the ISL consumers");
-				return;
-			}
+						} };
+				registration.slotClaims = { { stage, compute ? engine::ShaderResourceType::kShaderResource : engine::ShaderResourceType::kConstantBuffer, compute ? kTiledSlot : kRasterSlot } };
+			})) {
+			FailLoad("Unable to register the ISL consumers");
+			return;
 		}
 	}
 	void InverseSquareLighting::OnDataLoaded()
