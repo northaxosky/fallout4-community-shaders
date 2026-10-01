@@ -48,7 +48,7 @@ namespace cs::engine
 	inline constexpr float kMinimumWorldCameraOriginMagnitude = 1.0f;
 
 	// Field names and padding mirror package/Shaders/Common/DeferredContracts.hlsli and
-	// BSDFPrePass.hlsl one-for-one, so the layout can be audited against the HLSL by eye.
+	// DFPrepass.hlsl one-for-one, so the layout can be audited against the HLSL by eye.
 	// The trailing comment on each member is its b12 float4 register index.
 	struct alignas(16) FrameBuffer
 	{
@@ -115,7 +115,7 @@ namespace cs::engine
 		return reinterpret_cast<const DirectX::XMFLOAT4*>(&a_frameBuffer)[a_index];
 	}
 
-	// Absolute world position, matching BSDFCompositeShader.hlsl: dot each row with
+	// Absolute world position, matching DFComposite.hlsl: dot each row with
 	// float4(view, 1), then add the renderer's position adjustment.
 	[[nodiscard]] inline DirectX::XMFLOAT3 ViewToWorldPosition(
 		const DirectX::XMFLOAT3& a_viewPosition,

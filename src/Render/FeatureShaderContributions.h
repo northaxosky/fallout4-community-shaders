@@ -36,6 +36,7 @@ namespace cs::engine
 			add("ScreenSpaceShadows", kScreenSpaceShadows, { kBsdfLight });
 			add("ScreenSpaceGI", kScreenSpaceGi, { kBsdfComposite, kDeferredPrepass });
 			add("InverseSquareLighting", kInverseSquareLighting, { kBsdfLight, kDfTiledLighting });
+			// Effect, DistantTree and Lighting sources remain for these upstream forward consumers.
 			add("ExponentialHeightFog", kExponentialHeightFog,
 				{ kBsdfComposite, kBsWater, kEffect, kDistantTree, kBsLighting, kBsdfLight },
 				"EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG");

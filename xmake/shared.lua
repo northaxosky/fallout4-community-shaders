@@ -2,6 +2,7 @@ function main(target)
     local shared = {
         root = "extern/community-shaders-shared",
         shaders = {
+            "package/Shaders/Common/DummyVSTexCoord.hlsl",
             "package/Shaders/Common/FrameBuffer.hlsli",
             "package/Shaders/Common/Math.hlsli",
             "package/Shaders/Common/Game.hlsli",

@@ -424,9 +424,9 @@ namespace cs::feature_config
 	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root)
 	{
 		ShaderOwnershipParseResult result;
-		result.config.enabled = settings::core::ShaderOwnership{}.enabled;
+		result.config.enableShaders = settings::core::ShaderOwnership{}.enableShaders;
 		for (const auto& target : engine::GetShaderInjectionTargets())
-			result.config.targets[target.id] = target.BaselineOwnable() && settings::core::ShaderTarget{}.enabled;
+			result.config.targets[target.id] = settings::core::ShaderTarget{}.enabled;
 		const auto* ownershipNode = a_root.get("shader_ownership");
 		if (!ownershipNode)
 			return result;
@@ -442,7 +442,7 @@ namespace cs::feature_config
 		settings::core::ShaderOwnership parsed;
 		if (std::string error; !settings::ParseTable(settings::core::kShaderOwnership, *ownership, parsed, error))
 			return fail("shader_ownership." + error);
-		result.config.enabled = parsed.enabled;
+		result.config.enableShaders = parsed.enableShaders;
 		const auto* targetsNode = ownership->get("targets");
 		if (!targetsNode)
 			return result;
@@ -456,7 +456,7 @@ namespace cs::feature_config
 			settings::core::ShaderTarget value;
 			if (std::string error; !settings::ParseTable(settings::core::ShaderTargetSchema(target->name), *targets, value, error))
 				return fail("shader_ownership.targets." + error);
-			result.config.targets[target->id] = target->BaselineOwnable() && value.enabled;
+			result.config.targets[target->id] = value.enabled;
 		}
 		return result;
 	}

@@ -16,6 +16,14 @@ local shader_files = {
 
 local root = os.projectdir()
 
+-- Native FO4 entry points share engine names, not Skyrim's shader ABI.
+local engine_entry_points = {
+    ["effect.hlsl"] = true,
+    ["distanttree.hlsl"] = true,
+    ["lighting.hlsl"] = true,
+    ["water.hlsl"] = true
+}
+
 local function excluded(relative)
     -- SDK runtimes keep their manifest-owned install path.
     return relative == "Upscaling/XeSS"
@@ -64,7 +72,9 @@ local function stage_shaders()
             return
         end
         if not from_shared then
-            assert(not upstream[key],
+            local engine_entry_point = engine_entry_points[key]
+                and path.absolute(source) == path.absolute(path.join(root, "package/Shaders", relative))
+            assert(not upstream[key] or engine_entry_point,
                 "FO4 shader shadows upstream destination '" .. relative
                 .. "'; move it under FO4/: " .. source)
         end

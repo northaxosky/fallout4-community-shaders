@@ -793,13 +793,13 @@ namespace
 		const std::vector<Resource> reserved{ CB(4), CB(5), CB(6), CB(7), Texture(17) };
 		const std::vector<Resource> shared{ CB(5), CB(6), CB(7) };
 
-		a_jobs.push_back({ .path = a_root / "Imagespace" / "SSLRRaytracing.hlsl",
-			.defines = { { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" } },
+		a_jobs.push_back({ .path = a_root / "ISSSLRRaytracing.hlsl",
+			.defines = { { "PSHADER", "1" }, { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" } },
 			.profile = "ps_5_0",
 			.description = "SSLR dynamic resolution",
 			.required = { CB(0), CB(4), Texture(0), Texture(1), Texture(2), Texture(3) } });
-		a_jobs.push_back({ .path = a_root / "Imagespace" / "SSLRRaytracing.hlsl",
-			.defines = { { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" } },
+		a_jobs.push_back({ .path = a_root / "ISSSLRRaytracing.hlsl",
+			.defines = { { "PSHADER", "1" }, { "UPSCALING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" } },
 			.profile = "ps_5_0",
 			.description = "SSLR live DC setting with upscaling",
 			.required = { CB(0), CB(4), CB(6), CB(7), Texture(0), Texture(1), Texture(2), Texture(3) } });
@@ -818,7 +818,7 @@ namespace
 			.required = { CB(0), Texture(0) },
 			.forbidden = reserved });
 
-		const auto bsdfLight = a_root / "BSDFLightShader.hlsl";
+		const auto bsdfLight = a_root / "DFLight.hlsl";
 		const ShaderDefines directional{
 			{ "BSDFLIGHT_PS_DIRSPLITS2", "1" },
 			{ "RGBSPEC", "1" },
@@ -888,7 +888,7 @@ namespace
 				.forbidden = specular ? std::vector<Resource>{ Texture(24) } : std::vector<Resource>{ CB(7), Texture(24) } });
 		}
 
-		const auto composite = a_root / "BSDFCompositeShader.hlsl";
+		const auto composite = a_root / "DFComposite.hlsl";
 		for (const char* file : { "VolumetricFogConservativeDepthCS.hlsl", "VolumetricFogMaterialCS.hlsl",
 				 "VolumetricFogLightScatteringCS.hlsl", "VolumetricFogIntegrationCS.hlsl" }) {
 			a_jobs.push_back({ .path = a_root / "ExponentialHeightFog" / file,
@@ -927,28 +927,28 @@ namespace
 			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" },
 											  { "DIRECTIONAL", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
 											  { "WATER_EFFECTS", "1" }, { "WETNESS_EFFECTS", "1" }, { "TERRAIN_SHADOWS", "1" } });
-			a_jobs.push_back({ .path = a_root / "BSDFLightShader.hlsl", .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog directional and coat consumer", .required = { CB(4), CB(5), CB(6) }, .forbidden = { Texture(19) } });
+			a_jobs.push_back({ .path = bsdfLight, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog directional and coat consumer", .required = { CB(4), CB(5), CB(6) }, .forbidden = { Texture(19) } });
 		}
 		for (const char* family : { "BSLIGHTING_PS_COLOR", "BSLIGHTING_PS_CORE", "BSLIGHTING_PS_RESOURCE" })
-			a_jobs.push_back({ .path = a_root / "BSLightingShader.hlsl",
+			a_jobs.push_back({ .path = a_root / "Lighting.hlsl",
 				.defines = { { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } },
 				.profile = "ps_5_0",
 				.description = "ExponentialHeightFog secondary sunlight consumer",
 				.required = { CB(4), CB(5), CB(6) },
 				.forbidden = { Texture(19), CB(7) } });
 		for (const auto& [file, defines] : std::vector<std::pair<const char*, ShaderDefines>>{
-				 { "BSWaterShader.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" } } },
-				 { "BSWaterShader.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "LOD", "1" } } },
-				 { "BSDistantTreeShader.hlsl", { { "BSDISTANTTREE_PS_SOURCE", "1" } } },
-				 { "BSEffectShader.hlsl", { { "BSEFFECT_PS_SOURCE", "1" } } },
-				 { "BSEffectShader.hlsl", { { "BSEFFECT_PS_SOURCE", "1" }, { "LIGHTING", "1" }, { "ADDBLEND", "1" } } },
-				 { "BSEffectShader.hlsl", { { "BSEFFECT_PS_SOURCE", "1" }, { "MULTBLEND", "1" } } } }) {
+				 { "Water.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" } } },
+				 { "Water.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "LOD", "1" } } },
+				 { "DistantTree.hlsl", { { "BSDISTANTTREE_PS_SOURCE", "1" } } },
+				 { "Effect.hlsl", { { "BSEFFECT_PS_SOURCE", "1" } } },
+				 { "Effect.hlsl", { { "BSEFFECT_PS_SOURCE", "1" }, { "LIGHTING", "1" }, { "ADDBLEND", "1" } } },
+				 { "Effect.hlsl", { { "BSEFFECT_PS_SOURCE", "1" }, { "MULTBLEND", "1" } } } }) {
 			auto fogDefines = defines;
 			fogDefines.insert(fogDefines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } });
 			a_jobs.push_back({ .path = a_root / file, .defines = std::move(fogDefines), .profile = "ps_5_0", .description = "ExponentialHeightFog forward consumer", .required = { CB(4), CB(5), CB(6), Texture(19), Sampler(15) }, .forbidden = { CB(7) } });
 		}
 		// SSGI's vertex-AO write must compile for opaque, vertex-colour and blended prepass bodies.
-		const auto prepass = a_root / "BSDFPrePass.hlsl";
+		const auto prepass = a_root / "DFPrepass.hlsl";
 		for (const ShaderDefines& defines : {
 				 ShaderDefines{ { "BSDFPREPASS_PS_SOURCE", "1" }, { "SSGI", "1" } },
 				 ShaderDefines{ { "BSDFPREPASS_PS_SOURCE", "1" }, { "SSGI", "1" }, { "VC", "1" } },
@@ -1147,7 +1147,7 @@ namespace
 			auto defines = material;
 			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
 											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "NORMALS", "1" } });
-			a_jobs.push_back({ .path = a_root / "BSDFPrePass.hlsl",
+			a_jobs.push_back({ .path = prepass,
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
 				.description = "Wetness deferred material producer",
@@ -1156,7 +1156,7 @@ namespace
 			auto vertexDefines = material;
 			vertexDefines.insert(vertexDefines.end(), { { "BSDFPREPASS_VS_SOURCE", "1" },
 														  { "WETNESS_EFFECTS", "1" }, { "NORMALS", "1" }, { "BINORMAL_TANGENT", "1" }, { "TEXTURE", "1" } });
-			a_jobs.push_back({ .path = a_root / "BSDFPrePass.hlsl",
+			a_jobs.push_back({ .path = prepass,
 				.defines = std::move(vertexDefines),
 				.profile = "vs_5_0",
 				.description = "Wetness deferred geometry interface",
@@ -1167,7 +1167,7 @@ namespace
 			auto defines = material;
 			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
 											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TESSELLATE_DISP_HEIGHT", "1" } });
-			a_jobs.push_back({ .path = a_root / "BSDFPrePass.hlsl",
+			a_jobs.push_back({ .path = prepass,
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
 				.description = "Wetness incomplete domain interface retains native material behavior",
@@ -1219,20 +1219,20 @@ namespace
 				.forbidden = { CB(4), CB(5), CB(7) } });
 		}
 
-		const auto water = a_root / "BSWaterShader.hlsl";
+		const auto water = a_root / "Water.hlsl";
 		for (const char* family : { "BSLIGHTING_PS_COLOR", "BSLIGHTING_PS_CORE", "BSLIGHTING_PS_RESOURCE" }) {
-			a_jobs.push_back({ .path = a_root / "BSLightingShader.hlsl",
+			a_jobs.push_back({ .path = a_root / "Lighting.hlsl",
 				.defines = { { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
 				.profile = "ps_5_0",
 				.description = "BSLighting terrain directional consumer",
 				.required = { CB(4), CB(6), Texture(60), Sampler(13) } });
 		}
-		a_jobs.push_back({ .path = a_root / "BSDistantTreeShader.hlsl",
+		a_jobs.push_back({ .path = a_root / "DistantTree.hlsl",
 			.defines = { { "BSDISTANTTREE_PS_SOURCE", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDistantTree terrain directional consumer",
 			.required = { CB(4), CB(6), Texture(60), Sampler(13) } });
-		a_jobs.push_back({ .path = a_root / "BSEffectShader.hlsl",
+		a_jobs.push_back({ .path = a_root / "Effect.hlsl",
 			.defines = { { "BSEFFECT_PS_SOURCE", "1" }, { "LIGHTING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TERRAIN_SHADOWS", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSEffect terrain directional consumer",

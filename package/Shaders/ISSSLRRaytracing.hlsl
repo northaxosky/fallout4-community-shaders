@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
-#if defined(UPSCALING) || defined(DYNAMIC_CUBEMAPS)
-#	include "FO4/FO4ShaderData.hlsli"
-#endif
+#include "Common/DummyVSTexCoord.hlsl"
+
+#ifdef PSHADER
+#	if defined(UPSCALING) || defined(DYNAMIC_CUBEMAPS)
+#		include "FO4/FO4ShaderData.hlsli"
+#	endif
 
 cbuffer SSLRRaytracingConstants : register(b0)
 {
@@ -17,11 +20,7 @@ SamplerState SSRDepthSampler : register(s2);
 Texture2D<float4> SceneColor : register(t3);
 SamplerState SceneColorSampler : register(s3);
 
-struct PS_INPUT
-{
-	float4 Position: SV_POSITION;
-	float2 TexCoord: TEXCOORD0;
-};
+typedef VS_OUTPUT PS_INPUT;
 
 static const float DitherTable[16] = {
 	0.0,
@@ -50,18 +49,18 @@ bool OutsideView(float3 ray)
 
 float4 main(PS_INPUT input) : SV_Target0
 {
-#ifdef DYNAMIC_CUBEMAPS
+#	ifdef DYNAMIC_CUBEMAPS
 	// FO4 stock enables SSR without DC, so read DC's live setting instead of upstream's compile-time ENABLESSR.
 	if (SharedData::cubemapCreatorSettings.Enabled != 0 && FO4SharedData::EnabledSSR == 0)
 		return 0.0;
-#endif
+#	endif
 	float2 targetSize = TargetSizeNearFar.xy;
 	float2 sampleUV = input.TexCoord;
-#ifdef UPSCALING
+#	ifdef UPSCALING
 	// FO4 uses Hi-Z integer loads and full-RT cb0 sizes; scale traversal as well as FrameBuffer-style samples.
 	targetSize *= FrameBuffer::DynamicResolutionParams1.xy;
 	sampleUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(sampleUV);
-#endif
+#	endif
 	float4 color = 0.0;
 	float surfaceDepth =
 		SSRDepth.SampleLevel(SSRDepthSampler, sampleUV, 0).x;
@@ -158,9 +157,9 @@ float4 main(PS_INPUT input) : SV_Target0
 		confidence *= confidence;
 		if (!(OutsideView(ray) || iterations == 32 || blocked)) {
 			float2 hitUV = ray.xy;
-#ifdef UPSCALING
+#	ifdef UPSCALING
 			hitUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(hitUV);
-#endif
+#	endif
 			color = float4(
 				SceneColor.SampleLevel(SceneColorSampler, hitUV, 0).xyz,
 				confidence);
@@ -168,3 +167,4 @@ float4 main(PS_INPUT input) : SV_Target0
 	}
 	return color;
 }
+#endif

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Shader ownership toggles are editable in Advanced settings and apply immediately, including to feature shader contributions.
+- Utility, sky, particle and blood splatter shaders remain stock. Effect, distant tree and forward lighting replacements remain available for fog and terrain-shadow consumers.
+
 ## 0.2.1
 
 - Imagespace post-processing now uses the game's own shaders; only screen-space reflections are replaced, with a rebuild that matches vanilla exactly.

@@ -213,6 +213,9 @@ namespace
 		CHECK(RenderDocument(a_registry, toml::parse(fresh)) == fresh);
 		const auto ownership = ParseShaderOwnership(toml::parse("[shader_ownership.targets]\nimagespace = true\n"));
 		CHECK(ownership.valid && ownership.config.targets[cs::engine::ShaderInjectionTarget::kImageSpace]);
+		const auto defaults = ParseShaderOwnership({});
+		for (const auto& target : cs::engine::GetShaderInjectionTargets())
+			CHECK(defaults.config.targets[target.id]);
 
 		CHECK(InitializeAt(a_path, a_registry).error.empty());
 		CHECK(ReadFile(a_path) == fresh);

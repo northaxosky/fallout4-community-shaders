@@ -67,7 +67,7 @@ namespace cs::feature_config
 
 	struct ShaderOwnershipConfig
 	{
-		bool enabled{ false };
+		bool enableShaders{ false };
 		ShaderOwnershipTargets targets;
 	};
 

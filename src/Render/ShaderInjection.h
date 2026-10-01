@@ -38,6 +38,11 @@ namespace RE
 	}
 }
 
+namespace cs::feature_config
+{
+	struct ShaderOwnershipConfig;
+}
+
 namespace cs::engine
 {
 	struct ShaderFamilyDescriptor;
@@ -156,7 +161,6 @@ namespace cs::engine
 		std::string entryPoint;
 		std::string profile;
 		ShaderInjectionDefines defines;
-		const ShaderInjectionFamilyMetadata* familyMetadata = nullptr;
 	};
 
 	enum class DeveloperShaderOverride : std::uint8_t
@@ -166,38 +170,6 @@ namespace cs::engine
 		kForceOff
 	};
 
-	enum class ShaderInjectionRequestReason : std::uint8_t
-	{
-		kNone = 0,
-		kFeatureContributor = 1U << 0,
-		kBaselineOwnership = 1U << 1,
-		kDeveloperForceOn = 1U << 2
-	};
-
-	constexpr ShaderInjectionRequestReason operator|(
-		ShaderInjectionRequestReason a_left,
-		ShaderInjectionRequestReason a_right) noexcept
-	{
-		return static_cast<ShaderInjectionRequestReason>(
-			static_cast<std::uint8_t>(a_left) | static_cast<std::uint8_t>(a_right));
-	}
-
-	constexpr ShaderInjectionRequestReason& operator|=(
-		ShaderInjectionRequestReason& a_left,
-		ShaderInjectionRequestReason a_right) noexcept
-	{
-		a_left = a_left | a_right;
-		return a_left;
-	}
-
-	constexpr bool HasShaderInjectionRequestReason(
-		ShaderInjectionRequestReason a_reasons,
-		ShaderInjectionRequestReason a_reason) noexcept
-	{
-		return (
-				   static_cast<std::uint8_t>(a_reasons) & static_cast<std::uint8_t>(a_reason)) != 0;
-	}
-
 	struct ShaderInjectionTargetSnapshot
 	{
 		ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
@@ -206,8 +178,6 @@ namespace cs::engine
 		bool published = false;
 		bool slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
-		ShaderInjectionRequestReason requestReasons =
-			ShaderInjectionRequestReason::kNone;
 		std::size_t contributors = 0;
 		ShaderInjectionDefines defines;
 		std::string publicationError;
@@ -239,9 +209,6 @@ namespace cs::engine
 	{
 		std::size_t requested = 0;
 		std::size_t published = 0;
-		std::size_t requestedByFeatureContributor = 0;
-		std::size_t requestedByBaselineOwnership = 0;
-		std::size_t requestedByDeveloperForceOn = 0;
 		std::uint64_t matches = 0;
 		std::uint64_t substitutions = 0;
 		std::uint64_t passthroughCompileFail = 0;
@@ -274,6 +241,7 @@ namespace cs::engine
 	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
 	bool SetDeveloperShaderSourceRoot(std::wstring a_sourceRoot);
 	bool SetShaderInjectionEnabled(bool a_enabled);
+	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config);
 	bool ValidateShaderInjectionRoutes(
 		std::string_view a_contributor,
 		std::string& a_error);
@@ -293,35 +261,6 @@ namespace cs::engine
 	bool InstallComputeDispatchBridgeForTesting(
 		ID3D11DeviceContext* a_context,
 		std::uintptr_t a_validatedTail) noexcept;
-	struct NativeShaderMetadataForTesting
-	{
-		bool forceEarlyDepthStencil = false;
-	};
-	std::optional<NativeShaderMetadataForTesting>
-	GetObservedNativeShaderMetadataForTesting(
-		ID3D11DeviceChild* a_shader) noexcept;
-	ID3D11DeviceChild* PrepareNativeShaderVariantForTesting(
-		const ShaderFamilyDescriptor& a_descriptor) noexcept;
-	NativeGraphicsShaderBinding
-	ResolveNativeGraphicsShaderBindingForTesting(
-		ShaderInjectionTarget a_target,
-		std::string_view a_nativeName,
-		std::uint32_t a_vertexShaderId,
-		std::uint32_t a_pixelShaderId,
-		RE::BSGraphics::VertexShader* a_nativeVertex,
-		RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
-	RE::BSGraphics::VertexShader*
-	CacheNativeVertexReplacementWrapperForTesting(
-		RE::BSGraphics::VertexShader* a_nativeVertex,
-		ID3D11VertexShader* a_replacement) noexcept;
-	struct NativeVariantCacheStatsForTesting
-	{
-		std::size_t entries = 0;
-		std::size_t unsupported = 0;
-		std::size_t compilation = 0;
-	};
-	NativeVariantCacheStatsForTesting
-	GetNativeVariantCacheStatsForTesting() noexcept;
 	void ObserveNativeComputeShaderForTesting(
 		ShaderInjectionTarget a_target,
 		std::uint32_t a_descriptor,

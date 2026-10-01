@@ -764,7 +764,7 @@ target("ShaderInjectionRegistrationTests", function()
         runargs = "--compute-hooks-missing"
     })
     add_tests("ShaderInjectionComputePhase", {
-        runargs = "--compute-phase"
+        runargs = {"--compute-phase", path.join(os.projectdir(), "package/Shaders")}
     })
     add_tests("ShaderInjectionContributorConflict", {
         runargs = "--contributor-conflict"

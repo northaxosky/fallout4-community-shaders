@@ -3,11 +3,17 @@
 #include "Render/ShaderInjection.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string_view>
 
 namespace cs::engine
 {
+	[[nodiscard]] std::string ProfileForStage(ShaderStage a_stage);
+	[[nodiscard]] std::filesystem::path GetShaderPath(std::string_view a_nativeName);
+	[[nodiscard]] bool IsShaderSourceAvailable(
+		const std::filesystem::path& a_shaderRoot, std::string_view a_nativeName);
+
 	struct ShaderFamilyDescriptor
 	{
 		ShaderInjectionTarget target = ShaderInjectionTarget::kCount;

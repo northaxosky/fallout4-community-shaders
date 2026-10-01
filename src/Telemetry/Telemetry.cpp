@@ -124,18 +124,6 @@ namespace cs::telemetry
 					"published",
 					static_cast<std::int64_t>(
 						summary.published))
-				.Field(
-					"requested_by_feature_contributor",
-					static_cast<std::int64_t>(
-						summary.requestedByFeatureContributor))
-				.Field(
-					"requested_by_baseline_ownership",
-					static_cast<std::int64_t>(
-						summary.requestedByBaselineOwnership))
-				.Field(
-					"requested_by_developer_force_on",
-					static_cast<std::int64_t>(
-						summary.requestedByDeveloperForceOn))
 				.Field("stock_matches", TomlInteger(summary.matches))
 				.Field(
 					"replacements",

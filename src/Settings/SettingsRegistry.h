@@ -24,11 +24,11 @@ namespace cs::settings
 
 		struct ShaderOwnership
 		{
-			bool enabled = true;
+			bool enableShaders = true;
 		};
 
 		inline constexpr Schema kShaderOwnership{
-			std::tuple{ Field{ "enabled", "Enable baseline shader replacement ownership.", &ShaderOwnership::enabled, {}, ApplyTiming::kNextLaunch } }
+			std::tuple{ Field{ "enable_shaders", "Use custom shaders; disabling this effectively disables all features.", &ShaderOwnership::enableShaders } }
 		};
 
 		struct ShaderTarget
@@ -38,7 +38,7 @@ namespace cs::settings
 
 		constexpr auto ShaderTargetSchema(std::string_view a_target)
 		{
-			return Schema{ std::tuple{ Field{ a_target, "", &ShaderTarget::enabled, {}, ApplyTiming::kNextLaunch } } };
+			return Schema{ std::tuple{ Field{ a_target, "", &ShaderTarget::enabled } } };
 		}
 
 		struct Menu
@@ -82,14 +82,12 @@ namespace cs::settings
 			{ { "logging", "channels" }, {}, true },
 			{ { "shader_ownership" }, MakeSchemaView(core::kShaderOwnership) },
 			{ { "shader_ownership", "targets" }, {}, false,
-				"Allow baseline replacement of each target's reconstructed families. (restart required)" },
+				"Off binds the game's shader for that type, including feature changes to it." },
 			{ { "menu" }, MakeSchemaView(core::kMenu) },
 			{ { "menu", "debug_view_previews" }, {}, true },
 			{ { "preset" }, MakeSchemaView(core::kPreset) }
 		};
 		for (const auto& target : engine::GetShaderInjectionTargets()) {
-			if (!target.BaselineOwnable())
-				continue;
 			auto fields = MakeSchemaView(core::ShaderTargetSchema(target.name));
 			registry[3].fields.push_back(std::move(fields.front()));
 		}
