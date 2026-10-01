@@ -8,17 +8,9 @@ namespace FO4SharedData
 		bool EnableScreenSpaceGI;
 		uint3 pad0;
 	};
-	struct ExponentialHeightFogSettings
-	{
-		uint Mode;
-		float DensityMultiplier;
-		float HeightFalloffMultiplier;
-		float pad0;
-	};
 	cbuffer FO4SharedData : register(b7)
 	{
 		ScreenSpaceGISettings screenSpaceGISettings;
-		ExponentialHeightFogSettings exponentialHeightFogSettings;
 		uint reserved0;
 		uint padTerrain;
 		uint DynamicCubemapsDebugVisualization;

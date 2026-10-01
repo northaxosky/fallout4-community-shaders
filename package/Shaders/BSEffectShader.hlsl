@@ -1,4 +1,8 @@
 #ifdef BSEFFECT_PS_SOURCE
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+#		define FO4_FOG_SAMPLER s15
+#		include "FO4/ExponentialHeightFogConsumer.hlsli"
+#	endif
 #	if defined(TERRAIN_SHADOWS) && defined(LIGHTING)
 #		include "FO4/TerrainShadowsConsumer.hlsli"
 #	endif
@@ -136,7 +140,7 @@ struct PSOutput
 
 #	if defined(LIGHTING)
 float3 GetLightingColor(float3 msPosition
-#		ifdef TERRAIN_SHADOWS
+#		if defined(TERRAIN_SHADOWS) || defined(EXPONENTIAL_HEIGHT_FOG)
 	,
 	float3 screenPosition
 #		endif
@@ -172,6 +176,9 @@ float3 GetLightingColor(float3 msPosition
 	lightFadeMul *= spotPower;
 
 	float3 color = DLightColor.xyz;
+#		ifdef EXPONENTIAL_HEIGHT_FOG
+	color *= FO4Fog::SunlightForward(screenPosition);
+#		endif
 #		ifdef TERRAIN_SHADOWS
 	color *= TerrainShadows::GetShadowFromScreenPosition(screenPosition);
 #		endif
@@ -741,7 +748,7 @@ PSOutput main(PSInput input)
 	float3 propertyColor = PropertyColor.xyz;
 #			if defined(LIGHTING)
 	propertyColor = GetLightingColor(input.MSPosition
-#				ifdef TERRAIN_SHADOWS
+#				if defined(TERRAIN_SHADOWS) || defined(EXPONENTIAL_HEIGHT_FOG)
 		,
 		input.Position.xyz
 #				endif
@@ -759,7 +766,28 @@ PSOutput main(PSInput input)
 #			endif
 #		endif
 
-#		if defined(ADDBLEND)
+#		if defined(EXPONENTIAL_HEIGHT_FOG)
+	float4 heightFog = 0;
+	float vanillaFogFactor = input.FogParam.w;
+	if (SharedData::exponentialHeightFogSettings.enabled && !FO4Depth::IsFirstPerson(input.Position.z)) {
+		heightFog = FO4Fog::EvaluateForward(input.Position.xyz, input.FogParam.xyz);
+		if (ExponentialHeightFog::ShouldDisableVanillaFog())
+			vanillaFogFactor = 0;
+#			if !defined(ADDBLEND) && !defined(MULTBLEND)
+		alpha *= 1 - heightFog.w;
+#			endif
+	}
+#			if defined(ADDBLEND)
+	float3 blendedColor = lightColor * (1 - vanillaFogFactor) * (1 - heightFog.w);
+#			elif defined(MULTBLEND)
+	float3 blendedColor = lerp(lightColor, 1.0.xxx, saturate(1.5 * vanillaFogFactor));
+	blendedColor = lerp(blendedColor, 1.0.xxx, saturate(1.5 * heightFog.w));
+	blendedColor = lerp(1.0.xxx, blendedColor, alpha);
+#			else
+	float3 blendedColor = lerp(lightColor, input.FogParam.xyz, vanillaFogFactor);
+	blendedColor = lerp(blendedColor, heightFog.xyz, heightFog.w);
+#			endif
+#		elif defined(ADDBLEND)
 #			if defined(PIPBOY_SCREEN)
 	float addBlendFade = 1.0 - input.FogParam.w;
 	float3 blendedColor = lightColor * addBlendFade;

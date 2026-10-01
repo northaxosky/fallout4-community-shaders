@@ -7,6 +7,9 @@
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 #	include "FO4/TerrainShadowsConsumer.hlsli"
 #endif
+#ifdef EXPONENTIAL_HEIGHT_FOG
+#	include "FO4/ExponentialHeightFogConsumer.hlsli"
+#endif
 
 #ifdef WETNESS_EFFECTS
 #	include "FO4/WetnessEffects/WetnessEffects.hlsli"
@@ -706,6 +709,9 @@ PS_OUTPUT main(PS_INPUT input)
 	finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
 	float specMix = (1.0 - schlickFres * 0.5);
+#		ifdef EXPONENTIAL_HEIGHT_FOG
+	shadowPcf *= FO4Fog::SunlightView(posView);
+#		endif
 	output.specular.xyz = shadowPcf * specMix * brdfSpecular;
 #		ifdef AMBIENT_IBL_IN_LIGHT
 	output.specular.xyz += ambientSpecular;
@@ -2259,6 +2265,9 @@ float2 goboUV = float2(omniUV.x,
 		shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 		float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 #	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+		shadow *= FO4Fog::SunlightView(posView);
+#	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 		shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
 			posView,
@@ -3026,6 +3035,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+#	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			shadow *= FO4Fog::SunlightView(posView);
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -3992,6 +4004,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
+#	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			shadow *= FO4Fog::SunlightView(posView);
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
@@ -5109,8 +5124,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				ViewToWorld_row2,
 				CameraPosAdjust);
 #	endif
-#	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+#	if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
 			float shadowAlpha = result.z;
+#	endif
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			result *= FO4Fog::SunlightView(posView);
+#	endif
+#	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			result *= WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
@@ -5119,7 +5139,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #	endif
 
-#	ifdef WATER_EFFECTS
+#	if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
 			output.diffuse = float4(result.xyz, shadowAlpha);
 #	else
 	output.diffuse = result.zzzz;
@@ -5366,8 +5386,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				ViewToWorld_row2,
 				CameraPosAdjust);
 #		endif
-#		if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+#		if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
 			float shadowAlpha = result.z;
+#		endif
+#		if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			result *= FO4Fog::SunlightView(posView);
+#		endif
+#		if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			result *= WaterEffects::GetCausticsMultFromViewPosition(
 				posView,
 				ViewToWorld_row0,
@@ -5376,7 +5401,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				CameraPosAdjust);
 #		endif
 
-#		ifdef WATER_EFFECTS
+#		if defined(WATER_EFFECTS) || defined(EXPONENTIAL_HEIGHT_FOG)
 			output.diffuse = float4(result.xyz, shadowAlpha);
 #		else
 		output.diffuse = result.zzzz;
@@ -5390,6 +5415,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	float splitShadow = shadowBlend + 1.0;
 #		endif
 
+#		if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+	splitShadow *= FO4Fog::SunlightView(posView);
+#		endif
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 	splitShadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #		endif
@@ -6054,6 +6082,11 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			finalDiffuse += (forwardBlend * FO4LocalLightColor(LightColor_HDR.xyz)) * albedoSample.xyz;
 #	endif
 
+#	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+			float sunlightFogMult = FO4Fog::SunlightView(posView);
+			finalDiffuse *= sunlightFogMult;
+			brdfSpecular *= sunlightFogMult;
+#	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
 			float terrainShadowMult = TerrainShadows::GetTerrainShadowMultFromViewPosition(
 				posView,
@@ -6084,6 +6117,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 wetDiffuse = finalDiffuse * attenuation;
 #		else
 		float3 wetLightColor = FO4LocalLightColor(LightColor_HDR.xyz);
+#			if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
+		wetLightColor *= sunlightFogMult;
+#			endif
 #			if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 		wetLightColor *= directContactShadow;
 #			endif

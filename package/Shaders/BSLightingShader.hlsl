@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
+#ifdef EXPONENTIAL_HEIGHT_FOG
+#	include "FO4/ExponentialHeightFogConsumer.hlsli"
+#endif
 #ifdef TERRAIN_SHADOWS
 #	include "FO4/TerrainShadowsConsumer.hlsli"
 #endif
@@ -249,6 +252,11 @@ PSOutput main(PSInput input)
 		viewDirection, geometryData[0].xyz, normal,
 		NdotLSat, NdotVSat, specularPower, specularScale);
 	float3 lightsSpecular = shadow * (NdotLSat * (specular * geometryData[1].xyz));
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+	float sunlightFog = FO4Fog::SunlightForward(input.position.xyz);
+	lightsDiffuse *= sunlightFog;
+	lightsSpecular *= sunlightFog;
+#	endif
 #	ifdef TERRAIN_SHADOWS
 	float terrainShadow = TerrainShadows::GetShadowFromScreenPosition(input.position.xyz);
 	lightsDiffuse *= terrainShadow;
@@ -575,6 +583,11 @@ PSOutput main(PSInput input)
 		viewDirection, geometryData[0].xyz, normal,
 		NdotLSat, NdotVSat, specularPower, specularScale);
 	float3 lightsSpecular = shadow * (NdotLSat * (specular * geometryData[1].xyz));
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+	float sunlightFog = FO4Fog::SunlightForward(input.position.xyz);
+	lightsDiffuse *= sunlightFog;
+	lightsSpecular *= sunlightFog;
+#	endif
 #	ifdef TERRAIN_SHADOWS
 	float terrainShadow = TerrainShadows::GetShadowFromScreenPosition(input.position.xyz);
 	lightsDiffuse *= terrainShadow;
@@ -930,6 +943,11 @@ PSOutput main(PSInput input)
 		viewDirection, geometryData[0].xyz, normal,
 		NdotLSat, NdotVSat, specularPower, specularScale);
 	float3 lightsSpecular = shadow * (NdotLSat * (specular * geometryData[1].xyz));
+#	ifdef EXPONENTIAL_HEIGHT_FOG
+	float sunlightFog = FO4Fog::SunlightForward(input.position.xyz);
+	lightsDiffuse *= sunlightFog;
+	lightsSpecular *= sunlightFog;
+#	endif
 #	ifdef TERRAIN_SHADOWS
 	float terrainShadow = TerrainShadows::GetShadowFromScreenPosition(input.position.xyz);
 	lightsDiffuse *= terrainShadow;

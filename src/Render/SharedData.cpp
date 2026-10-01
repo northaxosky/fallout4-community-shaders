@@ -1,5 +1,6 @@
 #include "Render/SharedData.h"
 
+#include "ExponentialHeightFog.h"
 #include "FeatureBuffer.h"
 #include "Log.h"
 #include "LogThrottle.h"
@@ -124,7 +125,8 @@ namespace cs::render
 		{
 			auto& fo4 = a_data.fo4;
 			fo4.screenSpaceGISettings = a_features.screenSpaceGISettings;
-			fo4.exponentialHeightFogSettings = a_features.exponentialHeightFogSettings;
+			if (auto* fog = features::ExponentialHeightFog::GetSingleton(); fog->IsLoaded())
+				a_data.feature.exponentialHeightFogSettings = fog->GetCommonBufferData();
 			fo4.DynamicCubemapsDebugVisualization = a_features.dynamicCubemapsSettings.DebugVisualization;
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
 			a_data.feature.cubemapCreatorSettings.Enabled = a_features.dynamicCubemapsSettings.Enabled;

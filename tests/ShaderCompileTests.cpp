@@ -336,7 +336,6 @@ namespace
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
 		const auto gi = FIELDS(cs::ScreenSpaceGIFeatureData, F(EnableScreenSpaceGI), F(pad0));
-		const auto fo4fog = FIELDS(cs::ExponentialHeightFogFeatureData, F(Mode), F(DensityMultiplier), F(HeightFalloffMultiplier), F(pad0));
 #undef FIELDS
 #undef F
 		struct Block
@@ -356,8 +355,7 @@ namespace
 			{ 6, "enbSettings", enb }, { 6, "terrainBlendingSettings", blending },
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
-			{ 7, "screenSpaceGISettings", gi },
-			{ 7, "exponentialHeightFogSettings", fo4fog }
+			{ 7, "screenSpaceGISettings", gi }
 		};
 		D3D11_SHADER_DESC shader{};
 		a_reflection->GetDesc(&shader);
@@ -424,7 +422,7 @@ namespace
 		};
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, screenSpaceGISettings),
-			ABI(FO4SharedDataCB, exponentialHeightFogSettings), ABI(FO4SharedDataCB, reserved0),
+			ABI(FO4SharedDataCB, reserved0),
 			ABI(FO4SharedDataCB, padTerrain), ABI(FO4SharedDataCB, DynamicCubemapsDebugVisualization),
 			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, pad0)
@@ -685,6 +683,64 @@ namespace
 		}
 
 		const auto composite = a_root / "BSDFCompositeShader.hlsl";
+		for (const char* file : { "VolumetricFogConservativeDepthCS.hlsl", "VolumetricFogMaterialCS.hlsl",
+				 "VolumetricFogLightScatteringCS.hlsl", "VolumetricFogIntegrationCS.hlsl" }) {
+			a_jobs.push_back({ .path = a_root / "ExponentialHeightFog" / file,
+				.description = file,
+				.required = { CB(0) },
+				.forbidden = { CB(7), CB(12) } });
+		}
+		a_jobs.push_back({ .path = a_root / "ExponentialHeightFog" / "VolumetricFogLightScatteringCS.hlsl",
+			.defines = { { "TERRAIN_SHADOWS", "1" } },
+			.description = "VolumetricFog terrain scattering",
+			.required = { CB(0), CB(4), CB(6), Texture(60) },
+			.forbidden = { CB(7), CB(12) } });
+		a_jobs.push_back({ .path = a_root / "FO4" / "ExponentialHeightFog" / "SkyCompositeCS.hlsl",
+			.description = "ExponentialHeightFog post-sky boundary",
+			.required = { CB(4), CB(5), CB(6), Texture(17), Texture(19) },
+			.forbidden = { CB(7), CB(12) } });
+		for (auto defines : std::vector<ShaderDefines>{
+				 { { "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY", "1" } },
+				 { { "BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY", "1" }, { "FOGSTACK", "1" } },
+				 { { "BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY", "1" }, { "FOGSTACK", "1" } },
+				 { { "BSDFCOMPOSITE_PS_2D_FOG", "1" }, { "COMPOSITE_HAS_LIGHT", "1" } },
+				 { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" } },
+				 { { "BSDFCOMPOSITE_PS_NO_T0_FOG", "1" }, { "WAVE5A_FOG_SHAPE", "1" } } }) {
+			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" },
+											  { "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", "1" } });
+			a_jobs.push_back({ .path = composite, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog composite consumer", .required = { CB(4), CB(5), CB(6), Texture(17), Texture(19), Sampler(13) }, .forbidden = { CB(7) } });
+		}
+		for (auto defines : std::vector<ShaderDefines>{
+				 { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "AMBIENT_IBL_IN_LIGHT", "1" } },
+				 { { "BSDFLIGHT_PS_DIRSPLITS1", "1" }, { "DIRSPLITS", "1" }, { "SHADOW", "1" }, { "FILTER_PCF1", "1" } },
+				 { { "BSDFLIGHT_PS_DIRSPLITS2", "1" }, { "DIRSPLITS", "2" }, { "SHADOW", "1" } },
+				 { { "BSDFLIGHT_PS_DIRSPLITS3", "1" }, { "DIRSPLITS", "3" }, { "SHADOW", "1" } },
+				 { { "BSDFLIGHT_PS_SHADOW_ONLY", "1" }, { "DIRSPLITS", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" }, { "FILTER_PCF1", "1" } },
+				 { { "BSDFLIGHT_PS_SHADOW_ONLY_BLEND_SPLIT", "1" }, { "DIRSPLITS", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" }, { "BLENDSPLIT", "1" }, { "FILTER_PCF1", "1" }, { "AMBIENT", "1" } },
+				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRSPLITS", "2" } } }) {
+			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" },
+											  { "DIRECTIONAL", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
+											  { "WATER_EFFECTS", "1" }, { "WETNESS_EFFECTS", "1" }, { "TERRAIN_SHADOWS", "1" } });
+			a_jobs.push_back({ .path = a_root / "BSDFLightShader.hlsl", .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog directional and coat consumer", .required = { CB(4), CB(5), CB(6) }, .forbidden = { Texture(19) } });
+		}
+		for (const char* family : { "BSLIGHTING_PS_COLOR", "BSLIGHTING_PS_CORE", "BSLIGHTING_PS_RESOURCE" })
+			a_jobs.push_back({ .path = a_root / "BSLightingShader.hlsl",
+				.defines = { { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } },
+				.profile = "ps_5_0",
+				.description = "ExponentialHeightFog secondary sunlight consumer",
+				.required = { CB(4), CB(5), CB(6) },
+				.forbidden = { Texture(19), CB(7) } });
+		for (const auto& [file, defines] : std::vector<std::pair<const char*, ShaderDefines>>{
+				 { "BSWaterShader.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" } } },
+				 { "BSWaterShader.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "LOD", "1" } } },
+				 { "BSDistantTreeShader.hlsl", { { "BSDISTANTTREE_PS_SOURCE", "1" } } },
+				 { "BSEffectShader.hlsl", { { "BSEFFECT_PS_SOURCE", "1" } } },
+				 { "BSEffectShader.hlsl", { { "BSEFFECT_PS_SOURCE", "1" }, { "LIGHTING", "1" }, { "ADDBLEND", "1" } } },
+				 { "BSEffectShader.hlsl", { { "BSEFFECT_PS_SOURCE", "1" }, { "MULTBLEND", "1" } } } }) {
+			auto fogDefines = defines;
+			fogDefines.insert(fogDefines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } });
+			a_jobs.push_back({ .path = a_root / file, .defines = std::move(fogDefines), .profile = "ps_5_0", .description = "ExponentialHeightFog forward consumer", .required = { CB(4), CB(5), CB(6), Texture(19), Sampler(15) }, .forbidden = { CB(7) } });
+		}
 		// SSGI's vertex-AO write must compile for opaque, vertex-colour and blended prepass bodies.
 		const auto prepass = a_root / "BSDFPrePass.hlsl";
 		for (const ShaderDefines& defines : {

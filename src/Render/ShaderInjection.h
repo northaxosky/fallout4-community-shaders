@@ -52,11 +52,18 @@ namespace cs::engine
 		kRenderTarget
 	};
 
+	enum class ShaderSamplerContract : std::uint8_t
+	{
+		kExclusive,
+		kLinearClamp
+	};
+
 	struct ShaderSlotClaim
 	{
 		ShaderStage stage = ShaderStage::kPixel;
 		ShaderResourceType resourceType = ShaderResourceType::kShaderResource;
 		std::uint32_t slot = 0;
+		ShaderSamplerContract samplerContract = ShaderSamplerContract::kExclusive;
 
 		auto operator<=>(const ShaderSlotClaim&) const = default;
 	};
