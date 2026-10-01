@@ -501,7 +501,7 @@ namespace cs::features
 		const bool ready = _settings.enabled && _produced && state && _hasFrame && _lastFrame == state->frameCount;
 		UpdateConsumer(ready, _tiled);
 		auto* cb = _consumer->CB();
-		cs::engine::BindInjectionConstantBuffers(a_context, kConsumerSlot, 1, &cb);
+		cs::engine::BindFrameConstantBuffers(a_context, cs::engine::ShaderStage::kPixel, kConsumerSlot, 1, &cb);
 		ID3D11ShaderResourceView* views[kCompositionCount]{};
 		if (ready) {
 			auto& t = _textures;
@@ -512,9 +512,9 @@ namespace cs::features
 			views[2] = hq ? nullptr : t.chroma[_outputGI]->srv.get();
 			views[3] = t.normalGloss->srv.get();
 		}
-		cs::engine::BindInjectionShaderResources(a_context, kCompositionSlot, kCompositionCount, views);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kCompositionSlot, kCompositionCount, views);
 		auto* specular = ready && _settings.enableExperimentalSpecularGI ? _textures.specular[_outputAO]->srv.get() : nullptr;
-		cs::engine::BindInjectionShaderResources(a_context, kSpecularSlot, 1, &specular);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kSpecularSlot, 1, &specular);
 		++_binds;
 	}
 

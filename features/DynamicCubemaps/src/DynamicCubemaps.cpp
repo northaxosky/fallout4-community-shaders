@@ -281,7 +281,7 @@ namespace cs::features
 									   nullptr) :
 			                   resources[0];
 		}
-		cs::engine::BindInjectionShaderResources(a_context,
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel,
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
 	}
 
@@ -690,7 +690,7 @@ namespace cs::features
 					nullptr
 			};
 		}
-		context->PSSetShaderResources(
+		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel,
 			kDynamicCubemapPSSlot,
 			static_cast<UINT>(views.size()),
 			views.data());

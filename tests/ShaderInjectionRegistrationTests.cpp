@@ -250,7 +250,13 @@ namespace
 			.profile = "ps_5_0",
 			.defines = { { "CONFLICT", "family" } },
 		};
-		const ShaderDefineDeclaration definition{ "CONFLICT", { ShaderInjectionTarget::kBsLighting } };
+		struct Definition : ShaderDefineProvider
+		{
+			bool loaded = true;
+			std::string_view GetShaderDefineName() const override { return "CONFLICT"; }
+			bool HasShaderDefine(ShaderInjectionTarget) const override { return true; }
+			bool IsLoaded() const override { return loaded; }
+		} definition;
 		const ShaderReplacementRegistration contribution{
 			.targetId = ShaderInjectionTarget::kBsLighting,
 			.stages = ShaderStageBit(ShaderStage::kPixel),
@@ -267,6 +273,10 @@ namespace
 				&error) &&
 				!error.empty(),
 			"conflicting contributor defines were accepted");
+		definition.loaded = false;
+		const auto unloaded = BuildEffectiveShaderCompileRequest(*target, ShaderStage::kPixel, family, std::span(&contribution, 1));
+		Expect(unloaded && !unloaded->defines.contains("FO4CS_SUBSTRATE") && unloaded->defines.at("CONFLICT") == "family",
+			"an unloaded feature contributed shader defines");
 	}
 
 	void CheckRegistration()
@@ -821,6 +831,45 @@ namespace
 		Expect(restoredTarget == target, "pixel output override leaked into the engine draw");
 	}
 
+	void CheckFrameBindings()
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(CreateWarpDevice(device, context), "could not create frame binding WARP device");
+		if (!context)
+			return;
+		auto texture = CreateUintSrv(device.get(), 1);
+		auto buffer = CreateUintConstantBuffer(device.get(), 1);
+		auto* view = texture.get();
+		auto* cb = buffer.get();
+		BeginShaderInjectionFrame(100);
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 45, 1, &view);
+		BindFrameConstantBuffers(context.get(), ShaderStage::kVertex, 4, 1, &cb);
+		BindFrameShaderResources(context.get(), ShaderStage::kCompute, 17, 1, &view);
+		for (auto stage : { ShaderStage::kPixel, ShaderStage::kVertex, ShaderStage::kCompute })
+			VerifyFrameBindings(context.get(), stage, ShaderInjectionTarget::kBsdfLight);
+		Expect(GetFrameBindingMetrics().checks == 3 && GetFrameBindingMetrics().lost == 0,
+			"intact frame bindings failed verification");
+		context->ClearState();
+		for (auto stage : { ShaderStage::kPixel, ShaderStage::kVertex, ShaderStage::kCompute }) {
+			VerifyFrameBindings(context.get(), stage, ShaderInjectionTarget::kBsdfComposite);
+			VerifyFrameBindings(context.get(), stage, ShaderInjectionTarget::kBsdfComposite);
+		}
+		const auto lost = GetFrameBindingMetrics();
+		Expect(lost.checks == 6 && lost.lost == 3 && lost.resources[1].test(45) &&
+				   lost.buffers[0].test(4) && lost.resources[2].test(17),
+			"lost bindings were not counted once per consumer family and stage");
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 45, 1, &view);
+		VerifyFrameBindings(context.get(), ShaderStage::kPixel, ShaderInjectionTarget::kBsdfComposite);
+		Expect(GetFrameBindingMetrics().checks == 7 && GetFrameBindingMetrics().lost == 3,
+			"producer rebind did not restart consumer sampling");
+		BeginShaderInjectionFrame(101);
+		Expect(GetShaderInjectionSummary().draw.frameBindings.lost == 3 &&
+				   GetFrameBindingMetrics().lost == 0 && GetFrameBindingMetrics().lostTotal == 3,
+			"completed-frame binding evidence was not retained");
+	}
+
 	void CheckComputePhaseAndStateRestoration(const std::filesystem::path& a_shaderRoot)
 	{
 		using namespace cs::engine;
@@ -996,6 +1045,8 @@ int main(int argc, char** argv)
 		CheckComputePhaseAndStateRestoration(argv[2]);
 	else if (mode == "--pixel-bindings")
 		CheckPixelBindings();
+	else if (mode == "--frame-bindings")
+		CheckFrameBindings();
 	else {
 		std::cerr << "Unknown test mode\n";
 		return 2;

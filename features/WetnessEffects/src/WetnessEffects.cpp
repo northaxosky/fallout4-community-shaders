@@ -274,7 +274,7 @@ namespace cs::features
 			return;
 		if (_inPrepass) {
 			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
-			cs::engine::BindInjectionShaderResources(context, 70, 1, &precip);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, 70, 1, &precip);
 		} else {
 			BindFilmInput(context, false);
 			BindFilmInput(context, true);
@@ -286,11 +286,11 @@ namespace cs::features
 	{
 		auto* view = _filmReady.load(std::memory_order_relaxed) ? _filmSRV.get() : nullptr;
 		if (a_compute) {
-			a_context->CSSetShaderResources(71, 1, &view);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kCompute, 71, 1, &view);
 		} else {
-			cs::engine::BindInjectionShaderResources(a_context, 71, 1, &view);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, 71, 1, &view);
 			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
-			cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, 70, 1, &precip);
 		}
 	}
 
@@ -386,7 +386,7 @@ namespace cs::features
 		auto* srv =
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		// a null bind reads outside the encode domain, which is wetness identity
-		cs::engine::BindInjectionShaderResources(a_context, kGbufferNormalPSSlot, 1, &srv);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kGbufferNormalPSSlot, 1, &srv);
 		if (srv) {
 			_normalBinds.fetch_add(1, std::memory_order_relaxed);
 		} else {

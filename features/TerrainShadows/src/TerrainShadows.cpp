@@ -1153,7 +1153,7 @@ namespace cs::features
 	{
 		if (auto* context = GetImmediateContext()) {
 			auto* srv = GetShadowHeightSRV();
-			cs::engine::BindInjectionShaderResources(context, kShadowHeightPSSlot, 1, &srv);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kShadowHeightPSSlot, 1, &srv);
 		}
 	}
 

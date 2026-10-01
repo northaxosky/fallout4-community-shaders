@@ -408,7 +408,7 @@ namespace cs::features
 	{
 		if (auto* context = GetImmediateContext()) {
 			auto* srv = CanBind() ? _causticsSrv.get() : nullptr;
-			cs::engine::BindInjectionShaderResources(context, kCausticsPSSlot, 1, &srv);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kCausticsPSSlot, 1, &srv);
 		}
 	}
 

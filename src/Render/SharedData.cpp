@@ -446,17 +446,17 @@ namespace cs::render
 		auto* depth = GetCanonicalSceneDepthSRV();
 		switch (a_stage) {
 		case engine::ShaderStage::kVertex:
-			a_context->VSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->VSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
+			engine::BindFrameConstantBuffers(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+			engine::BindFrameShaderResources(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kPixel:
-			engine::BindInjectionConstantBuffers(a_context, kFrameDataSlot, kSubstrateBufferCount, buffers);
-			engine::BindInjectionShaderResources(a_context, kCanonicalDepthSlot, 1, &depth);
-			engine::BindInjectionShaderResources(a_context, kFullscreenDebugTextureSlot, 1, &debugTexture);
+			engine::BindFrameConstantBuffers(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+			engine::BindFrameShaderResources(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
+			engine::BindFrameShaderResources(a_context, a_stage, kFullscreenDebugTextureSlot, 1, &debugTexture);
 			break;
 		case engine::ShaderStage::kCompute:
-			a_context->CSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->CSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
+			engine::BindFrameConstantBuffers(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+			engine::BindFrameShaderResources(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kCount:
 			break;

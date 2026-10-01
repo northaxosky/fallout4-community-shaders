@@ -93,7 +93,7 @@ namespace cs::features
 			std::uint32_t a_slot,
 			ID3D11ShaderResourceView* a_view) noexcept
 		{
-			cs::engine::BindInjectionShaderResources(static_cast<ID3D11DeviceContext*>(a_context),
+			cs::engine::BindFrameShaderResources(static_cast<ID3D11DeviceContext*>(a_context), cs::engine::ShaderStage::kPixel,
 				static_cast<UINT>(a_slot),
 				1,
 				&a_view);

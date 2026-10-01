@@ -84,9 +84,11 @@ namespace cs::engine
 			return;
 		{
 			std::scoped_lock lock(g_drawMetricsMutex);
+			t_drawMetrics.frameBindings = GetFrameBindingMetrics();
 			g_completedDrawMetrics = t_drawMetrics;
 		}
 		t_drawMetrics = { .frame = a_frame };
+		ResetFrameBindings();
 		t_drawFrameStarted = true;
 	}
 
@@ -1083,6 +1085,9 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
+			VerifyFrameBindings(a_context, a_stage, a_target.id);
+			if (a_stage == ShaderStage::kPixel)
+				VerifyFrameBindings(a_context, ShaderStage::kVertex, a_target.id);
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
 			for (const auto& bind : a_target.binds) {
 				if ((bind.stages & ShaderStageBit(a_stage)) == 0)
@@ -1379,7 +1384,7 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		const bool installsPreDrawHook =
-			static_cast<bool>(a_registration.bind) && (a_registration.stages & ShaderStageBit(ShaderStage::kPixel)) != 0;
+			(a_registration.stages & ShaderStageBit(ShaderStage::kPixel)) != 0;
 		const auto admissible = [&service](
 									const ShaderReplacementRegistration& a_candidate) {
 			if (service.lifecycle != Lifecycle::kCollecting) {
@@ -1416,7 +1421,7 @@ namespace cs::engine
 
 		// Active substrate uses b4-b7 and canonical scene depth at t17.
 		render::EnsureSharedDataUpdateInstalled();
-		// a bind callback without its draw anchor would never run
+		// Consumer sampling and forced bindings share the engine draw anchor.
 		if (installsPreDrawHook && !EnsureDeferredDrawAnchorInstalled()) {
 			L->error(
 				"Replacement registration '{}' for '{}' rejected: the deferred draw anchor is unavailable.",

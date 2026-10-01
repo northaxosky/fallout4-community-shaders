@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Render/FrameBindings.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderDefineProvider.h"
 #include "Render/ShaderInjectionTargets.h"
@@ -67,6 +68,7 @@ namespace cs::engine
 		std::uint64_t captures = 0;
 		std::uint64_t restores = 0;
 		std::uint64_t d3dBinds = 0;
+		FrameBindingMetrics frameBindings;
 	};
 
 	// Render thread: publish the completed frame, including forward draws after composite.

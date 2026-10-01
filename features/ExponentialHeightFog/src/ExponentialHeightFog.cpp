@@ -302,7 +302,7 @@ namespace cs::features
 	{
 		if (auto* context = engine::GetImmediateContext()) {
 			auto* volume = _volume.Integrated();
-			engine::BindInjectionShaderResources(context, 19, 1, &volume);
+			engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, 19, 1, &volume);
 		}
 	}
 

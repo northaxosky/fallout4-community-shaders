@@ -636,6 +636,7 @@ target("ShaderInjectionRegistrationTests", function()
         "src/Render/ShaderInjectionCompileRequest.cpp",
         "src/Render/ShaderFamilyDescriptor.cpp",
         "src/Render/SharedDataDispatchScope.cpp",
+        "src/Render/FrameBindings.cpp",
         "src/Render/PixelShaderSwapBroker.cpp",
         "src/Render/PixelShaderSwapModel.cpp",
         "src/Render/ShaderSubclassContext.cpp",
@@ -762,6 +763,9 @@ target("ShaderInjectionRegistrationTests", function()
     })
     add_tests("ShaderInjectionRegistration", {
         runargs = "--registration"
+    })
+    add_tests("ShaderInjectionFrameBindings", {
+        runargs = "--frame-bindings"
     })
     add_tests("ShaderInjectionComputeHooksMissing", {
         runargs = "--compute-hooks-missing"
