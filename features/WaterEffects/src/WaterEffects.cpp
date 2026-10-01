@@ -136,12 +136,6 @@ namespace cs::features
 		}
 		_registrationsReady.store(true, std::memory_order_release);
 
-		cs::engine::RegisterPreDeferredLightsImpl(
-			[] { WaterEffects::GetSingleton()->SaveEngineBindings(); },
-			cs::engine::HookPriority::Early);
-		cs::engine::RegisterPostDeferredLightsImpl(
-			[] { WaterEffects::GetSingleton()->RestoreEngineBindings(); },
-			cs::engine::HookPriority::Late);
 		if (!cs::engine::RegisterPreDeferredComposite(
 				[this] {
 					if (auto* context = GetImmediateContext())
@@ -429,12 +423,18 @@ namespace cs::features
 		context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &nullSampler);
 	}
 
+	void WaterEffects::Prepass()
+	{
+		if (auto* context = GetImmediateContext()) {
+			auto* srv = CanBind() ? _causticsSrv.get() : nullptr;
+			cs::engine::BindInjectionShaderResources(context, kCausticsPSSlot, 1, &srv);
+		}
+	}
+
 	void WaterEffects::BindCaustics(ID3D11DeviceContext* a_context)
 	{
 		if (!a_context || !CanBind())
 			return;
-		auto* srv = _causticsSrv.get();
-		cs::engine::BindInjectionShaderResources(a_context, kCausticsPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _causticsSampler.get();
 		cs::engine::BindInjectionSamplers(a_context, kCausticsSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);

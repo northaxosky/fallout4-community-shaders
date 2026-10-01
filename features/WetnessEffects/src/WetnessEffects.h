@@ -37,6 +37,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		void Prepass() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;

@@ -163,7 +163,7 @@ namespace cs::features
 			FailLoad("Exponential height fog shader or prepass registration failed.");
 			return;
 		}
-		engine::RegisterPreDeferredLightsImpl([this] { RenderFrame(); }, engine::HookPriority::Late);
+		engine::RegisterPreDeferredLightsImpl([this] { RenderFrame(); Prepass(); }, engine::HookPriority::Late);
 		if (!engine::RegisterPostForwardSky([this] {
 				if (!CanBind() || !_enabled.load(std::memory_order_acquire))
 					return;
@@ -303,11 +303,17 @@ namespace cs::features
 		       render::GetCanonicalSceneDepthSRV() != nullptr;
 	}
 
+	void ExponentialHeightFog::Prepass()
+	{
+		if (auto* context = engine::GetImmediateContext()) {
+			auto* volume = _volume.Integrated();
+			engine::BindInjectionShaderResources(context, 19, 1, &volume);
+		}
+	}
+
 	void ExponentialHeightFog::Bind(ID3D11DeviceContext* a_context, std::uint32_t a_sampler)
 	{
-		auto* volume = _volume.Integrated();
 		auto* sampler = _volume.Sampler();
-		engine::BindInjectionShaderResources(a_context, 19, 1, &volume);
 		engine::BindInjectionSamplers(a_context, a_sampler, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
 	}

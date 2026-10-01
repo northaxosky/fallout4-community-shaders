@@ -170,12 +170,7 @@ namespace cs::features
 	{
 		// FO4: directional consumers execute inside DeferredLightsImpl under shader ownership.
 		const bool replacementRegistered =
-			cs::engine::RegisterFeatureShaderBindings("ScreenSpaceShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.bind = [this](ID3D11DeviceContext* a_context) { BindShadowMask(a_context); };
-				registration.slotClaims = { { .stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kMaskPSSlot } };
-			});
+			cs::engine::RegisterFeatureShaderBindings("ScreenSpaceShadows", *this);
 		if (!replacementRegistered) {
 			FailLoad("Failed to register the ScreenSpaceShadows BSDF light shader replacement");
 			return;
@@ -183,9 +178,7 @@ namespace cs::features
 
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
-		});
-		cs::engine::RegisterPostDeferredLightsImpl([] {
-			ScreenSpaceShadows::GetSingleton()->OnPostDeferredLights();
+			ScreenSpaceShadows::GetSingleton()->Prepass();
 		});
 		_started.store(true, std::memory_order_release);
 		L->info(
@@ -715,6 +708,12 @@ namespace cs::features
 		} catch (...) {
 			L->error("Raymarch dispatch failed.");
 		}
+	}
+
+	void ScreenSpaceShadows::Prepass()
+	{
+		if (auto* context = cs::engine::GetImmediateContext())
+			BindShadowMask(context);
 	}
 
 	void ScreenSpaceShadows::BindShadowMask(

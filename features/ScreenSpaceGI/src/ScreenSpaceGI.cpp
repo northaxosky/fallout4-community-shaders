@@ -133,32 +133,11 @@ namespace cs::features
 
 	void ScreenSpaceGI::Load()
 	{
-		std::vector<cs::engine::ShaderSlotClaim> claims;
-		for (UINT i = 0; i < kCompositionCount; ++i)
-			claims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-				.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-				.slot = kCompositionSlot + i });
-		claims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-			.resourceType = cs::engine::ShaderResourceType::kConstantBuffer,
-			.slot = kConsumerSlot });
-		claims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-			.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-			.slot = kSpecularSlot });
-		if (!cs::engine::RegisterFeatureShaderBindings("ScreenSpaceGI", *this, [this, &claims](cs::engine::ShaderReplacementRegistration& registration) {
-				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite) {
-					registration.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); };
-					registration.slotClaims = std::move(claims);
-				}
-			})) {
+		if (!cs::engine::RegisterFeatureShaderBindings("ScreenSpaceGI", *this)) {
 			FailLoad("SSGI shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPreDeferredComposite([] { GetSingleton()->SaveCompositionBindings(); }, cs::engine::HookPriority::Early) ||
-			!cs::engine::RegisterPostDeferredComposite([] { GetSingleton()->RestoreCompositionBindings(); }, cs::engine::HookPriority::Late)) {
-			FailLoad("SSGI composite binding scope registration failed.");
-			return;
-		}
-		cs::engine::RegisterPostDeferredLightsImpl([] { GetSingleton()->OnPostDeferredLights(); });
+		cs::engine::RegisterPostDeferredLightsImpl([] { GetSingleton()->OnPostDeferredLights(); GetSingleton()->Prepass(); });
 		if (!cs::engine::RegisterPostDeferredPrePass([] { GetSingleton()->ApplyVanillaSSAO(); }))
 			L->warn("Vanilla SSAO control could not register; the engine's AO stays as configured.");
 		_started = true;
@@ -526,6 +505,11 @@ namespace cs::features
 			return;
 		_consumer->Update(data);
 		_consumerData = data;
+	}
+
+	void ScreenSpaceGI::Prepass()
+	{
+		BindComposition(cs::engine::GetImmediateContext());
 	}
 
 	void ScreenSpaceGI::BindComposition(ID3D11DeviceContext* a_context)

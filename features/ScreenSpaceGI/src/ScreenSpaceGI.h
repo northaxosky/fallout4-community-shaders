@@ -28,6 +28,7 @@ namespace cs::features
 		std::string GetFeatureSummary() const override { return "Screen-space ambient occlusion and indirect lighting."; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
+		void Prepass() override;
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void DrawSettings() override;

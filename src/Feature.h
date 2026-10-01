@@ -53,6 +53,7 @@ namespace cs
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
+		virtual void Prepass() {}
 		virtual void OnRuntimeQuarantined() noexcept {}
 
 		// Defer wrappers until every feature loads.
@@ -210,6 +211,7 @@ namespace cs
 		void ActivateAll();
 		void OnDataLoadedAll();
 		void OnPostPostLoadAll();
+		void PrepassAll();
 
 		// Callback failures quarantine features without unloading them.
 		bool PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept;

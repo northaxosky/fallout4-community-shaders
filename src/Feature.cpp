@@ -317,6 +317,22 @@ namespace cs
 		}
 	}
 
+	void FeatureManager::PrepassAll()
+	{
+		for (auto* feature : _loadedFeatures) {
+			if (!PrepareRuntimeCallback(*feature, "Prepass"))
+				continue;
+			try {
+				feature->Prepass();
+			} catch (const std::exception& e) {
+				QuarantineRuntimeCallback(*feature, "Prepass", e.what());
+			} catch (...) {
+				QuarantineRuntimeCallback(*feature, "Prepass", "Non-standard exception");
+			}
+		}
+		FinishRuntimeCallbackPass();
+	}
+
 	void FeatureManager::ActivateAll()
 	{
 		_loadedFeatures.clear();

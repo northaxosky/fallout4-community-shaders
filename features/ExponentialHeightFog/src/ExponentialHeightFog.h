@@ -23,6 +23,7 @@ namespace cs::features
 		std::string GetFeatureSummary() const override { return "Analytic height fog and temporally accumulated volumetric scattering."; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
+		void Prepass() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		bool ValidateShaderInjections(std::string&) override;
 		void DrawSettings() override;

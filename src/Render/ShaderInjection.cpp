@@ -1421,9 +1421,6 @@ namespace cs::engine
 			std::optional<PixelBindingBatch> bindings;
 			if (a_stage == ShaderStage::kPixel)
 				bindings.emplace(a_context);
-			if (a_stage != ShaderStage::kCompute &&
-				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0)
-				render::BindSharedData(a_context, a_stage);
 
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
 			for (const auto& bind : a_target.binds) {
@@ -1553,8 +1550,7 @@ namespace cs::engine
 						a_threadGroupCountZ);
 					return;
 				}
-				render::ScopedComputeSharedDataBinding bindings(a_context);
-				if (!bindings.IsActive()) {
+				if (!render::IsSharedDataReady()) {
 					g_computePhaseRejections.fetch_add(
 						1, std::memory_order_relaxed);
 					a_context->Dispatch(

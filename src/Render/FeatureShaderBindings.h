@@ -37,4 +37,9 @@ namespace cs::engine
 		}
 		return !registrations.empty();
 	}
+
+	inline bool RegisterFeatureShaderBindings(std::string_view a_name, const ShaderDefineProvider& a_feature)
+	{
+		return RegisterFeatureShaderBindings(a_name, a_feature, [](ShaderReplacementRegistration&) {});
+	}
 }

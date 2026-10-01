@@ -321,30 +321,11 @@ namespace cs::features
 		_registrationsReady.store(true, std::memory_order_release);
 
 		if (!cs::engine::RegisterPostDeferredPrePass(
-				[] { TerrainShadows::GetSingleton()->OnPostDeferredPrePass(); },
+				[] { TerrainShadows::GetSingleton()->OnPostDeferredPrePass(); TerrainShadows::GetSingleton()->Prepass(); },
 				static_cast<cs::engine::HookPriority>(-200))) {
 			FailLoad(
 				"Terrain shadows update after the deferred prepass; registering that "
 				"anchor failed");
-			return;
-		}
-		cs::engine::RegisterPreDeferredLightsImpl(
-			[] { TerrainShadows::GetSingleton()->SaveEngineBindings(); },
-			cs::engine::HookPriority::Early);
-		cs::engine::RegisterPostDeferredLightsImpl(
-			[] { TerrainShadows::GetSingleton()->RestoreEngineBindings(); },
-			cs::engine::HookPriority::Late);
-		if (!cs::engine::RegisterPreDeferredComposite(
-				[this] {
-					if (_debugVisualization.load(std::memory_order_acquire) != DebugVisualization::kOff)
-						SaveEngineBindings();
-				},
-				cs::engine::HookPriority::Early) ||
-			!cs::engine::RegisterPostDeferredComposite(
-				[] { TerrainShadows::GetSingleton()->RestoreEngineBindings(); },
-				cs::engine::HookPriority::Late)) {
-			FailLoad(
-				"Terrain shadow debug views need a deferred-composite binding scope");
 			return;
 		}
 		_renderCallbacksReady.store(true, std::memory_order_release);
@@ -1196,13 +1177,19 @@ namespace cs::features
 		context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &nullSampler);
 	}
 
+	void TerrainShadows::Prepass()
+	{
+		if (auto* context = GetImmediateContext()) {
+			auto* srv = GetShadowHeightSRV();
+			cs::engine::BindInjectionShaderResources(context, kShadowHeightPSSlot, 1, &srv);
+		}
+	}
+
 	void TerrainShadows::BindShadowHeights(ID3D11DeviceContext* a_context)
 	{
 		if (!a_context || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_shadowTexture || !_shadowTexture->srv || !_linearClampSampler) {
 			return;
 		}
-		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
-		cs::engine::BindInjectionShaderResources(a_context, kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
 		cs::engine::BindInjectionSamplers(a_context, kShadowHeightSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
@@ -1246,8 +1233,6 @@ namespace cs::features
 	{
 		if (!a_context || GetFullscreenDebugData().mode == 0)
 			return;
-		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
-		cs::engine::BindInjectionShaderResources(a_context, kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
 		cs::engine::BindInjectionSamplers(a_context, kShadowHeightSamplerPSSlot, 1, &sampler);
 		_debugBinds.fetch_add(1, std::memory_order_relaxed);

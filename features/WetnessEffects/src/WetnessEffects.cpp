@@ -92,37 +92,15 @@ namespace cs::features
 	{
 		if (!cs::engine::RegisterFeatureShaderBindings("WetnessEffects", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				const auto a_target = registration.targetId;
-				const bool a_bindsComposite = a_target == cs::engine::ShaderInjectionTarget::kBsdfComposite;
 				const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
-				const bool compute = a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting;
-				const auto stage = compute ? cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel;
-				registration.bind = [this, producer, compute, a_bindsComposite](ID3D11DeviceContext* context) {
-					if (producer)
-						BindFilmOutput(context);
-					else
-						BindFilmInput(context, compute);
-					if (a_bindsComposite)
-						BindCompositeResources(context);
-				};
-				registration.slotClaims.push_back({ .stage = stage,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = 71 });
-				if (!compute) {
-					registration.slotClaims.push_back({ .stage = stage,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = 70 });
-				}
 				if (producer) {
-					registration.slotClaims.push_back({ .stage = stage,
+					registration.bind = [this](ID3D11DeviceContext* context) { BindFilmOutput(context); };
+					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+						.slot = 71 });
+					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 						.resourceType = cs::engine::ShaderResourceType::kRenderTarget,
 						.slot = 6 });
-				}
-				if (a_bindsComposite) {
-					for (const auto slot : std::array{ kGbufferNormalPSSlot }) {
-						registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-							.slot = slot });
-					}
 				}
 			})) {
 			FailLoad("Wetness shader contribution registration failed.");
@@ -131,35 +109,12 @@ namespace cs::features
 		if (!cs::engine::RegisterPreDeferredPrePass([this] { BeginPrepass(); }) ||
 			!cs::engine::RegisterPostDeferredPrePass([this] {
 				_inPrepass = false;
-				if (auto* context = GetImmediateContext()) {
-					ID3D11ShaderResourceView* empty[2]{};
-					context->PSSetShaderResources(70, 2, empty);
-				}
+				Prepass();
 			})) {
 			FailLoad("Wetness could not register its deferred material producer");
 			return;
 		}
-		// restore first: a failed save then leaves the restore a no-op
-		if (!cs::engine::RegisterPostDeferredComposite(
-				[] { WetnessEffects::GetSingleton()->RestoreCompositeBindings(); },
-				cs::engine::HookPriority::Late)) {
-			FailLoad(
-				"Wetness needs a post-composite hook to restore its resource bindings; "
-				"registering it failed");
-			return;
-		}
-		if (!cs::engine::RegisterPreDeferredComposite(
-				[] { WetnessEffects::GetSingleton()->SaveCompositeBindings(); },
-				cs::engine::HookPriority::Early)) {
-			FailLoad(
-				"Wetness needs a pre-composite hook to save the engine resource bindings; "
-				"registering it failed");
-			return;
-		}
-
 		_registrationsReady.store(true, std::memory_order_release);
-		cs::engine::RegisterPreDeferredLightsImpl([this] { SaveCompositeBindings(); }, cs::engine::HookPriority::Early);
-		cs::engine::RegisterPostDeferredLightsImpl([this] { RestoreCompositeBindings(); }, cs::engine::HookPriority::Late);
 		cs::engine::InstallWaterRippleVisibilityFilter([this] {
 			return _suppressRipples.load(std::memory_order_relaxed);
 		});
@@ -253,8 +208,6 @@ namespace cs::features
 
 	void WetnessEffects::BindFilmOutput(ID3D11DeviceContext* a_context)
 	{
-		auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
-		cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
 		ID3D11RenderTargetView* targets[8]{};
 		winrt::com_ptr<ID3D11DepthStencilView> depth;
 		const bool ready = _inPrepass && _filmReady.load(std::memory_order_relaxed) && cs::render::IsSharedDataCurrent();
@@ -319,6 +272,21 @@ namespace cs::features
 		auto* availability = bound ? _filmAvailabilitySRV.get() : nullptr;
 		cs::engine::BindInjectionShaderResources(a_context, 71, 1, &availability);
 		(bound ? _producerDraws : _producerRejected).fetch_add(1, std::memory_order_relaxed);
+	}
+
+	void WetnessEffects::Prepass()
+	{
+		auto* context = GetImmediateContext();
+		if (!context)
+			return;
+		if (_inPrepass) {
+			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
+			cs::engine::BindInjectionShaderResources(context, 70, 1, &precip);
+		} else {
+			BindFilmInput(context, false);
+			BindFilmInput(context, true);
+			BindCompositeResources(context);
+		}
 	}
 
 	void WetnessEffects::BindFilmInput(ID3D11DeviceContext* a_context, bool a_compute)

@@ -1036,8 +1036,11 @@ namespace
 		deferredLightsActive = true;
 		activeComputeVariantDefine.reset();
 		ResetComputeOutput(context.get(), output);
+		auto frameInputs = inputs;
+		frameInputs.buffers = publishedComputeBuffers;
+		frameInputs.depth = publishedDepth;
 		BindNativeComputeInputs(
-			context.get(), stock.get(), inputs, output.uav.get());
+			context.get(), stock.get(), frameInputs, output.uav.get());
 		auto* replacement = BindResolvedComputeShader(context.get(), nativeWrapper);
 		Expect(
 			replacement != &nativeWrapper,
@@ -1045,13 +1048,13 @@ namespace
 		bridge.Dispatch(context.get(), 3, 1, 1);
 		Expect(
 			NativeComputeInputsMatch(
-				context.get(), inputs, output.uav.get()),
-			"compute bridge did not restore b4-b8/t3-t4/t8/t17/u0");
+				context.get(), frameInputs, output.uav.get()),
+			"compute bridge did not preserve frame bindings and restore native t8");
 		Expect(
 			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 9 },
 			"replacement did not execute with shared and native inputs");
 		Expect(
-			sharedDataBindCount == 1 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
+			sharedDataBindCount == 0 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
 			"active compute contribution state was not exposed exactly once");
 		Expect(SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, false),
 			"live target disable was rejected");

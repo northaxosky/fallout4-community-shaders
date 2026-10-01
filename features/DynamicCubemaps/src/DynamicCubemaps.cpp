@@ -228,38 +228,10 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		if (!cs::engine::RegisterFeatureShaderBindings("DynamicCubemaps", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
-				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
-				if (!composite && registration.targetId != cs::engine::ShaderInjectionTarget::kBsWater)
-					return;
-				const auto firstSlot = composite ? kCompositionPSSlot : kDynamicCubemapPSSlot;
-				const auto slotCount = composite ? kCompositionPSSlotCount : kDynamicCubemapPSSlotCount;
-				for (std::uint32_t offset = 0; offset < slotCount; ++offset) {
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = firstSlot + offset });
-				}
-				if (composite)
-					registration.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); };
-			})) {
+		if (!cs::engine::RegisterFeatureShaderBindings("DynamicCubemaps", *this)) {
 			FailLoad(
 				"DynamicCubemaps could not register its water, composite, "
 				"deferred lighting, or SSLR shader contributions");
-			return;
-		}
-
-		// FO4 consumes the previous publication at composite draws, so preserve its t34-t35 bindings across that pass.
-		if (!cs::engine::RegisterPostDeferredComposite([] {
-				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Restore(
-					cs::engine::GetImmediateContext());
-			},
-				cs::engine::HookPriority::Late) ||
-			!cs::engine::RegisterPreDeferredComposite([] {
-				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Save(
-					cs::engine::GetImmediateContext(), kCompositionPSSlot);
-			},
-				cs::engine::HookPriority::Early)) {
-			FailLoad("DynamicCubemaps could not register its composite binding scope");
 			return;
 		}
 
@@ -267,7 +239,7 @@ namespace cs::features
 		if (!cs::engine::RegisterPostForwardSky([] {
 				auto* feature = DynamicCubemaps::GetSingleton();
 				feature->UpdateCubemap();
-				feature->PostDeferred();
+				feature->Prepass();
 			})) {
 			FailLoad(
 				"DynamicCubemaps could not register its post-sky "
@@ -283,6 +255,12 @@ namespace cs::features
 			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1,
 			kCompositionPSSlot,
 			kCompositionPSSlot + kCompositionPSSlotCount - 1);
+	}
+
+	void DynamicCubemaps::Prepass()
+	{
+		PostDeferred();
+		BindComposition(cs::engine::GetImmediateContext());
 	}
 
 	void DynamicCubemaps::BindComposition(ID3D11DeviceContext* a_context)
