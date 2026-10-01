@@ -50,7 +50,7 @@ namespace TerrainShadows
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	Texture2D<float> DebugHeightTexture : register(t61);
 	// FO4: diagnostic data is separate from upstream b6 and transitional b7.
-	cbuffer TerrainShadowsDebug : register(b8)
+	cbuffer TerrainShadowsDebug : register(b13)
 	{
 		uint DebugMode;
 		float3 DebugPadding;

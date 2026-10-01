@@ -29,6 +29,7 @@ namespace cs::features
 	public:
 		static constexpr std::uint32_t kShadowHeightPSSlot = 60;
 		static constexpr std::uint32_t kDebugHeightPSSlot = 61;
+		static constexpr std::uint32_t kDebugConstantsPSSlot = 13;
 		static constexpr std::uint32_t kShadowHeightSamplerPSSlot = 13;
 
 		enum class DebugVisualization : std::uint32_t

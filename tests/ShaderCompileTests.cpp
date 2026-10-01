@@ -980,7 +980,7 @@ namespace
 				{ "WATER_EFFECTS_FULLSCREEN_DEBUG", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
-			.required = { CB(4), CB(5), CB(6), CB(8), Texture(25), Texture(33), Texture(71), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
+			.required = { CB(4), CB(5), CB(6), CB(13), Texture(25), Texture(33), Texture(71), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
 			.forbidden = { CB(7), Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
 
 		for (auto defines : std::vector<ShaderDefines>{

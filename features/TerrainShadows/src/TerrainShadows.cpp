@@ -319,7 +319,7 @@ namespace cs::features
 					.slot = kDebugHeightPSSlot });
 				slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kConstantBuffer,
-					.slot = 8 });
+					.slot = kDebugConstantsPSSlot });
 				defines.emplace(
 					cs::engine::shader_injection_defines::kTerrainShadowsFullscreenDebug,
 					"1");
@@ -1286,7 +1286,7 @@ namespace cs::features
 		_debugShadowBinding.Save(context, kShadowHeightPSSlot);
 		_debugSamplerBinding.Save(context, kShadowHeightSamplerPSSlot);
 		if (!_debugCBSaved) {
-			context->PSGetConstantBuffers(8, 1, _savedDebugCB.put());
+			context->PSGetConstantBuffers(kDebugConstantsPSSlot, 1, _savedDebugCB.put());
 			_debugCBSaved = true;
 		}
 		ID3D11ShaderResourceView* nullSRVs[2]{};
@@ -1316,7 +1316,7 @@ namespace cs::features
 		std::memcpy(mapped.pData, &debug, sizeof(debug));
 		a_context->Unmap(_debugCB.get(), 0);
 		ID3D11Buffer* debugBuffer = _debugCB.get();
-		a_context->PSSetConstantBuffers(8, 1, &debugBuffer);
+		a_context->PSSetConstantBuffers(kDebugConstantsPSSlot, 1, &debugBuffer);
 		if (visualization == DebugVisualization::kOff)
 			return;
 		ID3D11ShaderResourceView* srvs[2]{ _shadowTexture->srv.get(), _heightTexture->srv.get() };
@@ -1344,7 +1344,7 @@ namespace cs::features
 		_debugShadowBinding.Restore(context);
 		if (context && _debugCBSaved) {
 			ID3D11Buffer* saved = _savedDebugCB.get();
-			context->PSSetConstantBuffers(8, 1, &saved);
+			context->PSSetConstantBuffers(kDebugConstantsPSSlot, 1, &saved);
 			_savedDebugCB = nullptr;
 			_debugCBSaved = false;
 		}
