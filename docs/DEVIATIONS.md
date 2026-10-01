@@ -8,15 +8,26 @@ and where it lives. Each code site also carries a one-line FO4 marker comment.
 - **Not supported**: upstream behavior that has no Fallout 4 equivalent without new FO4-only machinery.
 - **Pending**: upstream behavior not ported yet.
 
-Each row has a Kind, which decides whether a feature ships as core or as an extension:
+Classification is a judgment about feature design, not a count of row Kinds:
+
+1. Non-visual features (tooling and diagnostics, including RenderDoc and PerformanceOverlay) are always **core**.
+2. A visual feature is **core** when it implements upstream's algorithm and design. Minor FO4 adjustments
+   (calibrated defaults, diagnostics/debug views, UI presentation, simplified data sources, toggles and
+   fallbacks for optional engine resources) never make it an extension.
+3. A visual feature is an **extension** only for its own architecture/algorithm, substantive behavior
+   upstream lacks, or no upstream counterpart.
+4. Upscaling, FrameGeneration and MotionVectorFixes remain **core (doodlum FO4 release lineage)**.
+
+Each row has a Kind:
 
 - **Forced**: a Fallout 4 engine difference leaves no alternative. Cite the engine evidence.
 - **Fix**: a deliberate correction of an upstream bug, listed as an upstream PR candidate.
 - **Framework**: a repository-wide host contract (activation, TOML persistence, forwarding-only UI, shader ownership, telemetry), not feature behavior.
 - **Pending**: upstream behavior not ported yet.
-- **Chosen**: FO4's own design, behavior upstream lacks, or an adaptation whose necessity is unproven.
+- **Tweak**: a minor FO4 adjustment under rule 2; never affects classification.
+- **Divergence**: FO4's own architecture/algorithm or substantive behavior upstream lacks (rule 3).
 
-A feature is **core** when it has no Chosen rows.
+Core classification is not a claim of complete parity; Pending work remains unfinished.
 
 ## Shared seam edits
 
@@ -25,7 +36,7 @@ FO4 consumes unchanged files through `xmake\shared.lua`; no upstream path can be
 
 | Kind | File | SHA | Why | Upstream PR status |
 |---|---|---|---|---|
-| Chosen | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies; Phase 3 consumes these rows | In the shared fork; no upstream PR recorded |
+| Framework | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies; Phase 3 consumes these rows | In the shared fork; upstream PR candidate, not filed |
 | Forced | `package/Shaders/Common/FrameBuffer.hlsli` | `e305ed0a4` | `FRAMEBUFFER_REGISTER` defaults to b12 and permits host binding at b4; FO4 engine shaders already bind the native per-frame buffer at b12 (`package/Shaders/BSWaterShader.hlsl:3`, `cbuffer PerFrame : register(b12)`) | In the shared fork; no upstream PR recorded |
 | Fix | `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104` | `13d9d2e2d` | Scale the center-normal UV by `frameScale`, matching the neighbor lookups in half/quarter-resolution dynamic-resolution frames | community-shaders/skyrim-community-shaders#2795 |
 | Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/CaptureCommon.hlsli` | `83efe1ad9` | Optional prepared position/color/UV inputs, geometry/sky tags and capture origin isolate FO4's +Z, partitioned depth, infinite far plane and diffuse reconstruction; default Skyrim sampling/history are unchanged | In the shared fork; upstream PR candidate, not filed |
@@ -44,38 +55,22 @@ and scopes MSVC C4267 suppression for the upstream vector mean; the global PCH i
 
 | Kind | Difference | Where |
 |---|---|---|
-| Chosen | Windows declarations and a scoped C4267 suppression adapt the unchanged portable header to FO4's `/W4 /WX` build | `src/Shared/PerfUtils.h` |
+| Framework | Windows declarations and a scoped C4267 suppression adapt the unchanged portable header to FO4's `/W4 /WX` build | `src/Shared/PerfUtils.h` |
 
-Differing shader implementations remain FO4-owned. Upscaling's in-house shaders are retained,
-not scheduled for upstream conversion. The following are
-path-only relocations, with include and runtime source references updated; shader behavior is unchanged.
-Paths below are relative to the staged `Shaders` root. The renderer-specific reasons remain in the
-feature tables; this namespace separation is a Chosen ownership policy, not an engine limitation.
-Retired rows preserve the original Kind and identify replacements consumed unchanged.
+Remaining FO4-owned files are listed below; deleted copies consumed unchanged from upstream are
+not deviations. Paths are relative to the staged `Shaders` root. Kinds describe each live file,
+not its relocation. Upscaling's in-house shaders remain core by rule 4 and are not scheduled for
+upstream conversion; renderer-specific reasons remain in the feature tables.
 
 | Kind | Upstream destination | FO4-owned destination |
 |---|---|---|
-| Chosen | `Common/Random.hlsli` | `FO4/Common/Random.hlsli` |
-| Chosen | `Common/Shading.hlsli` | `FO4/Common/Shading.hlsli` |
-| Chosen | `DynamicCubemaps/BC6HEncodeCS.hlsl` | Retired; unchanged shared kernel |
-| Chosen | `DynamicCubemaps/CaptureCommon.hlsli` | Retired; shared prepared-capture seam and `FO4/DynamicCubemaps/PrepareCaptureCS.hlsl` |
-| Chosen | `DynamicCubemaps/DetectCaptureLightingCS.hlsl` | Retired; unchanged shared kernel |
-| Chosen | `DynamicCubemaps/DynamicCubemaps.hlsli` | `FO4/DynamicCubemaps/DynamicCubemaps.hlsli` is a consumer include, not a copy; calls shared functions |
-| Chosen | `DynamicCubemaps/InferCubemapCS.hlsl` | Retired; unchanged shared kernel |
-| Chosen | `DynamicCubemaps/SpecularIrradianceCS.hlsl` | Retired; unchanged shared kernel |
-| Chosen | `DynamicCubemaps/UpdateCubemapCS.hlsl` | Retired; unchanged shared kernel |
-| Chosen | `ExponentialHeightFog/ExponentialHeightFog.hlsli` | `FO4/ExponentialHeightFog/ExponentialHeightFog.hlsli` (retired; the unchanged upstream include and four compute passes are consumed directly) |
-| Chosen | `InverseSquareLighting/InverseSquareLighting.hlsli` | `FO4/InverseSquareLighting/InverseSquareLighting.hlsli` (retired; the unchanged upstream include is consumed directly) |
-| Chosen | `ScreenSpaceShadows/RaymarchCS.hlsl` | `FO4/ScreenSpaceShadows/RaymarchCS.hlsl` (retired; the unchanged upstream shader is consumed directly) |
-| Chosen | `ScreenSpaceShadows/ScreenSpaceShadows.hlsli` | `FO4/ScreenSpaceShadows/ScreenSpaceShadows.hlsli` (retired; the unchanged upstream include is consumed directly) |
-| Chosen | `ScreenSpaceShadows/bend_sss_gpu.hlsli` | `FO4/ScreenSpaceShadows/bend_sss_gpu.hlsli` (retired; the unchanged upstream include is consumed directly) |
-| Chosen | `TerrainShadows/ShadowUpdate.cs.hlsl` | `FO4/TerrainShadows/ShadowUpdate.cs.hlsl` (retired; the unchanged upstream shader is consumed directly) |
-| Chosen | `TerrainShadows/TerrainShadows.hlsli` | `FO4/TerrainShadows/TerrainShadows.hlsli` (retired; the unchanged upstream include is consumed directly) |
-| Chosen | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
-| Chosen | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |
-| Chosen | `Upscaling/UpscaleVS.hlsl` | `FO4/Upscaling/UpscaleVS.hlsl` |
-| Chosen | `WaterEffects/WaterCaustics.hlsli` | `FO4/WaterEffects/WaterCaustics.hlsli` (retired; the unchanged upstream include is consumed directly) |
-| Chosen | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` (copied implementation retired; this path only forwards to the FO4 consumer of the unchanged upstream include) |
+| Tweak | `Common/Random.hlsli` | `FO4/Common/Random.hlsli` retains the upstream Perlin subset without a different algorithm |
+| Tweak | `Common/Shading.hlsli` | `FO4/Common/Shading.hlsli` exposes upstream MultiBounceAO in the Shading namespace without changing its arithmetic |
+| Forced | `DynamicCubemaps/DynamicCubemaps.hlsli` | `FO4/DynamicCubemaps/DynamicCubemaps.hlsli` is a consumer include; the custom-consumer guard lets callers supply native samplers to shared functions |
+| Divergence | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
+| Divergence | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |
+| Divergence | `Upscaling/UpscaleVS.hlsl` | `FO4/Upscaling/UpscaleVS.hlsl` |
+| Tweak | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` only forwards to the FO4 consumer of the unchanged upstream include; this file does not adapt slots or samplers |
 
 ## Substrate
 
@@ -93,12 +88,11 @@ Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
 | Forced | Engine row-vector matrices are transposed into upstream's `row_major mul(Matrix,v)` b4 contract | Per-frame buffer sources: native forward/inverse upload transposes; registers 37–40 are unjittered, not the jittered VP | `SharedDataLayout.h` `PackFrameData`, `FrameBufferTests.cpp` projection-equivalence test |
 | Forced | FrameBuffer binds at b4 instead of upstream's default b12 | FO4 reconstructed shaders own b12 (`BSWaterShader.hlsl` native PerFrame); the shared register seam leaves their bytecode unchanged. b4/b7 are unused by reconstructed/native injection targets; stock DXBC identity, feature-off reflection and slot-clash tests enforce this | `SubstrateSlots.h`, utility compiler, injection compile request and cache recipe |
 | Forced | One R32_FLOAT boundary pass publishes canonical world-projection depth at t17; near pixels reproject through shadow +0x8A0, world pixels use `mad(d,1.01,-0.01)`, sky uses 1 | Depth & units / Per-frame buffer sources: FO4 combines first-person and world projections; prepass OG/NG/AE writes transpose(inverse(first-person jittered projection)) at shadow +0x8A0. Native targets use t0–t15, not t17 | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `FO4/Depth.hlsli`, `Engine.h` near accessor |
-| Chosen | Preserve upstream's scalar X clamp offset and Y clamp-to-ratio; snapshot current/previous ratios once per substrate update | Dynamic-resolution history: native clamp is `r−0.5/size` on NG/AE and `(trunc(size·r)−1)/size` on OG, size from logical target 1. Main clamped both axes, but upstream has one offset and clamps Y to ratio; parity takes precedence over a local fork. Substrate history is per-frame rather than effect-update history | `SharedData.cpp`, unchanged `Common/FrameBuffer.hlsli` |
+| Tweak | Preserve upstream's scalar X clamp offset and Y clamp-to-ratio; snapshot current/previous ratios once per substrate update | Dynamic-resolution history: native clamp is `r−0.5/size` on NG/AE and `(trunc(size·r)−1)/size` on OG, size from logical target 1. These facts do not require the scalar clamp policy; it preserves upstream semantics rather than main's two-axis clamp. Substrate history is per-frame rather than effect-update history | `SharedData.cpp`, unchanged `Common/FrameBuffer.hlsli` |
 | Forced | Pack world-channel DALC into pre-power SH, then apply FO4's 2.2 power once at linear consumer boundaries | Directional ambient transform/evaluation rows: native world-channel columns include transform scale and bias; native lighting evaluates power 2.2. SH is `(b/Y00,−ay/Y1,az/Y1,−ax/Y1)` with Y00=0.2820948, Y1=0.4886025. Upstream State.cpp does not gamma-convert before packing; unchanged GetAmbient is pre-power | `Engine.h` `TryGetDirectionalAmbientRows`, `SharedDataLayout.h` `PackAmbientSH`, `FO4/FO4ShaderData.hlsli` `GetAmbientLinear` |
 | Forced | b6 publishes neutral linear-lighting inputs, with native DALC power 2.2 and an already-linear sun | FO4 deferred HDR/sun inputs are linear; directional ambient alone is pre-power. These host inputs let unchanged Color/cubemap kernels consume the same encoding as the reconstructed consumers | `SharedData.cpp` `PackFeatures`, Dynamic Cubemaps translations |
-| Chosen | Keep one FO4-only b7 for unmatched modes, debug settings, delta time and player-cell water plane; move equivalent fields to upstream b4/b5/b6 | Retired single-plane design: WaterEffects now publishes the 25-tile grid in b5 and its b7 block is removed. This row retains the original design's Kind for audit | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
 | Framework | Keep one FO4-only b7 for unmatched modes, debug settings and delta time; move equivalent fields to upstream b4/b5/b6 | Repository-wide single-substrate ABI. WaterEffects publishes the 25-tile grid in b5 and has no b7 block. DR and NDC-to-view equivalents use b4, terrain/wetness/cubemap enable fields use b6 | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `SharedData.cpp` `PackFeatures` |
-| Chosen | FrameParams is zero; unvalidated celestial/HDR/map/shadow fields retain upstream absent values | No validated FO4 inverse-gamma/frame-flag or corresponding celestial/HDR source is consumed. SunDirection uses toward-light direction, while SunColor remains absent rather than inventing a sky-disc colour; FrameCount follows main's temporal method and AlwaysActive follows engine frame count | `SharedData.cpp` `BuildSharedData`, `SharedDataLayout.h` |
+| Pending | FrameParams is zero; unvalidated celestial/HDR/map/shadow fields retain upstream absent values | No validated FO4 inverse-gamma/frame-flag or corresponding celestial/HDR source is consumed. SunDirection uses toward-light direction, while SunColor remains absent rather than inventing a sky-disc colour; FrameCount follows main's temporal method and AlwaysActive follows engine frame count | `SharedData.cpp` `BuildSharedData`, `SharedDataLayout.h` |
 
 SSS reads canonical depth directly: first-person geometry casts as upstream does but never receives
 SSS. Its settings live only in its raymarch cbuffer, not b6 or b7. Feature-off engine variants include
@@ -159,9 +153,9 @@ are staged unchanged. The global replacement, global settings, comparison
 view and b7 ISL block are deleted. CPU radius/luminance math matches the pin,
 including its zero-radius edge case.
 
-Feature classification: **core**. No active Chosen rows. Kinds are
-Forced / Fix / Framework / Pending / Chosen; no Fix is applied to the retained
-upstream radius defect. Offline gates are not native-hook or rendering proof.
+Feature classification: **core** (rule 2: upstream inverse-square algorithm and design).
+No Fix is applied to the retained upstream radius defect. Offline gates are not native-hook
+or rendering proof.
 
 ### Translations
 
@@ -197,8 +191,8 @@ Skyrim's literal record/runtime overlay is replaced, not partially emulated.
 Upstream pin: `d330bf12d` (shared pin `83efe1ad991b91bba22ad121b7ebab763880fa3b`). `WaterCaustics.hlsli` and
 `watercaustics.dds` are staged unchanged through `xmake/shared.lua`; the FO4 caustics
 kernel and CPU shader mirror are deleted. There are no caustics quality knobs.
-Feature classification: **extension candidate**. Chosen rows: camera-cell
-`WaterSystemHeight` publication; fullscreen caustics/submersion diagnostics.
+Feature classification: **core** (rule 2: upstream water-effects algorithm and design).
+Camera-cell `WaterSystemHeight` and fullscreen diagnostics are minor FO4 adjustments.
 
 ### Translations
 
@@ -209,9 +203,9 @@ Feature classification: **extension candidate**. Chosen rows: camera-cell
 | Forced | `SampColorSampler` and t65 | Linear-wrap s14 in BSDFLight, unchanged t65; composite only reads an isolated diagnostic texture at t33 | Native composite s14 is occupied by scene colour (`BSDFCompositeShader.hlsl` `g_sLitScene`); terrain owns s13. State scopes restore exact SRV/sampler/context bindings | `WaterEffects.cpp`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl`, `ScopedContextState.h` |
 | Forced | RGB caustics multiply directional light colour in Lighting.hlsl | RGB direct diffuse/specular and wet coat in all directional BSDFLight families; shadow-only RGB retains independent alpha; ambient/local light is unaffected | engine-facts Raster light accumulation / Base composite equation: FO4 accumulates direct light separately in RGB targets rather than Skyrim's Lighting.hlsl | `BSDFLightShader.hlsl` |
 | Forced | Shore consumers read b5 water data | Wetness material production reads the unchanged shared per-cell lookup with camera-relative position | Removing WaterEffects b7 requires its shore reader to use the shared per-cell source; native positions/anchor are described in engine-facts Per-frame buffer sources | `FO4/WetnessMaterial.hlsli` `PrepareMaterial` |
-| Chosen | Pinned State.cpp leaves `WaterSystemHeight` absent | Publish the camera cell's resolved plane relative to b4, or -FLT_MAX; this is not a water-mesh intersection query | Requested host input; engine-facts Exterior cell height establishes the value, not arbitrary-position water intersections | `Water.cpp` `FillWaterData` |
+| Tweak | Pinned State.cpp leaves `WaterSystemHeight` absent | Publish the camera cell's resolved plane relative to b4, or -FLT_MAX; this is not a water-mesh intersection query | Simplified data source; engine-facts Exterior cell height establishes the value, not arbitrary-position water intersections | `Water.cpp` `FillWaterData` |
 | Framework | Always-loaded upstream feature | Preserve FO4 activation, load/ownership/readiness guards, persisted live enabled toggle and cached water telemetry | Repository activation, TOML persistence, shader ownership/identity, telemetry and fail-closed contracts; disabled/unready texture yields the identity multiplier | `WaterEffects.{h,cpp}`, `WaterEffectsMath.h`, `FO4/WaterEffectsConsumer.hlsli` |
-| Chosen | No upstream fullscreen caustics/submersion views | Optional fullscreen diagnostics execute the same kernel/filter in an isolated pass, not manual level-zero sampling | Feature-specific visualization beyond upstream behavior; sampler isolation is the Forced binding translation above | `WaterEffects.{h,cpp}`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl` |
+| Tweak | No upstream fullscreen caustics/submersion views | Optional fullscreen diagnostics execute the same kernel/filter in an isolated pass, not manual level-zero sampling | Diagnostic presentation, not a different water algorithm; sampler isolation is the Forced binding translation above | `WaterEffects.{h,cpp}`, `FO4/WaterEffectsConsumer.hlsli`, `FO4/WaterEffects/Debug.hlsl` |
 
 ### Not supported
 
@@ -232,8 +226,8 @@ Upstream pin: `d330bf12d`; shared pin: `83efe1ad991b91bba22ad121b7ebab763880fa3b
 Both upstream `WetnessEffects/*.hlsli` files and the required Common lighting includes
 are staged unchanged. The copied FO4 implementation is deleted. The exact upstream
 192-byte settings block is published in b6, with no wetness block in b7.
-Feature classification: **core**. There are no Chosen rows; Pending rows prevent a
-claim of complete parity.
+Feature classification: **core** (rule 2: upstream wetness algorithm and design).
+Pending rows prevent a claim of complete parity.
 
 ### Translations
 
@@ -279,7 +273,7 @@ The 192-byte settings block occupies upstream b6 offset 992; feature-owned b0 vo
 are 400 bytes. RGBA16F material/scattering/history/integration volumes, R32_FLOAT depth histories,
 four dispatches, Halton bases 2/3/5, slice mapping, history weights and sampling retain the pin.
 
-Feature classification: **core**. No Chosen or Fix rows. Pending rows are unfinished porting
+Feature classification: **core** (rule 2: upstream fog algorithm and design). Pending rows are unfinished porting
 or verification work, not engine incompatibilities or a claim of full enabled-feature parity.
 
 ### Translations
@@ -337,8 +331,8 @@ unchanged through `xmake\shared.lua`, including the three-frame query ring, 128 
 300-sample pass histories, 60-frame retirement, 600-sample default frame histories,
 EMA coefficients, graph thresholds and A/B outlier/statistical rules.
 
-Feature classification: **extension candidate** — visibility-independent sampling and
-explicit USER baseline capture are Chosen rows. Offline validation is not runtime parity.
+Feature classification: **core** (rule 1: non-visual diagnostics). Visibility-independent
+sampling and explicit USER baseline capture are Tweaks. Offline validation is not runtime parity.
 The existing Shared seam edits row for `6fd72a4a5` covers the portable row/history split;
 this implementation makes no additional shared edits.
 
@@ -352,8 +346,8 @@ this implementation makes no additional shared edits.
 | Framework | A/B snapshots contain only healthy, schema-declared live-effect fields; prepare/swap/finalize restores TEST, rolls back failures and quarantines failing publishers | Activation, ownership, restart-only fields, overlay state and diagnostic controls never enter the comparison. Transient variants cannot be persisted or saved/applied as presets; a failed restore keeps the persistence lock and exposes retry | `LiveSettings.h`, `Feature.h`, per-feature `Configure` bindings, `PerformanceOverlay.cpp` `ApplySettings`/`AbortTest`, `SettingsPersistence.h`, `PresetManager.cpp`, `HostClient.cpp` |
 | Framework | Timing instrumentation does not toggle shader ownership or change replacement identity | Existing measured-stock ownership gate and feature-off StockShaderIdentity remain mandatory; D3D11 query results are labeled separately from shader-family CPU interval attribution and exclude D3D12 provider execution | `FrameProfiler.cpp`, `Annotation.{h,cpp}`, pass scopes in DynamicCubemaps/ScreenSpaceGI/TemporalResolve, `PerformanceOverlay.cpp` `DrawDrawCalls`/`DrawPasses` |
 | Framework | Telemetry and fail-closed availability replace upstream's whole-overlay early return on missing VRAM adapter | A failed DearModdingUI VRAM query displays “unavailable”, not zero usage; lifecycle quarantine disables profiling and attempts TEST restoration. Device/context ownership stays in the existing D3D11 bootstrap/FrameProfiler adapter | `HostClient.cpp` `ObserveFrame`, `PerformanceOverlay.cpp` `CollectTelemetry`/`OnRuntimeQuarantined`, `FrameProfiler.cpp` |
-| Chosen | Sampling continues while the host overlay is hidden; scene profiling rotates at post-composite while frame history/A/B use host observers | Upstream samples through visible overlay drawing. DearModdingUI documents render-thread observers, but native-frame cadence under FG, secondary views and menus still needs runtime correlation; necessity of this schedule is unproven | `PerformanceOverlay.cpp` `TickHostFrame`, `Telemetry.cpp` `Install`, `FrameProfiler.cpp` `MarkEngineFrame` |
-| Chosen | Startup live settings or an explicitly captured USER baseline replace reloading the last saved USER configuration | TOML edits persist through the normal host UI, so explicit capture provides a stable in-memory baseline; this is a different user workflow, not an engine restriction | `PerformanceOverlay.cpp` `OnDataLoaded`, `CaptureSettings`, `DrawSettings`, `SetTestInterval` |
+| Tweak | Sampling continues while the host overlay is hidden; scene profiling rotates at post-composite while frame history/A/B use host observers | Upstream samples through visible overlay drawing. DearModdingUI documents render-thread observers, but native-frame cadence under FG, secondary views and menus still needs runtime correlation; necessity of this schedule is unproven | `PerformanceOverlay.cpp` `TickHostFrame`, `Telemetry.cpp` `Install`, `FrameProfiler.cpp` `MarkEngineFrame` |
+| Tweak | Startup live settings or an explicitly captured USER baseline replace reloading the last saved USER configuration | TOML edits persist through the normal host UI, so explicit capture provides a stable in-memory baseline; this is a different user workflow, not an engine restriction | `PerformanceOverlay.cpp` `OnDataLoaded`, `CaptureSettings`, `DrawSettings`, `SetTestInterval` |
 
 ### Pending
 
@@ -407,7 +401,8 @@ shadow heights, 128-thread scans, componentwise penumbra maxima, one-degree soft
 offsets, bounded UV, ZBlur, weight-1 full sweeps and weight-0.5 ordinary slices match the pin.
 Settings use `EnableTerrainShadow`; no downsampling setting or resize pass remains.
 
-Classification: **core** — no Chosen rows; Pending rows remain unfinished and do not establish upstream parity.
+Feature classification: **core** (rule 2: upstream terrain-shadow algorithm and design).
+Pending rows remain unfinished and do not establish upstream parity.
 
 ### Translations
 
@@ -441,9 +436,12 @@ Classification: **core** — no Chosen rows; Pending rows remain unfinished and 
 
 Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\BSWaterShader.hlsl`,
 `package\Shaders\BSDFCompositeShader.hlsl`, `package\Shaders\BSDFLightShader.hlsl` and
-`package\Shaders\DFTiledLighting.hlsl`. Feature classification: **extension candidate**.
-Chosen rows: exterior reflection availability; missing-engine-cube fallback; global SSLR toggle;
-display-only cubemap preview.
+`package\Shaders\DFTiledLighting.hlsl`.
+Feature classification: **extension** (rule 3: material-selection Divergence).
+Upstream's sentinel-cube material-selection design is not supported on FO4, so an
+FO4-specific selection mechanism replaces it. Current water/wet-film routes are implemented;
+the general authored-material selection design remains Pending.
+Reflection availability, the SSLR toggle and preview are minor FO4 adjustments.
 
 All files in upstream `features/Dynamic Cubemaps/Shaders/DynamicCubemaps` are staged unchanged
 from the shared fork. Only `CaptureCommon.hlsli` and `DynamicCubemaps.hlsli` have the generic seams
@@ -457,6 +455,7 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 
 | Kind | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|---|
+| Divergence | Authored 1×1 sentinel envmaps, Creator export and the Reflectance target select materials for dynamic reflections | Current FO4 selection uses the water REFLECTIONS route and positive wet-film reflectance in deferred composite, not authored sentinel cubes. General authored-material selection: **Pending**, replacement design not yet decided | Native cube-array registration rejects widths below 128 and the G-buffer has no reflectance/F0 channel (engine-facts Cubemap / Render targets). The FO4-specific selection replaces an unsupported upstream design; unchanged capture/filter kernels do not establish material-selection parity | `BSWaterShader.hlsl` `surfaceColor`; `DynamicCubemaps.cpp` `ResolveReflectionMode`; `FO4/DynamicCubemaps/Composite.hlsli` `GetWetnessReflection`; `BSDFCompositeShader.hlsl` wet-reflection consumers |
 | Forced | Capture before the deferred composite | Capture and publication run after the Forward cloud group (`RegisterPostForwardSky`) | FO4 draws the sky inside `DrawWorld::Forward`, after the composite; engine-facts Secondary scene views | `DynamicCubemaps.cpp` `Load` |
 | Forced | Capture the main color target | Preparation rebuilds geometry as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky comes from scene color | FO4 has no diffuse-only target; engine-facts Deferred composition; reconstructed `BSDFCompositeShader.hlsl` diffuse/emissive composition | `FO4/DynamicCubemaps/PrepareCaptureCS.hlsl` |
 | Forced | Sky depth reconstructs a finite far-plane position | Preparation places depth `1.0` on the camera far-plane direction | FO4's world projection has an infinite far plane; inverse projection at 1 has zero homogeneous w. A finite history position preserves upstream sky capture; engine-facts Camera matrix builder and `Engine.h` `TryGetWorldSceneProjection` | `PrepareCaptureCS.hlsl` |
@@ -466,8 +465,8 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 | Forced | `IrradianceToLinear`/`IrradianceToGamma`, `ReflectionNormalisationScale` | b6 selects unchanged Color's linear-lighting branch, identity conversions and scale `1.0` | FO4 native HDR is working-linear; engine-facts Deferred composition. Neutral host lighting inputs avoid a second gamma conversion | `SharedData.cpp` `PackFeatures`, unchanged `Common/Color.hlsli` |
 | Forced | `Color::Ambient(SharedData::GetAmbient(R))` | b5 pre-power DALC SH plus b6 `ambientGamma=2.2`, `ambientMult=1` | Engine-facts Directional ambient evaluation power 2.2; no local GetAmbient rows or normalization implementation | `Engine.h` `TryGetDirectionalAmbientRows`, `SharedDataLayout.h` `PackAmbientSH`, `SharedData.cpp` |
 | Forced | Lighting-change detection from Skyrim directional light | b5 FO4 sun radiance, b6 `isDirLightLinear=1`; unchanged upstream detection | Engine-facts Sun/light sources: the deferred sun input is already linear | `SharedData.cpp`, shared `DetectCaptureLightingCS.hlsl` |
-| Chosen | `activeReflections` from Skyrim's reflections prepass | Exterior water always uses the reflections variant | Retain main's exterior-water technique policy | `DynamicCubemaps.cpp` `ResolveReflectionMode` |
-| Chosen | Active variant infers uncaptured directions from the engine reflection cube | Without the engine cube, retain scene sky with fake-variant persistence | Engine cube is optional (`bUseCubeMapReflections`); fallback policy is FO4-owned | `DynamicCubemaps.cpp` `UpdateShader`, `InferShader` |
+| Tweak | `activeReflections` from Skyrim's reflections prepass | Exterior water always uses the reflections variant | Retain main's exterior-water technique policy | `DynamicCubemaps.cpp` `ResolveReflectionMode` |
+| Forced | Active variant infers uncaptured directions from the engine reflection cube | Without the engine cube, retain scene sky with fake-variant persistence | fallout4-re `docs\engine-facts.md`, Cube-mode gate: `bUseCubeMapReflections` defaults to 0 in OG/NG/AE and no pinned INI enables it. The native cube is unavailable by default; the boundary uses the existing shared fallback, not a different inference algorithm | `DynamicCubemaps.cpp` `UpdateShader`, `InferShader` |
 | Forced | Water blends the dynamic cube with `CubeMapTex` | Blends with water's sky-gradient reflection color | FO4 reconstructed reflection permutations shade a sky gradient | `BSWaterShader.hlsl` `surfaceColor` |
 | Forced | `WATER` permutation define | Defined locally for contributed Dynamic Cubemaps | FO4 reconstructed water compiles without it | `BSWaterShader.hlsl` |
 | Forced | Deferred cubes at CS t5–t7 with LinearSampler | Shared register seam: PS t34–t35, native probe samplers; water keeps t30–t31 | FO4 composite declarations occupy lower slots and samplers; reconstructed `BSDFCompositeShader.hlsl` resource declarations | `FO4/DynamicCubemaps/Composite.hlsli`, `DynamicCubemaps.cpp` |
@@ -475,21 +474,22 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 | Forced | Wet reflectance written to G-buffer | Existing composite film/view-space adapter calls upstream cubemap normalization | FO4 G-buffer has no reflectance channel; engine-facts Render targets. Wetness-specific code stays in the existing adapter | `FO4/DynamicCubemaps/Composite.hlsli` `GetWetnessReflection` |
 | Forced | Wet indirect-diffuse reduction in material pass | Applied in BSDFLight and DFTiledLighting | FO4 reconstructed light passes evaluate indirect diffuse | `WetnessEffects.hlsli` `GetIndirectDiffuseWeight` |
 | Framework | Always-on feature with JSON/ImGui configuration | load=false, TOML/live enabled, forwarding-only UI, ownership/stock identity, telemetry and fail-closed GPU scopes | Repository activation, persistence and runtime-safety contracts; live enable gates wet diffuse/reflection | `DynamicCubemapsSettings.h`, `DynamicCubemaps.cpp`, `FO4/DynamicCubemaps/Composite.hlsli` |
-| Chosen | Loaded DC defines ENABLESSR, labeled for water | Live enabled_ssr gates all SSLR when DC is enabled; baseline remains stock | Main's global toggle avoids recompilation; SSLR feeds surfaces and water in reconstructed shaders | `DynamicCubemaps.cpp`, `FO4SharedData.hlsli`, `Imagespace/SSLRRaytracing.hlsl` |
-| Chosen | No equirectangular display preview shader | FO4-only capture/filtered Reinhard preview at a non-colliding path | Additional display-only diagnostic, not shared capture behavior | `FO4/DynamicCubemaps/CubemapPreviewCS.hlsl`, `DynamicCubemaps.cpp` `RenderCubemapPreview` |
+| Tweak | Loaded DC defines ENABLESSR, labeled for water | Live enabled_ssr gates all SSLR when DC is enabled; baseline remains stock | Main's global toggle avoids recompilation; SSLR feeds surfaces and water in reconstructed shaders | `DynamicCubemaps.cpp`, `FO4SharedData.hlsli`, `Imagespace/SSLRRaytracing.hlsl` |
+| Tweak | No equirectangular display preview shader | FO4-only capture/filtered Reinhard preview at a non-colliding path | Additional display-only diagnostic, not shared capture behavior | `FO4/DynamicCubemaps/CubemapPreviewCS.hlsl`, `DynamicCubemaps.cpp` `RenderCubemapPreview` |
 
 ### Not supported
 
 | Kind | Upstream | Why / evidence | Where |
 |---|---|---|---|
+| Forced | Native deferred 1×1 sentinel-cube and Reflectance-target contract | FO4 cube-array registration rejects cubes narrower than 128 px and its G-buffer has no reflectance/F0 channel; fallout4-re `docs\engine-facts.md`, Cubemap / Render targets. Upstream's authored selection cannot use these native paths unchanged; the replacement selection is the Divergence above | `BSDFCompositeShader.hlsl`, native cube-array registration and G-buffer layout |
 | Forced | Forward `Lighting.hlsl` sentinel path | FO4 world and first-person accumulators emit no forward BSLighting passes; engine-facts DrawWorld pass ownership. No forward consumer is silently substituted | `BSLightingShader.hlsl`, native deferred consumer catalog |
 
 ### Pending
 
 | Kind | Upstream behavior | Remaining work | Where |
 |---|---|---|---|
-| Pending | Deferred sentinel cubes, TruePBR/complex material reflectance | FO4 cube-array registration rejects widths below 128; its G-buffer has no F0/reflectance channel. Complete a sentinel/material metadata boundary rather than claim unsupported parity | `BSDFCompositeShader.hlsl`, engine-facts Cubemap and Render targets |
-| Pending | Dynamic Cubemap Creator sentinel DDS export | Export/authoring workflow needs the deferred sentinel consumer; absence of that consumer is unfinished work, not a forced exception | `DynamicCubemaps.cpp`, upstream `DynamicCubemaps.cpp` creator/export path |
+| Pending | General authored-material selection and TruePBR/complex material reflectance | Decide and implement the FO4-specific selection/metadata design recorded as Divergence above. Existing water/wet-film routes do not provide general authored selection or complete optional material coverage | `BSDFCompositeShader.hlsl`, `FO4/DynamicCubemaps/Composite.hlsli`, engine-facts Cubemap and Render targets |
+| Pending | Material authoring/export workflow replacing Dynamic Cubemap Creator sentinel DDS export | Define the authoring workflow after choosing the FO4 selection contract; exporting upstream 1×1 sentinel cubes alone cannot select native deferred materials | `DynamicCubemaps.cpp`, upstream `DynamicCubemaps.cpp` creator/export path |
 | Pending | IBL and Skylighting feature consumers | Their providers are not converted here; retain shared implementations and complete host inputs when those features are added | shared `DynamicCubemaps.hlsli`, b6 IBL/Skylighting blocks |
 | Pending | Runtime equivalence | Authorized DevBench/RenderDoc batch must verify prepared radiance/positions, cube orientation under rotation/translation, sky/infinite-far handling, interior/base and exterior/reflection selection, dynamic resolution, wet reflections, reset/time transitions and native bindings/restoration | `PrepareCaptureCS.hlsl`, `DynamicCubemaps.cpp`, water/composite consumers |
 
@@ -510,9 +510,9 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 ## RenderDoc
 
 Upstream pin: `d330bf12d`. Code: `features\RenderDoc`; host services: `src\Host\HostClient.cpp`,
-`src\Menu\Menu.{h,cpp}`. Feature classification: **extension candidate**.
-Chosen rows: installed-runtime/capture-path policy; explicit D3D11/D3D12 target selection;
-absolute capture timestamps.
+`src\Menu\Menu.{h,cpp}`.
+Feature classification: **core** (rule 1: non-visual capture tooling).
+Runtime/capture paths, target selection and timestamps are minor host adjustments.
 
 The pinned `src/Features/RenderDoc.{h,cpp}` couples capture operations to Skyrim's Feature,
 globals, path helpers and ImGui (`.h:3,29`, `.cpp:3–33,879–918`); there is no separately compilable
@@ -533,12 +533,12 @@ The shared manifest and pin are unchanged. Upstream source citations below use t
 |---|---|---|---|---|
 | Framework | Engine/UI-coupled RenderDoc feature owns capture operations | Portable `CaptureService` with host-driven completion polling | The repository owns lifecycle and forwarding UI; no separable service exists at the pinned revision, so the host boundary keeps one reusable capture mechanism | `CaptureService.{h,cpp}`, `RenderDoc.cpp` `TickHostFrame` |
 | Framework | `Enable RenderDoc Capture` defaults false and controls library loading (`RenderDoc.cpp:36–43,555–562,583–587`) | `features.RenderDoc.load` is the sole startup switch; no redundant enable key | Repository-wide load=false activation; preserve main's load-with-feature implementation `d5b754f93` | `RenderDoc.cpp` `Load`, `RenderDocSettings.h`, `src/Host/README.md` startup policy |
-| Chosen | Fixed Data/Renderdoc runtime and CommunityShaders/Captures paths (`RenderDoc.cpp:539–547`) | Installed-runtime registry discovery, explicit UTF-8/env-expanded DLL override, F4SE Documents capture directory | Preserve main's installed-runtime fix `d5b754f93` and deterministic host path policy; loader options/API remain unchanged | `RenderDoc.cpp` path helpers, `TryLoadRuntime`, `ApplyCapturePath` |
+| Tweak | Fixed Data/Renderdoc runtime and CommunityShaders/Captures paths (`RenderDoc.cpp:539–547`) | Installed-runtime registry discovery, explicit UTF-8/env-expanded DLL override, F4SE Documents capture directory | FO4 install-layout adaptation retaining main's runtime discovery `d5b754f93`; this path-policy row does not establish an upstream loader defect. Loader options/API remain unchanged | `RenderDoc.cpp` path helpers, `TryLoadRuntime`, `ApplyCapturePath` |
 | Framework | Skyrim runtime/version filename, plugin version and per-feature versions (`RenderDoc.cpp:112–118,879–918`) | Fallout4 OG/NG/AE filename and metadata; every built-in feature uses the plugin version | Host identity and the feature registry supply metadata; repository features share one versioned DLL | `RenderDoc.cpp` `RuntimeName`, `ApplyCapturePath`, `BuildAutomaticCaptureComments` |
-| Chosen | Global trigger without explicit device/window (`RenderDoc.cpp:664–690`) | Explicit D3D11/D3D12 target selection | Choosing the captured API is additional behavior upstream lacks; unavailable targets still obey the Framework fail-closed contract | `RenderDoc.cpp` binding/request methods; existing temporal target publishers are unchanged |
+| Tweak | Global trigger without explicit device/window (`RenderDoc.cpp:664–690`) | Explicit D3D11/D3D12 target selection | Capture-target selection is a tooling adjustment; unavailable targets still obey the Framework fail-closed contract | `RenderDoc.cpp` binding/request methods; existing temporal target publishers are unchanged |
 | Fix | Global capture requests depend on presentation by the selected device (`RenderDoc.cpp:664–690`) | Explicit D3D11 Start/EndFrameCapture behind the temporal proxy | Preserve main correction `17bd6de7`: the proxy presents through D3D12, so global capture requests miss the game D3D11 frame. Both games have interop chains; this is a capture-boundary bug, not a forced FO4 engine difference | `RenderDoc.cpp` `FramesEngineCaptureManually`, `OnGameFramePresented` |
 | Framework | ImGui UI, OS hotkey polling and shell opening (`RenderDoc.cpp:144–468,718–739`) | DearModdingUI forwarding, contextual F12/PrintScreen suggestions, host external opening and existing native confirmation dialog | Repository host ownership; saved hotkey overrides remain authoritative. The pinned UI API lacks ImGui sort specs/double-click queries: header buttons select a single sort column, filenames open on click, and path copy is a button | `RenderDoc.cpp` `DrawSettings`, `DrawCaptureFiles`, `OpenCaptureLocation`; `HostClient.cpp` hotkey labels; `Menu.cpp` capture-delete operation |
-| Chosen | Created column shows relative age (`RenderDoc.cpp:440–443`) | Created column shows an absolute date/time | Presentation choice, not required by the forwarding-only UI contract | `RenderDoc.cpp` `DrawCaptureFiles` |
+| Tweak | Created column shows relative age (`RenderDoc.cpp:440–443`) | Created column shows an absolute date/time | Presentation choice, not required by the forwarding-only UI contract | `RenderDoc.cpp` `DrawCaptureFiles` |
 | Framework | JSON settings; filesystem failures are logged/swallowed (`RenderDoc.cpp:476–537,561–580,594–643`) | Typed TOML uses the upstream `Capture Frame Count` key and clamps integer counts before schema validation; filesystem failures surface in host UI/dialogs | Existing persistence, telemetry and dialog-result contracts remain authoritative. Obsolete `multi_frame_count`/`min_free_disk_gib` keys no longer control capture policy; capture count telemetry measures completed captures rather than requests | `RenderDocSettings.h`, `RenderDoc.cpp` `Configure`/`DrawSettings`/`CollectTelemetry`, `CaptureService.cpp`, `Menu.cpp` capture-delete operation |
 | Framework | Enable toggle forces/restores Skyrim frame annotations (`RenderDoc.cpp:150–158`) | Existing D3D11/D3D12 annotation services emit markers whenever the capture tool is attached | Repository annotation services have no separate enable state; no new toggle or renderer path is added | `src/Render/Annotation.cpp` `ScopedEvent`/`SetMarker`, existing annotated consumers |
 
@@ -577,7 +577,7 @@ directory/delete workflows on the intended runtime. This is a validation gap, no
 ## Upscaling
 
 Upstream pin: `d330bf12d`. Consumer: `package\Shaders\Imagespace\SSLRRaytracing.hlsl`.
-Feature classification: **core (doodlum FO4 release lineage)**.
+Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 Upscaling, FrameGeneration and MotionVectorFixes are maintained in-house. These comparisons
 describe main's existing implementation, not an upstream-conversion plan or parity claim.
@@ -588,18 +588,19 @@ The FO4 shader copies, settings keys, SDK inputs, render scheduling and presenta
 | Kind | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|---|
 | Forced | FrameBuffer-adjusted current/previous samples in ISReflectionsRayTracing | Unchanged upstream b4 current-frame clamp plus scaled pixel dithering/Hi-Z counts; snapshot survives proxy composites | FO4 integer Hi-Z loads use full-target cb0 sizes and top-left active region with no previous-frame reflection sample; engine-facts Composite pass order / Native SSLR production | `SSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp` |
-| Chosen | Upstream encode/depth/fullscreen shaders | Retain FO4-owned `EncodeTexturesCS.hlsl`, `DepthRefractionUpscalePS.hlsl` and `UpscaleVS.hlsl` under `FO4/Upscaling`; use `FO4ShaderData.hlsli` where needed | In-house maintenance and ownership policy; not an engine requirement to replace upstream files | `features/Upscaling/Shaders/FO4/Upscaling`, `TemporalRendererInternals.h`, `TemporalRenderResources.cpp` |
+| Divergence | Upstream encode/depth/fullscreen shaders | Retain FO4-owned `EncodeTexturesCS.hlsl`, `DepthRefractionUpscalePS.hlsl` and `UpscaleVS.hlsl` under `FO4/Upscaling`; use `FO4ShaderData.hlsli` where needed | In-house maintenance and ownership policy; not an engine requirement to replace upstream files | `features/Upscaling/Shaders/FO4/Upscaling`, `TemporalRendererInternals.h`, `TemporalRenderResources.cpp` |
 | Forced | Skyrim camera/state inputs | Current copied world+jitter camera record supplies provider matrices, basis, origins and FOV | engine-facts Camera-cache ownership / Main camera preparation / First-person renderer camera; Skyrim globals and buffer layout cannot identify the FO4 camera | `FrameBuffer.cpp` `GetWorldCameraRecord`, `TemporalPipeline.cpp`, `Streamline.cpp` camera constants |
 | Forced | Single non-inverted perspective depth | FO4 native scene DSV combines first-person and world projections | engine-facts Native composite depth partition / b12 near reprojection: near depth ≤0.01 and world `mad(d,1.01,-0.01)` use different inverses | `Engine.h`, `FO4/Depth.hlsli`, native depth accessors |
 | Pending | SDK world-projection depth | SR encoder copies native depth values into typed shared R32_FLOAT; SR/FG do not consume the substrate's canonical t17 depth | Equivalent world-projection SDK input is not implemented; typed storage does not reconcile projection partitions. Compatibility is not established merely by resource format | `TemporalResolve.cpp` `Upscale`, `TemporalFrameGenerationInputs.cpp`, `FO4/Upscaling/EncodeTexturesCS.hlsl` `DEPTH_OUTPUT` |
 | Forced | Depth/refraction fullscreen resolve with SAOCameraZ MRT1 | FO4 copy samples native depth/refraction normals with shared DR/jitter math and writes RefractionNormals plus SV_Depth, without SAOCameraZ | Native post-processing consumes the scene DSV; FO4 has no Skyrim SAOCameraZ attachment. engine-facts Scene-depth binding identity / Refraction-normal and depth-pyramid identities | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl`, `TemporalResolve.cpp` `UpscaleDepth` |
 | Forced | Jitter and dynamic-resolution publication into Skyrim viewport | Publish equivalent offsets and RenderTargetManager ratios after FO4's native UpdateTemporalData; preserve top-left active-region proxies and engine-image-space family routing | engine-facts Dynamic-resolution history / Main camera preparation; FO4's state/target-manager layout and native updater are different | `TemporalRenderer.cpp`, `TemporalRenderHooks.cpp`, `DynamicResolution.cpp` |
-| Chosen | Pre-tonemap SR with upstream exposure/HDR policy | Post-tonemap/LUT gamma-2.2 R8G8B8A8_UNORM SR and automatic exposure | Main's explicit color contract; no engine evidence proves pre-tonemap integration impossible | `TemporalResolve.cpp` `SuperResolutionRequest::color`, `TemporalFrameGenerationInputs.cpp` frozen color |
-| Chosen | Direct upstream FidelityFX FSR3 dispatch | Streamline FSR3/FSR4 D3D12 providers and typed shared input transport; FO4 encoder's FSR branch writes undilated motion to u2 | In-house SDK/backend architecture; upstream instead passes native motion directly and binds u2 only for DLSS | `Streamline.{h,cpp}`, `SuperResolutionProviders.cpp`, `DX12SwapChain.cpp`, `FO4/Upscaling/EncodeTexturesCS.hlsl` |
-| Chosen | FSR quality ratio used for all providers | Preserve SDK render-size queries, quality values 0–4 and provider-specific sizing; retain upstream jitter phase/sequence and projection signs | Upstream `Upscaling.cpp:854–882,911–925`: phase=int(8·(displayWidth/renderWidth)²), Halton bases 2/3 minus 0.5, offsets −2x/w,+2y/h. Upstream uses `ffxFsr3GetUpscaleRatioFromQualityMode`; FO4 queries DLSS/FSR optimal extents | `TemporalRendererInternals.h` jitter helpers, `TemporalRenderer.cpp` `PrepareRenderSize`, `Streamline.cpp` size queries |
+| Divergence | Pre-tonemap SR with upstream exposure/HDR policy | Post-tonemap/LUT gamma-2.2 R8G8B8A8_UNORM SR and automatic exposure | Main's explicit color contract; no engine evidence proves pre-tonemap integration impossible | `TemporalResolve.cpp` `SuperResolutionRequest::color`, `TemporalFrameGenerationInputs.cpp` frozen color |
+| Divergence | Direct upstream FidelityFX FSR3 dispatch | Streamline FSR3/FSR4 D3D12 providers and typed shared input transport; FO4 encoder's FSR branch writes undilated motion to u2 | In-house SDK/backend architecture; upstream instead passes native motion directly and binds u2 only for DLSS | `Streamline.{h,cpp}`, `SuperResolutionProviders.cpp`, `DX12SwapChain.cpp`, `FO4/Upscaling/EncodeTexturesCS.hlsl` |
+| Divergence | FSR quality ratio used for all providers | Preserve SDK render-size queries, quality values 0–4 and provider-specific sizing; retain upstream jitter phase/sequence and projection signs | Upstream `Upscaling.cpp:854–882,911–925`: phase=int(8·(displayWidth/renderWidth)²), Halton bases 2/3 minus 0.5, offsets −2x/w,+2y/h. Upstream uses `ffxFsr3GetUpscaleRatioFromQualityMode`; FO4 queries DLSS/FSR optimal extents | `TemporalRendererInternals.h` jitter helpers, `TemporalRenderer.cpp` `PrepareRenderSize`, `Streamline.cpp` size queries |
 | Framework | CamelCase JSON keys and combined SR/FG settings | Keep TOML `upscale_method`, `quality_mode`, `streamline_log_level`, `preset_dlss`, `sharpness_fsr`, `sharpness_enabled_dlss`, `sharpness_dlss`; FG controls stay under FrameGeneration | Repository schema/persistence, live admission and fail-closed missing-GPU contracts. Equivalent SR member defaults and quality/sharpness ranges match upstream `Upscaling.h:51–69`; provider-selection differences are listed separately | `TemporalRenderSettings.h`, `Upscaling.cpp`, `FrameGenerationSettings.h` |
-| Chosen | Upstream provider selection and `upscaleMethodNoDLSS` preference | Include FSR4 in the method values and keep one persisted SR preference | In-house provider/settings design beyond the repository-wide persistence contract | `TemporalRenderSettings.h`, `Upscaling.cpp` |
-| Chosen | RCAS D3D11 dispatch and upstream DLSS GPU/model defaults | D3D12 RCAS on SDR output and main's explicit/nondefault DLSS preset policy | RCAS shader is consumed unchanged and sharpness exp2 math matches; backend, color stage and preset-default selection are FO4 choices | `RCAS/RCAS.cpp`, `Streamline.cpp` DLSS options |
+| Tweak | Upstream provider selection and `upscaleMethodNoDLSS` preference | Include FSR4 in the method values and keep one persisted SR preference | Provider preference presentation/persistence; the FSR4 backend architecture is the separate Divergence above | `TemporalRenderSettings.h`, `Upscaling.cpp` |
+| Divergence | RCAS D3D11 dispatch | D3D12 RCAS on SDR output | RCAS shader is consumed unchanged and sharpness exp2 math matches; backend and color stage are in-house architecture | `RCAS/RCAS.cpp` |
+| Tweak | Upstream DLSS GPU/model preset defaults | Main's explicit/nondefault DLSS preset policy alongside RCAS controls | Preset defaults and settings presentation, not a different sharpening algorithm | `Upscaling.cpp`, `Streamline.cpp` DLSS options |
 | Pending | Production reactive/transparency masks from TAA xy and water normal.z | Encoder retains `taa.x * 0.1 + taa.y` and normal.z math, but null t0 and FO4's two-channel normal input yield zero masks | Production mask inputs are not ported; normal decoding cannot supply absent water VdotN. This difference is not established as engine-impossible | `TemporalResolve.cpp` encoder bindings, `FO4/Upscaling/EncodeTexturesCS.hlsl`, engine-facts Prepass attachment roster |
 | Pending | Upstream underwater-mask upscale and water consumer chain | Main's depth/refraction publication and linear-depth regeneration, without upstream `UnderwaterMaskUpscalePS.hlsl` | Equivalent upstream underwater producer/consumer coverage is not ported | `DynamicResolution.cpp`, `TemporalResolve.cpp`, upstream `features/Upscaling/Shaders/Upscaling/UnderwaterMaskUpscalePS.hlsl` |
 | Framework | Upstream load-reset scheduling | FO4 frame-discontinuity, frozen-frame, provider-transition and explicit reset reasons | Repository-wide lifecycle/recovery contracts; offline tests do not establish equivalent history behavior in game | `TemporalResolve.cpp`, `TemporalPipeline.cpp`, `TemporalRenderHooks.cpp` |
@@ -611,42 +612,42 @@ unchanged upstream C++. This reference does not change SDK or presentation behav
 
 | Kind | Component | Upstream-derived portion | FO4-authored portion |
 |---|---|---|---|
-| Chosen | `Streamline.{h,cpp}` | Upstream Upscaling Streamline integration: resource tags, DLSS options/evaluation, camera constants and Reflex/FG SDK operations | Typed provider requests/results, camera translation, D3D12 dispatch, FSR3/4 plugin integration, capability and failure contracts |
-| Chosen | `DX12SwapChain.{h,cpp}` | Upstream Upscaling's D3D11/D3D12 shared-handle/fence and proxy-presentation model | Current transport, frame-slot ownership/retirement, ordered producer/output dependencies, input publication and provider scheduling |
-| Chosen | `RCAS/RCAS.{h,cpp}` | Upstream unchanged RCAS shader and sharpness conversion | D3D12 root signature, descriptors, PSO, barriers and SDR publication |
-| Chosen | Direct `FidelityFX.{h,cpp}` | Upstream implementation exists in the shared checkout | Not consumed; FO4 FSR evaluation is through `StreamlineFidelityFXContract.h` and the Streamline SDK fork |
+| Divergence | `Streamline.{h,cpp}` | Upstream Upscaling Streamline integration: resource tags, DLSS options/evaluation, camera constants and Reflex/FG SDK operations | Typed provider requests/results, camera translation, D3D12 dispatch, FSR3/4 plugin integration, capability and failure contracts |
+| Divergence | `DX12SwapChain.{h,cpp}` | Upstream Upscaling's D3D11/D3D12 shared-handle/fence and proxy-presentation model | Current transport, frame-slot ownership/retirement, ordered producer/output dependencies, input publication and provider scheduling |
+| Divergence | `RCAS/RCAS.{h,cpp}` | Upstream unchanged RCAS shader and sharpness conversion | D3D12 root signature, descriptors, PSO, barriers and SDR publication |
+| Divergence | Direct `FidelityFX.{h,cpp}` | Upstream implementation exists in the shared checkout | Not consumed; FO4 FSR evaluation is through `StreamlineFidelityFXContract.h` and the Streamline SDK fork |
 | Framework | `AgilityBootstrap`, `DXGISwapChainProxy`, `DXGISwapChainFacadeContract` | D3D12/DXGI mechanisms, not shared upstream files | Repository SDK bootstrap and swapchain facade/interception |
 | Framework | `SuperResolutionProviders`, `FrameGeneration/PresentationProviders`, provider contracts | SDK operations ultimately derive from upstream Upscaling integrations | Repository typed adapters, capability admission and completion ownership |
 | Framework | `Render/SwapChainHook`, `TemporalPipeline`, `TemporalPresentation`, `FrameGenerationOrchestration` | No consumed upstream Upscaling C++ | Repository host creation hooks, frame-boundary mode transitions, frozen packets, UI admission, recovery/quarantine and retirement |
-| Chosen | `TemporalRenderer*`, `TemporalResolve`, `TemporalFrameGenerationInputs`, `DynamicResolution`, `SamplerBias`, `UpscalingAnchors`, `UpscalingPublication`, `ProviderOutputPreview` | Upstream jitter/encode/resolve algorithms with the local differences listed above | FO4 render scheduling, native target proxies, sampler edits, publication, capture diagnostics and engine-callsite anchors |
+| Divergence | `TemporalRenderer*`, `TemporalResolve`, `TemporalFrameGenerationInputs`, `DynamicResolution`, `SamplerBias`, `UpscalingAnchors`, `UpscalingPublication`, `ProviderOutputPreview` | Upstream jitter/encode/resolve algorithms with the local differences listed above | FO4 render scheduling, native target proxies, sampler edits, publication, capture diagnostics and engine-callsite anchors |
 
 ## FrameGeneration
 
 Upstream pin: `d330bf12d`, upstream `src/Features/Upscaling` FG implementation.
-Feature classification: **core (doodlum FO4 release lineage)**.
+Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 ### Differences from pinned upstream
 
 | Kind | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|---|
 | Pending | World-projection non-inverted SDK depth | Copy native partitioned depth into shared R32_FLOAT; ordinary capture preserves raw values and pads inactive pixels with sky=1 | Equivalent world-projection SDK input is not implemented; the forced engine partition is documented under Upscaling, but retaining it at this boundary is not proven necessary | `TemporalFrameGenerationInputs.cpp`, `CopyDepthForFrameGenerationCS.hlsl` |
-| Chosen | FG settings within Upscaling | Separate FrameGeneration feature and SR/FG provider lifetimes | In-house packaging and orchestration design, not an engine limitation; host persistence is a Framework contract | `FrameGeneration.{h,cpp}`, `FrameGenerationSettings.h`, `PresentationProviders.cpp`, `TemporalPipeline.cpp` |
+| Divergence | FG settings within Upscaling | Separate FrameGeneration feature and SR/FG provider lifetimes | In-house packaging and orchestration design, not an engine limitation; host persistence is a Framework contract | `FrameGeneration.{h,cpp}`, `FrameGenerationSettings.h`, `PresentationProviders.cpp`, `TemporalPipeline.cpp` |
 | Framework | Upstream activation, persistence and failure handling | Preserve load=false activation, typed TOML, forwarding-only UI, capability admission and recovery/quarantine | Repository-wide lifecycle, persistence, UI and fail-closed contracts | `FrameGeneration.cpp`, `FrameGenerationSettings.h`, `TemporalPipeline.cpp`, `HostClient.cpp` |
-| Chosen | Upstream separate premultiplied UI texture | Pre-UI SDR HUD-less plus final-color packet and current presentation providers | Main's capture/composition architecture; upstream UI-redirection parity is not established | `TemporalFrameGenerationInputs.cpp` `CaptureHUDLessColor`, `DX12SwapChain.cpp`, `Streamline.cpp` FG tags |
+| Divergence | Upstream separate premultiplied UI texture | Pre-UI SDR HUD-less plus final-color packet and current presentation providers | Main's capture/composition architecture; upstream UI-redirection parity is not established | `TemporalFrameGenerationInputs.cpp` `CaptureHUDLessColor`, `DX12SwapChain.cpp`, `Streamline.cpp` FG tags |
 | Pending | Upstream premultiplied UI-redirection producer/consumer coverage | No corresponding upstream UI texture chain is ported | The retained HUD-less/final-color packet architecture does not establish equivalent upstream UI coverage | `TemporalFrameGenerationInputs.cpp`, `DX12SwapChain.cpp`, `Streamline.cpp` |
-| Chosen | Geometry-derived motion/depth on transparent first-person pixels | Pre/post-alpha color-difference×1000 blends motion toward zero and depth toward `min(depth,0.1)` | engine-facts Prepass motion encoding proves BLEND coverage gaps, not this heuristic's correctness or necessity | `CopyDepthForFrameGenerationCS.hlsl`, `TemporalFrameGenerationInputs.cpp` alpha stages |
-| Chosen | Upstream FG frame-limit/menu/Reflex policy | Main's menu policy, fixed/dynamic generated-frame controls and Reflex policy | In-house presentation behavior, not asserted equivalent; capability admission and provider-switch/reset safety remain Framework contracts | `FrameGenerationSettings.h`, `Streamline.cpp`, `FrameGenerationOrchestration.h`, `TemporalPipeline.cpp` |
+| Divergence | Geometry-derived motion/depth on transparent first-person pixels | Pre/post-alpha color-difference×1000 blends motion toward zero and depth toward `min(depth,0.1)` | engine-facts Prepass motion encoding proves BLEND coverage gaps, not this heuristic's correctness or necessity | `CopyDepthForFrameGenerationCS.hlsl`, `TemporalFrameGenerationInputs.cpp` alpha stages |
+| Divergence | Upstream FG frame-limit/menu/Reflex policy | Main's menu policy, fixed/dynamic generated-frame controls and Reflex policy | In-house presentation behavior, not asserted equivalent; capability admission and provider-switch/reset safety remain Framework contracts | `FrameGenerationSettings.h`, `Streamline.cpp`, `FrameGenerationOrchestration.h`, `TemporalPipeline.cpp` |
 
 ## MotionVectorFixes
 
 Upstream pin: `d330bf12d`; no corresponding upstream feature.
-Feature classification: **core (doodlum FO4 release lineage)**.
+Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 ### Differences from pinned upstream
 
 | Kind | Difference | Engine reason / evidence | Where |
 |---|---|---|---|
-| Chosen | FO4-only previous-transform correction for player updates, sequence positioning, frozen/menu and LOD/landscape draws | FO4 prepass projects current/previous camera-relative positions from world/previousWorld (`BSDFPrePass.hlsl:1326–1328` previous-world rows, `:1233–1246` current/previous projections); stale transform history feeds native motion. Hook policy corrects that input and skips LoadingMenu; the necessity/effectiveness of each correction still needs runtime transform evidence. It does not add missing BLEND motion outputs (engine-facts Prepass motion encoding) | `MotionVectorFixes.cpp` `OnIdle_UpdatePlayer`, `TESObjectREFR_SetSequencePosition`, `BSLightingShaderProperty_GetRenderPasses` |
+| Divergence | FO4-only previous-transform correction for player updates, sequence positioning, frozen/menu and LOD/landscape draws | FO4 prepass projects current/previous camera-relative positions from world/previousWorld (`BSDFPrePass.hlsl:1326–1328` previous-world rows, `:1233–1246` current/previous projections); stale transform history feeds native motion. Hook policy corrects that input and skips LoadingMenu; the necessity/effectiveness of each correction still needs runtime transform evidence. Prepass consumption alone does not prove stale history at these hooks. The established BLEND output gap is not repaired by these corrections (engine-facts Prepass motion encoding) | `MotionVectorFixes.cpp` `OnIdle_UpdatePlayer`, `TESObjectREFR_SetSequencePosition`, `BSLightingShaderProperty_GetRenderPasses` |
 
 ### Verification limits
 
@@ -672,8 +673,8 @@ independent AO/GI/accumulation ping-pong, SH/YCoCg, blur and upsample use the pi
 The unchanged `readHistory` uses the current `RCP_OUT_FRAME_DIM`; main's reverted previous-extent
 correction (`e9d16c20`) is not reintroduced. The #2792 half-angle behavior is also unchanged.
 
-Feature classification: **extension candidate**. Chosen rows: MRT4 vertex-AO allocation/hair
-blend policy, native-linear consumer policy, and AOPower default/range calibration.
+Feature classification: **core** (rule 2: upstream SSGI algorithm and design).
+Native G-buffer/color translations and AOPower calibration do not change that design.
 Source/shader validation does not establish runtime parity.
 
 ### Translations
@@ -687,9 +688,9 @@ Source/shader validation does not establish runtime parity.
 | Forced | Skyrim camera and b1 host constants | Re-acquire the world+jitter record, fill all 224 bytes of b1, and retain its previous inverse view; substrate b4/b5/b6 supplies the other camera data | engine-facts Camera cache ownership / Per-frame buffer sources: native row-vector inverse view is uploaded into column-major b1, while b4 uses its existing transpose. b12 is diagnostic only | `ScreenSpaceGIConstants.h`, `ScreenSpaceGI.cpp` `UpdateConstants`; reflected b1 ABI test |
 | Forced | Color::Ambient(GetAmbient(N)) with Masks.z | Powered FO4 DALC times albedo, clamped to native diffuse before upstream sqrt-direct/full-ambient AO and diffuse bounce | engine-facts Directional ambient evaluation and reconstructed lighting/composite: FO4 folds powered 2.2 DALC into diffuse without upstream Masks.z. Preserve main's ambient/direct separation at the consumer, not inside GI kernels | `FO4/FO4ShaderData.hlsli`, `FO4/ScreenSpaceGIConsumer.hlsli` `ComposeDiffuse` |
 | Forced | Skyrim SSAO generation toggle | Per-frame native SAO_CS active/applied bits with the existing baseline snapshot | engine-facts AO state: native DrawModel/console rewrite active +0x08 and applied +0x121; the host must control generation as well as composition | `ScreenSpaceGI.cpp` `ApplyVanillaSSAO`, `Engine.h` |
-| Chosen | Masks2.x vertex AO | `1−vertexAO` in emissive logical 31.a; blended hair writes 0 | Preserve main's allocation/blend policy; reconstructed stock shaders leave this alpha unread. The allocation is not an engine-imposed choice | `BSDFPrePass.hlsl`, consumer `vertexAOStore` |
-| Chosen | Irradiance/albedo consumer conversions | Keep main's native-linear consumer algebra; prepare radiance using unchanged Color helpers paired with upstream `RadianceToLinear` | The shared neutral b6 LinearLighting inputs make both conversions identities, preserving FO4's linear HDR policy without forking Common/Color. Combined material-provider behavior remains unverified | `SharedData.cpp` `PackFeatures`, `FO4/ScreenSpaceGI/Prepare.cs.hlsl`, `FO4/ScreenSpaceGIConsumer.hlsli` |
-| Chosen | AOPower default 1, edit range 0–6 | Default 4, edit range 0–12 | Main `06032303` deliberately calibrates placed-light-dominated interiors; no engine fact forces this choice | `ScreenSpaceGISettings.h`, forwarding UI |
+| Forced | Masks2.x vertex AO | `1−vertexAO` in emissive logical 31.a; blended hair writes 0 | fallout4-re `docs\engine-facts.md`, Vertex colour in albedo / Composite vertex-AO limitation: no separate vertex-AO channel exists. Stock shaders leave emissive alpha unread; this storage is the minimal translation for upstream's independent AO input, with neutral AO for blended hair | `BSDFPrePass.hlsl`, consumer `vertexAOStore` |
+| Forced | Irradiance/albedo consumer conversions | Keep main's native-linear consumer algebra; prepare radiance using unchanged Color helpers paired with upstream `RadianceToLinear` | fallout4-re `docs\engine-facts.md`, Format numbering / Main and scene-intermediate identity / Base composite equation: sRGB albedo is decoded before lighting and accumulators compose into float HDR. With the LinearLighting feature absent, the host still sets neutral b6 `enableLinearLighting=1`, `colorGamma=1` and unit multipliers, making the relevant shared Color conversions identities; it does not use the nonidentity `ENABLE_LL=0` branch. Combined material-provider behavior remains unverified | `SharedData.cpp` `PackFeatures`, unchanged `Common/Color.hlsli`, `FO4/ScreenSpaceGI/Prepare.cs.hlsl`, `FO4/ScreenSpaceGIConsumer.hlsli` |
+| Tweak | AOPower default 1, edit range 0–6 | Default 4, edit range 0–12 | Main `06032303` deliberately calibrates placed-light-dominated interiors; no engine fact forces this choice | `ScreenSpaceGISettings.h`, forwarding UI |
 | Fix | Blur center normal lacks frameScale | Apply main's center-UV correction as a one-line shared seam | Half/quarter-resolution dynamic-resolution center and neighbor taps must use the same extent. This lookup is internal to blur, so an input/consumer adapter cannot repair it without changing neighbor samples; upstream #2795 | Shared `blur.cs.hlsl:104`, seam `13d9d2e2d` |
 | Framework | Skyrim lifecycle, JSON/UI and deferred bindings | Preserve load=false, TOML/live settings, forwarding-only UI, presets, ownership/hash gates, telemetry, AO preview, readiness/reset guards and exact binding scopes | Repository host contracts; upstream-cased keys and Float2 DepthFadeRange replace legacy keys. b1 carries all SSGI settings; no b6 or b7 SSGI block. PS t26–29/t38 and b10 are owned/snapshotted; CS t8–9/b10 are scoped without widening low-slot cleanup | `ScreenSpaceGI.{h,cpp}`, `ScreenSpaceGISettings.h`, `FO4/ScreenSpaceGI/Contracts.hlsli`, substrate packing and tests |
 
@@ -702,7 +703,8 @@ Source/shader validation does not establish runtime parity.
 
 ## Screen Space Shadows
 
-Feature classification: **core**. Every behavior row is Forced, an upstream bug fix, or repository framework policy; distant-tree/alpha coverage is Pending porting work.
+Feature classification: **core** (rule 2: upstream screen-space-shadow algorithm and design).
+Distant-tree/alpha coverage is Pending porting work.
 
 Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceShadows`, consumers in
 `package\Shaders\BSDFLightShader.hlsl` through `FO4/ScreenSpaceShadowConsumer.hlsli`.
