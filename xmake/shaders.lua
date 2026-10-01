@@ -20,7 +20,6 @@ local root = os.projectdir()
 local engine_entry_points = {
     ["effect.hlsl"] = true,
     ["distanttree.hlsl"] = true,
-    ["lighting.hlsl"] = true,
     ["water.hlsl"] = true
 }
 
@@ -51,7 +50,7 @@ local function stage_shaders()
     local upstream_roots = { path.join(shared_root, "package/Shaders") }
     table.join2(upstream_roots, os.dirs(path.join(shared_root, "features/*/Shaders")))
     assert(os.isdir(upstream_roots[1]),
-        "shared shaders missing; run git submodule update --init --recursive")
+        "shared shaders missing; run scripts\\fetch-submodules.ps1")
     for _, directory in ipairs(upstream_roots) do
         for _, source in ipairs(os.files(path.join(directory, "**"))) do
             local relative = path.relative(source, directory):gsub("\\", "/")

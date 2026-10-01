@@ -37,7 +37,7 @@ The native entry-point naming boundary is documented under Shader replacement.
 
 | Kind | File | SHA | Why | Upstream PR status |
 |---|---|---|---|---|
-| Framework | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies; Phase 3 consumes these rows | In the shared fork; upstream PR candidate, not filed |
+| Framework | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies | In the shared fork; upstream PR candidate, not filed |
 | Forced | `package/Shaders/Common/FrameBuffer.hlsli` | `e305ed0a4` | `FRAMEBUFFER_REGISTER` defaults to b12 and permits host binding at b4; FO4 engine shaders already bind the native per-frame buffer at b12 (`package/Shaders/Water.hlsl:3`, `cbuffer PerFrame : register(b12)`) | In the shared fork; no upstream PR recorded |
 | Fix | `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104` | `13d9d2e2d` | Scale the center-normal UV by `frameScale`, matching the neighbor lookups in half/quarter-resolution dynamic-resolution frames | community-shaders/skyrim-community-shaders#2795 |
 | Fix | `features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:7` | `6f81ebc25` | Remove the extra half-pixel offset from pixel-centered SV_POSITION before integer mask lookup | In the shared fork; upstream PR candidate, not filed |
@@ -77,19 +77,19 @@ upstream conversion; renderer-specific reasons remain in the feature tables.
 Upstream pin: `d330bf12d` (`ShaderCache`, `Hooks`, `State`, `AdvancedSettingsRenderer`).
 Source paths follow the native fxp name; entry point is `main`, profile follows the stage,
 and live type/master switches suppress the entire replacement, including feature contributions.
-Effect, DistantTree and Lighting remain owned for upstream fog and terrain-shadow consumers.
-Utility, Sky, Particle and BloodSplatter remain stock because no current feature consumes them.
+Effect and DistantTree remain owned for upstream fog and terrain-shadow consumers.
+Utility, Sky, Particle, BloodSplatter and Lighting remain stock because no current feature consumes them.
 
 | Kind | Upstream | Fallout 4 translation | Engine evidence / boundary | Code |
 |---|---|---|---|---|
 | Forced | `BSShader::shaderType` identifies each shader class | Use CommonLibF4's `BSShaderManager::ShaderEnum`; disambiguate type 4 by exact `DFPrepass` / `DFLight` fxp name | fallout4-re `docs\engine-facts.md`, “Batch index is shader type”: both constructors write 4 at `BSShader+0x18`, although CommonLibF4's enum lists DFLight as 5. `harness\shaders\section_partition\native.py` records the exact names. Standalone compute uses its existing loader-recorded name and target | `ShaderInjection.cpp` `ResolveNativeShaderTarget` |
-| Forced | Root-level native shader entry points | Stage FO4 Effect, DistantTree, Lighting and Water under their engine names, despite Skyrim having identically named entry points | The schema-2 measured export identifies these exact fxp names; their reconstructed native registers, descriptors and stock bytecode differ from Skyrim. The engine-name ownership contract requires these root names. No shared include is overridden, and staging still rejects duplicate consumed destinations | `xmake\shaders.lua`, `ShaderFamilyDescriptor.cpp`, `StockShaderIdentityTests.cpp` |
+| Forced | Root-level native shader entry points | Stage FO4 Effect, DistantTree and Water under their engine names, despite Skyrim having identically named entry points | The schema-2 measured export identifies these exact fxp names; their reconstructed native registers, descriptors and stock bytecode differ from Skyrim. The engine-name ownership contract requires these root names. No shared include is overridden, and staging still rejects duplicate consumed destinations | `xmake\shaders.lua`, `ShaderFamilyDescriptor.cpp`, `StockShaderIdentityTests.cpp` |
 | Framework | Source presence determines ownership | The existing developer force-on root remains the effective source root | Repository developer override contract; no additional source lookup path | `ShaderInjection.cpp` `ResolveShaderRoot`, `ShaderFamilyDescriptor.cpp` `IsShaderSourceAvailable` |
 | Framework | No stock reconstruction identity gate | FO4CS-only CI compares reconstructed routes against measured stock bytecode | Schema-2 fallout4-re export supplies native names; the gate shares runtime source-presence ownership and compilation with all type toggles on. Unnamed routes remain unowned; unhooked HS/DS routes are excluded | `StockShaderIdentityTests.cpp`, `generate_stock_shader_identity.py` |
 
 Stage selection uses upstream `VSHADER` / `PSHADER` / `CSHADER` defines. SSLR supplies both
 stages through unchanged shared `Common\DummyVSTexCoord.hlsl`, as `ISReflectionsRayTracing` does.
-The gate owns 2,994 routes, including passthrough VS ordinal 3881
+The gate checks every owned route, including passthrough VS ordinal 3881
 (`89e56423886dc05ed3b2d1445a70f386c651ac38`) and PS ordinal 3882. Compile failures remain
 runtime stock fallbacks but fail the identity gate; they are not reclassified as unowned.
 
@@ -243,7 +243,7 @@ Camera-cell `WaterSystemHeight` and fullscreen diagnostics are minor FO4 adjustm
 
 | Kind | Upstream | Why / evidence | Where |
 |---|---|---|---|
-| Forced | WaterParallax three normal-alpha height layers, including FLOWMAP variants | v1 `ba1bad9f` finding, recorded in `INGAME-CHECKLIST-v1.md` WaterEffects: vanilla normals have no height alpha. fallout4-re `docs/bswater-promotion.md` Shore Effects runtime evidence contract records the absent height signal; native `Water.hlsl` `normalSlope` reads only XY. No height assets are invented and the BSWater consumer remains stock. Archive channel evidence was not replayed in this task | `Water.hlsl`; upstream `WaterParallax.hlsli` is not staged |
+| Forced | WaterParallax three normal-alpha height layers, including FLOWMAP variants | Vanilla normals have no height alpha. fallout4-re `docs/bswater-promotion.md` Shore Effects runtime evidence contract records the absent height signal; native `Water.hlsl` `normalSlope` reads only XY. No height assets are invented and the water-parallax path remains stock | `Water.hlsl`; upstream `WaterParallax.hlsli` is not staged |
 | Forced | Interior cell water height | FO4's exterior-height accessor explicitly rejects interior cells; engine-facts Exterior cell height. The table retains -FLT_MAX rather than borrowing the player's cached plane. Placed-water mesh intersections are outside the upstream cell-height approximation | `Water.cpp` `CellWaterData` |
 
 ### Pending
@@ -283,7 +283,7 @@ Pending rows prevent a claim of complete parity.
 |---|---|---|
 | Pending | Original inputs for tessellated skinned/model-space materials and model-space variants without an authored normal in the native VS signature | Hull/domain stages are not injectable through the current stage interface. Add their typed ownership/routing and preserve original inputs, and reconstruct missing vertex attributes. These variants deliberately retain native g and produce no upstream film; missing adapters are not engine limitations |
 | Pending | Secondary forward BSLighting material consumers and optional upstream Skin/TruePBR integrations | World/first-person accumulation is deferred (engine-facts BSLighting forward-pass source). Secondary-view consumers and corresponding optional feature inputs are not integrated; no absence of execution or parity is claimed |
-| Pending | Runtime proof of material producer, weather, resources and consumer coverage | No deployment/game launch is authorized for this task. Confirm current camera cache freshness during prepass draws, MRT6 format/blends/restoration, original inputs and paired compilation fallback in RenderDoc |
+| Pending | Runtime proof of material producer, weather, resources and consumer coverage | Confirm current camera cache freshness during prepass draws, MRT6 format/blends/restoration, original inputs and paired compilation fallback in RenderDoc |
 
 ### Batched in-game checks
 
@@ -340,7 +340,7 @@ or verification work, not engine incompatibilities or a claim of full enabled-fe
 | Pending | IBL, Skylighting, CloudShadows and clustered local lights | Includes are unchanged, but absent host providers stay unbound and their flags/defines stay off. World-point irradiance, SH probe visibility, cloud transmittance and volumetric light clusters cannot be replaced by surface diffuse/AO/tile buffers. Terrain's validated t60 provider is connected |
 | Pending | Weather editor/reset and full weather-system lifecycle | Profiles are authored in TOML; upstream weather-editor reset actions and per-weather UI are not ported. Registry reset defaults for density, original color and vanilla suppression differ from Settings defaults; user-setting fallback uses the latter |
 | Pending | Map/reflection/secondary-view and forward first-person coverage | The three BSLighting families remain stock: secondary views need their own camera/depth publication. Engine-facts BSLighting forward-pass source limits these passes to modes 0/21. Upstream map-menu suppression remains unvalidated. Forward raw near depth retains native fog until a first-person-to-world camera adapter exists; deferred near depth already uses canonical t17 |
-| Pending | Runtime route pairing, histories and sky output | No game was launched. Live native fog suppression, MainTemp destination consumption, sky/additive layers, previous-frame origins, dynamic-resolution edges, allocation/dispatch timing and disabled-feature behavior need a build-pinned RenderDoc capture |
+| Pending | Runtime route pairing, histories and sky output | Live native fog suppression, MainTemp destination consumption, sky/additive layers, previous-frame origins, dynamic-resolution edges, allocation/dispatch timing and disabled-feature behavior need a build-pinned RenderDoc capture |
 | Pending | Native godray coexistence | Native NVIDIA godrays execute later and are not the upstream four-pass volume pipeline. Visual/light-energy overlap and an explicit coexistence policy need runtime evidence; native godrays are not silently disabled |
 
 ### Upstream PR candidates
@@ -423,8 +423,7 @@ this implementation makes no additional shared edits.
   Verify CPU/GPU publishers and SSGI history resets, locked persistence/presets, and
   failure/quarantine/restoration retry without modifying activation or ownership.
 - Verify VRAM adapter/local-segment identity and failed-query display against the host.
-  Runtime cadence, coverage, GPU state and failure recovery remain unverified here;
-  deployment and game launch are outside this worktree task.
+  Runtime cadence, coverage, GPU state and failure recovery remain unverified.
 ## Terrain Shadows
 
 Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`. Both `TerrainShadows/ShadowUpdate.cs.hlsl`
@@ -504,7 +503,7 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 | Forced | Deferred cubes at CS t5–t7 with LinearSampler | Shared register seam: PS t34–t35, native probe samplers; water keeps t30–t31 | FO4 composite declarations occupy lower slots and samplers; reconstructed `DFComposite.hlsl` resource declarations | `FO4/DynamicCubemaps/Composite.hlsli`, `DynamicCubemaps.cpp` |
 | Forced | Compile-time `INTERIOR` selects deferred base/reflection cube | Runtime b5 `InInterior` selects the cube, then calls shared normalized irradiance | FO4 reconstructed permutations serve both cell types | `FO4/DynamicCubemaps/Composite.hlsli` `GetFinalIrradiance` |
 | Forced | Wet reflectance written to G-buffer | Existing composite film/view-space adapter calls upstream cubemap normalization | FO4 G-buffer has no reflectance channel; engine-facts Render targets. Wetness-specific code stays in the existing adapter | `FO4/DynamicCubemaps/Composite.hlsli` `GetWetnessReflection` |
-| Forced | Wet indirect-diffuse reduction in material pass | Applied in BSDFLight and DFTiledLighting | FO4 reconstructed light passes evaluate indirect diffuse | `WetnessEffects.hlsli` `GetIndirectDiffuseWeight` |
+| Forced | Wet indirect-diffuse reduction in material pass | Applied in BSDFLight and DFTiledLighting | FO4 reconstructed light passes evaluate indirect diffuse | `FO4/WetnessEffectsConsumer.hlsli` `GetIndirectDiffuseWeight` |
 | Framework | Always-on feature with JSON/ImGui configuration | load=false, TOML/live enabled, forwarding-only UI, ownership/stock identity, telemetry and fail-closed GPU scopes | Repository activation, persistence and runtime-safety contracts; live enable gates wet diffuse/reflection | `DynamicCubemapsSettings.h`, `DynamicCubemaps.cpp`, `FO4/DynamicCubemaps/Composite.hlsli` |
 | Tweak | Loaded DC defines ENABLESSR, labeled for water | Live enabled_ssr gates all SSLR when DC is enabled; baseline remains stock | Main's global toggle avoids recompilation; SSLR feeds surfaces and water in reconstructed shaders | `DynamicCubemaps.cpp`, `FO4SharedData.hlsli`, `ISSSLRRaytracing.hlsl` |
 | Tweak | No equirectangular display preview shader | FO4-only capture/filtered Reinhard preview at a non-colliding path | Additional display-only diagnostic, not shared capture behavior | `FO4/DynamicCubemaps/CubemapPreviewCS.hlsl`, `DynamicCubemaps.cpp` `RenderCubemapPreview` |
@@ -514,7 +513,7 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 | Kind | Upstream | Why / evidence | Where |
 |---|---|---|---|
 | Forced | Native deferred 1×1 sentinel-cube and Reflectance-target contract | FO4 cube-array registration rejects cubes narrower than 128 px and its G-buffer has no reflectance/F0 channel; fallout4-re `docs\engine-facts.md`, Cubemap / Render targets. Upstream's authored selection cannot use these native paths unchanged; the replacement selection is the Divergence above | `DFComposite.hlsl`, native cube-array registration and G-buffer layout |
-| Forced | Forward `Lighting.hlsl` sentinel path | FO4 world and first-person accumulators emit no forward BSLighting passes; engine-facts DrawWorld pass ownership. No forward consumer is silently substituted | `Lighting.hlsl`, native deferred consumer catalog |
+| Forced | Forward `Lighting.hlsl` sentinel path | FO4 world and first-person accumulators emit no forward BSLighting passes; engine-facts DrawWorld pass ownership. No forward consumer is silently substituted | Native Lighting family, deferred consumer catalog |
 
 ### Pending
 
@@ -522,7 +521,7 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 |---|---|---|---|
 | Pending | General authored-material selection and TruePBR/complex material reflectance | Decide and implement the FO4-specific selection/metadata design recorded as Divergence above. Existing water/wet-film routes do not provide general authored selection or complete optional material coverage | `DFComposite.hlsl`, `FO4/DynamicCubemaps/Composite.hlsli`, engine-facts Cubemap and Render targets |
 | Pending | Material authoring/export workflow replacing Dynamic Cubemap Creator sentinel DDS export | Define the authoring workflow after choosing the FO4 selection contract; exporting upstream 1×1 sentinel cubes alone cannot select native deferred materials | `DynamicCubemaps.cpp`, upstream `DynamicCubemaps.cpp` creator/export path |
-| Pending | IBL and Skylighting feature consumers | Their providers are not converted here; retain shared implementations and complete host inputs when those features are added | shared `DynamicCubemaps.hlsli`, b6 IBL/Skylighting blocks |
+| Pending | IBL and Skylighting feature consumers | Host providers remain unimplemented; retain shared implementations and complete host inputs when those features are added | shared `DynamicCubemaps.hlsli`, b6 IBL/Skylighting blocks |
 | Pending | Runtime equivalence | Authorized DevBench/RenderDoc batch must verify prepared radiance/positions, cube orientation under rotation/translation, sky/infinite-far handling, interior/base and exterior/reflection selection, dynamic resolution, wet reflections, reset/time transitions and native bindings/restoration | `PrepareCaptureCS.hlsl`, `DynamicCubemaps.cpp`, water/composite consumers |
 
 ### Upstream PR candidates
@@ -585,7 +584,7 @@ None identified in the portable capture service.
 ### Runtime validation
 
 Implementation is present but live capture, comments, disk-management and UI behavior remain
-unverified: this worktree has no deployment/game authorization. Batched validation must verify
+unverified. Batched validation must verify
 ordinary D3D11, D3D11 behind temporal presentation, temporal D3D12, multi-frame comments and
 directory/delete workflows on the intended runtime. This is a validation gap, not unported behavior.
 
@@ -731,7 +730,7 @@ Source/shader validation does not establish runtime parity.
 | Kind | Upstream | Notes / where |
 |---|---|---|
 | Pending | IBL/Skylighting ambient branches and remaining specular consumer families | Native cube SH/HQ composition is present; ambient-IBL variants and combined DynamicCubemaps/wetness/IBL/Skylighting provider coverage still need adapters and resource-value proof. Missing consumers are not an engine incompatibility |
-| Pending | Material/glossiness coverage and batched runtime proof | Validate native hair/eye/material routes, radiance packing, first person, normal basis, vertex AO, SSAO state, full/half/quarter resolution, dynamic-size history, loading reset and saved/live settings through authorized DevBench/RenderDoc. No deployment or game session was run in this task |
+| Pending | Material/glossiness coverage and batched runtime proof | Validate native hair/eye/material routes, radiance packing, first person, normal basis, vertex AO, SSAO state, full/half/quarter resolution, dynamic-size history, loading reset and saved/live settings through authorized DevBench/RenderDoc |
 
 ## Screen Space Shadows
 
@@ -762,6 +761,6 @@ Bend reads it directly at CS t0, so first person casts as upstream does.
 
 | Kind | Upstream | Notes / where |
 |---|---|---|
-| Pending | DistantTree's 0.8 SSS strength and forward/alpha receiver coverage | Deferred material receivers have no identified distant-tree discriminator; do not invent one or bind the mask to unreached forward routes. fallout4-re engine-facts Stock forward-pass census leaves distant-tree relighting and alpha route coverage for capture proof; `DFLight.hlsl`, `DistantTree.hlsl`, `Lighting.hlsl` |
+| Pending | DistantTree's 0.8 SSS strength and forward/alpha receiver coverage | Deferred material receivers have no identified distant-tree discriminator; do not invent one or bind the mask to unreached forward routes. fallout4-re engine-facts Stock forward-pass census leaves distant-tree relighting and alpha route coverage for capture proof; `DFLight.hlsl`, `DistantTree.hlsl`, native Lighting family |
 
 [upstream]: https://github.com/community-shaders/skyrim-community-shaders
