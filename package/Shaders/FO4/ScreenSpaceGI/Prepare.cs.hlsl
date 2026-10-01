@@ -14,7 +14,7 @@ RWTexture2D<float3> ShadedDiffuse : register(u1);
 [numthreads(8, 8, 1)] void main(uint2 pixel : SV_DispatchThreadID) {
 	if (any(pixel >= uint2(FrameDim)))
 		return;
-	float3 normal = ScreenSpaceGI::DecodeViewNormal(Normal[pixel]);
+	float3 normal = FO4GBuffer::DecodeViewNormal(Normal[pixel]);
 	// FO4: spherical native normals become upstream's negated octahedral normal/gloss input.
 	NormalGloss[pixel] = float4(GBuffer::EncodeNormal(normal), Material[pixel].x, 0);
 	float3 diffuse = Diffuse[pixel];

@@ -1,10 +1,10 @@
 #ifndef FO4_WETNESS_CONSUMER_HLSLI
 #define FO4_WETNESS_CONSUMER_HLSLI
 #include "Common/Color.hlsli"
-#include "Common/GBuffer.hlsli"
 #include "Common/LightingEval.hlsli"
 #include "Common/Random.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
+#include "FO4/GBuffer.hlsli"
 #include "WetnessEffects/WetnessEffects.hlsli"
 
 namespace WetnessEffects
@@ -41,12 +41,7 @@ namespace WetnessEffects
 		float3x4 viewToWorld, float4 cameraPosAdjust,
 		float4x4 farReprojection, float4x4 nearReprojection)
 	{
-		// FO4: native sphere-map XY is not upstream octahedral encoding.
-		float2 encoded = GbufferNormal.Load(int3(int2(screenPosition), 0)).xy * 4.0 - 2.0;
-		float lengthSquared = dot(encoded, encoded);
-		float3 normal = float3(0, 0, -1);
-		if (lengthSquared <= 4.0)
-			normal = float3(encoded * sqrt(1.0 - lengthSquared * 0.25), -(1.0 - lengthSquared * 0.5));
+		float3 normal = FO4GBuffer::DecodeViewNormal(GbufferNormal.Load(int3(int2(screenPosition), 0)).xy);
 		return ReadSurface(screenPosition, normal);
 	}
 
