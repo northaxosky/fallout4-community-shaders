@@ -279,9 +279,9 @@ namespace cs::render
 			// Early draws can precede the camera capture; a miss must not poison the prepass attempt.
 			state.lastAttemptFrame = frame;
 
-			if (a_updateDepth)
-				UpdateCanonicalDepth(context, *camera);
 			try {
+				if (a_updateDepth)
+					UpdateCanonicalDepth(context, *camera);
 				SubstrateData data{};
 				data.fo4 = state.fo4;
 				PackFeatures(data, GetFeatureBufferData());
