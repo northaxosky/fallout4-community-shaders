@@ -3,9 +3,11 @@
 
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
+#include "Render/FrameProfiler.h"
 #include "Render/RendererContext.h"
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
+#include "Telemetry/Telemetry.h"
 #include "TerrainShadows.h"
 #include "Utils/CSUtil.h"
 
@@ -17,6 +19,11 @@ namespace cs::features::exponential_height_fog
 {
 	namespace
 	{
+		constexpr std::array<std::string_view, 4> kPassNames{
+			"ExponentialHeightFog/depth", "ExponentialHeightFog/material",
+			"ExponentialHeightFog/scattering", "ExponentialHeightFog/integration"
+		};
+
 		class ScatteringInputs
 		{
 		public:
@@ -131,6 +138,7 @@ namespace cs::features::exponential_height_fog
 			output->SetName("ExponentialHeightFog/SkyOutput", {}, "ExponentialHeightFog/SkyOutput.UAV");
 			_skySource = std::move(source);
 			_skyOutput = std::move(output);
+			++_skyAllocations;
 		}
 		_skyReady = true;
 	}
@@ -139,8 +147,10 @@ namespace cs::features::exponential_height_fog
 	{
 		const auto camera = engine::GetWorldCameraRecord();
 		const auto* graphics = engine::GetGraphicsState();
-		if (!_skyReady || !camera || !graphics || graphics->frameCount == _lastSkyFrame ||
-			!UpdateCamera(*camera, _previousRatio))
+		if (!_skyReady || !camera || !graphics || graphics->frameCount == _lastSkyFrame)
+			return;
+		render::annotation::ScopedEvent event("ExponentialHeightFog/sky");
+		if (!UpdateCamera(*camera, _previousRatio))
 			return;
 		auto* target = engine::ResolveRenderTarget(engine::RenderTarget::kMainTemp);
 		auto* texture = reinterpret_cast<ID3D11Texture2D*>(target->texture);
@@ -164,6 +174,7 @@ namespace cs::features::exponential_height_fog
 		}
 		engine::CopyResourcePreservingOM(a_context, texture, _skyOutput->resource.get());
 		_lastSkyFrame = graphics->frameCount;
+		++_skyDispatches;
 	}
 
 	void VolumetricFog::Prepare(const Settings& a_settings, std::uint32_t a_width, std::uint32_t a_height)
@@ -228,6 +239,7 @@ namespace cs::features::exponential_height_fog
 		_depthHistory->CreateSRV(srv);
 		_depthHistory->SetName("ExponentialHeightFog/ConservativeDepthHistory", "ExponentialHeightFog/ConservativeDepthHistory.SRV");
 		_grid = grid;
+		++_volumeAllocations;
 	}
 
 	bool VolumetricFog::Dispatch(ID3D11DeviceContext* a_context, const Settings& a_settings,
@@ -265,12 +277,15 @@ namespace cs::features::exponential_height_fog
 			static_cast<float>(std::clamp(a_settings.volumetricHistoryMissSampleCount, 1u, 16u)), 0, 0 };
 		cb.jitterParameters = { a_temporal ? std::max(a_settings.volumetricSampleJitterMultiplier, 0.0f) : 0,
 			static_cast<float>(a_frame % 8), 0, 0 };
-		_constants->Update(cb);
 		const auto* manager = engine::GetRenderTargetManager();
 		const DirectX::XMFLOAT2 ratio{ manager ? manager->GetDynamicWidthRatio() : 1.0f,
 			manager ? manager->GetDynamicHeightRatio() : 1.0f };
-		if (!UpdateCamera(a_camera, history ? _previousRatio : ratio))
-			return false;
+		{
+			render::annotation::ScopedEvent event("ExponentialHeightFog/upload");
+			_constants->Update(cb);
+			if (!UpdateCamera(a_camera, history ? _previousRatio : ratio))
+				return false;
+		}
 		engine::ComputeOMScope scope(a_context, 5, 2, 1, 1);
 		render::ScopedComputeSharedDataBinding shared(a_context);
 		if (!shared.IsActive())
@@ -283,6 +298,7 @@ namespace cs::features::exponential_height_fog
 		ID3D11SamplerState* samplers[]{ _linearSampler.get(), _shadowSampler.get() };
 		a_context->CSSetSamplers(0, 2, samplers);
 		const auto dispatch = [&](std::size_t a_pass, ID3D11UnorderedAccessView* a_output, UINT a_groupsZ) {
+			render::annotation::ScopedEvent event(kPassNames[a_pass]);
 			a_context->CSSetUnorderedAccessViews(0, 1, &a_output, nullptr);
 			a_context->CSSetShader(_shaders[a_pass].get(), nullptr, 0);
 			a_context->Dispatch((_grid.x + 7) / 8, (_grid.y + 7) / 8, a_groupsZ);
@@ -303,6 +319,7 @@ namespace cs::features::exponential_height_fog
 		ID3D11ShaderResourceView* empty[5]{};
 		a_context->CSSetShaderResources(0, 5, empty);
 		if (a_temporal) {
+			render::annotation::ScopedEvent event("ExponentialHeightFog/history_copy");
 			a_context->CopyResource(_history->resource.get(), _scattering->resource.get());
 			if (depth)
 				a_context->CopyResource(_depthHistory->resource.get(), _depth->resource.get());
@@ -311,7 +328,32 @@ namespace cs::features::exponential_height_fog
 		_hasDepthHistory = a_temporal && depth;
 		_lastFrame = a_frame;
 		_previousRatio = ratio;
+		_temporalEnabled = a_temporal;
+		++_volumeFrames;
+		if (history)
+			++_historyFrames;
 		return true;
+	}
+
+	void VolumetricFog::CollectTelemetry(telemetry::Sink& a_sink) const
+	{
+		a_sink.Field("volume_allocations", _volumeAllocations)
+			.Field("sky_allocations", _skyAllocations)
+			.Field("volume_frames", _volumeFrames)
+			.Field("history_frames", _historyFrames)
+			.Field("temporal_enabled", _temporalEnabled)
+			.Field("sky_dispatches", _skyDispatches);
+		std::uint32_t timingPasses = 0;
+		constexpr std::string_view prefix = "ExponentialHeightFog/";
+		for (const auto& result : render::profiling::GetProfiler().GetResults()) {
+			if (!result.valid || !result.name.starts_with(prefix))
+				continue;
+			const auto pass = result.name.substr(prefix.size());
+			a_sink.Field(pass + "_gpu_ms", result.gpuTimeMs)
+				.Field(pass + "_cpu_ms", result.cpuTimeMs);
+			++timingPasses;
+		}
+		a_sink.Field("timing_passes", timingPasses);
 	}
 
 	bool VolumetricFog::UpdateCamera(const engine::WorldCameraRecord& a_camera, const DirectX::XMFLOAT2& a_previousRatio)

@@ -208,6 +208,7 @@ namespace cs::features
 		_volumetricActive.store(false, std::memory_order_relaxed);
 		if (!_operational.load(std::memory_order_acquire))
 			return;
+		render::annotation::ScopedEvent event("ExponentialHeightFog/prepare");
 		Settings settings;
 		{
 			const std::lock_guard lock(_settingsMutex);
@@ -325,6 +326,7 @@ namespace cs::features
 			.Field("failures", static_cast<std::int64_t>(_failures.load()))
 			.Dimensions("volume", _width.load(), _height.load())
 			.Field("depth_slices", static_cast<std::int64_t>(_slices.load()));
+		_volume.CollectTelemetry(a_sink);
 	}
 
 	void ExponentialHeightFog::DrawSettings()

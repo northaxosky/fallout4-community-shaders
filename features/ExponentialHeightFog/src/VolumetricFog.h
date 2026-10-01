@@ -7,6 +7,11 @@
 #include <array>
 #include <memory>
 
+namespace cs::telemetry
+{
+	class Sink;
+}
+
 namespace cs::features::exponential_height_fog
 {
 	class VolumetricFog
@@ -18,6 +23,7 @@ namespace cs::features::exponential_height_fog
 			std::uint32_t a_frame, bool a_temporal);
 		void Reset();
 		void CompositeSky(ID3D11DeviceContext*);
+		void CollectTelemetry(telemetry::Sink&) const;
 		bool SkyReady() const { return _skyReady; }
 		ID3D11ShaderResourceView* Integrated() const { return _integrated ? _integrated->srv.get() : nullptr; }
 		ID3D11SamplerState* Sampler() const { return _linearSampler.get(); }
@@ -53,5 +59,8 @@ namespace cs::features::exponential_height_fog
 		bool _skyReady = false;
 		bool _hasHistory = false, _hasDepthHistory = false;
 		DirectX::XMFLOAT2 _previousRatio{ 1.0f, 1.0f };
+		// Render-thread counters persist across resource resets.
+		std::uint64_t _volumeAllocations{}, _skyAllocations{}, _volumeFrames{}, _historyFrames{}, _skyDispatches{};
+		bool _temporalEnabled{};
 	};
 }
