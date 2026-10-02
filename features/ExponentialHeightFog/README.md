@@ -37,7 +37,7 @@ CloudShadows and clustered local-light providers are pending. Terrain shadow sca
 uses the existing validated heightfield when available. Native fog color is supplied
 by the reconstructed shader equations, but native weather uploader/fade-brightness and
 sky-color mappings are unverified. Map/reflection coverage and native godray coexistence
-are also pending. See `docs\DEVIATIONS.md`; this is not a full parity claim.
+are also pending. See `docs\deviations\ExponentialHeightFog.md`; this is not a full parity claim.
 
 ## Required in-game validation
 

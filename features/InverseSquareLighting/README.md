@@ -6,7 +6,7 @@ strength, source-size or interior/exterior settings in upstream ISL.
 
 Place authoring files in `Data\F4SE\Plugins\FO4CommunityShaders\Lights\*.toml`.
 The FO4 format replaces Skyrim's occupied LIGH extension bits and repurposed
-spot fields; see [DEVIATIONS](../../docs/DEVIATIONS.md#inversesquarelighting).
+spot fields; see [DEVIATIONS](../../docs/deviations/InverseSquareLighting.md).
 Neither native form flags nor native attenuation coefficients are changed.
 Unlisted lights and explicit opt-outs retain native attenuation and color.
 

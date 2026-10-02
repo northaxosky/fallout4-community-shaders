@@ -1,0 +1,49 @@
+# Upscaling
+
+Rules, Kind legend and cross-cutting records: [README](README.md).
+
+Upstream pin: `d330bf12d`. Consumer: `package\Shaders\ISSSLRRaytracing.hlsl`.
+Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
+
+Upscaling, FrameGeneration and MotionVectorFixes are maintained in-house. These comparisons
+describe main's existing implementation, not an upstream-conversion plan or parity claim.
+The FO4 shader copies, settings keys, SDK inputs, render scheduling and presentation are retained.
+
+## Differences from pinned upstream
+
+| Kind | Upstream | Fallout 4 | Why | Where |
+|---|---|---|---|---|
+| Forced | FrameBuffer-adjusted current/previous samples in ISReflectionsRayTracing | Unchanged upstream b4 current-frame clamp plus scaled pixel dithering/Hi-Z counts; snapshot survives proxy composites | FO4 integer Hi-Z loads use full-target cb0 sizes and top-left active region with no previous-frame reflection sample; engine-facts Composite pass order / Native SSLR production | `ISSSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp` |
+| Divergence | Upstream encode/depth/fullscreen shaders | Retain FO4-owned `EncodeTexturesCS.hlsl`, `DepthRefractionUpscalePS.hlsl` and `UpscaleVS.hlsl` under `FO4/Upscaling`; use `FO4ShaderData.hlsli` where needed | In-house maintenance and ownership policy; not an engine requirement to replace upstream files | `features/Upscaling/Shaders/FO4/Upscaling`, `TemporalRendererInternals.h`, `TemporalRenderResources.cpp` |
+| Forced | Skyrim camera/state inputs | Prepass-captured world+jitter camera record supplies provider matrices, basis, origins, FOV and projection-derived near/far | engine-facts Camera-cache ownership / Main camera preparation / First-person renderer camera; Skyrim globals and buffer layout cannot identify the FO4 camera | `FrameBuffer.cpp` `GetCapturedWorldCameraRecord`, `TemporalPipeline.cpp`, `Streamline.cpp` camera constants |
+| Forced | Single non-inverted perspective depth | FO4 native scene DSV combines first-person and world projections | engine-facts Native composite depth partition / b12 near reprojection: near depth ≤0.01 and world `mad(d,1.01,-0.01)` use different inverses | `Engine.h`, `FO4/Depth.hlsli`, native depth accessors |
+| Pending | SDK world-projection depth | SR encoder copies native depth values into typed shared R32_FLOAT; SR/FG do not consume the substrate's canonical t17 depth | Equivalent world-projection SDK input is not implemented; typed storage does not reconcile projection partitions. Compatibility is not established merely by resource format | `TemporalResolve.cpp` `Upscale`, `TemporalFrameGenerationInputs.cpp`, `FO4/Upscaling/EncodeTexturesCS.hlsl` `DEPTH_OUTPUT` |
+| Forced | Depth/refraction fullscreen resolve with SAOCameraZ MRT1 | FO4 copy samples native depth/refraction normals with shared DR/jitter math and writes RefractionNormals plus SV_Depth, without SAOCameraZ | Native post-processing consumes the scene DSV; FO4 has no Skyrim SAOCameraZ attachment. engine-facts Scene-depth binding identity / Refraction-normal and depth-pyramid identities | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl`, `TemporalResolve.cpp` `UpscaleDepth` |
+| Forced | Jitter and dynamic-resolution publication into Skyrim viewport | Publish equivalent offsets and RenderTargetManager ratios after FO4's native UpdateTemporalData; preserve top-left active-region proxies and engine-image-space family routing | engine-facts Dynamic-resolution history / Main camera preparation; FO4's state/target-manager layout and native updater are different | `TemporalRenderer.cpp`, `TemporalRenderHooks.cpp`, `DynamicResolution.cpp` |
+| Divergence | Pre-tonemap SR with upstream exposure/HDR policy | Post-tonemap/LUT gamma-2.2 R8G8B8A8_UNORM SR and automatic exposure | Main's explicit color contract; no engine evidence proves pre-tonemap integration impossible | `TemporalResolve.cpp` `SuperResolutionRequest::color`, `TemporalFrameGenerationInputs.cpp` frozen color |
+| Divergence | Direct upstream FidelityFX FSR3 dispatch | Streamline FSR3/FSR4 D3D12 providers and typed shared input transport; FO4 encoder's FSR branch writes undilated motion to u2 | In-house SDK/backend architecture; upstream instead passes native motion directly and binds u2 only for DLSS | `Streamline.{h,cpp}`, `SuperResolutionProviders.cpp`, `DX12SwapChain.cpp`, `FO4/Upscaling/EncodeTexturesCS.hlsl` |
+| Divergence | FSR quality ratio used for all providers | Preserve SDK render-size queries, quality values 0–4 and provider-specific sizing; retain upstream jitter phase/sequence and projection signs | Upstream `Upscaling.cpp:854–882,911–925`: phase=int(8·(displayWidth/renderWidth)²), Halton bases 2/3 minus 0.5, offsets −2x/w,+2y/h. Upstream uses `ffxFsr3GetUpscaleRatioFromQualityMode`; FO4 queries DLSS/FSR optimal extents | `TemporalRendererInternals.h` jitter helpers, `TemporalRenderer.cpp` `PrepareRenderSize`, `Streamline.cpp` size queries |
+| Framework | CamelCase JSON keys and combined SR/FG settings | Keep TOML `upscale_method`, `quality_mode`, `streamline_log_level`, `preset_dlss`, `sharpness_fsr`, `sharpness_enabled_dlss`, `sharpness_dlss`; FG controls stay under FrameGeneration | Repository schema/persistence, live admission and fail-closed missing-GPU contracts. Equivalent SR member defaults and quality/sharpness ranges match upstream `Upscaling.h:51–69`; provider-selection differences are listed separately | `TemporalRenderSettings.h`, `Upscaling.cpp`, `FrameGenerationSettings.h` |
+| Tweak | Upstream provider selection and `upscaleMethodNoDLSS` preference | Include FSR4 in the method values and keep one persisted SR preference | Provider preference presentation/persistence; the FSR4 backend architecture is the separate Divergence above | `TemporalRenderSettings.h`, `Upscaling.cpp` |
+| Divergence | RCAS D3D11 dispatch | D3D12 RCAS on SDR output | RCAS shader is consumed unchanged and sharpness exp2 math matches; backend and color stage are in-house architecture | `RCAS/RCAS.cpp` |
+| Tweak | Upstream DLSS GPU/model preset defaults | Main's explicit/nondefault DLSS preset policy alongside RCAS controls | Preset defaults and settings presentation, not a different sharpening algorithm | `Upscaling.cpp`, `Streamline.cpp` DLSS options |
+| Pending | Production reactive/transparency masks from TAA xy and water normal.z | Encoder retains `taa.x * 0.1 + taa.y` and normal.z math, but null t0 and FO4's two-channel normal input yield zero masks | Production mask inputs are not ported; normal decoding cannot supply absent water VdotN. This difference is not established as engine-impossible | `TemporalResolve.cpp` encoder bindings, `FO4/Upscaling/EncodeTexturesCS.hlsl`, engine-facts Prepass attachment roster |
+| Pending | Upstream underwater-mask upscale and water consumer chain | Main's depth/refraction publication and linear-depth regeneration, without upstream `UnderwaterMaskUpscalePS.hlsl` | Equivalent upstream underwater producer/consumer coverage is not ported | `DynamicResolution.cpp`, `TemporalResolve.cpp`, upstream `features/Upscaling/Shaders/Upscaling/UnderwaterMaskUpscalePS.hlsl` |
+| Framework | Upstream load-reset scheduling | FO4 frame-discontinuity, frozen-frame, provider-transition and explicit reset reasons | Repository-wide lifecycle/recovery contracts; offline tests do not establish equivalent history behavior in game | `TemporalResolve.cpp`, `TemporalPipeline.cpp`, `TemporalRenderHooks.cpp` |
+
+## DX12 / presentation provenance
+
+These identify port lineage versus the current in-house implementation, not consumption of
+unchanged upstream C++. This reference does not change SDK or presentation behavior.
+
+| Kind | Component | Upstream-derived portion | FO4-authored portion |
+|---|---|---|---|
+| Divergence | `Streamline.{h,cpp}` | Upstream Upscaling Streamline integration: resource tags, DLSS options/evaluation, camera constants and Reflex/FG SDK operations | Typed provider requests/results, camera translation, D3D12 dispatch, FSR3/4 plugin integration, capability and failure contracts |
+| Divergence | `DX12SwapChain.{h,cpp}` | Upstream Upscaling's D3D11/D3D12 shared-handle/fence and proxy-presentation model | Current transport, frame-slot ownership/retirement, ordered producer/output dependencies, input publication and provider scheduling |
+| Divergence | `RCAS/RCAS.{h,cpp}` | Upstream unchanged RCAS shader and sharpness conversion | D3D12 root signature, descriptors, PSO, barriers and SDR publication |
+| Divergence | Direct `FidelityFX.{h,cpp}` | Upstream implementation exists in the shared checkout | Not consumed; FO4 FSR evaluation is through `StreamlineFidelityFXContract.h` and the Streamline SDK fork |
+| Framework | `AgilityBootstrap`, `DXGISwapChainProxy`, `DXGISwapChainFacadeContract` | D3D12/DXGI mechanisms, not shared upstream files | Repository SDK bootstrap and swapchain facade/interception |
+| Framework | `SuperResolutionProviders`, `FrameGeneration/PresentationProviders`, provider contracts | SDK operations ultimately derive from upstream Upscaling integrations | Repository typed adapters, capability admission and completion ownership |
+| Framework | `Render/SwapChainHook`, `TemporalPipeline`, `TemporalPresentation`, `FrameGenerationOrchestration` | No consumed upstream Upscaling C++ | Repository host creation hooks, frame-boundary mode transitions, frozen packets, UI admission, recovery/quarantine and retirement |
+| Divergence | `TemporalRenderer*`, `TemporalResolve`, `TemporalFrameGenerationInputs`, `DynamicResolution`, `SamplerBias`, `UpscalingAnchors`, `UpscalingPublication`, `ProviderOutputPreview` | Upstream jitter/encode/resolve algorithms with the local differences listed above | FO4 render scheduling, native target proxies, sampler edits, publication, capture diagnostics and engine-callsite anchors |
+
