@@ -1133,8 +1133,7 @@ namespace
 				 {}, { { "SKINNED", "1" }, { "FACE", "1" } },
 				 { { "LANDSCAPE", "1" } }, { { "BLEND", "1" } },
 				 { { "MODELSPACENORMALS", "1" } }, { { "TESSELLATE_DISP_HEIGHT", "1" } },
-				 { { "EYE", "1" } }, { { "TREE_ANIM", "1" } },
-				 { { "LOD_LANDSCAPE", "1" } }, { { "LOD_OBJECT_INSTANCED", "1" } },
+				 { { "LOD_LANDSCAPE", "1" } },
 				 { { "LANDSCAPE", "1" }, { "INSTANCED", "1" } },
 				 { { "MERGE_INSTANCED", "1" } },
 				 { { "SKINNED", "1" }, { "MODELSPACENORMALS", "1" } },
@@ -1156,6 +1155,19 @@ namespace
 				.profile = "vs_5_0",
 				.description = "Wetness deferred geometry interface",
 				.forbidden = { CB(4), CB(5), CB(6), CB(7), CB(8), Texture(71) } });
+		}
+		for (const auto& material : std::vector<ShaderDefines>{
+				 { { "GRASS", "1" } }, { { "GRASS", "1" }, { "ALPHA_TEST", "1" } },
+				 { { "EYE", "1" } }, { { "TREE_ANIM", "1" } }, { { "LOD_OBJECT_INSTANCED", "1" } } }) {
+			auto defines = material;
+			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
+											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "NORMALS", "1" } });
+			a_jobs.push_back({ .path = prepass,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "Wetness upstream-excluded class writes a dry film",
+				.required = { CB(6), Texture(71) },
+				.forbidden = { CB(4), CB(5), CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
 		}
 		for (const auto& material : std::vector<ShaderDefines>{
 				 { { "SKINNED", "1" } }, { { "MODELSPACENORMALS", "1" } } }) {

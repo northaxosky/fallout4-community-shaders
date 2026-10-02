@@ -1271,39 +1271,42 @@ struct PS_OUTPUT
 		output.motionVec = (currNDC - prevNDC) * float2(-0.5, 0.5);
 #	endif
 #	ifdef WETNESS_EFFECTS
+		// FO4: grass, tree animation, eyes and LOD objects share this pass; upstream compiles them without wetness.
+#		if !(GRASS || TREE_ANIM || EYE || LOD_OBJECT_INSTANCED)
 		if (wetnessOwned) {
 			FO4Wetness::MaterialInput wetInput;
 			wetInput.cameraRelativePosition = input.curr_pos_u.xyz;
-#		if !TESSELLATE_DISP_HEIGHT
+#			if !TESSELLATE_DISP_HEIGHT
 			wetInput.modelPosition = input.wetModelPosition;
-#		else
+#			else
 			wetInput.modelPosition = input.curr_pos_u.xyz + FrameBuffer::CameraPosAdjust.xyz;
-#		endif
+#			endif
 			float3 vertexView = float3(input.tangent.z, input.bitangent.z, input.normal.z);
 			float3 shadingView = normalize(float3(axisX, axisY, axisZ));
-#		if TESSELLATE_DISP_HEIGHT
+#			if TESSELLATE_DISP_HEIGHT
 			vertexView = FrameBuffer::WorldToView(FO4Wetness::TessellatedDirectionToWorld(vertexView), false);
 			float3 projectedNormal = float3(dot(input.tangent, nts), dot(input.bitangent, nts), dot(input.normal, nts));
 			shadingView = FrameBuffer::WorldToView(FO4Wetness::TessellatedDirectionToWorld(projectedNormal), false);
-#		endif
-#		if MODELSPACENORMALS && !TESSELLATE_DISP_HEIGHT
+#			endif
+#			if MODELSPACENORMALS && !TESSELLATE_DISP_HEIGHT
 			vertexView = input.wetGeometryNormal.xyz;
-#		endif
+#			endif
 			wetInput.vertexNormal = normalize(FrameBuffer::ViewToWorld(vertexView, false));
 			wetInput.shadingNormal = normalize(FrameBuffer::ViewToWorld(shadingView, false));
 			wetInput.viewDepth = FrameBuffer::WorldToView(input.curr_pos_u.xyz).z;
 			wetInput.environmentMapped = cb2_material_id_and_smoothness.y != 0.0;
 			wetInput.environmentMask = saturate(50.0 * output.material.z * output.material.z);
-#		if SKINNED
+#			if SKINNED
 			wetInput.skinned = true;
-#		else
+#			else
 			wetInput.skinned = false;
-#		endif
+#			endif
 			wetInput.skinOrHair = SKIN_TINT || FACE || HAIR;
-			wetInput.excludeDarkening = SKIN_TINT || FACE || EYE;
+			wetInput.excludeDarkening = SKIN_TINT || FACE;
 			wetInput.inWorld = true;
 			output.wetFilm = FO4Wetness::PrepareMaterial(wetInput, output.albedo.xyz);
 		}
+#		endif
 #		if BLEND
 		output.wetFilm.w *= output.normalOct.w;
 #		endif
