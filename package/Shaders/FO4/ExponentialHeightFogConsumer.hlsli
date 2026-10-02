@@ -5,7 +5,7 @@
 #include "FO4/Depth.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
 #if !defined(FO4_FOG_SAMPLER) && defined(TERRAIN_SHADOWS)
-// The runtime's shared linear-clamp s13 claim must also use one HLSL declaration.
+// Fog and terrain shadows share the linear-clamp sampler at s13.
 #	include "FO4/TerrainShadowsConsumer.hlsli"
 #	define SampColorSampler TerrainShadows::TerrainShadowsSampler
 #else
