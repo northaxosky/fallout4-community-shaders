@@ -5,8 +5,8 @@ Rules, Kind legend and cross-cutting records: [README](README.md).
 Upstream pin: `d330bf12d` (shared pin `6f81ebc2512da5564f37e728a65037b4c45e2a67`). `WaterCaustics.hlsli` and
 `watercaustics.dds` are staged unchanged through `xmake/shared.lua`; the FO4 caustics
 kernel and CPU shader mirror are deleted. There are no caustics quality knobs.
-Feature classification: **mixed** ([FEATURES](../FEATURES.md)). Caustics are core; water parallax needs FO4
-normal-alpha height assets and is an extension slice.
+Feature classification: **core** ([FEATURES](../FEATURES.md)). Water parallax reads height that water texture
+mods ship in the normal alpha; FLOWMAP variants have no FO4 flowmap path.
 Camera-cell `WaterSystemHeight` and fullscreen diagnostics are minor FO4 adjustments.
 
 ## Translations
@@ -26,12 +26,13 @@ Camera-cell `WaterSystemHeight` and fullscreen diagnostics are minor FO4 adjustm
 
 | Kind | Upstream | Why / evidence | Where |
 |---|---|---|---|
-| Forced | WaterParallax three normal-alpha height layers, including FLOWMAP variants | Vanilla normals have no height alpha. fallout4-re `docs/bswater-promotion.md` Shore Effects runtime evidence contract records the absent height signal; native `Water.hlsl` `normalSlope` reads only XY. No height assets are invented and the water-parallax path remains stock | `Water.hlsl`; upstream `WaterParallax.hlsli` is not staged |
+| Forced | WaterParallax FLOWMAP variants | Reconstructed FO4 `Water.hlsl` has no FLOWMAP path or flow-field input | `Water.hlsl`; upstream `WaterParallax.hlsli` FLOWMAP branches |
 | Forced | Interior cell water height | FO4's exterior-height accessor explicitly rejects interior cells; engine-facts Exterior cell height. The table retains -FLT_MAX rather than borrowing the player's cached plane. Placed-water mesh intersections are outside the upstream cell-height approximation | `Water.cpp` `CellWaterData` |
 
 ## Pending
 
 | Kind | Upstream | Notes |
 |---|---|---|
+| Pending | WaterParallax three normal-alpha height layers | Vanilla normals carry no height alpha (fallout4-re `docs/bswater-promotion.md`), but water texture mods do (Enhanced Vanilla Water: BC7 normals with height alpha). Stage `WaterParallax.hlsli`, read `.a` at the existing t4 normal samples, match upstream's height convention, and keep vanilla alpha-less normals flat |
 | Pending | Secondary mode-0/21 BSLighting caustics | World and first-person accumulators issue no BSLighting passes (engine-facts BSLighting forward-pass source), so their caustics are deferred. Secondary-view BSLighting execution and camera/resource lifetime are not validated or integrated; do not classify that missing adapter as an engine limitation |
 

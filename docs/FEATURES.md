@@ -73,7 +73,7 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | [Upscaling](deviations/Upscaling.md) | Core | SR/native AA, DR/RCAS/reflection/depth consumers, canonical SDK depth, masks, underwater chain, FG/UI/Reflex | — | Pt | H | L | High |
 | Volumetric Lighting | Mixed | Native GFSDK enable/quality controls | Ext: full raymarched renderer. N/A: Skyrim dispatch optimization | NS | L | S | Med |
 | Volumetric Shadows | Core | VSM producer, DFLight soft sun, Effect/Water short rays, Particle receiver | — | NS | H | L | Med |
-| [Water Effects](deviations/WaterEffects.md) | Mixed | Exterior/secondary caustics, interior heights*, debug | Ext: normal-alpha water parallax, flowmap parallax (height assets) | Pt | H | L | High |
+| [Water Effects](deviations/WaterEffects.md) | Core | Exterior/secondary caustics, interior heights*, debug, water parallax (height from water-normal alpha) | N/A: FLOWMAP parallax (no FO4 flowmap path) | Pt | H | M | High |
 | [Wetness Effects](deviations/WetnessEffects.md) | Mixed | Weather accumulation, wet albedo/shore, water-surface rain ripples, shelter | Ext: MRT6 film (normals/roughness/coat), ground ripples/splashes, flowmap ripples | Pt | H | M | High |
 
 [FrameGeneration](deviations/FrameGeneration.md) and [MotionVectorFixes](deviations/MotionVectorFixes.md)
@@ -92,6 +92,10 @@ are FO4-only rule-4 core features.
 - **Dynamic Cubemaps dry materials.** Sample the DC cube (t34/t35) at the six native probe sites in
   `DFComposite.hlsl`, keeping FO4 gain, SSLR blend and exclusions. Use DC's roughness-to-mip contract, not
   the native probe LOD.
+- **Water parallax.** Vanilla water normals have no height, but water texture mods do: Enhanced Vanilla
+  Water ships BC7 `DefaultWater`/`DefaultWaterTile`/`ChurningWaterTile` with height in alpha. `Water.hlsl`
+  already samples those normals (t4) and reads only `.xy`; reading `.a` is a relocated datum. Check the
+  height range against upstream's convention and gate vanilla (alpha-less) normals.
 - **Wetness Effects.** `package\Shaders\Water.hlsl` has no `WETNESS_EFFECTS`/`GetRainDrops` consumer; the
   water-surface rain slice is missing.
 - **Subsurface Scattering.** Replace FO4's fixed second-composite blur with upstream separable/Burley on
@@ -114,7 +118,7 @@ Ordered by user value over effort, respecting dependencies.
 
 1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE.
 2. **Finish ported features:** DC dry materials (S/M); Wetness water-surface rain (M); Terrain Shadows FO4
-   heightmap pack (M); Water Effects caustics proof (S).
+   heightmap pack (M); Water Effects caustics proof (S) and water parallax (M).
 3. **Cheap new features:** LOD Blending (S); Terrain Variation (M); Remote Control (M; DevBench automation).
 4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
 5. **Mid-size, few dependencies:** Cloud Shadows (L; feeds EHF); Subsurface Scattering (M); Volumetric
@@ -130,6 +134,6 @@ Ordered by user value over effort, respecting dependencies.
 
 Shipped: Wetness MRT6 film. Not planned: DC authored reflectance/material workflow. Candidates: TruePBR
 full materials; Extended Materials complex materials and parallax shadows; Grass Optimizations renderer;
-Unified Water tiles and flowmaps; water parallax height assets; Terrain Blending lit transition; Terrain
+Unified Water tiles and flowmaps; Terrain Blending lit transition; Terrain
 Helper ESP; Skin RFAOS/wet film; SSS profiles; Hair Kajiya-Kay and blended hair; LLF capacity/shadow
 redesign; full Volumetric Lighting renderer; Extended Translucency world coverage.
