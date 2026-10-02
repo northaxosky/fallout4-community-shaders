@@ -114,6 +114,7 @@ namespace cs::telemetry
 
 		void CollectShaderInjection(Sink& a_sink)
 		{
+			cs::render::profiling::CollectPassTimings(a_sink);
 			const auto summary =
 				cs::engine::GetShaderInjectionSummary();
 			std::string lostSlots;
@@ -705,7 +706,7 @@ namespace cs::telemetry
 			return;
 		g_installed = true;
 		if (!cs::engine::RegisterPostDeferredComposite([] {
-				cs::render::profiling::MarkEngineFrame();
+				cs::render::profiling::MarkEngineFrame(pump::Enabled());
 				pump::Tick();
 			})) {
 			g_compositeSamplingAvailable.store(false, std::memory_order_relaxed);

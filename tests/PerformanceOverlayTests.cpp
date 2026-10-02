@@ -1,10 +1,21 @@
 #include <Features/PerformanceOverlay/ABTesting/ABTestAggregator.h>
 #include <Profiler.h>
+#include "Log.h"
+#include "Render/Annotation.h"
+#include "Render/FrameProfiler.h"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <thread>
+
+namespace cs::log
+{
+	spdlog::logger* Get(const char*)
+	{
+		return spdlog::default_logger_raw();
+	}
+}
 
 namespace
 {
@@ -19,6 +30,63 @@ namespace
 	}
 
 #define CHECK(a_expression) Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
+
+	void TestTelemetryWithoutOverlay()
+	{
+		namespace profiling = cs::render::profiling;
+		using cs::render::annotation::ScopedEvent;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		const auto result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+			D3D11_SDK_VERSION, device.put(), nullptr, context.put());
+		CHECK(SUCCEEDED(result));
+		if (FAILED(result))
+			return;
+		profiling::InitializeD3D11(device.get(), context.get());
+		profiling::SetEnabled(true);
+		profiling::MarkEngineFrame(false);
+		CHECK(!profiling::BeginPass("Test::Disabled"));
+		profiling::SetEnabled(false);
+		profiling::MarkEngineFrame(true);
+		{
+			ScopedEvent group("Test::Group", false);
+			for (int i = 0; i < 2; ++i) {
+				ScopedEvent leaf("Test::Repeated");
+				// A rejected nested scope must not end the active leaf.
+				ScopedEvent nested("Test::Nested");
+			}
+			ScopedEvent sibling("Test::Sibling");
+		}
+		bool collected{};
+		for (int frame = 0; frame < 12; ++frame) {
+			profiling::MarkEngineFrame(true);
+			context->Flush();
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+			const auto& results = profiling::GetProfiler().GetResults();
+			if (results.empty())
+				continue;
+			CHECK(results.size() == 2);
+			const auto repeated = std::ranges::find(results, "Test::Repeated", &Profiler::TimerResult::name);
+			const auto sibling = std::ranges::find(results, "Test::Sibling", &Profiler::TimerResult::name);
+			CHECK(repeated != results.end() && sibling != results.end());
+			if (repeated != results.end() && !collected) {
+				CHECK(repeated->historyCount == 2);
+				CHECK(std::abs(repeated->gpuTimeMs -
+					(repeated->GetHistorySample(0) + repeated->GetHistorySample(1))) < 0.0001f);
+			}
+			collected = true;
+		}
+		CHECK(collected);
+		profiling::MarkEngineFrame(false);
+		CHECK(!profiling::BeginPass("Test::DisabledAgain"));
+		CHECK(profiling::GetProfiler().GetResults().empty());
+		// Re-enabling starts a fresh query ring, not stale pre-disable results.
+		profiling::MarkEngineFrame(true);
+		CHECK(profiling::BeginPass("Test::Reenabled"));
+		profiling::EndPass();
+		CHECK(profiling::GetProfiler().GetResults().empty());
+		profiling::MarkEngineFrame(false);
+	}
 
 	void TestQueryCollectionAndRetirement()
 	{
@@ -85,6 +153,7 @@ namespace
 
 int main()
 {
+	TestTelemetryWithoutOverlay();
 	TestQueryCollectionAndRetirement();
 	TestAggregationWithOutliers();
 	if (failures)

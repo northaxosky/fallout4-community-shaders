@@ -199,6 +199,7 @@ namespace cs::features
 			cs::render::annotation::SetName(_filmSRV.get(), "WetnessEffects::Film SRV");
 		}
 		const float dry[]{ 0.5f, 0.5f, 1.0f, 0.0f };
+		cs::render::annotation::ScopedEvent timing("WetnessEffects/ClearFilm");
 		context->ClearRenderTargetView(_filmRTV.get(), dry);
 		_filmReady.store(true, std::memory_order_relaxed);
 	}

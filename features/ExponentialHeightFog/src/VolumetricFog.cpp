@@ -346,17 +346,7 @@ namespace cs::features::exponential_height_fog
 			.Field("history_frames", _historyFrames)
 			.Field("temporal_enabled", _temporalEnabled)
 			.Field("sky_dispatches", _skyDispatches);
-		std::uint32_t timingPasses = 0;
-		constexpr std::string_view prefix = "ExponentialHeightFog/";
-		for (const auto& result : render::profiling::GetProfiler().GetResults()) {
-			if (!result.valid || !result.name.starts_with(prefix))
-				continue;
-			const auto pass = result.name.substr(prefix.size());
-			a_sink.Field(pass + "_gpu_ms", result.gpuTimeMs)
-				.Field(pass + "_cpu_ms", result.cpuTimeMs);
-			++timingPasses;
-		}
-		a_sink.Field("timing_passes", timingPasses);
+		render::profiling::CollectPassTimings(a_sink, "ExponentialHeightFog/");
 	}
 
 	bool VolumetricFog::UpdateCamera(const engine::WorldCameraRecord& a_camera, const DirectX::XMFLOAT2& a_previousRatio)

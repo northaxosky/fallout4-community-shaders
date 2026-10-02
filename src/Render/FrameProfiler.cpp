@@ -8,6 +8,11 @@
 #include <map>
 #include <mutex>
 
+#ifdef TRACY_SUPPORT
+#	include <tracy/Tracy.hpp>
+#	include <tracy/TracyD3D11.hpp>
+#endif
+
 namespace cs::render::profiling
 {
 	namespace
@@ -18,15 +23,22 @@ namespace cs::render::profiling
 			{
 				profiler.EndFrame();
 				profiler.Release();
-				if (context)
-					TracyD3D11Destroy(context);
+#ifdef TRACY_SUPPORT
+				if (tracyContext)
+					TracyD3D11Destroy(tracyContext);
+#endif
 			}
 
 			std::mutex mutex;
-			TracyD3D11Ctx context{};
+#ifdef TRACY_SUPPORT
+			TracyD3D11Ctx tracyContext{};
+#endif
+			ID3D11Device* device{};
+			ID3D11DeviceContext* context{};
 			Profiler profiler;
 			bool initialized{};
 			bool enabled{};
+			bool telemetryEnabled{};
 			std::string activePass;
 			std::map<int, ShaderTiming> shaderFrame;
 			std::vector<ShaderTiming> shaderTimings;
@@ -50,31 +62,44 @@ namespace cs::render::profiling
 			return;
 		auto& state = State();
 		const std::scoped_lock lock{ state.mutex };
-		if (!state.context)
-			state.context = TracyD3D11Context(a_device, a_context);
-		if (!state.initialized) {
-			// FO4: the engine device owns the unchanged shared query profiler.
-			state.profiler.Initialize(a_device, a_context);
-			state.initialized = true;
-			annotation::SetProfilerCallbacks(BeginPass, EndPass);
-		}
+		state.device = a_device;
+		state.context = a_context;
+#ifdef TRACY_SUPPORT
+		if (!state.tracyContext)
+			state.tracyContext = TracyD3D11Context(a_device, a_context);
+#endif
+		annotation::SetProfilerCallbacks(BeginPass, EndPass);
 	}
 
-	void MarkEngineFrame() noexcept
+	void MarkEngineFrame(bool a_telemetryEnabled) noexcept
 	{
+#ifdef TRACY_SUPPORT
 		FrameMark;
+#endif
 		auto& state = State();
 		const std::scoped_lock lock{ state.mutex };
-		if (state.context)
-			TracyD3D11Collect(state.context);
+#ifdef TRACY_SUPPORT
+		if (state.tracyContext)
+			TracyD3D11Collect(state.tracyContext);
+#endif
 		if (!state.activePass.empty()) {
 			cs::log::Get("cs.profiler")->error("Pass {} crosses the engine-frame boundary", state.activePass);
 			state.profiler.EndPass();
 			state.activePass.clear();
 		}
 		state.profiler.EndFrame();
-		if (state.enabled)
+		state.telemetryEnabled = a_telemetryEnabled;
+		if (state.telemetryEnabled && state.device && !state.initialized) {
+			// Allocate timestamp queries only on the render thread while telemetry is enabled.
+			state.profiler.Initialize(state.device, state.context);
+			state.initialized = true;
+		}
+		if (state.telemetryEnabled && state.initialized)
 			state.profiler.BeginFrame();
+		else if (state.initialized) {
+			state.profiler.Release();
+			state.initialized = false;
+		}
 		++state.sequence;
 		for (auto& timing : state.shaderTimings) {
 			const auto& sample = state.shaderFrame[timing.type];
@@ -100,19 +125,13 @@ namespace cs::render::profiling
 		state.shaderFrame.clear();
 		state.shaderType = -1;
 		state.lastDraw = Util::GetNowSecs();
-		if (!a_enabled) {
-			if (!state.activePass.empty())
-				state.profiler.EndPass();
-			state.profiler.EndFrame();
-			state.activePass.clear();
-		}
 	}
 
 	bool BeginPass(std::string_view a_name)
 	{
 		auto& state = State();
 		// FO4: annotation scopes can nest, but the shared profiler requires disjoint passes.
-		if (!state.enabled || !state.initialized || !state.activePass.empty())
+		if (!state.telemetryEnabled || !state.initialized || !state.activePass.empty())
 			return false;
 		state.activePass = a_name;
 		state.profiler.BeginPass(state.activePass);

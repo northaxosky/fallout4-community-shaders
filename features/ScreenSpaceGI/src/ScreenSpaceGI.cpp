@@ -297,6 +297,7 @@ namespace cs::features
 			QueueReset("resource_recreation");
 			const float clear[4]{};
 			auto* context = cs::engine::GetImmediateContext();
+			cs::render::annotation::ScopedEvent timing("SSGI/ClearHistory");
 			for (auto* textures : { &_textures.ao, &_textures.accumulation, &_textures.luma, &_textures.chroma, &_textures.specular })
 				for (auto& texture : *textures)
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
@@ -414,6 +415,7 @@ namespace cs::features
 			const bool reset = _queuedReset.exchange(false);
 			_historyUsed = !reset && _settings.enableTemporalDenoiser;
 			if (reset) {
+				cs::render::annotation::ScopedEvent timing("SSGI/ResetAccumulation");
 				const float clear[4]{};
 				for (auto& texture : _textures.accumulation)
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);

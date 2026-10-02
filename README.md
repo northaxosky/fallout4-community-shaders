@@ -115,6 +115,20 @@ The `component=shader_injection` telemetry line reports the previous completed d
 `draw_d3d_binds` count scopes, state-save calls, restore calls, and injection D3D state-setting calls.
 These fields are per-frame; the existing `dispatches` counter is cumulative and counts contributor callbacks.
 
+With `[logging] telemetry = true`, the same line includes `<annotation-name>_gpu_ms` and
+`<annotation-name>_cpu_ms` for timed D3D11 feature passes, plus `timing_passes`. Names retain
+their separators and casing, for example `Render/CanonicalDepth_gpu_ms`, `SSGI/GI_gpu_ms`,
+`ScreenSpaceShadows/Raymarch_gpu_ms`, `DynamicCubemaps::Compress_gpu_ms`,
+`TerrainShadows/Update_gpu_ms`, and `WetnessEffects/ClearFilm_gpu_ms`.
+Fog also retains its feature-local fields such as `scattering_gpu_ms`.
+GPU timestamps run independently of Performance Overlay visibility; disabling telemetry
+releases their queries and clears their results. Enabling takes effect at the next composite
+frame boundary. Results arrive asynchronously (at least three engine frames later), not
+necessarily for `draw_frame`; inactive passes retain their last sample until retirement after
+60 collected frames. Repeated names in a collected frame are summed, not overwritten.
+CPU fields measure submission time within each scope, not GPU execution.
+D3D12 frame-generation/RCAS markers are not timestamped by this D3D11 profiler.
+
 ---
 
 ## In-game Menu

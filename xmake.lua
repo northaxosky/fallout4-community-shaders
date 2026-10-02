@@ -327,9 +327,14 @@ end)
 target("PerformanceOverlayTests", function()
     set_kind("binary")
     set_default(false)
-    add_files("tests/PerformanceOverlayTests.cpp")
+    add_files(
+        "tests/PerformanceOverlayTests.cpp",
+        "src/Render/FrameProfiler.cpp",
+        "src/Render/Annotation.cpp"
+    )
+    add_packages("spdlog", "vcpkg::tomlplusplus")
     add_defines("NOMINMAX", "WIN32_LEAN_AND_MEAN")
-    add_syslinks("d3d11", "ole32")
+    add_syslinks("d3d11", "dxguid", "ole32")
     on_load(function(target)
         import("xmake.shared", { rootdir = os.projectdir() }).main(target)
     end)
