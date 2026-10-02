@@ -9,27 +9,27 @@ namespace cs
 {
 	namespace
 	{
-		template <class Data, class Feature>
-		Data CollectFeatureData(Feature* a_feature)
+		template <class Data, class Feature, class... Args>
+		Data CollectFeatureData(Feature* a_feature, Args... a_args)
 		{
 			if (!a_feature || !a_feature->IsLoaded())
 				return {};
-			return a_feature->GetCommonBufferData();
+			return a_feature->GetCommonBufferData(a_args...);
 		}
 	}
 
 	FeatureDataCB GetFeatureBufferData()
 	{
+		const auto dynamicCubemaps = CollectFeatureData<DynamicCubemapsFeatureData>(
+			features::DynamicCubemaps::GetSingleton());
 		return {
 			.wetnessEffectsSettings =
 				CollectFeatureData<WetnessEffectsFeatureData>(
-					features::WetnessEffects::GetSingleton()),
+					features::WetnessEffects::GetSingleton(), dynamicCubemaps.Enabled != 0),
 			.terrainShadowsSettings =
 				CollectFeatureData<TerrainShadowsFeatureData>(
 					features::TerrainShadows::GetSingleton()),
-			.dynamicCubemapsSettings =
-				CollectFeatureData<DynamicCubemapsFeatureData>(
-					features::DynamicCubemaps::GetSingleton()),
+			.dynamicCubemapsSettings = dynamicCubemaps,
 			.exponentialHeightFogSettings =
 				CollectFeatureData<render::ExponentialHeightFogSettings>(
 					features::ExponentialHeightFog::GetSingleton())
