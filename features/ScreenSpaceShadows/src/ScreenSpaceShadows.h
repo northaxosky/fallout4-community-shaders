@@ -2,9 +2,9 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "ScreenSpaceShadowsResources.h"
 #include "ScreenSpaceShadowsSettings.h"
 #include "ShaderDefines.h"
-#include "SssMaskBinding.h"
 #include "Utils/CSBuffer.h"
 
 #include <atomic>
@@ -63,15 +63,15 @@ namespace cs::features
 		void BindShadowMask(ID3D11DeviceContext* a_context);
 		bool EnsureResources();
 		bool TryGetMaskExtents(
-			sss_mask_binding::Extent& a_required,
-			sss_mask_binding::Extent& a_allocation) const;
+			sss_resources::Extent& a_required,
+			sss_resources::Extent& a_allocation) const;
 		bool EnsureWhiteFallback(
 			ID3D11Device* a_device,
-			sss_mask_binding::Extent a_required,
-			sss_mask_binding::Extent a_allocation);
+			sss_resources::Extent a_required,
+			sss_resources::Extent a_allocation);
 		bool CreateWhiteFallback(
 			ID3D11Device* a_device,
-			sss_mask_binding::Extent a_allocation);
+			sss_resources::Extent a_allocation);
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
@@ -103,9 +103,9 @@ namespace cs::features
 		bool _realMaskReadyForDraw = false;
 		ID3D11Device* _deviceIdentity = nullptr;
 		std::uint64_t _deviceGeneration = 0;
-		sss_mask_binding::Extent _requiredMaskExtent;
-		sss_mask_binding::ExtentState _whiteFallbackExtent;
-		sss_mask_binding::FallbackAllocationBackoff
+		sss_resources::Extent _requiredMaskExtent;
+		sss_resources::ExtentState _whiteFallbackExtent;
+		sss_resources::FallbackAllocationBackoff
 			_whiteFallbackBackoff;
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _raymarchCB;
