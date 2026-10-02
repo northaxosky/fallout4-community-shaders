@@ -1071,11 +1071,11 @@ namespace
 					.profile = "ps_5_0",
 					.description = family,
 					.required = dynamicCubemaps ?
-					                std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
-					                std::vector<Resource>{},
+				                    std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
+				                    std::vector<Resource>{},
 					.forbidden = dynamicCubemaps ?
-					                 std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
-					                 std::vector<Resource>{ CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35), Texture(71) } });
+				                     std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
+				                     std::vector<Resource>{ CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35), Texture(71) } });
 				AddFullscreenDebugVariant(a_jobs, a_jobs.back(), "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(7), Texture(25), Texture(71) });
 			}
 		}

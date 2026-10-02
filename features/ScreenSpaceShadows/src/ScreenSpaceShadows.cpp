@@ -94,7 +94,7 @@ namespace cs::features
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const ScreenSpaceShadows&>(a_feature)
-					    .GetShadowMaskDebugTexture();
+			            .GetShadowMaskDebugTexture();
 				} }
 		};
 		return views;

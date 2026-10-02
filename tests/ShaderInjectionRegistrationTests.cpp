@@ -36,7 +36,7 @@ namespace
 	bool compilationPending = false;
 
 	class TestCompilationHandle final :
-	    public cs::engine::ShaderVariantCompilationHandle
+		public cs::engine::ShaderVariantCompilationHandle
 	{
 	public:
 		TestCompilationHandle(
@@ -72,7 +72,7 @@ namespace
 	};
 
 	class TestCompilationCache final :
-	    public cs::engine::ShaderVariantCompilationCache
+		public cs::engine::ShaderVariantCompilationCache
 	{
 	public:
 		std::shared_ptr<cs::engine::ShaderVariantCompilationHandle> Request(

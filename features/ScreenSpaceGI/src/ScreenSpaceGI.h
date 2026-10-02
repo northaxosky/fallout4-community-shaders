@@ -16,8 +16,8 @@
 namespace cs::features
 {
 	class ScreenSpaceGI :
-	    public ShaderFeature<ssgi::kShaderDefines>,
-	    public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		public ShaderFeature<ssgi::kShaderDefines>,
+		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 	public:
 		static ScreenSpaceGI* GetSingleton();
