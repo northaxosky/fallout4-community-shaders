@@ -1858,6 +1858,17 @@ namespace cs::engine
 			summary.published);
 	}
 
+	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept
+	{
+		if (a_targets.empty())
+			return;
+		auto& service = GetService();
+		std::scoped_lock lock(service.nativeVariantMutex);
+		std::erase_if(service.nativeVariants, [a_targets](const auto& a_entry) {
+			return std::ranges::find(a_targets, a_entry.first.target) != a_targets.end();
+		});
+	}
+
 	void InvalidateNativeShaderVariantCompilations() noexcept
 	{
 		auto& service = GetService();

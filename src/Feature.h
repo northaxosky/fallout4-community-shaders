@@ -179,7 +179,7 @@ namespace cs
 	{
 	public:
 		std::string_view GetShaderDefineName() const override { return Declaration.GetShaderDefineName(); }
-		engine::ShaderDefineOptions GetShaderDefineOptions(engine::ShaderInjectionTarget a_target = engine::ShaderInjectionTarget::kCount) const override { return Declaration.GetShaderDefineOptions(a_target); }
+		engine::ShaderDefineOptions GetShaderDefineOptions(engine::ShaderInjectionTarget a_target = engine::ShaderInjectionTarget::kCount) const override { return Declaration.GetShaderDefineOptions(a_target, IsFullscreenDebugSelected()); }
 		bool HasShaderDefine(engine::ShaderInjectionTarget a_target) const override { return Declaration.HasShaderDefine(a_target); }
 		bool RequiresShaderGraphicsPair(engine::ShaderInjectionTarget a_target) const override { return Declaration.RequiresShaderGraphicsPair(a_target); }
 	};

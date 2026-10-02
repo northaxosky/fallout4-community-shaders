@@ -281,6 +281,8 @@ namespace cs::engine
 		std::size_t a_bytecodeLength,
 		ID3D11DeviceChild* a_shader) noexcept;
 	void InvalidateNativeShaderVariantCompilations() noexcept;
+	// Define changes retire target lookups, retaining immutable compiled variants and native identities.
+	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept;
 
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept;

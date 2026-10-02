@@ -26,6 +26,15 @@ namespace WaterEffects
 		float3 position = FrameBuffer::ViewToWorld(viewPosition);
 		return ComputeCaustics(SharedData::GetWaterData(position), position);
 	}
+
+	bool TryGetDebugColorFromViewPosition(
+		float3 viewPosition,
+		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2,
+		float4 cameraPosAdjust, out float4 color)
+	{
+		color = 0.0;
+		return false;
+	}
 #else
 	// FO4: composite s14 belongs to scene colour; sample the isolated debug result.
 	bool TryGetDebugColor(float2 pixelPosition, out float4 color)

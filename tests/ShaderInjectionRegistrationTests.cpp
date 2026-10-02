@@ -31,6 +31,9 @@ namespace
 	std::optional<bool> activeComputeVariantDefine;
 	std::array<winrt::com_ptr<ID3D11Buffer>, cs::render::kSubstrateBufferCount> publishedComputeBuffers;
 	winrt::com_ptr<ID3D11ShaderResourceView> publishedDepth;
+	std::vector<cs::engine::ShaderVariantCompilationRequest> compilationRequests;
+	std::uint32_t compilationInvalidations = 0;
+	bool compilationPending = false;
 
 	class TestCompilationHandle final :
 		public cs::engine::ShaderVariantCompilationHandle
@@ -76,6 +79,9 @@ namespace
 			cs::engine::ShaderVariantCompilationRequest a_request) override
 		{
 			using namespace cs::engine;
+			compilationRequests.push_back(a_request);
+			if (compilationPending)
+				return std::make_shared<TestCompilationHandle>(nullptr, ShaderVariantCompilationState::kPending);
 			if (!a_request.device || a_request.stage != ShaderStage::kCompute) {
 				return std::make_shared<TestCompilationHandle>(
 					nullptr,
@@ -143,7 +149,7 @@ namespace
 				std::move(child));
 		}
 
-		void Invalidate() override {}
+		void Invalidate() override { ++compilationInvalidations; }
 		void Stop() noexcept override {}
 	};
 }
@@ -699,10 +705,15 @@ namespace
 				Expect(descriptor && descriptor->sourcePath == GetShaderPath(family->name).wstring(),
 					"native family did not compile from its engine name");
 				if (descriptor) {
-					Expect(BuildEffectiveShaderCompileRequest(*GetShaderInjectionTarget(contribution.targetId),
-							   stage, *descriptor, GetFeatureShaderContributions())
-							   .has_value(),
+					const auto request = BuildEffectiveShaderCompileRequest(*GetShaderInjectionTarget(contribution.targetId),
+						stage, *descriptor, GetFeatureShaderContributions());
+					Expect(request.has_value(),
 						"native family rejected its feature contributions");
+					if (request) {
+						Expect(std::ranges::none_of(request->defines, [](const auto& define) {
+							return define.first.ends_with("_FULLSCREEN_DEBUG");
+						}), "production contribution includes fullscreen debug code");
+					}
 				}
 			}
 		}
@@ -717,6 +728,44 @@ namespace
 		Expect(wetness != GetFeatureShaderContributions().end() && wetness->requiresGraphicsPair &&
 				   wetness->stages == (ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel)),
 			"wetness producer lost its required VS/PS pair");
+
+		// Exercise the live provider/options path, including the feature-wide sentinel query.
+		ShaderDefineDeclaration wetnessDebug{
+			cs::features::wetness::kShaderDefines.name,
+			{ ShaderInjectionTarget::kDeferredPrepass, ShaderInjectionTarget::kBsdfLight, ShaderInjectionTarget::kBsdfComposite },
+			cs::features::wetness::kShaderDefines.debug
+		};
+		ShaderDefineDeclaration waterDebug{
+			cs::features::water_effects::kShaderDefines.name,
+			{ ShaderInjectionTarget::kBsdfLight, ShaderInjectionTarget::kBsdfComposite },
+			cs::features::water_effects::kShaderDefines.debug
+		};
+		auto contributions = DescribeFeatureShaderBindings("WetnessEffects", wetnessDebug);
+		contributions.append_range(DescribeFeatureShaderBindings("WaterEffects", waterDebug));
+		const auto options = [&] {
+			return BuildEffectiveShaderCompileRequest(
+				*GetShaderInjectionTarget(ShaderInjectionTarget::kBsdfComposite),
+				ShaderStage::kPixel, {}, contributions)->defines;
+		};
+		const std::vector expectedTargets{ ShaderInjectionTarget::kBsdfComposite };
+		Expect(wetnessDebug.GetShaderDefineOptions().empty(), "unselected feature-wide query enabled debug");
+		Expect(wetnessDebug.SetFullscreenDebugSelected(true) == expectedTargets,
+			"debug selection invalidated production lighting or prepass");
+		Expect(wetnessDebug.GetShaderDefineOptions() == wetnessDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfComposite) &&
+				   wetnessDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfLight).empty(),
+			"debug options lost kCount semantics or leaked into lighting");
+		Expect(options().contains(wetnessDebug.debug) && !options().contains(waterDebug.debug),
+			"selected fullscreen owner did not exclusively contribute debug");
+		Expect(wetnessDebug.SetFullscreenDebugSelected(true).empty(),
+			"same-owner mode selection requested a recompile");
+		Expect(wetnessDebug.SetFullscreenDebugSelected(false) == expectedTargets &&
+				   waterDebug.SetFullscreenDebugSelected(true) == expectedTargets,
+			"owner switch failed to retire both define sets");
+		Expect(!options().contains(wetnessDebug.debug) && options().contains(waterDebug.debug),
+			"previous fullscreen owner's debug define survived selection change");
+		Expect(waterDebug.SetFullscreenDebugSelected(false) == expectedTargets &&
+				   !options().contains(waterDebug.debug) && waterDebug.GetShaderDefineOptions().empty(),
+			"off/preview selection retained fullscreen debug compilation");
 	}
 
 	void CheckPixelBindings()
@@ -1114,6 +1163,27 @@ namespace
 		Expect(SetShaderInjectionEnabled(true), "live master enable was rejected");
 		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == replacement,
 			"re-enabled master did not reuse its replacement");
+
+		const auto compiled = compilationRequests.size();
+		const std::array unrelated{ ShaderInjectionTarget::kBsdfComposite };
+		InvalidateNativeShaderVariantCompilations(unrelated);
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == replacement &&
+				   compilationRequests.size() == compiled && compilationInvalidations == 0,
+			"fullscreen target invalidation disturbed unrelated compute variants");
+		const std::array affected{ ShaderInjectionTarget::kDfTiledLighting };
+		InvalidateNativeShaderVariantCompilations(affected);
+		compilationPending = true;
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper &&
+				   compilationRequests.size() == compiled + 1,
+			"retired target used its old wrapper instead of stock while recompiling");
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper &&
+				   compilationRequests.size() == compiled + 1 && compilationInvalidations == 0,
+			"pending target re-requested compilation or cleared the define-keyed cache");
+		compilationPending = false;
+		InvalidateNativeShaderVariantCompilations(affected);
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) != &nativeWrapper &&
+				   compilationRequests.size() == compiled + 2,
+			"target invalidation lost native owner identity or prevented lazy recompilation");
 		publishedComputeBuffers = {};
 		publishedDepth = {};
 	}

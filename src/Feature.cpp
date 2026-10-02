@@ -2,6 +2,7 @@
 
 #include "Env.h"
 #include "Log.h"
+#include "Render/ShaderInjection.h"
 #include "Render/TemporalPipeline.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
@@ -217,6 +218,7 @@ namespace cs
 		}
 
 		_fullscreenDebugFeature.store(nullptr, std::memory_order_release);
+		std::vector<engine::ShaderInjectionTarget> changedTargets;
 		for (auto* feature : _registeredFeatures) {
 			if (!feature)
 				continue;
@@ -225,7 +227,12 @@ namespace cs
 				selection == selected.end() ?
 					std::string_view{} :
 					selection->second);
+			for (const auto target : feature->SetFullscreenDebugSelected(feature == fullscreen)) {
+				if (std::ranges::find(changedTargets, target) == changedTargets.end())
+					changedTargets.push_back(target);
+			}
 		}
+		engine::InvalidateNativeShaderVariantCompilations(changedTargets);
 		_fullscreenDebugFeature.store(fullscreen, std::memory_order_release);
 		return true;
 	}
