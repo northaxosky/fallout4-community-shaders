@@ -923,7 +923,8 @@ namespace cs::features
 		const bool captureSky = a_reflections && !_fakeReflections.load(std::memory_order_relaxed);
 		{
 			cs::render::annotation::ScopedEvent timing(a_reflections ?
-				"DynamicCubemaps::PrepareReflections" : "DynamicCubemaps::Prepare");
+														   "DynamicCubemaps::PrepareReflections" :
+														   "DynamicCubemaps::Prepare");
 			context->CSSetShader(captureSky ? _prepareReflectionsCS.get() : _prepareCS.get(), nullptr, 0);
 			context->Dispatch(DispatchGroups(kCubemapSize), DispatchGroups(kCubemapSize), 6);
 		}
@@ -943,7 +944,8 @@ namespace cs::features
 		}
 		{
 			cs::render::annotation::ScopedEvent timing(a_reflections ?
-				"DynamicCubemaps::UpdateReflections" : "DynamicCubemaps::Update");
+														   "DynamicCubemaps::UpdateReflections" :
+														   "DynamicCubemaps::Update");
 			context->CSSetShader(UpdateShader(a_reflections), nullptr, 0);
 			context->Dispatch(
 				DispatchGroups(kCubemapSize),
@@ -1061,7 +1063,8 @@ namespace cs::features
 		{
 			// Keep the mip batch in one sample, including frames where this sparse pass is inactive.
 			cs::render::annotation::ScopedEvent timing(a_reflections ?
-				"DynamicCubemaps::CompressReflections" : "DynamicCubemaps::Compress");
+														   "DynamicCubemaps::CompressReflections" :
+														   "DynamicCubemaps::Compress");
 			for (std::uint32_t level = 0;
 				level < kBc6hMipLevels;
 				++level) {

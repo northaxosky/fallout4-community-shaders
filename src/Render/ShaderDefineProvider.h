@@ -65,9 +65,10 @@ namespace cs::engine
 		{
 			// kCount queries feature-wide options, not an injection target.
 			return a_fullscreenDebugSelected && !debug.empty() &&
-				HasShaderDefine(ShaderInjectionTarget::kBsdfComposite) &&
-				(a_target == ShaderInjectionTarget::kCount || a_target == ShaderInjectionTarget::kBsdfComposite) ?
-				ShaderDefineOptions{ { debug, "1" } } : ShaderDefineOptions{};
+			               HasShaderDefine(ShaderInjectionTarget::kBsdfComposite) &&
+			               (a_target == ShaderInjectionTarget::kCount || a_target == ShaderInjectionTarget::kBsdfComposite) ?
+			           ShaderDefineOptions{ { debug, "1" } } :
+			           ShaderDefineOptions{};
 		}
 		bool HasShaderDefine(ShaderInjectionTarget a_target) const override
 		{

@@ -1,8 +1,8 @@
-#include <Features/PerformanceOverlay/ABTesting/ABTestAggregator.h>
-#include <Profiler.h>
 #include "Log.h"
 #include "Render/Annotation.h"
 #include "Render/FrameProfiler.h"
+#include <Features/PerformanceOverlay/ABTesting/ABTestAggregator.h>
+#include <Profiler.h>
 
 #include <algorithm>
 #include <cmath>
@@ -72,7 +72,7 @@ namespace
 			if (repeated != results.end() && !collected) {
 				CHECK(repeated->historyCount == 2);
 				CHECK(std::abs(repeated->gpuTimeMs -
-					(repeated->GetHistorySample(0) + repeated->GetHistorySample(1))) < 0.0001f);
+							   (repeated->GetHistorySample(0) + repeated->GetHistorySample(1))) < 0.0001f);
 			}
 			collected = true;
 		}

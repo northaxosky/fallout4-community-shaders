@@ -712,7 +712,8 @@ namespace
 					if (request) {
 						Expect(std::ranges::none_of(request->defines, [](const auto& define) {
 							return define.first.ends_with("_FULLSCREEN_DEBUG");
-						}), "production contribution includes fullscreen debug code");
+						}),
+							"production contribution includes fullscreen debug code");
 					}
 				}
 			}
@@ -745,7 +746,8 @@ namespace
 		const auto options = [&] {
 			return BuildEffectiveShaderCompileRequest(
 				*GetShaderInjectionTarget(ShaderInjectionTarget::kBsdfComposite),
-				ShaderStage::kPixel, {}, contributions)->defines;
+				ShaderStage::kPixel, {}, contributions)
+			    ->defines;
 		};
 		const std::vector expectedTargets{ ShaderInjectionTarget::kBsdfComposite };
 		Expect(wetnessDebug.GetShaderDefineOptions().empty(), "unselected feature-wide query enabled debug");
