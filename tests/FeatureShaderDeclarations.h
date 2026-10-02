@@ -3,6 +3,7 @@
 #include "../features/DynamicCubemaps/src/ShaderDefines.h"
 #include "../features/ExponentialHeightFog/src/ShaderDefines.h"
 #include "../features/InverseSquareLighting/src/ShaderDefines.h"
+#include "../features/LODBlending/src/ShaderDefines.h"
 #include "../features/ScreenSpaceGI/src/ShaderDefines.h"
 #include "../features/ScreenSpaceShadows/src/ShaderDefines.h"
 #include "../features/TerrainShadows/src/ShaderDefines.h"
@@ -26,6 +27,7 @@ namespace cs::engine
 				{ "DynamicCubemaps", &dc::kShaderDefines },
 				{ "WetnessEffects", &wetness::kShaderDefines },
 				{ "TerrainShadows", &terrain_shader::kShaderDefines },
+				{ "LODBlending", &lod_blending_shader::kShaderDefines },
 				{ "WaterEffects", &water_effects::kShaderDefines },
 				{ "Upscaling", &upscaling::kShaderDefines }
 			};

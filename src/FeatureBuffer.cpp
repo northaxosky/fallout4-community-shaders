@@ -2,6 +2,7 @@
 
 #include "DynamicCubemaps.h"
 #include "ExponentialHeightFog.h"
+#include "LODBlending.h"
 #include "TerrainShadows.h"
 #include "WetnessEffects.h"
 
@@ -32,7 +33,10 @@ namespace cs
 			.dynamicCubemapsSettings = dynamicCubemaps,
 			.exponentialHeightFogSettings =
 				CollectFeatureData<render::ExponentialHeightFogSettings>(
-					features::ExponentialHeightFog::GetSingleton())
+					features::ExponentialHeightFog::GetSingleton()),
+			.lodBlendingSettings =
+				CollectFeatureData<LODBlendingFeatureData>(
+					features::LODBlending::GetSingleton())
 		};
 	}
 }

@@ -18,6 +18,7 @@ local features = {
     "FrameGeneration",
     "ScreenSpaceShadows",
     "TerrainShadows",
+    "LODBlending",
     "ScreenSpaceGI",
     "InverseSquareLighting",
     "ExponentialHeightFog",

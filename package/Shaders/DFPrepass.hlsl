@@ -116,6 +116,10 @@
 #	ifdef WETNESS_EFFECTS
 #		include "FO4/WetnessMaterial.hlsli"
 #	endif
+
+#	ifdef LOD_BLENDING
+#		include "FO4/FO4ShaderData.hlsli"
+#	endif
 cbuffer PerFrame_CB12 : register(b12)
 {
 	float4 cb12_pad_0_29[30];
@@ -445,6 +449,10 @@ struct PS_OUTPUT
 	PS_OUTPUT main(PS_INPUT input) {
 		PS_OUTPUT output;
 		float4 cb12_idx30_global_fade = native_global_fade;
+#	if defined(LOD_BLENDING) && (LANDSCAPE || GRASS) && VC
+		if (SharedData::lodBlendingSettings.DisableTerrainVertexColors)
+			input.vertexColor.xyz = 1;
+#	endif
 #	ifdef WETNESS_EFFECTS
 		uint2 filmDimensions;
 		WetnessEffects::Film.GetDimensions(filmDimensions.x, filmDimensions.y);
@@ -555,6 +563,9 @@ struct PS_OUTPUT
 												   g_sLandLodAlbedo, input.lodAlbedoUV)
 	                               .xyz;
 #		endif
+#		if defined(LOD_BLENDING) && LAND_LOD_BLEND
+		landLodAlbedo = pow(abs(landLodAlbedo), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
+#		endif
 #		if LAND_LOD_BLEND
 		float4 landNoiseUV = (input.lodBlend.xyxy + cb0_land_lod_params.zwzw) * float4(0.000250, 0.000250, 0.000350, 0.000350);
 		float3 landColorNoise = g_tLandColorNoise.Sample(
@@ -595,6 +606,13 @@ struct PS_OUTPUT
 	float4 albedoSample = g_tAlbedo.Sample(g_sAlbedo, uv);
 #	else
 	float4 albedoSample = 1.0;
+#	endif
+#	if defined(LOD_BLENDING)
+#		if LOD_OBJECT_INSTANCED && !LOD_LANDSCAPE
+		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
+#		elif LOD_LANDSCAPE && !BONE_TINTING
+		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
+#		endif
 #	endif
 #	if LOD_LANDSCAPE && !BONE_TINTING
 		albedoSample.xyz *= lodColorNoise;

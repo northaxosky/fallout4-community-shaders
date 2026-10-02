@@ -1,6 +1,7 @@
 #include "DynamicCubemapsSettings.h"
 #include "ExponentialHeightFogSettings.h"
 #include "FrameGenerationSettings.h"
+#include "LODBlendingSettings.h"
 #include "PerformanceOverlaySettings.h"
 #include "Render/TemporalRenderSettings.h"
 #include "RenderDocSettings.h"
@@ -78,6 +79,7 @@ namespace
 			std::pair{ "WaterEffects", MakeSchemaView(water_effects::kSchema) },
 			std::pair{ "ScreenSpaceShadows", MakeSchemaView(sss_settings::kSchema) },
 			std::pair{ "TerrainShadows", MakeSchemaView(terrain_shadows::kSchema) },
+			std::pair{ "LODBlending", MakeSchemaView(lod_blending::kSchema) },
 			std::pair{ "MotionVectorFixes", SchemaView{} },
 			std::pair{ "Upscaling", MakeSchemaView(cs::render::temporal::kSchema) },
 			std::pair{ "FrameGeneration", MakeSchemaView(frame_generation::kSchema) },

@@ -63,9 +63,10 @@ namespace cs::render
 	};
 	struct LODBlendingSettings
 	{
-		float LODTerrainBrightness, LODObjectBrightness, LODObjectSnowBrightness;
-		std::uint32_t DisableTerrainVertexColors;
-		float LODTerrainGamma, LODObjectGamma, LODObjectSnowGamma, pad0;
+		// Neutral defaults keep an unpublished block from blackening LOD.
+		float LODTerrainBrightness = 1.0f, LODObjectBrightness = 1.0f, LODObjectSnowBrightness = 1.0f;
+		std::uint32_t DisableTerrainVertexColors = 0;
+		float LODTerrainGamma = 1.0f, LODObjectGamma = 1.0f, LODObjectSnowGamma = 1.0f, pad0 = 0.0f;
 	};
 	struct HairSpecularSettings
 	{

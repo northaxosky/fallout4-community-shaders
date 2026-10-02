@@ -1198,6 +1198,27 @@ namespace
 				.forbidden = { CB(4), CB(5), CB(6), CB(7), CB(8), Texture(71) } });
 		}
 
+		a_jobs.push_back({ .path = prepass,
+			.defines = { { "BSDFPREPASS_PS_SOURCE", "1" } },
+			.profile = "ps_5_0",
+			.description = "BSDFPrePass feature off",
+			.forbidden = { CB(6) } });
+		for (const auto& material : std::vector<ShaderDefines>{
+				 { { "LOD_OBJECT_INSTANCED", "1" } }, { { "LOD_LANDSCAPE", "1" } },
+				 { { "LANDSCAPE", "1" }, { "LAND_LOD_BLEND", "1" } },
+				 { { "LANDSCAPE", "1" }, { "LAND_LOD_BLEND", "1" }, { "INSTANCED", "1" } },
+				 { { "LANDSCAPE", "1" }, { "VC", "1" } },
+				 { { "GRASS", "1" }, { "VC", "1" } }, { { "GRASS", "1" }, { "VC", "1" }, { "ALPHA_TEST", "1" } } }) {
+			auto defines = material;
+			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" }, { "LOD_BLENDING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "NORMALS", "1" } });
+			a_jobs.push_back({ .path = prepass,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "LOD Blending deferred material consumers",
+				.required = { CB(6) },
+				.forbidden = { CB(4), CB(5), CB(7), CB(8), CB(9), Texture(71) } });
+		}
+
 		const auto tiled = a_root / "DFTiledLighting.hlsl";
 		a_jobs.push_back({ .path = tiled,
 			.defines = { { "DFTILEDLIGHTING_VARIANT", "1" } },
