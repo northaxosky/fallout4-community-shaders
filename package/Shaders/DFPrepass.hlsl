@@ -106,6 +106,13 @@
 #		define DISMEMBERMENT_MEATCUFF 0
 #	endif
 
+#	if defined(OG)
+// OG blends have no motion target or tessellated frame-position inputs.
+#		define PREPASS_MOTION_VECTOR (!BLEND)
+#	else
+#		define PREPASS_MOTION_VECTOR (!BLEND || TESSELLATE_DISP_HEIGHT || DISMEMBERMENT_MEATCUFF)
+#	endif
+
 #	ifdef WETNESS_EFFECTS
 #		include "FO4/WetnessMaterial.hlsli"
 #	endif
@@ -366,8 +373,10 @@ struct PS_INPUT
 	float2 dismemberWeight: TEXCOORD5;
 #	endif
 #	if TESSELLATE_DISP_HEIGHT
+#		if PREPASS_MOTION_VECTOR
 	float4 curr_pos_u: POSITION1;
 	float4 tessellatedPosition: POSITION2;
+#		endif
 #	else
 	float3 tangent: TEXCOORD0;
 #		if FACE
@@ -425,7 +434,7 @@ struct PS_OUTPUT
 #	else
 	float3 specTint: SV_Target4;
 #	endif
-#	if !BLEND || TESSELLATE_DISP_HEIGHT || DISMEMBERMENT_MEATCUFF
+#	if PREPASS_MOTION_VECTOR
 	float2 motionVec: SV_Target5;
 #	endif
 };
@@ -443,6 +452,10 @@ struct PS_OUTPUT
 #		if MODELSPACENORMALS && !TESSELLATE_DISP_HEIGHT
 		wetnessOwned = wetnessOwned && input.wetGeometryNormal.w > 0.0;
 #		elif TESSELLATE_DISP_HEIGHT && (SKINNED || MODELSPACENORMALS)
+		wetnessOwned = false;
+#		endif
+#		if defined(OG) && BLEND && TESSELLATE_DISP_HEIGHT
+		// OG's native domain shader provides no position for blended wetness.
 		wetnessOwned = false;
 #		endif
 		// FO4: native g must not darken or modify specular before the upstream film.
@@ -841,7 +854,11 @@ struct PS_OUTPUT
 		float axisZ;
 		bool outsideCuff =
 			input.dismember.x < 0.0 || input.dismember.x > 10.0;
-		[branch] if (outsideCuff)
+#		if !defined(OG)
+		// OG-era compilation rejects attributed branches containing cuff samples.
+		[branch]
+#		endif
+			if (outsideCuff)
 		{
 			axisX = dot(tNorm, nts);
 			axisY = dot(bNorm, nts);
@@ -1242,7 +1259,7 @@ struct PS_OUTPUT
 #		endif
 #	endif
 
-#	if !BLEND || TESSELLATE_DISP_HEIGHT || DISMEMBERMENT_MEATCUFF
+#	if PREPASS_MOTION_VECTOR
 #		if TESSELLATE_DISP_HEIGHT
 		float4 worldPosition = float4(input.curr_pos_u.xyz, 1.0);
 		float currClipX = dot(CurrFrame_WorldToClip_row0, worldPosition);
@@ -1272,7 +1289,7 @@ struct PS_OUTPUT
 #	endif
 #	ifdef WETNESS_EFFECTS
 	// FO4: grass, tree animation, eyes and LOD objects share this pass; upstream compiles them without wetness; LOD land keeps it.
-#		if !(GRASS || TREE_ANIM || EYE || (LOD_OBJECT_INSTANCED && !LOD_LANDSCAPE))
+#		if !(GRASS || TREE_ANIM || EYE || (LOD_OBJECT_INSTANCED && !LOD_LANDSCAPE)) && !(defined(OG) && BLEND && TESSELLATE_DISP_HEIGHT)
 		if (wetnessOwned) {
 			FO4Wetness::MaterialInput wetInput;
 			wetInput.cameraRelativePosition = input.curr_pos_u.xyz;
@@ -1456,6 +1473,13 @@ cbuffer PerSkin_CB9 : register(b9)
 
 // A terrain call spends its LOD axis on the patch fade, so only a non-terrain call drops height.
 #	define LOD_HEIGHT_DROP (LOD_LANDSCAPE && !LANDSCAPE)
+
+#	if defined(OG) && BLEND
+// OG blends leave both frame lanes empty because they write no motion vector.
+#		define MOTION_LANES 0
+#	else
+#		define MOTION_LANES 1
+#	endif
 
 #	if STRUCTURED_TERRAIN
 cbuffer PerInstance_CB13 : register(b13)
@@ -2408,7 +2432,12 @@ VertexOutput main(VertexInput input)
 	output.color = float4(pow(grassColor, 2.2),
 		1.0 - saturate((length(projected.xyz) - cb2_grass_fade.z) / cb2_grass_fade.w));
 #		endif
+#		if MOTION_LANES || defined(WETNESS_EFFECTS)
+	// OG blends retain the current position only when wetness needs it.
 	output.currentPositionAndU.xyz = world.xyz;
+#		else
+	output.currentPositionAndU.xyz = float3(0.0, 0.0, 0.0);
+#		endif
 #		if CLIP_VOLUME
 	output.clipDistance =
 		length((world.xyz - cb0_clip_centre.xyz) / cb0_clip_extent.xyz) - 1.0;
@@ -2465,7 +2494,11 @@ VertexOutput main(VertexInput input)
 #		endif
 	output.currentPositionAndU.w = texcoord.x;
 	output.previousPositionAndV.w = texcoord.y;
+#		if MOTION_LANES
 	output.previousPositionAndV.xyz = previous;
+#		else
+	output.previousPositionAndV.xyz = float3(0.0, 0.0, 0.0);
+#		endif
 #		if STRUCTURED_TERRAIN
 #			if VC
 	output.color = float4(pow(corner.color, 2.2), 1.0);
