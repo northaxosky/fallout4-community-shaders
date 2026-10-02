@@ -5,10 +5,10 @@ Rules, Kind legend and cross-cutting records: [README](README.md).
 Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\Water.hlsl`,
 `package\Shaders\DFComposite.hlsl`, `package\Shaders\DFLight.hlsl` and
 `package\Shaders\DFTiledLighting.hlsl`.
-Feature classification: **extension** (rule 3: material-selection Divergence).
-Upstream's sentinel-cube material-selection design is not supported on FO4, so an
-FO4-specific selection mechanism replaces it. Current water/wet-film routes are implemented;
-the general authored-material selection design remains Pending.
+Feature classification: **mixed** ([FEATURES](../FEATURES.md)). Runtime slices are core: material
+selection uses FO4's native envmap data instead of upstream's sentinel cubes, which cannot register on FO4.
+Water and wet-film routes are implemented; dry envmap materials are Pending. Authored per-material
+selection (sentinel/Reflectance contract, Creator workflow) is an extension slice.
 Reflection availability, the SSLR toggle and preview are minor FO4 adjustments.
 
 All files in upstream `features/Dynamic Cubemaps/Shaders/DynamicCubemaps` are staged unchanged
@@ -23,7 +23,7 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 
 | Kind | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|---|
-| Divergence | Authored 1×1 sentinel envmaps, Creator export and the Reflectance target select materials for dynamic reflections | Current FO4 selection uses the water REFLECTIONS route and positive wet-film reflectance in deferred composite, not authored sentinel cubes. General authored-material selection: **Pending**, replacement design not yet decided | Native cube-array registration rejects widths below 128 and the G-buffer has no reflectance/F0 channel (engine-facts Cubemap / Render targets). The FO4-specific selection replaces an unsupported upstream design; unchanged capture/filter kernels do not establish material-selection parity | `Water.hlsl` `surfaceColor`; `DynamicCubemaps.cpp` `ResolveReflectionMode`; `FO4/DynamicCubemaps/Composite.hlsli` `GetWetnessReflection`; `DFComposite.hlsl` wet-reflection consumers |
+| Forced | Authored 1×1 sentinel envmaps, Creator export and the Reflectance target select materials for dynamic reflections | FO4 selects through native data: the water REFLECTIONS route, positive wet-film reflectance and (Pending) native `ENVMAP` materials at the composite probe sites with FO4 weighting. Authored per-material selection is an extension slice (Pending) | Native cube-array registration rejects widths below 128 and the G-buffer has no reflectance/F0 channel (engine-facts Cubemap / Render targets). The FO4-specific selection replaces an unsupported upstream design; unchanged capture/filter kernels do not establish material-selection parity | `Water.hlsl` `surfaceColor`; `DynamicCubemaps.cpp` `ResolveReflectionMode`; `FO4/DynamicCubemaps/Composite.hlsli` `GetWetnessReflection`; `DFComposite.hlsl` wet-reflection consumers |
 | Forced | Capture before the deferred composite | Capture and publication run after the Forward cloud group (`RegisterPostForwardSky`) | FO4 draws the sky inside `DrawWorld::Forward`, after the composite; engine-facts Secondary scene views | `DynamicCubemaps.cpp` `Load` |
 | Forced | Capture the main color target | Preparation rebuilds geometry as `3 · albedo · (diffuse A + diffuse B) + emissive`; sky comes from scene color | FO4 has no diffuse-only target; engine-facts Deferred composition; reconstructed `DFComposite.hlsl` diffuse/emissive composition | `FO4/DynamicCubemaps/PrepareCaptureCS.hlsl` |
 | Forced | Sky depth reconstructs a finite far-plane position | Preparation places depth `1.0` on the camera far-plane direction | FO4's world projection has an infinite far plane; inverse projection at 1 has zero homogeneous w. A finite history position preserves upstream sky capture; engine-facts Camera matrix builder and `Engine.h` `TryGetWorldSceneProjection` | `PrepareCaptureCS.hlsl` |
@@ -49,14 +49,15 @@ seven-mip BC6H textures, and bilinear capture depth retain the pinned behavior; 
 
 | Kind | Upstream | Why / evidence | Where |
 |---|---|---|---|
-| Forced | Native deferred 1×1 sentinel-cube and Reflectance-target contract | FO4 cube-array registration rejects cubes narrower than 128 px and its G-buffer has no reflectance/F0 channel; fallout4-re `docs\engine-facts.md`, Cubemap / Render targets. Upstream's authored selection cannot use these native paths unchanged; the replacement selection is the Divergence above | `DFComposite.hlsl`, native cube-array registration and G-buffer layout |
+| Forced | Native deferred 1×1 sentinel-cube and Reflectance-target contract | FO4 cube-array registration rejects cubes narrower than 128 px and its G-buffer has no reflectance/F0 channel; fallout4-re `docs\engine-facts.md`, Cubemap / Render targets. Upstream's authored selection cannot use these native paths unchanged; the native-envmap selection above replaces it | `DFComposite.hlsl`, native cube-array registration and G-buffer layout |
 | Forced | Forward `Lighting.hlsl` sentinel path | FO4 world and first-person accumulators emit no forward BSLighting passes; engine-facts DrawWorld pass ownership. No forward consumer is silently substituted | Native Lighting family, deferred consumer catalog |
 
 ## Pending
 
 | Kind | Upstream behavior | Remaining work | Where |
 |---|---|---|---|
-| Pending | General authored-material selection and TruePBR/complex material reflectance | Decide and implement the FO4-specific selection/metadata design recorded as Divergence above. Existing water/wet-film routes do not provide general authored selection or complete optional material coverage | `DFComposite.hlsl`, `FO4/DynamicCubemaps/Composite.hlsli`, engine-facts Cubemap and Render targets |
+| Pending | Dynamic reflections on dry envmap materials | Sample the DC cube at the six native probe sites (decoded probe slice/strength) instead of the authored probe, keeping FO4 gain, SSLR blend and exclusions; use DC's roughness-to-mip contract, not the native probe LOD | `DFComposite.hlsl`, `FO4/DynamicCubemaps/Composite.hlsli` |
+| Pending | Authored per-material selection and TruePBR/complex material reflectance (extension slice) | Needs an FO4 reflectance/selection contract and authored assets; pairs with TruePBR materials | `DFComposite.hlsl`, engine-facts Cubemap and Render targets |
 | Pending | Material authoring/export workflow replacing Dynamic Cubemap Creator sentinel DDS export | Define the authoring workflow after choosing the FO4 selection contract; exporting upstream 1×1 sentinel cubes alone cannot select native deferred materials | `DynamicCubemaps.cpp`, upstream `DynamicCubemaps.cpp` creator/export path |
 | Pending | IBL and Skylighting feature consumers | Host providers remain unimplemented; retain shared implementations and complete host inputs when those features are added | shared `DynamicCubemaps.hlsli`, b6 IBL/Skylighting blocks |
 | Pending | Runtime equivalence | Authorized DevBench/RenderDoc batch must verify prepared radiance/positions, cube orientation under rotation/translation, sky/infinite-far handling, interior/base and exterior/reflection selection, dynamic resolution, wet reflections, reset/time transitions and native bindings/restoration | `PrepareCaptureCS.hlsl`, `DynamicCubemaps.cpp`, water/composite consumers |

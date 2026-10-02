@@ -6,7 +6,8 @@ Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67
 Both upstream `WetnessEffects/*.hlsli` files and the required Common lighting includes
 are staged unchanged. The copied FO4 implementation is deleted. The exact upstream
 192-byte settings block is published in b6, with no wetness block in b7.
-Feature classification: **core** (rule 2: upstream wetness algorithm and design).
+Feature classification: **mixed** ([FEATURES](../FEATURES.md)). Weather, wet albedo, shore and water-surface rain
+are core; the MRT6 film transport (and the ground ripples riding it) is an extension slice.
 Pending rows prevent a claim of complete parity.
 
 ## Translations
@@ -34,6 +35,7 @@ Pending rows prevent a claim of complete parity.
 |---|---|---|
 | Pending | Original inputs for tessellated skinned/model-space materials and model-space variants without an authored normal in the native VS signature | Hull/domain stages are not injectable through the current stage interface. Add their typed ownership/routing and preserve original inputs, and reconstruct missing vertex attributes. These variants deliberately retain native g and produce no upstream film; missing adapters are not engine limitations |
 | Pending | Secondary forward BSLighting material consumers and optional upstream Skin/TruePBR integrations | World/first-person accumulation is deferred (engine-facts BSLighting forward-pass source). Secondary-view consumers and corresponding optional feature inputs are not integrated; no absence of execution or parity is claimed |
+| Pending | Rain ripples/splashes on the water surface (`Water.hlsl` `WETNESS_EFFECTS` `GetRainDrops`) | Reconstructed `Water.hlsl` has no wetness consumer; add it to the existing water normal calculation (no film target) |
 | Pending | Runtime proof of material producer, weather, resources and consumer coverage | Confirm current camera cache freshness during prepass draws, MRT6 format/blends/restoration, original inputs and paired compilation fallback in RenderDoc |
 
 ## Batched in-game checks

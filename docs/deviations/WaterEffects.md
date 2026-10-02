@@ -5,7 +5,8 @@ Rules, Kind legend and cross-cutting records: [README](README.md).
 Upstream pin: `d330bf12d` (shared pin `6f81ebc2512da5564f37e728a65037b4c45e2a67`). `WaterCaustics.hlsli` and
 `watercaustics.dds` are staged unchanged through `xmake/shared.lua`; the FO4 caustics
 kernel and CPU shader mirror are deleted. There are no caustics quality knobs.
-Feature classification: **core** (rule 2: upstream water-effects algorithm and design).
+Feature classification: **mixed** ([FEATURES](../FEATURES.md)). Caustics are core; water parallax needs FO4
+normal-alpha height assets and is an extension slice.
 Camera-cell `WaterSystemHeight` and fullscreen diagnostics are minor FO4 adjustments.
 
 ## Translations

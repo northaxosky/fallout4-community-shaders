@@ -2,21 +2,16 @@
 
 Upstream [Skyrim Community Shaders][upstream] is the specification for ported features (see `AGENTS.md`).
 These files list every place a feature knowingly differs from its pinned upstream revision, the reason,
-and where it lives: cross-cutting records here, one file per feature below. Each code site also carries a one-line FO4 marker comment.
+and where it lives: cross-cutting records here, one file per feature below. Each code site also carries
+a one-line FO4 marker comment.
 
 - **Translation**: same upstream behavior, re-expressed for a Fallout 4 engine difference.
 - **Not supported**: upstream behavior that has no Fallout 4 equivalent without new FO4-only machinery.
 - **Pending**: upstream behavior not ported yet.
 
-Classification is a judgment about feature design, not a count of row Kinds:
-
-1. Non-visual features (tooling and diagnostics, including RenderDoc and PerformanceOverlay) are always **core**.
-2. A visual feature is **core** when it implements upstream's algorithm and design. Minor FO4 adjustments
-   (calibrated defaults, diagnostics/debug views, UI presentation, simplified data sources, toggles and
-   fallbacks for optional engine resources) never make it an extension.
-3. A visual feature is an **extension** only for its own architecture/algorithm, substantive behavior
-   upstream lacks, or no upstream counterpart.
-4. Upscaling, FrameGeneration and MotionVectorFixes remain **core (doodlum FO4 release lineage)**.
+Core/extension classification and its rules live in [FEATURES](../FEATURES.md#classification); it judges
+design per slice, not by counting row Kinds. A Forced row can still be an extension slice when it adds
+machinery upstream lacks.
 
 Each row has a Kind:
 
