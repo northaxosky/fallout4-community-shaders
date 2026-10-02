@@ -3,6 +3,7 @@
 namespace cs::engine::shader_injection_defines
 {
 	inline constexpr auto kSubstrate = "FO4CS_SUBSTRATE";
+	inline constexpr auto kRuntimeOG = "OG";
 
 	inline constexpr auto kScreenSpaceShadows = "SCREEN_SPACE_SHADOWS";
 	inline constexpr auto kScreenSpaceGi = "SSGI";

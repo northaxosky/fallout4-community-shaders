@@ -29,6 +29,7 @@ namespace cs::engine
 			ShaderStage a_stage,
 			const ShaderVariantCompilationDescriptor& a_family,
 			std::span<const ShaderReplacementRegistration> a_contributions,
+			GameRuntime a_runtime,
 			std::string* a_error)
 		{
 			ShaderVariantCompilationDescriptor request{
@@ -63,6 +64,9 @@ namespace cs::engine
 									   a_error)) {
 				return std::nullopt;
 			}
+			if (a_runtime == GameRuntime::kOG &&
+				!MergeDefines(request.defines, { { shader_injection_defines::kRuntimeOG, "1" } }, a_error))
+				return std::nullopt;
 			if (!MergeDefines(request.defines, a_family.defines, a_error))
 				return std::nullopt;
 			if (a_error)
@@ -91,6 +95,7 @@ namespace cs::engine
 		ShaderStage a_stage,
 		const ShaderVariantCompilationDescriptor& a_family,
 		std::span<const ShaderReplacementRegistration> a_contributions,
+		GameRuntime a_runtime,
 		std::string* a_error)
 	{
 		return BuildEffectiveShaderCompileRequestImpl(
@@ -98,6 +103,7 @@ namespace cs::engine
 			a_stage,
 			a_family,
 			a_contributions,
+			a_runtime,
 			a_error);
 	}
 }

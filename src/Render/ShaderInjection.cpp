@@ -354,6 +354,7 @@ namespace cs::engine
 				compilationCache;
 			winrt::com_ptr<ID3D11Device> device;
 			std::wstring developerSourceRoot;
+			GameRuntime runtime = GameRuntime::kAE;
 			std::vector<PublishedTarget> targets;
 		};
 
@@ -448,6 +449,7 @@ namespace cs::engine
 			std::atomic_bool enabled = true;
 			bool developerForceOffEnabled = false;
 			std::wstring developerSourceRoot;
+			GameRuntime gameRuntime = GameRuntime::kAE;
 			std::array<std::atomic_bool,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				baselineOwnership{};
@@ -896,6 +898,7 @@ namespace cs::engine
 				descriptor.stage,
 				*family,
 				a_target.contributions,
+				a_plan.runtime,
 				&error);
 			if (!effective) {
 				L->error(
@@ -1583,6 +1586,18 @@ namespace cs::engine
 		return true;
 	}
 
+	bool SetShaderInjectionRuntime(GameRuntime a_runtime)
+	{
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		if (service.lifecycle != Lifecycle::kCollecting) {
+			LogLateMutation("Shader injection runtime");
+			return false;
+		}
+		service.gameRuntime = a_runtime;
+		return true;
+	}
+
 	bool PrepareShaderInjectionVariants(std::span<const ShaderFamilyDescriptor> a_variants,
 		std::string& a_error)
 	{
@@ -1818,6 +1833,7 @@ namespace cs::engine
 			developerOverrides{};
 		std::wstring developerSourceRoot;
 		bool developerForceOffEnabled = false;
+		GameRuntime gameRuntime = GameRuntime::kAE;
 
 		{
 			std::scoped_lock lock(service.mutex);
@@ -1827,6 +1843,7 @@ namespace cs::engine
 			developerForceOffEnabled = service.developerForceOffEnabled;
 			developerOverrides = service.developerOverrides;
 			developerSourceRoot = service.developerSourceRoot;
+			gameRuntime = service.gameRuntime;
 			registrations = service.registrations;
 		}
 
@@ -1835,6 +1852,7 @@ namespace cs::engine
 			CreateCachingShaderVariantCompilationCache();
 		plan->device.copy_from(a_device);
 		plan->developerSourceRoot = developerSourceRoot;
+		plan->runtime = gameRuntime;
 		std::size_t publishedTargets = 0;
 		auto frozenTargets = FreezeTargets(
 			registrations,

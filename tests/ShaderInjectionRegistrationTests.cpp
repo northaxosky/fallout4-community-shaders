@@ -278,13 +278,22 @@ namespace
 				ShaderStage::kPixel,
 				family,
 				std::span(&contribution, 1),
+				GameRuntime::kAE,
 				&error) &&
 				!error.empty(),
 			"conflicting contributor defines were accepted");
 		definition.loaded = false;
-		const auto unloaded = BuildEffectiveShaderCompileRequest(*target, ShaderStage::kPixel, family, std::span(&contribution, 1));
+		const auto unloaded = BuildEffectiveShaderCompileRequest(*target, ShaderStage::kPixel, family, std::span(&contribution, 1), GameRuntime::kAE);
 		Expect(unloaded && !unloaded->defines.contains("FO4CS_SUBSTRATE") && unloaded->defines.at("CONFLICT") == "family",
 			"an unloaded feature contributed shader defines");
+		Expect(unloaded && !unloaded->defines.contains("OG"), "a modern runtime compiled the OG variant");
+		const auto og = BuildEffectiveShaderCompileRequest(*target, ShaderStage::kPixel, family, std::span(&contribution, 1), GameRuntime::kOG);
+		Expect(og && og->defines.at("OG") == "1" && og->defines.at("CONFLICT") == "family",
+			"the OG runtime did not compile the OG variant");
+		auto ogConflict = family;
+		ogConflict.defines.emplace("OG", "0");
+		Expect(!BuildEffectiveShaderCompileRequest(*target, ShaderStage::kPixel, ogConflict, {}, GameRuntime::kOG),
+			"a family define overrode the OG runtime define");
 	}
 
 	void CheckRegistration()
@@ -707,7 +716,7 @@ namespace
 					"native family did not compile from its engine name");
 				if (descriptor) {
 					const auto request = BuildEffectiveShaderCompileRequest(*GetShaderInjectionTarget(contribution.targetId),
-						stage, *descriptor, GetFeatureShaderContributions());
+						stage, *descriptor, GetFeatureShaderContributions(), GameRuntime::kAE);
 					Expect(request.has_value(),
 						"native family rejected its feature contributions");
 					if (request) {
@@ -747,7 +756,7 @@ namespace
 		const auto options = [&] {
 			return BuildEffectiveShaderCompileRequest(
 				*GetShaderInjectionTarget(ShaderInjectionTarget::kBsdfComposite),
-				ShaderStage::kPixel, {}, contributions)
+				ShaderStage::kPixel, {}, contributions, GameRuntime::kAE)
 			    ->defines;
 		};
 		const std::vector expectedTargets{ ShaderInjectionTarget::kBsdfComposite };
