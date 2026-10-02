@@ -44,6 +44,8 @@ pwsh scripts\fetch-sdks.ps1
 
 Streamline comes from the latest `northaxosky/Streamline` release, which that fork
 publishes on every `main` push. `extern\Streamline` supplies only the headers.
+The script also stages the OG-era `d3dcompiler_47.dll` (6.3.9600.16384) into
+`build\tools\` for the OG stock identity test; it is never packaged.
 
 ## Configure and build
 
