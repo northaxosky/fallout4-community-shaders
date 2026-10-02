@@ -1,11 +1,9 @@
 #pragma once
 
-#include <d3d11.h>
-
 #include <compare>
 #include <cstdint>
 
-namespace cs::features::sss_mask_binding
+namespace cs::features::sss_resources
 {
 	inline constexpr std::uint8_t kWhiteR8Unorm = 0xFF;
 
@@ -95,47 +93,4 @@ namespace cs::features::sss_mask_binding
 		bool _failed = false;
 	};
 
-	struct Api
-	{
-		using Get = void (*)(
-			void*,
-			std::uint32_t,
-			ID3D11ShaderResourceView**) noexcept;
-		using Set = void (*)(
-			void*,
-			std::uint32_t,
-			ID3D11ShaderResourceView*) noexcept;
-
-		void* context = nullptr;
-		Get get = nullptr;
-		Set set = nullptr;
-	};
-
-	enum class Source : std::uint8_t
-	{
-		kNone,
-		kRealMask,
-		kWhiteFallback
-	};
-
-	struct Result
-	{
-		Source source = Source::kNone;
-		bool validBinding = false;
-	};
-
-	Result Bind(
-		const Api& a_api,
-		std::uint32_t a_slot,
-		ID3D11ShaderResourceView* a_realMask,
-		Extent a_realMaskExtent,
-		bool a_realMaskReady,
-		ID3D11ShaderResourceView* a_whiteFallback,
-		Extent a_whiteFallbackExtent,
-		Extent a_requiredExtent) noexcept;
-	bool RestoreNullIfOwned(
-		const Api& a_api,
-		std::uint32_t a_slot,
-		ID3D11ShaderResourceView* a_realMask,
-		ID3D11ShaderResourceView* a_whiteFallback) noexcept;
 }

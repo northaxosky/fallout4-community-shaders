@@ -34,7 +34,7 @@ namespace cs::features::exponential_height_fog
 				auto* terrain = TerrainShadows::GetSingleton();
 				for (const auto slot : _slots) {
 					ID3D11ShaderResourceView* srv = slot == 19 ? a_integrated :
-					                                             (slot == 60 && terrain->IsLoaded() ? terrain->GetShadowHeightSRV() : nullptr);
+					                                             (slot == 60 && terrain->IsHealthy() ? terrain->GetShadowHeightSRV() : nullptr);
 					_context->CSSetShaderResources(slot, 1, &srv);
 				}
 			}
@@ -76,7 +76,7 @@ namespace cs::features::exponential_height_fog
 		for (std::size_t i = 0; i < _shaders.size(); ++i) {
 			const std::wstring path = std::wstring(L"Data\\Shaders\\ExponentialHeightFog\\") + files[i];
 			std::vector<std::pair<const char*, const char*>> defines;
-			if (i == 2 && TerrainShadows::GetSingleton()->IsLoaded())
+			if (i == 2 && TerrainShadows::GetSingleton()->IsHealthy())
 				defines.emplace_back("TERRAIN_SHADOWS", "1");
 			_shaders[i].attach(static_cast<ID3D11ComputeShader*>(util::CompileShader(path.c_str(), defines, "cs_5_0")));
 			if (!_shaders[i])
@@ -346,17 +346,7 @@ namespace cs::features::exponential_height_fog
 			.Field("history_frames", _historyFrames)
 			.Field("temporal_enabled", _temporalEnabled)
 			.Field("sky_dispatches", _skyDispatches);
-		std::uint32_t timingPasses = 0;
-		constexpr std::string_view prefix = "ExponentialHeightFog/";
-		for (const auto& result : render::profiling::GetProfiler().GetResults()) {
-			if (!result.valid || !result.name.starts_with(prefix))
-				continue;
-			const auto pass = result.name.substr(prefix.size());
-			a_sink.Field(pass + "_gpu_ms", result.gpuTimeMs)
-				.Field(pass + "_cpu_ms", result.cpuTimeMs);
-			++timingPasses;
-		}
-		a_sink.Field("timing_passes", timingPasses);
+		render::profiling::CollectPassTimings(a_sink, "ExponentialHeightFog/");
 	}
 
 	bool VolumetricFog::UpdateCamera(const engine::WorldCameraRecord& a_camera, const DirectX::XMFLOAT2& a_previousRatio)

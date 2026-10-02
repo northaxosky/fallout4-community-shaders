@@ -2,8 +2,9 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "ScreenSpaceShadowsResources.h"
 #include "ScreenSpaceShadowsSettings.h"
-#include "SssMaskBinding.h"
+#include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 
 #include <atomic>
@@ -14,7 +15,7 @@
 
 namespace cs::features
 {
-	class ScreenSpaceShadows : public Feature
+	class ScreenSpaceShadows : public ShaderFeature<sss::kShaderDefines>
 	{
 	public:
 		static ScreenSpaceShadows* GetSingleton();
@@ -26,6 +27,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		void Prepass() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
@@ -59,18 +61,17 @@ namespace cs::features
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(sss_settings::kSchema); }
 		void OnPreDeferredLights();
 		void BindShadowMask(ID3D11DeviceContext* a_context);
-		void OnPostDeferredLights();
 		bool EnsureResources();
 		bool TryGetMaskExtents(
-			sss_mask_binding::Extent& a_required,
-			sss_mask_binding::Extent& a_allocation) const;
+			sss_resources::Extent& a_required,
+			sss_resources::Extent& a_allocation) const;
 		bool EnsureWhiteFallback(
 			ID3D11Device* a_device,
-			sss_mask_binding::Extent a_required,
-			sss_mask_binding::Extent a_allocation);
+			sss_resources::Extent a_required,
+			sss_resources::Extent a_allocation);
 		bool CreateWhiteFallback(
 			ID3D11Device* a_device,
-			sss_mask_binding::Extent a_allocation);
+			sss_resources::Extent a_allocation);
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
@@ -83,7 +84,6 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _whiteFallbackReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
-		std::atomic_bool _maskBound{ false };
 		std::atomic_bool _maskBoundLastFrame{ false };
 		std::atomic_bool _debugPreviewEnabled{ false };
 		std::atomic<float> _sunX{ 0.0f };
@@ -103,9 +103,9 @@ namespace cs::features
 		bool _realMaskReadyForDraw = false;
 		ID3D11Device* _deviceIdentity = nullptr;
 		std::uint64_t _deviceGeneration = 0;
-		sss_mask_binding::Extent _requiredMaskExtent;
-		sss_mask_binding::ExtentState _whiteFallbackExtent;
-		sss_mask_binding::FallbackAllocationBackoff
+		sss_resources::Extent _requiredMaskExtent;
+		sss_resources::ExtentState _whiteFallbackExtent;
+		sss_resources::FallbackAllocationBackoff
 			_whiteFallbackBackoff;
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _raymarchCB;

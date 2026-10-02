@@ -12,7 +12,7 @@ namespace cs
 		template <class Data, class Feature, class... Args>
 		Data CollectFeatureData(Feature* a_feature, Args... a_args)
 		{
-			if (!a_feature || !a_feature->IsLoaded())
+			if (!a_feature || !a_feature->IsHealthy())
 				return {};
 			return a_feature->GetCommonBufferData(a_args...);
 		}

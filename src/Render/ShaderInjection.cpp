@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <bitset>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -37,145 +36,65 @@ namespace cs::engine
 {
 	namespace
 	{
-		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
+		thread_local ScopedShaderInjectionBindings* t_bindings = nullptr;
+		thread_local std::uint16_t t_samplerMask = UINT16_MAX;
 		thread_local ShaderInjectionDrawMetrics t_drawMetrics;
 		thread_local bool t_drawFrameStarted = false;
-		thread_local bool t_dispatchingBindings = false;
 		std::mutex g_drawMetricsMutex;
 		ShaderInjectionDrawMetrics g_completedDrawMetrics;
 
-		void CapturePixelBindings(ID3D11DeviceContext* a_context, ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
+		ShaderStage ActiveBindingStage() noexcept
 		{
-			if (!t_pixelBindings)
-				return;
-			for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
-				const ShaderSlotClaim claim{ ShaderStage::kPixel, a_type, slot };
-				t_pixelBindings->Capture(a_context, std::span(&claim, 1));
-			}
+			return t_bindings ? t_bindings->GetStage() : ShaderStage::kPixel;
 		}
 
-		template <class T, std::size_t N>
-		struct BindingBatch
+		void CaptureBindings(ID3D11DeviceContext* a_context, ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
 		{
-			std::array<T*, N> values;
-			std::bitset<N> dirty;
-			UINT first = static_cast<UINT>(N);
-			UINT last = 0;
-
-			void Set(UINT a_start, UINT a_count, T* const* a_values) noexcept
-			{
-				assert(a_start + a_count <= N);
-				for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
-					values[slot] = a_values[slot - a_start];
-					dirty.set(slot);
-				}
-				first = std::min(first, a_start);
-				last = std::max(last, a_start + a_count);
+			if (!t_bindings)
+				return;
+			for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
+				t_bindings->Capture(a_context, a_type, slot);
 			}
-
-			template <class Set>
-			void Flush(Set a_set) noexcept
-			{
-				for (UINT slot = first; slot < last;) {
-					if (!dirty.test(slot)) {
-						++slot;
-						continue;
-					}
-					const auto start = slot++;
-					while (slot < last && dirty.test(slot))
-						++slot;
-					a_set(start, slot - start, values.data() + start);
-					RecordShaderInjectionD3DBinds();
-				}
-				dirty.reset();
-				first = static_cast<UINT>(N);
-				last = 0;
-			}
-		};
-
-		class PixelBindingBatch;
-		thread_local PixelBindingBatch* t_bindingBatch = nullptr;
-
-		class PixelBindingBatch
-		{
-		public:
-			explicit PixelBindingBatch(ID3D11DeviceContext* a_context) noexcept :
-				context(a_context), previous(std::exchange(t_bindingBatch, this)),
-				wasDispatching(std::exchange(t_dispatchingBindings, true))
-			{}
-			~PixelBindingBatch() noexcept
-			{
-				Flush();
-				t_bindingBatch = previous;
-				t_dispatchingBindings = wasDispatching;
-			}
-			void Flush() noexcept
-			{
-				buffers.Flush([this](UINT start, UINT count, auto values) {
-					CapturePixelBindings(context, ShaderResourceType::kConstantBuffer, start, count);
-					context->PSSetConstantBuffers(start, count, values);
-				});
-				resources.Flush([this](UINT start, UINT count, auto values) {
-					CapturePixelBindings(context, ShaderResourceType::kShaderResource, start, count);
-					context->PSSetShaderResources(start, count, values);
-				});
-				samplers.Flush([this](UINT start, UINT count, auto values) {
-					CapturePixelBindings(context, ShaderResourceType::kSampler, start, count);
-					context->PSSetSamplers(start, count, values);
-				});
-			}
-
-			ID3D11DeviceContext* context;
-			PixelBindingBatch* previous;
-			bool wasDispatching;
-			BindingBatch<ID3D11Buffer, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT> buffers;
-			BindingBatch<ID3D11ShaderResourceView, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> resources;
-			BindingBatch<ID3D11SamplerState, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> samplers;
-		};
+		}
 	}
 
 	void BindInjectionShaderResources(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11ShaderResourceView* const* a_values) noexcept
 	{
-		if (t_bindingBatch && t_bindingBatch->context == a_context)
-			t_bindingBatch->resources.Set(a_start, a_count, a_values);
-		else {
-			CapturePixelBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
+		CaptureBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
+		if (ActiveBindingStage() == ShaderStage::kCompute)
+			a_context->CSSetShaderResources(a_start, a_count, a_values);
+		else
 			a_context->PSSetShaderResources(a_start, a_count, a_values);
-			RecordShaderInjectionD3DBinds();
-		}
+		RecordShaderInjectionD3DBinds();
 	}
 
 	void BindInjectionSamplers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11SamplerState* const* a_values) noexcept
 	{
-		if (t_bindingBatch && t_bindingBatch->context == a_context)
-			t_bindingBatch->samplers.Set(a_start, a_count, a_values);
-		else {
-			CapturePixelBindings(a_context, ShaderResourceType::kSampler, a_start, a_count);
-			a_context->PSSetSamplers(a_start, a_count, a_values);
-			RecordShaderInjectionD3DBinds();
+		for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
+			if (ActiveBindingStage() == ShaderStage::kPixel && (t_samplerMask & (1u << slot)) == 0)
+				continue;
+			if (t_bindings) {
+				t_bindings->BindSampler(a_context, slot, a_values[slot - a_start]);
+			} else {
+				a_context->PSSetSamplers(slot, 1, &a_values[slot - a_start]);
+				RecordShaderInjectionD3DBinds();
+			}
 		}
 	}
 
 	void BindInjectionConstantBuffers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11Buffer* const* a_values) noexcept
 	{
-		if (t_bindingBatch && t_bindingBatch->context == a_context)
-			t_bindingBatch->buffers.Set(a_start, a_count, a_values);
-		else {
-			CapturePixelBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
+		CaptureBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
+		if (ActiveBindingStage() == ShaderStage::kCompute)
+			a_context->CSSetConstantBuffers(a_start, a_count, a_values);
+		else
 			a_context->PSSetConstantBuffers(a_start, a_count, a_values);
-			RecordShaderInjectionD3DBinds();
-		}
-	}
-
-	void FlushShaderInjectionBindings() noexcept
-	{
-		if (t_bindingBatch)
-			t_bindingBatch->Flush();
+		RecordShaderInjectionD3DBinds();
 	}
 
 	void CaptureShaderInjectionOutputs(ID3D11DeviceContext* a_context) noexcept
 	{
-		CapturePixelBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
+		CaptureBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
 	}
 
 	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept
@@ -184,30 +103,32 @@ namespace cs::engine
 			return;
 		{
 			std::scoped_lock lock(g_drawMetricsMutex);
+			t_drawMetrics.frameBindings = GetFrameBindingMetrics();
 			g_completedDrawMetrics = t_drawMetrics;
 		}
 		t_drawMetrics = { .frame = a_frame };
+		ResetFrameBindings();
 		t_drawFrameStarted = true;
 	}
 
 	void RecordShaderInjectionD3DBinds(std::uint32_t a_count) noexcept
 	{
-		if (t_pixelBindings || t_dispatchingBindings)
+		if (t_bindings && ActiveBindingStage() == ShaderStage::kPixel)
 			t_drawMetrics.d3dBinds += a_count;
 	}
 
 	ScopedShaderInjectionBindings::ScopedShaderInjectionBindings(ShaderStage a_stage) noexcept :
 		_stage(a_stage),
-		_previous(a_stage == ShaderStage::kPixel ? std::exchange(t_pixelBindings, this) : nullptr),
+		_previous(std::exchange(t_bindings, this)),
 		_started(std::chrono::steady_clock::now())
 	{}
 
 	ScopedShaderInjectionBindings::~ScopedShaderInjectionBindings() noexcept
 	{
 		const auto finish = [this] {
+			t_bindings = _previous;
 			if (_stage == ShaderStage::kPixel) {
-				t_pixelBindings = _previous;
-				if (!_previous) {
+				if (!_previous || _previous->GetStage() != ShaderStage::kPixel) {
 					++t_drawMetrics.scopes;
 					t_drawMetrics.scopeNanoseconds += static_cast<std::uint64_t>(
 						std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -264,59 +185,81 @@ namespace cs::engine
 	}
 
 	void ScopedShaderInjectionBindings::Capture(
-		ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims) noexcept
+		ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept
 	{
 		if (!a_context)
 			return;
 		if (!_context)
 			_context = a_context;
-		for (const auto& claim : a_claims) {
-			if (claim.stage != _stage)
-				continue;
+		{
 			// Engine-facts: PS shadow state owns t0-t15/s0-s15 and b0-b2/b12/b13 only.
 			if (_stage == ShaderStage::kPixel &&
-				((claim.resourceType == ShaderResourceType::kShaderResource && claim.slot >= 16) ||
-					(claim.resourceType == ShaderResourceType::kConstantBuffer && claim.slot > 2 && claim.slot != 12 && claim.slot != 13)))
-				continue;
-			if (claim.resourceType == ShaderResourceType::kRenderTarget && !_outputCaptured) {
+				((a_type == ShaderResourceType::kShaderResource && a_slot >= 16) ||
+					(a_type == ShaderResourceType::kConstantBuffer && a_slot > 2 && a_slot != 12 && a_slot != 13)))
+				return;
+			if (a_type == ShaderResourceType::kRenderTarget && !_outputCaptured) {
 				_context->OMGetRenderTargets(8, _targets, &_depth);
 				_context->OMGetBlendState(&_blend, _blendFactor, &_sampleMask);
 				_outputCaptured = true;
 				if (_stage == ShaderStage::kPixel)
 					t_drawMetrics.captures += 2;
 			}
-			if (claim.resourceType == ShaderResourceType::kShaderResource &&
-				std::ranges::none_of(std::span(_resources).first(_resourceCount), [&](const auto& r) { return r.slot == claim.slot; })) {
+			if (a_type == ShaderResourceType::kShaderResource &&
+				std::ranges::none_of(std::span(_resources).first(_resourceCount), [&](const auto& r) { return r.slot == a_slot; })) {
 				auto& resource = _resources[_resourceCount++];
-				resource = { claim.slot, nullptr };
+				resource = { a_slot, nullptr };
 				if (_stage == ShaderStage::kPixel)
 					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetShaderResources(claim.slot, 1, &resource.value);
+					_context->CSGetShaderResources(a_slot, 1, &resource.value);
 				else
-					_context->PSGetShaderResources(claim.slot, 1, &resource.value);
-			} else if (claim.resourceType == ShaderResourceType::kSampler &&
-					   std::ranges::none_of(std::span(_samplers).first(_samplerCount), [&](const auto& s) { return s.slot == claim.slot; })) {
-				auto& sampler = _samplers[_samplerCount++];
-				sampler = { claim.slot, nullptr };
-				if (_stage == ShaderStage::kPixel)
-					++t_drawMetrics.captures;
-				if (_stage == ShaderStage::kCompute)
-					_context->CSGetSamplers(claim.slot, 1, &sampler.value);
-				else
-					_context->PSGetSamplers(claim.slot, 1, &sampler.value);
-			} else if (claim.resourceType == ShaderResourceType::kConstantBuffer &&
-					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == claim.slot; })) {
+					_context->PSGetShaderResources(a_slot, 1, &resource.value);
+			} else if (a_type == ShaderResourceType::kConstantBuffer &&
+					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == a_slot; })) {
 				auto& buffer = _buffers[_bufferCount++];
-				buffer = { claim.slot, nullptr };
+				buffer = { a_slot, nullptr };
 				if (_stage == ShaderStage::kPixel)
 					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
-					_context->CSGetConstantBuffers(claim.slot, 1, &buffer.value);
+					_context->CSGetConstantBuffers(a_slot, 1, &buffer.value);
 				else
-					_context->PSGetConstantBuffers(claim.slot, 1, &buffer.value);
+					_context->PSGetConstantBuffers(a_slot, 1, &buffer.value);
 			}
 		}
+	}
+
+	void ScopedShaderInjectionBindings::BindSampler(
+		ID3D11DeviceContext* a_context, std::uint32_t a_slot, ID3D11SamplerState* a_sampler) noexcept
+	{
+		auto samplers = std::span(_samplers).first(_samplerCount);
+		const auto found = std::ranges::find(samplers, a_slot, &Sampler::slot);
+		auto* binding = found == samplers.end() ? nullptr : &*found;
+		if (!binding) {
+			ID3D11SamplerState* original = nullptr;
+			if (_stage == ShaderStage::kCompute)
+				a_context->CSGetSamplers(a_slot, 1, &original);
+			else
+				a_context->PSGetSamplers(a_slot, 1, &original);
+			if (original == a_sampler) {
+				if (original)
+					original->Release();
+				return;
+			}
+			_context = a_context;
+			binding = &_samplers[_samplerCount++];
+			*binding = { a_slot, original, original };
+			if (_stage == ShaderStage::kPixel)
+				++t_drawMetrics.captures;
+		}
+		if (binding->current == a_sampler)
+			return;
+		// AE SetDirtyStates (0x18247D0) skips clean slots; overrides must not outlive this draw.
+		if (_stage == ShaderStage::kCompute)
+			a_context->CSSetSamplers(a_slot, 1, &a_sampler);
+		else
+			a_context->PSSetSamplers(a_slot, 1, &a_sampler);
+		binding->current = a_sampler;
+		RecordShaderInjectionD3DBinds();
 	}
 
 	namespace
@@ -370,7 +313,6 @@ namespace cs::engine
 		struct TargetRuntimeState
 		{
 			std::atomic<bool> requested{ false };
-			std::atomic<bool> slotCollision{ false };
 			std::atomic<std::size_t> contributors{ 0 };
 			std::atomic<std::uint64_t> computeBindCalls{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
@@ -396,7 +338,6 @@ namespace cs::engine
 			};
 			std::vector<Bind> binds;
 			std::size_t contributors = 0;
-			bool slotCollision = false;
 		};
 
 		struct PublishedTarget
@@ -461,6 +402,9 @@ namespace cs::engine
 			ShaderStage stage = ShaderStage::kPixel;
 			std::atomic<bool> failureObserved{ false };
 			std::atomic<bool> pendingObserved{ false };
+			// Published after preparation stores its final compilation (or none).
+			std::atomic<bool> settled{ false };
+			std::atomic<std::uint16_t> samplerMask{ UINT16_MAX };
 		};
 
 		struct NativeReplacementWrapperKey
@@ -491,15 +435,6 @@ namespace cs::engine
 			winrt::com_ptr<ID3D11DeviceChild> shader;
 		};
 
-		// first claimant wins, in feature-registration order
-		struct TargetClaimLedger
-		{
-			std::vector<ShaderSlotClaim> slots;
-			std::array<ShaderInjectionDefines,
-				static_cast<std::size_t>(ShaderStage::kCount)>
-				defines;
-		};
-
 		struct Service
 		{
 			Service()
@@ -520,9 +455,6 @@ namespace cs::engine
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
-			std::array<TargetClaimLedger,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
-				ledgers;
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				runtime;
@@ -536,7 +468,12 @@ namespace cs::engine
 			std::array<bool,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				unsupportedNativeVariantReported{};
-			std::unordered_map<ID3D11DeviceChild*, NativeVariantKey>
+			struct NativeShaderIdentity
+			{
+				NativeVariantKey key;
+				std::shared_ptr<NativeVariant> variant;
+			};
+			std::unordered_map<ID3D11DeviceChild*, NativeShaderIdentity>
 				nativeShaderIdentities;
 			struct NativeShaderMetadata
 			{
@@ -551,6 +488,8 @@ namespace cs::engine
 				NativeReplacementWrapper,
 				NativeReplacementWrapperKeyHash>
 				nativeReplacementWrappers;
+			// Bumped whenever a cached native binding resolution may change.
+			std::atomic<std::uint64_t> nativeBindingGeneration{ 0 };
 			std::atomic_flag swapCountersLock = ATOMIC_FLAG_INIT;
 		};
 
@@ -790,202 +729,20 @@ namespace cs::engine
 			return counts;
 		}
 
-		std::string_view ContributorName(
-			const ShaderReplacementRegistration& a_registration,
-			std::size_t a_registrationIndex)
-		{
-			if (!a_registration.contributor.empty())
-				return a_registration.contributor;
-
-			thread_local std::string generated;
-			generated = "registration#" + std::to_string(a_registrationIndex);
-			return generated;
-		}
-
 		void LogLateMutation(std::string_view a_operation)
 		{
 			L->warn("{} rejected after shader-injection freeze; restart required.", a_operation);
 		}
 
-		template <class Registration>
-		bool RegistrationHasDuplicateClaims(const Registration& a_registration)
+		ShaderInjectionDefines GetDefines(const ShaderReplacementRegistration& a_registration)
 		{
-			auto claims = a_registration.slotClaims;
-			std::ranges::sort(claims);
-			return std::ranges::adjacent_find(claims) != claims.end();
-		}
-
-		bool IsReady(
-			const ShaderReplacementRegistration& a_registration,
-			std::size_t a_registrationIndex)
-		{
-			if (!a_registration.isReady)
-				return true;
-
-			try {
-				return a_registration.isReady();
-			} catch (const std::exception& e) {
-				L->warn(
-					"Readiness predicate for '{}' on '{}' failed: {}; contributor skipped.",
-					ContributorName(a_registration, a_registrationIndex),
-					kTargets[ToIndex(a_registration.targetId)].name,
-					e.what());
-			} catch (...) {
-				L->warn(
-					"Readiness predicate for '{}' on '{}' failed; contributor skipped.",
-					ContributorName(a_registration, a_registrationIndex),
-					kTargets[ToIndex(a_registration.targetId)].name);
-			}
-			return false;
-		}
-
-		bool HasDefineConflict(
-			const ShaderReplacementRegistration& a_registration,
-			std::span<const ShaderReplacementRegistration> a_contributions,
-			std::string_view& a_conflictingName,
-			std::string_view& a_existingValue)
-		{
-			for (const auto& [name, value] : a_registration.defines) {
-				for (const auto& contribution : a_contributions) {
-					if ((contribution.stages & a_registration.stages) == 0)
-						continue;
-					const auto existing = contribution.defines.find(name);
-					if (existing != contribution.defines.end() && existing->second != value) {
-						a_conflictingName = name;
-						a_existingValue = existing->second;
-						return true;
-					}
-				}
-			}
-			return false;
-		}
-
-		template <class Registration>
-		std::optional<ShaderSlotClaim> FindSlotCollision(
-			const Registration& a_registration,
-			const std::vector<ShaderSlotClaim>& a_claimedSlots)
-		{
-			for (const auto& claim : a_registration.slotClaims) {
-				for (const auto& occupied : a_claimedSlots) {
-					if (occupied.stage != claim.stage || occupied.resourceType != claim.resourceType || occupied.slot != claim.slot)
-						continue;
-					// FO4: identical immutable linear-clamp samplers may share scarce PS slots.
-					if (claim.resourceType != ShaderResourceType::kSampler ||
-						claim.samplerContract == ShaderSamplerContract::kExclusive ||
-						claim.samplerContract != occupied.samplerContract)
-						return claim;
-				}
-			}
-			return std::nullopt;
-		}
-
-		// Engine and feature claims cannot occupy substrate bindings.
-		std::optional<ShaderSlotClaim> FindSubstrateReservation(
-			std::span<const ShaderSlotClaim> a_claims)
-		{
-			for (const auto& claim : a_claims) {
-				if ((claim.resourceType == ShaderResourceType::kConstantBuffer &&
-						claim.slot >= render::kFrameDataSlot && claim.slot <= render::kFO4SharedDataSlot) ||
-					(claim.resourceType == ShaderResourceType::kShaderResource &&
-						(claim.slot == render::kCanonicalDepthSlot || claim.slot == render::kFullscreenDebugTextureSlot)))
-					return claim;
-			}
-			return std::nullopt;
-		}
-
-		template <class Visitor>
-		void ForEachStage(ShaderStageMask a_stages, Visitor&& a_visitor)
-		{
-			for (std::size_t stage = 0;
-				stage < static_cast<std::size_t>(ShaderStage::kCount);
-				++stage) {
-				if ((a_stages & ShaderStageBit(static_cast<ShaderStage>(stage))) != 0)
-					a_visitor(stage);
-			}
-		}
-
-		// registration-time ledger admission; freeze only reasserts the invariant
-		bool ClaimsAvailable(
-			const TargetClaimLedger& a_ledger,
-			const ShaderReplacementRegistration& a_registration,
-			const ShaderInjectionTargetMetadata& a_target)
-		{
-			for (const auto& claim : a_registration.slotClaims) {
-				const std::uint32_t limit = claim.resourceType == ShaderResourceType::kShaderResource ? D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT :
-				                            claim.resourceType == ShaderResourceType::kSampler        ? D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT :
-				                            claim.resourceType == ShaderResourceType::kConstantBuffer ? D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT :
-				                                                                                        D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;
-				if (claim.slot >= limit) {
-					L->error("Replacement registration '{}' for '{}' rejected: type={} slot={} exceeds the D3D11 slot range.",
-						a_registration.contributor, a_target.name, static_cast<unsigned>(claim.resourceType), claim.slot);
-					return false;
-				}
-			}
-			if (const auto reserved =
-					FindSubstrateReservation(a_registration.slotClaims)) {
-				L->error(
-					"Replacement registration '{}' for '{}' rejected: stage={} constant buffer b{} is reserved for the shared substrate (b{} and b{}).",
-					a_registration.contributor,
-					a_target.name,
-					static_cast<unsigned>(reserved->stage),
-					reserved->slot,
-					render::kSharedDataSlot,
-					render::kFeatureDataSlot);
-				return false;
-			}
-			if (const auto collision =
-					FindSlotCollision(a_registration, a_ledger.slots)) {
-				L->error(
-					"Replacement registration '{}' for '{}' rejected: stage={} type={} slot={} is already claimed.",
-					a_registration.contributor,
-					a_target.name,
-					static_cast<unsigned>(collision->stage),
-					static_cast<unsigned>(collision->resourceType),
-					collision->slot);
-				return false;
-			}
-			for (const auto& [name, value] : a_registration.defines) {
-				bool conflict = false;
-				std::string_view conflictingValue;
-				ForEachStage(
-					a_registration.stages,
-					[&](std::size_t a_stage) {
-						const auto existing =
-							a_ledger.defines[a_stage].find(name);
-						if (existing != a_ledger.defines[a_stage].end() && existing->second != value) {
-							conflict = true;
-							conflictingValue = existing->second;
-						}
-					});
-				if (conflict) {
-					L->error(
-						"Replacement registration '{}' for '{}' rejected: {}={} conflicts with the claimed value {}.",
-						a_registration.contributor,
-						a_target.name,
-						name,
-						value,
-						conflictingValue);
-					return false;
-				}
-			}
-			return true;
-		}
-
-		void CommitClaims(
-			TargetClaimLedger& a_ledger,
-			const ShaderReplacementRegistration& a_registration)
-		{
-			a_ledger.slots.insert(
-				a_ledger.slots.end(),
-				a_registration.slotClaims.begin(),
-				a_registration.slotClaims.end());
-			ForEachStage(
-				a_registration.stages,
-				[&](std::size_t a_stage) {
-					a_ledger.defines[a_stage].insert(
-						a_registration.defines.begin(),
-						a_registration.defines.end());
-				});
+			const auto* feature = a_registration.feature;
+			if (!feature || !feature->IsLoaded() || !feature->HasShaderDefine(a_registration.targetId))
+				return {};
+			ShaderInjectionDefines defines{ { std::string(feature->GetShaderDefineName()), "1" } };
+			for (const auto& [name, value] : feature->GetShaderDefineOptions(a_registration.targetId))
+				defines.emplace(name, value);
+			return defines;
 		}
 
 		std::vector<FrozenTarget> FreezeTargets(
@@ -1004,7 +761,6 @@ namespace cs::engine
 				auto developerOverride = a_developerOverrides[targetIndex];
 				if (developerOverride == DeveloperShaderOverride::kForceOff && !a_developerForceOffEnabled)
 					developerOverride = DeveloperShaderOverride::kAuto;
-				std::vector<ShaderSlotClaim> claimedSlots;
 
 				for (std::size_t registrationIndex = 0;
 					registrationIndex < a_registrations.size();
@@ -1012,73 +768,14 @@ namespace cs::engine
 					const auto& registration = a_registrations[registrationIndex];
 					if (registration.targetId != metadata.id)
 						continue;
-					if (!render::IsSharedDataReady()) {
-						L->error(
-							"Contributor '{}' for '{}' dropped because the shared substrate is unavailable.",
-							ContributorName(registration, registrationIndex),
-							metadata.name);
-						continue;
-					}
-					if (!IsReady(registration, registrationIndex)) {
-						L->warn(
-							"Contributor '{}' was not ready at freeze; '{}' will run stock for this session (injection readiness is frozen once at startup).",
-							registration.contributor,
-							metadata.name);
-						continue;
-					}
-
-					std::string_view conflictingName;
-					std::string_view existingValue;
-					if (HasDefineConflict(
-							registration,
-							target.contributions,
-							conflictingName,
-							existingValue)) {
-						L->error(
-							"Contributor '{}' for '{}' conflicts on {}={} (requested {}) after registration admitted it; contributor dropped.",
-							ContributorName(registration, registrationIndex),
-							metadata.name,
-							conflictingName,
-							existingValue,
-							registration.defines.find(conflictingName)->second);
-						target.slotCollision = true;
-						continue;
-					}
-
-					// registration already rejected these; a hit here is a broker invariant break
-					if (const auto reserved = FindSubstrateReservation(
-							registration.slotClaims)) {
-						L->error(
-							"Substrate slot collision on '{}' (stage={}, constant buffer b{}) from '{}'; b{} and b{} are reserved for the shared substrate; contributor dropped.",
-							metadata.name,
-							static_cast<unsigned>(reserved->stage),
-							reserved->slot,
-							ContributorName(registration, registrationIndex),
-							render::kSharedDataSlot,
-							render::kFeatureDataSlot);
-						target.slotCollision = true;
-						continue;
-					}
-
-					if (const auto collision = FindSlotCollision(registration, claimedSlots)) {
-						L->error(
-							"Slot collision on '{}' (stage={}, type={}, slot={}) from '{}'; contributor dropped.",
-							metadata.name,
-							static_cast<unsigned>(collision->stage),
-							static_cast<unsigned>(collision->resourceType),
-							collision->slot,
-							ContributorName(registration, registrationIndex));
-						target.slotCollision = true;
+					if (registration.feature && !registration.feature->IsLoaded()) {
 						continue;
 					}
 
 					++target.contributors;
-					target.defines.insert(registration.defines.begin(), registration.defines.end());
+					const auto defines = GetDefines(registration);
+					target.defines.insert(defines.begin(), defines.end());
 					target.contributions.push_back(registration);
-					claimedSlots.insert(
-						claimedSlots.end(),
-						registration.slotClaims.begin(),
-						registration.slotClaims.end());
 					if (registration.bind) {
 						target.binds.push_back({ registration.stages,
 							registration.bind });
@@ -1101,7 +798,6 @@ namespace cs::engine
 
 				auto& runtime = GetService().runtime[targetIndex];
 				runtime.requested.store(requested, std::memory_order_relaxed);
-				runtime.slotCollision.store(target.slotCollision, std::memory_order_relaxed);
 				runtime.contributors.store(target.contributors, std::memory_order_relaxed);
 				runtime.developerOverride = developerOverride;
 				runtime.defines = target.defines;
@@ -1158,6 +854,11 @@ namespace cs::engine
 				candidate->stage = a_key.stage;
 				service.nativeVariants.emplace(a_key, candidate);
 			}
+			struct SettleOnExit
+			{
+				NativeVariant& variant;
+				~SettleOnExit() { variant.settled.store(true, std::memory_order_release); }
+			} settle{ *candidate };
 
 			const auto descriptor = DescribeNativeVariant(a_key);
 			auto family = BuildShaderFamilyCompilationDescriptor(descriptor);
@@ -1284,23 +985,36 @@ namespace cs::engine
 				std::ignore = QueueNativeVariant(a_key);
 		}
 
+		// a_settled reports whether the outcome is final until the next binding generation.
 		template <class TShader>
 		TShader* AcquireNativeReplacement(
 			const PublishedPlan& a_plan,
 			const PublishedTarget& a_target,
-			const NativeVariantKey& a_key)
+			const NativeVariantKey& a_key,
+			bool* a_settled = nullptr)
 		{
+			bool settled = true;
+			const auto report = [&] {
+				if (a_settled)
+					*a_settled = settled;
+			};
 			auto variant = FindOrPrepareNativeVariant(
 				a_plan, a_target, a_key);
-			if (!variant)
+			if (!variant) {
+				report();
 				return nullptr;
+			}
+			// Read before the compilation so a concurrently prepared one is visible.
+			settled = variant->settled.load(std::memory_order_acquire);
 			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
 			{
 				std::scoped_lock lock(variant->mutex);
 				compilation = variant->compilation;
 			}
-			if (!compilation)
+			if (!compilation) {
+				report();
 				return nullptr;
+			}
 			auto shader = compilation->Acquire();
 			if (!shader) {
 				auto& runtime =
@@ -1311,19 +1025,26 @@ namespace cs::engine
 						runtime.passthroughCompileFail.fetch_add(
 							1, std::memory_order_relaxed);
 					}
-				} else if (!variant->pendingObserved.exchange(
-							   true, std::memory_order_relaxed)) {
-					runtime.passthroughNotReady.fetch_add(
-						1, std::memory_order_relaxed);
+				} else {
+					settled = false;
+					if (!variant->pendingObserved.exchange(
+							true, std::memory_order_relaxed)) {
+						runtime.passthroughNotReady.fetch_add(
+							1, std::memory_order_relaxed);
+					}
 				}
+				report();
 				return nullptr;
 			}
+			settled = true;
+			report();
 
+			variant->samplerMask.store(compilation->GetSamplerMask(), std::memory_order_relaxed);
 			{
 				auto& service = GetService();
 				std::scoped_lock lock(service.nativeVariantMutex);
 				service.nativeShaderIdentities.insert_or_assign(
-					shader.get(), a_key);
+					shader.get(), Service::NativeShaderIdentity{ a_key, variant });
 			}
 			return static_cast<TShader*>(shader.detach());
 		}
@@ -1390,12 +1111,13 @@ namespace cs::engine
 			const PublishedPlan& a_plan,
 			const PublishedTarget& a_target,
 			const NativeVariantKey& a_key,
-			TWrapper* a_nativeWrapper)
+			TWrapper* a_nativeWrapper,
+			bool* a_settled = nullptr)
 		{
 			if (!a_nativeWrapper)
 				return nullptr;
 			auto* replacement = AcquireNativeReplacement<TD3DShader>(
-				a_plan, a_target, a_key);
+				a_plan, a_target, a_key, a_settled);
 			if (!replacement)
 				return nullptr;
 			winrt::com_ptr<TD3DShader> replacementReference;
@@ -1441,13 +1163,9 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
-			std::optional<PixelBindingBatch> bindings;
+			VerifyFrameBindings(a_context, a_stage, a_target.id);
 			if (a_stage == ShaderStage::kPixel)
-				bindings.emplace(a_context);
-			if (a_stage != ShaderStage::kCompute &&
-				(a_target.contributedStages & ShaderStageBit(a_stage)) != 0)
-				render::BindSharedData(a_context, a_stage);
-
+				VerifyFrameBindings(a_context, ShaderStage::kVertex, a_target.id);
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
 			for (const auto& bind : a_target.binds) {
 				if ((bind.stages & ShaderStageBit(a_stage)) == 0)
@@ -1532,11 +1250,8 @@ namespace cs::engine
 				const auto identity =
 					service.nativeShaderIdentities.find(shader);
 				if (identity != service.nativeShaderIdentities.end()) {
-					owner = identity->second;
-					const auto found =
-						service.nativeVariants.find(identity->second);
-					if (found != service.nativeVariants.end())
-						variant = found->second;
+					owner = identity->second.key;
+					variant = identity->second.variant;
 				}
 			}
 			if (!owner) {
@@ -1576,8 +1291,7 @@ namespace cs::engine
 						a_threadGroupCountZ);
 					return;
 				}
-				render::ScopedComputeSharedDataBinding bindings(a_context);
-				if (!bindings.IsActive()) {
+				if (!render::IsSharedDataReady()) {
 					g_computePhaseRejections.fetch_add(
 						1, std::memory_order_relaxed);
 					a_context->Dispatch(
@@ -1587,10 +1301,8 @@ namespace cs::engine
 					return;
 				}
 				const ActiveVariantScope variantScope(variant.get());
-				// FO4: contribution claims restore exact CS bindings after native dispatch.
+				// FO4 rebuilds the native low-slot inputs for each tiled dispatch.
 				ScopedShaderInjectionBindings contributionBindings(ShaderStage::kCompute);
-				for (const auto& contribution : target->contributions)
-					contributionBindings.Capture(a_context, contribution.slotClaims);
 				DispatchPublishedTarget(
 					*target,
 					ShaderStage::kCompute,
@@ -1745,7 +1457,7 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		const bool installsPreDrawHook =
-			static_cast<bool>(a_registration.bind) && (a_registration.stages & ShaderStageBit(ShaderStage::kPixel)) != 0;
+			(a_registration.stages & ShaderStageBit(ShaderStage::kPixel)) != 0;
 		const auto admissible = [&service](
 									const ShaderReplacementRegistration& a_candidate) {
 			if (service.lifecycle != Lifecycle::kCollecting) {
@@ -1771,17 +1483,7 @@ namespace cs::engine
 					a_candidate.contributor);
 				return false;
 			}
-			if (RegistrationHasDuplicateClaims(a_candidate)) {
-				L->error(
-					"Replacement registration '{}' for '{}' rejected: duplicate slot claim.",
-					a_candidate.contributor,
-					metadata.name);
-				return false;
-			}
-			return ClaimsAvailable(
-				service.ledgers[ToIndex(a_candidate.targetId)],
-				a_candidate,
-				metadata);
+			return true;
 		};
 
 		{
@@ -1792,7 +1494,7 @@ namespace cs::engine
 
 		// Active substrate uses b4-b7 and canonical scene depth at t17.
 		render::EnsureSharedDataUpdateInstalled();
-		// a bind callback without its draw anchor would never run
+		// Consumer sampling and forced bindings share the engine draw anchor.
 		if (installsPreDrawHook && !EnsureDeferredDrawAnchorInstalled()) {
 			L->error(
 				"Replacement registration '{}' for '{}' rejected: the deferred draw anchor is unavailable.",
@@ -1804,9 +1506,6 @@ namespace cs::engine
 		std::scoped_lock lock(service.mutex);
 		if (!admissible(a_registration))
 			return false;
-		CommitClaims(
-			service.ledgers[ToIndex(a_registration.targetId)],
-			a_registration);
 		service.registrations.push_back(std::move(a_registration));
 		return true;
 	}
@@ -1873,6 +1572,7 @@ namespace cs::engine
 		service.developerSourceRoot = std::move(a_sourceRoot);
 		std::scoped_lock variantLock(service.nativeVariantMutex);
 		service.shaderSourceAvailability.clear();
+		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
 		return true;
 	}
 
@@ -1968,11 +1668,6 @@ namespace cs::engine
 
 			const auto& runtime =
 				service.runtime[ToIndex(registration.targetId)];
-			if (runtime.slotCollision.load(std::memory_order_relaxed)) {
-				a_error = "'" + std::string(metadata->name) + "' cannot deliver contributor '" + std::string(a_contributor) + "' because its slot or define claims conflict";
-				return false;
-			}
-
 			const auto* published =
 				FindPublishedTarget(*plan, registration.targetId);
 			if (!published) {
@@ -1987,7 +1682,7 @@ namespace cs::engine
 			const auto contribution = std::ranges::find_if(
 				published->contributions,
 				[&](const ShaderReplacementRegistration& a_candidate) {
-					return a_candidate.contributor == a_contributor && a_candidate.targetId == registration.targetId && a_candidate.stages == registration.stages && a_candidate.defines == registration.defines && a_candidate.slotClaims == registration.slotClaims && !std::ranges::contains(matched, std::addressof(a_candidate));
+					return a_candidate.contributor == a_contributor && a_candidate.targetId == registration.targetId && a_candidate.stages == registration.stages && a_candidate.feature == registration.feature && !std::ranges::contains(matched, std::addressof(a_candidate));
 				});
 			if (contribution == published->contributions.end()) {
 				a_error = "'" + std::string(metadata->name) + "' lost a registered route for contributor '" + std::string(a_contributor) + "'";
@@ -2183,6 +1878,7 @@ namespace cs::engine
 			}
 		}
 		service.published.store(plan, std::memory_order_release);
+		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
 		{
 			std::scoped_lock lock(service.mutex);
 			service.lifecycle = Lifecycle::kPublished;
@@ -2199,6 +1895,21 @@ namespace cs::engine
 			summary.published);
 	}
 
+	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept
+	{
+		if (a_targets.empty())
+			return;
+		auto& service = GetService();
+		std::scoped_lock lock(service.nativeVariantMutex);
+		std::erase_if(service.nativeVariants, [a_targets](const auto& a_entry) {
+			return std::ranges::find(a_targets, a_entry.first.target) != a_targets.end();
+		});
+		std::erase_if(service.nativeShaderIdentities, [a_targets](const auto& a_entry) {
+			return std::ranges::find(a_targets, a_entry.second.key.target) != a_targets.end();
+		});
+		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
+	}
+
 	void InvalidateNativeShaderVariantCompilations() noexcept
 	{
 		auto& service = GetService();
@@ -2213,11 +1924,13 @@ namespace cs::engine
 		service.shaderSourceAvailability.clear();
 		service.unsupportedNativeVariantReported.fill(false);
 		service.nativeShaderIdentities.clear();
+		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
 	}
 
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
-		ID3D11DeviceContext* a_context) noexcept
+		ID3D11DeviceContext* a_context,
+		std::uint16_t a_samplerMask) noexcept
 	{
 		if (!a_context || !IsValidTarget(a_target))
 			return;
@@ -2226,7 +1939,9 @@ namespace cs::engine
 		const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr;
 		if (!target)
 			return;
+		const auto previousMask = std::exchange(t_samplerMask, a_samplerMask);
 		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
+		t_samplerMask = previousMask;
 	}
 
 	namespace
@@ -2311,19 +2026,31 @@ namespace cs::engine
 			}
 		}
 
-		NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBindingImpl(
+		struct NativeGraphicsResolution
+		{
+			NativeGraphicsShaderBinding binding;
+			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
+			std::uint8_t matches = 0;
+			// Unsettled outcomes (pending compiles, disabled targets, failures) are not cached.
+			bool settled = true;
+		};
+
+		NativeGraphicsResolution ResolveNativeGraphicsShaderBindingImpl(
 			const NativeShaderFamilyContext& a_family,
 			std::uint32_t a_vertexShaderId,
 			std::uint32_t a_pixelShaderId,
 			RE::BSGraphics::VertexShader* a_nativeVertex,
 			RE::BSGraphics::PixelShader* a_nativePixel) noexcept
 		{
-			NativeGraphicsShaderBinding result{
-				.vertex = a_nativeVertex,
-				.pixel = a_nativePixel
+			NativeGraphicsResolution resolution{
+				.binding = { .vertex = a_nativeVertex, .pixel = a_nativePixel },
+				.target = a_family.target
 			};
-			if (!ShaderEnabled(a_family.target))
-				return result;
+			auto& result = resolution.binding;
+			if (!ShaderEnabled(a_family.target)) {
+				resolution.settled = false;
+				return resolution;
+			}
 
 			bool requiresGraphicsPair = false;
 			try {
@@ -2332,15 +2059,14 @@ namespace cs::engine
 				const auto* target =
 					plan ? FindPublishedTarget(*plan, a_family.target) : nullptr;
 				if (!target)
-					return result;
+					return resolution;
 				requiresGraphicsPair = std::ranges::any_of(target->contributions, [](const auto& contribution) {
 					return contribution.requiresGraphicsPair;
 				});
 
-				auto& runtime =
-					GetService().runtime[ToIndex(a_family.target)];
 				if (a_nativeVertex && a_nativeVertex->id == a_vertexShaderId) {
-					runtime.matches.fetch_add(1, std::memory_order_relaxed);
+					++resolution.matches;
+					bool settled = true;
 					if (auto* replacement =
 							AcquireNativeReplacementWrapper<
 								RE::BSGraphics::VertexShader,
@@ -2351,13 +2077,16 @@ namespace cs::engine
 									a_family,
 									ShaderStage::kVertex,
 									a_vertexShaderId),
-								a_nativeVertex)) {
+								a_nativeVertex,
+								&settled)) {
 						result.vertex = replacement;
 					}
+					resolution.settled &= settled;
 				}
 
 				if (a_nativePixel && a_nativePixel->id == a_pixelShaderId) {
-					runtime.matches.fetch_add(1, std::memory_order_relaxed);
+					++resolution.matches;
+					bool settled = true;
 					if (auto* replacement =
 							AcquireNativeReplacementWrapper<
 								RE::BSGraphics::PixelShader,
@@ -2370,11 +2099,14 @@ namespace cs::engine
 									a_pixelShaderId,
 									NativePixelForcesEarlyDepthStencil(
 										a_nativePixel)),
-								a_nativePixel)) {
+								a_nativePixel,
+								&settled)) {
 						result.pixel = replacement;
 					}
+					resolution.settled &= settled;
 				}
 			} catch (const std::exception& e) {
+				resolution.settled = false;
 				CS_LOG_EVERY_MS(
 					L,
 					2000,
@@ -2382,6 +2114,7 @@ namespace cs::engine
 					"Native shader descriptor routing failed: {}.",
 					e.what());
 			} catch (...) {
+				resolution.settled = false;
 				CS_LOG_EVERY_MS(
 					L,
 					2000,
@@ -2392,10 +2125,44 @@ namespace cs::engine
 			if (requiresGraphicsPair && (result.vertex == a_nativeVertex || result.pixel == a_nativePixel)) {
 				result = { a_nativeVertex, a_nativePixel };
 			}
-			GetService().runtime[ToIndex(a_family.target)].substitutions.fetch_add(
-				(result.vertex != a_nativeVertex) + (result.pixel != a_nativePixel), std::memory_order_relaxed);
-			return result;
+			return resolution;
 		}
+
+		struct NativeGraphicsBindingKey
+		{
+			const RE::BSShader* shader = nullptr;
+			const void* vertex = nullptr;
+			const void* pixel = nullptr;
+			const void* vertexShader = nullptr;
+			const void* pixelShader = nullptr;
+			std::uint32_t vertexShaderId = 0;
+			std::uint32_t pixelShaderId = 0;
+			std::uint32_t nativeVertexId = 0;
+			std::uint32_t nativePixelId = 0;
+
+			bool operator==(const NativeGraphicsBindingKey&) const = default;
+		};
+
+		struct NativeGraphicsBindingKeyHash
+		{
+			std::size_t operator()(const NativeGraphicsBindingKey& a_key) const noexcept
+			{
+				auto value = std::hash<const void*>{}(a_key.shader);
+				for (const void* pointer : { a_key.vertex, a_key.pixel, a_key.vertexShader, a_key.pixelShader })
+					value = value * 131U + std::hash<const void*>{}(pointer);
+				for (const auto id : { a_key.vertexShaderId, a_key.pixelShaderId, a_key.nativeVertexId, a_key.nativePixelId })
+					value = value * 131U + id;
+				return value;
+			}
+		};
+
+		// Per-thread so the per-draw hit path takes no lock; cleared when the generation moves.
+		struct NativeGraphicsBindingCache
+		{
+			std::uint64_t generation = UINT64_MAX;
+			std::unordered_map<NativeGraphicsBindingKey, NativeGraphicsResolution, NativeGraphicsBindingKeyHash> entries;
+		};
+		thread_local NativeGraphicsBindingCache t_nativeGraphicsBindings;
 	}
 
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
@@ -2405,19 +2172,58 @@ namespace cs::engine
 		RE::BSGraphics::VertexShader* a_nativeVertex,
 		RE::BSGraphics::PixelShader* a_nativePixel) noexcept
 	{
-		const auto family = ResolveNativeShaderFamilyContext(a_shader);
-		if (!family) {
-			return {
-				.vertex = a_nativeVertex,
-				.pixel = a_nativePixel
-			};
+		const NativeGraphicsShaderBinding native{
+			.vertex = a_nativeVertex,
+			.pixel = a_nativePixel
+		};
+		auto& cache = t_nativeGraphicsBindings;
+		const auto generation = GetService().nativeBindingGeneration.load(std::memory_order_acquire);
+		if (cache.generation != generation) {
+			cache.entries.clear();
+			cache.generation = generation;
 		}
-		return ResolveNativeGraphicsShaderBindingImpl(
-			*family,
-			a_vertexShaderId,
-			a_pixelShaderId,
-			a_nativeVertex,
-			a_nativePixel);
+		const NativeGraphicsBindingKey key{
+			.shader = a_shader,
+			.vertex = a_nativeVertex,
+			.pixel = a_nativePixel,
+			.vertexShader = a_nativeVertex ? a_nativeVertex->shader : nullptr,
+			.pixelShader = a_nativePixel ? a_nativePixel->shader : nullptr,
+			.vertexShaderId = a_vertexShaderId,
+			.pixelShaderId = a_pixelShaderId,
+			.nativeVertexId = a_nativeVertex ? a_nativeVertex->id : 0,
+			.nativePixelId = a_nativePixel ? a_nativePixel->id : 0
+		};
+		NativeGraphicsResolution fresh;
+		const NativeGraphicsResolution* resolution = nullptr;
+		if (const auto found = cache.entries.find(key); found != cache.entries.end()) {
+			resolution = &found->second;
+		} else {
+			if (const auto family = ResolveNativeShaderFamilyContext(a_shader)) {
+				fresh = ResolveNativeGraphicsShaderBindingImpl(
+					*family,
+					a_vertexShaderId,
+					a_pixelShaderId,
+					a_nativeVertex,
+					a_nativePixel);
+			} else {
+				fresh.binding = native;
+			}
+			resolution = &fresh;
+			if (fresh.settled) {
+				try {
+					resolution = &cache.entries.emplace(key, fresh).first->second;
+				} catch (...) {
+				}
+			}
+		}
+		if (!ShaderEnabled(resolution->target))
+			return native;
+		auto& runtime = GetService().runtime[ToIndex(resolution->target)];
+		runtime.matches.fetch_add(resolution->matches, std::memory_order_relaxed);
+		runtime.substitutions.fetch_add(
+			(resolution->binding.vertex != a_nativeVertex) + (resolution->binding.pixel != a_nativePixel),
+			std::memory_order_relaxed);
+		return resolution->binding;
 	}
 
 	RE::BSGraphics::ComputeShader* ResolveNativeComputeShaderBinding(
@@ -2597,16 +2403,12 @@ namespace cs::engine
 			std::scoped_lock lock(service.nativeVariantMutex);
 			const auto identity =
 				service.nativeShaderIdentities.find(boundShader);
-			if (identity != service.nativeShaderIdentities.end()) {
-				const auto variant =
-					service.nativeVariants.find(identity->second);
-				if (variant != service.nativeVariants.end())
-					activeVariant = variant->second;
-			}
+			if (identity != service.nativeShaderIdentities.end())
+				activeVariant = identity->second.variant;
 		}
 		if (activeVariant) {
 			const ActiveVariantScope scope(activeVariant.get());
-			DispatchShaderInjections(activeVariant->target, a_context);
+			DispatchShaderInjections(activeVariant->target, a_context, activeVariant->samplerMask.load(std::memory_order_relaxed));
 		}
 		boundShader->Release();
 	}
@@ -2661,8 +2463,6 @@ namespace cs::engine
 				runtime.requested.load(std::memory_order_relaxed);
 			snapshot.published =
 				plan && FindPublishedTarget(*plan, a_target);
-			snapshot.slotCollision =
-				runtime.slotCollision.load(std::memory_order_relaxed);
 			snapshot.developerOverride = runtime.developerOverride;
 			snapshot.contributors =
 				runtime.contributors.load(std::memory_order_relaxed);

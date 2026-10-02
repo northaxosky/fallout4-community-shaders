@@ -3,9 +3,9 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
-#include "Render/PixelShaderResourceSnapshot.h"
 #include "ScreenSpaceGIConstants.h"
 #include "ScreenSpaceGISettings.h"
+#include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 
 #include <array>
@@ -16,8 +16,8 @@
 namespace cs::features
 {
 	class ScreenSpaceGI :
-		public Feature,
-		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+	    public ShaderFeature<ssgi::kShaderDefines>,
+	    public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 	public:
 		static ScreenSpaceGI* GetSingleton();
@@ -27,6 +27,7 @@ namespace cs::features
 		std::string GetFeatureSummary() const override { return "Screen-space ambient occlusion and indirect lighting."; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
+		void Prepass() override;
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void DrawSettings() override;
@@ -59,18 +60,18 @@ namespace cs::features
 			MipTexture depth, radiance, normals;
 			Texture normalGloss, diffuse, radianceTemp, previousGeometry;
 			TexturePair ao, luma, chroma, specular, accumulation;
+			bool normalGlossSpecular = false;
 		};
 
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(ssgi_settings::kSchema); }
 		bool EnsureResources();
+		void EnsurePrepareResources(Resources&, UINT, UINT);
 		bool CompileShaders();
 		void UpdateConstants(const cs::engine::WorldCameraRecord&, UINT, UINT, UINT);
 		void QueueReset(const char*) noexcept;
 		void OnPostDeferredLights();
 		void ApplyVanillaSSAO();
-		void SaveCompositionBindings();
-		void RestoreCompositionBindings();
 		void BindComposition(ID3D11DeviceContext*);
 		void UpdateConsumer(bool a_enabled, bool a_tiled);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
@@ -89,9 +90,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11SamplerState> _pointSampler, _linearSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _prepare;
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 7> _shaders;
-		cs::render::PixelShaderResourceSnapshot<kCompositionCount> _compositionSnapshot;
-		cs::render::PixelShaderResourceSnapshot<1> _specularSnapshot;
-		winrt::com_ptr<ID3D11Buffer> _consumerSnapshot;
 		DirectX::XMFLOAT4X4 _previousViewInverse{};
 		std::optional<bool> _vanillaSSAOSnapshot;
 		std::atomic_bool _started{ false }, _resourcesReady{ false }, _produced{ false };

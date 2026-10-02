@@ -1,4 +1,6 @@
 #include "Render/ComputeScope.h"
+#include "Render/ShaderInjectionTargets.h"
+#include "Render/SharedData.h"
 
 #include <algorithm>
 
@@ -45,5 +47,6 @@ namespace cs
 			_ctx->CSSetConstantBuffers(0, _constantBufferCount, nullCBs);
 		}
 		_ctx->CSSetShader(nullptr, nullptr, 0);
+		render::BindSharedData(_ctx, engine::ShaderStage::kCompute);
 	}
 }

@@ -26,7 +26,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -297,17 +297,7 @@ namespace cs::features
 
 	void TerrainShadows::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderContributions("TerrainShadows", [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.slotClaims = {
-					{ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = kShadowHeightPSSlot },
-					{ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kSampler,
-						.slot = kShadowHeightSamplerPSSlot,
-						.samplerContract = cs::engine::ShaderSamplerContract::kLinearClamp }
-				};
-				registration.isReady = [this] { return ts::IsReadyForInjectionFreeze(GetBootstrapReadiness()); };
+		if (!cs::engine::RegisterFeatureShaderBindings("TerrainShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
 				registration.bind = [this, composite](ID3D11DeviceContext* a_context) {
 					if (composite)
@@ -322,30 +312,11 @@ namespace cs::features
 		_registrationsReady.store(true, std::memory_order_release);
 
 		if (!cs::engine::RegisterPostDeferredPrePass(
-				[] { TerrainShadows::GetSingleton()->OnPostDeferredPrePass(); },
+				[] { TerrainShadows::GetSingleton()->OnPostDeferredPrePass(); TerrainShadows::GetSingleton()->Prepass(); },
 				static_cast<cs::engine::HookPriority>(-200))) {
 			FailLoad(
 				"Terrain shadows update after the deferred prepass; registering that "
 				"anchor failed");
-			return;
-		}
-		cs::engine::RegisterPreDeferredLightsImpl(
-			[] { TerrainShadows::GetSingleton()->SaveEngineBindings(); },
-			cs::engine::HookPriority::Early);
-		cs::engine::RegisterPostDeferredLightsImpl(
-			[] { TerrainShadows::GetSingleton()->RestoreEngineBindings(); },
-			cs::engine::HookPriority::Late);
-		if (!cs::engine::RegisterPreDeferredComposite(
-				[this] {
-					if (_debugVisualization.load(std::memory_order_acquire) != DebugVisualization::kOff)
-						SaveEngineBindings();
-				},
-				cs::engine::HookPriority::Early) ||
-			!cs::engine::RegisterPostDeferredComposite(
-				[] { TerrainShadows::GetSingleton()->RestoreEngineBindings(); },
-				cs::engine::HookPriority::Late)) {
-			FailLoad(
-				"Terrain shadow debug views need a deferred-composite binding scope");
 			return;
 		}
 		_renderCallbacksReady.store(true, std::memory_order_release);
@@ -1178,23 +1149,12 @@ namespace cs::features
 		}
 	}
 
-	void TerrainShadows::SaveEngineBindings()
+	void TerrainShadows::Prepass()
 	{
-		auto* context = GetImmediateContext();
-		if (!context)
-			return;
-		if (!_engineShadowBinding.Save(context, kShadowHeightPSSlot) && _engineShadowBinding.IsSaved()) {
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::err,
-				"Terrain shadow t{} binding scopes overlap; preserving the active snapshot.",
-				kShadowHeightPSSlot);
+		if (auto* context = GetImmediateContext()) {
+			auto* srv = GetShadowHeightSRV();
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kShadowHeightPSSlot, 1, &srv);
 		}
-		_engineSamplerBinding.Save(context, kShadowHeightSamplerPSSlot);
-		ID3D11ShaderResourceView* nullSRV = nullptr;
-		context->PSSetShaderResources(kShadowHeightPSSlot, 1, &nullSRV);
-		ID3D11SamplerState* nullSampler = nullptr;
-		context->PSSetSamplers(kShadowHeightSamplerPSSlot, 1, &nullSampler);
 	}
 
 	void TerrainShadows::BindShadowHeights(ID3D11DeviceContext* a_context)
@@ -1202,8 +1162,6 @@ namespace cs::features
 		if (!a_context || !_injectionsOperational.load(std::memory_order_acquire) || !_enabled.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_shadowTexture || !_shadowTexture->srv || !_linearClampSampler) {
 			return;
 		}
-		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
-		cs::engine::BindInjectionShaderResources(a_context, kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
 		cs::engine::BindInjectionSamplers(a_context, kShadowHeightSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
@@ -1219,13 +1177,6 @@ namespace cs::features
 				_lightInertBinds.fetch_add(1, std::memory_order_relaxed);
 			}
 		}
-	}
-
-	void TerrainShadows::RestoreEngineBindings()
-	{
-		auto* context = GetImmediateContext();
-		_engineSamplerBinding.Restore(context);
-		_engineShadowBinding.Restore(context);
 	}
 
 	FullscreenDebugData TerrainShadows::GetFullscreenDebugData() const noexcept
@@ -1247,8 +1198,6 @@ namespace cs::features
 	{
 		if (!a_context || GetFullscreenDebugData().mode == 0)
 			return;
-		ID3D11ShaderResourceView* srv = _shadowTexture->srv.get();
-		cs::engine::BindInjectionShaderResources(a_context, kShadowHeightPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _linearClampSampler.get();
 		cs::engine::BindInjectionSamplers(a_context, kShadowHeightSamplerPSSlot, 1, &sampler);
 		_debugBinds.fetch_add(1, std::memory_order_relaxed);

@@ -114,8 +114,23 @@ namespace cs::telemetry
 
 		void CollectShaderInjection(Sink& a_sink)
 		{
+			cs::render::profiling::CollectPassTimings(a_sink);
 			const auto summary =
 				cs::engine::GetShaderInjectionSummary();
+			std::string lostSlots;
+			constexpr std::string_view stages[]{ "vs", "ps", "cs" };
+			const auto appendSlots = [&](const auto& masks, char kind) {
+				for (std::size_t stage = 0; stage < masks.size(); ++stage)
+					for (std::size_t slot = 0; slot < masks[stage].size(); ++slot)
+						if (masks[stage].test(slot)) {
+							if (!lostSlots.empty())
+								lostSlots += ',';
+							lostSlots += std::format("{}_{}{}", stages[stage], kind, slot);
+						}
+			};
+			appendSlots(summary.draw.frameBindings.resources, 't');
+			appendSlots(summary.draw.frameBindings.buffers, 'b');
+			a_sink.Field("frame_binding_lost_slots", lostSlots.empty() ? std::string_view("none") : std::string_view(lostSlots));
 			a_sink
 				.Field(
 					"requested",
@@ -144,6 +159,9 @@ namespace cs::telemetry
 				.Field("draw_captures", TomlInteger(summary.draw.captures))
 				.Field("draw_restores", TomlInteger(summary.draw.restores))
 				.Field("draw_d3d_binds", TomlInteger(summary.draw.d3dBinds))
+				.Field("frame_binding_checks", TomlInteger(summary.draw.frameBindings.checks))
+				.Field("frame_binding_lost", TomlInteger(summary.draw.frameBindings.lost))
+				.Field("frame_binding_lost_total", TomlInteger(summary.draw.frameBindings.lostTotal))
 				.Field(
 					"compute_bridge_installed",
 					summary.computeBridge.installed)
@@ -688,7 +706,7 @@ namespace cs::telemetry
 			return;
 		g_installed = true;
 		if (!cs::engine::RegisterPostDeferredComposite([] {
-				cs::render::profiling::MarkEngineFrame();
+				cs::render::profiling::MarkEngineFrame(pump::Enabled());
 				pump::Tick();
 			})) {
 			g_compositeSamplingAvailable.store(false, std::memory_order_relaxed);

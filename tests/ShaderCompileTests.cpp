@@ -22,6 +22,7 @@
 #include <vector>
 
 std::string CheckInverseSquareTileOverflow(const std::filesystem::path& a_root);
+std::string CheckScreenSpaceGIPrepare(const std::filesystem::path& a_root);
 
 namespace
 {
@@ -73,6 +74,20 @@ namespace
 	constexpr Resource StructuredBuffer(UINT a_slot)
 	{
 		return { ResourceKind::kStructuredBuffer, a_slot };
+	}
+
+	void AddFullscreenDebugVariant(std::vector<ShaderJob>& a_jobs,
+		const ShaderJob& a_production, const char* a_define,
+		std::initializer_list<Resource> a_required)
+	{
+		auto debug = a_production;
+		debug.defines.emplace_back(a_define, "1");
+		debug.description = a_define;
+		for (const auto resource : a_required) {
+			std::erase(debug.forbidden, resource);
+			debug.required.push_back(resource);
+		}
+		a_jobs.push_back(std::move(debug));
 	}
 
 	std::set<Resource> ReflectResources(ID3DBlob* a_blob, std::string& a_error)
@@ -690,11 +705,13 @@ namespace
 				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } }), .description = file });
 				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" }, { "GI_SPECULAR", "1" }, { "TEMPORAL_DENOISER", "1" } }), .description = file });
 			}
-			if (*resolution)
+			if (*resolution) {
+				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({ { "GI", "1" } }), .description = "upsample.cs.hlsl" });
 				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({ { "GI", "1" }, { "GI_SPECULAR", "1" } }), .description = "upsample.cs.hlsl" });
+			}
 		}
 		a_jobs.push_back({ .path = a_root / "FO4" / "ScreenSpaceGI" / "Prepare.cs.hlsl",
-			.defines = { { "FO4CS_SUBSTRATE", "1" } },
+			.defines = { { "FO4CS_SUBSTRATE", "1" }, { "GI", "1" }, { "GI_SPECULAR", "1" } },
 			.description = "SSGI native normal/radiance input boundary",
 			.required = { CB(1), CB(10), Texture(0), Texture(5) },
 			.forbidden = { CB(7) } });
@@ -914,9 +931,9 @@ namespace
 				 { { "BSDFCOMPOSITE_PS_2D_FOG", "1" }, { "COMPOSITE_HAS_LIGHT", "1" } },
 				 { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" } },
 				 { { "BSDFCOMPOSITE_PS_NO_T0_FOG", "1" }, { "WAVE5A_FOG_SHAPE", "1" } } }) {
-			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" },
-											  { "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", "1" } });
-			a_jobs.push_back({ .path = composite, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog composite consumer", .required = { CB(4), CB(5), CB(6), CB(7), Texture(17), Texture(19), Sampler(13) }, .forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
+			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } });
+			a_jobs.push_back({ .path = composite, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog composite consumer", .required = { CB(4), CB(5), CB(6), Texture(17), Texture(19), Sampler(13) }, .forbidden = { CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
+			AddFullscreenDebugVariant(a_jobs, a_jobs.back(), "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", { CB(7) });
 		}
 		for (auto defines : std::vector<ShaderDefines>{
 				 { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "AMBIENT_IBL_IN_LIGHT", "1" } },
@@ -968,16 +985,17 @@ namespace
 				{ "WETNESS_EFFECTS", "1" },
 				{ "DYNAMIC_CUBEMAPS", "1" },
 				{ "TERRAIN_SHADOWS", "1" },
-				{ "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", "1" },
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" },
-				{ "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", "1" },
-				{ "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" },
-				{ "WATER_EFFECTS", "1" },
-				{ "WATER_EFFECTS_FULLSCREEN_DEBUG", "1" } },
+				{ "WATER_EFFECTS", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
-			.required = { CB(4), CB(5), CB(6), CB(7), Texture(25), Texture(71), Texture(34), Texture(35), Texture(60), Texture(61), Sampler(13) },
-			.forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(26), Texture(27), Texture(28), Texture(29), Texture(65) } });
+			.required = { CB(4), CB(5), CB(6), CB(7), Texture(25), Texture(71), Texture(34), Texture(35) },
+			.forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(26), Texture(27), Texture(28), Texture(29), Texture(61), Texture(65) } });
+		const auto productionComposite = a_jobs.back();
+		AddFullscreenDebugVariant(a_jobs, productionComposite, "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", { CB(7), Texture(60), Texture(61), Sampler(13) });
+		AddFullscreenDebugVariant(a_jobs, productionComposite, "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", { CB(7) });
+		AddFullscreenDebugVariant(a_jobs, productionComposite, "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(7) });
+		AddFullscreenDebugVariant(a_jobs, productionComposite, "WATER_EFFECTS_FULLSCREEN_DEBUG", { CB(7), Texture(61) });
 
 		for (auto defines : std::vector<ShaderDefines>{
 				 { { "BSDFLIGHT_PS_DIRSPLITS1", "1" }, { "DIRSPLITS", "1" } },
@@ -1044,8 +1062,7 @@ namespace
 				ShaderDefines defines{
 					{ family, "1" },
 					{ "FO4CS_SUBSTRATE", "1" },
-					{ "WETNESS_EFFECTS", "1" },
-					{ "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" }
+					{ "WETNESS_EFFECTS", "1" }
 				};
 				if (dynamicCubemaps)
 					defines.emplace_back("DYNAMIC_CUBEMAPS", "1");
@@ -1054,11 +1071,12 @@ namespace
 					.profile = "ps_5_0",
 					.description = family,
 					.required = dynamicCubemaps ?
-				                    std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
-				                    std::vector<Resource>{ CB(7), Texture(25), Texture(71) },
+					                std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
+					                std::vector<Resource>{},
 					.forbidden = dynamicCubemaps ?
-				                     std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
-				                     std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35) } });
+					                 std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
+					                 std::vector<Resource>{ CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35), Texture(71) } });
+				AddFullscreenDebugVariant(a_jobs, a_jobs.back(), "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(7), Texture(25), Texture(71) });
 			}
 		}
 
@@ -1070,14 +1088,13 @@ namespace
 				 { { "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL", "1" }, { "WAVE5B_SSS_RECORD_NORMAL_SHAPE", "1" } },
 				 { { "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "1" }, { "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", "1" } } }) {
 			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" },
-											  { "WETNESS_EFFECTS", "1" },
-											  { "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" } });
+											  { "WETNESS_EFFECTS", "1" } });
 			a_jobs.push_back({ .path = composite,
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
-				.description = "BSDFComposite prepass film and debug",
-				.required = { CB(4), CB(6), CB(7), Texture(25), Texture(71) },
-				.forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
+				.description = "BSDFComposite without debug film reads",
+				.forbidden = { CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(71) } });
+			AddFullscreenDebugVariant(a_jobs, a_jobs.back(), "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(4), CB(6), CB(7), Texture(25), Texture(71) });
 		}
 
 		for (auto defines : std::vector<ShaderDefines>{
@@ -1307,6 +1324,10 @@ int main(int argc, char** argv)
 	AddStandaloneFeatureShaders(jobs, argv[1]);
 
 	int failures = 0;
+	if (const auto error = CheckScreenSpaceGIPrepare(argv[1]); !error.empty()) {
+		std::printf("FAIL: SSGI prepare: %s\n", error.c_str());
+		++failures;
+	}
 	if (const auto error = CheckInverseSquareTileOverflow(argv[1]); !error.empty()) {
 		std::printf("FAIL: ISL tile overflow: %s\n", error.c_str());
 		++failures;

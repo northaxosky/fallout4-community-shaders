@@ -4,7 +4,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "Render/PixelShaderResourceSnapshot.h"
+#include "ShaderDefines.h"
 
 #include <DirectXMath.h>
 #include <array>
@@ -33,7 +33,7 @@ namespace cs
 namespace cs::features
 {
 	class DynamicCubemaps :
-		public Feature,
+		public ShaderFeature<dc::kShaderDefines>,
 		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 	public:
@@ -58,6 +58,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		void Prepass() override;
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
@@ -217,7 +218,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ShaderResourceView> _preparedPositionArraySRV;
 		winrt::com_ptr<ID3D11ShaderResourceView> _preparedColorArraySRV;
 		winrt::com_ptr<ID3D11ShaderResourceView> _preparedUVArraySRV;
-		cs::render::PixelShaderResourceSnapshot<kCompositionPSSlotCount> _compositionBindingSnapshot;
 		CompressedCube _environmentBC6H;
 		CompressedCube _reflectionsBC6H;
 		winrt::com_ptr<ID3D11ShaderResourceView> _filteredArraySRV;

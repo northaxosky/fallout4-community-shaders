@@ -442,9 +442,9 @@ namespace cs::render
 			return false;
 		}
 
-		cs::render::annotation::ScopedEvent fallbackScope(
-			"Upscaling/SpatialFallback");
 		{
+			cs::render::annotation::ScopedEvent fallbackScope(
+				"Upscaling/SpatialFallback");
 			cs::engine::OMScope omScope(context);
 			context->IASetInputLayout(nullptr);
 			context->IASetVertexBuffers(0, 0, nullptr, nullptr, nullptr);
@@ -503,7 +503,7 @@ namespace cs::render
 		}
 
 		cs::render::annotation::ScopedEvent passthroughScope(
-			"Upscaling/FullExtentPassthrough");
+			"Upscaling/FullExtentPassthrough", false);
 		if (!PrepareUpscalingPassthrough(a_context,
 				publicationTexture->resource.get(),
 				upscalingTexture->resource.get())) {

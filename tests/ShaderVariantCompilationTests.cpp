@@ -124,7 +124,8 @@ namespace
 					}
 					(void)request;
 					return ShaderVariantCompilationOutput{
-						.shader = child
+						.shader = child,
+						.samplerMask = 0x6000
 					};
 				},
 				2);
@@ -178,6 +179,8 @@ namespace
 		Check(
 			!!handles.front()->Acquire(),
 			"ready compilation did not publish its shader");
+		Check(handles.front()->GetSamplerMask() == 0x6000,
+			"ready compilation lost its reflected sampler usage");
 	}
 
 	void CheckFailureAndInvalidation(ID3D11Device& a_device)

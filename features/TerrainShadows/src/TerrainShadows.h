@@ -3,8 +3,7 @@
 #include "Feature.h"
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
-#include "Render/PixelShaderResourceSnapshot.h"
-#include "Render/PixelShaderSamplerSnapshot.h"
+#include "ShaderDefines.h"
 #include "TerrainShadowsMath.h"
 #include "TerrainShadowsSettings.h"
 #include "Utils/CSBuffer.h"
@@ -24,7 +23,7 @@
 
 namespace cs::features
 {
-	class TerrainShadows : public Feature
+	class TerrainShadows : public ShaderFeature<terrain_shader::kShaderDefines>
 	{
 	public:
 		static constexpr std::uint32_t kShadowHeightPSSlot = 60;
@@ -50,6 +49,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		void Prepass() override;
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
@@ -132,9 +132,7 @@ namespace cs::features
 		void ReleaseLiveResources(ID3D11DeviceContext* a_context);
 		void UpdateShadowStatistics(ID3D11DeviceContext* a_context);
 
-		void SaveEngineBindings();
 		void BindShadowHeights(ID3D11DeviceContext* a_context);
-		void RestoreEngineBindings();
 		void BindCompositeResources(ID3D11DeviceContext* a_context);
 
 		void PublishStatus(
@@ -232,8 +230,5 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Buffer> _shadowStatsBuffer;
 		winrt::com_ptr<ID3D11UnorderedAccessView> _shadowStatsUav;
 		winrt::com_ptr<ID3D11Buffer> _shadowStatsStaging;
-
-		cs::render::PixelShaderResourceSnapshot<1> _engineShadowBinding;
-		cs::render::PixelShaderSamplerSnapshot<1> _engineSamplerBinding;
 	};
 }

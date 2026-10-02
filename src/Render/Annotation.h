@@ -15,6 +15,7 @@ namespace cs::render::annotation
 	class ScopedEvent
 	{
 	public:
+		// Container scopes must pass false so the disjoint profiler can time their GPU leaves.
 		explicit ScopedEvent(std::string_view a_name, bool a_profile = true) noexcept;
 		ScopedEvent(
 			ID3D12GraphicsCommandList* a_commandList,

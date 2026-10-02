@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Render/FrameBindings.h"
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderDefineProvider.h"
 #include "Render/ShaderInjectionTargets.h"
 #include "Render/SharedData.h"
 
@@ -58,22 +60,6 @@ namespace cs::engine
 		kRenderTarget
 	};
 
-	enum class ShaderSamplerContract : std::uint8_t
-	{
-		kExclusive,
-		kLinearClamp
-	};
-
-	struct ShaderSlotClaim
-	{
-		ShaderStage stage = ShaderStage::kPixel;
-		ShaderResourceType resourceType = ShaderResourceType::kShaderResource;
-		std::uint32_t slot = 0;
-		ShaderSamplerContract samplerContract = ShaderSamplerContract::kExclusive;
-
-		auto operator<=>(const ShaderSlotClaim&) const = default;
-	};
-
 	struct ShaderInjectionDrawMetrics
 	{
 		std::uint32_t frame = 0;
@@ -82,18 +68,17 @@ namespace cs::engine
 		std::uint64_t captures = 0;
 		std::uint64_t restores = 0;
 		std::uint64_t d3dBinds = 0;
+		FrameBindingMetrics frameBindings;
 	};
 
 	// Render thread: publish the completed frame, including forward draws after composite.
 	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept;
 	void RecordShaderInjectionD3DBinds(std::uint32_t a_count = 1) noexcept;
-	// Pixel callbacks use these setters: batch contiguous writes and capture only overwritten engine slots.
+	// Bind to the active scope's stage (pixel without a scope); capture overwritten engine slots.
 	void BindInjectionShaderResources(ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*) noexcept;
 	void BindInjectionSamplers(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*) noexcept;
 	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
 	void CaptureShaderInjectionOutputs(ID3D11DeviceContext*) noexcept;
-	// Flush before observing context state or changing outputs that may alias queued SRVs.
-	void FlushShaderInjectionBindings() noexcept;
 
 	class ScopedShaderInjectionBindings
 	{
@@ -102,7 +87,9 @@ namespace cs::engine
 		~ScopedShaderInjectionBindings() noexcept;
 		ScopedShaderInjectionBindings(const ScopedShaderInjectionBindings&) = delete;
 		ScopedShaderInjectionBindings& operator=(const ScopedShaderInjectionBindings&) = delete;
-		void Capture(ID3D11DeviceContext* a_context, std::span<const ShaderSlotClaim> a_claims) noexcept;
+		ShaderStage GetStage() const noexcept { return _stage; }
+		void Capture(ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept;
+		void BindSampler(ID3D11DeviceContext* a_context, std::uint32_t a_slot, ID3D11SamplerState* a_sampler) noexcept;
 
 	private:
 		struct Resource
@@ -114,6 +101,7 @@ namespace cs::engine
 		{
 			std::uint32_t slot;
 			ID3D11SamplerState* value;
+			ID3D11SamplerState* current;
 		};
 		struct Buffer
 		{
@@ -140,7 +128,6 @@ namespace cs::engine
 	using ScopedPixelShaderInjectionBindings = ScopedShaderInjectionBindings;
 
 	using ShaderInjectionDefines = std::map<std::string, std::string, std::less<>>;
-	using ShaderInjectionReadyPredicate = std::function<bool()>;
 	using ShaderInjectionBindCallback = std::function<void(ID3D11DeviceContext*)>;
 
 	struct ShaderReplacementRegistration
@@ -148,10 +135,8 @@ namespace cs::engine
 		ShaderInjectionTarget targetId = ShaderInjectionTarget::kCount;
 		ShaderStageMask stages = ShaderStageBit(ShaderStage::kPixel);
 		std::string contributor;
-		ShaderInjectionDefines defines;
-		ShaderInjectionReadyPredicate isReady;
+		const ShaderDefineProvider* feature = nullptr;
 		ShaderInjectionBindCallback bind;
-		std::vector<ShaderSlotClaim> slotClaims;
 		bool requiresGraphicsPair = false;
 	};
 
@@ -177,7 +162,6 @@ namespace cs::engine
 		bool requested = false;
 		bool enabled = false;
 		bool published = false;
-		bool slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 		std::size_t contributors = 0;
 		std::size_t observedComputeShaders = 0;
@@ -272,7 +256,8 @@ namespace cs::engine
 #endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
-		ID3D11DeviceContext* a_context) noexcept;
+		ID3D11DeviceContext* a_context,
+		std::uint16_t a_samplerMask = UINT16_MAX) noexcept;
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept;
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
@@ -297,6 +282,8 @@ namespace cs::engine
 		std::size_t a_bytecodeLength,
 		ID3D11DeviceChild* a_shader) noexcept;
 	void InvalidateNativeShaderVariantCompilations() noexcept;
+	// Define changes retire target lookups and native identities, retaining immutable compiled variants.
+	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept;
 
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept;

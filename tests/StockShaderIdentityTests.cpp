@@ -1,5 +1,5 @@
+#include "FeatureShaderDeclarations.h"
 #include "Log.h"
-#include "Render/FeatureShaderContributions.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantRecipe.h"
 #include "Utils/CSSha1.h"

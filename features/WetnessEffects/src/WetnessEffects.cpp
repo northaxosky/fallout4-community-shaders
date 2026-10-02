@@ -14,7 +14,7 @@
 #include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -90,42 +90,11 @@ namespace cs::features
 
 	void WetnessEffects::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderContributions("WetnessEffects", [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings("WetnessEffects", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				const auto a_target = registration.targetId;
-				const bool a_bindsComposite = a_target == cs::engine::ShaderInjectionTarget::kBsdfComposite;
-				registration.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire) && _filmAvailabilitySRV;
-				};
 				const bool producer = a_target == cs::engine::ShaderInjectionTarget::kDeferredPrepass;
-				const bool compute = a_target == cs::engine::ShaderInjectionTarget::kDfTiledLighting;
-				const auto stage = compute ? cs::engine::ShaderStage::kCompute : cs::engine::ShaderStage::kPixel;
-				registration.bind = [this, producer, compute, a_bindsComposite](ID3D11DeviceContext* context) {
-					if (producer)
-						BindFilmOutput(context);
-					else
-						BindFilmInput(context, compute);
-					if (a_bindsComposite)
-						BindCompositeResources(context);
-				};
-				registration.slotClaims.push_back({ .stage = stage,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = 71 });
-				if (!compute) {
-					registration.slotClaims.push_back({ .stage = stage,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = 70 });
-				}
 				if (producer) {
-					registration.slotClaims.push_back({ .stage = stage,
-						.resourceType = cs::engine::ShaderResourceType::kRenderTarget,
-						.slot = 6 });
-				}
-				if (a_bindsComposite) {
-					for (const auto slot : std::array{ kGbufferNormalPSSlot }) {
-						registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-							.slot = slot });
-					}
+					registration.bind = [this](ID3D11DeviceContext* context) { BindFilmOutput(context); };
 				}
 			})) {
 			FailLoad("Wetness shader contribution registration failed.");
@@ -134,35 +103,15 @@ namespace cs::features
 		if (!cs::engine::RegisterPreDeferredPrePass([this] { BeginPrepass(); }) ||
 			!cs::engine::RegisterPostDeferredPrePass([this] {
 				_inPrepass = false;
-				if (auto* context = GetImmediateContext()) {
-					ID3D11ShaderResourceView* empty[2]{};
-					context->PSSetShaderResources(70, 2, empty);
-				}
+				Prepass();
+			}) ||
+			!cs::engine::RegisterPreDeferredComposite([this] {
+				BindCompositeResources(GetImmediateContext());
 			})) {
-			FailLoad("Wetness could not register its deferred material producer");
+			FailLoad("Wetness could not register its deferred resource boundaries");
 			return;
 		}
-		// restore first: a failed save then leaves the restore a no-op
-		if (!cs::engine::RegisterPostDeferredComposite(
-				[] { WetnessEffects::GetSingleton()->RestoreCompositeBindings(); },
-				cs::engine::HookPriority::Late)) {
-			FailLoad(
-				"Wetness needs a post-composite hook to restore its resource bindings; "
-				"registering it failed");
-			return;
-		}
-		if (!cs::engine::RegisterPreDeferredComposite(
-				[] { WetnessEffects::GetSingleton()->SaveCompositeBindings(); },
-				cs::engine::HookPriority::Early)) {
-			FailLoad(
-				"Wetness needs a pre-composite hook to save the engine resource bindings; "
-				"registering it failed");
-			return;
-		}
-
 		_registrationsReady.store(true, std::memory_order_release);
-		cs::engine::RegisterPreDeferredLightsImpl([this] { SaveCompositeBindings(); }, cs::engine::HookPriority::Early);
-		cs::engine::RegisterPostDeferredLightsImpl([this] { RestoreCompositeBindings(); }, cs::engine::HookPriority::Late);
 		cs::engine::InstallWaterRippleVisibilityFilter([this] {
 			return _suppressRipples.load(std::memory_order_relaxed);
 		});
@@ -250,14 +199,13 @@ namespace cs::features
 			cs::render::annotation::SetName(_filmSRV.get(), "WetnessEffects::Film SRV");
 		}
 		const float dry[]{ 0.5f, 0.5f, 1.0f, 0.0f };
+		cs::render::annotation::ScopedEvent timing("WetnessEffects/ClearFilm");
 		context->ClearRenderTargetView(_filmRTV.get(), dry);
 		_filmReady.store(true, std::memory_order_relaxed);
 	}
 
 	void WetnessEffects::BindFilmOutput(ID3D11DeviceContext* a_context)
 	{
-		auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
-		cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
 		ID3D11RenderTargetView* targets[8]{};
 		winrt::com_ptr<ID3D11DepthStencilView> depth;
 		const bool ready = _inPrepass && _filmReady.load(std::memory_order_relaxed) && cs::render::IsSharedDataCurrent();
@@ -307,7 +255,6 @@ namespace cs::features
 				cs::engine::CaptureShaderInjectionOutputs(a_context);
 				ID3D11ShaderResourceView* nullView = nullptr;
 				cs::engine::BindInjectionShaderResources(a_context, 71, 1, &nullView);
-				cs::engine::FlushShaderInjectionBindings();
 				targets[6] = _filmRTV.get();
 				a_context->OMSetRenderTargets(7, targets, depth.get());
 				a_context->OMSetBlendState(film->film.get(), factors, mask);
@@ -324,15 +271,29 @@ namespace cs::features
 		(bound ? _producerDraws : _producerRejected).fetch_add(1, std::memory_order_relaxed);
 	}
 
+	void WetnessEffects::Prepass()
+	{
+		auto* context = GetImmediateContext();
+		if (!context)
+			return;
+		if (_inPrepass) {
+			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, 70, 1, &precip);
+		} else {
+			BindFilmInput(context, false);
+			BindFilmInput(context, true);
+		}
+	}
+
 	void WetnessEffects::BindFilmInput(ID3D11DeviceContext* a_context, bool a_compute)
 	{
 		auto* view = _filmReady.load(std::memory_order_relaxed) ? _filmSRV.get() : nullptr;
 		if (a_compute) {
-			a_context->CSSetShaderResources(71, 1, &view);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kCompute, 71, 1, &view);
 		} else {
-			cs::engine::BindInjectionShaderResources(a_context, 71, 1, &view);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, 71, 1, &view);
 			auto* precip = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kPrecipitationOcclusion);
-			cs::engine::BindInjectionShaderResources(a_context, 70, 1, &precip);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, 70, 1, &precip);
 		}
 	}
 
@@ -430,32 +391,12 @@ namespace cs::features
 		auto* srv =
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 		// a null bind reads outside the encode domain, which is wetness identity
-		cs::engine::BindInjectionShaderResources(a_context, kGbufferNormalPSSlot, 1, &srv);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kGbufferNormalPSSlot, 1, &srv);
 		if (srv) {
 			_normalBinds.fetch_add(1, std::memory_order_relaxed);
 		} else {
 			_normalBindsNull.fetch_add(1, std::memory_order_relaxed);
 		}
-	}
-
-	void WetnessEffects::SaveCompositeBindings()
-	{
-		auto* context = GetImmediateContext();
-		for (std::size_t i = 0; i < kCompositePSSlots.size(); ++i) {
-			if (!_engineBindings[i].Save(context, kCompositePSSlots[i]) && _engineBindings[i].IsSaved()) {
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Wetness binding scopes overlap; preserving the active snapshot.");
-			}
-		}
-	}
-
-	void WetnessEffects::RestoreCompositeBindings()
-	{
-		auto* context = GetImmediateContext();
-		for (auto& binding : _engineBindings)
-			binding.Restore(context);
 	}
 
 	void WetnessEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const

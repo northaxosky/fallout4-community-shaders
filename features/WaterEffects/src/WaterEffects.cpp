@@ -18,7 +18,7 @@
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/ScopedContextState.h"
@@ -120,17 +120,8 @@ namespace cs::features
 		PublishSettings();
 
 		// FO4: only owned, validated routes may activate a live contribution.
-		if (!cs::engine::RegisterFeatureShaderContributions("WaterEffects", [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [this] {
-					return _registrationsReady.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && cs::render::IsSharedDataReady();
-				};
+		if (!cs::engine::RegisterFeatureShaderBindings("WaterEffects", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfLight) {
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = kCausticsPSSlot });
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kSampler,
-						.slot = kCausticsSamplerPSSlot });
 					registration.bind = [this](ID3D11DeviceContext* a_context) { BindCaustics(a_context); };
 				}
 			})) {
@@ -139,12 +130,6 @@ namespace cs::features
 		}
 		_registrationsReady.store(true, std::memory_order_release);
 
-		cs::engine::RegisterPreDeferredLightsImpl(
-			[] { WaterEffects::GetSingleton()->SaveEngineBindings(); },
-			cs::engine::HookPriority::Early);
-		cs::engine::RegisterPostDeferredLightsImpl(
-			[] { WaterEffects::GetSingleton()->RestoreEngineBindings(); },
-			cs::engine::HookPriority::Late);
 		if (!cs::engine::RegisterPreDeferredComposite(
 				[this] {
 					if (auto* context = GetImmediateContext())
@@ -419,35 +404,21 @@ namespace cs::features
 		return _injectionsOperational.load(std::memory_order_acquire) && _enabled.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && _causticsSrv && _causticsSampler;
 	}
 
-	void WaterEffects::SaveEngineBindings()
+	void WaterEffects::Prepass()
 	{
-		auto* context = GetImmediateContext();
-		if (!context)
-			return;
-		_engineBinding.Save(context, kCausticsPSSlot);
-		_engineSamplerBinding.Save(context, kCausticsSamplerPSSlot);
-		ID3D11ShaderResourceView* nullSRV = nullptr;
-		context->PSSetShaderResources(kCausticsPSSlot, 1, &nullSRV);
-		ID3D11SamplerState* nullSampler = nullptr;
-		context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &nullSampler);
+		if (auto* context = GetImmediateContext()) {
+			auto* srv = CanBind() ? _causticsSrv.get() : nullptr;
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kCausticsPSSlot, 1, &srv);
+		}
 	}
 
 	void WaterEffects::BindCaustics(ID3D11DeviceContext* a_context)
 	{
 		if (!a_context || !CanBind())
 			return;
-		auto* srv = _causticsSrv.get();
-		cs::engine::BindInjectionShaderResources(a_context, kCausticsPSSlot, 1, &srv);
 		ID3D11SamplerState* sampler = _causticsSampler.get();
 		cs::engine::BindInjectionSamplers(a_context, kCausticsSamplerPSSlot, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
-	}
-
-	void WaterEffects::RestoreEngineBindings()
-	{
-		auto* context = GetImmediateContext();
-		_engineSamplerBinding.Restore(context);
-		_engineBinding.Restore(context);
 	}
 
 	FullscreenDebugData WaterEffects::GetFullscreenDebugData() const noexcept
@@ -495,7 +466,6 @@ namespace cs::features
 				lightSnapshot.publicationError.empty() ?
 					"none" :
 					lightSnapshot.publicationError)
-			.Field("injection_slot_collision", lightSnapshot.slotCollision)
 			.Field(
 				"caustics_binds",
 				static_cast<std::int64_t>(_binds.load(std::memory_order_relaxed)))

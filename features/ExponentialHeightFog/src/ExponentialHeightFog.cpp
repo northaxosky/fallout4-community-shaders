@@ -10,7 +10,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -143,17 +143,11 @@ namespace cs::features
 	void ExponentialHeightFog::Load()
 	{
 		PublishSettings();
-		if (!engine::RegisterFeatureShaderContributions("ExponentialHeightFog", [this](engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [this] { return _resourcesReady.load(std::memory_order_acquire) && render::IsSharedDataReady(); };
+		if (!engine::RegisterFeatureShaderBindings("ExponentialHeightFog", *this, [this](engine::ShaderReplacementRegistration& registration) {
 				const auto target = registration.targetId;
 				if (target == engine::ShaderInjectionTarget::kBsLighting || target == engine::ShaderInjectionTarget::kBsdfLight)
 					return;
 				const std::uint32_t sampler = target == engine::ShaderInjectionTarget::kBsdfComposite ? 13u : 15u;
-				registration.slotClaims = {
-					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kShaderResource, 19 },
-					{ engine::ShaderStage::kPixel, engine::ShaderResourceType::kSampler, sampler,
-						engine::ShaderSamplerContract::kLinearClamp }
-				};
 				registration.bind = [this, sampler](ID3D11DeviceContext* a_context) { Bind(a_context, sampler); };
 			})) {
 			FailLoad("Exponential height fog shader registration failed.");
@@ -164,7 +158,7 @@ namespace cs::features
 			FailLoad("Exponential height fog shader or prepass registration failed.");
 			return;
 		}
-		engine::RegisterPreDeferredLightsImpl([this] { RenderFrame(); }, engine::HookPriority::Late);
+		engine::RegisterPreDeferredLightsImpl([this] { RenderFrame(); Prepass(); }, engine::HookPriority::Late);
 		if (!engine::RegisterPostForwardSky([this] {
 				if (!CanBind() || !_enabled.load(std::memory_order_acquire))
 					return;
@@ -304,11 +298,17 @@ namespace cs::features
 		       render::GetCanonicalSceneDepthSRV() != nullptr;
 	}
 
+	void ExponentialHeightFog::Prepass()
+	{
+		if (auto* context = engine::GetImmediateContext()) {
+			auto* volume = _volume.Integrated();
+			engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, 19, 1, &volume);
+		}
+	}
+
 	void ExponentialHeightFog::Bind(ID3D11DeviceContext* a_context, std::uint32_t a_sampler)
 	{
-		auto* volume = _volume.Integrated();
 		auto* sampler = _volume.Sampler();
-		engine::BindInjectionShaderResources(a_context, 19, 1, &volume);
 		engine::BindInjectionSamplers(a_context, a_sampler, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
 	}

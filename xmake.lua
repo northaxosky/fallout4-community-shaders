@@ -327,9 +327,14 @@ end)
 target("PerformanceOverlayTests", function()
     set_kind("binary")
     set_default(false)
-    add_files("tests/PerformanceOverlayTests.cpp")
+    add_files(
+        "tests/PerformanceOverlayTests.cpp",
+        "src/Render/FrameProfiler.cpp",
+        "src/Render/Annotation.cpp"
+    )
+    add_packages("spdlog", "vcpkg::tomlplusplus")
     add_defines("NOMINMAX", "WIN32_LEAN_AND_MEAN")
-    add_syslinks("d3d11", "ole32")
+    add_syslinks("d3d11", "dxguid", "ole32")
     on_load(function(target)
         import("xmake.shared", { rootdir = os.projectdir() }).main(target)
     end)
@@ -515,6 +520,7 @@ target("ShaderCompileTests", function()
     add_files(
         "tests/ShaderCompileTests.cpp",
         "tests/InverseSquareLightingGpuTests.cpp",
+        "tests/ScreenSpaceGIPrepareTests.cpp",
         "src/Utils/ShaderCompile.cpp"
     )
     add_headerfiles("src/Utils/ShaderCompile.h")
@@ -636,6 +642,7 @@ target("ShaderInjectionRegistrationTests", function()
         "src/Render/ShaderInjectionCompileRequest.cpp",
         "src/Render/ShaderFamilyDescriptor.cpp",
         "src/Render/SharedDataDispatchScope.cpp",
+        "src/Render/FrameBindings.cpp",
         "src/Render/PixelShaderSwapBroker.cpp",
         "src/Render/PixelShaderSwapModel.cpp",
         "src/Render/ShaderSubclassContext.cpp",
@@ -760,8 +767,11 @@ target("ShaderInjectionRegistrationTests", function()
     add_tests("ShaderInjectionNativeFamilies", {
         runargs = {"--native-families", path.join(os.projectdir(), "package/Shaders")}
     })
-    add_tests("ShaderInjectionClaimLedger", {
-        runargs = "--claim-ledger"
+    add_tests("ShaderInjectionRegistration", {
+        runargs = "--registration"
+    })
+    add_tests("ShaderInjectionFrameBindings", {
+        runargs = "--frame-bindings"
     })
     add_tests("ShaderInjectionComputeHooksMissing", {
         runargs = "--compute-hooks-missing"

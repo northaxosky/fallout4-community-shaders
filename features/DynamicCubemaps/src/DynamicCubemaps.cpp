@@ -21,7 +21,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
@@ -228,39 +228,10 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		if (!cs::engine::RegisterFeatureShaderContributions("DynamicCubemaps", [this](cs::engine::ShaderReplacementRegistration& registration) {
-				registration.isReady = [this] { return _registrationsReady.load(std::memory_order_acquire); };
-				const bool composite = registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfComposite;
-				if (!composite && registration.targetId != cs::engine::ShaderInjectionTarget::kBsWater)
-					return;
-				const auto firstSlot = composite ? kCompositionPSSlot : kDynamicCubemapPSSlot;
-				const auto slotCount = composite ? kCompositionPSSlotCount : kDynamicCubemapPSSlotCount;
-				for (std::uint32_t offset = 0; offset < slotCount; ++offset) {
-					registration.slotClaims.push_back({ .stage = cs::engine::ShaderStage::kPixel,
-						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-						.slot = firstSlot + offset });
-				}
-				if (composite)
-					registration.bind = [this](ID3D11DeviceContext* a_context) { BindComposition(a_context); };
-			})) {
+		if (!cs::engine::RegisterFeatureShaderBindings("DynamicCubemaps", *this)) {
 			FailLoad(
 				"DynamicCubemaps could not register its water, composite, "
 				"deferred lighting, or SSLR shader contributions");
-			return;
-		}
-
-		// FO4 consumes the previous publication at composite draws, so preserve its t34-t35 bindings across that pass.
-		if (!cs::engine::RegisterPostDeferredComposite([] {
-				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Restore(
-					cs::engine::GetImmediateContext());
-			},
-				cs::engine::HookPriority::Late) ||
-			!cs::engine::RegisterPreDeferredComposite([] {
-				DynamicCubemaps::GetSingleton()->_compositionBindingSnapshot.Save(
-					cs::engine::GetImmediateContext(), kCompositionPSSlot);
-			},
-				cs::engine::HookPriority::Early)) {
-			FailLoad("DynamicCubemaps could not register its composite binding scope");
 			return;
 		}
 
@@ -268,7 +239,7 @@ namespace cs::features
 		if (!cs::engine::RegisterPostForwardSky([] {
 				auto* feature = DynamicCubemaps::GetSingleton();
 				feature->UpdateCubemap();
-				feature->PostDeferred();
+				feature->Prepass();
 			})) {
 			FailLoad(
 				"DynamicCubemaps could not register its post-sky "
@@ -284,6 +255,12 @@ namespace cs::features
 			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1,
 			kCompositionPSSlot,
 			kCompositionPSSlot + kCompositionPSSlotCount - 1);
+	}
+
+	void DynamicCubemaps::Prepass()
+	{
+		PostDeferred();
+		BindComposition(cs::engine::GetImmediateContext());
 	}
 
 	void DynamicCubemaps::BindComposition(ID3D11DeviceContext* a_context)
@@ -304,7 +281,7 @@ namespace cs::features
 									   nullptr) :
 			                   resources[0];
 		}
-		cs::engine::BindInjectionShaderResources(a_context,
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel,
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
 	}
 
@@ -606,6 +583,7 @@ namespace cs::features
 			_previewUAV.get(), "DynamicCubemaps/Preview.UAV");
 
 		if (auto* context = cs::engine::GetImmediateContext()) {
+			cs::render::annotation::ScopedEvent timing("DynamicCubemaps::Clear");
 			constexpr std::array<float, 4> clear{};
 			for (auto* cube : { &_environment, &_reflections }) {
 				context->ClearUnorderedAccessViewFloat(
@@ -713,7 +691,7 @@ namespace cs::features
 					nullptr
 			};
 		}
-		context->PSSetShaderResources(
+		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel,
 			kDynamicCubemapPSSlot,
 			static_cast<UINT>(views.size()),
 			views.data());
@@ -942,12 +920,14 @@ namespace cs::features
 		ID3D11SamplerState* sampler = _computeSampler.get();
 		context->CSSetSamplers(0, 1, &sampler);
 
-		cs::render::annotation::ScopedEvent timing(a_reflections ?
-													   "DynamicCubemaps::UpdateReflections" :
-													   "DynamicCubemaps::Update");
 		const bool captureSky = a_reflections && !_fakeReflections.load(std::memory_order_relaxed);
-		context->CSSetShader(captureSky ? _prepareReflectionsCS.get() : _prepareCS.get(), nullptr, 0);
-		context->Dispatch(DispatchGroups(kCubemapSize), DispatchGroups(kCubemapSize), 6);
+		{
+			cs::render::annotation::ScopedEvent timing(a_reflections ?
+														   "DynamicCubemaps::PrepareReflections" :
+														   "DynamicCubemaps::Prepare");
+			context->CSSetShader(captureSky ? _prepareReflectionsCS.get() : _prepareCS.get(), nullptr, 0);
+			context->Dispatch(DispatchGroups(kCubemapSize), DispatchGroups(kCubemapSize), 6);
+		}
 		UnbindCompute(context);
 
 		std::array<ID3D11ShaderResourceView*, 3> preparedSrvs{
@@ -957,14 +937,21 @@ namespace cs::features
 		context->CSSetUnorderedAccessViews(0, static_cast<UINT>(uavs.size()), uavs.data(), nullptr);
 		buffer = _updateBuffer.get();
 		context->CSSetConstantBuffers(0, 1, &buffer);
-		context->CSSetShader(_detectLightingCS.get(), nullptr, 0);
-		context->Dispatch(1, 1, 1);
-
-		context->CSSetShader(UpdateShader(a_reflections), nullptr, 0);
-		context->Dispatch(
-			DispatchGroups(kCubemapSize),
-			DispatchGroups(kCubemapSize),
-			6);
+		{
+			cs::render::annotation::ScopedEvent timing("DynamicCubemaps::DetectLighting");
+			context->CSSetShader(_detectLightingCS.get(), nullptr, 0);
+			context->Dispatch(1, 1, 1);
+		}
+		{
+			cs::render::annotation::ScopedEvent timing(a_reflections ?
+														   "DynamicCubemaps::UpdateReflections" :
+														   "DynamicCubemaps::Update");
+			context->CSSetShader(UpdateShader(a_reflections), nullptr, 0);
+			context->Dispatch(
+				DispatchGroups(kCubemapSize),
+				DispatchGroups(kCubemapSize),
+				6);
+		}
 		UnbindCompute(context);
 	}
 
@@ -975,10 +962,13 @@ namespace cs::features
 			return;
 		}
 		auto& stream = Stream(a_reflections);
+		{
+			cs::render::annotation::ScopedEvent timing("DynamicCubemaps::CaptureMips");
+			context->GenerateMips(stream.color.srv.get());
+		}
 		cs::render::annotation::ScopedEvent timing(a_reflections ?
 													   "DynamicCubemaps::InferReflections" :
 													   "DynamicCubemaps::Infer");
-		context->GenerateMips(stream.color.srv.get());
 
 		std::array<ID3D11ShaderResourceView*, 3> srvs{
 			stream.color.srv.get(),
@@ -1007,8 +997,8 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		cs::render::annotation::ScopedEvent timing("DynamicCubemaps::Irradiance");
 		if (a_doSetup) {
+			cs::render::annotation::ScopedEvent timing("DynamicCubemaps::FilterSetup");
 			for (std::uint32_t face = 0; face < 6; ++face) {
 				const std::uint32_t subresource =
 					D3D11CalcSubresource(0, face, kMipLevels);
@@ -1025,6 +1015,7 @@ namespace cs::features
 			context->GenerateMips(_inferred.srv.get());
 		}
 
+		cs::render::annotation::ScopedEvent timing("DynamicCubemaps::Irradiance");
 		ID3D11ShaderResourceView* source = _inferred.srv.get();
 		context->CSSetShaderResources(0, 1, &source);
 		ID3D11SamplerState* sampler = _computeSampler.get();
@@ -1063,48 +1054,51 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		cs::render::annotation::ScopedEvent timing(a_reflections ?
-													   "DynamicCubemaps::CompressReflections" :
-													   "DynamicCubemaps::Compress");
-
 		ID3D11ShaderResourceView* source = _filteredArraySRV.get();
 		context->CSSetShaderResources(0, 1, &source);
 		context->CSSetShader(_bc6hEncodeCS.get(), nullptr, 0);
 		ID3D11Buffer* buffer = _bc6hBuffer.get();
 		context->CSSetConstantBuffers(0, 1, &buffer);
 
-		for (std::uint32_t level = 0;
-			level < kBc6hMipLevels;
-			++level) {
-			const std::uint32_t sourceSize =
-				std::max(1u, kCubemapSize >> level);
-			const std::uint32_t blocks =
-				std::max(1u, sourceSize / 4);
-			const BC6HEncodeCB constants{
-				.textureSizeInBlocksX = blocks,
-				.textureSizeInBlocksY = blocks,
-				.mipLevel = level
-			};
-			UpdateBuffer(
-				context,
-				_bc6hBuffer.get(),
-				&constants,
-				sizeof(constants));
-			ID3D11UnorderedAccessView* output =
-				_bc6hScratchUAVs[level].get();
-			context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
-			context->Dispatch(
-				DispatchGroups(blocks),
-				DispatchGroups(blocks),
-				6);
-			_compressionDispatchCount.fetch_add(
-				1, std::memory_order_relaxed);
+		{
+			// Keep the mip batch in one sample, including frames where this sparse pass is inactive.
+			cs::render::annotation::ScopedEvent timing(a_reflections ?
+														   "DynamicCubemaps::CompressReflections" :
+														   "DynamicCubemaps::Compress");
+			for (std::uint32_t level = 0;
+				level < kBc6hMipLevels;
+				++level) {
+				const std::uint32_t sourceSize =
+					std::max(1u, kCubemapSize >> level);
+				const std::uint32_t blocks =
+					std::max(1u, sourceSize / 4);
+				const BC6HEncodeCB constants{
+					.textureSizeInBlocksX = blocks,
+					.textureSizeInBlocksY = blocks,
+					.mipLevel = level
+				};
+				UpdateBuffer(
+					context,
+					_bc6hBuffer.get(),
+					&constants,
+					sizeof(constants));
+				ID3D11UnorderedAccessView* output =
+					_bc6hScratchUAVs[level].get();
+				context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
+				context->Dispatch(
+					DispatchGroups(blocks),
+					DispatchGroups(blocks),
+					6);
+				_compressionDispatchCount.fetch_add(
+					1, std::memory_order_relaxed);
+			}
 		}
 		UnbindCompute(context);
 
 		auto& compressed =
 			a_reflections ? _reflectionsBC6H : _environmentBC6H;
 		auto& published = a_reflections ? _reflections : _environment;
+		cs::render::annotation::ScopedEvent timing("DynamicCubemaps::Publish");
 		context->CopyResource(
 			compressed.texture.get(),
 			_bc6hScratchTexture.get());
@@ -1137,6 +1131,7 @@ namespace cs::features
 		if (!source) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent timing("DynamicCubemaps::Preview");
 		context->CSSetShaderResources(0, 1, &source);
 		ID3D11UnorderedAccessView* output = _previewUAV.get();
 		context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);

@@ -40,6 +40,11 @@ namespace cs::engine
 				return _error;
 			}
 
+			std::uint16_t GetSamplerMask() const noexcept override
+			{
+				return GetState() == ShaderVariantCompilationState::kReady ? _samplerMask : UINT16_MAX;
+			}
+
 			void Complete(ShaderVariantCompilationOutput a_output)
 			{
 				const bool ready = !!a_output.shader;
@@ -47,6 +52,7 @@ namespace cs::engine
 					std::scoped_lock lock(_mutex);
 					if (ready) {
 						_shader = std::move(a_output.shader);
+						_samplerMask = a_output.samplerMask;
 						_error.clear();
 					} else {
 						_shader = nullptr;
@@ -81,6 +87,7 @@ namespace cs::engine
 			mutable std::mutex _mutex;
 			winrt::com_ptr<ID3D11DeviceChild> _shader;
 			std::string _error;
+			std::uint16_t _samplerMask = UINT16_MAX;
 		};
 
 		struct CompilationKey

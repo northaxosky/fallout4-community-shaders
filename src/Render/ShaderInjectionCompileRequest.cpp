@@ -40,15 +40,21 @@ namespace cs::engine
 			const auto stage = ShaderStageBit(a_stage);
 			bool substrateActive = false;
 			for (const auto& contribution : a_contributions) {
-				if (contribution.targetId != a_target.id || (contribution.stages & stage) == 0) {
+				if (contribution.targetId != a_target.id || (contribution.stages & stage) == 0 ||
+					!contribution.feature || !contribution.feature->IsLoaded() ||
+					!contribution.feature->HasShaderDefine(a_target.id)) {
 					continue;
 				}
 				substrateActive = true;
 				if (!MergeDefines(
 						request.defines,
-						contribution.defines,
+						{ { std::string(contribution.feature->GetShaderDefineName()), "1" } },
 						a_error)) {
 					return std::nullopt;
+				}
+				for (const auto& [name, value] : contribution.feature->GetShaderDefineOptions(a_target.id)) {
+					if (!MergeDefines(request.defines, { { std::string(name), std::string(value) } }, a_error))
+						return std::nullopt;
 				}
 			}
 			if (substrateActive && !MergeDefines(

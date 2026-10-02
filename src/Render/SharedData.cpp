@@ -46,8 +46,6 @@ namespace cs::render
 			std::atomic_bool ready{ false };
 			std::atomic_uint32_t lastFrame{ UINT32_MAX };
 			std::uint32_t lastAttemptFrame = UINT32_MAX;
-			SubstrateBindingSnapshot savedPixelBindings;
-			SubstrateBindingSnapshot savedVertexBindings;
 			FO4SharedDataCB fo4{};
 			DirectX::XMFLOAT2 previousRatio{ 1.0f, 1.0f };
 			bool hasResolutionHistory = false;
@@ -56,7 +54,6 @@ namespace cs::render
 			bool updateInstalled = false;
 			bool updateInstallFailed = false;
 			bool inDeferredLights = false;
-			std::uint32_t pixelBindingDepth = 0;
 			std::uint32_t debugFrame = UINT32_MAX;
 			std::uint32_t debugSelectionFrame = UINT32_MAX;
 			Feature* debugFeature = nullptr;
@@ -205,55 +202,6 @@ namespace cs::render
 			return rendererData ?
 			           reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
 			           nullptr;
-		}
-
-		void SavePixelBindings() noexcept
-		{
-			auto& state = GetSubstrateState();
-			if (state.pixelBindingDepth != 0) {
-				++state.pixelBindingDepth;
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Shared substrate pixel-binding scopes overlap; preserving the active snapshot.");
-				return;
-			}
-			auto* context = GetImmediateContext();
-			if (!context || !IsSharedDataReady())
-				return;
-
-			state.savedPixelBindings.Save(context, engine::ShaderStage::kPixel);
-			state.savedVertexBindings.Save(context, engine::ShaderStage::kVertex);
-			state.pixelBindingDepth = 1;
-		}
-
-		void RestorePixelBindings() noexcept
-		{
-			auto& state = GetSubstrateState();
-			if (state.pixelBindingDepth == 0)
-				return;
-			if (state.pixelBindingDepth > 1) {
-				--state.pixelBindingDepth;
-				return;
-			}
-
-			if (auto* context = GetImmediateContext()) {
-				state.savedPixelBindings.Restore(context, engine::ShaderStage::kPixel);
-				state.savedVertexBindings.Restore(context, engine::ShaderStage::kVertex);
-			}
-			state.pixelBindingDepth = 0;
-		}
-
-		void SaveDeferredLightBindings() noexcept
-		{
-			GetSubstrateState().inDeferredLights = true;
-			SavePixelBindings();
-		}
-
-		void RestoreDeferredLightBindings() noexcept
-		{
-			RestorePixelBindings();
-			GetSubstrateState().inDeferredLights = false;
 		}
 
 		void UpdateSharedData(bool a_updateDepth = true) noexcept
@@ -434,8 +382,22 @@ namespace cs::render
 		auto& state = GetSubstrateState();
 		if (state.updateInstalled || state.updateInstallFailed)
 			return;
-		if (!engine::RegisterPostDeferredPrePass(
-				[] { UpdateSharedData(); },
+		const auto bind = [] {
+			auto* context = GetImmediateContext();
+			for (auto stage : { engine::ShaderStage::kVertex, engine::ShaderStage::kPixel, engine::ShaderStage::kCompute })
+				BindSharedData(context, stage);
+		};
+		if (!engine::RegisterPreDeferredPrePass(
+				[bind] {
+					if (const auto* graphics = engine::GetGraphicsState())
+						engine::BeginShaderInjectionFrame(graphics->frameCount);
+					UpdateSharedData(false);
+					bind();
+					FeatureManager::Get().PrepassAll();
+				},
+				engine::HookPriority::Late) ||
+			!engine::RegisterPostDeferredPrePass(
+				[bind] { UpdateSharedData(); bind(); },
 				engine::HookPriority::Early)) {
 			state.updateInstallFailed = true;
 			state.ready.store(false, std::memory_order_release);
@@ -443,33 +405,19 @@ namespace cs::render
 			return;
 		}
 		engine::RegisterPreDeferredLightsImpl(
-			[] { SaveDeferredLightBindings(); },
+			[] { GetSubstrateState().inDeferredLights = true; },
 			engine::HookPriority::Early);
 		engine::RegisterPostDeferredLightsImpl(
-			[] { RestoreDeferredLightBindings(); },
+			[] { GetSubstrateState().inDeferredLights = false; },
 			engine::HookPriority::Late);
 		engine::RegisterPreDeferredLightsImpl(
-			[] { UpdateFullscreenDebugData(GetImmediateContext(), true); },
-			engine::HookPriority::Late);
+			[bind] { UpdateFullscreenDebugData(GetImmediateContext(), true); bind(); },
+			static_cast<engine::HookPriority>(200));
 		engine::RegisterPreDeferredComposite(
-			[] { UpdateFullscreenDebugData(GetImmediateContext(), true); },
-			engine::HookPriority::Late);
-		// FO4 shadow-caches state; it won't reissue clobbered bindings.
-		const bool compositeScopeInstalled =
-			engine::RegisterPreDeferredComposite(
-				[] { SavePixelBindings(); },
-				engine::HookPriority::Early) &&
-			engine::RegisterPostDeferredComposite(
-				[] { RestorePixelBindings(); },
-				engine::HookPriority::Late);
-		if (!compositeScopeInstalled) {
-			state.updateInstallFailed = true;
-			state.ready.store(false, std::memory_order_release);
-			L->error("Shared substrate composite binding scope registration failed.");
-			return;
-		}
+			[bind] { UpdateFullscreenDebugData(GetImmediateContext(), true); bind(); },
+			static_cast<engine::HookPriority>(200));
 		state.updateInstalled = true;
-		L->info("Shared substrate update and deferred binding scopes registered.");
+		L->info("Shared substrate frame and producer-boundary bindings registered.");
 	}
 
 	bool IsDeferredLightsActive() noexcept
@@ -490,8 +438,6 @@ namespace cs::render
 		if (!a_context || !IsSharedDataReady())
 			return;
 
-		// FO4: material draws run after the current world+jitter cache record is written.
-		UpdateSharedData(false);
 		UpdateFullscreenDebugData(a_context);
 		auto* debugTexture = state.debugTexture.get();
 		ID3D11Buffer* buffers[kSubstrateBufferCount]{};
@@ -500,17 +446,17 @@ namespace cs::render
 		auto* depth = GetCanonicalSceneDepthSRV();
 		switch (a_stage) {
 		case engine::ShaderStage::kVertex:
-			a_context->VSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->VSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
+			engine::BindFrameConstantBuffers(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+			engine::BindFrameShaderResources(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kPixel:
-			engine::BindInjectionConstantBuffers(a_context, kFrameDataSlot, kSubstrateBufferCount, buffers);
-			engine::BindInjectionShaderResources(a_context, kCanonicalDepthSlot, 1, &depth);
-			engine::BindInjectionShaderResources(a_context, kFullscreenDebugTextureSlot, 1, &debugTexture);
+			engine::BindFrameConstantBuffers(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+			engine::BindFrameShaderResources(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
+			engine::BindFrameShaderResources(a_context, a_stage, kFullscreenDebugTextureSlot, 1, &debugTexture);
 			break;
 		case engine::ShaderStage::kCompute:
-			a_context->CSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->CSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
+			engine::BindFrameConstantBuffers(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+			engine::BindFrameShaderResources(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
 			break;
 		case engine::ShaderStage::kCount:
 			break;

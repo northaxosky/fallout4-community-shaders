@@ -1,11 +1,12 @@
+#include "FeatureShaderDeclarations.h"
 #include "Render/Engine.h"
-#include "Render/FeatureShaderContributions.h"
 #include "Render/NativeShaderFamily.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
+#include "Utils/ShaderSamplerBindings.h"
 
 #include <array>
 #include <atomic>
@@ -30,9 +31,12 @@ namespace
 	std::optional<bool> activeComputeVariantDefine;
 	std::array<winrt::com_ptr<ID3D11Buffer>, cs::render::kSubstrateBufferCount> publishedComputeBuffers;
 	winrt::com_ptr<ID3D11ShaderResourceView> publishedDepth;
+	std::vector<cs::engine::ShaderVariantCompilationRequest> compilationRequests;
+	std::uint32_t compilationInvalidations = 0;
+	bool compilationPending = false;
 
 	class TestCompilationHandle final :
-		public cs::engine::ShaderVariantCompilationHandle
+	    public cs::engine::ShaderVariantCompilationHandle
 	{
 	public:
 		TestCompilationHandle(
@@ -68,13 +72,16 @@ namespace
 	};
 
 	class TestCompilationCache final :
-		public cs::engine::ShaderVariantCompilationCache
+	    public cs::engine::ShaderVariantCompilationCache
 	{
 	public:
 		std::shared_ptr<cs::engine::ShaderVariantCompilationHandle> Request(
 			cs::engine::ShaderVariantCompilationRequest a_request) override
 		{
 			using namespace cs::engine;
+			compilationRequests.push_back(a_request);
+			if (compilationPending)
+				return std::make_shared<TestCompilationHandle>(nullptr, ShaderVariantCompilationState::kPending);
 			if (!a_request.device || a_request.stage != ShaderStage::kCompute) {
 				return std::make_shared<TestCompilationHandle>(
 					nullptr,
@@ -87,15 +94,16 @@ namespace
 				"cbuffer SharedData : register(b5) { uint SharedValue; };"
 				"cbuffer FeatureData : register(b6) { uint FeatureValue; };"
 				"cbuffer FO4SharedData : register(b7) { uint FO4Value; };"
+				"cbuffer ContributionData : register(b8) { uint ContributionValue; };"
 				"Texture2D<uint> CanonicalDepth : register(t17);"
-				"Texture2D<uint> NativeTexture : register(t3);"
+				"Texture2D<uint> ContributionTexture : register(t4);"
 				"RWStructuredBuffer<uint> Output : register(u0);"
 				"[numthreads(1,1,1)] void main() {"
 				"InterlockedAdd(Output[0], 1);"
 				"Output[1] = SharedValue + FrameValue;"
 				"Output[2] = FeatureValue;"
 				"Output[3] = FO4Value + CanonicalDepth.Load(int3(0,0,0));"
-				"Output[4] = NativeTexture.Load(int3(0,0,0));"
+				"Output[4] = ContributionTexture.Load(int3(0,0,0)) + ContributionValue;"
 				"}";
 			winrt::com_ptr<ID3DBlob> bytecode;
 			winrt::com_ptr<ID3DBlob> errors;
@@ -142,7 +150,7 @@ namespace
 				std::move(child));
 		}
 
-		void Invalidate() override {}
+		void Invalidate() override { ++compilationInvalidations; }
 		void Stop() noexcept override {}
 	};
 }
@@ -250,11 +258,18 @@ namespace
 			.profile = "ps_5_0",
 			.defines = { { "CONFLICT", "family" } },
 		};
+		struct Definition : ShaderDefineProvider
+		{
+			bool loaded = true;
+			std::string_view GetShaderDefineName() const override { return "CONFLICT"; }
+			bool HasShaderDefine(ShaderInjectionTarget) const override { return true; }
+			bool IsLoaded() const override { return loaded; }
+		} definition;
 		const ShaderReplacementRegistration contribution{
 			.targetId = ShaderInjectionTarget::kBsLighting,
 			.stages = ShaderStageBit(ShaderStage::kPixel),
 			.contributor = "test",
-			.defines = { { "CONFLICT", "feature" } },
+			.feature = &definition,
 		};
 		std::string error;
 		Expect(
@@ -266,19 +281,15 @@ namespace
 				&error) &&
 				!error.empty(),
 			"conflicting contributor defines were accepted");
+		definition.loaded = false;
+		const auto unloaded = BuildEffectiveShaderCompileRequest(*target, ShaderStage::kPixel, family, std::span(&contribution, 1));
+		Expect(unloaded && !unloaded->defines.contains("FO4CS_SUBSTRATE") && unloaded->defines.at("CONFLICT") == "family",
+			"an unloaded feature contributed shader defines");
 	}
 
-	void CheckClaimLedger()
+	void CheckRegistration()
 	{
 		using namespace cs::engine;
-		const auto textureClaim = [](std::uint32_t a_slot) {
-			return ShaderSlotClaim{
-				.stage = ShaderStage::kPixel,
-				.resourceType = ShaderResourceType::kShaderResource,
-				.slot = a_slot
-			};
-		};
-
 		ShaderReplacementRegistration incompletePair;
 		incompletePair.targetId = ShaderInjectionTarget::kDeferredPrepass;
 		incompletePair.requiresGraphicsPair = true;
@@ -289,79 +300,11 @@ namespace
 		completePair.requiresGraphicsPair = true;
 		Expect(RegisterReplacement(std::move(completePair)), "paired vertex/pixel contribution was rejected");
 
-		ShaderReplacementRegistration first;
-		first.targetId = ShaderInjectionTarget::kBsdfComposite;
-		first.contributor = "ledger-first";
-		first.defines = { { "LEDGER_TEST", "1" } };
-		first.slotClaims = { textureClaim(25) };
-		Expect(RegisterReplacement(std::move(first)), "first claim was rejected");
-
-		ShaderReplacementRegistration duplicate;
-		duplicate.targetId = ShaderInjectionTarget::kBsdfComposite;
-		duplicate.contributor = "ledger-duplicate";
-		duplicate.slotClaims = { textureClaim(25) };
-		Expect(
-			!RegisterReplacement(std::move(duplicate)),
-			"duplicate target/slot claim was accepted");
-
-		ShaderReplacementRegistration otherTarget;
-		otherTarget.targetId = ShaderInjectionTarget::kBsdfLight;
-		otherTarget.contributor = "ledger-other-target";
-		otherTarget.slotClaims = { textureClaim(25) };
-		Expect(
-			RegisterReplacement(std::move(otherTarget)),
-			"same slot on another target was rejected");
-
-		const auto sampler = [](const char* a_name, ShaderSamplerContract a_contract) {
-			ShaderReplacementRegistration registration;
-			registration.targetId = ShaderInjectionTarget::kBsdfComposite;
-			registration.contributor = a_name;
-			registration.slotClaims = { { ShaderStage::kPixel, ShaderResourceType::kSampler, 13, a_contract } };
-			return registration;
-		};
-		Expect(RegisterReplacement(sampler("ledger-linear-first", ShaderSamplerContract::kLinearClamp)),
-			"linear-clamp sampler claim was rejected");
-		Expect(RegisterReplacement(sampler("ledger-linear-shared", ShaderSamplerContract::kLinearClamp)),
-			"matching immutable sampler contracts must share a slot");
-		Expect(!RegisterReplacement(sampler("ledger-exclusive", ShaderSamplerContract::kExclusive)),
-			"exclusive sampler claim overlapped a shared sampler");
-
-		ShaderReplacementRegistration conflictingDefine;
-		conflictingDefine.targetId = ShaderInjectionTarget::kBsdfComposite;
-		conflictingDefine.contributor = "ledger-conflicting-define";
-		conflictingDefine.defines = { { "LEDGER_TEST", "2" } };
-		Expect(
-			!RegisterReplacement(std::move(conflictingDefine)),
-			"conflicting define claim was accepted");
-
-		for (const auto slot :
-			{ cs::render::kFrameDataSlot, cs::render::kSharedDataSlot,
-				cs::render::kFeatureDataSlot, cs::render::kFO4SharedDataSlot }) {
-			ShaderReplacementRegistration reserved;
-			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
-			reserved.contributor = "ledger-reserved-slot";
-			reserved.slotClaims = { { .stage = ShaderStage::kPixel,
-				.resourceType = ShaderResourceType::kConstantBuffer,
-				.slot = slot } };
-			Expect(
-				!RegisterReplacement(std::move(reserved)),
-				"reserved b4-b7 claim was accepted");
-		}
-		for (auto slot : { cs::render::kCanonicalDepthSlot, cs::render::kFullscreenDebugTextureSlot }) {
-			ShaderReplacementRegistration reserved;
-			reserved.targetId = ShaderInjectionTarget::kBsdfComposite;
-			reserved.contributor = "ledger-reserved-texture";
-			reserved.slotClaims = { textureClaim(slot) };
-			Expect(!RegisterReplacement(std::move(reserved)), "reserved substrate texture claim was accepted");
-		}
-
 		drawAnchorInstallFails = true;
 		ShaderReplacementRegistration rejectedAnchor;
 		rejectedAnchor.targetId = ShaderInjectionTarget::kBsdfComposite;
 		rejectedAnchor.contributor = "ledger-rejected-anchor";
-		rejectedAnchor.defines = { { "LEDGER_ANCHOR", "1" } };
 		rejectedAnchor.bind = [](ID3D11DeviceContext*) {};
-		rejectedAnchor.slotClaims = { textureClaim(31) };
 		Expect(
 			!RegisterReplacement(std::move(rejectedAnchor)),
 			"registration with a failed draw anchor was accepted");
@@ -370,11 +313,9 @@ namespace
 		ShaderReplacementRegistration reuseAnchor;
 		reuseAnchor.targetId = ShaderInjectionTarget::kBsdfComposite;
 		reuseAnchor.contributor = "ledger-anchor-reuse";
-		reuseAnchor.defines = { { "LEDGER_ANCHOR", "2" } };
-		reuseAnchor.slotClaims = { textureClaim(31) };
 		Expect(
 			RegisterReplacement(std::move(reuseAnchor)),
-			"failed registration retained its claims");
+			"registration failed after the draw anchor became available");
 	}
 
 	class ExecutableDispatchFixture
@@ -464,7 +405,8 @@ namespace
 
 	winrt::com_ptr<ID3D11ShaderResourceView> CreateUintSrv(
 		ID3D11Device* a_device,
-		std::uint32_t a_value)
+		std::uint32_t a_value,
+		UINT a_bindFlags = D3D11_BIND_SHADER_RESOURCE)
 	{
 		D3D11_TEXTURE2D_DESC desc{};
 		desc.Width = 1;
@@ -474,7 +416,7 @@ namespace
 		desc.Format = DXGI_FORMAT_R32_UINT;
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
-		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		desc.BindFlags = a_bindFlags;
 		D3D11_SUBRESOURCE_DATA initial{ &a_value, sizeof(a_value) };
 		winrt::com_ptr<ID3D11Texture2D> texture;
 		if (FAILED(a_device->CreateTexture2D(
@@ -764,10 +706,16 @@ namespace
 				Expect(descriptor && descriptor->sourcePath == GetShaderPath(family->name).wstring(),
 					"native family did not compile from its engine name");
 				if (descriptor) {
-					Expect(BuildEffectiveShaderCompileRequest(*GetShaderInjectionTarget(contribution.targetId),
-							   stage, *descriptor, GetFeatureShaderContributions())
-							   .has_value(),
+					const auto request = BuildEffectiveShaderCompileRequest(*GetShaderInjectionTarget(contribution.targetId),
+						stage, *descriptor, GetFeatureShaderContributions());
+					Expect(request.has_value(),
 						"native family rejected its feature contributions");
+					if (request) {
+						Expect(std::ranges::none_of(request->defines, [](const auto& define) {
+							return define.first.ends_with("_FULLSCREEN_DEBUG");
+						}),
+							"production contribution includes fullscreen debug code");
+					}
 				}
 			}
 		}
@@ -782,6 +730,45 @@ namespace
 		Expect(wetness != GetFeatureShaderContributions().end() && wetness->requiresGraphicsPair &&
 				   wetness->stages == (ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel)),
 			"wetness producer lost its required VS/PS pair");
+
+		// Exercise the live provider/options path, including the feature-wide sentinel query.
+		ShaderDefineDeclaration wetnessDebug{
+			cs::features::wetness::kShaderDefines.name,
+			{ ShaderInjectionTarget::kDeferredPrepass, ShaderInjectionTarget::kBsdfLight, ShaderInjectionTarget::kBsdfComposite },
+			cs::features::wetness::kShaderDefines.debug
+		};
+		ShaderDefineDeclaration waterDebug{
+			cs::features::water_effects::kShaderDefines.name,
+			{ ShaderInjectionTarget::kBsdfLight, ShaderInjectionTarget::kBsdfComposite },
+			cs::features::water_effects::kShaderDefines.debug
+		};
+		auto contributions = DescribeFeatureShaderBindings("WetnessEffects", wetnessDebug);
+		contributions.append_range(DescribeFeatureShaderBindings("WaterEffects", waterDebug));
+		const auto options = [&] {
+			return BuildEffectiveShaderCompileRequest(
+				*GetShaderInjectionTarget(ShaderInjectionTarget::kBsdfComposite),
+				ShaderStage::kPixel, {}, contributions)
+			    ->defines;
+		};
+		const std::vector expectedTargets{ ShaderInjectionTarget::kBsdfComposite };
+		Expect(wetnessDebug.GetShaderDefineOptions().empty(), "unselected feature-wide query enabled debug");
+		Expect(wetnessDebug.SetFullscreenDebugSelected(true) == expectedTargets,
+			"debug selection invalidated production lighting or prepass");
+		Expect(wetnessDebug.GetShaderDefineOptions() == wetnessDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfComposite) &&
+				   wetnessDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfLight).empty(),
+			"debug options lost kCount semantics or leaked into lighting");
+		Expect(options().contains(wetnessDebug.debug) && !options().contains(waterDebug.debug),
+			"selected fullscreen owner did not exclusively contribute debug");
+		Expect(wetnessDebug.SetFullscreenDebugSelected(true).empty(),
+			"same-owner mode selection requested a recompile");
+		Expect(wetnessDebug.SetFullscreenDebugSelected(false) == expectedTargets &&
+				   waterDebug.SetFullscreenDebugSelected(true) == expectedTargets,
+			"owner switch failed to retire both define sets");
+		Expect(!options().contains(wetnessDebug.debug) && options().contains(waterDebug.debug),
+			"previous fullscreen owner's debug define survived selection change");
+		Expect(waterDebug.SetFullscreenDebugSelected(false) == expectedTargets &&
+				   !options().contains(waterDebug.debug) && waterDebug.GetShaderDefineOptions().empty(),
+			"off/preview selection retained fullscreen debug compilation");
 	}
 
 	void CheckPixelBindings()
@@ -805,27 +792,21 @@ namespace
 		if (!originalBuffer || !injectedBuffer || !originalTexture || !injectedTexture || !sampler)
 			return;
 
+		bool samplersOnly = false;
 		ShaderReplacementRegistration contribution;
 		contribution.targetId = ShaderInjectionTarget::kBsdfLight;
 		contribution.contributor = "pixel-bindings";
-		contribution.slotClaims = {
-			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 1 },
-			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 2 },
-			{ ShaderStage::kPixel, ShaderResourceType::kConstantBuffer, 10 },
-			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 3 },
-			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 24 },
-			{ ShaderStage::kPixel, ShaderResourceType::kShaderResource, 25 },
-			{ ShaderStage::kPixel, ShaderResourceType::kSampler, 1 }
-		};
 		contribution.bind = [&](ID3D11DeviceContext* ctx) {
 			auto* buffer = injectedBuffer.get();
 			auto* texture = injectedTexture.get();
 			auto* state = sampler.get();
-			BindInjectionConstantBuffers(ctx, 1, 1, &buffer);
-			BindInjectionConstantBuffers(ctx, 10, 1, &buffer);
-			BindInjectionShaderResources(ctx, 3, 1, &texture);
-			BindInjectionShaderResources(ctx, 24, 1, &texture);
-			BindInjectionShaderResources(ctx, 25, 1, &texture);
+			if (!samplersOnly) {
+				BindInjectionConstantBuffers(ctx, 1, 1, &buffer);
+				BindInjectionConstantBuffers(ctx, 10, 1, &buffer);
+				BindInjectionShaderResources(ctx, 3, 1, &texture);
+				BindInjectionShaderResources(ctx, 24, 1, &texture);
+				BindInjectionShaderResources(ctx, 25, 1, &texture);
+			}
 			BindInjectionSamplers(ctx, 1, 1, &state);
 			BindInjectionSamplers(ctx, 1, 1, &state);
 		};
@@ -842,7 +823,7 @@ namespace
 			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get());
 			winrt::com_ptr<ID3D11ShaderResourceView> actual;
 			context->PSGetShaderResources(25, 1, actual.put());
-			Expect(actual == injectedTexture, "batched high resources were not bound before the draw");
+			Expect(actual == injectedTexture, "high resources were not bound before the draw");
 			{
 				ScopedPixelShaderInjectionBindings inner;
 				ID3D11ShaderResourceView* empty = nullptr;
@@ -869,8 +850,8 @@ namespace
 		BeginShaderInjectionFrame(11);
 		const auto metrics = GetShaderInjectionSummary().draw;
 		Expect(metrics.frame == 10 && metrics.scopes == 1 && metrics.captures == 4 && metrics.restores == 4 &&
-				   metrics.d3dBinds == 10 && metrics.scopeNanoseconds > 0,
-			"draw counters did not count batching, nested restoration, or the completed frame");
+				   metrics.d3dBinds == 11 && metrics.scopeNanoseconds > 0,
+			"draw counters did not count writes, nested restoration, or the completed frame");
 		context->ClearState();
 		{
 			ScopedPixelShaderInjectionBindings scope;
@@ -881,7 +862,7 @@ namespace
 		}
 		BeginShaderInjectionFrame(12);
 		const auto next = GetShaderInjectionSummary().draw;
-		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 8,
+		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 9,
 			"per-frame counters accumulated earlier draws");
 
 		winrt::com_ptr<ID3D11Texture2D> output;
@@ -905,6 +886,129 @@ namespace
 		winrt::com_ptr<ID3D11RenderTargetView> restoredTarget;
 		context->OMGetRenderTargets(1, restoredTarget.put(), nullptr);
 		Expect(restoredTarget == target, "pixel output override leaked into the engine draw");
+
+		constexpr std::string_view source =
+			"Texture2D<float4> Texture : register(t0);"
+			"SamplerState Used : register(s1);"
+			"SamplerState Unused : register(s13);"
+			"float4 used(float2 uv : TEXCOORD) : SV_Target { return Texture.Sample(Used, uv); }"
+			"float4 inert() : SV_Target { return 1; }";
+		std::array<std::uint16_t, 2> masks{};
+		UINT index = 0;
+		for (const auto* entry : { "inert", "used" }) {
+			winrt::com_ptr<ID3DBlob> code;
+			const auto compiled = D3DCompile(source.data(), source.size(), nullptr, nullptr, nullptr,
+				entry, "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, code.put(), nullptr);
+			Expect(SUCCEEDED(compiled), "could not compile sampler usage fixture");
+			if (FAILED(compiled))
+				return;
+			const auto mask = cs::util::ReflectShaderSamplers(code->GetBufferPointer(), code->GetBufferSize());
+			Expect(mask.has_value(), "could not reflect sampler usage fixture");
+			masks[index++] = mask.value_or(UINT16_MAX);
+		}
+		Expect(masks[0] == 0 && masks[1] == 2, "unused declarations were mistaken for sampler consumers");
+
+		winrt::com_ptr<ID3D11SamplerState> nativeSampler;
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+		Expect(SUCCEEDED(device->CreateSamplerState(&samplerDesc, nativeSampler.put())), "could not create native sampler");
+		auto* nativeState = nativeSampler.get();
+		auto* injectedState = sampler.get();
+		samplersOnly = true;
+		BeginShaderInjectionFrame(13);
+		context->PSSetSamplers(1, 1, &nativeState);
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get(), masks[0]);
+			actualSampler = nullptr;
+			context->PSGetSamplers(1, 1, actualSampler.put());
+			Expect(actualSampler == nativeSampler, "inert shader overwrote its native sampler");
+		}
+		context->PSSetSamplers(1, 1, &injectedState);
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get(), masks[1]);
+		}
+		BeginShaderInjectionFrame(14);
+		const auto inert = GetShaderInjectionSummary().draw;
+		Expect(inert.scopes == 2 && inert.captures == 0 && inert.restores == 0 && inert.d3dBinds == 0,
+			"inert or already-matching samplers captured or rebound engine state");
+		context->PSSetSamplers(1, 1, &nativeState);
+		{
+			ScopedPixelShaderInjectionBindings outer;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get(), masks[1]);
+			{
+				ScopedPixelShaderInjectionBindings inner;
+				BindInjectionSamplers(context.get(), 1, 1, &nativeState);
+			}
+			actualSampler = nullptr;
+			context->PSGetSamplers(1, 1, actualSampler.put());
+			Expect(actualSampler == sampler, "nested sampler scope did not restore its parent");
+		}
+		actualSampler = nullptr;
+		context->PSGetSamplers(1, 1, actualSampler.put());
+		Expect(actualSampler == nativeSampler, "used sampler leaked into the following native draw");
+		BeginShaderInjectionFrame(15);
+		const auto used = GetShaderInjectionSummary().draw;
+		Expect(used.scopes == 1 && used.captures == 2 && used.restores == 2 && used.d3dBinds == 4,
+			"sampler override was not captured once per nested scope");
+	}
+
+	void CheckFrameBindings()
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(CreateWarpDevice(device, context), "could not create frame binding WARP device");
+		if (!context)
+			return;
+		auto texture = CreateUintSrv(device.get(), 1, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET);
+		auto buffer = CreateUintConstantBuffer(device.get(), 1);
+		auto* view = texture.get();
+		auto* cb = buffer.get();
+		BeginShaderInjectionFrame(100);
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 45, 1, &view);
+		BindFrameConstantBuffers(context.get(), ShaderStage::kVertex, 4, 1, &cb);
+		BindFrameShaderResources(context.get(), ShaderStage::kCompute, 17, 1, &view);
+		for (auto stage : { ShaderStage::kPixel, ShaderStage::kVertex, ShaderStage::kCompute })
+			VerifyFrameBindings(context.get(), stage, ShaderInjectionTarget::kBsdfLight);
+		Expect(GetFrameBindingMetrics().checks == 3 && GetFrameBindingMetrics().lost == 0,
+			"intact frame bindings failed verification");
+		context->ClearState();
+		for (auto stage : { ShaderStage::kPixel, ShaderStage::kVertex, ShaderStage::kCompute }) {
+			VerifyFrameBindings(context.get(), stage, ShaderInjectionTarget::kBsdfComposite);
+			VerifyFrameBindings(context.get(), stage, ShaderInjectionTarget::kBsdfComposite);
+		}
+		const auto lost = GetFrameBindingMetrics();
+		Expect(lost.checks == 6 && lost.lost == 3 && lost.resources[1].test(45) &&
+				   lost.buffers[0].test(4) && lost.resources[2].test(17),
+			"lost bindings were not counted once per consumer family and stage");
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 45, 1, &view);
+		VerifyFrameBindings(context.get(), ShaderStage::kPixel, ShaderInjectionTarget::kBsdfComposite);
+		Expect(GetFrameBindingMetrics().checks == 7 && GetFrameBindingMetrics().lost == 3,
+			"producer rebind did not restart consumer sampling");
+		BeginShaderInjectionFrame(101);
+		Expect(GetShaderInjectionSummary().draw.frameBindings.lost == 3 &&
+				   GetFrameBindingMetrics().lost == 0 && GetFrameBindingMetrics().lostTotal == 3,
+			"completed-frame binding evidence was not retained");
+
+		winrt::com_ptr<ID3D11Resource> resource;
+		texture->GetResource(resource.put());
+		winrt::com_ptr<ID3D11RenderTargetView> target;
+		const auto created = device->CreateRenderTargetView(resource.get(), nullptr, target.put());
+		Expect(SUCCEEDED(created), "could not create frame binding producer RTV");
+		if (FAILED(created))
+			return;
+		auto* output = target.get();
+		context->OMSetRenderTargets(1, &output, nullptr);
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 25, 1, &view);
+		VerifyFrameBindings(context.get(), ShaderStage::kPixel, ShaderInjectionTarget::kBsdfComposite);
+		Expect(GetFrameBindingMetrics().lost == 1 && GetFrameBindingMetrics().resources[1].test(25),
+			"publication before native G-buffer output retirement was not detected");
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+		BindFrameShaderResources(context.get(), ShaderStage::kPixel, 25, 1, &view);
+		VerifyFrameBindings(context.get(), ShaderStage::kPixel, ShaderInjectionTarget::kBsdfComposite);
+		Expect(GetFrameBindingMetrics().checks == 2 && GetFrameBindingMetrics().lost == 1,
+			"publication after the native producer boundary did not restore the frame binding");
 	}
 
 	void CheckComputePhaseAndStateRestoration(const std::filesystem::path& a_shaderRoot)
@@ -934,6 +1038,15 @@ namespace
 		if (!stock || !output.uav)
 			return;
 
+		winrt::com_ptr<ID3D11SamplerState> sampler;
+		D3D11_SAMPLER_DESC samplerDesc{};
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		samplerDesc.AddressU = samplerDesc.AddressV = samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+		Expect(SUCCEEDED(device->CreateSamplerState(&samplerDesc, sampler.put())), "could not create compute sampler");
+		if (!sampler)
+			return;
+
 		Expect(SetDeveloperShaderOverride(ShaderInjectionTarget::kDfTiledLighting,
 				   DeveloperShaderOverride::kForceOn) &&
 				   SetDeveloperShaderSourceRoot(a_shaderRoot.wstring()),
@@ -953,11 +1066,19 @@ namespace
 		contribution.targetId = ShaderInjectionTarget::kDfTiledLighting;
 		contribution.stages = ShaderStageBit(ShaderStage::kCompute);
 		contribution.contributor = "compute-phase";
-		contribution.defines = { { "COMPUTE_PHASE_TEST", "1" } };
-		contribution.slotClaims = { { ShaderStage::kCompute, ShaderResourceType::kShaderResource, 8 } };
-		contribution.bind = [](ID3D11DeviceContext* a_context) {
+		static const ShaderDefineDeclaration computeDefinition{ "COMPUTE_PHASE_TEST", { ShaderInjectionTarget::kDfTiledLighting } };
+		contribution.feature = &computeDefinition;
+		contribution.bind = [sampler](ID3D11DeviceContext* a_context) {
 			auto* metadata = publishedDepth.get();
-			a_context->CSSetShaderResources(8, 1, &metadata);
+			auto* buffer = publishedComputeBuffers[0].get();
+			auto* state = sampler.get();
+			BindInjectionShaderResources(a_context, 8, 1, &metadata);
+			BindInjectionShaderResources(a_context, 4, 1, &metadata);
+			BindInjectionConstantBuffers(a_context, 8, 1, &buffer);
+			BindInjectionSamplers(a_context, 1, 1, &state);
+			winrt::com_ptr<ID3D11SamplerState> actual;
+			a_context->CSGetSamplers(1, 1, actual.put());
+			Expect(actual == sampler, "compute contribution did not bind its sampler at CS");
 			++computeContributionBindCount;
 			activeComputeVariantDefine =
 				ActiveShaderInjectionVariantHasDefine(
@@ -1028,22 +1149,47 @@ namespace
 		deferredLightsActive = true;
 		activeComputeVariantDefine.reset();
 		ResetComputeOutput(context.get(), output);
+		auto frameInputs = inputs;
+		frameInputs.buffers = publishedComputeBuffers;
+		frameInputs.depth = publishedDepth;
 		BindNativeComputeInputs(
-			context.get(), stock.get(), inputs, output.uav.get());
+			context.get(), stock.get(), frameInputs, output.uav.get());
 		auto* replacement = BindResolvedComputeShader(context.get(), nativeWrapper);
 		Expect(
 			replacement != &nativeWrapper,
 			"active phase did not select the replacement");
-		bridge.Dispatch(context.get(), 3, 1, 1);
+		BeginShaderInjectionFrame(20);
+		{
+			ScopedPixelShaderInjectionBindings outer;
+			bridge.Dispatch(context.get(), 3, 1, 1);
+			auto* view = inputs.srv.get();
+			BindInjectionShaderResources(context.get(), 3, 1, &view);
+			winrt::com_ptr<ID3D11ShaderResourceView> actual;
+			context->PSGetShaderResources(3, 1, actual.put());
+			Expect(actual == inputs.srv, "compute scope did not restore the active pixel scope");
+		}
 		Expect(
 			NativeComputeInputsMatch(
-				context.get(), inputs, output.uav.get()),
-			"compute bridge did not restore b4-b8/t3-t4/t8/t17/u0");
+				context.get(), frameInputs, output.uav.get()),
+			"compute bridge did not preserve frame bindings and restore contributed slots");
+		winrt::com_ptr<ID3D11SamplerState> actualSampler;
+		context->CSGetSamplers(1, 1, actualSampler.put());
+		Expect(!actualSampler, "compute contribution leaked its sampler");
+		winrt::com_ptr<ID3D11Buffer> pixelBuffer;
+		winrt::com_ptr<ID3D11ShaderResourceView> pixelResource;
+		context->PSGetSamplers(1, 1, actualSampler.put());
+		context->PSGetConstantBuffers(8, 1, pixelBuffer.put());
+		context->PSGetShaderResources(4, 1, pixelResource.put());
+		Expect(!actualSampler && !pixelBuffer && !pixelResource, "compute bindings overwrote pixel state");
+		BeginShaderInjectionFrame(21);
+		const auto metrics = GetShaderInjectionSummary().draw;
+		Expect(metrics.scopes == 1 && metrics.captures == 1 && metrics.restores == 1 && metrics.d3dBinds == 2,
+			"compute dispatch inflated pixel draw metrics");
 		Expect(
-			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 9 },
-			"replacement did not execute with shared and native inputs");
+			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 57 },
+			"replacement did not execute with shared and contributed inputs");
 		Expect(
-			sharedDataBindCount == 1 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
+			sharedDataBindCount == 0 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
 			"active compute contribution state was not exposed exactly once");
 		Expect(SetBaselineShaderOwnership(ShaderInjectionTarget::kDfTiledLighting, false),
 			"live target disable was rejected");
@@ -1059,6 +1205,27 @@ namespace
 		Expect(SetShaderInjectionEnabled(true), "live master enable was rejected");
 		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == replacement,
 			"re-enabled master did not reuse its replacement");
+
+		const auto compiled = compilationRequests.size();
+		const std::array unrelated{ ShaderInjectionTarget::kBsdfComposite };
+		InvalidateNativeShaderVariantCompilations(unrelated);
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == replacement &&
+				   compilationRequests.size() == compiled && compilationInvalidations == 0,
+			"fullscreen target invalidation disturbed unrelated compute variants");
+		const std::array affected{ ShaderInjectionTarget::kDfTiledLighting };
+		InvalidateNativeShaderVariantCompilations(affected);
+		compilationPending = true;
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper &&
+				   compilationRequests.size() == compiled + 1,
+			"retired target used its old wrapper instead of stock while recompiling");
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) == &nativeWrapper &&
+				   compilationRequests.size() == compiled + 1 && compilationInvalidations == 0,
+			"pending target re-requested compilation or cleared the define-keyed cache");
+		compilationPending = false;
+		InvalidateNativeShaderVariantCompilations(affected);
+		Expect(BindResolvedComputeShader(context.get(), nativeWrapper) != &nativeWrapper &&
+				   compilationRequests.size() == compiled + 2,
+			"target invalidation lost native owner identity or prevented lazy recompilation");
 		publishedComputeBuffers = {};
 		publishedDepth = {};
 	}
@@ -1067,8 +1234,8 @@ namespace
 int main(int argc, char** argv)
 {
 	const std::string mode = argc > 1 ? argv[1] : "";
-	if (mode == "--claim-ledger")
-		CheckClaimLedger();
+	if (mode == "--registration")
+		CheckRegistration();
 	else if (mode == "--contributor-conflict")
 		CheckContributorConflict();
 	else if (mode == "--compute-hooks-missing")
@@ -1079,6 +1246,8 @@ int main(int argc, char** argv)
 		CheckComputePhaseAndStateRestoration(argv[2]);
 	else if (mode == "--pixel-bindings")
 		CheckPixelBindings();
+	else if (mode == "--frame-bindings")
+		CheckFrameBindings();
 	else {
 		std::cerr << "Unknown test mode\n";
 		return 2;
