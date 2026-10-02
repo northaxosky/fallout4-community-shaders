@@ -22,6 +22,11 @@
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
 
+#if defined(OG)
+// OG separates sampling scale from clip reconstruction because cb2[0].zw is unused.
+#	define FO4_LIGHT_UV4 float4(input.position.xy* cb2_og_screen_uv_scale.xy* ScreenSize.xy, input.position.xy* ScreenSize.xy)
+#endif
+
 #ifdef BSDFLIGHT_PS_DEFERRED
 
 #	define LIGHT_TYPE_DIRECTIONAL 1
@@ -196,6 +201,10 @@
 #		if defined(POINTOMNI) && defined(SHADOW) && defined(HALFOMNI) && !defined(SPECULAR) && !defined(IGNOREROUGHNESS) && !defined(IGNORERIM) && !defined(GOBOPROJECTION) && !defined(FILTER_POISSON)
 #			define FO4_DEFERRED_HALFOMNI_BASE 1
 #		endif
+#		if defined(OG) && defined(FO4_DEFERRED_HALFOMNI_BASE) && defined(FO4_DEFERRED_RAW_BASE)
+// OG half-omni raw sampling is unconditional because only the comparison branches.
+#			define FO4_DEFERRED_OG_HALFOMNI_RAW 1
+#		endif
 #		if defined(POINTOMNI) && defined(SHADOW) && defined(HALFOMNI) && defined(FILTER_PCF1) && defined(SPECULAR) && defined(IGNOREROUGHNESS) && !defined(IGNORERIM) && !defined(GOBOPROJECTION)
 #			define FO4_DEFERRED_HALFOMNI_PCF1_SPEC_IGNORE 1
 #		endif
@@ -223,7 +232,7 @@
 #		if defined(POINTOMNI) && defined(SHADOW) && defined(HALFOMNI) && defined(FILTER_POISSON) && defined(SPECULAR) && defined(GOBOPROJECTION) && !defined(IGNOREROUGHNESS) && !defined(IGNORERIM)
 #			define FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE 1
 #		endif
-#		if defined(FO4_DEFERRED_HALFOMNI_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_IGNORE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_IGNORE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE)
+#		if (defined(FO4_DEFERRED_HALFOMNI_BASE) && !defined(FO4_DEFERRED_OG_HALFOMNI_RAW)) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_IGNORE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_IGNORE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE)
 #			define FO4_DEFERRED_HALFOMNI_NATIVE_BRANCH 1
 #		endif
 #		if defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_IGNORE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
@@ -232,7 +241,8 @@
 #		if defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
 #			define FO4_DEFERRED_HALFOMNI_GOBO_NATIVE_BRANCH 1
 #		endif
-#		if defined(FO4_DEFERRED_HALFOMNI_POISSON_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
+#		if defined(FO4_DEFERRED_HALFOMNI_POISSON_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE) || (defined(OG) && (defined(FO4_DEFERRED_HALFOMNI_NATIVE_BRANCH) || defined(FO4_DEFERRED_HALFOMNI_GOBO_NATIVE_BRANCH)))
+// OG filtered half-omni preserves the live mask to match the native branch schedule.
 #			define FO4_DEFERRED_HALFOMNI_POISSON_LIVE_MASK 1
 #		endif
 #		if defined(POINTOMNI) && defined(SHADOW) && defined(FILTER_PCF9) && !defined(SPECULAR) && !defined(IGNOREROUGHNESS) && !defined(IGNORERIM) && !defined(GOBOPROJECTION)
@@ -373,6 +383,11 @@ cbuffer PerCall_CB2 : register(b2)
 	float4 cb2_pad_23;
 
 	float4 cb2_idx24_distance_fade;
+#		if defined(OG)
+	// OG directional sampling scale lives at cb2[27].
+	float4 cb2_pad_25_26[2];
+	float4 cb2_og_screen_uv_scale;
+#		endif
 };
 
 Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -483,7 +498,10 @@ float ComputeCascadePCF(float3 posView, float4 row0, float4 row1, float4 row2,
 struct PS_INPUT
 {
 	float4 position: SV_POSITION;
+#		if !defined(OG)
+	// OG light interfaces omit POSITION14 because the native VS never writes it.
 	float4 posUnused: POSITION14;
+#		endif
 };
 
 struct PS_OUTPUT
@@ -496,7 +514,12 @@ PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT output;
 
+#		if defined(OG)
+	// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+	float4 uv4 = FO4_LIGHT_UV4;
+#		else
 	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#		endif
 	float2 uv = uv4.xy;
 
 	float ddx_ = ddx_coarse(uv4.x);
@@ -757,6 +780,11 @@ cbuffer PerCall_CB2 : register(b2)
 	float4 cb2_lightspace_row1;
 	float4 cb2_lightspace_row2;
 	float4 cb2_lightspace_row3;
+#		if defined(OG)
+	// OG omni-cookie sampling scale lives at cb2[22].
+	float4 cb2_pad_15_21[7];
+	float4 cb2_og_screen_uv_scale;
+#		endif
 };
 
 Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -800,7 +828,10 @@ float2 ProjectCookieUV(float3 dirLightSpace, float unprojectedZ)
 struct PS_INPUT
 {
 	float4 position: SV_POSITION;
+#		if !defined(OG)
+	// OG light interfaces omit POSITION14 because the native VS never writes it.
 	float4 posUnused: POSITION14;
+#		endif
 };
 
 struct PS_OUTPUT
@@ -813,7 +844,12 @@ PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT output;
 
+#		if defined(OG)
+	// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+	float4 uv4 = FO4_LIGHT_UV4;
+#		else
 	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#		endif
 	float2 uv = uv4.xy;
 
 	float ddx_ = ddx_coarse(uv.x);
@@ -1060,6 +1096,11 @@ cbuffer PerCall_CB2 : register(b2)
 #		endif
 
 	float4 ShadowLightParam;
+#		if defined(OG)
+	// OG projected-light sampling scale lives at cb2[22].
+	float4 cb2_pad_21;
+	float4 cb2_og_screen_uv_scale;
+#		endif
 };
 
 #		ifndef ATTENUATION_ONLY
@@ -1125,7 +1166,10 @@ float3 DecodeOctahedralNormal(float2 enc01)
 struct PS_INPUT
 {
 	float4 position: SV_POSITION;
+#		if !defined(OG)
+	// OG light interfaces omit POSITION14 because the native VS never writes it.
 	float4 posUnused: POSITION14;
+#		endif
 };
 
 struct PS_OUTPUT
@@ -1138,7 +1182,12 @@ PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT output;
 
+#		if defined(OG)
+	// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+	float4 uv4 = FO4_LIGHT_UV4;
+#		else
 	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#		endif
 	float2 uv = uv4.xy;
 
 	float ddx_ = ddx_coarse(uv.x);
@@ -1166,7 +1215,12 @@ PS_OUTPUT main(PS_INPUT input)
 		reprojRow3 = FarReproj_row3;
 	}
 
+#		if defined(OG)
+	// OG flips clip Y by subtraction to match the native instruction schedule.
+	float2 uvScreen = float2(uv4.z, 1.0 - uv4.w);
+#		else
 	float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#		endif
 	float2 uvNDC = uvScreen * 2.0 - 1.0;
 	float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
 	float4 posViewH;
@@ -1226,6 +1280,10 @@ PS_OUTPUT main(PS_INPUT input)
 #		ifndef ATTENUATION_ONLY
 
 	float4 matSample = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv);
+#			if defined(OG)
+	// OG reads albedo alpha before the normal because sampling is outside the material branch.
+	float albedoTopW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#			endif
 	float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 	float3 normalView = DecodeOctahedralNormal(normalEnc);
@@ -1247,7 +1305,40 @@ PS_OUTPUT main(PS_INPUT input)
 	float shadowRef;
 	float shadowFactor;
 
-#			if defined(POINTOMNI) && defined(SHADOW)
+#			if defined(FO4_DEFERRED_OG_HALFOMNI_RAW)
+	// OG samples the selected hemisphere unconditionally because only its comparison branches.
+	float3 shadowProj;
+	shadowProj.x = dot(cb2_shadowproj_row0, posViewHomog);
+	shadowProj.y = dot(cb2_shadowproj_row1, posViewHomog);
+	shadowProj.z = dot(cb2_shadowproj_row2, posViewHomog);
+	float shadowProjW = dot(cb2_shadowproj_row3, posViewHomog);
+	float zHalf = shadowProj.z * 0.5 + 0.5;
+	shadowProj /= shadowProjW.xxx;
+	float shadowProjLenSq = dot(shadowProj, shadowProj);
+	float shadowProjInvLen = rsqrt(shadowProjLenSq);
+	bool frontHemisphere = (zHalf >= 0.0);
+	float3 paraboloid = normalize(shadowProj * shadowProjInvLen + float3(0.0, 0.0, 1.0));
+	float2 omniUV = paraboloid.xy / paraboloid.zz;
+	omniUV = omniUV * 0.5 + 0.5;
+	float mirroredY = 1.0 - omniUV.y;
+	float selectedY = frontHemisphere ? mirroredY : omniUV.y;
+	float2 scaledUV = float2(omniUV.x, selectedY) * ShadowLightParam.z;
+	float alternateY = 1.0 - selectedY * ShadowLightParam.z;
+	float finalY = frontHemisphere ? alternateY : scaledUV.y;
+	float shadowDepth = g_tSpotShadowAtlas.Sample(g_sSpotShadow, float3(scaledUV.x, finalY, 0.0)).x;
+	[branch] if (frontHemisphere)
+	{
+		shadowRef = saturate(sqrt(shadowProjLenSq) / LightPos_and_Radius.w);
+		shadowRef -= cb2_idx15_shadow_sample_param.x;
+		shadowFactor = (shadowDepth >= shadowRef) ? 1.0 : 0.0;
+	}
+	else
+	{
+		shadowFactor = 0.0;
+	}
+#			endif
+
+#			if defined(POINTOMNI) && defined(SHADOW) && !defined(FO4_DEFERRED_OG_HALFOMNI_RAW)
 	float3 shadowProj;
 #				ifdef FO4_DEFERRED_HALFOMNI_NATIVE_BRANCH
 	shadowProj.z = dot(cb2_shadowproj_row2, posViewHomog);
@@ -1367,7 +1458,7 @@ PS_OUTPUT main(PS_INPUT input)
 	shadowRef -= cb2_idx15_shadow_sample_param.x;
 #					endif
 #				endif
-#			else
+#			elif !defined(FO4_DEFERRED_OG_HALFOMNI_RAW)
 
 	float3 shadowProj;
 	shadowProj.x = dot(cb2_shadowproj_row0, posViewHomog);
@@ -1422,7 +1513,7 @@ PS_OUTPUT main(PS_INPUT input)
 #			elif defined(FILTER_PCF1)
 	shadowFactor = g_tSpotShadowAtlas.SampleCmpLevelZero(
 		g_sSpotShadowCmp, shadowCoord.xzw, shadowRef);
-#			else
+#			elif !defined(FO4_DEFERRED_OG_HALFOMNI_RAW)
 
 	float shadowDepth = g_tSpotShadowAtlas.Sample(
 											  g_sSpotShadow, shadowCoord.xzw)
@@ -1443,7 +1534,7 @@ else
 {
 	shadowFactor = 0.0;
 }
-#			elif defined(POINTOMNI) && defined(SHADOW) && defined(HALFOMNI)
+#			elif defined(POINTOMNI) && defined(SHADOW) && defined(HALFOMNI) && !defined(FO4_DEFERRED_OG_HALFOMNI_RAW)
 	shadowFactor = halfAccepted ? shadowFactor : 0.0;
 #			endif
 
@@ -1459,7 +1550,8 @@ else
 		float shadowDistNorm = saturate(dot(posView, posView) / cb2_idx19_shadow_fade.x);
 		float shadowDist2 = shadowDistNorm * shadowDistNorm;
 		float shadowDist4 = shadowDist2 * shadowDist2;
-#			if (defined(ATTENUATION_ONLY) && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON))) || defined(FO4_DEFERRED_PCF9_OMNI_IGNORE_ROUGHNESS) || defined(FO4_DEFERRED_PCF1_BASE) || defined(FO4_DEFERRED_RAW_BASE) || defined(FO4_DEFERRED_PCF1_SPEC_IGNORE) || defined(FO4_DEFERRED_RAW_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_RAW_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_IGNORE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_IGNORE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_GOBO_IGNORE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_IGNORE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_IGNORE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_IGNORE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
+#			if (defined(ATTENUATION_ONLY) && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON))) || defined(OG) || defined(FO4_DEFERRED_PCF9_OMNI_IGNORE_ROUGHNESS) || defined(FO4_DEFERRED_PCF1_BASE) || defined(FO4_DEFERRED_RAW_BASE) || defined(FO4_DEFERRED_PCF1_SPEC_IGNORE) || defined(FO4_DEFERRED_RAW_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_RAW_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_IGNORE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_IGNORE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_GOBO_IGNORE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_IGNORE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_IGNORE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_IGNORE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
+		// OG multiplies the distance fade first to preserve native operand order.
 		float shadowDistanceFactor = 1.0 - shadowDist4 * shadowDist4;
 		shadowFactor = shadowDistanceFactor * shadowFactor;
 #			else
@@ -1484,8 +1576,18 @@ attenuation = attenuation * shadowFactor;
 
 		float3 brdfSpecular = float3(0, 0, 0);
 		float brdfShadowMix = 0.0;
-		if (isMaterial1) {
-			float albedoW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#			if defined(OG)
+		// OG keeps the material branch because albedo sampling is already hoisted.
+		[branch]
+#			endif
+			if (isMaterial1)
+		{
+#			if defined(OG)
+			// OG uses the top-level alpha read to preserve native sampling order.
+			float albedoW = albedoTopW;
+#			else
+	float albedoW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#			endif
 #			ifdef FO4_DEFERRED_BRANCH_LOCAL_DIFFUSE
 			float posViewLenInv = rsqrt(dot(-posView, -posView));
 			float3 viewDirNeg = -posView * posViewLenInv.xxx;
@@ -1532,7 +1634,9 @@ attenuation = attenuation * shadowFactor;
 	brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
 #				endif
 #			endif
-		} else {
+		}
+		else
+		{
 #			if defined(FO4_DEFERRED_SPOT_SPEC_BASE) || defined(FO4_DEFERRED_SPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF1_OMNI_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF1_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF1_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_PCF1_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_RAW_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_RAW_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_PCF9_OMNI_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_BASE) || defined(FO4_DEFERRED_POISSON_OMNI_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
 			float specExp = exp2(matSample.x * 10.0 + 1.0);
 #			endif
@@ -1558,7 +1662,8 @@ attenuation = attenuation * shadowFactor;
 	float tangentSin = sqrt(saturate((1.0 - NdotV_raw * NdotV_raw) * (1.0 - NdotL_raw * NdotL_raw)));
 	float tangentDenom = max(NdotV_raw, NdotL_raw);
 	float tangentRatio = tangentSin / tangentDenom;
-#					if defined(FO4_DEFERRED_SPOT_BASE) || defined(FO4_DEFERRED_SPOT_GOBO_BASE)
+#					if defined(FO4_DEFERRED_SPOT_BASE) || defined(FO4_DEFERRED_SPOT_GOBO_BASE) || defined(OG)
+	// OG computes NdotL first to preserve the native diffuse schedule.
 	float NdotL_sat = max(NdotL_raw, 0.0);
 	float tangentVL = max(tangentVLDot, 0.0);
 #					else
@@ -1610,7 +1715,12 @@ attenuation = attenuation * shadowFactor;
 #				else
 	float distributionNorm = (specExp + 2.0) * 0.159155;
 #				endif
-			float distribution = exp2(log2(NdotH) * specExp);
+#				if defined(OG)
+			// OG exponent operands follow the native specular schedule.
+			float distribution = exp2(specExp * log2(NdotH));
+#				else
+	float distribution = exp2(log2(NdotH) * specExp);
+#				endif
 			distributionNorm *= distribution;
 
 			float VdotH_nonneg = max(VdotH, asfloat(0x34000000));
@@ -1824,6 +1934,11 @@ float2 goboUV = float2(omniUV.x,
 		float4 LightPos_and_Radius;
 		float4 LightColor_HDR;
 		float4 LightAttenuation;
+#	if defined(OG)
+		// OG attenuation sampling scale lives at cb2[22].
+		float4 cb2_pad_4_21[18];
+		float4 cb2_og_screen_uv_scale;
+#	endif
 	};
 
 	Texture2D<float4> g_tMainDepth : register(t3);
@@ -1832,7 +1947,10 @@ float2 goboUV = float2(omniUV.x,
 	struct PS_INPUT
 	{
 		float4 position: SV_POSITION;
+#	if !defined(OG)
+		// OG light interfaces omit POSITION14 because the native VS never writes it.
 		float4 posUnused: POSITION14;
+#	endif
 	};
 
 	struct PS_OUTPUT
@@ -1845,7 +1963,12 @@ float2 goboUV = float2(omniUV.x,
 	{
 		PS_OUTPUT output;
 
-		float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+		// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+		float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 		float depth = g_tMainDepth.SampleGrad(
 									  g_sMainDepth,
 									  uv4.xy,
@@ -1873,12 +1996,17 @@ float2 goboUV = float2(omniUV.x,
 			reprojRow3 = FarReproj_row3;
 		}
 
-		float2 screen = uv4.zw * float2(
-									 asfloat(0x3f800000),
-									 asfloat(0xbf800000)) +
-		                float2(
-							asfloat(0x00000000),
-							asfloat(0x3f800000));
+#	if defined(OG)
+		// OG flips clip Y by subtraction to match the native instruction schedule.
+		float2 screen = float2(uv4.z, asfloat(0x3f800000) - uv4.w);
+#	else
+	float2 screen = uv4.zw * float2(
+								 asfloat(0x3f800000),
+								 asfloat(0xbf800000)) +
+	                float2(
+						asfloat(0x00000000),
+						asfloat(0x3f800000));
+#	endif
 		float2 ndc = screen * asfloat(0x40000000) - asfloat(0x3f800000);
 		float4 position = float4(ndc, linearizedDepth, asfloat(0x3f800000));
 
@@ -2020,6 +2148,11 @@ float2 goboUV = float2(omniUV.x,
 		float4 cb2_idx21_cascade_world_scale[3];
 
 		float4 cb2_idx24_distance_fade;
+#	if defined(OG)
+		// OG directional sampling scale lives at cb2[27].
+		float4 cb2_pad_25_26[2];
+		float4 cb2_og_screen_uv_scale;
+#	endif
 	};
 
 	Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -2110,6 +2243,10 @@ float2 goboUV = float2(omniUV.x,
 
 #	elif defined(FILTER_PCSS)
 	float2 searchStep = 1.0 / cascadeScale.xy;
+#		if defined(OG)
+	// OG reads the center tap before searching because the native sample is hoisted.
+	float centerDepth = g_tCascadeShadowRaw.Sample(g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
+#		endif
 	float2 blocker = 0.0;
 	[loop] for (int bx = 0; bx < 5; ++bx)
 	{
@@ -2130,9 +2267,12 @@ float2 goboUV = float2(omniUV.x,
 	if (blocker.y == 0.0)
 		return 1.0;
 
+#		if !defined(OG)
+	// OG already read the center tap before the blocker search.
 	float centerDepth = g_tCascadeShadowRaw.Sample(
 											   g_sCascadeShadowRaw, float3(shadowUV, slice))
 	                        .x;
+#		endif
 	float sum = centerDepth >= shadowZ ? 1.0 : 0.0;
 
 	float averageBlocker = blocker.x / blocker.y;
@@ -2178,7 +2318,10 @@ float2 goboUV = float2(omniUV.x,
 	struct PS_INPUT
 	{
 		float4 position: SV_POSITION;
+#	if !defined(OG)
+		// OG light interfaces omit POSITION14 because the native VS never writes it.
 		float4 posUnused: POSITION14;
+#	endif
 	};
 
 	struct PS_OUTPUT
@@ -2191,7 +2334,12 @@ float2 goboUV = float2(omniUV.x,
 	{
 		PS_OUTPUT output;
 
-		float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+		// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+		float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 		float2 uv = uv4.xy;
 
 		float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv,
@@ -2218,7 +2366,12 @@ float2 goboUV = float2(omniUV.x,
 			reprojRow3 = FarReproj_row3;
 		}
 
-		float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	if defined(OG)
+		// OG flips clip Y by subtraction to match the native instruction schedule.
+		float2 uvScreen = float2(uv4.z, 1.0 - uv4.w);
+#	else
+	float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	endif
 		float2 uvNDC = uvScreen * 2.0 - 1.0;
 		float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
 		float4 posViewH;
@@ -2644,6 +2797,11 @@ float2 goboUV = float2(omniUV.x,
 		float4 cb2_pad_23;
 
 		float4 cb2_idx24_distance_fade;
+#	if defined(OG)
+		// OG directional sampling scale lives at cb2[27].
+		float4 cb2_pad_25_26[2];
+		float4 cb2_og_screen_uv_scale;
+#	endif
 	};
 
 	Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -2745,6 +2903,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	elif defined(FILTER_PCSS)
 
 	float2 searchStep = 1.0 / cascadeScale.xy;
+#		if defined(OG)
+	// OG reads the center tap before searching because the native sample is hoisted.
+	float centerDepth = g_tCascadeShadowRaw.Sample(g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
+#		endif
 
 	float2 blocker = float2(0.0, 0.0);
 	[unroll] for (int bi = 0; bi < 5; ++bi)
@@ -2767,9 +2929,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		return 1.0;
 	}
 
+#		if !defined(OG)
+	// OG already read the center tap before the blocker search.
 	float centerDepth = g_tCascadeShadowRaw.Sample(
 											   g_sCascadeShadowRaw, float3(shadowUV, slice))
 	                        .x;
+#		endif
 	float centerLit = (centerDepth >= shadowZ) ? 1.0 : 0.0;
 
 	float averageBlocker = blocker.x / blocker.y;
@@ -2786,7 +2951,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		[loop] for (int fj = 0; fj < 5; ++fj)
 		{
 			float offsetY = penumbra * (float(fj) - 2.0);
+#		if defined(OG)
+			// OG puts offsets first to preserve native PCSS operand order.
+			float2 tapUV = (float2(offsetX, offsetY) * searchStep) * 0.5 + shadowUV;
+#		else
 			float2 tapUV = (searchStep * float2(offsetX, offsetY)) * 0.5 + shadowUV;
+#		endif
 			sum = sum + g_tCascadeShadowCmp.SampleCmpLevelZero(
 							g_sCascadeShadowCmp, float3(tapUV, slice), shadowZ);
 		}
@@ -2829,7 +2999,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	struct PS_INPUT
 	{
 		float4 position: SV_POSITION;
+#	if !defined(OG)
+		// OG light interfaces omit POSITION14 because the native VS never writes it.
 		float4 posUnused: POSITION14;
+#	endif
 	};
 
 	struct PS_OUTPUT
@@ -2842,7 +3015,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	{
 		PS_OUTPUT output;
 
-		float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+		// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+		float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 		float2 uv = uv4.xy;
 
 		float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv,
@@ -2869,7 +3047,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			reprojRow3 = FarReproj_row3;
 		}
 
-		float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	if defined(OG)
+		// OG flips clip Y by subtraction to match the native instruction schedule.
+		float2 uvScreen = float2(uv4.z, 1.0 - uv4.w);
+#	else
+	float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	endif
 		float2 uvNDC = uvScreen * 2.0 - 1.0;
 		float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
 		float4 posViewH;
@@ -2920,7 +3103,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 #	ifdef FO4_DS2_EARLY_SPLIT_GATE
 			float shadow;
-			[branch] if (linearizedDepth < cb2_idx9_split_distances.w)
+#		if !defined(OG)
+			// OG lets the compiler shape the split gate because native code has no branch hint.
+			[branch]
+#		endif
+				if (linearizedDepth < cb2_idx9_split_distances.w)
 			{
 #	endif
 				bool cascade0Active = (linearizedDepth < cb2_idx10_fade_distances.y);
@@ -3554,6 +3741,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float4 cb2_idx23_cascade2_world_scale;
 
 			float4 cb2_idx24_distance_fade;
+#	if defined(OG)
+			// OG directional sampling scale lives at cb2[27].
+			float4 cb2_pad_25_26[2];
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 		Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -3655,6 +3847,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	elif defined(FILTER_PCSS)
 
 	float2 searchStep = 1.0 / cascadeScale.xy;
+#		if defined(OG)
+	// OG reads the center tap before searching because the native sample is hoisted.
+	float centerDepth = g_tCascadeShadowRaw.Sample(g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
+#		endif
 
 	float2 blocker = float2(0.0, 0.0);
 	[unroll] for (int bi = 0; bi < 5; ++bi)
@@ -3677,9 +3873,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		return 1.0;
 	}
 
+#		if !defined(OG)
+	// OG already read the center tap before the blocker search.
 	float centerDepth = g_tCascadeShadowRaw.Sample(
 											   g_sCascadeShadowRaw, float3(shadowUV, slice))
 	                        .x;
+#		endif
 	float centerLit = (centerDepth >= shadowZ) ? 1.0 : 0.0;
 
 	float averageBlocker = blocker.x / blocker.y;
@@ -3692,11 +3891,21 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	float sum = centerLit;
 	[loop] for (int fi = 0; fi < 5; ++fi)
 	{
+#		if defined(OG)
+		// OG puts the X offset first to preserve native PCSS operand order.
+		float offsetX = (float(fi) - 2.0) * penumbra;
+#		else
 		float offsetX = penumbra * (float(fi) - 2.0);
+#		endif
 		[loop] for (int fj = 0; fj < 5; ++fj)
 		{
 			float offsetY = penumbra * (float(fj) - 2.0);
+#		if defined(OG)
+			// OG puts offsets first to preserve native PCSS operand order.
+			float2 tapUV = (float2(offsetX, offsetY) * searchStep) * 0.5 + shadowUV;
+#		else
 			float2 tapUV = (searchStep * float2(offsetX, offsetY)) * 0.5 + shadowUV;
+#		endif
 			sum = sum + g_tCascadeShadowCmp.SampleCmpLevelZero(
 							g_sCascadeShadowCmp, float3(tapUV, slice), shadowZ);
 		}
@@ -3826,7 +4035,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			bool cascade2Active = above.z;
 #	elif defined(FO4_DS3_PHASED_SPLIT)
 	bool3 aboveFade = cb2_idx10_fade_distances.xzy < linearizedDepth;
+#		if defined(OG)
+	// OG tests the lower bound first to preserve native phased-split operand order.
+	bool2 middleRegion = aboveFade.xz && belowFade.yw;
+#		else
 	bool2 middleRegion = belowFade.yw && aboveFade.xz;
+#		endif
 	bool cascade1Active = middleRegion.x;
 	bool cascade2Active = aboveFade.y;
 #	endif
@@ -3919,7 +4133,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 posUnused: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -3932,7 +4149,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		{
 			PS_OUTPUT output;
 
-			float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 			float2 uv = uv4.xy;
 
 			float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv,
@@ -3959,7 +4181,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				reprojRow3 = FarReproj_row3;
 			}
 
-			float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	if defined(OG)
+			// OG flips clip Y by subtraction to match the native instruction schedule.
+			float2 uvScreen = float2(uv4.z, 1.0 - uv4.w);
+#	else
+	float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	endif
 			float2 uvNDC = uvScreen * 2.0 - 1.0;
 			float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
 			float4 posViewH;
@@ -4439,6 +4666,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float4 cb2_lightspace_row1;
 			float4 cb2_lightspace_row2;
 			float4 cb2_lightspace_row3;
+#	if defined(OG)
+			// OG gobo sampling scale lives at cb2[22].
+			float4 cb2_pad_15_21[7];
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 		Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -4492,7 +4724,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 posUnused: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -4505,7 +4740,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		{
 			PS_OUTPUT output;
 
-			float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 			float2 uv = uv4.xy;
 
 			float ddx_ = ddx_coarse(uv.x);
@@ -4533,7 +4773,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				reprojRow3 = FarReproj_row3;
 			}
 
-			float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	if defined(OG)
+			// OG flips clip Y by subtraction to match the native instruction schedule.
+			float2 uvScreen = float2(uv4.z, 1.0 - uv4.w);
+#	else
+	float2 uvScreen = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	endif
 			float2 uvNDC = uvScreen * 2.0 - 1.0;
 			float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
 			float4 posViewH;
@@ -4560,6 +4805,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 			float3 lightDir = toLight * rsqrt(toLightLenSq);
 			float4 matSample = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv);
+#	if defined(OG)
+			// OG reads albedo alpha before the normal because sampling is outside the material branch.
+			float albedoTopW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#	endif
 			float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 			float3 normalView = DecodeOctahedralNormal(normalEnc);
 #	ifndef IGNOREROUGHNESS
@@ -4579,8 +4828,18 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 			float3 brdfSpecular = float3(0, 0, 0);
 			float brdfShadowMix = 0.0;
-			if (isMaterial1) {
-				float albedoW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#	if defined(OG)
+			// OG keeps the material branch because albedo sampling is already hoisted.
+			[branch]
+#	endif
+				if (isMaterial1)
+			{
+#	if defined(OG)
+				// OG uses the top-level alpha read to preserve native sampling order.
+				float albedoW = albedoTopW;
+#	else
+		float albedoW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#	endif
 #	if defined(IGNOREROUGHNESS) && !defined(SPECULAR)
 				float posViewLenInv = rsqrt(dot(-posView, -posView));
 				float3 viewDirNeg = -posView * posViewLenInv.xxx;
@@ -4612,7 +4871,9 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				             cb12_idx28_sss_params.x;
 				brdfSpecular = (pow2 * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
 #	endif
-			} else {
+			}
+			else
+			{
 #	ifdef SPECULAR
 				float specExp = exp2(matSample.x * 10.0 + 1.0);
 #	endif
@@ -4660,7 +4921,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				float VdotH = saturate(dot(viewDirNeg, halfVec));
 				float NdotH = saturate(dot(halfVec, normalView));
 				float distributionNorm = (specExp + 2.0) * 0.15915494;
-#		ifdef IGNORERIM
+#		if defined(IGNORERIM) || defined(OG)
+				// OG exponent operands follow the native specular schedule.
 				float distribution = exp2(specExp * log2(NdotH));
 #		else
 			float distribution = exp2(log2(NdotH) * specExp);
@@ -4670,7 +4932,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				float minN = min(NdotV_sat, NdotL_clamped);
 				float twoNdotH = NdotH + NdotH;
 				bool usePeakRatio = (VdotH_nonneg >= minN * twoNdotH);
-#		ifdef IGNORERIM
+#		if defined(IGNORERIM) || defined(OG)
+				// OG comparison operands follow the native visibility schedule.
 				bool useUnityRatio = (minN == NdotV_sat);
 #		else
 			bool useUnityRatio = (NdotV_sat == minN);
@@ -4712,7 +4975,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	float NdotV_view = saturate(dot(normalView, viewDirNeg));
 	float edge = exp2(log2(1.0 - NdotV_view) * 0.01);
 	float toLightDotView = saturate(dot(viewDirNeg, -lightDir));
-#		ifdef SPECULAR
+#		if defined(SPECULAR) && !defined(OG)
+	// OG multiplies the edge term first to preserve native ambient operand order.
 	float ambientTerm = toLightDotView * edge * NdotL_clamped * roughness01;
 #		else
 	float ambientTerm = edge * toLightDotView * NdotL_clamped * roughness01;
@@ -4838,6 +5102,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float4 cb2_idx21_cascade_world_scale[3];
 
 			float4 cb2_idx24_distance_fade;
+#	if defined(OG)
+			// OG directional sampling scale lives at cb2[27].
+			float4 cb2_pad_25_26[2];
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 		Texture2D<float4> g_tGbufferNormal : register(t1);
@@ -4875,7 +5144,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 posUnused: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -4888,7 +5160,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		{
 			PS_OUTPUT output;
 
-			float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 
 			float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv4.xy,
 										  ddx_coarse(uv4.x).xx,
@@ -4914,7 +5191,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				reprojRow3 = FarReproj_row3;
 			}
 
-			float2 screenUV = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	if defined(OG)
+			// OG flips clip Y by subtraction to match the native instruction schedule.
+			float2 screenUV = float2(uv4.z, 1.0 - uv4.w);
+#	else
+	float2 screenUV = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	endif
 			float4 pos4 = float4(screenUV * 2.0 - 1.0, linearDepth, 1.0);
 			float4 posViewH;
 			posViewH.x = dot(reprojRow0, pos4);
@@ -4981,6 +5263,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 	float2 searchStep = 1.0 / cascadeScale.xy;
 	float zRef = shadowZ + (isMaterial1 ? -slopeBias : -0.275);
+#		if defined(OG)
+	// OG reads the center tap before searching because the native sample is hoisted.
+	float centerDepth = g_tCascadeShadowRaw.Sample(g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
+#		endif
 
 	float2 blocker = float2(0.0, 0.0);
 	[loop] for (int bi = 0; bi < 5; ++bi)
@@ -5000,9 +5286,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	}
 
 	if (blocker.y != 0.0) {
+
+#		if !defined(OG)
+		// OG already read the center tap before the blocker search.
 		float centerDepth = g_tCascadeShadowRaw.Sample(
 												   g_sCascadeShadowRaw, float3(shadowUV, slice))
 		                        .x;
+#		endif
 		float centerLit = (centerDepth >= zRef) ? 1.0 : 0.0;
 
 		float averageBlocker = blocker.x / blocker.y;
@@ -5221,6 +5511,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float4 cb2_idx21_cascade_world_scale[3];
 
 			float4 cb2_idx24_distance_fade;
+#	if defined(OG)
+			// OG directional sampling scale lives at cb2[27].
+			float4 cb2_pad_25_26[2];
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 #	ifdef AMBIENT
@@ -5241,7 +5536,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 posUnused: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -5254,7 +5552,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		{
 			PS_OUTPUT output;
 
-			float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 
 			float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv4.xy,
 										  ddx_coarse(uv4.x).xx,
@@ -5280,7 +5583,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				reprojRow3 = FarReproj_row3;
 			}
 
-			float2 screenUV = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	if defined(OG)
+			// OG flips clip Y by subtraction to match the native instruction schedule.
+			float2 screenUV = float2(uv4.z, 1.0 - uv4.w);
+#	else
+	float2 screenUV = uv4.zw * float2(1.0, -1.0) + float2(0.0, 1.0);
+#	endif
 			float4 pos4 = float4(screenUV * 2.0 - 1.0, linearDepth, 1.0);
 			float4 posViewH;
 			posViewH.x = dot(reprojRow0, pos4);
@@ -5578,6 +5886,17 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	float4 cb2_ambient_gradient_row1;
 	float4 cb2_ambient_gradient_row2;
 #	endif
+#	if defined(OG)
+			// OG unshadowed scale follows the light-specific padding.
+#		if defined(POINTOMNI)
+			float4 cb2_pad_4_21[18];
+#		elif defined(AMBIENT)
+		float4 cb2_pad_9_26[18];
+#		else
+		float4 cb2_pad_3_26[24];
+#		endif
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 		Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -5634,7 +5953,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 posUnused: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -5647,7 +5969,12 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		{
 			PS_OUTPUT output;
 
-			float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 uv4 = FO4_LIGHT_UV4;
+#	else
+	float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+#	endif
 			float2 uv = uv4.xy;
 
 			float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv,
@@ -5705,6 +6032,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float4 matSample = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv);
 #	ifdef DIRECTIONAL
 			float4 albedoSample = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv);
+#	elif defined(OG)
+	// OG reads albedo alpha before the normal because sampling is outside the material branch.
+	float albedoTopW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
 #	endif
 			float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
@@ -5776,9 +6106,19 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float brdfModulator = 0.0;
 #	endif
 
-			if (isMaterial1) {
+#	if defined(OG) && defined(POINTOMNI)
+			// OG keeps the material branch because albedo sampling is already hoisted.
+			[branch]
+#	endif
+				if (isMaterial1)
+			{
 #	ifdef POINTOMNI
-				float albedoAlpha = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#		if defined(OG)
+				// OG uses the top-level alpha read to preserve native sampling order.
+				float albedoAlpha = albedoTopW;
+#		else
+			float albedoAlpha = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+#		endif
 #		if defined(IGNOREROUGHNESS) && !defined(SPECULAR)
 				float posViewLen = rsqrt(dot(-posView, -posView));
 				float3 viewDirNeg = -posView * posViewLen;
@@ -5820,9 +6160,16 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #		endif
 				float pow2 = exp2(log2(vis2) * cb12_idx28_hair_spec_params.y) * cb12_idx28_hair_spec_params.x;
 
-				brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
+#		if defined(OG) && defined(POINTOMNI) && defined(IGNOREROUGHNESS)
+				// OG puts hair intensity first to preserve native specular operand order.
+				brdfSpecular = (pow2 * FO4LocalLightColor(LightColor_HDR.xyz)) * NdotL_clamped;
+#		else
+			brdfSpecular = NdotL_clamped * (pow2 * FO4LocalLightColor(LightColor_HDR.xyz));
+#		endif
 #	endif
-			} else {
+			}
+			else
+			{
 #	if defined(DIRECTIONAL) && !defined(AMBIENT)
 				brdfModulator = matSample.z * 100.0;
 #		ifdef SPECULAR
@@ -5969,6 +6316,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float distribution = exp2(specExp * log2(NdotH));
 #		elif defined(DIRECTIONAL) && !defined(AMBIENT)
 			float distribution = exp2(specExp * log2(NdotH));
+#		elif defined(POINTOMNI) && defined(OG)
+			// OG exponent operands follow the native specular schedule.
+			float distribution = exp2(specExp * log2(NdotH));
 #		else
 			float distribution = exp2(log2(NdotH) * specExp);
 #		endif
@@ -6039,7 +6389,8 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float ambientTerm = ambientFres * fresEdge * NdotL_clamped * roughness01;
 #		elif !defined(SPECULAR)
 		float ambientTerm = ambientFres * fresEdge * NdotL_clamped * roughness01;
-#		elif defined(DIRECTIONAL)
+#		elif defined(DIRECTIONAL) || defined(OG)
+		// OG multiplies Fresnel first to preserve native ambient operand order.
 		float ambientTerm = ambientFres * fresEdge * NdotL_clamped * roughness01;
 #		else
 		float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
@@ -6221,6 +6572,11 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float4 DirectionalAmbient_row0;
 			float4 DirectionalAmbient_row1;
 			float4 DirectionalAmbient_row2;
+#	if defined(OG)
+			// OG ambient sampling scale lives at cb2[22].
+			float4 cb2_pad_9_21[13];
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 		Texture2D<float4> g_tGbufferNormal : register(t1);
@@ -6233,7 +6589,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 unusedPosition: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -6254,7 +6613,12 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 
 		PS_OUTPUT main(PS_INPUT input)
 		{
-			float4 screen = input.position.xyxy * ScreenSize;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 screen = FO4_LIGHT_UV4;
+#	else
+	float4 screen = input.position.xyxy * ScreenSize;
+#	endif
 			float2 uv = screen.xy;
 			float gradientX = ddx(uv.x);
 			float gradientY = ddy(uv.y);
@@ -6349,6 +6713,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float4 DirectionalAmbient_row2;
 			float4 cb2_pad_9_20[12];
 			float4 CharacterLightParams;
+#	if defined(OG)
+			// OG character-light sampling scale follows cb2[21].
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 		Texture2D<float4> g_tGbufferNormal : register(t1);
@@ -6360,7 +6728,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 unusedPosition: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -6371,7 +6742,12 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 
 		PS_OUTPUT main(PS_INPUT input)
 		{
-			float4 screen = input.position.xyxy * ScreenSize;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 screen = FO4_LIGHT_UV4;
+#	else
+	float4 screen = input.position.xyxy * ScreenSize;
+#	endif
 			float2 uv = screen.xy;
 			float gradientX = ddx(uv.x);
 			float gradientY = ddy(uv.y);
@@ -6463,6 +6839,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float4 DirectionalAmbient_row2;
 			float4 cb2_pad_9_25[17];
 			float4 CharacterLightParams;
+#	if defined(OG)
+			// OG character-light sampling scale follows cb2[21].
+			float4 cb2_og_screen_uv_scale;
+#	endif
 		};
 
 		Texture2D<float4> g_tGbufferNormal : register(t1);
@@ -6474,7 +6854,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 unusedPosition: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -6485,7 +6868,12 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 
 		PS_OUTPUT main(PS_INPUT input)
 		{
-			float4 screen = input.position.xyxy * ScreenSize;
+#	if defined(OG)
+			// OG samples scaled pixels but reconstructs clip coordinates from unscaled pixels.
+			float4 screen = FO4_LIGHT_UV4;
+#	else
+	float4 screen = input.position.xyxy * ScreenSize;
+#	endif
 			float2 uv = screen.xy;
 			float gradientX = ddx(uv.x);
 			float gradientY = ddy(uv.y);
@@ -6558,7 +6946,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		struct PS_INPUT
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 unusedPosition: POSITION14;
+#	endif
 		};
 
 		struct PS_OUTPUT
@@ -6590,7 +6981,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		struct VSOutput
 		{
 			float4 position: SV_POSITION;
+#	if !defined(OG)
+			// OG light interfaces omit POSITION14 because the native VS never writes it.
 			float4 position14: POSITION14;
+#	endif
 		};
 
 		cbuffer PerGeometry : register(b2)
@@ -6604,7 +6998,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float4 position = float4(input.position.xyz, 1.0);
 			output.position = mul(transform, position);
 			output.position.z = min(output.position.z, output.position.w);
+#	if !defined(OG)
+			// OG omits POSITION14 because only the modern interface carries it.
 			output.position14 = 1.0;
+#	endif
 			return output;
 		}
 #endif
