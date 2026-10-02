@@ -1,4 +1,4 @@
-# export_sha256=8f583b6598cb0f296f1e8875d9a1f170923d514027c2a43bdcf256de69f80dfa routes=3939 exact=3718 canonical=10 unproven=211 rows=3801 rows_exact=3580 rows_canonical=10 rows_unproven=211 rows_unnamed=62 excluded_unhooked=138 compiler_sha256=1557adab24404308657d7902fdac82ce07a120987a849acab690ab402fecf449
+# export_sha256=f5fdf28374e7787a1ee033fcf837949420e1a735a9438fdc002d42a2c888d4ab runtime=AE-1.11.240 routes=3939 exact=3718 canonical=10 unproven=211 rows=3801 rows_exact=3580 rows_canonical=10 rows_unproven=211 rows_unnamed=62 excluded_unhooked=138 excluded_inherited=0 compiler_sha256=1557adab24404308657d7902fdac82ce07a120987a849acab690ab402fecf449
 blood_splatter	pixel	0x00000000	0	700a1e3169f8d0c02ed360cabd1d0a2f2631e243	2	"BloodSplatter"	""	""	0
 blood_splatter	pixel	0x00000001	0	fabc7b50a63bc9f1ac022eb29c9018e98b1abf26	3	"BloodSplatter"	""	""	0
 blood_splatter	vertex	0x00000000	0	a83cf576f5b08683d917d05e6be9d7b4dfc3bc77	0	"BloodSplatter"	""	""	0

@@ -543,51 +543,69 @@ target("PixelShaderSwapTests", function()
     )
 end)
 
-target("StockShaderIdentityTests", function()
-    set_kind("binary")
-    set_default(false)
-    set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/StockShaderIdentityTests")
-    add_deps("ShaderStage")
-    add_files(
-        "tests/StockShaderIdentityTests.cpp",
-        "src/Render/ShaderFamilyDescriptor.cpp",
-        "src/Render/ShaderInjectionCompileRequest.cpp",
-        "src/Render/ShaderVariantRecipe.cpp",
-        "src/Utils/CSSha1.cpp",
-        "src/Utils/CSSha256.cpp",
-        "src/Utils/ShaderCache/CacheStorage.cpp",
-        "src/Utils/ShaderCache/CompilerIdentity.cpp",
-        "src/Utils/ShaderCache/DependencyTrace.cpp",
-        "src/Utils/ShaderCache/RevalidationContext.cpp",
-        "src/Utils/ShaderCache/ShaderRecipe.cpp",
-        "src/Utils/ShaderCache/SourceCompile.cpp"
-    )
-    add_packages("spdlog", "vcpkg::tomlplusplus")
-    add_syslinks("bcrypt", "d3dcompiler", "version")
-    after_build(function(target)
-        local vcvars = target:toolchain("msvc"):config("vcvars")
-        local sdkdir = os.getenv("WindowsSdkDir") or (vcvars and vcvars.WindowsSdkDir)
-        assert(sdkdir, "Cannot locate Windows SDK for the pinned shader compiler")
-        local compiler = path.join(sdkdir, "bin", "10.0.26100.0", "x64", "d3dcompiler_47.dll")
-        assert(os.isfile(compiler), "Stock shader identity requires SDK bin/10.0.26100.0/x64/d3dcompiler_47.dll")
-        os.cp(compiler, target:targetdir())
+-- One gate binary per compiler: d3dcompiler_47.dll resolves from the executable directory.
+-- A nil compiler selects the pinned Windows SDK copy; otherwise it is a project-relative path.
+local function stock_shader_identity_target(name, compiler, tests)
+    target(name, function()
+        set_kind("binary")
+        set_default(false)
+        set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/" .. name)
+        add_deps("ShaderStage")
+        add_files(
+            "tests/StockShaderIdentityTests.cpp",
+            "src/Render/ShaderFamilyDescriptor.cpp",
+            "src/Render/ShaderInjectionCompileRequest.cpp",
+            "src/Render/ShaderVariantRecipe.cpp",
+            "src/Utils/CSSha1.cpp",
+            "src/Utils/CSSha256.cpp",
+            "src/Utils/ShaderCache/CacheStorage.cpp",
+            "src/Utils/ShaderCache/CompilerIdentity.cpp",
+            "src/Utils/ShaderCache/DependencyTrace.cpp",
+            "src/Utils/ShaderCache/RevalidationContext.cpp",
+            "src/Utils/ShaderCache/ShaderRecipe.cpp",
+            "src/Utils/ShaderCache/SourceCompile.cpp"
+        )
+        add_packages("spdlog", "vcpkg::tomlplusplus")
+        add_syslinks("bcrypt", "d3dcompiler", "version")
+        set_values("fo4cs.identity_compiler", compiler)
+        after_build(function(target)
+            local source = target:values("fo4cs.identity_compiler")
+            if source then
+                source = path.join(os.projectdir(), source)
+                assert(os.isfile(source), "Stock shader identity requires " .. source .. "; run scripts\\fetch-sdks.ps1")
+            else
+                local vcvars = target:toolchain("msvc"):config("vcvars")
+                local sdkdir = os.getenv("WindowsSdkDir") or (vcvars and vcvars.WindowsSdkDir)
+                assert(sdkdir, "Cannot locate Windows SDK for the pinned shader compiler")
+                source = path.join(sdkdir, "bin", "10.0.26100.0", "x64", "d3dcompiler_47.dll")
+                assert(os.isfile(source), "Stock shader identity requires SDK bin/10.0.26100.0/x64/d3dcompiler_47.dll")
+            end
+            os.cp(source, target:targetdir())
+        end)
+        for test, spec in pairs(tests) do
+            add_tests(test, {
+                runargs = {
+                    path.join(os.projectdir(), "build/ShaderStage/Shaders"),
+                    path.join(os.projectdir(), "tests/data", spec.file),
+                    spec.features and "--features-on" or nil
+                },
+                run_timeout = 600000
+            })
+        end
     end)
-    add_tests("StockShaderIdentity", {
-        runargs = {
-            path.join(os.projectdir(), "build/ShaderStage/Shaders"),
-            path.join(os.projectdir(), "tests/data/stock-shader-identity.tsv")
-        },
-        run_timeout = 600000
-    })
-    add_tests("FeatureShaderCompile", {
-        runargs = {
-            path.join(os.projectdir(), "build/ShaderStage/Shaders"),
-            path.join(os.projectdir(), "tests/data/stock-shader-identity.tsv"),
-            "--features-on"
-        },
-        run_timeout = 600000
-    })
-end)
+end
+
+stock_shader_identity_target("StockShaderIdentityTests", nil, {
+    StockShaderIdentity = { file = "stock-shader-identity.tsv" },
+    FeatureShaderCompile = { file = "stock-shader-identity.tsv", features = true },
+    -- OG recipes compile at runtime with the system compiler, so feature coverage uses it too.
+    FeatureShaderCompileOG = { file = "stock-shader-identity-OG-1.10.163.tsv", features = true }
+})
+
+-- The compiler OG 1.10.163 shipped with; staged by scripts\fetch-sdks.ps1, never packaged.
+stock_shader_identity_target("StockShaderIdentityOGTests", "build/tools/d3dcompiler-6.3.9600.16384/d3dcompiler_47.dll", {
+    StockShaderIdentityOG = { file = "stock-shader-identity-OG-1.10.163.tsv" }
+})
 
 target("ShaderCacheTests", function()
     set_kind("binary")
