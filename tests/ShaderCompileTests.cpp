@@ -22,6 +22,7 @@
 #include <vector>
 
 std::string CheckInverseSquareTileOverflow(const std::filesystem::path& a_root);
+std::string CheckScreenSpaceGIPrepare(const std::filesystem::path& a_root);
 
 namespace
 {
@@ -708,7 +709,7 @@ namespace
 				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({ { "GI", "1" }, { "GI_SPECULAR", "1" } }), .description = "upsample.cs.hlsl" });
 		}
 		a_jobs.push_back({ .path = a_root / "FO4" / "ScreenSpaceGI" / "Prepare.cs.hlsl",
-			.defines = { { "FO4CS_SUBSTRATE", "1" } },
+			.defines = { { "FO4CS_SUBSTRATE", "1" }, { "GI", "1" }, { "GI_SPECULAR", "1" } },
 			.description = "SSGI native normal/radiance input boundary",
 			.required = { CB(1), CB(10), Texture(0), Texture(5) },
 			.forbidden = { CB(7) } });
@@ -1321,6 +1322,10 @@ int main(int argc, char** argv)
 	AddStandaloneFeatureShaders(jobs, argv[1]);
 
 	int failures = 0;
+	if (const auto error = CheckScreenSpaceGIPrepare(argv[1]); !error.empty()) {
+		std::printf("FAIL: SSGI prepare: %s\n", error.c_str());
+		++failures;
+	}
 	if (const auto error = CheckInverseSquareTileOverflow(argv[1]); !error.empty()) {
 		std::printf("FAIL: ISL tile overflow: %s\n", error.c_str());
 		++failures;

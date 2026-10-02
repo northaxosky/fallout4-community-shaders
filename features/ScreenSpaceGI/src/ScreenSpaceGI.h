@@ -60,11 +60,14 @@ namespace cs::features
 			MipTexture depth, radiance, normals;
 			Texture normalGloss, diffuse, radianceTemp, previousGeometry;
 			TexturePair ao, luma, chroma, specular, accumulation;
+			bool normalGlossSpecular = false;
 		};
 
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(ssgi_settings::kSchema); }
 		bool EnsureResources();
+		void EnsurePrepareResources(Resources&, UINT, UINT);
+		void ClearSpecular(ID3D11DeviceContext*);
 		bool CompileShaders();
 		void UpdateConstants(const cs::engine::WorldCameraRecord&, UINT, UINT, UINT);
 		void QueueReset(const char*) noexcept;
@@ -101,5 +104,6 @@ namespace cs::features
 		UINT _width{}, _height{}, _generation{}, _lastFrame{};
 		UINT _lastAO{}, _lastGI{}, _lastAccum{}, _outputAO{}, _outputGI{};
 		bool _hasFrame = false;
+		bool _specularDirty = false;
 	};
 }

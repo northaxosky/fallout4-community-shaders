@@ -188,7 +188,12 @@ namespace cs::features
 			defines.emplace_back("GI", "");
 		if (_settings.enableExperimentalSpecularGI)
 			defines.emplace_back("GI_SPECULAR", "");
-		bool ready = true;
+		_prepare = nullptr;
+		_prepare.attach(reinterpret_cast<ID3D11ComputeShader*>(
+			cs::util::CompileShader(L"Data\\Shaders\\FO4\\ScreenSpaceGI\\Prepare.cs.hlsl", defines, "cs_5_0")));
+		if (_prepare)
+			cs::render::annotation::SetName(_prepare.get(), "SSGI/Prepare.CS");
+		bool ready = static_cast<bool>(_prepare);
 		for (std::size_t i = 0; i < _shaders.size(); ++i) {
 			auto passDefines = defines;
 			if (i == 0)
@@ -222,10 +227,6 @@ namespace cs::features
 			_consumerData.reset();
 			_constants->SetName("SSGI/Constants.Buffer");
 			_consumer->SetName("SSGI/Consumer.Buffer");
-			_prepare.attach(reinterpret_cast<ID3D11ComputeShader*>(
-				cs::util::CompileShader(L"Data\\Shaders\\FO4\\ScreenSpaceGI\\Prepare.cs.hlsl", {}, "cs_5_0")));
-			if (_prepare)
-				cs::render::annotation::SetName(_prepare.get(), "SSGI/Prepare.CS");
 			DirectX::ScratchImage image;
 			DX::ThrowIfFailed(DirectX::LoadFromDDSFile(L"Data\\Shaders\\ScreenSpaceGI\\fast_2uges.dds",
 				DirectX::DDS_FLAGS_NONE, nullptr, image));
@@ -250,16 +251,44 @@ namespace cs::features
 		}
 	}
 
+	void ScreenSpaceGI::EnsurePrepareResources(Resources& a_resources, UINT a_width, UINT a_height)
+	{
+		const bool specular = _settings.enableExperimentalSpecularGI;
+		if (!a_resources.normalGloss || a_resources.normalGlossSpecular != specular) {
+			a_resources.normalGloss = CreateTexture(a_width, a_height,
+				specular ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R16G16_FLOAT, "SSGI/NormalGloss");
+			a_resources.normalGlossSpecular = specular;
+		}
+		if (_settings.enableGI) {
+			if (!a_resources.diffuse)
+				a_resources.diffuse = CreateTexture(a_width, a_height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/Diffuse");
+		} else {
+			a_resources.diffuse.reset();
+		}
+	}
+
+	void ScreenSpaceGI::ClearSpecular(ID3D11DeviceContext* a_context)
+	{
+		cs::render::annotation::ScopedEvent timing("SSGI/ClearSpecular");
+		const float clear[4]{};
+		for (auto& texture : _textures.specular)
+			if (texture)
+				a_context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
+		_specularDirty = false;
+	}
+
 	bool ScreenSpaceGI::EnsureResources()
 	{
 		auto* state = cs::engine::GetGraphicsState();
 		if (!state || !state->screenWidth || !state->screenHeight)
 			return false;
 		const UINT width = state->screenWidth, height = state->screenHeight;
-		if (_resourcesReady && width == _width && height == _height)
-			return true;
-		_resourcesReady = false;
 		try {
+			if (_resourcesReady && width == _width && height == _height) {
+				EnsurePrepareResources(_textures, width, height);
+				return true;
+			}
+			_resourcesReady = false;
 			Resources resources;
 			auto* device = cs::engine::GetDevice();
 			const auto mip = [&](MipTexture& a_texture, DXGI_FORMAT a_format, const char* a_name) {
@@ -276,8 +305,7 @@ namespace cs::features
 			mip(resources.depth, DXGI_FORMAT_R16_FLOAT, "SSGI/Depth");
 			mip(resources.normals, DXGI_FORMAT_R8G8_UNORM, "SSGI/Normal");
 			mip(resources.radiance, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/Radiance");
-			resources.normalGloss = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, "SSGI/NormalGloss");
-			resources.diffuse = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/Diffuse");
+			EnsurePrepareResources(resources, width, height);
 			resources.radianceTemp = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/RadianceTemp");
 			resources.previousGeometry = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/PreviousGeometry");
 			const auto pair = [&](TexturePair& a_pair, DXGI_FORMAT a_format, const char* a_name) {
@@ -290,6 +318,7 @@ namespace cs::features
 			pair(resources.chroma, DXGI_FORMAT_R16G16_FLOAT, "SSGI/Chroma");
 			pair(resources.specular, DXGI_FORMAT_R16G16B16A16_FLOAT, "SSGI/Specular");
 			_textures = std::move(resources);
+			_specularDirty = true;
 			_width = width;
 			_height = height;
 			++_generation;
@@ -298,7 +327,7 @@ namespace cs::features
 			const float clear[4]{};
 			auto* context = cs::engine::GetImmediateContext();
 			cs::render::annotation::ScopedEvent timing("SSGI/ClearHistory");
-			for (auto* textures : { &_textures.ao, &_textures.accumulation, &_textures.luma, &_textures.chroma, &_textures.specular })
+			for (auto* textures : { &_textures.ao, &_textures.accumulation, &_textures.luma, &_textures.chroma })
 				for (auto& texture : *textures)
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
 			context->ClearUnorderedAccessViewFloat(_textures.previousGeometry->uav.get(), clear);
@@ -365,8 +394,13 @@ namespace cs::features
 		_cameraReady = false;
 		_tiledAvailable = false;
 		_motionAvailable = false;
-		if (!_settings.enabled)
+		if (!_settings.enabled) {
+			if (_specularDirty) {
+				ClearSpecular(context);
+				QueueReset("disabled");
+			}
 			return;
+		}
 		if (_recompile && !CompileShaders()) {
 			_failed = true;
 			return;
@@ -388,8 +422,10 @@ namespace cs::features
 		auto* motion = cs::engine::GetRenderTargetSRV(RT::kMotionVectors);
 		_motionAvailable = motion != nullptr;
 		_tiledAvailable = diffuseB != nullptr;
-		if (!camera || !manager || !depth || !normals || !material || !albedo || !emissive || !diffuse || !motion ||
-			(tiled && !diffuseB) || !cs::render::IsSharedDataReady()) {
+		if (!camera || !manager || !depth || !normals || !motion ||
+			(_settings.enableExperimentalSpecularGI && !material) ||
+			(_settings.enableGI && (!albedo || !emissive || !diffuse || (tiled && !diffuseB))) ||
+			!cs::render::IsSharedDataReady()) {
 			QueueReset("missing_inputs");
 			return;
 		}
@@ -421,6 +457,9 @@ namespace cs::features
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
 				++_resetCount;
 			}
+			// Upstream upsample reads specular even when GI_SPECULAR leaves it unwritten.
+			if (reset)
+				ClearSpecular(context);
 			UpdateConstants(*camera, width, height, state->frameCount);
 			auto* cb = _constants->CB();
 			context->CSSetConstantBuffers(1, 1, &cb);
@@ -432,13 +471,13 @@ namespace cs::features
 			auto& t = _textures;
 			// FO4: prepare native normals and current shaded diffuse before unchanged upstream kernels.
 			pass.Run(_prepare.get(), { normals, material, albedo, diffuse, tiled ? diffuseB : nullptr, emissive },
-				{ t.normalGloss->uav.get(), t.diffuse->uav.get() }, width, height, 8, "SSGI/Prepare");
+				{ t.normalGloss->uav.get(), t.diffuse ? t.diffuse->uav.get() : nullptr }, width, height, 8, "SSGI/Prepare");
 			const auto prefilter = [&](UINT a_shader, ID3D11ShaderResourceView* a_input, MipTexture& a_output, UINT a_width, UINT a_height, const char* a_name) {
 				pass.Run(_shaders[a_shader].get(), { a_input }, { a_output.uavs[0].get(), a_output.uavs[1].get(), a_output.uavs[2].get(), a_output.uavs[3].get(), a_output.uavs[4].get() }, a_width, a_height, 16, a_name);
 			};
 			prefilter(0, depth, t.depth, width, height, "SSGI/PrefilterDepths");
 			UINT ao = _lastAO, gi = _lastGI;
-			pass.Run(_shaders[1].get(), { t.diffuse->srv.get(), t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.previousGeometry->srv.get(), motion, t.accumulation[_lastAccum]->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), t.specular[ao]->srv.get() },
+			pass.Run(_shaders[1].get(), { t.diffuse ? t.diffuse->srv.get() : nullptr, t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.previousGeometry->srv.get(), motion, t.accumulation[_lastAccum]->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), t.specular[ao]->srv.get() },
 				{ t.radianceTemp->uav.get(), t.accumulation[!_lastAccum]->uav.get(), t.ao[!ao]->uav.get(),
 					t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), t.specular[!ao]->uav.get() },
 				internalWidth, internalHeight, 8, "SSGI/RadianceDisocc");
@@ -451,6 +490,7 @@ namespace cs::features
 				{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(),
 					t.specular[!ao]->uav.get(), t.previousGeometry->uav.get() },
 				internalWidth, internalHeight, 8, "SSGI/GI");
+			_specularDirty = _settings.enableExperimentalSpecularGI;
 			ao = !ao;
 			gi = !gi;
 			_lastAO = ao;

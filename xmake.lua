@@ -520,6 +520,7 @@ target("ShaderCompileTests", function()
     add_files(
         "tests/ShaderCompileTests.cpp",
         "tests/InverseSquareLightingGpuTests.cpp",
+        "tests/ScreenSpaceGIPrepareTests.cpp",
         "src/Utils/ShaderCompile.cpp"
     )
     add_headerfiles("src/Utils/ShaderCompile.h")
