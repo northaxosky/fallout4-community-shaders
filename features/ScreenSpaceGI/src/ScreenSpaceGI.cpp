@@ -265,16 +265,17 @@ namespace cs::features
 		} else {
 			a_resources.diffuse.reset();
 		}
-	}
-
-	void ScreenSpaceGI::ClearSpecular(ID3D11DeviceContext* a_context)
-	{
-		cs::render::annotation::ScopedEvent timing("SSGI/ClearSpecular");
-		const float clear[4]{};
-		for (auto& texture : _textures.specular)
-			if (texture)
-				a_context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
-		_specularDirty = false;
+		// Only GI_SPECULAR kernels touch the specular history.
+		if (specular && !a_resources.specular[0]) {
+			const float clear[4]{};
+			auto* context = cs::engine::GetImmediateContext();
+			for (UINT i = 0; i < 2; ++i) {
+				a_resources.specular[i] = CreateTexture(a_width, a_height, DXGI_FORMAT_R16G16B16A16_FLOAT, std::format("SSGI/Specular[{}]", i));
+				context->ClearUnorderedAccessViewFloat(a_resources.specular[i]->uav.get(), clear);
+			}
+		} else if (!specular) {
+			a_resources.specular = {};
+		}
 	}
 
 	bool ScreenSpaceGI::EnsureResources()
@@ -316,9 +317,7 @@ namespace cs::features
 			pair(resources.accumulation, DXGI_FORMAT_R8_UNORM, "SSGI/Accumulation");
 			pair(resources.luma, DXGI_FORMAT_R16G16B16A16_FLOAT, "SSGI/Luma");
 			pair(resources.chroma, DXGI_FORMAT_R16G16_FLOAT, "SSGI/Chroma");
-			pair(resources.specular, DXGI_FORMAT_R16G16B16A16_FLOAT, "SSGI/Specular");
 			_textures = std::move(resources);
-			_specularDirty = true;
 			_width = width;
 			_height = height;
 			++_generation;
@@ -394,13 +393,8 @@ namespace cs::features
 		_cameraReady = false;
 		_tiledAvailable = false;
 		_motionAvailable = false;
-		if (!_settings.enabled) {
-			if (_specularDirty) {
-				ClearSpecular(context);
-				QueueReset("disabled");
-			}
+		if (!_settings.enabled)
 			return;
-		}
 		if (_recompile && !CompileShaders()) {
 			_failed = true;
 			return;
@@ -457,9 +451,6 @@ namespace cs::features
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
 				++_resetCount;
 			}
-			// Upstream upsample reads specular even when GI_SPECULAR leaves it unwritten.
-			if (reset)
-				ClearSpecular(context);
 			UpdateConstants(*camera, width, height, state->frameCount);
 			auto* cb = _constants->CB();
 			context->CSSetConstantBuffers(1, 1, &cb);
@@ -469,6 +460,8 @@ namespace cs::features
 			Passes pass(context, kConsumerSlot, _consumer->CB());
 			cs::render::annotation::ScopedEvent generation("ScreenSpaceGI/Generate", false);
 			auto& t = _textures;
+			const auto specularSRV = [&](UINT a_index) { return t.specular[a_index] ? t.specular[a_index]->srv.get() : nullptr; };
+			const auto specularUAV = [&](UINT a_index) { return t.specular[a_index] ? t.specular[a_index]->uav.get() : nullptr; };
 			// FO4: prepare native normals and current shaded diffuse before unchanged upstream kernels.
 			pass.Run(_prepare.get(), { normals, material, albedo, diffuse, tiled ? diffuseB : nullptr, emissive },
 				{ t.normalGloss->uav.get(), t.diffuse ? t.diffuse->uav.get() : nullptr }, width, height, 8, "SSGI/Prepare");
@@ -477,20 +470,19 @@ namespace cs::features
 			};
 			prefilter(0, depth, t.depth, width, height, "SSGI/PrefilterDepths");
 			UINT ao = _lastAO, gi = _lastGI;
-			pass.Run(_shaders[1].get(), { t.diffuse ? t.diffuse->srv.get() : nullptr, t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.previousGeometry->srv.get(), motion, t.accumulation[_lastAccum]->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), t.specular[ao]->srv.get() },
+			pass.Run(_shaders[1].get(), { t.diffuse ? t.diffuse->srv.get() : nullptr, t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.previousGeometry->srv.get(), motion, t.accumulation[_lastAccum]->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao) },
 				{ t.radianceTemp->uav.get(), t.accumulation[!_lastAccum]->uav.get(), t.ao[!ao]->uav.get(),
-					t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), t.specular[!ao]->uav.get() },
+					t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
 				internalWidth, internalHeight, 8, "SSGI/RadianceDisocc");
 			prefilter(2, t.radianceTemp->srv.get(), t.radiance, internalWidth, internalHeight, "SSGI/PrefilterRadiance");
 			ao = !ao;
 			gi = !gi;
 			_lastAccum = !_lastAccum;
 			prefilter(3, t.normalGloss->srv.get(), t.normals, internalWidth, internalHeight, "SSGI/PrefilterNormals");
-			pass.Run(_shaders[4].get(), { t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.radiance.texture->srv.get(), _noise.get(), t.accumulation[_lastAccum]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), t.specular[ao]->srv.get(), t.normals.texture->srv.get() },
+			pass.Run(_shaders[4].get(), { t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.radiance.texture->srv.get(), _noise.get(), t.accumulation[_lastAccum]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao), t.normals.texture->srv.get() },
 				{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(),
-					t.specular[!ao]->uav.get(), t.previousGeometry->uav.get() },
+					specularUAV(!ao), t.previousGeometry->uav.get() },
 				internalWidth, internalHeight, 8, "SSGI/GI");
-			_specularDirty = _settings.enableExperimentalSpecularGI;
 			ao = !ao;
 			gi = !gi;
 			_lastAO = ao;
@@ -504,8 +496,8 @@ namespace cs::features
 				_lastAccum = !_lastAccum;
 			}
 			if (_settings.resolutionMode != 0) {
-				pass.Run(_shaders[6].get(), { t.depth.texture->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), t.specular[ao]->srv.get() },
-					{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), t.specular[!ao]->uav.get() },
+				pass.Run(_shaders[6].get(), { t.depth.texture->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao) },
+					{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
 					width, height, 8, "SSGI/Upsample");
 				ao = !ao;
 				gi = !gi;
@@ -555,7 +547,7 @@ namespace cs::features
 			views[3] = t.normalGloss->srv.get();
 		}
 		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kCompositionSlot, kCompositionCount, views);
-		auto* specular = ready && _settings.enableExperimentalSpecularGI ? _textures.specular[_outputAO]->srv.get() : nullptr;
+		auto* specular = ready && _textures.specular[_outputAO] ? _textures.specular[_outputAO]->srv.get() : nullptr;
 		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kSpecularSlot, 1, &specular);
 		++_binds;
 	}

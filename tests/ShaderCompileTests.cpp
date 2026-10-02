@@ -705,8 +705,10 @@ namespace
 				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" }, { "TEMPORAL_DENOISER", "1" } }), .description = file });
 				a_jobs.push_back({ .path = ssgi / file, .defines = withResolution({ { "GI", "1" }, { "GI_SPECULAR", "1" }, { "TEMPORAL_DENOISER", "1" } }), .description = file });
 			}
-			if (*resolution)
+			if (*resolution) {
+				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({ { "GI", "1" } }), .description = "upsample.cs.hlsl" });
 				a_jobs.push_back({ .path = ssgi / "upsample.cs.hlsl", .defines = withResolution({ { "GI", "1" }, { "GI_SPECULAR", "1" } }), .description = "upsample.cs.hlsl" });
+			}
 		}
 		a_jobs.push_back({ .path = a_root / "FO4" / "ScreenSpaceGI" / "Prepare.cs.hlsl",
 			.defines = { { "FO4CS_SUBSTRATE", "1" }, { "GI", "1" }, { "GI_SPECULAR", "1" } },
@@ -1069,11 +1071,11 @@ namespace
 					.profile = "ps_5_0",
 					.description = family,
 					.required = dynamicCubemaps ?
-				                    std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
-				                    std::vector<Resource>{},
+					                std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
+					                std::vector<Resource>{},
 					.forbidden = dynamicCubemaps ?
-				                     std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
-				                     std::vector<Resource>{ CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35), Texture(71) } });
+					                 std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
+					                 std::vector<Resource>{ CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35), Texture(71) } });
 				AddFullscreenDebugVariant(a_jobs, a_jobs.back(), "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(7), Texture(25), Texture(71) });
 			}
 		}
