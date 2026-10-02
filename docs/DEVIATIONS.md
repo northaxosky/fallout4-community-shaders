@@ -109,7 +109,7 @@ and wetness VS/PS linkage check; no second consumer-family list is maintained.
 | Forced | Wetness RT6, independent blend state and PS t71 producer-presence marker remain per draw; restore OM/blend afterward | Native deferred prepass owns six MRTs; accepted and rejected material draws need distinct presence markers | `WetnessEffects.cpp` `BindFilmOutput`, DrawTriShape/SetDirtyStates anchor |
 | Forced | Publish wetness normal t25 at pre-composite, after native G-buffer producers retire | Engine-facts “Pre-composite scene boundary”: prepass/decals write G-buffers; lights replace those outputs with logical33–36. Publishing t25 immediately after prepass can be rejected or subsequently cleared by native RTV use | `WetnessEffects.cpp` `BindCompositeResources`, WARP frame-binding alias test |
 | Forced | ISL PS b11 remains per light; CS t8 is bound/restored at native tiled dispatch | Raster geometry selects each light; the engine owns low CS inputs and rebuilds the dense tiled list | `InverseSquareLighting.cpp`, `ShaderInjection.cpp` compute bridge |
-| Framework | Fullscreen-debug options apply only to composite consumers; static declarations and runtime features share the same define interface | Host debug-owner contract; WaterEffects' debug-only include excludes light-consumer functions, as the feature-on sweep verifies | `ShaderDefineProvider.h`, `Feature.h`, `FeatureShaderDeclarations.h` |
+| Framework | Fullscreen-debug options apply only to the selected owner's composite consumers; selection changes invalidate only affected native target lookups and retain define-keyed compiled variants | Upstream LightLimitFix toggles LLFDEBUG through SetDefines and clears Lighting on visualization activation changes. Static declarations and runtime features share the same interface; offline sweeps explicitly select debug owners | `ShaderDefineProvider.h`, `Feature.cpp`, `ShaderInjection.cpp`, `ShaderCompileTests.cpp` |
 | Framework | Stock identity, shader ownership and post-freeze delivery validation remain independent of define selection | Repository shader-delivery contract; a resource failure does not silently compile a different feature set | `ShaderInjection.cpp`, `Feature.cpp` |
 
 Sampler verdicts are **forced per-draw binds**, not family-native reuse:
@@ -242,6 +242,11 @@ are staged unchanged. The global replacement, global settings, comparison
 view and b7 ISL block are deleted. CPU radius/luminance math matches the pin,
 including its zero-radius edge case.
 
+The larger light footprint is an accepted parity cost: upstream `ProcessLight` applies intensity
+times four and cutoffs 0.022 (shadow) / 0.05 before LLF clustering uses the calculated radius.
+`Lighting.hlsl` rejects ISL attenuation below `1e-5`; restoring the old `0.001` cutoff would truncate
+upstream lighting. FO4 publishes that radius before its native culling instead of LLF clustering.
+
 Feature classification: **core** (rule 2: upstream inverse-square algorithm and design).
 No Fix is applied to the retained upstream radius defect. Offline gates are not native-hook
 or rendering proof.
@@ -324,6 +329,7 @@ Pending rows prevent a claim of complete parity.
 |---|---|---|---|
 | Forced | Produce darkened albedo, film normal and roughness in the deferred material prepass; evaluate unchanged upstream direct/indirect wetness functions in raster/tiled lighting and composite | FO4 separates material production from lighting; engine-facts Deferred prepass MRT layout and Raster light accumulation. Later passes lack the original skinned/model-space material inputs. The consumer mirrors upstream Lighting.hlsl wet material orchestration without replacing an upstream path | `DFPrepass.hlsl`, `FO4/WetnessMaterial.hlsli`, `FO4/WetnessEffectsConsumer.hlsli`, `DFLight.hlsl`, `DFTiledLighting.hlsl`, `DFComposite.hlsl` |
 | Forced | Add an RGBA16F film target at checked-unused MRT6 and sample it at t71; preserve all six native targets and their blend state | Engine-facts Deferred prepass MRT layout: all native channels have material/emissive/velocity consumers; MRT2.z is environment strength, not roughness, and no universal spare film-normal channel is established. Film stores upstream octahedral world normal, roughness and validity | `WetnessEffects.cpp` `BeginPrepass`, `BindFilmOutput`; `DFPrepass.hlsl` |
+| Forced | Retain film precision and clear uncovered pixels | RGBA8 reduces normal/roughness precision; its roughness step is 1/255 versus FP16's 1/32768 near the 0.05 minimum. R10G10B10A2 rounds valid blend coverage near the native 4/255 clip threshold to zero. Film inherits MRT1 blending and is not written by rejected producers or sky, so presence alone cannot reject stale previous-frame pixels without a clear | `DFPrepass.hlsl` BLEND output/clip, `FO4/WetnessMaterial.hlsli`, `FO4/WetnessEffectsConsumer.hlsli` `ReadSurface`, `WetnessEffects.cpp` `BindFilmOutput`, `BeginPrepass` |
 | Forced | Set native global wetness g to zero only in ready, supported owned material variants | Engine-facts Native material wetness: ShadowSceneNode+0x2F8 is b12[30].x. Keeping it would apply native darkening/specular modification before the upstream film. Unsupported/unready/disabled variants retain native behavior | `DFPrepass.hlsl` `native_global_fade`, `wetnessOwned` |
 | Forced | Grass, `TREE_ANIM`, `EYE` and instanced LOD-object (not LOD-land) prepass variants write a dry film with native g suppressed; grass pixel routes receive a `GRASS` define from their descriptor | Upstream compiles grass (`RunGrass.hlsl`), `TREE_ANIM`, `EYE` and `LOD` without `WETNESS_EFFECTS`. FO4 draws them through the shared prepass, whose film persists under later draws; grass pixel blobs are stock-identical to non-grass blobs, so only the descriptor identifies them | `DFPrepass.hlsl`, `ShaderFamilyDescriptor.cpp` |
 | Forced | Supply original model position and authored geometry normal through paired non-tessellated VS/PS interpolators | Reconstructed prepass VS skins the model position and MODELSPACENORMALS replaces the normal basis with model axes before native PS interpolation. Upstream GetRainDrops uses original model position on skinned materials and puddles use geometry normal rather than the mapped normal | `DFPrepass.hlsl` `wetModelPosition`, `wetGeometryNormal` |
@@ -490,6 +496,8 @@ and `TerrainShadows/TerrainShadows.hlsli` are staged unchanged. Native DDS dimen
 shadow heights, 128-thread scans, componentwise penumbra maxima, one-degree softening, half-texel
 offsets, bounded UV, ZBlur, weight-1 full sweeps and weight-0.5 ordinary slices match the pin.
 Settings use `EnableTerrainShadow`; no downsampling setting or resize pass remains.
+The old v0.2.1 default downsample factor of four was a quality divergence: upstream allocates
+and scans the original heightmap dimensions. That additional work is an accepted parity cost.
 
 Feature classification: **core** (rule 2: upstream terrain-shadow algorithm and design).
 Pending rows remain unfinished and do not establish upstream parity.
