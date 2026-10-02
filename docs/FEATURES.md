@@ -37,9 +37,9 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | CS Editor | Core | Weather/template/imagespace editor, godray record editor, light editor, shell | N/A: Skyrim VL noise fields | NS | H | L | High |
 | Cloud Shadows | Core | Layer-cube producer, directional receivers, Effect/Water/Particle receivers, EHF attenuation | N/A: legacy VL consumer | NS | H | L | Med |
 | [Dynamic Cubemaps](deviations/DynamicCubemaps.md) | Mixed | Capture/filter/inference, water, wet-film consumer, dry materials via native envmap, IBL/Skylighting providers, Creator tool | Ext: authored sentinel/reflectance selection, FO4 material workflow | Pt | H | S/M | High |
-| Effects11 | Core, policy-gated | `.fx` host, color correction, editor, weather/light controls, volumetric rays | Policy: ENB-format preset compatibility | NS | H | L | Med |
+| Effects11 | Core | `.fx` host and effect chain, color correction, editor, weather/light controls, volumetric rays | N/A: ENB preset/binary compatibility | NS | H | L | Med |
 | [Exponential Height Fog](deviations/ExponentialHeightFog.md) | Core | Analytic/froxel fog; shadow/environment/weather/secondary consumers; local-light scattering (needs LLF light grid) | N/A: ENB | Pt | H | L | High |
-| Extended Materials | Mixed | Object POM + contact refinement*, warping fix*, terrain POM/height blend* | Ext: complex envmask material, terrain height assets, parallax soft shadows | NS | H | M | Med |
+| Extended Materials | Mixed | Object POM + contact refinement, warping fix, terrain POM/height blend (height from `_s` alpha) | Ext: complex envmask material, parallax soft shadows | NS | H | M | Med |
 | Extended Translucency | Mixed | Alpha models on an existing alpha route* | Ext: per-mesh NIF metadata, world translucent coverage | NS | M | S | Low |
 | Grass Collision | Core | Contact field, blade deformation/motion, optimized-grass consumer | — | NS | H | M | Med |
 | Grass Lighting | Mixed | Brightness/facing, complex-atlas decode, LOD brightness | Ext: exact specular/transmission/AO, PBR grass. N/A: forward activation | NS | M | S/M | Med |
@@ -68,7 +68,7 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | [Terrain Shadows](deviations/TerrainShadows.md) | Core | Height-field producer, world receivers, time/transition events, secondary/remaining receivers, diagnostics | — | Pt | H | L | High |
 | Terrain Shadows - Heightmaps | Core (data) | FO4 worldspace pack in the existing format | N/A: Skyrim payload | Loader P, no pack | H | M | High |
 | Terrain Variation | Core | Landscape stochastic sampling, LOD anti-tiling, landscape-textured meshes, height/PBR coherence | — | NS | H | M | High |
-| TruePBR | Mixed | Surface POM on native height* (EM marcher under `TRUE_PBR`+`HasDisplacement`) | Ext: PBR material loader + RMAOS lighting, coat/fuzz/SSS/hair, landscape/grass PBR, glints | NS | H | M | Med |
+| TruePBR | Mixed | Surface POM (EM marcher under `TRUE_PBR`+`HasDisplacement`; same slice as Extended Materials POM) | Ext: PBR material loader + RMAOS lighting, coat/fuzz/SSS/hair, landscape/grass PBR, glints | NS | H | M | Med |
 | Unified Water | Mixed | Optical distance blend, material identity fix*, cache UI | Ext: distant tile generation/lifetime, world flowmap | NS | M | S/M | Med |
 | [Upscaling](deviations/Upscaling.md) | Core | SR/native AA, DR/RCAS/reflection/depth consumers, canonical SDK depth, masks, underwater chain, FG/UI/Reflex | — | Pt | H | L | High |
 | Volumetric Lighting | Mixed | Native GFSDK enable/quality controls | Ext: full raymarched renderer. N/A: Skyrim dispatch optimization | NS | L | S | Med |
@@ -81,12 +81,14 @@ are FO4-only rule-4 core features.
 
 ## Slice notes
 
-- **TruePBR / Extended Materials parallax.** TruePBR relief is Extended Materials' marcher
+- **Parallax (Extended Materials / TruePBR).** TruePBR relief is Extended Materials' marcher
   (`ExtendedMaterialsParallaxCore.hlsli`) gated by `TRUE_PBR`, `EnableParallax` and `HasDisplacement`
-  (`Lighting.hlsl:1175-1217`), so it ships as one EM slice in `DFPrepass` before material sampling. The
-  slice is core only if FO4 materials carry a native height texture. Composite `PARALLAX_OCCLUSION_MAPPING`
-  macros prove emission, not executed relief, and prepass `0x40000` is SKIN_TINT. RE spike first. Terrain
-  Variation must share the same UV offsets.
+  (`Lighting.hlsl:1175-1217`), so it ships as one EM slice in `DFPrepass` before material sampling. Vanilla
+  textures carry no height, but FO4 parallax texture packs store it in the `_s` (specular/smoothness) alpha,
+  which `DFPrepass` already binds at t2 (landscape t8+). Reading it is a relocated upstream datum, so the
+  slice is core; RE confirms which material flag marks height-bearing `_s` textures (packs set one in BGSM).
+  Composite `PARALLAX_OCCLUSION_MAPPING` macros prove emission, not executed relief, and prepass `0x40000`
+  is SKIN_TINT. Terrain Variation must share the same UV offsets.
 - **Dynamic Cubemaps dry materials.** Sample the DC cube (t34/t35) at the six native probe sites in
   `DFComposite.hlsl`, keeping FO4 gain, SSLR blend and exclusions. Use DC's roughness-to-mip contract, not
   the native probe LOD.
@@ -103,29 +105,31 @@ are FO4-only rule-4 core features.
   local-light scattering input.
 - **Grass.** Grass wind/collision/placement is already reconstructed in `DFPrepass.hlsl`; remaining stock
   grass variants are port work.
-- **Effects11.** ColorCorrection ships alone after the FO4 HDR/tonemap attachment point is found.
+- **Effects11.** Replaces ENB's enbeffect role natively; no ENB preset/binary compatibility is kept. Attach at
+  FO4's HDR-to-LDR tonemap inside the identified imagespace range (RE); ColorCorrection can ship first.
 
 ## Core port order
 
-Ordered by payoff over effort, respecting dependencies.
+Ordered by user value over effort, respecting dependencies.
 
-1. **Finish ported features:** DC dry materials (S/M); Wetness water-surface rain (M); Terrain Shadows FO4
+1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE.
+2. **Finish ported features:** DC dry materials (S/M); Wetness water-surface rain (M); Terrain Shadows FO4
    heightmap pack (M); Water Effects caustics proof (S).
-2. **Cheap new features:** LOD Blending (S); Terrain Variation (M); Remote Control (M; DevBench automation).
-3. **Mid-size, few dependencies:** Cloud Shadows (L; feeds EHF); Subsurface Scattering (M); Volumetric
+3. **Cheap new features:** LOD Blending (S); Terrain Variation (M); Remote Control (M; DevBench automation).
+4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
+5. **Mid-size, few dependencies:** Cloud Shadows (L; feeds EHF); Subsurface Scattering (M); Volumetric
    Shadows producer + DFLight (M); Hair Specular opaque slices (M); Grass Collision (M, actor-bounds RE);
    LLF particle lights + visualization (M).
-4. **RE-gated:** native-height POM spike, then Extended Materials POM + TruePBR surface POM + terrain height
-   blend; Interior Sun; Extended Translucency alpha models.
-5. **Providers:** DC → IBL; Skylighting in parallel; LLF 3D light grid before EHF local-light scattering;
+6. **RE-gated:** Interior Sun; Extended Translucency alpha models.
+7. **Providers:** DC → IBL; Skylighting in parallel; LLF 3D light grid before EHF local-light scattering;
    then provider adapters in DC/SSGI/EHF/Wetness.
-6. **Remaining core:** Skin detail/default response; Sky Sync; Grass Lighting basics; Unified Water optical;
-   VL controls; CS Editor; Screenshot; HDR Display (L); Effects11 (policy-gated).
+8. **Remaining core:** Skin detail/default response; Sky Sync; Grass Lighting basics; Unified Water optical;
+   VL controls; CS Editor; Screenshot; HDR Display (L).
 
 ## Extension slices
 
-Shipped: Wetness MRT6 film. Candidates: DC authored reflectance/material workflow (pairs with TruePBR
-materials); TruePBR full materials; Extended Materials complex materials and parallax shadows; Grass
-Optimizations renderer; Unified Water tiles and flowmaps; water parallax height assets; Terrain Blending lit
-transition; Terrain Helper ESP; Skin RFAOS/wet film; SSS profiles; Hair Kajiya-Kay and blended hair; LLF
-capacity/shadow redesign; full Volumetric Lighting renderer; Extended Translucency world coverage.
+Shipped: Wetness MRT6 film. Not planned: DC authored reflectance/material workflow. Candidates: TruePBR
+full materials; Extended Materials complex materials and parallax shadows; Grass Optimizations renderer;
+Unified Water tiles and flowmaps; water parallax height assets; Terrain Blending lit transition; Terrain
+Helper ESP; Skin RFAOS/wet film; SSS profiles; Hair Kajiya-Kay and blended hair; LLF capacity/shadow
+redesign; full Volumetric Lighting renderer; Extended Translucency world coverage.
