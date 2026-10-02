@@ -31,7 +31,7 @@ namespace
 
 #define CHECK(a_expression) Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
 
-	void TestTelemetryWithoutOverlay()
+	void TestProfilerConsumers()
 	{
 		namespace profiling = cs::render::profiling;
 		using cs::render::annotation::ScopedEvent;
@@ -45,8 +45,12 @@ namespace
 		profiling::InitializeD3D11(device.get(), context.get());
 		profiling::SetEnabled(true);
 		profiling::MarkEngineFrame(false);
-		CHECK(!profiling::BeginPass("Test::Disabled"));
+		CHECK(profiling::BeginPass("Test::OverlayOnly"));
+		profiling::EndPass();
 		profiling::SetEnabled(false);
+		profiling::MarkEngineFrame(false);
+		CHECK(!profiling::BeginPass("Test::Disabled"));
+		CHECK(profiling::GetProfiler().GetResults().empty());
 		profiling::MarkEngineFrame(true);
 		{
 			ScopedEvent group("Test::Group", false);
@@ -153,7 +157,7 @@ namespace
 
 int main()
 {
-	TestTelemetryWithoutOverlay();
+	TestProfilerConsumers();
 	TestQueryCollectionAndRetirement();
 	TestAggregationWithOutliers();
 	if (failures)

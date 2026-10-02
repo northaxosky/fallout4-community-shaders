@@ -38,7 +38,7 @@ namespace cs::render::profiling
 			Profiler profiler;
 			bool initialized{};
 			bool enabled{};
-			bool telemetryEnabled{};
+			bool queriesWanted{};
 			std::string activePass;
 			std::map<int, ShaderTiming> shaderFrame;
 			std::vector<ShaderTiming> shaderTimings;
@@ -88,13 +88,13 @@ namespace cs::render::profiling
 			state.activePass.clear();
 		}
 		state.profiler.EndFrame();
-		state.telemetryEnabled = a_telemetryEnabled;
-		if (state.telemetryEnabled && state.device && !state.initialized) {
-			// Allocate timestamp queries only on the render thread while telemetry is enabled.
+		state.queriesWanted = a_telemetryEnabled || state.enabled;
+		if (state.queriesWanted && state.device && !state.initialized) {
+			// Allocate timestamp queries only on the render thread while a consumer needs them.
 			state.profiler.Initialize(state.device, state.context);
 			state.initialized = true;
 		}
-		if (state.telemetryEnabled && state.initialized)
+		if (state.queriesWanted && state.initialized)
 			state.profiler.BeginFrame();
 		else if (state.initialized) {
 			state.profiler.Release();
@@ -131,7 +131,7 @@ namespace cs::render::profiling
 	{
 		auto& state = State();
 		// FO4: annotation scopes can nest, but the shared profiler requires disjoint passes.
-		if (!state.telemetryEnabled || !state.initialized || !state.activePass.empty())
+		if (!state.queriesWanted || !state.initialized || !state.activePass.empty())
 			return false;
 		state.activePass = a_name;
 		state.profiler.BeginPass(state.activePass);
