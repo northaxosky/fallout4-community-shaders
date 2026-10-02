@@ -88,10 +88,8 @@ float3 EvaluateAmbientGradient(float3 direction)
 }
 #	endif
 
-[numthreads(8, 8, 1)] void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID) {
-	uint tileIndex = groupId.y * (uint)TiledParams[2].z + groupId.x;
-	uint2 pixel = groupId.xy * 8 + groupThreadId.xy;
-
+void ShadeTiledPixel(uint tileIndex, uint2 pixel)
+{
 	float3 diffuseAccum = 0.0;
 	float3 specularAccum = 0.0;
 
@@ -452,9 +450,10 @@ float3 EvaluateAmbientGradient(float3 direction)
 
 			float normalizedDistance = saturate(
 				sqrt(distanceSquared) / light.PositionRadius.w);
+			// OG key 1 multiplies in the key-2 operand order.
 			float falloffPower =
 				exp2(
-#	if DFTILEDLIGHTING_VARIANT == 2
+#	if DFTILEDLIGHTING_VARIANT == 2 || defined(OG)
 					light.Attenuation.z *
 					log2(normalizedDistance));
 #	else
@@ -490,6 +489,18 @@ float3 EvaluateAmbientGradient(float3 direction)
 	float4 specularOutput = float4(specularAccum, 0.0);
 	DiffuseOutput[pixel] = diffuseOutput;
 	SpecularOutput[pixel] = specularOutput;
+}
+
+[numthreads(8, 8, 1)] void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID) {
+	uint tileIndex = groupId.y * (uint)TiledParams[2].z + groupId.x;
+#	if defined(OG)
+	// OG 1.10.163 shades each pixel inside a one-row [loop] its kernels keep; only the schedule differs.
+	uint2 basePixel = groupId.xy * 8 + groupThreadId.xy;
+	[loop] for (uint row = 0; row < 1; ++row)
+		ShadeTiledPixel(tileIndex, basePixel + uint2(0, row));
+#	else
+	ShadeTiledPixel(tileIndex, groupId.xy * 8 + groupThreadId.xy);
+#	endif
 }
 
 #endif

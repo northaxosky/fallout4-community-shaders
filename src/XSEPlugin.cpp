@@ -89,6 +89,10 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 			shaderOwnership.error);
 	}
 	cs::engine::ApplyShaderOwnershipConfig(shaderOwnership.config);
+	cs::engine::SetShaderInjectionRuntime(
+		REX::FModule::IsRuntimeOG() ? cs::engine::GameRuntime::kOG :
+		REX::FModule::IsRuntimeNG() ? cs::engine::GameRuntime::kNG :
+									  cs::engine::GameRuntime::kAE);
 	cs::env::DetectENB();
 
 	L->info("FO4CommunityShaders v{}.{}.{} loaded (build {}, commit {})",

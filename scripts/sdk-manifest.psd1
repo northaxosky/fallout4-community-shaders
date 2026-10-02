@@ -46,5 +46,17 @@
 				'LICENSE.txt'
 			)
 		}
+		@{
+			# Test-only: the compiler OG 1.10.163 shipped with, for the OG stock identity gate; never packaged.
+			Name        = 'D3DCompilerOG'
+			Version     = '6.3.9600.16384'
+			Url         = 'https://download.microsoft.com/download/B/0/C/B0C80BA3-8AD6-4958-810B-6882485230B5/standalonesdk/Installers/69661e20556b3ca9456b946c2c881ddd.cab'
+			Sha256      = 'f057ddb342644fbe11eb2da28486365093b330506a9f214277106d053f652160'
+			Destination = 'build/tools/d3dcompiler-6.3.9600.16384'
+			# Windows 8.1 SDK bin\x64 copy (sha256 0bea1620...); cabinet members are MSI file keys.
+			Members     = @{
+				'fil25eff5d839f89befebf11b193bee8294' = 'd3dcompiler_47.dll'
+			}
+		}
 	)
 }

@@ -8,6 +8,8 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "tests/data"
+# Rows proven under an OG-era proof compiler; the export's inherited-row rule names this prefix.
+VARIANT_RECEIPTS = "harness/shaders/runtime-variants/"
 
 
 def require(condition, message):
@@ -57,11 +59,15 @@ def candidate(route, export_root):
     return matches.pop()
 
 
-def generate(export):
+def generate(export, output):
     raw = export.read_bytes()
     document = json.loads(raw)
     require(document["schema"] == "fo4re.consumer-stock-identity"
             and document["schema_version"] == 2, "unsupported export schema/version")
+    runtime = document["runtime"]["build"]
+    require(re.fullmatch("(OG|NG|AE)-[0-9.]+", runtime), "invalid runtime build")
+    inherited_rows = document["compiler"].get("inherited_rows")
+    require(inherited_rows is None or VARIANT_RECEIPTS in inherited_rows["rule"], "unexpected inherited-row rule")
     routes = document["routes"]
     declared = document["counts"]
     require(counts(routes) == declared["total"], "total counts mismatch")
@@ -76,7 +82,7 @@ def generate(export):
     require(sum(r["imagespace"] is not None for r in routes if r["target"] == "imagespace")
             == declared["imagespace_identity_established"], "imagespace count mismatch")
 
-    excluded = Counter(dict.fromkeys(("unhooked",), 0))
+    excluded = Counter(dict.fromkeys(("unhooked", "inherited"), 0))
     tiers = Counter(dict.fromkeys(("exact", "canonical", "unproven"), 0))
     rows = []
     unnamed = 0
@@ -88,7 +94,11 @@ def generate(export):
             isinstance(native_name, str) and re.fullmatch("[A-Za-z][A-Za-z0-9_]{0,63}", native_name)
         ), f"invalid native name: {key}")
         require(type(route["hooked"]) is bool, f"invalid hooked: {key}")
-        reason = "unhooked" if not route["hooked"] else None
+        receipt = route["producer_receipt"]
+        reason = ("unhooked" if not route["hooked"] else
+                  # Inherited rows are proven under another compiler and gated by the AE table.
+                  "inherited" if inherited_rows is not None
+                  and not (receipt and receipt["path"].startswith(VARIANT_RECEIPTS)) else None)
         if reason:
             excluded[reason] += 1
             continue
@@ -123,6 +133,7 @@ def generate(export):
     require(re.fullmatch("[0-9a-f]{64}", compiler["sha256"]), "invalid compiler SHA-256")
     header = {
         "export_sha256": hashlib.sha256(raw).hexdigest(),
+        "runtime": runtime,
         **{k: declared["total"][k] for k in ("routes", "exact", "canonical", "unproven")},
         "rows": len(rows),
         **{f"rows_{k}": v for k, v in tiers.items()},
@@ -133,15 +144,16 @@ def generate(export):
     text = "# " + " ".join(f"{k}={v}" for k, v in header.items()) + "\n"
     text += "".join(f"{target}\t{stage}\t0x{descriptor:08x}\t{early}\t{sha1}\t{ordinal}\t{identity}\n"
                     for target, stage, descriptor, ordinal, early, sha1, identity in sorted(rows))
-    (DATA / "stock-shader-identity.tsv").write_text(text, encoding="utf-8", newline="\n")
+    output.write_text(text, encoding="utf-8", newline="\n")
     print(text.splitlines()[0])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate the stock shader identity gate table.")
     parser.add_argument("export", type=Path)
+    parser.add_argument("--output", type=Path, default=DATA / "stock-shader-identity.tsv")
     args = parser.parse_args()
     try:
-        generate(args.export)
+        generate(args.export, args.output)
     except (ValueError, KeyError, OSError, TypeError) as error:
         parser.exit(1, f"stock identity export rejected: {error}\n")

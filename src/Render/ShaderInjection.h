@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Render/FrameBindings.h"
+#include "Render/GameRuntime.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderDefineProvider.h"
 #include "Render/ShaderInjectionTargets.h"
@@ -215,6 +216,7 @@ namespace cs::engine
 		ShaderStage a_stage,
 		const ShaderVariantCompilationDescriptor& a_family,
 		std::span<const ShaderReplacementRegistration> a_contributions,
+		GameRuntime a_runtime,
 		std::string* a_error = nullptr);
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
@@ -228,6 +230,7 @@ namespace cs::engine
 	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
 	bool SetDeveloperShaderSourceRoot(std::wstring a_sourceRoot);
 	bool SetShaderInjectionEnabled(bool a_enabled);
+	bool SetShaderInjectionRuntime(GameRuntime a_runtime);
 	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config);
 	bool ValidateShaderInjectionRoutes(
 		std::string_view a_contributor,

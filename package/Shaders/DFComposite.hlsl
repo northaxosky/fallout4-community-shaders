@@ -188,6 +188,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 ambientPairSum = ambientA * 3.0;
 #	endif
 	float depth = g_tMainDepth.SampleLevel(g_sMainDepth, uv, 0).x;
+#	if defined(OG) && AMBIENT_SUBSURFACE_BLUR
+	// OG schedules the skin sample ahead of the depth branch.
+	float3 skinAux = g_tSkinAuxColor.Sample(g_sSkinAuxColor, uv).xyz;
+#	endif
 	bool isNearPath = (depth <= 0.01);
 	float4 pos;
 	float4 reprojRow0, reprojRow1, reprojRow2, reprojRow3;
@@ -205,9 +209,14 @@ PS_OUTPUT main(PS_INPUT input)
 		reprojRow3 = FarReproj_row3;
 	}
 #	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#		if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float2 terrainScreen = float2(uv.x, 1.0 - uv.y);
+#		else
 	float2 terrainScreen = float2(
 		uv.x * ScreenSize.z,
 		1.0 - uv.y * ScreenSize.w);
+#		endif
 	float4 terrainPosition = float4(terrainScreen * 2.0 - 1.0, pos.z, 1.0);
 	float4 terrainPositionViewH = float4(
 		dot(reprojRow0, terrainPosition),
@@ -255,7 +264,12 @@ PS_OUTPUT main(PS_INPUT input)
 	bool hasIBL = (matSliceFloat > 0.5 / 255.0);
 	float3 iblColor = float3(0, 0, 0);
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
+#		if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float2 sn = float2(uv.x, 1.0 - uv.y);
+#		else
 	float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
+#		endif
 	pos.xy = sn * 2.0 - 1.0;
 	pos.w = 1.0;
 	float3 posViewXYZ = float3(dot(reprojRow0, pos),
@@ -271,7 +285,12 @@ PS_OUTPUT main(PS_INPUT input)
 		float zRecon = 1.0 - encDotEnc * 0.25;
 		float3 normalView = float3(enc * sqrt(zRecon), -(1.0 - encDotEnc * 0.5));
 #	if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
+#		if defined(OG)
+		// OG has no cb2[0].zw screen-UV rescale.
+		float2 sn = float2(uv.x, 1.0 - uv.y);
+#		else
 		float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
+#		endif
 		pos.xy = sn * 2.0 - 1.0;
 		pos.w = 1.0;
 		float3 posViewXYZ = float3(dot(reprojRow0, pos),
@@ -298,7 +317,12 @@ PS_OUTPUT main(PS_INPUT input)
 	} else {
 		iblColor = float3(0, 0, 0);
 	}
+#	if defined(OG)
+	// OG samples the lit scene and SSAO without the cb2[5].xy clamp.
+	float2 uvClamped = uv;
+#	else
 	float2 uvClamped = min(uv, cb2_idx5_lit_scene_uv_clamp.xy);
+#	endif
 	float4 litRaw = g_tLitScene.Sample(g_sLitScene, uvClamped);
 	float litAlpha = min(litRaw.w * cb0_idx2_lit_scene_alpha.z, 1.0);
 	float3 iblLitBlend = lerp(iblColor,
@@ -308,7 +332,9 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 ambientAccum;
 #	if AMBIENT_SUBSURFACE_BLUR
 	if (isSkin) {
+#		if !defined(OG)
 		float3 skinAux = g_tSkinAuxColor.Sample(g_sSkinAuxColor, uv).xyz;
+#		endif
 		float depthMaskF = isNearPath ? 1.0 : 0.0;
 		float blurDepthScale = depthMaskF * cb0_idx0_screen_scale_and_blur_tolerance.z + 1.0;
 		float refDepth = g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, uv, 0).x;
@@ -537,6 +563,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 shadingData =
 		g_tGbufferShadingData.SampleLevel(g_sGbufferShadingData, uv, 0).xyw;
 	float depth = g_tMainDepth.SampleLevel(g_sMainDepth, uv, 0).x;
+#	if defined(OG) && FO4_SKIN_BLUR
+	// OG schedules the skin sample ahead of the depth branch.
+	float3 skinAux = g_tSkinAuxColor.Sample(g_sSkinAuxColor, uv).xyz;
+#	endif
 	bool isNearPath = 0.01 >= depth;
 	float linearizedDepth;
 	float4 reprojRow0;
@@ -560,11 +590,17 @@ PS_OUTPUT main(PS_INPUT input)
 		reprojRow3 = FarReproj_row3;
 	}
 
+#	if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float4 positionInput =
+		float4(float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0, linearizedDepth, 1.0);
+#	else
 	float4 uvRemapped =
 		float4(uv.x, 0.0, -uv.y, 0.0) * float4(ScreenSize.z, 0.0, ScreenSize.w, 0.0);
 	uvRemapped.z += 1.0;
 	float4 positionInput =
 		float4(uvRemapped.xz * 2.0 - 1.0, linearizedDepth, 1.0);
+#	endif
 	float4 positionViewH;
 	positionViewH.x = dot(reprojRow0, positionInput);
 	positionViewH.y = dot(reprojRow1, positionInput);
@@ -652,6 +688,14 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 
 	float materialId = shadingData.z * 255.0;
+#	if defined(OG)
+	// OG samples unclamped lit scene and non-blurred SSAO before material tests.
+	float2 litSceneUv = uv;
+	float4 litScene = g_tLitScene.Sample(g_sLitScene, litSceneUv);
+#		if FO4_AMBIENT_OCCLUSION && !FO4_SKIN_BLUR
+	float ao = g_tSsao.Sample(g_sSsao, litSceneUv).x;
+#		endif
+#	endif
 #	if FO4_SKIN_BLUR
 	bool isMaterial5 = abs(materialId - 5.0) < 0.25;
 #	endif
@@ -661,8 +705,10 @@ PS_OUTPUT main(PS_INPUT input)
 #	if FO4_SKIN_BLUR
 	float3 ambientAccum = blurSourceCenter;
 	if (isMaterial5) {
+#		if !defined(OG)
 		float3 skinAux =
 			g_tSkinAuxColor.Sample(g_sSkinAuxColor, uv).xyz;
+#		endif
 		float blurDepthScale =
 			(isNearPath ? 1.0 : 0.0) * ScreenBlurParameters.z + 1.0;
 		float centerRef =
@@ -710,6 +756,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 ambientAccum;
 #	endif
 
+#	if defined(OG) && FO4_AMBIENT_OCCLUSION && FO4_SKIN_BLUR
+	// OG schedules blurred SSAO after skin composition, before exclusion.
+	float ao = g_tSsao.Sample(g_sSsao, litSceneUv).x;
+#	endif
 	if (!(isMaterial2 || isMaterial3)) {
 		float3 ambientPair =
 			g_tAmbientDiffuseA.SampleLevel(g_sAmbientDiffuseA, uv, 0).xyz;
@@ -727,15 +777,25 @@ PS_OUTPUT main(PS_INPUT input)
 			shadingData.y * 3.0 *
 			min(1.0, 1.0 / rsqrt(saturate(shadingData.x - 0.3)));
 		float glossSquaredScaled = material.z * material.z * 50.0;
+#	if !defined(OG)
 		float2 litSceneUv = min(uv, LitSceneUvClamp.xy);
 		float4 litScene = g_tLitScene.Sample(g_sLitScene, litSceneUv);
+#	endif
 		float litAlpha = min(litScene.w * LitSceneAlpha.z, 1.0);
 		float3 iblLitBlend = lerp(
 			iblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
+#	if defined(OG)
+		// OG keeps the leading factors in one register, preserving operand order.
+		float3 modulated =
+			ambientAccum + iblLitBlend * glossFactor * glossSquaredScaled * ambientPair;
+#	else
 		float3 modulated =
 			ambientAccum + glossFactor * iblLitBlend * glossSquaredScaled * ambientPair;
+#	endif
 #	if FO4_AMBIENT_OCCLUSION
+#		if !defined(OG)
 		float ao = g_tSsao.Sample(g_sSsao, litSceneUv).x;
+#		endif
 #	else
 		const float ao = 1.0;
 #	endif
@@ -918,11 +978,16 @@ float3 sampleSkinTap(float2 coordinate, float depthScale, float centerDepth, flo
 float3 reconstructViewPosition(float2 coordinate, float linearizedDepth,
 	float4 row0, float4 row1, float4 row2, float4 row3)
 {
+#	if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float2 clipPosition = float2(coordinate.x, 1.0 - coordinate.y) * 2.0 - 1.0;
+#	else
 	float2 clipPosition = float2(
 							  coordinate.x * screenSetup[0].z,
 							  1.0 - coordinate.y * screenSetup[0].w) *
 	                          2.0 -
 	                      1.0;
+#	endif
 	float4 projectedPosition = float4(clipPosition, linearizedDepth, 1.0);
 	float4 viewPosition;
 	viewPosition.x = dot(row0, projectedPosition);
@@ -943,6 +1008,11 @@ float3 sampleDirectLighting(float2 coordinate)
 
 float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFactor,
 	float gloss, float3 environment, float3 centerColor
+#	if defined(OG) && OUTPUTMASK && FOGSTACK
+	// OG passes the output mask sampled before exclusion.
+	,
+	float outputMask
+#	endif
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 	,
 	float3 wetReflection
@@ -953,11 +1023,19 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 	color *= gloss;
 	color = color * directLighting + centerColor;
 #	if OUTPUTMASK
+#		if !defined(OG)
 	float outputMask =
 		outputMaskTexture.Sample(
 							 outputMaskSampler, min(coordinate, screenSetup[5].xy))
 			.x;
 	color *= outputMask;
+#		elif !FOGSTACK
+	// OG samples the output mask without the cb2[5].xy clamp.
+	color *= outputMaskTexture.Sample(outputMaskSampler, coordinate).x;
+#		else
+	// OG applies the pre-exclusion mask before adding wet reflections.
+	color *= outputMask;
+#		endif
 #	endif
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 	color += wetReflection;
@@ -986,6 +1064,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	endif
 
 	float deviceDepth = depthTexture.SampleLevel(depthSampler, coordinate, 0.0).x;
+#	if defined(OG)
+	// OG schedules the skin sample ahead of the depth branch.
+	float3 skinAux = skinAuxTexture.Sample(skinAuxSampler, coordinate).xyz;
+#	endif
 	bool nearDepth = deviceDepth <= 0.01;
 	float linearizedDepth;
 	float4 row0;
@@ -1089,7 +1171,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	endif
 
 	if (isSkin) {
+#	if !defined(OG)
 		float3 skinAux = skinAuxTexture.Sample(skinAuxSampler, coordinate).xyz;
+#	endif
 		float depthScale = 1.0 + (float)nearDepth * ambientPass[0].z;
 		float centerDepth = linearDepthTexture.SampleLevel(linearDepthSampler, coordinate, 0.0).x * depthScale;
 		float2 tapStep = ambientPass[0].x * float2(0.078125, 0.13889) / centerDepth;
@@ -1135,6 +1219,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 					  ),
 		1.0);
 #	else
+#		if OUTPUTMASK && defined(OG)
+	// OG samples the unclamped output mask before exclusion.
+	float outputMask = outputMaskTexture.Sample(outputMaskSampler, coordinate).x;
+#		endif
 	float4 output;
 	if (!(materialMatches.y || materialMatches.z)) {
 		float3 directLighting = sampleDirectLighting(coordinate);
@@ -1143,6 +1231,11 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		glossFactor *= roughFactor;
 		float gloss = material.y * material.y * 50.0;
 		float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
+#		if OUTPUTMASK && defined(OG)
+			// OG passes the output mask sampled before exclusion.
+			,
+			outputMask
+#		endif
 #		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
 			,
 			wetReflection
@@ -1263,6 +1356,10 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
 	float3 surf = TexSurface.SampleLevel(SampSurface, uv, 0).xyw;
 	float depth = TexDepth.SampleLevel(SampDepth, uv, 0).x;
+#	if defined(OG)
+	// OG schedules TexA ahead of the depth branch.
+	float3 a = TexA.Sample(SampA, uv).xyz;
+#	endif
 
 	float4 pos;
 	float4 m0, m1, m2, m3;
@@ -1280,7 +1377,12 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		m3 = g_PF[23];
 	}
 
+#	if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float2 sn = float2(uv.x, 1.0 - uv.y);
+#	else
 	float2 sn = float2(uv.x * g_PixelToUV.z, 1.0 - uv.y * g_PixelToUV.w);
+#	endif
 	pos.xy = sn * 2.0 - 1.0;
 	pos.w = 1.0;
 
@@ -1355,12 +1457,18 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
 	float4 result;
 
+#	if OUTPUTMASK && defined(OG)
+	// OG samples the unclamped output mask before exclusion.
+	float mask = TexMask.Sample(SampMask, uv).x;
+#	endif
 	float2 idt = surf.z * 255.0 - float2(2.0, 3.0);
 	bool2 hit = abs(idt) < 0.25;
 	if (!(hit.x || hit.y)) {
 		float3 b = TexB.SampleLevel(SampB, uv, 0).xyz;
 		float3 b3 = b * 3.0;
+#	if !defined(OG)
 		float3 a = TexA.Sample(SampA, uv).xyz;
+#	endif
 		float3 c = TexC.SampleLevel(SampC, uv, 0).xyz;
 		float3 col = c + a;
 		col = b * 1.5 + col;
@@ -1372,7 +1480,9 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		col = ((cube * k) * g2) * b3 + col;
 
 #	if OUTPUTMASK
+#		if !defined(OG)
 		float mask = TexMask.Sample(SampMask, min(uv, g_UVClamp.xy)).x;
+#		endif
 		col = col * mask;
 #	endif
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
@@ -1552,6 +1662,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	base.xyz *= direct;
 	float3 color = base.xyz;
 #	endif
+#	if defined(OG) && COMPOSITE_MATERIAL_5
+	// OG schedules secondary color before the material branch.
+	float3 secondary = secondaryTexture.Sample(secondarySampler, uv).xyz;
+#	endif
 	color *= 3.0;
 #	ifdef SSGI
 	float3 ssgiSpecular = 0.0;
@@ -1563,7 +1677,12 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	{
 #	ifdef SSGI
 		// Specular stays outside SSGI, as upstream.
+#		if defined(OG) && COMPOSITE_MATERIAL_5
+		// OG reuses the secondary color sampled before the material branch.
+		color += secondary;
+#		else
 		color += secondaryTexture.Sample(secondarySampler, uv).xyz;
+#		endif
 		ssgiSpecular = ambientTexture.SampleLevel(ambientSampler, uv, 0.0).xyz;
 #		if TILED_LIGHTS
 		ssgiSpecular += tileAmbientTexture.SampleLevel(tileAmbientSampler, uv, 0.0).xyz;
@@ -1571,8 +1690,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	else
 #		if TILED_LIGHTS
 #			if COMPOSITE_MATERIAL_5
+#				if !defined(OG)
 		float3 secondary =
 			secondaryTexture.Sample(secondarySampler, uv).xyz;
+#				endif
 		float3 ambient =
 			ambientTexture.SampleLevel(ambientSampler, uv, 0.0).xyz;
 		float3 tileAmbient =
@@ -1588,8 +1709,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #			endif
 #		else
 #			if COMPOSITE_MATERIAL_5
+#				if !defined(OG)
 		float3 secondary =
 			secondaryTexture.Sample(secondarySampler, uv).xyz;
+#				endif
 		float3 explicitAmbient =
 			ambientTexture.SampleLevel(ambientSampler, uv, 0.0).xyz;
 		float3 ambient = explicitAmbient + secondary;
@@ -1612,7 +1735,12 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	endif
 
 #	if COMPOSITE_MODULATION
+#		if defined(OG)
+	// OG samples modulation without the cb2[5].xy clamp.
+	float2 modulationUv = uv;
+#		else
 	float2 modulationUv = min(uv, screenData[5].xy);
+#		endif
 	color *= modulationTexture.Sample(modulationSampler, modulationUv).x;
 #	endif
 	return float4(color, base.w);
@@ -1768,7 +1896,11 @@ PS_OUTPUT main(PS_INPUT input)
 	float matIdByte = matIdRaw * 255.0;
 #	endif
 	float depth = g_tLinearDepth.SampleLevel(g_sDepth, uv, 0).x;
-#	if !COMPOSITE_HAS_TYPE
+#	if defined(OG)
+	// OG schedules secondary color ahead of the depth branch.
+	float3 secondaryColor =
+		g_tSecondaryColor.Sample(g_sSecondaryColor, uv).xyz;
+#	elif !COMPOSITE_HAS_TYPE
 	float3 secondaryColor =
 		g_tSecondaryColor.Sample(g_sSecondaryColor, uv).xyz;
 #	endif
@@ -1796,11 +1928,17 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 
 #	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#		if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float4 terrainPosition =
+		float4(float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0, linearizedDepth, 1.0);
+#		else
 	float4 terrainUvRemapped =
 		float4(uv.x, 0.0, -uv.y, 0.0) * float4(ScreenSize.z, 0.0, ScreenSize.w, 0.0);
 	terrainUvRemapped.z += 1.0;
 	float4 terrainPosition =
 		float4(terrainUvRemapped.xz * 2.0 - 1.0, linearizedDepth, 1.0);
+#		endif
 	float4 terrainPositionViewH = float4(
 		dot(reprojRow0, terrainPosition),
 		dot(reprojRow1, terrainPosition),
@@ -1844,8 +1982,13 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 ssgiSpecular = 0.0;
 #		endif
 	if (abs(matIdByte - 5.0) >= 0.25) {
+#		if defined(OG)
+		// OG reuses secondary color sampled ahead of the depth branch.
+		float3 materialSecondary = secondaryColor;
+#		else
 		float3 materialSecondary =
 			g_tSecondaryColor.Sample(g_sSecondaryColor, uv).xyz;
+#		endif
 #		ifdef SSGI
 		ssgiEmissive = materialSecondary;
 #		endif
@@ -1876,6 +2019,10 @@ PS_OUTPUT main(PS_INPUT input)
 #		endif
 #	endif
 
+#	if defined(OG) && COMPOSITE_HAS_LIGHT && !COMPOSITE_MATERIAL_5 && COMPOSITE_MODULATION
+	// OG samples unclamped modulation before exclusion.
+	float modulation = g_tModulation.Sample(g_sModulation, uv).x;
+#	endif
 #	if COMPOSITE_MATERIAL_EXCLUSION
 	bool isMatId2 = abs(matIdByte - 2.0) < 0.25;
 	bool isMatId3 = abs(matIdByte - 3.0) < 0.25;
@@ -1897,15 +2044,20 @@ PS_OUTPUT main(PS_INPUT input)
 #		endif
 		float3 litColor = baseColor * directTotal;
 
-#		if !COMPOSITE_MATERIAL_5
+#		if !COMPOSITE_MATERIAL_5 && !defined(OG)
 		float3 secondaryColor = g_tSecondaryColor.Sample(g_sSecondaryColor, uv).xyz;
 #		endif
 #	endif
 
+#	if defined(OG)
+		// OG has no cb2[0].zw screen-UV rescale.
+		float2 uvNDC = float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0;
+#	else
 		float4 uvRemapped =
 			float4(uv.x, 0.0, -uv.y, 0.0) * float4(ScreenSize.z, 0.0, ScreenSize.w, 0.0);
 		uvRemapped.z += 1.0;
 		float2 uvNDC = uvRemapped.xz * 2.0 - 1.0;
+#	endif
 
 		float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
 		float4 posViewH;
@@ -1945,9 +2097,14 @@ PS_OUTPUT main(PS_INPUT input)
 		                  ambientLight;
 #		endif
 #		if COMPOSITE_MODULATION
+#			if defined(OG)
+		// OG uses modulation sampled before exclusion.
+		ambientWeighted *= modulation;
+#			else
 		float2 modulationUv = min(uv, ModulationUvClamp.xy);
 		ambientWeighted *=
 			g_tModulation.Sample(g_sModulation, modulationUv).x;
+#			endif
 #		endif
 #	endif
 
@@ -2336,6 +2493,9 @@ float4 main(PSInput input) : SV_Target0
 	float hardwareDepth = depthTexture.SampleLevel(depthSampler, uv, 0.0).x;
 #	if !COMPOSITE_MATERIAL_EXCLUSION
 	float3 ambient = ambientTexture.Sample(ambientSampler, uv).xyz;
+#	elif defined(OG)
+	// OG schedules the ambient target ahead of the depth branch.
+	float3 ambientBase = ambientTexture.Sample(ambientSampler, uv).xyz;
 #	endif
 	bool nearDepth = hardwareDepth <= 0.01;
 
@@ -2359,11 +2519,16 @@ float4 main(PSInput input) : SV_Target0
 	}
 
 #	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#		if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float2 terrainProjectedXY = float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0;
+#		else
 	float2 terrainProjectedXY = float2(
 									uv.x * screenData[0].z,
 									1.0 - uv.y * screenData[0].w) *
 	                                2.0 -
 	                            1.0;
+#		endif
 	float4 terrainProjected =
 		float4(terrainProjectedXY, linearDepth, 1.0);
 	float4 terrainPositionViewH = float4(
@@ -2401,11 +2566,16 @@ float4 main(PSInput input) : SV_Target0
 #	endif
 
 #	if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || defined(SSGI) || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
+#		if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float2 projectedXY = float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0;
+#		else
 	float2 projectedXY = float2(
 							 uv.x * screenData[0].z,
 							 1.0 - uv.y * screenData[0].w) *
 	                         2.0 -
 	                     1.0;
+#		endif
 	float4 projected = float4(projectedXY, linearDepth, 1.0);
 	float3 worldNumerator = float3(
 		dot(row0, projected),
@@ -2455,6 +2625,10 @@ float4 main(PSInput input) : SV_Target0
 	float3 probeColor = 0.0;
 #	endif
 
+#	if defined(OG) && COMPOSITE_MODULATION && COMPOSITE_MATERIAL_EXCLUSION
+	// OG samples unclamped modulation before exclusion.
+	float modulation = modulationTexture.Sample(modulationSampler, uv).x;
+#	endif
 #	if COMPOSITE_MATERIAL_EXCLUSION
 	bool2 excludedType =
 		abs(typeData.z * 255.0 - float2(2.0, 3.0)) < 0.25;
@@ -2469,7 +2643,9 @@ float4 main(PSInput input) : SV_Target0
 #		endif
 		diffuse *= 3.0;
 
+#		if !defined(OG)
 		float3 ambientBase = ambientTexture.Sample(ambientSampler, uv).xyz;
+#		endif
 		float3 light = lightTexture.SampleLevel(lightSampler, uv, 0.0).xyz;
 #		ifdef TILED_LIGHTS
 		float3 tileLight =
@@ -2532,11 +2708,16 @@ float4 main(PSInput input) : SV_Target0
 			encodedNormal * normalScale,
 			-(1.0 - encodedLengthSquared * 0.5));
 #		if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
+#			if defined(OG)
+		// OG has no cb2[0].zw screen-UV rescale.
+		float2 projectedXY = float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0;
+#			else
 		float2 projectedXY = float2(
 								 uv.x * screenData[0].z,
 								 1.0 - uv.y * screenData[0].w) *
 		                         2.0 -
 		                     1.0;
+#			endif
 		projected = float4(projectedXY, linearDepth, 1.0);
 		float3 worldNumerator = float3(
 			dot(row0, projected),
@@ -2574,9 +2755,14 @@ float4 main(PSInput input) : SV_Target0
 		color = mad(reflectionColor * gloss * specularScale, diffuse, color);
 
 #	if COMPOSITE_MODULATION
+#		if !defined(OG)
 		float2 modulationUV = min(uv, screenData[5].xy);
 		float modulation =
 			modulationTexture.Sample(modulationSampler, modulationUV).x;
+#		elif !COMPOSITE_MATERIAL_EXCLUSION
+		// OG samples modulation without the cb2[5].xy clamp.
+		float modulation = modulationTexture.Sample(modulationSampler, uv).x;
+#		endif
 		color *= modulation;
 #	endif
 #	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
@@ -2754,7 +2940,12 @@ float4 main(PS_INPUT input) : SV_Target0
 	ambient += g_tLighting.Sample(g_sLighting, screenUv).xyz;
 	float3 color = g_tColorPrimary.SampleLevel(g_sColorPrimary, screenUv, 0).xyz;
 	color += g_tColorSecondary.SampleLevel(g_sColorSecondary, screenUv, 0).xyz;
+#		if defined(OG)
+	// OG samples occlusion without the cb2[5].xy clamp.
+	float2 occlusionUv = screenUv;
+#		else
 	float2 occlusionUv = min(screenUv, cb2[5].xy);
+#		endif
 	float occlusion = g_tOcclusion.Sample(g_sOcclusion, occlusionUv).x;
 	float3 result = color * 1.5 + ambient;
 	return float4(result * occlusion, 0.5);
@@ -2837,9 +3028,15 @@ float4 main(PS_INPUT input) : SV_Target0
 	float2 screenUv = input.position.xy * cb2[0].xy;
 	float material = g_tShading.SampleLevel(g_sShading, screenUv, 0).w;
 	float3 color = g_tColor.SampleLevel(g_sColor, screenUv, 0).xyz;
+#		if defined(OG)
+	// OG schedules lighting before the material branch.
+	float3 lighting = g_tLighting.Sample(g_sLighting, screenUv).xyz;
+#		endif
 	float3 result = color * 1.5;
 	if (abs(material * 255.0 - 5.0) >= 0.25) {
+#		if !defined(OG)
 		float3 lighting = g_tLighting.Sample(g_sLighting, screenUv).xyz;
+#		endif
 		float3 tail = g_tAmbient.SampleLevel(g_sAmbient, screenUv, 0).xyz;
 		float3 ambient = tail + lighting;
 		result = color * 1.5 + ambient;
@@ -2929,9 +3126,15 @@ float4 main(PS_INPUT input) : SV_Target0
 	float material = g_tShading.SampleLevel(g_sShading, screenUv, 0).w;
 	float3 color = g_tColorPrimary.SampleLevel(g_sColorPrimary, screenUv, 0).xyz;
 	color += g_tColorSecondary.SampleLevel(g_sColorSecondary, screenUv, 0).xyz;
+#		if defined(OG)
+	// OG schedules lighting before the material branch.
+	float3 lighting = g_tLighting.Sample(g_sLighting, screenUv).xyz;
+#		endif
 	float3 result = color * 1.5;
 	if (abs(material * 255.0 - 5.0) >= 0.25) {
+#		if !defined(OG)
 		float3 lighting = g_tLighting.Sample(g_sLighting, screenUv).xyz;
+#		endif
 		float3 ambient = g_tAmbientPrimary.SampleLevel(g_sAmbientPrimary, screenUv, 0).xyz;
 		ambient += g_tAmbientSecondary.SampleLevel(g_sAmbientSecondary, screenUv, 0).xyz;
 		ambient += lighting;
@@ -3018,7 +3221,12 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 ambient = g_tLighting.Sample(g_sLighting, screenUv).xyz;
 	ambient += g_tAmbient.SampleLevel(g_sAmbient, screenUv, 0).xyz;
 	float3 color = g_tColor.SampleLevel(g_sColor, screenUv, 0).xyz;
+#		if defined(OG)
+	// OG samples occlusion without the cb2[5].xy clamp.
+	float2 occlusionUv = screenUv;
+#		else
 	float2 occlusionUv = min(screenUv, cb2[5].xy);
+#		endif
 	float occlusion = g_tOcclusion.Sample(g_sOcclusion, occlusionUv).x;
 	float3 result = (color * 1.5 + ambient) * occlusion;
 	return float4(result, 0.5);
@@ -3127,6 +3335,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	endif
 
 	float depth = depthTexture.SampleLevel(depthSampler, uv, 0.0).x;
+#	if defined(OG)
+	// OG schedules secondary color ahead of the depth branch.
+	float3 secondary = secondaryTexture.Sample(secondarySampler, uv).xyz;
+#	endif
 	float projectedDepth;
 	float4 row0;
 	float4 row1;
@@ -3147,9 +3359,14 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	}
 
 #	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
+#		if defined(OG)
+	// OG has no cb2[0].zw screen-UV rescale.
+	float2 terrainProjectedUv = float2(uv.x, 1.0 - uv.y);
+#		else
 	float2 terrainProjectedUv = float2(
 		uv.x * screenData[0].z,
 		1.0 - uv.y * screenData[0].w);
+#		endif
 	float4 terrainProjected =
 		float4(terrainProjectedUv * 2.0 - 1.0, projectedDepth, 1.0);
 	float4 terrainReconstructed = float4(
@@ -3188,7 +3405,9 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	if WAVE5A_FOG_MATERIAL5
 	float3 composite = direct * 1.5;
 	if (abs(material * 255.0 - 5.0) >= 0.25) {
+#		if !defined(OG)
 		float3 secondary = secondaryTexture.Sample(secondarySampler, uv).xyz;
+#		endif
 		float3 ambient = ambientTexture.SampleLevel(ambientSampler, uv, 0.0).xyz;
 #		if WAVE5A_FOG_TILED
 		ambient += ambientSecondaryTexture.SampleLevel(ambientSecondarySampler, uv, 0.0).xyz;
@@ -3198,6 +3417,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	}
 #	endif
 
+#	if defined(OG) && WAVE5A_FOG_MODULATION
+	// OG samples unclamped modulation before exclusion.
+	float modulation = modulationTexture.Sample(modulationSampler, uv).x;
+#	endif
 	bool isMaterial2 = abs(material * 255.0 - 2.0) < 0.25;
 	bool isMaterial3 = abs(material * 255.0 - 3.0) < 0.25;
 	float4 result;
@@ -3207,12 +3430,19 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #		if WAVE5A_FOG_TILED
 		direct += directSecondaryTexture.SampleLevel(directSecondarySampler, uv, 0.0).xyz;
 #		endif
+#		if !defined(OG)
 		float3 secondary = secondaryTexture.Sample(secondarySampler, uv).xyz;
+#		endif
 #	endif
 
+#	if defined(OG)
+		// OG has no cb2[0].zw screen-UV rescale.
+		float2 projectedUv = float2(uv.x, 1.0 - uv.y);
+#	else
 		float2 projectedUv = float2(
 			uv.x * screenData[0].z,
 			1.0 - uv.y * screenData[0].w);
+#	endif
 		float4 projected = float4(projectedUv * 2.0 - 1.0, projectedDepth, 1.0);
 		float4 reconstructed = float4(
 			dot(row0, projected),
@@ -3231,9 +3461,14 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #	endif
 
 #	if WAVE5A_FOG_MODULATION
+#		if defined(OG)
+		// OG uses modulation sampled before exclusion.
+		composite *= modulation;
+#		else
 		composite *= modulationTexture.Sample(
 										  modulationSampler, min(uv, screenData[5].xy))
 		                 .x;
+#		endif
 #	endif
 
 		float fogPlane = dot(scene[14], float4(reconstructed.xyz, 1.0)) + scene[35].z;
@@ -3289,7 +3524,12 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #	if WAVE5B_SSS_RECORD_NORMAL_SHAPE == 1
 #		define WAVE5B_RECORD_NORMAL_CB12_COUNT 28
-#		define WAVE5B_RECORD_NORMAL_CB2_COUNT 4
+#		if defined(OG)
+// OG's screen scale at cb2[5].xy requires six registers.
+#			define WAVE5B_RECORD_NORMAL_CB2_COUNT 6
+#		else
+#			define WAVE5B_RECORD_NORMAL_CB2_COUNT 4
+#		endif
 #		define WAVE5B_RECORD_NORMAL_HAS_T2 0
 #		define WAVE5B_RECORD_NORMAL_HAS_WETNESS 0
 #	elif WAVE5B_SSS_RECORD_NORMAL_SHAPE == 2
@@ -3425,11 +3665,16 @@ PS_OUTPUT main(PS_INPUT input)
 		inverseRow3 = cb12[23];
 	}
 
+#	if defined(OG)
+	// OG decal roots use cb2[5].xy instead of cb2[0].zw.
+	float2 clipPosition = float2(screenUv.x * cb2[5].x, 1.0 - screenUv.y * cb2[5].y) * 2.0 - 1.0;
+#	else
 	float2 clipPosition = float2(
 							  screenUv.x * cb2[0].z,
 							  1.0 - screenUv.y * cb2[0].w) *
 	                          2.0 -
 	                      1.0;
+#	endif
 	float4 homogeneousPosition = float4(clipPosition, projectedDepth, 1.0);
 	float4 reconstructedPosition = float4(
 		dot(inverseRow0, homogeneousPosition),
@@ -3601,7 +3846,12 @@ PS_OUTPUT main(PS_INPUT input)
 
 #	if WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 1
 #		define WAVE5B_SURFACE_CONTACT_CB12_COUNT 28
-#		define WAVE5B_SURFACE_CONTACT_CB2_COUNT 4
+#		if defined(OG)
+// OG's screen scale at cb2[5].xy requires six registers.
+#			define WAVE5B_SURFACE_CONTACT_CB2_COUNT 6
+#		else
+#			define WAVE5B_SURFACE_CONTACT_CB2_COUNT 4
+#		endif
 #		define WAVE5B_SURFACE_CONTACT_HAS_T2 0
 #		define WAVE5B_SURFACE_CONTACT_HAS_WETNESS 0
 #	elif WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 2
@@ -3745,11 +3995,16 @@ PS_OUTPUT main(PS_INPUT input)
 		inverseRow3 = cb12[23];
 	}
 
+#	if defined(OG)
+	// OG decal roots use cb2[5].xy instead of cb2[0].zw.
+	float2 clipPosition = float2(screenUv.x * cb2[5].x, 1.0 - screenUv.y * cb2[5].y) * 2.0 - 1.0;
+#	else
 	float2 clipPosition = float2(
 							  screenUv.x * cb2[0].z,
 							  1.0 - screenUv.y * cb2[0].w) *
 	                          2.0 -
 	                      1.0;
+#	endif
 	float4 homogeneousPosition = float4(clipPosition, projectedDepth, 1.0);
 	float4 reconstructedPosition = float4(
 		dot(inverseRow0, homogeneousPosition),

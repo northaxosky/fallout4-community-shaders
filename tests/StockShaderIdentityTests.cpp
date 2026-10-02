@@ -80,7 +80,25 @@ namespace
 			actual == a_calibrated ? " (calibrated)" : " (UNCALIBRATED)");
 	}
 
-	std::vector<Row> ReadRows(const std::filesystem::path& a_path)
+	struct Table
+	{
+		std::vector<Row> rows;
+		cs::engine::GameRuntime runtime = cs::engine::GameRuntime::kAE;
+		bool inheritsTargets = false;
+	};
+
+	cs::engine::GameRuntime ParseRuntime(std::string_view a_build)
+	{
+		using cs::engine::GameRuntime;
+		for (const auto [prefix, runtime] : { std::pair{ "OG-", GameRuntime::kOG }, std::pair{ "NG-", GameRuntime::kNG },
+				 std::pair{ "AE-", GameRuntime::kAE } }) {
+			if (a_build.starts_with(prefix))
+				return runtime;
+		}
+		throw std::runtime_error("Unknown identity table runtime: " + std::string(a_build));
+	}
+
+	Table ReadRows(const std::filesystem::path& a_path)
 	{
 		std::ifstream file(a_path);
 		std::string line;
@@ -94,7 +112,10 @@ namespace
 		}
 		Require(IsHex(fields.at("compiler_sha256"), 64), "Invalid compiler pin");
 		ReportCompiler(fields.at("compiler_sha256"));
-		std::vector<Row> rows;
+		Table table{ .runtime = ParseRuntime(fields.at("runtime")),
+			.inheritsTargets = std::stoull(fields.at("excluded_inherited")) != 0 };
+		std::printf("runtime %s\n", fields.at("runtime").c_str());
+		auto& rows = table.rows;
 		std::set<std::tuple<std::string, std::string, std::uint32_t, std::uint32_t>> keys;
 		while (std::getline(file, line)) {
 			Row row;
@@ -133,10 +154,10 @@ namespace
 		Require(static_cast<std::size_t>(std::ranges::count_if(rows, [](const auto& row) { return row.nativeName.empty(); })) ==
 					std::stoull(fields.at("rows_unnamed")),
 			"Unnamed identity row count mismatch");
-		return rows;
+		return table;
 	}
 
-	void ResolveOwnership(std::vector<Row>& a_rows, const std::filesystem::path& a_shaderRoot)
+	void ResolveOwnership(std::vector<Row>& a_rows, bool a_inheritsTargets, const std::filesystem::path& a_shaderRoot)
 	{
 		using namespace cs::engine;
 		Require(std::filesystem::is_directory(a_shaderRoot), "Shader root is not a directory: " + a_shaderRoot.string());
@@ -150,6 +171,9 @@ namespace
 			});
 		}
 		for (const auto& contribution : GetFeatureShaderContributions()) {
+			// Inherited targets keep their AE identity and are covered by the AE table.
+			if (a_inheritsTargets && std::ranges::none_of(a_rows, [&](const Row& row) { return row.family.target == contribution.targetId; }))
+				continue;
 			for (const auto stage : { ShaderStage::kVertex, ShaderStage::kPixel, ShaderStage::kCompute }) {
 				if ((contribution.stages & ShaderStageBit(stage)) == 0)
 					continue;
@@ -175,7 +199,8 @@ namespace
 		return std::string(a_error.substr(0, std::min(a_error.find_first_of("\r\n"), std::size_t{ 300 })));
 	}
 
-	auto CompileStage(const cs::engine::ShaderFamilyDescriptor& a_descriptor, const std::filesystem::path& a_shaderRoot, bool a_featuresOn)
+	auto CompileStage(const cs::engine::ShaderFamilyDescriptor& a_descriptor, const std::filesystem::path& a_shaderRoot, bool a_featuresOn,
+		cs::engine::GameRuntime a_runtime)
 	{
 		const auto family = cs::engine::BuildShaderFamilyCompilationDescriptor(a_descriptor);
 		Require(family.has_value(), "unresolved");
@@ -184,7 +209,7 @@ namespace
 		                               std::span<const cs::engine::ShaderReplacementRegistration>(cs::engine::GetFeatureShaderContributions()) :
 		                               std::span<const cs::engine::ShaderReplacementRegistration>{};
 		const auto request = cs::engine::BuildEffectiveShaderCompileRequest(
-			*cs::engine::GetShaderInjectionTarget(a_descriptor.target), a_descriptor.stage, *family, contributions, &error);
+			*cs::engine::GetShaderInjectionTarget(a_descriptor.target), a_descriptor.stage, *family, contributions, a_runtime, &error);
 		Require(request.has_value(), "invalid-compile-request: " + error);
 		cs::engine::ShaderVariantCompilationRequest variant;
 		variant.sourcePath = a_shaderRoot / request->sourcePath;
@@ -216,9 +241,9 @@ namespace
 		return signature;
 	}
 
-	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn)
+	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn, cs::engine::GameRuntime a_runtime)
 	{
-		const auto compiled = CompileStage(a_row.family, a_shaderRoot, a_featuresOn);
+		const auto compiled = CompileStage(a_row.family, a_shaderRoot, a_featuresOn, a_runtime);
 		if (a_featuresOn) {
 			if (a_row.family.stage != cs::engine::ShaderStage::kCompute &&
 				std::ranges::any_of(cs::engine::GetFeatureShaderContributions(), [&](const auto& contribution) {
@@ -230,7 +255,7 @@ namespace
 				// Tessellated prepass variants use the native domain stage and add no wetness interpolators.
 				if (cs::engine::BuildShaderFamilyCompilationDescriptor(a_row.family)->defines.contains("TESSELLATE_DISP_HEIGHT"))
 					return {};
-				const auto pairedCompiled = CompileStage(paired, a_shaderRoot, true);
+				const auto pairedCompiled = CompileStage(paired, a_shaderRoot, true, a_runtime);
 				const auto outputs = ReflectSignature(isVertex ? compiled.bytecode : pairedCompiled.bytecode, false);
 				for (const auto& input : ReflectSignature(isVertex ? pairedCompiled.bytecode : compiled.bytecode, true)) {
 					Require(std::ranges::find(outputs, input) != outputs.end(),
@@ -256,9 +281,10 @@ int main(int a_argc, char** a_argv)
 		const bool featuresOn = a_argc == 4;
 		cs::sha1::Sha1InitOnce();
 		cs::sha256::Sha256InitOnce();
-		auto rows = ReadRows(a_argv[2]);
+		auto table = ReadRows(a_argv[2]);
+		auto& rows = table.rows;
 		const std::filesystem::path shaderRoot(a_argv[1]);
-		ResolveOwnership(rows, shaderRoot);
+		ResolveOwnership(rows, table.inheritsTargets, shaderRoot);
 		const auto total = featuresOn ?
 		                       static_cast<std::size_t>(std::ranges::count(rows, true, &Row::contributed)) :
 		                       rows.size();
@@ -274,7 +300,7 @@ int main(int a_argc, char** a_argv)
 						if (!rows[index].owned || (featuresOn && !rows[index].contributed))
 							continue;
 						try {
-							rows[index].actual = Compile(rows[index], shaderRoot, featuresOn);
+							rows[index].actual = Compile(rows[index], shaderRoot, featuresOn, table.runtime);
 						} catch (const std::exception& error) {
 							rows[index].actual = "error: " + FirstErrorLine(error.what());
 						}
@@ -286,6 +312,7 @@ int main(int a_argc, char** a_argv)
 		std::size_t failed = 0;
 		std::size_t unowned = 0;
 		std::map<std::tuple<std::string, std::string, std::string>, std::pair<const Row*, std::size_t>> featureFailures;
+		std::map<std::string, std::pair<std::size_t, std::size_t>> targetResults;
 		for (const auto& row : rows) {
 			if (featuresOn && !row.contributed)
 				continue;
@@ -293,7 +320,9 @@ int main(int a_argc, char** a_argv)
 				++unowned;
 				continue;
 			}
-			if (featuresOn ? row.actual.empty() : row.actual == row.expected)
+			const bool passed = featuresOn ? row.actual.empty() : row.actual == row.expected;
+			++(passed ? targetResults[row.target].first : targetResults[row.target].second);
+			if (passed)
 				continue;
 			++failed;
 			if (featuresOn) {
@@ -312,6 +341,8 @@ int main(int a_argc, char** a_argv)
 		}
 		if (!featuresOn && failed > 50)
 			std::printf("... %zu additional failures omitted\n", failed - 50);
+		for (const auto& [target, result] : targetResults)
+			std::printf("  %s: %zu passed, %zu failed\n", target.c_str(), result.first, result.second);
 		std::printf("%s: %zu passed, %zu failed, %zu unowned, %zu total; %.3fs wall time (%u threads)\n",
 			featuresOn ? "Feature-on shader corpus" : "Stock shader identity",
 			total - failed - unowned, failed, unowned, total, seconds, threadCount);

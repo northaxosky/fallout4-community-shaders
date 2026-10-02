@@ -11,6 +11,7 @@
 #include <mutex>
 #include <utility>
 
+#include "Render/EngineCallSite.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/LocalLights.h"
 #include "Render/ShaderFamilyDescriptor.h"
@@ -332,6 +333,14 @@ namespace cs::features
 			if (!T::func.address())
 				throw std::runtime_error("Unable to install ISL native hook");
 		}
+
+		// FO4: OG AppendLight opens with RIP-relative loads a prologue detour cannot relocate; hook its sole caller.
+		constexpr engine::CallSiteAnchor kTiledCallbackAppendLight{
+			.name = "Tiled light callback -> AppendLight",
+			.function = REL::ID({ 999390, 2317525, 2317525 }),
+			.offset = { 0x281, 0x2A3, 0x2A3 },
+			.target = REL::ID({ 1250844, 2318542, 2318542 })
+		};
 	}
 
 	InverseSquareLighting* InverseSquareLighting::GetSingleton()
@@ -390,14 +399,18 @@ namespace cs::features
 	}
 	void InverseSquareLighting::OnPostPostLoad()
 	{
+		// Resolve before patching the callback so a mismatched site leaves every ISL hook uninstalled.
+		const auto appendSite = engine::ResolveCallSite(kTiledCallbackAppendLight);
+		if (!appendSite)
+			throw std::runtime_error("Unable to resolve ISL AppendLight call: " + appendSite.error());
 		InstallHook<CreateLight>(REL::ID({ 30546, 2198256, 2198256 }));
 		InstallHook<AddLight>(REL::ID({ 1109421, 2317457, 2317457 }));
 		InstallHook<RemoveLight>(REL::ID({ 162205, 2200909, 2200909 }));
 		InstallHook<RemoveSceneLight>(REL::ID({ 1410391, 2317464, 2317464 }));
 		InstallHook<UpdateLight>(REL::ID({ 1022957, 2198261, 2198261 }));
 		InstallHook<CullLight>(REL::ID({ 1440624, 2318414, 2318414 }));
-		InstallHook<TiledCallback>(REL::ID({ 999390, 2317525, 2317525 }));
-		InstallHook<AppendLight>(REL::ID({ 1250844, 2318542, 2318542 }));
+		InstallHook<TiledCallback>(kTiledCallbackAppendLight.function);
+		stl::write_thunk_call<AppendLight>(*appendSite);
 		InstallHook<UploadLights>(REL::ID({ 402301, 2276904, 2276904 }));
 		InstallHook<SetupGeometry>(REL::ID({ 976849, 2319150, 2319150 }));
 		InstallHook<Luminance>(REL::ID({ 170662, 2318428, 2318428 }));

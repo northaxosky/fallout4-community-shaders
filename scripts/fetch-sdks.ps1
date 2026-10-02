@@ -5,7 +5,7 @@
 .DESCRIPTION
 	Reads scripts/sdk-manifest.psd1, downloads each archive, verifies its SHA-256 against the
 	manifest pin or, for Repository packages, the latest release's SHA256SUMS.txt, and stages
-	the required files into the mod package tree. Re-running is cheap: an archive whose digest
+	the required files into their manifest destinations. Re-running is cheap: an archive whose digest
 	already matches the cached copy is not downloaded again.
 
 .PARAMETER CacheDirectory
@@ -65,7 +65,9 @@ function Get-Archive {
 	if (-not $Package.Url -or -not $Package.Sha256) {
 		throw "[$($Package.Name)] has no archive URL and SHA-256 pin."
 	}
-	$archivePath = Join-Path $CacheDirectory ("{0}-{1}.zip" -f $Package.Name, $Package.Version)
+	$extension = [IO.Path]::GetExtension(([uri]$Package.Url).AbsolutePath)
+	if ($extension -ne '.cab') { $extension = '.zip' }
+	$archivePath = Join-Path $CacheDirectory ("{0}-{1}{2}" -f $Package.Name, $Package.Version, $extension)
 
 	if (-not $Force -and (Test-Digest -Path $archivePath -Expected $Package.Sha256)) {
 		Write-Host "[$($Package.Name)] cached archive digest matches; skipping download."
@@ -137,10 +139,26 @@ foreach ($package in $packages) {
 	if (Test-Path -LiteralPath $extractRoot) {
 		Remove-Item -LiteralPath $extractRoot -Recurse -Force
 	}
-	Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
-
 	$destination = Join-Path $repoRoot $package.Destination
 	New-Item -ItemType Directory -Force -Path $destination | Out-Null
+
+	if ($package.ContainsKey('Members')) {
+		New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+		foreach ($member in $package.Members.GetEnumerator()) {
+			& expand.exe $archivePath "-F:$($member.Key)" $extractRoot | Out-Null
+			$extracted = Join-Path $extractRoot $member.Key
+			if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $extracted)) {
+				throw "[$($package.Name)] cabinet member '$($member.Key)' was not extracted."
+			}
+			Copy-Item -LiteralPath $extracted -Destination (Join-Path $destination $member.Value) -Force
+			Write-Host "  staged $($member.Value)"
+		}
+		Remove-Item -LiteralPath $extractRoot -Recurse -Force
+		Write-Host "[$($package.Name)] staged into $($package.Destination)"
+		continue
+	}
+
+	Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
 
 	foreach ($file in $package.Files) {
 		Copy-StagedFile -ExtractRoot $extractRoot -FileName $file -Destination $destination -Required $true

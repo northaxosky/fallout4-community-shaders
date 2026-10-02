@@ -40,7 +40,10 @@ struct VS_OUTPUT
 {
 	float4 HPosition: SV_POSITION;
 	float4 TexCoord0: TEXCOORD0;
+#	if !defined(OG)
+	// OG 1.10.163 has no world-position interpolant; every later output is one register lower.
 	float4 WPosition: POSITION0;
+#	endif
 #	ifdef HAS_OBJECT_POSITION
 	float4 TexCoord4: TEXCOORD4;
 #	endif
@@ -93,7 +96,9 @@ VS_OUTPUT main(VS_INPUT input)
 
 	float3 worldPosition = mul(World, inputPosition);
 	vsout.TexCoord0 = float4(worldPosition, length(worldPosition));
+#	if !defined(OG)
 	vsout.WPosition.xyz = worldPosition;
+#	endif
 #	ifdef HAS_OBJECT_POSITION
 	vsout.TexCoord4 = inputPosition;
 #	endif
@@ -169,6 +174,13 @@ cbuffer PerGeometry : register(b0)
 	float4 perGeometry[8];
 };
 
+// OG 1.10.163 predates the b0[1] DynamicResolutionParam clamp, so every later register is one lower.
+#	if defined(OG)
+#		define WATER_PER_GEOMETRY(index) perGeometry[(index) - 1]
+#	else
+#		define WATER_PER_GEOMETRY(index) perGeometry[index]
+#	endif
+
 cbuffer PerMaterial : register(b1)
 {
 	float4 perMaterial[14];
@@ -221,7 +233,10 @@ struct PS_INPUT
 {
 	float4 screenPosition: SV_POSITION;
 	float4 eyeVector: TEXCOORD0;
+#	if !defined(OG)
+	// OG 1.10.163 has no world-position interpolant; every later input is one register lower.
 	float4 worldPosition: POSITION0;
+#	endif
 #	if !defined(SPECULAR) && !defined(LOD)
 	float4 texcoord4: TEXCOORD4;
 #	endif
@@ -354,8 +369,13 @@ float3 surfaceColor(
 	}
 #		endif
 #		ifdef SSLR
+#			if defined(OG)
+	// OG 1.10.163 samples the reflection with the unclamped screen UV.
+	float2 clamped = screenUv;
+#			else
 	float2 clamped = min(screenUv, perGeometry[1].xy);
-	float4 reflection = lerp(texture9.SampleLevel(sampler9, clamped, 0.0), texture10.SampleLevel(sampler10, clamped, 0.0), perGeometry[7].x);
+#			endif
+	float4 reflection = lerp(texture9.SampleLevel(sampler9, clamped, 0.0), texture10.SampleLevel(sampler10, clamped, 0.0), WATER_PER_GEOMETRY(7).x);
 	color = lerp(color, reflection.xyz, reflection.w);
 #		endif
 #	endif
@@ -445,16 +465,16 @@ float4 main(PS_INPUT input) : SV_Target0
 
 	float3 viewDirection = normalize(-input.eyeToPosition);
 	float3 reflected = reflect(-viewDirection, viewNormal);
-	float sunGlare = pow(max(dot(-viewDirection, perGeometry[2].xyz), 0.0), perGeometry[3].w) * perGeometry[2].w;
+	float sunGlare = pow(max(dot(-viewDirection, WATER_PER_GEOMETRY(2).xyz), 0.0), WATER_PER_GEOMETRY(3).w) * WATER_PER_GEOMETRY(2).w;
 
-	float3 lightColor = perGeometry[2].w * perGeometry[3].xyz;
+	float3 lightColor = WATER_PER_GEOMETRY(2).w * WATER_PER_GEOMETRY(3).xyz;
 #		ifdef EXPONENTIAL_HEIGHT_FOG
 	lightColor *= FO4Fog::SunlightView(input.eyeToPosition);
 #		endif
 #		ifdef TERRAIN_SHADOWS
 	lightColor *= TerrainShadows::GetWorldShadow(FrameBuffer::ViewToWorld(input.eyeToPosition));
 #		endif
-	float3 specular = pow(saturate(dot(reflected, perGeometry[2].xyz)), perMaterial[8].x) * lightColor;
+	float3 specular = pow(saturate(dot(reflected, WATER_PER_GEOMETRY(2).xyz)), perMaterial[8].x) * lightColor;
 	float3 ambient = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
 	ambient = ambient * perMaterial[10].z;
 	float3 lighting = specular * perMaterial[1].w + ambient;
@@ -466,7 +486,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float fogAlpha;
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	float3 originalFog = fog;
-	fog = lerp(fog, perGeometry[3].xyz, sunGlare);
+	fog = lerp(fog, WATER_PER_GEOMETRY(3).xyz, sunGlare);
 #		ifdef EXPONENTIAL_HEIGHT_FOG
 	FO4Fog::ReplaceForward(input.screenPosition.xyz, originalFog, fog, fogAlpha);
 #		endif
@@ -670,7 +690,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float4 startClip = toClip(input.eyeToPosition);
 	float3 start = startClip.xyz / startClip.w;
 
-	bool visible = perGeometry[7].y < reflected.z;
+	bool visible = WATER_PER_GEOMETRY(7).y < reflected.z;
 	float3 far = reflected * 1000.0 + input.eyeToPosition;
 
 	float4 endClip = toClip(far);
@@ -689,7 +709,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float3 viewDirection = normalize(-input.eyeToPosition);
 	float3 reflected = reflect(-viewDirection, viewNormal);
 	float3 far = reflected * 1000.0 + input.eyeToPosition;
-	bool visible = perGeometry[7].y < reflected.z;
+	bool visible = WATER_PER_GEOMETRY(7).y < reflected.z;
 
 	float4 endClip = toClip(far);
 	float3 end = endClip.xyz / endClip.w;
@@ -772,13 +792,13 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	float3 originalFog = fog;
 	float3 viewDirection = normalize(-input.eyeToPosition);
-	float sunGlare = pow(max(dot(-viewDirection, perGeometry[2].xyz), 0.0), perGeometry[3].w) * perGeometry[2].w;
-	fog = lerp(fog, perGeometry[3].xyz, sunGlare);
+	float sunGlare = pow(max(dot(-viewDirection, WATER_PER_GEOMETRY(2).xyz), 0.0), WATER_PER_GEOMETRY(3).w) * WATER_PER_GEOMETRY(2).w;
+	fog = lerp(fog, WATER_PER_GEOMETRY(3).xyz, sunGlare);
 #		ifdef EXPONENTIAL_HEIGHT_FOG
 	FO4Fog::ReplaceForward(input.screenPosition.xyz, originalFog, fog, fogAlpha);
 #		endif
 #		ifndef INTERIOR
-	float3 lightColor = perGeometry[2].w * perGeometry[3].xyz;
+	float3 lightColor = WATER_PER_GEOMETRY(2).w * WATER_PER_GEOMETRY(3).xyz;
 #			ifdef EXPONENTIAL_HEIGHT_FOG
 	lightColor *= FO4Fog::SunlightView(input.eyeToPosition);
 #			endif
@@ -793,7 +813,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	viewNormal.y = dot(perFrame[1], float4(normal, 1.0));
 	viewNormal.z = dot(perFrame[2], float4(normal, 1.0));
 	float3 reflected = reflect(-viewDirection, viewNormal);
-	float3 specular = pow(saturate(dot(reflected, perGeometry[2].xyz)), perMaterial[8].x) * lightColor;
+	float3 specular = pow(saturate(dot(reflected, WATER_PER_GEOMETRY(2).xyz)), perMaterial[8].x) * lightColor;
 	float3 lighting = specular * perMaterial[1].w + ambient;
 #		endif
 
