@@ -74,7 +74,7 @@ namespace cs::engine
 	// Render thread: publish the completed frame, including forward draws after composite.
 	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept;
 	void RecordShaderInjectionD3DBinds(std::uint32_t a_count = 1) noexcept;
-	// Pixel callbacks capture only overwritten engine slots.
+	// Bind to the active scope's stage (pixel without a scope); capture overwritten engine slots.
 	void BindInjectionShaderResources(ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*) noexcept;
 	void BindInjectionSamplers(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*) noexcept;
 	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
@@ -87,6 +87,7 @@ namespace cs::engine
 		~ScopedShaderInjectionBindings() noexcept;
 		ScopedShaderInjectionBindings(const ScopedShaderInjectionBindings&) = delete;
 		ScopedShaderInjectionBindings& operator=(const ScopedShaderInjectionBindings&) = delete;
+		ShaderStage GetStage() const noexcept { return _stage; }
 		void Capture(ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept;
 		void BindSampler(ID3D11DeviceContext* a_context, std::uint32_t a_slot, ID3D11SamplerState* a_sampler) noexcept;
 
@@ -110,7 +111,7 @@ namespace cs::engine
 		ShaderStage _stage;
 		ScopedShaderInjectionBindings* _previous;
 		ID3D11DeviceContext* _context = nullptr;
-		std::array<Resource, 16> _resources;
+		std::array<Resource, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> _resources;
 		std::array<Sampler, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> _samplers;
 		std::array<Buffer, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT> _buffers;
 		std::uint32_t _resourceCount = 0;
@@ -281,7 +282,7 @@ namespace cs::engine
 		std::size_t a_bytecodeLength,
 		ID3D11DeviceChild* a_shader) noexcept;
 	void InvalidateNativeShaderVariantCompilations() noexcept;
-	// Define changes retire target lookups, retaining immutable compiled variants and native identities.
+	// Define changes retire target lookups and native identities, retaining immutable compiled variants.
 	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept;
 
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(

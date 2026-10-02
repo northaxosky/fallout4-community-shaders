@@ -351,7 +351,7 @@ namespace cs::features
 				registration.bind = [compute](ID3D11DeviceContext* context) {
 						if (compute) {
 							auto* view = Enabled() ? g_state.views[g_state.uploadedSide].get() : nullptr;
-							context->CSSetShaderResources(kTiledSlot, 1, &view);
+							engine::BindInjectionShaderResources(context, kTiledSlot, 1, &view);
 						} else {
 							const PerLightData data = Enabled() ? g_rasterData : PerLightData{};
 							if ((g_state.uploadedRaster && std::memcmp(&*g_state.uploadedRaster, &data, sizeof(data)) == 0) ||

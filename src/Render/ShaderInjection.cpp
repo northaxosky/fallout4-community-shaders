@@ -36,37 +36,45 @@ namespace cs::engine
 {
 	namespace
 	{
-		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
+		thread_local ScopedShaderInjectionBindings* t_bindings = nullptr;
 		thread_local std::uint16_t t_samplerMask = UINT16_MAX;
 		thread_local ShaderInjectionDrawMetrics t_drawMetrics;
 		thread_local bool t_drawFrameStarted = false;
 		std::mutex g_drawMetricsMutex;
 		ShaderInjectionDrawMetrics g_completedDrawMetrics;
 
-		void CapturePixelBindings(ID3D11DeviceContext* a_context, ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
+		ShaderStage ActiveBindingStage() noexcept
 		{
-			if (!t_pixelBindings)
+			return t_bindings ? t_bindings->GetStage() : ShaderStage::kPixel;
+		}
+
+		void CaptureBindings(ID3D11DeviceContext* a_context, ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
+		{
+			if (!t_bindings)
 				return;
 			for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
-				t_pixelBindings->Capture(a_context, a_type, slot);
+				t_bindings->Capture(a_context, a_type, slot);
 			}
 		}
 	}
 
 	void BindInjectionShaderResources(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11ShaderResourceView* const* a_values) noexcept
 	{
-		CapturePixelBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
-		a_context->PSSetShaderResources(a_start, a_count, a_values);
+		CaptureBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
+		if (ActiveBindingStage() == ShaderStage::kCompute)
+			a_context->CSSetShaderResources(a_start, a_count, a_values);
+		else
+			a_context->PSSetShaderResources(a_start, a_count, a_values);
 		RecordShaderInjectionD3DBinds();
 	}
 
 	void BindInjectionSamplers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11SamplerState* const* a_values) noexcept
 	{
 		for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
-			if ((t_samplerMask & (1u << slot)) == 0)
+			if (ActiveBindingStage() == ShaderStage::kPixel && (t_samplerMask & (1u << slot)) == 0)
 				continue;
-			if (t_pixelBindings) {
-				t_pixelBindings->BindSampler(a_context, slot, a_values[slot - a_start]);
+			if (t_bindings) {
+				t_bindings->BindSampler(a_context, slot, a_values[slot - a_start]);
 			} else {
 				a_context->PSSetSamplers(slot, 1, &a_values[slot - a_start]);
 				RecordShaderInjectionD3DBinds();
@@ -76,14 +84,17 @@ namespace cs::engine
 
 	void BindInjectionConstantBuffers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11Buffer* const* a_values) noexcept
 	{
-		CapturePixelBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
-		a_context->PSSetConstantBuffers(a_start, a_count, a_values);
+		CaptureBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
+		if (ActiveBindingStage() == ShaderStage::kCompute)
+			a_context->CSSetConstantBuffers(a_start, a_count, a_values);
+		else
+			a_context->PSSetConstantBuffers(a_start, a_count, a_values);
 		RecordShaderInjectionD3DBinds();
 	}
 
 	void CaptureShaderInjectionOutputs(ID3D11DeviceContext* a_context) noexcept
 	{
-		CapturePixelBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
+		CaptureBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
 	}
 
 	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept
@@ -102,22 +113,22 @@ namespace cs::engine
 
 	void RecordShaderInjectionD3DBinds(std::uint32_t a_count) noexcept
 	{
-		if (t_pixelBindings)
+		if (t_bindings && ActiveBindingStage() == ShaderStage::kPixel)
 			t_drawMetrics.d3dBinds += a_count;
 	}
 
 	ScopedShaderInjectionBindings::ScopedShaderInjectionBindings(ShaderStage a_stage) noexcept :
 		_stage(a_stage),
-		_previous(a_stage == ShaderStage::kPixel ? std::exchange(t_pixelBindings, this) : nullptr),
+		_previous(std::exchange(t_bindings, this)),
 		_started(std::chrono::steady_clock::now())
 	{}
 
 	ScopedShaderInjectionBindings::~ScopedShaderInjectionBindings() noexcept
 	{
 		const auto finish = [this] {
+			t_bindings = _previous;
 			if (_stage == ShaderStage::kPixel) {
-				t_pixelBindings = _previous;
-				if (!_previous) {
+				if (!_previous || _previous->GetStage() != ShaderStage::kPixel) {
 					++t_drawMetrics.scopes;
 					t_drawMetrics.scopeNanoseconds += static_cast<std::uint64_t>(
 						std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -203,17 +214,6 @@ namespace cs::engine
 					_context->CSGetShaderResources(a_slot, 1, &resource.value);
 				else
 					_context->PSGetShaderResources(a_slot, 1, &resource.value);
-			} else if (a_type == ShaderResourceType::kSampler &&
-					   std::ranges::none_of(std::span(_samplers).first(_samplerCount), [&](const auto& s) { return s.slot == a_slot; })) {
-				auto& sampler = _samplers[_samplerCount++];
-				sampler = { a_slot, nullptr, nullptr };
-				if (_stage == ShaderStage::kPixel)
-					++t_drawMetrics.captures;
-				if (_stage == ShaderStage::kCompute)
-					_context->CSGetSamplers(a_slot, 1, &sampler.value);
-				else
-					_context->PSGetSamplers(a_slot, 1, &sampler.value);
-				sampler.current = sampler.value;
 			} else if (a_type == ShaderResourceType::kConstantBuffer &&
 					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == a_slot; })) {
 				auto& buffer = _buffers[_bufferCount++];
@@ -236,7 +236,10 @@ namespace cs::engine
 		auto* binding = found == samplers.end() ? nullptr : &*found;
 		if (!binding) {
 			ID3D11SamplerState* original = nullptr;
-			a_context->PSGetSamplers(a_slot, 1, &original);
+			if (_stage == ShaderStage::kCompute)
+				a_context->CSGetSamplers(a_slot, 1, &original);
+			else
+				a_context->PSGetSamplers(a_slot, 1, &original);
 			if (original == a_sampler) {
 				if (original)
 					original->Release();
@@ -245,12 +248,16 @@ namespace cs::engine
 			_context = a_context;
 			binding = &_samplers[_samplerCount++];
 			*binding = { a_slot, original, original };
-			++t_drawMetrics.captures;
+			if (_stage == ShaderStage::kPixel)
+				++t_drawMetrics.captures;
 		}
 		if (binding->current == a_sampler)
 			return;
 		// AE SetDirtyStates (0x18247D0) skips clean slots; overrides must not outlive this draw.
-		a_context->PSSetSamplers(a_slot, 1, &a_sampler);
+		if (_stage == ShaderStage::kCompute)
+			a_context->CSSetSamplers(a_slot, 1, &a_sampler);
+		else
+			a_context->PSSetSamplers(a_slot, 1, &a_sampler);
 		binding->current = a_sampler;
 		RecordShaderInjectionD3DBinds();
 	}
@@ -428,7 +435,6 @@ namespace cs::engine
 			winrt::com_ptr<ID3D11DeviceChild> shader;
 		};
 
-		// first claimant wins, in feature-registration order
 		struct Service
 		{
 			Service()
@@ -1297,8 +1303,6 @@ namespace cs::engine
 				const ActiveVariantScope variantScope(variant.get());
 				// FO4 rebuilds the native low-slot inputs for each tiled dispatch.
 				ScopedShaderInjectionBindings contributionBindings(ShaderStage::kCompute);
-				if (!target->binds.empty())
-					contributionBindings.Capture(a_context, ShaderResourceType::kShaderResource, 8);
 				DispatchPublishedTarget(
 					*target,
 					ShaderStage::kCompute,

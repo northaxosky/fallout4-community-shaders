@@ -36,7 +36,7 @@ namespace
 	bool compilationPending = false;
 
 	class TestCompilationHandle final :
-		public cs::engine::ShaderVariantCompilationHandle
+	    public cs::engine::ShaderVariantCompilationHandle
 	{
 	public:
 		TestCompilationHandle(
@@ -72,7 +72,7 @@ namespace
 	};
 
 	class TestCompilationCache final :
-		public cs::engine::ShaderVariantCompilationCache
+	    public cs::engine::ShaderVariantCompilationCache
 	{
 	public:
 		std::shared_ptr<cs::engine::ShaderVariantCompilationHandle> Request(
@@ -94,15 +94,16 @@ namespace
 				"cbuffer SharedData : register(b5) { uint SharedValue; };"
 				"cbuffer FeatureData : register(b6) { uint FeatureValue; };"
 				"cbuffer FO4SharedData : register(b7) { uint FO4Value; };"
+				"cbuffer ContributionData : register(b8) { uint ContributionValue; };"
 				"Texture2D<uint> CanonicalDepth : register(t17);"
-				"Texture2D<uint> NativeTexture : register(t3);"
+				"Texture2D<uint> ContributionTexture : register(t4);"
 				"RWStructuredBuffer<uint> Output : register(u0);"
 				"[numthreads(1,1,1)] void main() {"
 				"InterlockedAdd(Output[0], 1);"
 				"Output[1] = SharedValue + FrameValue;"
 				"Output[2] = FeatureValue;"
 				"Output[3] = FO4Value + CanonicalDepth.Load(int3(0,0,0));"
-				"Output[4] = NativeTexture.Load(int3(0,0,0));"
+				"Output[4] = ContributionTexture.Load(int3(0,0,0)) + ContributionValue;"
 				"}";
 			winrt::com_ptr<ID3DBlob> bytecode;
 			winrt::com_ptr<ID3DBlob> errors;
@@ -1037,6 +1038,15 @@ namespace
 		if (!stock || !output.uav)
 			return;
 
+		winrt::com_ptr<ID3D11SamplerState> sampler;
+		D3D11_SAMPLER_DESC samplerDesc{};
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		samplerDesc.AddressU = samplerDesc.AddressV = samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+		Expect(SUCCEEDED(device->CreateSamplerState(&samplerDesc, sampler.put())), "could not create compute sampler");
+		if (!sampler)
+			return;
+
 		Expect(SetDeveloperShaderOverride(ShaderInjectionTarget::kDfTiledLighting,
 				   DeveloperShaderOverride::kForceOn) &&
 				   SetDeveloperShaderSourceRoot(a_shaderRoot.wstring()),
@@ -1058,9 +1068,17 @@ namespace
 		contribution.contributor = "compute-phase";
 		static const ShaderDefineDeclaration computeDefinition{ "COMPUTE_PHASE_TEST", { ShaderInjectionTarget::kDfTiledLighting } };
 		contribution.feature = &computeDefinition;
-		contribution.bind = [](ID3D11DeviceContext* a_context) {
+		contribution.bind = [sampler](ID3D11DeviceContext* a_context) {
 			auto* metadata = publishedDepth.get();
-			a_context->CSSetShaderResources(8, 1, &metadata);
+			auto* buffer = publishedComputeBuffers[0].get();
+			auto* state = sampler.get();
+			BindInjectionShaderResources(a_context, 8, 1, &metadata);
+			BindInjectionShaderResources(a_context, 4, 1, &metadata);
+			BindInjectionConstantBuffers(a_context, 8, 1, &buffer);
+			BindInjectionSamplers(a_context, 1, 1, &state);
+			winrt::com_ptr<ID3D11SamplerState> actual;
+			a_context->CSGetSamplers(1, 1, actual.put());
+			Expect(actual == sampler, "compute contribution did not bind its sampler at CS");
 			++computeContributionBindCount;
 			activeComputeVariantDefine =
 				ActiveShaderInjectionVariantHasDefine(
@@ -1140,14 +1158,36 @@ namespace
 		Expect(
 			replacement != &nativeWrapper,
 			"active phase did not select the replacement");
-		bridge.Dispatch(context.get(), 3, 1, 1);
+		BeginShaderInjectionFrame(20);
+		{
+			ScopedPixelShaderInjectionBindings outer;
+			bridge.Dispatch(context.get(), 3, 1, 1);
+			auto* view = inputs.srv.get();
+			BindInjectionShaderResources(context.get(), 3, 1, &view);
+			winrt::com_ptr<ID3D11ShaderResourceView> actual;
+			context->PSGetShaderResources(3, 1, actual.put());
+			Expect(actual == inputs.srv, "compute scope did not restore the active pixel scope");
+		}
 		Expect(
 			NativeComputeInputsMatch(
 				context.get(), frameInputs, output.uav.get()),
-			"compute bridge did not preserve frame bindings and restore native t8");
+			"compute bridge did not preserve frame bindings and restore contributed slots");
+		winrt::com_ptr<ID3D11SamplerState> actualSampler;
+		context->CSGetSamplers(1, 1, actualSampler.put());
+		Expect(!actualSampler, "compute contribution leaked its sampler");
+		winrt::com_ptr<ID3D11Buffer> pixelBuffer;
+		winrt::com_ptr<ID3D11ShaderResourceView> pixelResource;
+		context->PSGetSamplers(1, 1, actualSampler.put());
+		context->PSGetConstantBuffers(8, 1, pixelBuffer.put());
+		context->PSGetShaderResources(4, 1, pixelResource.put());
+		Expect(!actualSampler && !pixelBuffer && !pixelResource, "compute bindings overwrote pixel state");
+		BeginShaderInjectionFrame(21);
+		const auto metrics = GetShaderInjectionSummary().draw;
+		Expect(metrics.scopes == 1 && metrics.captures == 1 && metrics.restores == 1 && metrics.d3dBinds == 2,
+			"compute dispatch inflated pixel draw metrics");
 		Expect(
-			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 9 },
-			"replacement did not execute with shared and native inputs");
+			ReadComputeOutput(context.get(), output) == std::array<std::uint32_t, 5>{ 3, 90, 60, 87, 57 },
+			"replacement did not execute with shared and contributed inputs");
 		Expect(
 			sharedDataBindCount == 0 && computeContributionBindCount == 1 && activeComputeVariantDefine == true,
 			"active compute contribution state was not exposed exactly once");
