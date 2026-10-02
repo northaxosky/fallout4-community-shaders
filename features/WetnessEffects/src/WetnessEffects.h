@@ -32,7 +32,7 @@ namespace cs::features
 		std::string_view GetDisplayName() const override { return "Wetness Effects"; }
 		std::string GetConfigKey() const override { return "WetnessEffects"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
-		std::string GetFeatureSummary() const override { return "Adds rain and shore wetness to deferred lighting and composition."; }
+		std::string GetFeatureSummary() const override { return "Adds rain and shore wetness to deferred lighting and composition. Uses Fallout 4's native wetness while Dynamic Cubemaps is off."; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
@@ -49,7 +49,7 @@ namespace cs::features
 		void SetDebugView(std::string_view a_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
-		cs::WetnessEffectsFeatureData GetCommonBufferData() const;
+		cs::WetnessEffectsFeatureData GetCommonBufferData(bool a_dynamicReflections) const;
 
 		using Settings = wetness_math::Settings;
 

@@ -296,10 +296,12 @@ namespace cs::features
 		}
 	}
 
-	cs::WetnessEffectsFeatureData WetnessEffects::GetCommonBufferData() const
+	cs::WetnessEffectsFeatureData WetnessEffects::GetCommonBufferData(bool a_dynamicReflections) const
 	{
+		// FO4: without Dynamic Cubemaps the upstream film has no reflections, so native wetness and ripples stay.
+		const bool ownsWetness = _settings.enabled && a_dynamicReflections;
 		_suppressRipples.store(_injectionsOperational.load(std::memory_order_acquire) &&
-								   _settings.enabled && !_settings.enableVanillaRipples,
+								   ownsWetness && !_settings.enableVanillaRipples,
 			std::memory_order_relaxed);
 		if (!_injectionsOperational.load(std::memory_order_acquire)) {
 			return {};
@@ -348,7 +350,7 @@ namespace cs::features
 			.Raining = raining,
 			.Wetness = wetness,
 			.PuddleWetness = puddleWetness,
-			.EnableWetnessEffects = _settings.enabled ? 1u : 0u,
+			.EnableWetnessEffects = ownsWetness ? 1u : 0u,
 			.MaxRainWetness = _settings.maxRainWetness,
 			.MaxPuddleWetness = _settings.maxPuddleWetness,
 			.MaxShoreWetness = _settings.enabled ? _settings.maxShoreWetness : 0.0f,
