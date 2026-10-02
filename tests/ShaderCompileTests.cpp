@@ -1133,7 +1133,7 @@ namespace
 				 {}, { { "SKINNED", "1" }, { "FACE", "1" } },
 				 { { "LANDSCAPE", "1" } }, { { "BLEND", "1" } },
 				 { { "MODELSPACENORMALS", "1" } }, { { "TESSELLATE_DISP_HEIGHT", "1" } },
-				 { { "LOD_LANDSCAPE", "1" } },
+				 { { "LOD_LANDSCAPE", "1" } }, { { "LOD_LANDSCAPE", "1" }, { "LOD_OBJECT_INSTANCED", "1" } },
 				 { { "LANDSCAPE", "1" }, { "INSTANCED", "1" } },
 				 { { "MERGE_INSTANCED", "1" } },
 				 { { "SKINNED", "1" }, { "MODELSPACENORMALS", "1" } },

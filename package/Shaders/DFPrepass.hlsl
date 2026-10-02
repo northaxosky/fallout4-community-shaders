@@ -1271,8 +1271,8 @@ struct PS_OUTPUT
 		output.motionVec = (currNDC - prevNDC) * float2(-0.5, 0.5);
 #	endif
 #	ifdef WETNESS_EFFECTS
-		// FO4: grass, tree animation, eyes and LOD objects share this pass; upstream compiles them without wetness.
-#		if !(GRASS || TREE_ANIM || EYE || LOD_OBJECT_INSTANCED)
+		// FO4: grass, tree animation, eyes and LOD objects share this pass; upstream compiles them without wetness; LOD land keeps it.
+#		if !(GRASS || TREE_ANIM || EYE || (LOD_OBJECT_INSTANCED && !LOD_LANDSCAPE))
 		if (wetnessOwned) {
 			FO4Wetness::MaterialInput wetInput;
 			wetInput.cameraRelativePosition = input.curr_pos_u.xyz;
