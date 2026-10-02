@@ -6,6 +6,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
+#include "Utils/ShaderSamplerBindings.h"
 
 #include <array>
 #include <atomic>
@@ -739,6 +740,7 @@ namespace
 		if (!originalBuffer || !injectedBuffer || !originalTexture || !injectedTexture || !sampler)
 			return;
 
+		bool samplersOnly = false;
 		ShaderReplacementRegistration contribution;
 		contribution.targetId = ShaderInjectionTarget::kBsdfLight;
 		contribution.contributor = "pixel-bindings";
@@ -746,11 +748,13 @@ namespace
 			auto* buffer = injectedBuffer.get();
 			auto* texture = injectedTexture.get();
 			auto* state = sampler.get();
-			BindInjectionConstantBuffers(ctx, 1, 1, &buffer);
-			BindInjectionConstantBuffers(ctx, 10, 1, &buffer);
-			BindInjectionShaderResources(ctx, 3, 1, &texture);
-			BindInjectionShaderResources(ctx, 24, 1, &texture);
-			BindInjectionShaderResources(ctx, 25, 1, &texture);
+			if (!samplersOnly) {
+				BindInjectionConstantBuffers(ctx, 1, 1, &buffer);
+				BindInjectionConstantBuffers(ctx, 10, 1, &buffer);
+				BindInjectionShaderResources(ctx, 3, 1, &texture);
+				BindInjectionShaderResources(ctx, 24, 1, &texture);
+				BindInjectionShaderResources(ctx, 25, 1, &texture);
+			}
 			BindInjectionSamplers(ctx, 1, 1, &state);
 			BindInjectionSamplers(ctx, 1, 1, &state);
 		};
@@ -794,7 +798,7 @@ namespace
 		BeginShaderInjectionFrame(11);
 		const auto metrics = GetShaderInjectionSummary().draw;
 		Expect(metrics.frame == 10 && metrics.scopes == 1 && metrics.captures == 4 && metrics.restores == 4 &&
-				   metrics.d3dBinds == 12 && metrics.scopeNanoseconds > 0,
+				   metrics.d3dBinds == 11 && metrics.scopeNanoseconds > 0,
 			"draw counters did not count writes, nested restoration, or the completed frame");
 		context->ClearState();
 		{
@@ -806,7 +810,7 @@ namespace
 		}
 		BeginShaderInjectionFrame(12);
 		const auto next = GetShaderInjectionSummary().draw;
-		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 10,
+		Expect(next.frame == 11 && next.scopes == 1 && next.captures == 3 && next.restores == 3 && next.d3dBinds == 9,
 			"per-frame counters accumulated earlier draws");
 
 		winrt::com_ptr<ID3D11Texture2D> output;
@@ -830,6 +834,71 @@ namespace
 		winrt::com_ptr<ID3D11RenderTargetView> restoredTarget;
 		context->OMGetRenderTargets(1, restoredTarget.put(), nullptr);
 		Expect(restoredTarget == target, "pixel output override leaked into the engine draw");
+
+		constexpr std::string_view source =
+			"Texture2D<float4> Texture : register(t0);"
+			"SamplerState Used : register(s1);"
+			"SamplerState Unused : register(s13);"
+			"float4 used(float2 uv : TEXCOORD) : SV_Target { return Texture.Sample(Used, uv); }"
+			"float4 inert() : SV_Target { return 1; }";
+		std::array<std::uint16_t, 2> masks{};
+		UINT index = 0;
+		for (const auto* entry : { "inert", "used" }) {
+			winrt::com_ptr<ID3DBlob> code;
+			const auto compiled = D3DCompile(source.data(), source.size(), nullptr, nullptr, nullptr,
+				entry, "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, code.put(), nullptr);
+			Expect(SUCCEEDED(compiled), "could not compile sampler usage fixture");
+			if (FAILED(compiled))
+				return;
+			const auto mask = cs::util::ReflectShaderSamplers(code->GetBufferPointer(), code->GetBufferSize());
+			Expect(mask.has_value(), "could not reflect sampler usage fixture");
+			masks[index++] = mask.value_or(UINT16_MAX);
+		}
+		Expect(masks[0] == 0 && masks[1] == 2, "unused declarations were mistaken for sampler consumers");
+
+		winrt::com_ptr<ID3D11SamplerState> nativeSampler;
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+		Expect(SUCCEEDED(device->CreateSamplerState(&samplerDesc, nativeSampler.put())), "could not create native sampler");
+		auto* nativeState = nativeSampler.get();
+		auto* injectedState = sampler.get();
+		samplersOnly = true;
+		BeginShaderInjectionFrame(13);
+		context->PSSetSamplers(1, 1, &nativeState);
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get(), masks[0]);
+			actualSampler = nullptr;
+			context->PSGetSamplers(1, 1, actualSampler.put());
+			Expect(actualSampler == nativeSampler, "inert shader overwrote its native sampler");
+		}
+		context->PSSetSamplers(1, 1, &injectedState);
+		{
+			ScopedPixelShaderInjectionBindings scope;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get(), masks[1]);
+		}
+		BeginShaderInjectionFrame(14);
+		const auto inert = GetShaderInjectionSummary().draw;
+		Expect(inert.scopes == 2 && inert.captures == 0 && inert.restores == 0 && inert.d3dBinds == 0,
+			"inert or already-matching samplers captured or rebound engine state");
+		context->PSSetSamplers(1, 1, &nativeState);
+		{
+			ScopedPixelShaderInjectionBindings outer;
+			DispatchShaderInjections(ShaderInjectionTarget::kBsdfLight, context.get(), masks[1]);
+			{
+				ScopedPixelShaderInjectionBindings inner;
+				BindInjectionSamplers(context.get(), 1, 1, &nativeState);
+			}
+			actualSampler = nullptr;
+			context->PSGetSamplers(1, 1, actualSampler.put());
+			Expect(actualSampler == sampler, "nested sampler scope did not restore its parent");
+		}
+		actualSampler = nullptr;
+		context->PSGetSamplers(1, 1, actualSampler.put());
+		Expect(actualSampler == nativeSampler, "used sampler leaked into the following native draw");
+		BeginShaderInjectionFrame(15);
+		const auto used = GetShaderInjectionSummary().draw;
+		Expect(used.scopes == 1 && used.captures == 2 && used.restores == 2 && used.d3dBinds == 4,
+			"sampler override was not captured once per nested scope");
 	}
 
 	void CheckFrameBindings()

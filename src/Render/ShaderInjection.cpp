@@ -37,6 +37,7 @@ namespace cs::engine
 	namespace
 	{
 		thread_local ScopedPixelShaderInjectionBindings* t_pixelBindings = nullptr;
+		thread_local std::uint16_t t_samplerMask = UINT16_MAX;
 		thread_local ShaderInjectionDrawMetrics t_drawMetrics;
 		thread_local bool t_drawFrameStarted = false;
 		std::mutex g_drawMetricsMutex;
@@ -61,9 +62,16 @@ namespace cs::engine
 
 	void BindInjectionSamplers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11SamplerState* const* a_values) noexcept
 	{
-		CapturePixelBindings(a_context, ShaderResourceType::kSampler, a_start, a_count);
-		a_context->PSSetSamplers(a_start, a_count, a_values);
-		RecordShaderInjectionD3DBinds();
+		for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
+			if ((t_samplerMask & (1u << slot)) == 0)
+				continue;
+			if (t_pixelBindings) {
+				t_pixelBindings->BindSampler(a_context, slot, a_values[slot - a_start]);
+			} else {
+				a_context->PSSetSamplers(slot, 1, &a_values[slot - a_start]);
+				RecordShaderInjectionD3DBinds();
+			}
+		}
 	}
 
 	void BindInjectionConstantBuffers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11Buffer* const* a_values) noexcept
@@ -198,13 +206,14 @@ namespace cs::engine
 			} else if (a_type == ShaderResourceType::kSampler &&
 					   std::ranges::none_of(std::span(_samplers).first(_samplerCount), [&](const auto& s) { return s.slot == a_slot; })) {
 				auto& sampler = _samplers[_samplerCount++];
-				sampler = { a_slot, nullptr };
+				sampler = { a_slot, nullptr, nullptr };
 				if (_stage == ShaderStage::kPixel)
 					++t_drawMetrics.captures;
 				if (_stage == ShaderStage::kCompute)
 					_context->CSGetSamplers(a_slot, 1, &sampler.value);
 				else
 					_context->PSGetSamplers(a_slot, 1, &sampler.value);
+				sampler.current = sampler.value;
 			} else if (a_type == ShaderResourceType::kConstantBuffer &&
 					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == a_slot; })) {
 				auto& buffer = _buffers[_bufferCount++];
@@ -217,6 +226,33 @@ namespace cs::engine
 					_context->PSGetConstantBuffers(a_slot, 1, &buffer.value);
 			}
 		}
+	}
+
+	void ScopedShaderInjectionBindings::BindSampler(
+		ID3D11DeviceContext* a_context, std::uint32_t a_slot, ID3D11SamplerState* a_sampler) noexcept
+	{
+		auto samplers = std::span(_samplers).first(_samplerCount);
+		const auto found = std::ranges::find(samplers, a_slot, &Sampler::slot);
+		auto* binding = found == samplers.end() ? nullptr : &*found;
+		if (!binding) {
+			ID3D11SamplerState* original = nullptr;
+			a_context->PSGetSamplers(a_slot, 1, &original);
+			if (original == a_sampler) {
+				if (original)
+					original->Release();
+				return;
+			}
+			_context = a_context;
+			binding = &_samplers[_samplerCount++];
+			*binding = { a_slot, original, original };
+			++t_drawMetrics.captures;
+		}
+		if (binding->current == a_sampler)
+			return;
+		// AE SetDirtyStates (0x18247D0) skips clean slots; overrides must not outlive this draw.
+		a_context->PSSetSamplers(a_slot, 1, &a_sampler);
+		binding->current = a_sampler;
+		RecordShaderInjectionD3DBinds();
 	}
 
 	namespace
@@ -359,6 +395,7 @@ namespace cs::engine
 			ShaderStage stage = ShaderStage::kPixel;
 			std::atomic<bool> failureObserved{ false };
 			std::atomic<bool> pendingObserved{ false };
+			std::atomic<std::uint16_t> samplerMask{ UINT16_MAX };
 		};
 
 		struct NativeReplacementWrapperKey
@@ -963,6 +1000,7 @@ namespace cs::engine
 				return nullptr;
 			}
 
+			variant->samplerMask.store(compilation->GetSamplerMask(), std::memory_order_relaxed);
 			{
 				auto& service = GetService();
 				std::scoped_lock lock(service.nativeVariantMutex);
@@ -1838,7 +1876,8 @@ namespace cs::engine
 
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
-		ID3D11DeviceContext* a_context) noexcept
+		ID3D11DeviceContext* a_context,
+		std::uint16_t a_samplerMask) noexcept
 	{
 		if (!a_context || !IsValidTarget(a_target))
 			return;
@@ -1847,7 +1886,9 @@ namespace cs::engine
 		const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr;
 		if (!target)
 			return;
+		const auto previousMask = std::exchange(t_samplerMask, a_samplerMask);
 		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
+		t_samplerMask = previousMask;
 	}
 
 	namespace
@@ -2227,7 +2268,7 @@ namespace cs::engine
 		}
 		if (activeVariant) {
 			const ActiveVariantScope scope(activeVariant.get());
-			DispatchShaderInjections(activeVariant->target, a_context);
+			DispatchShaderInjections(activeVariant->target, a_context, activeVariant->samplerMask.load(std::memory_order_relaxed));
 		}
 		boundShader->Release();
 	}

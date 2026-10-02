@@ -5,6 +5,7 @@
 #include "Render/Annotation.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Utils/ShaderCache/ShaderCache.h"
+#include "Utils/ShaderSamplerBindings.h"
 
 #include <algorithm>
 #include <atomic>
@@ -231,6 +232,7 @@ namespace cs::engine
 																																										  ".PS");
 			render::annotation::SetName(shader.get(), shaderName);
 
+			result.samplerMask = util::ReflectShaderSamplers(outcome.bytecode.data(), outcome.bytecode.size()).value_or(UINT16_MAX);
 			result.shader = std::move(shader);
 			return result;
 		}

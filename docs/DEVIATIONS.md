@@ -123,9 +123,13 @@ Sampler verdicts are **forced per-draw binds**, not family-native reuse:
 
 Engine-facts “Invalidate dirties all PS slots” and “PS sampler shadow inputs” show why undeclared
 samplers are not reliable defaults: AE `Invalidate` at `0x182B030` dirties s0–s15, and
-`SetDirtyStates` at `0x18247F6–0x1824829` reissues retained address/filter/selector values.
-The narrow draw scope saves/restores these low samplers. No runtime slot claims or write batching
-remain; the feature-on shader sweep checks overlapping shader registers.
+`SetDirtyStates` at `0x18247D0` skips the sampler loop when the dirty mask is zero; otherwise
+`0x18247E0–0x1824831` clears and submits each dirty slot through PSSetSamplers (`0x1824829`).
+Direct overrides do not dirty the shadow state, so restoration is required before later native draws.
+Compiled bytecode supplies a cached sampler-use mask: unused permutations never query or overwrite
+samplers, matching native samplers need no restoration, and repeated identical writes within a draw
+are suppressed. No cross-draw sampler cache, runtime slot claims or write batching remain.
+The feature-on shader sweep checks overlapping shader registers.
 
 No chosen shader-contribution behavior divergence remains. Producer compute scopes still preserve
 their temporary inputs; these are not consumer-draw snapshots. `shader_injection` reports completed

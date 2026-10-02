@@ -88,6 +88,7 @@ namespace cs::engine
 		ScopedShaderInjectionBindings(const ScopedShaderInjectionBindings&) = delete;
 		ScopedShaderInjectionBindings& operator=(const ScopedShaderInjectionBindings&) = delete;
 		void Capture(ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept;
+		void BindSampler(ID3D11DeviceContext* a_context, std::uint32_t a_slot, ID3D11SamplerState* a_sampler) noexcept;
 
 	private:
 		struct Resource
@@ -99,6 +100,7 @@ namespace cs::engine
 		{
 			std::uint32_t slot;
 			ID3D11SamplerState* value;
+			ID3D11SamplerState* current;
 		};
 		struct Buffer
 		{
@@ -253,7 +255,8 @@ namespace cs::engine
 #endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
-		ID3D11DeviceContext* a_context) noexcept;
+		ID3D11DeviceContext* a_context,
+		std::uint16_t a_samplerMask = UINT16_MAX) noexcept;
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept;
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
