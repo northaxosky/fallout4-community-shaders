@@ -241,9 +241,11 @@ namespace cs::render
 				const auto nextTimer = state.timer + delta;
 				data.shared = BuildSharedData(nextTimer, *camera);
 				const auto* manager = engine::GetRenderTargetManager();
+				// OG deferred, water and tiled-lighting shaders carry no dynamic-resolution constants.
+				const bool fullScale = REX::FModule::IsRuntimeOG();
 				const DirectX::XMFLOAT2 ratio{
-					manager ? manager->GetDynamicWidthRatio() : 1.0f,
-					manager ? manager->GetDynamicHeightRatio() : 1.0f
+					manager && !fullScale ? manager->GetDynamicWidthRatio() : 1.0f,
+					manager && !fullScale ? manager->GetDynamicHeightRatio() : 1.0f
 				};
 				if (!(ratio.x > 0.0f) || !(ratio.y > 0.0f))
 					return;
