@@ -52,7 +52,7 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | [Inverse Square Lighting](deviations/InverseSquareLighting.md) | Core | Attenuation, radius/lifetime, gameplay luminance, TOML authoring (relocated LIGH fields), editor, diagnostics | — | Pt | H | M | High |
 | Light Limit Fix | Mixed | Particle lights, light-limit visualization, 3D light grid as EHF provider | Ext: capacity/shadow-limit redesign. N/A: surface clustered culling (native tiled), strict lights, contact shadows | NS | H | M | Med |
 | Linear Lighting | N/A | Shared-color compatibility (done), optional calibration controls | N/A: linearization (FO4 is linear), ENB | Substrate | L | S | High |
-| LOD Blending | Core | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD, DistantTree | NS | H | S | High |
+| [LOD Blending](deviations/LODBlending.md) | Core | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Core | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
 | Remote Control | Core | DevBench C-ABI bridge, settings, inspection/cache, capture commands | — | NS | H | M | High |
 | [RenderDoc](deviations/RenderDoc.md) | Core | Capture/targeting, inventory/comments/disk management, UI/hotkeys/annotation | — | P | H | S | High |

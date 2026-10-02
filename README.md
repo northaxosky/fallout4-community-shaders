@@ -56,6 +56,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 |---|---|
 | **Screen Space Shadows** | Contact shadows and finer shadow detail. |
 | **Terrain Shadows** | Long-range shadows from terrain. |
+| **LOD Blending** | LOD terrain and object brightness and gamma matching, optional terrain vertex-color removal. |
 | **Screen Space GI** | Ambient occlusion and indirect lighting. |
 | **Inverse Square Lighting** | Opt-in per-light falloff; requires [authored light TOML files](features/InverseSquareLighting/README.md). Existing lights stay unchanged. |
 | **[Exponential Height Fog](features/ExponentialHeightFog/README.md)** | Analytic and volumetric fog with weather profiles; provider coverage is pending. |

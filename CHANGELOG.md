@@ -2,6 +2,7 @@
 
 ## 0.3.0
 
+- LOD Blending: ported upstream's LOD terrain and object brightness and gamma controls and terrain vertex-color removal; snow LOD settings are not available.
 - Shader ownership toggles are editable in Advanced settings and apply immediately, including to feature shader contributions.
 - Utility, sky, particle, blood splatter and secondary-view lighting shaders remain stock. Effect and distant tree replacements remain available for fog and terrain-shadow consumers.
 - Settings: TerrainShadows replaces `enabled`/`downsample_factor` with `EnableTerrainShadow`; SSGI uses upstream-cased keys; InverseSquareLighting requires per-light authored opt-in; RenderDoc replaces `multi_frame_count` with `"Capture Frame Count"` and removes `min_free_disk_gib`.
