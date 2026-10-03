@@ -119,10 +119,6 @@ namespace cs::features
 		texture.texture = _maskTexture->srv.get();
 		texture.width = _allocWidth;
 		texture.height = _allocHeight;
-		texture.caption = std::format(
-			"Mask {}x{} (bright = lit, dark = shadowed)",
-			_allocWidth,
-			_allocHeight);
 		return texture;
 	}
 
@@ -795,10 +791,6 @@ namespace cs::features
 			_settings.SampleCount = static_cast<std::uint32_t>(sampleCount);
 		}
 
-		dmui::ui::TextDisabled(
-			"Resources: %s | wave dispatches last frame: %u",
-			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
-			_dispatchedLastFrame.load(std::memory_order_relaxed));
 		Menu::Get().DrawDebugViewSelector(*this);
 	}
 

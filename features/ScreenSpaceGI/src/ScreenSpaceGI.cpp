@@ -567,7 +567,6 @@ namespace cs::features
 			result.texture = _textures.ao[_outputAO]->srv.get();
 			result.width = _width;
 			result.height = _height;
-			result.caption = "Occlusion (bright = occluded)";
 		}
 		return result;
 	}
@@ -610,101 +609,101 @@ namespace cs::features
 			_recompile = true;
 			edit.Discrete(true);
 		};
-		dmui::ui::Separator();
-		dmui::ui::Text("Toggles");
-		static_cast<void>(dmui::ui::Checkbox("Show Advanced Options", &showAdvanced));
-		toggle("Enabled", _settings.enabled);
-		dmui::ui::BeginDisabled(!_settings.enabled);
-		toggle("Indirect Lighting (IL)", _settings.enableGI, true);
-		dmui::ui::EndDisabled();
-		toggle("Vanilla SSAO", _settings.enableVanillaSSAO);
-		tooltip("Enable Fallout 4's built-in SSAO. Usually disabled when using SSGI to avoid double-darkening.");
-		if (showAdvanced) {
-			toggle("(Experimental) HQ Specular IL", _settings.enableExperimentalSpecularGI, true);
-			tooltip("An experimental specular GI that is more accurate but requires more samples. Won't be blurred.");
-		}
-		dmui::ui::Separator();
-		dmui::ui::Text("Quality/Performance");
-		dmui::ui::BeginDisabled(!_settings.enabled);
-		if (dmui::ui::Button("AO only"))
-			preset(1, 6, -1, false);
-		dmui::ui::SameLine();
-		if (dmui::ui::Button("Low"))
-			preset(10, 12, 2, true);
-		dmui::ui::SameLine();
-		if (dmui::ui::Button("Standard"))
-			preset(4, 8, 1, true);
-		dmui::ui::SameLine();
-		if (dmui::ui::Button("Extreme"))
-			preset(4, 8, 0, true);
-		dmui::ui::SameLine();
-		if (dmui::ui::Button("Reference"))
-			preset(8, 10, 0, true);
-		if (showAdvanced) {
-			slider("Slices", &Settings::numSlices);
-			slider("Steps Per Slice", &Settings::numSteps);
-		}
-		static constexpr std::array<const char*, kResolutionModes> labels{ "Full Res", "Half Res", "Quarter Res" };
-		for (int mode = 0; mode < static_cast<int>(kResolutionModes); ++mode) {
-			if (mode != 0)
-				dmui::ui::SameLine();
-			if (dmui::ui::Selectable(labels[mode], _settings.resolutionMode == mode, dmui::ui::SelectableFlags::kNone, { 120.0f, 0.0f })) {
-				_settings.resolutionMode = mode;
-				_recompile = true;
-				edit.Discrete(true);
+		if (const dmui::ui::PanelScope panel{ "ssgi-toggles" }; panel) {
+			dmui::ui::Text("Toggles");
+			static_cast<void>(dmui::ui::Checkbox("Show Advanced Options", &showAdvanced));
+			toggle("Enabled", _settings.enabled);
+			dmui::ui::BeginDisabled(!_settings.enabled);
+			toggle("Indirect Lighting (IL)", _settings.enableGI, true);
+			dmui::ui::EndDisabled();
+			toggle("Vanilla SSAO", _settings.enableVanillaSSAO);
+			tooltip("Enable Fallout 4's built-in SSAO. Usually disabled when using SSGI to avoid double-darkening.");
+			if (showAdvanced) {
+				toggle("(Experimental) HQ Specular IL", _settings.enableExperimentalSpecularGI, true);
+				tooltip("An experimental specular GI that is more accurate but requires more samples. Won't be blurred.");
 			}
 		}
-		dmui::ui::EndDisabled();
-		dmui::ui::Separator();
-		dmui::ui::Text("Visual");
-		dmui::ui::BeginDisabled(!_settings.enabled);
-		slider("AO Power", &Settings::aoPower, "%.2f");
-		dmui::ui::BeginDisabled(!_settings.enableGI);
-		slider("IL Source Brightness", &Settings::giStrength, "%.2f");
-		dmui::ui::EndDisabled();
-		slider("AO radius", &Settings::aoRadius, "%.1f units");
-		dmui::ui::BeginDisabled(!_settings.enableGI);
-		slider("IL radius", &Settings::giRadius, "%.1f units");
-		dmui::ui::EndDisabled();
-		if (showAdvanced)
-			slider("Min Screen Radius", &Settings::minScreenRadius, "%.3f");
-		const float minimumFade = 10000.0f, maximumFade = 50000.0f;
-		edit.Continuous(dmui::ui::SliderScalar("Depth Fade Near", &_settings.depthFadeRange[0], &minimumFade, &maximumFade, "%.0f units"));
-		edit.Continuous(dmui::ui::SliderScalar("Depth Fade Far", &_settings.depthFadeRange[1], &minimumFade, &maximumFade, "%.0f units"));
-		if (showAdvanced)
-			slider("Thickness", &Settings::thickness, "%.1f units");
-		dmui::ui::EndDisabled();
-		dmui::ui::Separator();
-		dmui::ui::Text("Visual - IL");
-		dmui::ui::BeginDisabled(!_settings.enabled || !_settings.enableGI);
-		if (showAdvanced)
-			slider("IL Distance Compensation", &Settings::giDistanceCompensation, "%.1f");
-		percentSlider("IL Saturation", &Settings::giSaturation);
-		dmui::ui::EndDisabled();
-		dmui::ui::Separator();
-		dmui::ui::Text("Denoising");
-		dmui::ui::BeginDisabled(!_settings.enabled);
-		toggle("Temporal Denoiser", _settings.enableTemporalDenoiser, true);
-		dmui::ui::SameLine();
-		toggle("Blur", _settings.enableBlur);
-		if (showAdvanced) {
-			dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser);
-			slider("Max Frame Accumulation", &Settings::maxAccumFrames);
-			dmui::ui::EndDisabled();
-			dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser && !_settings.enableGI);
-			percentSlider("Movement Disocclusion", &Settings::depthDisocclusion);
-			dmui::ui::EndDisabled();
-			dmui::ui::BeginDisabled(!_settings.enableBlur);
-			slider("Blur Radius", &Settings::blurRadius, "%.1f px");
-			slider("Geometry Weight", &Settings::distanceNormalisation, "%.2f");
+		if (const dmui::ui::PanelScope panel{ "ssgi-quality" }; panel) {
+			dmui::ui::Text("Quality/Performance");
+			dmui::ui::BeginDisabled(!_settings.enabled);
+			if (dmui::ui::Button("AO only"))
+				preset(1, 6, -1, false);
+			dmui::ui::SameLine();
+			if (dmui::ui::Button("Low"))
+				preset(10, 12, 2, true);
+			dmui::ui::SameLine();
+			if (dmui::ui::Button("Standard"))
+				preset(4, 8, 1, true);
+			dmui::ui::SameLine();
+			if (dmui::ui::Button("Extreme"))
+				preset(4, 8, 0, true);
+			dmui::ui::SameLine();
+			if (dmui::ui::Button("Reference"))
+				preset(8, 10, 0, true);
+			if (showAdvanced) {
+				slider("Slices", &Settings::numSlices);
+				slider("Steps Per Slice", &Settings::numSteps);
+			}
+			static constexpr std::array<const char*, kResolutionModes> labels{ "Full Res", "Half Res", "Quarter Res" };
+			for (int mode = 0; mode < static_cast<int>(kResolutionModes); ++mode) {
+				if (mode != 0)
+					dmui::ui::SameLine();
+				if (dmui::ui::Selectable(labels[mode], _settings.resolutionMode == mode, dmui::ui::SelectableFlags::kNone, { 120.0f, 0.0f })) {
+					_settings.resolutionMode = mode;
+					_recompile = true;
+					edit.Discrete(true);
+				}
+			}
 			dmui::ui::EndDisabled();
 		}
-		dmui::ui::EndDisabled();
-		dmui::ui::Separator();
-		dmui::ui::TextDisabled("Resources: %s (%ux%u) | composition binds: %u | generation: %u",
-			_failed ? "failed" : (_resourcesReady ? "ready" : "not ready"), _width, _height, _binds.load(), _generation);
-		dmui::ui::TextDisabled("History: %s | motion: %s | resets: %u (%s)",
-			_historyUsed ? "in use" : "seeding", _motionAvailable ? "yes" : "no", _resetCount.load(), _resetReason.load());
+		if (const dmui::ui::PanelScope panel{ "ssgi-visual" }; panel) {
+			dmui::ui::Text("Visual");
+			dmui::ui::BeginDisabled(!_settings.enabled);
+			slider("AO Power", &Settings::aoPower, "%.2f");
+			dmui::ui::BeginDisabled(!_settings.enableGI);
+			slider("IL Source Brightness", &Settings::giStrength, "%.2f");
+			dmui::ui::EndDisabled();
+			slider("AO radius", &Settings::aoRadius, "%.1f units");
+			dmui::ui::BeginDisabled(!_settings.enableGI);
+			slider("IL radius", &Settings::giRadius, "%.1f units");
+			dmui::ui::EndDisabled();
+			if (showAdvanced)
+				slider("Min Screen Radius", &Settings::minScreenRadius, "%.3f");
+			const float minimumFade = 10000.0f, maximumFade = 50000.0f;
+			edit.Continuous(dmui::ui::SliderScalar("Depth Fade Near", &_settings.depthFadeRange[0], &minimumFade, &maximumFade, "%.0f units"));
+			edit.Continuous(dmui::ui::SliderScalar("Depth Fade Far", &_settings.depthFadeRange[1], &minimumFade, &maximumFade, "%.0f units"));
+			if (showAdvanced)
+				slider("Thickness", &Settings::thickness, "%.1f units");
+			dmui::ui::EndDisabled();
+		}
+		if (const dmui::ui::PanelScope panel{ "ssgi-visual-il" }; panel) {
+			dmui::ui::Text("Visual - IL");
+			dmui::ui::BeginDisabled(!_settings.enabled || !_settings.enableGI);
+			if (showAdvanced)
+				slider("IL Distance Compensation", &Settings::giDistanceCompensation, "%.1f");
+			percentSlider("IL Saturation", &Settings::giSaturation);
+			dmui::ui::EndDisabled();
+		}
+		if (const dmui::ui::PanelScope panel{ "ssgi-denoising" }; panel) {
+			dmui::ui::Text("Denoising");
+			dmui::ui::BeginDisabled(!_settings.enabled);
+			toggle("Temporal Denoiser", _settings.enableTemporalDenoiser, true);
+			dmui::ui::SameLine();
+			toggle("Blur", _settings.enableBlur);
+			if (showAdvanced) {
+				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser);
+				slider("Max Frame Accumulation", &Settings::maxAccumFrames);
+				dmui::ui::EndDisabled();
+				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser && !_settings.enableGI);
+				percentSlider("Movement Disocclusion", &Settings::depthDisocclusion);
+				dmui::ui::EndDisabled();
+				dmui::ui::BeginDisabled(!_settings.enableBlur);
+				slider("Blur Radius", &Settings::blurRadius, "%.1f px");
+				slider("Geometry Weight", &Settings::distanceNormalisation, "%.2f");
+				dmui::ui::EndDisabled();
+			}
+			dmui::ui::EndDisabled();
+		}
 		Menu::Get().DrawDebugViewSelector(*this);
 	}
 

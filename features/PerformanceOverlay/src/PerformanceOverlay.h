@@ -16,7 +16,7 @@ namespace cs::features
 		static PerformanceOverlay* GetSingleton();
 		std::string_view GetName() const override { return "PerformanceOverlay"; }
 		std::string_view GetDisplayName() const override { return "Performance Overlay"; }
-		std::string GetFeatureSummary() const override { return "FPS, frame history, shader and GPU pass timing, and live-configuration A/B comparisons."; }
+		std::string GetFeatureSummary() const override { return "FPS, frame times, draw calls, VRAM usage, and shader performance."; }
 		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
@@ -31,7 +31,6 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		void TickHostFrame(std::uint64_t a_vramUsedBytes, std::uint64_t a_vramBudgetBytes);
 		DMUI_ManagedOverlayOptions ManagedOverlayOptions() const noexcept;
-		void CommitOverlayPlacement(const DMUI_ManagedOverlayPlacement&);
 		const std::string& SuggestedToggleHotkey() const noexcept { return settings.toggleHotkey; }
 		using Settings = performance_overlay::Settings;
 		Settings settings;
@@ -48,7 +47,8 @@ namespace cs::features
 		void DrawTestResults();
 		void DrawPasses();
 		void DrawDrawCalls(const std::vector<DrawCallRow>&);
-		void DrawGraph(const char*, const CircularBuffer<float>&, dmui::ui::Vec4);
+		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4);
+		static float OverlayContentWidth() noexcept;
 		void UpdateGraphValues();
 		std::vector<DrawCallRow> BuildRows() const;
 

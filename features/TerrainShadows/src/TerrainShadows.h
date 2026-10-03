@@ -44,7 +44,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Casts long-range worldspace terrain shadows into directional lighting from an xLODGen heightmap.";
+			return "Terrain shadows from heightmap data.";
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;

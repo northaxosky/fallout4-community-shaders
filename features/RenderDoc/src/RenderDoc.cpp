@@ -582,11 +582,6 @@ namespace cs::features
 		// FO4: visible controls and native dialogs are owned by the forwarding host.
 		settings::SettingsEdit edit{ *this };
 
-		dmui::ui::TextDisabled(
-			"The host owns capture bindings. Suggested defaults: %s and %s.",
-			_settings.captureHotkey.c_str(),
-			_settings.multiCaptureHotkey.c_str());
-
 		const bool d3d11Available =
 			_d3d11TargetAvailable.load(std::memory_order_acquire);
 		const bool d3d12Available =
@@ -614,8 +609,7 @@ namespace cs::features
 		}
 		if (!CaptureTargetAvailable()) {
 			dmui::ui::TextDisabled(
-				"Selected target is unavailable. Temporal D3D12 is registered "
-				"only while native temporal presentation is active.");
+				"Selected capture target is unavailable.");
 		}
 
 		char dllPathBuf[260];
@@ -639,7 +633,7 @@ namespace cs::features
 			&frameRange.min,
 			&frameRange.max));
 		_settings.captureFrameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
-		dmui::ui::TextDisabled("Both capture bindings use this count. Required free space: %llu MiB.",
+		dmui::ui::TextDisabled("Required free space: %llu MiB.",
 			renderdoc::RequiredSpaceBytes(_settings.captureFrameCount) / (1024 * 1024));
 
 		(void)dmui::ui::InputTextMultiline("Comments (embedded in next .rdc)",

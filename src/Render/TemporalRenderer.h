@@ -181,7 +181,6 @@ namespace cs::render
 			winrt::com_ptr<ID3D11ShaderResourceView> view;
 			D3D11_TEXTURE2D_DESC sourceDesc{};
 			std::uint8_t capturedView = 0;
-			std::string caption;
 			FrozenTextureSnapshotFailure failure =
 				FrozenTextureSnapshotFailure::kNone;
 			HRESULT result = S_OK;
@@ -193,7 +192,6 @@ namespace cs::render
 			std::uint8_t a_view,
 			ID3D11Texture2D* a_source,
 			const D3D11_SHADER_RESOURCE_VIEW_DESC& a_viewDesc,
-			std::string a_caption,
 			const char* a_textureName,
 			const char* a_viewName,
 			std::string_view a_logName);
@@ -204,13 +202,11 @@ namespace cs::render
 			std::string_view a_unavailableText) const;
 		bool CaptureDebugSnapshot(
 			DebugView a_view,
-			ID3D11ShaderResourceView* a_source,
-			std::string a_caption);
+			ID3D11ShaderResourceView* a_source);
 		void ResetDebugSnapshotResources() noexcept;
 		bool CaptureFrameGenerationDebugSnapshot(
 			FrameGenerationDebugView a_view,
-			ID3D11ShaderResourceView* a_source,
-			std::string a_caption);
+			ID3D11ShaderResourceView* a_source);
 		void ResetFrameGenerationDebugSnapshotResources() noexcept;
 		void CaptureSelectedDebugSnapshot();
 		enum class ProviderOutputDebugFailure : std::uint8_t

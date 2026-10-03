@@ -10,10 +10,8 @@ window-procedure hook, or enumerate host modules itself.
 The menu-owned TOML state is parsed during core plugin startup, independently of host discovery.
 Persisted debug-view selections are applied after shader-injection validation when D3D11 becomes
 ready. At F4SE `kPostPostLoad`, after feature registration is complete, `HostClient` calls the
-official `dmui::Client::Connect`. The client negotiates host ABI 1 and the required stable UI
-revision/table prefix, and preflights API structure and required services, including native
-external opening, virtual-file targets, and navigation
-icon overrides, before registering anything. The client and host must use matching development headers from the
+official `dmui::Client::Connect`. The client requires exact-match ABI 2 before registering
+anything; all host and UI operations are required by that ABI. The client and host must use matching development headers from the
 CommonLibF4-pinned DearModdingUI API; no
 compatibility shim is provided for superseded development snapshots. It then registers all category
 descriptors before any page that references their stable IDs:
@@ -29,7 +27,7 @@ descriptors before any page that references their stable IDs:
 The host-ready state remains authoritative for render services. The final D3D11-facing swapchain
 is attached from `D3D11Bootstrap` after any upscaling proxy has replaced the native chain. A busy
 or not-yet-ready renderer is retried from the host frame observer. Community Shaders never creates
-a fallback menu if discovery, preflight, registration, readiness, or swapchain attachment fails.
+a fallback menu if discovery, registration, readiness, or swapchain attachment fails.
 
 With no compatible host, shader features, presets, TOML configuration, telemetry, and fullscreen
 debug selections continue headless. There is intentionally no menu, overlay, notification UI, or
@@ -71,32 +69,18 @@ successful clicks open the default browser. Host dispatch or launch failures fol
 link-row failure logging path; there is no shell or clipboard fallback. Disabled placeholders remain
 non-actionable.
 
-Performance Overlay placement is stored by Community Shaders in logical coordinates only after
-the host reports an arrangement-completed edge. The host applies content scaling exactly once.
+Performance Overlay offset and size are author defaults. DearModdingUI persists the user's
+arrangement in its `imgui.ini`; Reset Layout discards it and reapplies the defaults.
+Legacy TOML `Position` and `PositionSet` keys are ignored. The host applies content scaling exactly once.
 Overlay sampling and RenderDoc maintenance run from the frame observer rather than depending on a
 visible settings page.
 
-Dialog requests and polling occur from render-thread callbacks. Submitted preset identity, name,
-and path are copied into client-owned state so a preset refresh cannot invalidate the operation.
-The disk operation and its outcome are recorded separately from host resolution: a failed
-resolution retries without repeating the disk operation. Rejected submissions retain the text and
-display the validation or filesystem error; a later submission ID can be processed normally.
-Transient polling/resolution failures retry at a bounded cadence without repeated warnings.
-A stale dialog handle clears local request state; submitted outcomes are never discarded merely
-because a transient failure exceeded a timeout.
+`dmui::DialogSession` owns confirmation and text-entry dialogs and polls from the render-thread
+frame observer. Preset identity, name, path, and capture directory are captured when opening
+the relevant dialog. Rejected submissions retain the text and show validation or filesystem
+errors in the host dialog. Notifications post directly to the any-thread host service;
+without a connected host, they are logged instead.
 
 Performance hotkeys are registered disabled unless their owning feature is healthy and enabled.
 RenderDoc capture hotkeys additionally require a loaded capture API. IDs use the
 `dearmodding.cs.*` namespace, and host overrides remain authoritative after registration.
-
-## Tests
-
-`tests/HostIntegrationTests.cpp` exercises host ABI, stable UI table, and service preflight,
-including the external-open function/table and virtual-file service requirements, missing-service headless
-behavior, category/page catalog ordering, IDs, references, deduplication and collision handling,
-and independent fullscreen/texture
-debug-view selection. It intentionally builds without the plugin or an ImGui library:
-
-```bash
-xmake test HostIntegrationTests/HostIntegration
-```

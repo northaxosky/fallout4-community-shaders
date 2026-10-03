@@ -44,9 +44,7 @@ namespace cs::host
 			DMUI_StatusSeverity a_severity,
 			std::string a_message,
 			std::uint32_t a_durationMilliseconds) noexcept;
-		bool DrawAnnotatedPlot(
-			const char* a_id,
-			const DMUI_AnnotatedPlotDescriptor& a_descriptor) noexcept;
+		void ResetOverlay() noexcept;
 
 	private:
 		HostClient();
@@ -56,13 +54,6 @@ namespace cs::host
 			HostPageDescriptor descriptor;
 			Feature* feature{};
 			DMUI_PageHandle handle{ DMUI_INVALID_PAGE_HANDLE };
-		};
-
-		struct PendingNotification
-		{
-			DMUI_StatusSeverity severity{ DMUI_STATUS_SEVERITY_INFO };
-			std::string message;
-			std::uint32_t durationMilliseconds{ 4000 };
 		};
 
 		bool RegisterPages();
@@ -85,7 +76,6 @@ namespace cs::host
 			const std::optional<DMUI_HotkeyActionHandle>& a_handle,
 			bool a_enabled,
 			std::optional<DMUI_Result>& a_failure) noexcept;
-		void FlushNotification() noexcept;
 		void RetrySwapChain() noexcept;
 		void LogFailure(std::string_view a_operation) const noexcept;
 		void LogFailureOnce(
@@ -104,15 +94,11 @@ namespace cs::host
 		std::optional<DMUI_Result> _videoMemoryFailure;
 		std::optional<DMUI_Result> _overlayConfigurationFailure;
 		std::optional<DMUI_Result> _overlayDemandFailure;
-		std::optional<DMUI_Result> _overlayQueryFailure;
-		std::optional<DMUI_Result> _annotatedPlotFailure;
 		std::atomic_bool _overlayVisible{ true };
 		std::atomic_bool _registrationComplete{};
 		FrameDemandTracker _overlayFrameDemand;
 		std::atomic_bool _readyLogged{};
 		std::atomic_bool _unavailableLogged{};
-		std::mutex _notificationMutex;
-		std::optional<PendingNotification> _pendingNotification;
 		std::mutex _swapChainMutex;
 		IDXGISwapChain* _pendingSwapChain{};
 	};

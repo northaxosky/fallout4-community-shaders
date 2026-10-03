@@ -81,7 +81,6 @@ namespace cs::render
 		view = nullptr;
 		sourceDesc = {};
 		capturedView = 0;
-		caption.clear();
 		failure = FrozenTextureSnapshotFailure::kNone;
 		result = S_OK;
 	}
@@ -91,7 +90,6 @@ namespace cs::render
 		std::uint8_t a_view,
 		ID3D11Texture2D* a_source,
 		const D3D11_SHADER_RESOURCE_VIEW_DESC& a_viewDesc,
-		std::string a_caption,
 		const char* a_textureName,
 		const char* a_viewName,
 		std::string_view a_logName)
@@ -161,7 +159,6 @@ namespace cs::render
 		cs::engine::CopyResourcePreservingOM(
 			context, a_snapshot.texture.get(), a_source);
 		a_snapshot.capturedView = a_view;
-		a_snapshot.caption = std::move(a_caption);
 		a_snapshot.failure = FrozenTextureSnapshotFailure::kNone;
 		a_snapshot.result = S_OK;
 		a_snapshot.request.Captured(request);
@@ -182,14 +179,12 @@ namespace cs::render
 		texture.texture = a_snapshot.view.get();
 		texture.width = a_snapshot.sourceDesc.Width;
 		texture.height = a_snapshot.sourceDesc.Height;
-		texture.caption = a_snapshot.caption;
 		return texture;
 	}
 
 	bool TemporalRenderer::CaptureDebugSnapshot(
 		DebugView a_view,
-		ID3D11ShaderResourceView* a_source,
-		std::string a_caption)
+		ID3D11ShaderResourceView* a_source)
 	{
 		if (_debugView.load(std::memory_order_acquire) != a_view || !a_source)
 			return false;
@@ -208,7 +203,6 @@ namespace cs::render
 			static_cast<std::uint8_t>(a_view),
 			sourceTexture.get(),
 			viewDesc,
-			std::move(a_caption),
 			"Upscaling/DebugSnapshot.Texture",
 			"Upscaling/DebugSnapshot.SRV",
 			"Upscaling debug snapshot");
@@ -261,8 +255,7 @@ namespace cs::render
 
 	bool TemporalRenderer::CaptureFrameGenerationDebugSnapshot(
 		FrameGenerationDebugView a_view,
-		ID3D11ShaderResourceView* a_source,
-		std::string a_caption)
+		ID3D11ShaderResourceView* a_source)
 	{
 		if (_frameGenerationDebugView.load(std::memory_order_acquire) != a_view ||
 			!a_source) {
@@ -284,7 +277,6 @@ namespace cs::render
 			static_cast<std::uint8_t>(a_view),
 			sourceTexture.get(),
 			viewDesc,
-			std::move(a_caption),
 			"FrameGeneration/DebugSnapshot.Texture",
 			"FrameGeneration/DebugSnapshot.SRV",
 			"Frame-generation debug snapshot");
@@ -317,13 +309,10 @@ namespace cs::render
 		const auto selected =
 			_frameGenerationDebugView.load(std::memory_order_acquire);
 		render::FrameGenerationDebugResource resource;
-		std::string_view caption;
 		if (selected == FrameGenerationDebugView::kDepth) {
 			resource = render::FrameGenerationDebugResource::kDepth;
-			caption = "Frozen FG-conditioned depth snapshot; display resolution.";
 		} else if (selected == FrameGenerationDebugView::kMotion) {
 			resource = render::FrameGenerationDebugResource::kMotion;
-			caption = "Frozen FG-conditioned motion snapshot; display resolution.";
 		} else {
 			return;
 		}
@@ -331,7 +320,7 @@ namespace cs::render
 			render::TemporalPipeline::Get().GetFrameGenerationDebugTexture(
 				resource);
 		CaptureFrameGenerationDebugSnapshot(
-			selected, source.srv, std::string(caption));
+			selected, source.srv);
 	}
 
 	void TemporalRenderer::CaptureFrameGenerationHudlessDebugSnapshot()
@@ -345,8 +334,7 @@ namespace cs::render
 				render::FrameGenerationDebugResource::kHudless);
 		CaptureFrameGenerationDebugSnapshot(
 			FrameGenerationDebugView::kHudless,
-			source.srv,
-			"Frozen HUD-less color snapshot; display resolution.");
+			source.srv);
 	}
 
 	void TemporalRenderer::CaptureFrameGenerationFinalDebugSnapshot()
@@ -360,8 +348,7 @@ namespace cs::render
 				render::FrameGenerationDebugResource::kFinal);
 		CaptureFrameGenerationDebugSnapshot(
 			FrameGenerationDebugView::kFinal,
-			source.srv,
-			"Frozen final-color snapshot; display resolution.");
+			source.srv);
 	}
 
 	FeatureDebugTexture TemporalRenderer::GetRenderSubrectDebugTexture() const
@@ -536,71 +523,30 @@ namespace cs::render
 			D3D11_TEXTURE2D_DESC desc{};
 			if (!TryDescribeTextureView(view, desc))
 				return;
-			const auto activeExtent =
-				GetActiveExtent(desc.Width, desc.Height);
-			CaptureDebugSnapshot(
-				selected,
-				view,
-				std::format(
-					"Frozen scene-color snapshot {}x{}; captured active {}x{} "
-					"({:.1f}% x {:.1f}%), top-left; raw HDR, outside is undefined",
-					desc.Width,
-					desc.Height,
-					activeExtent.width,
-					activeExtent.height,
-					static_cast<double>(activeExtent.widthRatio) * 100.0,
-					static_cast<double>(activeExtent.heightRatio) * 100.0));
+			CaptureDebugSnapshot(selected, view);
 			return;
 		}
 		if (selected == DebugView::kProxy) {
 			const auto proxy = dynamicResolution.GetProxyTexture(kSceneColorTarget);
 			if (!proxy.view)
 				return;
-			const auto* state = cs::engine::GetGraphicsState();
-			const auto activeExtent = GetActiveExtent(
-				state ? state->screenWidth : 0,
-				state ? state->screenHeight : 0);
-			CaptureDebugSnapshot(
-				selected,
-				proxy.view,
-				std::format(
-					"Frozen scene-color proxy snapshot {}x{}; captured expected {}x{}; "
-					"raw HDR, no display transform",
-					proxy.width,
-					proxy.height,
-					activeExtent.width,
-					activeExtent.height));
+			CaptureDebugSnapshot(selected, proxy.view);
 			return;
 		}
 		if (selected == DebugView::kMotionVectors) {
 			const auto method = GetUpscaleMethod();
 			ID3D11ShaderResourceView* view = nullptr;
-			std::string_view source;
 			if (method == UpscaleMethod::kDLSS &&
 				motionVectorCopyTexture) {
 				view = motionVectorCopyTexture->srv.get();
-				source = "DLSS conditioned copy";
 			} else if (IsExternalUpscaler(method)) {
 				view =
 					cs::engine::GetRenderTargetSRV(kMotionVectorTarget);
-				source = "FSR engine motion";
 			}
 			D3D11_TEXTURE2D_DESC desc{};
 			if (!TryDescribeTextureView(view, desc))
 				return;
-			const auto activeExtent =
-				GetActiveExtent(desc.Width, desc.Height);
-			CaptureDebugSnapshot(
-				selected,
-				view,
-				std::format(
-					"Frozen {} snapshot {}x{}; captured active {}x{} top-left; "
-					"raw signed RG, negative components clip",
-					source,
-					desc.Width,
-					desc.Height,
-					activeExtent.width,
-					activeExtent.height));
+			CaptureDebugSnapshot(selected, view);
 			return;
 		}
 		if (selected != DebugView::kProviderOutput ||
@@ -658,18 +604,11 @@ namespace cs::render
 			viewDesc.Texture2DArray.ArraySize = frameBufferDesc.ArraySize;
 		}
 
-		const auto caption = std::format(
-			"Frozen RT0 snapshot {}x{}; captured after DrawWorld::Render_UI +0xC5 "
-			"provider resolve; runtime method {}",
-			frameBufferDesc.Width,
-			frameBufferDesc.Height,
-			UpscaleMethodName(GetUpscaleMethod()));
 		if (!CaptureFrozenTextureSnapshot(
 				_superResolutionDebugSnapshot,
 				static_cast<std::uint8_t>(DebugView::kProviderOutput),
 				frameBuffer.get(),
 				viewDesc,
-				caption,
 				"Upscaling/ProviderOutputDebugCopy.Texture",
 				"Upscaling/ProviderOutputDebugCopy.SRV",
 				std::string_view{})) {

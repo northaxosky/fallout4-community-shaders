@@ -701,10 +701,6 @@ namespace cs::features
 			changed |= edit.Discrete(dmui::ui::Checkbox(
 				"Allow in menus",
 				&settings.frameGenerationAllowInMenus));
-			dmui::ui::TextWrapped(
-				"Generated frames improve display smoothness; they do not speed up game simulation.");
-			dmui::ui::TextDisabled(
-				"Low base frame rates can increase latency and reduce image quality.");
 		}
 
 		if (changed) {

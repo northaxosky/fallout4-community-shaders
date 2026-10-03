@@ -32,7 +32,7 @@ namespace cs::features
 		std::string_view GetDisplayName() const override { return "Wetness Effects"; }
 		std::string GetConfigKey() const override { return "WetnessEffects"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
-		std::string GetFeatureSummary() const override { return "Adds rain and shore wetness to deferred lighting and composition. Uses Fallout 4's native wetness while Dynamic Cubemaps is off."; }
+		std::string GetFeatureSummary() const override { return "Rain-based surface wetness, puddles, and shore wetness."; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

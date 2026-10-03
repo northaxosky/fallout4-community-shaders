@@ -24,10 +24,10 @@ namespace cs::host
 		};
 
 		constexpr std::array<BuiltInPage, 4> kBuiltInPages{
-			BuiltInPage{ "home", "Home", "Feature status, quick links, and FAQ.", 0, HostPageKind::kHome },
-			BuiltInPage{ "advanced", "Advanced", "Startup loading, shader configuration, and logging.", 20, HostPageKind::kAdvanced },
-			BuiltInPage{ "presets", "Presets", "Cross-feature setting presets.", 30, HostPageKind::kPresets },
-			BuiltInPage{ "changelog", "Changelog", "Release history for Community Shaders.", 40, HostPageKind::kChangelog }
+			BuiltInPage{ "home", "Home", "", 0, HostPageKind::kHome },
+			BuiltInPage{ "advanced", "Advanced", "", 20, HostPageKind::kAdvanced },
+			BuiltInPage{ "presets", "Presets", "", 30, HostPageKind::kPresets },
+			BuiltInPage{ "changelog", "Changelog", "", 40, HostPageKind::kChangelog }
 		};
 
 		struct KnownCategory
@@ -242,7 +242,6 @@ namespace cs::host
 			.id = std::string(kOverlayPageId),
 			.displayName = "Community Shaders Overlay",
 			.categoryId = std::string(kOverlayCategoryId),
-			.summary = "On-screen feature overlays.",
 			.sortKey = kOverlaySortKey,
 			.kind = HostPageKind::kOverlay });
 

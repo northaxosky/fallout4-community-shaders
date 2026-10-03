@@ -53,7 +53,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Captures and prefilters the current scene for dynamic water reflections.";
+			return "Real-time environment mapping and reflections.";
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;

@@ -7,7 +7,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -43,29 +42,13 @@ namespace cs
 			DMUI_StatusSeverity a_severity = DMUI_STATUS_SEVERITY_INFO);
 
 	private:
-		Menu() = default;
+		Menu();
 
-		enum class DialogOperation : std::uint8_t
+		enum class ClearRequest : std::uint8_t
 		{
 			kNone,
 			kClearCache,
-			kClearRenderDocCaptures,
-			kSavePresetAs,
-			kDeletePreset
-		};
-
-		struct DialogState
-		{
-			DialogOperation operation{ DialogOperation::kNone };
-			DMUI_DialogHandle handle{ DMUI_INVALID_DIALOG_HANDLE };
-			host::DialogSubmissionTracker submissions;
-			host::DialogCallRetry polling;
-			host::DialogCallRetry resolution;
-			std::string text;
-			std::string presetIdentity;
-			std::string presetName;
-			std::filesystem::path presetPath;
-			std::filesystem::path capturePath;
+			kClearRenderDocCaptures
 		};
 
 		struct DebugImage
@@ -78,7 +61,6 @@ namespace cs
 			host::ImageImportFailure importFailure{
 				host::ImageImportFailure::kNone
 			};
-			DMUI_Result importResult{ DMUI_RESULT_OK };
 			std::optional<DMUI_Result> loggedFailure;
 			dmui::ImageResource image;
 		};
@@ -87,21 +69,10 @@ namespace cs
 		void DrawFeatureOverview(dmui::Client& a_client);
 		void DrawShaderSettings(dmui::Client& a_client);
 		void DrawDebugTexture(dmui::Client& a_client, const Feature& a_feature);
-		void ProcessDialog(dmui::Client& a_client);
 		void StartDialog(
 			dmui::Client& a_client,
-			DialogOperation a_operation,
-			const DMUI_DialogDescriptor& a_descriptor);
-		host::DialogSubmissionTracker::Outcome ExecuteDialogSubmission(
-			const DMUI_DialogEvent& a_event,
-			std::string_view a_text);
-		void RetryDialogResolution(
-			dmui::Client& a_client,
-			const DMUI_DialogEvent& a_event);
-		void HandleDialogFailure(
-			std::string_view a_operation,
-			DMUI_Result a_result,
-			host::DialogCallRetry& a_retry);
+			const DMUI_DialogDescriptor& a_descriptor,
+			dmui::DialogSession::Submit a_submit);
 		bool ClearShaderCache(std::string& a_error);
 		bool CheckHostResult(
 			dmui::Client& a_client,
@@ -112,8 +83,8 @@ namespace cs
 		host::StartupLoadSnapshot _startupLoads;
 		std::unordered_map<std::string, DebugImage> _debugImages;
 		std::unordered_map<std::string, DMUI_Result> _hostCallFailures;
-		DialogState _dialog;
-		std::atomic<DialogOperation> _clearRequested{ DialogOperation::kNone };
+		dmui::DialogSession _dialog;
+		std::atomic<ClearRequest> _clearRequested{ ClearRequest::kNone };
 		std::uint64_t _hostFrameSerial{};
 		std::uint64_t _debugImageGeneration{};
 	};

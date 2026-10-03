@@ -24,7 +24,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Independent frame-generation request, admission, and runtime diagnostics.";
+			return "Frame generation for a smoother experience.";
 		}
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

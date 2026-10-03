@@ -73,7 +73,7 @@ namespace cs::features
 			else if (a_key == "disableVanillaFog")
 				text = "Disables the vanilla fog entirely. Only exponential height fog will be applied.";
 			else if (a_key == "respectVanillaFogFade")
-				text = "Applies vanilla fade brightness to exponential height fog.\nFO4 fade-brightness mapping is not available.";
+				text = "Applies vanilla fade brightness to exponential height fog.\nNot available in Fallout 4 yet; this setting currently has no effect.";
 			else if (a_key == "volumetricSampleJitterMultiplier")
 				text = "Matches UE's r.VolumetricFog.LightScatteringSampleJitterMultiplier.\nAdds per-voxel random offset on top of the Halton sequence.\n0 = UE default; nonzero values need stronger temporal filtering.";
 			else if (a_key == "volumetricUpsampleJitterMultiplier")
@@ -392,7 +392,6 @@ namespace cs::features
 		if (changed)
 			PublishSettings();
 		Menu::Get().DrawDebugViewSelector(*this);
-		dmui::ui::TextDisabled("Directional cascade scattering, IBL, Skylighting, CloudShadows and local lights are unavailable.");
 	}
 
 	void ExponentialHeightFog::RestoreDefaultSettings()
