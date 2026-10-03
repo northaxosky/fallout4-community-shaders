@@ -32,6 +32,8 @@ namespace cs::features::performance_overlay
 		bool ShowBorder = true;
 		settings::Float2 Position{ 10.0f, 10.0f };
 		bool PositionSet = false;
+		settings::Float2 Size{ 600.0f, 0.0f };
+		bool SizeSet = false;
 		std::string toggleHotkey = "F10";
 	};
 
@@ -51,6 +53,8 @@ namespace cs::features::performance_overlay
 			settings::Field{ "ShowBorder", "Show Border", &Settings::ShowBorder },
 			settings::Float2Field<Settings>{ "Position", "Overlay position", &Settings::Position },
 			settings::Field{ "PositionSet", "Overlay position has been set", &Settings::PositionSet },
+			settings::Float2Field<Settings>{ "Size", "Overlay size", &Settings::Size },
+			settings::Field{ "SizeSet", "Overlay size has been set", &Settings::SizeSet },
 			settings::Field{ "toggle_hotkey", "Suggested overlay toggle binding; the host's saved override takes precedence.", &Settings::toggleHotkey } }
 	};
 }
