@@ -181,12 +181,6 @@ namespace cs::features
 		_menuSinkRegistered = true;
 	}
 
-	void MotionVectorFixes::DrawSettings()
-	{
-		dmui::ui::TextUnformatted("Active. No user-tunable options.");
-		dmui::ui::TextDisabled("Corrects player, animated-object, frozen/menu, and LOD previous transforms.");
-	}
-
 	void MotionVectorFixes::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		a_sink

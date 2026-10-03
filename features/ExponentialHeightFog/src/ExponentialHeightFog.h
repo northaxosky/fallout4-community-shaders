@@ -20,7 +20,7 @@ namespace cs::features
 		std::string_view GetName() const override { return "ExponentialHeightFog"; }
 		std::string_view GetDisplayName() const override { return "Exponential Height Fog"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
-		std::string GetFeatureSummary() const override { return "Analytic height fog and temporally accumulated volumetric scattering."; }
+		std::string GetFeatureSummary() const override { return "Height-dependent fog for atmospheric depth."; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
 		void Prepass() override;

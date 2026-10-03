@@ -109,7 +109,7 @@ namespace cs::render::temporal::presentation
 			if (capability.availability == CapabilityAvailability::kUnknown) {
 				return {
 					.kind = AvailabilityKind::kUnavailable,
-					.reason = "FSR 4 was not admitted for this session."
+					.reason = "FSR 4 is unavailable; see the log."
 				};
 			}
 			if (!capability.IsAvailable()) {
@@ -122,7 +122,7 @@ namespace cs::render::temporal::presentation
 		return {
 			.kind = AvailabilityKind::kUnavailable,
 			.reason = std::format(
-				"{} was not admitted for this session.",
+				"{} is unavailable; see the log.",
 				Name(a_method))
 		};
 	}
@@ -152,7 +152,7 @@ namespace cs::render::temporal::presentation
 			if (!a_status.session.latencyHooksInstalled) {
 				return {
 					.kind = AvailabilityKind::kUnavailable,
-					.reason = "Reflex latency markers could not be installed; see the log."
+					.reason = "DLSS frame generation failed to initialize; see the log."
 				};
 			}
 			if (a_dlss.configurationQueryFailed) {
@@ -164,7 +164,7 @@ namespace cs::render::temporal::presentation
 			if (a_dlss.availability == CapabilityAvailability::kUnknown) {
 				return {
 					.kind = AvailabilityKind::kUnavailable,
-					.reason = "DLSS was not admitted for this session."
+					.reason = "DLSS is unavailable; see the log."
 				};
 			}
 			if (a_dlss.availability == CapabilityAvailability::kUnsupported) {
@@ -187,7 +187,7 @@ namespace cs::render::temporal::presentation
 		return {
 			.kind = AvailabilityKind::kUnavailable,
 			.reason = std::format(
-				"{} was not admitted for this session.",
+				"{} is unavailable; see the log.",
 				Name(a_method))
 		};
 	}

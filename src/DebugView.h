@@ -33,7 +33,6 @@ namespace cs
 		ID3D11ShaderResourceView* texture = nullptr;
 		std::uint32_t width = 0;
 		std::uint32_t height = 0;
-		std::string caption;
 		std::string_view unavailableText = "Texture not allocated.";
 	};
 

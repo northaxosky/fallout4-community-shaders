@@ -14,7 +14,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Opt-in per-light inverse-square attenuation, authored in Lights TOML files.";
+			return "Physically accurate inverse-square light falloff.";
 		}
 		void Load() override;
 		void OnDataLoaded() override;

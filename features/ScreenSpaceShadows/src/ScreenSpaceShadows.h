@@ -23,7 +23,7 @@ namespace cs::features
 		std::string_view GetName() const override { return "ScreenSpaceShadows"; }
 		std::string_view GetDisplayName() const override { return "Screen Space Shadows"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
-		std::string GetFeatureSummary() const override { return "Sun/moon screen-space contact shadows via Bend Studio's ray-marched depth technique."; }
+		std::string GetFeatureSummary() const override { return "Detailed screen-space contact shadows."; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

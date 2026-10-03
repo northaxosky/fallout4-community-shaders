@@ -485,35 +485,7 @@ namespace cs::features
 		if (edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled))) {
 			PublishSettings();
 		}
-		dmui::ui::TextDisabled(
-			"Upstream ships no caustics tunables; every constant is fixed.");
-
-		if (_injectionsOperational.load(std::memory_order_relaxed)) {
-			const auto water = cs::engine::GetWaterDataStatus();
-			if (water.cameraCellHeight != cs::engine::kNoWaterHeight) {
-				dmui::ui::TextDisabled(
-					"Cell water plane: z = %.1f",
-					water.cameraCellHeight);
-			} else {
-				dmui::ui::TextDisabled("Current cell has no water plane.");
-			}
-		} else {
-			const auto detail = GetValidationDetail();
-			dmui::ui::TextDisabled(
-				"Inactive: %s",
-				detail.empty() ?
-					"shader delivery path unavailable" :
-					detail.c_str());
-		}
-
 		Menu::Get().DrawDebugViewSelector(*this);
-		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
-			tooltip.Visible()) {
-			dmui::ui::Text(
-				"%s",
-				"Caustics uses the production shader and sampler in an isolated pass. "
-				"Submersion shows depth below each cell's water plane.");
-		}
 	}
 
 	void WaterEffects::RestoreDefaultSettings()

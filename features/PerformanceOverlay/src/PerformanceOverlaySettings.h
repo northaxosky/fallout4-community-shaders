@@ -30,8 +30,6 @@ namespace cs::features::performance_overlay
 		float TextSize = 1.0f;
 		float BackgroundOpacity = 0.5f;
 		bool ShowBorder = true;
-		settings::Float2 Position{ 10.0f, 10.0f };
-		bool PositionSet = false;
 		std::string toggleHotkey = "F10";
 	};
 
@@ -49,8 +47,6 @@ namespace cs::features::performance_overlay
 			settings::Field{ "TextSize", "Text Size", &Settings::TextSize, settings::Range{ 0.8f, 1.2f } },
 			settings::Field{ "BackgroundOpacity", "Background Opacity", &Settings::BackgroundOpacity, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "ShowBorder", "Show Border", &Settings::ShowBorder },
-			settings::Float2Field<Settings>{ "Position", "Overlay position", &Settings::Position },
-			settings::Field{ "PositionSet", "Overlay position has been set", &Settings::PositionSet },
 			settings::Field{ "toggle_hotkey", "Suggested overlay toggle binding; the host's saved override takes precedence.", &Settings::toggleHotkey } }
 	};
 }

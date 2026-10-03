@@ -478,24 +478,6 @@ namespace cs::features
 		},
 			wetness_math::kSchema.fields);
 
-		const bool operational = _injectionsOperational.load(std::memory_order_relaxed);
-		if (operational && _settings.enabled) {
-			dmui::ui::TextDisabled(
-				"Weather wetness: %.2f | exterior: %s",
-				_weatherWetness.load(std::memory_order_relaxed),
-				_isExterior.load(std::memory_order_relaxed) ? "yes" : "no");
-		} else if (operational) {
-			dmui::ui::TextDisabled(
-				"Disabled: publishing zero wetness (weather wetness %.2f).",
-				_weatherWetness.load(std::memory_order_relaxed));
-		} else {
-			dmui::ui::TextDisabled(
-				"Inactive: %s",
-				_validationDetail.empty() ?
-					"shader delivery path unavailable" :
-					_validationDetail.c_str());
-		}
-
 		Menu::Get().DrawDebugViewSelector(*this);
 	}
 

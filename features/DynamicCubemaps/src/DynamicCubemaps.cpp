@@ -189,11 +189,6 @@ namespace cs::features
 		texture.texture = _previewSRV.get();
 		texture.width = kPreviewWidth;
 		texture.height = kPreviewHeight;
-		texture.caption = std::format(
-			"{} mip 0, equirectangular +X center/+Z up; screen-right is -Y; Reinhard display; polar stretching is expected",
-			visualization == DebugVisualization::kCaptureInput ?
-				"Distance-validated inference input" :
-				"Filtered reflections");
 		return texture;
 	}
 
@@ -1255,10 +1250,9 @@ namespace cs::features
 	{
 		settings::SettingsEdit edit{ *this };
 		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
-		dmui::ui::TextDisabled(
-			"Off restores native water reflections and pauses capture.");
 		changed |= edit.Discrete(dmui::ui::Checkbox("Enable Screen Space Reflections", &_settings.enabledSSR));
-		dmui::ui::TextDisabled("Enable screen-space reflections on all surfaces, including water.");
+		if (dmui::ui::IsItemHovered())
+			dmui::ui::SetTooltip("Enable all screen-space reflections, including water.");
 		if (changed) {
 			PublishSettings();
 		}

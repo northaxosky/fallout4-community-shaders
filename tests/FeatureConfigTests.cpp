@@ -358,7 +358,7 @@ namespace
 		CHECK(!restored.enableExperimentalSpecularGI && restored.depthFadeRange[0] == 30000.0f && resets == 1);
 	}
 
-	void TestOverlayPosition()
+	void TestLegacyOverlaySettings()
 	{
 		using namespace cs::features::performance_overlay;
 		Settings value;
@@ -368,12 +368,9 @@ namespace
 		serialized << toml::table{ { "settings", SerializeFull(kSchema, value) } };
 		Settings restored;
 		CHECK(Parse(kSchema, toml::parse(serialized.str()), restored, error));
-		CHECK(restored.Position == value.Position && restored.PositionSet && restored.FrameHistorySize == 1800);
-		const auto validPosition = restored.Position;
-		CHECK(!Parse(kSchema, toml::parse("[settings]\nPosition = [10.0, nan]"), restored, error));
-		CHECK(restored.Position == validPosition);
-		CHECK(!Parse(kSchema, toml::parse("[settings]\nPosition = [10.0]"), restored, error));
-		CHECK(restored.Position == validPosition);
+		CHECK(restored.FrameHistorySize == 1800);
+		CHECK(!SerializeFull(kSchema, restored).contains("Position"));
+		CHECK(!SerializeFull(kSchema, restored).contains("PositionSet"));
 	}
 }
 
@@ -393,7 +390,7 @@ int main()
 		TestRestartTiming();
 		TestLiveSettings();
 		TestSSGISettings();
-		TestOverlayPosition();
+		TestLegacyOverlaySettings();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
 		++failures;

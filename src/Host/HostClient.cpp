@@ -86,7 +86,7 @@ namespace cs::host
 			if (!RegisterPages()) {
 				(void)_client.SetStatus(
 					DMUI_STATUS_SEVERITY_ERROR,
-					"Community Shaders page registration is incomplete; callbacks are disabled.");
+					"Community Shaders menu unavailable. Restart and check FO4CommunityShaders.log.");
 				L->error(
 					"DearModdingUI page registration was only partially accepted; "
 					"registered callbacks remain disabled");
@@ -95,7 +95,7 @@ namespace cs::host
 			if (!RegisterActionsAndObservers() || !RegisterHotkeys()) {
 				(void)_client.SetStatus(
 					DMUI_STATUS_SEVERITY_ERROR,
-					"Community Shaders registration is incomplete; callbacks are disabled.");
+					"Community Shaders menu unavailable. Restart and check FO4CommunityShaders.log.");
 				L->error(
 					"DearModdingUI registration was only partially accepted; "
 					"Community Shaders callbacks remain disabled");
@@ -182,7 +182,7 @@ namespace cs::host
 				"clear-shader-cache",
 				"Clear Shader Cache",
 				"trash",
-				"Delete compiled shader records after confirmation.",
+				"",
 				[this] {
 					if (_registrationComplete.load(std::memory_order_acquire))
 						Menu::Get().RequestClearShaderCache();
@@ -543,7 +543,6 @@ namespace cs::host
 							.external = {
 								.targetKind = DMUI_EXTERNAL_TARGET_URI,
 								.target = modLink->c_str() },
-							.note = "Opens the feature download page in your default browser.",
 							.action = dmui::LinkAction::kOpenExternal }
 					};
 					if (!_client.DrawLinkRow("feature-mod-link", links))
@@ -564,8 +563,8 @@ namespace cs::host
 			dmui::SettingsRowScope row{
 				_client,
 				"feature-controls",
-				"Settings",
-				"Live feature controls.",
+				"",
+				"",
 				dmui::RowPresentation::Layout::kFullSpan
 			};
 			if (row.Result() != DMUI_RESULT_OK) {
@@ -663,7 +662,7 @@ namespace cs::host
 				_client,
 				id.c_str(),
 				"Restart required",
-				"This setting differs from its active startup value.",
+				"",
 				dmui::RowPresentation::Layout::kFullSpan
 			};
 			if (row.Result() != DMUI_RESULT_OK) {
@@ -734,7 +733,6 @@ namespace cs::host
 			}
 
 			RetrySwapChain();
-			FlushNotification();
 			Menu::Get().ObserveHostFrame(_client);
 
 			auto* performance = features::PerformanceOverlay::GetSingleton();
@@ -876,17 +874,6 @@ namespace cs::host
 				LogFailureOnce(
 					"performance overlay frame request",
 					_overlayDemandFailure);
-		}
-		if (const auto placement = _client.QueryOverlay(_overlayPage->handle);
-			placement && placement->arrangementCompleted) {
-			_overlayQueryFailure.reset();
-			performance->CommitOverlayPlacement(*placement);
-		} else if (placement) {
-			_overlayQueryFailure.reset();
-		} else {
-			LogFailureOnce(
-				"performance overlay placement query",
-				_overlayQueryFailure);
 		}
 	}
 
@@ -1077,44 +1064,18 @@ namespace cs::host
 			}
 			return;
 		}
-		if (a_message.size() > 1024)
-			a_message.resize(1024);
-		const std::scoped_lock lock{ _notificationMutex };
-		_pendingNotification = PendingNotification{
-			a_severity,
-			std::move(a_message),
-			std::clamp(a_durationMilliseconds, 250u, 30000u)
-		};
-	}
-
-	void HostClient::FlushNotification() noexcept
-	{
-		std::optional<PendingNotification> notification;
-		{
-			const std::scoped_lock lock{ _notificationMutex };
-			notification = std::move(_pendingNotification);
-			_pendingNotification.reset();
-		}
-		if (!notification)
-			return;
 		if (!_client.PostNotification(
-				notification->severity,
-				notification->message.c_str(),
-				notification->durationMilliseconds)) {
+				a_severity,
+				a_message.c_str(),
+				a_durationMilliseconds)) {
 			LogFailure("post notification");
 		}
 	}
 
-	bool HostClient::DrawAnnotatedPlot(
-		const char* a_id,
-		const DMUI_AnnotatedPlotDescriptor& a_descriptor) noexcept
+	void HostClient::ResetOverlay() noexcept
 	{
-		if (_client.DrawAnnotatedPlot(a_id, a_descriptor)) {
-			_annotatedPlotFailure.reset();
-			return true;
-		}
-		LogFailureOnce("annotated plot draw", _annotatedPlotFailure);
-		return false;
+		if (_overlayPage && !_client.ResetOverlay(_overlayPage->handle))
+			LogFailure("reset performance overlay layout");
 	}
 
 	void HostClient::LogFailure(std::string_view a_operation) const noexcept

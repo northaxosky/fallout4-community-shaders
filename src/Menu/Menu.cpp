@@ -128,6 +128,12 @@ namespace
 
 namespace cs
 {
+	Menu::Menu()
+	{
+		// The client must outlive the menu's owned dialog session.
+		(void)host::HostClient::Get();
+	}
+
 	Menu& Menu::Get()
 	{
 		static Menu instance;
@@ -261,12 +267,6 @@ namespace cs
 			"Debug visualization");
 		if (selection.changed)
 			SetDebugViewSelection(a_feature, *selection.selected);
-		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
-			tooltip.Visible()) {
-			dmui::ui::Text(
-				"%s",
-				"Fullscreen views are exclusive. Texture previews are independent.");
-		}
 		DrawDebugTexture(host::HostClient::Get().Client(), a_feature);
 	}
 
@@ -279,7 +279,6 @@ namespace cs
 			return;
 		if (selected->kind == FeatureDebugViewKind::kFullscreen) {
 			dmui::ui::TextWrapped(
-				"Fullscreen visualization: shown over the game scene, not in an image pane. "
 				"Close the menu to inspect it.");
 			return;
 		}
@@ -295,9 +294,6 @@ namespace cs
 			_debugImages.erase(std::string(a_feature.GetName()));
 			return;
 		}
-		if (!texture.caption.empty())
-			dmui::ui::TextDisabled("%s", texture.caption.c_str());
-
 		auto& cached = _debugImages[std::string(a_feature.GetName())];
 		const bool generationChanged =
 			cached.generation != _debugImageGeneration;
@@ -310,7 +306,7 @@ namespace cs
 		bool querySucceeded = true;
 		if (cached.image.Handle() && !sourceChanged) {
 			if (_hostFrameSerial < cached.retryAfterFrame) {
-				dmui::ui::TextDisabled("The host image service is temporarily unavailable.");
+				dmui::ui::TextDisabled("Preview unavailable. See FO4CommunityShaders.log.");
 				return;
 			}
 			imageInfo = a_client.QueryImage(cached.image.Handle());
@@ -347,7 +343,6 @@ namespace cs
 				cached.height = texture.height;
 				cached.generation = _debugImageGeneration;
 				const auto result = a_client.LastResult();
-				cached.importResult = result;
 				cached.importFailure =
 					result == DMUI_RESULT_UNSUPPORTED_RESOURCE ||
 							result == DMUI_RESULT_INVALID_ARGUMENT ?
@@ -368,9 +363,7 @@ namespace cs
 					cached.loggedFailure = result;
 				}
 				dmui::ui::TextDisabled(
-					"Image import failed: %s (code %u). See the cs.menu log.",
-					DMUI_ResultToString(cached.importResult),
-					cached.importResult);
+					"Preview unavailable. See FO4CommunityShaders.log.");
 				return;
 			}
 			cached.source = texture.texture;
@@ -381,14 +374,11 @@ namespace cs
 		}
 		if (cached.importFailure != host::ImageImportFailure::kNone) {
 			dmui::ui::TextDisabled(
-				"Image import failed: %s (code %u). See the cs.menu log.",
-				DMUI_ResultToString(cached.importResult),
-				cached.importResult);
+				"Preview unavailable. See FO4CommunityShaders.log.");
 			return;
 		}
 
 		const DMUI_ImageDrawOptions options{
-			DMUI_IMAGE_DRAW_OPTIONS_0_1_SIZE,
 			{ (std::max)(1.0f, dmui::ui::GetContentRegionAvail().x), 0.0f },
 			{ 0.0f, 0.0f },
 			{ 1.0f, 1.0f },
@@ -396,11 +386,11 @@ namespace cs
 			1u,
 			0u
 		};
-		if (!a_client.DrawImage(cached.image.Handle(), options)) {
+		if (!dmui::ui::Image(cached.image.Handle(), options)) {
 			L->warn(
 				"Debug image draw failed for {}: {}",
 				a_feature.GetName(),
-				DMUI_ResultToString(a_client.LastResult()));
+				DMUI_ResultToString(dmui::ui::LastResult()));
 		}
 	}
 
@@ -415,23 +405,9 @@ namespace cs
 				"draw home title"))
 			return;
 		dmui::ui::TextWrapped(
-			"Modern rendering features for Fallout 4. Features ship disabled; "
+			"Features ship disabled; "
 			"choose which features to load in Advanced, then restart. "
 			"Use Enabled on each loaded feature's page to toggle its effect live.");
-
-		std::size_t installed{};
-		std::size_t active{};
-		for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
-			if (!feature)
-				continue;
-			installed += feature->IsInstalled() ? 1u : 0u;
-			active += feature->IsActive() ? 1u : 0u;
-		}
-		dmui::ui::Text(
-			"Features installed: %zu of %zu (%zu loaded)",
-			installed,
-			FeatureManager::Get().GetRegisteredFeatures().size(),
-			active);
 
 		DrawFeatureOverview(a_client);
 
@@ -453,10 +429,9 @@ namespace cs
 				.external = {
 					.targetKind = DMUI_EXTERNAL_TARGET_URI,
 					.target = "https://github.com/northaxosky/fallout4-community-shaders" },
-				.note = "Opens the project page in your default browser.",
 				.glyph = githubGlyph,
 				.action = dmui::LinkAction::kOpenExternal },
-			dmui::Link{ .label = "Nexus Mods", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://www.nexusmods.com/fallout4/mods/109442" }, .note = "Opens the mod page in your default browser.", .glyph = nexusGlyph, .action = dmui::LinkAction::kOpenExternal }, dmui::Link{ .label = "Discord", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://discord.com/invite/nkrQybAsyy" }, .note = "Opens the Community Shaders Discord in your default browser.", .glyph = discordGlyph, .action = dmui::LinkAction::kOpenExternal }
+			dmui::Link{ .label = "Nexus Mods", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://www.nexusmods.com/fallout4/mods/109442" }, .glyph = nexusGlyph, .action = dmui::LinkAction::kOpenExternal }, dmui::Link{ .label = "Discord", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://discord.com/invite/nkrQybAsyy" }, .glyph = discordGlyph, .action = dmui::LinkAction::kOpenExternal }
 		};
 		if (!CheckHostResult(
 				a_client,
@@ -475,10 +450,7 @@ namespace cs
 				"Every feature ships disabled. Check it under Advanced > Load on startup, then restart." },
 			dmui::FaqEntry{
 				"Where are settings stored?",
-				"FO4CommunityShaders.toml is created on first launch (in MO2, under Overwrite). The menu writes changed values; Reset restores commented defaults." },
-			dmui::FaqEntry{
-				"Why is there no standalone menu?",
-				"Community Shaders is forwarding-only. Without a compatible DearModdingUI host, shader features continue headless." }
+				"FO4CommunityShaders.toml is created on first launch (in MO2, under Overwrite)." }
 		};
 		(void)CheckHostResult(
 			a_client,
@@ -493,10 +465,6 @@ namespace cs
 				a_client.DrawSectionHeader("Feature status"),
 				"draw feature status section"))
 			return;
-		dmui::ui::TextWrapped(
-			"Loaded means the feature was loaded at startup. "
-			"Its Enabled setting controls whether the effect is currently applied; "
-			"live controls are on each feature's page.");
 		dmui::SettingsTableScope table{ a_client, "home-feature-status" };
 		if (table.Result() != DMUI_RESULT_OK) {
 			CheckHostResult(a_client, false, "begin feature status table");
@@ -576,14 +544,6 @@ namespace cs
 				a_client,
 				a_client.DrawSectionHeader("Shader Ownership"),
 				"draw shader ownership section"))
-			return;
-		if (!CheckHostResult(
-				a_client,
-				dmui::DrawStyledText(
-					a_client,
-					"Off binds the game's shader for that type, including feature changes to it.",
-					{ .wrapped = true }),
-				"draw shader ownership help"))
 			return;
 		{
 			dmui::SettingsTableScope table{ a_client, "advanced-shader-ownership" };
@@ -686,7 +646,7 @@ namespace cs
 						a_client,
 						"shader-cache-location",
 						"Cache directory",
-						"Compiled shader records are stored here."
+						""
 					};
 					if (location.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader cache location row");
@@ -711,7 +671,7 @@ namespace cs
 					a_client,
 					"open-shader-cache",
 					"Open cache folder",
-					"Open the physical cache location. Under MO2 this may be in Overwrite."
+					"Under MO2 this may be in Overwrite."
 				};
 				if (open.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin open shader cache row");
@@ -757,7 +717,7 @@ namespace cs
 					a_client,
 					"open-configuration-folder",
 					"Configuration file location",
-					"Open the physical location of FO4CommunityShaders.toml."
+					""
 				};
 				if (folder.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin configuration folder row");
@@ -785,8 +745,7 @@ namespace cs
 			return;
 		{
 			dmui::ui::TextWrapped(
-				"Checked features load when the game starts. Changes require a restart. "
-				"Use Enabled on a feature's page to switch its effect on or off now.");
+				"Changes require a restart.");
 			dmui::SettingsTableScope table{ a_client, "advanced-startup-loading" };
 			if (table.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin startup loading table");
@@ -876,7 +835,7 @@ namespace cs
 					a_client,
 					"global-log-level",
 					"Global level",
-					"Default severity threshold for Community Shaders loggers."
+					""
 				};
 				if (global.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin global logging row");
@@ -933,7 +892,7 @@ namespace cs
 						a_client,
 						id.c_str(),
 						name.c_str(),
-						"Overrides the global logging level for this channel."
+						""
 					};
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin log channel row");
@@ -982,7 +941,7 @@ namespace cs
 						a_client,
 						"telemetry-enabled",
 						"Emit telemetry",
-						"Collect cached feature and frame diagnostics for log dumps."
+						""
 					};
 					if (enabledRow.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin telemetry enabled row");
@@ -1004,7 +963,7 @@ namespace cs
 					a_client,
 					"telemetry-dump",
 					"Dump now",
-					"Write the current diagnostic snapshot to the log."
+					""
 				};
 				if (dump.Result() != DMUI_RESULT_OK) {
 					CheckHostResult(a_client, false, "begin telemetry dump row");
@@ -1039,7 +998,6 @@ namespace cs
 				const std::array values{
 					std::pair{ "Plugin version", Plugin::VERSION.string(".") },
 					std::pair{ "Build", std::string(CS_BUILD_DESCRIBE) },
-					std::pair{ "Commit", std::string(CS_BUILD_GIT_SHA) },
 					std::pair{ "GPU adapter", util::AdapterDescription(engine::GetDevice()) }
 				};
 				for (std::size_t index = 0; index < values.size(); ++index) {
@@ -1098,7 +1056,7 @@ namespace cs
 				a_client,
 				"active-preset",
 				"Active preset",
-				"The last preset applied to live feature settings."
+				""
 			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin active preset row");
@@ -1153,7 +1111,7 @@ namespace cs
 				a_client,
 				"preset-selection",
 				"Preset",
-				"Choose a built-in or user preset."
+				""
 			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin preset selection row");
@@ -1190,8 +1148,8 @@ namespace cs
 		dmui::SettingsRowScope actions{
 			a_client,
 			"preset-actions",
-			"Actions",
-			"Load, save, copy, delete, or rescan presets.",
+			"",
+			"",
 			dmui::RowPresentation::Layout::kFullSpan
 		};
 		if (actions.Result() != DMUI_RESULT_OK) {
@@ -1235,10 +1193,8 @@ namespace cs
 		}
 
 		dmui::ui::SameLine();
-		if (dmui::ui::Button("Save As...") &&
-			_dialog.operation == DialogOperation::kNone) {
+		if (dmui::ui::Button("Save As...") && !_dialog.Active()) {
 			const DMUI_DialogDescriptor descriptor{
-				DMUI_DIALOG_DESCRIPTOR_0_1_SIZE,
 				DMUI_DIALOG_KIND_TEXT_ENTRY,
 				"Save Preset As",
 				"Enter a unique preset name using ASCII letters, digits, underscore, or hyphen.",
@@ -1248,22 +1204,39 @@ namespace cs
 				"",
 				65u
 			};
-			StartDialog(a_client, DialogOperation::kSavePresetAs, descriptor);
+			StartDialog(a_client, descriptor, [](std::string_view a_text) -> std::optional<std::string> {
+				auto& manager = PresetManager::Get();
+				std::string error;
+				if (!ValidatePresetName(a_text, manager.List(), error))
+					return "Invalid name: " + error;
+				const std::string name(a_text);
+				const auto path = std::filesystem::path(kPresetRoot) / (name + ".toml");
+				if (!manager.Save(path, name, error))
+					return error;
+				manager.Refresh();
+				if (const auto* saved = manager.FindByName(name, true)) {
+					manager.activeIdentity = saved->identity;
+					manager.activeName = saved->name;
+					manager.pendingComboIdentity = saved->identity;
+				}
+				if (!manager.SaveCoreConfig())
+					return "Preset was saved, but active preset configuration could not be persisted.";
+				manager.lastError.clear();
+				ShowToast("Preset saved", 2.5, DMUI_STATUS_SEVERITY_SUCCESS);
+				return std::nullopt;
+			});
 		}
 
 		dmui::ui::SameLine();
 		{
 			const dmui::DisabledScope disabled{ !active || active->builtin };
 			if (dmui::ui::Button("Delete") && active && !active->builtin &&
-				_dialog.operation == DialogOperation::kNone) {
-				_dialog.presetIdentity = active->identity;
-				_dialog.presetName = active->name;
-				_dialog.presetPath = active->path;
+				!_dialog.Active()) {
+				const PresetMeta target{ active->name, active->identity, active->path, false };
 				const auto body = std::format(
 					"Delete preset '{}'? File is removed from disk. This cannot be undone.",
 					active->name);
 				const DMUI_DialogDescriptor descriptor{
-					DMUI_DIALOG_DESCRIPTOR_0_1_SIZE,
 					DMUI_DIALOG_KIND_CONFIRM,
 					"Delete Preset",
 					body.c_str(),
@@ -1273,7 +1246,22 @@ namespace cs
 					nullptr,
 					1u
 				};
-				StartDialog(a_client, DialogOperation::kDeletePreset, descriptor);
+				StartDialog(a_client, descriptor, [target](std::string_view) -> std::optional<std::string> {
+					auto& manager = PresetManager::Get();
+					std::string error;
+					if (!manager.Delete(target, error))
+						return error;
+					manager.Refresh();
+					manager.activeIdentity.clear();
+					manager.activeName.clear();
+					manager.pendingComboIdentity.clear();
+					manager.autoLoadOnBoot = false;
+					if (!manager.SaveCoreConfig())
+						return "Preset was deleted, but preset configuration could not be persisted.";
+					manager.lastError.clear();
+					ShowToast("Preset deleted", 2.5, DMUI_STATUS_SEVERITY_SUCCESS);
+					return std::nullopt;
+				});
 			}
 		}
 
@@ -1294,7 +1282,7 @@ namespace cs
 				a_client,
 				"preset-auto-load",
 				"Auto-load on boot",
-				"Apply the active preset during startup."
+				""
 			};
 			if (row.Result() != DMUI_RESULT_OK) {
 				CheckHostResult(a_client, false, "begin preset auto-load row");
@@ -1314,18 +1302,19 @@ namespace cs
 	void Menu::ObserveHostFrame(dmui::Client& a_client)
 	{
 		++_hostFrameSerial;
-		ProcessDialog(a_client);
-		const auto operation = _clearRequested.exchange(DialogOperation::kNone, std::memory_order_acq_rel);
-		if (operation == DialogOperation::kNone)
+		const bool active = _dialog.Active();
+		_dialog.Poll();
+		if (active && _dialog.LastResult() != DMUI_RESULT_OK)
+			L->warn("Dialog polling failed: {}", DMUI_ResultToString(_dialog.LastResult()));
+		const auto operation = _clearRequested.exchange(ClearRequest::kNone, std::memory_order_acq_rel);
+		if (operation == ClearRequest::kNone)
 			return;
-		if (_dialog.operation != DialogOperation::kNone) {
+		if (_dialog.Active()) {
 			ShowToast("Finish the current dialog before deleting files.", 4.0);
 			return;
 		}
-		const bool captures = operation == DialogOperation::kClearRenderDocCaptures;
-		// FO4: capture deletion shares native confirmation and submission tracking with cache deletion.
+		const bool captures = operation == ClearRequest::kClearRenderDocCaptures;
 		const DMUI_DialogDescriptor descriptor{
-			DMUI_DIALOG_DESCRIPTOR_0_1_SIZE,
 			DMUI_DIALOG_KIND_CONFIRM,
 			captures ? "Clear RenderDoc Captures" : "Clear Shader Cache",
 			captures ? "This permanently deletes every regular file in the configured capture directory, not only .rdc files." :
@@ -1336,9 +1325,23 @@ namespace cs
 			nullptr,
 			1u
 		};
-		StartDialog(a_client, operation, descriptor);
-		if (captures && _dialog.operation == operation)
-			_dialog.capturePath = features::RenderDoc::GetSingleton()->CaptureDirectory();
+		if (captures) {
+			const auto path = features::RenderDoc::GetSingleton()->CaptureDirectory();
+			StartDialog(a_client, descriptor, [path](std::string_view) -> std::optional<std::string> {
+				auto* renderDoc = features::RenderDoc::GetSingleton();
+				if (path != renderDoc->CaptureDirectory())
+					return "The capture directory changed; cancel and request deletion again.";
+				renderDoc->ClearCaptures();
+				return std::nullopt;
+			});
+		} else {
+			StartDialog(a_client, descriptor, [this](std::string_view) -> std::optional<std::string> {
+				std::string error;
+				if (!ClearShaderCache(error))
+					return error;
+				return std::nullopt;
+			});
+		}
 	}
 
 	void Menu::OnHostDeviceReady() noexcept
@@ -1349,190 +1352,22 @@ namespace cs
 
 	void Menu::StartDialog(
 		dmui::Client& a_client,
-		DialogOperation a_operation,
-		const DMUI_DialogDescriptor& a_descriptor)
+		const DMUI_DialogDescriptor& a_descriptor,
+		dmui::DialogSession::Submit a_submit)
 	{
-		const auto dialog = a_client.RequestDialog(a_descriptor);
-		if (!dialog) {
+		if (!_dialog.Open(a_client, a_descriptor, [submit = std::move(a_submit)](std::string_view a_text) -> std::optional<std::string> {
+				try {
+					return submit(a_text);
+				} catch (const std::exception& error) {
+					return std::format("Operation failed: {}", error.what());
+				} catch (...) {
+					return "Operation failed with a non-standard exception.";
+				}
+			})) {
 			L->warn(
 				"Dialog request failed: {}",
-				DMUI_ResultToString(a_client.LastResult()));
-			return;
+				DMUI_ResultToString(_dialog.LastResult()));
 		}
-		_dialog.operation = a_operation;
-		_dialog.handle = *dialog;
-		_dialog.submissions.Reset();
-		_dialog.polling.Succeeded();
-		_dialog.resolution.Succeeded();
-		_dialog.text.clear();
-	}
-
-	void Menu::ProcessDialog(dmui::Client& a_client)
-	{
-		if (_dialog.handle == DMUI_INVALID_DIALOG_HANDLE ||
-			!_dialog.polling.Ready(_hostFrameSerial))
-			return;
-		const auto event = a_client.PollDialogEvent(_dialog.handle, _dialog.text);
-		if (!event) {
-			HandleDialogFailure(
-				"polling", a_client.LastResult(), _dialog.polling);
-			return;
-		}
-		_dialog.polling.Succeeded();
-		if (event->kind == DMUI_DIALOG_EVENT_SUBMITTED &&
-			_dialog.submissions.ShouldExecute(event->submissionId)) {
-			try {
-				auto outcome = ExecuteDialogSubmission(*event, _dialog.text);
-				_dialog.submissions.RecordOutcome(
-					outcome.submission,
-					outcome.accepted,
-					std::move(outcome.error));
-			} catch (const std::exception& error) {
-				_dialog.submissions.RecordOutcome(
-					event->submissionId,
-					false,
-					std::format("Operation failed: {}", error.what()));
-			} catch (...) {
-				_dialog.submissions.RecordOutcome(
-					event->submissionId,
-					false,
-					"Operation failed with a non-standard exception.");
-			}
-			RetryDialogResolution(a_client, *event);
-		} else if (event->kind == DMUI_DIALOG_EVENT_SUBMITTED &&
-				   _dialog.submissions.Pending(event->submissionId)) {
-			RetryDialogResolution(a_client, *event);
-		} else if (event->kind == DMUI_DIALOG_EVENT_CANCELLED ||
-				   event->kind == DMUI_DIALOG_EVENT_COMPLETED) {
-			_dialog = {};
-		}
-	}
-
-	host::DialogSubmissionTracker::Outcome Menu::ExecuteDialogSubmission(
-		const DMUI_DialogEvent& a_event,
-		std::string_view a_text)
-	{
-		auto& presets = PresetManager::Get();
-		std::string error;
-		bool accepted{};
-		switch (_dialog.operation) {
-		case DialogOperation::kClearCache:
-			accepted = ClearShaderCache(error);
-			break;
-		case DialogOperation::kClearRenderDocCaptures:
-			{
-				auto* renderDoc = features::RenderDoc::GetSingleton();
-				if (_dialog.capturePath != renderDoc->CaptureDirectory()) {
-					error = "The capture directory changed; cancel and request deletion again.";
-					break;
-				}
-				renderDoc->ClearCaptures();
-				accepted = true;
-			}
-			break;
-		case DialogOperation::kSavePresetAs:
-			if (!ValidatePresetName(a_text, presets.List(), error)) {
-				error = "Invalid name: " + error;
-				break;
-			}
-			{
-				const std::string name(a_text);
-				const auto path =
-					std::filesystem::path(kPresetRoot) / (name + ".toml");
-				if (!presets.Save(path, name, error))
-					break;
-				presets.Refresh();
-				if (const auto* saved = presets.FindByName(name, true)) {
-					presets.activeIdentity = saved->identity;
-					presets.activeName = saved->name;
-					presets.pendingComboIdentity = saved->identity;
-				}
-				if (!presets.SaveCoreConfig()) {
-					error =
-						"Preset was saved, but active preset configuration could not be persisted.";
-					break;
-				}
-				presets.lastError.clear();
-				accepted = true;
-			}
-			break;
-		case DialogOperation::kDeletePreset:
-			{
-				PresetMeta target{
-					_dialog.presetName,
-					_dialog.presetIdentity,
-					_dialog.presetPath,
-					false
-				};
-				if (!presets.Delete(target, error))
-					break;
-				presets.Refresh();
-				presets.activeIdentity.clear();
-				presets.activeName.clear();
-				presets.pendingComboIdentity.clear();
-				presets.autoLoadOnBoot = false;
-				if (!presets.SaveCoreConfig()) {
-					error =
-						"Preset was deleted, but preset configuration could not be persisted.";
-					break;
-				}
-				presets.lastError.clear();
-				accepted = true;
-			}
-			break;
-		default:
-			error = "No dialog operation is active.";
-			break;
-		}
-
-		return {
-			a_event.submissionId,
-			accepted,
-			std::move(error)
-		};
-	}
-
-	void Menu::RetryDialogResolution(
-		dmui::Client& a_client,
-		const DMUI_DialogEvent& a_event)
-	{
-		const auto* outcome =
-			_dialog.submissions.Pending(a_event.submissionId);
-		if (!outcome || !_dialog.resolution.Ready(_hostFrameSerial))
-			return;
-		if (!a_client.ResolveDialogSubmission(
-				_dialog.handle,
-				outcome->submission,
-				outcome->accepted,
-				outcome->accepted ? nullptr : outcome->error.c_str())) {
-			HandleDialogFailure(
-				"resolution", a_client.LastResult(), _dialog.resolution);
-			return;
-		}
-		_dialog.resolution.Succeeded();
-		if (!outcome->accepted &&
-			(_dialog.operation == DialogOperation::kSavePresetAs ||
-				_dialog.operation == DialogOperation::kDeletePreset))
-			PresetManager::Get().lastError = outcome->error;
-		_dialog.submissions.ResolutionSucceeded(outcome->submission);
-	}
-
-	void Menu::HandleDialogFailure(
-		std::string_view a_operation,
-		DMUI_Result a_result,
-		host::DialogCallRetry& a_retry)
-	{
-		if (a_retry.Failed(a_result, _hostFrameSerial)) {
-			L->warn(
-				"Dialog {} failed: {}",
-				a_operation,
-				DMUI_ResultToString(a_result));
-		}
-		if (host::DialogCallRetry::HandleLost(a_result)) {
-			L->warn("The host no longer owns this dialog; clearing its local request state.");
-			_dialog = {};
-		}
-		// Transient failures retain submitted outcomes so retries never repeat disk operations.
 	}
 
 	bool Menu::ClearShaderCache(std::string& a_error)
@@ -1557,12 +1392,12 @@ namespace cs
 
 	void Menu::RequestClearShaderCache() noexcept
 	{
-		_clearRequested.store(DialogOperation::kClearCache, std::memory_order_release);
+		_clearRequested.store(ClearRequest::kClearCache, std::memory_order_release);
 	}
 
 	void Menu::RequestClearRenderDocCaptures() noexcept
 	{
-		_clearRequested.store(DialogOperation::kClearRenderDocCaptures, std::memory_order_release);
+		_clearRequested.store(ClearRequest::kClearRenderDocCaptures, std::memory_order_release);
 	}
 
 	bool Menu::CheckHostResult(
@@ -1601,8 +1436,7 @@ namespace cs
 		host::HostClient::Get().PostNotification(
 			a_severity,
 			std::move(a_text),
-			static_cast<std::uint32_t>(
-				std::clamp(a_durationSec * 1000.0, 250.0, 30000.0)));
+			static_cast<std::uint32_t>(a_durationSec * 1000.0));
 	}
 
 }

@@ -13,6 +13,7 @@
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
+#include <RE/B/BSShaderManager.h>
 
 #include <algorithm>
 #include <cmath>
@@ -34,6 +35,33 @@ namespace cs::features
 		float CostPerCall(float a_ms, float a_calls)
 		{
 			return a_calls > 0.0f ? a_ms / a_calls : 0.0f;
+		}
+
+		const char* ShaderTooltip(int a_type)
+		{
+			using Type = RE::BSShaderManager::ShaderEnum;
+			switch (static_cast<Type>(a_type)) {
+			case Type::kSky:
+				return "Draw calls for the sky dome, clouds, and related effects.";
+			case Type::kWater:
+				return "Draw calls for water surfaces and effects.";
+			case Type::kLighting:
+				return "Draw calls for dynamic and static lighting passes.";
+			case Type::kEffect:
+				return "Draw calls for special effects, particles, and post-processing.";
+			case Type::kUtility:
+				return "Draw calls for utility passes, such as shadow masks or G-buffer fills.";
+			case Type::kDistantTree:
+				return "Draw calls for distant tree rendering (LOD vegetation).";
+			case Type::kParticle:
+				return "Draw calls for particle systems (smoke, sparks, etc.).";
+			case Type::kBloodSpatter:
+				return "Draw calls for blood splatter effects.";
+			case Type::kImageSpace:
+				return "Draw calls for image space post-processing effects.";
+			default:
+				return "Draw calls for this shader type.";
+			}
 		}
 
 		void SortHeader(std::span<const char* const> a_labels, int& a_column, bool& a_descending)
@@ -437,7 +465,7 @@ namespace cs::features
 			rows.push_back({ timing.name, timing.type, static_cast<int>(timing.calls),
 				timing.milliseconds, Percentage(timing.milliseconds, measured),
 				CostPerCall(timing.milliseconds, timing.calls),
-				"CPU interval attribution at native draw submission boundaries; not GPU time.",
+				ShaderTooltip(timing.type),
 				true, {}, {} });
 		}
 		float other = _displayMs - measured;
@@ -446,22 +474,34 @@ namespace cs::features
 		const float csPasses = render::profiling::GetProfiler().GetTotalTimeMs();
 		const float remainingOther = std::max(0.0f, other - csPasses);
 		rows.push_back({ "CS Passes:", -3, -1, csPasses, Percentage(csPasses, _displayMs), 0.0f,
-			"D3D11 GPU query time for instrumented Community Shaders passes.", true, {}, {} });
+			"GPU time spent in Community Shaders compute passes (profiled).", true, {}, {} });
 		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, _displayMs), 0.0f,
-			"Frame time not attributed to a shader family or profiled CS pass.", true, {}, {} });
+			"Frame time not attributed to any measured shader type or CS compute pass. This includes UI, post-processing, engine work, and any GPU activity not directly measured.", true, {}, {} });
 		rows.push_back({ "Total:", -1, static_cast<int>(calls), _displayMs, 100.0f,
 			CostPerCall(_displayMs, calls), "Total frame time.", true, {}, {} });
 		return rows;
 	}
 
-	void PerformanceOverlay::DrawGraph(const char* a_label, const CircularBuffer<float>& a_history, dmui::ui::Vec4 a_color)
+	void PerformanceOverlay::DrawGraph(const char* a_id, const char* a_overlay, const CircularBuffer<float>& a_history, dmui::ui::Vec4 a_color)
 	{
 		const auto samples = a_history.GetData();
 		dmui::ui::PushStyleColor(dmui::ui::Color::kPlotLines, a_color);
-		dmui::ui::PlotLines(a_label, samples.data(), static_cast<int>(samples.size()),
-			static_cast<int>(a_history.GetHeadIdx()), nullptr, _graphMin, _graphMax, { 600.0f, 50.0f });
+		dmui::ui::PlotLines(a_id, samples.data(), static_cast<int>(samples.size()),
+			static_cast<int>(a_history.GetHeadIdx()), a_overlay, _graphMin, _graphMax,
+			{ OverlayContentWidth(), 50.0f * settings.TextSize });
 		dmui::ui::PopStyleColor();
-		dmui::ui::TextDisabled("30 FPS: 33.3 ms     60 FPS: 16.7 ms     120 FPS: 8.3 ms");
+		if (dmui::ui::BeginTable(a_id, 3, dmui::ui::TableFlags::kSizingStretchSame)) {
+			for (const char* target : { "30 FPS: 33.3 ms", "60 FPS: 16.7 ms", "120 FPS: 8.3 ms" }) {
+				(void)dmui::ui::TableNextColumn();
+				dmui::ui::TextUnformatted(target);
+			}
+			dmui::ui::EndTable();
+		}
+	}
+
+	float PerformanceOverlay::OverlayContentWidth() noexcept
+	{
+		return dmui::ui::GetContentRegionAvail().x * 0.9f;
 	}
 
 	void PerformanceOverlay::DrawDrawCalls(const std::vector<DrawCallRow>& a_rows)
@@ -501,7 +541,6 @@ namespace cs::features
 				dmui::ui::TextUnformatted("-");
 		}
 		dmui::ui::EndTable();
-		dmui::ui::TextDisabled("Shader-family times are CPU interval attribution; CS pass times are D3D11 GPU queries.");
 	}
 
 	void PerformanceOverlay::DrawPasses()
@@ -545,7 +584,6 @@ namespace cs::features
 		dmui::ui::Text("CS total: %.3f GPU ms / %.3f CPU ms",
 			render::profiling::GetProfiler().GetTotalTimeMs(),
 			render::profiling::GetProfiler().GetCpuTotalTimeMs());
-		dmui::ui::TextDisabled("D3D11 query timings exclude D3D12 provider execution.");
 	}
 
 	void PerformanceOverlay::DrawTestResults()
@@ -650,12 +688,16 @@ namespace cs::features
 				const auto samples = _history.GetData();
 				if (std::ranges::all_of(samples, [](float a_sample) { return a_sample > 0.0f; }))
 					dmui::ui::Text("Avg: %.1f FPS", Util::CalcFPS(_averageMs));
-				if (settings.ShowPreFGFrameTimeGraph)
-					DrawGraph("Pre-FG Frame Time", _history, { 0.0f, 1.0f, 0.0f, 1.0f });
+				if (settings.ShowPreFGFrameTimeGraph) {
+					const auto overlay = std::format("{}{:.2f} ms ({:.1f} FPS)", _frameGeneration ? "Pre-FG: " : "", _displayMs, _displayFps);
+					DrawGraph("##frametime", overlay.c_str(), _history, { 0.0f, 1.0f, 0.0f, 1.0f });
+				}
 				if (_frameGeneration) {
 					dmui::ui::Text("[Post-FG calculated, 2x] %.1f FPS (%.2f ms)", _postDisplayFps, _postDisplayMs);
-					if (settings.ShowPostFGFrameTimeGraph)
-						DrawGraph("Post-FG Frame Time", _postHistory, { 0.0f, 0.5f, 1.0f, 1.0f });
+					if (settings.ShowPostFGFrameTimeGraph) {
+						const auto overlay = std::format("Post-FG: {:.2f} ms ({:.1f} FPS)", _postDisplayMs, _postDisplayFps);
+						DrawGraph("##postfgframetime", overlay.c_str(), _postHistory, { 0.0f, 0.5f, 1.0f, 1.0f });
+					}
 				}
 			}
 			if (settings.ShowVRAM) {
@@ -663,7 +705,7 @@ namespace cs::features
 					const float fraction = static_cast<float>(static_cast<double>(_vramUsed) / static_cast<double>(_vramBudget));
 					dmui::ui::Text("VRAM %.2f / %.2f GB (%.1f%%)",
 						_vramUsed / (1024.0 * 1024 * 1024), _vramBudget / (1024.0 * 1024 * 1024), fraction * 100.0f);
-					dmui::ui::ProgressBar(fraction, { 600.0f, 0.0f }, "");
+					dmui::ui::ProgressBar(fraction, { OverlayContentWidth(), 0.0f }, "");
 				} else {
 					dmui::ui::TextDisabled("VRAM unavailable");
 				}
@@ -687,74 +729,72 @@ namespace cs::features
 			edit.Continuous(dmui::ui::SliderScalar(label, &(settings.*member), &range.min, &range.max, format,
 				dmui::ui::SliderFlags::kAlwaysClamp));
 		};
-		dmui::ui::TextDisabled("The host owns the overlay hotkey. Suggested default: %s.", settings.toggleHotkey.c_str());
 		checkbox("Show in Overlay", settings.ShowInOverlay);
 		if (settings.ShowInOverlay) {
-			dmui::ui::Separator();
-			checkbox("Show FPS Counter", settings.ShowFPS);
-			checkbox("Show Draw Calls", settings.ShowDrawCalls);
-			checkbox("Show VRAM Usage", settings.ShowVRAM);
-			checkbox("Show CS Render Passes", settings.ShowCSPasses);
-			if (settings.ShowFPS) {
-				checkbox(_frameGeneration ? "Show Pre-FG Frametime Graph" : "Show Frametime Graph", settings.ShowPreFGFrameTimeGraph);
-				if (_frameGeneration)
-					checkbox("Show Post-FG Frametime Graph", settings.ShowPostFGFrameTimeGraph);
+			if (const dmui::ui::PanelScope panel{ "overlay-content" }; panel) {
+				dmui::ui::Text("Display Options");
+				checkbox("Show FPS Counter", settings.ShowFPS);
+				checkbox("Show Draw Calls", settings.ShowDrawCalls);
+				checkbox("Show VRAM Usage", settings.ShowVRAM);
+				checkbox("Show CS Render Passes", settings.ShowCSPasses);
+				if (settings.ShowFPS) {
+					checkbox(_frameGeneration ? "Show Pre-FG Frametime Graph" : "Show Frametime Graph", settings.ShowPreFGFrameTimeGraph);
+					if (_frameGeneration)
+						checkbox("Show Post-FG Frametime Graph", settings.ShowPostFGFrameTimeGraph);
+				}
 			}
-			dmui::ui::Separator();
-			slider("Text Size", &Settings::TextSize, "%.2f");
-			slider("Background Opacity", &Settings::BackgroundOpacity, "%.2f");
-			checkbox("Show Border", settings.ShowBorder);
-			slider("Update Interval", &Settings::UpdateInterval, "%.2f seconds");
-			slider("Frame History Size", &Settings::FrameHistorySize, "%d");
-			if (edit.Discrete(dmui::ui::Button("Reset Position"))) {
-				settings.Position = { 10.0f, 10.0f };
-				settings.PositionSet = false;
-			}
-		}
-		dmui::ui::Separator();
-		dmui::ui::TextWrapped("A/B compares live-effect settings only. Capture USER before editing TEST; switches stay in memory. The startup configuration is the initial USER baseline. Set the interval to 0 to restore TEST. Activation and shader ownership never change.");
-		if (_restorePending && dmui::ui::Button("Retry TEST Restoration"))
-			AbortTest("Retrying TEST restoration");
-		dmui::ui::BeginDisabled(_testing || _restorePending);
-		if (dmui::ui::Button("Capture USER Baseline")) {
-			_baseline = CaptureSettings();
-			_test.clear();
-			_aggregator.Clear();
-			_testError.clear();
-		}
-		dmui::ui::EndDisabled();
-		int interval = _testInterval;
-		constexpr int minimum = 0, maximum = 10;
-		if (dmui::ui::SliderScalar("A/B Test Interval", &interval, &minimum, &maximum)) {
-			try {
-				SetTestInterval(interval);
-			} catch (const std::exception& error) {
-				_testError = error.what();
-				Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR);
+			if (const dmui::ui::PanelScope panel{ "overlay-layout" }; panel) {
+				dmui::ui::Text("Appearance");
+				slider("Text Size", &Settings::TextSize, "%.2f");
+				slider("Background Opacity", &Settings::BackgroundOpacity, "%.2f");
+				checkbox("Show Border", settings.ShowBorder);
+				slider("Update Interval", &Settings::UpdateInterval, "%.2f seconds");
+				slider("Frame History Size", &Settings::FrameHistorySize, "%d");
+				if (dmui::ui::Button("Reset Layout"))
+					host::HostClient::Get().ResetOverlay();
 			}
 		}
-		DrawTestResults();
+		if (const dmui::ui::PanelScope panel{ "overlay-ab-test" }; panel) {
+			dmui::ui::Text("A/B Testing");
+			dmui::ui::TextWrapped("Capture USER before editing TEST. Set the interval to 0 to restore TEST.");
+			if (_restorePending && dmui::ui::Button("Retry TEST Restoration"))
+				AbortTest("Retrying TEST restoration");
+			dmui::ui::BeginDisabled(_testing || _restorePending);
+			if (dmui::ui::Button("Capture USER Baseline")) {
+				_baseline = CaptureSettings();
+				_test.clear();
+				_aggregator.Clear();
+				_testError.clear();
+			}
+			dmui::ui::EndDisabled();
+			int interval = _testInterval;
+			constexpr int minimum = 0, maximum = 10;
+			if (dmui::ui::SliderScalar("A/B Test Interval", &interval, &minimum, &maximum)) {
+				try {
+					SetTestInterval(interval);
+				} catch (const std::exception& error) {
+					_testError = error.what();
+					Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR);
+				}
+			}
+			DrawTestResults();
+		}
 	}
 
 	DMUI_ManagedOverlayOptions PerformanceOverlay::ManagedOverlayOptions() const noexcept
 	{
 		return {
-			DMUI_MANAGED_OVERLAY_OPTIONS_0_1_SIZE, DMUI_OVERLAY_ANCHOR_FREE,
-			{ settings.Position[0], settings.Position[1] },
-			{ 600.0f, 0.0f }, { 1000.0f, 10000.0f },
-			settings.BackgroundOpacity, settings.TextSize,
-			settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, 0u
+			.anchor = DMUI_OVERLAY_ANCHOR_FREE,
+			.offset = { 10.0f, 10.0f },
+			.size = { 0.0f, 0.0f },
+			.minimumSize = { 600.0f, 0.0f },
+			.maximumSize = { 1000.0f, 10000.0f },
+			.opacity = settings.BackgroundOpacity,
+			.contentScale = settings.TextSize,
+			.backgroundVisible = settings.ShowBorder ? 1u : 0u,
+			.borderVisible = settings.ShowBorder ? 1u : 0u,
+			.allowArrangement = settings.ShowBorder ? 1u : 0u
 		};
-	}
-
-	void PerformanceOverlay::CommitOverlayPlacement(const DMUI_ManagedOverlayPlacement& a_placement)
-	{
-		const cs::settings::Float2 position{ a_placement.position.x, a_placement.position.y };
-		if (settings.Position == position && settings.PositionSet)
-			return;
-		settings.Position = position;
-		settings.PositionSet = true;
-		SaveSettings();
 	}
 
 	void PerformanceOverlay::RestoreDefaultSettings()

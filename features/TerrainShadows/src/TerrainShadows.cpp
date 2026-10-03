@@ -1382,7 +1382,6 @@ namespace cs::features
 	{
 		settings::SettingsEdit edit{ *this };
 		bool changed = edit.Discrete(dmui::ui::Checkbox("Enable Terrain Shadow", &_settings.EnableTerrainShadow));
-		dmui::ui::TextDisabled("Off publishes zero terrain shadow, which is shader identity.");
 
 		if (changed) {
 			PublishSettings();
@@ -1397,8 +1396,8 @@ namespace cs::features
 			detail = _statusDetail;
 			failed = _statusFailed;
 		}
-		dmui::ui::Separator();
 		if (failed) {
+			dmui::ui::Separator();
 			auto& client = host::HostClient::Get().Client();
 			const auto warning = std::format(
 				"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
@@ -1416,43 +1415,6 @@ namespace cs::features
 					DMUI_ResultToString(client.LastResult()));
 				return;
 			}
-		} else {
-			dmui::ui::TextDisabled(
-				"Worldspace: %s | map: %s",
-				worldspace.empty() ? "none" : worldspace.c_str(),
-				detail.empty() ? "unknown" : detail.c_str());
-		}
-		const auto sourceWidth = _sourceWidth.load(std::memory_order_relaxed);
-		const auto sourceHeight = _sourceHeight.load(std::memory_order_relaxed);
-		const auto effectiveWidth = _effectiveWidth.load(std::memory_order_relaxed);
-		const auto effectiveHeight = _effectiveHeight.load(std::memory_order_relaxed);
-		if (effectiveWidth != 0 && effectiveHeight != 0) {
-			dmui::ui::TextDisabled(
-				"Source %ux%u -> effective %ux%u | %.2f MiB",
-				sourceWidth,
-				sourceHeight,
-				effectiveWidth,
-				effectiveHeight,
-				ts::BytesToMiB(_allocatedBytes.load(std::memory_order_relaxed)));
-		} else {
-			dmui::ui::TextDisabled(
-				"No heightmap resident (%zu discovered).",
-				_discoveredMaps.load(std::memory_order_relaxed));
-		}
-		if (!_injectionsOperational.load(std::memory_order_relaxed)) {
-			dmui::ui::TextDisabled(
-				"Inactive: %s",
-				_validationDetail.empty() ?
-					"shader delivery path unavailable" :
-					_validationDetail.c_str());
-		}
-		if (effectiveWidth != 0 && effectiveHeight != 0) {
-			dmui::ui::TextDisabled(
-				"Heightmap debug view maps the 1st-99th decoded-height "
-				"percentile (%.0f..%.0f) linearly to black-white; outliers "
-				"saturate.",
-				static_cast<double>(_debugHeightRange[0]),
-				static_cast<double>(_debugHeightRange[1]));
 		}
 		Menu::Get().DrawDebugViewSelector(*this);
 	}
