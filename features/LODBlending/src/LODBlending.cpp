@@ -108,14 +108,6 @@ namespace cs::features
 			(draw(fields), ...);
 		},
 			lod_blending::kSchema.fields);
-
-		if (!_injectionsOperational.load(std::memory_order_relaxed)) {
-			dmui::ui::TextDisabled(
-				"Inactive: %s",
-				_validationDetail.empty() ?
-					"shader delivery path unavailable" :
-					_validationDetail.c_str());
-		}
 	}
 
 	void LODBlending::RestoreDefaultSettings()

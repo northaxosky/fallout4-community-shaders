@@ -21,7 +21,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Matches LOD terrain and object brightness and gamma to full-detail geometry, with optional removal of terrain vertex colors.";
+			return "LOD terrain and object brightness and gamma matching.";
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
