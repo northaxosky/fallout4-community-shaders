@@ -706,9 +706,11 @@ namespace cs::features
 			checkbox("Show Border", settings.ShowBorder);
 			slider("Update Interval", &Settings::UpdateInterval, "%.2f seconds");
 			slider("Frame History Size", &Settings::FrameHistorySize, "%d");
-			if (edit.Discrete(dmui::ui::Button("Reset Position"))) {
+			if (edit.Discrete(dmui::ui::Button("Reset Position and Size"))) {
 				settings.Position = { 10.0f, 10.0f };
 				settings.PositionSet = false;
+				settings.Size = { 600.0f, 0.0f };
+				settings.SizeSet = false;
 			}
 		}
 		dmui::ui::Separator();
@@ -739,21 +741,26 @@ namespace cs::features
 	DMUI_ManagedOverlayOptions PerformanceOverlay::ManagedOverlayOptions() const noexcept
 	{
 		return {
-			DMUI_MANAGED_OVERLAY_OPTIONS_0_1_SIZE, DMUI_OVERLAY_ANCHOR_FREE,
+			DMUI_MANAGED_OVERLAY_OPTIONS_INITIAL_SIZE_SIZE, DMUI_OVERLAY_ANCHOR_FREE,
 			{ settings.Position[0], settings.Position[1] },
 			{ 600.0f, 0.0f }, { 1000.0f, 10000.0f },
 			settings.BackgroundOpacity, settings.TextSize,
-			settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, 0u
+			settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, settings.ShowBorder ? 1u : 0u, 0u,
+			{ settings.Size[0], settings.Size[1] }
 		};
 	}
 
 	void PerformanceOverlay::CommitOverlayPlacement(const DMUI_ManagedOverlayPlacement& a_placement)
 	{
 		const cs::settings::Float2 position{ a_placement.position.x, a_placement.position.y };
-		if (settings.Position == position && settings.PositionSet)
+		const cs::settings::Float2 size{ a_placement.size.x, a_placement.size.y };
+		if (settings.Position == position && settings.PositionSet &&
+			settings.Size == size && settings.SizeSet)
 			return;
 		settings.Position = position;
 		settings.PositionSet = true;
+		settings.Size = size;
+		settings.SizeSet = true;
 		SaveSettings();
 	}
 
