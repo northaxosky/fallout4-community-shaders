@@ -17,7 +17,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](xmake.lua)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
-<sub>[Install](#installation) · [Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
+<sub>[Install](#installation) · [Features](#features) · [Activation](#feature-activation) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
 
 </div>
 
@@ -34,6 +34,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
+| **[DearModdingUI](https://github.com/Dear-Modding-FO4/DearModdingUI)** | Recommended. Provides the in-game menu and performance overlay. |
 
 ---
 
@@ -68,17 +69,6 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Performance Overlay** | FPS, frame-time, and latency graphs. |
 | **RenderDoc** | In-game frame capture for debugging. |
 
-Terrain Shadows requires an xLODGen heightmap under `Data\Textures\Terrain\<worldspace>\`
-or a custom map under `Data\Textures\HeightMaps\`. Maps use the upstream filename/height encoding
-contract and native DDS resolution. `[features.TerrainShadows.settings]` uses `EnableTerrainShadow`;
-the legacy `enabled` and `downsample_factor` keys are no longer supported.
-
-Screen Space GI settings use upstream-cased keys, including `Enabled`, `EnableGI`,
-`EnableExperimentalSpecularGI`, `ResolutionMode`, and the two-number `DepthFadeRange`
-array. Legacy snake_case keys are no longer supported. `AOPower` retains the FO4 default
-of 4 and edit range 0–12. See [deviations](docs/deviations/ScreenSpaceGI.md) for
-composition coverage and validation limits.
-
 ---
 
 ## Feature activation
@@ -96,55 +86,9 @@ The menu writes only changed values. Reset restores each setting's commented def
 
 ---
 
-## Controls
-
-Default hotkeys registered with DearModdingUI:
-
-| Hotkey | Action |
-|---|---|
-| **F10** | Toggle Performance Overlay |
-| **F11** | RenderDoc frame capture |
-| **Shift + F11** | RenderDoc multi-frame capture |
-| **Ctrl + F12** | Telemetry and diagnostic dump |
-
-Key bindings can be customized through the DearModdingUI menu.
-
-The `component=shader_injection` telemetry line reports the previous completed draw frame in
-`draw_frame`: `draw_scope_cpu_us` measures accumulated CPU time inside the injection draw scopes
-(including native draw submission), and `draw_scopes`, `draw_captures`, `draw_restores`, and
-`draw_d3d_binds` count scopes, state-save calls, restore calls, and injection D3D state-setting calls.
-These fields are per-frame; the existing `dispatches` counter is cumulative and counts contributor callbacks.
-
-With `[logging] telemetry = true`, the same line includes `<annotation-name>_gpu_ms` and
-`<annotation-name>_cpu_ms` for timed D3D11 feature passes, plus `timing_passes`. Names retain
-their separators and casing, for example `Render/CanonicalDepth_gpu_ms`, `SSGI/GI_gpu_ms`,
-`ScreenSpaceShadows/Raymarch_gpu_ms`, `DynamicCubemaps::Compress_gpu_ms`,
-`TerrainShadows/Update_gpu_ms`, and `WetnessEffects/ClearFilm_gpu_ms`.
-Fog also retains its feature-local fields such as `scattering_gpu_ms`.
-GPU timestamps run independently of Performance Overlay visibility; disabling telemetry
-releases their queries and clears their results. Enabling takes effect at the next composite
-frame boundary. Results arrive asynchronously (at least three engine frames later), not
-necessarily for `draw_frame`; inactive passes retain their last sample until retirement after
-60 collected frames. Repeated names in a collected frame are summed, not overwritten.
-CPU fields measure submission time within each scope, not GPU execution.
-D3D12 frame-generation/RCAS markers are not timestamped by this D3D11 profiler.
-
----
-
 ## In-game Menu
 
-Community Shaders uses [DearModdingUI](https://github.com/Dear-Modding-FO4/dearmoddingui) for in-game configuration, feature toggles, and the performance overlay.
-
-Without DearModdingUI, settings can be changed through the TOML configuration files.
-
-Shader ownership follows Skyrim Community Shaders: a supported type is replaced only when its
-`[shader_ownership.targets]` toggle is on and `Data\Shaders\{engine fxp name}.hlsl` exists.
-All type toggles default on; missing source files leave the native shaders stock. Imagespace effects
-use their own engine names, so only `ISSSLRRaytracing.hlsl` currently supplies an imagespace replacement.
-The Advanced menu's type toggles and `[shader_ownership] enable_shaders` master are checked at shader bind time.
-Off binds the game's shader for that type, including feature changes to it. Feature loading still requires a restart.
-Effect, distant tree and forward lighting sources remain for fog and terrain-shadow consumers.
-Utility, sky, particle and blood splatter have no replacement sources and remain stock.
+Settings, feature toggles, and the performance overlay use [DearModdingUI](https://github.com/Dear-Modding-FO4/dearmoddingui). Without it, edit the TOML file instead.
 
 ---
 
