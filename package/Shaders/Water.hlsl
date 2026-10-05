@@ -26,7 +26,7 @@ cbuffer PerFrame : register(b12)
 #		endif
 #	endif
 #	if defined(WATER_PARALLAX) && defined(SPECULAR) && defined(HAS_VERTEX_DEPTH)
-// FO4: specular pixel shaders read no displacement, and an unread output would shift the replaced pair's registers.
+// FO4: specular PS never reads TEXCOORD3; keeps the pair's registers aligned.
 #		undef HAS_VERTEX_DEPTH
 #	endif
 #	if !defined(LOD) && !defined(SPECULAR)
@@ -68,7 +68,7 @@ struct VS_OUTPUT
 	float3 TexCoord5: TEXCOORD5;
 #	endif
 #	ifdef WATER_PARALLAX
-	// FO4: the pixel shader has no NormalsScale constant, so the vertex shader forwards it as upstream's TEXCOORD8.
+	// FO4: PS has no NormalsScale; forwarded as upstream's TEXCOORD8.
 	float3 NormalsScale: TEXCOORD8;
 #	endif
 #	ifdef CLIP_VOLUME
@@ -328,7 +328,7 @@ float3 blendedNormal(float2 uv0, float2 uv1, float2 uv2, float fade)
 }
 
 #	if !defined(LOD) && !defined(BSWATER_FLAT_INPUT)
-// FO4: ray passes rebuild the normal, so every normal consumer shares one parallax offset path.
+// FO4: SSLR ray passes rebuild the normal and need the same offset.
 float3 surfaceNormal(PS_INPUT input, float fade)
 {
 	float2 uv0 = input.normalUv01.xy;

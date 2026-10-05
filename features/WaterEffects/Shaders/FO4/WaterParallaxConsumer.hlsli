@@ -4,7 +4,7 @@
 #include "Common/Random.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
 
-// FO4: upstream's water names resolve to the reconstructed water pixel shader's inputs and resources.
+// FO4: maps upstream water names onto the reconstructed PS.
 #define TexCoord1 normalUv01
 #define TexCoord2 normalUv2
 #define WPosition eyeVector
