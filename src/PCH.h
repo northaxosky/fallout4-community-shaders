@@ -88,6 +88,12 @@ namespace stl
 	}
 
 	template <class T>
+	void detour_thunk(const REL::VariantID& a_relId)
+	{
+		*(uintptr_t*)&T::func = Detours::X64::DetourFunction(a_relId.address(), (uintptr_t)&T::thunk);
+	}
+
+	template <class T>
 	void detour_thunk_ignore_func(REL::ID a_relId)
 	{
 		std::ignore = Detours::X64::DetourFunction(a_relId.address(), (uintptr_t)&T::thunk);

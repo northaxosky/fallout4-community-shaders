@@ -228,8 +228,6 @@ namespace cs::engine
 		// Stock never reads the cb2 pad declared directly before material flags (constantTable byte 0x60), so it carries the lane.
 		constexpr std::size_t kPrepassMaterialFlagsSlot = 0x60 - 0x58;
 		constexpr std::uint64_t kLaneDiagnosticLimit = 16;
-		// BSDFPrePassShaderMacros::GetPixelShaderID masks NORMALS, BINORMAL_TANGENT and CHARACTER_LIGHT_MASK out of the key.
-		constexpr std::uint32_t kPrepassPixelKeyMask = 0xFFFFEFE7;
 		// Landscape draws lay that register out as land_material_gate, which stock reads.
 		constexpr std::uint32_t kPrepassLandscapeBit = 1U << 5;
 		// Context::GetConstantBuffer level of the per-geometry cb2.
@@ -269,26 +267,12 @@ namespace cs::engine
 			std::uint32_t a_descriptor) noexcept
 		{
 			RE::BSGraphics::PixelShader key;
-			key.id = a_descriptor & kPrepassPixelKeyMask;
+			key.id = RE::BSDFPrePassShader::GetPixelShaderID(a_descriptor);
 			auto* keyPointer = &key;
 			const auto& shaders = native::PixelShaders(a_shader);
 			const auto found = shaders.find(keyPointer);
 			return found != shaders.end() ? *found : nullptr;
 		}
-
-		// BSShader::BuildCommandBufferParam; the prepass and utility creators fill it on the stack.
-		struct BuildCommandBufferParam
-		{
-			RE::BSGeometry* geometry;       // 00
-			std::uint32_t vertexRegisters;  // 08, float4 count
-			std::uint32_t pixelRegisters;   // 0C, float4 count
-			std::byte unk10[0x10];          // 10
-			const float* vertexConstants;   // 20
-			float* pixelConstants;          // 28
-		};
-		static_assert(offsetof(BuildCommandBufferParam, pixelRegisters) == 0x0C);
-		static_assert(offsetof(BuildCommandBufferParam, vertexConstants) == 0x20);
-		static_assert(offsetof(BuildCommandBufferParam, pixelConstants) == 0x28);
 
 		// Immediate draws fill cb2 inside SetupGeometry: write the lane at the map on NG/AE, at the pre-unmap flush on OG (each inlines the other).
 		struct PrepassSetupGeometryHook
@@ -330,7 +314,7 @@ namespace cs::engine
 		struct PixelConstantMapHook
 		{
 			static RE::BSGraphics::ConstantGroup* thunk(
-				void* a_renderer,
+				RE::BSGraphics::Renderer* a_renderer,
 				RE::BSGraphics::PixelShader* a_pixel,
 				std::uint32_t a_level)
 			{
@@ -347,7 +331,7 @@ namespace cs::engine
 		struct ConstantGroupFlushHook
 		{
 			static void thunk(
-				void* a_renderer,
+				RE::BSGraphics::Renderer* a_renderer,
 				RE::BSGraphics::ConstantGroup* a_vertex,
 				RE::BSGraphics::ConstantGroup* a_pixel)
 			{
@@ -384,13 +368,13 @@ namespace cs::engine
 		{
 			static std::byte* thunk(
 				RE::BSShader* a_self,
-				BuildCommandBufferParam* a_param)
+				RE::BSShader::BuildCommandBufferParam& a_param)
 			{
 				if (const auto* request = t_prepassLane; request && request->path == PrepassBakePath::kCommandBuffer) {
-					const bool fits = request->offset >= 0 && a_param->pixelConstants &&
-					                  static_cast<std::uint32_t>(request->offset) < a_param->pixelRegisters * 4;
+					const bool fits = request->offset >= 0 && a_param.pixelConstants &&
+					                  static_cast<std::uint32_t>(request->offset) < a_param.pixelRegisters * 4;
 					if (fits)
-						a_param->pixelConstants[request->offset] = request->value;
+						a_param.pixelConstants[request->offset] = request->value;
 					CountLane(fits, request->descriptor, request->offset);
 				}
 				return func(a_self, a_param);
@@ -446,16 +430,16 @@ namespace cs::engine
 				"immediate pixel constants lane",
 				[] {
 					if (REX::FModule::IsRuntimeOG())
-						stl::detour_thunk<ConstantGroupFlushHook>(REL::ID({ 1515598, 0, 0 }));
+						stl::detour_thunk<ConstantGroupFlushHook>(RE::ID::BSGraphics::Renderer::FlushConstantGroup);
 					else
-						stl::detour_thunk<PixelConstantMapHook>(REL::ID({ 0, 2317224, 2317224 }));
+						stl::detour_thunk<PixelConstantMapHook>(RE::ID::BSGraphics::Renderer::GetShaderConstantGroupPS);
 				}) &&
 			TryPatch(
 				"BSDFPrePassShader command-buffer creator lane",
-				[] { stl::detour_thunk<PrepassCreateCommandBufferHook>(REL::ID({ 1285447, 2318501, 2318501 })); }) &&
+				[] { stl::detour_thunk<PrepassCreateCommandBufferHook>(RE::ID::BSDFPrePassShader::CreateCommandBuffer); }) &&
 			TryPatch(
 				"command-buffer builder lane",
-				[] { stl::detour_thunk<BuildCommandBufferHook>(REL::ID({ 833764, 2318870, 2318870 })); });
+				[] { stl::detour_thunk<BuildCommandBufferHook>(RE::ID::BSShader::BuildCommandBuffer); });
 		if (!installed || !a_classifier || g_prepassClassifier)
 			return false;
 		g_prepassClassifier = a_classifier;
