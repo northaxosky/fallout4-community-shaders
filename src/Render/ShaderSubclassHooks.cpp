@@ -16,7 +16,6 @@
 #include <format>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <string_view>
 
 #include "RE/B/BSBloodSplatterShader.h"
@@ -226,8 +225,7 @@ namespace cs::engine
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
 		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
 
-		// PixelShader::constantTable byte 0x60 is the material-flags register. DFPrepass.hlsl declares cb2_pad directly
-		// before it in every non-landscape variant, and stock never reads the pad, so the lane is the register before flags.
+		// Stock never reads the cb2 pad declared directly before material flags (constantTable byte 0x60), so it carries the lane.
 		constexpr std::size_t kPrepassMaterialFlagsSlot = 0x60 - 0x58;
 		constexpr std::uint64_t kLaneDiagnosticLimit = 16;
 		// BSDFPrePassShaderMacros::GetPixelShaderID masks NORMALS, BINORMAL_TANGENT and CHARACTER_LIGHT_MASK out of the key.
@@ -292,8 +290,7 @@ namespace cs::engine
 		static_assert(offsetof(BuildCommandBufferParam, vertexConstants) == 0x20);
 		static_assert(offsetof(BuildCommandBufferParam, pixelConstants) == 0x28);
 
-		// Immediate draws build cb2 inside SetupGeometry, so the lane is written when the engine hands out its mapped
-		// pixel constants: at the map on NG/AE, at the flush before unmap on OG (each inlines the other half).
+		// Immediate draws fill cb2 inside SetupGeometry: write the lane at the map on NG/AE, at the pre-unmap flush on OG (each inlines the other).
 		struct PrepassSetupGeometryHook
 		{
 			static constexpr std::size_t size = 0x07;
@@ -346,8 +343,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// BSGraphics::Renderer::FlushConstantGroup(vertex, pixel) unmaps both level-2 groups once SetupGeometry has
-		// filled them; BSDFPrePassShader::SetupGeometry is its only caller inside the lane scope.
+		// OG unmaps both level-2 groups here after SetupGeometry fills them; that is its only caller inside the lane scope.
 		struct ConstantGroupFlushHook
 		{
 			static void thunk(
@@ -362,8 +358,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Command-buffer draws bake cb2 once into an immutable buffer, so the lane rides the constants
-		// BuildCommandBuffer copies; the scope keeps utility-shader records out of it.
+		// cb2 is baked once into an immutable record, so the lane rides the constants BuildCommandBuffer copies; the scope excludes utility shaders.
 		struct PrepassCreateCommandBufferHook
 		{
 			static std::byte* thunk(

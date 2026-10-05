@@ -46,9 +46,6 @@ namespace cs::features
 			}
 			return false;
 		}
-
-		// The world has streamed in once records keep arriving; one line then proves the bake without per-draw logging.
-		constexpr std::uint32_t kSummaryDelayFrames = 600;
 	}
 
 	LODBlending* LODBlending::GetSingleton()
@@ -82,9 +79,6 @@ namespace cs::features
 			FailLoad("LOD Blending prepass draw classifier installation failed.");
 			return;
 		}
-		_classifierInstalled.store(true, std::memory_order_release);
-		if (!cs::engine::RegisterPostDeferredPrePass([this] { FinishPrepassFrame(); }, cs::engine::HookPriority::Late))
-			L->warn("Object-LOD bake summary unavailable: post-prepass registration failed.");
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
@@ -97,29 +91,6 @@ namespace cs::features
 		return lodObject;
 	}
 
-	void LODBlending::FinishPrepassFrame() noexcept
-	{
-		if (_loggedSummary)
-			return;
-		const auto* graphics = cs::engine::GetGraphicsState();
-		const auto frame = graphics ? graphics->frameCount : 0u;
-		const auto& records = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kCommandBuffer)];
-		const auto& immediate = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kImmediate)];
-		if (records.lodDraws.load(std::memory_order_relaxed) + immediate.lodDraws.load(std::memory_order_relaxed) == 0)
-			return;
-		if (_firstLODFrame == 0)
-			_firstLODFrame = frame;
-		if (frame - _firstLODFrame < kSummaryDelayFrames)
-			return;
-		_loggedSummary = true;
-		const auto lanes = cs::engine::GetPrepassLaneStats();
-		L->info(
-			"Object-LOD bake: frame={} records={} lod_records={} immediate_draws={} lod_immediate_draws={} lanes_baked={} lanes_unavailable={}",
-			frame, records.draws.load(std::memory_order_relaxed), records.lodDraws.load(std::memory_order_relaxed),
-			immediate.draws.load(std::memory_order_relaxed), immediate.lodDraws.load(std::memory_order_relaxed),
-			lanes.baked, lanes.unavailable);
-	}
-
 	void LODBlending::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		const auto& records = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kCommandBuffer)];
@@ -127,7 +98,7 @@ namespace cs::features
 		const auto lanes = cs::engine::GetPrepassLaneStats();
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
-			.Field("classifier_installed", _classifierInstalled.load(std::memory_order_relaxed))
+			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed))
 			.Field("records", records.draws.load(std::memory_order_relaxed))
 			.Field("lod_records", records.lodDraws.load(std::memory_order_relaxed))
 			.Field("immediate_draws", immediate.draws.load(std::memory_order_relaxed))
@@ -141,19 +112,14 @@ namespace cs::features
 		_injectionsOperational.store(false, std::memory_order_release);
 		if (!_registrationsReady.load(std::memory_order_acquire)) {
 			a_error = "shader contributions did not all register";
-			_validationDetail = a_error;
 			return false;
 		}
 		if (!cs::render::IsSharedDataReady()) {
 			a_error = "the shared substrate is unavailable, so b6 carries no LOD blending settings";
-			_validationDetail = a_error;
 			return false;
 		}
-		if (!cs::engine::ValidateShaderInjectionRoutes("LODBlending", a_error)) {
-			_validationDetail = a_error;
+		if (!cs::engine::ValidateShaderInjectionRoutes("LODBlending", a_error))
 			return false;
-		}
-		_validationDetail.clear();
 		_injectionsOperational.store(true, std::memory_order_release);
 		return true;
 	}

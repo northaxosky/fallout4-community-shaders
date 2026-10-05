@@ -49,7 +49,6 @@ namespace cs::features
 		LODBlending() = default;
 
 		static bool ClassifyPrepassDraw(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath a_path) noexcept;
-		void FinishPrepassFrame() noexcept;
 
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(lod_blending::kSchema); }
@@ -57,7 +56,6 @@ namespace cs::features
 		Settings _settings;
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
-		std::string _validationDetail;
 
 		struct BakeCounts
 		{
@@ -66,9 +64,5 @@ namespace cs::features
 		};
 		// Indexed by PrepassBakePath; classification runs on the creating or drawing thread.
 		std::array<BakeCounts, 2> _bakeCounts;
-		std::atomic_bool _classifierInstalled{ false };
-		// Render thread only.
-		bool _loggedSummary = false;
-		std::uint32_t _firstLODFrame = 0;
 	};
 }

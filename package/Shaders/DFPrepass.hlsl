@@ -439,6 +439,7 @@ struct PS_OUTPUT
 	PS_OUTPUT main(PS_INPUT input) {
 		PS_OUTPUT output;
 #	if defined(LOD_BLENDING) && (LANDSCAPE || GRASS) && VC
+		// FO4: the vertex-color consumer moved from Lighting/RunGrass into this prepass.
 		if (SharedData::lodBlendingSettings.DisableTerrainVertexColors)
 			input.vertexColor.xyz = 1;
 #	endif
@@ -535,6 +536,7 @@ struct PS_OUTPUT
 	                               .xyz;
 #		endif
 #		if defined(LOD_BLENDING) && LAND_LOD_BLEND
+		// FO4: applied to the raw sampled LOD albedo; there is no ColorToLinear*VanillaDiffuseColorMult step here.
 		landLodAlbedo = pow(abs(landLodAlbedo), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		endif
 #		if LAND_LOD_BLEND
@@ -580,6 +582,7 @@ struct PS_OUTPUT
 #	endif
 #	if defined(LOD_BLENDING)
 #		if LOD_LANDSCAPE && !BONE_TINTING
+		// FO4: maps Skyrim's LODLANDSCAPE onto the prepass LOD terrain variant.
 		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		elif !LANDSCAPE && !GRASS
 		// FO4: object LOD has no technique define; the host bakes the BTO flag into cb2_pad, which stock never reads.
