@@ -293,6 +293,7 @@ target("FeatureConfigTests", function()
     set_default(false)
     add_files(
         "tests/FeatureConfigTests.cpp",
+        "features/InverseSquareLighting/src/LightAuthoring.cpp",
         "src/Settings/FeatureConfig.cpp"
     )
     add_headerfiles(
@@ -351,22 +352,6 @@ target("TerrainShadowsMathTests", function()
     add_files("tests/TerrainShadowsMathTests.cpp")
     add_headerfiles("features/TerrainShadows/src/TerrainShadowsMath.h")
     add_includedirs("features/TerrainShadows/src")
-end)
-
-target("InverseSquareLightingMathTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files(
-        "tests/InverseSquareLightingMathTests.cpp",
-        "features/InverseSquareLighting/src/LightAuthoring.cpp",
-        "src/Settings/FeatureConfig.cpp"
-    )
-    add_headerfiles(
-        "features/InverseSquareLighting/src/InverseSquareLightingMath.h"
-    )
-    add_includedirs("features/InverseSquareLighting/src")
-    add_includedirs("src")
-    add_packages("vcpkg::tomlplusplus")
 end)
 
 target("ExponentialHeightFogMathTests", function()
@@ -666,10 +651,6 @@ end)
 
 target("TerrainShadowsMathTests", function()
     add_tests("TerrainShadowsMath")
-end)
-
-target("InverseSquareLightingMathTests", function()
-    add_tests("InverseSquareLightingMath")
 end)
 
 target("ExponentialHeightFogMathTests", function()

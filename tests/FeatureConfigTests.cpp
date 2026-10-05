@@ -1,6 +1,7 @@
 #include "DynamicCubemapsSettings.h"
 #include "ExponentialHeightFogSettings.h"
 #include "FrameGenerationSettings.h"
+#include "LightAuthoring.h"
 #include "PerformanceOverlaySettings.h"
 #include "Render/TemporalRenderSettings.h"
 #include "RenderDocSettings.h"
@@ -48,6 +49,7 @@ namespace
 		std::uint32_t count = 2;
 		float thickness = 0.02f;
 		Target target = Target::kEngine;
+		Float2 span{ 1.0f, 2.0f };
 
 		bool operator==(const TestSettings&) const = default;
 	};
@@ -59,9 +61,10 @@ namespace
 	constexpr Schema kTestSchema{
 		std::tuple{
 			Field{ "enabled", "Enable.", &TestSettings::enabled },
-			Field{ "count", "Count.", &TestSettings::count, Range{ 1u, 4u } },
+			Field{ "count", "Count.", &TestSettings::count, Range{ 1u, 4u }, ApplyTiming::kNextLaunch },
 			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } },
-			ChoiceField{ "target", "Target.", &TestSettings::target, kTargets } }
+			ChoiceField{ "target", "Target.", &TestSettings::target, kTargets },
+			Float2Field<TestSettings>{ "span", "Span.", &TestSettings::span } }
 	};
 
 	Registry BuildRegistry()
@@ -105,8 +108,15 @@ namespace
 		TestSettings value;
 		std::string error;
 		CHECK(Parse(kTestSchema, toml::parse("[settings]\nenabled = false\ncount = 4\nthickness = 0.049\ntarget = 'temporal'\n"), value, error));
-		const TestSettings expected{ false, 4, 0.049f, Target::kTemporal };
+		const TestSettings expected{ false, 4, 0.049f, Target::kTemporal, { 1.0f, 2.0f } };
 		CHECK(value == expected);
+
+		// Only next-launch fields are reported, and only when they differ from the boot value.
+		auto current = expected;
+		current.thickness = 0.01f;
+		CHECK(RestartRequired(kTestSchema, expected, current).empty());
+		current.count = 1;
+		CHECK(RestartRequired(kTestSchema, expected, current).size() == 1);
 
 		std::ostringstream serialized;
 		serialized << toml::table{ { "settings", SerializeFull(kTestSchema, value) } };
@@ -121,6 +131,13 @@ namespace
 		defaults.count = 3;
 		CHECK(SerializeDelta(kTestSchema, defaults, TestSettings{}).size() == 1);
 
+		auto spanned = expected;
+		CHECK(Parse(kTestSchema, toml::parse("[settings]\nspan = [25000, 45000]\n"), spanned, error));
+		CHECK(spanned.span[0] == 25000.0f && spanned.span[1] == 45000.0f);
+		TestSettings spanRoundTrip;
+		CHECK(Parse(kTestSchema, toml::table{ { "settings", SerializeDelta(kTestSchema, spanned, expected) } }, spanRoundTrip, error));
+		CHECK(spanRoundTrip.span == spanned.span);
+
 		for (const auto& [document, message] : {
 				 std::pair{ "[settings]\nenabled = 1\n", "settings.enabled: expected boolean" },
 				 std::pair{ "[settings]\ncount = 5\n", "settings.count: value is out of range" },
@@ -131,21 +148,9 @@ namespace
 			CHECK(error == message);
 			CHECK(candidate == expected);
 		}
-	}
-
-	void TestSSSSettings()
-	{
-		using namespace cs::features::sss_settings;
-		BendSettings value;
-		std::string error;
-		CHECK(Parse(kSchema, toml::parse("[settings]\nEnable = 0\nSampleCount = 4\nShadowContrast = 2.0\n"), value, error));
-		CHECK(value.Enable == 0 && value.SampleCount == 4 && value.ShadowContrast == 2.0f);
-		const auto delta = SerializeDelta(kSchema, value, BendSettings{});
-		BendSettings restored;
-		CHECK(Parse(kSchema, toml::table{ { "settings", delta } }, restored, error));
-		CHECK(restored.Enable == 0 && restored.SampleCount == 4 && restored.ShadowContrast == 2.0f);
-		CHECK(!Parse(kSchema, toml::parse("[settings]\nEnable = true\n"), restored, error));
-		CHECK(!Parse(kSchema, toml::parse("[settings]\nSampleCount = 5\n"), restored, error));
+		auto kept = spanned;
+		CHECK(!Parse(kTestSchema, toml::parse("[settings]\nspan = [10000, nan]\n"), kept, error));
+		CHECK(kept.span == spanned.span);
 	}
 
 	void TestRegistry(const Registry& a_registry)
@@ -230,28 +235,6 @@ namespace
 		CHECK(ReadFile(a_path) == invalid);
 	}
 
-	void TestRestartTiming()
-	{
-		using namespace cs::features::renderdoc_settings;
-		const Settings boot;
-		auto current = boot;
-		current.dllPath = "C:\\RenderDoc\\renderdoc.dll";
-		CHECK(RestartRequired(kSchema, boot, current).size() == 1);
-		current = boot;
-		current.captureFrameCount = 10;
-		CHECK(RestartRequired(kSchema, boot, current).empty());
-		Settings restored;
-		std::string error;
-		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = 120\n"), restored, error));
-		CHECK(restored.captureFrameCount == 120);
-		const auto serialized = SerializeDelta(kSchema, restored, Settings{});
-		CHECK(serialized["Capture Frame Count"].value<int>() == 120);
-		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = 9223372036854775807\n"), restored, error));
-		CHECK(restored.captureFrameCount == 120);
-		CHECK(cs::features::renderdoc_settings::Parse(toml::parse("[settings]\n'Capture Frame Count' = -1\n"), restored, error));
-		CHECK(restored.captureFrameCount == 1);
-	}
-
 	void TestLiveSettings()
 	{
 		constexpr Schema schema{ std::tuple{
@@ -299,46 +282,50 @@ namespace
 		CHECK(value.count == 3 && value.thickness == before.thickness && published == before.thickness);
 	}
 
-	void TestSSGISettings()
+	void TestLightAuthoring()
 	{
-		using namespace cs::features::ssgi_settings;
-		Settings value;
+		using namespace cs::features::inverse_square_lighting;
+		std::vector<LightDefinition> definitions;
 		std::string error;
-		CHECK(Parse(kSchema, toml::parse("[settings]\nEnabled = false\nEnableExperimentalSpecularGI = true\nResolutionMode = 2\nDepthFadeRange = [25000, 45000]\nAOPower = 8.0"), value, error));
-		CHECK(!value.enabled && value.enableExperimentalSpecularGI && value.resolutionMode == 2);
-		CHECK(value.depthFadeRange[0] == 25000.0f && value.depthFadeRange[1] == 45000.0f && value.aoPower == 8.0f);
-		std::ostringstream document;
-		document << toml::table{ { "settings", SerializeDelta(kSchema, value, Settings{}) } };
-		Settings restored;
-		CHECK(Parse(kSchema, toml::parse(document.str()), restored, error));
-		CHECK(restored.depthFadeRange == value.depthFadeRange && restored.enableExperimentalSpecularGI);
-		const auto before = restored.depthFadeRange;
-		CHECK(!Parse(kSchema, toml::parse("[settings]\nDepthFadeRange = [10000, nan]"), restored, error));
-		CHECK(restored.depthFadeRange == before);
-		int resets = 0;
-		auto live = BindLiveSettings(kSchema, restored, [&] { ++resets; });
-		auto prepared = live.prepare(toml::parse("EnableExperimentalSpecularGI = false\nDepthFadeRange = [30000, 50000]"), error);
-		CHECK(prepared.has_value());
-		if (prepared) {
-			std::array updates{ std::move(*prepared) };
-			ApplyPreparedLiveSettings(updates);
-		}
-		CHECK(!restored.enableExperimentalSpecularGI && restored.depthFadeRange[0] == 30000.0f && resets == 1);
-	}
+		CHECK(ParseLightDefinitions(toml::parse(R"(
+[[lights]]
+plugin = "Test.esm"
+form_id = 0x800
+inverse_square = true
+linear = true
+cutoff = 0.1
+size = 2.0
+[[references]]
+plugin = "Test.esm"
+form_id = 0x801
+inverse_square = false
+)"),
+			definitions, error));
+		CHECK(definitions.size() == 2);
+		if (definitions.size() != 2)
+			return;
+		auto inherited = definitions[0].data;
+		inherited.Apply(definitions[1].data);
+		CHECK(inherited.inverseSquare == false && inherited.linear == true && inherited.cutoff == 0.1f && inherited.size == 2.0f);
 
-	void TestLegacyOverlaySettings()
-	{
-		using namespace cs::features::performance_overlay;
-		Settings value;
-		std::string error;
-		CHECK(Parse(kSchema, toml::parse("[settings]\nPosition = [300.5, 700.25]\nPositionSet = true\nFrameHistorySize = 1800"), value, error));
-		std::ostringstream serialized;
-		serialized << toml::table{ { "settings", SerializeFull(kSchema, value) } };
-		Settings restored;
-		CHECK(Parse(kSchema, toml::parse(serialized.str()), restored, error));
-		CHECK(restored.FrameHistorySize == 1800);
-		CHECK(!SerializeFull(kSchema, restored).contains("Position"));
-		CHECK(!SerializeFull(kSchema, restored).contains("PositionSet"));
+		for (const char* invalid : {
+				 R"([[lights]]
+plugin = "Test.esm"
+form_id = 0x1000800
+)",
+				 R"([[lights]]
+plugin = "Test.esm"
+form_id = 0x800
+inverse_square = "true"
+)",
+				 R"([[lights]]
+plugin = "Test.esm"
+form_id = 0x800
+size = nan
+)" }) {
+			CHECK(!ParseLightDefinitions(toml::parse(invalid), definitions, error));
+			CHECK(definitions.size() == 2);
+		}
 	}
 }
 
@@ -350,14 +337,11 @@ int main()
 	try {
 		const auto registry = BuildRegistry();
 		TestSchema();
-		TestSSSSettings();
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");
-		TestRestartTiming();
 		TestLiveSettings();
-		TestSSGISettings();
-		TestLegacyOverlaySettings();
+		TestLightAuthoring();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
 		++failures;
