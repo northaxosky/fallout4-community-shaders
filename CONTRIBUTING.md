@@ -21,8 +21,9 @@ pwsh scripts\fetch-submodules.ps1
 ```
 
 Use this script instead of `--recursive`: it keeps `community-shaders-shared` shallow
-without its unused Skyrim dependencies, while fetching CommonLibF4/Streamline recursively
-and pulling LFS assets.
+without its unused Skyrim dependencies, fetching CommonLibF4 recursively and Streamline without
+its unused nested FidelityFX-SDK, and pulling LFS assets. In a linked worktree it clones from the
+main checkout's submodule objects, and `fetch-sdks.ps1` shares the main checkout's `.sdk-cache`.
 
 ## Upstream sync
 

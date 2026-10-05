@@ -6,10 +6,13 @@
 	Reads scripts/sdk-manifest.psd1, downloads each archive, verifies its SHA-256 against the
 	manifest pin or, for Repository packages, the latest release's SHA256SUMS.txt, and stages
 	the required files into their manifest destinations. Re-running is cheap: an archive whose digest
-	already matches the cached copy is not downloaded again.
+	already matches the cached copy is not downloaded again. Archives are downloaded to a unique temp
+	file and renamed into place only after the digest verifies, and extraction uses a unique temp
+	directory, so concurrent runs can share one cache.
 
 .PARAMETER CacheDirectory
-	Where downloaded archives are kept. Defaults to <repo>/.sdk-cache.
+	Where downloaded archives are kept. Defaults to <repo>/.sdk-cache, or, in a linked worktree,
+	to the main checkout's .sdk-cache so worktrees share one cache.
 
 .PARAMETER Force
 	Re-download archives even when a verified cached copy exists.
@@ -34,7 +37,13 @@ if (-not (Test-Path -LiteralPath $manifestPath)) {
 }
 
 if (-not $CacheDirectory) {
-	$CacheDirectory = Join-Path $repoRoot '.sdk-cache'
+	$cacheRoot = $repoRoot
+	$gitDir = & git -C $repoRoot rev-parse --path-format=absolute --git-dir
+	$commonDir = & git -C $repoRoot rev-parse --path-format=absolute --git-common-dir
+	if ($LASTEXITCODE -eq 0 -and $gitDir -ne $commonDir) {
+		$cacheRoot = Split-Path -Parent $commonDir
+	}
+	$CacheDirectory = Join-Path $cacheRoot '.sdk-cache'
 }
 New-Item -ItemType Directory -Force -Path $CacheDirectory | Out-Null
 
@@ -75,11 +84,17 @@ function Get-Archive {
 	}
 
 	Write-Host "[$($Package.Name)] downloading $($Package.Url)"
-	Invoke-WebRequest -Uri $Package.Url -OutFile $archivePath -UseBasicParsing
+	$partialPath = "$archivePath.$([guid]::NewGuid().ToString('N')).tmp"
+	try {
+		Invoke-WebRequest -Uri $Package.Url -OutFile $partialPath -UseBasicParsing
 
-	if (-not (Test-Digest -Path $archivePath -Expected $Package.Sha256)) {
-		$actual = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
-		throw "[$($Package.Name)] SHA-256 mismatch. expected=$($Package.Sha256) actual=$actual"
+		if (-not (Test-Digest -Path $partialPath -Expected $Package.Sha256)) {
+			$actual = (Get-FileHash -LiteralPath $partialPath -Algorithm SHA256).Hash
+			throw "[$($Package.Name)] SHA-256 mismatch. expected=$($Package.Sha256) actual=$actual"
+		}
+		Move-Item -LiteralPath $partialPath -Destination $archivePath -Force
+	} finally {
+		Remove-Item -LiteralPath $partialPath -Force -ErrorAction SilentlyContinue
 	}
 
 	Write-Host "[$($Package.Name)] digest verified."
@@ -133,49 +148,52 @@ function Copy-StagedFile {
 	Write-Host "  staged $leaf"
 }
 
-foreach ($package in $packages) {
-	$archivePath = Get-Archive -Package $package
-	$extractRoot = Join-Path $CacheDirectory ("{0}-{1}-extracted" -f $package.Name, $package.Version)
-	if (Test-Path -LiteralPath $extractRoot) {
-		Remove-Item -LiteralPath $extractRoot -Recurse -Force
-	}
-	$destination = Join-Path $repoRoot $package.Destination
-	New-Item -ItemType Directory -Force -Path $destination | Out-Null
+$expandExe = Join-Path $env:SystemRoot 'System32\expand.exe' # Git's expand shadows it
+$runRoot = Join-Path ([IO.Path]::GetTempPath()) "sdk-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+try {
+	foreach ($package in $packages) {
+		$archivePath = Get-Archive -Package $package
+		$extractRoot = Join-Path $runRoot ("{0}-{1}" -f $package.Name, $package.Version)
+		$destination = Join-Path $repoRoot $package.Destination
+		New-Item -ItemType Directory -Force -Path $destination | Out-Null
 
-	if ($package.ContainsKey('Members')) {
-		New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
-		foreach ($member in $package.Members.GetEnumerator()) {
-			& expand.exe $archivePath "-F:$($member.Key)" $extractRoot | Out-Null
-			$extracted = Join-Path $extractRoot $member.Key
-			if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $extracted)) {
-				throw "[$($package.Name)] cabinet member '$($member.Key)' was not extracted."
+		if ($package.ContainsKey('Members')) {
+			New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+			foreach ($member in $package.Members.GetEnumerator()) {
+				& $expandExe $archivePath "-F:$($member.Key)" $extractRoot | Out-Null
+				$extracted = Join-Path $extractRoot $member.Key
+				if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $extracted)) {
+					throw "[$($package.Name)] cabinet member '$($member.Key)' was not extracted."
+				}
+				Copy-Item -LiteralPath $extracted -Destination (Join-Path $destination $member.Value) -Force
+				Write-Host "  staged $($member.Value)"
 			}
-			Copy-Item -LiteralPath $extracted -Destination (Join-Path $destination $member.Value) -Force
-			Write-Host "  staged $($member.Value)"
+			Remove-Item -LiteralPath $extractRoot -Recurse -Force
+			Write-Host "[$($package.Name)] staged into $($package.Destination)"
+			continue
 		}
+
+		Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
+
+		foreach ($file in $package.Files) {
+			Copy-StagedFile -ExtractRoot $extractRoot -FileName $file -Destination $destination -Required $true
+		}
+		foreach ($license in $package.Licenses) {
+			Copy-StagedFile -ExtractRoot $extractRoot -FileName $license -Destination $destination -Required $true
+		}
+		if ($package.ContainsKey('Headers')) {
+			$headerDestination = Join-Path $repoRoot $package.HeaderDestination
+			New-Item -ItemType Directory -Force -Path $headerDestination | Out-Null
+			foreach ($header in $package.Headers) {
+				Copy-StagedFile -ExtractRoot $extractRoot -FileName $header -Destination $headerDestination -Required $true
+			}
+		}
+
 		Remove-Item -LiteralPath $extractRoot -Recurse -Force
 		Write-Host "[$($package.Name)] staged into $($package.Destination)"
-		continue
 	}
-
-	Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
-
-	foreach ($file in $package.Files) {
-		Copy-StagedFile -ExtractRoot $extractRoot -FileName $file -Destination $destination -Required $true
-	}
-	foreach ($license in $package.Licenses) {
-		Copy-StagedFile -ExtractRoot $extractRoot -FileName $license -Destination $destination -Required $true
-	}
-	if ($package.ContainsKey('Headers')) {
-		$headerDestination = Join-Path $repoRoot $package.HeaderDestination
-		New-Item -ItemType Directory -Force -Path $headerDestination | Out-Null
-		foreach ($header in $package.Headers) {
-			Copy-StagedFile -ExtractRoot $extractRoot -FileName $header -Destination $headerDestination -Required $true
-		}
-	}
-
-	Remove-Item -LiteralPath $extractRoot -Recurse -Force
-	Write-Host "[$($package.Name)] staged into $($package.Destination)"
+} finally {
+	Remove-Item -LiteralPath $runRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host 'SDK staging complete.'
