@@ -116,7 +116,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/fetch-sdks.ps1
+        run: ./scripts/fetch-sdks.ps1 -CacheDirectory .sdk-cache
 
       - name: Configure
         env:
