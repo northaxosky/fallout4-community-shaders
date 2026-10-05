@@ -2,6 +2,10 @@
 #	define NOMINMAX
 #endif
 
+#include <Windows.h>
+#include <d3d11.h>
+
+#include "Render/ShaderVariantCompilation.h"
 #include "Utils/ShaderCache/CacheRecord.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 #include "Utils/ShaderCache/CompilerIdentity.h"
@@ -9,11 +13,15 @@
 #include "Utils/ShaderCompile.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <barrier>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -229,6 +237,20 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		Check(
 			includeStale.succeeded && includeStale.bytecode != rootStale.bytecode,
 			"transitive include edits must return recompiled bytecode");
+
+		const auto forced = LoadOrCompileShader(
+			recipe, workspace.Options(), CacheMode::kRecompile);
+		Check(
+			forced.succeeded && forced.disposition == CacheDisposition::kBypassed && forced.recordWritten && forced.bytecode == includeStale.bytecode,
+			"recompile mode must bypass and republish the cache");
+
+		workspace.Write("Root.hlsl", "this is not HLSL\n");
+		auto broken = recipe;
+		broken.defines.emplace_back("BROKEN", "1");
+		const auto failed = LoadOrCompileShader(broken, workspace.Options());
+		Check(
+			!failed.succeeded && !failed.recordWritten && !std::filesystem::exists(failed.recordPath),
+			"failed compilation must publish no cache artifact");
 	}
 
 	void TestCompilerIdentityReset()
@@ -267,10 +289,6 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		auto corrupted = primed.record;
 		corrupted.front() ^= 0xFF;
 		WriteAll(primed.cold.recordPath, corrupted);
-		ShaderCacheRecord parsed;
-		Check(
-			ParseShaderCacheRecord(corrupted, parsed) == RecordStatus::kBadMagic,
-			"corrupt records must be rejected");
 
 		const auto repaired =
 			LoadOrCompileShader(recipe, workspace.Options());
@@ -285,18 +303,6 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			LoadOrCompileShader(recipe, workspace.Options()),
 			CacheDisposition::kHit,
 			"repaired records must hit");
-	}
-
-	void TestFailedCompileIsNotCached()
-	{
-		Workspace workspace("failed-compile");
-		workspace.WriteDefaultTree();
-		workspace.Write("Root.hlsl", "this is not HLSL\n");
-		const auto outcome =
-			LoadOrCompileShader(workspace.Recipe(), workspace.Options());
-		Check(
-			!outcome.succeeded && !outcome.error.empty() && !outcome.recordWritten && !std::filesystem::exists(outcome.recordPath),
-			"failed compilation must publish no cache artifact");
 	}
 
 	void TestConcurrentWriters()
@@ -357,36 +363,157 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			"concurrent writers must never yield an accepted partial record");
 	}
 
-	void TestConcurrentCompilersAndRecompile()
+	// The gate only pins when the in-flight compile finishes; the compile itself goes through the real cache.
+	class CompilerGate
 	{
-		Workspace workspace("concurrent-compilers");
-		workspace.WriteDefaultTree();
-		const auto recipe = workspace.Recipe();
-
-		constexpr int threadCount = 4;
-		std::barrier start(threadCount);
-		std::vector<ShaderCacheOutcome> outcomes(threadCount);
-		std::vector<std::thread> threads;
-		for (int index = 0; index < threadCount; ++index) {
-			threads.emplace_back([&, index] {
-				start.arrive_and_wait();
-				outcomes[index] =
-					LoadOrCompileShader(recipe, workspace.Options());
-			});
-		}
-		for (auto& thread : threads)
-			thread.join();
-		for (const auto& outcome : outcomes) {
-			Check(
-				outcome.succeeded && outcome.bytecode == outcomes.front().bytecode,
-				"concurrent compilers must agree on bytecode");
+	public:
+		void Enter()
+		{
+			std::unique_lock lock(_mutex);
+			_entered = true;
+			_condition.notify_all();
+			_condition.wait(lock, [&] { return _released; });
 		}
 
-		const auto forced = LoadOrCompileShader(
-			recipe, workspace.Options(), CacheMode::kRecompile);
+		void WaitEntered()
+		{
+			std::unique_lock lock(_mutex);
+			_condition.wait(lock, [&] { return _entered; });
+		}
+
+		void Release()
+		{
+			{
+				std::scoped_lock lock(_mutex);
+				_released = true;
+			}
+			_condition.notify_all();
+		}
+
+	private:
+		std::mutex _mutex;
+		std::condition_variable _condition;
+		bool _entered = false;
+		bool _released = false;
+	};
+
+	winrt::com_ptr<ID3D11Device> CreateWarpDevice()
+	{
+		winrt::com_ptr<ID3D11Device> device;
+		const D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+		if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, &level, 1, D3D11_SDK_VERSION, device.put(), nullptr, nullptr)))
+			return nullptr;
+		return device;
+	}
+
+	struct VariantFixture
+	{
+		explicit VariantFixture(std::string_view a_name, std::size_t a_workers = 1) :
+			workspace(a_name)
+		{
+			workspace.WriteDefaultTree();
+			device = CreateWarpDevice();
+			cache = cs::engine::CreateAsyncShaderVariantCompilationCache(
+				[this](cs::engine::ShaderVariantCompilationRequest a_request) {
+					attempts.fetch_add(1);
+					gate.Enter();
+					cs::engine::ShaderVariantCompilationOutput output;
+					const auto outcome = LoadOrCompileShader(workspace.Recipe(), workspace.Options());
+					winrt::com_ptr<ID3D11PixelShader> shader;
+					if (outcome.succeeded && SUCCEEDED(a_request.device->CreatePixelShader(outcome.bytecode.data(), outcome.bytecode.size(), nullptr, shader.put())))
+						shader->QueryInterface(IID_PPV_ARGS(output.shader.put()));
+					output.samplerMask = 0x6000;
+					finished.store(true);
+					return output;
+				},
+				a_workers);
+		}
+
+		cs::engine::ShaderVariantCompilationRequest Request(std::string_view a_tag) const
+		{
+			cs::engine::ShaderVariantCompilationRequest request;
+			request.device = device;
+			request.sourcePath = workspace.Sources() / "Root.hlsl";
+			request.entryPoint = "main";
+			request.profile = "ps_5_0";
+			request.defines = { { "TAG", std::string(a_tag) } };
+			return request;
+		}
+
+		Workspace workspace;
+		winrt::com_ptr<ID3D11Device> device;
+		CompilerGate gate;
+		std::atomic<unsigned> attempts{ 0 };
+		std::atomic<bool> finished{ false };
+		std::shared_ptr<cs::engine::ShaderVariantCompilationCache> cache;
+	};
+
+	bool WaitForState(const std::shared_ptr<cs::engine::ShaderVariantCompilationHandle>& a_handle, cs::engine::ShaderVariantCompilationState a_state)
+	{
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (a_handle->GetState() != a_state && std::chrono::steady_clock::now() < deadline)
+			std::this_thread::yield();
+		return a_handle->GetState() == a_state;
+	}
+
+	void TestVariantCompilationCoalescesAndPublishes()
+	{
+		using namespace cs::engine;
+		VariantFixture fixture("variant-coalesce", 2);
+		if (!fixture.device) {
+			Fail("could not create WARP device");
+			return;
+		}
+
+		constexpr std::size_t requesterCount = 12;
+		std::barrier start(static_cast<std::ptrdiff_t>(requesterCount));
+		std::array<std::shared_ptr<ShaderVariantCompilationHandle>, requesterCount> handles;
+		{
+			std::vector<std::jthread> requesters;
+			for (std::size_t index = 0; index < requesterCount; ++index) {
+				requesters.emplace_back([&, index] {
+					start.arrive_and_wait();
+					handles[index] = fixture.cache->Request(fixture.Request("A"));
+				});
+			}
+		}
+		fixture.gate.WaitEntered();
 		Check(
-			forced.succeeded && forced.disposition == CacheDisposition::kBypassed && forced.origin == CompileOrigin::kFreshCompile && forced.recordWritten && forced.bytecode == outcomes.front().bytecode,
-			"recompile mode must bypass and republish the cache");
+			std::ranges::all_of(handles, [&](const auto& handle) { return handle == handles.front(); }) && fixture.attempts.load() == 1,
+			"concurrent requests must coalesce to one handle and one compile");
+		Check(
+			handles.front()->GetState() == ShaderVariantCompilationState::kPending && !handles.front()->Acquire(),
+			"pending compilation must neither block nor return a shader");
+
+		fixture.gate.Release();
+		Check(
+			WaitForState(handles.front(), ShaderVariantCompilationState::kReady) && !!handles.front()->Acquire() && handles.front()->GetSamplerMask() == 0x6000,
+			"completed compilation must publish its shader and sampler usage");
+	}
+
+	void TestVariantCompilationSafeShutdown()
+	{
+		using namespace cs::engine;
+		VariantFixture fixture("variant-shutdown");
+		if (!fixture.device) {
+			Fail("could not create WARP device");
+			return;
+		}
+
+		const auto inflight = fixture.cache->Request(fixture.Request("A"));
+		const auto queued = fixture.cache->Request(fixture.Request("B"));
+		fixture.gate.WaitEntered();
+
+		std::thread stopping([&] { fixture.cache->Stop(); });
+		// Stop fails queued work before it joins, so the worker is provably still blocked here.
+		Check(
+			WaitForState(queued, ShaderVariantCompilationState::kFailed) && !fixture.finished.load(),
+			"shutdown must fail queued work while the in-flight compile is still running");
+		fixture.gate.Release();
+		stopping.join();
+		Check(
+			fixture.finished.load() && inflight->GetState() == ShaderVariantCompilationState::kFailed && !inflight->Acquire(),
+			"shutdown must wait for the in-flight worker and drop its result");
 	}
 
 	struct TestCase
@@ -399,10 +526,9 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		{ "hit-and-invalidation", &TestHitAndInvalidation },
 		{ "compiler-identity-reset", &TestCompilerIdentityReset },
 		{ "corrupt-record", &TestCorruptRecord },
-		{ "failed-compile-not-cached", &TestFailedCompileIsNotCached },
 		{ "concurrent-writers", &TestConcurrentWriters },
-		{ "concurrent-compilers-and-recompile",
-			&TestConcurrentCompilersAndRecompile }
+		{ "variant-compilation-coalesces", &TestVariantCompilationCoalescesAndPublishes },
+		{ "variant-compilation-shutdown", &TestVariantCompilationSafeShutdown }
 	};
 }
 

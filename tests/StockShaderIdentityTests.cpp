@@ -2,6 +2,7 @@
 #include "Log.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantRecipe.h"
+#include "ShaderABIChecks.h"
 #include "Utils/CSSha1.h"
 #include "Utils/CSSha256.h"
 #include "Utils/ShaderCache/SourceCompile.h"
@@ -284,6 +285,10 @@ int main(int a_argc, char** a_argv)
 		auto table = ReadRows(a_argv[2]);
 		auto& rows = table.rows;
 		const std::filesystem::path shaderRoot(a_argv[1]);
+		if (featuresOn) {
+			const auto abiError = VerifyShaderABI(shaderRoot);
+			Require(abiError.empty(), "Shader ABI: " + abiError);
+		}
 		ResolveOwnership(rows, table.inheritsTargets, shaderRoot);
 		const auto total = featuresOn ?
 		                       static_cast<std::size_t>(std::ranges::count(rows, true, &Row::contributed)) :

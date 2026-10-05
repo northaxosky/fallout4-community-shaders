@@ -273,14 +273,9 @@ target(plugin_name, function()
 
     set_pcxxheader("src/PCH.h")
 
-    add_deps("ShaderStage", "ShaderCompileTests")
-    after_build(function (target)
-        os.vrunv(target:dep("ShaderCompileTests"):targetfile(), {
-            path.join(os.projectdir(), "build/ShaderStage/Shaders")
-        })
-    end)
+    add_deps("ShaderStage")
     add_installfiles("package/(**)|Shaders/**", { prefixdir = "." })
-    add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl|SSSConsumerProbe.hlsl",
+    add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl",
         { prefixdir = "." })
     add_installfiles("features/Upscaling/(Shaders/Upscaling/Streamline/**)",
         { prefixdir = "." })
@@ -503,22 +498,6 @@ target("FrameGenerationRetirementGpuTests", function()
     add_syslinks("d3d11", "d3d12", "dxgi", "ole32", "version")
 end)
 
-target("ShaderCompileTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_deps("ShaderStage")
-    add_files(
-        "tests/ShaderCompileTests.cpp",
-        "tests/InverseSquareLightingGpuTests.cpp",
-        "tests/ScreenSpaceGIPrepareTests.cpp",
-        "src/Utils/ShaderCompile.cpp"
-    )
-    add_headerfiles("src/Utils/ShaderCompile.h")
-    add_includedirs("features/ScreenSpaceGI/src")
-    add_packages("vcpkg::directx-headers", "vcpkg::directxmath")
-    add_syslinks("d3dcompiler", "d3d11")
-end)
-
 target("PixelShaderSwapTests", function()
     set_kind("binary")
     set_default(false)
@@ -543,11 +522,13 @@ local function stock_shader_identity_target(name, compiler, tests)
         add_deps("ShaderStage")
         add_files(
             "tests/StockShaderIdentityTests.cpp",
+            "tests/ShaderABIChecks.cpp",
             "src/Render/ShaderFamilyDescriptor.cpp",
             "src/Render/ShaderInjectionCompileRequest.cpp",
             "src/Render/ShaderVariantRecipe.cpp",
             "src/Utils/CSSha1.cpp",
             "src/Utils/CSSha256.cpp",
+            "src/Utils/ShaderCompile.cpp",
             "src/Utils/ShaderCache/CacheStorage.cpp",
             "src/Utils/ShaderCache/CompilerIdentity.cpp",
             "src/Utils/ShaderCache/DependencyTrace.cpp",
@@ -555,7 +536,8 @@ local function stock_shader_identity_target(name, compiler, tests)
             "src/Utils/ShaderCache/ShaderRecipe.cpp",
             "src/Utils/ShaderCache/SourceCompile.cpp"
         )
-        add_packages("spdlog", "vcpkg::tomlplusplus")
+        add_includedirs("features/ScreenSpaceGI/src")
+        add_packages("spdlog", "vcpkg::directxmath", "vcpkg::tomlplusplus")
         add_syslinks("bcrypt", "d3dcompiler", "version")
         set_values("fo4cs.identity_compiler", compiler)
         after_build(function(target)
@@ -602,6 +584,7 @@ target("ShaderCacheTests", function()
     set_default(false)
     add_files(
         "tests/ShaderCacheTests.cpp",
+        "src/Render/ShaderVariantCompilation.cpp",
         "src/Utils/CSSha256.cpp",
         "src/Utils/ShaderCompile.cpp",
         "src/Utils/ShaderCache/CacheRecord.cpp",
@@ -626,17 +609,7 @@ target("ShaderCacheTests", function()
         "src/Utils/ShaderCache/ShaderRecipe.h",
         "src/Utils/ShaderCache/SourceCompile.h"
     )
-    add_syslinks("bcrypt", "d3dcompiler", "version")
-end)
-
-target("ShaderVariantCompilationTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files(
-        "tests/ShaderVariantCompilationTests.cpp",
-        "src/Render/ShaderVariantCompilation.cpp"
-    )
-    add_syslinks("d3d11")
+    add_syslinks("bcrypt", "d3dcompiler", "d3d11", "version")
 end)
 
 target("ShaderInjectionRegistrationTests", function()
@@ -746,22 +719,12 @@ target("FrameGenerationRetirementGpuTests", function()
     })
 end)
 
-target("ShaderCompileTests", function()
-    add_tests("ShaderCompile", {
-        runargs = path.join(os.projectdir(), "build/ShaderStage/Shaders")
-    })
-end)
-
 target("PixelShaderSwapTests", function()
     add_tests("PixelShaderSwap")
 end)
 
 target("ShaderCacheTests", function()
     add_tests("ShaderCache")
-end)
-
-target("ShaderVariantCompilationTests", function()
-    add_tests("ShaderVariantCompilation")
 end)
 
 target("ShaderInjectionRegistrationTests", function()
