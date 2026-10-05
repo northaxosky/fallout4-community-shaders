@@ -226,8 +226,10 @@ namespace cs::engine
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
 		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
 
-		// PixelShader::constantTable byte 0x61 is the prepass register DFPrepass.hlsl declares as cb2_pad; stock never reads it.
-		constexpr std::size_t kPrepassLaneSlot = 0x61 - 0x58;
+		// PixelShader::constantTable bytes 0x5F and 0x60 are the scroll-delta and material-flags registers; the one
+		// between them is the register DFPrepass.hlsl declares as cb2_pad, which has no table entry and stock never reads.
+		constexpr std::size_t kPrepassScrollDeltaSlot = 0x5F - 0x58;
+		constexpr std::size_t kPrepassMaterialFlagsSlot = 0x60 - 0x58;
 		// BSDFPrePassShaderMacros::GetPixelShaderID masks NORMALS, BINORMAL_TANGENT and CHARACTER_LIGHT_MASK out of the key.
 		constexpr std::uint32_t kPrepassPixelKeyMask = 0xFFFFEFE7;
 		// Landscape draws lay that register out as land_material_gate, which stock reads.
@@ -247,9 +249,12 @@ namespace cs::engine
 
 		[[nodiscard]] std::int32_t PrepassLaneOffset(const RE::BSGraphics::PixelShader* a_pixel) noexcept
 		{
+			if (!a_pixel)
+				return -1;
 			// Table bytes are dword offsets; 0xFF marks a constant the variant does not have.
-			const auto offset = a_pixel ? static_cast<std::uint8_t>(a_pixel->constantTable[kPrepassLaneSlot]) : std::uint8_t{ 0xFF };
-			return offset == 0xFF ? -1 : offset;
+			const auto scroll = static_cast<std::uint8_t>(a_pixel->constantTable[kPrepassScrollDeltaSlot]);
+			const auto flags = static_cast<std::uint8_t>(a_pixel->constantTable[kPrepassMaterialFlagsSlot]);
+			return scroll != 0xFF && flags == scroll + 8 ? scroll + 4 : -1;
 		}
 
 		void CountLane(bool a_baked) noexcept
