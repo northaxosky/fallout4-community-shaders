@@ -467,19 +467,19 @@ namespace cs::engine
 			CS_HOOK_SHADER_SUBCLASS(BSWaterShader, kBsWater);
 
 			TryPatch("BSShader archive loader observer", [] {
-				stl::detour_thunk<ReloadFromStreamHook>(REL::ID({ 101507, 2318873, 2318873 }));
+				stl::detour_thunk<ReloadFromStreamHook>(RE::ID::BSShader::Load);
 			});
 			TryPatch("native graphics shader-set boundary", [] {
-				stl::detour_thunk<SetShadersHook>(REL::ID({ 894905, 2276942, 2276942 }));
+				stl::detour_thunk<SetShadersHook>(RE::ID::BSGraphics::Renderer::SetShaders);
 			});
 			TryPatch("native compute shader-run boundary", [] {
-				stl::detour_thunk<RunComputeShaderHook>(REL::ID({ 1108829, 2276940, 2276940 }));
+				stl::detour_thunk<RunComputeShaderHook>(RE::ID::BSGraphics::Renderer::RunComputeShader);
 			});
 			TryPatch("standalone compute shader observers", [] {
-				stl::detour_thunk<ReloadStandaloneComputeHook>(REL::ID({ 166975, 2319682, 2319682 }));
+				stl::detour_thunk<ReloadStandaloneComputeHook>(RE::ID::BSComputeShader::LoadTechniquesFromStream);
 			});
 			CountRoutingHook(TryPatch("BSShader native technique binder", [] {
-				stl::detour_thunk<BeginTechniqueHook>(REL::ID({ 1041640, 2318876, 2318876 }));
+				stl::detour_thunk<BeginTechniqueHook>(RE::ID::BSShader::BeginTechnique);
 			}));
 
 			L->info(

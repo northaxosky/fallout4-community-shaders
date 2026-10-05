@@ -74,27 +74,21 @@ namespace stl
 		write_vfunc<F, 0, T>();
 	}
 
-	template <std::size_t idx, class T>
-	void write_vfunc(REL::ID id)
+	template <std::size_t idx, class T, class Id>
+	void write_vfunc(Id id)
 	{
 		REL::Relocation<std::uintptr_t> vtbl{ id };
 		T::func = vtbl.write_vfunc(idx, T::thunk);
 	}
 
 	template <class T>
-	void detour_thunk(REL::ID a_relId)
+	void detour_thunk(REL::VariantID a_relId)
 	{
 		*(uintptr_t*)&T::func = Detours::X64::DetourFunction(a_relId.address(), (uintptr_t)&T::thunk);
 	}
 
 	template <class T>
-	void detour_thunk(const REL::VariantID& a_relId)
-	{
-		*(uintptr_t*)&T::func = Detours::X64::DetourFunction(a_relId.address(), (uintptr_t)&T::thunk);
-	}
-
-	template <class T>
-	void detour_thunk_ignore_func(REL::ID a_relId)
+	void detour_thunk_ignore_func(REL::VariantID a_relId)
 	{
 		std::ignore = Detours::X64::DetourFunction(a_relId.address(), (uintptr_t)&T::thunk);
 	}

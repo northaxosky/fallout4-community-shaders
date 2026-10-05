@@ -8,11 +8,7 @@ namespace cs::engine
 {
 	RE::BSGraphics::Context* GetActiveContext() noexcept
 	{
-		using Context = RE::BSGraphics::Context;
-
-		// Main context uses this cross-runtime global.
-		static REL::Relocation<Context**> ptr{ REL::ID({ 33539, 2704428, 2704428 }) };
-		return ptr ? *ptr : nullptr;
+		return RE::BSGraphics::GetGlobalContext();
 	}
 
 	void CopyResourcePreservingOM(ID3D11DeviceContext* a_ctx, ID3D11Resource* a_dst, ID3D11Resource* a_src) noexcept

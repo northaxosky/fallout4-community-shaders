@@ -24,11 +24,8 @@ namespace cs::engine
 
 	bool QueryTiledLightingEnabled() noexcept
 	{
-		static REL::Relocation<bool()> tileLightingGetter{
-			REL::ID({ 1154650, 2318371, 2318371 })
-		};
 		// Tilelight changes per frame.
-		return tileLightingGetter();
+		return RE::DrawWorld::QTiledLighting();
 	}
 
 	std::optional<ShaderVariantKeyView> ResolvePixelShaderVariant(

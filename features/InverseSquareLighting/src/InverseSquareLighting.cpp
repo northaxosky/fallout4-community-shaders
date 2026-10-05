@@ -327,7 +327,7 @@ namespace cs::features
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 		template <class T>
-		void InstallHook(REL::ID a_id)
+		void InstallHook(REL::VariantID a_id)
 		{
 			stl::detour_thunk<T>(a_id);
 			if (!T::func.address())
@@ -337,9 +337,9 @@ namespace cs::features
 		// FO4: OG AppendLight opens with RIP-relative loads a prologue detour cannot relocate; hook its sole caller.
 		constexpr engine::CallSiteAnchor kTiledCallbackAppendLight{
 			.name = "Tiled light callback -> AppendLight",
-			.function = REL::ID({ 999390, 2317525, 2317525 }),
+			.function = REL::VariantID{ 999390, 2317525 },
 			.offset = { 0x281, 0x2A3, 0x2A3 },
-			.target = REL::ID({ 1250844, 2318542, 2318542 })
+			.target = RE::ID::BSDFTiledLighting::AddLight
 		};
 	}
 
@@ -403,17 +403,17 @@ namespace cs::features
 		const auto appendSite = engine::ResolveCallSite(kTiledCallbackAppendLight);
 		if (!appendSite)
 			throw std::runtime_error("Unable to resolve ISL AppendLight call: " + appendSite.error());
-		InstallHook<CreateLight>(REL::ID({ 30546, 2198256, 2198256 }));
-		InstallHook<AddLight>(REL::ID({ 1109421, 2317457, 2317457 }));
-		InstallHook<RemoveLight>(REL::ID({ 162205, 2200909, 2200909 }));
-		InstallHook<RemoveSceneLight>(REL::ID({ 1410391, 2317464, 2317464 }));
-		InstallHook<UpdateLight>(REL::ID({ 1022957, 2198261, 2198261 }));
-		InstallHook<CullLight>(REL::ID({ 1440624, 2318414, 2318414 }));
+		InstallHook<CreateLight>(RE::ID::TESObjectLIGH::GenDynamic);
+		InstallHook<AddLight>(RE::ID::ShadowSceneNode::AddLight);
+		InstallHook<RemoveLight>(RE::ID::TESObjectREFR::RemoveLight);
+		InstallHook<RemoveSceneLight>(RE::ID::ShadowSceneNode::RemoveLight);
+		InstallHook<UpdateLight>(RE::ID::TESObjectLIGH::Update);
+		InstallHook<CullLight>(RE::ID::BSLight::TestFrustumCull);
 		InstallHook<TiledCallback>(kTiledCallbackAppendLight.function);
 		stl::write_thunk_call<AppendLight>(*appendSite);
-		InstallHook<UploadLights>(REL::ID({ 402301, 2276904, 2276904 }));
-		InstallHook<SetupGeometry>(REL::ID({ 976849, 2319150, 2319150 }));
-		InstallHook<Luminance>(REL::ID({ 170662, 2318428, 2318428 }));
+		InstallHook<UploadLights>(RE::ID::BSGraphics::Renderer::UpdateStructuredBuffer);
+		InstallHook<SetupGeometry>(RE::ID::BSDFLightShader::SetupGeometry);
+		InstallHook<Luminance>(RE::ID::BSLight::GetLuminanceAtPoint);
 		g_state.hooks = true;
 	}
 	void InverseSquareLighting::OnRuntimeQuarantined() noexcept

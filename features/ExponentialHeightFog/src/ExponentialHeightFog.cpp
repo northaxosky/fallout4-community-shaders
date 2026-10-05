@@ -267,7 +267,7 @@ namespace cs::features
 		}
 		try {
 			if (!_volume.Dispatch(reinterpret_cast<ID3D11DeviceContext*>(renderer->context),
-					_frameSettings, *camera, graphics->frameCount, *engine::GetTemporalAAEnableGlobal() != 0)) {
+					_frameSettings, *camera, graphics->frameCount, graphics->GetTAAState() == RE::BSGraphics::TAA_STATE::kEnabled)) {
 				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Fog dispatch inputs are unavailable; retaining native fog.");
 				return;
 			}
