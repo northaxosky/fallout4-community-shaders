@@ -247,16 +247,6 @@ namespace cs::engine
 		RE::BSGraphics::VertexShader* vertex = nullptr;
 		RE::BSGraphics::PixelShader* pixel = nullptr;
 	};
-#ifdef FO4CS_SHADER_INJECTION_TESTING
-	bool InstallComputeDispatchBridgeForTesting(
-		ID3D11DeviceContext* a_context,
-		std::uintptr_t a_validatedTail) noexcept;
-	void ObserveNativeComputeShaderForTesting(
-		ShaderInjectionTarget a_target,
-		std::uint32_t a_descriptor,
-		std::string_view a_nativeName,
-		ID3D11ComputeShader* a_shader) noexcept;
-#endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
 		ID3D11DeviceContext* a_context,

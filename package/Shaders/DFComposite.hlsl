@@ -240,12 +240,12 @@ PS_OUTPUT main(PS_INPUT input)
 		float encDotEnc = dot(enc, enc);
 		float zRecon = 1.0 - encDotEnc * 0.25;
 		float3 normalView = float3(enc * sqrt(zRecon), -(1.0 - encDotEnc * 0.5));
-#		if defined(OG)
+#	if defined(OG)
 		// OG has no cb2[0].zw screen-UV rescale.
 		float2 sn = float2(uv.x, 1.0 - uv.y);
-#		else
+#	else
 		float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
-#		endif
+#	endif
 		pos.xy = sn * 2.0 - 1.0;
 		pos.w = 1.0;
 		float3 posViewXYZ = float3(dot(reprojRow0, pos),
@@ -348,7 +348,6 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY
-
 
 #	ifndef FO4_AMBIENT_OCCLUSION
 #		define FO4_AMBIENT_OCCLUSION 1
@@ -791,7 +790,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY
 
-
 #	ifndef TILELIGHT
 #		define TILELIGHT 0
 #	endif
@@ -1096,8 +1094,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	}
 
 #	if !FOGSTACK
-	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
-					  ),
+	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor),
 		1.0);
 #	else
 #		if OUTPUTMASK && defined(OG)
@@ -1166,7 +1163,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY
-
 
 #	ifndef OUTPUTMASK
 #		define OUTPUTMASK 0
@@ -1687,7 +1683,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float2 uv = input.position.xy * ScreenSize.xy;
 
-
 #	if !COMPOSITE_HAS_TYPE || COMPOSITE_MATERIAL_5
 	float4 baseSample = g_tHdrBaseColor.SampleLevel(g_sBaseColor, uv, 0);
 	float3 baseColor = baseSample.xyz;
@@ -2180,7 +2175,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_CUBE_IBL
 
-
 #	ifdef SSGI
 #		include "FO4/ScreenSpaceGIConsumer.hlsli"
 #	endif
@@ -2482,16 +2476,16 @@ float4 main(PSInput input) : SV_Target0
 		float3 normal = float3(
 			encodedNormal * normalScale,
 			-(1.0 - encodedLengthSquared * 0.5));
-#			if defined(OG)
+#		if defined(OG)
 		// OG has no cb2[0].zw screen-UV rescale.
 		float2 projectedXY = float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0;
-#			else
+#		else
 		float2 projectedXY = float2(
 								 uv.x * screenData[0].z,
 								 1.0 - uv.y * screenData[0].w) *
 		                         2.0 -
 		                     1.0;
-#			endif
+#		endif
 		projected = float4(projectedXY, linearDepth, 1.0);
 		float3 worldNumerator = float3(
 			dot(row0, projected),

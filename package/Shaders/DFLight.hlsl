@@ -11,7 +11,6 @@
 #	include "FO4/ExponentialHeightFogConsumer.hlsli"
 #endif
 
-
 #include "FO4/InverseSquareLightingRaster.hlsli"
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
@@ -552,7 +551,6 @@ PS_OUTPUT main(PS_INPUT input)
 	float posViewLenSq = dot(-posView, -posView);
 	float posViewLen = rsqrt(posViewLenSq);
 	float3 viewDirNeg = -posView * posViewLen;
-
 
 	bool cascade0Active = (linearizedDepth < cb2_idx10_cascade_range.y);
 	bool cascade1Active = (cb2_idx10_cascade_range.x < linearizedDepth);
@@ -1846,17 +1844,17 @@ float2 goboUV = float2(omniUV.x,
 		brdfSpecular *= cookieRGB;
 #		endif
 
-	output.specular.xyz = attenuation * brdfSpecular;
-	output.specular.w = 1.0;
-#			if (defined(ATTENUATION_ONLY) && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON))) || defined(FO4_DEFERRED_BRANCH_LOCAL_DIFFUSE) || defined(FO4_DEFERRED_SPOT_IGNORE_RIM) || defined(FO4_DEFERRED_BASE_ROUGHNESS) || defined(FO4_DEFERRED_SPEC_ORDER)
-	output.diffuse = float4(diffuseAccum, 0.0);
-	output.diffuse *= attenuation;
-	output.diffuse /= 3.0;
-#			else
+		output.specular.xyz = attenuation * brdfSpecular;
+		output.specular.w = 1.0;
+#		if (defined(ATTENUATION_ONLY) && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON))) || defined(FO4_DEFERRED_BRANCH_LOCAL_DIFFUSE) || defined(FO4_DEFERRED_SPOT_IGNORE_RIM) || defined(FO4_DEFERRED_BASE_ROUGHNESS) || defined(FO4_DEFERRED_SPEC_ORDER)
+		output.diffuse = float4(diffuseAccum, 0.0);
+		output.diffuse *= attenuation;
+		output.diffuse /= 3.0;
+#		else
 	output.diffuse.xyz = attenuation * diffuseAccum;
 	output.diffuse.w = 0.0;
 	output.diffuse /= asfloat(0x40400000);
-#			endif
+#		endif
 
 		return output;
 	}
@@ -2558,25 +2556,25 @@ float2 goboUV = float2(omniUV.x,
 		brdfSpecular *= causticsMult;
 #	endif
 		float specMix = mad(schlickFres, -0.5, 1.0);
-#		ifdef AMBIENT
-	float3 scaledSpecular = brdfSpecular * specMix;
-	output.specular = float4(0.0, 0.0, 0.0, 1.0);
-	output.specular += float4(
-		mad(scaledSpecular, shadow, ambientSpecular), 0.0);
-#		else
+#	ifdef AMBIENT
+		float3 scaledSpecular = brdfSpecular * specMix;
+		output.specular = float4(0.0, 0.0, 0.0, 1.0);
+		output.specular += float4(
+			mad(scaledSpecular, shadow, ambientSpecular), 0.0);
+#	else
 	output.specular.xyz = (brdfSpecular * specMix) * shadow;
 	output.specular.w = 1.0;
-#		endif
+#	endif
 
-#		ifdef AMBIENT
-	output.diffuse = float4(ambientDiffuse, 0.0);
-	output.diffuse += float4(finalDiffuse * shadow, 0.0);
-	output.diffuse /= 3.0;
-#		else
+#	ifdef AMBIENT
+		output.diffuse = float4(ambientDiffuse, 0.0);
+		output.diffuse += float4(finalDiffuse * shadow, 0.0);
+		output.diffuse /= 3.0;
+#	else
 	output.diffuse = float4(finalDiffuse, 0.0);
 	output.diffuse *= shadow;
 	output.diffuse /= 3.0;
-#		endif
+#	endif
 
 		return output;
 	}
@@ -3430,46 +3428,46 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	else
 	float specMix = 1.0 - schlickFres * 0.5;
 #	endif
-#		ifdef AMBIENT
-#			if defined(FO4_DS2_TIGHT_AMBIENT_IGNORE) || defined(FO4_DS2_TARGET_ORDER)
-	float3 scaledSpecular = brdfSpecular * specMix;
-	output.specular = float4(0.0, 0.0, 0.0, 1.0);
-	output.specular += float4(
-		mad(scaledSpecular, shadow, ambientSpecular), 0.0);
-#			else
-	float specularScale = shadow * specMix;
-	output.specular = float4(0.0, 0.0, 0.0, 1.0);
-	output.specular += float4(
-		mad(brdfSpecular, specularScale, ambientSpecular), 0.0);
-#			endif
+#	ifdef AMBIENT
+#		if defined(FO4_DS2_TIGHT_AMBIENT_IGNORE) || defined(FO4_DS2_TARGET_ORDER)
+			float3 scaledSpecular = brdfSpecular * specMix;
+			output.specular = float4(0.0, 0.0, 0.0, 1.0);
+			output.specular += float4(
+				mad(scaledSpecular, shadow, ambientSpecular), 0.0);
 #		else
-#			ifdef FO4_DS2_TIGHT_NONAMBIENT
-	output.specular.xyz = (brdfSpecular * specMix) * shadow;
-#			else
-	output.specular.xyz = shadow * specMix * brdfSpecular;
-#			endif
-	output.specular.w = 1.0;
+		float specularScale = shadow * specMix;
+		output.specular = float4(0.0, 0.0, 0.0, 1.0);
+		output.specular += float4(
+			mad(brdfSpecular, specularScale, ambientSpecular), 0.0);
 #		endif
-
-#		ifdef AMBIENT
-	output.diffuse = float4(ambientDiffuse, 0.0);
-#			if defined(FO4_DS2_TIGHT_AMBIENT_IGNORE) || defined(FO4_DS2_TARGET_ORDER)
-	output.diffuse += float4(finalDiffuse * shadow, 0.0);
-#			else
-	output.diffuse += float4(shadow * finalDiffuse, 0.0);
-#			endif
-	output.diffuse /= 3.0;
+#	else
+#		ifdef FO4_DS2_TIGHT_NONAMBIENT
+	output.specular.xyz = (brdfSpecular * specMix) * shadow;
 #		else
-#			ifdef FO4_DS2_TIGHT_NONAMBIENT
+	output.specular.xyz = shadow * specMix * brdfSpecular;
+#		endif
+	output.specular.w = 1.0;
+#	endif
+
+#	ifdef AMBIENT
+			output.diffuse = float4(ambientDiffuse, 0.0);
+#		if defined(FO4_DS2_TIGHT_AMBIENT_IGNORE) || defined(FO4_DS2_TARGET_ORDER)
+			output.diffuse += float4(finalDiffuse * shadow, 0.0);
+#		else
+		output.diffuse += float4(shadow * finalDiffuse, 0.0);
+#		endif
+			output.diffuse /= 3.0;
+#	else
+#		ifdef FO4_DS2_TIGHT_NONAMBIENT
 	output.diffuse = float4(finalDiffuse, 0.0);
 	output.diffuse *= shadow;
 	output.diffuse /= 3.0;
-#			else
+#		else
 	output.diffuse.xyz = shadow * finalDiffuse;
 	output.diffuse.xyz /= 3.0;
 	output.diffuse.w = 0.0;
-#			endif
 #		endif
+#	endif
 
 			return output;
 		}
@@ -4419,38 +4417,38 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	float specMix = 1.0 - schlickFres * 0.5;
 #	endif
 
-#		ifdef FO4_DS3_TIGHT_NONAMBIENT
-	output.specular.xyz = (brdfSpecular * specMix) * shadow;
-	output.specular.w = 1.0;
-#		elif defined(FO4_DS3_AMBIENT_ORDER)
+#	ifdef FO4_DS3_TIGHT_NONAMBIENT
+			output.specular.xyz = (brdfSpecular * specMix) * shadow;
+			output.specular.w = 1.0;
+#	elif defined(FO4_DS3_AMBIENT_ORDER)
 	float3 scaledSpecular = brdfSpecular * specMix;
 	output.specular = float4(0.0, 0.0, 0.0, 1.0);
 	output.specular += float4(
 		mad(scaledSpecular, shadow, ambientSpecular), 0.0);
-#		else
+#	else
 	output.specular.xyz = shadow * specMix * brdfSpecular;
-#			ifdef AMBIENT
+#		ifdef AMBIENT
 	output.specular.xyz += ambientSpecular;
-#			endif
-	output.specular.w = 1.0;
 #		endif
+	output.specular.w = 1.0;
+#	endif
 
-#		ifdef FO4_DS3_TIGHT_NONAMBIENT
-	output.diffuse = float4(finalDiffuse, 0.0);
-	output.diffuse *= shadow;
-	output.diffuse /= 3.0;
-#		elif defined(FO4_DS3_AMBIENT_ORDER)
+#	ifdef FO4_DS3_TIGHT_NONAMBIENT
+			output.diffuse = float4(finalDiffuse, 0.0);
+			output.diffuse *= shadow;
+			output.diffuse /= 3.0;
+#	elif defined(FO4_DS3_AMBIENT_ORDER)
 	output.diffuse = float4(ambientDiffuse, 0.0);
 	output.diffuse += float4(finalDiffuse * shadow, 0.0);
 	output.diffuse /= 3.0;
-#		else
+#	else
 	output.diffuse.xyz = shadow * finalDiffuse;
-#			ifdef AMBIENT
+#		ifdef AMBIENT
 	output.diffuse.xyz += ambientDiffuse;
-#			endif
+#		endif
 	output.diffuse.xyz /= 3.0;
 	output.diffuse.w = 0.0;
-#		endif
+#	endif
 
 			return output;
 		}
@@ -4859,15 +4857,15 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 cookieRGB = g_tLightCookie.Sample(g_sLightCookie, cookieUV).xyz;
 
 			diffuseAccum *= cookieRGB;
-#		ifdef SPECULAR
-	output.specular.xyz = (brdfSpecular * cookieRGB) * attenuation;
-#		else
+#	ifdef SPECULAR
+			output.specular.xyz = (brdfSpecular * cookieRGB) * attenuation;
+#	else
 	output.specular.xyz = float3(0, 0, 0);
-#		endif
-	output.specular.w = 1.0;
-	output.diffuse = float4(diffuseAccum, 0.0);
-	output.diffuse *= attenuation;
-	output.diffuse /= 3.0;
+#	endif
+			output.specular.w = 1.0;
+			output.diffuse = float4(diffuseAccum, 0.0);
+			output.diffuse *= attenuation;
+			output.diffuse /= 3.0;
 			return output;
 		}
 
@@ -6290,41 +6288,41 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			brdfSpecular *= causticsMult;
 #	endif
 
-#		ifdef SPECULAR
-#			ifdef FO4_UNSHADOWED_USES_GLOSS_FRESNEL
-#				if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
-	float specularFresnelScale = mad(schlickFres, -0.5, 1.0);
-	output.specular = float4(0.0, 0.0, 0.0, 1.0);
-	output.specular += float4(
-		mad(brdfSpecular, specularFresnelScale, ambientSpecular), 0.0);
-#				else
-	float specularFresnelScale = mad(schlickFres, -0.5, 1.0);
-	output.specular.xyz = brdfSpecular * specularFresnelScale;
-#				endif
+#	ifdef SPECULAR
+#		ifdef FO4_UNSHADOWED_USES_GLOSS_FRESNEL
+#			if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
+			float specularFresnelScale = mad(schlickFres, -0.5, 1.0);
+			output.specular = float4(0.0, 0.0, 0.0, 1.0);
+			output.specular += float4(
+				mad(brdfSpecular, specularFresnelScale, ambientSpecular), 0.0);
 #			else
-	output.specular.xyz = attenuation * brdfSpecular;
+		float specularFresnelScale = mad(schlickFres, -0.5, 1.0);
+		output.specular.xyz = brdfSpecular * specularFresnelScale;
 #			endif
 #		else
+		output.specular.xyz = attenuation * brdfSpecular;
+#		endif
+#	else
 	output.specular.xyz = float3(0, 0, 0);
-#		endif
-#		if defined(AMBIENT) && !defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) && !defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
-	output.specular.xyz += ambientSpecular;
-#		endif
-#		if !defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) && !defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
-	output.specular.w = 1.0;
-#		endif
+#	endif
+#	if defined(AMBIENT) && !defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) && !defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
+			output.specular.xyz += ambientSpecular;
+#	endif
+#	if !defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) && !defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
+			output.specular.w = 1.0;
+#	endif
 
-#		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
-	output.diffuse = float4(ambientDiffuse, 0.0);
-	output.diffuse += float4(finalDiffuse, 0.0);
-	output.diffuse /= 3.0;
-#		else
+#	if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
+			output.diffuse = float4(ambientDiffuse, 0.0);
+			output.diffuse += float4(finalDiffuse, 0.0);
+			output.diffuse /= 3.0;
+#	else
 	output.diffuse = float4(finalDiffuse, 0.0);
-#			ifdef POINTOMNI
+#		ifdef POINTOMNI
 	output.diffuse *= attenuation;
-#			endif
-	output.diffuse /= 3.0;
 #		endif
+	output.diffuse /= 3.0;
+#	endif
 
 			return output;
 		}

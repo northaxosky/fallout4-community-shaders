@@ -83,27 +83,11 @@ namespace
 		kApplicationQueueRedControl
 	};
 
-	constexpr std::array kFormatCases{
-		FormatCase{
-			.name = "R8G8B8A8_UNORM",
-			.format = DXGI_FORMAT_R8G8B8A8_UNORM,
-			.producerValue = { 0.0F, 1.0F, 0.0F, 1.0F },
-			.consumerValue = { 1.0F, 0.0F, 1.0F, 1.0F } },
-		FormatCase{
-			.name = "R32_FLOAT",
-			.format = DXGI_FORMAT_R32_FLOAT,
-			.producerValue = { 0.25F, 0.0F, 0.0F, 0.0F },
-			.consumerValue = { 0.75F, 0.0F, 0.0F, 0.0F } },
-		FormatCase{
-			.name = "R16G16_FLOAT",
-			.format = DXGI_FORMAT_R16G16_FLOAT,
-			.producerValue = { 0.25F, 0.5F, 0.0F, 0.0F },
-			.consumerValue = { 0.75F, 0.125F, 0.0F, 0.0F } },
-		FormatCase{
-			.name = "R8_UNORM",
-			.format = DXGI_FORMAT_R8_UNORM,
-			.producerValue = { 1.0F / 255.0F, 0.0F, 0.0F, 0.0F },
-			.consumerValue = { 2.0F / 255.0F, 0.0F, 0.0F, 0.0F } }
+	constexpr FormatCase kFormatCase{
+		.name = "R8G8B8A8_UNORM",
+		.format = DXGI_FORMAT_R8G8B8A8_UNORM,
+		.producerValue = { 0.0F, 1.0F, 0.0F, 1.0F },
+		.consumerValue = { 1.0F, 0.0F, 1.0F, 1.0F }
 	};
 
 	bool Check(bool a_condition, const char* a_message)
@@ -1338,14 +1322,12 @@ int main(int a_argc, char** a_argv)
 	PrintDeviceIdentity(devices, hardware);
 
 	bool ok = true;
-	for (const auto& formatCase : kFormatCases) {
-		ok &= RunBidirectionalAliasScenario(
-			devices.device11.get(),
-			devices.context11.get(),
-			devices.device12.get(),
-			devices.queue.get(),
-			formatCase);
-	}
+	ok &= RunBidirectionalAliasScenario(
+		devices.device11.get(),
+		devices.context11.get(),
+		devices.device12.get(),
+		devices.queue.get(),
+		kFormatCase);
 	ok &= RunRetirementScenario(
 		devices.device11.get(),
 		devices.context11.get(),

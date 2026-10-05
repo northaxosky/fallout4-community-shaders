@@ -10,8 +10,7 @@ local shader_directories = {
 }
 
 local shader_files = {
-    "tests/shaders/SharedDataProbe.hlsl",
-    "tests/shaders/SSSConsumerProbe.hlsl"
+    "tests/shaders/SharedDataProbe.hlsl"
 }
 
 local root = os.projectdir()

@@ -17,7 +17,6 @@
 StructuredBuffer<FO4InverseSquareLighting::PerLightData> InverseSquareLights : register(t8);
 #	endif
 
-
 cbuffer TiledLightingParameters : register(b0)
 {
 #	if DFTILEDLIGHTING_VARIANT == 1

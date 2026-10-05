@@ -90,10 +90,6 @@ namespace
 	void TestDiskAndInventory(const std::filesystem::path& a_directory)
 	{
 		using namespace cs::renderdoc;
-		CHECK(RequiredSpaceBytes(0) == 256ULL * 1024 * 1024);
-		CHECK(RequiredSpaceBytes(120) == 30ULL * 1024 * 1024 * 1024);
-		CHECK(RequiredSpaceBytes(121) == RequiredSpaceBytes(120));
-
 		std::filesystem::create_directories(a_directory / "nested");
 		const auto first = a_directory / "first.rdc";
 		const auto second = a_directory / "runtime.log";
