@@ -162,6 +162,7 @@ namespace cs::render
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
 			fo4.EnabledDynamicCubemaps = a_features.dynamicCubemapsSettings.Enabled;
 			fo4.DynamicMaterialReflections = a_features.dynamicCubemapsSettings.MaterialReflections;
+			fo4.EnabledWaterParallax = a_features.waterEffectsSettings.EnabledParallax;
 			auto& terrain = a_data.feature.terraOccSettings;
 			terrain.EnableTerrainShadow = a_features.terrainShadowsSettings.EnableTerrainShadow;
 			std::ranges::copy(a_features.terrainShadowsSettings.Scale, terrain.Scale);
