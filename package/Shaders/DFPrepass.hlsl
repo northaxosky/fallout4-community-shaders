@@ -442,6 +442,10 @@ struct PS_OUTPUT
 		// FO4: the vertex-color consumer moved from Lighting/RunGrass into this prepass.
 		if (SharedData::lodBlendingSettings.DisableTerrainVertexColors)
 			input.vertexColor.xyz = 1;
+#		if LANDSCAPE
+		else
+			input.vertexColor.xyz /= max(max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z), EPSILON_DIVISION);
+#		endif
 #	endif
 
 #	if TESSELLATE_DISP_HEIGHT
