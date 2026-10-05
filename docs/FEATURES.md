@@ -92,10 +92,6 @@ are FO4-only rule-4 core features.
 - **Dynamic Cubemaps dry materials.** Implemented: the six native probe sites in `DFComposite.hlsl` sample
   the DC cube (t34/t35) normalized to the authored cube's brightness, keeping FO4 gain, SSLR blend and
   exclusions, with DC's roughness-to-mip contract rather than the native probe LOD.
-- **Water parallax.** Vanilla water normals have no height, but water texture mods do: Enhanced Vanilla
-  Water ships BC7 `DefaultWater`/`DefaultWaterTile`/`ChurningWaterTile` with height in alpha. `Water.hlsl`
-  already samples those normals (t4) and reads only `.xy`; reading `.a` is a relocated datum. Check the
-  height range against upstream's convention and gate vanilla (alpha-less) normals.
 - **Subsurface Scattering.** Replace FO4's fixed second-composite blur with upstream separable/Burley on
   native class-5 eligibility; never stack both.
 - **Cloud Shadows.** Prior art on branch `cloud-shadows` (`3314d567`) maps material pointers to layers;
@@ -116,7 +112,7 @@ Ordered by user value over effort, respecting dependencies.
 
 1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE.
 2. **Finish ported features:** DC provider adapters (S/M); Terrain Shadows FO4
-   heightmap pack (M); Water Effects caustics proof (S) and water parallax (M).
+   heightmap pack (M); Water Effects caustics proof (S).
 3. **Cheap new features:** LOD Blending (S); Terrain Variation (M); Remote Control (M; DevBench automation).
 4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
 5. **Mid-size, few dependencies:** Cloud Shadows (L; feeds EHF); Subsurface Scattering (M); Volumetric
