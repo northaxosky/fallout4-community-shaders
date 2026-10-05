@@ -10,17 +10,14 @@
 
 #include <Windows.h>
 
-#include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <exception>
 #include <format>
 #include <mutex>
 #include <optional>
-#include <shared_mutex>
-#include <span>
+#include <stdexcept>
 #include <string_view>
-#include <unordered_map>
-#include <vector>
 
 #include "RE/B/BSBloodSplatterShader.h"
 #include "RE/B/BSDFCompositeShader.h"
@@ -28,6 +25,7 @@
 #include "RE/B/BSDFPrePassShader.h"
 #include "RE/B/BSDistantTreeShader.h"
 #include "RE/B/BSEffectShader.h"
+#include "RE/B/BSGeometry.h"
 #include "RE/B/BSLightingShader.h"
 #include "RE/B/BSParticleShader.h"
 #include "RE/B/BSRenderPass.h"
@@ -54,23 +52,26 @@ namespace cs::engine
 		thread_local const ActiveBeginTechnique* t_activeBeginTechnique =
 			nullptr;
 
-		class ActiveBeginTechniqueScope
+		// Restores the previous value so nested engine calls on one thread unwind correctly.
+		template <class T>
+		class ThreadLocalPointerScope
 		{
 		public:
-			explicit ActiveBeginTechniqueScope(
-				const ActiveBeginTechnique& a_active) noexcept :
-				_previous(t_activeBeginTechnique)
+			ThreadLocalPointerScope(T*& a_slot, T* a_value) noexcept :
+				_slot(a_slot),
+				_previous(a_slot)
 			{
-				t_activeBeginTechnique = &a_active;
+				_slot = a_value;
 			}
 
-			~ActiveBeginTechniqueScope() noexcept
-			{
-				t_activeBeginTechnique = _previous;
-			}
+			~ThreadLocalPointerScope() noexcept { _slot = _previous; }
+
+			ThreadLocalPointerScope(const ThreadLocalPointerScope&) = delete;
+			ThreadLocalPointerScope& operator=(const ThreadLocalPointerScope&) = delete;
 
 		private:
-			const ActiveBeginTechnique* _previous;
+			T*& _slot;
+			T* _previous;
 		};
 
 		struct BeginTechniqueHook
@@ -87,7 +88,7 @@ namespace cs::engine
 					.vertexShaderId = a_vertexShaderId,
 					.pixelShaderId = a_pixelShaderId
 				};
-				const ActiveBeginTechniqueScope scope(active);
+				const ThreadLocalPointerScope scope(t_activeBeginTechnique, &active);
 				const bool result = func(
 					a_shader,
 					a_vertexShaderId,
@@ -220,42 +221,69 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Fixed before the first frame renders, so the render thread reads it without a lock.
-		std::vector<PrepassDrawObserver> g_prepassObservers;
+		// Set at Load before the first frame renders, so engine threads read it without a lock.
+		PrepassDrawClassifier g_prepassClassifier = nullptr;
+		std::atomic<std::uint64_t> g_laneBaked{ 0 };
+		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
 
-		// The engine bakes most prepass draws into command-buffer records that ProcessCommandBuffer replays
-		// without SetupGeometry, so each live record is mapped back to its pass.
-		class PrepassRecordRegistry
+		// PixelShader::constantTable byte 0x61 is the prepass register DFPrepass.hlsl declares as cb2_pad; stock never reads it.
+		constexpr std::size_t kPrepassLaneSlot = 0x61 - 0x58;
+		// BSDFPrePassShaderMacros::GetPixelShaderID masks NORMALS, BINORMAL_TANGENT and CHARACTER_LIGHT_MASK out of the key.
+		constexpr std::uint32_t kPrepassPixelKeyMask = 0xFFFFEFE7;
+		// Landscape draws lay that register out as land_material_gate, which stock reads.
+		constexpr std::uint32_t kPrepassLandscapeBit = 1U << 5;
+		// Context::GetConstantBuffer level of the per-geometry cb2.
+		constexpr std::uint32_t kPerGeometryConstantLevel = 2;
+
+		struct PrepassLaneRequest
 		{
-		public:
-			void Add(const std::byte* a_record, RE::BSRenderPass* a_pass)
-			{
-				std::unique_lock lock(_mutex);
-				_passes[a_record] = a_pass;
-			}
-
-			void Remove(const std::byte* a_record)
-			{
-				std::unique_lock lock(_mutex);
-				_passes.erase(a_record);
-			}
-
-			void Resolve(std::span<std::byte* const> a_records, std::vector<RE::BSRenderPass*>& a_passes) const
-			{
-				a_passes.clear();
-				std::shared_lock lock(_mutex);
-				for (const auto* record : a_records) {
-					const auto it = _passes.find(record);
-					a_passes.push_back(it != _passes.end() ? it->second : nullptr);
-				}
-			}
-
-		private:
-			mutable std::shared_mutex _mutex;
-			std::unordered_map<const std::byte*, RE::BSRenderPass*> _passes;
+			PrepassBakePath path;
+			std::uint32_t descriptor;
+			float value;
+			std::int32_t offset;  // dword offset in the pixel cb2 constants; -1 when unresolved
 		};
-		PrepassRecordRegistry g_prepassRecords;
 
+		thread_local PrepassLaneRequest* t_prepassLane = nullptr;
+
+		[[nodiscard]] std::int32_t PrepassLaneOffset(const RE::BSGraphics::PixelShader* a_pixel) noexcept
+		{
+			// Table bytes are dword offsets; 0xFF marks a constant the variant does not have.
+			const auto offset = a_pixel ? static_cast<std::uint8_t>(a_pixel->constantTable[kPrepassLaneSlot]) : std::uint8_t{ 0xFF };
+			return offset == 0xFF ? -1 : offset;
+		}
+
+		void CountLane(bool a_baked) noexcept
+		{
+			(a_baked ? g_laneBaked : g_laneUnavailable).fetch_add(1, std::memory_order_relaxed);
+		}
+
+		[[nodiscard]] const RE::BSGraphics::PixelShader* FindPrepassPixelShader(
+			const RE::BSShader* a_shader,
+			std::uint32_t a_descriptor) noexcept
+		{
+			RE::BSGraphics::PixelShader key;
+			key.id = a_descriptor & kPrepassPixelKeyMask;
+			auto* keyPointer = &key;
+			const auto& shaders = native::PixelShaders(a_shader);
+			const auto found = shaders.find(keyPointer);
+			return found != shaders.end() ? *found : nullptr;
+		}
+
+		// BSShader::BuildCommandBufferParam; the prepass and utility creators fill it on the stack.
+		struct BuildCommandBufferParam
+		{
+			RE::BSGeometry* geometry;       // 00
+			std::uint32_t vertexRegisters;  // 08, float4 count
+			std::uint32_t pixelRegisters;   // 0C, float4 count
+			std::byte unk10[0x10];          // 10
+			const float* vertexConstants;   // 20
+			float* pixelConstants;          // 28
+		};
+		static_assert(offsetof(BuildCommandBufferParam, pixelRegisters) == 0x0C);
+		static_assert(offsetof(BuildCommandBufferParam, vertexConstants) == 0x20);
+		static_assert(offsetof(BuildCommandBufferParam, pixelConstants) == 0x28);
+
+		// Immediate draws build cb2 inside SetupGeometry, so the lane is written when the engine maps it.
 		struct PrepassSetupGeometryHook
 		{
 			static constexpr std::size_t size = 0x07;
@@ -264,100 +292,85 @@ namespace cs::engine
 				RE::BSShader* a_self,
 				RE::BSRenderPass* a_pass)
 			{
+				if (!g_prepassClassifier || !a_pass) {
+					func(a_self, a_pass);
+					return;
+				}
+				PrepassLaneRequest request{
+					.path = PrepassBakePath::kImmediate,
+					.descriptor = a_pass->passEnum,
+					.value = g_prepassClassifier(a_pass, PrepassBakePath::kImmediate) ? 1.0f : 0.0f,
+					.offset = -1
+				};
+				const ThreadLocalPointerScope scope(t_prepassLane, &request);
 				func(a_self, a_pass);
-				for (const auto& observer : g_prepassObservers)
-					observer.apply(observer.classify(a_pass));
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		struct PixelConstantMapHook
+		{
+			static RE::BSGraphics::ConstantGroup* thunk(
+				void* a_renderer,
+				RE::BSGraphics::PixelShader* a_pixel,
+				std::uint32_t a_level)
+			{
+				auto* group = func(a_renderer, a_pixel, a_level);
+				const auto* request = t_prepassLane;
+				if (!request || request->path != PrepassBakePath::kImmediate || a_level != kPerGeometryConstantLevel ||
+					!group || !group->data || (request->descriptor & kPrepassLandscapeBit) != 0)
+					return group;
+				const auto offset = PrepassLaneOffset(a_pixel);
+				if (offset >= 0)
+					group->data[offset] = request->value;
+				CountLane(offset >= 0);
+				return group;
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Command-buffer draws bake cb2 once into an immutable buffer, so the lane rides the constants
+		// BuildCommandBuffer copies; the scope keeps utility-shader records out of it.
 		struct PrepassCreateCommandBufferHook
 		{
 			static std::byte* thunk(
 				RE::BSShader* a_self,
 				RE::BSRenderPass* a_pass)
 			{
-				auto* record = func(a_self, a_pass);
-				if (record && !g_prepassObservers.empty())
-					g_prepassRecords.Add(record, a_pass);
-				return record;
+				if (!g_prepassClassifier || !a_pass || (a_pass->passEnum & kPrepassLandscapeBit) != 0)
+					return func(a_self, a_pass);
+				PrepassLaneRequest request{
+					.path = PrepassBakePath::kCommandBuffer,
+					.descriptor = a_pass->passEnum,
+					.value = g_prepassClassifier(a_pass, PrepassBakePath::kCommandBuffer) ? 1.0f : 0.0f,
+					.offset = PrepassLaneOffset(FindPrepassPixelShader(a_self, a_pass->passEnum))
+				};
+				const ThreadLocalPointerScope scope(t_prepassLane, &request);
+				return func(a_self, a_pass);
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		struct CleanupCommandBufferHook
+		struct BuildCommandBufferHook
 		{
-			static std::int64_t thunk(
-				void* a_renderer,
-				std::byte* a_record)
+			static std::byte* thunk(
+				RE::BSShader* a_self,
+				BuildCommandBufferParam* a_param)
 			{
-				if (!g_prepassObservers.empty())
-					g_prepassRecords.Remove(a_record);
-				return func(a_renderer, a_record);
+				if (const auto* request = t_prepassLane; request && request->path == PrepassBakePath::kCommandBuffer) {
+					const bool fits = request->offset >= 0 && a_param->pixelConstants &&
+					                  static_cast<std::uint32_t>(request->offset) < a_param->pixelRegisters * 4;
+					if (fits)
+						a_param->pixelConstants[request->offset] = request->value;
+					CountLane(fits);
+				}
+				return func(a_self, a_param);
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
-		// The record array is null-terminated; OG reads the third argument, NG/AE ignore it and the fourth.
-		struct ProcessCommandBufferHook
-		{
-			static std::int64_t thunk(
-				void* a_renderer,
-				std::byte** a_records,
-				void* a_arg3,
-				void* a_arg4)
-			{
-				if (g_prepassObservers.empty() || !a_records || !*a_records)
-					return func(a_renderer, a_records, a_arg3, a_arg4);
-				return ReplayByClass(a_renderer, a_records, a_arg3, a_arg4);
-			}
-
-			static inline REL::Relocation<decltype(thunk)> func;
-
-		private:
-			// Replays each run of equal-class records in its own engine call so apply lands between draws.
-			static std::int64_t ReplayByClass(
-				void* a_renderer,
-				std::byte** a_records,
-				void* a_arg3,
-				void* a_arg4)
-			{
-				thread_local std::vector<RE::BSRenderPass*> passes;
-				thread_local std::vector<std::uint32_t> classes;
-
-				std::size_t count = 0;
-				while (a_records[count])
-					++count;
-				g_prepassRecords.Resolve({ a_records, count }, passes);
-
-				const auto width = g_prepassObservers.size();
-				classes.assign(count * width, 0u);
-				for (std::size_t i = 0; i < count; ++i) {
-					if (!passes[i])
-						continue;
-					for (std::size_t j = 0; j < width; ++j)
-						classes[i * width + j] = g_prepassObservers[j].classify(passes[i]);
-				}
-
-				const auto row = [&](std::size_t a_index) { return classes.begin() + static_cast<std::ptrdiff_t>(a_index * width); };
-				std::int64_t result = 0;
-				for (std::size_t start = 0; start < count;) {
-					std::size_t end = start + 1;
-					while (end < count && std::equal(row(start), row(start) + static_cast<std::ptrdiff_t>(width), row(end)))
-						++end;
-					for (std::size_t j = 0; j < width; ++j)
-						g_prepassObservers[j].apply(classes[start * width + j]);
-					std::byte* const next = a_records[end];
-					a_records[end] = nullptr;
-					result = func(a_renderer, a_records + start, a_arg3, a_arg4);
-					a_records[end] = next;
-					start = end;
-				}
-				return result;
-			}
 		};
 
 		template <class Install>
@@ -397,25 +410,35 @@ namespace cs::engine
 	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
 	}
 
-	bool RegisterPrepassDrawObserver(PrepassDrawObserver a_observer)
+	bool RegisterPrepassDrawClassifier(PrepassDrawClassifier a_classifier)
 	{
 		static const bool installed =
 			TryPatch(
-				"BSDFPrePassShader SetupGeometry observer",
+				"BSDFPrePassShader SetupGeometry lane",
 				[] { stl::write_vfunc<RE::BSDFPrePassShader, PrepassSetupGeometryHook>(); }) &&
 			TryPatch(
-				"BSDFPrePassShader command-buffer builder observer",
+				"pixel constant group map",
+				[] {
+					// OG inlines the map into SetupGeometry, so it has no hookable site.
+					if (REX::FModule::IsRuntimeOG())
+						throw std::runtime_error("no out-of-line pixel constant map on OG");
+					stl::detour_thunk<PixelConstantMapHook>(REL::ID({ 0, 2317224, 2317224 }));
+				}) &&
+			TryPatch(
+				"BSDFPrePassShader command-buffer creator lane",
 				[] { stl::detour_thunk<PrepassCreateCommandBufferHook>(REL::ID({ 1285447, 2318501, 2318501 })); }) &&
 			TryPatch(
-				"command-buffer cleanup observer",
-				[] { stl::detour_thunk<CleanupCommandBufferHook>(REL::ID({ 1544902, 2276988, 2276988 })); }) &&
-			TryPatch(
-				"command-buffer replay observer",
-				[] { stl::detour_thunk<ProcessCommandBufferHook>(REL::ID({ 673619, 2276979, 2276979 })); });
-		if (!installed || !a_observer.classify || !a_observer.apply)
+				"command-buffer builder lane",
+				[] { stl::detour_thunk<BuildCommandBufferHook>(REL::ID({ 833764, 2318870, 2318870 })); });
+		if (!installed || !a_classifier || g_prepassClassifier)
 			return false;
-		g_prepassObservers.push_back(a_observer);
+		g_prepassClassifier = a_classifier;
 		return true;
+	}
+
+	PrepassLaneStats GetPrepassLaneStats() noexcept
+	{
+		return { g_laneBaked.load(std::memory_order_relaxed), g_laneUnavailable.load(std::memory_order_relaxed) };
 	}
 
 	void InstallShaderSubclassHooks()

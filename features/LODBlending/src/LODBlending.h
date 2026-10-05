@@ -4,8 +4,10 @@
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "LODBlendingSettings.h"
+#include "Render/ShaderSubclassHooks.h"
 #include "ShaderDefines.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -46,8 +48,7 @@ namespace cs::features
 	private:
 		LODBlending() = default;
 
-		static std::uint32_t ClassifyPrepassDraw(RE::BSRenderPass* a_pass) noexcept;
-		static void ApplyPrepassDraw(std::uint32_t a_class) noexcept;
+		static bool ClassifyPrepassDraw(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath a_path) noexcept;
 		void FinishPrepassFrame() noexcept;
 
 		bool SaveSettings() override;
@@ -58,24 +59,16 @@ namespace cs::features
 		std::atomic_bool _injectionsOperational{ false };
 		std::string _validationDetail;
 
-		struct PrepassCounts
+		struct BakeCounts
 		{
-			std::uint32_t draws = 0;
-			std::uint32_t lodDraws = 0;
-			std::uint32_t flagDraws = 0;
-			std::uint32_t materialDraws = 0;
+			std::atomic<std::uint64_t> draws{ 0 };
+			std::atomic<std::uint64_t> lodDraws{ 0 };
 		};
-		// Render thread only; folded into the atomics below after each deferred prepass.
-		PrepassCounts _frameCounts;
-		bool _loggedFirstPrepass = false;
-		bool _loggedFirstLOD = false;
-		std::atomic_bool _observerInstalled{ false };
-		std::atomic<std::uint32_t> _lastFrame{ 0 };
-		std::atomic<std::uint32_t> _lastDraws{ 0 };
-		std::atomic<std::uint32_t> _lastLodDraws{ 0 };
-		std::atomic<std::uint32_t> _lastFlagDraws{ 0 };
-		std::atomic<std::uint32_t> _lastMaterialDraws{ 0 };
-		std::atomic<std::uint64_t> _sessionDraws{ 0 };
-		std::atomic<std::uint64_t> _sessionLodDraws{ 0 };
+		// Indexed by PrepassBakePath; classification runs on the creating or drawing thread.
+		std::array<BakeCounts, 2> _bakeCounts;
+		std::atomic_bool _classifierInstalled{ false };
+		// Render thread only.
+		bool _loggedSummary = false;
+		std::uint32_t _firstLODFrame = 0;
 	};
 }

@@ -19,16 +19,25 @@ namespace cs::engine
 
 	void InstallShaderSubclassHooks();
 
-	// Per-draw state for the deferred prepass. The render thread calls classify exactly once per
-	// BSDFPrePassShader draw, in draw order, then apply with that class before the draw is issued.
-	// Class 0 is the neutral state: it is applied for draws without a prepass pass.
-	struct PrepassDrawObserver
+	// The engine path that baked a prepass draw's per-draw constants.
+	enum class PrepassBakePath
 	{
-		std::uint32_t (*classify)(RE::BSRenderPass* a_pass) noexcept;
-		void (*apply)(std::uint32_t a_class) noexcept;
+		kCommandBuffer,  // once, when the pass is created
+		kImmediate       // every frame, from BSDFPrePassShader::SetupGeometry
 	};
 
-	// Load or OnPostPostLoad only; the first call patches the engine, and false means no observer was installed.
-	// Covers both the immediate SetupGeometry path and command-buffer replay.
-	[[nodiscard]] bool RegisterPrepassDrawObserver(PrepassDrawObserver a_observer);
+	// Classifies a BSDFPrePassShader draw; the host bakes the answer into the lane DFPrepass.hlsl reads as cb2_pad.x
+	// of every non-landscape prepass draw. Runs on the thread that creates the pass or issues the draw.
+	using PrepassDrawClassifier = bool (*)(RE::BSRenderPass* a_pass, PrepassBakePath a_path) noexcept;
+
+	struct PrepassLaneStats
+	{
+		std::uint64_t baked = 0;        // draws whose lane was written
+		std::uint64_t unavailable = 0;  // non-landscape draws whose pixel shader has no lane
+	};
+
+	// Load or OnPostPostLoad only; the first call patches the engine. Returns false when the patches failed or
+	// a classifier is already registered, and then no draw carries a lane.
+	[[nodiscard]] bool RegisterPrepassDrawClassifier(PrepassDrawClassifier a_classifier);
+	[[nodiscard]] PrepassLaneStats GetPrepassLaneStats() noexcept;
 }

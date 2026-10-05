@@ -581,8 +581,8 @@ struct PS_OUTPUT
 #		if LOD_LANDSCAPE && !BONE_TINTING
 		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		elif !LANDSCAPE && !GRASS
-		// FO4: object LOD has no technique define, so the gate is the per-draw engine LOD marker.
-		if (FO4SharedData::LODObjectDraw)
+		// FO4: object LOD has no technique define; the host bakes the BTO flag into cb2_pad, which stock never reads.
+		if (cb2_pad.x != 0.0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
 #		endif
 #	endif

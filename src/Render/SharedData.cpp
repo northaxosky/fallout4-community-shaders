@@ -400,11 +400,7 @@ namespace cs::render
 				},
 				engine::HookPriority::Late) ||
 			!engine::RegisterPostDeferredPrePass(
-				[bind] {
-					PublishLODObjectDraw(false);
-					UpdateSharedData();
-					bind();
-				},
+				[bind] { UpdateSharedData(); bind(); },
 				engine::HookPriority::Early)) {
 			state.updateInstallFailed = true;
 			state.ready.store(false, std::memory_order_release);
@@ -435,24 +431,6 @@ namespace cs::render
 	void InvalidateFullscreenDebugData() noexcept
 	{
 		GetSubstrateState().debugFrame = UINT32_MAX;
-	}
-
-	void PublishLODObjectDraw(bool a_lodObject) noexcept
-	{
-		auto& state = GetSubstrateState();
-		const std::uint32_t value = a_lodObject ? 1u : 0u;
-		if (state.fo4.LODObjectDraw == value || !state.ready.load(std::memory_order_acquire))
-			return;
-		auto* context = GetImmediateContext();
-		if (!context)
-			return;
-		auto fo4 = state.fo4;
-		fo4.LODObjectDraw = value;
-		if (!WriteConstantBuffer(context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), &fo4, sizeof(fo4))) {
-			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared LOD object constant-buffer map failed.");
-			return;
-		}
-		state.fo4 = fo4;
 	}
 
 	void BindSharedData(

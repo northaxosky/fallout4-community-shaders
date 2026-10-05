@@ -21,8 +21,6 @@ namespace cs::render
 	bool IsSharedDataCurrent() noexcept;
 	// Debug producers invalidate the cached packet when replacing or updating its texture.
 	void InvalidateFullscreenDebugData() noexcept;
-	// Render thread only; rewrites b7 only on change and resets after the deferred prepass.
-	void PublishLODObjectDraw(bool a_lodObject) noexcept;
 
 	// startup thread only
 	void EnsureSharedDataUpdateInstalled();

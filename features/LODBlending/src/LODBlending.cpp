@@ -19,9 +19,11 @@
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
+#include "RE/B/BSGeometry.h"
 #include "RE/B/BSRenderPass.h"
-#include "RE/B/BSShaderMaterial.h"
 #include "RE/B/BSShaderProperty.h"
+#include "RE/M/Main.h"
+#include "RE/N/NiNode.h"
 
 namespace cs::features
 {
@@ -29,26 +31,24 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.lodblending");
 
-		struct ObjectLODMarkers
+		// BTO shapes hang under the land LOD root; terrain LOD there carries kLODLandscape. The kLODObjects property flag
+		// and the LOD material features miss BTO shapes, so they cannot gate.
+		bool IsObjectLOD(RE::BSRenderPass* a_pass) noexcept
 		{
-			bool flag = false;
-			bool material = false;
-		};
-
-		// FO4 has no technique define for object LOD; the engine marks it on the property flag and the lighting material feature.
-		ObjectLODMarkers ReadObjectLODMarkers(RE::BSShaderProperty* a_property) noexcept
-		{
-			ObjectLODMarkers markers;
-			if (!a_property)
-				return markers;
-			markers.flag = a_property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kLODObjects);
-			if (auto* material = a_property->material) {
-				const auto feature = material->GetFeature();
-				markers.material = feature == RE::BSShaderMaterial::Feature::kLODObjects ||
-				                   feature == RE::BSShaderMaterial::Feature::kLODObjectsHD;
+			auto* geometry = a_pass->GetGeometry();
+			auto* property = a_pass->GetShaderProperty();
+			const auto* landRoot = RE::Main::GetLandLODRoot();
+			if (!geometry || !property || !landRoot || property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kLODLandscape))
+				return false;
+			for (const RE::NiNode* node = geometry->parent; node; node = node->parent) {
+				if (node == landRoot)
+					return true;
 			}
-			return markers;
+			return false;
 		}
+
+		// The world has streamed in once records keep arriving; one line then proves the bake without per-draw logging.
+		constexpr std::uint32_t kSummaryDelayFrames = 600;
 	}
 
 	LODBlending* LODBlending::GetSingleton()
@@ -78,71 +78,62 @@ namespace cs::features
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawObserver({ &LODBlending::ClassifyPrepassDraw, &LODBlending::ApplyPrepassDraw })) {
-			FailLoad("LOD Blending prepass draw observer installation failed.");
+		if (!cs::engine::RegisterPrepassDrawClassifier(&LODBlending::ClassifyPrepassDraw)) {
+			FailLoad("LOD Blending prepass draw classifier installation failed.");
 			return;
 		}
-		_observerInstalled.store(true, std::memory_order_release);
+		_classifierInstalled.store(true, std::memory_order_release);
 		if (!cs::engine::RegisterPostDeferredPrePass([this] { FinishPrepassFrame(); }, cs::engine::HookPriority::Late))
-			L->warn("Object-LOD draw counters unavailable: post-prepass registration failed.");
+			L->warn("Object-LOD bake summary unavailable: post-prepass registration failed.");
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
-	std::uint32_t LODBlending::ClassifyPrepassDraw(RE::BSRenderPass* a_pass) noexcept
+	bool LODBlending::ClassifyPrepassDraw(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath a_path) noexcept
 	{
-		auto* self = GetSingleton();
-		const auto markers = ReadObjectLODMarkers(a_pass ? a_pass->GetShaderProperty() : nullptr);
-		const bool lodObject = markers.flag || markers.material;
-		++self->_frameCounts.draws;
-		self->_frameCounts.lodDraws += lodObject ? 1u : 0u;
-		self->_frameCounts.flagDraws += markers.flag ? 1u : 0u;
-		self->_frameCounts.materialDraws += markers.material ? 1u : 0u;
-		return lodObject ? 1u : 0u;
-	}
-
-	void LODBlending::ApplyPrepassDraw(std::uint32_t a_class) noexcept
-	{
-		cs::render::PublishLODObjectDraw(a_class != 0);
+		const bool lodObject = IsObjectLOD(a_pass);
+		auto& counts = GetSingleton()->_bakeCounts[static_cast<std::size_t>(a_path)];
+		counts.draws.fetch_add(1, std::memory_order_relaxed);
+		counts.lodDraws.fetch_add(lodObject ? 1u : 0u, std::memory_order_relaxed);
+		return lodObject;
 	}
 
 	void LODBlending::FinishPrepassFrame() noexcept
 	{
-		const auto counts = std::exchange(_frameCounts, PrepassCounts{});
-		if (counts.draws == 0)
+		if (_loggedSummary)
 			return;
 		const auto* graphics = cs::engine::GetGraphicsState();
 		const auto frame = graphics ? graphics->frameCount : 0u;
-		_lastFrame.store(frame, std::memory_order_relaxed);
-		_lastDraws.store(counts.draws, std::memory_order_relaxed);
-		_lastLodDraws.store(counts.lodDraws, std::memory_order_relaxed);
-		_lastFlagDraws.store(counts.flagDraws, std::memory_order_relaxed);
-		_lastMaterialDraws.store(counts.materialDraws, std::memory_order_relaxed);
-		_sessionDraws.fetch_add(counts.draws, std::memory_order_relaxed);
-		_sessionLodDraws.fetch_add(counts.lodDraws, std::memory_order_relaxed);
-		if (!_loggedFirstPrepass) {
-			_loggedFirstPrepass = true;
-			L->info("Object-LOD gate: first prepass frame={} prepass_draws={} lod_draws={} flag_draws={} material_draws={}",
-				frame, counts.draws, counts.lodDraws, counts.flagDraws, counts.materialDraws);
-		}
-		if (!_loggedFirstLOD && counts.lodDraws != 0) {
-			_loggedFirstLOD = true;
-			L->info("Object-LOD gate: first LOD frame={} prepass_draws={} lod_draws={} flag_draws={} material_draws={}",
-				frame, counts.draws, counts.lodDraws, counts.flagDraws, counts.materialDraws);
-		}
+		const auto& records = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kCommandBuffer)];
+		const auto& immediate = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kImmediate)];
+		if (records.lodDraws.load(std::memory_order_relaxed) + immediate.lodDraws.load(std::memory_order_relaxed) == 0)
+			return;
+		if (_firstLODFrame == 0)
+			_firstLODFrame = frame;
+		if (frame - _firstLODFrame < kSummaryDelayFrames)
+			return;
+		_loggedSummary = true;
+		const auto lanes = cs::engine::GetPrepassLaneStats();
+		L->info(
+			"Object-LOD bake: frame={} records={} lod_records={} immediate_draws={} lod_immediate_draws={} lanes_baked={} lanes_unavailable={}",
+			frame, records.draws.load(std::memory_order_relaxed), records.lodDraws.load(std::memory_order_relaxed),
+			immediate.draws.load(std::memory_order_relaxed), immediate.lodDraws.load(std::memory_order_relaxed),
+			lanes.baked, lanes.unavailable);
 	}
 
 	void LODBlending::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
+		const auto& records = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kCommandBuffer)];
+		const auto& immediate = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kImmediate)];
+		const auto lanes = cs::engine::GetPrepassLaneStats();
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
-			.Field("observer_installed", _observerInstalled.load(std::memory_order_relaxed))
-			.Field("last_frame", _lastFrame.load(std::memory_order_relaxed))
-			.Field("prepass_draws", _lastDraws.load(std::memory_order_relaxed))
-			.Field("lod_draws", _lastLodDraws.load(std::memory_order_relaxed))
-			.Field("lod_flag_draws", _lastFlagDraws.load(std::memory_order_relaxed))
-			.Field("lod_material_draws", _lastMaterialDraws.load(std::memory_order_relaxed))
-			.Field("session_prepass_draws", _sessionDraws.load(std::memory_order_relaxed))
-			.Field("session_lod_draws", _sessionLodDraws.load(std::memory_order_relaxed));
+			.Field("classifier_installed", _classifierInstalled.load(std::memory_order_relaxed))
+			.Field("records", records.draws.load(std::memory_order_relaxed))
+			.Field("lod_records", records.lodDraws.load(std::memory_order_relaxed))
+			.Field("immediate_draws", immediate.draws.load(std::memory_order_relaxed))
+			.Field("lod_immediate_draws", immediate.lodDraws.load(std::memory_order_relaxed))
+			.Field("lanes_baked", lanes.baked)
+			.Field("lanes_unavailable", lanes.unavailable);
 	}
 
 	bool LODBlending::ValidateShaderInjections(std::string& a_error)
