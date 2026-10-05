@@ -226,10 +226,10 @@ namespace cs::engine
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
 		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
 
-		// PixelShader::constantTable bytes 0x5F and 0x60 are the scroll-delta and material-flags registers; the one
-		// between them is the register DFPrepass.hlsl declares as cb2_pad, which has no table entry and stock never reads.
-		constexpr std::size_t kPrepassScrollDeltaSlot = 0x5F - 0x58;
+		// PixelShader::constantTable byte 0x60 is the material-flags register. DFPrepass.hlsl declares cb2_pad directly
+		// before it in every non-landscape variant, and stock never reads the pad, so the lane is the register before flags.
 		constexpr std::size_t kPrepassMaterialFlagsSlot = 0x60 - 0x58;
+		constexpr std::uint64_t kLaneDiagnosticLimit = 16;
 		// BSDFPrePassShaderMacros::GetPixelShaderID masks NORMALS, BINORMAL_TANGENT and CHARACTER_LIGHT_MASK out of the key.
 		constexpr std::uint32_t kPrepassPixelKeyMask = 0xFFFFEFE7;
 		// Landscape draws lay that register out as land_material_gate, which stock reads.
@@ -252,14 +252,18 @@ namespace cs::engine
 			if (!a_pixel)
 				return -1;
 			// Table bytes are dword offsets; 0xFF marks a constant the variant does not have.
-			const auto scroll = static_cast<std::uint8_t>(a_pixel->constantTable[kPrepassScrollDeltaSlot]);
 			const auto flags = static_cast<std::uint8_t>(a_pixel->constantTable[kPrepassMaterialFlagsSlot]);
-			return scroll != 0xFF && flags == scroll + 8 ? scroll + 4 : -1;
+			return flags != 0xFF && flags >= 4 ? flags - 4 : -1;
 		}
 
-		void CountLane(bool a_baked) noexcept
+		void CountLane(bool a_baked, std::uint32_t a_descriptor, std::int32_t a_offset) noexcept
 		{
-			(a_baked ? g_laneBaked : g_laneUnavailable).fetch_add(1, std::memory_order_relaxed);
+			if (a_baked) {
+				g_laneBaked.fetch_add(1, std::memory_order_relaxed);
+				return;
+			}
+			if (g_laneUnavailable.fetch_add(1, std::memory_order_relaxed) < kLaneDiagnosticLimit)
+				L->warn("Prepass lane unavailable: descriptor=0x{:08X} offset={}", a_descriptor, a_offset);
 		}
 
 		[[nodiscard]] const RE::BSGraphics::PixelShader* FindPrepassPixelShader(
@@ -329,7 +333,7 @@ namespace cs::engine
 				const auto offset = PrepassLaneOffset(a_pixel);
 				if (offset >= 0)
 					group->data[offset] = request->value;
-				CountLane(offset >= 0);
+				CountLane(offset >= 0, request->descriptor, offset);
 				return group;
 			}
 
@@ -370,7 +374,7 @@ namespace cs::engine
 					                  static_cast<std::uint32_t>(request->offset) < a_param->pixelRegisters * 4;
 					if (fits)
 						a_param->pixelConstants[request->offset] = request->value;
-					CountLane(fits);
+					CountLane(fits, request->descriptor, request->offset);
 				}
 				return func(a_self, a_param);
 			}

@@ -1086,6 +1086,10 @@ namespace
 				 { { "LOD_LANDSCAPE", "1" } },
 				 // Object LOD reads its baked cb2 lane in every plain non-landscape, non-grass variant.
 				 { { "TEXTURE", "1" } }, { { "TEXTURE", "1" }, { "VC", "1" } }, { { "TEXTURE", "1" }, { "INSTANCED", "1" } },
+				 // Packing variants move cb2_pad; the host finds it one register before cb2_material_flags in each.
+				 { { "TEXTURE", "1" }, { "BLEND", "1" } }, { { "TEXTURE", "1" }, { "SKIN_TINT", "1" } },
+				 { { "TEXTURE", "1" }, { "HAIR", "1" } }, { { "TEXTURE", "1" }, { "GRADIENT_REMAP", "1" }, { "HAIR", "1" } },
+				 { { "TEXTURE", "1" }, { "EYE", "1" }, { "COMBINED", "1" } },
 				 { { "LANDSCAPE", "1" }, { "LAND_LOD_BLEND", "1" } },
 				 { { "LANDSCAPE", "1" }, { "LAND_LOD_BLEND", "1" }, { "INSTANCED", "1" } },
 				 { { "LANDSCAPE", "1" }, { "VC", "1" } },

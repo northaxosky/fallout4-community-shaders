@@ -182,6 +182,7 @@ cbuffer PerCall_CB2 : register(b2)
 #	if LANDSCAPE
 	float4 cb2_land_material_gate;
 #	else
+	// The host locates this lane as the register before cb2_material_flags; keep the two adjacent (ShaderSubclassHooks.cpp).
 	float4 cb2_pad;
 #	endif
 #	if LANDSCAPE
