@@ -10,11 +10,16 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <exception>
 #include <format>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
+#include <span>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "RE/B/BSBloodSplatterShader.h"
@@ -216,7 +221,40 @@ namespace cs::engine
 		};
 
 		// Fixed before the first frame renders, so the render thread reads it without a lock.
-		std::vector<PrepassGeometryObserver> g_prepassGeometryObservers;
+		std::vector<PrepassDrawObserver> g_prepassObservers;
+
+		// The engine bakes most prepass draws into command-buffer records that ProcessCommandBuffer replays
+		// without SetupGeometry, so each live record is mapped back to its pass.
+		class PrepassRecordRegistry
+		{
+		public:
+			void Add(const std::byte* a_record, RE::BSRenderPass* a_pass)
+			{
+				std::unique_lock lock(_mutex);
+				_passes[a_record] = a_pass;
+			}
+
+			void Remove(const std::byte* a_record)
+			{
+				std::unique_lock lock(_mutex);
+				_passes.erase(a_record);
+			}
+
+			void Resolve(std::span<std::byte* const> a_records, std::vector<RE::BSRenderPass*>& a_passes) const
+			{
+				a_passes.clear();
+				std::shared_lock lock(_mutex);
+				for (const auto* record : a_records) {
+					const auto it = _passes.find(record);
+					a_passes.push_back(it != _passes.end() ? it->second : nullptr);
+				}
+			}
+
+		private:
+			mutable std::shared_mutex _mutex;
+			std::unordered_map<const std::byte*, RE::BSRenderPass*> _passes;
+		};
+		PrepassRecordRegistry g_prepassRecords;
 
 		struct PrepassSetupGeometryHook
 		{
@@ -226,12 +264,100 @@ namespace cs::engine
 				RE::BSShader* a_self,
 				RE::BSRenderPass* a_pass)
 			{
-				for (const auto observer : g_prepassGeometryObservers)
-					observer(a_pass);
 				func(a_self, a_pass);
+				for (const auto& observer : g_prepassObservers)
+					observer.apply(observer.classify(a_pass));
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct PrepassCreateCommandBufferHook
+		{
+			static std::byte* thunk(
+				RE::BSShader* a_self,
+				RE::BSRenderPass* a_pass)
+			{
+				auto* record = func(a_self, a_pass);
+				if (record && !g_prepassObservers.empty())
+					g_prepassRecords.Add(record, a_pass);
+				return record;
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct CleanupCommandBufferHook
+		{
+			static std::int64_t thunk(
+				void* a_renderer,
+				std::byte* a_record)
+			{
+				if (!g_prepassObservers.empty())
+					g_prepassRecords.Remove(a_record);
+				return func(a_renderer, a_record);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// The record array is null-terminated; OG reads the third argument, NG/AE ignore it and the fourth.
+		struct ProcessCommandBufferHook
+		{
+			static std::int64_t thunk(
+				void* a_renderer,
+				std::byte** a_records,
+				void* a_arg3,
+				void* a_arg4)
+			{
+				if (g_prepassObservers.empty() || !a_records || !*a_records)
+					return func(a_renderer, a_records, a_arg3, a_arg4);
+				return ReplayByClass(a_renderer, a_records, a_arg3, a_arg4);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+
+		private:
+			// Replays each run of equal-class records in its own engine call so apply lands between draws.
+			static std::int64_t ReplayByClass(
+				void* a_renderer,
+				std::byte** a_records,
+				void* a_arg3,
+				void* a_arg4)
+			{
+				thread_local std::vector<RE::BSRenderPass*> passes;
+				thread_local std::vector<std::uint32_t> classes;
+
+				std::size_t count = 0;
+				while (a_records[count])
+					++count;
+				g_prepassRecords.Resolve({ a_records, count }, passes);
+
+				const auto width = g_prepassObservers.size();
+				classes.assign(count * width, 0u);
+				for (std::size_t i = 0; i < count; ++i) {
+					if (!passes[i])
+						continue;
+					for (std::size_t j = 0; j < width; ++j)
+						classes[i * width + j] = g_prepassObservers[j].classify(passes[i]);
+				}
+
+				const auto row = [&](std::size_t a_index) { return classes.begin() + static_cast<std::ptrdiff_t>(a_index * width); };
+				std::int64_t result = 0;
+				for (std::size_t start = 0; start < count;) {
+					std::size_t end = start + 1;
+					while (end < count && std::equal(row(start), row(start) + static_cast<std::ptrdiff_t>(width), row(end)))
+						++end;
+					for (std::size_t j = 0; j < width; ++j)
+						g_prepassObservers[j].apply(classes[start * width + j]);
+					std::byte* const next = a_records[end];
+					a_records[end] = nullptr;
+					result = func(a_renderer, a_records + start, a_arg3, a_arg4);
+					a_records[end] = next;
+					start = end;
+				}
+				return result;
+			}
 		};
 
 		template <class Install>
@@ -271,14 +397,24 @@ namespace cs::engine
 	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
 	}
 
-	bool RegisterPrepassGeometryObserver(PrepassGeometryObserver a_observer)
+	bool RegisterPrepassDrawObserver(PrepassDrawObserver a_observer)
 	{
-		static const bool installed = TryPatch(
-			"BSDFPrePassShader SetupGeometry observer",
-			[] { stl::write_vfunc<RE::BSDFPrePassShader, PrepassSetupGeometryHook>(); });
-		if (!installed || !a_observer)
+		static const bool installed =
+			TryPatch(
+				"BSDFPrePassShader SetupGeometry observer",
+				[] { stl::write_vfunc<RE::BSDFPrePassShader, PrepassSetupGeometryHook>(); }) &&
+			TryPatch(
+				"BSDFPrePassShader command-buffer builder observer",
+				[] { stl::detour_thunk<PrepassCreateCommandBufferHook>(REL::ID({ 1285447, 2318501, 2318501 })); }) &&
+			TryPatch(
+				"command-buffer cleanup observer",
+				[] { stl::detour_thunk<CleanupCommandBufferHook>(REL::ID({ 1544902, 2276988, 2276988 })); }) &&
+			TryPatch(
+				"command-buffer replay observer",
+				[] { stl::detour_thunk<ProcessCommandBufferHook>(REL::ID({ 673619, 2276979, 2276979 })); });
+		if (!installed || !a_observer.classify || !a_observer.apply)
 			return false;
-		g_prepassGeometryObservers.push_back(a_observer);
+		g_prepassObservers.push_back(a_observer);
 		return true;
 	}
 

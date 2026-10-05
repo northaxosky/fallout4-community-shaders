@@ -46,7 +46,8 @@ namespace cs::features
 	private:
 		LODBlending() = default;
 
-		static void ObservePrepassGeometry(RE::BSRenderPass* a_pass) noexcept;
+		static std::uint32_t ClassifyPrepassDraw(RE::BSRenderPass* a_pass) noexcept;
+		static void ApplyPrepassDraw(std::uint32_t a_class) noexcept;
 		void FinishPrepassFrame() noexcept;
 
 		bool SaveSettings() override;

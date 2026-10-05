@@ -78,8 +78,8 @@ namespace cs::features
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassGeometryObserver(&LODBlending::ObservePrepassGeometry)) {
-			FailLoad("LOD Blending prepass geometry observer installation failed.");
+		if (!cs::engine::RegisterPrepassDrawObserver({ &LODBlending::ClassifyPrepassDraw, &LODBlending::ApplyPrepassDraw })) {
+			FailLoad("LOD Blending prepass draw observer installation failed.");
 			return;
 		}
 		_observerInstalled.store(true, std::memory_order_release);
@@ -88,7 +88,7 @@ namespace cs::features
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
-	void LODBlending::ObservePrepassGeometry(RE::BSRenderPass* a_pass) noexcept
+	std::uint32_t LODBlending::ClassifyPrepassDraw(RE::BSRenderPass* a_pass) noexcept
 	{
 		auto* self = GetSingleton();
 		const auto markers = ReadObjectLODMarkers(a_pass ? a_pass->GetShaderProperty() : nullptr);
@@ -97,7 +97,12 @@ namespace cs::features
 		self->_frameCounts.lodDraws += lodObject ? 1u : 0u;
 		self->_frameCounts.flagDraws += markers.flag ? 1u : 0u;
 		self->_frameCounts.materialDraws += markers.material ? 1u : 0u;
-		cs::render::PublishLODObjectDraw(lodObject);
+		return lodObject ? 1u : 0u;
+	}
+
+	void LODBlending::ApplyPrepassDraw(std::uint32_t a_class) noexcept
+	{
+		cs::render::PublishLODObjectDraw(a_class != 0);
 	}
 
 	void LODBlending::FinishPrepassFrame() noexcept
