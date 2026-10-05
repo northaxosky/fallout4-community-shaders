@@ -1814,16 +1814,6 @@ namespace cs::engine
 		};
 	}
 
-#ifdef FO4CS_SHADER_INJECTION_TESTING
-	bool InstallComputeDispatchBridgeForTesting(
-		ID3D11DeviceContext* a_context,
-		std::uintptr_t a_validatedTail) noexcept
-	{
-		return InstallComputeDispatchBridgeAt(
-			a_context, a_validatedTail);
-	}
-#endif
-
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device)
 	{
 		auto& service = GetService();
@@ -2378,27 +2368,6 @@ namespace cs::engine
 		std::scoped_lock lock(service.nativeVariantMutex);
 		service.nativeShaderMetadata.insert_or_assign(a_shader, metadata);
 	}
-
-#ifdef FO4CS_SHADER_INJECTION_TESTING
-	void ObserveNativeComputeShaderForTesting(
-		ShaderInjectionTarget a_target,
-		std::uint32_t a_descriptor,
-		std::string_view a_nativeName,
-		ID3D11ComputeShader* a_shader) noexcept
-	{
-		try {
-			RecordNativeComputeShader(
-				MakeNativeVariantKey({ .target = a_target,
-					.stage = ShaderStage::kCompute,
-					.descriptor = a_descriptor,
-					.nativeName = a_nativeName }),
-				a_shader,
-				false);
-		} catch (...) {
-		}
-	}
-
-#endif
 
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept
