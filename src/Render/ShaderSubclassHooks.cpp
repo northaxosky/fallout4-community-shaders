@@ -292,7 +292,8 @@ namespace cs::engine
 		static_assert(offsetof(BuildCommandBufferParam, vertexConstants) == 0x20);
 		static_assert(offsetof(BuildCommandBufferParam, pixelConstants) == 0x28);
 
-		// Immediate draws build cb2 inside SetupGeometry, so the lane is written when the engine maps it.
+		// Immediate draws build cb2 inside SetupGeometry, so the lane is written when the engine hands out its mapped
+		// pixel constants: at the map on NG/AE, at the flush before unmap on OG (each inlines the other half).
 		struct PrepassSetupGeometryHook
 		{
 			static constexpr std::size_t size = 0x07;
@@ -301,7 +302,7 @@ namespace cs::engine
 				RE::BSShader* a_self,
 				RE::BSRenderPass* a_pass)
 			{
-				if (!g_prepassClassifier || !a_pass) {
+				if (!g_prepassClassifier || !a_pass || (a_pass->passEnum & kPrepassLandscapeBit) != 0) {
 					func(a_self, a_pass);
 					return;
 				}
@@ -309,7 +310,7 @@ namespace cs::engine
 					.path = PrepassBakePath::kImmediate,
 					.descriptor = a_pass->passEnum,
 					.value = g_prepassClassifier(a_pass, PrepassBakePath::kImmediate) ? 1.0f : 0.0f,
-					.offset = -1
+					.offset = PrepassLaneOffset(FindPrepassPixelShader(a_self, a_pass->passEnum))
 				};
 				const ThreadLocalPointerScope scope(t_prepassLane, &request);
 				func(a_self, a_pass);
@@ -317,6 +318,17 @@ namespace cs::engine
 
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		void WriteImmediateLane(const RE::BSGraphics::ConstantGroup* a_group) noexcept
+		{
+			const auto* request = t_prepassLane;
+			if (!request || request->path != PrepassBakePath::kImmediate)
+				return;
+			const bool fits = request->offset >= 0 && a_group && a_group->data;
+			if (fits)
+				a_group->data[request->offset] = request->value;
+			CountLane(fits, request->descriptor, request->offset);
+		}
 
 		struct PixelConstantMapHook
 		{
@@ -326,15 +338,25 @@ namespace cs::engine
 				std::uint32_t a_level)
 			{
 				auto* group = func(a_renderer, a_pixel, a_level);
-				const auto* request = t_prepassLane;
-				if (!request || request->path != PrepassBakePath::kImmediate || a_level != kPerGeometryConstantLevel ||
-					!group || !group->data || (request->descriptor & kPrepassLandscapeBit) != 0)
-					return group;
-				const auto offset = PrepassLaneOffset(a_pixel);
-				if (offset >= 0)
-					group->data[offset] = request->value;
-				CountLane(offset >= 0, request->descriptor, offset);
+				if (a_level == kPerGeometryConstantLevel)
+					WriteImmediateLane(group);
 				return group;
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// BSGraphics::Renderer::FlushConstantGroup(vertex, pixel) unmaps both level-2 groups once SetupGeometry has
+		// filled them; BSDFPrePassShader::SetupGeometry is its only caller inside the lane scope.
+		struct ConstantGroupFlushHook
+		{
+			static void thunk(
+				void* a_renderer,
+				RE::BSGraphics::ConstantGroup* a_vertex,
+				RE::BSGraphics::ConstantGroup* a_pixel)
+			{
+				WriteImmediateLane(a_pixel);
+				func(a_renderer, a_vertex, a_pixel);
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -426,12 +448,12 @@ namespace cs::engine
 				"BSDFPrePassShader SetupGeometry lane",
 				[] { stl::write_vfunc<RE::BSDFPrePassShader, PrepassSetupGeometryHook>(); }) &&
 			TryPatch(
-				"pixel constant group map",
+				"immediate pixel constants lane",
 				[] {
-					// OG inlines the map into SetupGeometry, so it has no hookable site.
 					if (REX::FModule::IsRuntimeOG())
-						throw std::runtime_error("no out-of-line pixel constant map on OG");
-					stl::detour_thunk<PixelConstantMapHook>(REL::ID({ 0, 2317224, 2317224 }));
+						stl::detour_thunk<ConstantGroupFlushHook>(REL::ID({ 1515598, 0, 0 }));
+					else
+						stl::detour_thunk<PixelConstantMapHook>(REL::ID({ 0, 2317224, 2317224 }));
 				}) &&
 			TryPatch(
 				"BSDFPrePassShader command-buffer creator lane",
