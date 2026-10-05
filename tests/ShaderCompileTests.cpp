@@ -583,7 +583,7 @@ namespace
 			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams),
 			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, DynamicMaterialReflections),
-			ABI(FO4SharedDataCB, pad0)
+			ABI(FO4SharedDataCB, LODObjectDraw), ABI(FO4SharedDataCB, pad0)
 		};
 		struct Buffer
 		{
@@ -1083,7 +1083,7 @@ namespace
 			.description = "BSDFPrePass feature off",
 			.forbidden = { CB(6) } });
 		for (const auto& material : std::vector<ShaderDefines>{
-				 { { "LOD_OBJECT_INSTANCED", "1" } }, { { "LOD_LANDSCAPE", "1" } },
+				 { { "LOD_LANDSCAPE", "1" } },
 				 { { "LANDSCAPE", "1" }, { "LAND_LOD_BLEND", "1" } },
 				 { { "LANDSCAPE", "1" }, { "LAND_LOD_BLEND", "1" }, { "INSTANCED", "1" } },
 				 { { "LANDSCAPE", "1" }, { "VC", "1" } },
@@ -1096,6 +1096,18 @@ namespace
 				.description = "LOD Blending deferred material consumers",
 				.required = { CB(6) },
 				.forbidden = { CB(4), CB(5), CB(7), CB(8), CB(9), Texture(71) } });
+		}
+		// Only variants that can draw object LOD read the per-draw b7 gate.
+		for (const auto& material : std::vector<ShaderDefines>{
+				 { { "TEXTURE", "1" } }, { { "TEXTURE", "1" }, { "VC", "1" } }, { { "TEXTURE", "1" }, { "INSTANCED", "1" } } }) {
+			auto defines = material;
+			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" }, { "LOD_BLENDING", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "NORMALS", "1" } });
+			a_jobs.push_back({ .path = prepass,
+				.defines = std::move(defines),
+				.profile = "ps_5_0",
+				.description = "LOD Blending object LOD per-draw gate",
+				.required = { CB(6), CB(7) },
+				.forbidden = { CB(4), CB(5), CB(8), CB(9), Texture(71) } });
 		}
 
 		const auto tiled = a_root / "DFTiledLighting.hlsl";

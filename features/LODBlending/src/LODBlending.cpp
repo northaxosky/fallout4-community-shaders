@@ -4,21 +4,51 @@
 
 #include <string>
 #include <type_traits>
+#include <utility>
 
 #include <toml++/toml.hpp>
 
 #include "Log.h"
 #include "Menu/SettingsEdit.h"
+#include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
+#include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
+#include "Telemetry/Telemetry.h"
+
+#include "RE/B/BSRenderPass.h"
+#include "RE/B/BSShaderMaterial.h"
+#include "RE/B/BSShaderProperty.h"
 
 namespace cs::features
 {
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.lodblending");
+
+		struct ObjectLODMarkers
+		{
+			bool flag = false;
+			bool material = false;
+		};
+
+		// FO4 has no technique define for object LOD; the engine marks it on the property flag and the lighting material feature.
+		ObjectLODMarkers ReadObjectLODMarkers(RE::BSShaderProperty* a_property) noexcept
+		{
+			ObjectLODMarkers markers;
+			if (!a_property)
+				return markers;
+			markers.flag = a_property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kLODObjects);
+			if (auto* material = a_property->material) {
+				const auto feature = material->GetFeature();
+				markers.material = feature == RE::BSShaderMaterial::Feature::kLODObjects ||
+				                   feature == RE::BSShaderMaterial::Feature::kLODObjectsHD;
+			}
+			return markers;
+		}
 	}
 
 	LODBlending* LODBlending::GetSingleton()
@@ -48,7 +78,66 @@ namespace cs::features
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
+		if (!cs::engine::RegisterPrepassGeometryObserver(&LODBlending::ObservePrepassGeometry)) {
+			FailLoad("LOD Blending prepass geometry observer installation failed.");
+			return;
+		}
+		_observerInstalled.store(true, std::memory_order_release);
+		if (!cs::engine::RegisterPostDeferredPrePass([this] { FinishPrepassFrame(); }, cs::engine::HookPriority::Late))
+			L->warn("Object-LOD draw counters unavailable: post-prepass registration failed.");
 		_registrationsReady.store(true, std::memory_order_release);
+	}
+
+	void LODBlending::ObservePrepassGeometry(RE::BSRenderPass* a_pass) noexcept
+	{
+		auto* self = GetSingleton();
+		const auto markers = ReadObjectLODMarkers(a_pass ? a_pass->GetShaderProperty() : nullptr);
+		const bool lodObject = markers.flag || markers.material;
+		++self->_frameCounts.draws;
+		self->_frameCounts.lodDraws += lodObject ? 1u : 0u;
+		self->_frameCounts.flagDraws += markers.flag ? 1u : 0u;
+		self->_frameCounts.materialDraws += markers.material ? 1u : 0u;
+		cs::render::PublishLODObjectDraw(lodObject);
+	}
+
+	void LODBlending::FinishPrepassFrame() noexcept
+	{
+		const auto counts = std::exchange(_frameCounts, PrepassCounts{});
+		if (counts.draws == 0)
+			return;
+		const auto* graphics = cs::engine::GetGraphicsState();
+		const auto frame = graphics ? graphics->frameCount : 0u;
+		_lastFrame.store(frame, std::memory_order_relaxed);
+		_lastDraws.store(counts.draws, std::memory_order_relaxed);
+		_lastLodDraws.store(counts.lodDraws, std::memory_order_relaxed);
+		_lastFlagDraws.store(counts.flagDraws, std::memory_order_relaxed);
+		_lastMaterialDraws.store(counts.materialDraws, std::memory_order_relaxed);
+		_sessionDraws.fetch_add(counts.draws, std::memory_order_relaxed);
+		_sessionLodDraws.fetch_add(counts.lodDraws, std::memory_order_relaxed);
+		if (!_loggedFirstPrepass) {
+			_loggedFirstPrepass = true;
+			L->info("Object-LOD gate: first prepass frame={} prepass_draws={} lod_draws={} flag_draws={} material_draws={}",
+				frame, counts.draws, counts.lodDraws, counts.flagDraws, counts.materialDraws);
+		}
+		if (!_loggedFirstLOD && counts.lodDraws != 0) {
+			_loggedFirstLOD = true;
+			L->info("Object-LOD gate: first LOD frame={} prepass_draws={} lod_draws={} flag_draws={} material_draws={}",
+				frame, counts.draws, counts.lodDraws, counts.flagDraws, counts.materialDraws);
+		}
+	}
+
+	void LODBlending::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		a_sink
+			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
+			.Field("observer_installed", _observerInstalled.load(std::memory_order_relaxed))
+			.Field("last_frame", _lastFrame.load(std::memory_order_relaxed))
+			.Field("prepass_draws", _lastDraws.load(std::memory_order_relaxed))
+			.Field("lod_draws", _lastLodDraws.load(std::memory_order_relaxed))
+			.Field("lod_flag_draws", _lastFlagDraws.load(std::memory_order_relaxed))
+			.Field("lod_material_draws", _lastMaterialDraws.load(std::memory_order_relaxed))
+			.Field("session_prepass_draws", _sessionDraws.load(std::memory_order_relaxed))
+			.Field("session_lod_draws", _sessionLodDraws.load(std::memory_order_relaxed));
 	}
 
 	bool LODBlending::ValidateShaderInjections(std::string& a_error)

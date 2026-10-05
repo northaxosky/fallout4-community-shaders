@@ -578,10 +578,12 @@ struct PS_OUTPUT
 	float4 albedoSample = 1.0;
 #	endif
 #	if defined(LOD_BLENDING)
-#		if LOD_OBJECT_INSTANCED && !LOD_LANDSCAPE
-		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
-#		elif LOD_LANDSCAPE && !BONE_TINTING
+#		if LOD_LANDSCAPE && !BONE_TINTING
 		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
+#		elif !LANDSCAPE && !GRASS
+		// FO4: object LOD has no technique define, so the gate is the per-draw engine LOD marker.
+		if (FO4SharedData::LODObjectDraw)
+			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
 #		endif
 #	endif
 #	if LOD_LANDSCAPE && !BONE_TINTING

@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include "RE/B/BSBloodSplatterShader.h"
 #include "RE/B/BSDFCompositeShader.h"
@@ -24,6 +25,7 @@
 #include "RE/B/BSEffectShader.h"
 #include "RE/B/BSLightingShader.h"
 #include "RE/B/BSParticleShader.h"
+#include "RE/B/BSRenderPass.h"
 #include "RE/B/BSSkyShader.h"
 #include "RE/B/BSUtilityShader.h"
 #include "RE/B/BSWaterShader.h"
@@ -213,6 +215,25 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// Fixed before the first frame renders, so the render thread reads it without a lock.
+		std::vector<PrepassGeometryObserver> g_prepassGeometryObservers;
+
+		struct PrepassSetupGeometryHook
+		{
+			static constexpr std::size_t size = 0x07;
+
+			static void thunk(
+				RE::BSShader* a_self,
+				RE::BSRenderPass* a_pass)
+			{
+				for (const auto observer : g_prepassGeometryObservers)
+					observer(a_pass);
+				func(a_self, a_pass);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		template <class Install>
 		bool TryPatch(std::string_view a_label, Install&& a_install)
 		{
@@ -248,6 +269,17 @@ namespace cs::engine
 		static const char* Name() { return #klass; } \
 	};                                               \
 	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
+	}
+
+	bool RegisterPrepassGeometryObserver(PrepassGeometryObserver a_observer)
+	{
+		static const bool installed = TryPatch(
+			"BSDFPrePassShader SetupGeometry observer",
+			[] { stl::write_vfunc<RE::BSDFPrePassShader, PrepassSetupGeometryHook>(); });
+		if (!installed || !a_observer)
+			return false;
+		g_prepassGeometryObservers.push_back(a_observer);
+		return true;
 	}
 
 	void InstallShaderSubclassHooks()
