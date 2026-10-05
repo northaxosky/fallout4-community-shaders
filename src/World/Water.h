@@ -5,7 +5,6 @@
 #include <DirectXMath.h>
 #include <array>
 #include <cstdint>
-#include <functional>
 
 namespace cs::engine
 {
@@ -16,7 +15,6 @@ namespace cs::engine
 	};
 
 	[[nodiscard]] WaterDataStatus GetWaterDataStatus() noexcept;
-	void InstallWaterRippleVisibilityFilter(std::function<bool()> a_suppress);
 	void FillWaterData(
 		std::array<DirectX::XMFLOAT4, 25>& a_data,
 		float& a_systemHeight,

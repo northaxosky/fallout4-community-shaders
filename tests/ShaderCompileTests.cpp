@@ -582,7 +582,8 @@ namespace
 			ABI(FO4SharedDataCB, DebugOwner), ABI(FO4SharedDataCB, DebugMode),
 			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams),
-			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, pad0)
+			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, DynamicMaterialReflections),
+			ABI(FO4SharedDataCB, pad0)
 		};
 		struct Buffer
 		{
@@ -860,7 +861,6 @@ namespace
 			{ { "FO4CS_SUBSTRATE", "1" },
 				{ "SCREEN_SPACE_SHADOWS", "1" },
 				{ "TERRAIN_SHADOWS", "1" },
-				{ "WETNESS_EFFECTS", "1" },
 				{ "DYNAMIC_CUBEMAPS", "1" },
 				{ "WATER_EFFECTS", "1" } });
 		a_jobs.push_back({ .path = bsdfLight,
@@ -898,13 +898,13 @@ namespace
 			ShaderDefines defines{ { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRECTIONAL", "1" },
 				{ "LIGHT_TYPE", "1" }, { "DIRSPLITS", "2" }, { "RGBSPEC", "1" }, { "SCREEN_SPACE_SHADOWS", "1" } };
 			if (specular)
-				defines.insert(defines.end(), { { "SPECULAR", "1" }, { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" } });
+				defines.insert(defines.end(), { { "SPECULAR", "1" }, { "FO4CS_SUBSTRATE", "1" } });
 			a_jobs.push_back({ .path = bsdfLight,
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
-				.description = specular ? "SSS no-cascade wetness composition" : "SSS directional light without cascades",
+				.description = specular ? "SSS no-cascade specular composition" : "SSS directional light without cascades",
 				.required = { Texture(3), Texture(45) },
-				.forbidden = specular ? std::vector<Resource>{ Texture(24) } : std::vector<Resource>{ CB(7), Texture(24) } });
+				.forbidden = { CB(7), Texture(24), Texture(70), Texture(71) } });
 		}
 
 		const auto composite = a_root / "DFComposite.hlsl";
@@ -945,8 +945,8 @@ namespace
 				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRSPLITS", "2" } } }) {
 			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" },
 											  { "DIRECTIONAL", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
-											  { "WATER_EFFECTS", "1" }, { "WETNESS_EFFECTS", "1" }, { "TERRAIN_SHADOWS", "1" } });
-			a_jobs.push_back({ .path = bsdfLight, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog directional and coat consumer", .required = { CB(4), CB(5), CB(6) }, .forbidden = { Texture(19) } });
+											  { "WATER_EFFECTS", "1" }, { "TERRAIN_SHADOWS", "1" } });
+			a_jobs.push_back({ .path = bsdfLight, .defines = std::move(defines), .profile = "ps_5_0", .description = "ExponentialHeightFog directional consumer", .required = { CB(4), CB(5), CB(6) }, .forbidden = { Texture(19), Texture(70), Texture(71) } });
 		}
 		for (const auto& [file, defines] : std::vector<std::pair<const char*, ShaderDefines>>{
 				 { "Water.hlsl", { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" } } },
@@ -982,19 +982,17 @@ namespace
 				{ "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY", "1" },
 				{ "FO4CS_SUBSTRATE", "1" },
 				{ "SSGI", "1" },
-				{ "WETNESS_EFFECTS", "1" },
 				{ "DYNAMIC_CUBEMAPS", "1" },
 				{ "TERRAIN_SHADOWS", "1" },
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" },
 				{ "WATER_EFFECTS", "1" } },
 			.profile = "ps_5_0",
 			.description = "BSDFComposite feature composition",
-			.required = { CB(4), CB(5), CB(6), CB(7), Texture(25), Texture(71), Texture(34), Texture(35) },
-			.forbidden = { CB(8), CB(9), CB(13), Texture(33), Texture(26), Texture(27), Texture(28), Texture(29), Texture(61), Texture(65) } });
+			.required = { CB(5), CB(7), Texture(34), Texture(35) },
+			.forbidden = { CB(8), CB(9), CB(13), Texture(25), Texture(33), Texture(26), Texture(27), Texture(28), Texture(29), Texture(61), Texture(65), Texture(70), Texture(71) } });
 		const auto productionComposite = a_jobs.back();
-		AddFullscreenDebugVariant(a_jobs, productionComposite, "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", { CB(7), Texture(60), Texture(61), Sampler(13) });
+		AddFullscreenDebugVariant(a_jobs, productionComposite, "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", { CB(4), CB(6), CB(7), Texture(60), Texture(61), Sampler(13) });
 		AddFullscreenDebugVariant(a_jobs, productionComposite, "EXPONENTIAL_HEIGHT_FOG_FULLSCREEN_DEBUG", { CB(7) });
-		AddFullscreenDebugVariant(a_jobs, productionComposite, "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(7) });
 		AddFullscreenDebugVariant(a_jobs, productionComposite, "WATER_EFFECTS_FULLSCREEN_DEBUG", { CB(7), Texture(61) });
 
 		for (auto defines : std::vector<ShaderDefines>{
@@ -1005,7 +1003,7 @@ namespace
 				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRSPLITS", "2" } } }) {
 			const bool unshadowed = defines.front().first == "BSDFLIGHT_PS_UNSHADOWED";
 			defines.insert(defines.end(), { { "DIRECTIONAL", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
-											  { "FO4CS_SUBSTRATE", "1" }, { "WATER_EFFECTS", "1" }, { "WETNESS_EFFECTS", "1" } });
+											  { "FO4CS_SUBSTRATE", "1" }, { "WATER_EFFECTS", "1" } });
 			if (!unshadowed) {
 				defines.emplace_back("SHADOW", "1");
 				defines.emplace_back("FILTER_PCF1", "1");
@@ -1013,7 +1011,7 @@ namespace
 			a_jobs.push_back({ .path = bsdfLight,
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
-				.description = "water RGB directional and coat consumer",
+				.description = "water RGB directional consumer",
 				.required = { CB(4), CB(5), Texture(65), Sampler(14) },
 				.forbidden = { Texture(32) } });
 		}
@@ -1058,144 +1056,25 @@ namespace
 				 "BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY",
 				 "BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY",
 				 "BSDFCOMPOSITE_PS_CUBE_IBL" }) {
-			for (bool dynamicCubemaps : { false, true }) {
-				ShaderDefines defines{
-					{ family, "1" },
-					{ "FO4CS_SUBSTRATE", "1" },
-					{ "WETNESS_EFFECTS", "1" }
-				};
-				if (dynamicCubemaps)
-					defines.emplace_back("DYNAMIC_CUBEMAPS", "1");
-				a_jobs.push_back({ .path = composite,
-					.defines = std::move(defines),
-					.profile = "ps_5_0",
-					.description = family,
-					.required = dynamicCubemaps ?
-				                    std::vector<Resource>{ CB(7), Texture(25), Texture(34), Texture(35), Texture(71) } :
-				                    std::vector<Resource>{},
-					.forbidden = dynamicCubemaps ?
-				                     std::vector<Resource>{ CB(8), CB(9), CB(13), Texture(33), Texture(61) } :
-				                     std::vector<Resource>{ CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(34), Texture(35), Texture(71) } });
-				AddFullscreenDebugVariant(a_jobs, a_jobs.back(), "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(7), Texture(25), Texture(71) });
-			}
-		}
-
-		for (auto defines : std::vector<ShaderDefines>{
-				 { { "BSDFCOMPOSITE_PS_2D_ACCUMULATOR", "1" }, { "COMPOSITE_CB2_COUNT", "1" } },
-				 { { "BSDFCOMPOSITE_PS_2D_FOG", "1" }, { "COMPOSITE_HAS_LIGHT", "1" } },
-				 { { "BSDFCOMPOSITE_PS_NO_SRV_POSITION", "1" } },
-				 { { "BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR", "1" }, { "WAVE5A_ACCUMULATOR_SHAPE", "1" } },
-				 { { "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL", "1" }, { "WAVE5B_SSS_RECORD_NORMAL_SHAPE", "1" } },
-				 { { "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "1" }, { "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", "1" } } }) {
-			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" },
-											  { "WETNESS_EFFECTS", "1" } });
 			a_jobs.push_back({ .path = composite,
-				.defines = std::move(defines),
+				.defines = { { family, "1" }, { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" } },
 				.profile = "ps_5_0",
-				.description = "BSDFComposite without debug film reads",
-				.forbidden = { CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61), Texture(71) } });
-			AddFullscreenDebugVariant(a_jobs, a_jobs.back(), "WETNESS_EFFECTS_FULLSCREEN_DEBUG", { CB(4), CB(6), CB(7), Texture(25), Texture(71) });
+				.description = "Dynamic material reflections",
+				.required = { CB(7), Texture(34), Texture(35) },
+				.forbidden = { CB(8), CB(9), CB(13), Texture(25), Texture(33), Texture(61), Texture(70), Texture(71) } });
 		}
 
 		for (auto defines : std::vector<ShaderDefines>{
 				 { { "BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY", "1" }, { "FOGSTACK", "1" }, { "SSGI", "1" } },
 				 { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" }, { "COMPOSITE_MATERIAL_EXCLUSION", "0" }, { "COMPOSITE_FOG_STACK", "0" }, { "COMPOSITE_CB12_COUNT", "31" } } }) {
 			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" },
-											  { "WETNESS_EFFECTS", "1" },
 											  { "DYNAMIC_CUBEMAPS", "1" } });
 			a_jobs.push_back({ .path = composite,
 				.defines = std::move(defines),
 				.profile = "ps_5_0",
-				.description = "BSDFComposite wet reflection reconstruction branches",
-				.required = { Texture(34), Texture(35) } });
-		}
-
-		for (auto defines : std::vector<ShaderDefines>{
-				 { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "AMBIENT_IBL_IN_LIGHT", "1" } },
-				 { { "BSDFLIGHT_PS_DIRSPLITS1", "1" }, { "DIRSPLITS", "1" }, { "SHADOW", "1" }, { "FILTER_PCF1", "1" } },
-				 { { "BSDFLIGHT_PS_DIRSPLITS2", "1" }, { "DIRSPLITS", "2" }, { "SHADOW", "1" } },
-				 { { "BSDFLIGHT_PS_DIRSPLITS3", "1" }, { "DIRSPLITS", "3" }, { "SHADOW", "1" } },
-				 { { "BSDFLIGHT_PS_SHADOW_ONLY_BLEND_SPLIT", "1" }, { "DIRSPLITS", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" }, { "BLENDSPLIT", "1" }, { "FILTER_PCF1", "1" } },
-				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "DIRSPLITS", "2" } },
-				 { { "BSDFLIGHT_PS_AMBIENT", "1" } } }) {
-			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" },
-											  { "WETNESS_EFFECTS", "1" },
-											  { "DYNAMIC_CUBEMAPS", "1" },
-											  { "AMBIENT", "1" },
-											  { "DIRECTIONAL", "1" },
-											  { "SPECULAR", "1" },
-											  { "RGBSPEC", "1" } });
-			a_jobs.push_back({ .path = bsdfLight,
-				.defines = std::move(defines),
-				.profile = "ps_5_0",
-				.description = "BSDFLight wet indirect diffuse",
-				.required = { CB(6) },
-				.forbidden = { Texture(30), Texture(31), Texture(34), Texture(35) } });
-		}
-
-		for (auto defines : std::vector<ShaderDefines>{
-				 { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "LIGHT_TYPE", "3" }, { "SPOT", "1" } },
-				 { { "BSDFLIGHT_PS_GOBO", "1" }, { "POINTOMNI", "1" }, { "GOBOPROJECTION", "1" }, { "RGBSPEC", "1" }, { "DIRSPLITS", "2" } },
-				 { { "BSDFLIGHT_PS_UNSHADOWED", "1" }, { "POINTOMNI", "1" }, { "RGBSPEC", "1" }, { "DIRSPLITS", "2" } } }) {
-			defines.insert(defines.end(), { { "FO4CS_SUBSTRATE", "1" },
-											  { "WETNESS_EFFECTS", "1" } });
-			a_jobs.push_back({ .path = bsdfLight,
-				.defines = std::move(defines),
-				.profile = "ps_5_0",
-				.description = "BSDFLight wet direct coat camera reconstruction",
-				.required = { CB(6), CB(12) } });
-		}
-
-		for (const auto& material : std::vector<ShaderDefines>{
-				 {}, { { "SKINNED", "1" }, { "FACE", "1" } },
-				 { { "LANDSCAPE", "1" } }, { { "BLEND", "1" } },
-				 { { "MODELSPACENORMALS", "1" } }, { { "TESSELLATE_DISP_HEIGHT", "1" } },
-				 { { "LOD_LANDSCAPE", "1" } }, { { "LOD_LANDSCAPE", "1" }, { "LOD_OBJECT_INSTANCED", "1" } },
-				 { { "LANDSCAPE", "1" }, { "INSTANCED", "1" } },
-				 { { "MERGE_INSTANCED", "1" } },
-				 { { "SKINNED", "1" }, { "MODELSPACENORMALS", "1" } },
-				 { { "MERGE_INSTANCED", "1" }, { "MODELSPACENORMALS", "1" } } }) {
-			auto defines = material;
-			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
-											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "NORMALS", "1" } });
-			a_jobs.push_back({ .path = prepass,
-				.defines = std::move(defines),
-				.profile = "ps_5_0",
-				.description = "Wetness deferred material producer",
-				.required = { CB(4), CB(5), CB(6), Texture(71) },
-				.forbidden = { CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
-			auto vertexDefines = material;
-			vertexDefines.insert(vertexDefines.end(), { { "BSDFPREPASS_VS_SOURCE", "1" },
-														  { "WETNESS_EFFECTS", "1" }, { "NORMALS", "1" }, { "BINORMAL_TANGENT", "1" }, { "TEXTURE", "1" } });
-			a_jobs.push_back({ .path = prepass,
-				.defines = std::move(vertexDefines),
-				.profile = "vs_5_0",
-				.description = "Wetness deferred geometry interface",
-				.forbidden = { CB(4), CB(5), CB(6), CB(7), CB(8), Texture(71) } });
-		}
-		for (const auto& material : std::vector<ShaderDefines>{
-				 { { "GRASS", "1" } }, { { "GRASS", "1" }, { "ALPHA_TEST", "1" } },
-				 { { "EYE", "1" } }, { { "TREE_ANIM", "1" } }, { { "LOD_OBJECT_INSTANCED", "1" } } }) {
-			auto defines = material;
-			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
-											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "NORMALS", "1" } });
-			a_jobs.push_back({ .path = prepass,
-				.defines = std::move(defines),
-				.profile = "ps_5_0",
-				.description = "Wetness upstream-excluded class writes a dry film",
-				.required = { CB(6), Texture(71) },
-				.forbidden = { CB(4), CB(5), CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
-		}
-		for (const auto& material : std::vector<ShaderDefines>{
-				 { { "SKINNED", "1" } }, { { "MODELSPACENORMALS", "1" } } }) {
-			auto defines = material;
-			defines.insert(defines.end(), { { "BSDFPREPASS_PS_SOURCE", "1" },
-											  { "WETNESS_EFFECTS", "1" }, { "FO4CS_SUBSTRATE", "1" }, { "TESSELLATE_DISP_HEIGHT", "1" } });
-			a_jobs.push_back({ .path = prepass,
-				.defines = std::move(defines),
-				.profile = "ps_5_0",
-				.description = "Wetness incomplete domain interface retains native material behavior",
-				.forbidden = { CB(4), CB(5), CB(6), CB(7), CB(8), Texture(71) } });
+				.description = "BSDFComposite material reflection reconstruction branches",
+				.required = { CB(7), Texture(34), Texture(35) },
+				.forbidden = { Texture(25), Texture(70), Texture(71) } });
 		}
 
 		const auto tiled = a_root / "DFTiledLighting.hlsl";
@@ -1208,7 +1087,6 @@ namespace
 				.defines = {
 					{ "DFTILEDLIGHTING_VARIANT", variant },
 					{ "FO4CS_SUBSTRATE", "1" },
-					{ "WETNESS_EFFECTS", "1" },
 					{ "DYNAMIC_CUBEMAPS", "1" },
 					{ "INVERSE_SQUARE_LIGHTING", "1" } },
 				.description = variant[0] == '1' ? "DFTiled final 1 inverse square" : "DFTiled final 2 inverse square",
@@ -1281,27 +1159,27 @@ namespace
 
 		a_jobs.push_back({ .path = composite,
 			.defines = { { "BSDFCOMPOSITE_PS_CUBE_IBL", "1" }, { "FO4CS_SUBSTRATE", "1" },
-				{ "SSGI", "1" }, { "WETNESS_EFFECTS", "1" }, { "DYNAMIC_CUBEMAPS", "1" },
+				{ "SSGI", "1" }, { "DYNAMIC_CUBEMAPS", "1" },
 				{ "EXPONENTIAL_HEIGHT_FOG", "1" } },
 			.profile = "ps_5_0",
-			.description = "SSGI wet cubemap and fog composition",
-			.required = { CB(6), CB(7), CB(10), Texture(19), Texture(26), Texture(34), Texture(38), Texture(71) } });
+			.description = "SSGI cubemap and fog composition",
+			.required = { CB(6), CB(7), CB(10), Texture(19), Texture(26), Texture(34), Texture(35), Texture(38) },
+			.forbidden = { Texture(25), Texture(70), Texture(71) } });
 		a_jobs.push_back({ .path = bsdfLight,
 			.defines = { { "BSDFLIGHT_PS_DEFERRED", "1" }, { "LIGHT_TYPE", "3" }, { "SPOT", "1" },
 				{ "SPECULAR", "1" }, { "RGBSPEC", "1" }, { "DIRSPLITS", "2" },
 				{ "FO4CS_SUBSTRATE", "1" }, { "INVERSE_SQUARE_LIGHTING", "1" },
-				{ "WETNESS_EFFECTS", "1" }, { "DYNAMIC_CUBEMAPS", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } },
+				{ "DYNAMIC_CUBEMAPS", "1" }, { "EXPONENTIAL_HEIGHT_FOG", "1" } },
 			.profile = "ps_5_0",
-			.description = "ISL wet coat with fog and cubemap consumers",
+			.description = "ISL with fog and cubemap defines",
 			.required = { CB(6), CB(11) },
 			.forbidden = { CB(7) } });
 		a_jobs.push_back({ .path = prepass,
 			.defines = { { "BSDFPREPASS_PS_SOURCE", "1" }, { "FO4CS_SUBSTRATE", "1" },
-				{ "NORMALS", "1" }, { "VC", "1" }, { "SSGI", "1" }, { "WETNESS_EFFECTS", "1" } },
+				{ "NORMALS", "1" }, { "VC", "1" }, { "SSGI", "1" } },
 			.profile = "ps_5_0",
-			.description = "Wet material and SSGI vertex AO producer",
-			.required = { CB(6), Texture(71) },
-			.forbidden = { CB(7), CB(8), CB(9), CB(13), Texture(33), Texture(61) } });
+			.description = "SSGI vertex AO producer",
+			.forbidden = { CB(6), CB(7), CB(8), CB(9), CB(13), Texture(25), Texture(33), Texture(61), Texture(70), Texture(71) } });
 		a_jobs.push_back({ .path = water,
 			.defines = { { "BSWATER_PIXEL_SHADER", "1" }, { "REFLECTIONS", "1" },
 				{ "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS", "1" },

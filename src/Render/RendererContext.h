@@ -2,6 +2,8 @@
 
 #include <d3d11.h>
 
+#include <cstdint>
+
 #include "Render/ComputeScope.h"
 
 namespace RE::BSGraphics

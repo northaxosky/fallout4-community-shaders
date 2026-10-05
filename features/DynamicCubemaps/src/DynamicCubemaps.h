@@ -187,6 +187,7 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _enabled{ true };
 		std::atomic_bool _enabledSSR{ true };
+		std::atomic<float> _materialReflections{ 1.0f };
 		std::atomic_bool _queuedReset{ false };
 		std::atomic_bool _activeReflections{ false };
 		std::atomic_bool _fakeReflections{ false };

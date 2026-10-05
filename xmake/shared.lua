@@ -15,8 +15,6 @@ function main(target)
             "package/Shaders/Common/LightingEval.hlsli",
             "package/Shaders/Common/Random.hlsli",
             "package/Shaders/Common/Shading.hlsli",
-            "features/Wetness Effects/Shaders/WetnessEffects/WetnessEffects.hlsli",
-            "features/Wetness Effects/Shaders/WetnessEffects/optimized-ggx.hlsli",
             "package/Shaders/Common/Spherical Harmonics/SphericalHarmonics.hlsli",
             "package/Shaders/LICENSE",
             "package/Shaders/Common/Spherical Harmonics/LICENSE",

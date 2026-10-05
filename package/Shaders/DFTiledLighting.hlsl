@@ -17,9 +17,6 @@
 StructuredBuffer<FO4InverseSquareLighting::PerLightData> InverseSquareLights : register(t8);
 #	endif
 
-#	if defined(WETNESS_EFFECTS)
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 
 cbuffer TiledLightingParameters : register(b0)
 {
@@ -33,10 +30,6 @@ cbuffer TiledLightingParameters : register(b0)
 cbuffer DeferredPerFrame : register(b12)
 {
 	float4 PerFrame[30];
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	float4 cb12_pad_30_34[5];
-	float4 CameraPosAdjust;
-#	endif
 };
 
 Texture2D<float4> MainDepth : register(t0);
@@ -139,10 +132,6 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 	bool materialOne = abs(material.w * 255.0 - 1.0) < 0.25;
 	float materialSpecular = materialOne ? 0.0 : material.y;
 	diffuseAccum = EvaluateAmbientGradient(normalView);
-#		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	diffuseAccum *= WetnessEffects::GetIndirectDiffuseWeight(
-		normalView, viewDirection, pixel);
-#		endif
 
 	float normalDotView = dot(normalView, viewDirection);
 	float3 reflectionDirection =
@@ -471,14 +460,6 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 				lightData, sqrt(distanceSquared), attenuation);
 #	endif
 
-#	ifdef WETNESS_EFFECTS
-			if ((light.Flags & 8u) == 0) {
-				WetnessEffects::Surface wetSurface = WetnessEffects::ReadSurface(pixel, normalView);
-				WetnessEffects::ApplyDirectCoat(wetSurface.normalView, viewDirection,
-					toLight * rsqrt(distanceSquared), light.Color,
-					wetSurface.wetness, wetSurface.waterRoughness, diffuse, specular);
-			}
-#	endif
 			diffuseAccum += diffuse * attenuation;
 			specularAccum += specular * attenuation;
 		}

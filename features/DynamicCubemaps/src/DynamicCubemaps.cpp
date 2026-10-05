@@ -213,6 +213,7 @@ namespace cs::features
 			_queuedReset.store(true, std::memory_order_release);
 		}
 		_enabledSSR.store(_settings.enabledSSR, std::memory_order_release);
+		_materialReflections.store(_settings.materialReflections, std::memory_order_release);
 	}
 
 	bool DynamicCubemaps::SaveSettings()
@@ -1242,6 +1243,8 @@ namespace cs::features
 				_enabled.load(std::memory_order_acquire) ? 1u : 0u;
 			data.EnabledSSR =
 				_enabledSSR.load(std::memory_order_acquire) ? 1u : 0u;
+			if (data.Enabled)
+				data.MaterialReflections = _materialReflections.load(std::memory_order_acquire);
 		}
 		return data;
 	}
@@ -1253,6 +1256,10 @@ namespace cs::features
 		changed |= edit.Discrete(dmui::ui::Checkbox("Enable Screen Space Reflections", &_settings.enabledSSR));
 		if (dmui::ui::IsItemHovered())
 			dmui::ui::SetTooltip("Enable all screen-space reflections, including water.");
+		const auto range = dynamic_cubemaps::kSchema.EditRange(&Settings::materialReflections);
+		changed |= edit.Continuous(dmui::ui::SliderScalar("Material Reflections", &_settings.materialReflections, &range.min, &range.max));
+		if (dmui::ui::IsItemHovered())
+			dmui::ui::SetTooltip("Blend from authored material cubemaps to dynamic reflections on environment-mapped surfaces.");
 		if (changed) {
 			PublishSettings();
 		}

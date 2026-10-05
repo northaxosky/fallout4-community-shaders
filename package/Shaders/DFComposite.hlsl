@@ -6,37 +6,22 @@
 #ifdef WATER_EFFECTS
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
-#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-#	define WETNESS_COMPOSITE_CONSUMER 1
-#	include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#endif
 #include "Common/DeferredContracts.hlsli"
 #ifdef EXPONENTIAL_HEIGHT_FOG
 // FO4: native fog colors cross the analytic/volume boundary before the final blend.
 #	include "FO4/ExponentialHeightFogConsumer.hlsli"
 #endif
 
-#define WETNESS_CAMERA_ARGS(cameraAdjust)                                         \
-	float3x4(ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2), cameraAdjust, \
-		float4x4(FarReproj_row0, FarReproj_row1, FarReproj_row2, FarReproj_row3), \
-		float4x4(NearReproj_row0, NearReproj_row1, NearReproj_row2, NearReproj_row3)
-#define WETNESS_CAMERA_ARRAY_ARGS(frame)                      \
-	float3x4(frame[12], frame[13], frame[14]), frame[35],     \
-		float4x4(frame[20], frame[21], frame[22], frame[23]), \
-		float4x4(frame[24], frame[25], frame[26], frame[27])
-
-#if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-#	define WETNESS_COMPOSITE_CONSUMER 1
+#ifdef DYNAMIC_CUBEMAPS
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
-#	include "FO4/WetnessEffects/WetnessEffects.hlsli"
+#	define SAMPLE_MATERIAL_ENVIRONMENT(cube, probeSampler, direction, slice, lod, glossiness, nativeRain) \
+		DynamicCubemaps::GetMaterialEnvironment(cube, probeSampler, direction, slice, lod, glossiness, nativeRain)
+#else
+#	define SAMPLE_MATERIAL_ENVIRONMENT(cube, probeSampler, direction, slice, lod, glossiness, nativeRain) \
+		cube.SampleLevel(probeSampler, float4(direction, slice), lod).xyz
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
-
-#	ifdef WETNESS_EFFECTS
-#		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 
 #	ifndef AMBIENT_DIFFUSE_SET_B
 #		define AMBIENT_DIFFUSE_SET_B 1
@@ -55,7 +40,7 @@ cbuffer PerFrame_CB12 : register(b12)
 	DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 	float4 cb12_pad_28_29[2];
 	float4 cb12_idx30_ibl_desaturation;
-#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
+#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 	float4 cb12_pad_31_34[4];
 	float4 CameraPosAdjust;
 #	endif
@@ -165,19 +150,6 @@ struct PS_OUTPUT
 PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT output;
-#	ifdef WETNESS_EFFECTS
-	WetnessEffects::Surface wetSurface =
-		WetnessEffects::GetSurfaceFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust));
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor)) {
-		output.color = wetnessDebugColor;
-		return output;
-	}
-#		endif
-#	endif
 	float2 uv = input.position.xy * ScreenSize.xy;
 	float3 shadingData = g_tGbufferShadingData.SampleLevel(g_sGbufferShadingData, uv, 0).xyw;
 	float3 ambientA = g_tAmbientDiffuseA.SampleLevel(g_sAmbientDiffuseA, uv, 0).xyz;
@@ -263,28 +235,11 @@ PS_OUTPUT main(PS_INPUT input)
 	float glossSquaredScaled = matGlossOrSpec * matGlossOrSpec * 50.0;
 	bool hasIBL = (matSliceFloat > 0.5 / 255.0);
 	float3 iblColor = float3(0, 0, 0);
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-#		if defined(OG)
-	// OG has no cb2[0].zw screen-UV rescale.
-	float2 sn = float2(uv.x, 1.0 - uv.y);
-#		else
-	float2 sn = float2(uv.x * ScreenSize.z, 1.0 - uv.y * ScreenSize.w);
-#		endif
-	pos.xy = sn * 2.0 - 1.0;
-	pos.w = 1.0;
-	float3 posViewXYZ = float3(dot(reprojRow0, pos),
-		dot(reprojRow1, pos),
-		dot(reprojRow2, pos));
-	float posViewW = dot(reprojRow3, pos);
-	pos.xyz = posViewXYZ / posViewW;
-	float3 viewDirNeg = normalize(-pos.xyz);
-#	endif
 	if (hasIBL) {
 		float2 enc = g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
 		float encDotEnc = dot(enc, enc);
 		float zRecon = 1.0 - encDotEnc * 0.25;
 		float3 normalView = float3(enc * sqrt(zRecon), -(1.0 - encDotEnc * 0.5));
-#	if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
 #		if defined(OG)
 		// OG has no cb2[0].zw screen-UV rescale.
 		float2 sn = float2(uv.x, 1.0 - uv.y);
@@ -299,7 +254,6 @@ PS_OUTPUT main(PS_INPUT input)
 		float posViewW = dot(reprojRow3, pos);
 		pos.xyz = posViewXYZ / posViewW;
 		float3 viewDirNeg = normalize(-pos.xyz);
-#	endif
 		float ndotv2 = dot(viewDirNeg, normalView);
 		ndotv2 = ndotv2 + ndotv2;
 		float3 reflView = normalView * -ndotv2 + viewDirNeg;
@@ -310,7 +264,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float mipLevel = (1.0 - shadingData.x) * 6.0;
 		mipLevel = pos.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(matSliceFloat * 255.0 - 1.0);
-		float3 cubeSample = g_tIBLProbeCube.SampleLevel(g_sIBLProbeCube, float4(reflWorld, arraySlice), mipLevel).xyz;
+		float3 cubeSample = SAMPLE_MATERIAL_ENVIRONMENT(g_tIBLProbeCube, g_sIBLProbeCube, reflWorld, arraySlice, mipLevel, shadingData.x, cb12_idx30_ibl_desaturation.y);
 		float luma = dot(cubeSample, float3(0.299, 0.587, 0.114));
 		float desatW = cb12_idx30_ibl_desaturation.y * 0.9;
 		iblColor = lerp(cubeSample, luma.xxx, desatW);
@@ -388,13 +342,6 @@ PS_OUTPUT main(PS_INPUT input)
 	const float aoFactor = 1.0;
 #	endif
 	output.color.xyz = modulated * aoFactor;
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	output.color.xyz += DynamicCubemaps::GetWetnessReflection(
-		wetSurface.normalView, viewDirNeg, wetSurface.wetness,
-		wetSurface.waterRoughness,
-		float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
-		g_sIBLProbeCube);
-#	endif
 	output.color.w = 1.0;
 	return output;
 }
@@ -402,10 +349,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY
 
-#	ifdef WETNESS_EFFECTS
-#		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 
 #	ifndef FO4_AMBIENT_OCCLUSION
 #		define FO4_AMBIENT_OCCLUSION 1
@@ -545,19 +488,6 @@ struct PS_OUTPUT
 PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT output;
-#	ifdef WETNESS_EFFECTS
-	WetnessEffects::Surface wetSurface =
-		WetnessEffects::GetSurfaceFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust));
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor)) {
-		output.color = wetnessDebugColor;
-		return output;
-	}
-#		endif
-#	endif
 	float2 uv = input.position.xy * ScreenSize.xy;
 
 	float3 shadingData =
@@ -646,17 +576,6 @@ PS_OUTPUT main(PS_INPUT input)
 		g_tGbufferMaterial.SampleLevel(g_sGbufferMaterial, uv, 0);
 	bool hasIbl = material.y > (0.5 / 255.0);
 	float3 iblColor = float3(0.0, 0.0, 0.0);
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	float3 negativePositionView = -positionView;
-	float3 viewDirection =
-		negativePositionView *
-		rsqrt(dot(negativePositionView, negativePositionView));
-	float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
-		wetSurface.normalView, viewDirection, wetSurface.wetness,
-		wetSurface.waterRoughness,
-		float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
-		g_sIblProbeCube);
-#	endif
 	if (hasIbl) {
 		float2 encodedNormal =
 			g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
@@ -664,12 +583,10 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 normalView = float3(
 			encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
 			-(1.0 - encodedLengthSquared * 0.5));
-#	if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
 		float3 negativePositionView = -positionView;
 		float3 viewDirection =
 			negativePositionView *
 			rsqrt(dot(negativePositionView, negativePositionView));
-#	endif
 		float reflectionScale = 2.0 * dot(viewDirection, normalView);
 		float3 reflectionView =
 			normalView * -reflectionScale + viewDirection;
@@ -681,7 +598,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float mipLevel = (1.0 - shadingData.x) * 6.0;
 		mipLevel = positionView.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(material.y * 255.0 - 1.0);
-		float3 cubeSample = g_tIblProbeCube.SampleLevel(g_sIblProbeCube, float4(reflectionWorld, arraySlice), mipLevel).xyz;
+		float3 cubeSample = SAMPLE_MATERIAL_ENVIRONMENT(g_tIblProbeCube, g_sIblProbeCube, reflectionWorld, arraySlice, mipLevel, shadingData.x, IblDesaturation.y);
 		float luminance = dot(cubeSample, float3(0.299, 0.587, 0.114));
 		iblColor = lerp(
 			cubeSample, luminance.xxx, IblDesaturation.y * 0.9);
@@ -800,9 +717,6 @@ PS_OUTPUT main(PS_INPUT input)
 		const float ao = 1.0;
 #	endif
 		float3 aoColor = modulated * ao;
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-		aoColor += wetReflection;
-#	endif
 
 		float fogPlaneDistance =
 			dot(ViewToWorld_row2, float4(positionView, 1.0)) + CameraPosAdjust.z;
@@ -877,10 +791,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY
 
-#	ifdef WETNESS_EFFECTS
-#		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 
 #	ifndef TILELIGHT
 #		define TILELIGHT 0
@@ -892,7 +802,7 @@ PS_OUTPUT main(PS_INPUT input)
 #		define OUTPUTMASK 0
 #	endif
 
-#	if FOGSTACK || defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
+#	if FOGSTACK || defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 #		define AMBIENT_FRAME_COUNT 47
 #	else
 #		define AMBIENT_FRAME_COUNT 31
@@ -1013,10 +923,6 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 	,
 	float outputMask
 #	endif
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	,
-	float3 wetReflection
-#	endif
 )
 {
 	float3 color = environment * glossFactor;
@@ -1037,26 +943,12 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 	color *= outputMask;
 #		endif
 #	endif
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	color += wetReflection;
-#	endif
 	return color;
 }
 
 float4 main(float4 position : SV_POSITION) : SV_Target0
 {
 	float2 coordinate = position.xy * screenSetup[0].xy;
-#	ifdef WETNESS_EFFECTS
-	WetnessEffects::Surface wetSurface =
-		WetnessEffects::GetSurfaceFromScreenPosition(
-			position.xy,
-			WETNESS_CAMERA_ARRAY_ARGS(ambientFrame));
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
-		return wetnessDebugColor;
-#		endif
-#	endif
 	float3 surface = surfaceTexture.SampleLevel(surfaceSampler, coordinate, 0.0).xyw;
 #	if !FOGSTACK
 
@@ -1119,15 +1011,8 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #		endif
 #	endif
 
-#	if FOGSTACK || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
+#	if FOGSTACK
 	float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
-#	endif
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
-		wetSurface.normalView, normalize(-viewPosition), wetSurface.wetness,
-		wetSurface.waterRoughness,
-		float3x3(ambientFrame[12].xyz, ambientFrame[13].xyz, ambientFrame[14].xyz),
-		environmentSampler);
 #	endif
 
 	float3 centerColor = ambientBaseTexture.SampleLevel(ambientBaseSampler, coordinate, 0.0).xyz;
@@ -1147,7 +1032,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float normalLengthSquared = dot(encodedNormal, encodedNormal);
 		float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
 		float3 normal = float3(encodedNormal * sqrt(normalFactors.x), -normalFactors.y);
-#	if !FOGSTACK && (!defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS))
+#	if !FOGSTACK
 		float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
 #	endif
 		float3 reflected = reflect(normalize(-viewPosition), normal);
@@ -1158,7 +1043,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float mipLevel = (1.0 - surface.x) * 6.0;
 		mipLevel = viewPosition.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(material.x * 255.0 - 1.0);
-		environment = environmentTexture.SampleLevel(environmentSampler, float4(environmentCoordinate, arraySlice), mipLevel).xyz;
+		environment = SAMPLE_MATERIAL_ENVIRONMENT(environmentTexture, environmentSampler, environmentCoordinate, arraySlice, mipLevel, surface.x, ambientFrame[30].y);
 		float luminance = dot(environment, float3(0.299, 0.587, 0.114));
 		environment = lerp(environment, luminance.xxx, ambientFrame[30].y * 0.9);
 	}
@@ -1212,10 +1097,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #	if !FOGSTACK
 	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
-#		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-					  ,
-					  wetReflection
-#		endif
 					  ),
 		1.0);
 #	else
@@ -1235,10 +1116,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 			// OG passes the output mask sampled before exclusion.
 			,
 			outputMask
-#		endif
-#		if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-			,
-			wetReflection
 #		endif
 		);
 
@@ -1290,10 +1167,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY
 
-#	ifdef WETNESS_EFFECTS
-#		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 
 #	ifndef OUTPUTMASK
 #		define OUTPUTMASK 0
@@ -1342,17 +1215,6 @@ SamplerState SampMask : register(s9);
 float4 main(float4 svpos : SV_POSITION) : SV_Target
 {
 	float2 uv = svpos.xy * g_PixelToUV.xy;
-#	ifdef WETNESS_EFFECTS
-	WetnessEffects::Surface wetSurface =
-		WetnessEffects::GetSurfaceFromScreenPosition(
-			svpos.xy,
-			WETNESS_CAMERA_ARRAY_ARGS(g_PF));
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
-		return wetnessDebugColor;
-#		endif
-#	endif
 
 	float3 surf = TexSurface.SampleLevel(SampSurface, uv, 0).xyw;
 	float depth = TexDepth.SampleLevel(SampDepth, uv, 0).x;
@@ -1418,14 +1280,6 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
 	float2 prm = TexParam.SampleLevel(SampParam, uv, 0).yz;
 
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	float3 v = normalize(-pos.xyz);
-	float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
-		wetSurface.normalView, v, wetSurface.wetness,
-		wetSurface.waterRoughness,
-		float3x3(g_PF[12].xyz, g_PF[13].xyz, g_PF[14].xyz),
-		SampCube);
-#	endif
 	float3 cube = 0.0;
 	if (prm.x > 0.5 / 255.0) {
 		float4 nn;
@@ -1435,9 +1289,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		nn.xy = nn.xy * sqrt(nn.z);
 		nn.z = -nn.w;
 
-#	if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
 		float3 v = normalize(-pos.xyz);
-#	endif
 		float ndv = dot(v, nn.xyz);
 		ndv = ndv + ndv;
 		float3 r = nn.xyz * -ndv + v;
@@ -1450,7 +1302,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		lod = pos.z * 0.001953125 + lod;
 		float idx = floor(prm.x * 255.0 - 1.0);
 
-		cube = TexCube.SampleLevel(SampCube, float4(rw, idx), lod).xyz;
+		cube = SAMPLE_MATERIAL_ENVIRONMENT(TexCube, SampCube, rw, idx, lod, surf.x, g_PF[30].y);
 		float lum = dot(cube, float3(0.299, 0.587, 0.114));
 		cube = lerp(cube, lum.xxx, g_PF[30].y * 0.9);
 	}
@@ -1484,9 +1336,6 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		float mask = TexMask.Sample(SampMask, min(uv, g_UVClamp.xy)).x;
 #		endif
 		col = col * mask;
-#	endif
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-		col += wetReflection;
 #	endif
 
 		pos.w = 1.0;
@@ -1536,21 +1385,17 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
 #ifdef BSDFCOMPOSITE_PS_2D_ACCUMULATOR
 
-#	if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS) || defined(WATER_EFFECTS) || defined(SSGI)
+#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(SSGI)
 cbuffer PerFrame_CB12 : register(b12)
 {
 	DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
+#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 	float4 terrain_cb12_pad_28_34[7];
 	float4 CameraPosAdjust;
 #		endif
 };
 #	endif
 
-#	ifdef WETNESS_EFFECTS
-#		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 #	ifdef SSGI
 #		include "FO4/ScreenSpaceGIConsumer.hlsli"
 #	endif
@@ -1592,17 +1437,6 @@ SamplerState tileAmbientSampler : register(s12);
 
 float4 main(float4 position : SV_POSITION) : SV_Target0
 {
-#	ifdef WETNESS_EFFECTS
-	WetnessEffects::Surface wetSurface =
-		WetnessEffects::GetSurfaceFromScreenPosition(
-			position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust));
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
-		return wetnessDebugColor;
-#		endif
-#	endif
 #	ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -1749,10 +1583,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 #ifdef BSDFCOMPOSITE_PS_2D_FOG
 
-#	ifdef WETNESS_EFFECTS
-#		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 #	ifdef SSGI
 #		include "FO4/ScreenSpaceGIConsumer.hlsli"
 #	endif
@@ -1857,19 +1687,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float2 uv = input.position.xy * ScreenSize.xy;
 
-#	ifdef WETNESS_EFFECTS
-	WetnessEffects::Surface wetSurface =
-		WetnessEffects::GetSurfaceFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust_for_fog_height));
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor)) {
-		output.color = wetnessDebugColor;
-		return output;
-	}
-#		endif
-#	endif
 
 #	if !COMPOSITE_HAS_TYPE || COMPOSITE_MATERIAL_5
 	float4 baseSample = g_tHdrBaseColor.SampleLevel(g_sBaseColor, uv, 0);
@@ -2210,11 +2027,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_NO_SRV_POSITION_TEXCOORD
 
-#	if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS)
+#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 cbuffer PerFrame_CB12 : register(b12)
 {
 	DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
+#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 	float4 terrain_cb12_pad_28_34[7];
 	float4 CameraPosAdjust;
 #		endif
@@ -2238,16 +2055,6 @@ PS_OUTPUT main(PS_INPUT input)
 	PS_OUTPUT output;
 	output.color = 0.0;
 	output.secondary = 0.0;
-#	ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust),
-			wetnessDebugColor)) {
-		output.color = wetnessDebugColor;
-		return output;
-	}
-#	endif
 #	ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -2297,11 +2104,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_NO_SRV_POSITION
 
-#	if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS)
+#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 cbuffer PerFrame_CB12 : register(b12)
 {
 	DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
+#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 	float4 terrain_cb12_pad_28_34[7];
 	float4 CameraPosAdjust;
 #		endif
@@ -2324,16 +2131,6 @@ PS_OUTPUT main(PS_INPUT input)
 	PS_OUTPUT output;
 	output.color = 0.0;
 	output.secondary = 0.0;
-#	ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust),
-			wetnessDebugColor)) {
-		output.color = wetnessDebugColor;
-		return output;
-	}
-#	endif
 #	ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -2383,10 +2180,6 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_CUBE_IBL
 
-#	ifdef WETNESS_EFFECTS
-#		define WETNESS_COMPOSITE_CONSUMER 1
-#		include "FO4/WetnessEffects/WetnessEffects.hlsli"
-#	endif
 
 #	ifdef SSGI
 #		include "FO4/ScreenSpaceGIConsumer.hlsli"
@@ -2395,7 +2188,7 @@ PS_OUTPUT main(PS_INPUT input)
 #	ifndef COMPOSITE_CB12_COUNT
 #		define COMPOSITE_CB12_COUNT 47
 #	endif
-#	if (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(WETNESS_EFFECTS)) && COMPOSITE_CB12_COUNT < 36
+#	if (defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)) && COMPOSITE_CB12_COUNT < 36
 #		undef COMPOSITE_CB12_COUNT
 #		define COMPOSITE_CB12_COUNT 36
 #	endif
@@ -2468,17 +2261,6 @@ float4 main(PSInput input) : SV_Target0
 {
 	float4 result;
 	float2 uv = input.position.xy * screenData[0].xy;
-#	ifdef WETNESS_EFFECTS
-	WetnessEffects::Surface wetSurface =
-		WetnessEffects::GetSurfaceFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARRAY_ARGS(scene));
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
-		return wetnessDebugColor;
-#		endif
-#	endif
 #	if !COMPOSITE_MATERIAL_EXCLUSION
 	float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
 #	endif
@@ -2565,7 +2347,7 @@ float4 main(PSInput input) : SV_Target0
 #		endif
 #	endif
 
-#	if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || defined(SSGI) || (defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS))
+#	if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || defined(SSGI)
 #		if defined(OG)
 	// OG has no cb2[0].zw screen-UV rescale.
 	float2 projectedXY = float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0;
@@ -2586,13 +2368,6 @@ float4 main(PSInput input) : SV_Target0
 #	else
 	float4 projected;
 	float3 worldPosition;
-#	endif
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-	float3 wetReflection = DynamicCubemaps::GetWetnessReflection(
-		wetSurface.normalView, normalize(-worldPosition), wetSurface.wetness,
-		wetSurface.waterRoughness,
-		float3x3(scene[12].xyz, scene[13].xyz, scene[14].xyz),
-		probeSampler);
 #	endif
 
 #	if COMPOSITE_MATERIAL_EXCLUSION
@@ -2616,7 +2391,7 @@ float4 main(PSInput input) : SV_Target0
 			6.0,
 			worldPosition.z * 0.001953125);
 		float probeSlice = floor(material.x * 255.0 - 1.0);
-		probeColor = probeTexture.SampleLevel(probeSampler, float4(probeDirection, probeSlice), probeLod).xyz;
+		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(probeTexture, probeSampler, probeDirection, probeSlice, probeLod, typeData.x, scene[30].y);
 		float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
 		probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
 	}
@@ -2707,7 +2482,6 @@ float4 main(PSInput input) : SV_Target0
 		float3 normal = float3(
 			encodedNormal * normalScale,
 			-(1.0 - encodedLengthSquared * 0.5));
-#		if !defined(WETNESS_EFFECTS) || !defined(DYNAMIC_CUBEMAPS)
 #			if defined(OG)
 		// OG has no cb2[0].zw screen-UV rescale.
 		float2 projectedXY = float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0;
@@ -2725,7 +2499,6 @@ float4 main(PSInput input) : SV_Target0
 			dot(row2, projected));
 		float worldDenominator = dot(row3, projected);
 		worldPosition = worldNumerator / worldDenominator;
-#		endif
 		float3 reflected = reflect(normalize(-worldPosition), normal);
 		float3 probeDirection = float3(
 			dot(scene[12].xyz, reflected),
@@ -2736,7 +2509,7 @@ float4 main(PSInput input) : SV_Target0
 			6.0,
 			worldPosition.z * 0.001953125);
 		float probeSlice = floor(material.x * 255.0 - 1.0);
-		probeColor = probeTexture.SampleLevel(probeSampler, float4(probeDirection, probeSlice), probeLod).xyz;
+		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(probeTexture, probeSampler, probeDirection, probeSlice, probeLod, typeData.x, scene[30].y);
 		float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
 		probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
 	}
@@ -2764,9 +2537,6 @@ float4 main(PSInput input) : SV_Target0
 		float modulation = modulationTexture.Sample(modulationSampler, uv).x;
 #		endif
 		color *= modulation;
-#	endif
-#	if defined(WETNESS_EFFECTS) && defined(DYNAMIC_CUBEMAPS)
-		color += wetReflection;
 #	endif
 
 #	if COMPOSITE_FOG_STACK
@@ -2841,11 +2611,11 @@ float4 main(PSInput input) : SV_Target0
 
 #ifdef BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR
 
-#	if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS)
+#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 cbuffer PerFrame_CB12 : register(b12)
 {
 	DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS) || defined(WETNESS_EFFECTS)
+#		if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 	float4 terrain_cb12_pad_28_34[7];
 	float4 CameraPosAdjust;
 #		endif
@@ -2884,15 +2654,6 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust),
-			wetnessDebugColor)) {
-		return wetnessDebugColor;
-	}
-#		endif
 #		ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -2975,15 +2736,6 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust),
-			wetnessDebugColor)) {
-		return wetnessDebugColor;
-	}
-#		endif
 #		ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -3072,15 +2824,6 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust),
-			wetnessDebugColor)) {
-		return wetnessDebugColor;
-	}
-#		endif
 #		ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -3167,15 +2910,6 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
-#		ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARGS(CameraPosAdjust),
-			wetnessDebugColor)) {
-		return wetnessDebugColor;
-	}
-#		endif
 #		ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -3315,15 +3049,6 @@ SamplerState ambientSecondarySampler : register(s12);
 
 float4 main(float4 position : SV_POSITION) : SV_Target0
 {
-#	ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			position.xy,
-			WETNESS_CAMERA_ARRAY_ARGS(scene),
-			wetnessDebugColor)) {
-		return wetnessDebugColor;
-	}
-#	endif
 	float2 uv = position.xy * screenData[0].xy;
 	float material = typeTexture.SampleLevel(typeSampler, uv, 0.0).w;
 
@@ -3531,29 +3256,29 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #			define WAVE5B_RECORD_NORMAL_CB2_COUNT 4
 #		endif
 #		define WAVE5B_RECORD_NORMAL_HAS_T2 0
-#		define WAVE5B_RECORD_NORMAL_HAS_WETNESS 0
+#		define WAVE5B_RECORD_NORMAL_HAS_MATERIAL_FADE 0
 #	elif WAVE5B_SSS_RECORD_NORMAL_SHAPE == 2
 #		define WAVE5B_RECORD_NORMAL_CB12_COUNT 31
 #		define WAVE5B_RECORD_NORMAL_CB2_COUNT 7
 #		define WAVE5B_RECORD_NORMAL_HAS_T2 0
-#		define WAVE5B_RECORD_NORMAL_HAS_WETNESS 1
-#		define WAVE5B_RECORD_NORMAL_WETNESS_INDEX 6
+#		define WAVE5B_RECORD_NORMAL_HAS_MATERIAL_FADE 1
+#		define WAVE5B_RECORD_NORMAL_MATERIAL_FADE_INDEX 6
 #	elif WAVE5B_SSS_RECORD_NORMAL_SHAPE == 3
 #		define WAVE5B_RECORD_NORMAL_CB12_COUNT 28
 #		define WAVE5B_RECORD_NORMAL_CB2_COUNT 7
 #		define WAVE5B_RECORD_NORMAL_HAS_T2 1
-#		define WAVE5B_RECORD_NORMAL_HAS_WETNESS 0
+#		define WAVE5B_RECORD_NORMAL_HAS_MATERIAL_FADE 0
 #	elif WAVE5B_SSS_RECORD_NORMAL_SHAPE == 4
 #		define WAVE5B_RECORD_NORMAL_CB12_COUNT 31
 #		define WAVE5B_RECORD_NORMAL_CB2_COUNT 8
 #		define WAVE5B_RECORD_NORMAL_HAS_T2 1
-#		define WAVE5B_RECORD_NORMAL_HAS_WETNESS 1
-#		define WAVE5B_RECORD_NORMAL_WETNESS_INDEX 7
+#		define WAVE5B_RECORD_NORMAL_HAS_MATERIAL_FADE 1
+#		define WAVE5B_RECORD_NORMAL_MATERIAL_FADE_INDEX 7
 #	else
 #		error Unsupported SSS MRT record-normal shape
 #	endif
 
-#	if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
+#	if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)
 #		undef WAVE5B_RECORD_NORMAL_CB12_COUNT
 #		define WAVE5B_RECORD_NORMAL_CB12_COUNT 36
 #	endif
@@ -3682,19 +3407,6 @@ PS_OUTPUT main(PS_INPUT input)
 		dot(inverseRow2, homogeneousPosition),
 		dot(inverseRow3, homogeneousPosition));
 	reconstructedPosition.xyz /= reconstructedPosition.w;
-#	ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARRAY_ARGS(cb12),
-			wetnessDebugColor)) {
-		output.color = wetnessDebugColor;
-		output.normal = 0.0;
-		output.material = 0.0;
-		output.auxiliary = 0.0;
-		return output;
-	}
-#	endif
 #	ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromViewPosition(
@@ -3730,13 +3442,13 @@ PS_OUTPUT main(PS_INPUT input)
 #	endif
 	float3 viewDirection = normalize(-reconstructedPosition.xyz);
 
-#	if WAVE5B_RECORD_NORMAL_HAS_WETNESS
-	bool disableWetness = cb2[WAVE5B_RECORD_NORMAL_WETNESS_INDEX].y == -1.0;
-	float wetness = min(
-		pow(1.0 - dot(viewDirection, recordNormal), cb2[WAVE5B_RECORD_NORMAL_WETNESS_INDEX].y),
+#	if WAVE5B_RECORD_NORMAL_HAS_MATERIAL_FADE
+	bool disableMaterialFade = cb2[WAVE5B_RECORD_NORMAL_MATERIAL_FADE_INDEX].y == -1.0;
+	float materialFade = min(
+		pow(1.0 - dot(viewDirection, recordNormal), cb2[WAVE5B_RECORD_NORMAL_MATERIAL_FADE_INDEX].y),
 		1.0);
-	wetness = 1.0 + cb12[30].x * (wetness - 1.0);
-	wetness = disableWetness ? 1.0 : wetness;
+	materialFade = 1.0 + cb12[30].x * (materialFade - 1.0);
+	materialFade = disableMaterialFade ? 1.0 : materialFade;
 #	endif
 
 	float4 worldPosition = float4(reconstructedPosition.xyz, 1.0);
@@ -3819,8 +3531,8 @@ PS_OUTPUT main(PS_INPUT input)
 
 	output.normal.z = -mappedNormal.z;
 	output.normal.xy = mappedNormal.xy / sqrt(mappedNormal.z * -8.0 + 8.0) + 0.5;
-#	if WAVE5B_RECORD_NORMAL_HAS_WETNESS
-	output.material.z = sqrt(wetness * cb2[3].x * 0.02);
+#	if WAVE5B_RECORD_NORMAL_HAS_MATERIAL_FADE
+	output.material.z = sqrt(materialFade * cb2[3].x * 0.02);
 #	else
 	output.material.z = sqrt(cb2[3].x * 0.02);
 #	endif
@@ -3853,29 +3565,29 @@ PS_OUTPUT main(PS_INPUT input)
 #			define WAVE5B_SURFACE_CONTACT_CB2_COUNT 4
 #		endif
 #		define WAVE5B_SURFACE_CONTACT_HAS_T2 0
-#		define WAVE5B_SURFACE_CONTACT_HAS_WETNESS 0
+#		define WAVE5B_SURFACE_CONTACT_HAS_MATERIAL_FADE 0
 #	elif WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 2
 #		define WAVE5B_SURFACE_CONTACT_CB12_COUNT 31
 #		define WAVE5B_SURFACE_CONTACT_CB2_COUNT 7
 #		define WAVE5B_SURFACE_CONTACT_HAS_T2 0
-#		define WAVE5B_SURFACE_CONTACT_HAS_WETNESS 1
-#		define WAVE5B_SURFACE_CONTACT_WETNESS_INDEX 6
+#		define WAVE5B_SURFACE_CONTACT_HAS_MATERIAL_FADE 1
+#		define WAVE5B_SURFACE_CONTACT_MATERIAL_FADE_INDEX 6
 #	elif WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 3
 #		define WAVE5B_SURFACE_CONTACT_CB12_COUNT 28
 #		define WAVE5B_SURFACE_CONTACT_CB2_COUNT 7
 #		define WAVE5B_SURFACE_CONTACT_HAS_T2 1
-#		define WAVE5B_SURFACE_CONTACT_HAS_WETNESS 0
+#		define WAVE5B_SURFACE_CONTACT_HAS_MATERIAL_FADE 0
 #	elif WAVE5B_SSS_SURFACE_CONTACT_SHAPE == 4
 #		define WAVE5B_SURFACE_CONTACT_CB12_COUNT 31
 #		define WAVE5B_SURFACE_CONTACT_CB2_COUNT 8
 #		define WAVE5B_SURFACE_CONTACT_HAS_T2 1
-#		define WAVE5B_SURFACE_CONTACT_HAS_WETNESS 1
-#		define WAVE5B_SURFACE_CONTACT_WETNESS_INDEX 7
+#		define WAVE5B_SURFACE_CONTACT_HAS_MATERIAL_FADE 1
+#		define WAVE5B_SURFACE_CONTACT_MATERIAL_FADE_INDEX 7
 #	else
 #		error Unsupported SSS MRT surface/contact shape
 #	endif
 
-#	if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
+#	if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)
 #		undef WAVE5B_SURFACE_CONTACT_CB12_COUNT
 #		define WAVE5B_SURFACE_CONTACT_CB12_COUNT 36
 #	endif
@@ -4012,19 +3724,6 @@ PS_OUTPUT main(PS_INPUT input)
 		dot(inverseRow2, homogeneousPosition),
 		dot(inverseRow3, homogeneousPosition));
 	reconstructedPosition.xyz /= reconstructedPosition.w;
-#	ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-	float4 wetnessDebugColor;
-	if (WetnessEffects::TryGetDebugColorFromScreenPosition(
-			input.position.xy,
-			WETNESS_CAMERA_ARRAY_ARGS(cb12),
-			wetnessDebugColor)) {
-		output.color = wetnessDebugColor;
-		output.normal = 0.0;
-		output.material = 0.0;
-		output.auxiliary = 0.0;
-		return output;
-	}
-#	endif
 #	ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
 	float4 terrainDebugColor;
 	if (TerrainShadows::TryGetDebugColorFromViewPosition(
@@ -4060,13 +3759,13 @@ PS_OUTPUT main(PS_INPUT input)
 #	endif
 	float3 viewDirection = normalize(-reconstructedPosition.xyz);
 
-#	if WAVE5B_SURFACE_CONTACT_HAS_WETNESS
-	bool disableWetness = cb2[WAVE5B_SURFACE_CONTACT_WETNESS_INDEX].y == -1.0;
-	float wetness = min(
-		pow(1.0 - dot(viewDirection, recordNormal), cb2[WAVE5B_SURFACE_CONTACT_WETNESS_INDEX].y),
+#	if WAVE5B_SURFACE_CONTACT_HAS_MATERIAL_FADE
+	bool disableMaterialFade = cb2[WAVE5B_SURFACE_CONTACT_MATERIAL_FADE_INDEX].y == -1.0;
+	float materialFade = min(
+		pow(1.0 - dot(viewDirection, recordNormal), cb2[WAVE5B_SURFACE_CONTACT_MATERIAL_FADE_INDEX].y),
 		1.0);
-	wetness = 1.0 + cb12[30].x * (wetness - 1.0);
-	wetness = disableWetness ? 1.0 : wetness;
+	materialFade = 1.0 + cb12[30].x * (materialFade - 1.0);
+	materialFade = disableMaterialFade ? 1.0 : materialFade;
 #	endif
 
 	float4 worldPosition = float4(reconstructedPosition.xyz, 1.0);
@@ -4173,8 +3872,8 @@ PS_OUTPUT main(PS_INPUT input)
 
 	output.normal.z = -mappedNormal.z;
 	output.normal.xy = mappedNormal.xy / sqrt(mappedNormal.z * -8.0 + 8.0) + 0.5;
-#	if WAVE5B_SURFACE_CONTACT_HAS_WETNESS
-	output.material.z = sqrt(wetness * cb2[3].x * 0.02);
+#	if WAVE5B_SURFACE_CONTACT_HAS_MATERIAL_FADE
+	output.material.z = sqrt(materialFade * cb2[3].x * 0.02);
 #	else
 	output.material.z = sqrt(cb2[3].x * 0.02);
 #	endif

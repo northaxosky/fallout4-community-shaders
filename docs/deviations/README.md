@@ -65,7 +65,6 @@ upstream conversion; renderer-specific reasons remain in the feature tables.
 | Divergence | `Upscaling/DepthRefractionUpscalePS.hlsl` | `FO4/Upscaling/DepthRefractionUpscalePS.hlsl` |
 | Divergence | `Upscaling/EncodeTexturesCS.hlsl` | `FO4/Upscaling/EncodeTexturesCS.hlsl` |
 | Divergence | `Upscaling/UpscaleVS.hlsl` | `FO4/Upscaling/UpscaleVS.hlsl` |
-| Tweak | `WetnessEffects/WetnessEffects.hlsli` | `FO4/WetnessEffects/WetnessEffects.hlsli` only forwards to the FO4 consumer of the unchanged upstream include; this file does not adapt slots or samplers |
 
 ## Shader replacement
 
@@ -95,16 +94,14 @@ and OG output differs from native only in texture-sample scheduling on some rout
 Upstream pin: `d330bf12d`, `Feature.h:60–77`, `ShaderCache.cpp` define builders,
 `Deferred.cpp:211–296/730–740`, `State.cpp` `Draw`, and `ScreenSpaceShadows.cpp` `Prepass`.
 Loaded features declare their define, options and consumer families. Live effect settings and GPU
-readiness do not change those defines. Per-feature declarations also drive the offline variant sweep
-and wetness VS/PS linkage check; no second consumer-family list is maintained.
+readiness do not change those defines. Per-feature declarations also drive the offline variant sweep;
+no second consumer-family list is maintained.
 
 | Kind | Translation | Evidence / boundary | Code |
 |---|---|---|---|
 | Forced | FO4 deferred prepass/light/composite/tiled families replace Skyrim forward Lighting consumers | Native `DFPrepass`, `DFLight`, `DFComposite` and `DFTiledLighting` receipts; engine-facts shader-family/pass census | Per-feature `ShaderDefines.h`, `ShaderInjectionCompileRequest.cpp` |
 | Forced | Bind persistent resources after Begin's ClearState, at the first world prepass; rebind after producer RTV/UAV use and compute cleanup | AE `Main::Swap` calls Begin at `0xC3328E`; engine-facts high-slot writer census finds no mid-frame engine PS/VS/CS t16+ or PS/CS b3–b11 writes. D3D11 removes SRVs aliasing output resources | `Feature::Prepass`, `SharedData.cpp`, feature producer callbacks, `ComputeScope.cpp` |
 | Forced | Keep VS substrate at b4–b7; never use VS b10/b11 | Engine-facts VS constant-buffer census: b10/b11 are rewritten mid-frame | `SharedData.cpp`, `SubstrateSlots.h` |
-| Forced | Wetness RT6, independent blend state and PS t71 producer-presence marker remain per draw; restore OM/blend afterward | Native deferred prepass owns six MRTs; accepted and rejected material draws need distinct presence markers | `WetnessEffects.cpp` `BindFilmOutput`, DrawTriShape/SetDirtyStates anchor |
-| Forced | Publish wetness normal t25 at pre-composite, after native G-buffer producers retire | Engine-facts “Pre-composite scene boundary”: prepass/decals write G-buffers; lights replace those outputs with logical33–36. Publishing t25 immediately after prepass can be rejected or subsequently cleared by native RTV use | `WetnessEffects.cpp` `BindCompositeResources`, WARP frame-binding alias test |
 | Forced | ISL PS b11 remains per light; CS t8 is bound/restored at native tiled dispatch | Raster geometry selects each light; the engine owns low CS inputs and rebuilds the dense tiled list | `InverseSquareLighting.cpp`, `ShaderInjection.cpp` compute bridge |
 | Framework | Fullscreen-debug options apply only to the selected owner's composite consumers; selection changes invalidate only affected native target lookups and retain define-keyed compiled variants | Upstream LightLimitFix toggles LLFDEBUG through SetDefines and clears Lighting on visualization activation changes. Static declarations and runtime features share the same interface; offline sweeps explicitly select debug owners | `ShaderDefineProvider.h`, `Feature.cpp`, `ShaderInjection.cpp`, `ShaderCompileTests.cpp` |
 | Framework | Stock identity, shader ownership and post-freeze delivery validation remain independent of define selection | Repository shader-delivery contract; a resource failure does not silently compile a different feature set | `ShaderInjection.cpp`, `Feature.cpp` |
@@ -133,8 +130,8 @@ their temporary inputs; these are not consumer-draw snapshots. `shader_injection
 `draw_frame`, `frame_binding_checks`, `frame_binding_lost`, `frame_binding_lost_slots` (for example
 `ps_t45,vs_b4`) and cumulative `frame_binding_lost_total`. Verification samples the first consumer
 per family/stage after each publication, never repairs state, and preserves failed-frame counts.
-An authorized game/RenderDoc run must still verify zero losses, wetness producer acceptance,
-forward consumers, and godrays/HBAO+ save/restore behavior.
+An authorized game/RenderDoc run must still verify zero losses, forward consumers, and
+godrays/HBAO+ save/restore behavior.
 
 ## Feature loading
 
@@ -166,14 +163,14 @@ Engine evidence below refers to fallout4-re `docs\engine-facts.md`.
 | Kind | Difference | Evidence / reason | Where |
 |---|---|---|---|
 | Forced | Current world+jitter cache record supplies every rendering camera; b12 Map/Unmap is only a telemetry cross-check | Camera, matrices & world offsets: cache ownership and main preparation; cache +0x140, stride +0x250, keys +0x238/+0x240 on OG/NG/AE. AE proof: 5,614 prepass-record/b12 comparisons, maximum relative difference 0. Cache growth requires reacquiring and copying each call | `FrameBuffer.cpp` `GetWorldCameraRecord`, camera consumers, `Telemetry.cpp` |
-| Forced | Capture the world camera before deferred prepass draws; publish canonical depth and refresh feature data afterward | Engine-facts Main camera preparation: MainRenderSetup prepares world+jitter and advances history before DeferredPrePass on OG/NG/AE. Wetness material draws need current b4/b5 before the post-prepass boundary; fog/terrain prepare b6 afterward without advancing timer/resolution history twice. Missing early snapshots remain retryable; the moved capture requires an in-game b12 comparison | `FrameBuffer.cpp` `CaptureWorldCamera`, `SharedData.cpp` `UpdateSharedData` |
+| Forced | Capture the world camera before deferred prepass draws; publish canonical depth and refresh feature data afterward | Engine-facts Main camera preparation: MainRenderSetup prepares world+jitter and advances history before DeferredPrePass on OG/NG/AE. Fog/terrain prepare b6 afterward without advancing timer/resolution history twice. Missing early snapshots remain retryable; the moved capture requires an in-game b12 comparison | `FrameBuffer.cpp` `CaptureWorldCamera`, `SharedData.cpp` `UpdateSharedData` |
 | Forced | Engine row-vector matrices are transposed into upstream's `row_major mul(Matrix,v)` b4 contract | Per-frame buffer sources: native forward/inverse upload transposes; registers 37–40 are unjittered, not the jittered VP | `SharedDataLayout.h` `PackFrameData`, `FrameBufferTests.cpp` projection-equivalence test |
 | Forced | FrameBuffer binds at b4 instead of upstream's default b12 | FO4 reconstructed shaders own b12 (`Water.hlsl` native PerFrame); the shared register seam leaves their bytecode unchanged. b4/b7 are unused by reconstructed/native injection targets; stock DXBC identity, feature-off reflection and slot-clash tests enforce this | `SubstrateSlots.h`, utility compiler, injection compile request and cache recipe |
 | Forced | One R32_FLOAT boundary pass publishes canonical world-projection depth at t17; near pixels reproject through shadow +0x8A0, world pixels use `mad(d,1.01,-0.01)`, sky uses 1 | Depth & units / Per-frame buffer sources: FO4 combines first-person and world projections; prepass OG/NG/AE writes transpose(inverse(first-person jittered projection)) at shadow +0x8A0. Native targets use t0–t15, not t17 | `CanonicalDepth.cpp`, `FO4/CanonicalDepthCS.hlsl`, `FO4/Depth.hlsli`, `Engine.h` near accessor |
 | Tweak | Preserve upstream's scalar X clamp offset and Y clamp-to-ratio; snapshot current/previous ratios once per substrate update | Dynamic-resolution history: native clamp is `r−0.5/size` on NG/AE and `(trunc(size·r)−1)/size` on OG, size from logical target 1. These facts do not require the scalar clamp policy; it preserves upstream semantics rather than main's two-axis clamp. Substrate history is per-frame rather than effect-update history. OG publishes ratio 1: its deferred, water and tiled-lighting shaders read no dynamic-resolution constants | `SharedData.cpp`, unchanged `Common/FrameBuffer.hlsli` |
 | Forced | Pack world-channel DALC into pre-power SH, then apply FO4's 2.2 power once at linear consumer boundaries | Directional ambient transform/evaluation rows: native world-channel columns include transform scale and bias; native lighting evaluates power 2.2. SH is `(b/Y00,−ay/Y1,az/Y1,−ax/Y1)` with Y00=0.2820948, Y1=0.4886025. Upstream State.cpp does not gamma-convert before packing; unchanged GetAmbient is pre-power | `Engine.h` `TryGetDirectionalAmbientRows`, `SharedDataLayout.h` `PackAmbientSH`, `FO4/FO4ShaderData.hlsli` `GetAmbientLinear` |
 | Forced | b6 publishes neutral linear-lighting inputs, with native DALC power 2.2 and an already-linear sun | FO4 deferred HDR/sun inputs are linear; directional ambient alone is pre-power. These host inputs let unchanged Color/cubemap kernels consume the same encoding as the reconstructed consumers | `SharedData.cpp` `PackFeatures`, Dynamic Cubemaps translations |
-| Framework | One 48-byte FO4-only b7 holds host fullscreen debug owner/mode/params, EnabledSSR, EnabledDynamicCubemaps and DeltaTime; one host PS t61 serves the selected debug texture | Repository-wide single-substrate ABI; debug contributors claim no slots. Water tiles use b5; DR and NDC-to-view use b4; terrain/wetness enable fields use b6. Upstream b6 cubemapCreatorSettings retains Creator-mode semantics and stays zero | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `FO4/DebugViewOwners.h`, `SharedData.cpp` |
+| Framework | One 48-byte FO4-only b7 holds host fullscreen debug owner/mode/params, EnabledSSR, EnabledDynamicCubemaps and DeltaTime; one host PS t61 serves the selected debug texture | Repository-wide single-substrate ABI; debug contributors claim no slots. Water tiles use b5; DR and NDC-to-view use b4; terrain enable fields use b6. Upstream b6 cubemapCreatorSettings retains Creator-mode semantics and stays zero | `SharedDataLayout.h`, `FO4/FO4SharedData.hlsli`, `FO4/DebugViewOwners.h`, `SharedData.cpp` |
 | Pending | FrameParams is zero; unvalidated celestial/HDR/map/shadow fields retain upstream absent values | No validated FO4 inverse-gamma/frame-flag or corresponding celestial/HDR source is consumed. SunDirection uses toward-light direction, while SunColor remains absent rather than inventing a sky-disc colour; FrameCount follows main's temporal method and AlwaysActive follows engine frame count | `SharedData.cpp` `BuildSharedData`, `SharedDataLayout.h` |
 
 SSS reads canonical depth directly: first-person geometry casts as upstream does but never receives
@@ -222,14 +219,6 @@ their packet and bindings when resources change. See Shader contribution for the
 - `src/Features/TerrainShadows.cpp:332–336,365–380`: readiness compares the child worldspace
   editor ID, but loading resolves inherited land to the parent. Resolve the same land identity in
   both paths. FO4 retains main's parent-readiness correction; no upstream PR recorded.
-- `src/Features/WetnessEffects.cpp:557–558,940` and
-  `features/Wetness Effects/Shaders/WetnessEffects/WetnessEffects.hlsli`: the UI permits
-  zero ripple breadth/lifetime, but the CPU/shader takes their reciprocals. Define the
-  zero-value meaning upstream or use positive bounds; FO4 preserves the pinned behavior.
-- `src/Features/WetnessEffects.cpp:505,571` and `Common/SharedData.hlsli`:
-  `RaindropFxRange` and `WeatherTransitionSpeed` are exposed and published, but the pinned
-  wetness shader/material computation does not read them. Wire the intended controls
-  upstream or remove dead settings there; FO4 retains their defaults, persistence and UI.
 
 ## Temporal feature bug findings (no fixes)
 
@@ -243,7 +232,6 @@ evidence limits, not relabeled as proven bugs. A suspected upstream typed-depth 
 
 - [InverseSquareLighting](InverseSquareLighting.md)
 - [WaterEffects](WaterEffects.md)
-- [WetnessEffects](WetnessEffects.md)
 - [ExponentialHeightFog](ExponentialHeightFog.md)
 - [Performance Overlay](PerformanceOverlay.md)
 - [Terrain Shadows](TerrainShadows.md)

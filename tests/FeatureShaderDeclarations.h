@@ -8,7 +8,6 @@
 #include "../features/TerrainShadows/src/ShaderDefines.h"
 #include "../features/Upscaling/src/ShaderDefines.h"
 #include "../features/WaterEffects/src/ShaderDefines.h"
-#include "../features/WetnessEffects/src/ShaderDefines.h"
 #include "Render/FeatureShaderBindings.h"
 
 namespace cs::engine
@@ -24,7 +23,6 @@ namespace cs::engine
 				{ "InverseSquareLighting", &isl::kShaderDefines },
 				{ "ExponentialHeightFog", &fog_shader::kShaderDefines },
 				{ "DynamicCubemaps", &dc::kShaderDefines },
-				{ "WetnessEffects", &wetness::kShaderDefines },
 				{ "TerrainShadows", &terrain_shader::kShaderDefines },
 				{ "WaterEffects", &water_effects::kShaderDefines },
 				{ "Upscaling", &upscaling::kShaderDefines }
