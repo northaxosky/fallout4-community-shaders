@@ -10,6 +10,6 @@ namespace cs::features::water_effects
 	};
 
 	inline constexpr settings::Schema kSchema{
-		std::tuple{ settings::Field{ "enabled", "Enable water caustics.", &Settings::enabled } }
+		std::tuple{ settings::Field{ "enabled", "Enable water caustics and water parallax.", &Settings::enabled } }
 	};
 }

@@ -29,14 +29,22 @@ namespace cs
 	};
 	static_assert(sizeof(DynamicCubemapsFeatureData) == 16);
 
+	struct alignas(16) WaterEffectsFeatureData
+	{
+		std::uint32_t EnabledParallax = 0;
+		std::uint32_t pad0[3]{};
+	};
+	static_assert(sizeof(WaterEffectsFeatureData) == 16);
+
 	struct alignas(16) FeatureDataCB
 	{
 		TerrainShadowsFeatureData terrainShadowsSettings;
 		DynamicCubemapsFeatureData dynamicCubemapsSettings;
 		render::ExponentialHeightFogSettings exponentialHeightFogSettings;
 		LODBlendingFeatureData lodBlendingSettings;
+		WaterEffectsFeatureData waterEffectsSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 288);
+	static_assert(sizeof(FeatureDataCB) == 304);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);
@@ -47,6 +55,7 @@ namespace cs
 	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 48);
 	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 64);
 	static_assert(offsetof(FeatureDataCB, lodBlendingSettings) == 256);
+	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 288);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 4);
 

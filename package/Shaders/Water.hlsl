@@ -5,6 +5,10 @@ cbuffer PerFrame : register(b12)
 	float4 perFrame[48];
 };
 
+#if defined(WATER_EFFECTS) && !defined(VC) && !defined(LOD) && !defined(STENCIL) && !defined(STENCIL_DISPLACEMENT) && !defined(FOG)
+#	define WATER_PARALLAX
+#endif
+
 #ifdef BSWATER_VERTEX_SHADER
 
 #	define WorldToView (float3x4(perFrame[0], perFrame[1], perFrame[2]))
@@ -20,6 +24,10 @@ cbuffer PerFrame : register(b12)
 #		if defined(VERTEX_ALPHA_DEPTH) || defined(WADING)
 #			define HAS_VERTEX_DEPTH
 #		endif
+#	endif
+#	if defined(WATER_PARALLAX) && defined(SPECULAR) && defined(HAS_VERTEX_DEPTH)
+// FO4: specular PS never reads TEXCOORD3; keeps the pair's registers aligned.
+#		undef HAS_VERTEX_DEPTH
 #	endif
 #	if !defined(LOD) && !defined(SPECULAR)
 #		define HAS_OBJECT_POSITION
@@ -58,6 +66,10 @@ struct VS_OUTPUT
 #	endif
 #	ifdef HAS_SURFACE
 	float3 TexCoord5: TEXCOORD5;
+#	endif
+#	ifdef WATER_PARALLAX
+	// FO4: PS has no NormalsScale; forwarded as upstream's TEXCOORD8.
+	float3 NormalsScale: TEXCOORD8;
 #	endif
 #	ifdef CLIP_VOLUME
 	float ClipDistance: SV_ClipDistance0;
@@ -141,6 +153,9 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	ifdef HAS_SURFACE
 	vsout.TexCoord5 = mul(WorldToView, float4(worldPosition, 1.0));
+#	endif
+#	ifdef WATER_PARALLAX
+	vsout.NormalsScale = NormalsScale;
 #	endif
 
 #	ifdef CLIP_VOLUME
@@ -251,8 +266,15 @@ struct PS_INPUT
 #			endif
 #		endif
 	float3 eyeToPosition: TEXCOORD5;
+#		ifdef WATER_PARALLAX
+	float3 normalsScale: TEXCOORD8;
+#		endif
 #	endif
 };
+
+#	ifdef WATER_PARALLAX
+#		include "FO4/WaterParallaxConsumer.hlsli"
+#	endif
 
 float3 sceneDepthPosition(float2 screenUv)
 {
@@ -304,6 +326,26 @@ float3 blendedNormal(float2 uv0, float2 uv1, float2 uv2, float fade)
 	normal = detail2 * fade + normal;
 	return normal;
 }
+
+#	if !defined(LOD) && !defined(BSWATER_FLAT_INPUT)
+// FO4: SSLR ray passes rebuild the normal and need the same offset.
+float3 surfaceNormal(PS_INPUT input, float fade)
+{
+	float2 uv0 = input.normalUv01.xy;
+	float2 uv1 = input.normalUv01.zw;
+	float2 uv2 = input.normalUv2.xy;
+#		ifdef WATER_PARALLAX
+	if (FO4SharedData::EnabledWaterParallax != 0) {
+		float3 normalScalesRcp = rcp(input.normalsScale);
+		float2 parallaxOffset = WaterEffects::GetParallaxOffset(input, normalScalesRcp);
+		uv0 += parallaxOffset * normalScalesRcp.x;
+		uv1 += parallaxOffset * normalScalesRcp.y;
+		uv2 += parallaxOffset * normalScalesRcp.z;
+	}
+#		endif
+	return blendedNormal(uv0, uv1, uv2, fade);
+}
+#	endif
 
 float normalStrength(float shoreFade)
 {
@@ -502,7 +544,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float fade = saturate((input.eyeVector.w - 8192.0) / (perMaterial[10].x - 8192.0));
 	float strength = normalStrength(1.0);
 
-	float3 normal = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
+	float3 normal = surfaceNormal(input, fade);
 	normal = normalize(lerp(float3(0.0, 0.0, 1.0), normalize(normal), strength));
 
 #		ifdef UNDERWATER
@@ -545,7 +587,7 @@ float3 displacedNormal(float2 uv, float3 surface)
 float4 main(PS_INPUT input) : SV_Target0
 {
 	float fade = saturate((input.eyeVector.w - 8192.0) / (perMaterial[10].x - 8192.0));
-	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
+	float3 blended = surfaceNormal(input, fade);
 #		ifdef WADING
 	float3 normal = displacedNormal(input.displacement.xy, normalize(blended));
 #		else
@@ -658,7 +700,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	normal = normalize(normal);
 #		elif defined(BSWATER_RAY_UNDERWATER)
 	float fade = saturate((input.eyeVector.w - 8192.0) / (perMaterial[10].x - 8192.0));
-	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
+	float3 blended = surfaceNormal(input, fade);
 	float3 normal = normalize(blended);
 	normal = normalize(lerp(float3(0.0, 0.0, 1.0), normal, 0.5 * normalStrength(1.0)));
 #		else
@@ -668,7 +710,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float shore = saturate(1.0 - submersion * abs(planeDistance) / perMaterial[10].w);
 
 	float strength = 0.5 * normalStrength(shore);
-	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
+	float3 blended = surfaceNormal(input, fade);
 #			ifdef WADING
 	float3 normal = displacedNormal(input.displacement.xy, normalize(blended));
 #			else
@@ -762,7 +804,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float tint = lerp(perMaterial[12].z, perMaterial[12].w, opacity);
 	float shoreBlend = smoothstep(perMaterial[11].x, 1.0, shoreAlpha);
 	float strength = normalStrength(shoreAlpha);
-	float3 blended = blendedNormal(input.normalUv01.xy, input.normalUv01.zw, input.normalUv2.xy, fade);
+	float3 blended = surfaceNormal(input, fade);
 #		ifdef WADING
 	float3 normal = displacedNormal(input.displacement.xy, normalize(blended));
 #		else

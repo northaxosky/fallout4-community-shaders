@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
@@ -49,7 +50,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Projects animated water caustics onto submerged surfaces lit by the sun.";
+			return "Projects animated water caustics onto submerged surfaces lit by the sun and adds parallax depth to water normals.";
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
@@ -63,6 +64,7 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		cs::WaterEffectsFeatureData GetCommonBufferData() const;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;

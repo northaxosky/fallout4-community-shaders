@@ -96,7 +96,8 @@ namespace cs::render
 		DirectX::XMFLOAT4 DebugParams{};
 		std::uint32_t EnabledDynamicCubemaps = 0;
 		float DynamicMaterialReflections = 0.0f;
-		std::uint32_t pad0[2]{};
+		std::uint32_t EnabledWaterParallax = 0;
+		std::uint32_t pad0 = 0;
 	};
 	static_assert(sizeof(FO4SharedDataCB) == 48);
 	static_assert(offsetof(FO4SharedDataCB, DebugOwner) == 0);
@@ -106,7 +107,8 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, DebugParams) == 16);
 	static_assert(offsetof(FO4SharedDataCB, EnabledDynamicCubemaps) == 32);
 	static_assert(offsetof(FO4SharedDataCB, DynamicMaterialReflections) == 36);
-	static_assert(offsetof(FO4SharedDataCB, pad0) == 40);
+	static_assert(offsetof(FO4SharedDataCB, EnabledWaterParallax) == 40);
+	static_assert(offsetof(FO4SharedDataCB, pad0) == 44);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

@@ -421,6 +421,13 @@ namespace cs::features
 		_binds.fetch_add(1, std::memory_order_relaxed);
 	}
 
+	cs::WaterEffectsFeatureData WaterEffects::GetCommonBufferData() const
+	{
+		cs::WaterEffectsFeatureData data{};
+		data.EnabledParallax = _injectionsOperational.load(std::memory_order_acquire) && _enabled.load(std::memory_order_acquire) ? 1u : 0u;
+		return data;
+	}
+
 	FullscreenDebugData WaterEffects::GetFullscreenDebugData() const noexcept
 	{
 		if (!CanBind() || !_debugFrameReady)

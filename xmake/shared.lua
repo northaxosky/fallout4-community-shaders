@@ -32,7 +32,8 @@ function main(target)
             "features/Terrain Shadows/Shaders/TerrainShadows/TerrainShadows.hlsli",
             "features/Upscaling/Shaders/Upscaling/RCAS/RCAS.hlsl",
             "features/Water Effects/Shaders/WaterEffects/watercaustics.dds",
-            "features/Water Effects/Shaders/WaterEffects/WaterCaustics.hlsli"
+            "features/Water Effects/Shaders/WaterEffects/WaterCaustics.hlsli",
+            "features/Water Effects/Shaders/WaterEffects/WaterParallax.hlsli"
         },
         sources = {
             "src/Profiler.h",
