@@ -161,13 +161,13 @@ namespace cs::render
 			a_data.feature.exponentialHeightFogSettings = a_features.exponentialHeightFogSettings;
 			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
 			fo4.EnabledDynamicCubemaps = a_features.dynamicCubemapsSettings.Enabled;
+			fo4.DynamicMaterialReflections = a_features.dynamicCubemapsSettings.MaterialReflections;
 			auto& terrain = a_data.feature.terraOccSettings;
 			terrain.EnableTerrainShadow = a_features.terrainShadowsSettings.EnableTerrainShadow;
 			std::ranges::copy(a_features.terrainShadowsSettings.Scale, terrain.Scale);
 			std::ranges::copy(a_features.terrainShadowsSettings.ZRange, terrain.ZRange);
 			std::ranges::copy(a_features.terrainShadowsSettings.Offset, terrain.Offset);
 			terrain.ZBlur = a_features.terrainShadowsSettings.ZBlur;
-			a_data.feature.wetnessEffectsSettings = a_features.wetnessEffectsSettings;
 			a_data.feature.lodBlendingSettings = a_features.lodBlendingSettings;
 		}
 

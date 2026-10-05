@@ -36,7 +36,7 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 |---|---|---|---|---|---|---|---|
 | CS Editor | Core | Weather/template/imagespace editor, godray record editor, light editor, shell | N/A: Skyrim VL noise fields | NS | H | L | High |
 | Cloud Shadows | Core | Layer-cube producer, directional receivers, Effect/Water/Particle receivers, EHF attenuation | N/A: legacy VL consumer | NS | H | L | Med |
-| [Dynamic Cubemaps](deviations/DynamicCubemaps.md) | Mixed | Capture/filter/inference, water, wet-film consumer, dry materials via native envmap, IBL/Skylighting providers, Creator tool | Ext: authored sentinel/reflectance selection, FO4 material workflow | Pt | H | S/M | High |
+| [Dynamic Cubemaps](deviations/DynamicCubemaps.md) | Mixed | Capture/filter/inference, water, native envmap materials, IBL/Skylighting providers, Creator tool | Ext: authored sentinel/reflectance selection, FO4 material workflow | Pt | H | S/M | High |
 | Effects11 | Core | `.fx` host and effect chain, color correction, editor, weather/light controls, volumetric rays | N/A: ENB preset/binary compatibility | NS | H | L | Med |
 | [Exponential Height Fog](deviations/ExponentialHeightFog.md) | Core | Analytic/froxel fog; shadow/environment/weather/secondary consumers; local-light scattering (needs LLF light grid) | N/A: ENB | Pt | H | L | High |
 | Extended Materials | Mixed | Object POM + contact refinement, warping fix, terrain POM/height blend (height from `_s` alpha) | Ext: complex envmask material, parallax soft shadows | NS | H | M | Med |
@@ -74,7 +74,7 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | Volumetric Lighting | Mixed | Native GFSDK enable/quality controls | Ext: full raymarched renderer. N/A: Skyrim dispatch optimization | NS | L | S | Med |
 | Volumetric Shadows | Core | VSM producer, DFLight soft sun, Effect/Water short rays, Particle receiver | — | NS | H | L | Med |
 | [Water Effects](deviations/WaterEffects.md) | Core | Exterior/secondary caustics, interior heights*, debug, water parallax (height from water-normal alpha) | N/A: FLOWMAP parallax (no FO4 flowmap path) | Pt | H | M | High |
-| [Wetness Effects](deviations/WetnessEffects.md) | Mixed | Weather accumulation, wet albedo/shore, water-surface rain ripples, shelter | Ext: MRT6 film (normals/roughness/coat), ground ripples/splashes, flowmap ripples | Pt | H | M | High |
+| Wetness Effects | — | removed; not ported | — | NS | — | — | — |
 
 [FrameGeneration](deviations/FrameGeneration.md) and [MotionVectorFixes](deviations/MotionVectorFixes.md)
 are FO4-only rule-4 core features.
@@ -89,15 +89,13 @@ are FO4-only rule-4 core features.
   slice is core; RE confirms which material flag marks height-bearing `_s` textures (packs set one in BGSM).
   Composite `PARALLAX_OCCLUSION_MAPPING` macros prove emission, not executed relief, and prepass `0x40000`
   is SKIN_TINT. Terrain Variation must share the same UV offsets.
-- **Dynamic Cubemaps dry materials.** Sample the DC cube (t34/t35) at the six native probe sites in
-  `DFComposite.hlsl`, keeping FO4 gain, SSLR blend and exclusions. Use DC's roughness-to-mip contract, not
-  the native probe LOD.
+- **Dynamic Cubemaps dry materials.** Implemented: the six native probe sites in `DFComposite.hlsl` sample
+  the DC cube (t34/t35) normalized to the authored cube's brightness, keeping FO4 gain, SSLR blend and
+  exclusions, with DC's roughness-to-mip contract rather than the native probe LOD.
 - **Water parallax.** Vanilla water normals have no height, but water texture mods do: Enhanced Vanilla
   Water ships BC7 `DefaultWater`/`DefaultWaterTile`/`ChurningWaterTile` with height in alpha. `Water.hlsl`
   already samples those normals (t4) and reads only `.xy`; reading `.a` is a relocated datum. Check the
   height range against upstream's convention and gate vanilla (alpha-less) normals.
-- **Wetness Effects.** `package\Shaders\Water.hlsl` has no `WETNESS_EFFECTS`/`GetRainDrops` consumer; the
-  water-surface rain slice is missing.
 - **Subsurface Scattering.** Replace FO4's fixed second-composite blur with upstream separable/Burley on
   native class-5 eligibility; never stack both.
 - **Cloud Shadows.** Prior art on branch `cloud-shadows` (`3314d567`) maps material pointers to layers;
@@ -117,7 +115,7 @@ are FO4-only rule-4 core features.
 Ordered by user value over effort, respecting dependencies.
 
 1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE.
-2. **Finish ported features:** DC dry materials (S/M); Wetness water-surface rain (M); Terrain Shadows FO4
+2. **Finish ported features:** DC provider adapters (S/M); Terrain Shadows FO4
    heightmap pack (M); Water Effects caustics proof (S) and water parallax (M).
 3. **Cheap new features:** LOD Blending (S); Terrain Variation (M); Remote Control (M; DevBench automation).
 4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
@@ -126,14 +124,14 @@ Ordered by user value over effort, respecting dependencies.
    LLF particle lights + visualization (M).
 6. **RE-gated:** Interior Sun; Extended Translucency alpha models.
 7. **Providers:** DC → IBL; Skylighting in parallel; LLF 3D light grid before EHF local-light scattering;
-   then provider adapters in DC/SSGI/EHF/Wetness.
+   then provider adapters in DC/SSGI/EHF.
 8. **Remaining core:** Skin detail/default response; Sky Sync; Grass Lighting basics; Unified Water optical;
    VL controls; CS Editor; Screenshot; HDR Display (L).
 
 ## Extension slices
 
-Shipped: Wetness MRT6 film. Not planned: DC authored reflectance/material workflow. Candidates: TruePBR
+Not planned: DC authored reflectance/material workflow. Candidates: TruePBR
 full materials; Extended Materials complex materials and parallax shadows; Grass Optimizations renderer;
 Unified Water tiles and flowmaps; Terrain Blending lit transition; Terrain
-Helper ESP; Skin RFAOS/wet film; SSS profiles; Hair Kajiya-Kay and blended hair; LLF capacity/shadow
+Helper ESP; Skin RFAOS; SSS profiles; Hair Kajiya-Kay and blended hair; LLF capacity/shadow
 redesign; full Volumetric Lighting renderer; Extended Translucency world coverage.

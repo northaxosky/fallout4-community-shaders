@@ -23,7 +23,6 @@ local features = {
     "InverseSquareLighting",
     "ExponentialHeightFog",
     "DynamicCubemaps",
-    "WetnessEffects",
     "WaterEffects"
 }
 
@@ -358,15 +357,6 @@ target("TerrainShadowsMathTests", function()
     add_files("tests/TerrainShadowsMathTests.cpp")
     add_headerfiles("features/TerrainShadows/src/TerrainShadowsMath.h")
     add_includedirs("features/TerrainShadows/src")
-end)
-
-target("WetnessEffectsMathTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files("tests/WetnessEffectsMathTests.cpp")
-    add_headerfiles("features/WetnessEffects/src/WetnessMath.h")
-    add_includedirs("features/WetnessEffects/src")
-    add_packages("vcpkg::tomlplusplus")
 end)
 
 target("InverseSquareLightingMathTests", function()
@@ -704,10 +694,6 @@ end)
 
 target("TerrainShadowsMathTests", function()
     add_tests("TerrainShadowsMath")
-end)
-
-target("WetnessEffectsMathTests", function()
-    add_tests("WetnessEffectsMath")
 end)
 
 target("InverseSquareLightingMathTests", function()

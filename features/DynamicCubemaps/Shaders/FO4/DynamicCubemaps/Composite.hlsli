@@ -7,36 +7,39 @@
 #include "FO4/DynamicCubemaps/DynamicCubemaps.hlsli"
 #undef DYNAMIC_CUBEMAPS_ENVIRONMENT_REGISTER
 #undef DYNAMIC_CUBEMAPS_REFLECTIONS_REGISTER
-#include "FO4/WetnessEffects/WetnessEffects.hlsli"
 
 namespace DynamicCubemaps
 {
-	// FO4 composite sampler slots are exhausted, so DC cubes use the native probe sampler instead of upstream's LinearSampler.
-	float3 GetFinalIrradiance(float3 N, float3 V, float roughness, SamplerState LinearSampler)
+	// FO4: vanilla envmaps cannot carry upstream sentinels, so the live cube replaces the authored pattern at its authored brightness.
+	float3 GetMaterialEnvironment(TextureCubeArray<float4> nativeCube, SamplerState probeSampler,
+		float3 R, float slice, float lod, float glossiness, float nativeRain)
 	{
-		float3 R = reflect(-V, N);
-		// FO4 shares composite permutations across interiors and exteriors, so INTERIOR becomes SharedData::InInterior.
+		float3 native = nativeCube.SampleLevel(probeSampler, float4(R, slice), lod).xyz;
+		// Native rain boosts and greys this reflection; the live cube would turn that into chrome, so rain keeps the authored cube.
+		float blend = FO4SharedData::DynamicMaterialReflections * (1.0 - saturate(nativeRain));
+		if (blend <= 0.0)
+			return native;
+		// FO4 probe sites pass the negated reflection vector; DC cubes use the upstream reflect(-V, N) orientation.
+		float3 direction = -R;
+		uint width, height;
+		float3 irradiance, average;
+		float level = saturate(1.0 - glossiness) * 8.0;
 		if (SharedData::InInterior) {
-			return GetNormalizedSpecularIrradiance(EnvTexture, LinearSampler, R, roughness);
+			EnvTexture.GetDimensions(width, height);
+			irradiance = EnvTexture.SampleLevel(probeSampler, direction, level);
+			average = EnvTexture.SampleLevel(probeSampler, direction, 15);
 		} else {
-			return GetNormalizedSpecularIrradiance(EnvReflectionsTexture, LinearSampler, R, roughness);
+			EnvReflectionsTexture.GetDimensions(width, height);
+			irradiance = EnvReflectionsTexture.SampleLevel(probeSampler, direction, level);
+			average = EnvReflectionsTexture.SampleLevel(probeSampler, direction, 15);
 		}
-	}
-
-	// FO4 has no wet reflectance G-buffer, so the composite evaluates the film and transforms its view-space directions.
-	float3 GetWetnessReflection(float3 normalView, float3 viewDir, float wetness, float roughness,
-		float3x3 viewToWorld, SamplerState probeSampler)
-	{
-		float3 color = 0;
-		if (FO4SharedData::EnabledDynamicCubemaps == 0)
-			return color;
-		float reflectance = WetnessEffects::GetEnvironmentFilmWeight(normalView, viewDir, wetness, roughness);
-		if (reflectance > 0.0) {
-			float3 N = normalize(mul(viewToWorld, normalView));
-			float3 V = normalize(mul(viewToWorld, viewDir));
-			color += reflectance * GetFinalIrradiance(N, V, roughness, probeSampler);
-		}
-		return color;
+		if (width == 0)
+			return native;
+		float authored = Color::RGBToLuminance(nativeCube.SampleLevel(probeSampler, float4(R, slice), 15).xyz);
+		float3 live = irradiance / max(Color::RGBToLuminance(average), 0.001) * authored;
+		// FO4: native weighting multiplies an LDR authored pattern by surface light, so HDR live peaks stay in that range.
+		live /= max(1.0, max(live.r, max(live.g, live.b)));
+		return lerp(native, live, blend);
 	}
 }
 

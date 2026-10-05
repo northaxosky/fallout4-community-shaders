@@ -4,33 +4,29 @@
 #include "ExponentialHeightFog.h"
 #include "LODBlending.h"
 #include "TerrainShadows.h"
-#include "WetnessEffects.h"
 
 namespace cs
 {
 	namespace
 	{
-		template <class Data, class Feature, class... Args>
-		Data CollectFeatureData(Feature* a_feature, Args... a_args)
+		template <class Data, class Feature>
+		Data CollectFeatureData(Feature* a_feature)
 		{
 			if (!a_feature || !a_feature->IsHealthy())
 				return {};
-			return a_feature->GetCommonBufferData(a_args...);
+			return a_feature->GetCommonBufferData();
 		}
 	}
 
 	FeatureDataCB GetFeatureBufferData()
 	{
-		const auto dynamicCubemaps = CollectFeatureData<DynamicCubemapsFeatureData>(
-			features::DynamicCubemaps::GetSingleton());
 		return {
-			.wetnessEffectsSettings =
-				CollectFeatureData<WetnessEffectsFeatureData>(
-					features::WetnessEffects::GetSingleton(), dynamicCubemaps.Enabled != 0),
 			.terrainShadowsSettings =
 				CollectFeatureData<TerrainShadowsFeatureData>(
 					features::TerrainShadows::GetSingleton()),
-			.dynamicCubemapsSettings = dynamicCubemaps,
+			.dynamicCubemapsSettings =
+				CollectFeatureData<DynamicCubemapsFeatureData>(
+					features::DynamicCubemaps::GetSingleton()),
 			.exponentialHeightFogSettings =
 				CollectFeatureData<render::ExponentialHeightFogSettings>(
 					features::ExponentialHeightFog::GetSingleton()),

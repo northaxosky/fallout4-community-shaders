@@ -62,7 +62,6 @@ body:
         - label: Inverse Square Lighting
         - label: Exponential Height Fog
         - label: Dynamic Cubemaps
-        - label: Wetness Effects
         - label: Water Effects
         - label: Motion Vector Fixes
         - label: Upscaling

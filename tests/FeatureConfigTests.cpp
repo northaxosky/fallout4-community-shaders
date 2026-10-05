@@ -13,7 +13,6 @@
 #include "Settings/SettingsRegistry.h"
 #include "TerrainShadowsSettings.h"
 #include "WaterEffectsSettings.h"
-#include "WetnessMath.h"
 
 #include <filesystem>
 #include <fstream>
@@ -75,7 +74,6 @@ namespace
 			std::pair{ "InverseSquareLighting", SchemaView{} },
 			std::pair{ "ExponentialHeightFog", MakeSchemaView(exponential_height_fog::kSchema) },
 			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },
-			std::pair{ "WetnessEffects", MakeSchemaView(wetness_math::kSchema) },
 			std::pair{ "WaterEffects", MakeSchemaView(water_effects::kSchema) },
 			std::pair{ "ScreenSpaceShadows", MakeSchemaView(sss_settings::kSchema) },
 			std::pair{ "TerrainShadows", MakeSchemaView(terrain_shadows::kSchema) },
@@ -137,40 +135,6 @@ namespace
 		}
 	}
 
-	void TestWetnessSettings()
-	{
-		using namespace cs::features::wetness_math;
-		Settings value;
-		std::string error;
-		CHECK(Parse(kSchema, toml::parse("[settings]\npuddle_radius = 0.3\npuddle_max_angle = 0.6\nmax_puddle_wetness = 6.0\nmax_shore_wetness = 0.5\nshore_range = 64\n"), value, error));
-		CHECK(value.puddleRadius == 0.3f && value.puddleMaxAngle == 0.6f && value.maxPuddleWetness == 6.0f);
-		CHECK(value.maxShoreWetness == 0.5f && value.shoreRange == 64);
-		const auto serialized = SerializeDelta(kSchema, value, Settings{});
-		std::ostringstream document;
-		document << toml::table{ { "settings", serialized } };
-		Settings restored;
-		CHECK(Parse(kSchema, toml::parse(document.str()), restored, error));
-		CHECK(restored.puddleRadius == value.puddleRadius &&
-			  restored.puddleMaxAngle == value.puddleMaxAngle &&
-			  restored.maxPuddleWetness == value.maxPuddleWetness &&
-			  restored.maxShoreWetness == value.maxShoreWetness &&
-			  restored.shoreRange == value.shoreRange);
-
-		for (const char* invalid : {
-				 "[settings]\npuddle_radius = 0.0\n",
-				 "[settings]\npuddle_max_angle = 0.0\n",
-				 "[settings]\nmax_puddle_wetness = 6.1\n",
-				 "[settings]\nmax_shore_wetness = 1.1\n",
-				 "[settings]\nshore_range = 0\n",
-				 "[settings]\nshore_range = 65\n" }) {
-			CHECK(!Parse(kSchema, toml::parse(invalid), restored, error));
-		}
-		value.maxShoreWetness = -1.0f;
-		value.shoreRange = 0;
-		const auto clamped = Clamp(value);
-		CHECK(clamped.maxShoreWetness == 0.0f && clamped.shoreRange == 1);
-	}
-
 	void TestSSSSettings()
 	{
 		using namespace cs::features::sss_settings;
@@ -225,6 +189,8 @@ namespace
 		WriteFile(a_path,
 			"[features.ScreenSpaceShadows]\nload = true\n"
 			"[features.ScreenSpaceShadows.settings]\nSurfaceThickness = 0.03\ncustom = 1\n"
+			"[features.RetiredFeature]\nload = true\n"
+			"[features.RetiredFeature.settings]\nenabled = true\ncustom = 'preserved'\n"
 			"[unknown]\nvalue = 'kept'\n");
 		CHECK(InitializeAt(a_path, a_registry).error.empty());
 		const auto refreshed = ReadFile(a_path);
@@ -239,6 +205,10 @@ namespace
 		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["ShadowContrast"].value<double>() == 2.0);
 		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["custom"].value<std::int64_t>() == 1);
 		CHECK(root["unknown"]["value"].value<std::string>() == "kept");
+		CHECK(root["features"]["RetiredFeature"]["load"].value<bool>() == true);
+		CHECK(root["features"]["RetiredFeature"]["settings"]["custom"].value<std::string>() == "preserved");
+		const auto activeFeature = GetFeature("ScreenSpaceShadows");
+		CHECK(activeFeature && ParseActivation(*activeFeature).load);
 
 		CHECK(UpdateOwnedSettingsAt(a_path, path, {}));
 		const auto reset = ReadFile(a_path);
@@ -382,7 +352,6 @@ int main()
 	try {
 		const auto registry = BuildRegistry();
 		TestSchema();
-		TestWetnessSettings();
 		TestSSSSettings();
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");

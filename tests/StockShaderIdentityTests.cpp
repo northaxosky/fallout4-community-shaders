@@ -252,7 +252,7 @@ namespace
 				const bool isVertex = a_row.family.stage == cs::engine::ShaderStage::kVertex;
 				auto paired = a_row.family;
 				paired.stage = isVertex ? cs::engine::ShaderStage::kPixel : cs::engine::ShaderStage::kVertex;
-				// Tessellated prepass variants use the native domain stage and add no wetness interpolators.
+				// Tessellated prepass variants use the native domain stage.
 				if (cs::engine::BuildShaderFamilyCompilationDescriptor(a_row.family)->defines.contains("TESSELLATE_DISP_HEIGHT"))
 					return {};
 				const auto pairedCompiled = CompileStage(paired, a_shaderRoot, true, a_runtime);

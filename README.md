@@ -62,7 +62,6 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Inverse Square Lighting** | Opt-in per-light falloff; requires [authored light TOML files](features/InverseSquareLighting/README.md). Existing lights stay unchanged. |
 | **[Exponential Height Fog](features/ExponentialHeightFog/README.md)** | Analytic and volumetric fog with weather profiles; provider coverage is pending. |
 | **Dynamic Cubemaps** | Reflections that respond to the surrounding scene. |
-| **Wetness Effects** | Rain-darkened surfaces and wet reflections. |
 | **Water Effects** | Sunlight caustics on submerged surfaces. |
 | **Motion Vector Fixes** | Motion-data corrections for temporal rendering. |
 | **Upscaling** | TAA, FSR 3/4, and DLSS. |

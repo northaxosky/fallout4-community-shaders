@@ -62,11 +62,9 @@ namespace cs::engine
 			DefineBit(a_defines, a_descriptor, 1U << 6, "EYE");
 			const auto grassBit =
 				(a_descriptor & (1U << 7)) != 0;
-			// Grass pixel blobs are stock-identical to non-grass ones; the define only scopes feature contributions.
-			if (grassBit) {
+			if (a_family.stage == ShaderStage::kVertex && grassBit) {
 				Define(a_defines, "GRASS");
-				if (a_family.stage == ShaderStage::kVertex)
-					Define(a_defines, "MAX_ACTOR_VEGETATION_COLLISION", "4");
+				Define(a_defines, "MAX_ACTOR_VEGETATION_COLLISION", "4");
 			}
 			DefineBit(a_defines, a_descriptor, 1U << 8, "ALPHA_TEST");
 			if ((a_descriptor & (1U << 9)) != 0 || (a_family.stage == ShaderStage::kVertex && !tessellatedVertex && (a_descriptor & (1U << 25)) != 0)) {

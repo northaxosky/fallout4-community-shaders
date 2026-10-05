@@ -733,25 +733,18 @@ namespace
 		Expect(!ResolveStandaloneComputeTarget("Unknown"), "unknown standalone compute did not fail closed");
 		Expect(ResolveStandaloneComputeTarget("IndexBufferOffsetCS") == ShaderInjectionTarget::kImageSpace,
 			"unowned standalone compute observation was lost");
-		const auto wetness = std::ranges::find_if(GetFeatureShaderContributions(), [](const auto& contribution) {
-			return contribution.targetId == ShaderInjectionTarget::kDeferredPrepass && contribution.contributor == "WetnessEffects";
-		});
-		Expect(wetness != GetFeatureShaderContributions().end() && wetness->requiresGraphicsPair &&
-				   wetness->stages == (ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel)),
-			"wetness producer lost its required VS/PS pair");
-
 		// Exercise the live provider/options path, including the feature-wide sentinel query.
-		ShaderDefineDeclaration wetnessDebug{
-			cs::features::wetness::kShaderDefines.name,
-			{ ShaderInjectionTarget::kDeferredPrepass, ShaderInjectionTarget::kBsdfLight, ShaderInjectionTarget::kBsdfComposite },
-			cs::features::wetness::kShaderDefines.debug
+		ShaderDefineDeclaration terrainDebug{
+			cs::features::terrain_shader::kShaderDefines.name,
+			{ ShaderInjectionTarget::kBsdfLight, ShaderInjectionTarget::kBsdfComposite },
+			cs::features::terrain_shader::kShaderDefines.debug
 		};
 		ShaderDefineDeclaration waterDebug{
 			cs::features::water_effects::kShaderDefines.name,
 			{ ShaderInjectionTarget::kBsdfLight, ShaderInjectionTarget::kBsdfComposite },
 			cs::features::water_effects::kShaderDefines.debug
 		};
-		auto contributions = DescribeFeatureShaderBindings("WetnessEffects", wetnessDebug);
+		auto contributions = DescribeFeatureShaderBindings("TerrainShadows", terrainDebug);
 		contributions.append_range(DescribeFeatureShaderBindings("WaterEffects", waterDebug));
 		const auto options = [&] {
 			return BuildEffectiveShaderCompileRequest(
@@ -760,20 +753,20 @@ namespace
 			    ->defines;
 		};
 		const std::vector expectedTargets{ ShaderInjectionTarget::kBsdfComposite };
-		Expect(wetnessDebug.GetShaderDefineOptions().empty(), "unselected feature-wide query enabled debug");
-		Expect(wetnessDebug.SetFullscreenDebugSelected(true) == expectedTargets,
+		Expect(terrainDebug.GetShaderDefineOptions().empty(), "unselected feature-wide query enabled debug");
+		Expect(terrainDebug.SetFullscreenDebugSelected(true) == expectedTargets,
 			"debug selection invalidated production lighting or prepass");
-		Expect(wetnessDebug.GetShaderDefineOptions() == wetnessDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfComposite) &&
-				   wetnessDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfLight).empty(),
+		Expect(terrainDebug.GetShaderDefineOptions() == terrainDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfComposite) &&
+				   terrainDebug.GetShaderDefineOptions(ShaderInjectionTarget::kBsdfLight).empty(),
 			"debug options lost kCount semantics or leaked into lighting");
-		Expect(options().contains(wetnessDebug.debug) && !options().contains(waterDebug.debug),
+		Expect(options().contains(terrainDebug.debug) && !options().contains(waterDebug.debug),
 			"selected fullscreen owner did not exclusively contribute debug");
-		Expect(wetnessDebug.SetFullscreenDebugSelected(true).empty(),
+		Expect(terrainDebug.SetFullscreenDebugSelected(true).empty(),
 			"same-owner mode selection requested a recompile");
-		Expect(wetnessDebug.SetFullscreenDebugSelected(false) == expectedTargets &&
+		Expect(terrainDebug.SetFullscreenDebugSelected(false) == expectedTargets &&
 				   waterDebug.SetFullscreenDebugSelected(true) == expectedTargets,
 			"owner switch failed to retire both define sets");
-		Expect(!options().contains(wetnessDebug.debug) && options().contains(waterDebug.debug),
+		Expect(!options().contains(terrainDebug.debug) && options().contains(waterDebug.debug),
 			"previous fullscreen owner's debug define survived selection change");
 		Expect(waterDebug.SetFullscreenDebugSelected(false) == expectedTargets &&
 				   !options().contains(waterDebug.debug) && waterDebug.GetShaderDefineOptions().empty(),

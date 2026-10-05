@@ -2,6 +2,8 @@
 
 #include "Render/Annotation.h"
 
+#include <array>
+
 namespace cs::engine
 {
 	RE::BSGraphics::Context* GetActiveContext() noexcept
