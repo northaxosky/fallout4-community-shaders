@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`. FO4 stages `TerrainVariation.hlsli` unchanged through `xmake\shared.lua`. Settings keys, defaults and tooltips match the pin: `enableLODTerrainTilingFix`
+FO4 stages `TerrainVariation.hlsli` unchanged through `xmake\shared.lua`. Settings keys, defaults and tooltips match the shared pin: `enableLODTerrainTilingFix`
 and `enableMeshSupport`, both on. Upstream has no master toggle (FO4 adds a live `enabled`, see the Framework row) and no resources; the GPU block is the
 existing `TerrainVariationSettings` layout, published raw, and an unpublished block is zero (LOD fix
 and mesh variation off).
