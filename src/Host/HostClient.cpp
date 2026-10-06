@@ -28,13 +28,25 @@ namespace cs::host
 	{
 		auto* L = cs::log::Get("cs.host");
 
+		// DearModdingUI rejects control characters in page text; upstream descriptions use line breaks.
+		std::string ToPageSummary(std::string a_summary)
+		{
+			std::ranges::replace_if(
+				a_summary,
+				[](char a_character) {
+					return static_cast<unsigned char>(a_character) < 0x20u && a_character != '\t';
+				},
+				' ');
+			return a_summary;
+		}
+
 		FeaturePageInput DescribeFeature(Feature& a_feature)
 		{
 			return {
 				.name = std::string(a_feature.GetName()),
 				.displayName = std::string(a_feature.GetDisplayName()),
 				.category = a_feature.GetCategory(),
-				.summary = a_feature.GetFeatureSummary(),
+				.summary = ToPageSummary(a_feature.GetFeatureSummary()),
 				.active = a_feature.IsActive(),
 				.installed = a_feature.IsInstalled()
 			};
