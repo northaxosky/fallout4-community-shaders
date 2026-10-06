@@ -12,6 +12,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/ObjectLOD.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -31,20 +32,9 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.lodblending");
 
-		// BTO shapes hang under the land LOD root; terrain LOD there carries kLODLandscape. The kLODObjects property flag
-		// and the LOD material features miss BTO shapes, so they cannot gate.
-		bool IsObjectLOD(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
+		bool ClassifyObjectLOD(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
 		{
-			auto* geometry = a_pass->GetGeometry();
-			auto* property = a_pass->GetShaderProperty();
-			const auto* landRoot = RE::Main::GetLandLODRoot();
-			if (!geometry || !property || !landRoot || property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kLODLandscape))
-				return false;
-			for (const RE::NiNode* node = geometry->parent; node; node = node->parent) {
-				if (node == landRoot)
-					return true;
-			}
-			return false;
+			return cs::engine::IsObjectLODShape(a_pass);
 		}
 	}
 
@@ -75,7 +65,7 @@ namespace cs::features
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kX, &IsObjectLOD)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kX, &ClassifyObjectLOD)) {
 			FailLoad("LOD Blending prepass draw classifier installation failed.");
 			return;
 		}
@@ -84,20 +74,10 @@ namespace cs::features
 
 	void LODBlending::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		using cs::engine::PrepassBakePath;
-		using cs::engine::PrepassLaneComponent;
-		const auto records = cs::engine::GetPrepassClassifierStats(PrepassLaneComponent::kX, PrepassBakePath::kCommandBuffer);
-		const auto immediate = cs::engine::GetPrepassClassifierStats(PrepassLaneComponent::kX, PrepassBakePath::kImmediate);
-		const auto lanes = cs::engine::GetPrepassLaneStats();
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
-			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed))
-			.Field("records", records.classified)
-			.Field("lod_records", records.flagged)
-			.Field("immediate_draws", immediate.classified)
-			.Field("lod_immediate_draws", immediate.flagged)
-			.Field("lanes_baked", lanes.baked)
-			.Field("lanes_unavailable", lanes.unavailable);
+			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed));
+		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kX, "lod");
 	}
 
 	bool LODBlending::ValidateShaderInjections(std::string& a_error)

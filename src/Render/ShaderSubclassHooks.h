@@ -3,9 +3,16 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <string_view>
+
 namespace RE
 {
 	class BSRenderPass;
+}
+
+namespace cs::telemetry
+{
+	class Sink;
 }
 
 namespace cs::engine
@@ -35,8 +42,7 @@ namespace cs::engine
 		kW
 	};
 
-	// Classifies a BSDFPrePassShader draw; the host bakes the answer into the classifier's lane component of
-	// every non-landscape prepass draw. Runs on the thread that creates the pass or issues the draw.
+	// Classifies a prepass draw; the answer is baked into the classifier's lane component.
 	using PrepassDrawClassifier = bool (*)(RE::BSRenderPass* a_pass, PrepassBakePath a_path) noexcept;
 
 	struct PrepassLaneStats
@@ -56,4 +62,7 @@ namespace cs::engine
 	[[nodiscard]] bool RegisterPrepassDrawClassifier(PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier);
 	[[nodiscard]] PrepassLaneStats GetPrepassLaneStats() noexcept;
 	[[nodiscard]] PrepassClassifierStats GetPrepassClassifierStats(PrepassLaneComponent a_component, PrepassBakePath a_path) noexcept;
+
+	// Writes records, <flagged>_records, immediate_draws, <flagged>_immediate_draws and the lane totals.
+	void WritePrepassLaneTelemetry(telemetry::Sink& a_sink, PrepassLaneComponent a_component, std::string_view a_flagged);
 }

@@ -18,6 +18,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/ObjectLOD.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
@@ -92,12 +93,12 @@ namespace cs::features
 			return it->second;
 		}
 
-		// FO4: only eligibility is baked; the shader applies enableMeshSupport so records follow live toggles.
+		// FO4: only eligibility is baked; the shader applies enableMeshSupport.
 		bool IsLandscapeTexturedMesh(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
 		{
 			auto* geometry = a_pass->GetGeometry();
 			auto* lightProperty = netimmerse_cast<RE::BSLightingShaderProperty*>(a_pass->GetShaderProperty());
-			if (!geometry || !lightProperty) {
+			if (!geometry || !lightProperty || cs::engine::IsObjectLODShape(a_pass)) {
 				return false;
 			}
 
@@ -159,20 +160,10 @@ namespace cs::features
 
 	void TerrainVariation::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		using cs::engine::PrepassBakePath;
-		using cs::engine::PrepassLaneComponent;
-		const auto records = cs::engine::GetPrepassClassifierStats(PrepassLaneComponent::kY, PrepassBakePath::kCommandBuffer);
-		const auto immediate = cs::engine::GetPrepassClassifierStats(PrepassLaneComponent::kY, PrepassBakePath::kImmediate);
-		const auto lanes = cs::engine::GetPrepassLaneStats();
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
-			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed))
-			.Field("records", records.classified)
-			.Field("mesh_records", records.flagged)
-			.Field("immediate_draws", immediate.classified)
-			.Field("mesh_immediate_draws", immediate.flagged)
-			.Field("lanes_baked", lanes.baked)
-			.Field("lanes_unavailable", lanes.unavailable);
+			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed));
+		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kY, "mesh");
 	}
 
 	bool TerrainVariation::ValidateShaderInjections(std::string& a_error)

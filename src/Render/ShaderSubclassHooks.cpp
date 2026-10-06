@@ -7,6 +7,7 @@
 #include "Render/NativeShaderFamily.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassContext.h"
+#include "Telemetry/Telemetry.h"
 
 #include <Windows.h>
 
@@ -485,6 +486,20 @@ namespace cs::engine
 	{
 		const auto& counts = g_classifierCounts[static_cast<std::size_t>(a_component)][static_cast<std::size_t>(a_path)];
 		return { counts.classified.load(std::memory_order_relaxed), counts.flagged.load(std::memory_order_relaxed) };
+	}
+
+	void WritePrepassLaneTelemetry(telemetry::Sink& a_sink, PrepassLaneComponent a_component, std::string_view a_flagged)
+	{
+		const auto records = GetPrepassClassifierStats(a_component, PrepassBakePath::kCommandBuffer);
+		const auto immediate = GetPrepassClassifierStats(a_component, PrepassBakePath::kImmediate);
+		const auto lanes = GetPrepassLaneStats();
+		a_sink
+			.Field("records", records.classified)
+			.Field(std::format("{}_records", a_flagged), records.flagged)
+			.Field("immediate_draws", immediate.classified)
+			.Field(std::format("{}_immediate_draws", a_flagged), immediate.flagged)
+			.Field("lanes_baked", lanes.baked)
+			.Field("lanes_unavailable", lanes.unavailable);
 	}
 
 	void InstallShaderSubclassHooks()

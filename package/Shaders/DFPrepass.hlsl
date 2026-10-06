@@ -117,7 +117,7 @@
 #		include "FO4/FO4ShaderData.hlsli"
 #	endif
 
-// FO4: Skyrim's TERRAIN_VARIATION_MESH exclusions mapped onto prepass variants; meatcuff samples separately.
+// FO4: Skyrim's mesh exclusions mapped onto prepass variants; the host rejects object LOD.
 #	if defined(TERRAIN_VARIATION) && TEXTURE && !LANDSCAPE && !(LOD_LANDSCAPE || SKIN_TINT || HAIR || EYE || TREE_ANIM || DISMEMBERMENT_MEATCUFF)
 #		define TERRAIN_VARIATION_MESH
 #	endif
@@ -503,7 +503,8 @@ struct PS_OUTPUT
 		float3 nGeom = normalize(input.normal);
 #	endif
 #	if defined(TERRAIN_VARIATION_MESH)
-		// FO4: the host flags eligible meshes in cb2_pad.y; the setting is read here so baked records follow it.
+		// Lattice cell comes from the geometric UV, before the parallax block below rewrites uv.
+		// FO4: cb2_pad.y flags eligible meshes; enableMeshSupport is read here.
 		const bool applyMeshTV = cb2_pad.y != 0.0 && SharedData::terrainVariationSettings.enableMeshSupport;
 		StochasticOffsets meshOffset = (StochasticOffsets)0;
 		[branch] if (applyMeshTV)
@@ -530,7 +531,7 @@ struct PS_OUTPUT
 		int landSlices[12] = g_bLandInstances[input.instanceIndex].layerSlices;
 #		endif
 #		if defined(TERRAIN_VARIATION) && !INSTANCED
-		// FO4: no TexCoord0.zw; lodAlbedoUV is layerUV/48 where Skyrim's is layerUV/96, so halve it to keep the lattice tile-relative.
+		// FO4: lodAlbedoUV is layerUV/48 (Skyrim zw: /96), so halve it.
 		StochasticOffsets sharedOffset = ComputeStochasticOffsets(input.lodAlbedoUV * 0.5);
 		g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uv);
 #			define SampleTerrain(TEX, SAMP, UV, OFFSET) StochasticEffect(TEX, SAMP, UV, OFFSET)
