@@ -67,7 +67,7 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | Terrain Helper | Mixed | Displacement-slot gather/bind* | Ext: default-land ESP package | NS | M | M | Low |
 | [Terrain Shadows](deviations/TerrainShadows.md) | Core | Height-field producer, world receivers, time/transition events, secondary/remaining receivers, diagnostics | — | Pt | H | L | High |
 | Terrain Shadows - Heightmaps | Core (data) | FO4 worldspace pack in the existing format | N/A: Skyrim payload | Loader P, no pack | H | M | High |
-| Terrain Variation | Core | Landscape stochastic sampling, LOD anti-tiling, landscape-textured meshes, height/PBR coherence | — | NS | H | M | High |
+| [Terrain Variation](deviations/TerrainVariation.md) | Core | Landscape stochastic sampling, LOD anti-tiling, landscape-textured meshes, height/PBR coherence (needs Extended Materials/TruePBR consumers) | — | Pt | H | M | High |
 | TruePBR | Mixed | Surface POM (EM marcher under `TRUE_PBR`+`HasDisplacement`; same slice as Extended Materials POM) | Ext: PBR material loader + RMAOS lighting, coat/fuzz/SSS/hair, landscape/grass PBR, glints | NS | H | M | Med |
 | Unified Water | Mixed | Optical distance blend, material identity fix*, cache UI | Ext: distant tile generation/lifetime, world flowmap | NS | M | S/M | Med |
 | [Upscaling](deviations/Upscaling.md) | Core | SR/native AA, DR/RCAS/reflection/depth consumers, canonical SDK depth, masks, underwater chain, FG/UI/Reflex | — | Pt | H | L | High |

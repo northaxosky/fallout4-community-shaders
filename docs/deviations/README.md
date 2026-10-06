@@ -238,6 +238,7 @@ evidence limits, not relabeled as proven bugs. A suspected upstream typed-depth 
 - [Performance Overlay](PerformanceOverlay.md)
 - [Terrain Shadows](TerrainShadows.md)
 - [LOD Blending](LODBlending.md)
+- [Terrain Variation](TerrainVariation.md)
 - [Dynamic Cubemaps](DynamicCubemaps.md)
 - [RenderDoc](RenderDoc.md)
 - [Upscaling](Upscaling.md)
