@@ -7,8 +7,10 @@ namespace cs::features::upscaling
 		"UPSCALING", { engine::ShaderInjectionTarget::kImageSpace }
 	};
 
-	// Targets drawn inside a SamplerBias override window whose shaders read SharedData::MipBias.
+	// Every owned target drawn inside a SamplerBias override window; evidence in the Upscaling record.
 	inline const engine::ShaderDefineDeclaration kSamplerBiasShaderDefines{
-		"SAMPLER_MIP_BIAS", { engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kDistantTree }
+		"SAMPLER_MIP_BIAS",
+		{ engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kDistantTree,
+			engine::ShaderInjectionTarget::kEffect }
 	};
 }

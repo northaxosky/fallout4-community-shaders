@@ -63,6 +63,5 @@ namespace cs::engine
 	[[nodiscard]] PrepassLaneStats GetPrepassLaneStats() noexcept;
 	[[nodiscard]] PrepassClassifierStats GetPrepassClassifierStats(PrepassLaneComponent a_component, PrepassBakePath a_path) noexcept;
 
-	// Writes records, <flagged>_records, immediate_draws, <flagged>_immediate_draws and the lane totals.
 	void WritePrepassLaneTelemetry(telemetry::Sink& a_sink, PrepassLaneComponent a_component, std::string_view a_flagged);
 }

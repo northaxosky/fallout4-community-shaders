@@ -7,7 +7,6 @@ namespace RE
 
 namespace cs::engine
 {
-	// BTO shapes: non-kLODLandscape shaders of geometry under the land LOD root.
-	// The kLODObjects property flag and the LOD material features miss BTO shapes, so they cannot gate.
+	// The kLODObjects flag and LOD material features miss BTO shapes, so the land LOD root decides.
 	[[nodiscard]] bool IsObjectLODShape(RE::BSRenderPass* a_pass) noexcept;
 }

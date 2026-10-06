@@ -47,7 +47,7 @@ namespace cs::engine
 		std::atomic_bool _fullscreenDebugSelected{ false };
 	};
 
-	// Forwards a static declaration while reporting the owning provider's load state.
+	// Lets a feature add a second contributor that follows its own load state.
 	class OwnedShaderDefineProvider final : public ShaderDefineProvider
 	{
 	public:
