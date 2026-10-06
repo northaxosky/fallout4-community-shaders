@@ -2,7 +2,6 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 ISL, `LightLimitFix/Common.hlsli`, `Common/Game.hlsli` and `Common/Color.hlsli`
 are staged unchanged. The global replacement, global settings, comparison
 view and b7 ISL block are deleted. CPU radius/luminance math matches the pin,

@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`. Code: `features\RenderDoc`; host services: `src\Host\HostClient.cpp`,
+Code: `features\RenderDoc`; host services: `src\Host\HostClient.cpp`,
 `src\Menu\Menu.{h,cpp}`.
 Feature classification: **core** (rule 1: non-visual capture tooling).
 Runtime/capture paths, target selection and timestamps are minor host adjustments.

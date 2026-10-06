@@ -2,7 +2,6 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 All seven `ExponentialHeightFog` shaders, plus their Random, Color, Shading, IBL and Skylighting
 includes, are staged unchanged. The ramp-derived FO4 kernel and its b7 block are deleted.
 The 192-byte settings block occupies upstream b6 offset 992; feature-owned b0 volume constants

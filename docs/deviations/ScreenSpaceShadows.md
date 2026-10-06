@@ -5,7 +5,7 @@ Rules, Kind legend and cross-cutting records: [README](README.md).
 Feature classification: **core** (rule 2: upstream screen-space-shadow algorithm and design).
 Distant-tree/alpha coverage is Pending porting work.
 
-Upstream pin: `d330bf12d`. Code: `features\ScreenSpaceShadows`, consumers in
+Code: `features\ScreenSpaceShadows`, consumers in
 `package\Shaders\DFLight.hlsl` through `FO4/ScreenSpaceShadowConsumer.hlsli`.
 All three upstream shaders and Bend's CPU header are consumed unchanged through `xmake\shared.lua`.
 BendSettings names, keys, defaults and edit ranges match upstream; its own b1 dispatch constants

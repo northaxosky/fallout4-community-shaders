@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`. Settings keys, defaults
+Settings keys, defaults
 and ranges match the pin: `LODTerrainBrightness`, `LODObjectBrightness` (0.01-5), `LODTerrainGamma`,
 `LODObjectGamma` (0.1-3) and `DisableTerrainVertexColors`. The GPU block is the existing
 `LODBlendingSettings` layout, published raw with no CPU-derived values, and defaults to 1.0 so an

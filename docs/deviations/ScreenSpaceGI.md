@@ -2,7 +2,6 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 The entire upstream `features/Screen Space GI/Shaders/ScreenSpaceGI` directory is staged
 unchanged through `xmake\shared.lua`; all local XeGTAO copies are deleted. The blur correction
 is the single SSGI entry in [shared seam edits](README.md#shared-seam-edits). Settings, full/half/quarter modes, formats, noise, pass order,

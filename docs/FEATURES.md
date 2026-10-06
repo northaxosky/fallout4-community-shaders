@@ -1,6 +1,6 @@
 # Features
 
-Classification of every upstream Skyrim Community Shaders feature (pin `d330bf12d`, shared fork `6f81ebc2`)
+Classification of every upstream Skyrim Community Shaders feature
 for Fallout 4, with port order. Per-feature deviation records live in [deviations](deviations/README.md).
 
 ## Classification
