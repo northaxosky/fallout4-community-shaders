@@ -22,7 +22,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override
 		{
-			return "Terrain Variation reduces the repeating pattern effect on terrain textures.\nThis technique creates more natural-looking terrain by adding variation to texture sampling.";
+			return "Stochastic texture sampling that breaks up terrain tiling.";
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;

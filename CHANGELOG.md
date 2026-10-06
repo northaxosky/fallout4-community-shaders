@@ -3,7 +3,6 @@
 ## 0.3.2
 
 - Terrain Variation: ported Skyrim CS's stochastic terrain sampling, LOD terrain tiling fix and landscape-textured mesh support, with a live enable toggle; mesh support covers natural landscape textures only, and Extended Materials and TruePBR height and RMAOS consumers are pending.
-- Fixed the Community Shaders menu failing to register when a feature description contains a line break.
 
 ## 0.3.1
 
