@@ -13,7 +13,6 @@
 #include <utility>
 
 #include "Menu/SettingsEdit.h"
-#include "Render/EngineCallSite.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/LocalLights.h"
 #include "Render/ShaderFamilyDescriptor.h"
@@ -367,14 +366,6 @@ namespace cs::features
 			if (!T::func.address())
 				throw std::runtime_error("Unable to install ISL native hook");
 		}
-
-		// FO4: OG AppendLight opens with RIP-relative loads a prologue detour cannot relocate; hook its sole caller.
-		constexpr engine::CallSiteAnchor kTiledCallbackAppendLight{
-			.name = "Tiled light callback -> AppendLight",
-			.function = REL::VariantID{ 999390, 2317525 },
-			.offset = { 0x281, 0x2A3, 0x2A3 },
-			.target = RE::ID::BSDFTiledLighting::AddLight
-		};
 	}
 
 	InverseSquareLighting* InverseSquareLighting::GetSingleton()
@@ -455,18 +446,14 @@ namespace cs::features
 	}
 	void InverseSquareLighting::OnPostPostLoad()
 	{
-		// Resolve before patching the callback so a mismatched site leaves every ISL hook uninstalled.
-		const auto appendSite = engine::ResolveCallSite(kTiledCallbackAppendLight);
-		if (!appendSite)
-			throw std::runtime_error("Unable to resolve ISL AppendLight call: " + appendSite.error());
 		InstallHook<CreateLight>(RE::ID::TESObjectLIGH::GenDynamic);
 		InstallHook<AddLight>(RE::ID::ShadowSceneNode::AddLight);
 		InstallHook<RemoveLight>(RE::ID::TESObjectREFR::RemoveLight);
 		InstallHook<RemoveSceneLight>(RE::ID::ShadowSceneNode::RemoveLight);
 		InstallHook<UpdateLight>(RE::ID::TESObjectLIGH::Update);
 		InstallHook<CullLight>(RE::ID::BSLight::TestFrustumCull);
-		InstallHook<TiledCallback>(kTiledCallbackAppendLight.function);
-		stl::write_thunk_call<AppendLight>(*appendSite);
+		InstallHook<TiledCallback>(REL::VariantID{ 999390, 2317525 });
+		InstallHook<AppendLight>(RE::ID::BSDFTiledLighting::AddLight);
 		InstallHook<UploadLights>(RE::ID::BSGraphics::Renderer::UpdateStructuredBuffer);
 		InstallHook<SetupGeometry>(RE::ID::BSDFLightShader::SetupGeometry);
 		InstallHook<Luminance>(RE::ID::BSLight::GetLuminanceAtPoint);
