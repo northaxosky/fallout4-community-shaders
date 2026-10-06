@@ -30,6 +30,7 @@ function main(target)
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli",
             "features/Terrain Shadows/Shaders/TerrainShadows/ShadowUpdate.cs.hlsl",
             "features/Terrain Shadows/Shaders/TerrainShadows/TerrainShadows.hlsli",
+            "features/Terrain Variation/Shaders/TerrainVariation/TerrainVariation.hlsli",
             "features/Upscaling/Shaders/Upscaling/RCAS/RCAS.hlsl",
             "features/Water Effects/Shaders/WaterEffects/watercaustics.dds",
             "features/Water Effects/Shaders/WaterEffects/WaterCaustics.hlsli",

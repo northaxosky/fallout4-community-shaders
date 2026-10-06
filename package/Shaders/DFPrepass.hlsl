@@ -113,9 +113,25 @@
 #		define PREPASS_MOTION_VECTOR (!BLEND || TESSELLATE_DISP_HEIGHT || DISMEMBERMENT_MEATCUFF)
 #	endif
 
-#	ifdef LOD_BLENDING
+#	if defined(LOD_BLENDING) || defined(TERRAIN_VARIATION)
 #		include "FO4/FO4ShaderData.hlsli"
 #	endif
+
+// FO4: Skyrim's TERRAIN_VARIATION_MESH exclusions mapped onto prepass variants; meatcuff samples separately.
+#	if defined(TERRAIN_VARIATION) && TEXTURE && !LANDSCAPE && !(LOD_LANDSCAPE || SKIN_TINT || HAIR || EYE || TREE_ANIM || DISMEMBERMENT_MEATCUFF)
+#		define TERRAIN_VARIATION_MESH
+#	endif
+
+// FO4: instanced terrain is never bound by the engine, so it keeps its stock sampling.
+#	if defined(TERRAIN_VARIATION) && ((LANDSCAPE && LAND_LOD_BLEND && !INSTANCED) || (defined(LOD_BLENDING) && LOD_LANDSCAPE && !BONE_TINTING))
+#		define TERRAIN_VARIATION_LOD
+#	endif
+
+#	if defined(TERRAIN_VARIATION) && ((LANDSCAPE && !INSTANCED) || defined(TERRAIN_VARIATION_LOD) || defined(TERRAIN_VARIATION_MESH))
+#		include "Common/Random.hlsli"
+#		include "TerrainVariation/TerrainVariation.hlsli"
+#	endif
+
 cbuffer PerFrame_CB12 : register(b12)
 {
 	float4 cb12_pad_0_29[30];
@@ -438,6 +454,9 @@ struct PS_OUTPUT
 #	endif
 	PS_OUTPUT main(PS_INPUT input) {
 		PS_OUTPUT output;
+#	if defined(TERRAIN_VARIATION_LOD)
+		float screenNoise = Random::InterleavedGradientNoise(input.position.xy, SharedData::FrameCount);
+#	endif
 #	if defined(LOD_BLENDING) && (LANDSCAPE || GRASS) && VC
 		// FO4: the vertex-color consumer moved from Lighting/RunGrass into this prepass.
 		if (SharedData::lodBlendingSettings.DisableTerrainVertexColors)
@@ -483,9 +502,40 @@ struct PS_OUTPUT
 		float3 bNorm = normalize(input.bitangent);
 		float3 nGeom = normalize(input.normal);
 #	endif
+#	if defined(TERRAIN_VARIATION_MESH)
+		// FO4: the host flags eligible meshes in cb2_pad.y; the setting is read here so baked records follow it.
+		const bool applyMeshTV = cb2_pad.y != 0.0 && SharedData::terrainVariationSettings.enableMeshSupport;
+		StochasticOffsets meshOffset = (StochasticOffsets)0;
+		[branch] if (applyMeshTV)
+		{
+			g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uv);
+			meshOffset = ComputeStochasticOffsetsMesh(uv);
+		}
+#		define MESH_TV_SAMPLE(DEST, TEX, SAMP, UV)                 \
+			float4 DEST;                                            \
+			[branch] if (applyMeshTV)                               \
+			{                                                       \
+				DEST = StochasticEffect(TEX, SAMP, UV, meshOffset); \
+			}                                                       \
+			else                                                    \
+			{                                                       \
+				DEST = TEX.Sample(SAMP, UV);                        \
+			}
+#	else
+#		define MESH_TV_SAMPLE(DEST, TEX, SAMP, UV) float4 DEST = TEX.Sample(SAMP, UV)
+#	endif
+
 #	if LANDSCAPE
 #		if INSTANCED
 		int landSlices[12] = g_bLandInstances[input.instanceIndex].layerSlices;
+#		endif
+#		if defined(TERRAIN_VARIATION) && !INSTANCED
+		// FO4: no TexCoord0.zw; lodAlbedoUV is layerUV/48 where Skyrim's is layerUV/96, so halve it to keep the lattice tile-relative.
+		StochasticOffsets sharedOffset = ComputeStochasticOffsets(input.lodAlbedoUV * 0.5);
+		g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uv);
+#			define SampleTerrain(TEX, SAMP, UV, OFFSET) StochasticEffect(TEX, SAMP, UV, OFFSET)
+#		else
+#			define SampleTerrain(TEX, SAMP, UV, OFFSET) TEX.Sample(SAMP, UV)
 #		endif
 		bool4 landActive = (input.layerWeights > 0.0);
 		float3 landAlbedo = 0.0;
@@ -505,12 +555,8 @@ struct PS_OUTPUT
 													   g_sLandNormal, landNormalUV)
 			                              .xy;
 #		else
-				landAlbedo += landWeight * g_tLandAlbedo[landLayer].Sample(
-																	   g_sLandAlbedo[landLayer], uv)
-			                                   .xyz;
-				float2 landNormalXY = g_tLandNormal[landLayer].Sample(
-																  g_sLandNormal[landLayer], uv)
-			                              .xy;
+				landAlbedo += landWeight * SampleTerrain(g_tLandAlbedo[landLayer], g_sLandAlbedo[landLayer], uv, sharedOffset).xyz;
+				float2 landNormalXY = SampleTerrain(g_tLandNormal[landLayer], g_sLandNormal[landLayer], uv, sharedOffset).xy;
 #		endif
 				landNormalXY = landNormalXY * 2.0 - 1.0;
 				float landNormalZ = sqrt(
@@ -522,12 +568,11 @@ struct PS_OUTPUT
 																g_sLandMaterial, landMaterialUV)
 			                                     .xy;
 #		else
-				landMaterial += landWeight * g_tLandMaterial[landLayer].Sample(
-																		   g_sLandMaterial[landLayer], uv)
-			                                     .xy;
+				landMaterial += landWeight * SampleTerrain(g_tLandMaterial[landLayer], g_sLandMaterial[landLayer], uv, sharedOffset).xy;
 #		endif
 			}
 		}
+#		undef SampleTerrain
 #		if LAND_LOD_BLEND && INSTANCED
 		float3 landLodAlbedo = g_tLandLodAlbedo.Sample(
 												   g_sLandLodAlbedo,
@@ -535,9 +580,16 @@ struct PS_OUTPUT
 													   g_bLandInstances[input.instanceIndex].lodSlice))
 	                               .xyz;
 #		elif LAND_LOD_BLEND
+#			if defined(TERRAIN_VARIATION)
+		float3 landLodAlbedo;
+		[branch] if (SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
+			landLodAlbedo = StochasticSampleLOD(screenNoise, g_tLandLodAlbedo, g_sLandLodAlbedo, input.lodAlbedoUV).xyz;
+		else landLodAlbedo = g_tLandLodAlbedo.SampleBias(g_sLandLodAlbedo, input.lodAlbedoUV, SharedData::MipBias).xyz;
+#			else
 		float3 landLodAlbedo = g_tLandLodAlbedo.Sample(
 												   g_sLandLodAlbedo, input.lodAlbedoUV)
 	                               .xyz;
+#			endif
 #		endif
 #		if defined(LOD_BLENDING) && LAND_LOD_BLEND
 		// FO4: applied to the raw sampled LOD albedo; there is no ColorToLinear*VanillaDiffuseColorMult step here.
@@ -580,12 +632,20 @@ struct PS_OUTPUT
 #	elif DISMEMBERMENT_MEATCUFF
 	float4 albedoSample = g_tAlbedo.Sample(g_sAlbedo, uv);
 #	elif TEXTURE
-	float4 albedoSample = g_tAlbedo.Sample(g_sAlbedo, uv);
+	MESH_TV_SAMPLE(albedoSample, g_tAlbedo, g_sAlbedo, uv);
 #	else
 	float4 albedoSample = 1.0;
 #	endif
 #	if defined(LOD_BLENDING)
 #		if LOD_LANDSCAPE && !BONE_TINTING
+#			if defined(TERRAIN_VARIATION)
+		// FO4: the prepass albedo is raw, so Skyrim's Color::Diffuse on the stochastic sample is omitted.
+		[branch] if (SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
+		{
+			float4 lodStochasticColor = StochasticSampleLOD(screenNoise, g_tAlbedo, g_sAlbedo, uv);
+			albedoSample.xyz = lodStochasticColor.rgb;
+		}
+#			endif
 		// FO4: maps Skyrim's LODLANDSCAPE onto the prepass LOD terrain variant.
 		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		elif !LANDSCAPE && !GRASS
@@ -629,7 +689,7 @@ struct PS_OUTPUT
 			g_sNormalMap,
 			float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.y));
 #		elif TEXTURE
-		float4 normalMapSample = g_tNormalMap.Sample(g_sNormalMap, uv);
+		MESH_TV_SAMPLE(normalMapSample, g_tNormalMap, g_sNormalMap, uv);
 #		else
 		float4 normalMapSample = 0.5;
 #		endif
@@ -672,7 +732,7 @@ struct PS_OUTPUT
 		g_sMaterial,
 		float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.z));
 #		elif TEXTURE
-	float4 materialSample = g_tMaterial.Sample(g_sMaterial, uv);
+	MESH_TV_SAMPLE(materialSample, g_tMaterial, g_sMaterial, uv);
 #		else
 	float4 materialSample = float4(0.0, 1.0, 0.0, 0.0);
 #		endif

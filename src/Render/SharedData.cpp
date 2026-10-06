@@ -170,6 +170,7 @@ namespace cs::render
 			std::ranges::copy(a_features.terrainShadowsSettings.Offset, terrain.Offset);
 			terrain.ZBlur = a_features.terrainShadowsSettings.ZBlur;
 			a_data.feature.lodBlendingSettings = a_features.lodBlendingSettings;
+			a_data.feature.terrainVariationSettings = a_features.terrainVariationSettings;
 		}
 
 		constexpr std::array<std::size_t, kSubstrateBufferCount> kBufferSizes{

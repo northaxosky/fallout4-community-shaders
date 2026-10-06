@@ -4,6 +4,7 @@
 #include "ExponentialHeightFog.h"
 #include "LODBlending.h"
 #include "TerrainShadows.h"
+#include "TerrainVariation.h"
 #include "WaterEffects.h"
 
 namespace cs
@@ -36,7 +37,10 @@ namespace cs
 					features::LODBlending::GetSingleton()),
 			.waterEffectsSettings =
 				CollectFeatureData<WaterEffectsFeatureData>(
-					features::WaterEffects::GetSingleton())
+					features::WaterEffects::GetSingleton()),
+			.terrainVariationSettings =
+				CollectFeatureData<TerrainVariationFeatureData>(
+					features::TerrainVariation::GetSingleton())
 		};
 	}
 }

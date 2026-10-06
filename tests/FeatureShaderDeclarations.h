@@ -7,6 +7,7 @@
 #include "../features/ScreenSpaceGI/src/ShaderDefines.h"
 #include "../features/ScreenSpaceShadows/src/ShaderDefines.h"
 #include "../features/TerrainShadows/src/ShaderDefines.h"
+#include "../features/TerrainVariation/src/ShaderDefines.h"
 #include "../features/Upscaling/src/ShaderDefines.h"
 #include "../features/WaterEffects/src/ShaderDefines.h"
 #include "Render/FeatureShaderBindings.h"
@@ -26,6 +27,7 @@ namespace cs::engine
 				{ "DynamicCubemaps", &dc::kShaderDefines },
 				{ "TerrainShadows", &terrain_shader::kShaderDefines },
 				{ "LODBlending", &lod_blending_shader::kShaderDefines },
+				{ "TerrainVariation", &terrain_variation_shader::kShaderDefines },
 				{ "WaterEffects", &water_effects::kShaderDefines },
 				{ "Upscaling", &upscaling::kShaderDefines }
 			};
