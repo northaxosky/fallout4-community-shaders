@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`. Code: `features\DynamicCubemaps`, consumers in `package\Shaders\Water.hlsl`,
+Code: `features\DynamicCubemaps`, consumers in `package\Shaders\Water.hlsl`,
 `package\Shaders\DFComposite.hlsl`, `package\Shaders\DFLight.hlsl` and
 `package\Shaders\DFTiledLighting.hlsl`.
 Feature classification: **mixed** ([FEATURES](../FEATURES.md)). Runtime slices are core: material

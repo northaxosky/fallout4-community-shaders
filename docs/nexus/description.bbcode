@@ -12,20 +12,21 @@ Every feature ships turned off, so you enable only what you want.
 [list]
 [*][b]Screen Space Shadows:[/b] Contact shadows and finer shadow detail.[/*]
 [*][b]Terrain Shadows:[/b] Long-range shadows cast by distant terrain.[/*]
+[*][b]LOD Blending:[/b] Brightness and gamma matching for distant terrain and objects, with optional terrain vertex-color removal.[/*]
 [*][b]Screen Space GI:[/b] Ambient occlusion and indirect lighting.[/*]
 [*][b]Inverse Square Lighting:[/b] Opt-in per-light falloff, authored in Lights TOML files. Existing lights stay unchanged.[/*]
-[*][b]Exponential Height Fog:[/b] Weather-driven fog that thins with altitude.[/*]
+[*][b]Exponential Height Fog:[/b] Weather-driven analytic and volumetric fog that thins with altitude.[/*]
 [*][b]Dynamic Cubemaps:[/b] Reflections that respond to the surrounding scene.[/*]
-[*][b]Water Effects:[/b] Sunlight caustics on submerged surfaces.[/*]
+[*][b]Water Effects:[/b] Water parallax and sunlight caustics on submerged surfaces.[/*]
 [*][b]Upscaling:[/b] TAA, FSR 3/4, and DLSS.[/*]
 [*][b]Frame Generation:[/b] FSR 3/4 and DLSS, including supported Multi Frame Generation modes.[/*]
 [*][b]Motion Vector Fixes:[/b] Motion-data corrections for temporal rendering.[/*]
-[*][b]Performance Overlay:[/b] FPS, frame-time, and latency graphs.[/*]
+[*][b]Performance Overlay:[/b] FPS, frame-time, and latency graphs, plus per-feature GPU timings.[/*]
 [/list]
 
 [size=5][color=#42FA60][b]REQUIREMENTS[/b][/color][/size]
 [list]
-[*]Fallout 4 [b]1.11.240[/b] on Windows. NG should work but is untested; OG is unsupported.[/*]
+[*]Fallout 4 [b]1.11.240[/b] on Windows. OG 1.10.163 loads and renders but is not officially supported; NG should work but is untested.[/*]
 [*][url=https://f4se.silverlock.org/]F4SE[/url] matching your game version[/*]
 [*][url=https://www.nexusmods.com/fallout4/mods/47327]Address Library for F4SE Plugins[/url][/*]
 [*][url=https://github.com/Dear-Modding-FO4/DearModdingUI]Dear Modding UI[/url] for the in-game menu (recommended)[/*]
@@ -61,7 +62,7 @@ FO4 Community Shaders renders in SDR. Windows Auto HDR and NVIDIA RTX HDR conver
 Every feature ships turned off. Enable the ones you want in Dear Modding UI, then restart the game.
 
 [b]Does it work on the OG or NG runtime?[/b]
-NG should work but is untested. OG is unsupported.
+Only 1.11.240 is officially supported. OG 1.10.163 loads and renders; NG should work but is untested.
 
 [b]Does it work on Linux / Steam Deck (Proton)?[/b]
 Proton's built-in shader compiler cannot build the shaders, so only upscaling and frame generation work. Place a Windows 10 [b]d3dcompiler_47.dll[/b] in the prefix's [b]system32[/b] or next to Fallout4.exe.

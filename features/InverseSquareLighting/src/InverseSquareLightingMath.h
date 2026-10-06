@@ -2,11 +2,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace cs::features::inverse_square_lighting
 {
 	inline constexpr float kScaledUnitsSq = 0.8f * 70.0f * 70.0f;
 	inline constexpr float kFadeZoneBase = 4.5f * 0.8f * 70.0f;
+	inline constexpr float kDefaultSize = std::numbers::sqrt2_v<float>;
+
+	inline constexpr float kMinCutoff = 0.01f;
 
 	inline float CalculateRadius(float a_intensity, bool a_shadowCaster,
 		float a_cutoffOverride, float a_size) noexcept
@@ -16,6 +20,13 @@ namespace cs::features::inverse_square_lighting
 		const float radius = std::sqrt(kScaledUnitsSq *
 									   ((2 * a_intensity - cutoff * a_size * a_size) / (2 * cutoff)));
 		return std::isnan(radius) ? 1.0f : radius;
+	}
+
+	// Exact inverse of CalculateRadius for a given reach.
+	inline float CalculateCutoff(float a_intensity, float a_radius, float a_size) noexcept
+	{
+		return 2 * kScaledUnitsSq * a_intensity /
+		       (2 * a_radius * a_radius + kScaledUnitsSq * a_size * a_size);
 	}
 
 	inline float GetAttenuation(float a_distance, float a_radius, float a_size) noexcept

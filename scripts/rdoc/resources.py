@@ -4,7 +4,7 @@ import os
 import renderdoc as rd
 
 from bindings import descriptor_bindings, output_targets, pipeline_state
-from common import enum_name, finite, format_name, resource_id, result_message, result_ok, sanitize_filename, safe_get, vector
+from common import enum_name, finite, format_name, plain_path, resource_id, result_message, result_ok, sanitize_filename, safe_get, vector
 
 
 WRITE_USAGES = (
@@ -209,7 +209,7 @@ def dump_bound_textures(session, event_id, out_dir):
         entry = dict(binding)
         entry.update({
             "file": os.path.basename(path),
-            "path": path,
+            "path": plain_path(path),
             "blackPoint": black,
             "whitePoint": white,
             "exportedMip": mip,

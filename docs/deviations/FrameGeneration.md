@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`, upstream `src/Features/Upscaling` FG implementation.
+Upstream: `src/Features/Upscaling` FG implementation.
 Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 ## Differences from pinned upstream

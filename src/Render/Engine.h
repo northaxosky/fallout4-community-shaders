@@ -173,24 +173,13 @@ namespace cs::engine
 		}
 	}
 
-	namespace native
-	{
-		// CommonLibF4 declares BSShaderManager::State members private and exposes no singleton.
-		[[nodiscard]] inline const RE::NiTransform* DirectionalAmbientTransform() noexcept
-		{
-			static REL::Relocation<std::byte*> state{ REL::ID({ 1327069, 2712479, 2712479 }) };
-			auto* base = state.get();
-			const auto offset = REX::FModule::IsRuntimeOG() ? 0xB8 : 0xC0;
-			return base ? reinterpret_cast<const RE::NiTransform*>(base + offset) : nullptr;
-		}
-	}
-
 	// World-space directional ambient: channel c is pow(max(0, dot(rows[c], float4(N, 1))), 2.2).
 	[[nodiscard]] inline bool TryGetDirectionalAmbientRows(DirectX::XMFLOAT4 (&a_rows)[3]) noexcept
 	{
-		const auto* transform = native::DirectionalAmbientTransform();
-		if (!transform)
+		const auto* state = RE::BSShaderManager::State::GetSingleton();
+		if (!state)
 			return false;
+		const auto* transform = &state->GetDirectionalAmbientTransform();
 		// BSDFLightShader::SetupGeometry scales rotation by scale, appends (translate, 1), and evaluates (N, 1) * M.
 		const auto& rotate = transform->rotate.entry;
 		const float scale = transform->scale;
@@ -229,22 +218,12 @@ namespace cs::engine
 
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
 	{
-		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
-		return singleton.get();
-	}
-
-	// CommonLibF4 uses OG's taaState offset; NG/AE read +0xAC.
-	inline void SetGraphicsStateTemporalAA(RE::BSGraphics::State& a_state, bool a_enabled) noexcept
-	{
-		const auto offset = REX::FModule::IsRuntimeOG() ? 0xA8 : 0xAC;
-		*reinterpret_cast<RE::BSGraphics::TAA_STATE*>(reinterpret_cast<std::byte*>(&a_state) + offset) =
-			a_enabled ? RE::BSGraphics::TAA_STATE::kEnabled : RE::BSGraphics::TAA_STATE::kDisabled;
+		return RE::BSGraphics::State::GetSingleton();
 	}
 
 	[[nodiscard]] inline RE::BSGraphics::RenderTargetManager* GetRenderTargetManager()
 	{
-		static REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
-		return singleton.get();
+		return RE::BSGraphics::RenderTargetManager::GetSingleton();
 	}
 
 	[[nodiscard]] inline RE::ImageSpaceEffect* GetImageSpaceEffect(
@@ -295,13 +274,6 @@ namespace cs::engine
 		if (auto* renderTargetManager = GetRenderTargetManager()) {
 			renderTargetManager->SetDynamicResolutionState(a_widthRatio, a_heightRatio, a_activated);
 		}
-	}
-
-	// Master enable read by ImageSpaceEffectTemporalAA::IsActive; FO4 has no bUseTAA INI literal.
-	[[nodiscard]] inline std::uint32_t* GetTemporalAAEnableGlobal()
-	{
-		static REL::Relocation<std::uint32_t*> global{ REL::ID({ 460417, 2704658, 2704658 }) };
-		return global.get();
 	}
 
 	[[nodiscard]] inline bool TryGetWorldSceneProjection(

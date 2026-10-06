@@ -15,6 +15,10 @@ namespace cs::engine::local_lights
 		}
 	}
 
+	float RadialFalloff(float a_x, float a_constant, float a_scalar, float a_exponent)
+	{
+		return std::pow(1.0f - std::clamp(a_constant + a_scalar * std::pow(a_x, a_exponent), 0.0f, 1.0f), 2.2f);
+	}
 	RE::NiLight* Light(RE::BSLight& a_light)
 	{
 		return Member<RE::NiPointer<RE::NiLight>>(a_light, 0xB8).get();
@@ -67,17 +71,17 @@ namespace cs::engine::local_lights
 	}
 	std::uint32_t AppendSide()
 	{
-		static REL::Relocation<std::uint32_t*> side{ REL::ID({ 1577505, 2713010, 2713010 }) };
+		static REL::Relocation<std::uint32_t*> side{ REL::VariantID{ 1577505, 2713010 } };
 		return *side;
 	}
 	std::uint32_t AppendCount(std::uint32_t a_side)
 	{
-		static REL::Relocation<std::uint32_t*> counts{ REL::ID({ 1366811, 2713007, 2713007 }) };
+		static REL::Relocation<std::uint32_t*> counts{ REL::VariantID{ 1366811, 2713007 } };
 		return counts.get()[a_side];
 	}
 	const TiledRecord* Records(std::uint32_t a_side)
 	{
-		static REL::Relocation<TiledRecord*> records{ REL::ID({ 223744, 2713009, 2713009 }) };
+		static REL::Relocation<TiledRecord*> records{ REL::VariantID{ 223744, 2713009 } };
 		return records.get() + a_side * kCapacity;
 	}
 }

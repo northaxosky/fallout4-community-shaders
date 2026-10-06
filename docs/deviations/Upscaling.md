@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`. Consumer: `package\Shaders\ISSSLRRaytracing.hlsl`.
+Consumer: `package\Shaders\ISSSLRRaytracing.hlsl`.
 Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 Upscaling, FrameGeneration and MotionVectorFixes are maintained in-house. These comparisons

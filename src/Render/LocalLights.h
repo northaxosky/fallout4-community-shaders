@@ -30,6 +30,8 @@ namespace cs::engine::local_lights
 	{
 		a_light.spec = { a_radius, a_radius, a_radius };
 	}
+	// FO4: native render falloff (DFLight/DFTiledLighting) at x = distance / radius.
+	float RadialFalloff(float a_x, float a_constant, float a_scalar, float a_exponent);
 	RE::NiLight* Light(RE::BSLight& a_light);
 	float CurrentFade(RE::BSLight& a_light);
 	bool IsShadowLight(RE::BSLight& a_light);

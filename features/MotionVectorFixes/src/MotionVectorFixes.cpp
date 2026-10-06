@@ -149,14 +149,14 @@ namespace cs::features
 	void MotionVectorFixes::Load()
 	{
 		stl::detour_thunk<OnIdle_UpdatePlayer>(
-			REL::ID({ 1318162, 2228929, 2228929 }));
+			RE::ID::Main::OnIdle_UpdatePlayer);
 		_playerUpdateHooked = true;
 
 		constexpr cs::engine::CallSiteAnchor kSetSequencePositionUpdate{
 			.name = "TESObjectREFR::SetSequencePosition -> NiAVObject::Update",
-			.function = REL::ID({ 854236, 2200766, 2200766 }),
+			.function = RE::ID::TESObjectREFR::SetSequencePosition,
 			.offset = { 0x1D7, 0x1D7, 0x1D7 },
-			.target = REL::ID({ 121052, 2270101, 2270101 })
+			.target = RE::ID::NiAVObject::Update
 		};
 		if (const auto site = cs::engine::ResolveCallSite(kSetSequencePositionUpdate)) {
 			stl::write_thunk_call<TESObjectREFR_SetSequencePosition>(*site);

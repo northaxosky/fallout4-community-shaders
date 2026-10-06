@@ -254,7 +254,7 @@ namespace cs::engine
 			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 			constexpr std::ptrdiff_t offsets[] = { 0x2C9, 0x2D5, 0x2D5 };
 			stl::write_thunk_call<ForwardSkyGroup_Hook>(
-				REL::ID({ 656535, 2318315, 2318315 }).address() + offsets[runtimeIdx]);
+				RE::ID::DrawWorld::Forward.address() + offsets[runtimeIdx]);
 			g_forwardSkyInstalled = true;
 			L->info("Hook installed on DrawWorld::Forward cloud group call (post-sky boundary)");
 		}
@@ -264,7 +264,7 @@ namespace cs::engine
 			if (g_lightsImplInstalled) {
 				return;
 			}
-			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
+			stl::detour_thunk<DeferredLightsImpl_Hook>(RE::ID::DrawWorld::DeferredLightsImpl);
 			g_lightsImplInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
 		}
@@ -274,7 +274,7 @@ namespace cs::engine
 			if (g_prePassInstalled) {
 				return;
 			}
-			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
+			stl::detour_thunk<DeferredPrePass_Hook>(RE::ID::DrawWorld::DeferredPrePass);
 			g_prePassInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredPrePass");
 		}
@@ -284,7 +284,7 @@ namespace cs::engine
 			if (g_compositeInstalled) {
 				return;
 			}
-			stl::detour_thunk<DeferredComposite_Hook>(REL::ID({ 728427, 2318313, 2318313 }));
+			stl::detour_thunk<DeferredComposite_Hook>(RE::ID::DrawWorld::DeferredComposite);
 			g_compositeInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredComposite");
 		}
@@ -298,9 +298,9 @@ namespace cs::engine
 			}
 			constexpr cs::engine::CallSiteAnchor kDrawTriShapeSetDirtyStates{
 				.name = "DrawTriShape -> BSGraphics::SetDirtyStates",
-				.function = REL::ID({ 763320, 2276846, 2276846 }),
+				.function = RE::ID::BSGraphics::Renderer::DrawTriShape,
 				.offset = { 0x9C, 0x9A, 0x9A },
-				.target = REL::ID({ 1557284, 2277017, 2277017 })
+				.target = RE::ID::BSGraphics::SetDirtyStates
 			};
 			const auto site = cs::engine::ResolveCallSite(kDrawTriShapeSetDirtyStates);
 			if (!site) {
@@ -331,7 +331,7 @@ namespace cs::engine
 		if (!RegistrationAllowed("DrawProfiling"))
 			return false;
 		// FO4: SetDirtyStates is the shared native draw submission boundary on OG/NG/AE.
-		stl::detour_thunk<DrawProfiling_Hook>(REL::ID({ 1557284, 2277017, 2277017 }));
+		stl::detour_thunk<DrawProfiling_Hook>(RE::ID::BSGraphics::SetDirtyStates);
 		installed = true;
 		return true;
 	}

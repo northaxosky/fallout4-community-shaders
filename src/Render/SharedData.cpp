@@ -127,12 +127,12 @@ namespace cs::render
 
 		void PackFeatures(SubstrateData& a_data, const FeatureDataCB& a_features)
 		{
-			// FO4 HDR and sun radiance are linear; DALC alone requires its native power 2.2.
+			// FO4 HDR and sun radiance are linear; DALC and local-light color keep native power 2.2.
 			a_data.feature.linearLightingSettings = {
 				.enableLinearLighting = 1,
 				.isDirLightLinear = 1,
 				.dirLightMult = 1.0f,
-				.lightGamma = 1.0f,
+				.lightGamma = 2.2f,
 				.colorGamma = 1.0f,
 				.emitColorGamma = 1.0f,
 				.glowmapGamma = 1.0f,

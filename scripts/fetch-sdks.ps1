@@ -11,8 +11,8 @@
 	directory, so concurrent runs can share one cache.
 
 .PARAMETER CacheDirectory
-	Where downloaded archives are kept. Defaults to <repo>/.sdk-cache, or, in a linked worktree,
-	to the main checkout's .sdk-cache so worktrees share one cache.
+	Where downloaded archives are kept. Defaults to %LOCALAPPDATA%\FO4CommunityShaders\sdk-cache,
+	shared across checkouts because every archive is digest-verified.
 
 .PARAMETER Force
 	Re-download archives even when a verified cached copy exists.
@@ -37,13 +37,7 @@ if (-not (Test-Path -LiteralPath $manifestPath)) {
 }
 
 if (-not $CacheDirectory) {
-	$cacheRoot = $repoRoot
-	$gitDir = & git -C $repoRoot rev-parse --path-format=absolute --git-dir
-	$commonDir = & git -C $repoRoot rev-parse --path-format=absolute --git-common-dir
-	if ($LASTEXITCODE -eq 0 -and $gitDir -ne $commonDir) {
-		$cacheRoot = Split-Path -Parent $commonDir
-	}
-	$CacheDirectory = Join-Path $cacheRoot '.sdk-cache'
+	$CacheDirectory = Join-Path $env:LOCALAPPDATA 'FO4CommunityShaders\sdk-cache'
 }
 New-Item -ItemType Directory -Force -Path $CacheDirectory | Out-Null
 

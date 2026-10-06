@@ -26,7 +26,7 @@ Core classification is not a claim of complete parity; Pending work remains unfi
 
 ## Shared seam edits
 
-Shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`, based on `d330bf12d`.
+Shared pin: the `extern\community-shaders-shared` submodule commit; upstream base `bff82b03e`.
 FO4 consumes unchanged files through `xmake\shared.lua`; shared include paths cannot be replaced.
 The native entry-point naming boundary is documented under Shader replacement.
 
@@ -70,7 +70,7 @@ upstream conversion; renderer-specific reasons remain in the feature tables.
 
 ## Shader replacement
 
-Upstream pin: `d330bf12d` (`ShaderCache`, `Hooks`, `State`, `AdvancedSettingsRenderer`).
+Upstream: `ShaderCache`, `Hooks`, `State`, `AdvancedSettingsRenderer`.
 Source paths follow the native fxp name; entry point is `main`, profile follows the stage,
 and live type/master switches suppress the entire replacement, including feature contributions.
 Effect and DistantTree remain owned for upstream fog and terrain-shadow consumers.
@@ -93,7 +93,7 @@ and OG output differs from native only in texture-sample scheduling on some rout
 
 ## Shader contribution
 
-Upstream pin: `d330bf12d`, `Feature.h:60–77`, `ShaderCache.cpp` define builders,
+Upstream: `Feature.h:60–77`, `ShaderCache.cpp` define builders,
 `Deferred.cpp:211–296/730–740`, `State.cpp` `Draw`, and `ScreenSpaceShadows.cpp` `Prepass`.
 Loaded features declare their define, options and consumer families. Live effect settings and GPU
 readiness do not change those defines. Per-feature declarations also drive the offline variant sweep;
@@ -137,7 +137,7 @@ godrays/HBAO+ save/restore behavior.
 
 ## Feature loading
 
-Upstream pin: `d330bf12d`, `Feature.cpp` `Load`, `State.cpp` `Load`/`Setup`,
+Upstream: `Feature.cpp` `Load`, `State.cpp` `Load`/`Setup`,
 `Menu.cpp` `DrawDisableAtBootSettings`, and `ShaderCache.cpp` `ValidateDiskCache`.
 
 | Kind | Upstream | Fallout 4 | Boundary / code |
@@ -154,7 +154,7 @@ bridge can flip `Feature::loaded`; that is not resource setup/teardown and is no
 
 ## Substrate
 
-Shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`. FrameBuffer, SharedData,
+FrameBuffer, SharedData,
 SphericalHarmonics and its Math dependency are staged byte-for-byte. The pinned b6 ABI contains
 **20** blocks, including HorizonFixSettings; all 20 are mirrored in upstream order, and absent
 features leave zero blocks, except the host's neutral linear-color policy in the upstream
@@ -204,8 +204,8 @@ their packet and bindings when resources change. See Shader contribution for the
   needs `frameScale`. Main's correction is retained as shared seam `13d9d2e2d`; upstream PR is
   community-shaders/skyrim-community-shaders#2795. No FO4 shader copy remains.
 - `features/Screen Space GI/Shaders/ScreenSpaceGI/gi.cs.hlsl:232`: the experimental specular
-  half-angle calculation has inconsistent angular units; upstream issue/PR #2792 records it.
-  The pinned behavior remains unchanged.
+  half-angle calculation has inconsistent angular units. Upstream #2792 (adopted at `bff82b03e`)
+  corrects only the blur half-angle, not this one; the pinned behavior remains unchanged.
 - `src/Deferred.cpp:362–364`: experimental HQ specular binds null diffuse Y/CoCg SRVs although
   `DeferredCompositeCS.hlsl:46–56` still samples them. FO4 retains that binding; settle the intended
   diffuse/HQ combination upstream rather than silently changing it in the host.

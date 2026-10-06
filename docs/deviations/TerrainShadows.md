@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`. Both `TerrainShadows/ShadowUpdate.cs.hlsl`
+Both `TerrainShadows/ShadowUpdate.cs.hlsl`
 and `TerrainShadows/TerrainShadows.hlsli` are staged unchanged. Native DDS dimensions, R16G16_UNORM
 shadow heights, 128-thread scans, componentwise penumbra maxima, one-degree softening, half-texel
 offsets, bounded UV, ZBlur, weight-1 full sweeps and weight-0.5 ordinary slices match the pin.

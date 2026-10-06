@@ -61,14 +61,6 @@ namespace cs::features
 		constexpr const wchar_t* kOverrideDepthPath = L"Data\\Shaders\\Upscaling\\OverrideDepthCS.hlsl";
 		constexpr const wchar_t* kOverrideLinearDepthPath = L"Data\\Shaders\\Upscaling\\OverrideLinearDepthCS.hlsl";
 
-		// Native SetUseDynamicResolutionViewportAsDefaultViewport; toggles the render-target viewport.
-		void SetUseDynamicResolutionViewport(RE::BSGraphics::RenderTargetManager* a_manager, bool a_enabled)
-		{
-			using func_t = void (*)(RE::BSGraphics::RenderTargetManager*, bool);
-			static REL::Relocation<func_t> func{ REL::ID({ 676851, 2277194, 2277194 }) };
-			func(a_manager, a_enabled);
-		}
-
 		template <class T>
 		void SafeRelease(T*& a_ptr)
 		{
@@ -356,7 +348,7 @@ namespace cs::features
 			boundSRVs[slot]->Release();
 		}
 
-		SetUseDynamicResolutionViewport(renderTargetManager, false);
+		renderTargetManager->SetUseDynamicResolutionViewportAsDefaultViewport(false);
 		_renderTargetsOverridden = true;
 	}
 
@@ -401,7 +393,7 @@ namespace cs::features
 			boundSRVs[slot]->Release();
 		}
 
-		SetUseDynamicResolutionViewport(renderTargetManager, true);
+		renderTargetManager->SetUseDynamicResolutionViewportAsDefaultViewport(true);
 		_renderTargetsOverridden = false;
 	}
 
@@ -535,7 +527,7 @@ namespace cs::features
 				for (int i = 0; i < 100; i++) {
 					renderTargetManager->renderTargetData[i] = originalRenderTargetData[i];
 				}
-				SetUseDynamicResolutionViewport(renderTargetManager, true);
+				renderTargetManager->SetUseDynamicResolutionViewportAsDefaultViewport(true);
 			}
 			_renderTargetsOverridden = false;
 		}

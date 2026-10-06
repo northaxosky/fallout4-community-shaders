@@ -3,7 +3,7 @@ import json
 import os
 
 from bindings import decode_cbuffer, pipeline_state, stage_shader, state_record
-from common import enum_name, resource_id, safe_get, sanitize_filename
+from common import enum_name, extended_path, plain_path, resource_id, safe_get, sanitize_filename
 from resources import dump_bound_textures, is_write_usage, texture_stats, usage_name, usage_records
 from triage import run_triage
 
@@ -162,7 +162,7 @@ def stats(session, actions, args, out_dir):
 def dump(session, actions, args, out_dir):
     values = _require(args, 1, "dump <eid-or-marker-name> [--outdir PATH]")
     event_id = actions.resolve_event(values[0])
-    artifact_dir = os.path.abspath(_option(args, "outdir", out_dir, str))
+    artifact_dir = extended_path(_option(args, "outdir", out_dir, str))
     if not os.path.isdir(artifact_dir):
         os.makedirs(artifact_dir)
     manifest = dump_bound_textures(session, event_id, artifact_dir)
@@ -172,8 +172,8 @@ def dump(session, actions, args, out_dir):
                   stream, indent=2, sort_keys=True)
     return {
         "eventId": event_id,
-        "artifactDirectory": artifact_dir,
-        "manifest": manifest_path,
+        "artifactDirectory": plain_path(artifact_dir),
+        "manifest": plain_path(manifest_path),
         "textureCount": len(manifest),
         "textures": manifest,
     }
@@ -213,7 +213,7 @@ def disasm(session, actions, args, out_dir):
             "compute" if stage_name == "compute" else "graphics"),
         "pipelineObjectId": resource_id(pipeline),
         "target": target,
-        "artifact": path,
+        "artifact": plain_path(path),
         "characters": len(text),
     }
 
@@ -225,12 +225,12 @@ def triage(session, actions, args, out_dir):
 def script(session, actions, args, out_dir):
     if not args:
         raise ValueError("Usage: script <file.py> [args...]")
-    path = os.path.abspath(args[0])
+    path = extended_path(args[0])
     spec = importlib.util.spec_from_file_location("rdoc_probe", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     if not hasattr(module, "run"):
-        raise ValueError(path + " must define run(session, actions, args, out_dir)")
+        raise ValueError(plain_path(path) + " must define run(session, actions, args, out_dir)")
     return module.run(session, actions, args[1:], out_dir)
 
 

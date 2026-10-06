@@ -45,7 +45,7 @@ namespace cs::render
 		const auto dataSection =
 			REX::FModule::GetExecutingModule().GetSection(".data");
 		_renderUiPathGate = cs::engine::RenderUIPathGate::Decode(
-			cs::engine::RuntimeSite(kDrawWorldRenderUI, kDrawWorldRenderUIEffectsGateCompare),
+			cs::engine::RuntimeSite(RE::ID::DrawWorld::Imagespace, kDrawWorldRenderUIEffectsGateCompare),
 			dataSection.GetAddress(),
 			dataSection.GetSize(),
 			kDrawWorldRenderUIEffectsGate.address());
@@ -58,13 +58,15 @@ namespace cs::render
 		for (const auto& hook : callHooks) {
 			hook.install(hook.site);
 		}
-		stl::detour_thunk<LensFlare_RenderLensFlare>(kLensFlareRenderLensFlare);
-		stl::detour_thunk<BSImageSpace_Init_FXAA>(kImageSpaceInitEffects);
+		// Lens-flare visibility read samples the main depth buffer.
+		stl::detour_thunk<LensFlare_RenderLensFlare>(RE::ID::BSImagespaceShaderLensFlare::RenderLensFlare);
+		stl::detour_thunk<BSImageSpace_Init_FXAA>(RE::ID::ImageSpaceManager::InitEffects);
 		// ResetWindow can run without the render-target create callback.
-		stl::detour_thunk<Renderer_ResetWindow>(kRendererResetWindow);
-		stl::detour_thunk<BSShaderRenderTargets_Create>(kBSShaderRenderTargetsCreate);
+		stl::detour_thunk<Renderer_ResetWindow>(RE::ID::BSGraphics::Renderer::ResetWindow);
+		// Resource setup follows creation of the engine render targets.
+		stl::detour_thunk<BSShaderRenderTargets_Create>(RE::ID::BSShaderRenderTargets::Create);
 		// Own both the normal and pause-only Render_UI paths.
-		stl::detour_thunk<DrawWorldRenderUI>(kDrawWorldRenderUI);
+		stl::detour_thunk<DrawWorldRenderUI>(RE::ID::DrawWorld::Imagespace);
 		stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(
 			RE::VTABLE::ImageSpaceEffectTemporalAA[0]);
 		_hooksInstalled.store(true, std::memory_order_release);

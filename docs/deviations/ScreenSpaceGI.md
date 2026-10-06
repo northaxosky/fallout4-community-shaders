@@ -2,13 +2,12 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 The entire upstream `features/Screen Space GI/Shaders/ScreenSpaceGI` directory is staged
 unchanged through `xmake\shared.lua`; all local XeGTAO copies are deleted. The blur correction
 is the single SSGI entry in [shared seam edits](README.md#shared-seam-edits). Settings, full/half/quarter modes, formats, noise, pass order,
 independent AO/GI/accumulation ping-pong, SH/YCoCg, blur and upsample use the pinned contracts.
 The unchanged `readHistory` uses the current `RCP_OUT_FRAME_DIM`; main's reverted previous-extent
-correction (`e9d16c20`) is not reintroduced. The #2792 half-angle behavior is also unchanged.
+correction (`e9d16c20`) is not reintroduced. The upstream #2792 blur half-angle correction is adopted with the pin.
 
 Feature classification: **core** (rule 2: upstream SSGI algorithm and design).
 Native G-buffer/color translations and AOPower calibration do not change that design.

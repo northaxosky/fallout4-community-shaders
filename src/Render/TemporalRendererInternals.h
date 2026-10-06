@@ -215,19 +215,14 @@ namespace cs::render::renderer_detail
 		if (!cs::engine::GetActiveContext()) {
 			return;
 		}
-		using func_t = void (*)();
-		static REL::Relocation<func_t> func{ upscaling_anchors::kForceViewportToRenderTargetDimensions };
-		func();
+		RE::BSGraphics::RenderTargetManager::SetCurrentViewportForceToRenderTargetDimensions();
 	}
 
-	// Fallout 4 controls TAA through this global and the graphics state.
+	// ImageSpaceEffectTemporalAA::IsActive reads the graphics state's TAA flag.
 	inline void SetTemporalEnabled(bool a_enabled)
 	{
-		if (auto* global = cs::engine::GetTemporalAAEnableGlobal()) {
-			*global = a_enabled ? 1u : 0u;
-		}
 		if (auto* state = cs::engine::GetGraphicsState()) {
-			cs::engine::SetGraphicsStateTemporalAA(*state, a_enabled);
+			state->SetTAAState(a_enabled ? RE::BSGraphics::TAA_STATE::kEnabled : RE::BSGraphics::TAA_STATE::kDisabled);
 		}
 	}
 

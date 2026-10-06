@@ -2,7 +2,6 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; shared pin: `6f81ebc2512da5564f37e728a65037b4c45e2a67`.
 `Profiler.{h,cpp}`, `CircularBuffer`, `DrawCallRow` and `ABTestAggregator` are consumed
 unchanged through `xmake\shared.lua`, including the three-frame query ring, 128 timers,
 300-sample pass histories, 60-frame retirement, 600-sample default frame histories,

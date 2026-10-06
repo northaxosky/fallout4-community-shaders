@@ -17,7 +17,7 @@ namespace cs::engine
 		}
 	}
 
-	std::uintptr_t RuntimeSite(const REL::ID& a_function, const RuntimeOffsets& a_offset)
+	std::uintptr_t RuntimeSite(const REL::VariantID& a_function, const RuntimeOffsets& a_offset)
 	{
 		return a_function.address() +
 		       a_offset[static_cast<std::size_t>(REX::FModule::GetRuntimeIndex())];

@@ -1,13 +1,29 @@
 # Changelog
 
+## 0.3.2
+
+- Terrain Variation: ported Skyrim CS's stochastic terrain sampling, LOD terrain tiling fix and landscape-textured mesh support, with a live enable toggle; mesh support covers natural landscape textures only, and Extended Materials and TruePBR height and RMAOS consumers are pending.
+- Fixed the Community Shaders menu failing to register when a feature description contains a line break.
+
+## 0.3.1
+
+- Fixed the in-game menu and performance overlay not loading with DearModdingUI 0.2.0. Community Shaders now works with DearModdingUI 0.2.0 and later.
+
 ## 0.3.0
 
-- Terrain Variation: ported upstream's stochastic terrain sampling, LOD terrain tiling fix and landscape-textured mesh support; Extended Materials and TruePBR height and RMAOS consumers are pending.
-- LOD Blending: ported upstream's LOD terrain and object brightness and gamma controls and terrain vertex-color removal; snow LOD settings are not available.
-- Water Effects: ported upstream's water parallax; it follows the Water Effects `enabled` toggle and leaves vanilla water flat.
+- LOD Blending: ported Skyrim CS's LOD terrain and object brightness and gamma controls and terrain vertex-color removal; snow LOD settings are not available.
+- Water Effects: ported Skyrim CS's water parallax; it follows the Water Effects `enabled` toggle and leaves vanilla water flat. Caustics now use Skyrim CS's implementation with per-cell water data.
+- Exponential Height Fog: now runs Skyrim CS's analytic and volumetric fog pipeline with weather profiles; it has no directional shadow cascade input and no IBL, Skylighting, Cloud Shadows or local-light providers yet.
+- Terrain Shadows: now uses Skyrim CS's heightfield shadows and terrain occlusion data; it still needs a user-supplied xLODGen heightmap export.
+- Screen Space GI, Dynamic Cubemaps, Inverse Square Lighting, Performance Overlay and RenderDoc now share their implementation with Skyrim CS. The Performance Overlay adds Skyrim CS's profiler and A/B analysis, with GPU timings for every feature pass.
+- Dynamic Cubemaps: environment-mapped materials now reflect the live cubemap, blended from the authored cubemap by the new `material_reflections` setting (default 1) and faded out in rain.
+- Wetness Effects: removed. Rain-darkened surfaces and wet reflections are no longer provided.
+- Screen Space Shadows: now uses Skyrim CS's Bend shaders with a corrected half-pixel lookup; first-person hands and weapons cast shadows as Skyrim CS does, replacing the 0.2.0 exclusion.
+- Fixed fog and terrain shadows leaking into secondary-view lighting, and frames without a usable camera or depth now skip temporal processing instead of reusing stale data.
 - Shader ownership toggles are editable in Advanced settings and apply immediately, including to feature shader contributions.
 - Utility, sky, particle, blood splatter and secondary-view lighting shaders remain stock. Effect and distant tree replacements remain available for fog and terrain-shadow consumers.
-- Settings: TerrainShadows replaces `enabled`/`downsample_factor` with `EnableTerrainShadow`; SSGI uses upstream-cased keys; InverseSquareLighting requires per-light authored opt-in; RenderDoc replaces `multi_frame_count` with `"Capture Frame Count"` and removes `min_free_disk_gib`.
+- Settings: TerrainShadows replaces `enabled`/`downsample_factor` with `EnableTerrainShadow`; SSGI keys are cased as in Skyrim CS; InverseSquareLighting requires per-light authored opt-in; RenderDoc replaces `multi_frame_count` with `"Capture Frame Count"` and removes `min_free_disk_gib`; the WetnessEffects section is removed.
+- Fallout 4 OG 1.10.163: injected shaders now compile and are checked against stock shader output, and Inverse Square Lighting hooks an OG-safe call site. It loads and renders on OG, but only 1.11.240 is officially supported.
 
 ## 0.2.1
 

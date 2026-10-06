@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d` (shared pin `6f81ebc2512da5564f37e728a65037b4c45e2a67`). `WaterCaustics.hlsli` and
+`WaterCaustics.hlsli` and
 `watercaustics.dds` are staged unchanged through `xmake/shared.lua`; the FO4 caustics
 kernel and CPU shader mirror are deleted. There are no caustics quality knobs.
 Feature classification: **core** ([FEATURES](../FEATURES.md)). Water parallax reads height that water texture

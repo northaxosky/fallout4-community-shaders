@@ -42,6 +42,7 @@ namespace cs::features::inverse_square_lighting
 		RE::TESFormID referenceID = 0;
 		float cutoffOverride = 1;
 		float size = 0;
+		float intensityScale = 1;
 		bool shadowCaster = false;
 		float nativeRadius = 0;
 		float cullRadius = 0;
@@ -60,7 +61,8 @@ namespace cs::features::inverse_square_lighting
 		bool Remove(const RE::NiLight& a_light);
 		const RuntimeLightData& CaptureAuthoredLight(RE::NiLight& a_light,
 			const RE::TESObjectLIGH& a_form, RE::TESFormID a_reference,
-			const AuthoredLight& a_authored, float a_nativeRadius, bool a_shadowCaster);
+			const AuthoredLight& a_authored, float a_nativeRadius, bool a_shadowCaster,
+			float a_intensityScale);
 
 	private:
 		struct Entry

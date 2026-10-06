@@ -1741,7 +1741,7 @@ namespace cs::engine
 
 		try {
 			const auto function =
-				REL::ID({ 1108829, 2276940, 2276940 }).address();
+				RE::ID::BSGraphics::Renderer::RunComputeShader.address();
 			const auto tail =
 				function + kRunComputeShaderDispatchTailOffset;
 			const auto text =

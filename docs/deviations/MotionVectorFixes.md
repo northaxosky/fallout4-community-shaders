@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Upstream pin: `d330bf12d`; no corresponding upstream feature.
+No corresponding upstream feature.
 Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 ## Differences from pinned upstream
@@ -15,5 +15,5 @@ Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 | Kind | Difference | Verification boundary |
 |---|---|---|
-| Pending | Hook effectiveness and per-runtime sequence anchor | Main's guarded `REL::ID({og,ng,ae})` sequence callsite retains the existing OG offset; independent OG proof and runtime transform/output evidence for each correction are absent from this audit. A failed anchor is logged. These are pending evidence limits, not confirmed defects or an upstream port |
+| Pending | Hook effectiveness and per-runtime sequence anchor | Main's guarded `REL::VariantID{og,ng,ae}` sequence callsite retains the existing OG offset; independent OG proof and runtime transform/output evidence for each correction are absent from this audit. A failed anchor is logged. These are pending evidence limits, not confirmed defects or an upstream port |
 

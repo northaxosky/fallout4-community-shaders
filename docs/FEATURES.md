@@ -1,6 +1,6 @@
 # Features
 
-Classification of every upstream Skyrim Community Shaders feature (pin `d330bf12d`, shared fork `6f81ebc2`)
+Classification of every upstream Skyrim Community Shaders feature
 for Fallout 4, with port order. Per-feature deviation records live in [deviations](deviations/README.md).
 
 ## Classification
@@ -49,7 +49,7 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | HorizonFix | N/A | — | Integration with a Skyrim-only companion DLL | — | L | — | High |
 | IBL | Core | Environment SH, sky SH*, occlusion integration, static IBL, fog, grass/tree | — | NS | H | L | Med |
 | Interior Sun | Core (provisional) | Native sun gating*, portal culling, double-sided/distance, gameplay sun | N/A: plain interior directional light | NS | H | L | Low |
-| [Inverse Square Lighting](deviations/InverseSquareLighting.md) | Core | Attenuation, radius/lifetime, gameplay luminance, TOML authoring (relocated LIGH fields), editor, diagnostics | — | Pt | H | M | High |
+| [Inverse Square Lighting](deviations/InverseSquareLighting.md) | Mixed | Attenuation, radius/lifetime, gameplay luminance, TOML authoring (relocated LIGH fields), editor, diagnostics | Ext: derivation of unauthored lights from native falloff | Pt | H | M | High |
 | Light Limit Fix | Mixed | Particle lights, light-limit visualization, 3D light grid as EHF provider | Ext: capacity/shadow-limit redesign. N/A: surface clustered culling (native tiled), strict lights, contact shadows | NS | H | M | Med |
 | Linear Lighting | N/A | Shared-color compatibility (done), optional calibration controls | N/A: linearization (FO4 is linear), ENB | Substrate | L | S | High |
 | [LOD Blending](deviations/LODBlending.md) | Core | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |

@@ -17,14 +17,6 @@ namespace cs::engine
 		std::atomic_uint32_t waterCells{ 0 };
 		std::atomic<float> cameraCellHeight{ kNoWaterHeight };
 
-		float GetExteriorWaterHeight(const RE::TESObjectCELL& a_cell)
-		{
-			// FO4: the accessor resolves worldspace inheritance and rejects interior/no-water cells.
-			using Func = float(const RE::TESObjectCELL*);
-			static REL::Relocation<Func> func{ REL::ID({ 1457825, 2200267, 2200267 }) };
-			return func(&a_cell);
-		}
-
 		DirectX::XMFLOAT4 CellWaterData(
 			const RE::TESObjectCELL& a_cell, const RE::Sky* a_sky, float a_originZ)
 		{
@@ -42,7 +34,7 @@ namespace cs::engine
 				data.y *= multiplier.g;
 				data.z *= multiplier.b;
 			}
-			data.w = RelativeWaterHeight(GetExteriorWaterHeight(a_cell), a_originZ);
+			data.w = RelativeWaterHeight(a_cell.GetExteriorWaterHeight(), a_originZ);
 			return data;
 		}
 	}
