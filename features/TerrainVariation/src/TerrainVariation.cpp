@@ -2,6 +2,8 @@
 
 #include <DearModdingUI/Client.h>
 
+#include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <mutex>
@@ -40,7 +42,11 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.terrainvariation");
 
-		constexpr std::string_view LandscapeDirectory = "landscape/";
+		// FO4: only natural folders wrap seamlessly; man-made strips and the atlas seam.
+		constexpr std::array<std::string_view, 5> kNaturalFolders{
+			"landscape/rocks/", "landscape/dlc06rocks/", "landscape/ground/", "landscape/trees/", "landscape/dirtcliffs/"
+		};
+		constexpr std::string_view kAtlasStem = "rockriverstones";
 		constexpr std::uint16_t kAlphaTestFlag = 0x200;
 
 		std::string CanonicaliseTexturePath(std::string_view a_path)
@@ -58,6 +64,18 @@ namespace cs::features
 			}
 
 			return canonical;
+		}
+
+		bool IsNaturalLandscapePath(std::string_view a_canonical)
+		{
+			// DLC materials may resolve under dlc0N/, so both forms match.
+			if (a_canonical.size() > 6 && a_canonical.starts_with("dlc0") && std::isdigit(static_cast<unsigned char>(a_canonical[4])) && a_canonical[5] == '/') {
+				a_canonical.remove_prefix(6);
+			}
+			if (!std::ranges::any_of(kNaturalFolders, [&](std::string_view a_folder) { return a_canonical.starts_with(a_folder); })) {
+				return false;
+			}
+			return !a_canonical.substr(a_canonical.rfind('/') + 1).starts_with(kAtlasStem);
 		}
 
 		// Guards meshTextureCache and meshTextureKeepAlive.
@@ -86,7 +104,7 @@ namespace cs::features
 			if (inserted) {
 				const auto canonical = CanonicaliseTexturePath(key);
 				// FO4: vanilla terrain textures live in landscape/ subfolders.
-				it->second = canonical.starts_with(LandscapeDirectory);
+				it->second = IsNaturalLandscapePath(canonical);
 				meshTextureKeepAlive.push_back(a_name);
 			}
 
