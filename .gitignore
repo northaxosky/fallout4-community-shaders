@@ -26,10 +26,6 @@ extern/FidelityFX-SDK/
 features/Upscaling/Shaders/Upscaling/Streamline/
 features/Upscaling/Shaders/Upscaling/FidelityFX/
 
-# Vendored Detours static libs are NOT build output, track them.
-!extern/detours/**/*.lib
-!extern/detours/**/*.pdb
-
 compile_commands.json
 
 # Visual Studio

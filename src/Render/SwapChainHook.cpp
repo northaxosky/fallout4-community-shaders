@@ -10,6 +10,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/D3D11Bootstrap.h"
+#include "Utils/DetourHooks.h"
 
 namespace cs::render
 {
@@ -176,7 +177,7 @@ namespace cs::render
 			installState.store(SwapChainHookState::kFailed, std::memory_order_release);
 			return false;
 		}
-		const auto previous = Detours::IATHook(
+		const auto previous = cs::hooks::IATHook(
 			module,
 			"d3d11.dll",
 			"D3D11CreateDeviceAndSwapChain",

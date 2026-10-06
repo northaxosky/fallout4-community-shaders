@@ -44,6 +44,8 @@ function main(target)
             "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.h",
             "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.cpp",
             "src/Utils/PerfUtils.h",
+            "src/Utils/VTableHookFallback.h",
+            "src/Utils/VTableHookFallback.cpp",
             "src/Features/ScreenSpaceShadows/bend_sss_cpu.h"
         },
         includedirs = {

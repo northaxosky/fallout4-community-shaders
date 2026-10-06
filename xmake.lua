@@ -78,6 +78,7 @@ end)
 
 add_repositories("fo4cs-repository xmake")
 
+add_requires("vcpkg::detours 4.0.1")
 add_requires("vcpkg::directx-headers 1.619.1")
 add_requires("vcpkg::directxmath")
 add_requires("vcpkg::directxtex 2025-10-27")
@@ -239,6 +240,7 @@ target(plugin_name, function()
     )
 
     add_packages(
+        "vcpkg::detours",
         "vcpkg::directx-headers",
         "vcpkg::directxmath",
         "vcpkg::directxtex",
@@ -251,8 +253,6 @@ target(plugin_name, function()
         add_defines("TRACY_SUPPORT", "TRACY_ENABLE")
     end
 
-    add_linkdirs("extern/detours/Release")
-    add_links("detours")
     add_syslinks(
         "bcrypt",
         "d3dcompiler",

@@ -35,7 +35,11 @@ using TracyD3D11Ctx = void*;
 #include <string>
 using namespace std::literals;
 
-#include "detours/NukemDetours.h"
+#include "Log.h"
+#include "Utils/DetourHooks.h"
+#include "Utils/VTableHookFallback.h"
+
+#include <typeinfo>
 
 #include "SimpleMath.h"
 
@@ -51,6 +55,16 @@ using uint = uint32_t;
 
 #define DLLEXPORT __declspec(dllexport)
 #define STATIC_ASSERT_ALIGNAS_16(T) static_assert(sizeof(T) % 16 == 0, #T " must be 16-byte aligned for D3D11 CB")
+
+// FO4: shared sources log through upstream's `logger::` namespace; route it to the hooks logger.
+namespace logger
+{
+	template <class... Args>
+	void warn(spdlog::format_string_t<Args...> a_format, Args&&... a_args)
+	{
+		cs::log::Get("cs.hooks")->warn(a_format, std::forward<Args>(a_args)...);
+	}
+}
 
 namespace stl
 {
@@ -81,22 +95,33 @@ namespace stl
 		T::func = vtbl.write_vfunc(idx, T::thunk);
 	}
 
+	// FO4: T::func is a REL::Relocation or raw pointer; both are one pointer wide.
 	template <class T>
 	void detour_thunk(REL::VariantID a_relId)
 	{
-		*(uintptr_t*)&T::func = Detours::X64::DetourFunction(a_relId.address(), (uintptr_t)&T::thunk);
+		auto* func = reinterpret_cast<PVOID*>(&T::func);
+		*func = reinterpret_cast<PVOID>(a_relId.address());
+		// Leave func null so callers that check the address see the failed hook.
+		if (cs::hooks::Attach(func, reinterpret_cast<PVOID>(&T::thunk), typeid(T).name()) != NO_ERROR)
+			*func = nullptr;
 	}
 
 	template <class T>
 	void detour_thunk_ignore_func(REL::VariantID a_relId)
 	{
-		std::ignore = Detours::X64::DetourFunction(a_relId.address(), (uintptr_t)&T::thunk);
+		auto target = reinterpret_cast<PVOID>(a_relId.address());
+		std::ignore = cs::hooks::Attach(&target, reinterpret_cast<PVOID>(&T::thunk), typeid(T).name());
 	}
 
 	template <std::size_t idx, class T>
 	void detour_vfunc(void* target)
 	{
-		*(uintptr_t*)&T::func = Detours::X64::DetourClassVTable(*(uintptr_t*)target, &T::thunk, idx);
+		auto vtable = *reinterpret_cast<uintptr_t**>(target);
+		auto* func = reinterpret_cast<PVOID*>(&T::func);
+		*func = reinterpret_cast<PVOID>(vtable[idx]);
+		const LONG result = cs::hooks::Attach(func, reinterpret_cast<PVOID>(&T::thunk), typeid(T).name());
+		if (result != NO_ERROR)
+			*func = reinterpret_cast<PVOID>(Util::VTableHookFallback(target, idx, reinterpret_cast<PVOID>(&T::thunk), result));
 	}
 }
 
