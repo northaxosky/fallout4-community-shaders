@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "Utils/ModuleInfo.h"
+
 // IAT slot, not &D3DCompile; that names our own thunk
 extern "C" void* __imp_D3DCompile;
 
@@ -18,27 +20,6 @@ namespace cs::shader_cache
 {
 	namespace
 	{
-		bool ResolveModulePath(HMODULE a_module, std::wstring& a_path)
-		{
-			std::wstring buffer(MAX_PATH, L'\0');
-			for (;;) {
-				const DWORD written = GetModuleFileNameW(
-					a_module,
-					buffer.data(),
-					static_cast<DWORD>(buffer.size()));
-				if (written == 0)
-					return false;
-				if (written < buffer.size()) {
-					buffer.resize(written);
-					a_path = std::move(buffer);
-					return true;
-				}
-				if (buffer.size() >= 32768)
-					return false;
-				buffer.resize(buffer.size() * 2);
-			}
-		}
-
 		bool ReadFileVersion(
 			const std::filesystem::path& a_path,
 			CompilerFileVersion& a_version)
@@ -226,19 +207,14 @@ namespace cs::shader_cache
 			if (!address)
 				return {};
 
-			HMODULE module = nullptr;
-			if (!GetModuleHandleExW(
-					GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-					reinterpret_cast<LPCWSTR>(address),
-					&module) ||
-				!module) {
+			const auto module = util::ModuleFromAddress(address);
+			if (!module)
 				return {};
-			}
 
-			std::wstring modulePath;
-			if (!ResolveModulePath(module, modulePath))
+			const auto modulePath = util::ModulePath(module);
+			if (!modulePath)
 				return {};
-			return ResolveCompilerIdentity(modulePath);
+			return ResolveCompilerIdentity(modulePath->native());
 		} catch (...) {
 			return {};
 		}

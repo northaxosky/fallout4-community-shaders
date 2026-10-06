@@ -6,6 +6,7 @@
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
+#include "Utils/ModuleInfo.h"
 
 #include <algorithm>
 #include <atomic>
@@ -692,11 +693,7 @@ namespace cs::engine
 		const bool mapMissing = table[kMapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferMap_Hook::thunk);
 		const bool unmapMissing = table[kUnmapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferUnmap_Hook::thunk);
 		const auto nativeEntry = [](std::uintptr_t a_entry) {
-			HMODULE owner = nullptr;
-			return GetModuleHandleExW(
-					   GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-					   reinterpret_cast<LPCWSTR>(a_entry), &owner) &&
-			       owner == GetModuleHandleW(L"d3d11.dll");
+			return util::ModuleFromAddress(reinterpret_cast<const void*>(a_entry)) == GetModuleHandleW(L"d3d11.dll");
 		};
 		if ((mapMissing && !nativeEntry(table[kMapVtableSlot])) ||
 			(unmapMissing && !nativeEntry(table[kUnmapVtableSlot]))) {

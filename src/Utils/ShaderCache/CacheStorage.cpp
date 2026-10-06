@@ -15,6 +15,8 @@
 #include <string_view>
 #include <system_error>
 
+#include "Utils/ModuleInfo.h"
+
 namespace cs::shader_cache
 {
 	namespace
@@ -77,27 +79,6 @@ namespace cs::shader_cache
 				written += produced;
 			}
 			return true;
-		}
-
-		bool ResolveExecutablePath(std::filesystem::path& a_path)
-		{
-			std::wstring buffer(MAX_PATH, L'\0');
-			for (;;) {
-				const DWORD written = GetModuleFileNameW(
-					nullptr,
-					buffer.data(),
-					static_cast<DWORD>(buffer.size()));
-				if (written == 0)
-					return false;
-				if (written < buffer.size()) {
-					buffer.resize(written);
-					a_path = std::move(buffer);
-					return true;
-				}
-				if (buffer.size() >= 32768)
-					return false;
-				buffer.resize(buffer.size() * 2);
-			}
 		}
 
 		std::string IdentityMechanismToken(
@@ -313,9 +294,8 @@ namespace cs::shader_cache
 	std::filesystem::path DefaultCacheRoot()
 	{
 		static const std::filesystem::path root = [] {
-			std::filesystem::path executable;
-			if (ResolveExecutablePath(executable)) {
-				return (executable.parent_path() / L"Data" / L"ShaderCache")
+			if (const auto executable = util::ModulePath(nullptr)) {
+				return (executable->parent_path() / L"Data" / L"ShaderCache")
 				    .lexically_normal();
 			}
 
