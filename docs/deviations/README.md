@@ -26,7 +26,7 @@ Core classification is not a claim of complete parity; Pending work remains unfi
 
 ## Shared seam edits
 
-Shared pin: the `extern\community-shaders-shared` submodule commit; upstream base `d330bf12d`.
+Shared pin: the `extern\community-shaders-shared` submodule commit; upstream base `bff82b03e`.
 FO4 consumes unchanged files through `xmake\shared.lua`; shared include paths cannot be replaced.
 The native entry-point naming boundary is documented under Shader replacement.
 
@@ -204,8 +204,8 @@ their packet and bindings when resources change. See Shader contribution for the
   needs `frameScale`. Main's correction is retained as shared seam `13d9d2e2d`; upstream PR is
   community-shaders/skyrim-community-shaders#2795. No FO4 shader copy remains.
 - `features/Screen Space GI/Shaders/ScreenSpaceGI/gi.cs.hlsl:232`: the experimental specular
-  half-angle calculation has inconsistent angular units; upstream issue/PR #2792 records it.
-  The pinned behavior remains unchanged.
+  half-angle calculation has inconsistent angular units. Upstream #2792 (adopted at `bff82b03e`)
+  corrects only the blur half-angle, not this one; the pinned behavior remains unchanged.
 - `src/Deferred.cpp:362–364`: experimental HQ specular binds null diffuse Y/CoCg SRVs although
   `DeferredCompositeCS.hlsl:46–56` still samples them. FO4 retains that binding; settle the intended
   diffuse/HQ combination upstream rather than silently changing it in the host.
