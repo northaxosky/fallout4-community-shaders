@@ -316,12 +316,6 @@ namespace cs::engine
 			static inline std::atomic<UnmapFunction> func{ nullptr };
 		};
 
-		// The engine rewrites these slots, so the hook is a slot swap that RefreshContextAccessHooks can redo.
-		void PatchVTableSlot(std::uintptr_t* a_table, std::size_t a_slot, std::uintptr_t a_thunk)
-		{
-			REL::Relocation<std::uintptr_t>{ reinterpret_cast<std::uintptr_t>(&a_table[a_slot]) }.write(a_thunk);
-		}
-
 		void InstallContextAccessHooks(
 			ID3D11DeviceContext* a_context, bool a_map, bool a_unmap)
 		{
@@ -329,12 +323,12 @@ namespace cs::engine
 			if (a_map && table[kMapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferMap_Hook::thunk)) {
 				FrameBufferMap_Hook::func.store(
 					reinterpret_cast<MapFunction>(table[kMapVtableSlot]), std::memory_order_release);
-				PatchVTableSlot(table, kMapVtableSlot, reinterpret_cast<std::uintptr_t>(&FrameBufferMap_Hook::thunk));
+				REL::Relocation<std::uintptr_t>{ reinterpret_cast<std::uintptr_t>(table) }.write_vfunc(kMapVtableSlot, &FrameBufferMap_Hook::thunk);
 			}
 			if (a_unmap && table[kUnmapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferUnmap_Hook::thunk)) {
 				FrameBufferUnmap_Hook::func.store(
 					reinterpret_cast<UnmapFunction>(table[kUnmapVtableSlot]), std::memory_order_release);
-				PatchVTableSlot(table, kUnmapVtableSlot, reinterpret_cast<std::uintptr_t>(&FrameBufferUnmap_Hook::thunk));
+				REL::Relocation<std::uintptr_t>{ reinterpret_cast<std::uintptr_t>(table) }.write_vfunc(kUnmapVtableSlot, &FrameBufferUnmap_Hook::thunk);
 			}
 		}
 
