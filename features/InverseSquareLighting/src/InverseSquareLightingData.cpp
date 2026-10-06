@@ -4,7 +4,6 @@
 #include "Render/LocalLights.h"
 
 #include <algorithm>
-#include <numbers>
 
 namespace cs::features::inverse_square_lighting
 {
@@ -17,7 +16,7 @@ namespace cs::features::inverse_square_lighting
 			light.radius = a_data.nativeRadius;
 			light.fade = a_light.dimmer;
 			if ((light.lightFlags & static_cast<std::uint32_t>(LightFlags::kInverseSquare)) != 0) {
-				light.fade *= 4;
+				light.fade *= 4 * a_data.intensityScale;
 				light.radius = CalculateRadius(light.fade, a_data.shadowCaster,
 					a_data.cutoffOverride, a_data.size);
 				light.invRadius = 1.0f / light.radius;
@@ -91,7 +90,8 @@ namespace cs::features::inverse_square_lighting
 
 	const RuntimeLightData& LightSidecar::CaptureAuthoredLight(RE::NiLight& a_light,
 		const RE::TESObjectLIGH& a_form, RE::TESFormID a_reference,
-		const AuthoredLight& a_authored, float a_nativeRadius, bool a_shadowCaster)
+		const AuthoredLight& a_authored, float a_nativeRadius, bool a_shadowCaster,
+		float a_intensityScale)
 	{
 		auto& entry = _lights[&a_light];
 		entry.owner = &a_light;
@@ -101,13 +101,11 @@ namespace cs::features::inverse_square_lighting
 		data.referenceID = a_reference;
 		data.shadowCaster = a_shadowCaster;
 		data.nativeRadius = a_nativeRadius;
+		data.intensityScale = a_intensityScale;
 		data.cullRadius = a_nativeRadius;
-		data.cutoffOverride = std::clamp(a_authored.cutoff.value_or(1.0f), 0.01f, 1.0f);
-		const float authoredSize = a_authored.size.value_or(std::numbers::sqrt2_v<float>);
-		data.size = std::clamp(authoredSize >= 50.0f ?
-								   std::numbers::sqrt2_v<float> :
-								   authoredSize,
-			0.01f, 50.0f);
+		data.cutoffOverride = std::clamp(a_authored.cutoff.value_or(1.0f), kMinCutoff, 1.0f);
+		const float authoredSize = a_authored.size.value_or(kDefaultSize);
+		data.size = std::clamp(authoredSize >= 50.0f ? kDefaultSize : authoredSize, 0.01f, 50.0f);
 		data.shaderData.lightFlags = static_cast<std::uint32_t>(LightFlags::kInitialised);
 		if (a_authored.inverseSquare.value_or(false))
 			data.shaderData.lightFlags |= static_cast<std::uint32_t>(LightFlags::kInverseSquare);

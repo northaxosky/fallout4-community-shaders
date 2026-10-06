@@ -28,9 +28,10 @@ namespace FO4InverseSquareLighting
 			return 0.0;
 		if ((data.lightFlags & LightLimitFix::LightFlags::InverseSquare) == 0)
 			return nativeColor;
+		// FO4: native local BRDF lacks upstream's Lambert 1/pi, so apply it where ISL radiance enters.
 		return Color::PointLight(data.color,
 				   (data.lightFlags & LightLimitFix::LightFlags::Linear) != 0) *
-		       data.fade;
+		       data.fade * Color::VanillaNormalization();
 	}
 
 	float GetAttenuation(PerLightData data, float distance, float nativeAttenuation)

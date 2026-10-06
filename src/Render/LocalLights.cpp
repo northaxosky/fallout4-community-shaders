@@ -15,6 +15,10 @@ namespace cs::engine::local_lights
 		}
 	}
 
+	float RadialFalloff(float a_x, float a_constant, float a_scalar, float a_exponent)
+	{
+		return std::pow(1.0f - std::clamp(a_constant + a_scalar * std::pow(a_x, a_exponent), 0.0f, 1.0f), 2.2f);
+	}
 	RE::NiLight* Light(RE::BSLight& a_light)
 	{
 		return Member<RE::NiPointer<RE::NiLight>>(a_light, 0xB8).get();

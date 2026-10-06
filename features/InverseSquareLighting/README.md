@@ -8,7 +8,21 @@ Place authoring files in `Data\F4SE\Plugins\FO4CommunityShaders\Lights\*.toml`.
 The FO4 format replaces Skyrim's occupied LIGH extension bits and repurposed
 spot fields; see [DEVIATIONS](../../docs/deviations/InverseSquareLighting.md).
 Neither native form flags nor native attenuation coefficients are changed.
-Unlisted lights and explicit opt-outs retain native attenuation and color.
+Explicit opt-outs retain native attenuation and color.
+
+`[features.InverseSquareLighting.settings] derive_unauthored_lights` (default
+`true`, applies at next launch) converts every light with no TOML entry from
+its native falloff when it is created; `false` leaves unlisted lights native,
+as upstream. A matching TOML entry, base form or reference, is authoritative:
+only its fields apply, omitted fields take upstream defaults with intensity scale 1,
+and derived values are never merged with it.
+Derivation fills only `inverse_square`, `cutoff` and an intensity scale
+(equivalent to retuning LIGH fade), with `size` at √2. The scale matches the
+d²-weighted energy of the native curve out to its radius, and the cutoff
+reproduces the native radius at the reference's un-flickered fade (clamped to
+0.01 to just below 1; the gain is kept, so reach changes). Lights stay native
+when DATA flag 0x4 negates color, the radial scalar is 0, native energy is not
+positive, or the radius is at most 0.1.
 
 ```toml
 [[lights]]
@@ -39,7 +53,7 @@ Missing or wrong-type forms are logged and ignored. Changes require restart.
 | `cutoff` | `1.0` | Clamped to 0.01–1; exactly 1 selects 0.05 for nonshadow lights or 0.022 for shadow lights |
 | `size` | √2 | Source size in meters; values ≥50 select √2, then clamp to 0.01–50 |
 
-Intensity is the native animated dimmer times 4. Radius and the 252-unit
+Intensity is the native animated dimmer times 4, times the derived scale. Radius and the 252-unit
 fade zone follow upstream. Render publication includes native `currentFade`;
 gameplay luminance intentionally does not. Spot cones, cookies, shadow tests,
 hemisphere/box masks and native gameplay exclusions remain independent.

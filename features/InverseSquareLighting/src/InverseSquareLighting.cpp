@@ -1,6 +1,7 @@
 #include "InverseSquareLighting.h"
 #include "InverseSquareLightingData.h"
 #include "InverseSquareLightingMath.h"
+#include "LightDerivation.h"
 
 #include <DearModdingUI/Client.h>
 #include <winrt/base.h>
@@ -11,10 +12,12 @@
 #include <mutex>
 #include <utility>
 
+#include "Menu/SettingsEdit.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/LocalLights.h"
 #include "Render/ShaderFamilyDescriptor.h"
+#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -22,6 +25,7 @@ namespace cs::features
 	namespace
 	{
 		using namespace inverse_square_lighting;
+		using Flag = RE::OBJ_LIGH::Flag;
 		namespace native = engine::local_lights;
 		constexpr std::uint32_t kRasterSlot = 11;
 		constexpr std::uint32_t kTiledSlot = 8;
@@ -43,6 +47,7 @@ namespace cs::features
 			std::atomic<bool> resources{ false }, validated{ false }, hooks{ false }, dataLoaded{ false };
 			std::atomic<std::uint64_t> authored{ 0 }, created{ 0 }, removed{ 0 };
 			std::atomic<std::uint64_t> removedLights{ 0 }, orphaned{ 0 };
+			std::atomic<std::uint64_t> derived{ 0 }, derivedClamped{ 0 }, keptNative{ 0 };
 			std::atomic<std::uint64_t> appended{ 0 }, uploads{ 0 }, rasterDraws{ 0 }, luminance{ 0 }, uploadFailures{ 0 };
 			std::atomic<std::uint32_t> lastReference{ 0 }, lastForm{ 0 }, lastIndex{ 0 }, lastSide{ 0 };
 			std::atomic<std::uint64_t> lastNiLight{ 0 }, lastBSLight{ 0 };
@@ -91,32 +96,61 @@ namespace cs::features
 				auto* wrapper = std::exchange(g_createdLight, previous);
 				if (!light || !a_form || !a_root || !Enabled())
 					return light;
+				const bool derive = InverseSquareLighting::GetSingleton()->DeriveUnauthoredLights();
+				// GetFade locks the reference's ExtraDataList; keep it outside our mutex.
+				const float fade = derive && a_reference ? a_reference->GetFade(a_form->fade) : a_form->fade;
 				std::scoped_lock lock(g_state.mutex);
+				const auto referenceID = a_reference ? a_reference->GetFormID() : 0;
+				const auto* existing = g_state.sidecar.Find(*light);
+				const auto radius = existing && native::Radius(*light) == existing->shaderData.radius ?
+				                        existing->nativeRadius :
+				                        native::Radius(*light);
+				const auto shadow = wrapper  ? native::IsShadowLight(*wrapper) :
+				                    existing ? existing->shadowCaster :
+				                               a_form->data.flags.any(Flag::kShadowSpotlight, Flag::kShadowHemisphere,
+												   Flag::kShadowOmnidirectional);
 				AuthoredLight authored;
+				float intensityScale = 1;
 				bool found = false;
 				if (const auto it = g_state.forms.find(a_form->GetFormID()); it != g_state.forms.end()) {
 					authored = it->second;
 					found = true;
 				}
-				const auto referenceID = a_reference ? a_reference->GetFormID() : 0;
 				if (const auto it = g_state.references.find(referenceID); it != g_state.references.end()) {
 					authored.Apply(it->second);
 					found = true;
 				}
-				if (found) {
-					const auto* existing = g_state.sidecar.Find(*light);
-					const auto radius = existing && native::Radius(*light) == existing->shaderData.radius ?
-					                        existing->nativeRadius :
-					                        native::Radius(*light);
-					const auto shadow = wrapper  ? native::IsShadowLight(*wrapper) :
-					                    existing ? existing->shadowCaster :
-					                               (a_form->data.flags & 0x1C00U) != 0;
-					const auto& data = g_state.sidecar.CaptureAuthoredLight(*light, *a_form,
-						referenceID, authored, radius, shadow);
-					if (IsInverseSquare(data.shaderData))
-						native::SetRadius(*light, data.shaderData.radius);
-					++g_state.created;
+				// A TOML entry is authoritative: derivation never merges with it.
+				if (!found && derive) {
+					const auto& data = a_form->data;
+					if (const auto derived = DeriveLight({ .radius = radius,
+							.fade = fade,
+							.a = data.attenConstant,
+							.b = data.attenScalar,
+							.c = data.attenExponent,
+							.negatedColor = data.flags.any(Flag::kNegative) })) {
+						authored = derived->authored;
+						intensityScale = derived->intensityScale;
+						found = true;
+						++g_state.derived;
+						g_state.derivedClamped += derived->clamped;
+					} else {
+						++g_state.keptNative;
+					}
 				}
+				if (!found) {
+					// A reused light may carry a stale entry from an earlier conversion.
+					if (existing) {
+						g_state.sidecar.Remove(*light);
+						native::SetRadius(*light, radius);
+					}
+					return light;
+				}
+				const auto& data = g_state.sidecar.CaptureAuthoredLight(*light, *a_form,
+					referenceID, authored, radius, shadow, intensityScale);
+				if (IsInverseSquare(data.shaderData))
+					native::SetRadius(*light, data.shaderData.radius);
+				++g_state.created;
 				return light;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -348,6 +382,28 @@ namespace cs::features
 		static InverseSquareLighting instance;
 		return &instance;
 	}
+	bool InverseSquareLighting::Configure(const toml::table& a_config, std::string& a_error)
+	{
+		auto candidate = _settings;
+		if (!settings::Parse(inverse_square_lighting::kSchema, a_config, candidate, a_error))
+			return false;
+		_settings = candidate;
+		_bootSettings = candidate;
+		return true;
+	}
+	bool InverseSquareLighting::SaveSettings()
+	{
+		return settings::SaveDelta(inverse_square_lighting::kSchema, GetConfigKey(), _settings, *Log());
+	}
+	std::vector<std::string_view> InverseSquareLighting::GetRestartSettings() const
+	{
+		return settings::RestartRequired(inverse_square_lighting::kSchema, _bootSettings, _settings);
+	}
+	void InverseSquareLighting::RestoreDefaultSettings()
+	{
+		_settings = {};
+		SaveSettings();
+	}
 	void InverseSquareLighting::Load()
 	{
 		std::string error;
@@ -463,7 +519,12 @@ namespace cs::features
 	}
 	void InverseSquareLighting::DrawSettings()
 	{
-		dmui::ui::TextWrapped("Lights are opt-in through %s\\*.toml. Authoring changes require a restart.", kDirectory);
+		settings::SettingsEdit edit{ *this };
+		edit.Discrete(dmui::ui::Checkbox("Derive Unauthored Lights", &_settings.deriveUnauthoredLights));
+		dmui::ui::TextWrapped(
+			"Lights without a %s\\*.toml entry convert from their native falloff; "
+			"an entry is authoritative and never merged. Changes require a restart.",
+			kDirectory);
 	}
 	void InverseSquareLighting::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
@@ -472,6 +533,9 @@ namespace cs::features
 			.Field("hooks_installed", g_state.hooks.load())
 			.Field("authored_definitions", g_state.authored.load())
 			.Field("created_lights", g_state.created.load())
+			.Field("derived_lights", g_state.derived.load())
+			.Field("derived_clamped_cutoff_lights", g_state.derivedClamped.load())
+			.Field("kept_native_lights", g_state.keptNative.load())
 			.Field("removed_references", g_state.removed.load())
 			.Field("removed_scene_lights", g_state.removedLights.load())
 			.Field("orphaned_lights", g_state.orphaned.load())
