@@ -171,16 +171,9 @@ namespace cs::render
 		}
 		installState.store(SwapChainHookState::kInstalling, std::memory_order_release);
 
-		const auto module = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-		if (!module) {
-			L->error("SwapChainHook: GetModuleHandle failed; hook not installed");
-			installState.store(SwapChainHookState::kFailed, std::memory_order_release);
-			return false;
-		}
-		const auto previous = cs::hooks::IATHook(
-			module,
-			"d3d11.dll",
+		const auto previous = REX::FModule::GetExecutingModule().SetImportFunctionAddress(
 			"D3D11CreateDeviceAndSwapChain",
+			"d3d11.dll",
 			reinterpret_cast<uintptr_t>(&CreateDeviceAndSwapChainThunk));
 		if (!previous ||
 			previous == reinterpret_cast<uintptr_t>(&CreateDeviceAndSwapChainThunk)) {

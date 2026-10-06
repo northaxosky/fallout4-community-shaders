@@ -452,7 +452,7 @@ namespace cs::features
 		InstallHook<RemoveSceneLight>(RE::ID::ShadowSceneNode::RemoveLight);
 		InstallHook<UpdateLight>(RE::ID::TESObjectLIGH::Update);
 		InstallHook<CullLight>(RE::ID::BSLight::TestFrustumCull);
-		InstallHook<TiledCallback>(REL::VariantID{ 999390, 2317525 });
+		InstallHook<TiledCallback>(RE::ID::BSDFTiledLighting::UpdateLightListTiledPackingCallback);
 		InstallHook<AppendLight>(RE::ID::BSDFTiledLighting::AddLight);
 		InstallHook<UploadLights>(RE::ID::BSGraphics::Renderer::UpdateStructuredBuffer);
 		InstallHook<SetupGeometry>(RE::ID::BSDFLightShader::SetupGeometry);
