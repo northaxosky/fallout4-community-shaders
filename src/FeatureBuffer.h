@@ -8,7 +8,6 @@ namespace cs
 {
 	// Feature contributors retain host contracts; the substrate packs shared and FO4-only fields.
 	using LODBlendingFeatureData = render::LODBlendingSettings;
-	using TerrainVariationFeatureData = render::TerrainVariationSettings;
 
 	struct alignas(16) TerrainShadowsFeatureData
 	{
@@ -37,6 +36,14 @@ namespace cs
 	};
 	static_assert(sizeof(WaterEffectsFeatureData) == 16);
 
+	struct alignas(16) TerrainVariationFeatureData
+	{
+		render::TerrainVariationSettings shared;  // upstream ABI block; its pad stays pad
+		std::uint32_t Enabled = 0;
+		std::uint32_t pad0[3]{};
+	};
+	static_assert(sizeof(TerrainVariationFeatureData) == 32);
+
 	struct alignas(16) FeatureDataCB
 	{
 		TerrainShadowsFeatureData terrainShadowsSettings;
@@ -46,7 +53,7 @@ namespace cs
 		WaterEffectsFeatureData waterEffectsSettings;
 		TerrainVariationFeatureData terrainVariationSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 320);
+	static_assert(sizeof(FeatureDataCB) == 336);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);

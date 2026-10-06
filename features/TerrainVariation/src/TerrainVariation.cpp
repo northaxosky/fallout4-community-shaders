@@ -188,16 +188,16 @@ namespace cs::features
 		if (!_injectionsOperational.load(std::memory_order_acquire))
 			return {};
 		cs::TerrainVariationFeatureData data{};
-		data.enableLODTerrainTilingFix = _settings.enableLODTerrainTilingFix ? 1u : 0u;
-		data.enableMeshSupport = _settings.enableMeshSupport ? 1u : 0u;
+		data.Enabled = _settings.enabled ? 1u : 0u;
+		data.shared.enableLODTerrainTilingFix = _settings.enableLODTerrainTilingFix ? 1u : 0u;
+		data.shared.enableMeshSupport = _settings.enableMeshSupport ? 1u : 0u;
 		return data;
 	}
 
 	void TerrainVariation::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		// FO4: the host has no Disable at Boot; startup loading lives in Advanced.
-		dmui::ui::TextWrapped("%s", "Terrain Variation is always enabled when installed. To turn it off, uncheck it under Advanced > Load on startup.");
+		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 		dmui::ui::Spacing();
 
 		const auto toggle = [&](const auto& field, const char* a_tooltip) {
@@ -208,7 +208,7 @@ namespace cs::features
 				dmui::ui::Text("%s", a_tooltip);
 			}
 		};
-		const auto& [lodTiling, meshSupport] = terrain_variation::kSchema.fields;
+		const auto& [enabledField, lodTiling, meshSupport] = terrain_variation::kSchema.fields;
 		toggle(lodTiling, "Applies the tiling fix to LOD terrain objects.\nThis helps reduce the visible tiling effect on distant terrain.");
 		toggle(meshSupport, "Applies the tiling fix to meshes that use landscape textures, such as dirt cliffs and mountain slabs.\nAlpha tested meshes like foliage and decals are never affected.");
 	}

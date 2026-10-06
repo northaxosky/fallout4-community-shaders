@@ -132,6 +132,18 @@
 #		include "TerrainVariation/TerrainVariation.hlsli"
 #	endif
 
+#	if defined(TERRAIN_VARIATION) && LANDSCAPE && !INSTANCED
+// FO4: EnabledTerrainVariation is the live master toggle; off keeps the stock sample.
+float4 SampleTerrainVariation(Texture2D tex, SamplerState samp, float2 uv, StochasticOffsets offsets)
+{
+	float4 result;
+	[branch] if (FO4SharedData::EnabledTerrainVariation != 0)
+		result = StochasticEffect(tex, samp, uv, offsets);
+	else result = tex.Sample(samp, uv);
+	return result;
+}
+#	endif
+
 cbuffer PerFrame_CB12 : register(b12)
 {
 	float4 cb12_pad_0_29[30];
@@ -505,7 +517,7 @@ struct PS_OUTPUT
 #	if defined(TERRAIN_VARIATION_MESH)
 		// Lattice cell comes from the geometric UV, before the parallax block below rewrites uv.
 		// FO4: cb2_pad.y flags eligible meshes; enableMeshSupport is read here.
-		const bool applyMeshTV = cb2_pad.y != 0.0 && SharedData::terrainVariationSettings.enableMeshSupport;
+		const bool applyMeshTV = cb2_pad.y != 0.0 && FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableMeshSupport;
 		StochasticOffsets meshOffset = (StochasticOffsets)0;
 		[branch] if (applyMeshTV)
 		{
@@ -532,9 +544,13 @@ struct PS_OUTPUT
 #		endif
 #		if defined(TERRAIN_VARIATION) && !INSTANCED
 		// FO4: lodAlbedoUV is layerUV/48 (Skyrim zw: /96), so halve it.
-		StochasticOffsets sharedOffset = ComputeStochasticOffsets(input.lodAlbedoUV * 0.5);
-		g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uv);
-#			define SampleTerrain(TEX, SAMP, UV, OFFSET) StochasticEffect(TEX, SAMP, UV, OFFSET)
+		StochasticOffsets sharedOffset = (StochasticOffsets)0;
+		[branch] if (FO4SharedData::EnabledTerrainVariation != 0)
+		{
+			sharedOffset = ComputeStochasticOffsets(input.lodAlbedoUV * 0.5);
+			g_terrainStochasticLodBase = ComputeTerrainStochasticLodBase(uv);
+		}
+#			define SampleTerrain(TEX, SAMP, UV, OFFSET) SampleTerrainVariation(TEX, SAMP, UV, OFFSET)
 #		else
 #			define SampleTerrain(TEX, SAMP, UV, OFFSET) TEX.Sample(SAMP, UV)
 #		endif
@@ -583,7 +599,9 @@ struct PS_OUTPUT
 #		elif LAND_LOD_BLEND
 #			if defined(TERRAIN_VARIATION)
 		float3 landLodAlbedo;
-		[branch] if (SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
+		[branch] if (FO4SharedData::EnabledTerrainVariation == 0)
+			landLodAlbedo = g_tLandLodAlbedo.Sample(g_sLandLodAlbedo, input.lodAlbedoUV).xyz;
+		else[branch] if (SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
 			landLodAlbedo = StochasticSampleLOD(screenNoise, g_tLandLodAlbedo, g_sLandLodAlbedo, input.lodAlbedoUV).xyz;
 		else landLodAlbedo = g_tLandLodAlbedo.SampleBias(g_sLandLodAlbedo, input.lodAlbedoUV, SharedData::MipBias).xyz;
 #			else
@@ -641,7 +659,7 @@ struct PS_OUTPUT
 #		if LOD_LANDSCAPE && !BONE_TINTING
 #			if defined(TERRAIN_VARIATION)
 		// FO4: the prepass albedo is raw, so Skyrim's Color::Diffuse on the stochastic sample is omitted.
-		[branch] if (SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
+		[branch] if (FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
 		{
 			float4 lodStochasticColor = StochasticSampleLOD(screenNoise, g_tAlbedo, g_sAlbedo, uv);
 			albedoSample.xyz = lodStochasticColor.rgb;

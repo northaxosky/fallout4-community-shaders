@@ -183,7 +183,7 @@ namespace
 			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams),
 			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, DynamicMaterialReflections),
-			ABI(FO4SharedDataCB, EnabledWaterParallax), ABI(FO4SharedDataCB, pad0)
+			ABI(FO4SharedDataCB, EnabledWaterParallax), ABI(FO4SharedDataCB, EnabledTerrainVariation)
 		};
 		struct Buffer
 		{
