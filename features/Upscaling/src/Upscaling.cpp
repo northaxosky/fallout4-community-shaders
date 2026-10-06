@@ -108,7 +108,7 @@ namespace cs::features
 			FailLoad("Upscaling could not register its SSLR shader contribution");
 			return;
 		}
-		// A separate contributor keeps Upscaling operational when those targets stay stock.
+		// Own contributor, so stock targets cannot fail Upscaling.
 		if (!cs::engine::RegisterFeatureShaderBindings("UpscalingSamplerBias", _samplerBiasDefines)) {
 			FailLoad("Upscaling could not register its sampler bias shader define");
 		}

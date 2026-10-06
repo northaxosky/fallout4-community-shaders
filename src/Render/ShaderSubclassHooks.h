@@ -33,7 +33,7 @@ namespace cs::engine
 		kImmediate       // every frame, from BSDFPrePassShader::SetupGeometry
 	};
 
-	// Component of the float4 lane DFPrepass.hlsl reads as cb2_pad; each feature's classifier owns one.
+	// One classifier owns each cb2_pad component.
 	enum class PrepassLaneComponent : std::uint8_t
 	{
 		kX,
@@ -42,7 +42,6 @@ namespace cs::engine
 		kW
 	};
 
-	// Classifies a prepass draw; the answer is baked into the classifier's lane component.
 	using PrepassDrawClassifier = bool (*)(RE::BSRenderPass* a_pass, PrepassBakePath a_path) noexcept;
 
 	struct PrepassLaneStats
@@ -53,12 +52,11 @@ namespace cs::engine
 
 	struct PrepassClassifierStats
 	{
-		std::uint64_t classified = 0;  // non-landscape draws the classifier ran on
-		std::uint64_t flagged = 0;     // draws it answered true for
+		std::uint64_t classified = 0;
+		std::uint64_t flagged = 0;
 	};
 
-	// Load or OnPostPostLoad only; the first call patches the engine. Returns false when the patches failed or
-	// the component already has a classifier, and then that component is never written.
+	// Load/OnPostPostLoad only; false if patching failed or the component is taken.
 	[[nodiscard]] bool RegisterPrepassDrawClassifier(PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier);
 	[[nodiscard]] PrepassLaneStats GetPrepassLaneStats() noexcept;
 	[[nodiscard]] PrepassClassifierStats GetPrepassClassifierStats(PrepassLaneComponent a_component, PrepassBakePath a_path) noexcept;

@@ -28,7 +28,7 @@ namespace cs::host
 	{
 		auto* L = cs::log::Get("cs.host");
 
-		// DearModdingUI rejects control characters in page text; upstream descriptions use line breaks.
+		// DearModdingUI rejects control characters; upstream summaries use line breaks.
 		std::string ToPageSummary(std::string a_summary)
 		{
 			std::ranges::replace_if(

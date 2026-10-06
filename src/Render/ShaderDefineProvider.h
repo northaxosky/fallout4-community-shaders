@@ -47,7 +47,7 @@ namespace cs::engine
 		std::atomic_bool _fullscreenDebugSelected{ false };
 	};
 
-	// Lets a feature add a second contributor that follows its own load state.
+	// A second contributor that follows its feature's load state.
 	class OwnedShaderDefineProvider final : public ShaderDefineProvider
 	{
 	public:

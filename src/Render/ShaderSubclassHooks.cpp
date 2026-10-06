@@ -232,7 +232,7 @@ namespace cs::engine
 			std::atomic<std::uint64_t> flagged{ 0 };
 		};
 
-		// Set at Load before the first frame renders, so engine threads read them without a lock.
+		// Written only during Load, before rendering, so reads need no lock.
 		std::array<PrepassDrawClassifier, kPrepassLaneComponents> g_prepassClassifiers{};
 		bool g_prepassLaneActive = false;
 		std::array<std::array<ClassifierCounts, kPrepassBakePaths>, kPrepassLaneComponents> g_classifierCounts;
@@ -288,7 +288,7 @@ namespace cs::engine
 			return found != shaders.end() ? *found : nullptr;
 		}
 
-		// Unregistered components stay 0 so the whole register is deterministic.
+		// Constants are not cleared between draws, so unused components are written 0.
 		[[nodiscard]] PrepassLaneRequest MakePrepassLaneRequest(
 			RE::BSShader* a_shader,
 			RE::BSRenderPass* a_pass,

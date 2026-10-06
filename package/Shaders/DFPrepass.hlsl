@@ -117,12 +117,12 @@
 #		include "FO4/FO4ShaderData.hlsli"
 #	endif
 
-// FO4: Skyrim's mesh exclusions mapped onto prepass variants; the host rejects object LOD.
+// FO4: Skyrim mesh exclusions as prepass variants; host rejects object LOD.
 #	if defined(TERRAIN_VARIATION) && TEXTURE && !LANDSCAPE && !(LOD_LANDSCAPE || SKIN_TINT || HAIR || EYE || TREE_ANIM || DISMEMBERMENT_MEATCUFF)
 #		define TERRAIN_VARIATION_MESH
 #	endif
 
-// FO4: instanced terrain is never bound by the engine, so it keeps its stock sampling.
+// FO4: the engine never draws instanced terrain, so it stays stock.
 #	if defined(TERRAIN_VARIATION) && ((LANDSCAPE && LAND_LOD_BLEND && !INSTANCED) || (defined(LOD_BLENDING) && LOD_LANDSCAPE && !BONE_TINTING))
 #		define TERRAIN_VARIATION_LOD
 #	endif
@@ -133,7 +133,7 @@
 #	endif
 
 #	if defined(TERRAIN_VARIATION) && LANDSCAPE && !INSTANCED
-// FO4: EnabledTerrainVariation is the live master toggle; off keeps the stock sample.
+// FO4: live master toggle; off keeps the stock sample.
 float4 SampleTerrainVariation(Texture2D tex, SamplerState samp, float2 uv, StochasticOffsets offsets)
 {
 	float4 result;
@@ -516,7 +516,7 @@ struct PS_OUTPUT
 #	endif
 #	if defined(TERRAIN_VARIATION_MESH)
 		// Lattice cell comes from the geometric UV, before the parallax block below rewrites uv.
-		// FO4: cb2_pad.y flags eligible meshes; enableMeshSupport is read here.
+		// FO4: the host flags eligible meshes in cb2_pad.y.
 		const bool applyMeshTV = cb2_pad.y != 0.0 && FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableMeshSupport;
 		StochasticOffsets meshOffset = (StochasticOffsets)0;
 		[branch] if (applyMeshTV)
@@ -543,7 +543,7 @@ struct PS_OUTPUT
 		int landSlices[12] = g_bLandInstances[input.instanceIndex].layerSlices;
 #		endif
 #		if defined(TERRAIN_VARIATION) && !INSTANCED
-		// FO4: lodAlbedoUV is layerUV/48 (Skyrim zw: /96), so halve it.
+		// FO4: lodAlbedoUV is layerUV/48, Skyrim's zw is /96.
 		StochasticOffsets sharedOffset = (StochasticOffsets)0;
 		[branch] if (FO4SharedData::EnabledTerrainVariation != 0)
 		{
@@ -658,7 +658,7 @@ struct PS_OUTPUT
 #	if defined(LOD_BLENDING)
 #		if LOD_LANDSCAPE && !BONE_TINTING
 #			if defined(TERRAIN_VARIATION)
-		// FO4: the prepass albedo is raw, so Skyrim's Color::Diffuse on the stochastic sample is omitted.
+		// FO4: prepass albedo is raw, so Color::Diffuse is omitted.
 		[branch] if (FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
 		{
 			float4 lodStochasticColor = StochasticSampleLOD(screenNoise, g_tAlbedo, g_sAlbedo, uv);

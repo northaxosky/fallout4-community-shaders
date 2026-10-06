@@ -7,6 +7,6 @@ namespace RE
 
 namespace cs::engine
 {
-	// The kLODObjects flag and LOD material features miss BTO shapes, so the land LOD root decides.
+	// kLODObjects and LOD material features miss BTO shapes.
 	[[nodiscard]] bool IsObjectLODShape(RE::BSRenderPass* a_pass) noexcept;
 }

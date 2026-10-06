@@ -38,7 +38,7 @@ namespace cs
 
 	struct alignas(16) TerrainVariationFeatureData
 	{
-		render::TerrainVariationSettings shared;  // upstream ABI block; its pad stays pad
+		render::TerrainVariationSettings shared;
 		std::uint32_t Enabled = 0;
 		std::uint32_t pad0[3]{};
 	};

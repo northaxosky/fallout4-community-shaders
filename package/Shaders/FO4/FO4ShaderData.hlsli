@@ -2,7 +2,7 @@
 #define FO4_SHADER_DATA_HLSLI
 #ifdef FO4CS_SUBSTRATE
 #	ifdef SAMPLER_MIP_BIAS
-// FO4: the bound samplers already carry MipBias, so SharedData::MipBias resolves to 0 here.
+// FO4: the bound samplers already carry MipBias.
 #		define MipBias SamplerMipBiasCB
 #	endif
 #	include "Common/SharedData.hlsli"

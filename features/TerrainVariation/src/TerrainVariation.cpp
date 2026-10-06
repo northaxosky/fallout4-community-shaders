@@ -85,7 +85,7 @@ namespace cs::features
 			auto [it, inserted] = meshTextureCache.try_emplace(key, false);
 			if (inserted) {
 				const auto canonical = CanonicaliseTexturePath(key);
-				// FO4: vanilla terrain textures sit one folder below landscape/, so any depth qualifies.
+				// FO4: vanilla terrain textures live in landscape/ subfolders.
 				it->second = canonical.starts_with(LandscapeDirectory);
 				meshTextureKeepAlive.push_back(a_name);
 			}
@@ -93,7 +93,7 @@ namespace cs::features
 			return it->second;
 		}
 
-		// FO4: only eligibility is baked; the shader applies enableMeshSupport.
+		// FO4: baked records are immutable, so the shader gates enableMeshSupport.
 		bool IsLandscapeTexturedMesh(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
 		{
 			auto* geometry = a_pass->GetGeometry();
