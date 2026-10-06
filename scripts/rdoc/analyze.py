@@ -28,35 +28,43 @@ def _terminate():
 
 
 def _inside(path, root):
-    candidate = os.path.normcase(os.path.realpath(path))
-    parent = os.path.normcase(os.path.realpath(root))
+    from common import extended_path, plain_path
+
+    def resolve(value):
+        return os.path.normcase(plain_path(os.path.realpath(extended_path(value))))
+
+    candidate = resolve(path)
+    parent = resolve(root)
     return candidate == parent or candidate.startswith(parent + os.sep)
 
 
 def main():
     job_path = os.environ.get("RDOC_JOB")
-    if not job_path:
+    script_dir = os.environ.get("RDOC_SCRIPT_DIR")
+    if not job_path or not script_dir:
         _terminate()
     out_dir = None
     result_path = None
     session = None
     command = ""
     try:
-        with io.open(job_path, "r", encoding="utf-8") as stream:
+        script_dir = os.path.abspath(script_dir)
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+        from actions import ActionIndex
+        from capture import CaptureSession
+        from commands import run
+        from common import extended_path, plain_path
+
+        with io.open(extended_path(job_path), "r", encoding="utf-8") as stream:
             job = json.load(stream)
-        out_dir = os.path.abspath(job["outDir"])
+        out_dir = extended_path(job["outDir"])
         repo_root = os.path.abspath(job["repoRoot"])
         if _inside(out_dir, repo_root):
             raise ValueError("Artifact directory must be outside the repository")
         if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
         result_path = os.path.join(out_dir, "result.json")
-        script_dir = os.path.abspath(job["scriptDir"])
-        if script_dir not in sys.path:
-            sys.path.insert(0, script_dir)
-        from actions import ActionIndex
-        from capture import CaptureSession
-        from commands import run
 
         command = str(job.get("command", "overview")).lower()
         args = [str(value) for value in job.get("args", [])]
@@ -64,10 +72,10 @@ def main():
             index = args.index("--outdir")
             if index + 1 < len(args) and _inside(args[index + 1], repo_root):
                 raise ValueError("Dump directory must be outside the repository")
-        capture_path = os.path.abspath(job["capture"])
+        capture_path = extended_path(job["capture"])
         if not os.path.isfile(capture_path):
-            raise ValueError("Capture not found: " + capture_path)
-        _progress(out_dir, "opening " + capture_path)
+            raise ValueError("Capture not found: " + plain_path(capture_path))
+        _progress(out_dir, "opening " + plain_path(capture_path))
         session = CaptureSession(capture_path)
         session.open()
         _progress(out_dir, "indexing actions")
@@ -77,14 +85,14 @@ def main():
         result = {
             "ok": True,
             "command": command,
-            "artifactDirectory": out_dir,
+            "artifactDirectory": plain_path(out_dir),
             "result": payload,
         }
     except BaseException as error:
         result = {
             "ok": False,
             "command": command,
-            "artifactDirectory": out_dir,
+            "artifactDirectory": out_dir and plain_path(out_dir),
             "error": str(error),
             "errorType": error.__class__.__name__,
             "traceback": traceback.format_exc(),

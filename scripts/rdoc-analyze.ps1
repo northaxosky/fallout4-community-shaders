@@ -189,7 +189,6 @@ $job = [ordered]@{
     command = $Command.ToLowerInvariant()
     args = @($CommandArgs)
     outDir = $OutputDir
-    scriptDir = (Split-Path -Parent $analyzer)
     repoRoot = $repoRoot
 }
 $jobJson = $job | ConvertTo-Json -Depth 10
@@ -206,6 +205,7 @@ $startInfo.Arguments = '--python "' + $analyzer + '"'
 $startInfo.UseShellExecute = $true
 $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
 $env:RDOC_JOB = $jobPath
+$env:RDOC_SCRIPT_DIR = Split-Path -Parent $analyzer
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $startInfo
 

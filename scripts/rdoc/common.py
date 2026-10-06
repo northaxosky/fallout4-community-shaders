@@ -3,6 +3,24 @@ import os
 import re
 
 
+def extended_path(path):
+    # qrenderdoc.exe is not long-path aware; extended-length paths bypass MAX_PATH.
+    path = os.path.abspath(path)
+    if os.name != "nt" or path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
+def plain_path(path):
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
+
+
 def enum_name(value):
     return str(value).rsplit(".", 1)[-1]
 
