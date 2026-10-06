@@ -2,6 +2,7 @@
 
 ## 0.3.0
 
+- Terrain Variation: ported upstream's stochastic terrain sampling, LOD terrain tiling fix and landscape-textured mesh support; Extended Materials and TruePBR height and RMAOS consumers are pending.
 - LOD Blending: ported upstream's LOD terrain and object brightness and gamma controls and terrain vertex-color removal; snow LOD settings are not available.
 - Water Effects: ported upstream's water parallax; it follows the Water Effects `enabled` toggle and leaves vanilla water flat.
 - Shader ownership toggles are editable in Advanced settings and apply immediately, including to feature shader contributions.
