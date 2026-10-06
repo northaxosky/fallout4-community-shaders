@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Fixed the in-game menu and performance overlay not loading with DearModdingUI 0.2.0. Community Shaders now works with DearModdingUI 0.2.0 and later.
+
 ## 0.3.0
 
 - LOD Blending: ported Skyrim CS's LOD terrain and object brightness and gamma controls and terrain vertex-color removal; snow LOD settings are not available.
