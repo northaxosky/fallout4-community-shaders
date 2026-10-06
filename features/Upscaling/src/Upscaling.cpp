@@ -106,6 +106,11 @@ namespace cs::features
 		if (!cs::engine::RegisterFeatureShaderBindings("Upscaling", *this, [](cs::engine::ShaderReplacementRegistration&) {
 			})) {
 			FailLoad("Upscaling could not register its SSLR shader contribution");
+			return;
+		}
+		// A separate contributor keeps Upscaling operational when those targets stay stock.
+		if (!cs::engine::RegisterFeatureShaderBindings("UpscalingSamplerBias", _samplerBiasDefines)) {
+			FailLoad("Upscaling could not register its sampler bias shader define");
 		}
 	}
 

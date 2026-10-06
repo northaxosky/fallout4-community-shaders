@@ -48,6 +48,7 @@ namespace cs::features
 
 	private:
 		Upscaling() = default;
+		engine::OwnedShaderDefineProvider _samplerBiasDefines{ upscaling::kSamplerBiasShaderDefines, *this };
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(render::temporal::kSchema); }
 		Settings _bootSettings;

@@ -47,6 +47,25 @@ namespace cs::engine
 		std::atomic_bool _fullscreenDebugSelected{ false };
 	};
 
+	// Forwards a static declaration while reporting the owning provider's load state.
+	class OwnedShaderDefineProvider final : public ShaderDefineProvider
+	{
+	public:
+		OwnedShaderDefineProvider(const ShaderDefineProvider& a_declaration, const ShaderDefineProvider& a_owner) noexcept :
+			_declaration(a_declaration), _owner(a_owner)
+		{}
+
+		std::string_view GetShaderDefineName() const override { return _declaration.GetShaderDefineName(); }
+		ShaderDefineOptions GetShaderDefineOptions(ShaderInjectionTarget a_target = ShaderInjectionTarget::kCount) const override { return _declaration.GetShaderDefineOptions(a_target); }
+		bool HasShaderDefine(ShaderInjectionTarget a_target) const override { return _declaration.HasShaderDefine(a_target); }
+		bool IsLoaded() const override { return _owner.IsLoaded(); }
+		bool RequiresShaderGraphicsPair(ShaderInjectionTarget a_target) const override { return _declaration.RequiresShaderGraphicsPair(a_target); }
+
+	private:
+		const ShaderDefineProvider& _declaration;
+		const ShaderDefineProvider& _owner;
+	};
+
 	struct ShaderDefineDeclaration final : ShaderDefineProvider
 	{
 		ShaderDefineDeclaration(std::string_view a_name,
