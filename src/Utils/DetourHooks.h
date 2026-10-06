@@ -6,8 +6,7 @@
 
 namespace cs::hooks
 {
-	// Redirects *a_func (the target on entry, the original-call trampoline on success) to a_thunk,
-	// warning first when another plugin already hijacked the target's prologue.
-	// Logs and returns the Detours error on failure; *a_func is then left as the target.
+	// On success *a_func is the original-call trampoline; on failure it is untouched.
 	[[nodiscard]] LONG Attach(void** a_func, void* a_thunk, const char* a_typeName);
-}
+
+}

@@ -56,7 +56,7 @@ using uint = uint32_t;
 #define DLLEXPORT __declspec(dllexport)
 #define STATIC_ASSERT_ALIGNAS_16(T) static_assert(sizeof(T) % 16 == 0, #T " must be 16-byte aligned for D3D11 CB")
 
-// FO4: shared sources log through upstream's `logger::` namespace; route it to the hooks logger.
+// FO4: shared sources call upstream's `logger::`; route it to the hooks logger.
 namespace logger
 {
 	template <class... Args>

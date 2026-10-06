@@ -1,6 +1,7 @@
 #include "Utils/DetourHooks.h"
 
 #include "Log.h"
+#include "Utils/ModuleInfo.h"
 
 #include <detours.h>
 
@@ -18,14 +19,12 @@ namespace
 	constexpr int kMaxForeignHops = 4;
 	constexpr std::size_t kMaxJumpBytes = 12;
 
-	// Reduces an RTTI name such as "struct `anonymous namespace'::CreateLight" to "CreateLight".
 	std::string_view ShortTypeName(std::string_view a_typeName)
 	{
 		const auto split = a_typeName.find_last_of(": ");
 		return split == std::string_view::npos ? a_typeName : a_typeName.substr(split + 1);
 	}
 
-	// Copies a_size bytes only when every page in the range is committed and readable.
 	bool ReadForeign(std::uintptr_t a_address, void* a_out, std::size_t a_size) noexcept
 	{
 		constexpr DWORD readable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
@@ -41,11 +40,10 @@ namespace
 		return true;
 	}
 
-	// Decodes the unconditional jump forms plugins use to hijack a prologue.
 	std::optional<std::uintptr_t> JumpDestination(std::uintptr_t a_address) noexcept
 	{
 		std::uint8_t code[kMaxJumpBytes]{};
-		// A tiny function at the end of a region may not have 12 readable bytes.
+		// A tiny function at a region's end may have under 12 readable bytes.
 		std::size_t size = kMaxJumpBytes;
 		while (size >= 2 && !ReadForeign(a_address, code, size))
 			--size;
@@ -75,49 +73,34 @@ namespace
 		return std::nullopt;
 	}
 
-	HMODULE ModuleOf(std::uintptr_t a_address) noexcept
-	{
-		HMODULE module = nullptr;
-		GetModuleHandleExW(
-			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-			reinterpret_cast<LPCWSTR>(a_address), &module);
-		return module;
-	}
-
 	std::string ModuleFileName(HMODULE a_module)
 	{
-		wchar_t path[MAX_PATH]{};
-		const DWORD length = GetModuleFileNameW(a_module, path, MAX_PATH);
-		if (length == 0 || length >= MAX_PATH)
+		const auto path = cs::util::ModulePath(a_module);
+		if (!path)
 			return "unknown module";
-		std::wstring_view file{ path, length };
-		file.remove_prefix(file.find_last_of(L"\\/") + 1);
-		const int bytes = WideCharToMultiByte(CP_UTF8, 0, file.data(), static_cast<int>(file.size()), nullptr, 0, nullptr, nullptr);
-		std::string name(static_cast<std::size_t>(bytes > 0 ? bytes : 0), '\0');
-		if (bytes > 0)
-			WideCharToMultiByte(CP_UTF8, 0, file.data(), static_cast<int>(file.size()), name.data(), bytes, nullptr, nullptr);
+		std::string name;
+		REX::UTF16_TO_UTF8(path->filename().native(), name);
 		return name;
 	}
 
-	// "Fallout4.exe+320A60" for module addresses, the raw address otherwise.
 	std::string DescribeAddress(std::uintptr_t a_address)
 	{
-		if (const auto module = ModuleOf(a_address))
+		if (const auto module = cs::util::ModuleFromAddress(reinterpret_cast<const void*>(a_address)))
 			return std::format("{}+{:X}", ModuleFileName(module), a_address - reinterpret_cast<std::uintptr_t>(module));
 		return std::format("{:#x}", a_address);
 	}
 
-	// Chains through other plugins' jumps; trampolines often sit in allocated memory outside any module.
+	// Trampolines often sit in allocated memory outside any module.
 	void WarnIfForeignHook(std::uintptr_t a_target, std::string_view a_hookName)
 	{
 		static const auto game = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-		static const auto self = reinterpret_cast<std::uintptr_t>(ModuleOf(reinterpret_cast<std::uintptr_t>(&ModuleOf)));
+		static const auto self = reinterpret_cast<std::uintptr_t>(cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&ModuleFileName)));
 
 		auto destination = JumpDestination(a_target);
 		if (!destination)
 			return;
 		for (int hop = 0; hop < kMaxForeignHops; ++hop) {
-			const auto module = reinterpret_cast<std::uintptr_t>(ModuleOf(*destination));
+			const auto module = reinterpret_cast<std::uintptr_t>(cs::util::ModuleFromAddress(reinterpret_cast<const void*>(*destination)));
 			if (module == game || module == self)
 				return;
 			if (module != 0) {
@@ -146,7 +129,7 @@ namespace cs::hooks
 
 		LONG result = DetourTransactionBegin();
 		if (result == NO_ERROR) {
-			// A failed thread update must abort too, or the transaction commits half-initialized.
+			// A failed thread update must abort too, or the transaction commits and skips the fallback.
 			result = DetourUpdateThread(GetCurrentThread());
 			if (result == NO_ERROR)
 				result = DetourAttach(a_func, a_thunk);
