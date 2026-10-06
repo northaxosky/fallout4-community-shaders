@@ -33,7 +33,7 @@ namespace cs::features
 
 		// BTO shapes hang under the land LOD root; terrain LOD there carries kLODLandscape. The kLODObjects property flag
 		// and the LOD material features miss BTO shapes, so they cannot gate.
-		bool IsObjectLOD(RE::BSRenderPass* a_pass) noexcept
+		bool IsObjectLOD(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
 		{
 			auto* geometry = a_pass->GetGeometry();
 			auto* property = a_pass->GetShaderProperty();
@@ -75,34 +75,27 @@ namespace cs::features
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(&LODBlending::ClassifyPrepassDraw)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kX, &IsObjectLOD)) {
 			FailLoad("LOD Blending prepass draw classifier installation failed.");
 			return;
 		}
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
-	bool LODBlending::ClassifyPrepassDraw(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath a_path) noexcept
-	{
-		const bool lodObject = IsObjectLOD(a_pass);
-		auto& counts = GetSingleton()->_bakeCounts[static_cast<std::size_t>(a_path)];
-		counts.draws.fetch_add(1, std::memory_order_relaxed);
-		counts.lodDraws.fetch_add(lodObject ? 1u : 0u, std::memory_order_relaxed);
-		return lodObject;
-	}
-
 	void LODBlending::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		const auto& records = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kCommandBuffer)];
-		const auto& immediate = _bakeCounts[static_cast<std::size_t>(cs::engine::PrepassBakePath::kImmediate)];
+		using cs::engine::PrepassBakePath;
+		using cs::engine::PrepassLaneComponent;
+		const auto records = cs::engine::GetPrepassClassifierStats(PrepassLaneComponent::kX, PrepassBakePath::kCommandBuffer);
+		const auto immediate = cs::engine::GetPrepassClassifierStats(PrepassLaneComponent::kX, PrepassBakePath::kImmediate);
 		const auto lanes = cs::engine::GetPrepassLaneStats();
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed))
-			.Field("records", records.draws.load(std::memory_order_relaxed))
-			.Field("lod_records", records.lodDraws.load(std::memory_order_relaxed))
-			.Field("immediate_draws", immediate.draws.load(std::memory_order_relaxed))
-			.Field("lod_immediate_draws", immediate.lodDraws.load(std::memory_order_relaxed))
+			.Field("records", records.classified)
+			.Field("lod_records", records.flagged)
+			.Field("immediate_draws", immediate.classified)
+			.Field("lod_immediate_draws", immediate.flagged)
 			.Field("lanes_baked", lanes.baked)
 			.Field("lanes_unavailable", lanes.unavailable);
 	}

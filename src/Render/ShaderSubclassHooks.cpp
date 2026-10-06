@@ -10,6 +10,8 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <exception>
@@ -220,8 +222,19 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Set at Load before the first frame renders, so engine threads read it without a lock.
-		PrepassDrawClassifier g_prepassClassifier = nullptr;
+		constexpr std::size_t kPrepassLaneComponents = 4;
+		constexpr std::size_t kPrepassBakePaths = 2;
+
+		struct ClassifierCounts
+		{
+			std::atomic<std::uint64_t> classified{ 0 };
+			std::atomic<std::uint64_t> flagged{ 0 };
+		};
+
+		// Set at Load before the first frame renders, so engine threads read them without a lock.
+		std::array<PrepassDrawClassifier, kPrepassLaneComponents> g_prepassClassifiers{};
+		bool g_prepassLaneActive = false;
+		std::array<std::array<ClassifierCounts, kPrepassBakePaths>, kPrepassLaneComponents> g_classifierCounts;
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
 		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
 
@@ -237,7 +250,7 @@ namespace cs::engine
 		{
 			PrepassBakePath path;
 			std::uint32_t descriptor;
-			float value;
+			std::array<float, kPrepassLaneComponents> lane;
 			std::int32_t offset;  // dword offset in the pixel cb2 constants; -1 when unresolved
 		};
 
@@ -274,6 +287,31 @@ namespace cs::engine
 			return found != shaders.end() ? *found : nullptr;
 		}
 
+		// Unregistered components stay 0 so the whole register is deterministic.
+		[[nodiscard]] PrepassLaneRequest MakePrepassLaneRequest(
+			RE::BSShader* a_shader,
+			RE::BSRenderPass* a_pass,
+			PrepassBakePath a_path) noexcept
+		{
+			PrepassLaneRequest request{
+				.path = a_path,
+				.descriptor = a_pass->passEnum,
+				.lane = {},
+				.offset = PrepassLaneOffset(FindPrepassPixelShader(a_shader, a_pass->passEnum))
+			};
+			for (std::size_t component = 0; component < kPrepassLaneComponents; ++component) {
+				const auto classifier = g_prepassClassifiers[component];
+				if (!classifier)
+					continue;
+				const bool flagged = classifier(a_pass, a_path);
+				auto& counts = g_classifierCounts[component][static_cast<std::size_t>(a_path)];
+				counts.classified.fetch_add(1, std::memory_order_relaxed);
+				counts.flagged.fetch_add(flagged ? 1u : 0u, std::memory_order_relaxed);
+				request.lane[component] = flagged ? 1.0f : 0.0f;
+			}
+			return request;
+		}
+
 		// Immediate draws fill cb2 inside SetupGeometry: write the lane at the map on NG/AE, at the pre-unmap flush on OG (each inlines the other).
 		struct PrepassSetupGeometryHook
 		{
@@ -283,16 +321,11 @@ namespace cs::engine
 				RE::BSShader* a_self,
 				RE::BSRenderPass* a_pass)
 			{
-				if (!g_prepassClassifier || !a_pass || (a_pass->passEnum & kPrepassLandscapeBit) != 0) {
+				if (!g_prepassLaneActive || !a_pass || (a_pass->passEnum & kPrepassLandscapeBit) != 0) {
 					func(a_self, a_pass);
 					return;
 				}
-				PrepassLaneRequest request{
-					.path = PrepassBakePath::kImmediate,
-					.descriptor = a_pass->passEnum,
-					.value = g_prepassClassifier(a_pass, PrepassBakePath::kImmediate) ? 1.0f : 0.0f,
-					.offset = PrepassLaneOffset(FindPrepassPixelShader(a_self, a_pass->passEnum))
-				};
+				auto request = MakePrepassLaneRequest(a_self, a_pass, PrepassBakePath::kImmediate);
 				const ThreadLocalPointerScope scope(t_prepassLane, &request);
 				func(a_self, a_pass);
 			}
@@ -307,7 +340,7 @@ namespace cs::engine
 				return;
 			const bool fits = request->offset >= 0 && a_group && a_group->data;
 			if (fits)
-				a_group->data[request->offset] = request->value;
+				std::ranges::copy(request->lane, a_group->data + request->offset);
 			CountLane(fits, request->descriptor, request->offset);
 		}
 
@@ -349,14 +382,9 @@ namespace cs::engine
 				RE::BSShader* a_self,
 				RE::BSRenderPass* a_pass)
 			{
-				if (!g_prepassClassifier || !a_pass || (a_pass->passEnum & kPrepassLandscapeBit) != 0)
+				if (!g_prepassLaneActive || !a_pass || (a_pass->passEnum & kPrepassLandscapeBit) != 0)
 					return func(a_self, a_pass);
-				PrepassLaneRequest request{
-					.path = PrepassBakePath::kCommandBuffer,
-					.descriptor = a_pass->passEnum,
-					.value = g_prepassClassifier(a_pass, PrepassBakePath::kCommandBuffer) ? 1.0f : 0.0f,
-					.offset = PrepassLaneOffset(FindPrepassPixelShader(a_self, a_pass->passEnum))
-				};
+				auto request = MakePrepassLaneRequest(a_self, a_pass, PrepassBakePath::kCommandBuffer);
 				const ThreadLocalPointerScope scope(t_prepassLane, &request);
 				return func(a_self, a_pass);
 			}
@@ -372,9 +400,9 @@ namespace cs::engine
 			{
 				if (const auto* request = t_prepassLane; request && request->path == PrepassBakePath::kCommandBuffer) {
 					const bool fits = request->offset >= 0 && a_param.pixelConstants &&
-					                  static_cast<std::uint32_t>(request->offset) < a_param.pixelRegisters * 4;
+					                  static_cast<std::uint32_t>(request->offset) + kPrepassLaneComponents <= a_param.pixelRegisters * 4;
 					if (fits)
-						a_param.pixelConstants[request->offset] = request->value;
+						std::ranges::copy(request->lane, a_param.pixelConstants + request->offset);
 					CountLane(fits, request->descriptor, request->offset);
 				}
 				return func(a_self, a_param);
@@ -420,7 +448,7 @@ namespace cs::engine
 	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
 	}
 
-	bool RegisterPrepassDrawClassifier(PrepassDrawClassifier a_classifier)
+	bool RegisterPrepassDrawClassifier(PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier)
 	{
 		static const bool installed =
 			TryPatch(
@@ -440,15 +468,23 @@ namespace cs::engine
 			TryPatch(
 				"command-buffer builder lane",
 				[] { stl::detour_thunk<BuildCommandBufferHook>(RE::ID::BSShader::BuildCommandBuffer); });
-		if (!installed || !a_classifier || g_prepassClassifier)
+		auto& slot = g_prepassClassifiers[static_cast<std::size_t>(a_component)];
+		if (!installed || !a_classifier || slot)
 			return false;
-		g_prepassClassifier = a_classifier;
+		slot = a_classifier;
+		g_prepassLaneActive = true;
 		return true;
 	}
 
 	PrepassLaneStats GetPrepassLaneStats() noexcept
 	{
 		return { g_laneBaked.load(std::memory_order_relaxed), g_laneUnavailable.load(std::memory_order_relaxed) };
+	}
+
+	PrepassClassifierStats GetPrepassClassifierStats(PrepassLaneComponent a_component, PrepassBakePath a_path) noexcept
+	{
+		const auto& counts = g_classifierCounts[static_cast<std::size_t>(a_component)][static_cast<std::size_t>(a_path)];
+		return { counts.classified.load(std::memory_order_relaxed), counts.flagged.load(std::memory_order_relaxed) };
 	}
 
 	void InstallShaderSubclassHooks()

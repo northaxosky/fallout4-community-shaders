@@ -7,15 +7,8 @@
 #include "Render/ShaderSubclassHooks.h"
 #include "ShaderDefines.h"
 
-#include <array>
 #include <atomic>
-#include <cstdint>
 #include <string>
-
-namespace RE
-{
-	class BSRenderPass;
-}
 
 namespace cs::features
 {
@@ -48,21 +41,11 @@ namespace cs::features
 	private:
 		LODBlending() = default;
 
-		static bool ClassifyPrepassDraw(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath a_path) noexcept;
-
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(lod_blending::kSchema); }
 
 		Settings _settings;
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
-
-		struct BakeCounts
-		{
-			std::atomic<std::uint64_t> draws{ 0 };
-			std::atomic<std::uint64_t> lodDraws{ 0 };
-		};
-		// Indexed by PrepassBakePath; classification runs on the creating or drawing thread.
-		std::array<BakeCounts, 2> _bakeCounts;
 	};
 }
