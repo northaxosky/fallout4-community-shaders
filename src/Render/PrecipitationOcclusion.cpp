@@ -30,53 +30,7 @@ namespace cs::engine
 			return g_active.accumulator.load(std::memory_order_acquire) != nullptr;
 		}
 
-		// TSC ticks per millisecond, from the span since the first read against the performance counter.
-		struct TickClock
-		{
-			LARGE_INTEGER counterStart{};
-			LARGE_INTEGER frequency{};
-			std::uint64_t ticksStart = 0;
-
-			TickClock() noexcept
-			{
-				QueryPerformanceFrequency(&frequency);
-				QueryPerformanceCounter(&counterStart);
-				ticksStart = ReadTicks();
-			}
-
-			[[nodiscard]] double TicksPerMs() const noexcept
-			{
-				LARGE_INTEGER now{};
-				QueryPerformanceCounter(&now);
-				const double ms = static_cast<double>(now.QuadPart - counterStart.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
-				return ms > 0.0 ? static_cast<double>(ReadTicks() - ticksStart) / ms : 1.0;
-			}
-		};
-		const TickClock g_tickClock;
-
-		// Times AccumulateScene or RenderScene while the capture runs; other callers pass through.
-		class ScopedCaptureTicks
-		{
-		public:
-			explicit ScopedCaptureTicks(std::atomic<std::uint64_t>& a_total) noexcept :
-				_total(CaptureActive() ? &a_total : nullptr),
-				_begin(_total ? ReadTicks() : 0)
-			{}
-			~ScopedCaptureTicks() noexcept
-			{
-				if (_total)
-					_total->fetch_add(ReadTicks() - _begin, std::memory_order_relaxed);
-			}
-
-			ScopedCaptureTicks(const ScopedCaptureTicks&) = delete;
-			ScopedCaptureTicks& operator=(const ScopedCaptureTicks&) = delete;
-
-		private:
-			std::atomic<std::uint64_t>* _total;
-			std::uint64_t _begin;
-		};
-
-		// Direct rel32 calls inside the stock occlusion functions, resolved per runtime.
+		// Direct rel32 calls inside the stock occlusion functions, per runtime.
 		constexpr CallSiteAnchor kProjectionSetViewFrustum{
 			.name = "Precipitation::ComputeProjection -> NiCamera::SetViewFrustum",
 			.function = RE::ID::Precipitation::ComputeProjection,
@@ -88,26 +42,6 @@ namespace cs::engine
 			.function = RE::ID::Precipitation::RenderOcclusionMapImpl,
 			.offset = { 0x23D, 0x232, 0x232 },
 			.target = RE::ID::BSPreCulledObjects::QEnabled
-		};
-
-		struct AccumulateScene_Hook
-		{
-			static void thunk(RE::NiCamera* a_camera, RE::NiAVObject* a_scene, RE::NiCullingProcess& a_process, bool a_resetCamera)
-			{
-				const ScopedCaptureTicks timing{ g_timings.accumulate };
-				func(a_camera, a_scene, a_process, a_resetCamera);
-			}
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
-		struct RenderScene_Hook
-		{
-			static void thunk(RE::NiCamera* a_camera, RE::BSShaderAccumulator* a_accumulator, bool a_jitter)
-			{
-				const ScopedCaptureTicks timing{ g_timings.render };
-				func(a_camera, a_accumulator, a_jitter);
-			}
-			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
 		struct SetViewFrustum_Hook
@@ -139,18 +73,6 @@ namespace cs::engine
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
-
-		template <class Hook>
-		HookInstall InstallDetourHook(std::string_view a_name, const REL::VariantID& a_function)
-		{
-			HookInstall install{ .name = std::string(a_name) };
-			stl::detour_thunk<Hook>(a_function);
-			install.installed = Hook::func.address() != 0;
-			install.detail = install.installed ? std::format("detour {:#x}", Hook::func.address()) : "Detours failed";
-			if (!install.installed)
-				L->error("Hook {} unavailable", install.name);
-			return install;
-		}
 
 		template <class Hook>
 		HookInstall InstallCallSiteHook(const CallSiteAnchor& a_anchor)
@@ -203,7 +125,7 @@ namespace cs::engine
 			return desc.Width == kOcclusionMapSize && desc.Height == kOcclusionMapSize;
 		}
 
-		// An allocated stock target must be 512x512: RT 86 forces the viewport, DS8 is swapped.
+		// A stock target must be 512x512: RT 86 forces the viewport, DS8 is swapped.
 		[[nodiscard]] bool StockTargetsMatch() noexcept
 		{
 			const auto* depth = ResolveDepthStencilTarget(DepthStencilTarget::kPrecipitationOcclusion);
@@ -255,7 +177,9 @@ namespace cs::engine
 				_primed = true;
 				{
 					const cs::render::annotation::ScopedEvent event{ "Skylighting/OcclusionMask" };
+					const auto begin = CaptureClock::now();
 					_precipitation.RenderOcclusionMapImpl(nullptr);
+					g_timings.capture.fetch_add((CaptureClock::now() - begin).count(), std::memory_order_relaxed);
 				}
 				std::memcpy(&a_matrix, RE::Precipitation::GetOcclusionMatrix(), sizeof(a_matrix));
 			}
@@ -310,18 +234,11 @@ namespace cs::engine
 		return g_timings;
 	}
 
-	double TicksToMs(std::uint64_t a_ticks) noexcept
-	{
-		return static_cast<double>(a_ticks) / g_tickClock.TicksPerMs();
-	}
-
 	std::vector<HookInstall> InstallOcclusionCaptureHooks()
 	{
 		std::vector<HookInstall> installs;
 		installs.push_back(InstallCallSiteHook<SetViewFrustum_Hook>(kProjectionSetViewFrustum));
 		installs.push_back(InstallCallSiteHook<PreCulledObjectsEnabled_Hook>(kCaptureQEnabled));
-		installs.push_back(InstallDetourHook<AccumulateScene_Hook>("BSShaderUtil::AccumulateScene timing", RE::ID::BSShaderUtil::AccumulateScene));
-		installs.push_back(InstallDetourHook<RenderScene_Hook>("BSShaderUtil::RenderScene timing", RE::ID::BSShaderUtil::RenderScene));
 		installs.push_back(InstallOccluderPassHook());
 		return installs;
 	}

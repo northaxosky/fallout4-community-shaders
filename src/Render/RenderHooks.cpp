@@ -111,37 +111,7 @@ namespace cs::engine
 			bool _previous;
 		};
 
-		class PostDispatchScope
-		{
-		public:
-			explicit PostDispatchScope(
-				const std::vector<PrioritizedCallback>& a_callbacks) noexcept :
-				_callbacks(a_callbacks)
-			{}
-			~PostDispatchScope() noexcept
-			{
-				for (const auto& entry : _callbacks) {
-					try {
-						entry.cb();
-					} catch (const std::exception& e) {
-						L->error(
-							"Deferred-lights post callback failed: {}",
-							e.what());
-					} catch (...) {
-						L->error(
-							"Deferred-lights post callback failed.");
-					}
-				}
-			}
-
-			PostDispatchScope(const PostDispatchScope&) = delete;
-			PostDispatchScope& operator=(const PostDispatchScope&) = delete;
-
-		private:
-			const std::vector<PrioritizedCallback>& _callbacks;
-		};
-
-		// Callbacks run inside engine frames, so a failure is logged instead of unwinding through them.
+		// Callbacks run inside engine frames, so failures are logged, not unwound.
 		void DispatchGuarded(const std::vector<PrioritizedCallback>& v, const char* a_where) noexcept
 		{
 			for (auto& entry : v) {
@@ -154,6 +124,25 @@ namespace cs::engine
 				}
 			}
 		}
+
+		class PostDispatchScope
+		{
+		public:
+			explicit PostDispatchScope(
+				const std::vector<PrioritizedCallback>& a_callbacks) noexcept :
+				_callbacks(a_callbacks)
+			{}
+			~PostDispatchScope() noexcept
+			{
+				DispatchGuarded(_callbacks, "Deferred-lights post");
+			}
+
+			PostDispatchScope(const PostDispatchScope&) = delete;
+			PostDispatchScope& operator=(const PostDispatchScope&) = delete;
+
+		private:
+			const std::vector<PrioritizedCallback>& _callbacks;
+		};
 
 		struct DeferredPrePass_Hook
 		{
@@ -267,7 +256,7 @@ namespace cs::engine
 			return scene ? scene->directionalShadowLight : nullptr;
 		}
 
-		// The main sun's Render(7) is the only directional render inside DeferredLightsImpl; its cascades are clean on return.
+		// The sun's Render(7) is the only directional render in DeferredLightsImpl.
 		struct SunShadowRender_Hook
 		{
 			static void thunk(RE::BSShadowDirectionalLight* a_this, std::uint32_t a_mask)

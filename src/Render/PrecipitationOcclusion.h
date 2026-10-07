@@ -1,10 +1,10 @@
 #pragma once
 
 #include <DirectXMath.h>
-#include <intrin.h>
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -50,9 +50,9 @@ namespace cs::engine
 
 	struct OcclusionCaptureResult
 	{
-		// Engine occlusion matrix as stored: rows map (world - main camera) to occlusion NDC.
+		// Engine matrix as stored: rows map (world - main camera) to occlusion NDC.
 		DirectX::XMFLOAT4X4 matrix{};
-		// The platform entry of DS8 resolves to the same slot and holds the stock target again.
+		// DS8's platform entry resolves to the same slot and holds the stock target.
 		bool stockTargetRestored = false;
 	};
 
@@ -89,10 +89,10 @@ namespace cs::engine
 		OccluderPolicy occluders;
 	};
 
-	// Null unless a capture is running and the accumulator is its occlusion accumulator.
+	// Null unless a capture runs and the accumulator is its occlusion one.
 	[[nodiscard]] const ActiveCapture* GetActiveCapture(const RE::BSShaderAccumulator* a_accumulator) noexcept;
 
-	// Telemetry counters; slot 44 also runs on worker threads, so all are relaxed atomics.
+	// Telemetry counters; slot 44 runs on worker threads, so relaxed atomics.
 	enum class OccluderReject : std::uint8_t
 	{
 		kSkinned,
@@ -119,27 +119,30 @@ namespace cs::engine
 		std::atomic<std::uint64_t> delegated{ 0 };
 		// Own passes handed to the engine, new or reused, by reason.
 		std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(OwnBuildReason::kCount)> ownBuilt{};
-		// Own passes whose command buffer was created, not reused from an earlier frame.
+		// Own passes whose command buffer was created, not reused.
 		std::atomic<std::uint64_t> ownNew{ 0 };
-		// Upstream-accepted occluders that stock rejected and the own build could not take.
+		// Upstream-accepted occluders stock rejected and the own build could not take.
 		std::atomic<std::uint64_t> stockOnly{ 0 };
 		std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(OccluderReject::kCount)> rejected{};
 	};
 
 	[[nodiscard]] OccluderStats& GetOccluderStats() noexcept;
 
-	// Where one capture spends its CPU time, in TSC ticks (cheap enough to read per slot-44 call).
-	// The hook parts run inside accumulate; hooks may also run on worker threads.
+	using CaptureClock = std::chrono::steady_clock;
+
+	// Capture CPU time; the hook parts run inside it, possibly on worker threads.
 	struct CaptureTimings
 	{
-		std::atomic<std::uint64_t> accumulate{ 0 };
-		std::atomic<std::uint64_t> render{ 0 };
-		std::atomic<std::uint64_t> hookPredicate{ 0 };
-		std::atomic<std::uint64_t> hookStock{ 0 };
-		std::atomic<std::uint64_t> hookOwn{ 0 };
+		std::atomic<CaptureClock::rep> capture{ 0 };
+		std::atomic<CaptureClock::rep> hookPredicate{ 0 };
+		std::atomic<CaptureClock::rep> hookStock{ 0 };
+		std::atomic<CaptureClock::rep> hookOwn{ 0 };
 	};
 
 	[[nodiscard]] CaptureTimings& GetCaptureTimings() noexcept;
-	[[nodiscard]] inline std::uint64_t ReadTicks() noexcept { return __rdtsc(); }
-	[[nodiscard]] double TicksToMs(std::uint64_t a_ticks) noexcept;
+
+	[[nodiscard]] inline double TicksToMs(CaptureClock::rep a_ticks) noexcept
+	{
+		return std::chrono::duration<double, std::milli>(CaptureClock::duration(a_ticks)).count();
+	}
 }

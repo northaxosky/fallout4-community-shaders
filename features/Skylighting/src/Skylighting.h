@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
+#include "Render/PrecipitationOcclusion.h"
 #include "Render/ShadowCascades.h"
 #include "ShaderDefines.h"
 #include "ShadowLightData.h"
@@ -31,7 +32,7 @@ namespace cs::features
 	public:
 		using Settings = skylighting::Settings;
 
-		// PS slot of the probe array for forward consumers; compute consumers bind it at t50 too.
+		// PS slot of the probe array for forward consumers; compute binds t50 too.
 		static constexpr std::uint32_t kProbeArraySlot = 50;
 
 		static Skylighting* GetSingleton();
@@ -63,7 +64,7 @@ namespace cs::features
 		// Packs b6; repeated packs within a frame must not advance the grid again.
 		render::SkylightingSettings GetCommonBufferData();
 
-		// Null unless the feature is healthy and its probes were created, so consumers fail neutral.
+		// Null unless healthy with probes created, so consumers fail neutral.
 		ID3D11ShaderResourceView* GetProbeArraySRV() const noexcept;
 
 	private:
@@ -72,7 +73,7 @@ namespace cs::features
 		bool SaveSettings() override;
 		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(skylighting::kSchema); }
 
-		// Captures the occlusion map from a random zenith direction after the stock pass.
+		// Captures the occlusion map from a random zenith direction after stock.
 		void RenderOcclusion();
 		enum class CaptureState : std::uint8_t
 		{
@@ -119,7 +120,7 @@ namespace cs::features
 			kInvalid,
 			kCopyTarget
 		};
-		// Right after the main sun's Render(7); publishes the cascade copy and its light data for the next probe update.
+		// Right after the main sun's Render(7); publishes the cascades and light data.
 		void CopySunCascades();
 		CascadeSkip PublishSunCascades(ID3D11DeviceContext* a_context);
 		bool EnsureCascadeCopy(ID3D11Device* a_device, ID3D11Texture2D* a_source);
@@ -135,8 +136,7 @@ namespace cs::features
 			kTiled
 		};
 		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
-		// Probes at kProbeArraySlot; lighting also gets albedo and MRT4 (vertex AO) at the next two,
-		// and raster lights the probe shadow visibility after them.
+		// Probes at kProbeArraySlot, then albedo, MRT4 (vertex AO), shadow visibility.
 		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t
@@ -161,10 +161,10 @@ namespace cs::features
 		std::unique_ptr<cs::buffer::Texture3D> _texShadowVisibility;
 		winrt::com_ptr<ID3D11SamplerState> _comparisonSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _probeUpdateCompute;
-		// Zero split distances leave every probe lit, so a neutral publish is the zeroed block.
+		// Zero split distances leave every probe lit, so neutral is the zeroed block.
 		winrt::com_ptr<ID3D11Buffer> _shadowLightsBuffer;
 		winrt::com_ptr<ID3D11ShaderResourceView> _shadowLightsSRV;
-		// The stock array is overwritten by focus and local shadows, so the sun cascades live in an owned copy.
+		// Focus and local shadows overwrite the stock array; cascades live in a copy.
 		winrt::com_ptr<ID3D11Texture2D> _cascadeCopy;
 		winrt::com_ptr<ID3D11ShaderResourceView> _cascadeCopySRV;
 		D3D11_TEXTURE2D_DESC _cascadeDesc{};
@@ -181,7 +181,7 @@ namespace cs::features
 
 		// misc parameters
 		float occlusionDistance = 10000.f;
-		// Slack below the probe grid for eye movement between the grid update and the occlusion render.
+		// Slack below the grid for eye movement between grid update and render.
 		static constexpr float OCCLUSION_BELOW_GRID_MARGIN = 512.f;
 		static constexpr float MIN_OCCLUDER_RADIUS = 32.0f;
 
@@ -191,7 +191,7 @@ namespace cs::features
 		DirectX::XMFLOAT4X4 OcclusionTransform{};
 		DirectX::XMFLOAT4 OcclusionDir{};
 		std::uint32_t frameCount = 0;
-		// The probe update needs a published matrix; the first capture can fail at load.
+		// The probe update needs a published matrix; the first capture can fail.
 		bool _hasOcclusion = false;
 
 		// Render thread only; the frame stamp makes repeated packs reuse one advance.
@@ -213,8 +213,8 @@ namespace cs::features
 			std::atomic<std::uint64_t> failed{ 0 };
 			std::atomic<float> cpuMsAverage{ 0.0f };
 			std::atomic<float> cpuMsMax{ 0.0f };
-			// Per-capture window averages: accumulate, render, hook predicate, hook stock, hook own.
-			std::array<std::atomic<float>, 5> stageMs{};
+			// Per-capture window averages: capture, hook predicate, hook stock, hook own.
+			std::array<std::atomic<float>, 4> stageMs{};
 			std::atomic_bool stockTargetRestored{ true };
 		} _counters;
 		struct ProbeCounters
@@ -238,7 +238,7 @@ namespace cs::features
 			// Latest frame: cell id, array origin, valid margin.
 			std::array<std::atomic<std::int32_t>, 9> grid{};
 		} _probeCounters;
-		// Sun cascade copies; a skip publishes neutral light data so stale cascades are never sampled.
+		// Sun cascade copies; a skip publishes neutral data, never stale cascades.
 		struct CascadeCounters
 		{
 			std::atomic<std::uint64_t> copies{ 0 };
@@ -251,8 +251,8 @@ namespace cs::features
 		double _windowCpuMsSum = 0.0;
 		float _windowCpuMsMax = 0.0f;
 		std::uint32_t _windowCaptures = 0;
-		// Stage tick totals at the last summary: accumulate, render, predicate, stock, own.
-		std::array<std::uint64_t, 5> _timingSnapshot{};
+		// Stage tick totals at the last summary, in CaptureTimings order.
+		std::array<cs::engine::CaptureClock::rep, 4> _timingSnapshot{};
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
 		ProbeState _probeState = ProbeState::kPending;

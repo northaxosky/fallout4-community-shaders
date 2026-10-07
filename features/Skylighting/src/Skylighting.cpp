@@ -117,7 +117,7 @@ namespace cs::features
 			FailLoad("Skylighting shader contribution registration failed.");
 			return;
 		}
-		// FO4: the stock array holds the sun cascades only until focus and local shadows reuse it.
+		// FO4: the stock array holds the sun cascades until focus shadows reuse it.
 		if (!cs::engine::RegisterPostSunShadowRender([this] { CopySunCascades(); })) {
 			FailLoad("Skylighting shadow history needs the main sun shadow render hook");
 			return;
@@ -145,7 +145,7 @@ namespace cs::features
 			a_error = "the shared substrate is unavailable, so b6 carries no probe grid";
 			return false;
 		}
-		// Raster and tiled ambient are chosen per frame; every registered route must publish or neither runs.
+		// Raster and tiled ambient vary per frame; every route must publish.
 		if (!cs::engine::ValidateShaderInjectionRoutes("Skylighting", a_error))
 			return false;
 		_injectionsOperational.store(true, std::memory_order_release);
@@ -182,7 +182,7 @@ namespace cs::features
 		if (!a_context || !probes)
 			return;
 		const bool lighting = a_consumer == Consumer::kLight || a_consumer == Consumer::kTiled;
-		// Only the raster sun reads shadow visibility; the tiled kernel has no directional lobes.
+		// Only the raster sun reads shadow visibility; tiled has no directional lobes.
 		const bool shadowVisibility = a_consumer == Consumer::kLight;
 		const std::array<ID3D11ShaderResourceView*, 4> views{
 			probes,
@@ -209,7 +209,7 @@ namespace cs::features
 
 	void Skylighting::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		// Typed UAV loads are optional in D3D11 and the probe update reads UAVs it writes.
+		// Typed UAV loads are optional in D3D11 and the probe update needs them.
 		for (const auto& [format, name] : kProbeFormats) {
 			D3D11_FEATURE_DATA_FORMAT_SUPPORT2 support{ format, 0 };
 			if (FAILED(a_device->CheckFeatureSupport(D3D11_FEATURE_FORMAT_SUPPORT2, &support, sizeof(support))) ||
@@ -467,7 +467,7 @@ namespace cs::features
 	void Skylighting::RenderOcclusion()
 	{
 		const auto state = CaptureFrame();
-		// Keyed on anchor frames so skipped frames report too; state changes log at once.
+		// Keyed on anchor frames so skipped frames report; state changes log at once.
 		if (++_anchorFrames == 1 || _anchorFrames % kSummaryIntervalFrames == 0 || state != _loggedState || std::exchange(_summaryPending, false))
 			LogCaptureSummary(state);
 	}
@@ -600,12 +600,13 @@ namespace cs::features
 		const auto own = [&](Own a_reason) { return count(stats.ownBuilt[static_cast<std::size_t>(a_reason)]); };
 		const auto ownTotal = own(Own::kLandscape) + own(Own::kNotCasting) + own(Own::kAlphaBlended) + own(Own::kOther);
 
-		// Per-capture milliseconds of the window; the hook parts run inside accumulate.
+		// Per-capture window milliseconds; the hook parts run inside the capture.
 		const auto& timings = cs::engine::GetCaptureTimings();
-		const std::array<std::uint64_t, 5> ticks{
-			count(timings.accumulate), count(timings.render), count(timings.hookPredicate), count(timings.hookStock), count(timings.hookOwn)
+		const std::array<cs::engine::CaptureClock::rep, 4> ticks{
+			timings.capture.load(std::memory_order_relaxed), timings.hookPredicate.load(std::memory_order_relaxed),
+			timings.hookStock.load(std::memory_order_relaxed), timings.hookOwn.load(std::memory_order_relaxed)
 		};
-		std::array<float, 5> stageMs{};
+		std::array<float, 4> stageMs{};
 		for (std::size_t i = 0; i < stageMs.size(); ++i) {
 			stageMs[i] = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(ticks[i] - _timingSnapshot[i]) / _windowCaptures) : 0.0f;
 			_counters.stageMs[i].store(stageMs[i], std::memory_order_relaxed);
@@ -632,7 +633,7 @@ namespace cs::features
 			"L={:.0f} dir=({:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
-			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_accumulate={:.3f} ms_render={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
+			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"sun_copies={} sun_copy_skipped_unavailable={} sun_copy_skipped_not_full_sky={} sun_copy_skipped_no_light={} sun_copy_skipped_unsupported_count={} sun_copy_skipped_no_target={} sun_copy_skipped_invalid={} sun_copy_skipped_copy_target={} "
 			"cascade_count={} split_end=({:.1f},{:.1f}) "
@@ -644,7 +645,7 @@ namespace cs::features
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
-			cpuMsAverage, _windowCpuMsMax, stageMs[0], stageMs[1], stageMs[2], stageMs[3], stageMs[4], _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
+			cpuMsAverage, _windowCpuMsMax, stageMs[0], stageMs[1], stageMs[2], stageMs[3], _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange,
 			count(_cascadeCounters.copies), cascadeSkipped(CascadeSkip::kUnavailable), cascadeSkipped(CascadeSkip::kNotFullSky), cascadeSkipped(CascadeSkip::kNoLight),
 			cascadeSkipped(CascadeSkip::kUnsupportedCount), cascadeSkipped(CascadeSkip::kNoTarget), cascadeSkipped(CascadeSkip::kInvalid), cascadeSkipped(CascadeSkip::kCopyTarget),
@@ -674,11 +675,10 @@ namespace cs::features
 			.Field("capture_cpu_ms_avg", static_cast<double>(_counters.cpuMsAverage.load(std::memory_order_relaxed)))
 			.Field("capture_cpu_ms_max", static_cast<double>(_counters.cpuMsMax.load(std::memory_order_relaxed)))
 			.Field("stock_ds8_restored", _counters.stockTargetRestored.load(std::memory_order_relaxed))
-			.Field("ms_accumulate", static_cast<double>(_counters.stageMs[0].load(std::memory_order_relaxed)))
-			.Field("ms_render", static_cast<double>(_counters.stageMs[1].load(std::memory_order_relaxed)))
-			.Field("ms_hook_predicate", static_cast<double>(_counters.stageMs[2].load(std::memory_order_relaxed)))
-			.Field("ms_hook_stock", static_cast<double>(_counters.stageMs[3].load(std::memory_order_relaxed)))
-			.Field("ms_hook_own", static_cast<double>(_counters.stageMs[4].load(std::memory_order_relaxed)))
+			.Field("ms_capture", static_cast<double>(_counters.stageMs[0].load(std::memory_order_relaxed)))
+			.Field("ms_hook_predicate", static_cast<double>(_counters.stageMs[1].load(std::memory_order_relaxed)))
+			.Field("ms_hook_stock", static_cast<double>(_counters.stageMs[2].load(std::memory_order_relaxed)))
+			.Field("ms_hook_own", static_cast<double>(_counters.stageMs[3].load(std::memory_order_relaxed)))
 			.Field("occluders_accepted", count(stats.accepted))
 			.Field("occluders_delegated", count(stats.delegated))
 			.Field("occluders_own_new", count(stats.ownNew))
@@ -878,7 +878,7 @@ namespace cs::features
 
 		skylighting::DirectionalShadowLightData data{};
 		for (std::size_t i = 0; i < cs::engine::kMaxSunCascades; ++i) {
-			// The engine matrix is row-vector world to cascade UV and depth; HLSL column_major reads the same bytes as its transpose.
+			// Row-vector engine matrix; column_major HLSL reads the same bytes transposed.
 			data.ShadowProj[i] = snapshot.worldToShadow[i];
 			DirectX::XMVECTOR determinant;
 			const auto inverse = DirectX::XMMatrixInverse(&determinant, DirectX::XMLoadFloat4x4(&snapshot.worldToShadow[i]));
@@ -888,7 +888,7 @@ namespace cs::features
 			DirectX::XMStoreFloat4x4(&data.InvShadowProj[i], inverse);
 		}
 		data.EndSplitDistances = { snapshot.splitEnd[0], snapshot.splitEnd[1] };
-		// FO4: the engine's overlap constant is untyped and UpdateProbesCS does not read the start distances.
+		// FO4: the engine's overlap constant is untyped and the shader ignores starts.
 		data.StartSplitDistances = { 0.0f, snapshot.splitEnd[0] };
 
 		if (!EnsureCascadeCopy(device, snapshot.texture))
@@ -901,7 +901,7 @@ namespace cs::features
 		for (std::size_t i = 0; i < cs::engine::kMaxSunCascades; ++i)
 			_cascadeCounters.splitEnd[i].store(snapshot.splitEnd[i], std::memory_order_relaxed);
 		if (!std::exchange(_loggedCascadeDesc, true)) {
-			// The cached matrix must already carry the cascade sub-rect: its UV scale is one over texels times world units per texel.
+			// The cached matrix already carries the cascade sub-rect in its UV scale.
 			for (std::size_t i = 0; i < cs::engine::kMaxSunCascades; ++i) {
 				const auto& m = snapshot.worldToShadow[i].m;
 				const float uScale = std::sqrt(m[0][0] * m[0][0] + m[1][0] * m[1][0] + m[2][0] * m[2][0]);
@@ -936,8 +936,7 @@ namespace cs::features
 		cs::engine::ComputeOMScope scope(a_context, 4, 1, 4, 0);
 		cs::render::ScopedComputeSharedDataBinding substrate(a_context);
 
-		// FO4: no ESRAM shadow exists, so t3 repeats the cascade copy and min(a, a) leaves the sample unchanged.
-		// Unpublished cascades stay null; the neutral light block has zero splits, which skips SampleCmp.
+		// FO4: no ESRAM shadow, so t3 repeats the cascade copy; unpublished stays null.
 		auto* cascades = _cascadesPublished ? _cascadeCopySRV.get() : nullptr;
 		std::array<ID3D11ShaderResourceView*, 4> srvs = {
 			_occlusionSRV.get(),
