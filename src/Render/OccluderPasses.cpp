@@ -14,14 +14,22 @@ namespace cs::engine
 
 		using ShaderFlag = RE::BSShaderProperty::EShaderPropertyFlag;
 
-		// BSUtilityShader technique bits of a depth-only static: T N BT, Sm, Smclamp.
-		constexpr std::uint32_t kUtilityTexNormalBinormalTangent = 0x1A;
+		// BSUtilityShader technique bits the stock pass builder composes (vslot 44, AE 0x217B8F0).
+		constexpr std::uint32_t kUtilityLandscape = 0x20;
+		constexpr std::uint32_t kUtilityAlphaTest = 0x80;
 		constexpr std::uint32_t kUtilityShadowMap = 0x4000;
 		constexpr std::uint32_t kUtilityShadowMapClamped = 0x8000;
-		// Without the stock land bit: the utility vertex shader has no code behind it.
-		constexpr std::uint32_t kLandscapeOcclusionTechnique =
-			kUtilityTexNormalBinormalTangent | kUtilityShadowMap | kUtilityShadowMapClamped;
+		constexpr std::uint32_t kUtilityGeometryType15 = 0x200040;
+		constexpr std::uint32_t kUtilityMergeInstanced = 0xA00000;
+		constexpr std::uint32_t kUtilityAdditionalAlphaMask = 0x10000000;
 
+		// BSGeometry::type that the stock builder gives extra technique bits.
+		constexpr std::uint8_t kGeometryType15 = 15;
+		constexpr std::uint16_t kAlphaPropertyBlend = 0x1;
+		constexpr std::uint16_t kAlphaPropertyTest = 0x200;
+		constexpr std::ptrdiff_t kEffectDataPayloadOffset = 0x20;
+		constexpr std::uint8_t kTreeAnimPassType = 11;
+		constexpr std::uint8_t kVatsPassType = 21;
 		constexpr std::uint64_t kGeometryMeshLodFlag = 0x1000;
 		constexpr std::int8_t kDefaultLodMode = 3;
 
@@ -81,21 +89,63 @@ namespace cs::engine
 			return std::nullopt;
 		}
 
-		[[nodiscard]] bool IsLoadedCellLandscape(const RE::BSLightingShaderProperty& a_property) noexcept
+		[[nodiscard]] const RE::NiAlphaProperty* GetAlphaProperty(const RE::BSGeometry& a_geometry) noexcept
 		{
-			return a_property.flags.any(ShaderFlag::kMultiTextureLandscape) && a_property.flags.none(ShaderFlag::kLODLandscape);
+			return static_cast<const RE::NiAlphaProperty*>(a_geometry.properties[0].get());
 		}
 
-		// Land clears Cast Shadows at creation, so stock never builds its pass.
-		RE::BSShaderProperty::RenderPassArray* BuildLandscapePasses(
+		// Names the stock builder condition that upstream's predicate does not share.
+		[[nodiscard]] OwnBuildReason ClassifyStockRejection(
+			const RE::BSLightingShaderProperty& a_property,
+			const RE::BSGeometry& a_geometry) noexcept
+		{
+			if (a_property.flags.any(ShaderFlag::kMultiTextureLandscape))
+				return OwnBuildReason::kLandscape;
+			if (const auto* alpha = GetAlphaProperty(a_geometry); alpha && (alpha->flags.flags & kAlphaPropertyBlend))
+				return OwnBuildReason::kAlphaBlended;
+			if (a_property.flags.none(ShaderFlag::kCastShadows))
+				return OwnBuildReason::kNotCasting;
+			return OwnBuildReason::kOther;
+		}
+
+		// The stock builder's technique for the occlusion mode, from the same property and geometry inputs.
+		[[nodiscard]] std::uint32_t OcclusionTechnique(
+			const RE::BSLightingShaderProperty& a_property,
+			RE::BSGeometry& a_geometry)
+		{
+			auto technique = a_property.DetermineUtilityShaderDecl();
+			// Landscape decl carries a land bit whose utility permutation has no code behind it.
+			if (a_property.flags.any(ShaderFlag::kMultiTextureLandscape))
+				technique &= ~kUtilityLandscape;
+
+			if (a_geometry.type == kGeometryType15) {
+				technique |= kUtilityGeometryType15;
+				if (a_property.flags.any(ShaderFlag::kAlphaTest))
+					technique |= kUtilityAlphaTest;
+			} else if (a_geometry.IsBSMergeInstancedTriShape()) {
+				technique |= kUtilityMergeInstanced;
+			}
+
+			technique |= kUtilityShadowMap | kUtilityShadowMapClamped;
+			if (const auto* alpha = GetAlphaProperty(a_geometry); alpha && (alpha->flags.flags & kAlphaPropertyTest))
+				technique |= kUtilityAlphaTest;
+			if (a_property.effectData && *reinterpret_cast<void* const*>(reinterpret_cast<const std::byte*>(a_property.effectData) + kEffectDataPayloadOffset))
+				technique |= kUtilityAdditionalAlphaMask;
+			return technique;
+		}
+
+		// Mirrors the stock else-branch for pass lists the stock builder rejects; reuses the list once built.
+		RE::BSShaderProperty::RenderPassArray* BuildOcclusionPasses(
 			RE::BSLightingShaderProperty& a_property,
 			RE::BSGeometry& a_geometry,
-			const RE::BSShaderAccumulator& a_accumulator)
+			const RE::BSShaderAccumulator& a_accumulator,
+			bool& a_created)
 		{
 			auto* shader = RE::BSUtilityShader::GetSingleton();
 			if (!shader || a_accumulator.depthPassIndex >= std::size(a_property.depthMapRenderPassListA))
 				return nullptr;
 			auto& list = a_property.depthMapRenderPassListA[a_accumulator.depthPassIndex];
+			const auto technique = OcclusionTechnique(a_property, a_geometry);
 
 			// FO4: stock reads the fade node's mesh LOD level only when this geometry flag is set.
 			auto lodMode = kDefaultLodMode;
@@ -103,18 +153,23 @@ namespace cs::engine
 				lodMode = a_property.fadeNode->currentMeshLODLevel;
 
 			if (list.passList) {
-				if (list.passList->passEnum != kLandscapeOcclusionTechnique)
+				if (list.passList->passEnum != technique)
 					return nullptr;
 				list.passList->lodMode = lodMode;
 				return &list;
 			}
 
-			auto* pass = list.Add(shader, &a_property, &a_geometry, kLandscapeOcclusionTechnique, 0, nullptr, nullptr, nullptr, nullptr);
+			auto* pass = list.Add(shader, &a_property, &a_geometry, technique, 0, nullptr, nullptr, nullptr, nullptr);
 			if (!pass)
 				return nullptr;
 			// The pass is new for this list, so it holds no command buffer to release first.
 			pass->commandBuffer = shader->CreateCommandBuffer(pass);
 			pass->lodMode = lodMode;
+			if (a_property.flags.any(ShaderFlag::kTreeAnim))
+				pass->passType = kTreeAnimPassType;
+			else if (a_property.flags.any(ShaderFlag::kVATSTarget))
+				pass->passType = kVatsPassType;
+			a_created = true;
 			return &list;
 		}
 
@@ -149,16 +204,18 @@ namespace cs::engine
 					stats.delegated.fetch_add(1, std::memory_order_relaxed);
 					return passes;
 				}
-				if (IsLoadedCellLandscape(*a_property)) {
-					passes = BuildLandscapePasses(*a_property, *a_geometry, *a_accumulator);
-					timings.hookOwn.fetch_add(ReadTicks() - stockEnd, std::memory_order_relaxed);
-					if (passes) {
-						stats.ownBuilt.fetch_add(1, std::memory_order_relaxed);
-						return passes;
-					}
+
+				bool created = false;
+				passes = BuildOcclusionPasses(*a_property, *a_geometry, *a_accumulator, created);
+				timings.hookOwn.fetch_add(ReadTicks() - stockEnd, std::memory_order_relaxed);
+				if (!passes) {
+					stats.stockOnly.fetch_add(1, std::memory_order_relaxed);
+					return nullptr;
 				}
-				stats.stockOnly.fetch_add(1, std::memory_order_relaxed);
-				return nullptr;
+				stats.ownBuilt[static_cast<std::size_t>(ClassifyStockRejection(*a_property, *a_geometry))].fetch_add(1, std::memory_order_relaxed);
+				if (created)
+					stats.ownNew.fetch_add(1, std::memory_order_relaxed);
+				return passes;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};

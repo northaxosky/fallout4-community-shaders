@@ -103,11 +103,25 @@ namespace cs::engine
 		kCount
 	};
 
+	// Why the stock builder rejects an occluder that upstream accepts.
+	enum class OwnBuildReason : std::uint8_t
+	{
+		kLandscape,
+		kNotCasting,
+		kAlphaBlended,
+		kOther,
+		kCount
+	};
+
 	struct OccluderStats
 	{
 		std::atomic<std::uint64_t> accepted{ 0 };
 		std::atomic<std::uint64_t> delegated{ 0 };
-		std::atomic<std::uint64_t> ownBuilt{ 0 };
+		// Own passes handed to the engine, new or reused, by reason.
+		std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(OwnBuildReason::kCount)> ownBuilt{};
+		// Own passes whose command buffer was created, not reused from an earlier frame.
+		std::atomic<std::uint64_t> ownNew{ 0 };
+		// Upstream-accepted occluders that stock rejected and the own build could not take.
 		std::atomic<std::uint64_t> stockOnly{ 0 };
 		std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(OccluderReject::kCount)> rejected{};
 	};

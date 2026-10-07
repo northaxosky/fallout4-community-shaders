@@ -278,6 +278,9 @@ namespace cs::features
 		const auto count = [](const std::atomic<std::uint64_t>& a_value) { return a_value.load(std::memory_order_relaxed); };
 		using Reject = cs::engine::OccluderReject;
 		const auto rejected = [&](Reject a_reason) { return count(stats.rejected[static_cast<std::size_t>(a_reason)]); };
+		using Own = cs::engine::OwnBuildReason;
+		const auto own = [&](Own a_reason) { return count(stats.ownBuilt[static_cast<std::size_t>(a_reason)]); };
+		const auto ownTotal = own(Own::kLandscape) + own(Own::kNotCasting) + own(Own::kAlphaBlended) + own(Own::kOther);
 
 		// Per-capture milliseconds of the window; the hook parts run inside accumulate.
 		const auto& timings = cs::engine::GetCaptureTimings();
@@ -293,14 +296,15 @@ namespace cs::features
 		CaptureLog->info(
 			"summary state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
 			"L={:.0f} dir=({:.3f},{:.3f},{:.3f}) quadrant={} "
-			"accepted={} delegated={} own_built={} stock_only={} "
+			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
 			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_accumulate={:.3f} ms_render={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f}",
 			stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
-			count(stats.accepted), count(stats.delegated), count(stats.ownBuilt), count(stats.stockOnly),
+			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
+			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
 			cpuMsAverage, _windowCpuMsMax, stageMs[0], stageMs[1], stageMs[2], stageMs[3], stageMs[4], _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange);
@@ -331,7 +335,11 @@ namespace cs::features
 			.Field("ms_hook_own", static_cast<double>(_counters.stageMs[4].load(std::memory_order_relaxed)))
 			.Field("occluders_accepted", count(stats.accepted))
 			.Field("occluders_delegated", count(stats.delegated))
-			.Field("occluders_own_built", count(stats.ownBuilt))
+			.Field("occluders_own_new", count(stats.ownNew))
+			.Field("occluders_own_landscape", count(stats.ownBuilt[static_cast<std::size_t>(cs::engine::OwnBuildReason::kLandscape)]))
+			.Field("occluders_own_not_casting", count(stats.ownBuilt[static_cast<std::size_t>(cs::engine::OwnBuildReason::kNotCasting)]))
+			.Field("occluders_own_alpha_blended", count(stats.ownBuilt[static_cast<std::size_t>(cs::engine::OwnBuildReason::kAlphaBlended)]))
+			.Field("occluders_own_other", count(stats.ownBuilt[static_cast<std::size_t>(cs::engine::OwnBuildReason::kOther)]))
 			.Field("occluders_stock_only", count(stats.stockOnly))
 			.Field("rejected_skinned", rejected(Reject::kSkinned))
 			.Field("rejected_flags", rejected(Reject::kFlags))
