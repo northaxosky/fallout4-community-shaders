@@ -75,7 +75,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// FO4: Umbra-culled objects skip frustum tests; stock shadow culling does this too.
+		// FO4: Umbra skips frustum tests; stock sun cascades bypass it the same way.
 		class ScopedPreCullBypass
 		{
 		public:
@@ -154,7 +154,7 @@ namespace cs::engine
 			       (!color || IsOcclusionSquare(reinterpret_cast<ID3D11Texture2D*>(color->texture)));
 		}
 
-		// Owns every engine override of one capture and restores them on every exit.
+		// Owns the capture overrides; ScopedPreCullBypass covers only the Impl call.
 		class ScopedOcclusionCapture
 		{
 		public:
