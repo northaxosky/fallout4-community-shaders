@@ -22,9 +22,9 @@ namespace cs::engine
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	bool RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	bool RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
-	// Right after the main sun light's cascades render, before focus and local shadows reuse the shared target.
+	// Right after the main sun's cascades render, before focus shadows reuse them.
 	bool RegisterPostSunShadowRender(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
-	// After the stock precipitation occlusion pass, which runs once per frame in clear weather too.
+	// After the stock precipitation occlusion pass; it runs in clear weather too.
 	bool RegisterPostPrecipitationOcclusion(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
 	// After all sky and cloud draws in the main color target, before water and alpha.

@@ -37,7 +37,7 @@ namespace DynamicCubemaps
 		} else {
 			EnvReflectionsTexture.GetDimensions(width, height);
 #if defined(SKYLIGHTING)
-			// FO4: sky visibility only selects the cube; native weighting already carries it.
+			// FO4: sky visibility only selects the cube; native weighting carries it.
 			float3 reflections = 0.0;
 			float3 environment = 0.0;
 			if (skylightingSpecular > 0.0)

@@ -39,7 +39,7 @@ namespace ScreenSpaceGI
 		// FO4: native diffuse folds in powered DALC without an upstream Masks.z channel.
 		float3 directionalAmbientColor = FO4SharedData::GetAmbientLinear(normalWS) * albedo;
 #ifdef SKYLIGHTING
-		// FO4: lighting already scaled the ambient addend; scale the separated term to match.
+		// FO4: lighting scaled the ambient addend; scale the separated term too.
 		directionalAmbientColor *= Skylighting::GetAmbientScale(Skylighting::GetViewPosition(screenPosition), normalVS, albedo, vertexAO);
 #endif
 		float maxScale = 1.0;

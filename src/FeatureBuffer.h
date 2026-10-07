@@ -71,6 +71,6 @@ namespace cs
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 4);
 
-	// inactive contributors leave zeroed blocks, except LOD blending and Skylighting, which default to neutral
+	// Inactive blocks are zeroed; LOD blending and Skylighting default neutral.
 	FeatureDataCB GetFeatureBufferData();
 }

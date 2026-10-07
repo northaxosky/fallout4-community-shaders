@@ -382,7 +382,7 @@ float3 refractedScene(float2 screenPosition, float3 normal, out float3 unclipped
 float skylightingSpecularVisibility(float3 positionMS, float3 normal, float3 eyeDirection)
 {
 #	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
-	// FO4: callers pass eyeVector.xyz, the camera-relative world position OG lacks as WPosition.
+	// FO4: callers pass eyeVector.xyz, the camera-relative position OG lacks.
 	sh2 skylightingSH = Skylighting::SampleNoBias(positionMS);
 	sh2 specularLobe = SphericalHarmonics::FauxSpecularLobe(normal, -eyeDirection, 0.0);
 	return Skylighting::EvaluateSpecular(skylightingSH, specularLobe, Skylighting::GetFadeOutFactor(positionMS));

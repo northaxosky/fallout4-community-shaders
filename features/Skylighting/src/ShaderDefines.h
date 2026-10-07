@@ -3,7 +3,7 @@
 
 namespace cs::features::skylighting_shader
 {
-	// Raster and tiled lighting are chosen per frame, so both must carry the ambient factor.
+	// Raster and tiled lighting are chosen per frame, so both carry the factor.
 	inline const engine::ShaderDefineDeclaration kShaderDefines{
 		"SKYLIGHTING",
 		{ engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kBsdfLight,

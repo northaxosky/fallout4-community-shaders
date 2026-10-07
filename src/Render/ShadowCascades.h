@@ -9,16 +9,16 @@
 
 namespace cs::engine
 {
-	// Consumers size their per-cascade data by this; the engine's live count must not exceed it.
+	// Consumers size per-cascade data by this; the live count must not exceed it.
 	inline constexpr std::size_t kMaxSunCascades = 2;
 
-	// The main sun light's rendered cascades. Valid only right after its Render(7) returns, before focus and local shadows reuse the target.
+	// The main sun's cascades; valid only right after its Render(7) returns.
 	struct SunCascadeSnapshot
 	{
 		std::uint32_t count = 0;
 		// Borrowed; the engine owns the array target.
 		ID3D11Texture2D* texture = nullptr;
-		// Row-vector (world, 1) * matrix yields the cascade's full-texture UV and forward depth.
+		// Row-vector (world, 1) * matrix yields full-texture UV and forward depth.
 		std::array<DirectX::XMFLOAT4X4, kMaxSunCascades> worldToShadow{};
 		// View-axis distance where each cascade ends.
 		std::array<float, kMaxSunCascades> splitEnd{};

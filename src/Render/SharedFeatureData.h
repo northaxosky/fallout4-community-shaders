@@ -50,7 +50,7 @@ namespace cs::render
 	};
 	struct SkylightingSettings
 	{
-		// Neutral defaults: a far PosOffset puts every lookup outside the grid (unit SH, visibility 1).
+		// Neutral: a far PosOffset puts every lookup outside the grid (unit SH, vis 1).
 		DirectX::XMFLOAT4X4 OcclusionViewProj{};
 		DirectX::XMFLOAT4 OcclusionDir{}, PosOffset{ 1.0e30f, 1.0e30f, 1.0e30f, 0.0f };
 		std::uint32_t ArrayOrigin[4]{};

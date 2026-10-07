@@ -4,6 +4,6 @@
 
 namespace cs::engine
 {
-	// Replaces the occlusion-pass builder of BSLightingShaderProperty while a capture runs.
+	// Replaces BSLightingShaderProperty's occlusion-pass builder during a capture.
 	[[nodiscard]] HookInstall InstallOccluderPassHook();
 }

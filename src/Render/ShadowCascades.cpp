@@ -32,7 +32,7 @@ namespace cs::engine
 		if (count == 0 || count > kMaxSunCascades)
 			return SunCascadeStatus::kUnsupportedCount;
 
-		// Stock binds the descriptor-selected target at both PS shadow slots, so resolve the same field.
+		// Stock binds the descriptor-selected target at both PS shadow slots; match it.
 		const auto target = light->shadowMapData[0].depthStencilTarget;
 		if (target >= static_cast<std::uint32_t>(DepthStencilTarget::kCount))
 			return SunCascadeStatus::kNoTarget;
