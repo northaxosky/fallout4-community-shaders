@@ -12,4 +12,10 @@ namespace cs::engine
 
 	// Sky::Flags::kHideSky: the sky is not rendered this frame.
 	bool IsSkyHidden() noexcept;
+
+	// Sky::Mode::kFull: the exterior sky lights the scene.
+	bool IsFullSky() noexcept;
+
+	// Interior cell, or a no-sky or fixed-dimension worldspace.
+	bool IsInterior() noexcept;
 }

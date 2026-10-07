@@ -118,9 +118,7 @@ namespace cs::render
 			}
 			data.HideSky = engine::IsSkyHidden() ? 1u : 0u;
 
-			auto* player = RE::PlayerCharacter::GetSingleton();
-			if (const auto* cell = player ? player->GetParentCell() : nullptr)
-				data.InInterior = cell->IsExterior() ? 0u : 1u;
+			data.InInterior = engine::IsInterior() ? 1u : 0u;
 
 			return data;
 		}

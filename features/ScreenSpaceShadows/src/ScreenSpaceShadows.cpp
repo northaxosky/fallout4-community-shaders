@@ -2,7 +2,6 @@
 
 #include <DearModdingUI/Client.h>
 #include <DirectXMath.h>
-#include <RE/S/Sky.h>
 #include <d3d11.h>
 
 #include <algorithm>
@@ -577,8 +576,7 @@ namespace cs::features
 			return;
 
 		try {
-			auto* sky = RE::Sky::GetSingleton();
-			auto* shader = (_settings.Enable && sky && sky->mode.get() == RE::Sky::Mode::kFull) ?
+			auto* shader = (_settings.Enable && cs::engine::IsFullSky()) ?
 			                   GetComputeRaymarch() :
 			                   nullptr;
 

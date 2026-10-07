@@ -8,6 +8,8 @@
 #include "RE/N/NiLight.h"
 #include "RE/S/Sky.h"
 #include "RE/S/Sun.h"
+#include "RE/T/TES.h"
+#include "RE/T/TESWorldSpace.h"
 
 namespace cs::engine
 {
@@ -54,5 +56,23 @@ namespace cs::engine
 	{
 		const auto* sky = RE::Sky::GetSingleton();
 		return sky && sky->flags.all(RE::Sky::Flags::kHideSky);
+	}
+
+	bool IsFullSky() noexcept
+	{
+		const auto* sky = RE::Sky::GetSingleton();
+		return sky && sky->mode.get() == RE::Sky::Mode::kFull;
+	}
+
+	bool IsInterior() noexcept
+	{
+		const auto* tes = RE::TES::GetSingleton();
+		if (tes && !tes->interiorCell) {
+			if (const auto* worldSpace = tes->worldSpace) {
+				if (!worldSpace->flags.any(RE::TESWorldSpace::FLAG::kNoSky, RE::TESWorldSpace::FLAG::kFixedDimensions))
+					return false;
+			}
+		}
+		return true;
 	}
 }
