@@ -15,7 +15,6 @@ namespace cs::render
 
 	struct CreateDeviceAndSwapChainContext
 	{
-		CreateDeviceAndSwapChain realCreate;
 		CreateDevice createDevice;
 		IDXGIAdapter* adapter;
 		D3D_DRIVER_TYPE driverType;

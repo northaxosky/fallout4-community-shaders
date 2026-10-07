@@ -25,11 +25,11 @@ namespace cs::render
 		ReplacementCreateDeviceCallback replacementCreateCallback;
 
 		// FO4: no static d3d11 import; bind by name like upstream's import would.
-		CreateDevice ResolveCreateDevice() noexcept
+		template <class Fn>
+		Fn ResolveD3D11Export(const char* a_name) noexcept
 		{
 			auto* d3d11 = GetModuleHandleW(L"d3d11.dll");
-			return d3d11 ? reinterpret_cast<CreateDevice>(GetProcAddress(d3d11, "D3D11CreateDevice")) :
-			               nullptr;
+			return d3d11 ? reinterpret_cast<Fn>(GetProcAddress(d3d11, a_name)) : nullptr;
 		}
 
 		// A throwing callback must never cross the game's import boundary.
@@ -84,7 +84,6 @@ namespace cs::render
 			const auto requestedFeatureLevelCount =
 				featureLevels.empty() ? a_featureLevelCount : static_cast<UINT>(featureLevels.size());
 			CreateDeviceAndSwapChainContext context{
-				.realCreate = next,
 				.createDevice = nextCreateDevice.load(std::memory_order_acquire),
 				.adapter = a_adapter,
 				.driverType = a_driverType,
@@ -188,16 +187,15 @@ namespace cs::render
 			previous == reinterpret_cast<uintptr_t>(&CreateDeviceAndSwapChainThunk)) {
 			const auto existing =
 				nextCreateDeviceAndSwapChain.load(std::memory_order_acquire);
-			auto* d3d11 = GetModuleHandleW(L"d3d11.dll");
-			const auto native = d3d11 ? reinterpret_cast<CreateDeviceAndSwapChain>(
-											GetProcAddress(d3d11, "D3D11CreateDeviceAndSwapChain")) :
-			                            nullptr;
+			const auto native =
+				ResolveD3D11Export<CreateDeviceAndSwapChain>("D3D11CreateDeviceAndSwapChain");
 			if (!existing && native &&
 				native != &CreateDeviceAndSwapChainThunk) {
 				nextCreateDeviceAndSwapChain.store(native, std::memory_order_release);
 			}
 			if (!nextCreateDevice.load(std::memory_order_acquire)) {
-				nextCreateDevice.store(ResolveCreateDevice(), std::memory_order_release);
+				nextCreateDevice.store(ResolveD3D11Export<CreateDevice>("D3D11CreateDevice"),
+					std::memory_order_release);
 			}
 			L->error(
 				"SwapChainHook IAT installation returned an invalid predecessor ({:#x}); "
@@ -209,7 +207,8 @@ namespace cs::render
 		nextCreateDeviceAndSwapChain.store(
 			reinterpret_cast<CreateDeviceAndSwapChain>(previous),
 			std::memory_order_release);
-		nextCreateDevice.store(ResolveCreateDevice(), std::memory_order_release);
+		nextCreateDevice.store(ResolveD3D11Export<CreateDevice>("D3D11CreateDevice"),
+			std::memory_order_release);
 		installState.store(SwapChainHookState::kInstalled, std::memory_order_release);
 		L->info("SwapChainHook IAT hook installed (next={:#x})", previous);
 		return true;
