@@ -95,7 +95,10 @@ namespace cs::features
 			return;
 		}
 
-		if (!cs::engine::RegisterFeatureShaderBindings("Skylighting", *this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings("Skylighting", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsWater)
+					registration.bind = [this](ID3D11DeviceContext* a_context) { BindWaterProbes(a_context); };
+			})) {
 			FailLoad("Skylighting shader contribution registration failed.");
 			return;
 		}
@@ -126,6 +129,22 @@ namespace cs::features
 			return false;
 		_injectionsOperational.store(true, std::memory_order_release);
 		return true;
+	}
+
+	ID3D11ShaderResourceView* Skylighting::GetProbeArraySRV() const noexcept
+	{
+		if (!IsHealthy() || !_probesReady.load(std::memory_order_acquire) || !_injectionsOperational.load(std::memory_order_acquire) || !_texProbeArray)
+			return nullptr;
+		return _texProbeArray->srv.get();
+	}
+
+	void Skylighting::BindWaterProbes(ID3D11DeviceContext* a_context)
+	{
+		auto* srv = GetProbeArraySRV();
+		if (!a_context || !srv)
+			return;
+		cs::engine::BindInjectionShaderResources(a_context, kProbeArraySlot, 1, &srv);
+		_probeCounters.waterDraws.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void Skylighting::OnLoadingMenuClosed()
@@ -557,7 +576,7 @@ namespace cs::features
 			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_accumulate={:.3f} ms_render={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"probe_state={} probe_dispatches={} probe_skipped_not_full_sky={} probe_skipped_no_occlusion={} probe_skipped_no_grid={} resets={} resets_load={} resets_rebuild={} "
-			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f}",
+			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={}",
 			stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
@@ -568,7 +587,7 @@ namespace cs::features
 			extentX, extentY, depthRange,
 			probeStateNames[static_cast<std::size_t>(_probeState)], count(_probeCounters.dispatches), count(_probeCounters.skippedNotFullSky), count(_probeCounters.skippedNoOcclusion), count(_probeCounters.skippedNoGrid),
 			count(_probeCounters.resets), count(_probeCounters.resetsLoad), count(_probeCounters.resetsRebuild),
-			grid[0], grid[1], grid[2], grid[3], grid[4], grid[5], grid[6], grid[7], grid[8], _probeCounters.gpuMs.load(std::memory_order_relaxed));
+			grid[0], grid[1], grid[2], grid[3], grid[4], grid[5], grid[6], grid[7], grid[8], _probeCounters.gpuMs.load(std::memory_order_relaxed), count(_probeCounters.waterDraws));
 		_windowCpuMsSum = 0.0;
 		_windowCpuMsMax = 0.0f;
 		_windowCaptures = 0;
@@ -624,7 +643,8 @@ namespace cs::features
 			.Field("valid_margin_y", static_cast<std::int64_t>(_probeCounters.grid[7].load(std::memory_order_relaxed)))
 			.Field("valid_margin_z", static_cast<std::int64_t>(_probeCounters.grid[8].load(std::memory_order_relaxed)))
 			.Field("probe_update_gpu_ms", static_cast<double>(_probeCounters.gpuMs.load(std::memory_order_relaxed)))
-			.Field("debug_frames", count(_probeCounters.debugFrames));
+			.Field("debug_frames", count(_probeCounters.debugFrames))
+			.Field("water_draws_bound", count(_probeCounters.waterDraws));
 		cs::render::profiling::CollectPassTimings(a_sink, "Skylighting/");
 	}
 

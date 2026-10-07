@@ -29,6 +29,9 @@ namespace cs::features
 	public:
 		using Settings = skylighting::Settings;
 
+		// PS slot of the probe array for forward consumers; compute consumers bind it at t50 too.
+		static constexpr std::uint32_t kProbeArraySlot = 50;
+
 		static Skylighting* GetSingleton();
 
 		std::string_view GetName() const override { return "Skylighting"; }
@@ -57,6 +60,9 @@ namespace cs::features
 
 		// Packs b6; repeated packs within a frame must not advance the grid again.
 		render::SkylightingSettings GetCommonBufferData();
+
+		// Null unless the feature is healthy and its probes were created, so consumers fail neutral.
+		ID3D11ShaderResourceView* GetProbeArraySRV() const noexcept;
 
 	private:
 		Skylighting() = default;
@@ -100,6 +106,7 @@ namespace cs::features
 		};
 		void DispatchProbeUpdate(ID3D11DeviceContext* a_context);
 		void RenderDebug(ID3D11DeviceContext* a_context);
+		void BindWaterProbes(ID3D11DeviceContext* a_context);
 
 		enum class DebugVisualization : std::uint32_t
 		{
@@ -183,6 +190,7 @@ namespace cs::features
 			std::atomic<std::uint64_t> resetsLoad{ 0 };
 			std::atomic<std::uint64_t> resetsRebuild{ 0 };
 			std::atomic<std::uint64_t> debugFrames{ 0 };
+			std::atomic<std::uint64_t> waterDraws{ 0 };
 			std::atomic<float> gpuMs{ 0.0f };
 			// Latest frame: cell id, array origin, valid margin.
 			std::array<std::atomic<std::int32_t>, 9> grid{};

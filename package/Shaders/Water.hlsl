@@ -183,6 +183,10 @@ VS_OUTPUT main(VS_INPUT input)
 #		include "FO4/DynamicCubemaps/DynamicCubemaps.hlsli"
 SamplerState sampler3 : register(s3);
 #	endif
+#	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
+#		define SKYLIGHTING_PROBE_REGISTER t50
+#		include "Skylighting/Skylighting.hlsli"
+#	endif
 
 cbuffer PerGeometry : register(b0)
 {
@@ -375,18 +379,30 @@ float3 refractedScene(float2 screenPosition, float3 normal, out float3 unclipped
 
 #	endif
 
+float skylightingSpecularVisibility(float3 positionMS, float3 normal, float3 eyeDirection)
+{
+#	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
+	// FO4: callers pass eyeVector.xyz, the camera-relative world position OG lacks as WPosition.
+	sh2 skylightingSH = Skylighting::SampleNoBias(positionMS);
+	sh2 specularLobe = SphericalHarmonics::FauxSpecularLobe(normal, -eyeDirection, 0.0);
+	return Skylighting::EvaluateSpecular(skylightingSH, specularLobe, Skylighting::GetFadeOutFactor(positionMS));
+#	else
+	return 1.0;
+#	endif
+}
+
 float3 surfaceColor(
 	float slope,
 	float2 screenUv,
 	float3 reflectionDirection,
-	float cameraDistance)
+	float cameraDistance,
+	float skylightingSpecular)
 {
 	float3 color = lerp(perMaterial[3].xyz, perMaterial[4].xyz, saturate(slope + 0.75));
 	color = lerp(color, perMaterial[5].xyz, saturate(slope * 1.9 + 0.35));
 #	if defined(REFLECTIONS)
 #		ifdef DYNAMIC_CUBEMAPS
 	if (FO4SharedData::EnabledDynamicCubemaps != 0) {
-		const float skylightingSpecular = 1.0;
 		float3 dynamicCubemap;
 		if (SharedData::InInterior) {
 			dynamicCubemap = DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
@@ -524,7 +540,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 eyeDirection = normalize(input.eyeVector.xyz);
 	float3 reflectionDirection = reflect(eyeDirection, normal);
 	float slope = reflectionDirection.z;
-	float3 color = lerp(perMaterial[2].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, reflectionDirection, input.eyeVector.w), perMaterial[2].w) + lighting;
+	float3 color = lerp(perMaterial[2].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, reflectionDirection, input.eyeVector.w, skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection)), perMaterial[2].w) + lighting;
 	float fogAlpha;
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	float3 originalFog = fog;
@@ -601,7 +617,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 reflectionDirection = reflect(eyeDirection, normal);
 	float slope = reflectionDirection.z;
 	float grazing = 1.0 - saturate(dot(-eyeDirection, -normal));
-	float3 water = lerp(perMaterial[0].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, reflectionDirection, input.eyeVector.w), 0.5);
+	float3 water = lerp(perMaterial[0].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, reflectionDirection, input.eyeVector.w, skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection)), 0.5);
 	return float4(lerp(water, refraction, 1.0 - fresnelTerm(grazing)), 0.0);
 }
 
@@ -820,7 +836,8 @@ float4 main(PS_INPUT input) : SV_Target0
 		slope,
 		screenUv,
 		reflectionDirection,
-		input.eyeVector.w);
+		input.eyeVector.w,
+		skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection));
 	float3 tinted = lerp(perMaterial[2].xyz, water, perMaterial[2].w);
 
 	float3 unclipped;
