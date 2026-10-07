@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
+#include "Render/ShadowCascades.h"
 #include "ShaderDefines.h"
 #include "ShadowLightData.h"
 #include "SkylightingSettings.h"
@@ -106,6 +107,25 @@ namespace cs::features
 			kNoGrid
 		};
 		void DispatchProbeUpdate(ID3D11DeviceContext* a_context);
+
+		enum class CascadeSkip : std::uint8_t
+		{
+			kNone,
+			kUnavailable,
+			kNotFullSky,
+			kNoLight,
+			kUnsupportedCount,
+			kNoTarget,
+			kInvalid,
+			kCopyTarget
+		};
+		// Right after the main sun's Render(7); publishes the cascade copy and its light data for the next probe update.
+		void CopySunCascades();
+		CascadeSkip PublishSunCascades(ID3D11DeviceContext* a_context);
+		bool EnsureCascadeCopy(ID3D11Device* a_device, ID3D11Texture2D* a_source);
+		void PublishShadowLights(ID3D11DeviceContext* a_context, const skylighting::DirectionalShadowLightData& a_data);
+		// Publishes the neutral block so no probe update samples stale cascades.
+		void RetireCascades(ID3D11DeviceContext* a_context);
 		void RenderDebug(ID3D11DeviceContext* a_context);
 		enum class Consumer : std::uint8_t
 		{
@@ -115,7 +135,8 @@ namespace cs::features
 			kTiled
 		};
 		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
-		// Probes at kProbeArraySlot; lighting also gets albedo and MRT4 (vertex AO) at the next two.
+		// Probes at kProbeArraySlot; lighting also gets albedo and MRT4 (vertex AO) at the next two,
+		// and raster lights the probe shadow visibility after them.
 		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t
@@ -140,9 +161,15 @@ namespace cs::features
 		std::unique_ptr<cs::buffer::Texture3D> _texShadowVisibility;
 		winrt::com_ptr<ID3D11SamplerState> _comparisonSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _probeUpdateCompute;
-		// Zeroed until cascades exist; zero split distances leave every probe lit.
+		// Zero split distances leave every probe lit, so a neutral publish is the zeroed block.
 		winrt::com_ptr<ID3D11Buffer> _shadowLightsBuffer;
 		winrt::com_ptr<ID3D11ShaderResourceView> _shadowLightsSRV;
+		// The stock array is overwritten by focus and local shadows, so the sun cascades live in an owned copy.
+		winrt::com_ptr<ID3D11Texture2D> _cascadeCopy;
+		winrt::com_ptr<ID3D11ShaderResourceView> _cascadeCopySRV;
+		D3D11_TEXTURE2D_DESC _cascadeDesc{};
+		// Render thread only: the copy holds sun cascades from this frame's Render(7).
+		bool _cascadesPublished = false;
 		std::atomic_bool _probesReady{ false };
 
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _debugCompute;
@@ -205,10 +232,22 @@ namespace cs::features
 			// Every raster light draw and tiled dispatch, not only the ambient ones.
 			std::atomic<std::uint64_t> lightDraws{ 0 };
 			std::atomic<std::uint64_t> tiledDispatches{ 0 };
+			// Raster light draws that carried the probe shadow visibility.
+			std::atomic<std::uint64_t> shadowVisDraws{ 0 };
 			std::atomic<float> gpuMs{ 0.0f };
 			// Latest frame: cell id, array origin, valid margin.
 			std::array<std::atomic<std::int32_t>, 9> grid{};
 		} _probeCounters;
+		// Sun cascade copies; a skip publishes neutral light data so stale cascades are never sampled.
+		struct CascadeCounters
+		{
+			std::atomic<std::uint64_t> copies{ 0 };
+			std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(CascadeSkip::kCopyTarget) + 1> skipped{};
+			std::atomic<std::uint32_t> count{ 0 };
+			std::array<std::atomic<float>, cs::engine::kMaxSunCascades> splitEnd{};
+		} _cascadeCounters;
+		CascadeSkip _loggedCascadeSkip = CascadeSkip::kNone;
+		bool _loggedCascadeDesc = false;
 		double _windowCpuMsSum = 0.0;
 		float _windowCpuMsMax = 0.0f;
 		std::uint32_t _windowCaptures = 0;

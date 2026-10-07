@@ -2363,6 +2363,7 @@ float2 goboUV = float2(omniUV.x,
 		bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 #	endif
 
+		FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
 		float slice = cb2_idx9_cascade_slice.y;
 
 		float shadow = ComputeCascadeShadow(posView, slice);
@@ -2378,16 +2379,10 @@ float2 goboUV = float2(omniUV.x,
 		float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
-		shadow *= FO4Fog::SunlightView(posView);
+		FO4_SHADOW_LIGHT_MUL(shadow, softShadow, FO4Fog::SunlightView(posView));
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-		shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
-			posView,
-			TerrainShadows::TerrainShadowsSampler,
-			ViewToWorld_row0,
-			ViewToWorld_row1,
-			ViewToWorld_row2,
-			CameraPosAdjust);
+		FO4_SHADOW_LIGHT_MUL(shadow, softShadow, TerrainShadows::GetTerrainShadowMultFromViewPosition(posView, TerrainShadows::TerrainShadowsSampler, ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust));
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 		float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
@@ -2579,6 +2574,7 @@ float2 goboUV = float2(omniUV.x,
 	output.diffuse /= 3.0;
 #	endif
 
+		FO4_SOFT_SUN_LOBES(output, shadow, softShadow, SunColor_HDR.xyz, ambientTerm, backfaceWrap, albedoPremult, forwardBlend, albedoSample.xyz);
 		return output;
 	}
 #endif
@@ -3012,6 +3008,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float3 ambientSpecular = 0.0;
 #	endif
 
+		FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
 #	ifdef FO4_DS2_TIGHT_AMBIENT_IGNORE
 		bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 #	endif
@@ -3152,16 +3149,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
-			shadow *= FO4Fog::SunlightView(posView);
+			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, FO4Fog::SunlightView(posView));
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
-				posView,
-				TerrainShadows::TerrainShadowsSampler,
-				ViewToWorld_row0,
-				ViewToWorld_row1,
-				ViewToWorld_row2,
-				CameraPosAdjust);
+			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, TerrainShadows::GetTerrainShadowMultFromViewPosition(posView, TerrainShadows::TerrainShadowsSampler, ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust));
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
@@ -3473,6 +3464,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #		endif
 #	endif
 
+#	ifdef IGNOREROUGHNESS
+			FO4_SOFT_SUN_LOBES(output, shadow, softShadow, SunColor_HDR.xyz, 0.0, backfaceWrap, albedoPremult, forwardBlend, albedoSample.xyz);
+#	else
+	FO4_SOFT_SUN_LOBES(output, shadow, softShadow, SunColor_HDR.xyz, ambientTerm, backfaceWrap, albedoPremult, forwardBlend, albedoSample.xyz);
+#	endif
 			return output;
 		}
 
@@ -4115,6 +4111,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 ambientSpecular = 0.0;
 #	endif
 
+			FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
 #	ifdef FO4_DS3_HOISTED_VIEW_LOG
 			float NdotV_view = saturate(dot(normalView, viewDirNeg));
 			float ambientFresLog = log2(1.0 - NdotV_view);
@@ -4130,16 +4127,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, SunDirection.xyz));
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
-			shadow *= FO4Fog::SunlightView(posView);
+			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, FO4Fog::SunlightView(posView));
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-			shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
-				posView,
-				TerrainShadows::TerrainShadowsSampler,
-				ViewToWorld_row0,
-				ViewToWorld_row1,
-				ViewToWorld_row2,
-				CameraPosAdjust);
+			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, TerrainShadows::GetTerrainShadowMultFromViewPosition(posView, TerrainShadows::TerrainShadowsSampler, ViewToWorld_row0, ViewToWorld_row1, ViewToWorld_row2, CameraPosAdjust));
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
@@ -4455,6 +4446,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 	output.diffuse.w = 0.0;
 #	endif
 
+#	ifdef IGNOREROUGHNESS
+			FO4_SOFT_SUN_LOBES(output, shadow, softShadow, SunColor_HDR.xyz, 0.0, backfaceWrap, albedoPremult, forwardBlend, albedoSample.xyz);
+#	else
+	FO4_SOFT_SUN_LOBES(output, shadow, softShadow, SunColor_HDR.xyz, ambientTerm, backfaceWrap, albedoPremult, forwardBlend, albedoSample.xyz);
+#	endif
 			return output;
 		}
 #endif
@@ -5893,6 +5889,8 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 ambientSpecular = 0.0;
 #	endif
 
+			FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
+
 #	ifdef FO4_UNSHADOWED_AMBIENT_ROUGHNESS
 			float NdotV_raw = dot(normalView, viewDirNeg);
 			float oneMinusNdotV = 1.0 - saturate(NdotV_raw);
@@ -6214,6 +6212,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	endif
 
 			float3 finalDiffuse = FO4LocalLightColor(LightColor_HDR.xyz) * brdfShadowMix;
+			FO4_SOFT_LOBES_DECLARE(softDiffuse);
 
 #	if !defined(IGNOREROUGHNESS) && !defined(IGNORERIM)
 
@@ -6231,7 +6230,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 		float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 #		endif
 
-			finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
+			FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += FO4LocalLightColor(LightColor_HDR.xyz) * ambientTerm;
 #	endif
 
 #	ifdef DIRECTIONAL
@@ -6249,9 +6248,9 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			backfaceWrap *= transmissionContactShadow;
 #		endif
 #		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
-			finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
+			FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
 #		else
-		finalDiffuse += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
+		FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += FO4LocalLightColor(LightColor_HDR.xyz) * (backfaceWrap * albedoPremult);
 #		endif
 
 #		if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
@@ -6265,12 +6264,13 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #		ifdef SCREEN_SPACE_SHADOWS
 			forwardBlend *= transmissionContactShadow;
 #		endif
-			finalDiffuse += (forwardBlend * FO4LocalLightColor(LightColor_HDR.xyz)) * albedoSample.xyz;
+			FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += (forwardBlend * FO4LocalLightColor(LightColor_HDR.xyz)) * albedoSample.xyz;
 #	endif
 
 #	if defined(DIRECTIONAL) && defined(EXPONENTIAL_HEIGHT_FOG)
 			float sunlightFogMult = FO4Fog::SunlightView(posView);
 			finalDiffuse *= sunlightFogMult;
+			FO4_SOFT_LOBE_SCALE(softDiffuse, sunlightFogMult);
 			brdfSpecular *= sunlightFogMult;
 #	endif
 #	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
@@ -6282,6 +6282,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				ViewToWorld_row2,
 				CameraPosAdjust);
 			finalDiffuse *= terrainShadowMult;
+			FO4_SOFT_LOBE_SCALE(softDiffuse, terrainShadowMult);
 			brdfSpecular *= terrainShadowMult;
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
@@ -6292,6 +6293,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				ViewToWorld_row2,
 				CameraPosAdjust);
 			finalDiffuse *= causticsMult;
+			FO4_SOFT_LOBE_SCALE(softDiffuse, causticsMult);
 			brdfSpecular *= causticsMult;
 #	endif
 
@@ -6331,6 +6333,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 	output.diffuse /= 3.0;
 #	endif
 
+			FO4_SOFT_LOBES_APPLY(output, softDiffuse, softShadow);
 			return output;
 		}
 

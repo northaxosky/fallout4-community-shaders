@@ -97,7 +97,10 @@ are FO4-only rule-4 core features.
 - **Cloud Shadows.** Prior art on branch `cloud-shadows` (`3314d567`) maps material pointers to layers;
   replace with typed layer order.
 - **Skylighting.** Reuse FO4's precipitation geometry/camera renderer, redirecting it to Skylighting's
-  upstream-owned target for direction-sampled captures; stock logical DS8 alone is insufficient.
+  upstream-owned target for direction-sampled captures; stock logical DS8 alone is insufficient. The probe
+  update's directional shadow history samples an owned copy of the main sun cascades, taken right after its
+  `Render(7)` because focus and local shadows reuse the stock array; shadow visibility feeds the rim, soft and
+  back sun lobes of the DFLight directional families. Remaining: LOD landscape occluders, in-game proof.
 - **Light Limit Fix.** FO4 tiled lighting (625 lights, 127 per tile) replaces surface clustering; particle
   lights feed the native list within its capacity. The upstream 3D cluster grid is still needed as EHF's
   local-light scattering input.
