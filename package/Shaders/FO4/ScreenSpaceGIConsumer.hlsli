@@ -6,6 +6,7 @@
 #include "Common/Spherical Harmonics/SphericalHarmonics.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
 #include "FO4/ScreenSpaceGI/Contracts.hlsli"
+#include "FO4/SkylightingConsumer.hlsli"
 
 namespace ScreenSpaceGI
 {
@@ -37,6 +38,10 @@ namespace ScreenSpaceGI
 		float3 multiBounceSSGIAo = MultiBounceAO(linAlbedo, ssgiAo);
 		// FO4: native diffuse folds in powered DALC without an upstream Masks.z channel.
 		float3 directionalAmbientColor = FO4SharedData::GetAmbientLinear(normalWS) * albedo;
+#ifdef SKYLIGHTING
+		// FO4: lighting already scaled the ambient addend; scale the separated term to match.
+		directionalAmbientColor *= Skylighting::GetAmbientScale(Skylighting::GetViewPosition(screenPosition), normalVS, albedo, vertexAO);
+#endif
 		float maxScale = 1.0;
 		if (directionalAmbientColor.x > 0.0)
 			maxScale = min(maxScale, diffuseColor.x / directionalAmbientColor.x);

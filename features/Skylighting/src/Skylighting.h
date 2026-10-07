@@ -16,6 +16,7 @@
 #include <cfloat>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -106,7 +107,16 @@ namespace cs::features
 		};
 		void DispatchProbeUpdate(ID3D11DeviceContext* a_context);
 		void RenderDebug(ID3D11DeviceContext* a_context);
-		void BindWaterProbes(ID3D11DeviceContext* a_context);
+		enum class Consumer : std::uint8_t
+		{
+			kWater,
+			kComposite,
+			kLight,
+			kTiled
+		};
+		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
+		// Probes at kProbeArraySlot; lighting also gets albedo and MRT4 (vertex AO) at the next two.
+		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t
 		{
@@ -191,6 +201,10 @@ namespace cs::features
 			std::atomic<std::uint64_t> resetsRebuild{ 0 };
 			std::atomic<std::uint64_t> debugFrames{ 0 };
 			std::atomic<std::uint64_t> waterDraws{ 0 };
+			std::atomic<std::uint64_t> compositeDraws{ 0 };
+			// Every raster light draw and tiled dispatch, not only the ambient ones.
+			std::atomic<std::uint64_t> lightDraws{ 0 };
+			std::atomic<std::uint64_t> tiledDispatches{ 0 };
 			std::atomic<float> gpuMs{ 0.0f };
 			// Latest frame: cell id, array origin, valid margin.
 			std::array<std::atomic<std::int32_t>, 9> grid{};

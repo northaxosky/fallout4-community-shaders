@@ -106,6 +106,11 @@
 #		define DISMEMBERMENT_MEATCUFF 0
 #	endif
 
+// MRT4 alpha carries 1 - vertexAO for SSGI and Skylighting (upstream Masks2.x).
+#	if defined(SSGI) || defined(SKYLIGHTING)
+#		define FO4_PREPASS_VERTEX_AO 1
+#	endif
+
 #	if defined(OG)
 // OG blends have no motion target or tessellated frame-position inputs.
 #		define PREPASS_MOTION_VECTOR (!BLEND)
@@ -451,7 +456,7 @@ struct PS_OUTPUT
 #	endif
 	float4 material: SV_Target2;
 	float4 auxA: SV_Target3;
-#	if BLEND || defined(SSGI)
+#	if BLEND || defined(FO4_PREPASS_VERTEX_AO)
 	float4 specTint: SV_Target4;
 #	else
 	float3 specTint: SV_Target4;
@@ -1193,15 +1198,15 @@ struct PS_OUTPUT
 #		else
 		output.auxA.w = blendAlpha;
 #		endif
-#		if HAIR && defined(SSGI)
+#		if HAIR && defined(FO4_PREPASS_VERTEX_AO)
 		// MRT4 alpha is also its blend factor, so hair writes 0 and keeps the value beneath instead of upstream's coverage-weighted 1 - vertexAO.
 		output.specTint.w = 0.0;
 #		else
 		output.specTint.w = blendAlpha;
 #		endif
 #	else
-#		ifdef SSGI
-	// 1 - vertexAO for SSGI, as upstream's Masks2; nothing else reads MRT4 alpha.
+#		ifdef FO4_PREPASS_VERTEX_AO
+	// 1 - vertexAO as upstream's Masks2; SSGI composite and Skylighting ambient read it.
 #			if VC && !LANDSCAPE && !HAIR && !EYE && !SKIN_TINT
 	// Albedo is already linear here, so unlike upstream the max needs no ColorToLinear.
 	output.specTint.w = 1.0 - max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z);

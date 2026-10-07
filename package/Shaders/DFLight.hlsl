@@ -10,6 +10,7 @@
 #ifdef EXPONENTIAL_HEIGHT_FOG
 #	include "FO4/ExponentialHeightFogConsumer.hlsli"
 #endif
+#include "FO4/SkylightingConsumer.hlsli"
 
 #include "FO4/InverseSquareLightingRaster.hlsli"
 
@@ -454,7 +455,7 @@ float3 EvaluateAmbientGradient(float3 direction)
 	encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 	encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 	encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-	return exp2(log2(encoded) * 2.2);
+	return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
 }
 #		endif
 
@@ -543,6 +544,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 normalView = DecodeOctahedralNormal(normalEnc);
 
 #		ifdef AMBIENT_IBL_IN_LIGHT
+	FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 	float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 	float3 ambientSpecular = 0.0;
 #		endif
@@ -2155,7 +2157,7 @@ float2 goboUV = float2(omniUV.x,
 		encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 		encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 		encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-		return exp2(log2(encoded) * 2.2);
+		return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
 	}
 #	endif
 
@@ -2353,6 +2355,7 @@ float2 goboUV = float2(omniUV.x,
 		float3 viewDirNeg = -posView * posViewLen;
 
 #	ifdef AMBIENT
+		FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 		float3 ambientSpecular = 0.0;
 		float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -2784,7 +2787,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 		encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 		encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-		return exp2(log2(encoded) * 2.2);
+		return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
 	}
 #	endif
 
@@ -3004,6 +3007,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float3 viewDirNeg = -posView * posViewLen;
 
 #	ifdef AMBIENT
+		FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 		float3 ambientSpecular = 0.0;
 #	endif
@@ -3696,7 +3700,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 			encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 			encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-			return exp2(log2(encoded) * 2.2);
+			return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
 		}
 #	endif
 
@@ -4106,6 +4110,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 viewDirNeg = -posView * posViewLen;
 
 #	ifdef AMBIENT
+			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 			float3 ambientSpecular = 0.0;
 #	endif
@@ -5443,11 +5448,12 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			normal.xy = normalEnc * sqrt(1.0 - encSq * 0.25);
 			normal.z = -(1.0 - encSq * 0.5);
 
+			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normal);
 			float3 ambientDiffuse;
 			ambientDiffuse.x = dot(cb2_ambient_row0, float4(normal, 1.0));
 			ambientDiffuse.y = dot(cb2_ambient_row1, float4(normal, 1.0));
 			ambientDiffuse.z = dot(cb2_ambient_row2, float4(normal, 1.0));
-			ambientDiffuse = pow(ambientDiffuse, 2.2);
+			ambientDiffuse = FO4_AMBIENT_SKYLIGHTING(pow(ambientDiffuse, 2.2));
 
 			bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
 #	endif
@@ -5595,7 +5601,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		ambientReflected.x = dot(cb2_ambient_row0, float4(reflected, 1.0));
 		ambientReflected.y = dot(cb2_ambient_row1, float4(reflected, 1.0));
 		ambientReflected.z = dot(cb2_ambient_row2, float4(reflected, 1.0));
-		ambientSpecular = (fresnel * pow(ambientReflected, 2.2)) * material.y;
+		ambientSpecular = FO4_AMBIENT_SKYLIGHTING((fresnel * pow(ambientReflected, 2.2)) * material.y);
 	}
 
 #		ifdef WATER_EFFECTS
@@ -5778,7 +5784,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 			encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 			encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-			return exp2(log2(encoded) * 2.2);
+			return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
 		}
 #	endif
 
@@ -5882,6 +5888,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	endif
 
 #	ifdef AMBIENT
+			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 			float3 ambientSpecular = 0.0;
 #	endif
@@ -6381,7 +6388,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				dot(DirectionalAmbient_row0, directionH),
 				dot(DirectionalAmbient_row1, directionH),
 				dot(DirectionalAmbient_row2, directionH));
-			return exp2(log2(encoded) * 2.2);
+			return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
 		}
 
 		PS_OUTPUT main(PS_INPUT input)
@@ -6437,6 +6444,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				-(1.0 - encodedLengthSquared * 0.5));
 			float3 viewDirection = normalize(-positionView);
 
+			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, positionView, normalView);
 			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
 			float ndotv = dot(normalView, viewDirection);
 			float3 reflectionDirection = 2.0 * ndotv * normalView - viewDirection;

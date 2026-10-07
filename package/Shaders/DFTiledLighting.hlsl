@@ -69,6 +69,7 @@ float3 DecodeOctahedralNormal(float2 encoded)
 }
 
 #	if DFTILEDLIGHTING_VARIANT == 2
+#		include "FO4/SkylightingConsumer.hlsli"
 float3 EvaluateAmbientGradient(float3 direction)
 {
 	float4 directionH = float4(direction, 1.0);
@@ -76,7 +77,7 @@ float3 EvaluateAmbientGradient(float3 direction)
 	encoded.x = dot(TiledParams[4], directionH);
 	encoded.y = dot(TiledParams[5], directionH);
 	encoded.z = dot(TiledParams[6], directionH);
-	return exp2(log2(encoded) * 2.2);
+	return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
 }
 #	endif
 
@@ -130,6 +131,7 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 
 	bool materialOne = abs(material.w * 255.0 - 1.0) < 0.25;
 	float materialSpecular = materialOne ? 0.0 : material.y;
+	FO4_AMBIENT_SKYLIGHTING_SET(float2(pixel), positionView, normalView);
 	diffuseAccum = EvaluateAmbientGradient(normalView);
 
 	float normalDotView = dot(normalView, viewDirection);

@@ -96,8 +96,8 @@ namespace cs::features
 		}
 
 		if (!cs::engine::RegisterFeatureShaderBindings("Skylighting", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
-				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsWater)
-					registration.bind = [this](ID3D11DeviceContext* a_context) { BindWaterProbes(a_context); };
+				if (const auto consumer = ConsumerFor(registration.targetId))
+					registration.bind = [this, consumer = *consumer](ID3D11DeviceContext* a_context) { BindConsumer(a_context, consumer); };
 			})) {
 			FailLoad("Skylighting shader contribution registration failed.");
 			return;
@@ -125,6 +125,7 @@ namespace cs::features
 			a_error = "the shared substrate is unavailable, so b6 carries no probe grid";
 			return false;
 		}
+		// Raster and tiled ambient are chosen per frame; every registered route must publish or neither runs.
 		if (!cs::engine::ValidateShaderInjectionRoutes("Skylighting", a_error))
 			return false;
 		_injectionsOperational.store(true, std::memory_order_release);
@@ -138,13 +139,40 @@ namespace cs::features
 		return _texProbeArray->srv.get();
 	}
 
-	void Skylighting::BindWaterProbes(ID3D11DeviceContext* a_context)
+	std::optional<Skylighting::Consumer> Skylighting::ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept
 	{
-		auto* srv = GetProbeArraySRV();
-		if (!a_context || !srv)
+		using Target = cs::engine::ShaderInjectionTarget;
+		switch (a_target) {
+		case Target::kBsWater:
+			return Consumer::kWater;
+		case Target::kBsdfComposite:
+			return Consumer::kComposite;
+		case Target::kBsdfLight:
+			return Consumer::kLight;
+		case Target::kDfTiledLighting:
+			return Consumer::kTiled;
+		default:
+			return std::nullopt;
+		}
+	}
+
+	void Skylighting::BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer)
+	{
+		auto* probes = GetProbeArraySRV();
+		if (!a_context || !probes)
 			return;
-		cs::engine::BindInjectionShaderResources(a_context, kProbeArraySlot, 1, &srv);
-		_probeCounters.waterDraws.fetch_add(1, std::memory_order_relaxed);
+		const bool lighting = a_consumer == Consumer::kLight || a_consumer == Consumer::kTiled;
+		const std::array<ID3D11ShaderResourceView*, 3> views{
+			probes,
+			lighting ? cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferAlbedo) : nullptr,
+			lighting ? cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferEmissive) : nullptr
+		};
+		cs::engine::BindInjectionShaderResources(a_context, kProbeArraySlot, lighting ? 3 : 1, views.data());
+		auto& counter = a_consumer == Consumer::kWater     ? _probeCounters.waterDraws :
+		                a_consumer == Consumer::kComposite ? _probeCounters.compositeDraws :
+		                a_consumer == Consumer::kLight     ? _probeCounters.lightDraws :
+		                                                     _probeCounters.tiledDispatches;
+		counter.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void Skylighting::OnLoadingMenuClosed()
@@ -576,7 +604,7 @@ namespace cs::features
 			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_accumulate={:.3f} ms_render={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"probe_state={} probe_dispatches={} probe_skipped_not_full_sky={} probe_skipped_no_occlusion={} probe_skipped_no_grid={} resets={} resets_load={} resets_rebuild={} "
-			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={}",
+			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={} composite_draws_bound={} dflight_draws_bound={} tiled_dispatches_bound={}",
 			stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
@@ -587,7 +615,8 @@ namespace cs::features
 			extentX, extentY, depthRange,
 			probeStateNames[static_cast<std::size_t>(_probeState)], count(_probeCounters.dispatches), count(_probeCounters.skippedNotFullSky), count(_probeCounters.skippedNoOcclusion), count(_probeCounters.skippedNoGrid),
 			count(_probeCounters.resets), count(_probeCounters.resetsLoad), count(_probeCounters.resetsRebuild),
-			grid[0], grid[1], grid[2], grid[3], grid[4], grid[5], grid[6], grid[7], grid[8], _probeCounters.gpuMs.load(std::memory_order_relaxed), count(_probeCounters.waterDraws));
+			grid[0], grid[1], grid[2], grid[3], grid[4], grid[5], grid[6], grid[7], grid[8], _probeCounters.gpuMs.load(std::memory_order_relaxed), count(_probeCounters.waterDraws),
+			count(_probeCounters.compositeDraws), count(_probeCounters.lightDraws), count(_probeCounters.tiledDispatches));
 		_windowCpuMsSum = 0.0;
 		_windowCpuMsMax = 0.0f;
 		_windowCaptures = 0;
@@ -644,7 +673,10 @@ namespace cs::features
 			.Field("valid_margin_z", static_cast<std::int64_t>(_probeCounters.grid[8].load(std::memory_order_relaxed)))
 			.Field("probe_update_gpu_ms", static_cast<double>(_probeCounters.gpuMs.load(std::memory_order_relaxed)))
 			.Field("debug_frames", count(_probeCounters.debugFrames))
-			.Field("water_draws_bound", count(_probeCounters.waterDraws));
+			.Field("water_draws_bound", count(_probeCounters.waterDraws))
+			.Field("composite_draws_bound", count(_probeCounters.compositeDraws))
+			.Field("dflight_draws_bound", count(_probeCounters.lightDraws))
+			.Field("tiled_dispatches_bound", count(_probeCounters.tiledDispatches));
 		cs::render::profiling::CollectPassTimings(a_sink, "Skylighting/");
 	}
 
