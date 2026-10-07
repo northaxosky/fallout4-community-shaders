@@ -10,9 +10,16 @@
 
 namespace DynamicCubemaps
 {
+	float3 GetNormalizedProbe(TextureCube<float3> cube, SamplerState probeSampler, float3 direction, float level)
+	{
+		float3 irradiance = cube.SampleLevel(probeSampler, direction, level);
+		float average = Color::RGBToLuminance(cube.SampleLevel(probeSampler, direction, 15));
+		return irradiance / max(average, 0.001);
+	}
+
 	// FO4: vanilla envmaps cannot carry upstream sentinels, so the live cube replaces the authored pattern at its authored brightness.
 	float3 GetMaterialEnvironment(TextureCubeArray<float4> nativeCube, SamplerState probeSampler,
-		float3 R, float slice, float lod, float glossiness, float nativeRain)
+		float3 R, float slice, float lod, float glossiness, float nativeRain, float skylightingSpecular = 1.0)
 	{
 		float3 native = nativeCube.SampleLevel(probeSampler, float4(R, slice), lod).xyz;
 		// Native rain boosts and greys this reflection; the live cube would turn that into chrome, so rain keeps the authored cube.
@@ -22,21 +29,30 @@ namespace DynamicCubemaps
 		// FO4 probe sites pass the negated reflection vector; DC cubes use the upstream reflect(-V, N) orientation.
 		float3 direction = -R;
 		uint width, height;
-		float3 irradiance, average;
+		float3 normalized;
 		float level = saturate(1.0 - glossiness) * 8.0;
 		if (SharedData::InInterior) {
 			EnvTexture.GetDimensions(width, height);
-			irradiance = EnvTexture.SampleLevel(probeSampler, direction, level);
-			average = EnvTexture.SampleLevel(probeSampler, direction, 15);
+			normalized = GetNormalizedProbe(EnvTexture, probeSampler, direction, level);
 		} else {
 			EnvReflectionsTexture.GetDimensions(width, height);
-			irradiance = EnvReflectionsTexture.SampleLevel(probeSampler, direction, level);
-			average = EnvReflectionsTexture.SampleLevel(probeSampler, direction, 15);
+#if defined(SKYLIGHTING)
+			// FO4: sky visibility only selects the cube; native weighting already carries it.
+			float3 reflections = 0.0;
+			float3 environment = 0.0;
+			if (skylightingSpecular > 0.0)
+				reflections = GetNormalizedProbe(EnvReflectionsTexture, probeSampler, direction, level);
+			if (skylightingSpecular < 1.0)
+				environment = GetNormalizedProbe(EnvTexture, probeSampler, direction, level);
+			normalized = lerp(environment, reflections, skylightingSpecular);
+#else
+			normalized = GetNormalizedProbe(EnvReflectionsTexture, probeSampler, direction, level);
+#endif
 		}
 		if (width == 0)
 			return native;
 		float authored = Color::RGBToLuminance(nativeCube.SampleLevel(probeSampler, float4(R, slice), 15).xyz);
-		float3 live = irradiance / max(Color::RGBToLuminance(average), 0.001) * authored;
+		float3 live = normalized * authored;
 		// FO4: native weighting multiplies an LDR authored pattern by surface light, so HDR live peaks stay in that range.
 		live /= max(1.0, max(live.r, max(live.g, live.b)));
 		return lerp(native, live, blend);

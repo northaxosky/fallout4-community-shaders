@@ -42,6 +42,20 @@ namespace Skylighting
 		return view.xyz / view.w;
 	}
 
+	// FO4: composite probe sites share the upstream DeferredCompositeCS lobe; positions are view space.
+	float GetSpecularVisibility(float3 viewPosition, float3 normalView, float glossiness)
+	{
+		// FO4: the interior branch samples EnvTexture and never reads visibility.
+		if (SharedData::InInterior)
+			return 1.0;
+		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
+		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
+		float3 V = -normalize(positionMS);
+		float3 R = reflect(-V, normalWS);
+		sh2 skylightingSH = Sample(positionMS, R);
+		return EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, 1.0 - glossiness));
+	}
+
 	// FO4: lighting stages evaluate the ambient gradient at several directions per pixel.
 	static float3 AmbientScale = 1.0;
 #endif
@@ -68,8 +82,10 @@ namespace Skylighting
 #	define FO4_AMBIENT_SKYLIGHTING_SET(pixelPosition, viewPosition, normalView) \
 		Skylighting::AmbientScale = Skylighting::GetAmbientScale(pixelPosition, viewPosition, normalView)
 #	define FO4_AMBIENT_SKYLIGHTING(ambient) ((ambient) * Skylighting::AmbientScale)
+#	define FO4_SKYLIGHTING_SPECULAR(viewPosition, normalView, glossiness) Skylighting::GetSpecularVisibility(viewPosition, normalView, glossiness)
 #else
 #	define FO4_AMBIENT_SKYLIGHTING_SET(pixelPosition, viewPosition, normalView)
 #	define FO4_AMBIENT_SKYLIGHTING(ambient) (ambient)
+#	define FO4_SKYLIGHTING_SPECULAR(viewPosition, normalView, glossiness) 1.0
 #endif
 #endif

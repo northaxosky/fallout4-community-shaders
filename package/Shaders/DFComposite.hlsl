@@ -6,7 +6,7 @@
 #ifdef WATER_EFFECTS
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
-#ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+#if defined(SKYLIGHTING) || defined(SKYLIGHTING_FULLSCREEN_DEBUG)
 #	include "FO4/SkylightingConsumer.hlsli"
 #endif
 #include "Common/DeferredContracts.hlsli"
@@ -17,10 +17,10 @@
 
 #ifdef DYNAMIC_CUBEMAPS
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
-#	define SAMPLE_MATERIAL_ENVIRONMENT(cube, probeSampler, direction, slice, lod, glossiness, nativeRain) \
-		DynamicCubemaps::GetMaterialEnvironment(cube, probeSampler, direction, slice, lod, glossiness, nativeRain)
+#	define SAMPLE_MATERIAL_ENVIRONMENT(cube, probeSampler, direction, slice, lod, glossiness, nativeRain, skylightingSpecular) \
+		DynamicCubemaps::GetMaterialEnvironment(cube, probeSampler, direction, slice, lod, glossiness, nativeRain, skylightingSpecular)
 #else
-#	define SAMPLE_MATERIAL_ENVIRONMENT(cube, probeSampler, direction, slice, lod, glossiness, nativeRain) \
+#	define SAMPLE_MATERIAL_ENVIRONMENT(cube, probeSampler, direction, slice, lod, glossiness, nativeRain, skylightingSpecular) \
 		cube.SampleLevel(probeSampler, float4(direction, slice), lod).xyz
 #endif
 
@@ -274,7 +274,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float mipLevel = (1.0 - shadingData.x) * 6.0;
 		mipLevel = pos.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(matSliceFloat * 255.0 - 1.0);
-		float3 cubeSample = SAMPLE_MATERIAL_ENVIRONMENT(g_tIBLProbeCube, g_sIBLProbeCube, reflWorld, arraySlice, mipLevel, shadingData.x, cb12_idx30_ibl_desaturation.y);
+		float3 cubeSample = SAMPLE_MATERIAL_ENVIRONMENT(g_tIBLProbeCube, g_sIBLProbeCube, reflWorld, arraySlice, mipLevel, shadingData.x, cb12_idx30_ibl_desaturation.y, FO4_SKYLIGHTING_SPECULAR(pos.xyz, normalView, shadingData.x));
 		float luma = dot(cubeSample, float3(0.299, 0.587, 0.114));
 		float desatW = cb12_idx30_ibl_desaturation.y * 0.9;
 		iblColor = lerp(cubeSample, luma.xxx, desatW);
@@ -614,7 +614,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float mipLevel = (1.0 - shadingData.x) * 6.0;
 		mipLevel = positionView.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(material.y * 255.0 - 1.0);
-		float3 cubeSample = SAMPLE_MATERIAL_ENVIRONMENT(g_tIblProbeCube, g_sIblProbeCube, reflectionWorld, arraySlice, mipLevel, shadingData.x, IblDesaturation.y);
+		float3 cubeSample = SAMPLE_MATERIAL_ENVIRONMENT(g_tIblProbeCube, g_sIblProbeCube, reflectionWorld, arraySlice, mipLevel, shadingData.x, IblDesaturation.y, FO4_SKYLIGHTING_SPECULAR(positionView, normalView, shadingData.x));
 		float luminance = dot(cubeSample, float3(0.299, 0.587, 0.114));
 		iblColor = lerp(
 			cubeSample, luminance.xxx, IblDesaturation.y * 0.9);
@@ -1064,7 +1064,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float mipLevel = (1.0 - surface.x) * 6.0;
 		mipLevel = viewPosition.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(material.x * 255.0 - 1.0);
-		environment = SAMPLE_MATERIAL_ENVIRONMENT(environmentTexture, environmentSampler, environmentCoordinate, arraySlice, mipLevel, surface.x, ambientFrame[30].y);
+		environment = SAMPLE_MATERIAL_ENVIRONMENT(environmentTexture, environmentSampler, environmentCoordinate, arraySlice, mipLevel, surface.x, ambientFrame[30].y, FO4_SKYLIGHTING_SPECULAR(viewPosition, normal, surface.x));
 		float luminance = dot(environment, float3(0.299, 0.587, 0.114));
 		environment = lerp(environment, luminance.xxx, ambientFrame[30].y * 0.9);
 	}
@@ -1327,7 +1327,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		lod = pos.z * 0.001953125 + lod;
 		float idx = floor(prm.x * 255.0 - 1.0);
 
-		cube = SAMPLE_MATERIAL_ENVIRONMENT(TexCube, SampCube, rw, idx, lod, surf.x, g_PF[30].y);
+		cube = SAMPLE_MATERIAL_ENVIRONMENT(TexCube, SampCube, rw, idx, lod, surf.x, g_PF[30].y, FO4_SKYLIGHTING_SPECULAR(pos.xyz, nn.xyz, surf.x));
 		float lum = dot(cube, float3(0.299, 0.587, 0.114));
 		cube = lerp(cube, lum.xxx, g_PF[30].y * 0.9);
 	}
@@ -2447,7 +2447,7 @@ float4 main(PSInput input) : SV_Target0
 			6.0,
 			worldPosition.z * 0.001953125);
 		float probeSlice = floor(material.x * 255.0 - 1.0);
-		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(probeTexture, probeSampler, probeDirection, probeSlice, probeLod, typeData.x, scene[30].y);
+		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(probeTexture, probeSampler, probeDirection, probeSlice, probeLod, typeData.x, scene[30].y, FO4_SKYLIGHTING_SPECULAR(worldPosition, normal, typeData.x));
 		float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
 		probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
 	}
@@ -2565,7 +2565,7 @@ float4 main(PSInput input) : SV_Target0
 			6.0,
 			worldPosition.z * 0.001953125);
 		float probeSlice = floor(material.x * 255.0 - 1.0);
-		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(probeTexture, probeSampler, probeDirection, probeSlice, probeLod, typeData.x, scene[30].y);
+		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(probeTexture, probeSampler, probeDirection, probeSlice, probeLod, typeData.x, scene[30].y, FO4_SKYLIGHTING_SPECULAR(worldPosition, normal, typeData.x));
 		float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
 		probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
 	}
