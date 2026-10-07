@@ -64,7 +64,7 @@ namespace cs::features
 		// Packs b6; repeated packs within a frame must not advance the grid again.
 		render::SkylightingSettings GetCommonBufferData();
 
-		// Null unless healthy with probes created, so consumers fail neutral.
+		// Null unless enabled, healthy and with probes created, so consumers fail neutral.
 		ID3D11ShaderResourceView* GetProbeArraySRV() const noexcept;
 
 	private:
@@ -94,7 +94,8 @@ namespace cs::features
 		enum ResetReason : std::uint8_t
 		{
 			kResetLoad = 1,
-			kResetRebuild = 2
+			kResetRebuild = 2,
+			kResetEnable = 4
 		};
 		void QueueReset(ResetReason a_reason) noexcept { _queuedReset.fetch_or(a_reason, std::memory_order_acq_rel); }
 		void ResetSkylighting(ID3D11DeviceContext* a_context);
@@ -105,7 +106,8 @@ namespace cs::features
 			kDispatched,
 			kNotFullSky,
 			kNoOcclusion,
-			kNoGrid
+			kNoGrid,
+			kDisabled
 		};
 		void DispatchProbeUpdate(ID3D11DeviceContext* a_context);
 
@@ -118,7 +120,8 @@ namespace cs::features
 			kUnsupportedCount,
 			kNoTarget,
 			kInvalid,
-			kCopyTarget
+			kCopyTarget,
+			kDisabled
 		};
 		// Right after the main sun's Render(7); publishes the cascades and light data.
 		void CopySunCascades();
@@ -128,6 +131,8 @@ namespace cs::features
 		// Publishes the neutral block so no probe update samples stale cascades.
 		void RetireCascades(ID3D11DeviceContext* a_context);
 		void RenderDebug(ID3D11DeviceContext* a_context);
+		// Healthy with probes created, whether or not the feature is enabled.
+		ID3D11ShaderResourceView* GetBindableProbeArraySRV() const noexcept;
 		enum class Consumer : std::uint8_t
 		{
 			kWater,
@@ -178,6 +183,8 @@ namespace cs::features
 
 		std::atomic<std::uint8_t> _queuedReset{ 0 };
 		bool _summaryPending = false;
+		// Render thread only; a disabled stretch leaves stale history to reset.
+		bool _wasEnabled = true;
 
 		// misc parameters
 		float occlusionDistance = 10000.f;
@@ -226,6 +233,7 @@ namespace cs::features
 			std::atomic<std::uint64_t> resets{ 0 };
 			std::atomic<std::uint64_t> resetsLoad{ 0 };
 			std::atomic<std::uint64_t> resetsRebuild{ 0 };
+			std::atomic<std::uint64_t> resetsEnable{ 0 };
 			std::atomic<std::uint64_t> debugFrames{ 0 };
 			std::atomic<std::uint64_t> waterDraws{ 0 };
 			std::atomic<std::uint64_t> compositeDraws{ 0 };
@@ -242,7 +250,7 @@ namespace cs::features
 		struct CascadeCounters
 		{
 			std::atomic<std::uint64_t> copies{ 0 };
-			std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(CascadeSkip::kCopyTarget) + 1> skipped{};
+			std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(CascadeSkip::kDisabled) + 1> skipped{};
 			std::atomic<std::uint32_t> count{ 0 };
 			std::array<std::atomic<float>, cs::engine::kMaxSunCascades> splitEnd{};
 		} _cascadeCounters;

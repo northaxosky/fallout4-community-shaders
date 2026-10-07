@@ -18,6 +18,7 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
@@ -50,7 +51,7 @@ namespace cs::features
 
 		constexpr float kRadiansToDegrees = 180.0f / std::numbers::pi_v<float>;
 
-		constexpr std::array kCascadeSkipNames{ "none", "unavailable", "not_full_sky", "no_light", "unsupported_count", "no_target", "invalid", "copy_target" };
+		constexpr std::array kCascadeSkipNames{ "none", "unavailable", "not_full_sky", "no_light", "unsupported_count", "no_target", "invalid", "copy_target", "disabled" };
 
 		// Directional families whose soft sun lobes read the probe shadow visibility.
 		constexpr std::array kShadowVisFamilies{ "BSDFLIGHT_PS_DIRSPLITS1", "BSDFLIGHT_PS_DIRSPLITS2", "BSDFLIGHT_PS_DIRSPLITS3", "BSDFLIGHT_PS_UNSHADOWED" };
@@ -154,6 +155,11 @@ namespace cs::features
 
 	ID3D11ShaderResourceView* Skylighting::GetProbeArraySRV() const noexcept
 	{
+		return _settings.enabled ? GetBindableProbeArraySRV() : nullptr;
+	}
+
+	ID3D11ShaderResourceView* Skylighting::GetBindableProbeArraySRV() const noexcept
+	{
 		if (!IsHealthy() || !_probesReady.load(std::memory_order_acquire) || !_injectionsOperational.load(std::memory_order_acquire) || !_texProbeArray)
 			return nullptr;
 		return _texProbeArray->srv.get();
@@ -178,7 +184,8 @@ namespace cs::features
 
 	void Skylighting::BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer)
 	{
-		auto* probes = GetProbeArraySRV();
+		// Disabled keeps the bindings: the neutral b6 block never reads them.
+		auto* probes = GetBindableProbeArraySRV();
 		if (!a_context || !probes)
 			return;
 		const bool lighting = a_consumer == Consumer::kLight || a_consumer == Consumer::kTiled;
@@ -403,7 +410,7 @@ namespace cs::features
 		_debugFrameReady = false;
 		cs::render::InvalidateFullscreenDebugData();
 		const auto mode = _debugVisualization.load(std::memory_order_acquire);
-		if (mode == DebugVisualization::kOff || !_injectionsOperational.load(std::memory_order_acquire) || !_probesReady.load(std::memory_order_acquire))
+		if (mode == DebugVisualization::kOff || !_settings.enabled || !_injectionsOperational.load(std::memory_order_acquire) || !_probesReady.load(std::memory_order_acquire))
 			return;
 		auto* shader = _debugCompute[mode == DebugVisualization::kUp ? 1 : 0].get();
 		auto* normals = cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
@@ -478,6 +485,14 @@ namespace cs::features
 			_counters.skippedDisabled.fetch_add(1, std::memory_order_relaxed);
 			return CaptureState::kDisabled;
 		}
+		if (!_settings.enabled) {
+			_wasEnabled = false;
+			_counters.skippedDisabled.fetch_add(1, std::memory_order_relaxed);
+			return CaptureState::kDisabled;
+		}
+		// Re-enabling must not show history from before the disabled stretch.
+		if (!std::exchange(_wasEnabled, true))
+			QueueReset(kResetEnable);
 		if (cs::engine::IsInterior()) {
 			_counters.skippedInterior.fetch_add(1, std::memory_order_relaxed);
 			return CaptureState::kInterior;
@@ -490,6 +505,8 @@ namespace cs::features
 				_probeCounters.resetsLoad.fetch_add(1, std::memory_order_relaxed);
 			if (reasons & kResetRebuild)
 				_probeCounters.resetsRebuild.fetch_add(1, std::memory_order_relaxed);
+			if (reasons & kResetEnable)
+				_probeCounters.resetsEnable.fetch_add(1, std::memory_order_relaxed);
 			// FO4: capture can fail at load; the update waits for a fresh matrix.
 			_hasOcclusion = false;
 			_summaryPending = true;
@@ -614,7 +631,7 @@ namespace cs::features
 		_timingSnapshot = ticks;
 
 		const auto cascadeSkipped = [&](CascadeSkip a_reason) { return count(_cascadeCounters.skipped[static_cast<std::size_t>(a_reason)]); };
-		const auto probeStateNames = std::array{ "pending", "dispatched", "not_full_sky", "no_occlusion", "no_grid" };
+		const auto probeStateNames = std::array{ "pending", "dispatched", "not_full_sky", "no_occlusion", "no_grid", "disabled" };
 		const auto cellID = _grid.cellID;
 		const auto& block = _grid.block;
 		const std::array<std::int32_t, 9> grid{
@@ -629,17 +646,17 @@ namespace cs::features
 				_probeCounters.gpuMs.store(result.gpuTimeMs, std::memory_order_relaxed);
 		}
 		CaptureLog->info(
-			"summary state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
+			"summary enabled={} state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
 			"L={:.0f} dir=({:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
 			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
-			"sun_copies={} sun_copy_skipped_unavailable={} sun_copy_skipped_not_full_sky={} sun_copy_skipped_no_light={} sun_copy_skipped_unsupported_count={} sun_copy_skipped_no_target={} sun_copy_skipped_invalid={} sun_copy_skipped_copy_target={} "
+			"sun_copies={} sun_copy_skipped_unavailable={} sun_copy_skipped_not_full_sky={} sun_copy_skipped_no_light={} sun_copy_skipped_unsupported_count={} sun_copy_skipped_no_target={} sun_copy_skipped_invalid={} sun_copy_skipped_copy_target={} sun_copy_skipped_disabled={} "
 			"cascade_count={} split_end=({:.1f},{:.1f}) "
-			"probe_state={} probe_dispatches={} probe_skipped_not_full_sky={} probe_skipped_no_occlusion={} probe_skipped_no_grid={} resets={} resets_load={} resets_rebuild={} "
+			"probe_state={} probe_dispatches={} probe_skipped_not_full_sky={} probe_skipped_no_occlusion={} probe_skipped_no_grid={} resets={} resets_load={} resets_rebuild={} resets_enable={} "
 			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={} composite_draws_bound={} dflight_draws_bound={} tiled_dispatches_bound={} shadow_vis_draws_bound={}",
-			stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
+			_settings.enabled ? 1 : 0, stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
@@ -648,10 +665,10 @@ namespace cs::features
 			cpuMsAverage, _windowCpuMsMax, stageMs[0], stageMs[1], stageMs[2], stageMs[3], _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange,
 			count(_cascadeCounters.copies), cascadeSkipped(CascadeSkip::kUnavailable), cascadeSkipped(CascadeSkip::kNotFullSky), cascadeSkipped(CascadeSkip::kNoLight),
-			cascadeSkipped(CascadeSkip::kUnsupportedCount), cascadeSkipped(CascadeSkip::kNoTarget), cascadeSkipped(CascadeSkip::kInvalid), cascadeSkipped(CascadeSkip::kCopyTarget),
+			cascadeSkipped(CascadeSkip::kUnsupportedCount), cascadeSkipped(CascadeSkip::kNoTarget), cascadeSkipped(CascadeSkip::kInvalid), cascadeSkipped(CascadeSkip::kCopyTarget), cascadeSkipped(CascadeSkip::kDisabled),
 			_cascadeCounters.count.load(std::memory_order_relaxed), _cascadeCounters.splitEnd[0].load(std::memory_order_relaxed), _cascadeCounters.splitEnd[1].load(std::memory_order_relaxed),
 			probeStateNames[static_cast<std::size_t>(_probeState)], count(_probeCounters.dispatches), count(_probeCounters.skippedNotFullSky), count(_probeCounters.skippedNoOcclusion), count(_probeCounters.skippedNoGrid),
-			count(_probeCounters.resets), count(_probeCounters.resetsLoad), count(_probeCounters.resetsRebuild),
+			count(_probeCounters.resets), count(_probeCounters.resetsLoad), count(_probeCounters.resetsRebuild), count(_probeCounters.resetsEnable),
 			grid[0], grid[1], grid[2], grid[3], grid[4], grid[5], grid[6], grid[7], grid[8], _probeCounters.gpuMs.load(std::memory_order_relaxed), count(_probeCounters.waterDraws),
 			count(_probeCounters.compositeDraws), count(_probeCounters.lightDraws), count(_probeCounters.tiledDispatches), count(_probeCounters.shadowVisDraws));
 		_windowCpuMsSum = 0.0;
@@ -667,6 +684,7 @@ namespace cs::features
 		const auto rejected = [&](Reject a_reason) { return count(stats.rejected[static_cast<std::size_t>(a_reason)]); };
 		const auto cascadeSkipped = [&](CascadeSkip a_reason) { return count(_cascadeCounters.skipped[static_cast<std::size_t>(a_reason)]); };
 		a_sink
+			.Field("enabled", _settings.enabled)
 			.Field("captures", count(_counters.captures))
 			.Field("skipped_interior", count(_counters.skippedInterior))
 			.Field("skipped_disabled", count(_counters.skippedDisabled))
@@ -699,6 +717,7 @@ namespace cs::features
 			.Field("resets", count(_probeCounters.resets))
 			.Field("resets_load", count(_probeCounters.resetsLoad))
 			.Field("resets_rebuild", count(_probeCounters.resetsRebuild))
+			.Field("resets_enable", count(_probeCounters.resetsEnable))
 			.Field("grid_cell_x", static_cast<std::int64_t>(_probeCounters.grid[0].load(std::memory_order_relaxed)))
 			.Field("grid_cell_y", static_cast<std::int64_t>(_probeCounters.grid[1].load(std::memory_order_relaxed)))
 			.Field("grid_cell_z", static_cast<std::int64_t>(_probeCounters.grid[2].load(std::memory_order_relaxed)))
@@ -723,6 +742,7 @@ namespace cs::features
 			.Field("sun_copy_skipped_no_target", cascadeSkipped(CascadeSkip::kNoTarget))
 			.Field("sun_copy_skipped_invalid", cascadeSkipped(CascadeSkip::kInvalid))
 			.Field("sun_copy_skipped_copy_target", cascadeSkipped(CascadeSkip::kCopyTarget))
+			.Field("sun_copy_skipped_disabled", cascadeSkipped(CascadeSkip::kDisabled))
 			.Field("cascade_count", static_cast<std::int64_t>(_cascadeCounters.count.load(std::memory_order_relaxed)))
 			.Field("split_end_0", static_cast<double>(_cascadeCounters.splitEnd[0].load(std::memory_order_relaxed)))
 			.Field("split_end_1", static_cast<double>(_cascadeCounters.splitEnd[1].load(std::memory_order_relaxed)));
@@ -732,7 +752,7 @@ namespace cs::features
 	render::SkylightingSettings Skylighting::GetCommonBufferData()
 	{
 		const auto* graphics = cs::engine::GetGraphicsState();
-		if (!graphics)
+		if (!graphics || !_settings.enabled)
 			return {};
 		// FO4: packs repeat within a frame and the advance must happen once.
 		if (_grid.frame == graphics->frameCount)
@@ -776,7 +796,9 @@ namespace cs::features
 	void Skylighting::Prepass()
 	{
 		auto state = ProbeState::kDispatched;
-		if (!cs::engine::IsFullSky()) {
+		if (!_settings.enabled) {
+			state = ProbeState::kDisabled;
+		} else if (!cs::engine::IsFullSky()) {
 			_probeCounters.skippedNotFullSky.fetch_add(1, std::memory_order_relaxed);
 			state = ProbeState::kNotFullSky;
 		} else if (!_hasOcclusion) {
@@ -856,6 +878,8 @@ namespace cs::features
 		auto* device = cs::engine::GetDevice();
 		if (!IsHealthy() || !_probesReady.load(std::memory_order_acquire) || !device)
 			return CascadeSkip::kUnavailable;
+		if (!_settings.enabled)
+			return CascadeSkip::kDisabled;
 		if (!cs::engine::IsFullSky())
 			return CascadeSkip::kNotFullSky;
 
@@ -968,7 +992,7 @@ namespace cs::features
 	void Skylighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto& [maxZenith, minDiffuse, minSpecular] = skylighting::kSchema.fields;
+		const auto& [enabledField, maxZenith, minDiffuse, minSpecular] = skylighting::kSchema.fields;
 		const auto labelOf = [](const auto& a_field) {
 			return std::string(a_field.description) + "##" + std::string(a_field.key);
 		};
@@ -976,6 +1000,9 @@ namespace cs::features
 			const auto range = skylighting::kSchema.EditRange(a_field.member);
 			edit.Continuous(dmui::ui::SliderScalar(labelOf(a_field).c_str(), &(_settings.*a_field.member), &range.min, &range.max, "%.2f"));
 		};
+
+		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
+		dmui::ui::Spacing();
 
 		dmui::ui::Text("%s", "Minimum visibility values. Diffuse darkens objects. Specular removes the sky from reflections.");
 		drawVisibility(minDiffuse);
@@ -1000,6 +1027,9 @@ namespace cs::features
 		edit.Continuous(changed);
 		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
 			dmui::ui::Text("%s", "Smaller angles creates more focused top-down shadow.");
+
+		dmui::ui::Separator();
+		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void Skylighting::RestoreDefaultSettings()
