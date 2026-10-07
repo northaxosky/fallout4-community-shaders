@@ -38,11 +38,28 @@ namespace cs::engine
 			.target = RE::ID::NiCamera::SetViewFrustum
 		};
 
+		// FO4: the stock basis is mirrored, so single-sided terrain faces away.
+		void MakeBasisRightHanded(RE::NiCamera& a_camera) noexcept
+		{
+			auto& rotate = a_camera.local.rotate;
+			const auto row = [&](std::size_t a_row) {
+				return RE::NiPoint3{ rotate[a_row].x, rotate[a_row].y, rotate[a_row].z };
+			};
+			if (row(0).Dot(row(1).Cross(row(2))) < 0.0f) {
+				rotate[1].x = -rotate[1].x;
+				rotate[1].y = -rotate[1].y;
+				rotate[1].z = -rotate[1].z;
+			}
+		}
+
 		struct SetViewFrustum_Hook
 		{
 			static void thunk(RE::NiCamera* a_camera, RE::NiFrustum* a_frustum)
 			{
 				if (CaptureActive()) {
+					// The Update that follows in ComputeProjection republishes the world.
+					MakeBasisRightHanded(*a_camera);
+
 					const auto corner = g_active.quadrant;
 
 					const float frustumSize = a_frustum->top;
