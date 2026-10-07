@@ -41,12 +41,14 @@ namespace cs::engine
 		std::vector<PrioritizedCallback> g_preFullscreenDeferredLightDraw;
 		std::vector<PrioritizedCallback> g_postForwardSky;
 		std::vector<PrioritizedCallback> g_postPrecipitationOcclusion;
+		std::vector<PrioritizedCallback> g_postSunShadowRender;
 		bool g_prePassInstalled = false;
 		bool g_lightsImplInstalled = false;
 		bool g_compositeInstalled = false;
 		bool g_deferredDrawAnchorInstalled = false;
 		bool g_forwardSkyInstalled = false;
 		bool g_precipitationOcclusionInstalled = false;
+		bool g_sunShadowRenderInstalled = false;
 		bool g_insideDeferredLightsImpl = false;
 		bool g_insideDeferredComposite = false;
 
@@ -259,6 +261,25 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		[[nodiscard]] const RE::BSShadowDirectionalLight* GetSunShadowLight() noexcept
+		{
+			const auto* scene = GetWorldShadowSceneNode();
+			return scene ? scene->directionalShadowLight : nullptr;
+		}
+
+		// The main sun's Render(7) is the only directional render inside DeferredLightsImpl; its cascades are clean on return.
+		struct SunShadowRender_Hook
+		{
+			static void thunk(RE::BSShadowDirectionalLight* a_this, std::uint32_t a_mask)
+			{
+				func(a_this, a_mask);
+				constexpr std::uint32_t kMainSunMask = 7;
+				if (a_mask == kMainSunMask && g_insideDeferredLightsImpl && a_this == GetSunShadowLight())
+					DispatchGuarded(g_postSunShadowRender, "Post sun shadow render");
+			}
+			static inline REL::Relocation<void(RE::BSShadowDirectionalLight*, std::uint32_t)> func;
+		};
+
 		// DrawWorld::Forward renders sky batch 7, then cloud group 14; water and alpha follow.
 		struct ForwardSkyGroup_Hook
 		{
@@ -309,6 +330,31 @@ namespace cs::engine
 			stl::detour_thunk<DeferredLightsImpl_Hook>(RE::ID::DrawWorld::DeferredLightsImpl);
 			g_lightsImplInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
+		}
+
+		bool EnsureSunShadowRenderInstalled()
+		{
+			if (g_sunShadowRenderInstalled) {
+				return true;
+			}
+			constexpr std::size_t kRenderVtableSlot = 10;
+			REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE::BSShadowDirectionalLight[0] };
+			const auto slot = vtable.address() + kRenderVtableSlot * sizeof(std::uintptr_t);
+			const auto expected = RE::ID::BSShadowDirectionalLight::Render.address();
+			if (*reinterpret_cast<const std::uintptr_t*>(slot) != expected) {
+				L->error("BSShadowDirectionalLight vtable slot {} is not Render ({:#x}); sun shadow hook unavailable", kRenderVtableSlot, expected);
+				return false;
+			}
+			stl::write_vfunc<kRenderVtableSlot, SunShadowRender_Hook>(RE::VTABLE::BSShadowDirectionalLight[0]);
+			g_sunShadowRenderInstalled = SunShadowRender_Hook::func.address() != 0;
+			if (!g_sunShadowRenderInstalled) {
+				L->error("Hook failed on BSShadowDirectionalLight::Render");
+				return false;
+			}
+			// The inside-DeferredLightsImpl flag only flips while that hook is installed.
+			EnsureDeferredLightsImplInstalled();
+			L->info("Hook installed on BSShadowDirectionalLight::Render (vtable slot {})", kRenderVtableSlot);
+			return true;
 		}
 
 		void EnsureDeferredPrePassInstalled()
@@ -437,6 +483,14 @@ namespace cs::engine
 		InsertPrioritized(g_postForwardSky, std::move(callback), priority);
 		EnsureForwardSkyInstalled();
 		return true;
+	}
+
+	bool RegisterPostSunShadowRender(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PostSunShadowRender"))
+			return false;
+		InsertPrioritized(g_postSunShadowRender, std::move(callback), priority);
+		return EnsureSunShadowRenderInstalled();
 	}
 
 	bool RegisterPostPrecipitationOcclusion(RenderHookCallback callback, HookPriority priority)

@@ -216,6 +216,13 @@ namespace cs::engine
 		           nullptr;
 	}
 
+	// CommonLibF4 keeps State::shadowSceneNode private; index 0 is the world scene at offset 0.
+	[[nodiscard]] inline RE::ShadowSceneNode* GetWorldShadowSceneNode() noexcept
+	{
+		const auto* state = RE::BSShaderManager::State::GetSingleton();
+		return state ? *reinterpret_cast<RE::ShadowSceneNode* const*>(state) : nullptr;
+	}
+
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
 	{
 		return RE::BSGraphics::State::GetSingleton();
