@@ -336,6 +336,18 @@ namespace cs::features
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// FO4: point lights skip SetupGeometry; this writes their per-draw constants.
+		struct SetupPointLightGeometry
+		{
+			static bool thunk(RE::BSShader* a_shader, RE::BSLight* a_light, std::uint32_t a_technique, bool a_setState)
+			{
+				const auto result = func(a_shader, a_light, a_technique, a_setState);
+				g_rasterData = Snapshot(a_light, true);
+				return result;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		// FO4: gameplay queries preserve native shape masks and exclusions, without render fade.
 		struct Luminance
 		{
@@ -456,6 +468,7 @@ namespace cs::features
 		InstallHook<AppendLight>(RE::ID::BSDFTiledLighting::AddLight);
 		InstallHook<UploadLights>(RE::ID::BSGraphics::Renderer::UpdateStructuredBuffer);
 		InstallHook<SetupGeometry>(RE::ID::BSDFLightShader::SetupGeometry);
+		InstallHook<SetupPointLightGeometry>(RE::ID::BSDFLightShader::SetupPointLightGeometry);
 		InstallHook<Luminance>(RE::ID::BSLight::GetLuminanceAtPoint);
 		g_state.hooks = true;
 	}
