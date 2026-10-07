@@ -6,6 +6,9 @@
 #ifdef WATER_EFFECTS
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
+#ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+#	include "FO4/SkylightingConsumer.hlsli"
+#endif
 #include "Common/DeferredContracts.hlsli"
 #ifdef EXPONENTIAL_HEIGHT_FOG
 // FO4: native fog colors cross the analytic/volume boundary before the final blend.
@@ -221,6 +224,13 @@ PS_OUTPUT main(PS_INPUT input)
 			CameraPosAdjust,
 			waterDebugColor)) {
 		output.color = waterDebugColor;
+		return output;
+	}
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		output.color = skylightingDebugColor;
 		return output;
 	}
 #	endif
@@ -561,6 +571,13 @@ PS_OUTPUT main(PS_INPUT input)
 			CameraPosAdjust,
 			waterDebugColor)) {
 		output.color = waterDebugColor;
+		return output;
+	}
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		output.color = skylightingDebugColor;
 		return output;
 	}
 #	endif
@@ -1008,6 +1025,12 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	}
 #		endif
 #	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
+	}
+#	endif
 
 #	if FOGSTACK
 	float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
@@ -1273,6 +1296,12 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		return waterDebugColor;
 	}
 #	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(svpos.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
+	}
+#	endif
 
 	float2 prm = TexParam.SampleLevel(SampParam, uv, 0).yz;
 
@@ -1472,6 +1501,12 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 			NearReproj_row3,
 			waterDebugColor)) {
 		return waterDebugColor;
+	}
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
 	}
 #	endif
 	float2 uv = position.xy * screenData[0].xy;
@@ -1786,6 +1821,13 @@ PS_OUTPUT main(PS_INPUT input)
 	}
 #		endif
 #	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		output.color = skylightingDebugColor;
+		return output;
+	}
+#	endif
 
 #	if COMPOSITE_MATERIAL_5
 	float3 ambientWeighted = litColor * 3.0;
@@ -2093,6 +2135,13 @@ PS_OUTPUT main(PS_INPUT input)
 		return output;
 	}
 #	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		output.color = skylightingDebugColor;
+		return output;
+	}
+#	endif
 	return output;
 }
 #endif
@@ -2166,6 +2215,13 @@ PS_OUTPUT main(PS_INPUT input)
 			NearReproj_row3,
 			waterDebugColor)) {
 		output.color = waterDebugColor;
+		return output;
+	}
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		output.color = skylightingDebugColor;
 		return output;
 	}
 #	endif
@@ -2339,6 +2395,12 @@ float4 main(PSInput input) : SV_Target0
 		return waterDebugColor;
 	}
 #		endif
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
+	}
 #	endif
 
 #	if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK || defined(SSGI)
@@ -2689,6 +2751,12 @@ float4 main(PS_INPUT input) : SV_Target0
 		return waterDebugColor;
 	}
 #		endif
+#		ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
+	}
+#		endif
 	float2 screenUv = input.position.xy * cb2[0].xy;
 	float3 ambient = g_tAmbientPrimary.SampleLevel(g_sAmbientPrimary, screenUv, 0).xyz;
 	ambient += g_tAmbientSecondary.SampleLevel(g_sAmbientSecondary, screenUv, 0).xyz;
@@ -2769,6 +2837,12 @@ float4 main(PS_INPUT input) : SV_Target0
 			NearReproj_row3,
 			waterDebugColor)) {
 		return waterDebugColor;
+	}
+#		endif
+#		ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
 	}
 #		endif
 	float2 screenUv = input.position.xy * cb2[0].xy;
@@ -2859,6 +2933,12 @@ float4 main(PS_INPUT input) : SV_Target0
 		return waterDebugColor;
 	}
 #		endif
+#		ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
+	}
+#		endif
 	float2 screenUv = input.position.xy * cb2[0].xy;
 	float material = g_tShading.SampleLevel(g_sShading, screenUv, 0).w;
 	float3 color = g_tColorPrimary.SampleLevel(g_sColorPrimary, screenUv, 0).xyz;
@@ -2943,6 +3023,12 @@ float4 main(PS_INPUT input) : SV_Target0
 			NearReproj_row3,
 			waterDebugColor)) {
 		return waterDebugColor;
+	}
+#		endif
+#		ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
 	}
 #		endif
 	float2 screenUv = input.position.xy * cb2[0].xy;
@@ -3119,6 +3205,12 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		return waterDebugColor;
 	}
 #		endif
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(position.xy, skylightingDebugColor)) {
+		return skylightingDebugColor;
+	}
 #	endif
 
 #	if WAVE5A_FOG_MATERIAL5
@@ -3428,6 +3520,16 @@ PS_OUTPUT main(PS_INPUT input)
 			cb12[35],
 			waterDebugColor)) {
 		output.color = waterDebugColor;
+		output.normal = 0.0;
+		output.material = 0.0;
+		output.auxiliary = 0.0;
+		return output;
+	}
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		output.color = skylightingDebugColor;
 		output.normal = 0.0;
 		output.material = 0.0;
 		output.auxiliary = 0.0;
@@ -3745,6 +3847,16 @@ PS_OUTPUT main(PS_INPUT input)
 			cb12[35],
 			waterDebugColor)) {
 		output.color = waterDebugColor;
+		output.normal = 0.0;
+		output.material = 0.0;
+		output.auxiliary = 0.0;
+		return output;
+	}
+#	endif
+#	ifdef SKYLIGHTING_FULLSCREEN_DEBUG
+	float4 skylightingDebugColor;
+	if (Skylighting::TryGetDebugColor(input.position.xy, skylightingDebugColor)) {
+		output.color = skylightingDebugColor;
 		output.normal = 0.0;
 		output.material = 0.0;
 		output.auxiliary = 0.0;

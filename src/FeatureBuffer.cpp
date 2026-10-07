@@ -3,6 +3,7 @@
 #include "DynamicCubemaps.h"
 #include "ExponentialHeightFog.h"
 #include "LODBlending.h"
+#include "Skylighting.h"
 #include "TerrainShadows.h"
 #include "TerrainVariation.h"
 #include "WaterEffects.h"
@@ -40,7 +41,10 @@ namespace cs
 					features::WaterEffects::GetSingleton()),
 			.terrainVariationSettings =
 				CollectFeatureData<TerrainVariationFeatureData>(
-					features::TerrainVariation::GetSingleton())
+					features::TerrainVariation::GetSingleton()),
+			.skylightingSettings =
+				CollectFeatureData<render::SkylightingSettings>(
+					features::Skylighting::GetSingleton())
 		};
 	}
 }

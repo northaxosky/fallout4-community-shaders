@@ -6,6 +6,7 @@
 #include "../features/LODBlending/src/ShaderDefines.h"
 #include "../features/ScreenSpaceGI/src/ShaderDefines.h"
 #include "../features/ScreenSpaceShadows/src/ShaderDefines.h"
+#include "../features/Skylighting/src/ShaderDefines.h"
 #include "../features/TerrainShadows/src/ShaderDefines.h"
 #include "../features/TerrainVariation/src/ShaderDefines.h"
 #include "../features/Upscaling/src/ShaderDefines.h"
@@ -22,6 +23,7 @@ namespace cs::engine
 			const std::pair<std::string_view, const ShaderDefineProvider*> features[]{
 				{ "ScreenSpaceShadows", &sss::kShaderDefines },
 				{ "ScreenSpaceGI", &ssgi::kShaderDefines },
+				{ "Skylighting", &skylighting_shader::kShaderDefines },
 				{ "InverseSquareLighting", &isl::kShaderDefines },
 				{ "ExponentialHeightFog", &fog_shader::kShaderDefines },
 				{ "DynamicCubemaps", &dc::kShaderDefines },

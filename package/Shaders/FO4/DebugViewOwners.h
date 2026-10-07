@@ -15,6 +15,7 @@ namespace FullscreenDebugOwner
 		None = 0,
 		ExponentialHeightFog = 2,
 		TerrainShadows = 3,
-		WaterEffects = 4;
+		WaterEffects = 4,
+		Skylighting = 5;
 }
 #endif

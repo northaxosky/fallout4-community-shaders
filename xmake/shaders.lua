@@ -6,7 +6,8 @@ local shader_directories = {
     "features/FrameGeneration/Shaders",
     "features/ExponentialHeightFog/Shaders",
     "features/DynamicCubemaps/Shaders",
-    "features/WaterEffects/Shaders"
+    "features/WaterEffects/Shaders",
+    "features/Skylighting/Shaders"
 }
 
 local shader_files = {

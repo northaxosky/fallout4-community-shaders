@@ -169,6 +169,7 @@ namespace cs::render
 			terrain.ZBlur = a_features.terrainShadowsSettings.ZBlur;
 			a_data.feature.lodBlendingSettings = a_features.lodBlendingSettings;
 			a_data.feature.terrainVariationSettings = a_features.terrainVariationSettings.shared;
+			a_data.feature.skylightingSettings = a_features.skylightingSettings;
 			fo4.EnabledTerrainVariation = a_features.terrainVariationSettings.Enabled;
 		}
 

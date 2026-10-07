@@ -1,8 +1,12 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
+#include "ShaderDefines.h"
+#include "ShadowLightData.h"
 #include "SkylightingSettings.h"
+#include "Utils/CSBuffer.h"
 
 #include <DirectXMath.h>
 #include <d3d11.h>
@@ -11,6 +15,7 @@
 #include <atomic>
 #include <cfloat>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,7 +24,7 @@
 
 namespace cs::features
 {
-	class Skylighting : public Feature
+	class Skylighting : public ShaderFeature<skylighting_shader::kShaderDefines>
 	{
 	public:
 		using Settings = skylighting::Settings;
@@ -37,6 +42,9 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
+		bool ValidateShaderInjections(std::string& a_error) override;
+		void OnLoadingMenuClosed() override;
+		void Prepass() override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
@@ -45,6 +53,10 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
+
+		// Packs b6; repeated packs within a frame must not advance the grid again.
+		render::SkylightingSettings GetCommonBufferData();
 
 	private:
 		Skylighting() = default;
@@ -64,8 +76,37 @@ namespace cs::features
 		};
 		CaptureState CaptureFrame();
 		void CreateOcclusionResources(ID3D11Device* a_device);
+		void CreateProbeResources(ID3D11Device* a_device);
+		void CreateDebugResources();
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 		void LogCaptureSummary(CaptureState a_state);
+
+		// Reasons accumulate until the next exterior capture consumes them.
+		enum ResetReason : std::uint8_t
+		{
+			kResetLoad = 1,
+			kResetRebuild = 2
+		};
+		void QueueReset(ResetReason a_reason) noexcept { _queuedReset.fetch_or(a_reason, std::memory_order_acq_rel); }
+		void ResetSkylighting(ID3D11DeviceContext* a_context);
+
+		enum class ProbeState : std::uint8_t
+		{
+			kPending,
+			kDispatched,
+			kNotFullSky,
+			kNoOcclusion,
+			kNoGrid
+		};
+		void DispatchProbeUpdate(ID3D11DeviceContext* a_context);
+		void RenderDebug(ID3D11DeviceContext* a_context);
+
+		enum class DebugVisualization : std::uint32_t
+		{
+			kOff,
+			kDiffuse,
+			kUp
+		};
 
 		Settings _settings;
 
@@ -73,6 +114,26 @@ namespace cs::features
 		winrt::com_ptr<ID3D11DepthStencilView> _occlusionDSV;
 		winrt::com_ptr<ID3D11ShaderResourceView> _occlusionSRV;
 		std::atomic_bool _debugPreviewEnabled{ false };
+		std::atomic<DebugVisualization> _debugVisualization{ DebugVisualization::kOff };
+
+		static constexpr std::array<std::uint32_t, 3> kProbeArrayDims{ 256, 256, 128 };
+		std::unique_ptr<cs::buffer::Texture3D> _texProbeArray;
+		std::unique_ptr<cs::buffer::Texture3D> _texAccumFramesArray;
+		std::unique_ptr<cs::buffer::Texture3D> _texShadowBitmask;
+		std::unique_ptr<cs::buffer::Texture3D> _texShadowVisibility;
+		winrt::com_ptr<ID3D11SamplerState> _comparisonSampler;
+		winrt::com_ptr<ID3D11ComputeShader> _probeUpdateCompute;
+		// Zeroed until cascades exist; zero split distances leave every probe lit.
+		winrt::com_ptr<ID3D11Buffer> _shadowLightsBuffer;
+		winrt::com_ptr<ID3D11ShaderResourceView> _shadowLightsSRV;
+		std::atomic_bool _probesReady{ false };
+
+		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _debugCompute;
+		std::unique_ptr<cs::buffer::Texture2D> _debugTexture;
+		bool _debugFrameReady = false;
+
+		std::atomic<std::uint8_t> _queuedReset{ 0 };
+		bool _summaryPending = false;
 
 		// misc parameters
 		float occlusionDistance = 10000.f;
@@ -86,6 +147,17 @@ namespace cs::features
 		DirectX::XMFLOAT4X4 OcclusionTransform{};
 		DirectX::XMFLOAT4 OcclusionDir{};
 		std::uint32_t frameCount = 0;
+		// The probe update needs a published matrix; the first capture can fail at load.
+		bool _hasOcclusion = false;
+
+		// Render thread only; the frame stamp makes repeated packs reuse one advance.
+		struct GridState
+		{
+			std::uint32_t frame = UINT32_MAX;
+			DirectX::XMFLOAT3 prevCellID{};
+			DirectX::XMFLOAT3 cellID{};
+			render::SkylightingSettings block{};
+		} _grid;
 
 		// Counters are atomic for telemetry; the window state is render-thread only.
 		struct CaptureCounters
@@ -101,6 +173,20 @@ namespace cs::features
 			std::array<std::atomic<float>, 5> stageMs{};
 			std::atomic_bool stockTargetRestored{ true };
 		} _counters;
+		struct ProbeCounters
+		{
+			std::atomic<std::uint64_t> dispatches{ 0 };
+			std::atomic<std::uint64_t> skippedNotFullSky{ 0 };
+			std::atomic<std::uint64_t> skippedNoOcclusion{ 0 };
+			std::atomic<std::uint64_t> skippedNoGrid{ 0 };
+			std::atomic<std::uint64_t> resets{ 0 };
+			std::atomic<std::uint64_t> resetsLoad{ 0 };
+			std::atomic<std::uint64_t> resetsRebuild{ 0 };
+			std::atomic<std::uint64_t> debugFrames{ 0 };
+			std::atomic<float> gpuMs{ 0.0f };
+			// Latest frame: cell id, array origin, valid margin.
+			std::array<std::atomic<std::int32_t>, 9> grid{};
+		} _probeCounters;
 		double _windowCpuMsSum = 0.0;
 		float _windowCpuMsMax = 0.0f;
 		std::uint32_t _windowCaptures = 0;
@@ -108,7 +194,11 @@ namespace cs::features
 		std::array<std::uint64_t, 5> _timingSnapshot{};
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
+		ProbeState _probeState = ProbeState::kPending;
 		bool _loggedFirstCapture = false;
 		bool _loggedTargetFailure = false;
+
+		std::atomic_bool _registrationsReady{ false };
+		std::atomic_bool _injectionsOperational{ false };
 	};
 }

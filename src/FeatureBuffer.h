@@ -52,8 +52,9 @@ namespace cs
 		LODBlendingFeatureData lodBlendingSettings;
 		WaterEffectsFeatureData waterEffectsSettings;
 		TerrainVariationFeatureData terrainVariationSettings;
+		render::SkylightingSettings skylightingSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 336);
+	static_assert(sizeof(FeatureDataCB) == 480);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);
@@ -66,9 +67,10 @@ namespace cs
 	static_assert(offsetof(FeatureDataCB, lodBlendingSettings) == 256);
 	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 288);
 	static_assert(offsetof(FeatureDataCB, terrainVariationSettings) == 304);
+	static_assert(offsetof(FeatureDataCB, skylightingSettings) == 336);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 4);
 
-	// inactive contributors leave zeroed blocks, except LOD blending, which defaults to neutral
+	// inactive contributors leave zeroed blocks, except LOD blending and Skylighting, which default to neutral
 	FeatureDataCB GetFeatureBufferData();
 }
