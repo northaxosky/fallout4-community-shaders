@@ -10,7 +10,6 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/D3D11Bootstrap.h"
-#include "Utils/DetourHooks.h"
 
 namespace cs::render
 {
