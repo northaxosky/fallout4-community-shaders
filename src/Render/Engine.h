@@ -283,6 +283,58 @@ namespace cs::engine
 		}
 	}
 
+	// Full-extent offscreen draws: no render scale, viewport remap or jitter.
+	class UnscaledRenderScope
+	{
+	public:
+		UnscaledRenderScope() noexcept :
+			_manager(GetRenderTargetManager()),
+			_state(GetGraphicsState())
+		{
+			if (_manager) {
+				_widthRatio = _manager->GetDynamicWidthRatio();
+				_heightRatio = _manager->GetDynamicHeightRatio();
+				_activated = _manager->IsDynamicResolutionCurrentlyActivated();
+				_viewportAsDefault = _manager->IsUsingDynamicResolutionViewportAsDefaultViewport();
+				SetDynamicResolution(1.0f, 1.0f, false);
+				_manager->SetUseDynamicResolutionViewportAsDefaultViewport(false);
+			}
+			if (_state) {
+				_offsetX = _state->offsetX;
+				_offsetY = _state->offsetY;
+				_state->offsetX = 0.0f;
+				_state->offsetY = 0.0f;
+			}
+		}
+
+		~UnscaledRenderScope() noexcept
+		{
+			if (_manager) {
+				SetDynamicResolution(_widthRatio, _heightRatio, _activated);
+				_manager->SetUseDynamicResolutionViewportAsDefaultViewport(_viewportAsDefault);
+			}
+			if (_state) {
+				_state->offsetX = _offsetX;
+				_state->offsetY = _offsetY;
+			}
+		}
+
+		UnscaledRenderScope(const UnscaledRenderScope&) = delete;
+		UnscaledRenderScope(UnscaledRenderScope&&) = delete;
+		UnscaledRenderScope& operator=(const UnscaledRenderScope&) = delete;
+		UnscaledRenderScope& operator=(UnscaledRenderScope&&) = delete;
+
+	private:
+		RE::BSGraphics::RenderTargetManager* _manager;
+		RE::BSGraphics::State* _state;
+		float _widthRatio = 1.0f;
+		float _heightRatio = 1.0f;
+		bool _activated = false;
+		bool _viewportAsDefault = false;
+		float _offsetX = 0.0f;
+		float _offsetY = 0.0f;
+	};
+
 	[[nodiscard]] inline bool TryGetWorldSceneProjection(
 		DirectX::XMFLOAT4X4& a_outProj,
 		DirectX::XMFLOAT4X4& a_outInvProj,

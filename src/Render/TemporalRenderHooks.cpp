@@ -67,6 +67,9 @@ namespace cs::render
 		stl::detour_thunk<BSShaderRenderTargets_Create>(RE::ID::BSShaderRenderTargets::Create);
 		// Own both the normal and pause-only Render_UI paths.
 		stl::detour_thunk<DrawWorldRenderUI>(RE::ID::DrawWorld::Imagespace);
+		// Pip-Boy and companion map render inside Render_UI before the resolve.
+		stl::detour_thunk<Interface3D_SetRenderFunc>(RE::ID::DrawWorld::SetInterface3DRenderFunc);
+		stl::detour_thunk<CompanionLocalMap_SetRenderFunc>(RE::ID::DrawWorld::SetCompanionLocalMapRenderFunc);
 		stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(
 			RE::VTABLE::ImageSpaceEffectTemporalAA[0]);
 		_hooksInstalled.store(true, std::memory_order_release);
@@ -99,10 +102,8 @@ namespace cs::render
 		RE::ImageSpaceEffectTemporalAA* a_this)
 	{
 		auto* upscaling = GetSingleton();
-		const auto method = upscaling->GetUpscaleMethod();
-		if (upscaling->IsDrivingFrameState() &&
-			upscaling->_srPublishedToFramebuffer.load(std::memory_order_acquire) &&
-			IsExternalUpscaler(method)) {
+		if (upscaling->IsDrivingVendorUpscaler() &&
+			upscaling->_srPublishedToFramebuffer.load(std::memory_order_acquire)) {
 			return false;
 		}
 		return func(a_this);
@@ -112,12 +113,7 @@ namespace cs::render
 		RE::BSGraphics::RenderTargetManager* a_this,
 		bool a_enabled)
 	{
-		auto* upscaling = GetSingleton();
-		const auto method = upscaling->GetUpscaleMethod();
-		const bool vendorActive =
-			upscaling->IsDrivingFrameState() &&
-			IsExternalUpscaler(method);
-		func(a_this, vendorActive ? true : a_enabled);
+		func(a_this, GetSingleton()->IsDrivingVendorUpscaler() ? true : a_enabled);
 	}
 
 	void TemporalRenderer::Main_UpdateDynamicResolution::thunk(
@@ -321,10 +317,7 @@ namespace cs::render
 		const REX::TScopeExit clearScope{ [upscaling]() noexcept {
 			upscaling->_imagespaceScope = false;
 		} };
-		const auto method = upscaling->GetUpscaleMethod();
-		const bool resolveRequired =
-			upscaling->IsDrivingFrameState() &&
-			IsExternalUpscaler(method);
+		const bool resolveRequired = upscaling->IsDrivingVendorUpscaler();
 
 		func(a_this);
 
@@ -381,6 +374,23 @@ namespace cs::render
 				upscaling->_savedDynamicHeightRatio,
 				activated);
 		});
+	}
+
+	template <class Tag, class... Args>
+	void TemporalRenderer::UnscaledRenderCallback<Tag, Args...>::Invoke(Args... a_args)
+	{
+		std::optional<cs::engine::UnscaledRenderScope> scope;
+		if (GetSingleton()->IsDrivingVendorUpscaler()) {
+			scope.emplace();
+		}
+		original.load(std::memory_order_acquire)(a_args...);
+	}
+
+	template <class Tag, class... Args>
+	void TemporalRenderer::UnscaledRenderCallback<Tag, Args...>::thunk(Callback a_callback)
+	{
+		original.store(a_callback, std::memory_order_release);
+		func(a_callback ? &Invoke : nullptr);
 	}
 
 	void TemporalRenderer::DeferredComposite_RenderPass::thunk(void* a_pass, std::uint32_t a_2, bool a_3)

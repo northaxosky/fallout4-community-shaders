@@ -282,6 +282,11 @@ namespace cs::render
 		return _hooksInstalled.load(std::memory_order_acquire) && _resourcesReady.load(std::memory_order_acquire) && !_quarantined.load(std::memory_order_acquire) && _superResolutionEligible;
 	}
 
+	bool TemporalRenderer::IsDrivingVendorUpscaler() const
+	{
+		return IsDrivingFrameState() && IsExternalUpscaler(GetUpscaleMethod());
+	}
+
 	void TemporalRenderer::RestoreNativeFrameState()
 	{
 		_upscaledThisFrame = false;

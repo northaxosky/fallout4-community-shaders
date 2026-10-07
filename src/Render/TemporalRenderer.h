@@ -242,6 +242,24 @@ namespace cs::render
 		features::SamplerBias samplerBias;
 
 		bool IsDrivingFrameState() const noexcept;
+		bool IsDrivingVendorUpscaler() const;
+
+		// Render_UI calls these registered callbacks before the resolve seam.
+		template <class Tag, class... Args>
+		struct UnscaledRenderCallback
+		{
+			using Callback = void (*)(Args...);
+			static void Invoke(Args... a_args);
+			static void thunk(Callback a_callback);
+			static inline REL::Relocation<decltype(thunk)> func;
+			static inline std::atomic<Callback> original{ nullptr };
+		};
+
+		struct Interface3D_SetRenderFunc : UnscaledRenderCallback<Interface3D_SetRenderFunc, std::uint32_t>
+		{};
+
+		struct CompanionLocalMap_SetRenderFunc : UnscaledRenderCallback<CompanionLocalMap_SetRenderFunc>
+		{};
 
 		struct ImageSpaceEffectTemporalAA_IsActive
 		{
