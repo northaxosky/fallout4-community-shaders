@@ -43,6 +43,19 @@ namespace
 		}
 		a_manager.FinishRuntimeCallbackPass();
 	}
+
+	class LoadingMenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+	{
+	public:
+		RE::BSEventNotifyControl ProcessEvent(
+			const RE::MenuOpenCloseEvent& a_event,
+			RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+		{
+			if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening)
+				cs::FeatureManager::Get().OnLoadingMenuClosedAll();
+			return RE::BSEventNotifyControl::kContinue;
+		}
+	};
 }
 
 namespace cs
@@ -407,8 +420,20 @@ namespace cs
 
 	void FeatureManager::OnDataLoadedAll()
 	{
+		static LoadingMenuSink loadingMenuSink;
+		if (auto* ui = RE::UI::GetSingleton())
+			ui->RegisterSink<RE::MenuOpenCloseEvent>(&loadingMenuSink);
+		else
+			L->warn("UI event source unavailable; loading-menu callbacks are disabled.");
 		DispatchRuntimeCallbacks(*this, "OnDataLoaded", [](Feature& a_feature) {
 			a_feature.OnDataLoaded();
+		});
+	}
+
+	void FeatureManager::OnLoadingMenuClosedAll()
+	{
+		DispatchRuntimeCallbacks(*this, "OnLoadingMenuClosed", [](Feature& a_feature) {
+			a_feature.OnLoadingMenuClosed();
 		});
 	}
 

@@ -53,6 +53,8 @@ namespace cs
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
+		// Runs on the UI event thread; queue render-thread work instead of doing it.
+		virtual void OnLoadingMenuClosed() {}
 		virtual void Prepass() {}
 		virtual void OnRuntimeQuarantined() noexcept {}
 
@@ -210,6 +212,7 @@ namespace cs
 		void PrepareAll();
 		void ActivateAll();
 		void OnDataLoadedAll();
+		void OnLoadingMenuClosedAll();
 		void OnPostPostLoadAll();
 		void PrepassAll();
 
