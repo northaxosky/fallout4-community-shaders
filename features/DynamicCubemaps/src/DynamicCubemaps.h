@@ -33,8 +33,7 @@ namespace cs
 namespace cs::features
 {
 	class DynamicCubemaps :
-		public ShaderFeature<dc::kShaderDefines>,
-		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		public ShaderFeature<dc::kShaderDefines>
 	{
 	public:
 		enum class DebugVisualization : std::uint32_t
@@ -59,7 +58,7 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void Prepass() override;
-		void OnDataLoaded() override;
+		void OnLoadingMenuClosed() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
@@ -72,10 +71,6 @@ namespace cs::features
 		void SetDebugView(std::string_view a_view) noexcept override;
 
 		cs::DynamicCubemapsFeatureData GetCommonBufferData() const;
-
-		RE::BSEventNotifyControl ProcessEvent(
-			const RE::MenuOpenCloseEvent& a_event,
-			RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override;
 
 	private:
 		static constexpr std::uint32_t kCubemapSize = 256;

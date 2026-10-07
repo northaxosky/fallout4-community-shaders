@@ -143,18 +143,9 @@ namespace cs::features
 		_started = true;
 	}
 
-	void ScreenSpaceGI::OnDataLoaded()
+	void ScreenSpaceGI::OnLoadingMenuClosed()
 	{
-		if (auto* ui = RE::UI::GetSingleton())
-			ui->RegisterSink<RE::MenuOpenCloseEvent>(this);
-	}
-
-	RE::BSEventNotifyControl ScreenSpaceGI::ProcessEvent(
-		const RE::MenuOpenCloseEvent& a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*)
-	{
-		if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening)
-			QueueReset("loading_screen_closed");
-		return RE::BSEventNotifyControl::kContinue;
+		QueueReset("loading_screen_closed");
 	}
 
 	void ScreenSpaceGI::ApplyVanillaSSAO()

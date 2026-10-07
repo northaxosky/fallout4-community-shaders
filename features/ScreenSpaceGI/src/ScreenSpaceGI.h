@@ -16,8 +16,7 @@
 namespace cs::features
 {
 	class ScreenSpaceGI :
-		public ShaderFeature<ssgi::kShaderDefines>,
-		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		public ShaderFeature<ssgi::kShaderDefines>
 	{
 	public:
 		static ScreenSpaceGI* GetSingleton();
@@ -28,7 +27,7 @@ namespace cs::features
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
 		void Prepass() override;
-		void OnDataLoaded() override;
+		void OnLoadingMenuClosed() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
@@ -37,8 +36,6 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view) noexcept override;
-		RE::BSEventNotifyControl ProcessEvent(
-			const RE::MenuOpenCloseEvent&, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override;
 		using Settings = ssgi_settings::Settings;
 
 	private:

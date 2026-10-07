@@ -281,24 +281,9 @@ namespace cs::features
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
 	}
 
-	void DynamicCubemaps::OnDataLoaded()
+	void DynamicCubemaps::OnLoadingMenuClosed()
 	{
-		if (auto* ui = RE::UI::GetSingleton()) {
-			ui->RegisterSink<RE::MenuOpenCloseEvent>(this);
-		} else {
-			L->warn("UI event source unavailable; loading-menu resets are disabled.");
-		}
-	}
-
-	RE::BSEventNotifyControl DynamicCubemaps::ProcessEvent(
-		const RE::MenuOpenCloseEvent& a_event,
-		RE::BSTEventSource<RE::MenuOpenCloseEvent>*)
-	{
-		if (a_event.menuName == RE::LoadingMenu::MENU_NAME &&
-			!a_event.opening) {
-			_queuedReset.store(true, std::memory_order_release);
-		}
-		return RE::BSEventNotifyControl::kContinue;
+		_queuedReset.store(true, std::memory_order_release);
 	}
 
 	void DynamicCubemaps::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
@@ -731,9 +716,7 @@ namespace cs::features
 	void DynamicCubemaps::ResolveReflectionMode()
 	{
 		const bool engineCube = cs::engine::GetActiveReflectionCubeSRV() != nullptr;
-		const auto* player = RE::PlayerCharacter::GetSingleton();
-		const auto* cell = player ? player->GetParentCell() : nullptr;
-		const bool interior = cell && !cell->IsExterior();
+		const bool interior = cs::engine::IsInterior();
 		// FO4 exterior water always renders its REFLECTIONS technique, standing in for Skyrim's reflections prepass.
 		const bool active = engineCube || !interior;
 		const bool fake = active && cs::engine::IsSkyHidden();
