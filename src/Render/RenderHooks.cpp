@@ -40,11 +40,13 @@ namespace cs::engine
 		std::vector<PrioritizedCallback> g_postDeferredComposite;
 		std::vector<PrioritizedCallback> g_preFullscreenDeferredLightDraw;
 		std::vector<PrioritizedCallback> g_postForwardSky;
+		std::vector<PrioritizedCallback> g_postPrecipitationOcclusion;
 		bool g_prePassInstalled = false;
 		bool g_lightsImplInstalled = false;
 		bool g_compositeInstalled = false;
 		bool g_deferredDrawAnchorInstalled = false;
 		bool g_forwardSkyInstalled = false;
+		bool g_precipitationOcclusionInstalled = false;
 		bool g_insideDeferredLightsImpl = false;
 		bool g_insideDeferredComposite = false;
 
@@ -136,6 +138,20 @@ namespace cs::engine
 		private:
 			const std::vector<PrioritizedCallback>& _callbacks;
 		};
+
+		// Callbacks run inside engine frames, so a failure is logged instead of unwinding through them.
+		void DispatchGuarded(const std::vector<PrioritizedCallback>& v, const char* a_where) noexcept
+		{
+			for (auto& entry : v) {
+				try {
+					entry.cb();
+				} catch (const std::exception& e) {
+					L->error("{} callback failed: {}", a_where, e.what());
+				} catch (...) {
+					L->error("{} callback failed.", a_where);
+				}
+			}
+		}
 
 		struct DeferredPrePass_Hook
 		{
@@ -232,6 +248,17 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		struct PrecipitationOcclusion_Hook
+		{
+			static void thunk()
+			{
+				MarkRegistrationClosed();
+				func();
+				DispatchGuarded(g_postPrecipitationOcclusion, "Precipitation occlusion");
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		// DrawWorld::Forward renders sky batch 7, then cloud group 14; water and alpha follow.
 		struct ForwardSkyGroup_Hook
 		{
@@ -257,6 +284,21 @@ namespace cs::engine
 				RE::ID::DrawWorld::Forward.address() + offsets[runtimeIdx]);
 			g_forwardSkyInstalled = true;
 			L->info("Hook installed on DrawWorld::Forward cloud group call (post-sky boundary)");
+		}
+
+		bool EnsurePrecipitationOcclusionInstalled()
+		{
+			if (g_precipitationOcclusionInstalled) {
+				return true;
+			}
+			stl::detour_thunk<PrecipitationOcclusion_Hook>(RE::ID::Precipitation::RenderOcclusionMap);
+			if (PrecipitationOcclusion_Hook::func.address() == 0) {
+				L->error("Hook failed on Precipitation::RenderOcclusionMap");
+				return false;
+			}
+			g_precipitationOcclusionInstalled = true;
+			L->info("Hook installed on Precipitation::RenderOcclusionMap");
+			return true;
 		}
 
 		void EnsureDeferredLightsImplInstalled()
@@ -395,6 +437,14 @@ namespace cs::engine
 		InsertPrioritized(g_postForwardSky, std::move(callback), priority);
 		EnsureForwardSkyInstalled();
 		return true;
+	}
+
+	bool RegisterPostPrecipitationOcclusion(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PostPrecipitationOcclusion"))
+			return false;
+		InsertPrioritized(g_postPrecipitationOcclusion, std::move(callback), priority);
+		return EnsurePrecipitationOcclusionInstalled();
 	}
 
 	void RegisterPreFullscreenDeferredLightDraw(

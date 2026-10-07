@@ -353,6 +353,9 @@ namespace cs::engine
 		kMainVerticalBlur = 68,
 		kLuminanceDownscale = 70,
 
+		// Fixed 512x512 R8_UNORM color target of the precipitation occlusion pass; acquired per pass.
+		kPrecipitationOcclusionColor = 86,
+
 		kCount = 100
 	};
 
