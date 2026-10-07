@@ -37,12 +37,6 @@ namespace cs::engine
 			.offset = { 0x54E, 0x55A, 0x55A },
 			.target = RE::ID::NiCamera::SetViewFrustum
 		};
-		constexpr CallSiteAnchor kCaptureQEnabled{
-			.name = "Precipitation::RenderOcclusionMapImpl -> BSPreCulledObjects::QEnabled",
-			.function = RE::ID::Precipitation::RenderOcclusionMapImpl,
-			.offset = { 0x23D, 0x232, 0x232 },
-			.target = RE::ID::BSPreCulledObjects::QEnabled
-		};
 
 		struct SetViewFrustum_Hook
 		{
@@ -64,14 +58,23 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Impl reads the Umbra list, empty in clear weather, unless this reports off.
-		struct PreCulledObjectsEnabled_Hook
+		// FO4: Umbra-culled objects skip frustum tests; stock shadow culling does this too.
+		class ScopedPreCullBypass
 		{
-			static bool thunk()
+		public:
+			ScopedPreCullBypass() noexcept :
+				_wasDisabled(RE::BSPreCulledObjects::QTempDisabled())
 			{
-				return !CaptureActive() && func();
+				RE::BSPreCulledObjects::SetTempDisabled(true, false);
 			}
-			static inline REL::Relocation<decltype(thunk)> func;
+
+			~ScopedPreCullBypass() noexcept { RE::BSPreCulledObjects::SetTempDisabled(_wasDisabled, false); }
+
+			ScopedPreCullBypass(const ScopedPreCullBypass&) = delete;
+			ScopedPreCullBypass& operator=(const ScopedPreCullBypass&) = delete;
+
+		private:
+			const bool _wasDisabled;
 		};
 
 		template <class Hook>
@@ -177,6 +180,7 @@ namespace cs::engine
 				_primed = true;
 				{
 					const cs::render::annotation::ScopedEvent event{ "Skylighting/OcclusionMask" };
+					const ScopedPreCullBypass bypass;
 					const auto begin = CaptureClock::now();
 					_precipitation.RenderOcclusionMapImpl(nullptr);
 					g_timings.capture.fetch_add((CaptureClock::now() - begin).count(), std::memory_order_relaxed);
@@ -238,7 +242,6 @@ namespace cs::engine
 	{
 		std::vector<HookInstall> installs;
 		installs.push_back(InstallCallSiteHook<SetViewFrustum_Hook>(kProjectionSetViewFrustum));
-		installs.push_back(InstallCallSiteHook<PreCulledObjectsEnabled_Hook>(kCaptureQEnabled));
 		installs.push_back(InstallOccluderPassHook());
 		return installs;
 	}
