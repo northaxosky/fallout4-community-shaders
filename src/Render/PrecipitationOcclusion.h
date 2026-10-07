@@ -1,6 +1,7 @@
 #pragma once
 
 #include <DirectXMath.h>
+#include <intrin.h>
 
 #include <array>
 #include <atomic>
@@ -112,4 +113,19 @@ namespace cs::engine
 	};
 
 	[[nodiscard]] OccluderStats& GetOccluderStats() noexcept;
+
+	// Where one capture spends its CPU time, in TSC ticks (cheap enough to read per slot-44 call).
+	// The hook parts run inside accumulate; hooks may also run on worker threads.
+	struct CaptureTimings
+	{
+		std::atomic<std::uint64_t> accumulate{ 0 };
+		std::atomic<std::uint64_t> render{ 0 };
+		std::atomic<std::uint64_t> hookPredicate{ 0 };
+		std::atomic<std::uint64_t> hookStock{ 0 };
+		std::atomic<std::uint64_t> hookOwn{ 0 };
+	};
+
+	[[nodiscard]] CaptureTimings& GetCaptureTimings() noexcept;
+	[[nodiscard]] inline std::uint64_t ReadTicks() noexcept { return __rdtsc(); }
+	[[nodiscard]] double TicksToMs(std::uint64_t a_ticks) noexcept;
 }

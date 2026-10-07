@@ -278,19 +278,31 @@ namespace cs::features
 		const auto count = [](const std::atomic<std::uint64_t>& a_value) { return a_value.load(std::memory_order_relaxed); };
 		using Reject = cs::engine::OccluderReject;
 		const auto rejected = [&](Reject a_reason) { return count(stats.rejected[static_cast<std::size_t>(a_reason)]); };
+
+		// Per-capture milliseconds of the window; the hook parts run inside accumulate.
+		const auto& timings = cs::engine::GetCaptureTimings();
+		const std::array<std::uint64_t, 5> ticks{
+			count(timings.accumulate), count(timings.render), count(timings.hookPredicate), count(timings.hookStock), count(timings.hookOwn)
+		};
+		std::array<float, 5> stageMs{};
+		for (std::size_t i = 0; i < stageMs.size(); ++i) {
+			stageMs[i] = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(ticks[i] - _timingSnapshot[i]) / _windowCaptures) : 0.0f;
+			_counters.stageMs[i].store(stageMs[i], std::memory_order_relaxed);
+		}
+		_timingSnapshot = ticks;
 		CaptureLog->info(
 			"summary state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
 			"L={:.0f} dir=({:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
-			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} stock_ds8_restored={} "
+			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_accumulate={:.3f} ms_render={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f}",
 			stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
 			count(stats.accepted), count(stats.delegated), count(stats.ownBuilt), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
-			cpuMsAverage, _windowCpuMsMax, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
+			cpuMsAverage, _windowCpuMsMax, stageMs[0], stageMs[1], stageMs[2], stageMs[3], stageMs[4], _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange);
 		_windowCpuMsSum = 0.0;
 		_windowCpuMsMax = 0.0f;
@@ -312,6 +324,11 @@ namespace cs::features
 			.Field("capture_cpu_ms_avg", static_cast<double>(_counters.cpuMsAverage.load(std::memory_order_relaxed)))
 			.Field("capture_cpu_ms_max", static_cast<double>(_counters.cpuMsMax.load(std::memory_order_relaxed)))
 			.Field("stock_ds8_restored", _counters.stockTargetRestored.load(std::memory_order_relaxed))
+			.Field("ms_accumulate", static_cast<double>(_counters.stageMs[0].load(std::memory_order_relaxed)))
+			.Field("ms_render", static_cast<double>(_counters.stageMs[1].load(std::memory_order_relaxed)))
+			.Field("ms_hook_predicate", static_cast<double>(_counters.stageMs[2].load(std::memory_order_relaxed)))
+			.Field("ms_hook_stock", static_cast<double>(_counters.stageMs[3].load(std::memory_order_relaxed)))
+			.Field("ms_hook_own", static_cast<double>(_counters.stageMs[4].load(std::memory_order_relaxed)))
 			.Field("occluders_accepted", count(stats.accepted))
 			.Field("occluders_delegated", count(stats.delegated))
 			.Field("occluders_own_built", count(stats.ownBuilt))

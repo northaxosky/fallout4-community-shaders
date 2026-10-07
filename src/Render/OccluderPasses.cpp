@@ -61,7 +61,9 @@ namespace cs::engine
 				}
 
 				if (fadeNode) {
-					if (const auto* bsx = RE::BSXFlags::Find(fadeNode)) {
+					// The key is interned once; building it per call costs a string-pool lookup.
+					static const RE::BSFixedString bsxKey{ "BSX" };
+					if (const auto* bsx = fadeNode->GetExtraData<RE::BSXFlags>(bsxKey)) {
 						using Flag = RE::BSXFlags::Flag;
 						if (bsx->GetFlags().any(
 								Flag::kRagdoll,
@@ -129,18 +131,28 @@ namespace cs::engine
 					return func(a_property, a_geometry, a_renderMode, a_accumulator);
 
 				auto& stats = GetOccluderStats();
-				if (const auto reject = RejectOccluder(*a_property, *a_geometry, capture->occluders)) {
+				auto& timings = GetCaptureTimings();
+				const auto begin = ReadTicks();
+				const auto reject = RejectOccluder(*a_property, *a_geometry, capture->occluders);
+				const auto predicateEnd = ReadTicks();
+				timings.hookPredicate.fetch_add(predicateEnd - begin, std::memory_order_relaxed);
+				if (reject) {
 					stats.rejected[static_cast<std::size_t>(*reject)].fetch_add(1, std::memory_order_relaxed);
 					return nullptr;
 				}
 				stats.accepted.fetch_add(1, std::memory_order_relaxed);
 
-				if (auto* passes = func(a_property, a_geometry, a_renderMode, a_accumulator)) {
+				auto* passes = func(a_property, a_geometry, a_renderMode, a_accumulator);
+				const auto stockEnd = ReadTicks();
+				timings.hookStock.fetch_add(stockEnd - predicateEnd, std::memory_order_relaxed);
+				if (passes) {
 					stats.delegated.fetch_add(1, std::memory_order_relaxed);
 					return passes;
 				}
 				if (IsLoadedCellLandscape(*a_property)) {
-					if (auto* passes = BuildLandscapePasses(*a_property, *a_geometry, *a_accumulator)) {
+					passes = BuildLandscapePasses(*a_property, *a_geometry, *a_accumulator);
+					timings.hookOwn.fetch_add(ReadTicks() - stockEnd, std::memory_order_relaxed);
+					if (passes) {
 						stats.ownBuilt.fetch_add(1, std::memory_order_relaxed);
 						return passes;
 					}

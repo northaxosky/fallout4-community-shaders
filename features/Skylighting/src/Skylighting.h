@@ -7,6 +7,7 @@
 #include <DirectXMath.h>
 #include <d3d11.h>
 
+#include <array>
 #include <atomic>
 #include <cfloat>
 #include <cstdint>
@@ -96,11 +97,15 @@ namespace cs::features
 			std::atomic<std::uint64_t> failed{ 0 };
 			std::atomic<float> cpuMsAverage{ 0.0f };
 			std::atomic<float> cpuMsMax{ 0.0f };
+			// Per-capture window averages: accumulate, render, hook predicate, hook stock, hook own.
+			std::array<std::atomic<float>, 5> stageMs{};
 			std::atomic_bool stockTargetRestored{ true };
 		} _counters;
 		double _windowCpuMsSum = 0.0;
 		float _windowCpuMsMax = 0.0f;
 		std::uint32_t _windowCaptures = 0;
+		// Stage tick totals at the last summary: accumulate, render, predicate, stock, own.
+		std::array<std::uint64_t, 5> _timingSnapshot{};
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
 		bool _loggedFirstCapture = false;
