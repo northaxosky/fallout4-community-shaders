@@ -171,6 +171,8 @@ namespace cs::render
 			a_data.feature.terrainVariationSettings = a_features.terrainVariationSettings.shared;
 			a_data.feature.skylightingSettings = a_features.skylightingSettings;
 			fo4.EnabledTerrainVariation = a_features.terrainVariationSettings.Enabled;
+			fo4.EnabledSkylighting = a_features.vertexAOConsumers.Skylighting;
+			fo4.EnabledScreenSpaceGI = a_features.vertexAOConsumers.ScreenSpaceGI;
 		}
 
 		constexpr std::array<std::size_t, kSubstrateBufferCount> kBufferSizes{

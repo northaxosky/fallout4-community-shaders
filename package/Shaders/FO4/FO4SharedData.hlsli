@@ -16,6 +16,9 @@ namespace FO4SharedData
 		float DynamicMaterialReflections;
 		uint EnabledWaterParallax;
 		uint EnabledTerrainVariation;
+		uint EnabledSkylighting;
+		uint EnabledScreenSpaceGI;
+		uint2 pad0;
 	};
 #if defined(FO4CS_SUBSTRATE) && (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(SKYLIGHTING_FULLSCREEN_DEBUG))
 	Texture2D<float4> DebugTexture : register(t61);

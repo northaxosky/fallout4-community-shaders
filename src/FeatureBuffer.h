@@ -44,6 +44,15 @@ namespace cs
 	};
 	static_assert(sizeof(TerrainVariationFeatureData) == 32);
 
+	// Consumers of the grass vertex-AO split; 0 keeps stock grass albedo.
+	struct alignas(16) VertexAOConsumersFeatureData
+	{
+		std::uint32_t Skylighting = 0;
+		std::uint32_t ScreenSpaceGI = 0;
+		std::uint32_t pad0[2]{};
+	};
+	static_assert(sizeof(VertexAOConsumersFeatureData) == 16);
+
 	struct alignas(16) FeatureDataCB
 	{
 		TerrainShadowsFeatureData terrainShadowsSettings;
@@ -53,8 +62,9 @@ namespace cs
 		WaterEffectsFeatureData waterEffectsSettings;
 		TerrainVariationFeatureData terrainVariationSettings;
 		render::SkylightingSettings skylightingSettings;
+		VertexAOConsumersFeatureData vertexAOConsumers;
 	};
-	static_assert(sizeof(FeatureDataCB) == 480);
+	static_assert(sizeof(FeatureDataCB) == 496);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);

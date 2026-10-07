@@ -19,6 +19,7 @@ namespace cs::features
 		public ShaderFeature<ssgi::kShaderDefines>
 	{
 	public:
+		bool IsEnabled() const noexcept { return _settings.enabled; }
 		static ScreenSpaceGI* GetSingleton();
 		std::string_view GetName() const override { return "ScreenSpaceGI"; }
 		std::string_view GetDisplayName() const override { return "Screen Space GI"; }

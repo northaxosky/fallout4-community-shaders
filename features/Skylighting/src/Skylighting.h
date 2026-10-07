@@ -30,6 +30,7 @@ namespace cs::features
 	class Skylighting : public ShaderFeature<skylighting_shader::kShaderDefines>
 	{
 	public:
+		bool IsEnabled() const noexcept { return _settings.enabled; }
 		using Settings = skylighting::Settings;
 
 		// PS slot of the probe array for forward consumers; compute binds t50 too.

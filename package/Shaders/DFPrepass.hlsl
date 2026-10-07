@@ -118,7 +118,7 @@
 #		define PREPASS_MOTION_VECTOR (!BLEND || TESSELLATE_DISP_HEIGHT || DISMEMBERMENT_MEATCUFF)
 #	endif
 
-#	if defined(LOD_BLENDING) || defined(TERRAIN_VARIATION)
+#	if defined(LOD_BLENDING) || defined(TERRAIN_VARIATION) || defined(FO4_PREPASS_VERTEX_AO)
 #		include "FO4/FO4ShaderData.hlsli"
 #	endif
 
@@ -485,9 +485,10 @@ struct PS_OUTPUT
 #	endif
 
 #	if GRASS && VC && defined(FO4_PREPASS_VERTEX_AO)
-		// FO4: upstream RunGrass splits the vertex colour here; albedo keeps only the chroma.
+		// FO4: upstream RunGrass splits the vertex colour; stock keeps it while no consumer is on.
 		float grassVertexAO = max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z);
-		input.vertexColor.xyz /= max(grassVertexAO, EPSILON_DIVISION);
+		[branch] if (FO4SharedData::EnabledSkylighting != 0 || FO4SharedData::EnabledScreenSpaceGI != 0)
+			input.vertexColor.xyz /= max(grassVertexAO, EPSILON_DIVISION);
 #	endif
 
 #	if TESSELLATE_DISP_HEIGHT
