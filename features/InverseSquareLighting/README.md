@@ -16,9 +16,11 @@ its native falloff when it is created; `false` leaves unlisted lights native,
 as upstream. A matching TOML entry, base form or reference, is authoritative:
 only its fields apply, omitted fields take upstream defaults with intensity scale 1,
 and derived values are never merged with it.
-Derivation fills only `inverse_square`, `cutoff` and an intensity scale
-(equivalent to retuning LIGH fade), with `size` at √2. The scale matches the
-d²-weighted energy of the native curve out to its radius, and the cutoff
+Derivation fills only `inverse_square`, `size`, `cutoff` and an intensity scale
+(equivalent to retuning LIGH fade). `size` makes ISL's half-intensity distance
+match the native curve's (clamped to 0.01 to just below 50, the √2 sentinel).
+The scale then matches the d²-weighted energy of the native curve out to its
+radius with that size, and the cutoff
 reproduces the native radius at the reference's un-flickered fade (clamped to
 0.01 to just below 1; the gain is kept, so reach changes). Lights stay native
 when DATA flag 0x4 negates color, the radial scalar is 0, native energy is not
