@@ -13,6 +13,7 @@
 #include "Settings/FeatureKeys.h"
 #include "Settings/LiveSettings.h"
 #include "Settings/SettingsRegistry.h"
+#include "SkylightingSettings.h"
 #include "TerrainShadowsSettings.h"
 #include "TerrainVariationSettings.h"
 #include "WaterEffectsSettings.h"
@@ -76,6 +77,7 @@ namespace
 		auto registry = BuildCoreRegistry();
 		const std::array features{
 			std::pair{ "ScreenSpaceGI", MakeSchemaView(ssgi_settings::kSchema) },
+			std::pair{ "Skylighting", MakeSchemaView(skylighting::kSchema) },
 			std::pair{ "InverseSquareLighting", MakeSchemaView(inverse_square_lighting::kSchema) },
 			std::pair{ "ExponentialHeightFog", MakeSchemaView(exponential_height_fog::kSchema) },
 			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },

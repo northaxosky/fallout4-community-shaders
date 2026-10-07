@@ -21,6 +21,7 @@ local features = {
     "LODBlending",
     "TerrainVariation",
     "ScreenSpaceGI",
+    "Skylighting",
     "InverseSquareLighting",
     "ExponentialHeightFog",
     "DynamicCubemaps",
@@ -363,7 +364,7 @@ local function stock_shader_identity_target(name, compiler, tests)
             "src/Utils/ShaderCache/ShaderRecipe.cpp",
             "src/Utils/ShaderCache/SourceCompile.cpp"
         )
-        add_includedirs("features/ScreenSpaceGI/src")
+        add_includedirs("features/ScreenSpaceGI/src", "features/Skylighting/src")
         add_packages("spdlog", "vcpkg::directxmath", "vcpkg::tomlplusplus")
         add_syslinks("bcrypt", "d3dcompiler", "version")
         set_values("fo4cs.identity_compiler", compiler)

@@ -2,6 +2,7 @@
 
 #include "Render/SharedDataLayout.h"
 #include "ScreenSpaceGIConstants.h"
+#include "ShadowLightData.h"
 #include "Utils/ShaderCompile.h"
 
 #include <algorithm>
@@ -283,6 +284,23 @@ namespace
 			return "SSGICB.PrevInvViewMat: expected column-major storage";
 		return {};
 	}
+	std::string VerifySkylightingABI(const std::filesystem::path& a_root)
+	{
+		std::string error;
+		auto blob = cs::util::CompileShaderToBlob((a_root / "Skylighting/UpdateProbesCS.hlsl").c_str(),
+			{ { "FO4CS_SUBSTRATE", "1" } }, "cs_5_0", "main", &error, a_root);
+		if (!blob)
+			return error;
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(reflection.GetAddressOf()))))
+			return "Skylighting ABI reflection failed";
+		D3D11_SHADER_INPUT_BIND_DESC binding{};
+		if (FAILED(reflection->GetResourceBindingDescByName("DirectionalShadowLights", &binding)) || binding.BindPoint != 2)
+			return "DirectionalShadowLights: ABI slot mismatch";
+		if (binding.NumSamples != sizeof(cs::features::skylighting::DirectionalShadowLightData))
+			return "DirectionalShadowLights: ABI structure stride mismatch";
+		return {};
+	}
 #undef ABI
 }
 
@@ -292,5 +310,7 @@ std::string VerifyShaderABI(const std::filesystem::path& a_root)
 		return "substrate ABI: " + error;
 	if (auto error = VerifySSGIABI(a_root); !error.empty())
 		return "SSGI ABI: " + error;
+	if (auto error = VerifySkylightingABI(a_root); !error.empty())
+		return "Skylighting ABI: " + error;
 	return {};
 }

@@ -50,12 +50,13 @@ namespace cs::render
 	};
 	struct SkylightingSettings
 	{
-		DirectX::XMFLOAT4X4 OcclusionViewProj;
-		DirectX::XMFLOAT4 OcclusionDir, PosOffset;
-		std::uint32_t ArrayOrigin[4];
-		std::int32_t ValidMargin[4];
-		float MinDiffuseVisibility, MinSpecularVisibility;
-		std::uint32_t pad0[2];
+		// Neutral defaults: a far PosOffset puts every lookup outside the grid (unit SH, visibility 1).
+		DirectX::XMFLOAT4X4 OcclusionViewProj{};
+		DirectX::XMFLOAT4 OcclusionDir{}, PosOffset{ 1.0e30f, 1.0e30f, 1.0e30f, 0.0f };
+		std::uint32_t ArrayOrigin[4]{};
+		std::int32_t ValidMargin[4]{};
+		float MinDiffuseVisibility = 1.0f, MinSpecularVisibility = 1.0f;
+		std::uint32_t pad0[2]{};
 	};
 	struct CloudShadowsSettings
 	{

@@ -46,7 +46,7 @@ The native entry-point naming boundary is documented under Shader replacement.
 Shared consumption includes byte-identical SSS shaders, RCAS, shader licenses, default cubemap, the
 entire ScreenSpaceGI shader/noise directory and water caustics assets from the shared pin.
 All seven ExponentialHeightFog shaders and the Color, FastMath, GBuffer, Shading, Random,
-IBL and Skylighting dependencies are also staged unchanged.
+IBL dependencies and the Skylighting include and probe-update shader are also staged unchanged.
 Bend's CPU header is identical modulo comments; its
 existing SSS consumer uses the unchanged shared header. PerformanceOverlay uses shared QPC/FPS
 helpers, the profiler and the A/B aggregator. `src/Shared/PerfUtils.h` supplies Windows declarations
@@ -246,5 +246,6 @@ evidence limits, not relabeled as proven bugs. A suspected upstream typed-depth 
 - [MotionVectorFixes](MotionVectorFixes.md)
 - [Screen Space GI](ScreenSpaceGI.md)
 - [Screen Space Shadows](ScreenSpaceShadows.md)
+- [Skylighting](Skylighting.md)
 
 [upstream]: https://github.com/community-shaders/skyrim-community-shaders

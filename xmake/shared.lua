@@ -22,6 +22,7 @@ function main(target)
             "features/Exponential Height Fog/Shaders/ExponentialHeightFog",
             "features/IBL/Shaders/IBL/IBL.hlsli",
             "features/Skylighting/Shaders/Skylighting/Skylighting.hlsli",
+            "features/Skylighting/Shaders/Skylighting/UpdateProbesCS.hlsl",
             "features/Screen Space GI/Shaders/ScreenSpaceGI",
             "features/Inverse Square Lighting/Shaders/InverseSquareLighting/InverseSquareLighting.hlsli",
             "features/Light Limit Fix/Shaders/LightLimitFix/Common.hlsli",
