@@ -30,7 +30,6 @@ namespace cs::features
 	class Skylighting : public ShaderFeature<skylighting_shader::kShaderDefines>
 	{
 	public:
-		bool IsEnabled() const noexcept { return _settings.enabled; }
 		using Settings = skylighting::Settings;
 
 		// PS slot of the probe array for forward consumers; compute binds t50 too.
@@ -63,7 +62,7 @@ namespace cs::features
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		// Packs b6; repeated packs within a frame must not advance the grid again.
-		render::SkylightingSettings GetCommonBufferData();
+		cs::SkylightingFeatureData GetCommonBufferData();
 
 		// Null unless enabled and healthy with probes, so consumers fail neutral.
 		ID3D11ShaderResourceView* GetProbeArraySRV() const noexcept;

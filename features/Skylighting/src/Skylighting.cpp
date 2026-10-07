@@ -749,14 +749,14 @@ namespace cs::features
 		cs::render::profiling::CollectPassTimings(a_sink, "Skylighting/");
 	}
 
-	render::SkylightingSettings Skylighting::GetCommonBufferData()
+	cs::SkylightingFeatureData Skylighting::GetCommonBufferData()
 	{
 		const auto* graphics = cs::engine::GetGraphicsState();
 		if (!graphics || !_settings.enabled)
 			return {};
 		// FO4: packs repeat within a frame and the advance must happen once.
 		if (_grid.frame == graphics->frameCount)
-			return _grid.block;
+			return { .shared = _grid.block, .Enabled = 1u };
 		// FO4: the captured world camera replaces Util::GetEyePosition.
 		const auto camera = cs::engine::GetCapturedWorldCameraRecord(graphics->frameCount);
 		if (!camera)
@@ -790,7 +790,7 @@ namespace cs::features
 			.MinSpecularVisibility = _settings.MinSpecularVisibility
 		};
 		_grid.frame = graphics->frameCount;
-		return _grid.block;
+		return { .shared = _grid.block, .Enabled = 1u };
 	}
 
 	void Skylighting::Prepass()

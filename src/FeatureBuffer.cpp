@@ -20,12 +20,6 @@ namespace cs
 				return {};
 			return a_feature->GetCommonBufferData();
 		}
-
-		template <class Feature>
-		std::uint32_t IsEnabledFlag(Feature* a_feature)
-		{
-			return a_feature && a_feature->IsHealthy() && a_feature->IsEnabled() ? 1u : 0u;
-		}
 	}
 
 	FeatureDataCB GetFeatureBufferData()
@@ -50,11 +44,11 @@ namespace cs
 				CollectFeatureData<TerrainVariationFeatureData>(
 					features::TerrainVariation::GetSingleton()),
 			.skylightingSettings =
-				CollectFeatureData<render::SkylightingSettings>(
+				CollectFeatureData<SkylightingFeatureData>(
 					features::Skylighting::GetSingleton()),
-			.vertexAOConsumers = {
-				.Skylighting = IsEnabledFlag(features::Skylighting::GetSingleton()),
-				.ScreenSpaceGI = IsEnabledFlag(features::ScreenSpaceGI::GetSingleton()) }
+			.screenSpaceGISettings =
+				CollectFeatureData<ScreenSpaceGIFeatureData>(
+					features::ScreenSpaceGI::GetSingleton())
 		};
 	}
 }

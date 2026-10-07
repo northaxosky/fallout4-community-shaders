@@ -485,7 +485,7 @@ struct PS_OUTPUT
 #	endif
 
 #	if GRASS && VC && defined(FO4_PREPASS_VERTEX_AO)
-		// FO4: upstream RunGrass splits the vertex colour; stock keeps it while no consumer is on.
+		// FO4: RunGrass:467-470 split; stock albedo while no consumer is on.
 		float grassVertexAO = max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z);
 		[branch] if (FO4SharedData::EnabledSkylighting != 0 || FO4SharedData::EnabledScreenSpaceGI != 0)
 			input.vertexColor.xyz /= max(grassVertexAO, EPSILON_DIVISION);

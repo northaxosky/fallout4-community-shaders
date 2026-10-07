@@ -504,6 +504,11 @@ namespace cs::features
 		}
 	}
 
+	cs::ScreenSpaceGIFeatureData ScreenSpaceGI::GetCommonBufferData() const
+	{
+		return { .Enabled = _settings.enabled ? 1u : 0u };
+	}
+
 	void ScreenSpaceGI::UpdateConsumer(bool a_enabled, bool a_tiled)
 	{
 		const ConsumerCB data{ a_enabled, a_tiled, {} };

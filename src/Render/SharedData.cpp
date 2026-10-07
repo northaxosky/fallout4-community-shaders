@@ -169,10 +169,10 @@ namespace cs::render
 			terrain.ZBlur = a_features.terrainShadowsSettings.ZBlur;
 			a_data.feature.lodBlendingSettings = a_features.lodBlendingSettings;
 			a_data.feature.terrainVariationSettings = a_features.terrainVariationSettings.shared;
-			a_data.feature.skylightingSettings = a_features.skylightingSettings;
+			a_data.feature.skylightingSettings = a_features.skylightingSettings.shared;
 			fo4.EnabledTerrainVariation = a_features.terrainVariationSettings.Enabled;
-			fo4.EnabledSkylighting = a_features.vertexAOConsumers.Skylighting;
-			fo4.EnabledScreenSpaceGI = a_features.vertexAOConsumers.ScreenSpaceGI;
+			fo4.EnabledSkylighting = a_features.skylightingSettings.Enabled;
+			fo4.EnabledScreenSpaceGI = a_features.screenSpaceGISettings.Enabled;
 		}
 
 		constexpr std::array<std::size_t, kSubstrateBufferCount> kBufferSizes{

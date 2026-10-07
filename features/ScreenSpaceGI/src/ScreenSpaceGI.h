@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
 #include "ScreenSpaceGIConstants.h"
@@ -19,8 +20,8 @@ namespace cs::features
 		public ShaderFeature<ssgi::kShaderDefines>
 	{
 	public:
-		bool IsEnabled() const noexcept { return _settings.enabled; }
 		static ScreenSpaceGI* GetSingleton();
+		cs::ScreenSpaceGIFeatureData GetCommonBufferData() const;
 		std::string_view GetName() const override { return "ScreenSpaceGI"; }
 		std::string_view GetDisplayName() const override { return "Screen Space GI"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }

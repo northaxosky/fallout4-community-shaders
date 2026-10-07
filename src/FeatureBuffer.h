@@ -44,14 +44,20 @@ namespace cs
 	};
 	static_assert(sizeof(TerrainVariationFeatureData) == 32);
 
-	// Consumers of the grass vertex-AO split; 0 keeps stock grass albedo.
-	struct alignas(16) VertexAOConsumersFeatureData
+	struct alignas(16) SkylightingFeatureData
 	{
-		std::uint32_t Skylighting = 0;
-		std::uint32_t ScreenSpaceGI = 0;
-		std::uint32_t pad0[2]{};
+		render::SkylightingSettings shared;
+		std::uint32_t Enabled = 0;
+		std::uint32_t pad0[3]{};
 	};
-	static_assert(sizeof(VertexAOConsumersFeatureData) == 16);
+	static_assert(sizeof(SkylightingFeatureData) == 160);
+
+	struct alignas(16) ScreenSpaceGIFeatureData
+	{
+		std::uint32_t Enabled = 0;
+		std::uint32_t pad0[3]{};
+	};
+	static_assert(sizeof(ScreenSpaceGIFeatureData) == 16);
 
 	struct alignas(16) FeatureDataCB
 	{
@@ -61,10 +67,10 @@ namespace cs
 		LODBlendingFeatureData lodBlendingSettings;
 		WaterEffectsFeatureData waterEffectsSettings;
 		TerrainVariationFeatureData terrainVariationSettings;
-		render::SkylightingSettings skylightingSettings;
-		VertexAOConsumersFeatureData vertexAOConsumers;
+		SkylightingFeatureData skylightingSettings;
+		ScreenSpaceGIFeatureData screenSpaceGISettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 496);
+	static_assert(sizeof(FeatureDataCB) == 512);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);
