@@ -7,6 +7,7 @@
 #include "Render/RendererContext.h"
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
+#include "Skylighting.h"
 #include "Telemetry/Telemetry.h"
 #include "TerrainShadows.h"
 #include "Utils/CSUtil.h"
@@ -27,13 +28,15 @@ namespace cs::features::exponential_height_fog
 		class ScatteringInputs
 		{
 		public:
-			explicit ScatteringInputs(ID3D11DeviceContext* a_context, ID3D11ShaderResourceView* a_integrated = nullptr) : _context(a_context)
+			explicit ScatteringInputs(ID3D11DeviceContext* a_context, ID3D11ShaderResourceView* a_integrated = nullptr,
+				ID3D11ShaderResourceView* a_skylighting = nullptr) : _context(a_context)
 			{
 				for (std::size_t i = 0; i < _slots.size(); ++i)
 					_context->CSGetShaderResources(_slots[i], 1, _saved[i].put());
 				auto* terrain = TerrainShadows::GetSingleton();
 				for (const auto slot : _slots) {
 					ID3D11ShaderResourceView* srv = slot == 19 ? a_integrated :
+					                                slot == 50 ? a_skylighting :
 					                                             (slot == 60 && terrain->IsHealthy() ? terrain->GetShadowHeightSRV() : nullptr);
 					_context->CSSetShaderResources(slot, 1, &srv);
 				}
@@ -255,8 +258,9 @@ namespace cs::features::exponential_height_fog
 		auto* depth = render::GetCanonicalSceneDepthSRV();
 		const bool history = a_temporal && _hasHistory && _lastFrame != UINT32_MAX && a_frame == _lastFrame + 1u;
 		Constants cb{};
+		auto* skylighting = cs::features::Skylighting::GetSingleton()->GetProbeArraySRV();
 		cb.gridSizeAndFlags = { _grid.x, _grid.y, _grid.z,
-			(depth ? 2u : 0u) | (depth && history && _hasDepthHistory ? 16u : 0u) };
+			(depth ? 2u : 0u) | (skylighting ? 8u : 0u) | (depth && history && _hasDepthHistory ? 16u : 0u) };
 		cb.invGridSizeAndNearFade = { 1.0f / static_cast<float>(_grid.x), 1.0f / static_cast<float>(_grid.y), 1.0f / static_cast<float>(_grid.z),
 			a_settings.volumetricFogNearFadeInDistance > 0 ? 1.0f / a_settings.volumetricFogNearFadeInDistance : 100000000.0f };
 		const auto cameraData = engine::GetCameraDepthParameters(a_camera);
@@ -293,7 +297,7 @@ namespace cs::features::exponential_height_fog
 		render::ScopedComputeSharedDataBinding shared(a_context);
 		if (!shared.IsActive())
 			return false;
-		ScatteringInputs inputs(a_context);
+		ScatteringInputs inputs(a_context, nullptr, skylighting);
 		ID3D11Buffer* cameraBuffer = _cameraConstants->CB();
 		a_context->CSSetConstantBuffers(render::kFrameDataSlot, 1, &cameraBuffer);
 		ID3D11Buffer* buffer = _constants->CB();
@@ -333,6 +337,8 @@ namespace cs::features::exponential_height_fog
 		_previousRatio = ratio;
 		_temporalEnabled = a_temporal;
 		++_volumeFrames;
+		if (skylighting)
+			++_skylightingFrames;
 		if (history)
 			++_historyFrames;
 		return true;
@@ -344,6 +350,7 @@ namespace cs::features::exponential_height_fog
 			.Field("sky_allocations", _skyAllocations)
 			.Field("volume_frames", _volumeFrames)
 			.Field("history_frames", _historyFrames)
+			.Field("skylighting_frames", _skylightingFrames)
 			.Field("temporal_enabled", _temporalEnabled)
 			.Field("sky_dispatches", _skyDispatches);
 		render::profiling::CollectPassTimings(a_sink, "ExponentialHeightFog/");

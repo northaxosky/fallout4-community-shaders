@@ -192,7 +192,7 @@ namespace cs::features
 		if (!engine::ValidateShaderInjectionRoutes("ExponentialHeightFog", a_error))
 			return false;
 		_operational.store(true, std::memory_order_release);
-		L->warn("Fog directional cascade input is unavailable: world-to-shadow transform/split contract needs RE. IBL, Skylighting, CloudShadows and local-light providers are absent.");
+		L->warn("Fog directional cascade input is unavailable: world-to-shadow transform/split contract needs RE. IBL, CloudShadows and local-light providers are absent.");
 		return true;
 	}
 

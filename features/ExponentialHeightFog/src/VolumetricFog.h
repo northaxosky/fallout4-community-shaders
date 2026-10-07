@@ -60,7 +60,7 @@ namespace cs::features::exponential_height_fog
 		bool _hasHistory = false, _hasDepthHistory = false;
 		DirectX::XMFLOAT2 _previousRatio{ 1.0f, 1.0f };
 		// Render-thread counters persist across resource resets.
-		std::uint64_t _volumeAllocations{}, _skyAllocations{}, _volumeFrames{}, _historyFrames{}, _skyDispatches{};
+		std::uint64_t _volumeAllocations{}, _skyAllocations{}, _volumeFrames{}, _historyFrames{}, _skylightingFrames{}, _skyDispatches{};
 		bool _temporalEnabled{};
 	};
 }

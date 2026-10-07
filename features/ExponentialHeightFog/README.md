@@ -32,9 +32,10 @@ into an extinction model.
 
 ## Current limits
 
-Directional shadow scattering, analytic cubemap inscattering, IBL, Skylighting,
-CloudShadows and clustered local-light providers are pending. Terrain shadow scattering
-uses the existing validated heightfield when available. Native fog color is supplied
+Directional shadow scattering, analytic cubemap inscattering, IBL, CloudShadows and
+clustered local-light providers are pending. Terrain shadow scattering uses the existing
+validated heightfield when available, and sky-light scattering uses the Skylighting probe
+array when that feature is healthy. Native fog color is supplied
 by the reconstructed shader equations, but native weather uploader/fade-brightness and
 sky-color mappings are unverified. Map/reflection coverage and native godray coexistence
 are also pending. See `docs\deviations\ExponentialHeightFog.md`; this is not a full parity claim.
