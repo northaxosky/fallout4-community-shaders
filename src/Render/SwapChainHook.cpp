@@ -18,11 +18,20 @@ namespace cs::render
 	{
 		auto* L = cs::log::Get("cs.render.swapchainhook");
 		std::atomic<CreateDeviceAndSwapChain> nextCreateDeviceAndSwapChain{ nullptr };
+		std::atomic<CreateDevice> nextCreateDevice{ nullptr };
 		std::atomic<SwapChainHookState> installState{ SwapChainHookState::kUnattempted };
 		std::mutex installMutex;
 		std::vector<PreCreateDeviceCallback> preCreateCallbacks;
 		std::vector<PostCreateDeviceCallback> postCreateCallbacks;
 		ReplacementCreateDeviceCallback replacementCreateCallback;
+
+		// FO4: no static d3d11 import; bind by name like upstream's import would.
+		CreateDevice ResolveCreateDevice() noexcept
+		{
+			auto* d3d11 = GetModuleHandleW(L"d3d11.dll");
+			return d3d11 ? reinterpret_cast<CreateDevice>(GetProcAddress(d3d11, "D3D11CreateDevice")) :
+			               nullptr;
+		}
 
 		// A throwing callback must never cross the game's import boundary.
 		template <class Fn>
@@ -77,6 +86,7 @@ namespace cs::render
 				featureLevels.empty() ? a_featureLevelCount : static_cast<UINT>(featureLevels.size());
 			CreateDeviceAndSwapChainContext context{
 				.realCreate = next,
+				.createDevice = nextCreateDevice.load(std::memory_order_acquire),
 				.adapter = a_adapter,
 				.driverType = a_driverType,
 				.software = a_software,
@@ -187,6 +197,9 @@ namespace cs::render
 				native != &CreateDeviceAndSwapChainThunk) {
 				nextCreateDeviceAndSwapChain.store(native, std::memory_order_release);
 			}
+			if (!nextCreateDevice.load(std::memory_order_acquire)) {
+				nextCreateDevice.store(ResolveCreateDevice(), std::memory_order_release);
+			}
 			L->error(
 				"SwapChainHook IAT installation returned an invalid predecessor ({:#x}); "
 				"the thunk will pass through to the system entry point if it was installed",
@@ -197,6 +210,7 @@ namespace cs::render
 		nextCreateDeviceAndSwapChain.store(
 			reinterpret_cast<CreateDeviceAndSwapChain>(previous),
 			std::memory_order_release);
+		nextCreateDevice.store(ResolveCreateDevice(), std::memory_order_release);
 		installState.store(SwapChainHookState::kInstalled, std::memory_order_release);
 		L->info("SwapChainHook IAT hook installed (next={:#x})", previous);
 		return true;

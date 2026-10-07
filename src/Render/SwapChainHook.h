@@ -11,10 +11,12 @@
 namespace cs::render
 {
 	using CreateDeviceAndSwapChain = decltype(&D3D11CreateDeviceAndSwapChain);
+	using CreateDevice = decltype(&D3D11CreateDevice);
 
 	struct CreateDeviceAndSwapChainContext
 	{
 		CreateDeviceAndSwapChain realCreate;
+		CreateDevice createDevice;
 		IDXGIAdapter* adapter;
 		D3D_DRIVER_TYPE driverType;
 		HMODULE software;

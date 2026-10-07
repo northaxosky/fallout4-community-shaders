@@ -1070,7 +1070,7 @@ namespace cs::render
 		if (!request.upscalingEligible && !request.frameGenerationEligible) {
 			return std::nullopt;
 		}
-		if (!a_context.realCreate || !a_context.swapChainDesc ||
+		if (!a_context.createDevice || !a_context.swapChainDesc ||
 			!a_context.swapChain || !a_context.device ||
 			!a_context.immediateContext) {
 			PostFailure(temporal::FailureDomain::kTransport,
@@ -1098,11 +1098,11 @@ namespace cs::render
 		ID3D11Device* device = nullptr;
 		ID3D11DeviceContext* immediateContext = nullptr;
 		D3D_FEATURE_LEVEL featureLevel{};
-		const HRESULT deviceResult = a_context.realCreate(
+		// Upstream requests exactly 11_1; proxy interop cannot use a lower level.
+		const HRESULT deviceResult = a_context.createDevice(
 			a_context.adapter, a_context.driverType, a_context.software,
-			a_context.flags, a_context.featureLevels, a_context.featureLevelCount,
-			a_context.sdkVersion, nullptr, nullptr, &device, &featureLevel,
-			&immediateContext);
+			a_context.flags, &temporal::kTemporalInteropMinimumFeatureLevel, 1,
+			a_context.sdkVersion, &device, &featureLevel, &immediateContext);
 		if (FAILED(deviceResult) || !device || !immediateContext) {
 			if (immediateContext) {
 				immediateContext->Release();
