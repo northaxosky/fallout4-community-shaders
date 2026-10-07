@@ -484,6 +484,12 @@ struct PS_OUTPUT
 #		endif
 #	endif
 
+#	if GRASS && VC && defined(FO4_PREPASS_VERTEX_AO)
+		// FO4: upstream RunGrass splits the vertex colour here; albedo keeps only the chroma.
+		float grassVertexAO = max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z);
+		input.vertexColor.xyz /= max(grassVertexAO, EPSILON_DIVISION);
+#	endif
+
 #	if TESSELLATE_DISP_HEIGHT
 		float2 uv = input.uv;
 #	else
@@ -1207,7 +1213,9 @@ struct PS_OUTPUT
 #	else
 #		ifdef FO4_PREPASS_VERTEX_AO
 	// 1 - vertexAO as upstream's Masks2; SSGI composite and Skylighting read it.
-#			if VC && !LANDSCAPE && !HAIR && !EYE && !SKIN_TINT
+#			if GRASS && VC
+	output.specTint.w = 1.0 - grassVertexAO;
+#			elif VC && !LANDSCAPE && !HAIR && !EYE && !SKIN_TINT
 	// Albedo is already linear here, so unlike upstream the max needs no ColorToLinear.
 	output.specTint.w = 1.0 - max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z);
 #			else
