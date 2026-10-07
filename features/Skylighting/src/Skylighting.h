@@ -53,9 +53,18 @@ namespace cs::features
 
 		// Captures the occlusion map from a random zenith direction after the stock pass.
 		void RenderOcclusion();
+		enum class CaptureState : std::uint8_t
+		{
+			kCaptured,
+			kInterior,
+			kDisabled,
+			kTargets,
+			kFailed
+		};
+		CaptureState CaptureFrame();
 		void CreateOcclusionResources(ID3D11Device* a_device);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
-		void LogCaptureSummary(const DirectX::XMFLOAT4X4& a_matrix, bool a_stockTargetRestored);
+		void LogCaptureSummary(CaptureState a_state);
 
 		Settings _settings;
 
@@ -92,6 +101,8 @@ namespace cs::features
 		double _windowCpuMsSum = 0.0;
 		float _windowCpuMsMax = 0.0f;
 		std::uint32_t _windowCaptures = 0;
+		std::uint64_t _anchorFrames = 0;
+		CaptureState _loggedState = CaptureState::kDisabled;
 		bool _loggedFirstCapture = false;
 		bool _loggedTargetFailure = false;
 	};

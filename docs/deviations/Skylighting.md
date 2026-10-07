@@ -30,7 +30,7 @@ upstream parity.
 | Forced | Alpha group pool growth and the `geometryGroups[14]` flag clear | Not ported: FO4's pool is per renderer and saturates, mode 14 registers with group -1/9, and group 14 is clouds. Evidence: Contract A4 | n/a |
 | Forced | `Util::IsInterior()` gates the capture | `engine::IsInterior()` (interior cell, or a no-sky or fixed-dimension worldspace) feeds the capture and the b5 `InInterior` flag, replacing `!cell->IsExterior()`. One predicate with upstream semantics; effect on Dynamic Cubemaps is recorded in its deviation file | `World/Sky.cpp`, `SharedData.cpp` |
 | Fix | A disc point that rounds past the unit disc takes the square root of a negative number | The frame is skipped when the direction is not finite instead of handing the engine a NaN. Upstream PR candidate, not filed | `Skylighting.cpp` `RenderOcclusion` |
-| Framework | None (upstream logs through spdlog and Tracy zones) | Capture log channel `cs.feature.skylighting.capture` (hook install results, resolved targets, one `summary` line every 300 captures and on the first), telemetry fields, profiler pass `Skylighting/OcclusionMask` and the `occlusion_depth` texture preview. Evidence: Runtime-safety contract: cached or atomic telemetry, render-thread-only logging | `Skylighting.cpp` |
+| Framework | None (upstream logs through spdlog and Tracy zones) | Capture log channel `cs.feature.skylighting.capture` (hook install results, resolved targets, one `summary` line every 300 anchor frames, on the first and on every capture-state change), telemetry fields, profiler pass `Skylighting/OcclusionMask` and the `occlusion_depth` texture preview. Evidence: Runtime-safety contract: cached or atomic telemetry, render-thread-only logging | `Skylighting.cpp` |
 
 ## Pending
 

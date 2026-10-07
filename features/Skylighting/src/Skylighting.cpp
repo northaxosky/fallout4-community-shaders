@@ -35,7 +35,7 @@ namespace cs::features
 
 		// Same square as the stock precipitation occlusion depth and color targets.
 		constexpr std::uint32_t kOcclusionResolution = 512;
-		constexpr std::uint32_t kSummaryIntervalCaptures = 300;
+		constexpr std::uint64_t kSummaryIntervalFrames = 300;
 
 		constexpr float kRadiansToDegrees = 180.0f / std::numbers::pi_v<float>;
 
@@ -161,13 +161,21 @@ namespace cs::features
 
 	void Skylighting::RenderOcclusion()
 	{
+		const auto state = CaptureFrame();
+		// Keyed on anchor frames so skipped frames report too; state changes log at once.
+		if (++_anchorFrames == 1 || _anchorFrames % kSummaryIntervalFrames == 0 || state != _loggedState)
+			LogCaptureSummary(state);
+	}
+
+	Skylighting::CaptureState Skylighting::CaptureFrame()
+	{
 		if (!IsHealthy() || !_occlusionDSV) {
 			_counters.skippedDisabled.fetch_add(1, std::memory_order_relaxed);
-			return;
+			return CaptureState::kDisabled;
 		}
 		if (cs::engine::IsInterior()) {
 			_counters.skippedInterior.fetch_add(1, std::memory_order_relaxed);
-			return;
+			return CaptureState::kInterior;
 		}
 
 		const auto start = std::chrono::steady_clock::now();
@@ -203,7 +211,7 @@ namespace cs::features
 		// Rounding past the unit disc would hand the engine a NaN direction.
 		if (!std::isfinite(PrecipitationShaderDirectionF.x + PrecipitationShaderDirectionF.y + PrecipitationShaderDirectionF.z)) {
 			_counters.failed.fetch_add(1, std::memory_order_relaxed);
-			return;
+			return CaptureState::kFailed;
 		}
 
 		// FO4: the adapter swaps DS8 and the globals, projects twice, restores.
@@ -227,25 +235,28 @@ namespace cs::features
 			if (!std::exchange(_loggedTargetFailure, true)) {
 				CaptureLog->warn("capture skipped: {}", status == cs::engine::OcclusionCaptureStatus::kNoPrecipitation ? "the sky has no precipitation occlusion camera yet" : "a stock occlusion target is not 512x512");
 			}
-			return;
+			return CaptureState::kTargets;
 		}
 
 		OcclusionDir = { -PrecipitationShaderDirectionF.x, -PrecipitationShaderDirectionF.y, -PrecipitationShaderDirectionF.z, 0 };
 		OcclusionTransform = result.matrix;
 
-		const auto captures = _counters.captures.fetch_add(1, std::memory_order_relaxed) + 1;
+		_counters.captures.fetch_add(1, std::memory_order_relaxed);
 		_counters.stockTargetRestored.store(result.stockTargetRestored, std::memory_order_relaxed);
 		const auto cpuMs = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
 		_windowCpuMsSum += cpuMs;
 		_windowCpuMsMax = std::max(_windowCpuMsMax, cpuMs);
 		++_windowCaptures;
-		if (captures == 1 || captures % kSummaryIntervalCaptures == 0)
-			LogCaptureSummary(result.matrix, result.stockTargetRestored);
+		return CaptureState::kCaptured;
 	}
 
 	// Render thread only; one line per window keeps the capture log cheap.
-	void Skylighting::LogCaptureSummary(const DirectX::XMFLOAT4X4& a_matrix, bool a_stockTargetRestored)
+	void Skylighting::LogCaptureSummary(CaptureState a_state)
 	{
+		_loggedState = a_state;
+		const auto& a_matrix = OcclusionTransform;
+		constexpr std::array stateNames{ "captured", "interior", "disabled", "targets", "failed" };
+		const auto stateName = stateNames[static_cast<std::size_t>(a_state)];
 		const float cpuMsAverage = _windowCaptures ? static_cast<float>(_windowCpuMsSum / _windowCaptures) : 0.0f;
 		_counters.cpuMsAverage.store(cpuMsAverage, std::memory_order_relaxed);
 		_counters.cpuMsMax.store(_windowCpuMsMax, std::memory_order_relaxed);
@@ -254,27 +265,32 @@ namespace cs::features
 		const auto rowLength = [&](std::size_t a_row) {
 			return std::sqrt(a_matrix.m[a_row][0] * a_matrix.m[a_row][0] + a_matrix.m[a_row][1] * a_matrix.m[a_row][1] + a_matrix.m[a_row][2] * a_matrix.m[a_row][2]);
 		};
-		const float extentX = 2.0f / rowLength(0) / occlusionDistance;
-		const float extentY = 2.0f / rowLength(1) / occlusionDistance;
-		const float depthRange = 1.0f / rowLength(2) / occlusionDistance;
+		// Zero until the first capture publishes a matrix.
+		const auto extent = [&](float a_range, std::size_t a_row) {
+			const float length = rowLength(a_row);
+			return length > 0.0f ? a_range / length / occlusionDistance : 0.0f;
+		};
+		const float extentX = extent(2.0f, 0);
+		const float extentY = extent(2.0f, 1);
+		const float depthRange = extent(1.0f, 2);
 
 		const auto& stats = cs::engine::GetOccluderStats();
 		const auto count = [](const std::atomic<std::uint64_t>& a_value) { return a_value.load(std::memory_order_relaxed); };
 		using Reject = cs::engine::OccluderReject;
 		const auto rejected = [&](Reject a_reason) { return count(stats.rejected[static_cast<std::size_t>(a_reason)]); };
 		CaptureLog->info(
-			"summary frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
+			"summary state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
 			"L={:.0f} dir=({:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
 			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f}",
-			frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
+			stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
 			count(stats.accepted), count(stats.delegated), count(stats.ownBuilt), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
-			cpuMsAverage, _windowCpuMsMax, a_stockTargetRestored ? 1 : 0,
+			cpuMsAverage, _windowCpuMsMax, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange);
 		_windowCpuMsSum = 0.0;
 		_windowCpuMsMax = 0.0f;
