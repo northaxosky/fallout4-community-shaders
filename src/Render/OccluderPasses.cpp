@@ -14,11 +14,6 @@ namespace cs::engine
 
 		using ShaderFlag = RE::BSShaderProperty::EShaderPropertyFlag;
 
-		// Not declared by CommonLibF4 yet.
-		inline constexpr REL::VariantID kRenderPassArrayAdd{ 563779, 2316273 };
-		inline constexpr REL::VariantID kUtilityShaderCreateCommandBuffer{ 768994, 2319078 };
-		inline constexpr REL::VariantID kUtilityShaderSingleton{ 562442, 2713259 };
-
 		// BSUtilityShader technique bits of a depth-only static: T N BT, Sm, Smclamp.
 		constexpr std::uint32_t kUtilityTexNormalBinormalTangent = 0x1A;
 		constexpr std::uint32_t kUtilityShadowMap = 0x4000;
@@ -95,11 +90,7 @@ namespace cs::engine
 			RE::BSGeometry& a_geometry,
 			const RE::BSShaderAccumulator& a_accumulator)
 		{
-			static REL::Relocation<RE::BSShader**> utilityShader{ kUtilityShaderSingleton };
-			static REL::Relocation<RE::BSRenderPass*(RE::BSShaderProperty::RenderPassArray*, RE::BSShader*, RE::BSShaderProperty*, RE::BSGeometry*, std::uint32_t, std::uint8_t, RE::BSLight*, RE::BSLight*, RE::BSLight*, RE::BSLight*)> addPass{ kRenderPassArrayAdd };
-			static REL::Relocation<std::byte*(RE::BSShader*, RE::BSRenderPass*)> createCommandBuffer{ kUtilityShaderCreateCommandBuffer };
-
-			auto* shader = *utilityShader;
+			auto* shader = RE::BSUtilityShader::GetSingleton();
 			if (!shader || a_accumulator.depthPassIndex >= std::size(a_property.depthMapRenderPassListA))
 				return nullptr;
 			auto& list = a_property.depthMapRenderPassListA[a_accumulator.depthPassIndex];
@@ -116,11 +107,11 @@ namespace cs::engine
 				return &list;
 			}
 
-			auto* pass = addPass(&list, shader, &a_property, &a_geometry, kLandscapeOcclusionTechnique, 0, nullptr, nullptr, nullptr, nullptr);
+			auto* pass = list.Add(shader, &a_property, &a_geometry, kLandscapeOcclusionTechnique, 0, nullptr, nullptr, nullptr, nullptr);
 			if (!pass)
 				return nullptr;
 			// The pass is new for this list, so it holds no command buffer to release first.
-			pass->commandBuffer = createCommandBuffer(shader, pass);
+			pass->commandBuffer = shader->CreateCommandBuffer(pass);
 			pass->lodMode = lodMode;
 			return &list;
 		}
