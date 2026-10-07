@@ -133,6 +133,13 @@ namespace cs::engine
 			       (!color || IsOcclusionSquare(reinterpret_cast<ID3D11Texture2D*>(color->texture)));
 		}
 
+		// The engine takes the camera pointer by value and releases it on return.
+		void ComputeProjection(RE::Precipitation& a_precipitation)
+		{
+			static REL::Relocation<void(RE::Precipitation*, RE::NiPointer<RE::NiCamera>)> func{ RE::ID::Precipitation::ComputeProjection };
+			func(&a_precipitation, a_precipitation.occlusionData.camera);
+		}
+
 		// Owns every engine override of one capture and restores them on every exit.
 		class ScopedOcclusionCapture
 		{
@@ -172,7 +179,7 @@ namespace cs::engine
 			// The pre-call primes the rotation Impl's own projection call reads back.
 			void Capture(DirectX::XMFLOAT4X4& a_matrix)
 			{
-				_precipitation.ComputeProjection(_precipitation.occlusionData.camera);
+				ComputeProjection(_precipitation);
 				_primed = true;
 				{
 					const cs::render::annotation::ScopedEvent event{ "Skylighting/OcclusionMask" };
@@ -197,7 +204,7 @@ namespace cs::engine
 
 				// Leaves the camera rotation on the stock direction for the next projection.
 				if (_primed)
-					_precipitation.ComputeProjection(_precipitation.occlusionData.camera);
+					ComputeProjection(_precipitation);
 			}
 
 			[[nodiscard]] bool TargetRestored() const noexcept { return _targetRestored; }
