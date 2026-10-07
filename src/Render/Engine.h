@@ -216,11 +216,11 @@ namespace cs::engine
 		           nullptr;
 	}
 
-	// CommonLibF4 keeps State::shadowSceneNode private; index 0 is the world scene at offset 0.
+	// Index 0 is the world scene.
 	[[nodiscard]] inline RE::ShadowSceneNode* GetWorldShadowSceneNode() noexcept
 	{
 		const auto* state = RE::BSShaderManager::State::GetSingleton();
-		return state ? *reinterpret_cast<RE::ShadowSceneNode* const*>(state) : nullptr;
+		return state ? state->GetShadowSceneNode(0) : nullptr;
 	}
 
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
@@ -360,7 +360,7 @@ namespace cs::engine
 		kMainVerticalBlur = 68,
 		kLuminanceDownscale = 70,
 
-		// Fixed 512x512 R8_UNORM color target of the precipitation occlusion pass; acquired per pass.
+		// Fixed 512x512 R8_UNORM precipitation occlusion target; acquired per pass.
 		kPrecipitationOcclusionColor = 86,
 
 		kCount = 100
