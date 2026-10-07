@@ -31,6 +31,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 | | |
 |---|---|
 | **Game** | Fallout 4 runtime **1.11.240**. |
+| **GPU** | Direct3D 11 feature level 11.1 support. |
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |

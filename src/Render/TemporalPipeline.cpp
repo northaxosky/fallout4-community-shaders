@@ -1,5 +1,4 @@
 #include "Render/TemporalPipeline.h"
-#include "Render/TemporalDevicePolicy.h"
 #include "Render/TemporalStartup.h"
 
 #include <algorithm>
@@ -391,9 +390,8 @@ namespace cs::render
 		}
 
 		const bool preRegistered = RegisterPreCreateDeviceAndSwapChain(
-			[this](DXGI_SWAP_CHAIN_DESC* a_desc,
-				std::vector<D3D_FEATURE_LEVEL>& a_levels) {
-				OnPreCreateDeviceAndSwapChain(a_desc, a_levels);
+			[this](DXGI_SWAP_CHAIN_DESC* a_desc) {
+				OnPreCreateDeviceAndSwapChain(a_desc);
 			});
 		const bool postRegistered = RegisterPostCreateDeviceAndSwapChain(
 			[this](IDXGIAdapter* a_adapter, ID3D11Device** a_device,
@@ -1024,8 +1022,7 @@ namespace cs::render
 		}
 	}
 
-	void TemporalPipeline::OnPreCreateDeviceAndSwapChain(
-		DXGI_SWAP_CHAIN_DESC*, std::vector<D3D_FEATURE_LEVEL>& a_featureLevels)
+	void TemporalPipeline::OnPreCreateDeviceAndSwapChain(DXGI_SWAP_CHAIN_DESC*)
 	{
 		if (!_impl->requestFrozen.load(std::memory_order_acquire)) {
 			_impl->creationState.store(TemporalCreationState::kNative,
@@ -1043,7 +1040,6 @@ namespace cs::render
 		}
 		const bool streamlineRequested =
 			request.upscalingEligible || request.frameGenerationEligible;
-		temporal::ConfigureTemporalFeatureLevels(request, a_featureLevels);
 		if (streamlineRequested) {
 			const bool loadDlssFrameGeneration =
 				request.frameGenerationEligible;
@@ -1098,10 +1094,9 @@ namespace cs::render
 		ID3D11Device* device = nullptr;
 		ID3D11DeviceContext* immediateContext = nullptr;
 		D3D_FEATURE_LEVEL featureLevel{};
-		// Upstream requests exactly 11_1; proxy interop cannot use a lower level.
 		const HRESULT deviceResult = a_context.createDevice(
 			a_context.adapter, a_context.driverType, a_context.software,
-			a_context.flags, &temporal::kTemporalInteropMinimumFeatureLevel, 1,
+			a_context.flags, a_context.featureLevels, a_context.featureLevelCount,
 			a_context.sdkVersion, &device, &featureLevel, &immediateContext);
 		if (FAILED(deviceResult) || !device || !immediateContext) {
 			if (immediateContext) {

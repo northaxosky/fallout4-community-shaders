@@ -18,6 +18,8 @@ namespace cs::render
 		auto* L = cs::log::Get("cs.render.swapchainhook");
 		std::atomic<CreateDeviceAndSwapChain> nextCreateDeviceAndSwapChain{ nullptr };
 		std::atomic<CreateDevice> nextCreateDevice{ nullptr };
+		// Upstream ignores the caller's list and requests exactly 11_1.
+		constexpr D3D_FEATURE_LEVEL kRequiredFeatureLevel = D3D_FEATURE_LEVEL_11_1;
 		std::atomic<SwapChainHookState> installState{ SwapChainHookState::kUnattempted };
 		std::mutex installMutex;
 		std::vector<PreCreateDeviceCallback> preCreateCallbacks;
@@ -50,8 +52,8 @@ namespace cs::render
 			D3D_DRIVER_TYPE a_driverType,
 			HMODULE a_software,
 			UINT a_flags,
-			const D3D_FEATURE_LEVEL* a_featureLevels,
-			UINT a_featureLevelCount,
+			const D3D_FEATURE_LEVEL*,
+			UINT,
 			UINT a_sdkVersion,
 			const DXGI_SWAP_CHAIN_DESC* a_swapChainDesc,
 			IDXGISwapChain** a_swapChain,
@@ -68,29 +70,21 @@ namespace cs::render
 
 			DXGI_SWAP_CHAIN_DESC swapChainDesc{};
 			const bool hasDesc = a_swapChainDesc != nullptr;
-			std::vector<D3D_FEATURE_LEVEL> featureLevels;
-			if (a_featureLevels && a_featureLevelCount) {
-				featureLevels.assign(a_featureLevels, a_featureLevels + a_featureLevelCount);
-			}
 			if (hasDesc) {
 				swapChainDesc = *a_swapChainDesc;
 				for (auto& callback : preCreateCallbacks) {
-					RunGuarded("pre-create", [&] { callback(&swapChainDesc, featureLevels); });
+					RunGuarded("pre-create", [&] { callback(&swapChainDesc); });
 				}
 			}
 
-			const auto* requestedFeatureLevels =
-				featureLevels.empty() ? a_featureLevels : featureLevels.data();
-			const auto requestedFeatureLevelCount =
-				featureLevels.empty() ? a_featureLevelCount : static_cast<UINT>(featureLevels.size());
 			CreateDeviceAndSwapChainContext context{
 				.createDevice = nextCreateDevice.load(std::memory_order_acquire),
 				.adapter = a_adapter,
 				.driverType = a_driverType,
 				.software = a_software,
 				.flags = a_flags,
-				.featureLevels = requestedFeatureLevels,
-				.featureLevelCount = requestedFeatureLevelCount,
+				.featureLevels = &kRequiredFeatureLevel,
+				.featureLevelCount = 1,
 				.sdkVersion = a_sdkVersion,
 				.swapChainDesc = hasDesc ? &swapChainDesc : nullptr,
 				.swapChain = a_swapChain,
@@ -112,7 +106,7 @@ namespace cs::render
 				}
 			}
 
-			const HRESULT result = replacementResult ? *replacementResult : next(a_adapter, a_driverType, a_software, a_flags, requestedFeatureLevels, requestedFeatureLevelCount, a_sdkVersion, hasDesc ? &swapChainDesc : nullptr, a_swapChain, a_device, a_featureLevel, a_immediateContext);
+			const HRESULT result = replacementResult ? *replacementResult : next(a_adapter, a_driverType, a_software, a_flags, &kRequiredFeatureLevel, 1, a_sdkVersion, hasDesc ? &swapChainDesc : nullptr, a_swapChain, a_device, a_featureLevel, a_immediateContext);
 
 			if (SUCCEEDED(result)) {
 				// Callbacks run before the bootstrap so an interface upgrade is visible to it.

@@ -243,9 +243,7 @@ namespace cs::render
 		TemporalPipeline(const TemporalPipeline&) = delete;
 		TemporalPipeline& operator=(const TemporalPipeline&) = delete;
 
-		void OnPreCreateDeviceAndSwapChain(
-			DXGI_SWAP_CHAIN_DESC* a_desc,
-			std::vector<D3D_FEATURE_LEVEL>& a_featureLevels);
+		void OnPreCreateDeviceAndSwapChain(DXGI_SWAP_CHAIN_DESC* a_desc);
 		std::optional<HRESULT> OnReplacementCreateDeviceAndSwapChain(
 			CreateDeviceAndSwapChainContext& a_context);
 		void OnPostCreateDeviceAndSwapChain(IDXGIAdapter* a_adapter,

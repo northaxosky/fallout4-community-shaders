@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <vector>
 
 namespace cs::render
 {
@@ -30,9 +29,8 @@ namespace cs::render
 		ID3D11DeviceContext** immediateContext;
 	};
 
-	// Runs before the real creation call; may adjust the descriptor and requested feature levels.
-	using PreCreateDeviceCallback =
-		std::function<void(DXGI_SWAP_CHAIN_DESC*, std::vector<D3D_FEATURE_LEVEL>&)>;
+	// Runs before the real creation call; may adjust the descriptor.
+	using PreCreateDeviceCallback = std::function<void(DXGI_SWAP_CHAIN_DESC*)>;
 
 	// Runs before the D3D bootstrap so a callback may upgrade the device and swap chain in place.
 	using PostCreateDeviceCallback =
