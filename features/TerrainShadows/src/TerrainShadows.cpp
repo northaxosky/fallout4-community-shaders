@@ -23,6 +23,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
@@ -1381,39 +1382,38 @@ namespace cs::features
 	void TerrainShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		bool changed = edit.Discrete(dmui::ui::Checkbox("Enable Terrain Shadow", &_settings.EnableTerrainShadow));
+		if (const ui::Section section{ "terrain-shadows-general", "General" }; section) {
+			if (edit.Discrete(dmui::ui::Checkbox("Enable Terrain Shadow", &_settings.EnableTerrainShadow)))
+				PublishSettings();
 
-		if (changed) {
-			PublishSettings();
-		}
-
-		std::string worldspace;
-		std::string detail;
-		bool failed = false;
-		{
-			const std::lock_guard<std::mutex> guard(_statusMutex);
-			worldspace = _statusWorldspace;
-			detail = _statusDetail;
-			failed = _statusFailed;
-		}
-		if (failed) {
-			dmui::ui::Separator();
-			auto& client = host::HostClient::Get().Client();
-			const auto warning = std::format(
-				"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
-				"are doing nothing; regenerate "
-				"the map.",
-				worldspace.empty() ? "none" : worldspace,
-				detail.empty() ? "unknown failure" : detail);
-			if (!dmui::DrawStyledText(
-					client,
-					warning,
-					{ .tone = dmui::TextTone::kWarning,
-						.wrapped = true })) {
-				L->warn(
-					"DearModdingUI draw terrain warning failed: {}",
-					DMUI_ResultToString(client.LastResult()));
-				return;
+			std::string worldspace;
+			std::string detail;
+			bool failed = false;
+			{
+				const std::lock_guard<std::mutex> guard(_statusMutex);
+				worldspace = _statusWorldspace;
+				detail = _statusDetail;
+				failed = _statusFailed;
+			}
+			if (failed) {
+				dmui::ui::Separator();
+				auto& client = host::HostClient::Get().Client();
+				const auto warning = std::format(
+					"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
+					"are doing nothing; regenerate "
+					"the map.",
+					worldspace.empty() ? "none" : worldspace,
+					detail.empty() ? "unknown failure" : detail);
+				if (!dmui::DrawStyledText(
+						client,
+						warning,
+						{ .tone = dmui::TextTone::kWarning,
+							.wrapped = true })) {
+					L->warn(
+						"DearModdingUI draw terrain warning failed: {}",
+						DMUI_ResultToString(client.LastResult()));
+					return;
+				}
 			}
 		}
 		Menu::Get().DrawDebugViewSelector(*this);

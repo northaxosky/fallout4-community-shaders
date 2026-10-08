@@ -611,22 +611,24 @@ namespace cs::host
 					throw;
 				}
 				bool resettable{};
+				bool modified{};
 				try {
 					resettable = a_feature.HasResettableSettings();
+					modified = resettable && a_feature.HasModifiedSettings();
 				} catch (const std::exception& error) {
 					reportCallbackFailure(
-						"DearModdingUI::HasResettableSettings",
+						"DearModdingUI::SettingsRowMetadata",
 						"Feature reset metadata callback failed",
 						error.what());
 					throw;
 				} catch (...) {
 					reportCallbackFailure(
-						"DearModdingUI::HasResettableSettings",
+						"DearModdingUI::SettingsRowMetadata",
 						"Feature reset metadata callback failed",
 						"non-standard exception");
 					throw;
 				}
-				const auto reset = row.End(resettable && !comparing, resettable && !comparing);
+				const auto reset = row.End(resettable && !comparing, modified && !comparing);
 				if (!reset) {
 					LogFailure("end feature controls row");
 					return;
@@ -1046,7 +1048,8 @@ namespace cs::host
 	void HostClient::PostNotification(
 		DMUI_StatusSeverity a_severity,
 		std::string a_message,
-		std::uint32_t a_durationMilliseconds) noexcept
+		std::uint32_t a_durationMilliseconds,
+		std::string a_title) noexcept
 	{
 		if (!_client.IsConnected()) {
 			if (a_severity == DMUI_STATUS_SEVERITY_ERROR) {
@@ -1067,7 +1070,8 @@ namespace cs::host
 		if (!_client.PostNotification(
 				a_severity,
 				a_message.c_str(),
-				a_durationMilliseconds)) {
+				a_durationMilliseconds,
+				a_title.empty() ? "Community Shaders" : a_title.c_str())) {
 			LogFailure("post notification");
 		}
 	}

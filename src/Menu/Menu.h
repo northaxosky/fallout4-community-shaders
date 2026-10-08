@@ -39,7 +39,8 @@ namespace cs
 		static void ShowToast(
 			std::string a_text,
 			double a_durationSec = 3.0,
-			DMUI_StatusSeverity a_severity = DMUI_STATUS_SEVERITY_INFO);
+			DMUI_StatusSeverity a_severity = DMUI_STATUS_SEVERITY_INFO,
+			std::string a_title = {});
 
 	private:
 		Menu();

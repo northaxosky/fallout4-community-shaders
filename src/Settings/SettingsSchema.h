@@ -344,6 +344,29 @@ namespace cs::settings
 	}
 
 	template <class... Fields>
+	bool DiffersFromDefaults(
+		const Schema<Fields...>& a_schema,
+		const typename Schema<Fields...>::SettingsType& a_value)
+	{
+		const typename Schema<Fields...>::SettingsType defaults{};
+		return std::apply([&](const auto&... a_fields) {
+			return ((a_value.*a_fields.member != defaults.*a_fields.member) || ...);
+		},
+			a_schema.fields);
+	}
+
+	template <class... Fields>
+	SettingsBinding BindSettings(
+		const Schema<Fields...>& a_schema,
+		const typename Schema<Fields...>::SettingsType& a_value)
+	{
+		return {
+			[&a_schema] { return MakeSchemaView(a_schema); },
+			[&a_schema, &a_value] { return DiffersFromDefaults(a_schema, a_value); }
+		};
+	}
+
+	template <class... Fields>
 	std::vector<std::string_view> RestartRequired(
 		const Schema<Fields...>& a_schema,
 		const typename Schema<Fields...>::SettingsType& a_boot,

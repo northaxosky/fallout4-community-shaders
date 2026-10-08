@@ -55,7 +55,6 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -105,7 +104,7 @@ namespace cs::features
 		TerrainShadows() = default;
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(terrain_shadows::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(terrain_shadows::kSchema, _settings); }
 		void PublishSettings();
 
 		void DiscoverHeightMaps();

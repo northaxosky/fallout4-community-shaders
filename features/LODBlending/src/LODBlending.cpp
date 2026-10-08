@@ -9,6 +9,7 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
@@ -113,25 +114,32 @@ namespace cs::features
 	void LODBlending::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		std::apply([&](const auto&... fields) {
-			const auto draw = [&](const auto& field) {
-				auto& value = _settings.*field.member;
-				const std::string label = std::string(field.description) + "##" + std::string(field.key);
-				if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, bool>) {
-					edit.Discrete(dmui::ui::Checkbox(label.c_str(), &value));
-					if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
-						tooltip.Visible()) {
-						dmui::ui::Text("%s",
-							"Disables vertex coloring on nearby terrain. Best combined with terrain LOD generated in xLODGen with Vertex Color Intensity set to 0.");
-					}
-				} else {
-					const auto range = lod_blending::kSchema.EditRange(field.member);
-					edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &value, &range.min, &range.max, "%.2f"));
+		const auto draw = [&](const auto& field) {
+			auto& value = _settings.*field.member;
+			const std::string label = std::string(field.description) + "##" + std::string(field.key);
+			if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, bool>) {
+				edit.Discrete(dmui::ui::Checkbox(label.c_str(), &value));
+				if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
+					tooltip.Visible()) {
+					dmui::ui::Text("%s",
+						"Disables vertex coloring on nearby terrain. Best combined with terrain LOD generated in xLODGen with Vertex Color Intensity set to 0.");
 				}
-			};
-			(draw(fields), ...);
-		},
-			lod_blending::kSchema.fields);
+			} else {
+				const auto range = lod_blending::kSchema.EditRange(field.member);
+				edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &value, &range.min, &range.max, "%.2f"));
+			}
+		};
+		const auto& fields = lod_blending::kSchema.fields;
+		if (const ui::Section section{ "lod-brightness", "Brightness" }; section) {
+			draw(std::get<0>(fields));
+			draw(std::get<1>(fields));
+		}
+		if (const ui::Section section{ "lod-gamma", "Gamma" }; section) {
+			draw(std::get<2>(fields));
+			draw(std::get<3>(fields));
+		}
+		if (const ui::Section section{ "lod-terrain", "Terrain" }; section)
+			draw(std::get<4>(fields));
 	}
 
 	void LODBlending::RestoreDefaultSettings()

@@ -7,6 +7,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
@@ -332,20 +333,47 @@ namespace cs::features
 	void ExponentialHeightFog::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		bool changed = false, volume = false, debug = false, showDebug = false;
+		bool changed = false, volume = false, debug = false;
+		std::optional<ui::Section> section;
+		bool sectionOpen = true;
+		const auto begin = [&](const char* a_id, const char* a_title) {
+			section.reset();
+			section.emplace(a_id, a_title);
+			sectionOpen = static_cast<bool>(*section);
+		};
+		const auto beginDebug = [&](std::size_t a_count) {
+			section.reset();
+			debug = _settings.volumetricFogEnabled;
+			sectionOpen = false;
+			if (debug) {
+				section.emplace("ehf-volumetric-debug", "Volumetric Debug", ui::Collapsible{ a_count });
+				sectionOpen = static_cast<bool>(*section);
+			}
+		};
+		std::size_t debugFields{};
+		bool inDebugFields = false;
+		std::apply([&](const auto&... fields) {
+			((inDebugFields |= fields.key == "volumetricGridPixelSize", debugFields += inDebugFields), ...);
+		},
+			ehf::kSchema.fields);
 		std::apply([&](const auto&... fields) {
 			const auto draw = [&](const auto& field) {
-				if (field.key == "volumetricFogEnabled") {
-					dmui::ui::Separator();
-					dmui::ui::Text("Volumetric Fog");
+				if (field.key == "enabled")
+					begin("ehf-fog", "Fog");
+				else if (field.key == "fogInscatteringColor")
+					begin("ehf-inscattering", "Inscattering");
+				else if (field.key == "disableVanillaFog")
+					begin("ehf-vanilla", "Vanilla Fog");
+				else if (field.key == "useDynamicCubemaps")
+					begin("ehf-cubemaps", "Cubemaps");
+				else if (field.key == "volumetricFogEnabled") {
+					begin("ehf-volumetric", "Volumetric Fog");
 					volume = true;
-				}
-				if (field.key == "volumetricGridPixelSize") {
-					debug = true;
-					if (_settings.volumetricFogEnabled)
-						showDebug = dmui::ui::CollapsingHeader("Debug");
-				}
-				if ((volume && field.key != "volumetricFogEnabled" && !_settings.volumetricFogEnabled) || (debug && !showDebug))
+				} else if (field.key == "volumetricGridPixelSize")
+					beginDebug(debugFields);
+				if (!sectionOpen)
+					return;
+				if (volume && field.key != "volumetricFogEnabled" && !_settings.volumetricFogEnabled)
 					return;
 				auto& value = _settings.*field.member;
 				const auto label = std::string(field.description);
@@ -389,6 +417,7 @@ namespace cs::features
 			(draw(fields), ...);
 		},
 			ehf::kSchema.fields);
+		section.reset();
 		if (changed)
 			PublishSettings();
 		Menu::Get().DrawDebugViewSelector(*this);

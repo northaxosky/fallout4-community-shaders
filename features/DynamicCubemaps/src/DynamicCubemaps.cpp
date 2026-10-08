@@ -18,6 +18,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
@@ -1235,14 +1236,20 @@ namespace cs::features
 	void DynamicCubemaps::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		bool changed = edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
-		changed |= edit.Discrete(dmui::ui::Checkbox("Enable Screen Space Reflections", &_settings.enabledSSR));
-		if (dmui::ui::IsItemHovered())
-			dmui::ui::SetTooltip("Enable all screen-space reflections, including water.");
-		const auto range = dynamic_cubemaps::kSchema.EditRange(&Settings::materialReflections);
-		changed |= edit.Continuous(dmui::ui::SliderScalar("Material Reflections", &_settings.materialReflections, &range.min, &range.max));
-		if (dmui::ui::IsItemHovered())
-			dmui::ui::SetTooltip("Blend from authored material cubemaps to dynamic reflections on environment-mapped surfaces.");
+		bool changed = false;
+		if (const ui::Section section{ "dynamic-cubemaps-general", "General" }; section)
+			changed |= edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
+		if (const ui::Section section{ "dynamic-cubemaps-ssr", "Screen Space Reflections" }; section) {
+			changed |= edit.Discrete(dmui::ui::Checkbox("Enable Screen Space Reflections", &_settings.enabledSSR));
+			if (dmui::ui::IsItemHovered())
+				dmui::ui::SetTooltip("Enable all screen-space reflections, including water.");
+		}
+		if (const ui::Section section{ "dynamic-cubemaps-material", "Material Reflections" }; section) {
+			const auto range = dynamic_cubemaps::kSchema.EditRange(&Settings::materialReflections);
+			changed |= edit.Continuous(dmui::ui::SliderScalar("Material Reflections", &_settings.materialReflections, &range.min, &range.max));
+			if (dmui::ui::IsItemHovered())
+				dmui::ui::SetTooltip("Blend from authored material cubemaps to dynamic reflections on environment-mapped surfaces.");
+		}
 		if (changed) {
 			PublishSettings();
 		}

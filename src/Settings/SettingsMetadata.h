@@ -36,6 +36,15 @@ namespace cs::settings
 
 	using SchemaView = std::vector<FieldView>;
 
+	// A feature's schema bound to its settings object; empty when it has none.
+	struct SettingsBinding
+	{
+		std::function<SchemaView()> schema;
+		std::function<bool()> modified;
+
+		explicit operator bool() const noexcept { return static_cast<bool>(schema); }
+	};
+
 	struct Section
 	{
 		std::vector<std::string> path;

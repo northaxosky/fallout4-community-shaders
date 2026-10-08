@@ -33,7 +33,6 @@ namespace cs::features
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
@@ -63,7 +62,7 @@ namespace cs::features
 		};
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(ssgi_settings::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(ssgi_settings::kSchema, _settings); }
 		bool EnsureResources();
 		void EnsurePrepareResources(Resources&, UINT, UINT);
 		bool CompileShaders();

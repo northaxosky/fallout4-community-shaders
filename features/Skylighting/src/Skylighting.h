@@ -53,7 +53,6 @@ namespace cs::features
 		void Prepass() override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -71,7 +70,7 @@ namespace cs::features
 		Skylighting() = default;
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(skylighting::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(skylighting::kSchema, _settings); }
 
 		// Captures the occlusion map from a random zenith direction after stock.
 		void RenderOcclusion();

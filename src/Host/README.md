@@ -69,6 +69,14 @@ successful clicks open the default browser. Host dispatch or launch failures fol
 link-row failure logging path; there is no shell or clipboard fallback. Disabled placeholders remain
 non-actionable.
 
+Feature pages group controls with `cs::ui::Section` (`Menu\Section.h`): a host panel titled by the
+native section header. `ui::Collapsible` swaps in the host's collapsing header; the host keeps no
+expanded state, so the section remembers it per session and the host shows the item count. The
+settings row enables Reset only while `Feature::HasModifiedSettings()` reports a difference from
+the schema defaults. Notifications carry a title (feature or preset name, else Community Shaders).
+The Performance Overlay frame graphs are host annotated plots with 30/60/120 FPS reference lines
+in theme colors.
+
 Performance Overlay offset and size are author defaults. DearModdingUI persists the user's
 arrangement in its `imgui.ini`; Reset Layout discards it and reapplies the defaults.
 Legacy TOML `Position` and `PositionSet` keys are ignored. The host applies content scaling exactly once.

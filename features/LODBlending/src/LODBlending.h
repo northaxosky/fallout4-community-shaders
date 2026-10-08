@@ -30,7 +30,6 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
@@ -42,7 +41,7 @@ namespace cs::features
 		LODBlending() = default;
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(lod_blending::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(lod_blending::kSchema, _settings); }
 
 		Settings _settings;
 		std::atomic_bool _registrationsReady{ false };

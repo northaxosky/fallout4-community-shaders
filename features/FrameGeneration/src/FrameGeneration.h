@@ -30,7 +30,6 @@ namespace cs::features
 		void Load() override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
@@ -56,7 +55,7 @@ namespace cs::features
 		};
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(frame_generation::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(frame_generation::kSchema, settings); }
 		FeatureDebugTexture GetDebugTexture(DebugView a_view) const;
 
 		std::optional<Settings> _stagedSettings;

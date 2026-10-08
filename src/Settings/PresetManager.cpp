@@ -514,7 +514,8 @@ namespace cs
 			Menu::ShowToast("Applied '" + a_meta.name + "' with " +
 								std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted",
 				5.0,
-				DMUI_STATUS_SEVERITY_ERROR);
+				DMUI_STATUS_SEVERITY_ERROR,
+				a_meta.name);
 			return false;
 		}
 
@@ -525,7 +526,7 @@ namespace cs
 
 		L->info("Applied preset: {} ({}, {} feature(s))", a_meta.name,
 			a_meta.builtin ? "builtin" : "user", staged.size());
-		Menu::ShowToast("Applied preset '" + a_meta.name + "'", 2.5);
+		Menu::ShowToast("Applied preset '" + a_meta.name + "'", 2.5, DMUI_STATUS_SEVERITY_INFO, a_meta.name);
 		return true;
 	}
 

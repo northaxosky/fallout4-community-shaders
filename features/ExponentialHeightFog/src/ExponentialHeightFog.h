@@ -28,7 +28,6 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string&) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
@@ -38,7 +37,7 @@ namespace cs::features
 
 	private:
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(exponential_height_fog::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(exponential_height_fog::kSchema, _settings); }
 		void PublishSettings();
 		bool CanBind() const;
 		void PrepareFrame();

@@ -26,12 +26,8 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override
-		{
-			return settings::MakeSchemaView(inverse_square_lighting::kSchema);
-		}
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(inverse_square_lighting::kSchema, _settings); }
 		std::vector<std::string_view> GetRestartSettings() const override;
-		bool HasResettableSettings() const override { return true; }
 		void RestoreDefaultSettings() override;
 		// Applies at the next launch: the boot value gates light creation.
 		bool DeriveUnauthoredLights() const noexcept { return _bootSettings.deriveUnauthoredLights; }

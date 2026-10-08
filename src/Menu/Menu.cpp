@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "Host/HostClient.h"
 #include "Log.h"
+#include "Menu/Section.h"
 #include "Plugin.h"
 #include "Render/Engine.h"
 #include "Render/ShaderInjection.h"
@@ -250,6 +251,9 @@ namespace cs
 		if (views.empty())
 			return;
 
+		const ui::Section section{ "feature-debug", "Debug" };
+		if (!section)
+			return;
 		const auto selectedId = _debugViews.SelectedView(a_feature.GetName());
 		std::vector<dmui::ChoiceOption<std::string>> options;
 		options.reserve(views.size() + 1);
@@ -1222,7 +1226,7 @@ namespace cs
 				if (!manager.SaveCoreConfig())
 					return "Preset was saved, but active preset configuration could not be persisted.";
 				manager.lastError.clear();
-				ShowToast("Preset saved", 2.5, DMUI_STATUS_SEVERITY_SUCCESS);
+				ShowToast("Preset saved", 2.5, DMUI_STATUS_SEVERITY_SUCCESS, name);
 				return std::nullopt;
 			});
 		}
@@ -1259,7 +1263,7 @@ namespace cs
 					if (!manager.SaveCoreConfig())
 						return "Preset was deleted, but preset configuration could not be persisted.";
 					manager.lastError.clear();
-					ShowToast("Preset deleted", 2.5, DMUI_STATUS_SEVERITY_SUCCESS);
+					ShowToast("Preset deleted", 2.5, DMUI_STATUS_SEVERITY_SUCCESS, target.name);
 					return std::nullopt;
 				});
 			}
@@ -1431,12 +1435,14 @@ namespace cs
 	void Menu::ShowToast(
 		std::string a_text,
 		double a_durationSec,
-		DMUI_StatusSeverity a_severity)
+		DMUI_StatusSeverity a_severity,
+		std::string a_title)
 	{
 		host::HostClient::Get().PostNotification(
 			a_severity,
 			std::move(a_text),
-			static_cast<std::uint32_t>(a_durationSec * 1000.0));
+			static_cast<std::uint32_t>(a_durationSec * 1000.0),
+			std::move(a_title));
 	}
 
 }

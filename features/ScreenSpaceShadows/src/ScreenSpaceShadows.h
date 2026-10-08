@@ -31,7 +31,6 @@ namespace cs::features
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 		bool IsShadowMaskReady();
 
 		bool ProducesTelemetry() const override { return true; }
@@ -58,7 +57,7 @@ namespace cs::features
 		ScreenSpaceShadows() = default;
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(sss_settings::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(sss_settings::kSchema, _settings); }
 		void OnPreDeferredLights();
 		void BindShadowMask(ID3D11DeviceContext* a_context);
 		bool EnsureResources();

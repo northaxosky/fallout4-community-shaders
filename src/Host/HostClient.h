@@ -43,7 +43,8 @@ namespace cs::host
 		void PostNotification(
 			DMUI_StatusSeverity a_severity,
 			std::string a_message,
-			std::uint32_t a_durationMilliseconds) noexcept;
+			std::uint32_t a_durationMilliseconds,
+			std::string a_title = {}) noexcept;
 		void ResetOverlay() noexcept;
 
 	private:

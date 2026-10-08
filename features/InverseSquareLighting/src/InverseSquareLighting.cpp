@@ -12,6 +12,7 @@
 #include <mutex>
 #include <utility>
 
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/LocalLights.h"
@@ -520,11 +521,13 @@ namespace cs::features
 	void InverseSquareLighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		edit.Discrete(dmui::ui::Checkbox("Derive Unauthored Lights", &_settings.deriveUnauthoredLights));
-		dmui::ui::TextWrapped(
-			"Lights without a %s\\*.toml entry convert from their native falloff; "
-			"an entry is authoritative and never merged. Changes require a restart.",
-			kDirectory);
+		if (const ui::Section section{ "isl-general", "General" }; section) {
+			edit.Discrete(dmui::ui::Checkbox("Derive Unauthored Lights", &_settings.deriveUnauthoredLights));
+			dmui::ui::TextWrapped(
+				"Lights without a %s\\*.toml entry convert from their native falloff; "
+				"an entry is authoritative and never merged. Changes require a restart.",
+				kDirectory);
+		}
 	}
 	void InverseSquareLighting::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{

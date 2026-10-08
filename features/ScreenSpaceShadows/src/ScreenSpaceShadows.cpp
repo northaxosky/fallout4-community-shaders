@@ -20,6 +20,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
@@ -755,40 +756,41 @@ namespace cs::features
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		auto enabled = _settings.Enable != 0;
-		if (edit.Discrete(dmui::ui::Checkbox("Enable", &enabled)))
-			_settings.Enable = enabled ? 1u : 0u;
-		constexpr auto surfaceThickness = sss_settings::kSchema.EditRange(&Settings::SurfaceThickness);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Surface thickness",
-			&_settings.SurfaceThickness,
-			&surfaceThickness.min,
-			&surfaceThickness.max));
-		constexpr auto bilinearThreshold = sss_settings::kSchema.EditRange(&Settings::BilinearThreshold);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Bilinear threshold",
-			&_settings.BilinearThreshold,
-			&bilinearThreshold.min,
-			&bilinearThreshold.max));
-		constexpr auto shadowContrast = sss_settings::kSchema.EditRange(&Settings::ShadowContrast);
-		edit.Continuous(dmui::ui::SliderScalar(
-			"Shadow contrast",
-			&_settings.ShadowContrast,
-			&shadowContrast.min,
-			&shadowContrast.max));
+		if (const ui::Section section{ "sss-general", "General" }; section) {
+			auto enabled = _settings.Enable != 0;
+			if (edit.Discrete(dmui::ui::Checkbox("Enable", &enabled)))
+				_settings.Enable = enabled ? 1u : 0u;
+			constexpr auto surfaceThickness = sss_settings::kSchema.EditRange(&Settings::SurfaceThickness);
+			edit.Continuous(dmui::ui::SliderScalar(
+				"Surface thickness",
+				&_settings.SurfaceThickness,
+				&surfaceThickness.min,
+				&surfaceThickness.max));
+			constexpr auto bilinearThreshold = sss_settings::kSchema.EditRange(&Settings::BilinearThreshold);
+			edit.Continuous(dmui::ui::SliderScalar(
+				"Bilinear threshold",
+				&_settings.BilinearThreshold,
+				&bilinearThreshold.min,
+				&bilinearThreshold.max));
+			constexpr auto shadowContrast = sss_settings::kSchema.EditRange(&Settings::ShadowContrast);
+			edit.Continuous(dmui::ui::SliderScalar(
+				"Shadow contrast",
+				&_settings.ShadowContrast,
+				&shadowContrast.min,
+				&shadowContrast.max));
 
-		auto sampleCount = static_cast<int>(_settings.SampleCount);
-		constexpr auto sampleCountRange = sss_settings::kSchema.EditRange(&Settings::SampleCount);
-		constexpr int sampleCountMin = static_cast<int>(sampleCountRange.min);
-		constexpr int sampleCountMax = static_cast<int>(sampleCountRange.max);
-		if (edit.Continuous(dmui::ui::SliderScalar(
-				"Sample count multiplier",
-				&sampleCount,
-				&sampleCountMin,
-				&sampleCountMax))) {
-			_settings.SampleCount = static_cast<std::uint32_t>(sampleCount);
+			auto sampleCount = static_cast<int>(_settings.SampleCount);
+			constexpr auto sampleCountRange = sss_settings::kSchema.EditRange(&Settings::SampleCount);
+			constexpr int sampleCountMin = static_cast<int>(sampleCountRange.min);
+			constexpr int sampleCountMax = static_cast<int>(sampleCountRange.max);
+			if (edit.Continuous(dmui::ui::SliderScalar(
+					"Sample count multiplier",
+					&sampleCount,
+					&sampleCountMin,
+					&sampleCountMax))) {
+				_settings.SampleCount = static_cast<std::uint32_t>(sampleCount);
+			}
 		}
-
 		Menu::Get().DrawDebugViewSelector(*this);
 	}
 

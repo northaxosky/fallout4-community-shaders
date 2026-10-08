@@ -14,6 +14,7 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
@@ -489,8 +490,9 @@ namespace cs::features
 	void WaterEffects::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		if (edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled))) {
-			PublishSettings();
+		if (const ui::Section section{ "water-effects-general", "General" }; section) {
+			if (edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled)))
+				PublishSettings();
 		}
 		Menu::Get().DrawDebugViewSelector(*this);
 	}

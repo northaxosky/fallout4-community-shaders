@@ -71,7 +71,12 @@ namespace cs
 		virtual void DrawSettings() {}
 		// False keeps recorded edits pending for a later flush.
 		virtual bool SaveSettings() { return true; }
-		virtual settings::SchemaView GetSettingsSchema() const { return {}; }
+		virtual settings::SettingsBinding GetSettingsBinding() const { return {}; }
+		settings::SchemaView GetSettingsSchema() const
+		{
+			const auto binding = GetSettingsBinding();
+			return binding ? binding.schema() : settings::SchemaView{};
+		}
 		const settings::LiveSettingsAccess& GetLiveSettingsAccess() const noexcept { return _liveSettings; }
 
 		// Persists edits recorded by settings::SettingsEdit, optionally only once an edit completes.
@@ -96,7 +101,12 @@ namespace cs
 
 		virtual void RestoreDefaultSettings() {}
 
-		virtual bool HasResettableSettings() const { return false; }
+		bool HasResettableSettings() const { return static_cast<bool>(GetSettingsBinding()); }
+		bool HasModifiedSettings() const
+		{
+			const auto binding = GetSettingsBinding();
+			return binding && binding.modified();
+		}
 
 		// Overlays render even while settings are closed.
 		virtual void DrawOverlay() {}

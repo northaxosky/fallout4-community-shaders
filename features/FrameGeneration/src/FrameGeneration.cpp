@@ -12,6 +12,7 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
@@ -514,7 +515,6 @@ namespace cs::features
 	void FrameGeneration::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		dmui::ui::TextDisabled("Requires borderless windowed mode.");
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto dlssCapabilities =
@@ -546,158 +546,163 @@ namespace cs::features
 			methodOption(3, "fsr-4")
 		};
 		bool changed = false;
-		const auto method = dmui::DrawChoice<std::uint32_t>(
-			"frame-generation-provider", settings.frameGenerationMethod,
-			std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
-			"Unavailable", "Method");
-		if (edit.Discrete(method.changed)) {
-			settings.frameGenerationMethod = *method.selected;
-			changed = true;
-		}
+		if (const ui::Section section{ "frame-generation-method", "Frame Generation" }; section) {
+			dmui::ui::TextDisabled("Requires borderless windowed mode.");
+			const auto method = dmui::DrawChoice<std::uint32_t>(
+				"frame-generation-provider", settings.frameGenerationMethod,
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
+				"Unavailable", "Method");
+			if (edit.Discrete(method.changed)) {
+				settings.frameGenerationMethod = *method.selected;
+				changed = true;
+			}
 
-		if (settings.frameGenerationMethod ==
-			static_cast<std::uint32_t>(Method::kDLSSG)) {
-			constexpr std::uint32_t kDynamicChoice = 1;
-			const auto currentGeneration =
-				settings.dlssgMode == 1 ? kDynamicChoice : settings.dlssgFixedMultiplier;
-			std::vector<dmui::ChoiceOption<std::uint32_t>>
-				generationOptions;
-			const bool capabilitiesCurrent =
-				dlssCapabilities.availability ==
-					render::temporal::CapabilityAvailability::kSupported &&
-				dlssCapabilities.IsCurrent();
-			if (capabilitiesCurrent &&
-				dlssCapabilities.maxGeneratedFrames > 0) {
-				const auto maxGeneratedFrames = std::min(
-					dlssCapabilities.maxGeneratedFrames,
-					std::numeric_limits<std::uint32_t>::max() - 1);
-				generationOptions.reserve(maxGeneratedFrames + 1);
-				for (std::uint32_t generated = 1;
-					generated <= maxGeneratedFrames;
-					++generated) {
-					const auto multiplier = generated + 1;
-					generationOptions.push_back(
-						{ multiplier,
-							std::to_string(multiplier) + "x",
-							std::to_string(multiplier) + "x" });
-				}
-			}
-			const bool currentFixedSupported =
-				settings.dlssgMode == 0 &&
-				capabilitiesCurrent &&
-				settings.dlssgFixedMultiplier >= 2 &&
-				settings.dlssgFixedMultiplier - 1 <=
-					dlssCapabilities.maxGeneratedFrames;
-			if (settings.dlssgMode == 0 &&
-				!currentFixedSupported) {
-				const auto reason = capabilitiesCurrent                       ? std::format(
-																					"runtime maximum is {}x",
-																					dlssCapabilities.maxGeneratedFrames + 1) :
-				                    dlssCapabilities.configurationQueryFailed ? std::string("runtime capability check failed") :
-				                                                                std::string("checking availability");
-				generationOptions.insert(
-					generationOptions.begin(),
-					{ settings.dlssgFixedMultiplier,
-						std::format(
-							"{}x — {}",
-							settings.dlssgFixedMultiplier,
-							reason),
-						std::format(
-							"{}x-current",
-							settings.dlssgFixedMultiplier),
-						false });
-			}
-			const bool dynamicSupported =
-				capabilitiesCurrent &&
-				dlssCapabilities.dynamicModeSupported;
-			std::string dynamicReason;
-			if (!dynamicSupported) {
-				dynamicReason = dlssCapabilities.configurationQueryFailed ? "runtime capability check failed" : capabilitiesCurrent ? "not supported by this runtime" :
-				                                                                                                                      "checking availability";
-			}
-			generationOptions.push_back(
-				{ kDynamicChoice,
-					dynamicSupported ? "Dynamic" : std::format("Dynamic — {}", dynamicReason),
-					"dynamic",
-					dynamicSupported });
-			const auto enabledOptions = std::ranges::count_if(
-				generationOptions,
-				[](const auto& a_option) {
-					return a_option.enabled;
-				});
-			if (enabledOptions == 1 &&
-				currentGeneration == 2 &&
-				generationOptions.front().value == 2 &&
-				generationOptions.front().enabled) {
-				dmui::ui::TextDisabled("Generation: 2x");
-			} else {
-				const auto generation =
-					dmui::DrawChoice<std::uint32_t>(
-						"dlss-generation",
-						currentGeneration,
-						std::span<const dmui::ChoiceOption<std::uint32_t>>{
-							generationOptions },
-						"Unavailable",
-						"Generation");
-				if (edit.Discrete(generation.changed)) {
-					if (*generation.selected == kDynamicChoice) {
-						settings.dlssgMode = 1;
-					} else {
-						settings.dlssgMode = 0;
-						settings.dlssgFixedMultiplier =
-							*generation.selected;
+			if (settings.frameGenerationMethod ==
+				static_cast<std::uint32_t>(Method::kDLSSG)) {
+				constexpr std::uint32_t kDynamicChoice = 1;
+				const auto currentGeneration =
+					settings.dlssgMode == 1 ? kDynamicChoice : settings.dlssgFixedMultiplier;
+				std::vector<dmui::ChoiceOption<std::uint32_t>>
+					generationOptions;
+				const bool capabilitiesCurrent =
+					dlssCapabilities.availability ==
+						render::temporal::CapabilityAvailability::kSupported &&
+					dlssCapabilities.IsCurrent();
+				if (capabilitiesCurrent &&
+					dlssCapabilities.maxGeneratedFrames > 0) {
+					const auto maxGeneratedFrames = std::min(
+						dlssCapabilities.maxGeneratedFrames,
+						std::numeric_limits<std::uint32_t>::max() - 1);
+					generationOptions.reserve(maxGeneratedFrames + 1);
+					for (std::uint32_t generated = 1;
+						generated <= maxGeneratedFrames;
+						++generated) {
+						const auto multiplier = generated + 1;
+						generationOptions.push_back(
+							{ multiplier,
+								std::to_string(multiplier) + "x",
+								std::to_string(multiplier) + "x" });
 					}
-					changed = true;
 				}
-			}
-
-			if (settings.dlssgMode == 1) {
-				const std::uint32_t currentTarget =
-					settings.dlssgDynamicTargetFps > 0.0f ? 1u : 0u;
-				static const std::array targets{
-					dmui::ChoiceOption<std::uint32_t>{
-						0, "Display refresh", "display" },
-					dmui::ChoiceOption<std::uint32_t>{
-						1, "Custom", "custom" }
-				};
-				const auto target = dmui::DrawChoice<std::uint32_t>(
-					"dlss-dynamic-target",
-					currentTarget,
-					std::span<const dmui::ChoiceOption<std::uint32_t>>{
-						targets },
-					"Unavailable",
-					"Dynamic target");
-				if (edit.Discrete(target.changed)) {
-					settings.dlssgDynamicTargetFps =
-						*target.selected == 0 ? 0.0f : 60.0f;
-					changed = true;
+				const bool currentFixedSupported =
+					settings.dlssgMode == 0 &&
+					capabilitiesCurrent &&
+					settings.dlssgFixedMultiplier >= 2 &&
+					settings.dlssgFixedMultiplier - 1 <=
+						dlssCapabilities.maxGeneratedFrames;
+				if (settings.dlssgMode == 0 &&
+					!currentFixedSupported) {
+					const auto reason = capabilitiesCurrent                       ? std::format(
+																						"runtime maximum is {}x",
+																						dlssCapabilities.maxGeneratedFrames + 1) :
+					                    dlssCapabilities.configurationQueryFailed ? std::string("runtime capability check failed") :
+					                                                                std::string("checking availability");
+					generationOptions.insert(
+						generationOptions.begin(),
+						{ settings.dlssgFixedMultiplier,
+							std::format(
+								"{}x — {}",
+								settings.dlssgFixedMultiplier,
+								reason),
+							std::format(
+								"{}x-current",
+								settings.dlssgFixedMultiplier),
+							false });
 				}
-				if (settings.dlssgDynamicTargetFps > 0.0f) {
-					float customTarget =
-						settings.dlssgDynamicTargetFps;
-					if (edit.Continuous(dmui::ui::InputScalar(
-							"Custom target FPS",
-							&customTarget))) {
-						if (std::isfinite(customTarget) &&
-							customTarget > 0.0f) {
-							settings.dlssgDynamicTargetFps =
-								customTarget;
-							changed = true;
+				const bool dynamicSupported =
+					capabilitiesCurrent &&
+					dlssCapabilities.dynamicModeSupported;
+				std::string dynamicReason;
+				if (!dynamicSupported) {
+					dynamicReason = dlssCapabilities.configurationQueryFailed ? "runtime capability check failed" : capabilitiesCurrent ? "not supported by this runtime" :
+					                                                                                                                      "checking availability";
+				}
+				generationOptions.push_back(
+					{ kDynamicChoice,
+						dynamicSupported ? "Dynamic" : std::format("Dynamic — {}", dynamicReason),
+						"dynamic",
+						dynamicSupported });
+				const auto enabledOptions = std::ranges::count_if(
+					generationOptions,
+					[](const auto& a_option) {
+						return a_option.enabled;
+					});
+				if (enabledOptions == 1 &&
+					currentGeneration == 2 &&
+					generationOptions.front().value == 2 &&
+					generationOptions.front().enabled) {
+					dmui::ui::TextDisabled("Generation: 2x");
+				} else {
+					const auto generation =
+						dmui::DrawChoice<std::uint32_t>(
+							"dlss-generation",
+							currentGeneration,
+							std::span<const dmui::ChoiceOption<std::uint32_t>>{
+								generationOptions },
+							"Unavailable",
+							"Generation");
+					if (edit.Discrete(generation.changed)) {
+						if (*generation.selected == kDynamicChoice) {
+							settings.dlssgMode = 1;
 						} else {
-							Menu::ShowToast(
-								"Custom target must be a finite positive number.",
-								4.0);
+							settings.dlssgMode = 0;
+							settings.dlssgFixedMultiplier =
+								*generation.selected;
+						}
+						changed = true;
+					}
+				}
+
+				if (settings.dlssgMode == 1) {
+					const std::uint32_t currentTarget =
+						settings.dlssgDynamicTargetFps > 0.0f ? 1u : 0u;
+					static const std::array targets{
+						dmui::ChoiceOption<std::uint32_t>{
+							0, "Display refresh", "display" },
+						dmui::ChoiceOption<std::uint32_t>{
+							1, "Custom", "custom" }
+					};
+					const auto target = dmui::DrawChoice<std::uint32_t>(
+						"dlss-dynamic-target",
+						currentTarget,
+						std::span<const dmui::ChoiceOption<std::uint32_t>>{
+							targets },
+						"Unavailable",
+						"Dynamic target");
+					if (edit.Discrete(target.changed)) {
+						settings.dlssgDynamicTargetFps =
+							*target.selected == 0 ? 0.0f : 60.0f;
+						changed = true;
+					}
+					if (settings.dlssgDynamicTargetFps > 0.0f) {
+						float customTarget =
+							settings.dlssgDynamicTargetFps;
+						if (edit.Continuous(dmui::ui::InputScalar(
+								"Custom target FPS",
+								&customTarget))) {
+							if (std::isfinite(customTarget) &&
+								customTarget > 0.0f) {
+								settings.dlssgDynamicTargetFps =
+									customTarget;
+								changed = true;
+							} else {
+								Menu::ShowToast(
+									"Custom target must be a finite positive number.",
+									4.0,
+									DMUI_STATUS_SEVERITY_INFO,
+									std::string(GetDisplayName()));
+							}
+						}
+						if (dlssCapabilities.vsyncEnabled) {
+							dmui::ui::TextDisabled(
+								"VSync is enabled; DLSS ignores the custom target.");
 						}
 					}
-					if (dlssCapabilities.vsyncEnabled) {
-						dmui::ui::TextDisabled(
-							"VSync is enabled; DLSS ignores the custom target.");
-					}
 				}
 			}
 		}
 
-		if (dmui::ui::CollapsingHeader("Advanced")) {
+		if (const ui::Section section{ "frame-generation-advanced", "Advanced", ui::Collapsible{ 1 } }; section) {
 			changed |= edit.Discrete(dmui::ui::Checkbox(
 				"Allow in menus",
 				&settings.frameGenerationAllowInMenus));
@@ -711,71 +716,80 @@ namespace cs::features
 		const auto effectiveName =
 			render::temporal::presentation::Name(
 				currentStatus.effective.frameGeneration);
-		if (currentStatus.transitionInFlight) {
-			dmui::ui::TextDisabled(
-				"Switching to %.*s...",
-				static_cast<int>(
-					MethodName(settings.frameGenerationMethod).size()),
-				MethodName(settings.frameGenerationMethod).data());
-		} else if (!currentStatus.effective.frameGenerationEnabled) {
-			dmui::ui::TextDisabled("Active: Off");
-		} else if (
-			currentStatus.effective.frameGeneration ==
-				render::temporal::FrameGenerationMethod::kDLSSG &&
-			currentStatus.effective.frameGenerationConfiguration.mode ==
-				render::temporal::FrameGenerationMode::kDynamic) {
-			dmui::ui::TextDisabled("Active: DLSS Dynamic");
-		} else if (
-			currentStatus.effective.frameGeneration ==
-			render::temporal::FrameGenerationMethod::kDLSSG) {
-			dmui::ui::TextDisabled(
-				"Active: DLSS %ux",
-				currentStatus.effective.frameGenerationConfiguration
-					.fixedMultiplier);
-		} else {
-			dmui::ui::TextDisabled(
-				"Active: %.*s",
-				static_cast<int>(effectiveName.size()),
-				effectiveName.data());
-		}
-		const auto selectedAvailability =
-			render::temporal::presentation::Describe(
-				static_cast<render::temporal::FrameGenerationMethod>(
-					settings.frameGenerationMethod),
-				currentStatus,
-				dlssCapabilities,
-				fidelityFx);
-		if (selectedAvailability.kind !=
-			render::temporal::presentation::AvailabilityKind::kAvailable) {
-			dmui::ui::TextWrapped(
-				"%s. %.*s remains active.",
-				selectedAvailability.reason.c_str(),
-				static_cast<int>(effectiveName.size()),
-				effectiveName.data());
-		} else if (
-			!currentStatus.transitionInFlight &&
-			currentStatus.effective.frameGeneration !=
-				static_cast<render::temporal::FrameGenerationMethod>(
-					settings.frameGenerationMethod) &&
-			!currentStatus.failure.empty()) {
-			dmui::ui::TextWrapped(
-				"Could not activate %.*s. %.*s remains active; see Diagnostics.",
-				static_cast<int>(
-					MethodName(settings.frameGenerationMethod).size()),
-				MethodName(settings.frameGenerationMethod).data(),
-				static_cast<int>(effectiveName.size()),
-				effectiveName.data());
+		if (const ui::Section section{ "frame-generation-status", "Status" }; section) {
+			if (currentStatus.transitionInFlight) {
+				dmui::ui::TextDisabled(
+					"Switching to %.*s...",
+					static_cast<int>(
+						MethodName(settings.frameGenerationMethod).size()),
+					MethodName(settings.frameGenerationMethod).data());
+			} else if (!currentStatus.effective.frameGenerationEnabled) {
+				dmui::ui::TextDisabled("Active: Off");
+			} else if (
+				currentStatus.effective.frameGeneration ==
+					render::temporal::FrameGenerationMethod::kDLSSG &&
+				currentStatus.effective.frameGenerationConfiguration.mode ==
+					render::temporal::FrameGenerationMode::kDynamic) {
+				dmui::ui::TextDisabled("Active: DLSS Dynamic");
+			} else if (
+				currentStatus.effective.frameGeneration ==
+				render::temporal::FrameGenerationMethod::kDLSSG) {
+				dmui::ui::TextDisabled(
+					"Active: DLSS %ux",
+					currentStatus.effective.frameGenerationConfiguration
+						.fixedMultiplier);
+			} else {
+				dmui::ui::TextDisabled(
+					"Active: %.*s",
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			}
+			const auto selectedAvailability =
+				render::temporal::presentation::Describe(
+					static_cast<render::temporal::FrameGenerationMethod>(
+						settings.frameGenerationMethod),
+					currentStatus,
+					dlssCapabilities,
+					fidelityFx);
+			if (selectedAvailability.kind !=
+				render::temporal::presentation::AvailabilityKind::kAvailable) {
+				dmui::ui::TextWrapped(
+					"%s. %.*s remains active.",
+					selectedAvailability.reason.c_str(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			} else if (
+				!currentStatus.transitionInFlight &&
+				currentStatus.effective.frameGeneration !=
+					static_cast<render::temporal::FrameGenerationMethod>(
+						settings.frameGenerationMethod) &&
+				!currentStatus.failure.empty()) {
+				dmui::ui::TextWrapped(
+					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
+					static_cast<int>(
+						MethodName(settings.frameGenerationMethod).size()),
+					MethodName(settings.frameGenerationMethod).data(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			}
 		}
 
-		if (dmui::ui::CollapsingHeader("Diagnostics")) {
+		const auto diagnostics =
+			pipeline.GetFrameGenerationDiagnostics();
+		const auto diagnosticRows =
+			std::size_t{ 3 } +
+			diagnostics.generatedFrameCountAvailable +
+			(fidelityFx.fsr4FrameGeneration.availability !=
+				render::temporal::CapabilityAvailability::kUnknown) +
+			currentStatus.pending.required +
+			!currentStatus.failure.empty();
+		if (const ui::Section section{ "frame-generation-diagnostics", "Diagnostics", ui::Collapsible{ diagnosticRows } }; section) {
 			if (edit.Discrete(dmui::ui::Checkbox(
 					"Detailed diagnostics",
 					&settings.detailedDiagnostics))) {
 				pipeline.SetDetailedTracing(
 					settings.detailedDiagnostics);
 			}
-			const auto diagnostics =
-				pipeline.GetFrameGenerationDiagnostics();
 			dmui::ui::TextDisabled(
 				"Ready: %s | active: %s | dispatches: %llu | failures: %llu",
 				diagnostics.ready ? "yes" : "no",
@@ -828,9 +842,12 @@ namespace cs::features
 					"%s",
 					currentStatus.failure.c_str());
 			}
-			Menu::Get().DrawDebugViewSelector(*this);
-			auto& renderer = pipeline.Renderer();
-			if (renderer.HasFrameGenerationDebugSnapshotSelection()) {
+		}
+
+		Menu::Get().DrawDebugViewSelector(*this);
+		auto& renderer = pipeline.Renderer();
+		if (renderer.HasFrameGenerationDebugSnapshotSelection()) {
+			if (const ui::Section section{ "frame-generation-debug-snapshot", "Debug Snapshot" }; section) {
 				if (dmui::ui::Button("Refresh snapshot"))
 					renderer.RefreshFrameGenerationDebugSnapshot();
 				if (renderer.FrameGenerationDebugSnapshotPending())

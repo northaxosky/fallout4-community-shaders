@@ -26,7 +26,6 @@ namespace cs::features
 		void DrawOverlay() override;
 		bool IsOverlayActive() const override { return settings.ShowInOverlay || _testing || _restorePending; }
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		void TickHostFrame(std::uint64_t a_vramUsedBytes, std::uint64_t a_vramBudgetBytes);
@@ -38,7 +37,7 @@ namespace cs::features
 	private:
 		using Snapshot = std::map<Feature*, toml::table>;
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(performance_overlay::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(performance_overlay::kSchema, settings); }
 		static Snapshot CaptureSettings();
 		static void ApplySettings(const Snapshot&, bool a_restoring = false);
 		void SetTestInterval(int);
@@ -47,7 +46,7 @@ namespace cs::features
 		void DrawTestResults();
 		void DrawPasses();
 		void DrawDrawCalls(const std::vector<DrawCallRow>&);
-		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4);
+		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4 DMUI_ThemeColors::*);
 		static float OverlayContentWidth() noexcept;
 		void UpdateGraphValues();
 		std::vector<DrawCallRow> BuildRows() const;

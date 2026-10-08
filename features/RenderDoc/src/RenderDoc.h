@@ -31,7 +31,6 @@ namespace cs::features
 		std::string_view GetDisplayName() const override { return "RenderDoc"; }
 		std::string GetFeatureSummary() const override { return "In-game RenderDoc capture support."; }
 		std::string GetCategory() const override { return FeatureCategories::kDevTools; }
-		bool HasResettableSettings() const override { return true; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
@@ -71,7 +70,7 @@ namespace cs::features
 		RenderDoc() = default;
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(renderdoc_settings::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(renderdoc_settings::kSchema, _settings); }
 		bool TryLoadRuntime(std::string& a_error);
 		void ApplyCapturePath();
 		bool CheckCaptureDiskSpace(int a_frames) const;

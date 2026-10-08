@@ -19,6 +19,7 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
@@ -1001,34 +1002,32 @@ namespace cs::features
 			edit.Continuous(dmui::ui::SliderScalar(labelOf(a_field).c_str(), &(_settings.*a_field.member), &range.min, &range.max, "%.2f"));
 		};
 
-		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
-		dmui::ui::Spacing();
+		if (const ui::Section section{ "skylighting-general", "General" }; section)
+			edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
+		if (const ui::Section section{ "skylighting-visibility", "Visibility" }; section) {
+			dmui::ui::Text("%s", "Minimum visibility values. Diffuse darkens objects. Specular removes the sky from reflections.");
+			drawVisibility(minDiffuse);
+			drawVisibility(minSpecular);
+		}
+		if (const ui::Section section{ "skylighting-rebuild", "Rebuild" }; section) {
+			if (dmui::ui::Button("Rebuild Skylighting"))
+				QueueReset(kResetRebuild);
 
-		dmui::ui::Text("%s", "Minimum visibility values. Diffuse darkens objects. Specular removes the sky from reflections.");
-		drawVisibility(minDiffuse);
-		drawVisibility(minSpecular);
+			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
+				dmui::ui::Text("%s", "Changes below require rebuilding, a loading screen, or moving away from the current location to apply.");
 
-		dmui::ui::Separator();
-
-		if (dmui::ui::Button("Rebuild Skylighting"))
-			QueueReset(kResetRebuild);
-
-		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
-			dmui::ui::Text("%s", "Changes below require rebuilding, a loading screen, or moving away from the current location to apply.");
-
-		// Stored in radians; the slider edits degrees like upstream's SliderAngle.
-		const auto range = skylighting::kSchema.EditRange(maxZenith.member);
-		const float minDegrees = range.min * kRadiansToDegrees;
-		const float maxDegrees = range.max * kRadiansToDegrees;
-		float degrees = _settings.MaxZenith * kRadiansToDegrees;
-		const bool changed = dmui::ui::SliderScalar(labelOf(maxZenith).c_str(), &degrees, &minDegrees, &maxDegrees, "%.0f deg", dmui::ui::SliderFlags::kAlwaysClamp);
-		if (changed)
-			_settings.MaxZenith = degrees / kRadiansToDegrees;
-		edit.Continuous(changed);
-		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
-			dmui::ui::Text("%s", "Smaller angles creates more focused top-down shadow.");
-
-		dmui::ui::Separator();
+			// Stored in radians; the slider edits degrees like upstream's SliderAngle.
+			const auto range = skylighting::kSchema.EditRange(maxZenith.member);
+			const float minDegrees = range.min * kRadiansToDegrees;
+			const float maxDegrees = range.max * kRadiansToDegrees;
+			float degrees = _settings.MaxZenith * kRadiansToDegrees;
+			const bool changed = dmui::ui::SliderScalar(labelOf(maxZenith).c_str(), &degrees, &minDegrees, &maxDegrees, "%.0f deg", dmui::ui::SliderFlags::kAlwaysClamp);
+			if (changed)
+				_settings.MaxZenith = degrees / kRadiansToDegrees;
+			edit.Continuous(changed);
+			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
+				dmui::ui::Text("%s", "Smaller angles creates more focused top-down shadow.");
+		}
 		Menu::Get().DrawDebugViewSelector(*this);
 	}
 

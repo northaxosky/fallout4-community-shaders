@@ -11,6 +11,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
@@ -605,8 +606,7 @@ namespace cs::features
 			_recompile = true;
 			edit.Discrete(true);
 		};
-		if (const dmui::ui::PanelScope panel{ "ssgi-toggles" }; panel) {
-			dmui::ui::Text("Toggles");
+		if (const ui::Section section{ "ssgi-toggles", "Toggles" }; section) {
 			static_cast<void>(dmui::ui::Checkbox("Show Advanced Options", &showAdvanced));
 			toggle("Enabled", _settings.enabled);
 			dmui::ui::BeginDisabled(!_settings.enabled);
@@ -619,8 +619,7 @@ namespace cs::features
 				tooltip("An experimental specular GI that is more accurate but requires more samples. Won't be blurred.");
 			}
 		}
-		if (const dmui::ui::PanelScope panel{ "ssgi-quality" }; panel) {
-			dmui::ui::Text("Quality/Performance");
+		if (const ui::Section section{ "ssgi-quality", "Quality/Performance" }; section) {
 			dmui::ui::BeginDisabled(!_settings.enabled);
 			if (dmui::ui::Button("AO only"))
 				preset(1, 6, -1, false);
@@ -652,8 +651,7 @@ namespace cs::features
 			}
 			dmui::ui::EndDisabled();
 		}
-		if (const dmui::ui::PanelScope panel{ "ssgi-visual" }; panel) {
-			dmui::ui::Text("Visual");
+		if (const ui::Section section{ "ssgi-visual", "Visual" }; section) {
 			dmui::ui::BeginDisabled(!_settings.enabled);
 			slider("AO Power", &Settings::aoPower, "%.2f");
 			dmui::ui::BeginDisabled(!_settings.enableGI);
@@ -672,16 +670,14 @@ namespace cs::features
 				slider("Thickness", &Settings::thickness, "%.1f units");
 			dmui::ui::EndDisabled();
 		}
-		if (const dmui::ui::PanelScope panel{ "ssgi-visual-il" }; panel) {
-			dmui::ui::Text("Visual - IL");
+		if (const ui::Section section{ "ssgi-visual-il", "Visual - IL" }; section) {
 			dmui::ui::BeginDisabled(!_settings.enabled || !_settings.enableGI);
 			if (showAdvanced)
 				slider("IL Distance Compensation", &Settings::giDistanceCompensation, "%.1f");
 			percentSlider("IL Saturation", &Settings::giSaturation);
 			dmui::ui::EndDisabled();
 		}
-		if (const dmui::ui::PanelScope panel{ "ssgi-denoising" }; panel) {
-			dmui::ui::Text("Denoising");
+		if (const ui::Section section{ "ssgi-denoising", "Denoising" }; section) {
 			dmui::ui::BeginDisabled(!_settings.enabled);
 			toggle("Temporal Denoiser", _settings.enableTemporalDenoiser, true);
 			dmui::ui::SameLine();

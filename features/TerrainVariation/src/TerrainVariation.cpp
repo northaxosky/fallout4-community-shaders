@@ -17,6 +17,7 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
@@ -213,8 +214,8 @@ namespace cs::features
 	void TerrainVariation::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
-		dmui::ui::Spacing();
+		if (const ui::Section section{ "terrain-variation-general", "General" }; section)
+			edit.Discrete(dmui::ui::Checkbox("Enabled", &_settings.enabled));
 
 		const auto toggle = [&](const auto& field, const char* a_tooltip) {
 			const std::string label = std::string(field.description) + "##" + std::string(field.key);
@@ -225,8 +226,10 @@ namespace cs::features
 			}
 		};
 		const auto& [enabledField, lodTiling, meshSupport] = terrain_variation::kSchema.fields;
-		toggle(lodTiling, "Applies the tiling fix to LOD terrain objects.\nThis helps reduce the visible tiling effect on distant terrain.");
-		toggle(meshSupport, "Applies the tiling fix to meshes that use landscape textures, such as dirt cliffs and mountain slabs.\nAlpha tested meshes like foliage and decals are never affected.");
+		if (const ui::Section section{ "terrain-variation-coverage", "Coverage" }; section) {
+			toggle(lodTiling, "Applies the tiling fix to LOD terrain objects.\nThis helps reduce the visible tiling effect on distant terrain.");
+			toggle(meshSupport, "Applies the tiling fix to meshes that use landscape textures, such as dirt cliffs and mountain slabs.\nAlpha tested meshes like foliage and decals are never affected.");
+		}
 	}
 
 	void TerrainVariation::RestoreDefaultSettings()

@@ -16,6 +16,7 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "REX/CONVERT.h"
 #include "REX/W32/OLE32.h"
@@ -99,7 +100,7 @@ namespace cs::features
 			if (!client.OpenExternal({ .targetKind = a_kind, .target = utf8.c_str() }, &nativeError)) {
 				L->warn("Failed to open '{}': {} (native error {})",
 					utf8, DMUI_ResultToString(client.LastResult()), nativeError);
-				cs::Menu::ShowToast("Could not open the capture location; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR);
+				cs::Menu::ShowToast("Could not open the capture location; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR, "RenderDoc");
 			}
 		}
 
@@ -314,7 +315,8 @@ namespace cs::features
 				cs::Menu::ShowToast(
 					std::format("RenderDoc capture aborted: at least {} MiB free required.", requiredMiB),
 					4.0,
-					DMUI_STATUS_SEVERITY_WARNING);
+					DMUI_STATUS_SEVERITY_WARNING,
+					"RenderDoc");
 				return false;
 			}
 		} catch (const std::filesystem::filesystem_error& e) {
@@ -323,7 +325,8 @@ namespace cs::features
 			cs::Menu::ShowToast(
 				"RenderDoc capture aborted: disk check failed",
 				4.0,
-				DMUI_STATUS_SEVERITY_ERROR);
+				DMUI_STATUS_SEVERITY_ERROR,
+				"RenderDoc");
 			return false;
 		}
 
@@ -369,7 +372,8 @@ namespace cs::features
 				cs::Menu::ShowToast(
 					"RenderDoc capture target binding is unavailable",
 					4.0,
-					DMUI_STATUS_SEVERITY_ERROR);
+					DMUI_STATUS_SEVERITY_ERROR,
+					"RenderDoc");
 			}
 			return false;
 		}
@@ -387,7 +391,8 @@ namespace cs::features
 						"RenderDoc capture target unavailable: {}",
 						name),
 					4.0,
-					DMUI_STATUS_SEVERITY_ERROR);
+					DMUI_STATUS_SEVERITY_ERROR,
+					"RenderDoc");
 			}
 			return false;
 		}
@@ -598,74 +603,80 @@ namespace cs::features
 				"temporal-d3d12",
 				d3d12Available }
 		};
-		const auto captureTarget = dmui::DrawChoice<CaptureTarget>(
-			"renderdoc-capture-target",
-			_settings.captureTarget,
-			std::span<const dmui::ChoiceOption<CaptureTarget>>{ captureTargets },
-			"Unavailable",
-			"Capture target");
-		if (edit.Discrete(captureTarget.changed)) {
-			_settings.captureTarget = *captureTarget.selected;
-		}
-		if (!CaptureTargetAvailable()) {
-			dmui::ui::TextDisabled(
-				"Selected capture target is unavailable.");
-		}
+		if (const ui::Section section{ "renderdoc-settings", "Capture Settings" }; section) {
+			const auto captureTarget = dmui::DrawChoice<CaptureTarget>(
+				"renderdoc-capture-target",
+				_settings.captureTarget,
+				std::span<const dmui::ChoiceOption<CaptureTarget>>{ captureTargets },
+				"Unavailable",
+				"Capture target");
+			if (edit.Discrete(captureTarget.changed)) {
+				_settings.captureTarget = *captureTarget.selected;
+			}
+			if (!CaptureTargetAvailable()) {
+				dmui::ui::TextDisabled(
+					"Selected capture target is unavailable.");
+			}
 
-		char dllPathBuf[260];
-		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
-		if (edit.Continuous(dmui::ui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf))))
-			_settings.dllPath = dllPathBuf;
-		dmui::ui::TextDisabled("Empty uses the installed RenderDoc. DLL path changes require a restart.");
+			char dllPathBuf[260];
+			strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
+			if (edit.Continuous(dmui::ui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf))))
+				_settings.dllPath = dllPathBuf;
+			dmui::ui::TextDisabled("Empty uses the installed RenderDoc. DLL path changes require a restart.");
 
-		char folderBuf[260];
-		strncpy_s(folderBuf, _settings.captureFolder.c_str(), _TRUNCATE);
-		if (edit.Continuous(dmui::ui::InputText("Capture folder", folderBuf, sizeof(folderBuf))))
-			_settings.captureFolder = folderBuf;
-		if (dmui::ui::IsItemDeactivatedAfterEdit()) {
-			ApplyCapturePath();
-		}
+			char folderBuf[260];
+			strncpy_s(folderBuf, _settings.captureFolder.c_str(), _TRUNCATE);
+			if (edit.Continuous(dmui::ui::InputText("Capture folder", folderBuf, sizeof(folderBuf))))
+				_settings.captureFolder = folderBuf;
+			if (dmui::ui::IsItemDeactivatedAfterEdit()) {
+				ApplyCapturePath();
+			}
 
-		const auto frameRange = renderdoc_settings::kSchema.EditRange(&Settings::captureFrameCount);
-		(void)edit.Continuous(dmui::ui::SliderScalar(
-			"Capture Frame Count",
-			&_settings.captureFrameCount,
-			&frameRange.min,
-			&frameRange.max));
-		_settings.captureFrameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
-		dmui::ui::TextDisabled("Required free space: %llu MiB.",
-			renderdoc::RequiredSpaceBytes(_settings.captureFrameCount) / (1024 * 1024));
+			const auto frameRange = renderdoc_settings::kSchema.EditRange(&Settings::captureFrameCount);
+			(void)edit.Continuous(dmui::ui::SliderScalar(
+				"Capture Frame Count",
+				&_settings.captureFrameCount,
+				&frameRange.min,
+				&frameRange.max));
+			_settings.captureFrameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
+			dmui::ui::TextDisabled("Required free space: %llu MiB.",
+				renderdoc::RequiredSpaceBytes(_settings.captureFrameCount) / (1024 * 1024));
 
-		(void)dmui::ui::InputTextMultiline("Comments (embedded in next .rdc)",
-			_commentsBuf.data(), _commentsBuf.size(),
-			dmui::ui::Vec2{ 0, dmui::ui::GetTextLineHeightWithSpacing() * 3 });
-
-		dmui::ui::BeginDisabled(!_api || !CaptureTargetAvailable());
-		if (dmui::ui::Button("Trigger Capture"))
-			TriggerCapture();
-		dmui::ui::EndDisabled();
-		dmui::ui::TextWrapped(
-			"RenderDoc is loaded and may severely impact performance. Disable startup loading and restart to unload it. "
-			"Upscaling and frame generation may be incompatible with captures.");
-
-		try {
-			if (dmui::ui::Button("Open Capture Directory"))
-				OpenCaptureLocation(_resolvedCaptureFolder, DMUI_EXTERNAL_TARGET_DIRECTORY);
-			dmui::ui::SameLine();
-			if (dmui::ui::Button("Copy Directory Path"))
-				dmui::ui::SetClipboardText(_resolvedCaptureFolderUtf8.c_str());
-			dmui::ui::TextDisabled("Capture Directory: %s", _resolvedCaptureFolderUtf8.c_str());
-			const auto usageMiB = _captures.DiskUsageBytes() / (1024 * 1024);
-			dmui::ui::Text("Capture Size: %.2f GiB", static_cast<double>(usageMiB) / 1024.0);
-			if (usageMiB > 0 && dmui::ui::Button("Clear All Captures"))
-				Menu::Get().RequestClearRenderDocCaptures();
-			DrawCaptureFiles();
-		} catch (const std::filesystem::filesystem_error& error) {
-			dmui::ui::TextWrapped("Capture directory unavailable: %s", error.what());
+			(void)dmui::ui::InputTextMultiline("Comments (embedded in next .rdc)",
+				_commentsBuf.data(), _commentsBuf.size(),
+				dmui::ui::Vec2{ 0, dmui::ui::GetTextLineHeightWithSpacing() * 3 });
 		}
 
-		if (!_api)
-			dmui::ui::TextDisabled("Runtime load failed - install RenderDoc or fix the DLL path, then restart.");
+		if (const ui::Section section{ "renderdoc-capture", "Capture" }; section) {
+			dmui::ui::BeginDisabled(!_api || !CaptureTargetAvailable());
+			if (dmui::ui::Button("Trigger Capture"))
+				TriggerCapture();
+			dmui::ui::EndDisabled();
+			dmui::ui::TextWrapped(
+				"RenderDoc is loaded and may severely impact performance. Disable startup loading and restart to unload it. "
+				"Upscaling and frame generation may be incompatible with captures.");
+
+			if (!_api)
+				dmui::ui::TextDisabled("Runtime load failed - install RenderDoc or fix the DLL path, then restart.");
+		}
+
+		if (const ui::Section section{ "renderdoc-captures", "Captures" }; section) {
+			try {
+				if (dmui::ui::Button("Open Capture Directory"))
+					OpenCaptureLocation(_resolvedCaptureFolder, DMUI_EXTERNAL_TARGET_DIRECTORY);
+				dmui::ui::SameLine();
+				if (dmui::ui::Button("Copy Directory Path"))
+					dmui::ui::SetClipboardText(_resolvedCaptureFolderUtf8.c_str());
+				dmui::ui::TextDisabled("Capture Directory: %s", _resolvedCaptureFolderUtf8.c_str());
+				const auto usageMiB = _captures.DiskUsageBytes() / (1024 * 1024);
+				dmui::ui::Text("Capture Size: %.2f GiB", static_cast<double>(usageMiB) / 1024.0);
+				if (usageMiB > 0 && dmui::ui::Button("Clear All Captures"))
+					Menu::Get().RequestClearRenderDocCaptures();
+				DrawCaptureFiles();
+			} catch (const std::filesystem::filesystem_error& error) {
+				dmui::ui::TextWrapped("Capture directory unavailable: %s", error.what());
+			}
+		}
 	}
 
 	void RenderDoc::DrawCaptureFiles()

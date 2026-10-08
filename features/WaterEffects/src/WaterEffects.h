@@ -60,7 +60,6 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -75,7 +74,7 @@ namespace cs::features
 		WaterEffects() = default;
 
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(water_effects::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(water_effects::kSchema, _settings); }
 		void PublishSettings() noexcept;
 		bool BuildCausticsResources(ID3D11Device* a_device, std::string& a_error);
 		void SetValidationDetail(std::string a_detail);

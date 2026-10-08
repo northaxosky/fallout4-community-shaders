@@ -3,6 +3,7 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/FrameProfiler.h"
 #include "Render/RenderHooks.h"
@@ -261,7 +262,7 @@ namespace cs::features
 			_testInterval = 0;
 			_aggregator.OnTestEnd();
 		}
-		Menu::ShowToast(_testError, 8.0, DMUI_STATUS_SEVERITY_ERROR);
+		Menu::ShowToast(_testError, 8.0, DMUI_STATUS_SEVERITY_ERROR, std::string(GetDisplayName()));
 	}
 
 	bool PerformanceOverlay::SaveSettings()
@@ -482,21 +483,30 @@ namespace cs::features
 		return rows;
 	}
 
-	void PerformanceOverlay::DrawGraph(const char* a_id, const char* a_overlay, const CircularBuffer<float>& a_history, dmui::ui::Vec4 a_color)
+	void PerformanceOverlay::DrawGraph(const char* a_id, const char* a_overlay, const CircularBuffer<float>& a_history, dmui::ui::Vec4 DMUI_ThemeColors::* a_role)
 	{
+		const auto theme = dmui::ui::GetThemeColors();
+		const std::array references{
+			DMUI_PlotReferenceLine{ 1000.0f / 30.0f, theme.error },
+			DMUI_PlotReferenceLine{ 1000.0f / 60.0f, theme.warning },
+			DMUI_PlotReferenceLine{ 1000.0f / 120.0f, theme.success }
+		};
 		const auto samples = a_history.GetData();
-		dmui::ui::PushStyleColor(dmui::ui::Color::kPlotLines, a_color);
-		dmui::ui::PlotLines(a_id, samples.data(), static_cast<int>(samples.size()),
-			static_cast<int>(a_history.GetHeadIdx()), a_overlay, _graphMin, _graphMax,
-			{ OverlayContentWidth(), 50.0f * settings.TextSize });
+		dmui::ui::PushStyleColor(dmui::ui::Color::kPlotLines, theme.*a_role);
+		dmui::ui::PlotAnnotated(a_id,
+			{ .samples = samples.data(),
+				.sampleCount = static_cast<std::uint32_t>(samples.size()),
+				.sampleOffset = static_cast<std::uint32_t>(a_history.GetHeadIdx()),
+				.scaleMinimum = _graphMin,
+				// The host rejects an empty scale range.
+				.scaleMaximum = std::max(_graphMax, _graphMin + 0.001f),
+				.size = { OverlayContentWidth(), 50.0f * settings.TextSize },
+				.overlayText = a_overlay,
+				.referenceLines = references.data(),
+				.referenceLineCount = static_cast<std::uint32_t>(references.size()) });
 		dmui::ui::PopStyleColor();
-		if (dmui::ui::BeginTable(a_id, 3, dmui::ui::TableFlags::kSizingStretchSame)) {
-			for (const char* target : { "30 FPS: 33.3 ms", "60 FPS: 16.7 ms", "120 FPS: 8.3 ms" }) {
-				(void)dmui::ui::TableNextColumn();
-				dmui::ui::TextUnformatted(target);
-			}
-			dmui::ui::EndTable();
-		}
+		if (dmui::ui::IsItemHovered())
+			dmui::ui::SetTooltip("Reference lines: 30 FPS = 33.3 ms, 60 FPS = 16.7 ms, 120 FPS = 8.3 ms");
 	}
 
 	float PerformanceOverlay::OverlayContentWidth() noexcept
@@ -592,23 +602,28 @@ namespace cs::features
 			dmui::ui::Text("Variant %s: %.1f seconds left",
 				_variantB ? "B (TEST)" : "A (USER)",
 				std::max(0.0, _testInterval - (Util::GetNowSecs() - _lastSwitch)));
-		if (!_test.empty() && dmui::ui::CollapsingHeader("Changes from USER")) {
-			for (const auto& [feature, values] : _test) {
-				const auto baseline = _baseline.find(feature);
-				if (baseline == _baseline.end())
+		std::vector<std::string> changes;
+		for (const auto& [feature, values] : _test) {
+			const auto baseline = _baseline.find(feature);
+			if (baseline == _baseline.end())
+				continue;
+			for (const auto& [key, value] : values) {
+				const auto* original = baseline->second.get(key);
+				if (original && toml::node_view<const toml::node>{ original } == toml::node_view<const toml::node>{ &value })
 					continue;
-				for (const auto& [key, value] : values) {
-					const auto* original = baseline->second.get(key);
-					if (original && toml::node_view<const toml::node>{ original } == toml::node_view<const toml::node>{ &value })
-						continue;
-					std::ostringstream text;
-					text << feature->GetName() << "." << key.str() << ": ";
-					if (original)
-						original->visit([&](const auto& node) { text << node; });
-					text << " -> ";
-					value.visit([&](const auto& node) { text << node; });
-					dmui::ui::TextUnformatted(text.str().c_str());
-				}
+				std::ostringstream text;
+				text << feature->GetName() << "." << key.str() << ": ";
+				if (original)
+					original->visit([&](const auto& node) { text << node; });
+				text << " -> ";
+				value.visit([&](const auto& node) { text << node; });
+				changes.push_back(text.str());
+			}
+		}
+		if (!changes.empty()) {
+			if (const ui::Section section{ "overlay-ab-changes", "Changes from USER", ui::Collapsible{ .count = changes.size(), .framed = false } }; section) {
+				for (const auto& change : changes)
+					dmui::ui::TextUnformatted(change.c_str());
 			}
 		}
 		if (!_testError.empty())
@@ -690,13 +705,13 @@ namespace cs::features
 					dmui::ui::Text("Avg: %.1f FPS", Util::CalcFPS(_averageMs));
 				if (settings.ShowPreFGFrameTimeGraph) {
 					const auto overlay = std::format("{}{:.2f} ms ({:.1f} FPS)", _frameGeneration ? "Pre-FG: " : "", _displayMs, _displayFps);
-					DrawGraph("##frametime", overlay.c_str(), _history, { 0.0f, 1.0f, 0.0f, 1.0f });
+					DrawGraph("##frametime", overlay.c_str(), _history, &DMUI_ThemeColors::success);
 				}
 				if (_frameGeneration) {
 					dmui::ui::Text("[Post-FG calculated, 2x] %.1f FPS (%.2f ms)", _postDisplayFps, _postDisplayMs);
 					if (settings.ShowPostFGFrameTimeGraph) {
 						const auto overlay = std::format("Post-FG: {:.2f} ms ({:.1f} FPS)", _postDisplayMs, _postDisplayFps);
-						DrawGraph("##postfgframetime", overlay.c_str(), _postHistory, { 0.0f, 0.5f, 1.0f, 1.0f });
+						DrawGraph("##postfgframetime", overlay.c_str(), _postHistory, &DMUI_ThemeColors::info);
 					}
 				}
 			}
@@ -729,10 +744,9 @@ namespace cs::features
 			edit.Continuous(dmui::ui::SliderScalar(label, &(settings.*member), &range.min, &range.max, format,
 				dmui::ui::SliderFlags::kAlwaysClamp));
 		};
-		checkbox("Show in Overlay", settings.ShowInOverlay);
-		if (settings.ShowInOverlay) {
-			if (const dmui::ui::PanelScope panel{ "overlay-content" }; panel) {
-				dmui::ui::Text("Display Options");
+		if (const ui::Section section{ "overlay-content", "Display Options" }; section) {
+			checkbox("Show in Overlay", settings.ShowInOverlay);
+			if (settings.ShowInOverlay) {
 				checkbox("Show FPS Counter", settings.ShowFPS);
 				checkbox("Show Draw Calls", settings.ShowDrawCalls);
 				checkbox("Show VRAM Usage", settings.ShowVRAM);
@@ -743,8 +757,9 @@ namespace cs::features
 						checkbox("Show Post-FG Frametime Graph", settings.ShowPostFGFrameTimeGraph);
 				}
 			}
-			if (const dmui::ui::PanelScope panel{ "overlay-layout" }; panel) {
-				dmui::ui::Text("Appearance");
+		}
+		if (settings.ShowInOverlay) {
+			if (const ui::Section section{ "overlay-layout", "Appearance" }; section) {
 				slider("Text Size", &Settings::TextSize, "%.2f");
 				slider("Background Opacity", &Settings::BackgroundOpacity, "%.2f");
 				checkbox("Show Border", settings.ShowBorder);
@@ -754,8 +769,7 @@ namespace cs::features
 					host::HostClient::Get().ResetOverlay();
 			}
 		}
-		if (const dmui::ui::PanelScope panel{ "overlay-ab-test" }; panel) {
-			dmui::ui::Text("A/B Testing");
+		if (const ui::Section section{ "overlay-ab-test", "A/B Testing" }; section) {
 			dmui::ui::TextWrapped("Capture USER before editing TEST. Set the interval to 0 to restore TEST.");
 			if (_restorePending && dmui::ui::Button("Retry TEST Restoration"))
 				AbortTest("Retrying TEST restoration");
@@ -774,7 +788,7 @@ namespace cs::features
 					SetTestInterval(interval);
 				} catch (const std::exception& error) {
 					_testError = error.what();
-					Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR);
+					Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR, std::string(GetDisplayName()));
 				}
 			}
 			DrawTestResults();

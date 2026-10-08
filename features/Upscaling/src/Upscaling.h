@@ -31,7 +31,6 @@ namespace cs::features
 		void DrawSettings() override;
 		std::vector<std::string_view> GetRestartSettings() const override;
 		void RestoreDefaultSettings() override;
-		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
@@ -50,7 +49,7 @@ namespace cs::features
 		Upscaling() = default;
 		engine::OwnedShaderDefineProvider _samplerBiasDefines{ upscaling::kSamplerBiasShaderDefines, *this };
 		bool SaveSettings() override;
-		settings::SchemaView GetSettingsSchema() const override { return settings::MakeSchemaView(render::temporal::kSchema); }
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(render::temporal::kSchema, settings); }
 		Settings _bootSettings;
 		std::optional<Settings> _stagedSettings;
 	};
