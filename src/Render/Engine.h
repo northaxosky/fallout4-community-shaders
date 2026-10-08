@@ -4,6 +4,7 @@
 #include "RE/B/BSShaderManager.h"
 #include "RE/I/ImageSpaceEffect.h"
 #include "RE/I/ImageSpaceManager.h"
+#include "RE/I/Interface3D.h"
 #include "RE/S/SceneGraph.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RendererContext.h"
@@ -287,9 +288,9 @@ namespace cs::engine
 	class UnscaledRenderScope
 	{
 	public:
-		UnscaledRenderScope() noexcept :
-			_manager(GetRenderTargetManager()),
-			_state(GetGraphicsState())
+		explicit UnscaledRenderScope(bool a_active = true) noexcept :
+			_manager(a_active ? GetRenderTargetManager() : nullptr),
+			_state(a_active ? GetGraphicsState() : nullptr)
 		{
 			if (_manager) {
 				_widthRatio = _manager->GetDynamicWidthRatio();
@@ -409,6 +410,10 @@ namespace cs::engine
 		// Depth pyramid; logical 41-45 are its mip views.
 		kMainDepthMips = 40,
 
+		// Sized by uPipboyTargetWidth/Height and sampled as a texture.
+		kPipboyTarget = 60,
+		kPipboyTargetSwap = 61,
+
 		kMainVerticalBlur = 68,
 		kLuminanceDownscale = 70,
 
@@ -417,6 +422,22 @@ namespace cs::engine
 
 		kCount = 100
 	};
+
+	// Mirrors Interface3D::Renderer::RenderPrepassesAndMenus target selection.
+	[[nodiscard]] inline bool RendersToPipboyTarget(const RE::Interface3D::Renderer& a_renderer) noexcept
+	{
+		using RE::Interface3D::OffscreenMenuSize;
+		using RE::Interface3D::PostEffect;
+
+		if (a_renderer.customRenderTarget != -1) {
+			const auto target = static_cast<RenderTarget>(a_renderer.customRenderTarget);
+			return target == RenderTarget::kPipboyTarget || target == RenderTarget::kPipboyTargetSwap;
+		}
+		if (a_renderer.postfx == PostEffect::kHUDGlass || a_renderer.postfx == PostEffect::kHUDGlassWithMod) {
+			return false;
+		}
+		return a_renderer.omsize == OffscreenMenuSize::kPipboy;
+	}
 
 	// Logical RenderTargetManager depth IDs; recreation reassigns their physical pool slots.
 	enum class DepthStencilTarget : std::uint32_t

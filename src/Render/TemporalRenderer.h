@@ -255,8 +255,12 @@ namespace cs::render
 			static inline std::atomic<Callback> original{ nullptr };
 		};
 
-		struct Interface3D_SetRenderFunc : UnscaledRenderCallback<Interface3D_SetRenderFunc, std::uint32_t>
-		{};
+		// Pip-Boy targets are sampled as textures; full-frame ones join the scene.
+		struct Interface3D_RenderPrepassesAndMenus
+		{
+			static void thunk(RE::Interface3D::Renderer* a_this);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
 
 		struct CompanionLocalMap_SetRenderFunc : UnscaledRenderCallback<CompanionLocalMap_SetRenderFunc>
 		{};

@@ -68,7 +68,7 @@ namespace cs::render
 		// Own both the normal and pause-only Render_UI paths.
 		stl::detour_thunk<DrawWorldRenderUI>(RE::ID::DrawWorld::Imagespace);
 		// Pip-Boy and companion map render inside Render_UI before the resolve.
-		stl::detour_thunk<Interface3D_SetRenderFunc>(RE::ID::DrawWorld::SetInterface3DRenderFunc);
+		stl::detour_thunk<Interface3D_RenderPrepassesAndMenus>(RE::ID::Interface3D::RenderPrepassesAndMenus);
 		stl::detour_thunk<CompanionLocalMap_SetRenderFunc>(RE::ID::DrawWorld::SetCompanionLocalMapRenderFunc);
 		stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(
 			RE::VTABLE::ImageSpaceEffectTemporalAA[0]);
@@ -376,13 +376,18 @@ namespace cs::render
 		});
 	}
 
+	void TemporalRenderer::Interface3D_RenderPrepassesAndMenus::thunk(RE::Interface3D::Renderer* a_this)
+	{
+		cs::engine::UnscaledRenderScope scope{
+			GetSingleton()->IsDrivingVendorUpscaler() && cs::engine::RendersToPipboyTarget(*a_this)
+		};
+		func(a_this);
+	}
+
 	template <class Tag, class... Args>
 	void TemporalRenderer::UnscaledRenderCallback<Tag, Args...>::Invoke(Args... a_args)
 	{
-		std::optional<cs::engine::UnscaledRenderScope> scope;
-		if (GetSingleton()->IsDrivingVendorUpscaler()) {
-			scope.emplace();
-		}
+		cs::engine::UnscaledRenderScope scope{ GetSingleton()->IsDrivingVendorUpscaler() };
 		original.load(std::memory_order_acquire)(a_args...);
 	}
 
