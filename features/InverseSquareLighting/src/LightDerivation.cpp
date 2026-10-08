@@ -11,8 +11,6 @@ namespace cs::features::inverse_square_lighting
 	namespace
 	{
 		constexpr float kMinRadius = 0.1f;
-		// 1.0 is the "use default" cutoff sentinel and must never be produced.
-		const float kMaxCutoff = std::nextafter(1.0f, 0.0f);
 		constexpr int kIntervals = 128;
 		constexpr float kMinSize = 0.01f;
 		// 50 is upstream's "use default size" sentinel and must never be produced.
@@ -67,16 +65,12 @@ namespace cs::features::inverse_square_lighting
 			return GetAttenuation(static_cast<float>(a_x * a_light.radius), a_light.radius, size);
 		});
 		const double gain = nativeEnergy / (4.0 * islEnergy);
-		const double intensity = 4.0 * a_light.fade * gain;
-		const float cutoff = CalculateCutoff(static_cast<float>(intensity), a_light.radius, size);
-		if (!std::isfinite(gain) || !std::isfinite(cutoff))
+		if (!std::isfinite(gain))
 			return std::nullopt;
 		DerivedLight derived;
 		derived.intensityScale = static_cast<float>(gain);
 		derived.authored.inverseSquare = true;
 		derived.authored.size = size;
-		derived.authored.cutoff = std::clamp(cutoff, kMinCutoff, kMaxCutoff);
-		derived.clamped = *derived.authored.cutoff != cutoff;
 		return derived;
 	}
 }

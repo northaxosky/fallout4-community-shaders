@@ -46,6 +46,7 @@ namespace cs::features::inverse_square_lighting
 		bool shadowCaster = false;
 		float nativeRadius = 0;
 		float cullRadius = 0;
+		bool derived = false;
 	};
 
 	// FO4: a typed sidecar preserves native fields and owns identities through publication.
@@ -62,7 +63,7 @@ namespace cs::features::inverse_square_lighting
 		const RuntimeLightData& CaptureAuthoredLight(RE::NiLight& a_light,
 			const RE::TESObjectLIGH& a_form, RE::TESFormID a_reference,
 			const AuthoredLight& a_authored, float a_nativeRadius, bool a_shadowCaster,
-			float a_intensityScale);
+			float a_intensityScale, bool a_derived = false);
 
 	private:
 		struct Entry

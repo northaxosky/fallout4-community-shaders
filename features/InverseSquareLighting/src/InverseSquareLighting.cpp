@@ -47,7 +47,7 @@ namespace cs::features
 			std::atomic<bool> resources{ false }, validated{ false }, hooks{ false }, dataLoaded{ false };
 			std::atomic<std::uint64_t> authored{ 0 }, created{ 0 }, removed{ 0 };
 			std::atomic<std::uint64_t> removedLights{ 0 }, orphaned{ 0 };
-			std::atomic<std::uint64_t> derived{ 0 }, derivedClamped{ 0 }, keptNative{ 0 };
+			std::atomic<std::uint64_t> derived{ 0 }, keptNative{ 0 };
 			std::atomic<std::uint64_t> appended{ 0 }, uploads{ 0 }, rasterDraws{ 0 }, luminance{ 0 }, uploadFailures{ 0 };
 			std::atomic<std::uint32_t> lastReference{ 0 }, lastForm{ 0 }, lastIndex{ 0 }, lastSide{ 0 };
 			std::atomic<std::uint64_t> lastNiLight{ 0 }, lastBSLight{ 0 };
@@ -112,6 +112,7 @@ namespace cs::features
 				AuthoredLight authored;
 				float intensityScale = 1;
 				bool found = false;
+				bool fromDerivation = false;
 				if (const auto it = g_state.forms.find(a_form->GetFormID()); it != g_state.forms.end()) {
 					authored = it->second;
 					found = true;
@@ -132,8 +133,8 @@ namespace cs::features
 						authored = derived->authored;
 						intensityScale = derived->intensityScale;
 						found = true;
+						fromDerivation = true;
 						++g_state.derived;
-						g_state.derivedClamped += derived->clamped;
 					} else {
 						++g_state.keptNative;
 					}
@@ -147,7 +148,7 @@ namespace cs::features
 					return light;
 				}
 				const auto& data = g_state.sidecar.CaptureAuthoredLight(*light, *a_form,
-					referenceID, authored, radius, shadow, intensityScale);
+					referenceID, authored, radius, shadow, intensityScale, fromDerivation);
 				if (IsInverseSquare(data.shaderData))
 					native::SetRadius(*light, data.shaderData.radius);
 				++g_state.created;
@@ -537,7 +538,6 @@ namespace cs::features
 			.Field("authored_definitions", g_state.authored.load())
 			.Field("created_lights", g_state.created.load())
 			.Field("derived_lights", g_state.derived.load())
-			.Field("derived_clamped_cutoff_lights", g_state.derivedClamped.load())
 			.Field("kept_native_lights", g_state.keptNative.load())
 			.Field("removed_references", g_state.removed.load())
 			.Field("removed_scene_lights", g_state.removedLights.load())

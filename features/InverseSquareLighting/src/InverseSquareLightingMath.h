@@ -22,13 +22,6 @@ namespace cs::features::inverse_square_lighting
 		return std::isnan(radius) ? 1.0f : radius;
 	}
 
-	// Exact inverse of CalculateRadius for a given reach.
-	inline float CalculateCutoff(float a_intensity, float a_radius, float a_size) noexcept
-	{
-		return 2 * kScaledUnitsSq * a_intensity /
-		       (2 * a_radius * a_radius + kScaledUnitsSq * a_size * a_size);
-	}
-
 	inline float GetAttenuation(float a_distance, float a_radius, float a_size) noexcept
 	{
 		const float attenuation = kScaledUnitsSq /

@@ -20,7 +20,6 @@ namespace cs::features::inverse_square_lighting
 	{
 		AuthoredLight authored;
 		float intensityScale = 1;
-		bool clamped = false;
 	};
 
 	// Fills only the upstream-authored inputs; nullopt keeps the light native.

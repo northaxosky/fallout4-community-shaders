@@ -17,8 +17,10 @@ namespace cs::features::inverse_square_lighting
 			light.fade = a_light.dimmer;
 			if ((light.lightFlags & static_cast<std::uint32_t>(LightFlags::kInverseSquare)) != 0) {
 				light.fade *= 4 * a_data.intensityScale;
-				light.radius = CalculateRadius(light.fade, a_data.shadowCaster,
-					a_data.cutoffOverride, a_data.size);
+				// FO4: native Update animates only dimmer, so derived reach stays fixed.
+				if (!a_data.derived)
+					light.radius = CalculateRadius(light.fade, a_data.shadowCaster,
+						a_data.cutoffOverride, a_data.size);
 				light.invRadius = 1.0f / light.radius;
 				light.fadeZone = 1.0f /
 				                 (light.radius * std::clamp(kFadeZoneBase * light.invRadius, 0.0f, 1.0f));
@@ -91,7 +93,7 @@ namespace cs::features::inverse_square_lighting
 	const RuntimeLightData& LightSidecar::CaptureAuthoredLight(RE::NiLight& a_light,
 		const RE::TESObjectLIGH& a_form, RE::TESFormID a_reference,
 		const AuthoredLight& a_authored, float a_nativeRadius, bool a_shadowCaster,
-		float a_intensityScale)
+		float a_intensityScale, bool a_derived)
 	{
 		auto& entry = _lights[&a_light];
 		entry.owner = &a_light;
@@ -102,6 +104,7 @@ namespace cs::features::inverse_square_lighting
 		data.shadowCaster = a_shadowCaster;
 		data.nativeRadius = a_nativeRadius;
 		data.intensityScale = a_intensityScale;
+		data.derived = a_derived;
 		data.cullRadius = a_nativeRadius;
 		data.cutoffOverride = std::clamp(a_authored.cutoff.value_or(1.0f), kMinCutoff, 1.0f);
 		const float authoredSize = a_authored.size.value_or(kDefaultSize);
