@@ -6,6 +6,7 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -299,9 +300,11 @@ namespace cs::features
 		if (ec)
 			L->warn("Failed to prepare RenderDoc capture folder: {}", ec.message());
 		_captures.SetDirectory(_resolvedCaptureFolder);
-		// FO4: runtime identity comes from CommonLibF4 rather than Skyrim's module.
+		// FO4: runtime identity comes from CommonLibF4; the session stamp keeps names unique.
+		static const auto sessionStart = std::chrono::current_zone()->to_local(
+			std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
 		auto pathTemplate = PathToUtf8(_resolvedCaptureFolder /
-									   std::format("Fallout4_{}_{}", RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string(".")));
+									   std::format("Fallout4_{}_{}_{:%Y%m%d_%H%M%S}", RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string("."), sessionStart));
 		_api->SetCaptureFilePathTemplate(pathTemplate.c_str());
 	}
 
