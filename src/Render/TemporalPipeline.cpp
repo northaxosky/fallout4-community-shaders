@@ -1558,7 +1558,7 @@ namespace cs::render
 		_impl->renderer.ClearFrameGenerationCaptureState();
 		std::scoped_lock lock(_impl->mutex);
 		_impl->resetEpochs.RequestSuperResolution();
-		_impl->resetEpochs.RequestFrameGeneration();
+		_impl->resetEpochs.SetFrameGenerationInterrupted(true);
 	}
 
 	void TemporalPipeline::RequestFrameGenerationReset() noexcept
@@ -1567,12 +1567,22 @@ namespace cs::render
 		_impl->resetEpochs.RequestFrameGeneration();
 	}
 
+	void TemporalPipeline::SetFrameGenerationInterrupted(
+		bool a_interrupted) noexcept
+	{
+		std::scoped_lock lock(_impl->mutex);
+		_impl->resetEpochs.SetFrameGenerationInterrupted(a_interrupted);
+	}
+
 	bool TemporalPipeline::SuperResolutionResetPending() const noexcept
 	{
 		std::scoped_lock lock(_impl->mutex);
+		const bool frameGenerationConsumes =
+			_impl->renderer.ShouldUseFrameGenerationThisFrame();
 		const auto& effective = _impl->topology.Effective();
 		return _impl->resetEpochs.SuperResolutionPending() ||
-		       (UsesSharedStreamlineConstants(effective) &&
+		       (frameGenerationConsumes &&
+				   UsesSharedStreamlineConstants(effective) &&
 				   _impl->resetEpochs.FrameGenerationPending());
 	}
 

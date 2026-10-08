@@ -194,6 +194,7 @@ namespace cs::render
 
 		auto* upscaling = GetSingleton();
 		GuardedThunkBody("Upscaling resolve", [&] {
+			upscaling->LatchFrameGenerationDecision();
 			if (!upscaling->_imagespaceScope) {
 				return;
 			}

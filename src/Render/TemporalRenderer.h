@@ -59,7 +59,9 @@ namespace cs::render
 		void InstallTemporalMenuListener();
 		void ClearFrameGenerationCaptureState() noexcept;
 		void QuarantineAfterException(const char* a_where) noexcept;
+		// Decided once per frame at the pre-UI seam; Present reads the latch.
 		bool ShouldUseFrameGenerationThisFrame() const noexcept;
+		void LatchFrameGenerationDecision() noexcept;
 		[[nodiscard]] std::pair<std::uint32_t, std::uint32_t> GetRenderSize() const noexcept;
 		[[nodiscard]] float2 GetAppliedJitter() const noexcept { return jitter; }
 		[[nodiscard]] float GetMipBias() const;
@@ -96,6 +98,7 @@ namespace cs::render
 		bool IsUpscalingActive() const;
 		bool IsFrameGenerationDx12PathActive() const noexcept;
 		bool IsFrameGenerationActive() const noexcept;
+		bool EvaluateFrameGenerationDecision() const noexcept;
 		UpscaleMethod GetUpscaleMethod() const;
 
 		bool CheckResources(UpscaleMethod a_upscalemethod);
@@ -420,6 +423,8 @@ namespace cs::render
 		FrozenTextureSnapshot _frameGenerationDebugSnapshot;
 		std::atomic<float> _mipBias{ 0.0f };
 		std::atomic_uint32_t _upscaleDispatches{ 0 };
+		std::atomic_uint32_t _resetSubmissions{ 0 };
+		std::atomic_uint64_t _frameGenerationLatchFrame{ 0 };
 		std::atomic_uint32_t _providerFailures{ 0 };
 		std::atomic_uint32_t _spatialFallbacks{ 0 };
 		std::atomic_uint32_t _missedResolveFrames{ 0 };

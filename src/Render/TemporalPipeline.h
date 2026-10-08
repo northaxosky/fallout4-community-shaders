@@ -170,6 +170,7 @@ namespace cs::render
 		void RequestSuperResolutionReset() noexcept;
 		void SkipWorldFrame() noexcept;
 		void RequestFrameGenerationReset() noexcept;
+		void SetFrameGenerationInterrupted(bool a_interrupted) noexcept;
 		[[nodiscard]] bool SuperResolutionResetPending() const noexcept;
 		[[nodiscard]] bool FrameGenerationResetPending() const noexcept;
 		[[nodiscard]] bool ArmFrameGenerationReset() noexcept;

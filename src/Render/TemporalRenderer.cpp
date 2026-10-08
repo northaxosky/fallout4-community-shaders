@@ -64,6 +64,21 @@ namespace cs::render
 
 	bool TemporalRenderer::ShouldUseFrameGenerationThisFrame() const noexcept
 	{
+		const auto latched =
+			_frameGenerationLatchFrame.load(std::memory_order_acquire);
+		// Expires when the pre-UI seam stops running, e.g. loading screens.
+		return latched != 0 && GetEngineFrame() + 1 - latched <= 1;
+	}
+
+	void TemporalRenderer::LatchFrameGenerationDecision() noexcept
+	{
+		_frameGenerationLatchFrame.store(
+			EvaluateFrameGenerationDecision() ? GetEngineFrame() + 1 : 0,
+			std::memory_order_release);
+	}
+
+	bool TemporalRenderer::EvaluateFrameGenerationDecision() const noexcept
+	{
 		if (!IsFrameGenerationDx12PathActive() ||
 			!render::TemporalPipeline::Get()
 				.GetFrameGenerationCaptureResources()
@@ -71,16 +86,13 @@ namespace cs::render
 			return false;
 		}
 
-		auto* main = RE::Main::GetSingleton();
 		auto* ui = RE::UI::GetSingleton();
-		const bool excludedMenu =
-			!main || !ui || main->inMenuMode ||
+		const bool menuOpen =
+			!ui || ui->GameIsPaused() ||
 			ui->GetMenuOpen<RE::MainMenu>() ||
-			ui->GetMenuOpen<RE::PauseMenu>() ||
-			ui->GetMenuOpen<RE::LoadingMenu>() ||
-			ui->GetMenuOpen<RE::PipboyMenu>();
+			ui->GetMenuOpen<RE::LoadingMenu>();
 		return render::TemporalPipeline::Get().IsFrameGenerationEnabledForFrame(
-			excludedMenu);
+			menuOpen);
 	}
 
 	std::pair<std::uint32_t, std::uint32_t> TemporalRenderer::GetRenderSize() const noexcept

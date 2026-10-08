@@ -819,6 +819,14 @@ namespace cs::render::temporal
 		[[nodiscard]] std::uint64_t SuperResolutionConsumed() const noexcept { return _srConsumed; }
 		[[nodiscard]] std::uint64_t FrameGenerationRequested() const noexcept { return _fgRequested; }
 		[[nodiscard]] std::uint64_t FrameGenerationConsumed() const noexcept { return _fgConsumed; }
+		// Coalesces a run of interrupted frames into one pending request.
+		void SetFrameGenerationInterrupted(bool a_interrupted) noexcept
+		{
+			if (a_interrupted && !_fgInterrupted) {
+				++_fgRequested;
+			}
+			_fgInterrupted = a_interrupted;
+		}
 		[[nodiscard]] bool ArmFrameGeneration() noexcept
 		{
 			if (_fgIssued == _fgRequested) {
@@ -846,5 +854,6 @@ namespace cs::render::temporal
 		std::uint64_t _fgRequested = 1;
 		std::uint64_t _fgIssued = 0;
 		std::uint64_t _fgConsumed = 0;
+		bool _fgInterrupted = false;
 	};
 }

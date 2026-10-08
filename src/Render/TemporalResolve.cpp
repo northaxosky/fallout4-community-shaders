@@ -120,6 +120,9 @@ namespace cs::render
 			}
 			const bool resetHistory =
 				render::TemporalPipeline::Get().SuperResolutionResetPending();
+			if (resetHistory) {
+				_resetSubmissions.fetch_add(1, std::memory_order_relaxed);
+			}
 			const auto* timer = RE::BSTimer::GetSingleton();
 			const auto realFrame = render::TemporalPipeline::Get().CurrentRealFrame();
 			const auto snapshot = cs::engine::GetCapturedWorldCameraRecord(frameCount);

@@ -1931,9 +1931,7 @@ namespace cs::features
 				requested = false;
 				_vendorConsumptionPossible = false;
 			}
-			if (!requested) {
-				pipeline.RequestFrameGenerationReset();
-			}
+			pipeline.SetFrameGenerationInterrupted(!requested);
 			bool frameGenerationPrepared = false;
 			if (_provider && requested) {
 				cs::render::annotation::ScopedEvent prepareScope(commandList,

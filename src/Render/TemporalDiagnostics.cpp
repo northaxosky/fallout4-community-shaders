@@ -749,6 +749,7 @@ namespace cs::render
 			.Field("resolution_scale_x", static_cast<double>(resolutionScale.x))
 			.Field("resolution_scale_y", static_cast<double>(resolutionScale.y))
 			.Field("mip_bias", static_cast<double>(_mipBias.load(std::memory_order_relaxed)))
-			.Field("dispatches", static_cast<std::int64_t>(_upscaleDispatches.load(std::memory_order_relaxed)));
+			.Field("dispatches", static_cast<std::int64_t>(_upscaleDispatches.load(std::memory_order_relaxed)))
+			.Field("sr_reset_submissions", static_cast<std::int64_t>(_resetSubmissions.load(std::memory_order_relaxed)));
 	}
 }
