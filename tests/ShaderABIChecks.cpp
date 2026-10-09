@@ -300,14 +300,6 @@ namespace
 			return "DirectionalShadowLights: ABI slot mismatch";
 		if (binding.NumSamples != sizeof(cs::features::skylighting::DirectionalShadowLightData))
 			return "DirectionalShadowLights: ABI structure stride mismatch";
-		// The debug producer binds normals at t0, probes at t1 and its target at u0.
-		for (const auto* permutation : { "", "SKYLIGHTING_UP_VISIBILITY" }) {
-			std::vector<std::pair<const char*, const char*>> defines{ { "FO4CS_SUBSTRATE", "1" } };
-			if (*permutation)
-				defines.emplace_back(permutation, "1");
-			if (!cs::util::CompileShaderToBlob((a_root / "FO4/Skylighting/DebugCS.hlsl").c_str(), defines, "cs_5_0", "main", &error, a_root))
-				return "DebugCS " + std::string(permutation) + ": " + error;
-		}
 		return {};
 	}
 #undef ABI

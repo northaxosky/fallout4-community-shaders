@@ -1,5 +1,6 @@
 #include "FeatureShaderDeclarations.h"
 #include "Log.h"
+#include "ParallelFor.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantRecipe.h"
 #include "ShaderABIChecks.h"
@@ -8,7 +9,6 @@
 #include "Utils/ShaderCache/SourceCompile.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <d3d11shader.h>
@@ -20,7 +20,6 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
-#include <thread>
 #include <tuple>
 
 namespace cs::log
@@ -295,24 +294,15 @@ int main(int a_argc, char** a_argv)
 		                       rows.size();
 		Require(total != 0, "No contributor targets in the identity corpus");
 		const auto start = std::chrono::steady_clock::now();
-		const auto threadCount = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
-		std::atomic_size_t next = 0;
-		{
-			std::vector<std::jthread> workers;
-			for (unsigned i = 0; i < threadCount; ++i) {
-				workers.emplace_back([&] {
-					for (auto index = next.fetch_add(1); index < rows.size(); index = next.fetch_add(1)) {
-						if (!rows[index].owned || (featuresOn && !rows[index].contributed))
-							continue;
-						try {
-							rows[index].actual = Compile(rows[index], shaderRoot, featuresOn, table.runtime);
-						} catch (const std::exception& error) {
-							rows[index].actual = "error: " + FirstErrorLine(error.what());
-						}
-					}
-				});
+		ParallelFor(rows.size(), [&](std::size_t index) {
+			if (!rows[index].owned || (featuresOn && !rows[index].contributed))
+				return;
+			try {
+				rows[index].actual = Compile(rows[index], shaderRoot, featuresOn, table.runtime);
+			} catch (const std::exception& error) {
+				rows[index].actual = "error: " + FirstErrorLine(error.what());
 			}
-		}
+		});
 		const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 		std::size_t failed = 0;
 		std::size_t unowned = 0;
@@ -350,7 +340,7 @@ int main(int a_argc, char** a_argv)
 			std::printf("  %s: %zu passed, %zu failed\n", target.c_str(), result.first, result.second);
 		std::printf("%s: %zu passed, %zu failed, %zu unowned, %zu total; %.3fs wall time (%u threads)\n",
 			featuresOn ? "Feature-on shader corpus" : "Stock shader identity",
-			total - failed - unowned, failed, unowned, total, seconds, threadCount);
+			total - failed - unowned, failed, unowned, total, seconds, ParallelThreadCount());
 		return failed == 0 ? 0 : 1;
 	} catch (const std::exception& error) {
 		std::fprintf(stderr, "Stock shader identity: %s\n", error.what());
