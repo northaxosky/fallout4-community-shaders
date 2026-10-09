@@ -135,6 +135,7 @@ namespace cs::features
 		enum class Consumer : std::uint8_t
 		{
 			kWater,
+			kEffect,
 			kComposite,
 			kLight,
 			kTiled
@@ -235,6 +236,7 @@ namespace cs::features
 			std::atomic<std::uint64_t> resetsEnable{ 0 };
 			std::atomic<std::uint64_t> debugFrames{ 0 };
 			std::atomic<std::uint64_t> waterDraws{ 0 };
+			std::atomic<std::uint64_t> effectDraws{ 0 };
 			std::atomic<std::uint64_t> compositeDraws{ 0 };
 			// Every raster light draw and tiled dispatch, not only the ambient ones.
 			std::atomic<std::uint64_t> lightDraws{ 0 };

@@ -74,6 +74,11 @@ namespace cs::features
 
 		cs::DynamicCubemapsFeatureData GetCommonBufferData() const;
 
+		// Null unless enabled, operational and published, so consumers fail neutral.
+		ID3D11ShaderResourceView* GetEnvironmentSRV() const noexcept;
+		// The environment cube stands in while reflections are inactive.
+		ID3D11ShaderResourceView* GetReflectionsSRV() const noexcept;
+
 	private:
 		static constexpr std::uint32_t kCubemapSize = 256;
 		static constexpr std::uint32_t kMipLevels = 9;
@@ -178,6 +183,8 @@ namespace cs::features
 		CaptureStream& Stream(bool a_reflections);
 		ID3D11ComputeShader* UpdateShader(bool a_reflections) const;
 		ID3D11ComputeShader* InferShader(bool a_reflections) const;
+		bool Operational() const noexcept;
+		ID3D11ShaderResourceView* PublishedSRV(bool a_reflections) const noexcept;
 
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _injectionsOperational{ false };

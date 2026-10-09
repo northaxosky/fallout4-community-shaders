@@ -6,14 +6,10 @@
 #ifdef WATER_EFFECTS
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
-#if defined(SKYLIGHTING) || defined(SKYLIGHTING_FULLSCREEN_DEBUG)
-#	include "FO4/SkylightingConsumer.hlsli"
-#endif
 #include "Common/DeferredContracts.hlsli"
-#ifdef EXPONENTIAL_HEIGHT_FOG
+#include "FO4/SkylightingConsumer.hlsli"
 // FO4: native fog colors cross the analytic/volume boundary before the final blend.
-#	include "FO4/ExponentialHeightFogConsumer.hlsli"
-#endif
+#include "FO4/FogConsumer.hlsli"
 
 #ifdef DYNAMIC_CUBEMAPS
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
@@ -792,9 +788,7 @@ PS_OUTPUT main(PS_INPUT input)
 			sunlitFog + grayscale * (grayscale.xxx - sunlitFog);
 		float3 colorStack = useGrayscale ? grayscaleStack : sunlitFog;
 
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		FO4Fog::Replace(input.position.xy, fogColor, colorStack, fogMixFactor);
-#	endif
+		FO4_FOG_REPLACE(input.position.xy, fogColor, colorStack, fogMixFactor);
 		output.color.xyz = lerp(aoColor, colorStack, fogMixFactor);
 		output.color.w = 1.0;
 	} else {
@@ -1159,9 +1153,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float3 lowFog = lerp(ambientFrame[42].xyz, ambientFrame[44].xyz, fogCurve);
 		float3 highFog = lerp(ambientFrame[43].xyz, ambientFrame[45].xyz, fogCurve);
 		float3 fogColor = lerp(lowFog, highFog, heightWeight);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		float3 originalFogColor = fogColor;
-#		endif
+		FO4_FOG_ORIGINAL(originalFogColor, fogColor);
 		float fogAmount = fogCurve * heightAlpha;
 		fogAmount *= nearDistanceScale;
 
@@ -1173,9 +1165,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 			fogColor = lerp(fogColor, gray.xxx, gray);
 		}
 
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		FO4Fog::Replace(position.xy, originalFogColor, fogColor, fogAmount);
-#		endif
+		FO4_FOG_REPLACE(position.xy, originalFogColor, fogColor, fogAmount);
 		output = float4(lerp(color, fogColor, fogAmount), 1.0);
 	} else {
 		output = 0.0;
@@ -1382,9 +1372,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		float3 cA = lerp(g_PF[42].xyz, g_PF[44].xyz, fk);
 		float3 cB = lerp(g_PF[43].xyz, g_PF[45].xyz, fk);
 		float3 fogC = lerp(cA, cB, fogH);
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		float3 originalFogColor = fogC;
-#	endif
+		FO4_FOG_ORIGINAL(originalFogColor, fogC);
 		float amt = (fk * alpha) * t2v;
 
 		float3 dir = pos.xyz * rsqrt(dd);
@@ -1396,9 +1384,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 			fogC = lerp(fogC, lum2.xxx, lum2);
 		}
 
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		FO4Fog::Replace(svpos.xy, originalFogColor, fogC, amt);
-#	endif
+		FO4_FOG_REPLACE(svpos.xy, originalFogColor, fogC, amt);
 		result = float4(lerp(col, fogC, amt), 0.5);
 	} else {
 		result = float4(0.0, 0.0, 0.0, 0.0);
@@ -2031,9 +2017,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 selectedFog =
 			useGraySaturated ? graySaturated : sunlitFogColor;
 
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		FO4Fog::Replace(input.position.xy, fogColor, selectedFog, fogMixFactor);
-#	endif
+		FO4_FOG_REPLACE(input.position.xy, fogColor, selectedFog, fogMixFactor);
 #	if COMPOSITE_SCENE_BLEND
 		output.color.xyz = lerp(ambientWeighted, selectedFog, fogMixFactor);
 #		if COMPOSITE_ALPHA_ONE
@@ -2624,9 +2608,7 @@ float4 main(PSInput input) : SV_Target0
 		float3 highFog =
 			lerp(scene[43].xyz, scene[45].xyz, fogCurve);
 		float3 fogColor = lerp(lowFog, highFog, heightWeight);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		float3 originalFogColor = fogColor;
-#		endif
+		FO4_FOG_ORIGINAL(originalFogColor, fogColor);
 		float fogAmount = fogCurve * heightAlpha * nearDistanceScale;
 
 		float3 worldDirection = normalize(worldPosition);
@@ -2641,9 +2623,7 @@ float4 main(PSInput input) : SV_Target0
 			fogColor = lerp(fogColor, gray.xxx, gray);
 		}
 
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-		FO4Fog::Replace(input.position.xy, originalFogColor, fogColor, fogAmount);
-#		endif
+		FO4_FOG_REPLACE(input.position.xy, originalFogColor, fogColor, fogAmount);
 		color = lerp(color, fogColor, fogAmount);
 #	endif
 
@@ -3311,9 +3291,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float gray = dot(composite, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
 		float3 graySaturated = sunlitFog + gray * (gray - sunlitFog);
 		float3 selectedFog = useGrayFog ? graySaturated : sunlitFog;
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-		FO4Fog::Replace(position.xy, fogColor, selectedFog, fogMix);
-#	endif
+		FO4_FOG_REPLACE(position.xy, fogColor, selectedFog, fogMix);
 		float3 outputColor = lerp(composite, selectedFog, fogMix);
 		result = float4(outputColor, 0.5);
 	} else {

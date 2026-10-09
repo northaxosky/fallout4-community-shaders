@@ -172,6 +172,8 @@ namespace cs::features
 		switch (a_target) {
 		case Target::kBsWater:
 			return Consumer::kWater;
+		case Target::kEffect:
+			return Consumer::kEffect;
 		case Target::kBsdfComposite:
 			return Consumer::kComposite;
 		case Target::kBsdfLight:
@@ -204,6 +206,7 @@ namespace cs::features
 		if (shadowVisibility && ActiveLightReadsShadowVisibility())
 			_probeCounters.shadowVisDraws.fetch_add(1, std::memory_order_relaxed);
 		auto& counter = a_consumer == Consumer::kWater     ? _probeCounters.waterDraws :
+		                a_consumer == Consumer::kEffect    ? _probeCounters.effectDraws :
 		                a_consumer == Consumer::kComposite ? _probeCounters.compositeDraws :
 		                a_consumer == Consumer::kLight     ? _probeCounters.lightDraws :
 		                                                     _probeCounters.tiledDispatches;
@@ -656,7 +659,7 @@ namespace cs::features
 			"sun_copies={} sun_copy_skipped_unavailable={} sun_copy_skipped_not_full_sky={} sun_copy_skipped_no_light={} sun_copy_skipped_unsupported_count={} sun_copy_skipped_no_target={} sun_copy_skipped_invalid={} sun_copy_skipped_copy_target={} sun_copy_skipped_disabled={} "
 			"cascade_count={} split_end=({:.1f},{:.1f}) "
 			"probe_state={} probe_dispatches={} probe_skipped_not_full_sky={} probe_skipped_no_occlusion={} probe_skipped_no_grid={} resets={} resets_load={} resets_rebuild={} resets_enable={} "
-			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={} composite_draws_bound={} dflight_draws_bound={} tiled_dispatches_bound={} shadow_vis_draws_bound={}",
+			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={} effect_draws_bound={} composite_draws_bound={} dflight_draws_bound={} tiled_dispatches_bound={} shadow_vis_draws_bound={}",
 			_settings.enabled ? 1 : 0, stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
@@ -671,7 +674,7 @@ namespace cs::features
 			probeStateNames[static_cast<std::size_t>(_probeState)], count(_probeCounters.dispatches), count(_probeCounters.skippedNotFullSky), count(_probeCounters.skippedNoOcclusion), count(_probeCounters.skippedNoGrid),
 			count(_probeCounters.resets), count(_probeCounters.resetsLoad), count(_probeCounters.resetsRebuild), count(_probeCounters.resetsEnable),
 			grid[0], grid[1], grid[2], grid[3], grid[4], grid[5], grid[6], grid[7], grid[8], _probeCounters.gpuMs.load(std::memory_order_relaxed), count(_probeCounters.waterDraws),
-			count(_probeCounters.compositeDraws), count(_probeCounters.lightDraws), count(_probeCounters.tiledDispatches), count(_probeCounters.shadowVisDraws));
+			count(_probeCounters.effectDraws), count(_probeCounters.compositeDraws), count(_probeCounters.lightDraws), count(_probeCounters.tiledDispatches), count(_probeCounters.shadowVisDraws));
 		_windowCpuMsSum = 0.0;
 		_windowCpuMsMax = 0.0f;
 		_windowCaptures = 0;
@@ -731,6 +734,7 @@ namespace cs::features
 			.Field("probe_update_gpu_ms", static_cast<double>(_probeCounters.gpuMs.load(std::memory_order_relaxed)))
 			.Field("debug_frames", count(_probeCounters.debugFrames))
 			.Field("water_draws_bound", count(_probeCounters.waterDraws))
+			.Field("effect_draws_bound", count(_probeCounters.effectDraws))
 			.Field("composite_draws_bound", count(_probeCounters.compositeDraws))
 			.Field("dflight_draws_bound", count(_probeCounters.lightDraws))
 			.Field("tiled_dispatches_bound", count(_probeCounters.tiledDispatches))

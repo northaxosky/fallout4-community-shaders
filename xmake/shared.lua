@@ -15,6 +15,7 @@ function main(target)
             "package/Shaders/Common/LightingEval.hlsli",
             "package/Shaders/Common/Random.hlsli",
             "package/Shaders/Common/Shading.hlsli",
+            "package/Shaders/Common/ShadowSampling.hlsli",
             "package/Shaders/Common/Spherical Harmonics/SphericalHarmonics.hlsli",
             "package/Shaders/LICENSE",
             "package/Shaders/Common/Spherical Harmonics/LICENSE",

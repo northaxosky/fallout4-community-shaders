@@ -8,7 +8,7 @@ namespace cs::features::skylighting_shader
 		"SKYLIGHTING",
 		{ engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kBsdfLight,
 			engine::ShaderInjectionTarget::kDfTiledLighting, engine::ShaderInjectionTarget::kBsdfComposite,
-			engine::ShaderInjectionTarget::kBsWater },
+			engine::ShaderInjectionTarget::kBsWater, engine::ShaderInjectionTarget::kEffect },
 		"SKYLIGHTING_FULLSCREEN_DEBUG"
 	};
 }

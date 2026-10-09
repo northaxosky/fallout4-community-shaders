@@ -192,11 +192,8 @@ namespace cs::features
 
 	FullscreenDebugData DynamicCubemaps::GetFullscreenDebugData() const noexcept
 	{
-		if (!_injectionsOperational.load(std::memory_order_acquire) ||
-			!_resourcesReady.load(std::memory_order_acquire) ||
-			!_enabled.load(std::memory_order_acquire)) {
+		if (!Operational())
 			return {};
-		}
 		switch (_debugVisualization.load(std::memory_order_acquire)) {
 		case DebugVisualization::kDirectionCube:
 			return { .owner = FullscreenDebugOwner::DynamicCubemaps,
@@ -310,25 +307,42 @@ namespace cs::features
 		if (!a_context) {
 			return;
 		}
-		std::array<ID3D11ShaderResourceView*, kCompositionPSSlotCount> resources{};
-		if (_resourcesReady.load(std::memory_order_acquire) &&
-			_injectionsOperational.load(std::memory_order_acquire) &&
-			_enabled.load(std::memory_order_acquire)) {
-			resources[0] = _cubemapValid[0].load(std::memory_order_acquire) ?
-			                   _environment.srv.get() :
-			                   nullptr;
-			resources[1] = _activeReflections.load(std::memory_order_acquire) ?
-			                   (_cubemapValid[1].load(std::memory_order_acquire) ?
-									   _reflections.srv.get() :
-									   nullptr) :
-			                   resources[0];
-			if (_debugVisualization.load(std::memory_order_acquire) ==
+		std::array<ID3D11ShaderResourceView*, kCompositionPSSlotCount> resources{
+			GetEnvironmentSRV(), GetReflectionsSRV()
+		};
+		if (Operational() &&
+			_debugVisualization.load(std::memory_order_acquire) ==
 				DebugVisualization::kEngineCube) {
-				resources[1] = cs::engine::GetSkyReflectionCubeSRV();
-			}
+			resources[1] = cs::engine::GetSkyReflectionCubeSRV();
 		}
 		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel,
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
+	}
+
+	ID3D11ShaderResourceView* DynamicCubemaps::GetEnvironmentSRV() const noexcept
+	{
+		return PublishedSRV(false);
+	}
+
+	ID3D11ShaderResourceView* DynamicCubemaps::GetReflectionsSRV() const noexcept
+	{
+		return PublishedSRV(_activeReflections.load(std::memory_order_acquire));
+	}
+
+	bool DynamicCubemaps::Operational() const noexcept
+	{
+		return _resourcesReady.load(std::memory_order_acquire) &&
+		       _injectionsOperational.load(std::memory_order_acquire) &&
+		       _enabled.load(std::memory_order_acquire);
+	}
+
+	ID3D11ShaderResourceView* DynamicCubemaps::PublishedSRV(bool a_reflections) const noexcept
+	{
+		if (!Operational() ||
+			!_cubemapValid[a_reflections ? 1 : 0].load(std::memory_order_acquire)) {
+			return nullptr;
+		}
+		return (a_reflections ? _reflections : _environment).srv.get();
 	}
 
 	void DynamicCubemaps::OnLoadingMenuClosed()

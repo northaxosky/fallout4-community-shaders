@@ -38,6 +38,7 @@ The native entry-point naming boundary is documented under Shader replacement.
 | Fix | `features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:7` | `6f81ebc25` | Remove the extra half-pixel offset from pixel-centered SV_POSITION before integer mask lookup | In the shared fork; upstream PR candidate, not filed |
 | Fix | `features/Water Effects/Shaders/WaterEffects/WaterParallax.hlsli` | `eacfd1c6a` | Seed the parallax march with the real height at offset 0 instead of 1.0, so alpha-less normals give zero offset | community-shaders/skyrim-community-shaders#2837 |
 | Fix | `features/Water Effects/Shaders/WaterEffects/WaterParallax.hlsli` | `d456e9c5` | Anchor the parallax march to the mean height from each normal map's smallest mip, so the mean surface sits on the water plane | community-shaders/skyrim-community-shaders#2838 |
+| Fix | `package/Shaders/Common/ShadowSampling.hlsli:139` | `bf36f3353` | Apply `Color::Ambient` to the DALC ambient before the IBL replacement so it matches the linearized directional light; identity without Linear Lighting | community-shaders/skyrim-community-shaders#2862 |
 | Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/CaptureCommon.hlsli` | `83efe1ad9` | Optional prepared position/color/UV inputs, geometry/sky tags and capture origin isolate FO4's +Z, partitioned depth, infinite far plane and diffuse reconstruction; default Skyrim sampling/history are unchanged | In the shared fork; upstream PR candidate, not filed |
 | Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/DynamicCubemaps.hlsli` | `83efe1ad9` | Optional cube registers/custom-consumer guard and extracted explicit-sampler normalization let native FO4 deferred slots/samplers call shared arithmetic; default Skyrim registers/consumers are unchanged | In the shared fork; upstream PR candidate, not filed |
 
@@ -46,7 +47,7 @@ The native entry-point naming boundary is documented under Shader replacement.
 Shared consumption includes byte-identical SSS shaders, RCAS, shader licenses, default cubemap, the
 entire ScreenSpaceGI shader/noise directory and water caustics assets from the shared pin.
 All seven ExponentialHeightFog shaders and the Color, FastMath, GBuffer, Shading, Random,
-IBL dependencies and the Skylighting include and probe-update shader are also staged unchanged.
+IBL dependencies, ShadowSampling and the Skylighting include and probe-update shader are also staged unchanged.
 Bend's CPU header is identical modulo comments; its
 existing SSS consumer uses the unchanged shared header. PerformanceOverlay uses shared QPC/FPS
 helpers, the profiler and the A/B aggregator. `src/Shared/PerfUtils.h` supplies Windows declarations
@@ -73,7 +74,7 @@ upstream conversion; renderer-specific reasons remain in the feature tables.
 Upstream: `ShaderCache`, `Hooks`, `State`, `AdvancedSettingsRenderer`.
 Source paths follow the native fxp name; entry point is `main`, profile follows the stage,
 and live type/master switches suppress the entire replacement, including feature contributions.
-Effect and DistantTree remain owned for upstream fog and terrain-shadow consumers.
+Effect and DistantTree remain owned for upstream fog and terrain-shadow consumers; Effect also owns the Skylighting diffuse term.
 Utility, Sky, Particle, BloodSplatter and Lighting remain stock because no current feature consumes them.
 
 | Kind | Upstream | Fallout 4 translation | Engine evidence / boundary | Code |
@@ -134,6 +135,30 @@ their temporary inputs; these are not consumer-draw snapshots. `shader_injection
 per family/stage after each publication, never repairs state, and preserves failed-frame counts.
 An authorized game/RenderDoc run must still verify zero losses, forward consumers, and
 godrays/HBAO+ save/restore behavior.
+
+## Effect lighting
+
+Upstream: `Effect.hlsl` `GetLightingColor` / `GetLightingShadow` and the staged
+`Common/ShadowSampling.hlsli` (`ExtractLighting`, `GetWorldShadow`, `Get3DFilteredShadow`).
+`FO4/EffectLightingConsumer.hlsli` ports both under upstream's defines; `Effect.hlsl` keeps FO4's
+native point lights and calls it from two sites. The directional part of `DLightColor` takes the
+world/terrain shadow and the height-fog sun attenuation; the ambient part takes the Skylighting
+diffuse visibility, as upstream. Effect lighting, ambient and sun are linear (`PLight` and
+`DLightColor` arrive pre-powered; b6 `effectLightingMult` is 1).
+
+| Kind | Upstream | Fallout 4 translation | Engine evidence / boundary | Code |
+|---|---|---|---|---|
+| Framework | The split runs for every lit effect | `FO4_EFFECT_LIGHTING` (lit, and `SKYLIGHTING`, `TERRAIN_SHADOWS` or `EXPONENTIAL_HEIGHT_FOG`) and `FO4_EFFECT_FALLOFF_SHADOW` (falloff volume, and `TERRAIN_SHADOWS` or `EXPONENTIAL_HEIGHT_FOG`) gate it; otherwise the split recombines to its input except below the ambient share, and stock identity must hold | Stock identity gate | `EffectLightingConsumer.hlsli` |
+| Forced | `input.WorldPosition` | Camera-relative world position from `SV_POSITION` and the b4 inverse projection (`FO4Forward::WorldPosition`, shared with the terrain consumer); first-person pixels use the scene depth. The sun fog attenuation keeps `FO4Fog::SunlightForward`, which skips first-person | FO4 `BSEffect` PS has no world-position input: `MSPosition` is model space, where the point lights live | `ForwardPosition.hlsli`, `EffectLightingConsumer.hlsli` |
+| Forced | `HasDirectionalShadows` is `!IsInterior() \|\| IsActiveInteriorSun()` | Published as `!InInterior`; Interior Sun is not ported | Upstream `State::HasDirectionalShadows` | `SharedData.cpp` |
+| Forced | Native point lights | FO4's four-light term (radius and spot fade, engine-powered colors) stays; upstream's Skyrim term (`PLightingRadiusInverseSquared`, `Color::PointLight`, `EffectLightingMult`) is not applied | FO4 `PerGeometry` layout; engine-facts "BSEffect DLightColor" | `Effect.hlsl` |
+| Forced | Falloff volume guard `VC && TEXCOORD && NORMALS && TEXTURE && FALLOFF && SOFT` and `GrayscaleToAlpha` | `TEXTURE` implies `TEXCOORD`; `GRAYSCALE_TO_ALPHA` is a compile define; 17 stock permutations match. The soft depth is decoded with `FO4Depth::ProjectionDepth` before `GetScreenDepth` | `AddEffectDefines` vocabulary, identity table | `EffectLightingConsumer.hlsli`, `Effect.hlsl` |
+| Pending | `Permutation::ExtraFlags::InWorld` | No per-draw descriptor carrier exists, so every lit Effect draw counts as in-world; this keeps the shadow and fog FO4 already applied to each. Menu and Interface3D effects are not separated, and upstream's non-world `LinearToSrgb` on output is not ported | Upstream sets it per `Main_RenderWorld` call | `EffectLightingConsumer.hlsli` `Permutation` |
+| Pending | `Permutation::ExtraFlags::SuppressExternalEmittance` | The branch compiles out. `BSShaderProperty::kExternalEmittance` exists (CommonLibF4), but nothing carries it per draw; FO4 interior `DLightColor` is zero on every lit effect (RenderDoc) | `ExternalEmittance::UpdatePermutation` upstream | `EffectLightingConsumer.hlsli` |
+| Pending | `Permutation::EffectRadius` (`worldBound.radius` at `BSEffectShader::SetupGeometry`) | Zero, so `Get3DFilteredShadow` takes one sample at the pixel, the former behavior | No carrier from `BSEffectShader::SetupGeometry` | `EffectLightingConsumer.hlsli` |
+| Pending | `VOLUMETRIC_SHADOWS`, `CLOUD_SHADOWS`, `IBL`, `LIGHT_LIMIT_FIX` (clustered lights, `InWorld` point-light gate), Interior Sun | Features not ported; their blocks compile out as upstream's do without the define. The IBL guard on the Skylighting ambient scale is kept | `FEATURES.md` | `EffectLightingConsumer.hlsli` |
+| N/A | `EFFECTS11` blocks | No ENB; Effects11 is N/A | `AGENTS.md` | n/a |
+| N/A | `shadowVariance` | Written by both upstream functions and read by neither | Upstream `Effect.hlsl` | n/a |
 
 ## Feature loading
 

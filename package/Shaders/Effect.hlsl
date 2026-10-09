@@ -1,11 +1,7 @@
 #ifdef BSEFFECT_PS_SOURCE
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		define FO4_FOG_SAMPLER s15
-#		include "FO4/ExponentialHeightFogConsumer.hlsli"
-#	endif
-#	if defined(TERRAIN_SHADOWS) && defined(LIGHTING)
-#		include "FO4/TerrainShadowsConsumer.hlsli"
-#	endif
+#	define FO4_FOG_SAMPLER s15
+#	include "FO4/FogConsumer.hlsli"
+#	include "FO4/EffectLightingConsumer.hlsli"
 #	if defined(ENVCUBE_RAIN) || defined(ENVCUBE_SNOW)
 #		define WEATHER
 #	endif
@@ -140,7 +136,7 @@ struct PSOutput
 
 #	if defined(LIGHTING)
 float3 GetLightingColor(float3 msPosition
-#		if defined(TERRAIN_SHADOWS) || defined(EXPONENTIAL_HEIGHT_FOG)
+#		if defined(FO4_EFFECT_LIGHTING)
 	,
 	float3 screenPosition
 #		endif
@@ -176,11 +172,8 @@ float3 GetLightingColor(float3 msPosition
 	lightFadeMul *= spotPower;
 
 	float3 color = DLightColor.xyz;
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-	color *= FO4Fog::SunlightForward(screenPosition);
-#		endif
-#		ifdef TERRAIN_SHADOWS
-	color *= TerrainShadows::GetShadowFromScreenPosition(screenPosition);
+#		if defined(FO4_EFFECT_LIGHTING)
+	color = FO4EffectLighting::GetLightingColor(color, screenPosition);
 #		endif
 	color.x += dot(PLightColorR * lightFadeMul, 1.0.xxxx);
 	color.y += dot(PLightColorG * lightFadeMul, 1.0.xxxx);
@@ -748,7 +741,7 @@ PSOutput main(PSInput input)
 	float3 propertyColor = PropertyColor.xyz;
 #			if defined(LIGHTING)
 	propertyColor = GetLightingColor(input.MSPosition
-#				if defined(TERRAIN_SHADOWS) || defined(EXPONENTIAL_HEIGHT_FOG)
+#				if defined(FO4_EFFECT_LIGHTING)
 		,
 		input.Position.xyz
 #				endif
@@ -766,11 +759,16 @@ PSOutput main(PSInput input)
 #			endif
 #		endif
 
+#		if defined(FO4_EFFECT_FALLOFF_SHADOW)
+	if (LightingInfluence.x == 1.0)
+		lightColor = FO4EffectLighting::GetLightingShadow(lightColor, input.Position.xyz, depth);
+#		endif
+
 #		if defined(EXPONENTIAL_HEIGHT_FOG)
 	float4 heightFog = 0;
 	float vanillaFogFactor = input.FogParam.w;
 	if (SharedData::exponentialHeightFogSettings.enabled && !FO4Depth::IsFirstPerson(input.Position.z)) {
-		heightFog = FO4Fog::EvaluateForward(input.Position.xyz, input.FogParam.xyz);
+		heightFog = FO4Fog::EvaluateForward(input.Position.xyz, FO4_FOG_VANILLA_COLOR(input.FogParam.xyz));
 		if (ExponentialHeightFog::ShouldDisableVanillaFog())
 			vanillaFogFactor = 0;
 #			if !defined(ADDBLEND) && !defined(MULTBLEND)
@@ -789,7 +787,7 @@ PSOutput main(PSInput input)
 	blendedColor = lerp(blendedColor, 1.0.xxx, saturate(1.5 * heightFog.w));
 	blendedColor = lerp(1.0.xxx, blendedColor, alpha);
 #			else
-	float3 blendedColor = lerp(lightColor, input.FogParam.xyz, vanillaFogFactor);
+	float3 blendedColor = lerp(lightColor, FO4_FOG_VANILLA_COLOR(input.FogParam.xyz), vanillaFogFactor);
 	blendedColor = lerp(blendedColor, heightFog.xyz, heightFog.w);
 #			endif
 #		elif defined(ADDBLEND)
@@ -808,7 +806,7 @@ PSOutput main(PSInput input)
 #		else
 	float3 blendedColor = lerp(
 		lightColor,
-		input.FogParam.xyz,
+		FO4_FOG_VANILLA_COLOR(input.FogParam.xyz),
 		input.FogParam.www);
 #		endif
 

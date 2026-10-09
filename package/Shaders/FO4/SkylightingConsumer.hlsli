@@ -33,14 +33,19 @@ namespace Skylighting
 #	endif
 	}
 
+	// FO4: scalar diffuse visibility, the input of the ambient scale.
+	float GetDiffuseVisibility(float3 positionMS, float3 normalWS, float vertexAO)
+	{
+		sh2 skylightingSH = SampleProbes(positionMS, normalWS);
+		return GetSkylightingDiffuse(skylightingSH, positionMS, normalWS, vertexAO);
+	}
+
 	// FO4: ambient is a linear addend and gamma is the identity, so scale it.
 	float3 GetAmbientScale(float3 viewPosition, float3 normalView, float3 albedo, float vertexAO)
 	{
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
-		sh2 skylightingSH = SampleProbes(positionMS, normalWS);
-		float skylightingDiffuse = GetSkylightingDiffuse(skylightingSH, positionMS, normalWS, vertexAO);
-		return MultiBounceAO(albedo, skylightingDiffuse);
+		return MultiBounceAO(albedo, GetDiffuseVisibility(positionMS, normalWS, vertexAO));
 	}
 
 	float3 GetAmbientScale(float2 pixelPosition, float3 viewPosition, float3 normalView)

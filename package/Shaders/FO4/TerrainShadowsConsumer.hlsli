@@ -4,12 +4,12 @@
 
 #include "FO4/Depth.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
+#include "FO4/ForwardPosition.hlsli"
+#include "FO4/TerrainShadowsSampler.hlsli"
 #include "TerrainShadows/TerrainShadows.hlsli"
 
 namespace TerrainShadows
 {
-	SamplerState TerrainShadowsSampler : register(s13);
-
 	float GetWorldShadow(float3 cameraRelativePosition)
 	{
 		if (SharedData::InInterior || SharedData::HideSky || SharedData::InMapMenu)
@@ -18,21 +18,9 @@ namespace TerrainShadows
 		return GetTerrainShadow(cameraRelativePosition + FrameBuffer::CameraPosAdjust.xyz, TerrainShadowsSampler);
 	}
 
-	float3 GetViewPosition(float3 screenPosition)
-	{
-		float2 uv = screenPosition.xy * SharedData::BufferDim.zw;
-		uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(uv);
-		float depth = FO4Depth::ProjectionDepth(screenPosition.z);
-		if (FO4Depth::IsFirstPerson(screenPosition.z))
-			depth = SharedData::GetDepth(uv);
-		float4 view = mul(FrameBuffer::CameraProjInverse,
-			float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), depth, 1.0));
-		return view.xyz / view.w;
-	}
-
 	float GetShadowFromScreenPosition(float3 screenPosition)
 	{
-		return GetWorldShadow(FrameBuffer::ViewToWorld(GetViewPosition(screenPosition)));
+		return GetWorldShadow(FrameBuffer::ViewToWorld(FO4Forward::ViewPosition(screenPosition)));
 	}
 
 	float GetTerrainShadowMultFromViewPosition(

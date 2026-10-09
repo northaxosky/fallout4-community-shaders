@@ -167,10 +167,8 @@ VS_OUTPUT main(VS_INPUT input)
 #endif
 
 #ifdef BSWATER_PIXEL_SHADER
-#	ifdef EXPONENTIAL_HEIGHT_FOG
-#		define FO4_FOG_SAMPLER s15
-#		include "FO4/ExponentialHeightFogConsumer.hlsli"
-#	endif
+#	define FO4_FOG_SAMPLER s15
+#	include "FO4/FogConsumer.hlsli"
 #	ifdef TERRAIN_SHADOWS
 #		include "FO4/TerrainShadowsConsumer.hlsli"
 #	endif
@@ -551,9 +549,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	float3 originalFog = fog;
 	fog = lerp(fog, WATER_PER_GEOMETRY(3).xyz, sunGlare);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-	FO4Fog::ReplaceForward(input.screenPosition.xyz, originalFog, fog, fogAlpha);
-#		endif
+	FO4_FOG_REPLACE_FORWARD(input.screenPosition.xyz, originalFog, fog, fogAlpha);
 	return float4(lerp(color, fog, fogAlpha), 0.0);
 }
 
@@ -859,9 +855,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 viewDirection = normalize(-input.eyeToPosition);
 	float sunGlare = pow(max(dot(-viewDirection, WATER_PER_GEOMETRY(2).xyz), 0.0), WATER_PER_GEOMETRY(3).w) * WATER_PER_GEOMETRY(2).w;
 	fog = lerp(fog, WATER_PER_GEOMETRY(3).xyz, sunGlare);
-#		ifdef EXPONENTIAL_HEIGHT_FOG
-	FO4Fog::ReplaceForward(input.screenPosition.xyz, originalFog, fog, fogAlpha);
-#		endif
+	FO4_FOG_REPLACE_FORWARD(input.screenPosition.xyz, originalFog, fog, fogAlpha);
 #		ifndef INTERIOR
 	float3 lightColor = WATER_PER_GEOMETRY(2).w * WATER_PER_GEOMETRY(3).xyz;
 #			ifdef EXPONENTIAL_HEIGHT_FOG

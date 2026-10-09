@@ -10,7 +10,7 @@
 #ifdef EXPONENTIAL_HEIGHT_FOG
 #	include "FO4/ExponentialHeightFogConsumer.hlsli"
 #endif
-#include "FO4/SkylightingConsumer.hlsli"
+#include "FO4/AmbientConsumer.hlsli"
 
 #include "FO4/InverseSquareLightingRaster.hlsli"
 
@@ -455,7 +455,7 @@ float3 EvaluateAmbientGradient(float3 direction)
 	encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 	encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 	encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-	return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
+	return exp2(log2(encoded) * 2.2);
 }
 #		endif
 
@@ -545,7 +545,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #		ifdef AMBIENT_IBL_IN_LIGHT
 	FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
-	float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+	float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
 	float3 ambientSpecular = 0.0;
 #		endif
 
@@ -645,7 +645,7 @@ PS_OUTPUT main(PS_INPUT input)
 			exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;
 		ambientSpecular =
 			matSample.y * ambientSpecularFactor *
-			EvaluateAmbientGradient(reflectionDir);
+			FO4Ambient::Specular(EvaluateAmbientGradient(reflectionDir));
 #		endif
 		float3 tangentV = viewDirNeg - normalView * NdotV_raw;
 		float3 tangentL = SunDirection_and_padding.xyz - normalView * NdotL_raw;
@@ -2157,7 +2157,7 @@ float2 goboUV = float2(omniUV.x,
 		encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 		encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 		encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-		return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
+		return exp2(log2(encoded) * 2.2);
 	}
 #	endif
 
@@ -2356,7 +2356,7 @@ float2 goboUV = float2(omniUV.x,
 
 #	ifdef AMBIENT
 		FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
-		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+		float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
 		float3 ambientSpecular = 0.0;
 		float NdotV_view = saturate(dot(normalView, viewDirNeg));
 		float ambientFresLog = log2(1.0 - NdotV_view);
@@ -2453,7 +2453,7 @@ float2 goboUV = float2(omniUV.x,
 			float ambientSpecularFactor =
 				exp2((3.0 - matSample.x) * log2(oneMinusNdotV)) * 0.25;
 			ambientSpecular = ambientSpecularFactor *
-			                  EvaluateAmbientGradient(reflectionDir) * matSample.y;
+			                  FO4Ambient::Specular(EvaluateAmbientGradient(reflectionDir)) * matSample.y;
 
 			float specExpScale = mad(schlickFres, -0.98, 1.0);
 			float specExp = specExpBase * specExpScale;
@@ -2783,7 +2783,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 		encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 		encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-		return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
+		return exp2(log2(encoded) * 2.2);
 	}
 #	endif
 
@@ -3004,7 +3004,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 #	ifdef AMBIENT
 		FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
-		float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+		float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
 		float3 ambientSpecular = 0.0;
 #	endif
 
@@ -3246,7 +3246,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;
 #		endif
 				ambientSpecular = ambientSpecularFactor *
-				                  EvaluateAmbientGradient(reflectionDir) * matSample.y;
+				                  FO4Ambient::Specular(EvaluateAmbientGradient(reflectionDir)) * matSample.y;
 #		if defined(FO4_DS2_TIGHT_AMBIENT_IGNORE) || defined(FO4_DS2_TARGET_ORDER)
 				float specExpScale = mad(schlickFres, -0.98, 1.0);
 				float specExp = specExpBase * specExpScale;
@@ -3696,7 +3696,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 			encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 			encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-			return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
+			return exp2(log2(encoded) * 2.2);
 		}
 #	endif
 
@@ -4107,7 +4107,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 #	ifdef AMBIENT
 			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
-			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+			float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
 			float3 ambientSpecular = 0.0;
 #	endif
 
@@ -4229,10 +4229,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #		endif
 #		ifdef FO4_DS3_AMBIENT_ORDER
 				ambientSpecular = ambientSpecularFactor *
-				                  EvaluateAmbientGradient(reflectionDir) * matSample.y;
+				                  FO4Ambient::Specular(EvaluateAmbientGradient(reflectionDir)) * matSample.y;
 #		else
 			ambientSpecular = matSample.y * ambientSpecularFactor *
-			                  EvaluateAmbientGradient(reflectionDir);
+			                  FO4Ambient::Specular(EvaluateAmbientGradient(reflectionDir));
 #		endif
 #		ifdef FO4_DS3_AMBIENT_ORDER
 				float specExpScale = mad(schlickFres, -0.98, 1.0);
@@ -5449,7 +5449,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			ambientDiffuse.x = dot(cb2_ambient_row0, float4(normal, 1.0));
 			ambientDiffuse.y = dot(cb2_ambient_row1, float4(normal, 1.0));
 			ambientDiffuse.z = dot(cb2_ambient_row2, float4(normal, 1.0));
-			ambientDiffuse = FO4_AMBIENT_SKYLIGHTING(pow(ambientDiffuse, 2.2));
+			ambientDiffuse = FO4Ambient::Diffuse(pow(ambientDiffuse, 2.2), normal);
 
 			bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
 #	endif
@@ -5597,7 +5597,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		ambientReflected.x = dot(cb2_ambient_row0, float4(reflected, 1.0));
 		ambientReflected.y = dot(cb2_ambient_row1, float4(reflected, 1.0));
 		ambientReflected.z = dot(cb2_ambient_row2, float4(reflected, 1.0));
-		ambientSpecular = FO4_AMBIENT_SKYLIGHTING((fresnel * pow(ambientReflected, 2.2)) * material.y);
+		ambientSpecular = FO4Ambient::Specular((fresnel * pow(ambientReflected, 2.2)) * material.y);
 	}
 
 #		ifdef WATER_EFFECTS
@@ -5780,7 +5780,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			encoded.x = dot(cb2_ambient_gradient_row0, directionH);
 			encoded.y = dot(cb2_ambient_gradient_row1, directionH);
 			encoded.z = dot(cb2_ambient_gradient_row2, directionH);
-			return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
+			return exp2(log2(encoded) * 2.2);
 		}
 #	endif
 
@@ -5885,7 +5885,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 
 #	ifdef AMBIENT
 			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
-			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+			float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
 			float3 ambientSpecular = 0.0;
 #	endif
 
@@ -6049,7 +6049,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #			endif
 #		endif
 				ambientSpecular = ambientSpecularFactor *
-				                  EvaluateAmbientGradient(reflectionDir) * matSample.y;
+				                  FO4Ambient::Specular(EvaluateAmbientGradient(reflectionDir)) * matSample.y;
 #	endif
 
 #	ifdef FO4_UNSHADOWED_AMBIENT_ROUGHNESS
@@ -6391,7 +6391,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				dot(DirectionalAmbient_row0, directionH),
 				dot(DirectionalAmbient_row1, directionH),
 				dot(DirectionalAmbient_row2, directionH));
-			return FO4_AMBIENT_SKYLIGHTING(exp2(log2(encoded) * 2.2));
+			return exp2(log2(encoded) * 2.2);
 		}
 
 		PS_OUTPUT main(PS_INPUT input)
@@ -6448,7 +6448,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 viewDirection = normalize(-positionView);
 
 			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, positionView, normalView);
-			float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+			float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
 			float ndotv = dot(normalView, viewDirection);
 			float3 reflectionDirection = 2.0 * ndotv * normalView - viewDirection;
 			float oneMinusNdotV = 1.0 - saturate(ndotv);
@@ -6456,7 +6456,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float ambientSpecularFactor =
 				exp2(ambientExponent * log2(oneMinusNdotV)) * 0.25;
 			float3 ambientSpecular =
-				EvaluateAmbientGradient(reflectionDirection) * ambientSpecularFactor;
+				FO4Ambient::Specular(EvaluateAmbientGradient(reflectionDirection)) * ambientSpecularFactor;
 			bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
 			ambientSpecular *= isMaterial1 ? 0.0 : material.y;
 

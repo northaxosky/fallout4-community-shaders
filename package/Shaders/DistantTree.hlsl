@@ -1,7 +1,7 @@
 #if defined(BSDISTANTTREE_PS_SOURCE)
-#	if defined(EXPONENTIAL_HEIGHT_FOG) && !defined(RENDER_DEPTH)
+#	ifndef RENDER_DEPTH
 #		define FO4_FOG_SAMPLER s15
-#		include "FO4/ExponentialHeightFogConsumer.hlsli"
+#		include "FO4/FogConsumer.hlsli"
 #	endif
 #	if defined(TERRAIN_SHADOWS) && !defined(RENDER_DEPTH)
 #		include "FO4/TerrainShadowsConsumer.hlsli"
@@ -52,10 +52,6 @@ PS_OUTPUT main(PS_INPUT input)
 												  * TerrainShadows::GetShadowFromScreenPosition(input.HPosition.xyz)
 #			endif
 											  + AmbientColor.xyz);
-	float3 fogColor = input.FogParam.xyz;
-	float fogOpacity = input.FogParam.w;
-	FO4Fog::ReplaceForward(input.HPosition.xyz, input.FogParam.xyz, fogColor, fogOpacity);
-	float3 color = lerp(diffuseColor, fogColor, fogOpacity);
 #		else
 	float3 diffuseColor =
 #			ifdef TERRAIN_SHADOWS
@@ -65,9 +61,11 @@ PS_OUTPUT main(PS_INPUT input)
 #			else
 		baseColor.xyz * (input.TexCoord.z * DiffuseColor + AmbientColor.xyz);
 #			endif
-	float3 color =
-		lerp(diffuseColor, input.FogParam.xyz, input.FogParam.w);
 #		endif
+	float3 fogColor = input.FogParam.xyz;
+	float fogOpacity = input.FogParam.w;
+	FO4_FOG_REPLACE_FORWARD(input.HPosition.xyz, input.FogParam.xyz, fogColor, fogOpacity);
+	float3 color = lerp(diffuseColor, fogColor, fogOpacity);
 	psout.Color.xyz = color * AmbientColor.w;
 	psout.Color.w = 1;
 #	endif
