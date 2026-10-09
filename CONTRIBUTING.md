@@ -105,4 +105,6 @@ To deploy, set one destination before running `xmake install`:
 xmake install
 ```
 
+For development, `pwsh scripts\deploy-dev.ps1 [-Mod <folder>] [-Toml <file> | -Preset taa-all|dlss-all] [-WhatIf]` builds, mirrors the isolated install into an MO2 mod folder, overwrites its settings TOML, and verifies the DLL and PDB hashes.
+
 Launch through MO2/F4SE. Enable only the features being tested in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml`, created on first launch.

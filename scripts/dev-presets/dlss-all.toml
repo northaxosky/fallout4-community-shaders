@@ -1,0 +1,52 @@
+# Every feature except RenderDoc, which diagnostics enable on demand.
+
+[logging]
+telemetry = true
+
+[features.ScreenSpaceGI]
+load = true
+
+[features.Skylighting]
+load = true
+
+[features.InverseSquareLighting]
+load = true
+
+[features.ExponentialHeightFog]
+load = true
+
+[features.DynamicCubemaps]
+load = true
+
+[features.WaterEffects]
+load = true
+
+[features.ScreenSpaceShadows]
+load = true
+
+[features.TerrainShadows]
+load = true
+
+[features.LODBlending]
+load = true
+
+[features.TerrainVariation]
+load = true
+
+[features.MotionVectorFixes]
+load = true
+
+[features.Upscaling]
+load = true
+
+[features.Upscaling.settings]
+upscale_method = 3
+
+[features.FrameGeneration]
+load = true
+
+[features.FrameGeneration.settings]
+frame_generation_method = 2
+
+[features.PerformanceOverlay]
+load = true
