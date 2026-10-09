@@ -8,10 +8,18 @@
 
 .PARAMETER Check
 	Report unformatted files and fail instead of rewriting them.
+
+.PARAMETER Path
+	Limit the run to these tracked files (repository-relative or absolute).
+
+.PARAMETER Changed
+	Limit the run to files changed against origin/main, including the working tree.
 #>
 [CmdletBinding()]
 param(
-	[switch]$Check
+	[switch]$Check,
+	[string[]]$Path,
+	[switch]$Changed
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,7 +35,15 @@ if (-not (Test-Path $executable)) {
 
 Push-Location $root
 try {
+	$selected = @($Path -split ',' | Where-Object { $_ } | ForEach-Object { [IO.Path]::GetRelativePath($root, (Resolve-Path -LiteralPath $_).Path).Replace('\', '/') })
 	$files = @(git ls-files '*.h' '*.hpp' '*.c' '*.cpp' '*.hlsl' '*.hlsli' ':!:extern/**' ':!:include/**' | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+	if ($selected) {
+		$files = @($files | Where-Object { $_ -in $selected })
+	}
+	if ($Changed) {
+		$changedFiles = @(git diff --name-only (git merge-base origin/main HEAD))
+		$files = @($files | Where-Object { $_ -in $changedFiles })
+	}
 	$mode = $Check ? @('--dry-run', '--Werror') : @('-i')
 	# Heavily preprocessor-branched shaders take minutes each, so run files in parallel.
 	$failed = $files | ForEach-Object -ThrottleLimit ([Environment]::ProcessorCount) -Parallel {
