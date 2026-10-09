@@ -137,6 +137,9 @@ namespace cs::hooks
 				result = DetourTransactionCommit();
 			else
 				DetourTransactionAbort();
+		} else {
+			// Begin can claim the transaction before failing; release it for later hooks.
+			DetourTransactionAbort();
 		}
 		if (result != NO_ERROR)
 			L->error("Detours failed to hook {} (error {})", hookName, result);
