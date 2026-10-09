@@ -42,6 +42,7 @@ namespace cs::engine
 		std::vector<PrioritizedCallback> g_postForwardSky;
 		std::vector<PrioritizedCallback> g_postPrecipitationOcclusion;
 		std::vector<PrioritizedCallback> g_postSunShadowRender;
+		std::vector<PrioritizedCallback> g_preWaterUpdate;
 		bool g_prePassInstalled = false;
 		bool g_lightsImplInstalled = false;
 		bool g_compositeInstalled = false;
@@ -49,6 +50,7 @@ namespace cs::engine
 		bool g_forwardSkyInstalled = false;
 		bool g_precipitationOcclusionInstalled = false;
 		bool g_sunShadowRenderInstalled = false;
+		bool g_waterUpdateInstalled = false;
 		bool g_insideDeferredLightsImpl = false;
 		bool g_insideDeferredComposite = false;
 
@@ -283,6 +285,43 @@ namespace cs::engine
 			static inline REL::Relocation<void(RE::BSShaderAccumulator*, std::uint32_t, bool)> func;
 		};
 
+		// Render_PreUI calls the water callback before world setup.
+		struct UpdateWaterFunc_Hook
+		{
+			using Callback = RE::DrawWorld::UpdateWaterFunc;
+
+			static void Invoke(RE::BSGeometryListCullingProcess* a_cullingProcess)
+			{
+				MarkRegistrationClosed();
+				DispatchGuarded(g_preWaterUpdate, "Pre water update");
+				original.load(std::memory_order_acquire)(a_cullingProcess);
+			}
+
+			static void thunk(Callback a_callback)
+			{
+				original.store(a_callback, std::memory_order_release);
+				func(a_callback ? &Invoke : nullptr);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+			static inline std::atomic<Callback> original{ nullptr };
+		};
+
+		bool EnsureWaterUpdateInstalled()
+		{
+			if (g_waterUpdateInstalled) {
+				return true;
+			}
+			stl::detour_thunk<UpdateWaterFunc_Hook>(RE::ID::DrawWorld::SetUpdateWaterFunc);
+			if (UpdateWaterFunc_Hook::func.address() == 0) {
+				L->error("Hook failed on DrawWorld::SetUpdateWaterFunc");
+				return false;
+			}
+			g_waterUpdateInstalled = true;
+			L->info("Hook installed on DrawWorld::SetUpdateWaterFunc (pre water update)");
+			return true;
+		}
+
 		void EnsureForwardSkyInstalled()
 		{
 			if (g_forwardSkyInstalled) {
@@ -413,6 +452,11 @@ namespace cs::engine
 		return true;
 	}
 
+	bool RenderHookRegistrationAllowed(const char* a_where)
+	{
+		return RegistrationAllowed(a_where);
+	}
+
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
 	{
 		if (!RegistrationAllowed("PostDeferredPrePass"))
@@ -463,6 +507,14 @@ namespace cs::engine
 		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
 		EnsureDeferredCompositeInstalled();
 		return true;
+	}
+
+	bool RegisterPreWaterUpdate(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PreWaterUpdate"))
+			return false;
+		InsertPrioritized(g_preWaterUpdate, std::move(callback), priority);
+		return EnsureWaterUpdateInstalled();
 	}
 
 	bool RegisterPostForwardSky(RenderHookCallback callback, HookPriority priority)

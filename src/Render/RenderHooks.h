@@ -15,6 +15,9 @@ namespace cs::engine
 		Late = 100,
 	};
 
+	// True on the startup thread before the first render hook fires.
+	[[nodiscard]] bool RenderHookRegistrationAllowed(const char* a_where);
+
 	// Register only during Load or OnPostPostLoad.
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	bool RegisterPreDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
@@ -26,6 +29,9 @@ namespace cs::engine
 	bool RegisterPostSunShadowRender(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	// After the stock precipitation occlusion pass; it runs in clear weather too.
 	bool RegisterPostPrecipitationOcclusion(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+
+	// Start of Render_PreUI, before the world camera or frame targets are set.
+	bool RegisterPreWaterUpdate(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
 	// After all sky and cloud draws in the main color target, before water and alpha.
 	bool RegisterPostForwardSky(RenderHookCallback callback, HookPriority priority = HookPriority::Default);

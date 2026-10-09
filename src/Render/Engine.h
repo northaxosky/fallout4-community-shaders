@@ -201,22 +201,6 @@ namespace cs::engine
 		return std::isfinite(scale);
 	}
 
-	// Engine reflection cube (logical cube 0); rendered only when bUseCubeMapReflections:Display is set.
-	[[nodiscard]] inline ID3D11ShaderResourceView* GetActiveReflectionCubeSRV() noexcept
-	{
-		const auto* setting = RE::GetINISetting("bUseCubeMapReflections:Display");
-		if (!setting || !setting->GetBinary())
-			return nullptr;
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		auto* manager = RE::BSGraphics::RenderTargetManager::GetSingleton();
-		if (!rendererData || !manager)
-			return nullptr;
-		const auto platformID = manager->GetCubeMapRenderTargetPlatformID(0);
-		return platformID < std::size(rendererData->cubeMapRenderTargets) ?
-		           reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->cubeMapRenderTargets[platformID].srView) :
-		           nullptr;
-	}
-
 	// Index 0 is the world scene.
 	[[nodiscard]] inline RE::ShadowSceneNode* GetWorldShadowSceneNode() noexcept
 	{

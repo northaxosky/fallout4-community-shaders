@@ -10,6 +10,7 @@
 #include "Render/FrameProfiler.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
+#include "Render/SkyReflectionCube.h"
 #include "Settings/SettingsRegistry.h"
 
 #include <atomic>
@@ -444,6 +445,27 @@ namespace cs::telemetry
 						camera->CameraPreviousPosAdjust.z));
 		}
 
+		void CollectSkyReflectionCube(Sink& a_sink)
+		{
+			const auto status = cs::engine::GetSkyReflectionCubeStatus();
+			a_sink
+				.Field("hook_installed", status.hookInstalled)
+				.Field("disabled", status.disabled)
+				.Field("valid", status.valid)
+				.Field("face_mask", static_cast<std::int64_t>(status.faceMask))
+				.Field("consumers", static_cast<std::int64_t>(status.consumers))
+				.Field("renders", TomlInteger(status.renders))
+				.Field("faces", TomlInteger(status.faces))
+				.Field("invalidations", TomlInteger(status.invalidations))
+				.Field("unbound_targets", TomlInteger(status.unboundTargets))
+				.Field("skipped_no_demand", TomlInteger(status.skippedNoDemand))
+				.Field("skipped_interior", TomlInteger(status.skippedInterior))
+				.Field("skipped_sky_hidden", TomlInteger(status.skippedSkyHidden))
+				.Field("skipped_no_camera", TomlInteger(status.skippedNoCamera))
+				.Field("skipped_no_targets", TomlInteger(status.skippedNoTargets))
+				.Field("skipped_no_world", TomlInteger(status.skippedNoWorld));
+		}
+
 		void CollectFrameBufferRegisters(Sink& a_sink)
 		{
 			const auto& snapshot = cs::engine::GetFrameBuffer();
@@ -527,6 +549,34 @@ namespace cs::telemetry
 	{
 		static void DumpAll();
 
+		inline constexpr char kFrameBufferComponent[] = "frame_buffer";
+		inline constexpr char kShaderInjectionComponent[] = "shader_injection";
+		inline constexpr char kSkyReflectionCubeComponent[] = "sky_reflection_cube";
+
+		// One instantiation per component keeps each failure's log-once state separate.
+		template <const char* Component>
+		void EmitComponent(spdlog::logger* a_logger, std::uint64_t a_frame, void (*a_collect)(Sink&))
+		{
+			try {
+				Sink sink;
+				a_collect(sink);
+				a_logger->info("frame={} component={} {}", a_frame, Component, sink.ToLine());
+			} catch (const std::exception& e) {
+				CS_LOG_ONCE(
+					a_logger,
+					spdlog::level::warn,
+					"Telemetry collection failed for {}: {}",
+					Component,
+					e.what());
+			} catch (...) {
+				CS_LOG_ONCE(
+					a_logger,
+					spdlog::level::warn,
+					"Telemetry collection failed for {}: non-standard exception",
+					Component);
+			}
+		}
+
 		void Tick()
 		{
 			const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -556,41 +606,9 @@ namespace cs::telemetry
 			}
 
 			auto* logger = cs::log::Get("cs.telemetry");
-			try {
-				Sink sink;
-				CollectFrameBuffer(sink);
-				logger->info("frame={} component=frame_buffer {}", frame, sink.ToLine());
-			} catch (const std::exception& e) {
-				CS_LOG_ONCE(
-					logger,
-					spdlog::level::warn,
-					"Telemetry collection failed for frame_buffer: {}",
-					e.what());
-			} catch (...) {
-				CS_LOG_ONCE(
-					logger,
-					spdlog::level::warn,
-					"Telemetry collection failed for frame_buffer: non-standard exception");
-			}
-			try {
-				Sink sink;
-				CollectShaderInjection(sink);
-				logger->info(
-					"frame={} component=shader_injection {}",
-					frame,
-					sink.ToLine());
-			} catch (const std::exception& e) {
-				CS_LOG_ONCE(
-					logger,
-					spdlog::level::warn,
-					"Telemetry collection failed for shader_injection: {}",
-					e.what());
-			} catch (...) {
-				CS_LOG_ONCE(
-					logger,
-					spdlog::level::warn,
-					"Telemetry collection failed for shader_injection: non-standard exception");
-			}
+			EmitComponent<kFrameBufferComponent>(logger, frame, CollectFrameBuffer);
+			EmitComponent<kShaderInjectionComponent>(logger, frame, CollectShaderInjection);
+			EmitComponent<kSkyReflectionCubeComponent>(logger, frame, CollectSkyReflectionCube);
 			for (const auto* feature : FeatureManager::Get().GetAll()) {
 				try {
 					if (!feature->ProducesTelemetry())
@@ -626,13 +644,17 @@ namespace cs::telemetry
 				Sink shaderInjection;
 				CollectShaderInjection(shaderInjection);
 				root.insert_or_assign(
-					"shader_injection",
+					kShaderInjectionComponent,
 					shaderInjection.AsTable());
 
 				Sink frameBuffer;
 				CollectFrameBuffer(frameBuffer);
 				CollectFrameBufferRegisters(frameBuffer);
-				root.insert_or_assign("frame_buffer", frameBuffer.AsTable());
+				root.insert_or_assign(kFrameBufferComponent, frameBuffer.AsTable());
+
+				Sink skyReflectionCube;
+				CollectSkyReflectionCube(skyReflectionCube);
+				root.insert_or_assign(kSkyReflectionCubeComponent, skyReflectionCube.AsTable());
 
 				toml::table features;
 				for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {

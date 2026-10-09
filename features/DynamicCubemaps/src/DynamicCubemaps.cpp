@@ -30,6 +30,7 @@
 #include "Render/ShaderStage.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
 #include "Render/SharedData.h"
+#include "Render/SkyReflectionCube.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
@@ -230,6 +231,15 @@ namespace cs::features
 				"DynamicCubemaps could not register its water, composite, "
 				"deferred lighting, or SSLR shader contributions");
 			return;
+		}
+
+		// FO4 vanilla never renders the reflections cube; the host does.
+		if (!cs::engine::RegisterSkyReflectionCubeConsumer("DynamicCubemaps", [this] {
+				return _enabled.load(std::memory_order_acquire) &&
+			           _resourcesReady.load(std::memory_order_acquire) &&
+			           _injectionsOperational.load(std::memory_order_acquire);
+			})) {
+			L->warn("Sky reflection cube unavailable; reflections capture the sky from the scene.");
 		}
 
 		// FO4 draws the sky inside DrawWorld::Forward after the composite, so capture and publication follow it.
@@ -693,7 +703,7 @@ namespace cs::features
 			return _updateCS.get();
 		if (_fakeReflections.load(std::memory_order_relaxed))
 			return _updateFakeReflectionsCS.get();
-		// Without FO4's engine cube, sky is captured from the scene and kept with the fake variant's history persistence.
+		// Without a valid sky cube, scene sky persists via the fake variant.
 		return _engineReflectionCube.load(std::memory_order_relaxed) ?
 		           _updateReflectionsCS.get() :
 		           _updateSkyReflectionsCS.get();
@@ -716,7 +726,7 @@ namespace cs::features
 
 	void DynamicCubemaps::ResolveReflectionMode()
 	{
-		const bool engineCube = cs::engine::GetActiveReflectionCubeSRV() != nullptr;
+		const bool engineCube = cs::engine::GetSkyReflectionCubeSRV() != nullptr;
 		const bool interior = cs::engine::IsInterior();
 		// FO4 exterior water always renders its REFLECTIONS technique, standing in for Skyrim's reflections prepass.
 		const bool active = engineCube || !interior;
@@ -952,7 +962,7 @@ namespace cs::features
 
 		std::array<ID3D11ShaderResourceView*, 3> srvs{
 			stream.color.srv.get(),
-			cs::engine::GetActiveReflectionCubeSRV(),
+			cs::engine::GetSkyReflectionCubeSRV(),
 			_defaultCubemap.get()
 		};
 		ID3D11UnorderedAccessView* uav = _inferred.mip0Uav.get();
