@@ -69,7 +69,8 @@ namespace cs::engine
 		const auto* tes = RE::TES::GetSingleton();
 		if (tes && !tes->interiorCell) {
 			if (const auto* worldSpace = tes->worldSpace) {
-				if (!worldSpace->flags.any(RE::TESWorldSpace::FLAG::kNoSky, RE::TESWorldSpace::FLAG::kFixedDimensions))
+				// FO4: kFixedDimensions marks open-sky worlds; Sky::mode replaces it.
+				if (!worldSpace->flags.any(RE::TESWorldSpace::FLAG::kNoSky) && IsFullSky())
 					return false;
 			}
 		}

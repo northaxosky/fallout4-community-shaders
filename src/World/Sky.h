@@ -16,6 +16,6 @@ namespace cs::engine
 	// Sky::Mode::kFull: the exterior sky lights the scene.
 	bool IsFullSky() noexcept;
 
-	// Interior cell, or a no-sky or fixed-dimension worldspace.
+	// Interior cell, no-sky worldspace, or Sky::mode != kFull.
 	bool IsInterior() noexcept;
 }
