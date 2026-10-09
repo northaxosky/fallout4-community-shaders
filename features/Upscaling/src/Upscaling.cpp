@@ -104,11 +104,6 @@ namespace cs::features
 
 	void Upscaling::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("Upscaling", *this, [](cs::engine::ShaderReplacementRegistration&) {
-			})) {
-			FailLoad("Upscaling could not register its SSLR shader contribution");
-			return;
-		}
 		// Own contributor, so stock targets cannot fail Upscaling.
 		if (!cs::engine::RegisterFeatureShaderBindings("UpscalingSamplerBias", _samplerBiasDefines)) {
 			FailLoad("Upscaling could not register its sampler bias shader define");
@@ -117,7 +112,7 @@ namespace cs::features
 
 	bool Upscaling::ValidateShaderInjections(std::string& a_error)
 	{
-		return cs::engine::ValidateShaderInjectionRoutes("Upscaling", a_error);
+		return cs::engine::ValidateShaderInjectionRoutes("UpscalingSamplerBias", a_error);
 	}
 
 	bool Upscaling::StageFromPreset(

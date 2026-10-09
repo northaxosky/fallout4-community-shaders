@@ -42,11 +42,26 @@ namespace cs::features
 			RenderTarget::kSSLRRayStart,
 			RenderTarget::kSSLRSurfaceDepth,
 			RenderTarget::kSSLRRayResult,
-			RenderTarget::kSSLRBlurH,
 			RenderTarget::kLuminanceDownscale,
 			RenderTarget::kMainVerticalBlur,
 			RenderTarget::kHdrImagespaceAux
 		};
+
+		// Pooled slots exist only between acquire and release; proxied per acquire.
+		constexpr RenderTarget kPooledTargets[] = {
+			RenderTarget::kSSLRBlurH
+		};
+
+		template <class F>
+		void ForEachTarget(F&& a_fn)
+		{
+			for (const auto target : kProxiedTargets) {
+				a_fn(target);
+			}
+			for (const auto target : kPooledTargets) {
+				a_fn(target);
+			}
+		}
 
 		constexpr std::size_t Index(RenderTarget a_target) noexcept
 		{
@@ -68,6 +83,25 @@ namespace cs::features
 				a_ptr->Release();
 				a_ptr = nullptr;
 			}
+		}
+	}
+
+	bool DynamicResolution::IsProxyTexture(const void* a_texture) const noexcept
+	{
+		bool found = false;
+		ForEachTarget([&](RenderTarget a_target) {
+			found = found || (a_texture && proxyRenderTargets[Index(a_target)].texture == a_texture);
+		});
+		return found;
+	}
+
+	void DynamicResolution::RestoreEngineSlot(RenderTarget a_target)
+	{
+		const auto index = Index(a_target);
+		auto* engineTarget = cs::engine::ResolveRenderTarget(a_target);
+		if (engineTarget && proxyRenderTargets[index].texture && originalRenderTargets[index].texture &&
+			engineTarget->texture == proxyRenderTargets[index].texture) {
+			*engineTarget = originalRenderTargets[index];
 		}
 	}
 
@@ -99,6 +133,20 @@ namespace cs::features
 		return { view, desc.Width, desc.Height };
 	}
 
+	void DynamicResolution::CaptureOriginal(RenderTarget a_target, const RE::BSGraphics::RenderTarget& a_engineTarget)
+	{
+		const auto index = Index(a_target);
+		auto& proxy = proxyRenderTargets[index];
+		const auto proxyViews = proxy;
+		// Keep the engine's copyTexture/copySRView pointers so a swap-in never nulls them.
+		originalRenderTargets[index] = a_engineTarget;
+		proxy = originalRenderTargets[index];
+		proxy.texture = proxyViews.texture;
+		proxy.rtView = proxyViews.rtView;
+		proxy.srView = proxyViews.srView;
+		proxy.uaView = proxyViews.uaView;
+	}
+
 	void DynamicResolution::UpdateRenderTarget(RenderTarget a_target, float a_widthRatio, float a_heightRatio)
 	{
 		auto* rendererData = RE::BSGraphics::GetRendererData();
@@ -109,13 +157,7 @@ namespace cs::features
 			return;
 		}
 
-		// Keep the engine's copyTexture/copySRView pointers so a swap-in never nulls them.
-		originalRenderTargets[index] = *engineTarget;
-		proxyRenderTargets[index] = originalRenderTargets[index];
-		proxyRenderTargets[index].texture = nullptr;
-		proxyRenderTargets[index].rtView = nullptr;
-		proxyRenderTargets[index].srView = nullptr;
-		proxyRenderTargets[index].uaView = nullptr;
+		CaptureOriginal(a_target, *engineTarget);
 
 		auto& original = originalRenderTargets[index];
 		auto& proxy = proxyRenderTargets[index];
@@ -186,9 +228,14 @@ namespace cs::features
 		if (_previousWidthRatio == a_widthRatio && _previousHeightRatio == a_heightRatio && _hasProxies) {
 			return;
 		}
+		AbortProxyPass();
 		_previousWidthRatio = a_widthRatio;
 		_previousHeightRatio = a_heightRatio;
 
+		for (const auto target : kPooledTargets) {
+			ReleaseProxy(target);
+			originalRenderTargets[Index(target)] = {};
+		}
 		for (const auto target : kProxiedTargets) {
 			ReleaseProxy(target);
 			UpdateRenderTarget(target, a_widthRatio, a_heightRatio);
@@ -441,6 +488,82 @@ namespace cs::features
 		}
 	}
 
+	bool DynamicResolution::ProxyPassAvailable() const
+	{
+		auto* renderTargetManager = cs::engine::GetRenderTargetManager();
+		return !_proxyPass && _hasProxies && renderTargetManager &&
+		       (renderTargetManager->GetDynamicWidthRatio() != 1.0f ||
+				   renderTargetManager->GetDynamicHeightRatio() != 1.0f);
+	}
+
+	bool DynamicResolution::BeginProxyPass(std::initializer_list<RenderTarget> a_toProxy)
+	{
+		if (!ProxyPassAvailable()) {
+			return false;
+		}
+
+		// Set first so EndProxyPass unwinds a partially applied override.
+		_proxyPass = true;
+		_proxyPassWidthRatio = cs::engine::GetRenderTargetManager()->GetDynamicWidthRatio();
+		_proxyPassHeightRatio = cs::engine::GetRenderTargetManager()->GetDynamicHeightRatio();
+		OverrideRenderTargets(a_toProxy);
+		OverrideDepth(true);
+		cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
+		return true;
+	}
+
+	void DynamicResolution::EndProxyPass(std::initializer_list<RenderTarget> a_fromProxy)
+	{
+		if (!_proxyPass) {
+			return;
+		}
+		_proxyPass = false;
+		ResetRenderTargets(a_fromProxy);
+		ResetDepth();
+		if (_hasProxies) {
+			cs::engine::SetDynamicResolution(_proxyPassWidthRatio, _proxyPassHeightRatio, true);
+		}
+	}
+
+	void DynamicResolution::ProxyAcquiredRenderTarget(RenderTarget a_target)
+	{
+		auto* engineTarget = cs::engine::ResolveRenderTarget(a_target);
+		if (!_proxyPass || !engineTarget || !engineTarget->texture || IsProxyTexture(engineTarget->texture)) {
+			return;
+		}
+
+		const auto index = Index(a_target);
+		auto& proxy = proxyRenderTargets[index];
+		auto* liveTexture = reinterpret_cast<ID3D11Texture2D*>(engineTarget->texture);
+		D3D11_TEXTURE2D_DESC liveDesc{};
+		liveTexture->GetDesc(&liveDesc);
+		liveDesc.Width = static_cast<std::uint32_t>(static_cast<float>(liveDesc.Width) * _proxyPassWidthRatio);
+		liveDesc.Height = static_cast<std::uint32_t>(static_cast<float>(liveDesc.Height) * _proxyPassHeightRatio);
+
+		bool reusable = false;
+		if (auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxy.texture)) {
+			D3D11_TEXTURE2D_DESC proxyDesc{};
+			proxyTexture->GetDesc(&proxyDesc);
+			reusable = proxyDesc.Width == liveDesc.Width && proxyDesc.Height == liveDesc.Height &&
+			           proxyDesc.Format == liveDesc.Format;
+		}
+
+		if (reusable) {
+			// Pooled engine fields may differ per acquire; keep our own texture and views.
+			CaptureOriginal(a_target, *engineTarget);
+		} else {
+			ReleaseProxy(a_target);
+			UpdateRenderTarget(a_target, _proxyPassWidthRatio, _proxyPassHeightRatio);
+		}
+		OverrideRenderTarget(a_target, false);
+	}
+
+	void DynamicResolution::ReleaseAcquiredRenderTarget(RenderTarget a_target)
+	{
+		RestoreEngineSlot(a_target);
+		originalRenderTargets[Index(a_target)] = {};
+	}
+
 	bool DynamicResolution::CopyDepth()
 	{
 		auto* context = cs::engine::GetImmediateContext();
@@ -505,24 +628,13 @@ namespace cs::features
 		return true;
 	}
 
-	void DynamicResolution::Release()
+	void DynamicResolution::AbortProxyPass()
 	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* renderTargetManager = cs::engine::GetRenderTargetManager();
 
-		// Unwind an in-progress render-target override so no engine state is left mutated.
+		// Unwind an in-progress override so no engine slot keeps pointing at a proxy.
+		ForEachTarget([&](RenderTarget a_target) { RestoreEngineSlot(a_target); });
 		if (_renderTargetsOverridden) {
-			if (rendererData) {
-				for (const auto target : kProxiedTargets) {
-					const auto index = Index(target);
-					auto* engineTarget = cs::engine::ResolveRenderTarget(target);
-					auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxyRenderTargets[index].texture);
-					auto* liveTexture = engineTarget ? reinterpret_cast<ID3D11Texture2D*>(engineTarget->texture) : nullptr;
-					if (proxyTexture && liveTexture == proxyTexture && originalRenderTargets[index].texture) {
-						*engineTarget = originalRenderTargets[index];
-					}
-				}
-			}
 			if (renderTargetManager) {
 				for (int i = 0; i < 100; i++) {
 					renderTargetManager->renderTargetData[i] = originalRenderTargetData[i];
@@ -532,6 +644,8 @@ namespace cs::features
 			_renderTargetsOverridden = false;
 		}
 
+		_proxyPass = false;
+
 		// Restore the engine depth SRV if the override is still applied.
 		if (_depthOverridden) {
 			if (auto* mainDepth = cs::engine::ResolveDepthStencilTarget(cs::engine::DepthStencilTarget::kMain)) {
@@ -539,11 +653,16 @@ namespace cs::features
 			}
 			_depthOverridden = false;
 		}
+	}
 
-		for (const auto target : kProxiedTargets) {
-			ReleaseProxy(target);
-			originalRenderTargets[Index(target)] = {};
-		}
+	void DynamicResolution::Release()
+	{
+		AbortProxyPass();
+
+		ForEachTarget([&](RenderTarget a_target) {
+			ReleaseProxy(a_target);
+			originalRenderTargets[Index(a_target)] = {};
+		});
 
 		_originalDepthView = nullptr;
 		_depthOverrideTexture = nullptr;

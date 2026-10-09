@@ -338,6 +338,28 @@ namespace cs::render
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		struct DeferredCompositeSSLR_Begin
+		{
+			static void thunk(
+				RE::BSGraphics::RenderTargetManager* a_this,
+				std::int32_t a_slot,
+				std::int32_t a_logicalID,
+				RE::BSGraphics::SetRenderTargetMode a_mode);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DeferredCompositeSSLR_AcquireBlurH
+		{
+			static void thunk(RE::BSGraphics::RenderTargetManager* a_this, std::int32_t a_logicalID);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DeferredCompositeSSLR_ReleaseBlurH
+		{
+			static void thunk(RE::BSGraphics::RenderTargetManager* a_this, std::int32_t a_logicalID);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct LensFlare_RenderLensFlare
 		{
 			static void thunk(RE::NiCamera* a_camera);

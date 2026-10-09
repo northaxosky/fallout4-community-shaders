@@ -9,7 +9,7 @@
 
 namespace cs::features
 {
-	class Upscaling : public ShaderFeature<upscaling::kShaderDefines>
+	class Upscaling : public Feature
 	{
 	public:
 		using UpscaleMethod = render::temporal::UpscaleMethod;

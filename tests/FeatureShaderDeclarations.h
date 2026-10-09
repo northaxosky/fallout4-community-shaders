@@ -31,7 +31,6 @@ namespace cs::engine
 				{ "LODBlending", &lod_blending_shader::kShaderDefines },
 				{ "TerrainVariation", &terrain_variation_shader::kShaderDefines },
 				{ "WaterEffects", &water_effects::kShaderDefines },
-				{ "Upscaling", &upscaling::kShaderDefines },
 				{ "UpscalingSamplerBias", &upscaling::kSamplerBiasShaderDefines }
 			};
 			for (const auto& [name, feature] : features) {

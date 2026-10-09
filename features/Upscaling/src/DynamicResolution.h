@@ -40,6 +40,16 @@ namespace cs::features
 		void OverrideDepth(bool a_doCopy = true);
 		void ResetDepth();
 
+		// Ratio-1 draws into render-resolution proxies so stock TexCoord spans [0, 1].
+		[[nodiscard]] bool ProxyPassAvailable() const;
+		bool BeginProxyPass(std::initializer_list<cs::engine::RenderTarget> a_toProxy);
+		// Copies only a_fromProxy back to the engine targets.
+		void EndProxyPass(std::initializer_list<cs::engine::RenderTarget> a_fromProxy);
+		// Pooled targets: the platform slot exists only between acquire and release.
+		void ProxyAcquiredRenderTarget(cs::engine::RenderTarget a_target);
+		// Must precede the engine release; the slot is unmapped afterwards.
+		void ReleaseAcquiredRenderTarget(cs::engine::RenderTarget a_target);
+
 		void Release();
 
 		[[nodiscard]] bool HasProxies() const noexcept { return _hasProxies; }
@@ -47,10 +57,15 @@ namespace cs::features
 
 	private:
 		void UpdateRenderTarget(cs::engine::RenderTarget a_target, float a_widthRatio, float a_heightRatio);
+		// Snapshots the engine target and mirrors its fields into the proxy.
+		void CaptureOriginal(cs::engine::RenderTarget a_target, const RE::BSGraphics::RenderTarget& a_engineTarget);
 		void OverrideRenderTarget(cs::engine::RenderTarget a_target, bool a_doCopy);
 		void ResetRenderTarget(cs::engine::RenderTarget a_target, bool a_doCopy);
 		bool CopyDepth();
 		void ReleaseProxy(cs::engine::RenderTarget a_target);
+		void RestoreEngineSlot(cs::engine::RenderTarget a_target);
+		bool IsProxyTexture(const void* a_texture) const noexcept;
+		void AbortProxyPass();
 
 		ID3D11ComputeShader* GetOverrideDepthCS();
 		ID3D11ComputeShader* GetOverrideLinearDepthCS();
@@ -78,5 +93,8 @@ namespace cs::features
 		bool _hasProxies = false;
 		bool _renderTargetsOverridden = false;
 		bool _depthOverridden = false;
+		bool _proxyPass = false;
+		float _proxyPassWidthRatio = 1.0f;
+		float _proxyPassHeightRatio = 1.0f;
 	};
 }

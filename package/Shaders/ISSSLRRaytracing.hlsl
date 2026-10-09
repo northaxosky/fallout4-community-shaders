@@ -3,7 +3,7 @@
 #include "Common/DummyVSTexCoord.hlsl"
 
 #ifdef PSHADER
-#	if defined(UPSCALING) || defined(DYNAMIC_CUBEMAPS)
+#	ifdef DYNAMIC_CUBEMAPS
 #		include "FO4/FO4ShaderData.hlsli"
 #	endif
 
@@ -55,15 +55,9 @@ float4 main(PS_INPUT input) : SV_Target0
 		return 0.0;
 #	endif
 	float2 targetSize = TargetSizeNearFar.xy;
-	float2 sampleUV = input.TexCoord;
-#	ifdef UPSCALING
-	// FO4 uses Hi-Z integer loads and full-RT cb0 sizes; scale traversal as well as FrameBuffer-style samples.
-	targetSize *= FrameBuffer::DynamicResolutionParams1.xy;
-	sampleUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(sampleUV);
-#	endif
 	float4 color = 0.0;
 	float surfaceDepth =
-		SSRDepth.SampleLevel(SSRDepthSampler, sampleUV, 0).x;
+		SSRDepth.SampleLevel(SSRDepthSampler, input.TexCoord, 0).x;
 	// The branch preserves stock confidence scheduling.
 	[branch] if (TargetSizeNearFar.z < surfaceDepth)
 	{
@@ -72,7 +66,7 @@ float4 main(PS_INPUT input) : SV_Target0
 		uint ditherX = (uint)(pixel.x % 4.0);
 		float dither = DitherTable[ditherX * 4 + ditherY];
 		float2 rayStartUv =
-			SSRRay.SampleLevel(SSRRaySampler, sampleUV, 0).xy;
+			SSRRay.SampleLevel(SSRRaySampler, input.TexCoord, 0).xy;
 		float3 origin = float3(
 			rayStartUv,
 			rcp(TargetSizeNearFar.z) + (dither - 0.5) * 0.004);
@@ -156,12 +150,8 @@ float4 main(PS_INPUT input) : SV_Target0
 										 -25.0 * (cellDepth - startDepth));
 		confidence *= confidence;
 		if (!(OutsideView(ray) || iterations == 32 || blocked)) {
-			float2 hitUV = ray.xy;
-#	ifdef UPSCALING
-			hitUV = FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(hitUV);
-#	endif
 			color = float4(
-				SceneColor.SampleLevel(SceneColorSampler, hitUV, 0).xyz,
+				SceneColor.SampleLevel(SceneColorSampler, ray.xy, 0).xyz,
 				confidence);
 		}
 	}

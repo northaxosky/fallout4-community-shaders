@@ -54,6 +54,28 @@ namespace cs::features::upscaling_anchors
 		.target = RE::ID::BSBatchRenderer::RenderPassImmediately
 	};
 
+	// The stock SSLR chain between these sites assumes TexCoord spans [0, 1].
+	inline constexpr CallSiteAnchor kDeferredCompositeSSLRBegin{
+		.name = "DrawWorld::DeferredComposite -> RenderTargetManager::SetCurrentRenderTarget (SSLR ray start)",
+		.function = RE::ID::DrawWorld::DeferredComposite,
+		.offset = { 0x3D9, 0x3EE, 0x3EE },
+		.target = RE::ID::BSGraphics::RenderTargetManager::SetCurrentRenderTarget
+	};
+	// BlurH writes a pooled target that only exists after this acquire.
+	inline constexpr CallSiteAnchor kDeferredCompositeSSLRBlurHAcquire{
+		.name = "DrawWorld::DeferredComposite -> RenderTargetManager::AcquireRenderTarget (SSLR BlurH)",
+		.function = RE::ID::DrawWorld::DeferredComposite,
+		.offset = { 0x5FB, 0x60E, 0x60E },
+		.target = RE::ID::BSGraphics::RenderTargetManager::AcquireRenderTarget
+	};
+	// BlurV is done; the pooled target is still mapped until this release.
+	inline constexpr CallSiteAnchor kDeferredCompositeSSLRBlurHRelease{
+		.name = "DrawWorld::DeferredComposite -> RenderTargetManager::ReleaseRenderTarget (SSLR BlurH)",
+		.function = RE::ID::DrawWorld::DeferredComposite,
+		.offset = { 0x6BA, 0x6C3, 0x6C3 },
+		.target = RE::ID::BSGraphics::RenderTargetManager::ReleaseRenderTarget
+	};
+
 	// VATS outline thickness scales with the dynamic ratio.
 	inline constexpr CallSiteAnchor kVatsSetPixelConstant{
 		.name = "VATS UpdateParams -> ImageSpaceShaderParam::SetPixelConstant",

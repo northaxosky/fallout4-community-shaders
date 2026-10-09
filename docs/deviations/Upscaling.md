@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Consumer: `package\Shaders\ISSSLRRaytracing.hlsl`.
+Consumer: sampler-bias targets (`SAMPLER_MIP_BIAS`) only; the SSLR chain uses stock shaders.
 Feature classification: **core (doodlum FO4 release lineage)** (rule 4).
 
 Upscaling, FrameGeneration and MotionVectorFixes are maintained in-house. These comparisons
@@ -13,7 +13,8 @@ The FO4 shader copies, settings keys, SDK inputs, render scheduling and presenta
 
 | Kind | Upstream | Fallout 4 | Why | Where |
 |---|---|---|---|---|
-| Forced | FrameBuffer-adjusted current/previous samples in ISReflectionsRayTracing | Unchanged upstream b4 current-frame clamp plus scaled pixel dithering/Hi-Z counts; snapshot survives proxy composites | FO4 integer Hi-Z loads use full-target cb0 sizes and top-left active region with no previous-frame reflection sample; engine-facts Composite pass order / Native SSLR production | `ISSSLRRaytracing.hlsl`, `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp` |
+| Forced | FrameBuffer-adjusted current/previous samples in ISReflectionsRayTracing | Unchanged upstream b4 current-frame clamp; no dynamic-resolution adjustment in the shader because the chain runs in the SSLR proxy pass below; snapshot survives proxy composites | FO4 has no previous-frame reflection sample; Hi-Z integer loads index the engine's top-left region pyramid (mip 4 is 160x90 for a 1280x720 target), which the proxy-pass cb0 sizes address directly; engine-facts Composite pass order / Native SSLR production | `SharedData.cpp`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp` |
+| Forced | Stock SSLR chain runs against full-extent targets | Prepass, Raytracing, BlurH and BlurV run in one full-proxy pass (render-resolution proxies, ratio 1, whole-proxy viewport) from the ray-start bind to the BlurH release; BlurH's pooled target is proxied after its acquire; ray result and BlurV are copied back for water and the composite reads BlurV's proxy | Under live dynamic resolution the stock quad spans [0, ratio] and the Prepass pixel shader builds NDC as 2*TexCoord-1. RenderDoc DLSS capture (render 2560x1440 in 3840x2160, 1920x1080 SSLR targets, 1280x720 viewports): the ray pass rescaled that TexCoord again and read SSRDepth/SSRRay near 0.44 of frame width, so reflections slid under camera rotation. Stock shaders are valid unmodified once TexCoord spans [0, 1]; the composite already does this. | `DynamicResolution.{h,cpp}` `BeginProxyPass`, `UpscalingAnchors.h`, `TemporalRenderHooks.cpp` |
 | Divergence | Upstream encode/depth/fullscreen shaders | Retain FO4-owned `EncodeTexturesCS.hlsl`, `DepthRefractionUpscalePS.hlsl` and `UpscaleVS.hlsl` under `FO4/Upscaling`; use `FO4ShaderData.hlsli` where needed | In-house maintenance and ownership policy; not an engine requirement to replace upstream files | `features/Upscaling/Shaders/FO4/Upscaling`, `TemporalRendererInternals.h`, `TemporalRenderResources.cpp` |
 | Forced | Skyrim camera/state inputs | Prepass-captured world+jitter camera record supplies provider matrices, basis, origins, FOV and projection-derived near/far | engine-facts Camera-cache ownership / Main camera preparation / First-person renderer camera; Skyrim globals and buffer layout cannot identify the FO4 camera | `FrameBuffer.cpp` `GetCapturedWorldCameraRecord`, `TemporalPipeline.cpp`, `Streamline.cpp` camera constants |
 | Forced | Single non-inverted perspective depth | FO4 native scene DSV combines first-person and world projections | engine-facts Native composite depth partition / b12 near reprojection: near depth ≤0.01 and world `mad(d,1.01,-0.01)` use different inverses | `Engine.h`, `FO4/Depth.hlsli`, native depth accessors |
