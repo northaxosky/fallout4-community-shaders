@@ -30,7 +30,7 @@ reflectance selection is an extension.
 
 ## Map
 
-Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cover all core slices.
+Status: **Pt** partial, **NS** not started; finished features leave the map. Payoff and effort cover all core slices.
 
 | Feature | Verdict | Core slices | Extension / N/A slices | Status | Payoff | Effort | Conf. |
 |---|---|---|---|---|---|---|---|
@@ -55,18 +55,15 @@ Status: **P** ported, **Pt** partial, **NS** not started. Payoff and effort cove
 | [LOD Blending](deviations/LODBlending.md) | Core | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Core | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
 | Remote Control | Core | DevBench C-ABI bridge, settings, inspection/cache, capture commands | — | NS | H | M | High |
-| [RenderDoc](deviations/RenderDoc.md) | Core | Capture/targeting, inventory/comments/disk management, UI/hotkeys/annotation | — | P | H | S | High |
 | [Screen Space GI](deviations/ScreenSpaceGI.md) | Core | AO, GI, temporal, specular GI, vertex AO (relocated), provider wiring | — | Pt | H | M | High |
 | [Screen-Space Shadows](deviations/ScreenSpaceShadows.md) | Core | Bend raymarch, direct/back visibility, tree/alpha/secondary receivers, preview/telemetry | — | Pt | H | M | High |
 | Screenshot | Core | SDR/crop/async/clipboard, temporal source, HDR PNG (needs HDR Display) | — | NS | M | M | High |
 | Skin | Mixed | Detail normal/color, default dual-lobe*, transmittance*, sweat inputs* | Ext: RFAOS/wet textures, wet-skin film | NS | H | M | Med |
 | Sky Sync | Core | Alternate sun path, moon casting*, dawn/dusk + godray dimming | N/A: daytime sun fix (native matches), Skyrim compat checks | NS | M | M | Med |
-| [Skylighting](deviations/Skylighting.md) | Core | Occlusion capture via native precipitation renderer, SH probes, diffuse/specular/shadow visibility, vertex AO (relocated) | — | P | H | L | Med |
 | Subsurface Scattering | Mixed | Separable and Burley on native class-5 skin (single profile), character light* | Ext: per-pixel amount/profile channel | NS | H | M | Med |
 | Terrain Blending | Mixed | Depth prep/feather (no standalone payoff) | Ext: lit terrain/object transition (the shippable effect) | NS | H | L | Med |
 | Terrain Helper | Mixed | Displacement-slot gather/bind* | Ext: default-land ESP package | NS | M | M | Low |
 | [Terrain Shadows](deviations/TerrainShadows.md) | Core | Height-field producer, world receivers, time/transition events, secondary/remaining receivers, diagnostics | — | Pt | H | L | High |
-| Terrain Shadows - Heightmaps | Core (data) | FO4 worldspace pack in the existing format | N/A: Skyrim payload | Loader P, no pack | H | M | High |
 | [Terrain Variation](deviations/TerrainVariation.md) | Core | Landscape stochastic sampling, LOD anti-tiling, landscape-textured meshes, height/PBR coherence (needs Extended Materials/TruePBR consumers) | — | Pt | H | M | High |
 | TruePBR | Mixed | Surface POM (EM marcher under `TRUE_PBR`+`HasDisplacement`; same slice as Extended Materials POM) | Ext: PBR material loader + RMAOS lighting, coat/fuzz/SSS/hair, landscape/grass PBR, glints | NS | H | M | Med |
 | Unified Water | Mixed | Optical distance blend, material identity fix*, cache UI | Ext: distant tile generation/lifetime, world flowmap | NS | M | S/M | Med |
@@ -96,9 +93,6 @@ are FO4-only rule-4 core features.
   native class-5 eligibility; never stack both.
 - **Cloud Shadows.** Prior art on branch `cloud-shadows` (`3314d567`) maps material pointers to layers;
   replace with typed layer order.
-- **Skylighting.** Reuse FO4's precipitation geometry/camera renderer, redirected to an owned target for
-  direction-sampled captures (stock logical DS8 alone is insufficient), with the probe shadow history sampled
-  from an owned copy of the main sun cascades.
 - **Light Limit Fix.** FO4 tiled lighting (625 lights, 127 per tile) replaces surface clustering; particle
   lights feed the native list within its capacity. The upstream 3D cluster grid is still needed as EHF's
   local-light scattering input.
@@ -112,15 +106,14 @@ are FO4-only rule-4 core features.
 Ordered by user value over effort, respecting dependencies.
 
 1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE.
-2. **Finish ported features:** DC provider adapters (S/M); Terrain Shadows FO4
-   heightmap pack (M); Water Effects caustics proof (S).
+2. **Finish ported features:** DC provider adapters (S/M); Water Effects caustics proof (S).
 3. **Cheap new features:** LOD Blending (S); Terrain Variation (M); Remote Control (M; DevBench automation).
 4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
 5. **Mid-size, few dependencies:** Cloud Shadows (L; feeds EHF); Subsurface Scattering (M); Volumetric
    Shadows producer + DFLight (M); Hair Specular opaque slices (M); Grass Collision (M, actor-bounds RE);
    LLF particle lights + visualization (M).
 6. **RE-gated:** Interior Sun; Extended Translucency alpha models.
-7. **Providers:** DC → IBL; Skylighting in parallel; LLF 3D light grid before EHF local-light scattering;
+7. **Providers:** DC → IBL; LLF 3D light grid before EHF local-light scattering;
    then provider adapters in DC/SSGI/EHF.
 8. **Remaining core:** Skin detail/default response; Sky Sync; Grass Lighting basics; Unified Water optical;
    VL controls; CS Editor; Screenshot; HDR Display (L).

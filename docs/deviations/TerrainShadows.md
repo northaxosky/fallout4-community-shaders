@@ -39,5 +39,17 @@ Pending rows remain unfinished and do not establish upstream parity.
 | Pending | Console/Papyrus GameHour hooks, fast-travel event and completed celestial generation | FO4 wait/sleep/load/interior-exit events request a full refresh, retained hour-jump polling covers large console/script/travel changes, and refresh waits for Sky's consumed hour. Exact small forward-hour edits and active-light versus Sky transition equivalence still need host hooks/evidence; not an accepted parity exception | `TerrainShadows.cpp` `OnDataLoaded`, `PollGameHourJump`, `OnPostDeferredPrePass` |
 | Pending | Particle and volumetric sunlight | Native FO4 particles contain only texture × vertex color × ColorScale; upstream reconstructs particle sunlight/ambient. Complete that lighting input boundary rather than shadowing emissive color. No particle source is shipped. Imagespace currently supplies SSLR, not volumetric generation; reconstruct/add that consumer | Native Particle family; `ShaderInjectionTargets.h` |
 | Pending | Reflections and other secondary views | BSLighting remains stock: secondary views need their own camera/depth publication. Engine-facts BSLighting forward-pass source limits these passes to modes 0/21; b4/t17 publish the main view | `SharedData.cpp`, `FO4/TerrainShadowsConsumer.hlsli` |
-| Pending | Host input/runtime proof | Verify xLODGen orientation/altitude against landscape, active directional light equivalence at transitions, persistent t60 and per-draw s13 for every consumer in an authorized batched runtime session; static shader tests alone are insufficient | `TerrainShadows.cpp`, reconstructed consumers |
+| Pending | BSDistantTree receiver | A Commonwealth dusk capture binds the shadow field at t60 with s13 and `EnableTerrainShadow = 1` in b6 for the DFLight directional, Water and Effect receivers, and the debug view matches the field; that frame issued no DistantTree draw, so this receiver is unobserved | `package/Shaders/DistantTree.hlsl` |
 
+## Heightmap pack
+
+`package/Textures/Terrain/HeightMaps/` ships upstream-format maps for Commonwealth,
+SanctuaryHillsWorld, DiamondCity, DLC03FarHarbor and NukaWorld, built from Fallout4.esm and the
+official DLC masters. Creation Club content is excluded. Goodneighbor and NukaWorldMarket inherit parent
+land. DiamondCity's parent-use flags omit land, so it gets its own map.
+
+`scripts/generate_terrain_heightmaps.py` writes xLODGen's 1:1 LAND export. Against xLODGen 132 FO4 mode
+with the same plugins, NukaWorld is byte-identical and Commonwealth pixel-identical. xLODGen 132 crashes
+while saving worldspaces with land holes (FarHarbor, Sanctuary), so it cannot build the whole pack.
+Maps use xLODGen's lossless L16, which upstream also accepts. BC4 with the fixed ±32767 range
+measured a mean error of 85 game units (p99 270, max 862) on Commonwealth.
