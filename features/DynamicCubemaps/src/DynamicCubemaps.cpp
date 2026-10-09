@@ -73,6 +73,10 @@ namespace cs::features
 				return "capture_input";
 			case DynamicCubemaps::DebugVisualization::kFilteredReflections:
 				return "filtered_reflections";
+			case DynamicCubemaps::DebugVisualization::kDirectionCube:
+				return "direction_cube";
+			case DynamicCubemaps::DebugVisualization::kEngineCube:
+				return "engine_cube";
 			default:
 				return "off";
 			}
@@ -144,6 +148,14 @@ namespace cs::features
 	{
 		static constexpr std::array views{
 			FeatureDebugView{
+				.id = "direction_cube",
+				.label = "Direction cube (world axes)",
+				.kind = FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{
+				.id = "engine_cube",
+				.label = "Engine reflection cube (raw)",
+				.kind = FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{
 				.id = "capture_input",
 				.label = "Capture input",
 				.kind = FeatureDebugViewKind::kTexturePreview,
@@ -166,11 +178,34 @@ namespace cs::features
 			visualization = DebugVisualization::kCaptureInput;
 		} else if (a_view == "filtered_reflections") {
 			visualization = DebugVisualization::kFilteredReflections;
+		} else if (a_view == "direction_cube") {
+			visualization = DebugVisualization::kDirectionCube;
+		} else if (a_view == "engine_cube") {
+			visualization = DebugVisualization::kEngineCube;
 		}
 		const auto previous = _debugVisualization.exchange(
 			visualization, std::memory_order_acq_rel);
 		if (previous != visualization) {
 			_previewPopulated.store(false, std::memory_order_release);
+		}
+	}
+
+	FullscreenDebugData DynamicCubemaps::GetFullscreenDebugData() const noexcept
+	{
+		if (!_injectionsOperational.load(std::memory_order_acquire) ||
+			!_resourcesReady.load(std::memory_order_acquire) ||
+			!_enabled.load(std::memory_order_acquire)) {
+			return {};
+		}
+		switch (_debugVisualization.load(std::memory_order_acquire)) {
+		case DebugVisualization::kDirectionCube:
+			return { .owner = FullscreenDebugOwner::DynamicCubemaps,
+				.mode = DynamicCubemapsDebugMode::DirectionCube };
+		case DebugVisualization::kEngineCube:
+			return { .owner = FullscreenDebugOwner::DynamicCubemaps,
+				.mode = DynamicCubemapsDebugMode::EngineCube };
+		default:
+			return {};
 		}
 	}
 
@@ -287,6 +322,10 @@ namespace cs::features
 									   _reflections.srv.get() :
 									   nullptr) :
 			                   resources[0];
+			if (_debugVisualization.load(std::memory_order_acquire) ==
+				DebugVisualization::kEngineCube) {
+				resources[1] = cs::engine::GetSkyReflectionCubeSRV();
+			}
 		}
 		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel,
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
@@ -682,6 +721,10 @@ namespace cs::features
 					_environmentBC6H.srv.get() :
 					nullptr
 			};
+			if (_debugVisualization.load(std::memory_order_acquire) ==
+				DebugVisualization::kEngineCube) {
+				views[0] = cs::engine::GetSkyReflectionCubeSRV();
+			}
 		}
 		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel,
 			kDynamicCubemapPSSlot,

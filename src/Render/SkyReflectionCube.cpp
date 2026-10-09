@@ -205,6 +205,37 @@ namespace cs::engine
 			}
 		}
 
+		// Engine Update adds these only when the worldspace has a terrain manager.
+		void AddLodScenes(CubeCamera& a_camera)
+		{
+			for (auto* node : { RE::BGSTerrainManager::GetLandNode(),
+					 RE::BGSTerrainManager::GetObjectsNode(),
+					 RE::BGSTerrainManager::GetTreesNode() }) {
+				if (node)
+					a_camera.AddCubeMapScene(node);
+			}
+		}
+
+		// Faces leave cube mode set; end it so no later draw lands in the cube.
+		class ScopedCubeModeExit
+		{
+		public:
+			explicit ScopedCubeModeExit(RE::BSGraphics::RenderTargetManager& a_manager) noexcept :
+				_manager(a_manager)
+			{}
+
+			~ScopedCubeModeExit()
+			{
+				_manager.SetCurrentCubeMapRenderTarget(-1, RE::BSGraphics::SetRenderTargetMode::kNoClear, 0);
+			}
+
+			ScopedCubeModeExit(const ScopedCubeModeExit&) = delete;
+			ScopedCubeModeExit& operator=(const ScopedCubeModeExit&) = delete;
+
+		private:
+			RE::BSGraphics::RenderTargetManager& _manager;
+		};
+
 		[[nodiscard]] bool EnsureCamera()
 		{
 			if (g_camera)
@@ -231,11 +262,14 @@ namespace cs::engine
 		void RenderFaces(
 			CubeCamera& a_camera,
 			RE::BSMultiBoundNode& a_skyRoot,
+			RE::BSGraphics::RenderTargetManager& a_manager,
 			RE::BSGraphics::RendererShadowState& a_state,
 			const float (&a_clear)[4])
 		{
 			const ScopedSkyRootCubeFlag skyFlag(a_skyRoot);
 			const ScopedClearColor clearColor(a_state, a_clear);
+			const ScopedCubeModeExit cubeMode(a_manager);
+			AddLodScenes(a_camera);
 			a_camera.AddCubeMapScene(&a_skyRoot);
 			const std::array<std::uint32_t, kFacesPerUpdate> faces{ g_step, 5 - g_step };
 			for (std::size_t i = 0; i < faces.size(); ++i) {
@@ -325,7 +359,7 @@ namespace cs::engine
 				unscaled.emplace();
 			UnbindAuxiliaryTargets(*manager, context->shadowState);
 			SetupCamera(**g_camera, eye, worldCamera->viewFrustum.far);
-			RenderFaces(**g_camera, *sky->root, context->shadowState, clear);
+			RenderFaces(**g_camera, *sky->root, *manager, context->shadowState, clear);
 
 			g_counters.renders.fetch_add(1, std::memory_order_relaxed);
 			g_lastRenderFrame.store(state->frameCount, std::memory_order_relaxed);

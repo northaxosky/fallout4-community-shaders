@@ -16,6 +16,18 @@ namespace FullscreenDebugOwner
 		ExponentialHeightFog = 2,
 		TerrainShadows = 3,
 		WaterEffects = 4,
-		Skylighting = 5;
+		Skylighting = 5,
+		DynamicCubemaps = 6;
+}
+
+namespace DynamicCubemapsDebugMode
+{
+#ifdef __cplusplus
+	inline constexpr std::uint32_t
+#else
+	static const uint
+#endif
+		DirectionCube = 1,
+		EngineCube = 2;
 }
 #endif

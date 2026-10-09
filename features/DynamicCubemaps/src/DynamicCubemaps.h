@@ -40,7 +40,9 @@ namespace cs::features
 		{
 			kOff,
 			kCaptureInput,
-			kFilteredReflections
+			kFilteredReflections,
+			kDirectionCube,
+			kEngineCube
 		};
 
 		using Settings = dynamic_cubemaps::Settings;
@@ -68,6 +70,7 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		cs::DynamicCubemapsFeatureData GetCommonBufferData() const;
 

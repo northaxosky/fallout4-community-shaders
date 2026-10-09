@@ -422,6 +422,12 @@ float3 surfaceColor(
 
 		if (SharedData::HideSky)
 			reflectionAmount = 0.0;
+
+		float3 debugColor;
+		if (DynamicCubemaps::TryGetDebugEnvironment(reflectionDirection, sampler3, debugColor)) {
+			dynamicCubemap = debugColor;
+			reflectionAmount = 0.0;
+		}
 		// FO4 reflection permutations shade the sky gradient instead of sampling a reflection cube.
 		color = lerp(dynamicCubemap, color, reflectionAmount);
 	}

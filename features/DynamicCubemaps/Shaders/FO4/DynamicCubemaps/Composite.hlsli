@@ -21,13 +21,16 @@ namespace DynamicCubemaps
 	float3 GetMaterialEnvironment(TextureCubeArray<float4> nativeCube, SamplerState probeSampler,
 		float3 R, float slice, float lod, float glossiness, float nativeRain, float skylightingSpecular = 1.0)
 	{
+		// FO4 probe sites pass -R; DC cubes use upstream reflect(-V, N).
+		float3 direction = -R;
+		float3 debugColor;
+		if (TryGetDebugEnvironment(direction, probeSampler, debugColor))
+			return debugColor;
 		float3 native = nativeCube.SampleLevel(probeSampler, float4(R, slice), lod).xyz;
 		// Native rain boosts and greys this reflection; the live cube would turn that into chrome, so rain keeps the authored cube.
 		float blend = FO4SharedData::DynamicMaterialReflections * (1.0 - saturate(nativeRain));
 		if (blend <= 0.0)
 			return native;
-		// FO4 probe sites pass the negated reflection vector; DC cubes use the upstream reflect(-V, N) orientation.
-		float3 direction = -R;
 		uint width, height;
 		float3 normalized;
 		float level = saturate(1.0 - glossiness) * 8.0;
