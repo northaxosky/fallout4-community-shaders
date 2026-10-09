@@ -394,7 +394,9 @@ namespace cs::render
 			for (auto stage : { engine::ShaderStage::kVertex, engine::ShaderStage::kPixel, engine::ShaderStage::kCompute })
 				BindSharedData(context, stage);
 		};
-		if (!engine::RegisterPreDeferredPrePass(
+		// Upstream Renderer_ResetState rebind; FO4's Begin clears b4-b7 first.
+		if (!engine::RegisterPostResetState(bind) ||
+			!engine::RegisterPreDeferredPrePass(
 				[bind] {
 					if (const auto* graphics = engine::GetGraphicsState())
 						engine::BeginShaderInjectionFrame(graphics->frameCount);

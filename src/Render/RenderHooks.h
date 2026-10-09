@@ -36,6 +36,9 @@ namespace cs::engine
 	// After all sky and cloud draws in the main color target, before water and alpha.
 	bool RegisterPostForwardSky(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
+	// After every engine ResetState, including loading-screen and UI callers.
+	bool RegisterPostResetState(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+
 	// Install the post-dirty-state deferred draw anchor.
 	bool EnsureDeferredDrawAnchorInstalled();
 	void RegisterPreFullscreenDeferredLightDraw(

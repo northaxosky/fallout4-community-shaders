@@ -43,6 +43,7 @@ namespace cs::engine
 		std::vector<PrioritizedCallback> g_postPrecipitationOcclusion;
 		std::vector<PrioritizedCallback> g_postSunShadowRender;
 		std::vector<PrioritizedCallback> g_preWaterUpdate;
+		std::vector<PrioritizedCallback> g_postResetState;
 		bool g_prePassInstalled = false;
 		bool g_lightsImplInstalled = false;
 		bool g_compositeInstalled = false;
@@ -51,6 +52,7 @@ namespace cs::engine
 		bool g_precipitationOcclusionInstalled = false;
 		bool g_sunShadowRenderInstalled = false;
 		bool g_waterUpdateInstalled = false;
+		bool g_resetStateInstalled = false;
 		bool g_insideDeferredLightsImpl = false;
 		bool g_insideDeferredComposite = false;
 
@@ -200,6 +202,16 @@ namespace cs::engine
 			static inline REL::Relocation<void(bool, bool)> func;
 		};
 
+		struct ResetState_Hook
+		{
+			static void thunk(RE::BSGraphics::Renderer* a_this)
+			{
+				func(a_this);
+				DispatchGuarded(g_postResetState, "Post reset state");
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct DeferredComposite_Hook
 		{
 			static void thunk()
@@ -307,19 +319,32 @@ namespace cs::engine
 			static inline std::atomic<Callback> original{ nullptr };
 		};
 
-		bool EnsureWaterUpdateInstalled()
+		template <class Hook>
+		bool EnsureDetourInstalled(bool& a_installed, REL::VariantID a_id, const char* a_name)
 		{
-			if (g_waterUpdateInstalled) {
+			if (a_installed) {
 				return true;
 			}
-			stl::detour_thunk<UpdateWaterFunc_Hook>(RE::ID::DrawWorld::SetUpdateWaterFunc);
-			if (UpdateWaterFunc_Hook::func.address() == 0) {
-				L->error("Hook failed on DrawWorld::SetUpdateWaterFunc");
+			stl::detour_thunk<Hook>(a_id);
+			if (Hook::func.address() == 0) {
+				L->error("Hook failed on {}", a_name);
 				return false;
 			}
-			g_waterUpdateInstalled = true;
-			L->info("Hook installed on DrawWorld::SetUpdateWaterFunc (pre water update)");
+			a_installed = true;
+			L->info("Hook installed on {}", a_name);
 			return true;
+		}
+
+		bool EnsureWaterUpdateInstalled()
+		{
+			return EnsureDetourInstalled<UpdateWaterFunc_Hook>(
+				g_waterUpdateInstalled, RE::ID::DrawWorld::SetUpdateWaterFunc, "DrawWorld::SetUpdateWaterFunc");
+		}
+
+		bool EnsureResetStateInstalled()
+		{
+			return EnsureDetourInstalled<ResetState_Hook>(
+				g_resetStateInstalled, RE::ID::BSGraphics::Renderer::ResetState, "BSGraphics::Renderer::ResetState");
 		}
 
 		void EnsureForwardSkyInstalled()
@@ -337,17 +362,8 @@ namespace cs::engine
 
 		bool EnsurePrecipitationOcclusionInstalled()
 		{
-			if (g_precipitationOcclusionInstalled) {
-				return true;
-			}
-			stl::detour_thunk<PrecipitationOcclusion_Hook>(RE::ID::Precipitation::RenderOcclusionMap);
-			if (PrecipitationOcclusion_Hook::func.address() == 0) {
-				L->error("Hook failed on Precipitation::RenderOcclusionMap");
-				return false;
-			}
-			g_precipitationOcclusionInstalled = true;
-			L->info("Hook installed on Precipitation::RenderOcclusionMap");
-			return true;
+			return EnsureDetourInstalled<PrecipitationOcclusion_Hook>(
+				g_precipitationOcclusionInstalled, RE::ID::Precipitation::RenderOcclusionMap, "Precipitation::RenderOcclusionMap");
 		}
 
 		void EnsureDeferredLightsImplInstalled()
@@ -515,6 +531,14 @@ namespace cs::engine
 			return false;
 		InsertPrioritized(g_preWaterUpdate, std::move(callback), priority);
 		return EnsureWaterUpdateInstalled();
+	}
+
+	bool RegisterPostResetState(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PostResetState"))
+			return false;
+		InsertPrioritized(g_postResetState, std::move(callback), priority);
+		return EnsureResetStateInstalled();
 	}
 
 	bool RegisterPostForwardSky(RenderHookCallback callback, HookPriority priority)
