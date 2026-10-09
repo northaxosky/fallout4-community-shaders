@@ -371,8 +371,14 @@ float3 refractedScene(float2 screenPosition, float3 normal, out float3 unclipped
 	float3 direct = texture1.Sample(sampler1, screenPosition * perGeometry[0].xy).xyz;
 	float3 refracted = texture1.Load(int3(texel, 0)).xyz;
 	float stencil = texture11.Load(int3(texel, 0)).w * 255.0;
+	float3 accepted = (abs(stencil - 2.0) < 0.25 || abs(stencil - 3.0) < 0.25) ? refracted : direct;
+#		ifdef FO4CS_SUBSTRATE
+	// Stock shore blend skips the mask and pulls in first-person pixels.
+	unclipped = accepted;
+#		else
 	unclipped = refracted;
-	return (abs(stencil - 2.0) < 0.25 || abs(stencil - 3.0) < 0.25) ? refracted : direct;
+#		endif
+	return accepted;
 }
 
 #	endif
