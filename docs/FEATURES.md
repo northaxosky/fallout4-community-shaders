@@ -50,7 +50,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | IBL | Core | Environment SH, sky SH*, occlusion integration, static IBL, fog, grass/tree | — | NS | H | L | Med |
 | Interior Sun | Core (provisional) | Native sun gating*, portal culling, double-sided/distance, gameplay sun | N/A: plain interior directional light | NS | H | L | Low |
 | [Inverse Square Lighting](deviations/InverseSquareLighting.md) | Mixed | Attenuation, radius/lifetime, gameplay luminance, TOML authoring (relocated LIGH fields), editor, diagnostics | Ext: derivation of unauthored lights from native falloff | Pt | H | M | High |
-| Light Limit Fix | Mixed | Particle lights, light-limit visualization, 3D light grid as EHF provider | Ext: capacity/shadow-limit redesign. N/A: surface clustered culling (native tiled), strict lights, contact shadows | NS | H | M | Med |
+| Light Limit Fix | Mixed | Light-limit visualization, 3D light grid as EHF provider | Ext: capacity/shadow-limit redesign. N/A: surface clustered culling (native tiled), strict lights, contact shadows, particle lights (no FO4 content) | NS | H | M | Med |
 | Linear Lighting | N/A | Shared-color compatibility (done), optional calibration controls | N/A: linearization (FO4 is linear), ENB | Substrate | L | S | High |
 | [LOD Blending](deviations/LODBlending.md) | Core | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Core | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
@@ -93,9 +93,11 @@ are FO4-only rule-4 core features.
   native class-5 eligibility; never stack both.
 - **Cloud Shadows.** Prior art on branch `cloud-shadows` (`3314d567`) maps material pointers to layers;
   replace with typed layer order.
-- **Light Limit Fix.** FO4 tiled lighting (625 lights, 127 per tile) replaces surface clustering; particle
-  lights feed the native list within its capacity. The upstream 3D cluster grid is still needed as EHF's
-  local-light scattering input.
+- **Light Limit Fix.** FO4 tiled lighting (625 lights, 127 per tile) replaces surface clustering. Particle
+  lights are N/A: upstream lights only texture stems listed in `Data\ParticleLights\*.ini`, which no FO4
+  content ships; lighting vanilla glow cards by shader flags would be an FO4-original extension. The
+  upstream 3D cluster grid is still needed as EHF's local-light scattering input; the light-limit
+  visualization (tiles at 127, per-tile count) ships with it.
 - **Grass.** Grass wind/collision/placement is already reconstructed in `DFPrepass.hlsl`; remaining stock
   grass variants are port work.
 - **Effects11.** Replaces ENB's enbeffect role natively; no ENB preset/binary compatibility is kept. Attach at
@@ -110,17 +112,16 @@ Ordered by user value over effort, respecting dependencies.
 3. **Cheap new features:** LOD Blending (S); Terrain Variation (M); Remote Control (M; DevBench automation).
 4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
 5. **Mid-size, few dependencies:** Cloud Shadows (L; feeds EHF); Subsurface Scattering (M); Volumetric
-   Shadows producer + DFLight (M); Hair Specular opaque slices (M); Grass Collision (M, actor-bounds RE);
-   LLF particle lights + visualization (M).
+   Shadows producer + DFLight (M); Hair Specular opaque slices (M); Grass Collision (M, actor-bounds RE).
 6. **RE-gated:** Interior Sun; Extended Translucency alpha models.
-7. **Providers:** DC → IBL; LLF 3D light grid before EHF local-light scattering;
+7. **Providers:** DC → IBL; LLF 3D light grid + light-limit visualization before EHF local-light scattering;
    then provider adapters in DC/SSGI/EHF.
 8. **Remaining core:** Skin detail/default response; Sky Sync; Grass Lighting basics; Unified Water optical;
    VL controls; CS Editor; Screenshot; HDR Display (L).
 
 ## Extension slices
 
-Not planned: DC authored reflectance/material workflow. Candidates: TruePBR
+Not planned: DC authored reflectance/material workflow; LLF vanilla glow-card particle lights. Candidates: TruePBR
 full materials; Extended Materials complex materials and parallax shadows; Grass Optimizations renderer;
 Unified Water tiles and flowmaps; Terrain Blending lit transition; Terrain
 Helper ESP; Skin RFAOS; SSS profiles; Hair Kajiya-Kay and blended hair; LLF capacity/shadow
