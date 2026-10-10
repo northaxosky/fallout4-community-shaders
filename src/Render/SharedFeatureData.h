@@ -52,7 +52,7 @@ namespace cs::render
 	{
 		// Neutral: a far PosOffset puts every lookup outside the grid (unit SH, vis 1).
 		DirectX::XMFLOAT4X4 OcclusionViewProj{};
-		DirectX::XMFLOAT4 OcclusionDir{}, PosOffset{ 1.0e30f, 1.0e30f, 1.0e30f, 0.0f };
+		DirectX::XMFLOAT4 OcclusionSHBasis4Pi{}, PosOffset{ 1.0e30f, 1.0e30f, 1.0e30f, 0.0f };
 		std::uint32_t ArrayOrigin[4]{};
 		std::int32_t ValidMargin[4]{};
 		float MinDiffuseVisibility = 1.0f, MinSpecularVisibility = 1.0f;
@@ -122,6 +122,24 @@ namespace cs::render
 		std::uint32_t EnableVolumetricRays;
 		float VolumetricRaysIntensity, VolumetricRaysExtinction, VolumetricRaysSkyColorAmount;
 		float VolumetricRaysDesaturation, VolumetricRaysColorFilter[3];
+		// Effects11 sky/cloud/water blocks; FO4 has no Effects11, so they stay zero.
+		std::uint32_t EnableCloudsScattering;
+		float SkyScatteringIntensity, SkyScatteringShadowAmount, SkyScatteringAmount;
+		float SkyScatteringColor[3], SkyScatteringDustDarkening;
+		float SkyScatteringDustTint[3], SkyScatteringDustVolume;
+		float SkyScatteringSunDirection[3], SkyScatteringSunVisibility;
+		float SkyScatteringHorizonRange, SkyScatteringAtmosphereThickness, SkyScatteringAirGlowIntensity, SkyScatteringAirGlowRange;
+		float SkyScatteringSunGlowIntensity, SkyScatteringSunGlowRange, SkyScatteringMoonGlowAmount, SkyScatteringMoonGlowRange;
+		float SkyScatteringSunIntensity, CloudsLightingSunIntensity, CloudsLightingMoonIntensity;
+		std::uint32_t EnableCloudsLightingFromMoon, CalculateCloudsEdgeFromScattering;
+		float CloudsLightingDesaturation, CloudsLightingForwardScattering, CloudsLightingDensity;
+		float CloudsColorFilter[3], CloudsIntensity;
+		float CloudsVertexAlphaBoost, CloudsEdgeClamp, CloudsEdgeFadePower, SunBillboardTan;
+		float MasserBillboardTan, SecundaBillboardTan, SkyScatteringPad0[2];
+		std::uint32_t EnableWater;
+		float WaterWavesAmplitude, WaterMuddiness, WaterSunLightingMultiplier;
+		float WaterSunSpecularMultiplier, WaterFresnelMin, WaterFresnelMax, WaterFresnelMultiplier;
+		float WaterReflectionAmount, WaterPad0, WaterPad1, WaterPad2;
 	};
 	struct TerrainBlendingSettings
 	{
@@ -131,7 +149,9 @@ namespace cs::render
 	{
 		std::uint32_t enabled, useDynamicCubemaps;
 		float startDistance, fogHeight, fogHeightFalloff, fogDensity;
+		float fogHeight2, fogHeightFalloff2, fogDensity2;
 		float directionalInscatteringMultiplier, directionalInscatteringAnisotropy;
+		std::uint32_t useSkyIBL;
 		DirectX::XMFLOAT4 inscatteringTint;
 		float cubemapMipLevel, sunlightAttenuationAmount;
 		std::uint32_t respectVanillaFogFade, disableVanillaFog;
@@ -144,7 +164,10 @@ namespace cs::render
 		float volumetricDepthDistributionScale, volumetricSkyLightingIntensity;
 		float volumetricFogScatteringDistribution, volumetricHistoryWeight;
 		std::uint32_t volumetricHistoryMissSampleCount;
-		float volumetricSampleJitterMultiplier, volumetricUpsampleJitterMultiplier, volumetricLocalLightScatteringIntensity, pad0[2];
+		float volumetricSampleJitterMultiplier, volumetricUpsampleJitterMultiplier, volumetricNearGridDistance;
+		std::uint32_t volumetricFarGridPixelSize, volumetricFarGridSizeZ;
+		float volumetricLocalLightScatteringIntensity, volumetricFogNoiseScale, volumetricFogNoiseThreshold, pad3;
+		float volumetricFogNoiseVelocity[3], pad0;
 	};
 	struct TruePBRSettings
 	{
@@ -202,12 +225,12 @@ namespace cs::render
 	CS_FEATURE_LAYOUT(iblSettings, 656, 48);
 	CS_FEATURE_LAYOUT(extendedTranslucencySettings, 704, 16);
 	CS_FEATURE_LAYOUT(linearLightingSettings, 720, 112);
-	CS_FEATURE_LAYOUT(enbSettings, 832, 144);
-	CS_FEATURE_LAYOUT(terrainBlendingSettings, 976, 16);
-	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 992, 192);
-	CS_FEATURE_LAYOUT(truePBRSettings, 1184, 16);
-	CS_FEATURE_LAYOUT(skinData, 1200, 112);
-	CS_FEATURE_LAYOUT(horizonFixSettings, 1312, 16);
+	CS_FEATURE_LAYOUT(enbSettings, 832, 368);
+	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1200, 16);
+	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1216, 240);
+	CS_FEATURE_LAYOUT(truePBRSettings, 1456, 16);
+	CS_FEATURE_LAYOUT(skinData, 1472, 112);
+	CS_FEATURE_LAYOUT(horizonFixSettings, 1584, 16);
 #undef CS_FEATURE_LAYOUT
-	static_assert(sizeof(SharedFeatureDataCB) == 1328);
+	static_assert(sizeof(SharedFeatureDataCB) == 1600);
 }

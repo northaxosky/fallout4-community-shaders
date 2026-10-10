@@ -199,6 +199,8 @@ namespace cs::settings
 	template <class Settings>
 	using Float2Field = FloatArrayField<Settings, 2>;
 	template <class Settings>
+	using Float3Field = FloatArrayField<Settings, 3>;
+	template <class Settings>
 	using ColorField = FloatArrayField<Settings, 4>;
 
 	template <class Settings, class T>
@@ -287,7 +289,7 @@ namespace cs::settings
 	{
 		if constexpr (std::is_enum_v<T>)
 			return EncodeValue(static_cast<std::underlying_type_t<T>>(a_value));
-		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string> || std::same_as<T, Float2> || std::same_as<T, Color4>)
+		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string> || std::same_as<T, Float2> || std::same_as<T, Float3> || std::same_as<T, Color4>)
 			return a_value;
 		else if constexpr (std::is_signed_v<T>)
 			return static_cast<std::int64_t>(a_value);

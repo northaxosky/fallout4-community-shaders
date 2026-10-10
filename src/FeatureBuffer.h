@@ -70,7 +70,7 @@ namespace cs
 		SkylightingFeatureData skylightingSettings;
 		ScreenSpaceGIFeatureData screenSpaceGISettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 512);
+	static_assert(sizeof(FeatureDataCB) == 560);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, EnableTerrainShadow) == 0);
@@ -80,10 +80,10 @@ namespace cs
 	static_assert(offsetof(TerrainShadowsFeatureData, ZBlur) == 32);
 	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 48);
 	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 64);
-	static_assert(offsetof(FeatureDataCB, lodBlendingSettings) == 256);
-	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 288);
-	static_assert(offsetof(FeatureDataCB, terrainVariationSettings) == 304);
-	static_assert(offsetof(FeatureDataCB, skylightingSettings) == 336);
+	static_assert(offsetof(FeatureDataCB, lodBlendingSettings) == 304);
+	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 336);
+	static_assert(offsetof(FeatureDataCB, terrainVariationSettings) == 352);
+	static_assert(offsetof(FeatureDataCB, skylightingSettings) == 384);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, EnabledSSR) == 4);
 

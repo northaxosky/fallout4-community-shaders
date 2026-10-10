@@ -36,6 +36,7 @@
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
+#include "Utils/SphericalHarmonics.h"
 #include "World/Sky.h"
 
 namespace cs::features
@@ -576,7 +577,8 @@ namespace cs::features
 			return CaptureState::kTargets;
 		}
 
-		OcclusionDir = { -PrecipitationShaderDirectionF.x, -PrecipitationShaderDirectionF.y, -PrecipitationShaderDirectionF.z, 0 };
+		const auto basis = SphericalHarmonics::Scale(SphericalHarmonics::Evaluate(float3(-PrecipitationShaderDirectionF.x, -PrecipitationShaderDirectionF.y, -PrecipitationShaderDirectionF.z)), 4.0f * std::numbers::pi_v<float>);
+		OcclusionSHBasis4Pi = { basis.c0, basis.c1[0], basis.c1[1], basis.c1[2] };
 		OcclusionTransform = result.matrix;
 		_hasOcclusion = true;
 
@@ -651,7 +653,7 @@ namespace cs::features
 		}
 		CaptureLog->info(
 			"summary enabled={} state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
-			"L={:.0f} dir=({:.3f},{:.3f},{:.3f}) quadrant={} "
+			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
 			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
@@ -662,7 +664,7 @@ namespace cs::features
 			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={} effect_draws_bound={} composite_draws_bound={} dflight_draws_bound={} tiled_dispatches_bound={} shadow_vis_draws_bound={}",
 			_settings.enabled ? 1 : 0, stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
-			occlusionDistance, OcclusionDir.x, OcclusionDir.y, OcclusionDir.z, frameCount % 4,
+			occlusionDistance, OcclusionSHBasis4Pi.x, OcclusionSHBasis4Pi.y, OcclusionSHBasis4Pi.z, OcclusionSHBasis4Pi.w, frameCount % 4,
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
@@ -787,7 +789,7 @@ namespace cs::features
 		};
 		_grid.block = {
 			.OcclusionViewProj = OcclusionTransform,
-			.OcclusionDir = OcclusionDir,
+			.OcclusionSHBasis4Pi = OcclusionSHBasis4Pi,
 			.PosOffset = { cellOrigin.x - anchor.x, cellOrigin.y - anchor.y, cellOrigin.z - anchor.z, 0.0f },
 			.ArrayOrigin = { arrayOrigin(cellID.x, 0), arrayOrigin(cellID.y, 1), arrayOrigin(cellID.z, 2), 0 },
 			.ValidMargin = { static_cast<int>(cellIDDiff.x), static_cast<int>(cellIDDiff.y), static_cast<int>(cellIDDiff.z), 0 },

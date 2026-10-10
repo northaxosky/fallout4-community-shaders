@@ -15,7 +15,7 @@ namespace cs::settings
 	{
 		return std::visit([](const auto& value) -> std::string {
 			using T = std::remove_cvref_t<decltype(value)>;
-			if constexpr (std::same_as<T, Float2> || std::same_as<T, Color4>) {
+			if constexpr (std::same_as<T, Float2> || std::same_as<T, Float3> || std::same_as<T, Color4>) {
 				std::string text = "[";
 				for (float component : value) {
 					if (text.size() > 1)

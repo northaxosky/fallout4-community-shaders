@@ -15,7 +15,6 @@
 #define Normals02Sampler sampler5
 #define Normals03Tex texture6
 #define Normals03Sampler sampler6
-#define NormalsAmplitude perMaterial[9]
 #include "WaterEffects/WaterParallax.hlsli"
 #undef TexCoord1
 #undef TexCoord2
@@ -27,6 +26,5 @@
 #undef Normals02Sampler
 #undef Normals03Tex
 #undef Normals03Sampler
-#undef NormalsAmplitude
 
 #endif

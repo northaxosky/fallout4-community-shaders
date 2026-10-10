@@ -62,7 +62,7 @@ namespace
 			F(MinRainWetness), F(SkinWetness), F(WeatherTransitionSpeed), F(EnableRaindropFx), F(EnableSplashes), F(EnableRipples), F(EnableVanillaRipples),
 			F(RaindropFxRange), F(RaindropGridSizeRcp), F(RaindropIntervalRcp), F(RaindropChance), F(SplashesLifetime), F(SplashesStrength),
 			F(SplashesMinRadius), F(SplashesMaxRadius), F(RippleStrength), F(RippleRadius), F(RippleBreadth), F(RippleLifetimeRcp), F(pad0));
-		const auto sky = FIELDS(SkylightingSettings, F(OcclusionViewProj), F(OcclusionDir), F(PosOffset), F(ArrayOrigin), F(ValidMargin),
+		const auto sky = FIELDS(SkylightingSettings, F(OcclusionViewProj), F(OcclusionSHBasis4Pi), F(PosOffset), F(ArrayOrigin), F(ValidMargin),
 			F(MinDiffuseVisibility), F(MinSpecularVisibility), F(pad0));
 		const auto cloud = FIELDS(CloudShadowsSettings, F(Opacity), F(pad0));
 		const auto lod = FIELDS(LODBlendingSettings, F(LODTerrainBrightness), F(LODObjectBrightness), F(LODObjectSnowBrightness),
@@ -83,16 +83,28 @@ namespace
 			F(EnableProceduralSun), F(ProceduralSunDiskRadiusSq), F(ProceduralSunDiskEdgeScale), F(ProceduralSunGlowIntensity),
 			F(ProceduralSunCoronaFalloff), F(ProceduralSunCoronaScale), F(UseProceduralGradientWeights), F(ProceduralGradientWeightCurve),
 			F(LightSpriteCurve), F(pad1), F(ParticleIntensity), F(ParticleLightingInfluence), F(ParticleAmbientInfluence), F(ParticlePointLightingInfluence),
-			F(EnableVolumetricRays), F(VolumetricRaysIntensity), F(VolumetricRaysExtinction), F(VolumetricRaysSkyColorAmount), F(VolumetricRaysDesaturation), F(VolumetricRaysColorFilter));
+			F(EnableVolumetricRays), F(VolumetricRaysIntensity), F(VolumetricRaysExtinction), F(VolumetricRaysSkyColorAmount), F(VolumetricRaysDesaturation), F(VolumetricRaysColorFilter),
+			F(EnableCloudsScattering), F(SkyScatteringIntensity), F(SkyScatteringShadowAmount), F(SkyScatteringAmount), F(SkyScatteringColor),
+			F(SkyScatteringDustDarkening), F(SkyScatteringDustTint), F(SkyScatteringDustVolume), F(SkyScatteringSunDirection), F(SkyScatteringSunVisibility),
+			F(SkyScatteringHorizonRange), F(SkyScatteringAtmosphereThickness), F(SkyScatteringAirGlowIntensity), F(SkyScatteringAirGlowRange),
+			F(SkyScatteringSunGlowIntensity), F(SkyScatteringSunGlowRange), F(SkyScatteringMoonGlowAmount), F(SkyScatteringMoonGlowRange),
+			F(SkyScatteringSunIntensity), F(CloudsLightingSunIntensity), F(CloudsLightingMoonIntensity), F(EnableCloudsLightingFromMoon),
+			F(CalculateCloudsEdgeFromScattering), F(CloudsLightingDesaturation), F(CloudsLightingForwardScattering), F(CloudsLightingDensity),
+			F(CloudsColorFilter), F(CloudsIntensity), F(CloudsVertexAlphaBoost), F(CloudsEdgeClamp), F(CloudsEdgeFadePower), F(SunBillboardTan),
+			F(MasserBillboardTan), F(SecundaBillboardTan), F(SkyScatteringPad0), F(EnableWater), F(WaterWavesAmplitude), F(WaterMuddiness),
+			F(WaterSunLightingMultiplier), F(WaterSunSpecularMultiplier), F(WaterFresnelMin), F(WaterFresnelMax), F(WaterFresnelMultiplier),
+			F(WaterReflectionAmount), F(WaterPad0), F(WaterPad1), F(WaterPad2));
 		const auto blending = FIELDS(TerrainBlendingSettings, F(Enabled), F(_padding));
 		const auto fog = FIELDS(ExponentialHeightFogSettings, F(enabled), F(useDynamicCubemaps), F(startDistance), F(fogHeight), F(fogHeightFalloff),
-			F(fogDensity), F(directionalInscatteringMultiplier), F(directionalInscatteringAnisotropy), F(inscatteringTint), F(cubemapMipLevel),
+			F(fogDensity), F(fogHeight2), F(fogHeightFalloff2), F(fogDensity2), F(directionalInscatteringMultiplier), F(directionalInscatteringAnisotropy),
+			F(useSkyIBL), F(inscatteringTint), F(cubemapMipLevel),
 			F(sunlightAttenuationAmount), F(respectVanillaFogFade), F(disableVanillaFog), F(fogInscatteringColor), F(originalFogColorAmount),
 			F(volumetricFogEnabled), F(volumetricGridPixelSize), F(volumetricGridSizeZ), F(volumetricFogDistance), F(volumetricFogStartDistance),
 			F(volumetricFogNearFadeInDistance), F(volumetricFogExtinctionScale), F(volumetricFogAlbedo), F(volumetricFogEmissive),
 			F(volumetricDirectionalScatteringIntensity), F(volumetricShadowBias), F(volumetricDepthDistributionScale), F(volumetricSkyLightingIntensity),
 			F(volumetricFogScatteringDistribution), F(volumetricHistoryWeight), F(volumetricHistoryMissSampleCount), F(volumetricSampleJitterMultiplier),
-			F(volumetricUpsampleJitterMultiplier), F(volumetricLocalLightScatteringIntensity), F(pad0));
+			F(volumetricUpsampleJitterMultiplier), F(volumetricNearGridDistance), F(volumetricFarGridPixelSize), F(volumetricFarGridSizeZ),
+			F(volumetricLocalLightScatteringIntensity), F(volumetricFogNoiseScale), F(volumetricFogNoiseThreshold), F(pad3), F(volumetricFogNoiseVelocity), F(pad0));
 		const auto pbr = FIELDS(TruePBRSettings, F(VertexAOStrength), F(EnableMicroShadows), F(MicroShadowStrength), F(pad));
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));

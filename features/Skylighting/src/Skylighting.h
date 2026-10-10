@@ -196,7 +196,8 @@ namespace cs::features
 		// World height of the probe grid's bottom layer, from the snapped grid origin.
 		float probeGridBottomZ = -FLT_MAX;
 		DirectX::XMFLOAT4X4 OcclusionTransform{};
-		DirectX::XMFLOAT4 OcclusionDir{};
+		// SH basis of the occlusion direction times 4 pi; evaluated once per capture.
+		DirectX::XMFLOAT4 OcclusionSHBasis4Pi{};
 		std::uint32_t frameCount = 0;
 		// The probe update needs a published matrix; the first capture can fail.
 		bool _hasOcclusion = false;

@@ -29,8 +29,12 @@ namespace cs::features
 	FOG_ABI(fogHeight);
 	FOG_ABI(fogHeightFalloff);
 	FOG_ABI(fogDensity);
+	FOG_ABI(fogHeight2);
+	FOG_ABI(fogHeightFalloff2);
+	FOG_ABI(fogDensity2);
 	FOG_ABI(directionalInscatteringMultiplier);
 	FOG_ABI(directionalInscatteringAnisotropy);
+	FOG_ABI(useSkyIBL);
 	FOG_ABI(inscatteringTint);
 	FOG_ABI(cubemapMipLevel);
 	FOG_ABI(sunlightAttenuationAmount);
@@ -56,7 +60,14 @@ namespace cs::features
 	FOG_ABI(volumetricHistoryMissSampleCount);
 	FOG_ABI(volumetricSampleJitterMultiplier);
 	FOG_ABI(volumetricUpsampleJitterMultiplier);
+	FOG_ABI(volumetricNearGridDistance);
+	FOG_ABI(volumetricFarGridPixelSize);
+	FOG_ABI(volumetricFarGridSizeZ);
 	FOG_ABI(volumetricLocalLightScatteringIntensity);
+	FOG_ABI(volumetricFogNoiseScale);
+	FOG_ABI(volumetricFogNoiseThreshold);
+	FOG_ABI(pad3);
+	FOG_ABI(volumetricFogNoiseVelocity);
 	FOG_ABI(pad0);
 #undef FOG_ABI
 	namespace
@@ -76,9 +87,15 @@ namespace cs::features
 			else if (a_key == "respectVanillaFogFade")
 				text = "Applies vanilla fade brightness to exponential height fog.\nNot available in Fallout 4 yet; this setting currently has no effect.";
 			else if (a_key == "volumetricSampleJitterMultiplier")
-				text = "Matches UE's r.VolumetricFog.LightScatteringSampleJitterMultiplier.\nAdds per-voxel random offset on top of the Halton sequence.\n0 = UE default; nonzero values need stronger temporal filtering.";
+				text = "Adds per-voxel random offset on top of the Halton sequence.";
 			else if (a_key == "volumetricUpsampleJitterMultiplier")
-				text = "Matches UE's r.VolumetricFog.UpsampleJitterMultiplier.\nJitters the final 3D fog lookup in screen space to hide\nlow-resolution froxel pixelization. 0 = UE default.";
+				text = "Jitters the final 3D fog lookup in screen space to hide\nlow-resolution froxel pixelization.";
+			else if (a_key == "fogDensity2")
+				text = "Adds a second stacked exponential height fog layer with its own base height, density and height falloff.\nThe two line integrals are summed.\nUse it for high-altitude haze above the ground layer or a distinct low-lying ground fog.";
+			else if (a_key == "volumetricNearGridDistance")
+				text = "Distance covered by the full-resolution near volume.\nA second, coarser far volume covers the remaining distance up to the Volumetric View Distance.\nSmaller values improve near-field resolution; larger values move the low-resolution far volume farther away.";
+			else if (a_key == "volumetricFogNoiseScale")
+				text = "Modulates the volumetric fog density with a 3D value noise field.\nNoise Scale: spatial frequency of the fog clumps (0 = disabled).\nNoise Threshold: soft cutoff that carves clumps out of the noise.\nNoise Velocity: animation drift of the noise field, scaled by time.";
 			if (text && dmui::ui::IsItemHovered())
 				dmui::ui::SetTooltip("%s", text);
 		}
@@ -87,11 +104,13 @@ namespace cs::features
 		{
 			if (a_key == "volumetricShadowBias")
 				return "%.4f";
-			if (a_key == "fogHeightFalloff" || a_key == "fogDensity" || a_key == "directionalInscatteringAnisotropy")
+			if (a_key == "fogHeightFalloff" || a_key == "fogHeightFalloff2" || a_key == "fogDensity" || a_key == "fogDensity2" || a_key == "directionalInscatteringAnisotropy")
 				return "%.3f";
-			if (a_key == "startDistance" || a_key == "fogHeight" || a_key == "cubemapMipLevel" || a_key == "volumetricDepthDistributionScale")
+			if (a_key == "startDistance" || a_key == "fogHeight" || a_key == "fogHeight2" || a_key == "cubemapMipLevel" || a_key == "volumetricDepthDistributionScale")
 				return "%.1f";
-			if (a_key == "volumetricFogDistance" || a_key == "volumetricFogStartDistance" || a_key == "volumetricFogNearFadeInDistance")
+			if (a_key == "volumetricFogNoiseScale")
+				return "%.6f";
+			if (a_key == "volumetricFogDistance" || a_key == "volumetricFogStartDistance" || a_key == "volumetricFogNearFadeInDistance" || a_key == "volumetricNearGridDistance")
 				return "%.0f";
 			return "%.2f";
 		}
@@ -272,10 +291,8 @@ namespace cs::features
 				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Fog dispatch inputs are unavailable; retaining native fog.");
 				return;
 			}
-			if (_frameSettings.enabled && _frameSettings.volumetricFogEnabled && _frameSettings.fogDensity > 0)
-				_dispatches.fetch_add(4, std::memory_order_relaxed);
 			_volumetricActive.store(_frameSettings.enabled && _frameSettings.volumetricFogEnabled &&
-										_frameSettings.fogDensity > 0,
+										(_frameSettings.fogDensity > 0 || _frameSettings.fogDensity2 > 0),
 				std::memory_order_relaxed);
 			_frameReady.store(true, std::memory_order_release);
 		} catch (const std::exception& e) {
@@ -304,6 +321,8 @@ namespace cs::features
 		if (auto* context = engine::GetImmediateContext()) {
 			auto* volume = _volume.Integrated();
 			engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, 19, 1, &volume);
+			auto* farVolume = _volume.IntegratedFar();
+			engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, 22, 1, &farVolume);
 		}
 	}
 
@@ -322,7 +341,6 @@ namespace cs::features
 			.Field("volumetric_active", _volumetricActive.load())
 			.Field("directional_shadows_available", false)
 			.Field("debug_fog_factor", _debugFogFactor.load())
-			.Field("dispatches", static_cast<std::int64_t>(_dispatches.load()))
 			.Field("consumer_binds", static_cast<std::int64_t>(_binds.load()))
 			.Field("failures", static_cast<std::int64_t>(_failures.load()))
 			.Dimensions("volume", _width.load(), _height.load())
@@ -378,16 +396,18 @@ namespace cs::features
 				auto& value = _settings.*field.member;
 				const auto label = std::string(field.description);
 				using T = typename std::remove_cvref_t<decltype(field)>::ValueType;
-				if constexpr (std::same_as<T, settings::Color4>) {
-					// The forwarding ABI exposes scalar inputs but no color editor.
+				if constexpr (std::same_as<T, settings::Float3> || std::same_as<T, settings::Color4>) {
+					// The forwarding ABI exposes scalar inputs but no vector or color editor.
 					constexpr const char* components[]{ "R", "G", "B", "A" };
+					constexpr const char* axes[]{ "X", "Y", "Z" };
 					dmui::ui::Text("%s", label.c_str());
 					for (std::size_t i = 0; i < value.size(); ++i) {
-						const std::string component = std::string(components[i]) + "##" + std::string(field.key);
+						const char* name = std::same_as<T, settings::Float3> ? axes[i] : components[i];
+						const std::string component = std::string(name) + "##" + std::string(field.key);
 						float candidate = value[i];
 						const bool edited = dmui::ui::InputScalar(component.c_str(), &candidate);
 						if (edited && !std::isfinite(candidate)) {
-							L->warn("Rejected non-finite {} component {}", field.key, components[i]);
+							L->warn("Rejected non-finite {} component {}", field.key, name);
 						} else {
 							if (edited)
 								value[i] = candidate;

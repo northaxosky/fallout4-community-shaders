@@ -339,7 +339,7 @@ float3 surfaceNormal(PS_INPUT input, float fade)
 #		ifdef WATER_PARALLAX
 	if (FO4SharedData::EnabledWaterParallax != 0) {
 		float3 normalScalesRcp = rcp(input.normalsScale);
-		float2 parallaxOffset = WaterEffects::GetParallaxOffset(input, normalScalesRcp);
+		float2 parallaxOffset = WaterEffects::GetParallaxOffset(input, perMaterial[9].xyz, normalScalesRcp);
 		uv0 += parallaxOffset * normalScalesRcp.x;
 		uv1 += parallaxOffset * normalScalesRcp.y;
 		uv2 += parallaxOffset * normalScalesRcp.z;

@@ -25,8 +25,8 @@ function main(target)
             "features/Skylighting/Shaders/Skylighting/Skylighting.hlsli",
             "features/Skylighting/Shaders/Skylighting/UpdateProbesCS.hlsl",
             "features/Screen Space GI/Shaders/ScreenSpaceGI",
-            "features/Inverse Square Lighting/Shaders/InverseSquareLighting/InverseSquareLighting.hlsli",
             "features/Light Limit Fix/Shaders/LightLimitFix/Common.hlsli",
+            "features/Light Limit Fix/Shaders/LightLimitFix/Attenuation.hlsli",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/RaymarchCS.hlsl",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/bend_sss_gpu.hlsli",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli",
@@ -46,6 +46,8 @@ function main(target)
             "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.h",
             "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.cpp",
             "src/Utils/PerfUtils.h",
+            "src/Utils/SphericalHarmonics.h",
+            "src/Utils/SphericalHarmonics.cpp",
             "src/Utils/VTableHookFallback.h",
             "src/Utils/VTableHookFallback.cpp",
             "src/Features/ScreenSpaceShadows/bend_sss_cpu.h"

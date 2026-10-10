@@ -38,6 +38,8 @@ namespace
 		Toggle("GI_SPECULAR")
 	};
 
+	const std::vector<Axis> kFogGridAxes{ Toggle("VOLUMETRIC_FOG_FAR_GRID") };
+
 	// Runtime-compiled shaders with the defines their call sites select.
 	const std::vector<Shader>& Shaders()
 	{
@@ -52,10 +54,10 @@ namespace
 			{ "DynamicCubemaps/BC6HEncodeCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
 			{ "FO4/DynamicCubemaps/CubemapPreviewCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
 
-			{ "ExponentialHeightFog/VolumetricFogConservativeDepthCS.hlsl" },
-			{ "ExponentialHeightFog/VolumetricFogMaterialCS.hlsl" },
-			{ "ExponentialHeightFog/VolumetricFogLightScatteringCS.hlsl", "cs_5_0", {}, { Toggle("TERRAIN_SHADOWS", "1") } },
-			{ "ExponentialHeightFog/VolumetricFogIntegrationCS.hlsl" },
+			{ "ExponentialHeightFog/VolumetricFogConservativeDepthCS.hlsl", "cs_5_0", {}, kFogGridAxes },
+			{ "ExponentialHeightFog/VolumetricFogMaterialCS.hlsl", "cs_5_0", {}, kFogGridAxes },
+			{ "ExponentialHeightFog/VolumetricFogLightScatteringCS.hlsl", "cs_5_0", {}, { Toggle("TERRAIN_SHADOWS", "1"), kFogGridAxes[0] } },
+			{ "ExponentialHeightFog/VolumetricFogIntegrationCS.hlsl", "cs_5_0", {}, kFogGridAxes },
 			{ "FO4/ExponentialHeightFog/SkyCompositeCS.hlsl" },
 
 			{ "FrameGeneration/CopyDepthForFrameGenerationCS.hlsl" },

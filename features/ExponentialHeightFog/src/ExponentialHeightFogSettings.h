@@ -8,7 +8,10 @@ namespace cs::features::exponential_height_fog
 	{
 		std::uint32_t enabled = 0, useDynamicCubemaps = 1;
 		float startDistance = 0.0f, fogHeight = 0.0f, fogHeightFalloff = 0.2f, fogDensity = 0.005f;
+		float fogHeight2 = 0.0f, fogHeightFalloff2 = 0.2f, fogDensity2 = 0.0f;
 		float directionalInscatteringMultiplier = 1.0f, directionalInscatteringAnisotropy = 0.2f;
+		// FO4: no IBL, so the shader gate is off and there is no schema key.
+		std::uint32_t useSkyIBL = 1;
 		settings::Color4 inscatteringTint{ 1, 1, 1, 1 };
 		float cubemapMipLevel = 8.0f, sunlightAttenuationAmount = 1.0f;
 		std::uint32_t respectVanillaFogFade = 0, disableVanillaFog = 1;
@@ -23,11 +26,15 @@ namespace cs::features::exponential_height_fog
 		float volumetricFogScatteringDistribution = 0.2f, volumetricHistoryWeight = 0.96f;
 		std::uint32_t volumetricHistoryMissSampleCount = 4;
 		float volumetricSampleJitterMultiplier = 0.0f, volumetricUpsampleJitterMultiplier = 1.0f;
+		float volumetricNearGridDistance = 8000.0f;
+		std::uint32_t volumetricFarGridPixelSize = 64, volumetricFarGridSizeZ = 32;
 		float volumetricLocalLightScatteringIntensity = 1.0f;
-		float pad0[2]{};
+		float volumetricFogNoiseScale = 0.0f, volumetricFogNoiseThreshold = 0.5f, pad3 = 0.0f;
+		settings::Float3 volumetricFogNoiseVelocity{ 0, 0, 0 };
+		float pad0 = 0.0f;
 	};
-	static_assert(sizeof(Settings) == 192);
-	inline constexpr std::array<std::string_view, 23> kWeatherVariables{
+	static_assert(sizeof(Settings) == 240);
+	inline constexpr std::array<std::string_view, 30> kWeatherVariables{
 		"startDistance", "fogHeight", "fogHeightFalloff", "fogInscatteringColor",
 		"originalFogColorAmount", "fogDensity", "directionalInscatteringMultiplier",
 		"sunlightAttenuationAmount", "directionalInscatteringAnisotropy", "inscatteringTint",
@@ -35,7 +42,9 @@ namespace cs::features::exponential_height_fog
 		"volumetricFogDistance", "volumetricFogStartDistance", "volumetricFogNearFadeInDistance",
 		"volumetricFogExtinctionScale", "volumetricFogScatteringDistribution",
 		"volumetricDirectionalScatteringIntensity", "volumetricFogAlbedo", "volumetricFogEmissive",
-		"volumetricSkyLightingIntensity", "volumetricLocalLightScatteringIntensity"
+		"volumetricSkyLightingIntensity", "volumetricLocalLightScatteringIntensity",
+		"fogHeight2", "fogHeightFalloff2", "fogDensity2", "volumetricNearGridDistance",
+		"volumetricFogNoiseScale", "volumetricFogNoiseThreshold", "volumetricFogNoiseVelocity"
 	};
 
 	inline constexpr settings::Schema kSchema{
@@ -47,6 +56,9 @@ namespace cs::features::exponential_height_fog
 			settings::ColorField<Settings>{ "fogInscatteringColor", "Fog Inscattering Color", &Settings::fogInscatteringColor },
 			settings::Field{ "originalFogColorAmount", "Original Fog Color Amount", &Settings::originalFogColorAmount, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "fogDensity", "Fog Density", &Settings::fogDensity, settings::Range{ 0.0f, 1.0f } },
+			settings::Field{ "fogHeight2", "Fog Height 2", &Settings::fogHeight2, settings::Range{ -22000.0f, 22000.0f } },
+			settings::Field{ "fogHeightFalloff2", "Fog Height Falloff 2", &Settings::fogHeightFalloff2, settings::Range{ 0.001f, 2.0f } },
+			settings::Field{ "fogDensity2", "Fog Density 2", &Settings::fogDensity2, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "directionalInscatteringMultiplier", "Directional Light Inscattering Multiplier", &Settings::directionalInscatteringMultiplier, settings::Range{ 0.0f, 10.0f } },
 			settings::Field{ "sunlightAttenuationAmount", "Sunlight Attenuation Amount", &Settings::sunlightAttenuationAmount, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "directionalInscatteringAnisotropy", "Directional Light Inscattering Anisotropy", &Settings::directionalInscatteringAnisotropy, settings::Range{ -0.99f, 0.99f } },
@@ -59,6 +71,10 @@ namespace cs::features::exponential_height_fog
 			settings::Field{ "volumetricFogDistance", "Volumetric View Distance", &Settings::volumetricFogDistance, settings::Range{ 1000.0f, 200000.0f } },
 			settings::Field{ "volumetricFogStartDistance", "Volumetric Start Distance", &Settings::volumetricFogStartDistance, settings::Range{ 0.0f, 200000.0f }, settings::Range{ 0.0f, 20000.0f } },
 			settings::Field{ "volumetricFogNearFadeInDistance", "Near Fade In Distance", &Settings::volumetricFogNearFadeInDistance, settings::Range{ 0.0f, 20000.0f } },
+			settings::Field{ "volumetricNearGridDistance", "Near Grid Distance", &Settings::volumetricNearGridDistance, settings::Range{ 256.0f, 50000.0f } },
+			settings::Field{ "volumetricFogNoiseScale", "Noise Scale", &Settings::volumetricFogNoiseScale, settings::Range{ 0.0f, 0.01f } },
+			settings::Field{ "volumetricFogNoiseThreshold", "Noise Threshold", &Settings::volumetricFogNoiseThreshold, settings::Range{ 0.0f, 1.0f } },
+			settings::Float3Field<Settings>{ "volumetricFogNoiseVelocity", "Noise Velocity", &Settings::volumetricFogNoiseVelocity },
 			settings::Field{ "volumetricFogExtinctionScale", "Volumetric Extinction Scale", &Settings::volumetricFogExtinctionScale, settings::Range{ 0.0f, 10.0f } },
 			settings::Field{ "volumetricFogScatteringDistribution", "Volumetric Scattering Distribution", &Settings::volumetricFogScatteringDistribution, settings::Range{ -0.9f, 0.9f } },
 			settings::ColorField<Settings>{ "volumetricFogAlbedo", "Volumetric Albedo", &Settings::volumetricFogAlbedo },
@@ -68,6 +84,8 @@ namespace cs::features::exponential_height_fog
 			settings::Field{ "volumetricLocalLightScatteringIntensity", "Local Light Scattering Intensity", &Settings::volumetricLocalLightScatteringIntensity, settings::Range{ 0.0f, 100.0f }, settings::Range{ 0.0f, 10.0f } },
 			settings::Field{ "volumetricGridPixelSize", "Grid Pixel Size", &Settings::volumetricGridPixelSize, settings::Range{ 4u, 64u } },
 			settings::Field{ "volumetricGridSizeZ", "Grid Depth Slices", &Settings::volumetricGridSizeZ, settings::Range{ 16u, 160u } },
+			settings::Field{ "volumetricFarGridPixelSize", "Far Grid Pixel Size", &Settings::volumetricFarGridPixelSize, settings::Range{ 4u, 64u } },
+			settings::Field{ "volumetricFarGridSizeZ", "Far Grid Depth Slices", &Settings::volumetricFarGridSizeZ, settings::Range{ 16u, 160u } },
 			settings::Field{ "volumetricShadowBias", "Directional Shadow Bias", &Settings::volumetricShadowBias, settings::Range{ 0.0f, 0.05f } },
 			settings::Field{ "volumetricDepthDistributionScale", "Depth Distribution Scale", &Settings::volumetricDepthDistributionScale, settings::Range{ 1.0f, 128.0f } },
 			settings::Field{ "volumetricHistoryWeight", "Temporal History Weight", &Settings::volumetricHistoryWeight, settings::Range{ 0.0f, 0.99f } },

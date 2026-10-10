@@ -105,7 +105,7 @@ namespace cs::weather
 					const auto& last = hasTo ? to->values.*field.member : a_base.*field.member;
 					auto& value = result.*field.member;
 					using T = typename std::remove_cvref_t<decltype(field)>::ValueType;
-					if constexpr (std::same_as<T, settings::Color4>) {
+					if constexpr (std::same_as<T, settings::Float3> || std::same_as<T, settings::Color4>) {
 						for (std::size_t i = 0; i < value.size(); ++i)
 							value[i] = std::lerp(first[i], last[i], a_factor);
 					} else if constexpr (std::floating_point<T>) {

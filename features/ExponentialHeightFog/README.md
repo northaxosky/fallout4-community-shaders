@@ -1,7 +1,8 @@
 # Exponential Height Fog
 
-Uses the unchanged analytic and four-pass volumetric shaders from shared pin
-`e305ed0a4` (upstream `d330bf12d`). This replaces the native-ramp extinction approximation.
+Uses the unchanged analytic and four-pass volumetric shaders from the shared pin (upstream
+`488e408a9`), including the second fog layer, volumetric noise and the near/far volume split.
+This replaces the native-ramp extinction approximation.
 
 Set `load = true`, configure the relevant native shader ownership and restart.
 `enabled` toggles the effect live; `volumetricFogEnabled` selects the volume pipeline.
@@ -26,7 +27,7 @@ volumetricFogEnabled = 1
 
 Restart after editing profiles. Omitted variables fall back to user settings.
 Float and RGBA values interpolate through FO4's weather transition; integer toggles
-switch above 0.5. Profiles accept only the upstream 23 weather variables, not grid/history
+switch above 0.5. Profiles accept only the upstream 30 weather variables, not grid/history
 controls. Fog density is independently authored; native near/far ramps are not fitted
 into an extinction model.
 
@@ -49,7 +50,7 @@ After separate deployment/DevBench authorization, capture a build-pinned AE fram
 - One post-sky application after alpha/additive/mask layers; geometry and inactive
   allocation pixels unchanged; the copied logical MainTemp output reaches the final scene.
 - Current camera-owned b4, exact b6 fog block and no fog b7; RGBA16F volumes, R32 depth,
-  dispatch groups, t19, terrain t60 and restored OM/high-slot state.
+  dispatch groups, t19, t22, terrain t60 and restored OM/high-slot state.
 - Consecutive-frame history, TAA off/on, camera-origin changes, load/teleport and
   dynamic-resolution changes; no history or active-region edge artifacts.
 - Weather profile interpolation, missing/disabled profiles, live settings, persistence

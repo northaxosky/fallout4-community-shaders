@@ -1,12 +1,8 @@
 #ifndef FO4_INVERSE_SQUARE_LIGHTING_CONSUMER_HLSLI
 #define FO4_INVERSE_SQUARE_LIGHTING_CONSUMER_HLSLI
 
-namespace LightLimitFix
-{
-#include "LightLimitFix/Common.hlsli"
-}
 #include "Common/Color.hlsli"
-#include "InverseSquareLighting/InverseSquareLighting.hlsli"
+#include "LightLimitFix/Attenuation.hlsli"
 
 namespace FO4InverseSquareLighting
 {
@@ -47,7 +43,7 @@ namespace FO4InverseSquareLighting
 		light.fadeZone = data.fadeZone;
 		light.sizeBias = data.sizeBias;
 		light.lightFlags = data.lightFlags;
-		return InverseSquareLighting::GetAttenuation(distance, light);
+		return LightLimitFix::GetAttenuation(distance, light);
 	}
 }
 #endif

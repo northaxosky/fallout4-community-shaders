@@ -52,6 +52,6 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false }, _operational{ false }, _frameReady{ false };
 		std::atomic_bool _enabled{ false }, _volumetricActive{ false };
 		std::atomic_uint32_t _width{ 0 }, _height{ 0 }, _slices{ 0 };
-		std::atomic_uint64_t _dispatches{ 0 }, _binds{ 0 }, _failures{ 0 };
+		std::atomic_uint64_t _binds{ 0 }, _failures{ 0 };
 	};
 }
