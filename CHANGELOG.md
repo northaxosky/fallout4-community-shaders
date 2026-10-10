@@ -4,6 +4,7 @@
 
 - Terrain Shadows: ships heightmaps for the base-game and DLC worldspaces; other worldspaces still need an xLODGen export.
 - Terrain Variation: ported Skyrim CS's stochastic terrain sampling, LOD terrain tiling fix and landscape-textured mesh support, with a live enable toggle; mesh support covers natural landscape textures only, and Extended Materials and TruePBR height and RMAOS consumers are pending.
+- Performance Overlay: starts hidden each session; press F10 (rebindable) to show it, as in Skyrim CS. The frametime graph now scales with resolution.
 
 ## 0.3.1
 

@@ -95,7 +95,7 @@ namespace cs::host
 		std::optional<DMUI_Result> _videoMemoryFailure;
 		std::optional<DMUI_Result> _overlayConfigurationFailure;
 		std::optional<DMUI_Result> _overlayDemandFailure;
-		std::atomic_bool _overlayVisible{ true };
+		std::atomic_bool _overlayVisible{ false };
 		std::atomic_bool _registrationComplete{};
 		FrameDemandTracker _overlayFrameDemand;
 		std::atomic_bool _readyLogged{};

@@ -14,6 +14,7 @@
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
+#include <DearModdingUI/FontMetrics.h>
 #include <RE/B/BSShaderManager.h>
 
 #include <algorithm>
@@ -500,7 +501,7 @@ namespace cs::features
 				.scaleMinimum = _graphMin,
 				// The host rejects an empty scale range.
 				.scaleMaximum = std::max(_graphMax, _graphMin + 0.001f),
-				.size = { OverlayContentWidth(), 50.0f * settings.TextSize },
+				.size = { OverlayContentWidth(), 50.0f * dmui::ui::GetFontSize() / DearModdingUI::Theme::kBaselineFontSize * settings.TextSize },
 				.overlayText = a_overlay,
 				.referenceLines = references.data(),
 				.referenceLineCount = static_cast<std::uint32_t>(references.size()) });
