@@ -55,9 +55,6 @@ or verification work, not engine incompatibilities or a claim of full enabled-fe
   (`originalFogColorAmount=1`, `fogDensity=0.02`, `disableVanillaFog=false`) disagree with
   `ExponentialHeightFog.h` Settings defaults (`0`, `0.005`, `true`). Confirm intent upstream
   and align reset behavior or document the distinction. No shared code is changed.
-- `src/Features/ExponentialHeightFog.cpp` `Prepass`: both volumes share one `historyParameters` weight, but
-  a far volume without history binds a null history SRV. When the far volume starts after the near one already
-  has history, its first frames blend 96 percent of zero. Upload the weight per volume upstream.
 - `src/Features/ExponentialHeightFog.cpp:457–465`: the slice denominator is zero when
   `volumetricFogDistance = volumetricFogStartDistance + 9.5` above the camera near plane
   (for example, start 990.5 and distance 1000, both accepted settings). Clamp the far

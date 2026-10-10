@@ -2,7 +2,7 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-Pin: shared `b57493893` (upstream `488e408a9`). Consumed unchanged:
+Pin: shared `9d7087ed9` (upstream `488e408a9`). Consumed unchanged:
 `features/Skylighting/Shaders/Skylighting/Skylighting.hlsli` and `UpdateProbesCS.hlsl`; the port
 does not stage `Skylighting.ini`. Settings keys, defaults and ranges match the pin: `MaxZenith`
 (radians, 0 to 90 degrees, default 90), `MinDiffuseVisibility` and `MinSpecularVisibility`

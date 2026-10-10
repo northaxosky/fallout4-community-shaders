@@ -308,7 +308,8 @@ namespace cs::features::exponential_height_fog
 				a_temporal ? Halton(frame, 3) : 0.5f, a_temporal ? Halton(frame, 5) : 0.5f, 0 };
 		}
 		cb.historyParameters = { history ? std::clamp(a_settings.volumetricHistoryWeight, 0.0f, 0.99f) : 0,
-			static_cast<float>(std::clamp(a_settings.volumetricHistoryMissSampleCount, 1u, 16u)), 0, 0 };
+			static_cast<float>(std::clamp(a_settings.volumetricHistoryMissSampleCount, 1u, 16u)),
+			farHistory ? std::clamp(a_settings.volumetricHistoryWeight, 0.0f, 0.99f) : 0, 0 };
 		cb.jitterParameters = { a_temporal ? std::max(a_settings.volumetricSampleJitterMultiplier, 0.0f) : 0,
 			static_cast<float>(a_frame % 8), 0, 0 };
 		const auto* manager = engine::GetRenderTargetManager();
