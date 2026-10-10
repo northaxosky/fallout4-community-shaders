@@ -2,8 +2,9 @@
 
 Rules, Kind legend and cross-cutting records: [README](README.md).
 
-ISL, `LightLimitFix/Common.hlsli`, `Common/Game.hlsli` and `Common/Color.hlsli`
-are staged unchanged. The global replacement, global settings, comparison
+Upstream #2825 merged ISL into Light Limit Fix; the feature keeps its name here. `GetAttenuation`
+lives in the shared seam `LightLimitFix/Attenuation.hlsli`. It, `LightLimitFix/Common.hlsli`,
+`Common/Game.hlsli` and `Common/Color.hlsli` are staged unchanged. The global replacement, global settings, comparison
 view and b7 ISL block are deleted. CPU radius/luminance math matches the pin,
 including its zero-radius edge case.
 

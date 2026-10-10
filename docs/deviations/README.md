@@ -26,7 +26,7 @@ Core classification is not a claim of complete parity; Pending work remains unfi
 
 ## Shared seam edits
 
-Shared pin: the `extern\community-shaders-shared` submodule commit; upstream base `bff82b03e`.
+Shared pin: the `extern\community-shaders-shared` submodule commit; upstream base `488e408a9`.
 FO4 consumes unchanged files through `xmake\shared.lua`; shared include paths cannot be replaced.
 The native entry-point naming boundary is documented under Shader replacement.
 
@@ -34,11 +34,8 @@ The native entry-point naming boundary is documented under Shader replacement.
 |---|---|---|---|---|
 | Framework | `src/Features/PerformanceOverlay.h`, `src/Features/PerformanceOverlay/{CircularBuffer,DrawCallRow}.h`, `src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.{h,cpp}` | `6fd72a4a5` | Split portable history/timing rows from the Skyrim feature header so hosts can consume them without its engine dependencies | In the shared fork; upstream PR candidate, not filed |
 | Forced | `package/Shaders/Common/FrameBuffer.hlsli` | `e305ed0a4` | `FRAMEBUFFER_REGISTER` defaults to b12 and permits host binding at b4; FO4 engine shaders already bind the native per-frame buffer at b12 (`package/Shaders/Water.hlsl:3`, `cbuffer PerFrame : register(b12)`) | In the shared fork; no upstream PR recorded |
-| Fix | `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104` | `13d9d2e2d` | Scale the center-normal UV by `frameScale`, matching the neighbor lookups in half/quarter-resolution dynamic-resolution frames | community-shaders/skyrim-community-shaders#2795 |
 | Fix | `features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:7` | `6f81ebc25` | Remove the extra half-pixel offset from pixel-centered SV_POSITION before integer mask lookup | In the shared fork; upstream PR candidate, not filed |
-| Fix | `features/Water Effects/Shaders/WaterEffects/WaterParallax.hlsli` | `eacfd1c6a` | Seed the parallax march with the real height at offset 0 instead of 1.0, so alpha-less normals give zero offset | community-shaders/skyrim-community-shaders#2837 |
-| Fix | `features/Water Effects/Shaders/WaterEffects/WaterParallax.hlsli` | `d456e9c5` | Anchor the parallax march to the mean height from each normal map's smallest mip, so the mean surface sits on the water plane | community-shaders/skyrim-community-shaders#2838 |
-| Fix | `package/Shaders/Common/ShadowSampling.hlsli:139` | `bf36f3353` | Apply `Color::Ambient` to the DALC ambient before the IBL replacement so it matches the linearized directional light; identity without Linear Lighting | community-shaders/skyrim-community-shaders#2862 |
+| Forced | `features/Light Limit Fix/Shaders/LightLimitFix/Attenuation.hlsli`, `LightLimitFix.hlsli` | `b57493893` | Move `GetAttenuation` and its constants into their own include; `LightLimitFix.hlsli` includes it, so upstream callers are unchanged. The rest of `LightLimitFix.hlsli` declares Skyrim's clustered-lighting b3 `StrictLightData` and t35-t37 buffers, which FO4 cannot include | In the shared fork; community-shaders/skyrim-community-shaders#2864 |
 | Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/CaptureCommon.hlsli` | `83efe1ad9` | Optional prepared position/color/UV inputs, geometry/sky tags and capture origin isolate FO4's +Z, partitioned depth, infinite far plane and diffuse reconstruction; default Skyrim sampling/history are unchanged | In the shared fork; upstream PR candidate, not filed |
 | Forced | `features/Dynamic Cubemaps/Shaders/DynamicCubemaps/DynamicCubemaps.hlsli` | `83efe1ad9` | Optional cube registers/custom-consumer guard and extracted explicit-sampler normalization let native FO4 deferred slots/samplers call shared arithmetic; default Skyrim registers/consumers are unchanged | In the shared fork; upstream PR candidate, not filed |
 
@@ -50,7 +47,7 @@ All seven ExponentialHeightFog shaders and the Color, FastMath, GBuffer, Shading
 IBL dependencies, ShadowSampling and the Skylighting include and probe-update shader are also staged unchanged.
 Bend's CPU header is identical modulo comments; its
 existing SSS consumer uses the unchanged shared header. PerformanceOverlay uses shared QPC/FPS
-helpers, the profiler and the A/B aggregator. `src/Shared/PerfUtils.h` supplies Windows declarations
+helpers, the profiler and the A/B aggregator. Skylighting evaluates its occlusion SH basis with the shared `SphericalHarmonics.{h,cpp}`. `src/Shared/PerfUtils.h` supplies Windows declarations
 and scopes MSVC C4267 suppression for the upstream vector mean; the global PCH is unchanged.
 
 | Kind | Difference | Where |
@@ -227,9 +224,6 @@ their packet and bindings when resources change. See Shader contribution for the
 - `src/Utils/PerfUtils.h:41`: `Mean` implicitly converts `size_t` to float, raising C4267
   under FO4's `/W4 /WX`; an explicit float conversion preserves its current arithmetic.
   FO4 scopes the warning in `src/Shared/PerfUtils.h`, without changing shared behavior.
-- `features/Screen Space GI/Shaders/ScreenSpaceGI/blur.cs.hlsl:104`: the center normal lookup
-  needs `frameScale`. Main's correction is retained as shared seam `13d9d2e2d`; upstream PR is
-  community-shaders/skyrim-community-shaders#2795. No FO4 shader copy remains.
 - `features/Screen Space GI/Shaders/ScreenSpaceGI/gi.cs.hlsl:232`: the experimental specular
   half-angle calculation has inconsistent angular units. Upstream #2792 (adopted at `bff82b03e`)
   corrects only the blur half-angle, not this one; the pinned behavior remains unchanged.
