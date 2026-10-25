@@ -52,7 +52,6 @@ namespace FO4RainRefraction
 		float transmissionLobe = pow(saturate(dot(surface.refractDir, L)), Raindrop::TransmissionExponent) * (Raindrop::TransmissionExponent + 2.0) / Math::TAU;
 		float3 transmission = transmissionLobe * (1.0 - BRDF::F_Schlick(Raindrop::WaterF0, NdotV));
 
-		// FO4: the pin renames Color::IrradianceToLinear to SceneToLinear.
 		return ColorManagement::SceneToLinear(lightColor) * (specular + transmission);
 	}
 
