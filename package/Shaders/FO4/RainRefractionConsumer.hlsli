@@ -7,7 +7,7 @@
 #	include "FO4/FO4ShaderData.hlsli"
 #endif
 
-// FO4: the vertex stage has no Dynamic Cubemaps define, so only the pixel stage gates on it.
+// FO4: no Dynamic Cubemaps define in the vertex stage; only PS gates on it.
 #if defined(FO4_RAIN_REFRACTION) && defined(DYNAMIC_CUBEMAPS) && defined(PSHADER)
 #	define FO4_REFRACTIVE_RAIN
 
@@ -66,15 +66,23 @@ namespace FO4RainRefraction
 		return dirLightColor;
 	}
 
+	struct Drop
+	{
+		Surface surface;
+		float3 positionWS;
+		float3 ambient;  // Fresnel blend of the refracted and reflected environment
+		float alpha;
+	};
+
 	// FO4: the effect's base sampler stands in for upstream's SampSourceTexture.
-	float4 Shade(float3 screenPosition, float2 raindropUV, bool frontFace, SamplerState dropSampler)
+	Drop Prepare(float3 screenPosition, float2 raindropUV, bool frontFace, SamplerState dropSampler)
 	{
 		float4 raindropNormal = TexRaindropNormals.Sample(dropSampler, raindropUV);
 		float alpha = saturate(raindropNormal.w * (1.0 - SharedData::rainRefractionSettings.MotionTransparency));
 		clip(alpha - (4.0 / 255.0));
 		raindropNormal.y = 1.0 - raindropNormal.y;
 
-		// FO4: position rebuilds from SV_POSITION; camera at origin.
+		// FO4: FO4Forward handles dynamic resolution and first-person depth.
 		float3 posWS = FO4Forward::WorldPosition(screenPosition);
 
 		// World TBN from screen derivatives; the camera-aligned billboard spans X/Y
@@ -101,12 +109,25 @@ namespace FO4RainRefraction
 		float3 reflectColor = ColorManagement::SceneToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(dropSampler, reflectDir, 0).xyz);
 		float3 refractColor = ColorManagement::SceneToLinear(DynamicCubemaps::EnvReflectionsTexture.SampleLevel(dropSampler, refractDir, 0).xyz);
 
-		// The env cubemap carries faint bounce light, so lights shade the drop directly
-		// FO4: point lights await Light Limit Fix.
-		Surface drop = { normalWS, V, refractDir };
-		float3 directLighting = ShadeLight(drop, GetDirLightColor(posWS), SharedData::DirLightDirection.xyz);
+		Drop drop;
+		drop.surface.normal = normalWS;
+		drop.surface.view = V;
+		drop.surface.refractDir = refractDir;
+		drop.positionWS = posWS;
+		drop.ambient = lerp(refractColor, reflectColor, fresnel);
+		drop.alpha = alpha;
+		return drop;
+	}
 
-		return float4(ColorManagement::LinearToScene(lerp(refractColor, reflectColor, fresnel) + directLighting), alpha);
+	// The env cube holds faint bounce light, so lights also shade the drop.
+	float3 ShadeSun(Drop drop)
+	{
+		return ShadeLight(drop.surface, GetDirLightColor(drop.positionWS), SharedData::DirLightDirection.xyz);
+	}
+
+	float4 Finish(Drop drop, float3 directLighting)
+	{
+		return float4(ColorManagement::LinearToScene(drop.ambient + directLighting), drop.alpha);
 	}
 }
 #endif

@@ -146,6 +146,25 @@ struct PSOutput
 };
 
 #	if defined(LIGHTING)
+// Radius fade times spot cone, with the unit light-to-point direction in lightDist.
+// A macro because routing the stock lighting through a function changes its bytecode.
+#		define FO4_EFFECT_LIGHT_FALLOFF(msPosition, lightFadeMul, lightDistX, lightDistY, lightDistZ)                \
+			float4 lightDistX = msPosition.xxxx - PLightPositionX;                                                    \
+			float4 lightDistY = msPosition.yyyy - PLightPositionY;                                                    \
+			float4 lightDistZ = msPosition.zzzz - PLightPositionZ;                                                    \
+			float4 lightDistance = sqrt(lightDistX * lightDistX + lightDistY * lightDistY + lightDistZ * lightDistZ); \
+			float4 lightFadeMul = saturate(lightDistance * PLightingRadiusInverseSquared);                            \
+			lightFadeMul = 1.0.xxxx - lightFadeMul * lightFadeMul;                                                    \
+			lightFadeMul = pow(lightFadeMul, 2.2);                                                                    \
+			lightDistance = max(lightDistance, 0.001);                                                                \
+			lightDistX /= lightDistance;                                                                              \
+			lightDistY /= lightDistance;                                                                              \
+			lightDistZ /= lightDistance;                                                                              \
+			float4 spotFade = saturate(lightDistX * PSpotDirX + lightDistY * PSpotDirY + lightDistZ * PSpotDirZ);     \
+			spotFade = saturate(1.0.xxxx - (1.0.xxxx - spotFade) / (-PSpotAngle + 1.0.xxxx));                         \
+			float4 spotPower = (bool4)PSpotPower ? min(pow(spotFade, PSpotPower), 1.0.xxxx) : 1.0.xxxx;               \
+			lightFadeMul *= spotPower;
+
 float3 GetLightingColor(float3 msPosition
 #		if defined(FO4_EFFECT_LIGHTING)
 	,
@@ -153,34 +172,7 @@ float3 GetLightingColor(float3 msPosition
 #		endif
 )
 {
-	float4 lightDistX = msPosition.xxxx - PLightPositionX;
-	float4 lightDistY = msPosition.yyyy - PLightPositionY;
-	float4 lightDistZ = msPosition.zzzz - PLightPositionZ;
-	float4 lightDistance = sqrt(
-		lightDistX * lightDistX +
-		lightDistY * lightDistY +
-		lightDistZ * lightDistZ);
-	float4 lightFadeMul = saturate(lightDistance * PLightingRadiusInverseSquared);
-	lightFadeMul = 1.0.xxxx - lightFadeMul * lightFadeMul;
-	lightFadeMul = pow(lightFadeMul, 2.2);
-
-	lightDistance = max(lightDistance, 0.001);
-	lightDistX /= lightDistance;
-	lightDistY /= lightDistance;
-	lightDistZ /= lightDistance;
-
-	float4 spotFade = saturate(
-		lightDistX * PSpotDirX +
-		lightDistY * PSpotDirY +
-		lightDistZ * PSpotDirZ);
-	spotFade = saturate(
-		1.0.xxxx -
-		(1.0.xxxx - spotFade) /
-			(-PSpotAngle + 1.0.xxxx));
-	float4 spotPower = (bool4)PSpotPower ?
-	                       min(pow(spotFade, PSpotPower), 1.0.xxxx) :
-	                       1.0.xxxx;
-	lightFadeMul *= spotPower;
+	FO4_EFFECT_LIGHT_FALLOFF(msPosition, lightFadeMul, lightDistX, lightDistY, lightDistZ)
 
 	float3 color = DLightColor.xyz;
 #		if defined(FO4_EFFECT_LIGHTING)
@@ -190,6 +182,26 @@ float3 GetLightingColor(float3 msPosition
 	color.y += dot(PLightColorG * lightFadeMul, 1.0.xxxx);
 	color.z += dot(PLightColorB * lightFadeMul, 1.0.xxxx);
 	return color;
+}
+#	endif
+
+#	if defined(FO4_REFRACTIVE_RAIN) && defined(LIGHTING)
+// Adds the engine's effect lights to lighting, each shaded by ShadeLight.
+void AddPointLighting(FO4RainRefraction::Drop drop, inout float3 lighting)
+{
+	FO4_EFFECT_LIGHT_FALLOFF(drop.positionWS, fade, dirX, dirY, dirZ)
+	// FO4: engine light colors are linear and unscaled, like LLF's light.color.
+	float3 lightColor[4] = {
+		float3(PLightColorR.x, PLightColorG.x, PLightColorB.x),
+		float3(PLightColorR.y, PLightColorG.y, PLightColorB.y),
+		float3(PLightColorR.z, PLightColorG.z, PLightColorB.z),
+		float3(PLightColorR.w, PLightColorG.w, PLightColorB.w)
+	};
+	[unroll] for (uint i = 0; i < 4; i++)
+	{
+		float3 L = -float3(dirX[i], dirY[i], dirZ[i]);
+		lighting += FO4RainRefraction::ShadeLight(drop.surface, lightColor[i] * fade[i], L);
+	}
 }
 #	endif
 
@@ -270,7 +282,12 @@ PSOutput main(PSInput input
 #			if defined(FO4_REFRACTIVE_RAIN)
 	[branch] if (SharedData::rainRefractionSettings.Enable)
 	{
-		output.Color = FO4RainRefraction::Shade(input.Position.xyz, input.RaindropData, frontFace, SampBaseSampler);
+		FO4RainRefraction::Drop drop = FO4RainRefraction::Prepare(input.Position.xyz, input.RaindropData, frontFace, SampBaseSampler);
+		float3 directLighting = FO4RainRefraction::ShadeSun(drop);
+#				if defined(LIGHTING)
+		AddPointLighting(drop, directLighting);
+#				endif
+		output.Color = FO4RainRefraction::Finish(drop, directLighting);
 		return output;
 	}
 #			endif
@@ -1406,7 +1423,7 @@ VSOutput main(VSInput input)
 	output.WeatherCoord.w = dot(OcclusionWorldViewProj[3], weatherPosition);
 #	endif
 #	ifdef FO4_RAIN_REFRACTION
-	// Corner offsets are +-particle size; their sign is the UV within the atlas cell
+	// Corner offsets are +-particle size; their sign is the UV in the atlas cell
 	output.RaindropData = step(0, input.WeatherData.xy);
 #	endif
 #	ifdef ENVMAP
