@@ -6,6 +6,7 @@
 #include "LODBlendingSettings.h"
 #include "LightAuthoring.h"
 #include "PerformanceOverlaySettings.h"
+#include "RainRefractionSettings.h"
 #include "Render/TemporalRenderSettings.h"
 #include "RenderDocSettings.h"
 #include "ScreenSpaceGISettings.h"
@@ -89,6 +90,7 @@ namespace
 			std::pair{ "LODBlending", MakeSchemaView(lod_blending::kSchema) },
 			std::pair{ "TerrainVariation", MakeSchemaView(terrain_variation::kSchema) },
 			std::pair{ "TerrainBlending", SchemaView{} },
+			std::pair{ "RainRefraction", MakeSchemaView(rain_refraction::kSchema) },
 			std::pair{ "ExtendedMaterials", MakeSchemaView(extended_materials::kSchema) },
 			std::pair{ "MotionVectorFixes", SchemaView{} },
 			std::pair{ "Upscaling", MakeSchemaView(cs::render::temporal::kSchema) },

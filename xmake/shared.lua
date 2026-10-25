@@ -29,6 +29,7 @@ function main(target)
             "features/Screen Space GI/Shaders/ScreenSpaceGI",
             "features/Light Limit Fix/Shaders/LightLimitFix/Common.hlsli",
             "features/Light Limit Fix/Shaders/LightLimitFix/Attenuation.hlsli",
+            "features/Rain Refraction/Shaders/RainRefraction/Raindrops.png",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/RaymarchCS.hlsl",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/bend_sss_gpu.hlsli",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli",

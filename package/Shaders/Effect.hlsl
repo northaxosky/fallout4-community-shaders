@@ -1,6 +1,7 @@
 #ifdef BSEFFECT_PS_SOURCE
 #	include "FO4/FogConsumer.hlsli"
 #	include "FO4/EffectLightingConsumer.hlsli"
+#	include "FO4/RainRefractionConsumer.hlsli"
 #	if defined(ENVCUBE_RAIN) || defined(ENVCUBE_SNOW)
 #		define WEATHER
 #	endif
@@ -110,6 +111,9 @@ struct PSInput
 #	if defined(WEATHER)
 	float4 WeatherCoord: TEXCOORD3;
 #	endif
+#	if defined(FO4_RAIN_REFRACTION)
+	float2 RaindropData: TEXCOORD2;
+#	endif
 #	if defined(ENVMAP)
 	float3 Tangent: TEXCOORD7;
 	float3 Bitangent: TEXCOORD8;
@@ -189,7 +193,12 @@ float3 GetLightingColor(float3 msPosition
 }
 #	endif
 
-PSOutput main(PSInput input)
+PSOutput main(PSInput input
+#	if defined(FO4_REFRACTIVE_RAIN)
+	,
+	bool frontFace : SV_IsFrontFace
+#	endif
+)
 {
 	PSOutput output;
 #	if defined(UI_MASK_RECTS)
@@ -258,6 +267,13 @@ PSOutput main(PSInput input)
 	float weatherDepth =
 		TexWeatherDepth.Load(int3(weatherPixelInt, 0)).x;
 	clip(weatherDepth - input.WeatherCoord.z);
+#			if defined(FO4_REFRACTIVE_RAIN)
+	[branch] if (SharedData::rainRefractionSettings.Enable)
+	{
+		output.Color = FO4RainRefraction::Shade(input.Position.xyz, input.RaindropData, frontFace, SampBaseSampler);
+		return output;
+	}
+#			endif
 #		endif
 #		if defined(VC)
 #			if defined(MEMBRANE) && defined(GRAYSCALE_TO_COLOR) && defined(IGNORE_TEX_ALPHA) && !defined(GRAYSCALE_TO_ALPHA) && !defined(ALPHA_TEST)
@@ -862,6 +878,7 @@ PSOutput main(PSInput input)
 #endif
 
 #ifdef BSEFFECT_VS_SOURCE
+#	include "FO4/RainRefractionConsumer.hlsli"
 #	if defined(ENVCUBE_RAIN) || defined(ENVCUBE_SNOW)
 #		define WEATHER
 #	endif
@@ -1081,6 +1098,9 @@ struct VSOutput
 #	ifdef WEATHER
 	float4 WeatherCoord: TEXCOORD3;
 #	endif
+#	ifdef FO4_RAIN_REFRACTION
+	float2 RaindropData: TEXCOORD2;
+#	endif
 #	ifdef ENVMAP
 	float3 Tangent: TEXCOORD7;
 	float3 Bitangent: TEXCOORD8;
@@ -1203,6 +1223,15 @@ VSOutput main(VSInput input)
 #		ifdef ENVCUBE_RAIN
 	float rainFactor = (input.WeatherData.y + 1.0) * 0.5;
 	float4 rainStartPosition = -float4(EnvcubeVelocity.xyz, 0.0);
+#			ifdef FO4_RAIN_REFRACTION
+	if (SharedData::rainRefractionSettings.Enable) {
+		float velLen = length(EnvcubeVelocity.xyz);
+		if (velLen > 0) {
+			float3 normVel = EnvcubeVelocity.xyz / velLen;
+			rainStartPosition.xyz = -lerp(normVel, EnvcubeVelocity.xyz, SharedData::rainRefractionSettings.MotionStretch);
+		}
+	}
+#			endif
 #		endif
 	float3 weatherCell =
 		(input.Position.xyz + EnvcubeParticleOffset_RotationOffset.xyz) / EnvcubeSize_row0.x;
@@ -1375,6 +1404,10 @@ VSOutput main(VSInput input)
 	output.WeatherCoord.y = -dot(OcclusionWorldViewProj[1], weatherPosition);
 	output.WeatherCoord.z = dot(OcclusionWorldViewProj[2], weatherPosition);
 	output.WeatherCoord.w = dot(OcclusionWorldViewProj[3], weatherPosition);
+#	endif
+#	ifdef FO4_RAIN_REFRACTION
+	// Corner offsets are +-particle size; their sign is the UV within the atlas cell
+	output.RaindropData = step(0, input.WeatherData.xy);
 #	endif
 #	ifdef ENVMAP
 #		ifdef WEATHER

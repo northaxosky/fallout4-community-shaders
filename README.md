@@ -59,6 +59,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Terrain Shadows** | Long-range shadows from terrain. |
 | **Terrain Variation** | Stochastic terrain texture sampling to reduce tiling, including LOD terrain and landscape-textured meshes. |
 | **Terrain Blending** | Terrain blends into objects that sink into it, removing the hard seam. |
+| **Rain Refraction** | Rain drops reflect and refract the surrounding environment; requires Dynamic Cubemaps. |
 | **LOD Blending** | LOD terrain and object brightness and gamma matching, optional terrain vertex-color removal. |
 | **Screen Space GI** | Ambient occlusion and indirect lighting. |
 | **Inverse Square Lighting** | Opt-in per-light falloff; requires [authored light TOML files](features/InverseSquareLighting/README.md). Existing lights stay unchanged. |

@@ -4,6 +4,7 @@
 #include "ExtendedMaterials.h"
 #include "ImageBasedLighting.h"
 #include "LODBlending.h"
+#include "RainRefraction.h"
 #include "ScreenSpaceGI.h"
 #include "Skylighting.h"
 #include "TerrainBlending.h"
@@ -60,7 +61,10 @@ namespace cs
 					features::ExtendedMaterials::GetSingleton()),
 			.terrainBlendingSettings =
 				CollectFeatureData<TerrainBlendingFeatureData>(
-					features::TerrainBlending::GetSingleton())
+					features::TerrainBlending::GetSingleton()),
+			.rainRefractionSettings =
+				CollectFeatureData<RainRefractionFeatureData>(
+					features::RainRefraction::GetSingleton())
 		};
 	}
 }

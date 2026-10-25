@@ -5,6 +5,7 @@
 - Dynamic Cubemaps: `material_reflections` now defaults to 0.25.
 - Skylighting: fixed a bright patch around the player with 3 shadow cascades (`iDirShadowSplits=3`, the High/Ultra default).
 - Volumetric Shadows: new feature ported from Skyrim CS; softens the sun's soft, rim and back lighting and shadows the sun on water.
+- Rain Refraction: new feature ported from Skyrim CS; renders rain as refractive drops that reflect and refract the Dynamic Cubemaps environment, with motion stretch and transparency settings; requires Dynamic Cubemaps, and point lights are not yet shaded.
 
 ## 0.4.1
 

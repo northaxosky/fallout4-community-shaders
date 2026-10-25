@@ -43,6 +43,9 @@ load = true
 [features.TerrainBlending]
 load = true
 
+[features.RainRefraction]
+load = true
+
 [features.ExtendedMaterials]
 load = true
 

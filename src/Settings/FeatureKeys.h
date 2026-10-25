@@ -6,7 +6,7 @@
 
 namespace cs::feature_config
 {
-	inline constexpr std::array<std::string_view, 21> kAllFeatureKeys{
+	inline constexpr std::array<std::string_view, 22> kAllFeatureKeys{
 		"ScreenSpaceGI",
 		"Skylighting",
 		"InverseSquareLighting",
@@ -20,6 +20,7 @@ namespace cs::feature_config
 		"LODBlending",
 		"TerrainVariation",
 		"TerrainBlending",
+		"RainRefraction",
 		"ExtendedMaterials",
 		"MotionVectorFixes",
 		"Upscaling",
@@ -30,6 +31,7 @@ namespace cs::feature_config
 		"CSEditor"
 	};
 
-	// Activation follows this order, and IBL fails to load before Dynamic Cubemaps.
+	// Activation follows this order, and IBL and Rain Refraction fail to load before Dynamic Cubemaps.
 	static_assert(std::ranges::find(kAllFeatureKeys, "DynamicCubemaps") < std::ranges::find(kAllFeatureKeys, "ImageBasedLighting"));
+	static_assert(std::ranges::find(kAllFeatureKeys, "DynamicCubemaps") < std::ranges::find(kAllFeatureKeys, "RainRefraction"));
 }

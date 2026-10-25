@@ -5,6 +5,7 @@
 #include "../features/IBL/src/ShaderDefines.h"
 #include "../features/InverseSquareLighting/src/ShaderDefines.h"
 #include "../features/LODBlending/src/ShaderDefines.h"
+#include "../features/RainRefraction/src/ShaderDefines.h"
 #include "../features/ScreenSpaceGI/src/ShaderDefines.h"
 #include "../features/ScreenSpaceShadows/src/ShaderDefines.h"
 #include "../features/Skylighting/src/ShaderDefines.h"
@@ -36,6 +37,7 @@ namespace cs::engine
 				{ "LODBlending", &lod_blending_shader::kShaderDefines },
 				{ "TerrainVariation", &terrain_variation_shader::kShaderDefines },
 				{ "TerrainBlending", &terrain_blending_shader::kShaderDefines },
+				{ "RainRefraction", &rain_refraction_shader::kShaderDefines },
 				{ "ExtendedMaterials", &extended_materials_shader::kShaderDefines },
 				{ "WaterEffects", &water_effects::kShaderDefines },
 				{ "UnifiedWater", &unified_water::kShaderDefines },

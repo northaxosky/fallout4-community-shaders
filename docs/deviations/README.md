@@ -40,6 +40,7 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 - [LOD Blending](LODBlending.md)
 - [Terrain Variation](TerrainVariation.md)
 - [Terrain Blending](TerrainBlending.md)
+- [Rain Refraction](RainRefraction.md)
 - [Extended Materials](ExtendedMaterials.md)
 - [Dynamic Cubemaps](DynamicCubemaps.md)
 - [Image Based Lighting](IBL.md)
