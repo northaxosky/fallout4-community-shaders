@@ -4,7 +4,7 @@
 
 namespace cs::features::rain_refraction
 {
-	// Upstream RainRefraction::Settings without Enable, which is the framework switch.
+	// Upstream Settings minus Enable, which is the framework switch.
 	struct Settings
 	{
 		float MotionStretch = 2.0f;

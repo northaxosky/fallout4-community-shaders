@@ -31,7 +31,7 @@ namespace cs::feature_config
 		"CSEditor"
 	};
 
-	// Activation follows this order, and IBL and Rain Refraction fail to load before Dynamic Cubemaps.
+	// Activation order; IBL and Rain Refraction fail to load before Dynamic Cubemaps.
 	static_assert(std::ranges::find(kAllFeatureKeys, "DynamicCubemaps") < std::ranges::find(kAllFeatureKeys, "ImageBasedLighting"));
 	static_assert(std::ranges::find(kAllFeatureKeys, "DynamicCubemaps") < std::ranges::find(kAllFeatureKeys, "RainRefraction"));
 }

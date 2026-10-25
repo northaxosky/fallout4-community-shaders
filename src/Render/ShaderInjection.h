@@ -83,7 +83,7 @@ namespace cs::engine
 	void BindInjectionSamplers(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*) noexcept;
 	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
 	void CaptureShaderInjectionOutputs(ID3D11DeviceContext*) noexcept;
-	// Overrides the blend state for the current draw; the active scope restores it afterward.
+	// Overrides the draw's blend state; the active scope restores it afterward.
 	void SetInjectionBlendState(ID3D11DeviceContext*, ID3D11BlendState*, const float (&)[4], UINT) noexcept;
 
 	class ScopedShaderInjectionBindings

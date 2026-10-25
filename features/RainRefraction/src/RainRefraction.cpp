@@ -1,8 +1,8 @@
 #include "RainRefraction.h"
 
 #include <DearModdingUI/Client.h>
-#include <d3d11.h>
 #include <DirectXTex.h>
+#include <d3d11.h>
 #include <objbase.h>
 
 #include <algorithm>
@@ -34,7 +34,7 @@ namespace cs::features
 
 		constexpr const wchar_t* kRaindropsPath = L"Data\\Shaders\\RainRefraction\\Raindrops.png";
 
-		// The weather technique carries the rain define; the paired features carry the rest.
+		// The weather technique carries the rain define; paired features carry the rest.
 		constexpr std::array<std::string_view, 3> kRainPassDefines{ "ENVCUBE_RAIN", "RAIN_REFRACTION", "DYNAMIC_CUBEMAPS" };
 
 		void Tooltip(const char* a_text)
@@ -43,7 +43,7 @@ namespace cs::features
 				dmui::ui::SetTooltip("%s", a_text);
 		}
 
-		// WIC needs COM on the calling thread; an existing apartment of either kind is fine.
+		// WIC needs COM on this thread; an existing apartment of either kind is fine.
 		struct ComScope
 		{
 			ComScope() : initialized(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {}
@@ -57,7 +57,7 @@ namespace cs::features
 			bool initialized;
 		};
 
-		// Loads a raindrop normal map (RGB normal, A coverage) as a mipmapped BC7 texture.
+		// Loads the raindrop normal map (RGB normal, A coverage) as mipmapped BC7.
 		std::string LoadRaindrops(ID3D11Device* a_device, winrt::com_ptr<ID3D11ShaderResourceView>& a_view)
 		{
 			const auto fail = [](std::string_view a_step, HRESULT a_result) {
@@ -241,7 +241,7 @@ namespace cs::features
 		engine::BindInjectionShaderResources(a_context, kRaindropSlot, 1, &raindrops);
 		constexpr float blendFactor[4]{};
 		engine::SetInjectionBlendState(a_context, _alphaBlend.get(), blendFactor, 0xFFFFFFFFu);
-		_blendOverrides.fetch_add(1, std::memory_order_relaxed);
+		_rainBinds.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	std::string RainRefraction::GetTextureStatus() const
@@ -259,7 +259,7 @@ namespace cs::features
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_relaxed))
 			.Field("injection_operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("texture_status", status.empty() ? "loaded" : status)
-			.Field("blend_overrides", count(_blendOverrides));
+			.Field("rain_binds", count(_rainBinds));
 	}
 
 	void RainRefraction::DrawSettings()

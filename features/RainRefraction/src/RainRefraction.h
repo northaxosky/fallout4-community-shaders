@@ -6,6 +6,8 @@
 #include "RainRefractionSettings.h"
 #include "ShaderDefines.h"
 
+#include <d3d11.h>
+
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -13,14 +15,9 @@
 
 #include <winrt/base.h>
 
-struct ID3D11BlendState;
-struct ID3D11Device;
-struct ID3D11DeviceContext;
-struct ID3D11ShaderResourceView;
-
 namespace cs::features
 {
-	// Renders rain as refractive drops that reflect and refract the Dynamic Cubemaps environment.
+	// Rain as refractive drops reflecting the Dynamic Cubemaps environment.
 	class RainRefraction : public ShaderFeature<rain_refraction_shader::kShaderDefines>
 	{
 	public:
@@ -50,7 +47,7 @@ namespace cs::features
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(telemetry::Sink& a_sink) const override;
 
-		// Enable is cleared while the texture, blend state or reflections cube is missing.
+		// Enable clears while the texture, blend state or reflections cube is missing.
 		cs::RainRefractionFeatureData GetCommonBufferData();
 
 	private:
@@ -76,9 +73,9 @@ namespace cs::features
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
-		// The last packed Enable, so the blend override matches what the shader branches on.
+		// Last packed Enable, so the blend override matches the shader branch.
 		std::atomic_bool _packedEnable{ false };
 
-		std::atomic_uint64_t _blendOverrides{ 0 };
+		std::atomic_uint64_t _rainBinds{ 0 };
 	};
 }
