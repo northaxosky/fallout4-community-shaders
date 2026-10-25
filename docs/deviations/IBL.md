@@ -3,7 +3,7 @@
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
 | Divergence | Always on | Defaults off | |
-| Divergence | Consumers `#undef` `IBL` without `DYNAMIC_CUBEMAPS` | `Load` fails unless Dynamic Cubemaps is loaded | Effect and DistantTree are not DC targets |
+| Divergence | Consumers `#undef` `IBL` without `DYNAMIC_CUBEMAPS` | `Load` fails unless Dynamic Cubemaps is loaded | DistantTree is not a DC target |
 | Forced | Sky SH from the reflections cube, rendered every frame | Host `SkyReflectionCube` ([Dynamic Cubemaps](DynamicCubemaps.md)), rendered only while IBL asks; a stale or interior cube clears the sky SH to zero | Vanilla FO4 never writes the engine cube |
 | Forced | Lighting replaces `directionalAmbientColor`, then Skylighting scales it | Replaces the vanilla diffuse ambient in DFLight and the tiled pass before the Skylighting scale; reflection-direction ambient keeps only the Skylighting scale | Deferred ambient is a separate linear DALC addend |
 | Forced | SSGI recompose uses `Masks.z` luminance | Luminance from a replay of the lighting ambient (ambient times albedo) | FO4 has no `Masks.z` |

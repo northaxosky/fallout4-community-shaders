@@ -75,7 +75,7 @@ namespace cs::features
 	void ImageBasedLighting::Load()
 	{
 		PublishSettings();
-		// FO4: Effect and DistantTree are not DC targets; require DC at load.
+		// FO4: DistantTree is not a DC target; require DC at load.
 		if (!DynamicCubemaps::GetSingleton()->IsLoaded()) {
 			FailLoad("Image Based Lighting requires Dynamic Cubemaps to be loaded.");
 			return;
