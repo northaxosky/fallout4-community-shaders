@@ -291,7 +291,7 @@ namespace cs::features
 			"Registered post-sky capture, forward BSWater consumption at t{}-t{}, "
 			"composite consumption at t{}-t{}, and deferred lighting contributions.",
 			kDynamicCubemapPSSlot,
-			kDynamicCubemapPSSlot + kForwardCubemapSlotCount - 1,
+			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1,
 			kCompositionPSSlot,
 			kCompositionPSSlot + kCompositionPSSlotCount - 1);
 	}
@@ -725,47 +725,31 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		const auto views = GetForwardCubemapViews();
+		std::array<ID3D11ShaderResourceView*, kDynamicCubemapPSSlotCount> views{};
+		if (_injectionsOperational.load(std::memory_order_acquire) &&
+			_resourcesReady.load(std::memory_order_acquire)) {
+			const bool active =
+				_activeReflections.load(std::memory_order_acquire);
+			views = {
+				_cubemapValid[active ? 1 : 0].load(std::memory_order_acquire) ?
+					(active ? _reflectionsBC6H : _environmentBC6H).srv.get() :
+					nullptr,
+				_cubemapValid[0].load(std::memory_order_acquire) ?
+					_environmentBC6H.srv.get() :
+					nullptr,
+				cs::engine::GetSkyReflectionCubeSRV()
+			};
+			if (_debugVisualization.load(std::memory_order_acquire) ==
+				DebugVisualization::kEngineCube) {
+				views[0] = cs::engine::GetSkyReflectionCubeSRV();
+			}
+		}
 		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel,
 			kDynamicCubemapPSSlot,
 			static_cast<UINT>(views.size()),
 			views.data());
 		// Engine PS constant buffers stop at b2 and b12/b13, so forward consumers keep the substrate.
 		cs::render::BindSharedData(context, cs::engine::ShaderStage::kPixel);
-	}
-
-	std::array<ID3D11ShaderResourceView*, DynamicCubemaps::kForwardCubemapSlotCount>
-	DynamicCubemaps::GetForwardCubemapViews() const noexcept
-	{
-		std::array<ID3D11ShaderResourceView*, kForwardCubemapSlotCount> views{};
-		if (!_injectionsOperational.load(std::memory_order_acquire) ||
-			!_resourcesReady.load(std::memory_order_acquire)) {
-			return views;
-		}
-		const bool active =
-			_activeReflections.load(std::memory_order_acquire);
-		views = {
-			_cubemapValid[active ? 1 : 0].load(std::memory_order_acquire) ?
-				(active ? _reflectionsBC6H : _environmentBC6H).srv.get() :
-				nullptr,
-			_cubemapValid[0].load(std::memory_order_acquire) ?
-				_environmentBC6H.srv.get() :
-				nullptr,
-			cs::engine::GetSkyReflectionCubeSRV()
-		};
-		if (_debugVisualization.load(std::memory_order_acquire) ==
-			DebugVisualization::kEngineCube) {
-			views[0] = cs::engine::GetSkyReflectionCubeSRV();
-		}
-		return views;
-	}
-
-	bool DynamicCubemaps::BindForwardCubemaps(ID3D11DeviceContext* a_context) const noexcept
-	{
-		const auto views = GetForwardCubemapViews();
-		cs::engine::BindInjectionShaderResources(a_context, kDynamicCubemapPSSlot,
-			static_cast<UINT>(views.size()), views.data());
-		return views[0] != nullptr;
 	}
 
 	DynamicCubemaps::CaptureStream& DynamicCubemaps::Stream(

@@ -79,9 +79,6 @@ namespace cs::features
 		// The last packed Enable, so the blend override matches what the shader branches on.
 		std::atomic_bool _packedEnable{ false };
 
-		std::atomic_uint64_t _rainBinds{ 0 };
 		std::atomic_uint64_t _blendOverrides{ 0 };
-		std::atomic_uint64_t _cubeBound{ 0 };
-		std::atomic_uint64_t _cubeMissing{ 0 };
 	};
 }

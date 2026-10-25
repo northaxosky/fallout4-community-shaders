@@ -206,7 +206,7 @@ namespace cs::features
 		}
 		const bool enable = _injectionsOperational.load(std::memory_order_acquire) &&
 		                    _resourcesReady.load(std::memory_order_acquire) &&
-		                    DynamicCubemaps::GetSingleton()->GetForwardCubemapViews()[0] != nullptr;
+		                    DynamicCubemaps::GetSingleton()->GetReflectionsSRV() != nullptr;
 		_packedEnable.store(enable, std::memory_order_release);
 		return {
 			.Enable = enable ? 1u : 0u,
@@ -239,11 +239,8 @@ namespace cs::features
 			return;
 		auto* raindrops = _raindrops.get();
 		engine::BindInjectionShaderResources(a_context, kRaindropSlot, 1, &raindrops);
-		// Per draw, so the cube does not rely on frame bindings surviving.
-		(DynamicCubemaps::GetSingleton()->BindForwardCubemaps(a_context) ? _cubeBound : _cubeMissing).fetch_add(1, std::memory_order_relaxed);
 		constexpr float blendFactor[4]{};
 		engine::SetInjectionBlendState(a_context, _alphaBlend.get(), blendFactor, 0xFFFFFFFFu);
-		_rainBinds.fetch_add(1, std::memory_order_relaxed);
 		_blendOverrides.fetch_add(1, std::memory_order_relaxed);
 	}
 
@@ -262,10 +259,7 @@ namespace cs::features
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_relaxed))
 			.Field("injection_operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("texture_status", status.empty() ? "loaded" : status)
-			.Field("rain_binds", count(_rainBinds))
-			.Field("blend_overrides", count(_blendOverrides))
-			.Field("cube_bound", count(_cubeBound))
-			.Field("cube_missing", count(_cubeMissing));
+			.Field("blend_overrides", count(_blendOverrides));
 	}
 
 	void RainRefraction::DrawSettings()
