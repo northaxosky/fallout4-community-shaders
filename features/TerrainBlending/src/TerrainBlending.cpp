@@ -306,10 +306,8 @@ namespace cs::features
 		auto* constants = g_replay.passBuffer[pass].get();
 		cs::engine::BindInjectionShaderResources(a_context, kObjectDepthSlot, 1, &depth);
 		cs::engine::BindInjectionConstantBuffers(a_context, kReplayPassSlot, 1, &constants);
-		// The draw scope restores the captured targets and blend state after the draw.
-		cs::engine::CaptureShaderInjectionOutputs(a_context);
 		constexpr float blendFactor[4]{};
-		a_context->OMSetBlendState(g_replay.blend[pass].get(), blendFactor, 0xFFFFFFFFu);
+		cs::engine::SetInjectionBlendState(a_context, g_replay.blend[pass].get(), blendFactor, 0xFFFFFFFFu);
 		(pass == kColor ? _colorDraws : _dataDraws).fetch_add(1, std::memory_order_relaxed);
 	}
 

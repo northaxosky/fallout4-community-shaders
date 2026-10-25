@@ -99,6 +99,13 @@ namespace cs::engine
 		CaptureBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
 	}
 
+	void SetInjectionBlendState(ID3D11DeviceContext* a_context, ID3D11BlendState* a_blend, const float (&a_blendFactor)[4], UINT a_sampleMask) noexcept
+	{
+		CaptureShaderInjectionOutputs(a_context);
+		a_context->OMSetBlendState(a_blend, a_blendFactor, a_sampleMask);
+		RecordShaderInjectionD3DBinds();
+	}
+
 	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept
 	{
 		if (t_drawFrameStarted && t_drawMetrics.frame == a_frame)
