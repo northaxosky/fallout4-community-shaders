@@ -82,6 +82,12 @@ namespace cs::features
 		// The environment cube stands in while reflections are inactive.
 		ID3D11ShaderResourceView* GetReflectionsSRV() const noexcept;
 
+		static constexpr std::uint32_t kForwardCubemapSlotCount = 3;
+		// Reflections, environment and sky cubes at t30-t32; null entries are unpublished.
+		std::array<ID3D11ShaderResourceView*, kForwardCubemapSlotCount> GetForwardCubemapViews() const noexcept;
+		// Per-draw form of the frame binding; true when the reflections cube was published.
+		bool BindForwardCubemaps(ID3D11DeviceContext* a_context) const noexcept;
+
 	private:
 		static constexpr std::uint32_t kCubemapSize = 256;
 		static constexpr std::uint32_t kMipLevels = 9;
@@ -91,7 +97,6 @@ namespace cs::features
 		static constexpr std::uint32_t kPreviewWidth = 512;
 		static constexpr std::uint32_t kPreviewHeight = 256;
 		static constexpr std::uint32_t kDynamicCubemapPSSlot = 30;
-		static constexpr std::uint32_t kDynamicCubemapPSSlotCount = 3;
 		static constexpr std::uint32_t kCompositionPSSlot = 34;
 		static constexpr std::uint32_t kCompositionPSSlotCount = 2;
 
