@@ -7,6 +7,7 @@ local shader_directories = {
     "features/DynamicCubemaps/Shaders",
     "features/WaterEffects/Shaders",
     "features/Skylighting/Shaders",
+    "features/SubsurfaceScattering/Shaders",
     "features/VolumetricShadows/Shaders"
 }
 

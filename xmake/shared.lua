@@ -27,6 +27,7 @@ function main(target)
             "features/Skylighting/Shaders/Skylighting/Skylighting.hlsli",
             "features/Skylighting/Shaders/Skylighting/UpdateProbesCS.hlsl",
             "features/Screen Space GI/Shaders/ScreenSpaceGI",
+            "features/Subsurface Scattering/Shaders/SubsurfaceScattering",
             "features/Light Limit Fix/Shaders/LightLimitFix/Common.hlsli",
             "features/Light Limit Fix/Shaders/LightLimitFix/Attenuation.hlsli",
             "features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/RaymarchCS.hlsl",

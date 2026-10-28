@@ -15,10 +15,13 @@
 #include "Settings/LiveSettings.h"
 #include "Settings/SettingsRegistry.h"
 #include "SkylightingSettings.h"
+#include "SubsurfaceScatteringKernel.h"
+#include "SubsurfaceScatteringSettings.h"
 #include "TerrainVariationSettings.h"
 #include "World/WeatherVariableRegistry.h"
 
 #include "Check.h"
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 
@@ -68,6 +71,7 @@ namespace
 		auto registry = BuildCoreRegistry();
 		const std::array features{
 			std::pair{ "ScreenSpaceGI", MakeSchemaView(ssgi_settings::kSchema) },
+			std::pair{ "SubsurfaceScattering", MakeSchemaView(subsurface_scattering::kSchema) },
 			std::pair{ "Skylighting", MakeSchemaView(skylighting::kSchema) },
 			std::pair{ "InverseSquareLighting", MakeSchemaView(inverse_square_lighting::kSchema) },
 			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },
@@ -356,6 +360,29 @@ namespace
 		CHECK(value.count == 3 && value.thickness == before.thickness && published == before.thickness);
 	}
 
+	void TestSubsurfaceKernel()
+	{
+		using namespace cs::features::subsurface_scattering;
+		std::array<DirectX::XMFLOAT4, kKernelSamples> kernel{};
+		CalculateKernel({ 0.48f, 0.41f, 0.28f }, { 1.0f, 0.37f, 0.3f }, kernel);
+		// The zero offset leads and the strength blend keeps unit energy per channel.
+		CHECK(std::abs(kernel[0].w) < 1e-5f);
+		float sum[3]{};
+		for (const auto& sample : kernel) {
+			CHECK(sample.w >= -3.0f && sample.w <= 3.0f);
+			sum[0] += sample.x;
+			sum[1] += sample.y;
+			sum[2] += sample.z;
+		}
+		for (const float channel : sum)
+			CHECK(std::abs(channel - 1.0f) < 1e-4f);
+		// Zero strength passes the center through and drops every tap.
+		CalculateKernel({ 0.0f, 0.0f, 0.0f }, { 1.0f, 0.37f, 0.3f }, kernel);
+		CHECK(kernel[0].x == 1.0f && kernel[0].y == 1.0f && kernel[0].z == 1.0f);
+		for (std::size_t i = 1; i < kernel.size(); ++i)
+			CHECK(kernel[i].x == 0.0f && kernel[i].y == 0.0f && kernel[i].z == 0.0f);
+	}
+
 	void TestLightAuthoring()
 	{
 		using namespace cs::features::inverse_square_lighting;
@@ -417,6 +444,7 @@ int main()
 		TestWeatherProfiles(registry, directory / "weather.toml");
 		TestLiveSettings();
 		TestLightAuthoring();
+		TestSubsurfaceKernel();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
 		++cs::tests::failures;

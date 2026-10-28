@@ -42,6 +42,8 @@ namespace
 		Toggle("GI_SPECULAR")
 	};
 
+	const std::vector<Axis> kSubsurfaceScatteringAxes{ { {}, { { "HORIZONTAL", "" } }, { { "BURLEY", "" } } } };
+
 	// Runtime-compiled shaders with the defines their call sites select.
 	const std::vector<Shader>& Shaders()
 	{
@@ -68,6 +70,10 @@ namespace
 			{ "ScreenSpaceGI/gi.cs.hlsl", "cs_5_0", {}, kScreenSpaceGIAxes },
 			{ "ScreenSpaceGI/blur.cs.hlsl", "cs_5_0", {}, kScreenSpaceGIAxes },
 			{ "ScreenSpaceGI/upsample.cs.hlsl", "cs_5_0", {}, kScreenSpaceGIAxes },
+
+			{ "FO4/SubsurfaceScattering/PrepareCS.hlsl" },
+			{ "SubsurfaceScattering/DiffuseExtractionCS.hlsl" },
+			{ "SubsurfaceScattering/SeparableSSSCS.hlsl", "cs_5_0", {}, kSubsurfaceScatteringAxes },
 
 			// The shader's sample count is a scaled runtime value; compile its bounds.
 			{ "ScreenSpaceShadows/RaymarchCS.hlsl", "cs_5_0", { { "TERRAIN_BLENDING", "" } }, { { { { "SAMPLE_COUNT", "8" } }, { { "SAMPLE_COUNT", "480" } } } } },

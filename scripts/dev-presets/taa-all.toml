@@ -6,6 +6,9 @@ telemetry = true
 [features.ScreenSpaceGI]
 load = true
 
+[features.SubsurfaceScattering]
+load = true
+
 [features.Skylighting]
 load = true
 

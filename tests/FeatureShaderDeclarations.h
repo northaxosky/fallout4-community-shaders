@@ -8,6 +8,7 @@
 #include "../features/ScreenSpaceGI/src/ShaderDefines.h"
 #include "../features/ScreenSpaceShadows/src/ShaderDefines.h"
 #include "../features/Skylighting/src/ShaderDefines.h"
+#include "../features/SubsurfaceScattering/src/ShaderDefines.h"
 #include "../features/TerrainBlending/src/ShaderDefines.h"
 #include "../features/TerrainShadows/src/ShaderDefines.h"
 #include "../features/TerrainVariation/src/ShaderDefines.h"
@@ -27,6 +28,7 @@ namespace cs::engine
 			const std::pair<std::string_view, const ShaderDefineProvider*> features[]{
 				{ "ScreenSpaceShadows", &sss::kShaderDefines },
 				{ "ScreenSpaceGI", &ssgi::kShaderDefines },
+				{ "SubsurfaceScattering", &subsurface_scattering_shader::kShaderDefines },
 				{ "Skylighting", &skylighting_shader::kShaderDefines },
 				{ "InverseSquareLighting", &isl::kShaderDefines },
 				{ "DynamicCubemaps", &dc::kShaderDefines },

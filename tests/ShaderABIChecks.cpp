@@ -5,6 +5,7 @@
 #include "Render/SharedDataLayout.h"
 #include "Render/SubstrateSlots.h"
 #include "ScreenSpaceGIConstants.h"
+#include "SubsurfaceScatteringConstants.h"
 #include "Utils/ShaderCompile.h"
 #include "Utils/ShaderSamplerBindings.h"
 
@@ -318,6 +319,36 @@ namespace
 			return "SSGICB.PrevInvViewMat: expected column-major storage";
 		return {};
 	}
+	std::string VerifySubsurfaceScatteringABI(const std::filesystem::path& a_root)
+	{
+		using Constants = cs::features::subsurface_scattering::Constants;
+		const ABIField fields[]{
+			ABI(Constants, Kernels), ABI(Constants, BaseProfile), ABI(Constants, HumanProfile), ABI(Constants, SSSS_FOVY),
+			ABI(Constants, BurleySamples), ABI(Constants, ScatterMode), ABI(Constants, pad),
+			ABI(Constants, MeanFreePathBase), ABI(Constants, MeanFreePathHuman)
+		};
+		std::string error;
+		auto blob = cs::util::CompileShaderToBlob((a_root / "SubsurfaceScattering/SeparableSSSCS.hlsl").c_str(),
+			{ { "BURLEY", "1" } }, "cs_5_0", "main", &error, a_root);
+		if (!blob)
+			return error;
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(reflection.GetAddressOf()))))
+			return "Subsurface Scattering ABI reflection failed";
+		D3D11_SHADER_INPUT_BIND_DESC binding{};
+		if (FAILED(reflection->GetResourceBindingDescByName("PerFrameSSS", &binding)) || binding.BindPoint != 1)
+			return "PerFrameSSS: ABI slot mismatch";
+		auto* cb = reflection->GetConstantBufferByName("PerFrameSSS");
+		D3D11_SHADER_BUFFER_DESC desc{};
+		if (FAILED(cb->GetDesc(&desc)) || desc.Size != sizeof(Constants) || desc.Variables != std::size(fields))
+			return "PerFrameSSS: ABI buffer size/member count mismatch";
+		for (const auto& field : fields) {
+			D3D11_SHADER_VARIABLE_DESC value{};
+			if (FAILED(cb->GetVariableByName(field.name)->GetDesc(&value)) || value.StartOffset != field.offset || value.Size != field.size)
+				return std::string("PerFrameSSS.") + field.name + ": ABI offset/size mismatch";
+		}
+		return {};
+	}
 	std::string VerifySkylightingABI(const std::filesystem::path& a_root)
 	{
 		std::string error;
@@ -417,6 +448,8 @@ std::string VerifyShaderABI(const std::filesystem::path& a_root)
 		return "substrate ABI: " + error;
 	if (auto error = VerifySSGIABI(a_root); !error.empty())
 		return "SSGI ABI: " + error;
+	if (auto error = VerifySubsurfaceScatteringABI(a_root); !error.empty())
+		return "Subsurface Scattering ABI: " + error;
 	if (auto error = VerifySkylightingABI(a_root); !error.empty())
 		return "Skylighting ABI: " + error;
 	if (auto error = VerifyIBLABI(a_root); !error.empty())

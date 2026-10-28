@@ -24,6 +24,7 @@ local features = {
     "TerrainBlending",
     "ExtendedMaterials",
     "ScreenSpaceGI",
+    "SubsurfaceScattering",
     "Skylighting",
     "InverseSquareLighting",
     "DynamicCubemaps",
@@ -425,7 +426,7 @@ local function stock_shader_identity_target(name, compiler, tests)
         )
         add_files(shader_cache_sources)
         add_defines("NOMINMAX")
-        add_includedirs("features/ScreenSpaceGI/src")
+        add_includedirs("features/ScreenSpaceGI/src", "features/SubsurfaceScattering/src")
         add_packages("spdlog", "vcpkg::directxmath", "vcpkg::tomlplusplus")
         add_syslinks("bcrypt", "d3dcompiler", "version")
         set_values("fo4cs.identity_compiler", compiler)
