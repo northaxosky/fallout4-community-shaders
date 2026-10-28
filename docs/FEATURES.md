@@ -67,7 +67,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | TruePBR | Mixed | Surface POM (EM marcher under `TRUE_PBR`+`HasDisplacement`; same slice as Extended Materials POM) | Ext: PBR material loader + RMAOS lighting, coat/fuzz/SSS/hair, landscape/grass PBR, glints | NS | H | M | Med |
 | [Unified Water](deviations/UnifiedWater.md) | Port | Optical distance blend, distant terrain tile generation/lifetime, cache UI, material identity fix | FO4-specific requirement: preserve vanilla placed-water distance rendering. N/A: Skyrim world flowmap | Pt | M | S/M | Med |
 | [Upscaling](deviations/Upscaling.md) | Port | SR/native AA, DR/RCAS/reflection/depth consumers, canonical SDK depth, masks, underwater chain, FG/UI/Reflex | — | Pt | H | L | High |
-| Volumetric Lighting | Extension | — | Ext: native GFSDK godray controls and output-relative resolution (`feat/volumetric-lighting`), night-time (moon) godrays. N/A: Skyrim froxel VL patches (FO4 has no froxel renderer; volumetrics come from Exponential Height Fog) | NS | M | M | Med |
+| [Volumetric Lighting](deviations/VolumetricLighting.md) | Extension | — | Ext: native GFSDK godray controls and output-relative resolution (`feat/volumetric-lighting`), night-time (moon) godrays. N/A: Skyrim froxel VL patches (FO4 has no froxel renderer; volumetrics come from Exponential Height Fog) | NS | M | M | Med |
 | [Water Effects](deviations/WaterEffects.md) | Port | Exterior/secondary caustics, interior heights*, debug, water parallax (height from water-normal alpha) | N/A: FLOWMAP parallax (no FO4 flowmap path) | Pt | H | M | High |
 | Wetness Effects | — | removed; not ported | — | NS | — | — | — |
 

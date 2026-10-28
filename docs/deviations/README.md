@@ -56,6 +56,7 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 - [Sky Sync](SkySync.md)
 - [Volumetric Shadows](VolumetricShadows.md)
 - [Cloud Shadows](CloudShadows.md)
+- [Volumetric Lighting](VolumetricLighting.md)
 - [CS Editor](CSEditor.md)
 
 [upstream]: https://github.com/community-shaders/skyrim-community-shaders
