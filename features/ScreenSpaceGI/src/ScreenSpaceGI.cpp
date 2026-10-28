@@ -17,6 +17,7 @@
 #include "RE/D/DrawWorld.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
+#include "Render/ComputePasses.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
@@ -32,82 +33,8 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.screenspacegi");
 		using RT = RE::BSGraphics::RenderTargetID;
-		using Texture = std::unique_ptr<cs::buffer::Texture2D>;
-
-		Texture CreateTexture(UINT a_width, UINT a_height, DXGI_FORMAT a_format,
-			std::string_view a_name, UINT a_mips = 1)
-		{
-			D3D11_TEXTURE2D_DESC desc{};
-			desc.Width = a_width;
-			desc.Height = a_height;
-			desc.MipLevels = a_mips;
-			desc.ArraySize = 1;
-			desc.Format = a_format;
-			desc.SampleDesc.Count = 1;
-			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-			auto result = std::make_unique<cs::buffer::Texture2D>(desc);
-			D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
-			srv.Format = a_format;
-			srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-			srv.Texture2D.MipLevels = a_mips;
-			result->CreateSRV(srv);
-			if (a_mips == 1) {
-				D3D11_UNORDERED_ACCESS_VIEW_DESC uav{};
-				uav.Format = a_format;
-				uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-				result->CreateUAV(uav);
-			}
-			result->SetName(a_name, std::format("{}.SRV", a_name), std::format("{}.UAV", a_name));
-			return result;
-		}
-
-		// FO4: preserve t8-t9 and b10 without widening the engine low-slot cleanup.
-		class Passes
-		{
-		public:
-			Passes(ID3D11DeviceContext* a_context, UINT a_consumerSlot, ID3D11Buffer* a_consumer) :
-				_context(a_context), _consumerSlot(a_consumerSlot)
-			{
-				_context->CSGetConstantBuffers(_consumerSlot, 1, _consumer.put());
-				_context->CSSetConstantBuffers(_consumerSlot, 1, &a_consumer);
-				ID3D11ShaderResourceView* tail[2]{};
-				_context->CSGetShaderResources(8, 2, tail);
-				for (UINT i = 0; i < 2; ++i)
-					_tail[i].attach(tail[i]);
-				ID3D11ShaderResourceView* nullSRVs[8]{};
-				ID3D11UnorderedAccessView* nullUAVs[6]{};
-				_context->CSSetShaderResources(0, 8, nullSRVs);
-				_context->CSSetUnorderedAccessViews(0, 6, nullUAVs, nullptr);
-			}
-			~Passes()
-			{
-				ID3D11ShaderResourceView* tail[]{ _tail[0].get(), _tail[1].get() };
-				_context->CSSetShaderResources(8, 2, tail);
-				auto* consumer = _consumer.get();
-				_context->CSSetConstantBuffers(_consumerSlot, 1, &consumer);
-			}
-			void Run(ID3D11ComputeShader* a_shader,
-				std::initializer_list<ID3D11ShaderResourceView*> a_srvs,
-				std::initializer_list<ID3D11UnorderedAccessView*> a_uavs,
-				UINT a_width, UINT a_height, UINT a_group, std::string_view a_name)
-			{
-				cs::render::annotation::ScopedEvent event(a_name);
-				_context->CSSetShaderResources(0, static_cast<UINT>(a_srvs.size()), a_srvs.begin());
-				_context->CSSetUnorderedAccessViews(0, static_cast<UINT>(a_uavs.size()), a_uavs.begin(), nullptr);
-				_context->CSSetShader(a_shader, nullptr, 0);
-				_context->Dispatch((a_width + a_group - 1) / a_group, (a_height + a_group - 1) / a_group, 1);
-				ID3D11ShaderResourceView* nullSRVs[10]{};
-				ID3D11UnorderedAccessView* nullUAVs[6]{};
-				_context->CSSetShaderResources(0, static_cast<UINT>(a_srvs.size()), nullSRVs);
-				_context->CSSetUnorderedAccessViews(0, static_cast<UINT>(a_uavs.size()), nullUAVs, nullptr);
-			}
-
-		private:
-			ID3D11DeviceContext* _context;
-			UINT _consumerSlot;
-			winrt::com_ptr<ID3D11Buffer> _consumer;
-			std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 2> _tail;
-		};
+		using cs::render::ComputePasses;
+		using cs::render::CreateComputeTexture;
 	}
 
 	ScreenSpaceGI* ScreenSpaceGI::GetSingleton()
@@ -242,13 +169,13 @@ namespace cs::features
 	{
 		const bool specular = _settings.enableExperimentalSpecularGI;
 		if (!a_resources.normalGloss || a_resources.normalGlossSpecular != specular) {
-			a_resources.normalGloss = CreateTexture(a_width, a_height,
+			a_resources.normalGloss = CreateComputeTexture(a_width, a_height,
 				specular ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R16G16_FLOAT, "SSGI/NormalGloss");
 			a_resources.normalGlossSpecular = specular;
 		}
 		if (_settings.enableGI) {
 			if (!a_resources.diffuse)
-				a_resources.diffuse = CreateTexture(a_width, a_height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/Diffuse");
+				a_resources.diffuse = CreateComputeTexture(a_width, a_height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/Diffuse");
 		} else {
 			a_resources.diffuse.reset();
 		}
@@ -257,7 +184,7 @@ namespace cs::features
 			const float clear[4]{};
 			auto* context = cs::engine::GetImmediateContext();
 			for (UINT i = 0; i < 2; ++i) {
-				a_resources.specular[i] = CreateTexture(a_width, a_height, DXGI_FORMAT_R16G16B16A16_FLOAT, std::format("SSGI/Specular[{}]", i));
+				a_resources.specular[i] = CreateComputeTexture(a_width, a_height, DXGI_FORMAT_R16G16B16A16_FLOAT, std::format("SSGI/Specular[{}]", i));
 				context->ClearUnorderedAccessViewFloat(a_resources.specular[i]->uav.get(), clear);
 			}
 		} else if (!specular) {
@@ -280,7 +207,7 @@ namespace cs::features
 			Resources resources;
 			auto* device = cs::engine::GetDevice();
 			const auto mip = [&](MipTexture& a_texture, DXGI_FORMAT a_format, const char* a_name) {
-				a_texture.texture = CreateTexture(width, height, a_format, a_name, 5);
+				a_texture.texture = CreateComputeTexture(width, height, a_format, a_name, 5);
 				for (UINT i = 0; i < 5; ++i) {
 					D3D11_UNORDERED_ACCESS_VIEW_DESC desc{};
 					desc.Format = a_format;
@@ -294,11 +221,11 @@ namespace cs::features
 			mip(resources.normals, DXGI_FORMAT_R8G8_UNORM, "SSGI/Normal");
 			mip(resources.radiance, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/Radiance");
 			EnsurePrepareResources(resources, width, height);
-			resources.radianceTemp = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/RadianceTemp");
-			resources.previousGeometry = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/PreviousGeometry");
+			resources.radianceTemp = CreateComputeTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/RadianceTemp");
+			resources.previousGeometry = CreateComputeTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "SSGI/PreviousGeometry");
 			const auto pair = [&](TexturePair& a_pair, DXGI_FORMAT a_format, const char* a_name) {
 				for (UINT i = 0; i < 2; ++i)
-					a_pair[i] = CreateTexture(width, height, a_format, std::format("{}[{}]", a_name, i));
+					a_pair[i] = CreateComputeTexture(width, height, a_format, std::format("{}[{}]", a_name, i));
 			};
 			pair(resources.ao, DXGI_FORMAT_R8_UNORM, "SSGI/AO");
 			pair(resources.accumulation, DXGI_FORMAT_R8_UNORM, "SSGI/Accumulation");
@@ -452,7 +379,7 @@ namespace cs::features
 			UpdateConsumer(true, tiled);
 			ID3D11SamplerState* samplers[]{ _pointSampler.get(), cs::render::GetLinearClampSampler() };
 			context->CSSetSamplers(0, 2, samplers);
-			Passes pass(context, kConsumerSlot, _consumer->CB());
+			ComputePasses pass(context, kConsumerSlot, _consumer->CB());
 			cs::render::annotation::ScopedEvent generation("ScreenSpaceGI::Generate", false);
 			auto& t = _textures;
 			const auto specularSRV = [&](UINT a_index) { return t.specular[a_index] ? t.specular[a_index]->srv.get() : nullptr; };
