@@ -3,9 +3,12 @@
 #include "Feature.h"
 #include "Menu/SettingWidgets.h"
 
+#include <DearModdingUI/Presentation.h>
 #include <DearModdingUI/UI.h>
 
+#include <span>
 #include <string>
+#include <vector>
 
 namespace cs::settings
 {
@@ -36,6 +39,24 @@ namespace cs::settings
 		{
 			const std::string label = ui::FieldLabel(a_field);
 			const bool changed = Discrete(dmui::ui::Checkbox(label.c_str(), &(a_settings.*a_field.member)));
+			ui::Tooltip(a_tooltip);
+			return changed;
+		}
+
+		// A schema choice as a combo labeled by its description, with a tooltip.
+		template <class Field, class Settings>
+		bool Choice(const Field& a_field, Settings& a_settings, const char* a_tooltip)
+		{
+			using Type = typename Field::ValueType;
+			std::vector<dmui::ChoiceOption<Type>> options;
+			for (const auto& choice : a_field.choices)
+				options.push_back({ choice.value, std::string(choice.text), std::string(choice.text), true });
+			auto& value = a_settings.*a_field.member;
+			const auto result = dmui::DrawChoice<Type>(a_field.key, value,
+				std::span<const dmui::ChoiceOption<Type>>{ options }, "Unavailable", a_field.description);
+			const bool changed = Discrete(result.changed);
+			if (changed)
+				value = *result.selected;
 			ui::Tooltip(a_tooltip);
 			return changed;
 		}
