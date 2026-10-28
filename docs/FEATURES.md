@@ -54,7 +54,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Linear Lighting | N/A | Shared-color compatibility (done), optional calibration controls | N/A: linearization (FO4 is linear), ENB | Substrate | L | S | High |
 | [LOD Blending](deviations/LODBlending.md) | Core | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Core | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
-| [Rain Refraction](deviations/RainRefraction.md) | Core | Refractive drop shading from the Dynamic Cubemaps environment, sun and effect-light shading, motion stretch and transparency | N/A: Effects 11 preset coupling | Pt | M | S | Med |
+| [Rain Refraction](deviations/RainRefraction.md) | Core | Refractive drop shading from the Dynamic Cubemaps environment, sun shading, motion stretch and transparency; point lights pending (Light Limit Fix) | N/A: Effects 11 preset coupling | Pt | M | S | Med |
 | [Remote Control](deviations/RemoteControl.md) | Core | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc capture tools and events; NvPerf tool and screenshot capture pending | — | Pt | H | M | High |
 | [Screen Space GI](deviations/ScreenSpaceGI.md) | Core | AO, GI, temporal, specular GI, vertex AO (relocated), provider wiring | — | Pt | H | M | High |
 | [Screen-Space Shadows](deviations/ScreenSpaceShadows.md) | Core | Bend raymarch, direct/back visibility, tree/alpha/secondary receivers, preview/telemetry | — | Pt | H | M | High |

@@ -4,7 +4,7 @@
 
 - Terrain Blending: new feature ported from Skyrim CS; blends terrain into objects that sink into it by depth, removing the hard seam; no per-mesh opt-out yet.
 - Volumetric Shadows: new feature ported from Skyrim CS; softens the sun's soft, rim and back lighting and shadows the sun on water and effects; Skylighting's sky visibility drives those lobes instead while it is enabled.
-- Rain Refraction: new feature ported from Skyrim CS; rain drops reflect and refract the Dynamic Cubemaps environment (required) and are lit by the sun and the engine's effect lights.
+- Rain Refraction: new feature ported from Skyrim CS; rain drops reflect and refract the Dynamic Cubemaps environment (required) and are lit by the sun; point lights are not yet shaded.
 - When shaders take over a second to compile, Continue, Load, and New Game wait behind the main menu's loading spinner until they finish, with a progress window when DearModdingUI is installed; set `background_compilation` in `[shader_cache]` (restart required) to play while they compile, with uncompiled shaders rendering as stock. Every stock shader variant a loaded feature modifies now precompiles at startup instead of as the game first draws it.
 - Shader cache: `max_size_mb` in `[shader_cache]` caps the disk cache (default 4096 MiB); least recently used shaders are removed first.
 - Community Shaders now disables all hooks and features and shows a message when the standalone Motion Vector Fixes (`MotionVectorFixes.dll`) or Dynamic Cubemaps F4 (`DynamicCubemapF4.dll`) plugin is installed; remove them, as Community Shaders includes both.
