@@ -18,6 +18,7 @@
 #include "SkySyncSettings.h"
 #include "SkylightingSettings.h"
 #include "TerrainVariationSettings.h"
+#include "VolumetricLightingSettings.h"
 #include "World/WeatherVariableRegistry.h"
 
 #include "Check.h"
@@ -83,6 +84,7 @@ namespace
 			std::pair{ "SkySync", MakeSchemaView(sky_sync::kSchema) },
 			std::pair{ "VolumetricShadows", SchemaView{} },
 			std::pair{ "CloudShadows", MakeSchemaView(cloud_shadows::kSchema) },
+			std::pair{ "VolumetricLighting", MakeSchemaView(volumetric_lighting::kSchema) },
 			std::pair{ "LODBlending", MakeSchemaView(lod_blending::kSchema) },
 			std::pair{ "TerrainVariation", MakeSchemaView(terrain_variation::kSchema) },
 			std::pair{ "TerrainBlending", SchemaView{} },
