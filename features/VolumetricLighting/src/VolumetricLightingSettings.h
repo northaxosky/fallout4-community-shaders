@@ -64,24 +64,23 @@ namespace cs::features::volumetric_lighting
 
 	struct Location
 	{
-		bool Settings::* enabled;
-		std::int32_t Settings::* quality;
-		std::uint32_t Settings::* resolution;
-		std::uint32_t Settings::* samples;
-		std::uint32_t Settings::* upsample;
-		float Settings::* raySize;
+		const settings::Field<Settings, bool>* enabled;
+		const settings::Field<Settings, std::int32_t>* quality;
+		const settings::ChoiceField<Settings, std::uint32_t>* resolution;
+		const settings::ChoiceField<Settings, std::uint32_t>* samples;
+		const settings::ChoiceField<Settings, std::uint32_t>* upsample;
+		const settings::Field<Settings, float>* raySize;
 	};
 
 	inline constexpr Location kExterior{
-		&Settings::ExteriorEnabled, &Settings::ExteriorQuality, &Settings::ExteriorCustomResolution,
-		&Settings::ExteriorCustomSamples, &Settings::ExteriorCustomUpsample, &Settings::ExteriorCustomRaySize
+		&std::get<0>(kSchema.fields), &std::get<1>(kSchema.fields), &std::get<2>(kSchema.fields),
+		&std::get<3>(kSchema.fields), &std::get<4>(kSchema.fields), &std::get<5>(kSchema.fields)
 	};
 	inline constexpr Location kInterior{
-		&Settings::InteriorEnabled, &Settings::InteriorQuality, &Settings::InteriorCustomResolution,
-		&Settings::InteriorCustomSamples, &Settings::InteriorCustomUpsample, &Settings::InteriorCustomRaySize
+		&std::get<6>(kSchema.fields), &std::get<7>(kSchema.fields), &std::get<8>(kSchema.fields),
+		&std::get<9>(kSchema.fields), &std::get<10>(kSchema.fields), &std::get<11>(kSchema.fields)
 	};
 
-	// Output-relative godray quality.
 	struct Level
 	{
 		std::uint32_t divisor;
@@ -99,15 +98,15 @@ namespace cs::features::volumetric_lighting
 
 	inline Level ResolveLevel(const Settings& a_settings, const Location& a_location)
 	{
-		const auto quality = a_settings.*a_location.quality;
+		const auto quality = a_settings.*a_location.quality->member;
 		if (quality == kCustomQuality) {
-			return { a_settings.*a_location.resolution, a_settings.*a_location.samples,
-				a_settings.*a_location.raySize, a_settings.*a_location.upsample };
+			return { a_settings.*a_location.resolution->member, a_settings.*a_location.samples->member,
+				a_settings.*a_location.raySize->member, a_settings.*a_location.upsample->member };
 		}
 		return kLevels[static_cast<std::size_t>(std::clamp(quality, 0, 3))];
 	}
 
-	// The engine buffer is render size >> shift; flooring keeps it at or above the target.
+	// Buffer is render size >> shift; floor keeps it at or above target.
 	inline std::uint32_t BufferShift(std::uint32_t a_divisor, float a_renderScale)
 	{
 		const float scaled = static_cast<float>(a_divisor) * a_renderScale;

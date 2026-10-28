@@ -30,7 +30,7 @@ namespace cs::features
 		void Load() override;
 		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override;
 		void DrawSettings() override;
-		void DrawLocation(settings::SettingsEdit& a_edit, const volumetric_lighting::Location& a_location, const char* a_title);
+		void DrawLocation(settings::SettingsEdit& a_edit, const volumetric_lighting::Location& a_location);
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -55,7 +55,7 @@ namespace cs::features
 		bool _savedRuntimeDisabled = false;
 		std::int32_t _savedQuality = 0;
 
-		// Engine table row 0 is overwritten; the original rows are saved on first patch.
+		// Row 0 is overwritten; originals are saved on first patch.
 		std::atomic_bool _tablePatched{ false };
 		bool _haveOriginal = false;
 		bool _patchFailed = false;

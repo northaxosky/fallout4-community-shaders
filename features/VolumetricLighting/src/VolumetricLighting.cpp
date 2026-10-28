@@ -1,14 +1,11 @@
 #include "VolumetricLighting.h"
 
 #include <DearModdingUI/Client.h>
-#include <DearModdingUI/Presentation.h>
 
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <span>
 #include <string>
-#include <vector>
 
 #include <toml++/toml.hpp>
 
@@ -41,19 +38,6 @@ namespace cs::features
 			"High: 1/2 resolution, 4x MSAA, 8 px rays, bilateral upsample.\n"
 			"Ultra: full resolution, 1 sample, 8 px rays, no upsample.\n"
 			"Custom: the settings below.";
-
-		template <class Choices>
-		void DrawChoice(settings::SettingsEdit& a_edit, const char* a_label, const std::string& a_id,
-			std::uint32_t& a_value, const Choices& a_choices)
-		{
-			std::vector<dmui::ChoiceOption<std::uint32_t>> options;
-			for (const auto& choice : a_choices)
-				options.push_back({ choice.value, std::string(choice.text), std::string(choice.text), true });
-			const auto result = dmui::DrawChoice<std::uint32_t>(a_id, a_value,
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{ options }, "Unavailable", a_label);
-			if (a_edit.Discrete(result.changed))
-				a_value = *result.selected;
-		}
 
 		const char* BufferText(std::uint32_t a_shift)
 		{
@@ -117,7 +101,7 @@ namespace cs::features
 
 		const bool interior = cs::engine::IsInterior();
 		const auto& location = interior ? volumetric_lighting::kInterior : volumetric_lighting::kExterior;
-		const bool enabled = _settings.*location.enabled;
+		const bool enabled = _settings.*location.enabled->member;
 		_interior.store(interior, std::memory_order_relaxed);
 
 		auto* manager = cs::engine::GetRenderTargetManager();
@@ -126,20 +110,21 @@ namespace cs::features
 		                              1.0f;
 		_renderScale.store(renderScale, std::memory_order_relaxed);
 
-		auto quality = _settings.*location.quality;
+		auto quality = _settings.*location.quality->member;
 		if (enabled) {
 			const auto level = volumetric_lighting::ResolveLevel(_settings, location);
 			const RE::NVGodrays::QualityPreset preset{
 				volumetric_lighting::BufferShift(level.divisor, renderScale), level.samples, level.raySize, level.upsample
 			};
-			if (!ApplyPreset(preset))
-				return;
-			// Row 0 holds the desired preset, so the engine selects it.
-			quality = 0;
-			_appliedShift.store(preset.bufferShift, std::memory_order_relaxed);
-			_appliedSamples.store(preset.sampleCount, std::memory_order_relaxed);
-			_appliedRaySize.store(preset.targetRaySize, std::memory_order_relaxed);
-			_appliedUpsample.store(preset.upsampleQuality, std::memory_order_relaxed);
+			// On failure the engine keeps its own row for the user's level.
+			if (ApplyPreset(preset)) {
+				// Row 0 holds the desired preset, so the engine selects it.
+				quality = 0;
+				_appliedShift.store(preset.bufferShift, std::memory_order_relaxed);
+				_appliedSamples.store(preset.sampleCount, std::memory_order_relaxed);
+				_appliedRaySize.store(preset.targetRaySize, std::memory_order_relaxed);
+				_appliedUpsample.store(preset.upsampleQuality, std::memory_order_relaxed);
+			}
 		}
 
 		auto* qualitySetting = RE::NVGodrays::GetQualitySetting();
@@ -169,7 +154,7 @@ namespace cs::features
 		}
 		if (!REL::WriteSafe(presets.data(), &a_preset, sizeof(a_preset))) {
 			_patchFailed = true;
-			L->error("Failed to write the godray quality table; leaving engine quality untouched.");
+			L->error("Failed to write the godray quality table; using the engine's quality rows.");
 			return false;
 		}
 		_lastWritten = a_preset;
@@ -215,32 +200,26 @@ namespace cs::features
 			.Field("applied_frames", static_cast<std::int64_t>(_appliedFrames.load(std::memory_order_relaxed)));
 	}
 
-	void VolumetricLighting::DrawLocation(settings::SettingsEdit& a_edit, const volumetric_lighting::Location& a_location, const char* a_title)
+	void VolumetricLighting::DrawLocation(settings::SettingsEdit& a_edit, const volumetric_lighting::Location& a_location)
 	{
-		const std::string title = a_title;
-		const std::string toggle = "Enable Volumetric Lighting in " + title + "s##" + title + "Enabled";
-		a_edit.Discrete(dmui::ui::Checkbox(toggle.c_str(), &(_settings.*a_location.enabled)));
-		ui::Tooltip("Controls the game's native godrays at this location type.");
-		if (!(_settings.*a_location.enabled))
+		a_edit.Toggle(*a_location.enabled, _settings, "Controls the game's native godrays at this location type.");
+		if (!(_settings.*a_location.enabled->member))
 			return;
 
-		auto& quality = _settings.*a_location.quality;
-		const std::string qualityLabel = title + " Quality##" + title + "Quality";
-		const auto range = volumetric_lighting::kSchema.EditRange(a_location.quality);
-		a_edit.Continuous(dmui::ui::SliderScalar(qualityLabel.c_str(), &quality, &range.min, &range.max,
+		auto& quality = _settings.*a_location.quality->member;
+		const std::string qualityLabel = std::string(a_location.quality->description) + "##" + std::string(a_location.quality->key);
+		a_edit.Continuous(dmui::ui::SliderScalar(qualityLabel.c_str(), &quality,
+			&a_location.quality->edit.min, &a_location.quality->edit.max,
 			kQualityFormats[static_cast<std::size_t>(std::clamp(quality, 0, 4))]));
 		ui::Tooltip(kQualityTooltip);
 
 		dmui::ui::BeginDisabled(quality != volumetric_lighting::kCustomQuality);
-		DrawChoice(a_edit, "Custom Resolution", title + "Resolution",
-			_settings.*a_location.resolution, volumetric_lighting::kResolutionChoices);
-		DrawChoice(a_edit, "Custom Samples", title + "Samples",
-			_settings.*a_location.samples, volumetric_lighting::kSampleChoices);
-		DrawChoice(a_edit, "Custom Upsample", title + "Upsample",
-			_settings.*a_location.upsample, volumetric_lighting::kUpsampleChoices);
-		const std::string rayLabel = "Custom Ray Size##" + title + "RaySize";
-		a_edit.Continuous(dmui::ui::SliderScalar(rayLabel.c_str(), &(_settings.*a_location.raySize),
-			&volumetric_lighting::kRaySizeRange.min, &volumetric_lighting::kRaySizeRange.max, "%.0f px"));
+		a_edit.Choice(*a_location.resolution, _settings, "Godray buffer size relative to output resolution.");
+		a_edit.Choice(*a_location.samples, _settings, "MSAA samples of the godray buffer; no effect at full resolution.");
+		a_edit.Choice(*a_location.upsample, _settings, "Upsample filter for the godray buffer; unused at full resolution.");
+		const std::string rayLabel = std::string(a_location.raySize->description) + "##" + std::string(a_location.raySize->key);
+		a_edit.Continuous(dmui::ui::SliderScalar(rayLabel.c_str(), &(_settings.*a_location.raySize->member),
+			&a_location.raySize->edit.min, &a_location.raySize->edit.max, "%.0f px"));
 		ui::Tooltip("Target ray size in pixels; smaller is denser.");
 		dmui::ui::EndDisabled();
 
@@ -254,8 +233,8 @@ namespace cs::features
 			dmui::ui::Text("Godrays are off in the game's display settings; enable them there and restart.");
 
 		settings::SettingsEdit edit{ *this };
-		DrawLocation(edit, volumetric_lighting::kExterior, "Exterior");
-		DrawLocation(edit, volumetric_lighting::kInterior, "Interior");
+		DrawLocation(edit, volumetric_lighting::kExterior);
+		DrawLocation(edit, volumetric_lighting::kInterior);
 	}
 
 	void VolumetricLighting::RestoreDefaultSettings()
