@@ -50,6 +50,9 @@ namespace cs::engine
 	CS_DECLARE_RENDER_HOOK(RegisterPostDeferredLightsImpl);
 	CS_DECLARE_RENDER_HOOK(RegisterPreDeferredComposite);
 	CS_DECLARE_RENDER_HOOK(RegisterPostDeferredComposite);
+	// Once per frame inside DeferredComposite, after the first composite and SSLR
+	// and before the second composite; runs only while native SSS is on.
+	CS_DECLARE_RENDER_HOOK(RegisterPreSecondDeferredComposite);
 	// Right after the main sun's cascades render, before focus shadows reuse them.
 	CS_DECLARE_RENDER_HOOK(RegisterPostSunShadowRender);
 	// Before the stock precipitation occlusion pass.

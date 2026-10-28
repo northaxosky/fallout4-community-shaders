@@ -47,6 +47,7 @@ namespace cs::engine
 		bool EnsureDeferredLightsImplInstalled();
 		bool EnsureDeferredCompositeInstalled();
 		bool EnsureForwardSkyInstalled();
+		bool EnsureSecondCompositeInstalled();
 		bool EnsurePrecipitationOcclusionInstalled();
 		bool EnsureSunShadowRenderInstalled();
 		bool EnsureWaterUpdateInstalled();
@@ -69,6 +70,7 @@ namespace cs::engine
 		HookPoint g_postDeferredLightsImpl{ "PostDeferredLightsImpl", {}, EnsureDeferredLightsImplInstalled };
 		HookPoint g_preDeferredComposite{ "PreDeferredComposite", {}, EnsureDeferredCompositeInstalled };
 		HookPoint g_postDeferredComposite{ "PostDeferredComposite", {}, EnsureDeferredCompositeInstalled };
+		HookPoint g_preSecondDeferredComposite{ "PreSecondDeferredComposite", {}, EnsureSecondCompositeInstalled };
 		HookPoint g_postForwardSky{ "PostForwardSky", {}, EnsureForwardSkyInstalled };
 		HookPoint g_prePrecipitationOcclusion{ "PrePrecipitationOcclusion", {}, EnsurePrecipitationOcclusionInstalled };
 		HookPoint g_postPrecipitationOcclusion{ "PostPrecipitationOcclusion", {}, EnsurePrecipitationOcclusionInstalled };
@@ -113,6 +115,7 @@ namespace cs::engine
 		bool g_drawProfilingInstalled = false;
 		bool g_drawFlushInstalled = false;
 		bool g_forwardSkyInstalled = false;
+		bool g_secondCompositeInstalled = false;
 		bool g_precipitationOcclusionInstalled = false;
 		bool g_sunShadowRenderInstalled = false;
 		bool g_frustumShadowRenderInstalled = false;
@@ -354,6 +357,25 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// DeferredComposite's only t15 = logical 40 bind; it precedes the second pass.
+		struct SecondCompositeBind_Hook
+		{
+			static void thunk(
+				RE::BSGraphics::RenderTargetManager* a_this,
+				std::uint32_t a_slot,
+				std::int32_t a_logicalID,
+				RE::BSGraphics::TextureAddressMode a_mode,
+				bool a_useDepth)
+			{
+				Dispatch(g_preSecondDeferredComposite, "Second deferred composite pre");
+				func(a_this, a_slot, a_logicalID, a_mode, a_useDepth);
+			}
+			static inline REL::Relocation<void(
+				RE::BSGraphics::RenderTargetManager*, std::uint32_t, std::int32_t,
+				RE::BSGraphics::TextureAddressMode, bool)>
+				func;
+		};
+
 		struct PrecipitationOcclusion_Hook
 		{
 			static void thunk()
@@ -556,6 +578,28 @@ namespace cs::engine
 			stl::write_thunk_call<ForwardSkyGroup_Hook>(*site);
 			g_forwardSkyInstalled = true;
 			L->info("Hook installed on DrawWorld::Forward cloud group call (post-sky boundary)");
+			return true;
+		}
+
+		bool EnsureSecondCompositeInstalled()
+		{
+			if (g_secondCompositeInstalled) {
+				return true;
+			}
+			const CallSiteAnchor anchor{
+				"DrawWorld::DeferredComposite t15 bind before second composite",
+				RE::ID::DrawWorld::DeferredComposite,
+				{ 0x7E4, 0x812, 0x812 },
+				RE::ID::BSGraphics::RenderTargetManager::SetTextureRenderTarget
+			};
+			const auto site = ResolveCallSite(anchor);
+			if (!site) {
+				L->error("Second deferred composite hook unavailable: {}", site.error());
+				return false;
+			}
+			stl::write_thunk_call<SecondCompositeBind_Hook>(*site);
+			g_secondCompositeInstalled = true;
+			L->info("Hook installed on DrawWorld::DeferredComposite t15 bind (pre-second-composite boundary)");
 			return true;
 		}
 
@@ -844,6 +888,7 @@ namespace cs::engine
 	CS_DEFINE_RENDER_HOOK(RegisterPostDeferredLightsImpl, g_postDeferredLightsImpl)
 	CS_DEFINE_RENDER_HOOK(RegisterPreDeferredComposite, g_preDeferredComposite)
 	CS_DEFINE_RENDER_HOOK(RegisterPostDeferredComposite, g_postDeferredComposite)
+	CS_DEFINE_RENDER_HOOK(RegisterPreSecondDeferredComposite, g_preSecondDeferredComposite)
 	CS_DEFINE_RENDER_HOOK(RegisterPreWaterUpdate, g_preWaterUpdate)
 	CS_DEFINE_RENDER_HOOK(RegisterPostWaterUpdate, g_postWaterUpdate)
 	CS_DEFINE_RENDER_HOOK(RegisterPreCommandBufferReplay, g_preCommandBufferReplay)
