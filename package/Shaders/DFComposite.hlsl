@@ -10,6 +10,11 @@
 #include "FO4/SkylightingConsumer.hlsli"
 // FO4: IBL tints native fog colors before the final blend.
 #include "FO4/FogConsumer.hlsli"
+#ifdef SUBSURFACE_SCATTERING
+#	include "FO4/SubsurfaceScattering/Consumer.hlsli"
+#else
+#	define FO4_SSS_IF_PRODUCED(statement)
+#endif
 
 #ifdef DYNAMIC_CUBEMAPS
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
@@ -304,6 +309,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 blurAccum = SSSS_CENTER_WEIGHT * blurSourceCenter;
 		[unroll] for (int i = 0; i < 10; ++i)
 		{
+			FO4_SSS_IF_PRODUCED(continue);
 			float2 tapUV = uv + tapBase * SSSS_RING_OFFSETS[i];
 			float tapMatId = g_tGbufferShadingData.SampleLevel(
 													  g_sGbufferShadingData, tapUV, 0)
@@ -326,6 +332,7 @@ PS_OUTPUT main(PS_INPUT input)
 			}
 			blurAccum += tapBlended * SSSS_RING_WEIGHTS[i];
 		}
+		FO4_SSS_IF_PRODUCED(blurAccum = blurSourceCenter);
 		float3 probeA = g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
 #		if AMBIENT_DIFFUSE_SET_B
 		float3 probeB = g_tAmbientProbeB.SampleLevel(g_sAmbientProbeB, uv, 0).xyz;
@@ -654,6 +661,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 blurAccum = blurSourceCenter * SSSS_CENTER_WEIGHT;
 		[unroll] for (int i = 0; i < 10; ++i)
 		{
+			FO4_SSS_IF_PRODUCED(continue);
 			float2 tapUv = uv + tapBase * SSSS_RING_OFFSETS[i];
 			float tapMaterialId = g_tGbufferShadingData.SampleLevel(
 														   g_sGbufferShadingData, tapUv, 0)
@@ -675,6 +683,7 @@ PS_OUTPUT main(PS_INPUT input)
 			}
 			blurAccum += tapColor * SSSS_RING_WEIGHTS[i];
 		}
+		FO4_SSS_IF_PRODUCED(blurAccum = blurSourceCenter);
 
 		float3 probeA =
 			g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
@@ -901,6 +910,7 @@ Texture2D<float4> linearDepthTexture : register(t15);
 
 float3 sampleSkinTap(float2 coordinate, float depthScale, float centerDepth, float3 centerColor)
 {
+	FO4_SSS_IF_PRODUCED(return centerColor);
 	float materialId = surfaceTexture.SampleLevel(surfaceSampler, coordinate, 0.0).w;
 	float3 tapColor;
 
@@ -1123,6 +1133,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		skinBase += skinProbeTexture.SampleLevel(skinProbeSampler, coordinate, 0.0).xyz;
 #	endif
 		skinBase += skinAux;
+		FO4_SSS_IF_PRODUCED(blurred = centerColor);
 		centerColor = blurred + skinBase;
 	}
 
