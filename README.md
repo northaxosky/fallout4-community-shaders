@@ -63,6 +63,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Extended Materials** | Parallax on objects and terrain, with sun parallax shadows; object parallax needs a height map in the specular texture's alpha. |
 | **LOD Blending** | LOD terrain and object brightness and gamma matching, optional terrain vertex-color removal. |
 | **Screen Space GI** | Ambient occlusion and indirect lighting. |
+| **Subsurface Scattering** | Separable or Burley scattering for skin, replacing the vanilla skin blur. |
 | **Skylighting** | Scales ambient light and reflections by how much sky a surface can see. |
 | **Inverse Square Lighting** | Physically based light falloff. Lights are converted from their vanilla falloff by default; [light TOML files](features/InverseSquareLighting/README.md) override individual lights. |
 | **Dynamic Cubemaps** | Reflections that respond to the surrounding scene. |

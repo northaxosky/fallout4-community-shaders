@@ -60,7 +60,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Screenshot | Core | SDR/crop/async/clipboard, temporal source, HDR PNG (needs HDR Display) | — | NS | M | M | High |
 | Skin | Mixed | Detail normal/color, default dual-lobe*, transmittance*, sweat inputs* | Ext: RFAOS/wet textures, wet-skin film | NS | H | M | Med |
 | Sky Sync | Core | Alternate sun path, moon casting*, dawn/dusk + godray dimming | N/A: daytime sun fix (native matches), Skyrim compat checks | NS | M | M | Med |
-| Subsurface Scattering | Mixed | Separable and Burley on native class-5 skin (single profile), character light* | Ext: per-pixel amount/profile channel | NS | H | M | Med |
+| [Subsurface Scattering](deviations/SubsurfaceScattering.md) | Mixed | Separable and Burley on native class-5 skin (single profile), character light | Ext: per-pixel amount/profile channel | Pt | H | M | Med |
 | [Terrain Blending](deviations/TerrainBlending.md) | Core | Deferred landscape replay, depth-ramp alpha blend into the G-buffer, offset Z-prepass for near terrain | Pending: no-blend mesh flag | Pt | H | L | Med |
 | Terrain Helper | Mixed | Displacement-slot gather/bind* | Ext: default-land ESP package | NS | M | M | Low |
 | [Terrain Shadows](deviations/TerrainShadows.md) | Core | Height-field producer, world receivers, time/transition events, secondary/remaining receivers, diagnostics | — | Pt | H | L | High |
