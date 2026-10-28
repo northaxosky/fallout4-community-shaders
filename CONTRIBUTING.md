@@ -60,16 +60,19 @@ xmake
 ```
 
 The DLL is written to `build\windows\x64\releasedbg\`.
+To build the Nsight Perf GPU counter profiler (NVIDIA only), download the login-gated Nsight Perf SDK
+and pass `--nvperf_sdk=<folder holding include\nvperf_host.h>` to `xmake f`. Its DLL is delay-loaded
+and installed to `F4SE\Plugins\FO4CommunityShaders\NvPerf`; leave the option unset for CI.
 For clangd, generate a compile database with `pwsh scripts\gen-compile-commands.ps1`.
 
 ## Test
 
 ```powershell
-xmake test
+xmake test --output-on-failure
 ```
 
-Set `FO4CS_SHADER_TEST_CACHE` to a directory to reuse compiled blobs across `xmake test -g shaders`
-runs; entries are revalidated against source, includes, and compiler on every hit.
+Shader suites reuse compiled blobs from `.shader-test-cache` (override with
+`FO4CS_SHADER_TEST_CACHE`); entries are revalidated against source, includes, and compiler on every hit.
 
 Add regression tests for critical behavior and real failure modes, not implementation
 details. Validate rendering and hook changes in game before claiming they work.

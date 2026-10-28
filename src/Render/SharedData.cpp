@@ -6,6 +6,7 @@
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
+#include "Render/ForwardDraw.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedDataLayout.h"
@@ -132,6 +133,10 @@ namespace cs::render
 				data.DirLightDirection = { -sunX, -sunY, -sunZ, 0.0f };
 				data.SunDirection = data.DirLightDirection;
 			}
+			// FO4: clouds follow the drawn disc, not the clamped light.
+			a_fo4.SunDiscDirection = data.DirLightDirection;
+			if (float discX, discY, discZ; engine::TryGetSunDiscDirectionWS(discX, discY, discZ))
+				a_fo4.SunDiscDirection = { discX, discY, discZ, 0.0f };
 
 			DirectX::XMFLOAT3 sunColor{};
 			if (engine::TryGetSunLightColor(sunColor))
@@ -177,7 +182,8 @@ namespace cs::render
 				.DebugOwner = state.fo4.DebugOwner,
 				.DebugMode = state.fo4.DebugMode,
 				.DeltaTime = state.fo4.DeltaTime,
-				.DebugParams = state.fo4.DebugParams
+				.DebugParams = state.fo4.DebugParams,
+				.SunDiscDirection = state.fo4.SunDiscDirection
 			};
 			std::ranges::copy(state.fo4.DirectionalAmbient, a_data.fo4.DirectionalAmbient);
 			FeatureManager::Get().WriteSharedDataAll(a_data.feature, a_data.fo4);
@@ -377,6 +383,7 @@ namespace cs::render
 			annotation::SetName(state.buffers[index].get(), names[index]);
 		}
 		InitializeCanonicalDepth(a_device);
+		forward_draw::Initialize(a_device);
 
 		D3D11_SAMPLER_DESC samplerDesc{};
 		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;

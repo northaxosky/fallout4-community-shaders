@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <mutex>
 
 namespace cs::settings
 {
@@ -29,7 +30,8 @@ namespace cs::settings
 		typename Schema<Fields...>::SettingsType& a_settings,
 		std::function<void()> a_finalize = {},
 		std::vector<std::string_view> a_notComparable = {},
-		std::function<bool(const typename Schema<Fields...>::SettingsType&, std::string&)> a_validate = {})
+		std::function<bool(const typename Schema<Fields...>::SettingsType&, std::string&)> a_validate = {},
+		std::mutex* a_swapGuard = nullptr)
 	{
 		const auto included = [](const auto& a_field) {
 			return a_field.timing == ApplyTiming::kImmediate;
@@ -47,7 +49,7 @@ namespace cs::settings
 					a_schema.fields);
 				return snapshot;
 			},
-			[&a_schema, &a_settings, included, finalize = std::move(a_finalize), validate = std::move(a_validate)](
+			[&a_schema, &a_settings, included, a_swapGuard, finalize = std::move(a_finalize), validate = std::move(a_validate)](
 				const toml::table& a_snapshot, std::string& a_error) -> std::optional<PreparedLiveSettings> {
 				auto candidate = a_settings;
 				bool valid = true;
@@ -64,7 +66,10 @@ namespace cs::settings
 				if (validate && !validate(candidate, a_error))
 					return std::nullopt;
 				return PreparedLiveSettings{
-					[&a_schema, &a_settings, included, candidate = std::move(candidate)]() mutable {
+					[&a_schema, &a_settings, included, a_swapGuard, candidate = std::move(candidate)]() mutable {
+						std::unique_lock<std::mutex> guard;
+						if (a_swapGuard)
+							guard = std::unique_lock<std::mutex>(*a_swapGuard);
 						// FO4: swap only live fields so concurrent startup edits retain their restart requirement.
 						std::apply([&](const auto&... fields) {
 							([&] {

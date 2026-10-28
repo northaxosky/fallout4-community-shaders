@@ -4,9 +4,15 @@
 
 #include "Host/HostClient.h"
 #include "Log.h"
+#include "Render/Annotation.h"
+#include "Render/FrameBoundary.h"
 
 #include <DearModdingUI/Client.h>
 #include <DevBenchAPI.h>
+
+#ifdef NVPERF_ENABLED
+#	include "Features/RemoteControl/NvPerf.h"
+#endif
 
 #include <filesystem>
 #include <format>
@@ -34,6 +40,19 @@ namespace cs::features
 		return &singleton;
 	}
 
+	void RemoteControl::Load()
+	{
+#ifdef NVPERF_ENABLED
+		// Main::Swap renders and presents, so both Present edges sit after it.
+		if (!render::RegisterPostSwap(*this, [] {
+				NvPerf::OnPresentBegin();
+				NvPerf::OnPresentEnd();
+			}))
+			L->warn("Nsight Perf frame boundary callback was not registered");
+		render::annotation::SetRangeSink({ &NvPerf::RangesActive, &NvPerf::PushRange, &NvPerf::PopRange });
+#endif
+	}
+
 	void RemoteControl::OnPostPostLoad()
 	{
 		auto* host = DevBenchAPI::GetDevBenchInterface001();
@@ -52,6 +71,7 @@ namespace cs::features
 	{
 		remote_control::SubscribeShaderCacheEvents();
 		remote_control::SubscribeCaptureEvents();
+		remote_control::SubscribeNvPerfEvents();
 	}
 
 	void RemoteControl::EmitEvent(const char* a_topic, const nlohmann::json& a_payload, bool a_bypassMute) const
@@ -81,6 +101,13 @@ namespace cs::features
 	}
 
 	void RemoteControl::DrawSettings()
+	{
+		DrawHostStatus();
+		// The Nsight Perf panel works without the DevBench host.
+		remote_control::DrawNvPerfPanel();
+	}
+
+	void RemoteControl::DrawHostStatus()
 	{
 		auto& client = host::HostClient::Get().Client();
 		const auto draw = [&](std::string_view a_text, dmui::TextTone a_tone) {

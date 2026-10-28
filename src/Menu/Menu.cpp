@@ -1,5 +1,6 @@
 #include "Menu/Menu.h"
 
+#include "BuildIdentity.h"
 #include "Feature.h"
 #include "Host/HostClient.h"
 #include "Log.h"
@@ -16,6 +17,7 @@
 #include "Settings/SettingsRegistry.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
+#include "Utils/PathUtf8.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 
 #include <algorithm>
@@ -80,11 +82,7 @@ namespace
 			return;
 		}
 
-		const auto encoded = absolute.u8string();
-		std::string target;
-		target.reserve(encoded.size());
-		for (const char8_t character : encoded)
-			target.push_back(static_cast<char>(character));
+		const auto target = cs::util::PathToUtf8(absolute);
 
 		std::uint32_t nativeError{};
 		if (!a_client.OpenExternal({ .targetKind = DMUI_EXTERNAL_TARGET_VIRTUAL_FILE_PARENT,

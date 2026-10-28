@@ -1,10 +1,11 @@
 #pragma once
 
+#include "../features/CloudShadows/src/ShaderDefines.h"
 #include "../features/DynamicCubemaps/src/ShaderDefines.h"
 #include "../features/ExtendedMaterials/src/ShaderDefines.h"
 #include "../features/IBL/src/ShaderDefines.h"
-#include "../features/InverseSquareLighting/src/ShaderDefines.h"
 #include "../features/LODBlending/src/ShaderDefines.h"
+#include "../features/LightLimitFix/src/ShaderDefines.h"
 #include "../features/RainRefraction/src/ShaderDefines.h"
 #include "../features/ScreenSpaceGI/src/ShaderDefines.h"
 #include "../features/ScreenSpaceShadows/src/ShaderDefines.h"
@@ -29,11 +30,12 @@ namespace cs::engine
 				{ "ScreenSpaceShadows", &sss::kShaderDefines },
 				{ "ScreenSpaceGI", &ssgi::kShaderDefines },
 				{ "Skylighting", &skylighting_shader::kShaderDefines },
-				{ "InverseSquareLighting", &isl::kShaderDefines },
+				{ "LightLimitFix", &light_limit_fix::kShaderDefines },
 				{ "DynamicCubemaps", &dc::kShaderDefines },
 				{ "ImageBasedLighting", &ibl_shader::kShaderDefines },
 				{ "TerrainShadows", &terrain_shader::kShaderDefines },
 				{ "VolumetricShadows", &volumetric_shadows_shader::kShaderDefines },
+				{ "CloudShadows", &cloud_shadows_shader::kShaderDefines },
 				{ "LODBlending", &lod_blending_shader::kShaderDefines },
 				{ "TerrainVariation", &terrain_variation_shader::kShaderDefines },
 				{ "TerrainBlending", &terrain_blending_shader::kShaderDefines },

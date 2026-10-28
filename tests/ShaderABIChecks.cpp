@@ -1,7 +1,10 @@
 #include "ShaderABIChecks.h"
 
+#include "../features/CloudShadows/src/ShaderDefines.h"
+#include "../features/LightLimitFix/src/LightData.h"
 #include "../features/VolumetricShadows/src/ShaderDefines.h"
 #include "Render/DirectionalShadowLightData.h"
+#include "Render/ForwardDraw.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/SubstrateSlots.h"
 #include "ScreenSpaceGIConstants.h"
@@ -173,6 +176,52 @@ namespace
 		}
 		return {};
 	}
+	struct ConstantBufferABI
+	{
+		const char* name;
+		UINT slot;
+		std::size_t size;
+		std::span<const ABIField> fields;
+		const char* structField = nullptr;
+		std::span<const ABIField> structLayout{};
+	};
+	std::string CheckConstantBuffer(ID3D11ShaderReflection* a_reflection, const ConstantBufferABI& a_buffer)
+	{
+		D3D11_SHADER_INPUT_BIND_DESC binding{};
+		D3D11_SHADER_DESC shaderDesc{};
+		a_reflection->GetDesc(&shaderDesc);
+		bool found = false;
+		for (UINT index = 0; index < shaderDesc.BoundResources; ++index) {
+			a_reflection->GetResourceBindingDesc(index, &binding);
+			if (binding.Type == D3D_SIT_CBUFFER && binding.BindPoint == a_buffer.slot) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return std::string(a_buffer.name) + ": ABI slot mismatch";
+		auto* cb = a_reflection->GetConstantBufferByName(binding.Name);
+		D3D11_SHADER_BUFFER_DESC desc{};
+		if (FAILED(cb->GetDesc(&desc)) || desc.Size != a_buffer.size || desc.Variables != a_buffer.fields.size())
+			return std::string(a_buffer.name) + ": ABI buffer size/member count mismatch";
+		for (UINT index = 0; index < desc.Variables; ++index) {
+			auto* member = cb->GetVariableByIndex(index);
+			D3D11_SHADER_VARIABLE_DESC variable{};
+			if (FAILED(member->GetDesc(&variable)))
+				return "ABI member reflection failed";
+			const auto name = std::string_view(variable.Name);
+			const auto field = std::ranges::find_if(a_buffer.fields, [&](const auto& a_field) {
+				return name == a_field.name || name.ends_with(std::string("::") + a_field.name);
+			});
+			if (field == a_buffer.fields.end() || variable.StartOffset != field->offset || variable.Size != field->size)
+				return std::string(a_buffer.name) + "." + variable.Name + ": ABI offset/size mismatch";
+			if (a_buffer.structField && std::string_view(field->name) == a_buffer.structField) {
+				if (const auto layout = CheckStructLayout(member->GetType(), a_buffer.structLayout); !layout.empty())
+					return std::string(a_buffer.name) + "." + a_buffer.structField + ": " + layout;
+			}
+		}
+		return {};
+	}
 	std::string VerifySubstrateABI(const std::filesystem::path& a_root)
 	{
 		using namespace cs::render;
@@ -217,17 +266,10 @@ namespace
 			ABI(FO4SharedDataCB, EnabledSkylighting), ABI(FO4SharedDataCB, EnabledScreenSpaceGI),
 			ABI(FO4SharedDataCB, EnabledUnifiedWater), ABI(FO4SharedDataCB, EnabledScreenSpaceShadows),
 			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
-			ABI(FO4SharedDataCB, EnabledLODBlending), ABI(FO4SharedDataCB, EnabledInverseSquareLighting),
-			ABI(FO4SharedDataCB, pad0)
+			ABI(FO4SharedDataCB, EnabledLODBlending), ABI(FO4SharedDataCB, EnabledLightLimitFix),
+			ABI(FO4SharedDataCB, pad0), ABI(FO4SharedDataCB, SunDiscDirection)
 		};
-		struct Buffer
-		{
-			const char* name;
-			UINT slot;
-			std::size_t size;
-			std::span<const ABIField> fields;
-		};
-		const Buffer buffers[]{
+		const ConstantBufferABI buffers[]{
 			{ "PerFrame", 4, sizeof(FrameDataCB), frame }, { "SharedData", 5, sizeof(SharedDataCB), shared },
 			{ "FeatureData", 6, sizeof(SharedFeatureDataCB), feature }, { "FO4SharedData", 7, sizeof(FO4SharedDataCB), fo4 }
 		};
@@ -240,34 +282,8 @@ namespace
 		if (FAILED(D3DReflect(blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(reflection.GetAddressOf()))))
 			return "ABI reflection failed";
 		for (const auto& buffer : buffers) {
-			D3D11_SHADER_INPUT_BIND_DESC binding{};
-			D3D11_SHADER_DESC shaderDesc{};
-			reflection->GetDesc(&shaderDesc);
-			bool found = false;
-			for (UINT index = 0; index < shaderDesc.BoundResources; ++index) {
-				reflection->GetResourceBindingDesc(index, &binding);
-				if (binding.Type == D3D_SIT_CBUFFER && binding.BindPoint == buffer.slot) {
-					found = true;
-					break;
-				}
-			}
-			if (!found)
-				return std::string(buffer.name) + ": ABI slot mismatch";
-			auto* cb = reflection->GetConstantBufferByName(binding.Name);
-			D3D11_SHADER_BUFFER_DESC desc{};
-			if (FAILED(cb->GetDesc(&desc)) || desc.Size != buffer.size || desc.Variables != buffer.fields.size())
-				return std::string(buffer.name) + ": ABI buffer size/member count mismatch";
-			for (UINT index = 0; index < desc.Variables; ++index) {
-				D3D11_SHADER_VARIABLE_DESC variable{};
-				if (FAILED(cb->GetVariableByIndex(index)->GetDesc(&variable)))
-					return "ABI member reflection failed";
-				const auto name = std::string_view(variable.Name);
-				const auto field = std::ranges::find_if(buffer.fields, [&](const auto& a_field) {
-					return name == a_field.name || name.ends_with(std::string("::") + a_field.name);
-				});
-				if (field == buffer.fields.end() || variable.StartOffset != field->offset || variable.Size != field->size)
-					return std::string(buffer.name) + "." + variable.Name + ": ABI offset/size mismatch";
-			}
+			if (const auto mismatch = CheckConstantBuffer(reflection.Get(), buffer); !mismatch.empty())
+				return mismatch;
 		}
 		for (const char* slot : { "b4", "b7" }) {
 			if (cs::util::CompileShaderToBlob((a_root / "SharedDataProbe.hlsl").c_str(),
@@ -350,16 +366,42 @@ namespace
 		return {};
 	}
 	// Namespace-scoped resources reflect with their qualified name.
-	UINT BindPoint(ID3D11ShaderReflection* a_reflection, std::string_view a_name)
+	std::optional<D3D11_SHADER_INPUT_BIND_DESC> FindBinding(ID3D11ShaderReflection* a_reflection, std::string_view a_name)
 	{
 		D3D11_SHADER_DESC shader{};
 		a_reflection->GetDesc(&shader);
 		for (UINT i = 0; i < shader.BoundResources; ++i) {
 			D3D11_SHADER_INPUT_BIND_DESC binding{};
 			if (SUCCEEDED(a_reflection->GetResourceBindingDesc(i, &binding)) && std::string_view(binding.Name).ends_with(a_name))
-				return binding.BindPoint;
+				return binding;
 		}
-		return UINT_MAX;
+		return std::nullopt;
+	}
+	UINT BindPoint(ID3D11ShaderReflection* a_reflection, std::string_view a_name)
+	{
+		const auto binding = FindBinding(a_reflection, a_name);
+		return binding ? binding->BindPoint : UINT_MAX;
+	}
+	struct StructuredBufferABI
+	{
+		const char* name;
+		UINT slot;
+		std::size_t stride;
+		std::span<const ABIField> element{};
+	};
+	std::string CheckStructuredBuffer(ID3D11ShaderReflection* a_reflection, const StructuredBufferABI& a_buffer)
+	{
+		const auto binding = FindBinding(a_reflection, a_buffer.name);
+		if (!binding || binding->BindPoint != a_buffer.slot)
+			return std::string(a_buffer.name) + ": ABI slot mismatch";
+		if (binding->NumSamples != a_buffer.stride)
+			return std::string(a_buffer.name) + ": ABI structure stride mismatch";
+		if (!a_buffer.element.empty()) {
+			auto* element = a_reflection->GetConstantBufferByName(binding->Name)->GetVariableByName("$Element");
+			if (auto layout = CheckStructLayout(element->GetType(), a_buffer.element); !layout.empty())
+				return std::string(a_buffer.name) + ": " + layout;
+		}
+		return {};
 	}
 	std::string VerifyIBLABI(const std::filesystem::path& a_root)
 	{
@@ -408,6 +450,97 @@ namespace
 			return "DirectionalShadowLights: ABI structure stride mismatch";
 		return {};
 	}
+	std::string VerifyLightLimitFixABI(const std::filesystem::path& a_root)
+	{
+		using cs::features::light_limit_fix::LightData;
+		// HLSL names the shadow channel shadowLightIndex.
+		const ABIField fields[]{
+			ABI(LightData, color), ABI(LightData, fade), ABI(LightData, radius), ABI(LightData, invRadius),
+			ABI(LightData, fadeZone), ABI(LightData, sizeBias), ABI(LightData, positionWS), ABI(LightData, roomFlags),
+			ABI(LightData, lightFlags), ABIField{ "shadowLightIndex", offsetof(LightData, shadowMaskIndex), sizeof(LightData::shadowMaskIndex) },
+			ABI(LightData, localShadowIndex), ABI(LightData, pad1)
+		};
+		std::string error;
+		const auto tiled = Reflect(a_root, "DFTiledLighting.hlsl", { { "DFTILEDLIGHTING_VARIANT", "2" }, { "LIGHT_LIMIT_FIX", "1" }, { "CSHADER", "1" } }, "cs_5_0", error);
+		if (!tiled)
+			return error;
+		if (const auto mismatch = CheckStructuredBuffer(tiled.Get(), { "LightLimitFixLights", 8, sizeof(LightData), fields }); !mismatch.empty())
+			return mismatch;
+		const auto raster = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX", "1" } }, "ps_5_0", error);
+		if (!raster)
+			return error;
+		const ABIField drawFields[]{ { "LightLimitFixLight", 0, sizeof(LightData) } };
+		if (const auto mismatch = CheckConstantBuffer(raster.Get(), { "LightLimitFixDraw", 11, sizeof(LightData), drawFields, "LightLimitFixLight", fields }); !mismatch.empty())
+			return mismatch;
+		const auto forward = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX_FORWARD", "1" } }, "ps_5_0", error);
+		if (!forward)
+			return error;
+		if (const auto mismatch = CheckStructuredBuffer(forward.Get(), { "Cones", 34, sizeof(cs::features::light_limit_fix::ConeData) }); !mismatch.empty())
+			return mismatch;
+		using cs::features::light_limit_fix::StrictLightDataCB;
+		const auto strict = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX_STRICT", "1" } }, "ps_5_0", error);
+		if (!strict)
+			return error;
+		const ABIField strictFields[]{ { "NumStrictLights", offsetof(StrictLightDataCB, numStrictLights), sizeof(StrictLightDataCB::numStrictLights) },
+			{ "RoomIndex", offsetof(StrictLightDataCB, roomIndex), sizeof(StrictLightDataCB::roomIndex) },
+			{ "ShadowBitMask", offsetof(StrictLightDataCB, shadowBitMask), sizeof(StrictLightDataCB::shadowBitMask) },
+			{ "FirstPerson", offsetof(StrictLightDataCB, firstPerson), sizeof(StrictLightDataCB::firstPerson) },
+			{ "WorldEyePosition", offsetof(StrictLightDataCB, worldEyePosition), sizeof(StrictLightDataCB::worldEyePosition) },
+			{ "StrictLights", offsetof(StrictLightDataCB, strictLights), sizeof(StrictLightDataCB::strictLights) } };
+		if (const auto mismatch = CheckConstantBuffer(strict.Get(), { "StrictLightData", 3, sizeof(StrictLightDataCB), strictFields, "StrictLights", fields }); !mismatch.empty())
+			return mismatch;
+
+		const auto descriptor = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "FORWARD_DRAW_DESCRIPTOR", "1" } }, "ps_5_0", error);
+		if (!descriptor)
+			return error;
+		using cs::render::forward_draw::ForwardDrawCB;
+		const ABIField descriptorFields[]{ ABI(ForwardDrawCB, ExtraShaderDescriptor), ABI(ForwardDrawCB, PerShaderPad) };
+		if (const auto mismatch = CheckConstantBuffer(descriptor.Get(), { "PerShader", cs::render::kForwardDrawSlot, sizeof(ForwardDrawCB), descriptorFields }); !mismatch.empty())
+			return mismatch;
+
+		using cs::features::light_limit_fix::LightBuildingCB;
+		using cs::features::light_limit_fix::LightCullingCB;
+		const ABIField building[]{ ABI(LightBuildingCB, LightsNear), ABI(LightBuildingCB, LightsFar),
+			ABI(LightBuildingCB, pad0), ABI(LightBuildingCB, ClusterSize) };
+		const ABIField culling[]{ ABI(LightCullingCB, LightCount), ABI(LightCullingCB, pad0), ABI(LightCullingCB, ClusterSize) };
+		const struct
+		{
+			const char* file;
+			std::span<const ABIField> fields;
+			std::size_t size;
+		} computes[]{
+			{ "LightLimitFix/ClusterBuildingCS.hlsl", building, sizeof(LightBuildingCB) },
+			{ "LightLimitFix/ClusterCullingCS.hlsl", culling, sizeof(LightCullingCB) }
+		};
+		for (const auto& compute : computes) {
+			const auto reflection = Reflect(a_root, compute.file, {}, "cs_5_0", error);
+			if (!reflection)
+				return error;
+			if (const auto mismatch = CheckConstantBuffer(reflection.Get(), { "PerFrame", 0, compute.size, compute.fields }); !mismatch.empty())
+				return std::string(compute.file) + ": " + mismatch;
+		}
+		return {};
+	}
+
+	std::string VerifyCloudShadowsABI(const std::filesystem::path& a_root)
+	{
+		namespace slots = cs::features::cloud_shadows_shader;
+		std::string error;
+		// The host binds the face depth, the cube output and the layer output.
+		const auto sky = Reflect(a_root, "Sky.hlsl", { { "BSSKY_PIXEL_SHADER", "1" }, { "PSHADER", "1" }, { "TEX", "1" }, { "CLOUDS", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
+		if (!sky)
+			return error;
+		D3D11_SHADER_DESC desc{};
+		sky->GetDesc(&desc);
+		if (BindPoint(sky.Get(), "TexDepthSampler") != slots::kCloudDepthSlot || desc.OutputParameters != 4)
+			return "Sky: ABI depth slot or output count mismatch";
+		const auto consumer = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
+		if (!consumer)
+			return error;
+		if (BindPoint(consumer.Get(), "CloudShadows::CloudShadowsTexture") != slots::kCloudShadowsSlot)
+			return "consumer: ABI slot mismatch";
+		return {};
+	}
 #undef ABI
 }
 
@@ -417,11 +550,15 @@ std::string VerifyShaderABI(const std::filesystem::path& a_root)
 		return "substrate ABI: " + error;
 	if (auto error = VerifySSGIABI(a_root); !error.empty())
 		return "SSGI ABI: " + error;
+	if (auto error = VerifyLightLimitFixABI(a_root); !error.empty())
+		return "Light Limit Fix ABI: " + error;
 	if (auto error = VerifySkylightingABI(a_root); !error.empty())
 		return "Skylighting ABI: " + error;
 	if (auto error = VerifyIBLABI(a_root); !error.empty())
 		return "IBL ABI: " + error;
 	if (auto error = VerifyVolumetricShadowsABI(a_root); !error.empty())
 		return "Volumetric Shadows ABI: " + error;
+	if (auto error = VerifyCloudShadowsABI(a_root); !error.empty())
+		return "Cloud Shadows ABI: " + error;
 	return {};
 }

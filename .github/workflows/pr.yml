@@ -139,8 +139,6 @@ jobs:
 
       # Each suite already compiles on every core; cap concurrent suites at two.
       - name: Compile stock and feature shaders
-        env:
-          FO4CS_SHADER_TEST_CACHE: ${{ github.workspace }}\.shader-test-cache
         run: xmake test -g shaders -j 2
 
       - name: Assemble package

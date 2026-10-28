@@ -85,8 +85,9 @@ namespace cs::engine
 			std::initializer_list<ShaderInjectionTarget> a_targets,
 			std::string_view a_debug = {},
 			ShaderInjectionTarget a_pair = ShaderInjectionTarget::kCount,
-			ShaderStageMask a_stages = 0) :
-			name(a_name), targets(a_targets), debug(a_debug), pair(a_pair), stages(a_stages)
+			ShaderStageMask a_stages = 0,
+			std::initializer_list<ShaderInjectionTarget> a_debugTargets = { ShaderInjectionTarget::kBsdfComposite }) :
+			name(a_name), targets(a_targets), debug(a_debug), pair(a_pair), stages(a_stages), debugTargets(a_debugTargets)
 		{}
 
 		std::string_view GetShaderDefineName() const override { return name; }
@@ -96,10 +97,7 @@ namespace cs::engine
 		}
 		ShaderDefineOptions GetShaderDefineOptions(ShaderInjectionTarget a_target, bool a_fullscreenDebugSelected) const
 		{
-			// kCount queries feature-wide options, not an injection target.
-			return a_fullscreenDebugSelected && !debug.empty() &&
-			               HasShaderDefine(ShaderInjectionTarget::kBsdfComposite) &&
-			               (a_target == ShaderInjectionTarget::kCount || a_target == ShaderInjectionTarget::kBsdfComposite) ?
+			return a_fullscreenDebugSelected && !debug.empty() && ReachesDebugTarget(a_target) ?
 			           ShaderDefineOptions{ { debug, "1" } } :
 			           ShaderDefineOptions{};
 		}
@@ -119,5 +117,19 @@ namespace cs::engine
 		std::string_view debug;
 		ShaderInjectionTarget pair;
 		ShaderStageMask stages;
+		std::vector<ShaderInjectionTarget> debugTargets;
+
+	private:
+		bool IsDebugTarget(ShaderInjectionTarget a_target) const
+		{
+			return HasShaderDefine(a_target) && std::ranges::find(debugTargets, a_target) != debugTargets.end();
+		}
+		// kCount queries feature-wide options, not an injection target.
+		bool ReachesDebugTarget(ShaderInjectionTarget a_target) const
+		{
+			return a_target == ShaderInjectionTarget::kCount ?
+			           std::ranges::any_of(debugTargets, [this](auto a_debugTarget) { return IsDebugTarget(a_debugTarget); }) :
+			           IsDebugTarget(a_target);
+		}
 	};
 }

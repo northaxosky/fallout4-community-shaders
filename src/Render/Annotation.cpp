@@ -15,6 +15,12 @@ namespace cs::render::annotation
 		winrt::com_ptr<ID3DUserDefinedAnnotation> annotation;
 		BeginPassCallback beginPass{};
 		EndPassCallback endPass{};
+		RangeSink rangeSink{};
+
+		bool SinkActive() noexcept
+		{
+			return rangeSink.active && rangeSink.active();
+		}
 
 		std::wstring_view ToWide(
 			std::string_view a_name,
@@ -64,14 +70,23 @@ namespace cs::render::annotation
 		endPass = a_end;
 	}
 
+	void SetRangeSink(const RangeSink& a_sink) noexcept
+	{
+		rangeSink = a_sink;
+	}
+
 	bool EventsConsumed() noexcept
 	{
-		return annotation != nullptr;
+		return annotation != nullptr || SinkActive();
 	}
 
 	ScopedEvent::ScopedEvent(std::string_view a_name, bool a_profile) noexcept
 	{
 		_profile = a_profile && beginPass && endPass && beginPass(a_name);
+		if (SinkActive()) {
+			rangeSink.begin(a_name);
+			_sink = true;
+		}
 		if (!annotation)
 			return;
 
@@ -103,6 +118,8 @@ namespace cs::render::annotation
 	{
 		if (_profile)
 			endPass();
+		if (_sink)
+			rangeSink.end();
 		if (_d3d11)
 			_d3d11->EndEvent();
 		if (_d3d12)

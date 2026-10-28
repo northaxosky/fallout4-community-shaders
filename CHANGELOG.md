@@ -1,10 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Light Limit Fix: replaces Inverse Square Lighting; the config section is now `[features.LightLimitFix]` and `derive_unauthored_lights` now defaults to off, so converting unauthored lights to inverse-square falloff needs opting in.
+- Light Limit Fix: effects (smoke, fire, glow, rain) and water now receive every nearby light instead of at most 4 (effects) or 7 (water); portal-strict lights respect rooms; the magic light limit is lifted; adds a Clustered Lights Count debug view.
+- Pip-Boy and inventory effects no longer sample world sun shadows.
+- Rain Refraction: new feature ported from Skyrim CS; rain drops reflect and refract the Dynamic Cubemaps environment (required) and are lit by the sun and, with Light Limit Fix, nearby lights.
+
 ## 0.5.0
 
+- Sky Sync: new feature ported from Skyrim CS; sun and moon lights, shadows and godrays follow the bodies in the sky, with an optional alternate sun path and moonlight at night.
 - Terrain Blending: new feature ported from Skyrim CS; blends terrain into objects that sink into it by depth, removing the hard seam; no per-mesh opt-out yet.
 - Volumetric Shadows: new feature ported from Skyrim CS; softens the sun's soft, rim and back lighting and shadows the sun on water and effects; Skylighting's sky visibility drives those lobes instead while it is enabled.
-- Rain Refraction: new feature ported from Skyrim CS; rain drops reflect and refract the Dynamic Cubemaps environment (required) and are lit by the sun; point lights are not yet shaded.
+- Cloud Shadows: new feature ported from Skyrim CS; clouds shade the sun on terrain, objects and water. Cloud self-shadowing is not ported.
+- Dynamic Cubemaps, IBL: the engine reflection cube's side faces now include clouds; they were culled.
 - When shaders take over a second to compile, Continue, Load, and New Game wait behind the main menu's loading spinner until they finish, with a progress window when DearModdingUI is installed; set `background_compilation` in `[shader_cache]` (restart required) to play while they compile, with uncompiled shaders rendering as stock. Every stock shader variant a loaded feature modifies now precompiles at startup instead of as the game first draws it.
 - Shader cache: `max_size_mb` in `[shader_cache]` caps the disk cache (default 4096 MiB); least recently used shaders are removed first.
 - Community Shaders now disables all hooks and features and shows a message when the standalone Motion Vector Fixes (`MotionVectorFixes.dll`) or Dynamic Cubemaps F4 (`DynamicCubemapF4.dll`) plugin is installed; remove them, as Community Shaders includes both.
@@ -26,6 +35,7 @@
 - Disabling a feature's `enabled` toggle now skips its shader lookups for Skylighting, Screen Space Shadows, Terrain Shadows, Volumetric Shadows, Water Effects, Extended Materials parallax shadows and LOD Blending.
 - Lower CPU cost per injected draw: bindings are cached, Extended Materials skips unchanged target rebinds, draw counters run only with telemetry on, and per-shader timings run only while the Performance Overlay needs them.
 - Fixed an intermittent crash at startup while shaders compile.
+- Remote Control: Nsight Perf GPU counters per render pass ported from Skyrim CS (NVIDIA only, built with `--nvperf_sdk`); adds the `communityshaders.nvperf` tool and a panel on the Remote Control page.
 
 ## 0.4.1
 

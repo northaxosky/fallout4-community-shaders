@@ -1,6 +1,10 @@
 #ifdef BSEFFECT_PS_SOURCE
 #	include "FO4/FogConsumer.hlsli"
 #	include "FO4/EffectLightingConsumer.hlsli"
+#	if defined(LIGHTING) && defined(LIGHT_LIMIT_FIX)
+#		include "FO4/ForwardPosition.hlsli"
+#		include "FO4/LightLimitFixForward.hlsli"
+#	endif
 #	include "FO4/RainRefractionConsumer.hlsli"
 #	if defined(ENVCUBE_RAIN) || defined(ENVCUBE_SNOW)
 #		define WEATHER
@@ -146,25 +150,6 @@ struct PSOutput
 };
 
 #	if defined(LIGHTING)
-// Radius fade times spot cone, with the unit light-to-point direction in lightDist.
-// A macro because routing the stock lighting through a function changes its bytecode.
-#		define FO4_EFFECT_LIGHT_FALLOFF(msPosition, lightFadeMul, lightDistX, lightDistY, lightDistZ)                \
-			float4 lightDistX = msPosition.xxxx - PLightPositionX;                                                    \
-			float4 lightDistY = msPosition.yyyy - PLightPositionY;                                                    \
-			float4 lightDistZ = msPosition.zzzz - PLightPositionZ;                                                    \
-			float4 lightDistance = sqrt(lightDistX * lightDistX + lightDistY * lightDistY + lightDistZ * lightDistZ); \
-			float4 lightFadeMul = saturate(lightDistance * PLightingRadiusInverseSquared);                            \
-			lightFadeMul = 1.0.xxxx - lightFadeMul * lightFadeMul;                                                    \
-			lightFadeMul = pow(lightFadeMul, 2.2);                                                                    \
-			lightDistance = max(lightDistance, 0.001);                                                                \
-			lightDistX /= lightDistance;                                                                              \
-			lightDistY /= lightDistance;                                                                              \
-			lightDistZ /= lightDistance;                                                                              \
-			float4 spotFade = saturate(lightDistX * PSpotDirX + lightDistY * PSpotDirY + lightDistZ * PSpotDirZ);     \
-			spotFade = saturate(1.0.xxxx - (1.0.xxxx - spotFade) / (-PSpotAngle + 1.0.xxxx));                         \
-			float4 spotPower = (bool4)PSpotPower ? min(pow(spotFade, PSpotPower), 1.0.xxxx) : 1.0.xxxx;               \
-			lightFadeMul *= spotPower;
-
 float3 GetLightingColor(float3 msPosition
 #		if defined(FO4_EFFECT_LIGHTING)
 	,
@@ -172,11 +157,42 @@ float3 GetLightingColor(float3 msPosition
 #		endif
 )
 {
-	FO4_EFFECT_LIGHT_FALLOFF(msPosition, lightFadeMul, lightDistX, lightDistY, lightDistZ)
+	float4 lightDistX = msPosition.xxxx - PLightPositionX;
+	float4 lightDistY = msPosition.yyyy - PLightPositionY;
+	float4 lightDistZ = msPosition.zzzz - PLightPositionZ;
+	float4 lightDistance = sqrt(
+		lightDistX * lightDistX +
+		lightDistY * lightDistY +
+		lightDistZ * lightDistZ);
+	float4 lightFadeMul = saturate(lightDistance * PLightingRadiusInverseSquared);
+	lightFadeMul = 1.0.xxxx - lightFadeMul * lightFadeMul;
+	lightFadeMul = pow(lightFadeMul, 2.2);
+
+	lightDistance = max(lightDistance, 0.001);
+	lightDistX /= lightDistance;
+	lightDistY /= lightDistance;
+	lightDistZ /= lightDistance;
+
+	float4 spotFade = saturate(
+		lightDistX * PSpotDirX +
+		lightDistY * PSpotDirY +
+		lightDistZ * PSpotDirZ);
+	spotFade = saturate(
+		1.0.xxxx -
+		(1.0.xxxx - spotFade) /
+			(-PSpotAngle + 1.0.xxxx));
+	float4 spotPower = (bool4)PSpotPower ?
+	                       min(pow(spotFade, PSpotPower), 1.0.xxxx) :
+	                       1.0.xxxx;
+	lightFadeMul *= spotPower;
 
 	float3 color = DLightColor.xyz;
 #		if defined(FO4_EFFECT_LIGHTING)
 	color = FO4EffectLighting::GetLightingColor(color, screenPosition);
+#		endif
+#		if defined(LIGHT_LIMIT_FIX)
+	// FO4: the cluster loop in main replaces native lanes while LLF is healthy.
+	[branch] if (FO4LightLimitFix::UseClusteredLights()) return color;
 #		endif
 	color.x += dot(PLightColorR * lightFadeMul, 1.0.xxxx);
 	color.y += dot(PLightColorG * lightFadeMul, 1.0.xxxx);
@@ -185,22 +201,23 @@ float3 GetLightingColor(float3 msPosition
 }
 #	endif
 
-#	if defined(FO4_REFRACTIVE_RAIN) && defined(LIGHTING)
-// Adds the engine's effect lights to lighting, each shaded by ShadeLight.
+#	if defined(FO4_REFRACTIVE_RAIN) && defined(LIGHTING) && defined(LIGHT_LIMIT_FIX)
+// Adds the clustered lights at the drop, each shaded by ShadeLight.
 void AddPointLighting(FO4RainRefraction::Drop drop, inout float3 lighting)
 {
-	FO4_EFFECT_LIGHT_FALLOFF(drop.positionWS, fade, dirX, dirY, dirZ)
-	// FO4: engine light colors are linear and unscaled, like LLF's light.color.
-	float3 lightColor[4] = {
-		float3(PLightColorR.x, PLightColorG.x, PLightColorB.x),
-		float3(PLightColorR.y, PLightColorG.y, PLightColorB.y),
-		float3(PLightColorR.z, PLightColorG.z, PLightColorB.z),
-		float3(PLightColorR.w, PLightColorG.w, PLightColorB.w)
-	};
-	[unroll] for (uint i = 0; i < 4; i++)
+	[branch] if (!FO4LightLimitFix::UseClusteredLights()) return;
+	uint lightOffset, lightCount;
+	FO4LightLimitFix::GetClusterLights(drop.positionVS, lightOffset, lightCount);
+	[loop] for (uint i = 0; i < lightCount; i++)
 	{
-		float3 L = -float3(dirX[i], dirY[i], dirZ[i]);
-		lighting += FO4RainRefraction::ShadeLight(drop.surface, lightColor[i] * fade[i], L);
+		uint clusteredLightIndex = LightLimitFix::lightList[lightOffset + i];
+		LightLimitFix::Light light = LightLimitFix::lights[clusteredLightIndex];
+		if (FO4LightLimitFix::IsClusterLightSkipped(light))
+			continue;
+		// FO4: native effect falloff, color decode and spot cone.
+		float3 lightColor = FO4LightLimitFix::GetEffectLightColor(clusteredLightIndex, light, drop.positionWS);
+		float3 lightDirection = normalize(light.positionWS.xyz - drop.positionWS);
+		lighting += FO4RainRefraction::ShadeLight(drop.surface, lightColor, lightDirection);
 	}
 }
 #	endif
@@ -284,7 +301,7 @@ PSOutput main(PSInput input
 	{
 		FO4RainRefraction::Drop drop = FO4RainRefraction::Prepare(input.Position.xyz, input.RaindropData, frontFace, SampBaseSampler);
 		float3 directLighting = FO4RainRefraction::ShadeSun(drop);
-#				if defined(LIGHTING)
+#				if defined(LIGHTING) && defined(LIGHT_LIMIT_FIX)
 		AddPointLighting(drop, directLighting);
 #				endif
 		output.Color = FO4RainRefraction::Finish(drop, directLighting);
@@ -786,6 +803,14 @@ PSOutput main(PSInput input
 		input.Position.xyz
 #				endif
 	);
+#				if defined(LIGHT_LIMIT_FIX)
+	uint lightCount = 0;
+	[branch] if (FO4LightLimitFix::UseClusteredLights())
+	{
+		float3 viewPosition = FO4Forward::ViewPosition(input.Position.xyz);
+		propertyColor += FO4LightLimitFix::GetEffectLighting(viewPosition, FrameBuffer::ViewToWorld(viewPosition), lightCount);
+	}
+#				endif
 #			endif
 	float3 propertyBaseColor = propertyColor;
 	propertyBaseColor *= baseColor.xyz;
@@ -888,6 +913,17 @@ PSOutput main(PSInput input
 	output.Color = finalColor;
 #		elif defined(PIPBOY_SCREEN)
 	output.Color = finalColor;
+#		endif
+#		if defined(LIGHTING) && defined(LIGHT_LIMIT_FIX) && defined(LLFDEBUG) && !defined(MEMBRANE)
+	if (SharedData::lightLimitFixSettings.EnableLightsVisualisation) {
+		if (SharedData::lightLimitFixSettings.LightsVisualisationMode == 0) {
+			output.Color.xyz = Color::TurboColormap(0.0);
+		} else if (SharedData::lightLimitFixSettings.LightsVisualisationMode == 1) {
+			output.Color.xyz = Color::TurboColormap(0.0);
+		} else {
+			output.Color.xyz = Color::TurboColormap((float)lightCount / MAX_CLUSTER_LIGHTS);
+		}
+	}
 #		endif
 #	endif
 	return output;

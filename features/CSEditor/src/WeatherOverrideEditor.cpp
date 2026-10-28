@@ -36,7 +36,7 @@ namespace cs::features::cs_editor
 			const auto& label = a_field.description.empty() ? a_field.key : a_field.description;
 			return std::visit([&](auto& a_v) -> ui::EditResult {
 				using T = std::remove_cvref_t<decltype(a_v)>;
-				if constexpr (std::same_as<T, std::string> || std::same_as<T, settings::Float2>) {
+				if constexpr (std::same_as<T, std::string> || std::same_as<T, settings::Float2> || std::same_as<T, settings::StringList>) {
 					dmui::ui::TextDisabled("%s: not editable here", label.c_str());
 					return {};
 				} else if constexpr (std::same_as<T, settings::Float3> || std::same_as<T, settings::Color4>) {

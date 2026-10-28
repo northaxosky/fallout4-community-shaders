@@ -1,5 +1,6 @@
 #include "Telemetry/Telemetry.h"
 
+#include "BuildIdentity.h"
 #include "Feature.h"
 #include "FeatureState.h"
 #include "Log.h"

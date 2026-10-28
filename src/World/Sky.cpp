@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cmath>
 
+#include "RE/B/BSGeometry.h"
+#include "RE/B/BSSkyShaderProperty.h"
 #include "RE/I/ImageSpaceManager.h"
 #include "RE/N/NiAVObject.h"
 #include "RE/N/NiLight.h"
+#include "RE/N/NiNode.h"
 #include "RE/S/Sky.h"
 #include "RE/S/Sun.h"
 #include "RE/T/TES.h"
@@ -31,6 +34,32 @@ namespace cs::engine
 		outX = x * invLen;
 		outY = y * invLen;
 		outZ = z * invLen;
+		return true;
+	}
+
+	RE::BSSkyShaderProperty* GetSkyShaderProperty(RE::BSGeometry* a_geometry)
+	{
+		return a_geometry ? netimmerse_cast<RE::BSSkyShaderProperty*>(a_geometry->properties[1].get()) : nullptr;
+	}
+
+	const RE::BSSkyShaderProperty* GetSkyShaderProperty(const RE::BSGeometry* a_geometry)
+	{
+		return GetSkyShaderProperty(const_cast<RE::BSGeometry*>(a_geometry));
+	}
+
+	bool TryGetSunDiscDirectionWS(float& outX, float& outY, float& outZ) noexcept
+	{
+		const auto* sky = RE::Sky::GetSingleton();
+		if (!sky || !sky->root || !sky->sun || !sky->sun->root)
+			return false;
+		// The sky root sits at the camera; the sun root's offset is the disc.
+		const auto offset = sky->sun->root->world.translate - sky->root->world.translate;
+		const float length = std::sqrt(offset.SqrLength());
+		if (!(length > 0.0f) || !std::isfinite(length))
+			return false;
+		outX = offset.x / length;
+		outY = offset.y / length;
+		outZ = offset.z / length;
 		return true;
 	}
 

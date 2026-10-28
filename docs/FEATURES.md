@@ -35,12 +35,12 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Feature | Verdict | Core slices | Extension / N/A slices | Status | Payoff | Effort | Conf. |
 |---|---|---|---|---|---|---|---|
 | [CS Editor](deviations/CSEditor.md) | Core | Weather picker, lock, time controls, weather panels and per-weather feature overrides; template/imagespace/godray editors, light editor and shell pending | N/A: Skyrim VL noise fields | Pt | H | L | High |
-| Cloud Shadows | Mixed | Layer-cube producer, DFLight directional receivers, Water sun specular | Ext: Effect/particle sun term (FO4 Effect lighting has none). N/A: legacy VL consumer, BSParticleShader (never drawn) | NS | H | L | Med |
+| [Cloud Shadows](deviations/CloudShadows.md) | Mixed | Layer-cube producer, DFLight directional receivers, Water sun specular; cloud self-shadowing pending | Ext: Effect/particle sun term. N/A: legacy VL consumer, BSParticleShader (never drawn) | Pt | H | L | High |
 | [Dynamic Cubemaps](deviations/DynamicCubemaps.md) | Mixed | Capture/filter/inference, water, native envmap materials, Skylighting/IBL-specular providers, Creator tool | Ext: authored sentinel/reflectance selection, FO4 material workflow | Pt | H | S/M | High |
 | Effects11 | Core | `.fx` host and effect chain, color correction, editor, weather/light controls, volumetric rays, water shore fade/sun specular | N/A: ENB preset/binary compatibility | NS | H | L | Med |
 | Exponential Height Fog | Core | Deferred until upstream releases it | — | NS | — | — | — |
 | [Extended Materials](deviations/ExtendedMaterials.md) | Mixed | Object POM + contact refinement, warping fix, terrain POM/height blend (height from `_s` alpha); parallax material gate pending | Ext: complex envmask material; sun parallax soft shadows (done). N/A: point-light parallax shadows | Pt | H | M | Med |
-| Extended Translucency | Mixed | Alpha models on an existing alpha route* | Ext: per-mesh NIF metadata, world translucent coverage | NS | M | S | Low |
+| Extended Translucency | N/A | — | N/A: FO4 never forward-renders lit alpha-blended world geometry; vanilla has no translucent lit fabric | — | L | — | High |
 | Grass Collision | Core | Contact field, blade deformation/motion, optimized-grass consumer | — | NS | H | M | Med |
 | Grass Lighting | Mixed | Brightness/facing, complex-atlas decode, LOD brightness | Ext: exact specular/transmission/AO, PBR grass. N/A: forward activation | NS | M | S/M | Med |
 | Grass Optimizations | Mixed | Culling policy, HiZ, complex detection (no standalone payoff) | Ext: instance/bucket renderer + indirect submission, mesh LOD | NS | H | L | Med |
@@ -49,18 +49,17 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | HorizonFix | N/A | — | Integration with a Skyrim-only companion DLL | — | L | — | High |
 | [IBL](deviations/IBL.md) | Core | Environment SH, sky SH*, ambient/fog/effect consumers, occlusion integration, specular IBL | N/A: static IBL, world-map toggle, ENB | Pt | H | L | Med |
 | Interior Sun | Core (provisional) | Native sun gating*, portal culling, double-sided/distance, gameplay sun | N/A: plain interior directional light | NS | H | L | Low |
-| [Inverse Square Lighting](deviations/InverseSquareLighting.md) | Mixed | Attenuation, radius/lifetime, gameplay luminance, TOML authoring (relocated LIGH fields), editor, diagnostics | Ext: derivation of unauthored lights from native falloff | Pt | H | M | High |
-| Light Limit Fix | Mixed | Light-limit visualization | Ext: capacity/shadow-limit redesign. N/A: surface clustered culling (native tiled), strict lights, contact shadows, particle lights (no FO4 content) | NS | H | M | Med |
+| [Light Limit Fix](deviations/LightLimitFix.md) | Mixed | Forward cluster grid, strict lights, ISL attenuation, radius/lifetime, gameplay luminance, effect and water consumers, clustered light count visualization, TOML authoring (relocated LIGH fields), editor, diagnostics; local shadow copy pending | Ext: derivation of unauthored lights from native falloff. N/A: surface clustered shading (native tiled) and its Light Limit and Strict Lights Count views, particle lights (no FO4 content), local shadow cache/scheduler (no FO4 shadow-caster cap), Shadow Mask view (no FO4 shadow mask) | Pt | H | M | High |
 | Linear Lighting | N/A | Shared-color compatibility (done), optional calibration controls | N/A: linearization (FO4 is linear), ENB | Substrate | L | S | High |
 | [LOD Blending](deviations/LODBlending.md) | Core | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Core | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
-| [Rain Refraction](deviations/RainRefraction.md) | Core | Refractive drop shading from the Dynamic Cubemaps environment, sun shading, motion stretch and transparency; point lights pending (Light Limit Fix) | N/A: Effects 11 preset coupling | Pt | M | S | Med |
-| [Remote Control](deviations/RemoteControl.md) | Core | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc capture tools and events; NvPerf tool and screenshot capture pending | — | Pt | H | M | High |
+| [Rain Refraction](deviations/RainRefraction.md) | Core | Refractive drop shading from the Dynamic Cubemaps environment, sun and Light Limit Fix clustered light shading, motion stretch and transparency | N/A: Effects 11 preset coupling | Pt | M | S | Med |
+| [Remote Control](deviations/RemoteControl.md) | Core | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc capture and NvPerf tools and events; screenshot capture pending | — | Pt | H | M | High |
 | [Screen Space GI](deviations/ScreenSpaceGI.md) | Core | AO, GI, temporal, specular GI, vertex AO (relocated), provider wiring | — | Pt | H | M | High |
 | [Screen-Space Shadows](deviations/ScreenSpaceShadows.md) | Core | Bend raymarch, direct/back visibility, tree/alpha/secondary receivers, preview/telemetry | — | Pt | H | M | High |
 | Screenshot | Core | SDR/crop/async/clipboard, temporal source, HDR PNG (needs HDR Display) | — | NS | M | M | High |
 | Skin | Mixed | Detail normal/color, default dual-lobe*, transmittance*, sweat inputs* | Ext: RFAOS/wet textures, wet-skin film | NS | H | M | Med |
-| Sky Sync | Core | Alternate sun path, moon casting*, dawn/dusk + godray dimming | N/A: daytime sun fix (native matches), Skyrim compat checks | NS | M | M | Med |
+| [Sky Sync](deviations/SkySync.md) | Core | Alternate sun path, moon casting*, dawn/dusk + godray dimming, celestial transitions | N/A: Skyrim compat checks | Pt | M | M | Med |
 | Subsurface Scattering | Mixed | Separable and Burley on native class-5 skin (single profile), character light* | Ext: per-pixel amount/profile channel | NS | H | M | Med |
 | [Terrain Blending](deviations/TerrainBlending.md) | Core | Deferred landscape replay, depth-ramp alpha blend into the G-buffer, offset Z-prepass for near terrain | Pending: no-blend mesh flag | Pt | H | L | Med |
 | Terrain Helper | Mixed | Displacement-slot gather/bind* | Ext: default-land ESP package | NS | M | M | Low |
@@ -88,12 +87,15 @@ are FO4-only rule-4 core features.
   BGSM flag is recovered. Terrain shares Terrain Variation's UV offsets.
 - **Subsurface Scattering.** Replace FO4's fixed second-composite blur with upstream separable/Burley on
   native class-5 eligibility; never stack both.
-- **Cloud Shadows.** Prior art on branch `cloud-shadows` (`3314d567`) maps material pointers to layers;
-  replace with typed layer order.
-- **Light Limit Fix.** FO4 tiled lighting (625 lights, 127 per tile) replaces surface clustering. Particle
-  lights are N/A: upstream lights only texture stems listed in `Data\ParticleLights\*.ini`, which no FO4
-  content ships; lighting vanilla glow cards by shader flags would be an FO4-original extension. The
-  light-limit visualization (tiles at 127, per-tile count) ships with it.
+- **Light Limit Fix.** Opaque surfaces keep FO4's native tiled lighting (625 lights, 127 per tile). Forward
+  consumers (Effect, Water, Rain Refraction) read a clustered grid of every nearby light, with
+  portal-strict lights bound to rooms. Particle lights are N/A: upstream lights only texture stems listed in
+  `Data\ParticleLights\*.ini`, which no FO4 content ships; lighting vanilla glow cards by shader flags would be
+  an FO4-original extension. Debug view: clustered light count.
+- **Extended Translucency.** Forward BSLightingShader draws only Interface3D and cube captures. Blended
+  lit world geometry renders only when decal-flagged, through the `DFPrepass` BLEND variant; material alpha
+  below 1 becomes a 4×4 dither. Vanilla skinned blended content is hair/lash head parts (upstream excludes
+  them) and decals; glass and see-through fabric are BSEffect.
 - **Grass.** Grass wind/collision/placement is already reconstructed in `DFPrepass.hlsl`; remaining stock
   grass variants are port work.
 - **Shadow receivers** (fallout4-re `docs/cloud-volumetric-shadows-contract.md`). FO4 Effect LIGHTING carries
@@ -108,14 +110,14 @@ are FO4-only rule-4 core features.
 Ordered by user value over effort, respecting dependencies.
 
 1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE.
-2. **Finish ported features:** DC provider adapters (S/M); Water Effects caustics proof (S).
+2. **Finish ported features:** Light Limit Fix local shadow copy (M); DC provider adapters (S/M); Water Effects caustics proof (S).
 3. **Cheap new features:** LOD Blending (S); Unified Water optical blend and terrain tiles (M); Terrain Variation (M).
 4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
-5. **Mid-size, few dependencies:** Cloud Shadows (L); Subsurface Scattering (M); Volumetric
+5. **Mid-size, few dependencies:** Subsurface Scattering (M); Volumetric
    Shadows producer + DFLight (M); Hair Specular opaque slices (M); Grass Collision (M, actor-bounds RE).
-6. **RE-gated:** Interior Sun; Extended Translucency alpha models.
-7. **Providers:** LLF light-limit visualization; then provider adapters in DC/SSGI.
-8. **Remaining core:** Skin detail/default response; Sky Sync; Grass Lighting basics; CS Editor; Screenshot (then Remote Control screenshot capture); Remote Control NvPerf; HDR Display (L).
+6. **RE-gated:** Interior Sun.
+7. **Providers:** provider adapters in DC/SSGI.
+8. **Remaining core:** Skin detail/default response; Sky Sync; Grass Lighting basics; CS Editor; Screenshot (then Remote Control screenshot capture); HDR Display (L).
 
 ## Extension slices
 
@@ -123,5 +125,4 @@ Planned: Volumetric Lighting as an FO4 extension over native GFSDK godrays: enab
 a resolution fix for pixelated godrays and night-time (moon) godrays; RE first (GFSDK grid/quality/upsample
 parameters, night gating). Not planned: DC authored reflectance/material workflow; LLF vanilla glow-card particle lights. Candidates: TruePBR
 full materials; Extended Materials complex materials (envmask-alpha height, RGB metal/colour); Grass Optimizations renderer;
-Terrain Helper ESP; Skin RFAOS; SSS profiles; Hair Kajiya-Kay and blended hair; LLF capacity/shadow
-redesign; full raymarched Volumetric Lighting renderer; Extended Translucency world coverage.
+Terrain Helper ESP; Cloud Shadows Effect/particle sun term; Skin RFAOS; SSS profiles; Hair Kajiya-Kay and blended hair; full raymarched Volumetric Lighting renderer.

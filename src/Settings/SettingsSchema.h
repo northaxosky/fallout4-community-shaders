@@ -27,6 +27,10 @@ namespace cs::settings
 	struct Range<std::string>
 	{};
 
+	template <>
+	struct Range<StringList>
+	{};
+
 	template <class T>
 		requires std::is_enum_v<T>
 	struct Range<T>
@@ -197,6 +201,50 @@ namespace cs::settings
 	};
 
 	template <class Settings>
+	struct StringListField
+	{
+		using SettingsType = Settings;
+		using ValueType = StringList;
+
+		std::string_view key;
+		std::string_view description;
+		ValueType Settings::* member;
+		ApplyTiming timing = ApplyTiming::kImmediate;
+
+		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
+		{
+			const auto* node = a_table.get(key);
+			if (!node)
+				return true;
+			const auto* values = node->as_array();
+			if (!values) {
+				a_error = std::string(key) + ": expected array of strings";
+				return false;
+			}
+			StringList candidate;
+			candidate.reserve(values->size());
+			for (const auto& element : *values) {
+				const auto* text = element.as_string();
+				if (!text) {
+					a_error = std::string(key) + ": expected array of strings";
+					return false;
+				}
+				candidate.push_back(text->get());
+			}
+			a_value.*member = std::move(candidate);
+			return true;
+		}
+
+		void Write(toml::table& a_table, const Settings& a_value) const
+		{
+			toml::array values;
+			for (const auto& text : a_value.*member)
+				values.push_back(text);
+			a_table.insert_or_assign(key, std::move(values));
+		}
+	};
+
+	template <class Settings>
 	using Float2Field = FloatArrayField<Settings, 2>;
 	template <class Settings>
 	using Float3Field = FloatArrayField<Settings, 3>;
@@ -252,6 +300,13 @@ namespace cs::settings
 		}
 	};
 
+	template <class T, class... Fields>
+	struct FieldFor;
+	template <class T, class Field, class... Rest>
+	struct FieldFor<T, Field, Rest...> :
+		std::conditional_t<std::same_as<T, typename Field::ValueType>, std::type_identity<Field>, FieldFor<T, Rest...>>
+	{};
+
 	template <class... Fields>
 	struct Schema
 	{
@@ -263,24 +318,31 @@ namespace cs::settings
 			fields(std::move(a_fields))
 		{}
 
+		// The field bound to a settings member.
+		template <class T>
+		constexpr const typename FieldFor<T, Fields...>::type& Find(T SettingsType::* a_member) const
+		{
+			using Found = typename FieldFor<T, Fields...>::type;
+			const Found* found = nullptr;
+			std::apply([&](const auto&... a_fields) {
+				const auto match = [&](const auto& a_field) {
+					if constexpr (std::same_as<Found, std::remove_cvref_t<decltype(a_field)>>) {
+						if (a_field.member == a_member)
+							found = &a_field;
+					}
+				};
+				(match(a_fields), ...);
+			},
+				fields);
+			if (!found)
+				throw std::invalid_argument("Settings member is not in the schema");
+			return *found;
+		}
+
 		template <class T>
 		constexpr Range<T> EditRange(T SettingsType::* a_member) const
 		{
-			const Range<T>* range = nullptr;
-			std::apply([&](const auto&... a_fields) {
-				const auto find = [&](const auto& a_field) {
-					if constexpr (std::same_as<T, typename std::remove_cvref_t<decltype(a_field)>::ValueType> &&
-								  requires { a_field.edit; }) {
-						if (a_field.member == a_member)
-							range = &a_field.edit;
-					}
-				};
-				(find(a_fields), ...);
-			},
-				fields);
-			if (!range)
-				throw std::invalid_argument("Settings member is not in the schema");
-			return *range;
+			return Find(a_member).edit;
 		}
 	};
 
@@ -289,7 +351,7 @@ namespace cs::settings
 	{
 		if constexpr (std::is_enum_v<T>)
 			return EncodeValue(static_cast<std::underlying_type_t<T>>(a_value));
-		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string> || std::same_as<T, Float2> || std::same_as<T, Float3> || std::same_as<T, Color4>)
+		else if constexpr (std::same_as<T, bool> || std::floating_point<T> || std::same_as<T, std::string> || std::same_as<T, Float2> || std::same_as<T, Float3> || std::same_as<T, Color4> || std::same_as<T, StringList>)
 			return a_value;
 		else if constexpr (std::is_signed_v<T>)
 			return static_cast<std::int64_t>(a_value);

@@ -69,6 +69,7 @@ namespace FO4RainRefraction
 	struct Drop
 	{
 		Surface surface;
+		float3 positionVS;
 		float3 positionWS;
 		float3 ambient;  // Fresnel blend of the refracted and reflected environment
 		float alpha;
@@ -83,7 +84,8 @@ namespace FO4RainRefraction
 		raindropNormal.y = 1.0 - raindropNormal.y;
 
 		// FO4: FO4Forward handles dynamic resolution and first-person depth.
-		float3 posWS = FO4Forward::WorldPosition(screenPosition);
+		float3 posVS = FO4Forward::ViewPosition(screenPosition);
+		float3 posWS = FrameBuffer::ViewToWorld(posVS);
 
 		// World TBN from screen derivatives; the camera-aligned billboard spans X/Y
 		float3 T = normalize(ddx(posWS));
@@ -113,6 +115,7 @@ namespace FO4RainRefraction
 		drop.surface.normal = normalWS;
 		drop.surface.view = V;
 		drop.surface.refractDir = refractDir;
+		drop.positionVS = posVS;
 		drop.positionWS = posWS;
 		drop.ambient = lerp(refractColor, reflectColor, fresnel);
 		drop.alpha = alpha;

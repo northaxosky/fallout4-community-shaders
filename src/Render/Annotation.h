@@ -12,7 +12,15 @@ namespace cs::render::annotation
 	using BeginPassCallback = bool (*)(std::string_view);
 	using EndPassCallback = void (*)();
 	void SetProfilerCallbacks(BeginPassCallback a_begin, EndPassCallback a_end) noexcept;
-	// A capture tool attached at device creation receives the events.
+	// A range sink mirrors scoped events into a tool that reads them only while active().
+	struct RangeSink
+	{
+		bool (*active)(){};
+		void (*begin)(std::string_view){};
+		void (*end)(){};
+	};
+	void SetRangeSink(const RangeSink& a_sink) noexcept;
+	// True while a capture tool or a registered range sink consumes the events.
 	[[nodiscard]] bool EventsConsumed() noexcept;
 
 	class ScopedEvent
@@ -34,6 +42,7 @@ namespace cs::render::annotation
 		ID3DUserDefinedAnnotation* _d3d11{};
 		ID3D12GraphicsCommandList* _d3d12{};
 		bool _profile{};
+		bool _sink{};
 	};
 
 	// Spans a Pre/Post hook pair, so no C++ scope can own it.

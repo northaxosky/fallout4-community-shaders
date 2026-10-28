@@ -31,6 +31,7 @@ namespace cs::features
 			return "Expose Community Shaders tools to the DevBench host for MCP and REST clients.";
 		}
 
+		void Load() override;
 		void OnPostPostLoad() override;
 		void DrawSettings() override;
 
@@ -40,6 +41,7 @@ namespace cs::features
 	private:
 		RemoteControl() = default;
 
+		void DrawHostStatus();
 		void SubscribeToEvents();
 		[[nodiscard]] int ReadHostPort();
 

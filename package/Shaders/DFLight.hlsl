@@ -4,8 +4,8 @@
 #	include "FO4/ScreenSpaceShadowConsumer.hlsli"
 #endif
 
-#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-#	include "FO4/TerrainShadowsConsumer.hlsli"
+#if defined(DIRECTIONAL)
+#	include "FO4/WorldShadowConsumer.hlsli"
 #endif
 #if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 #	include "FO4/ExtendedMaterialsConsumer.hlsli"
@@ -13,7 +13,7 @@
 #include "FO4/AmbientConsumer.hlsli"
 #include "FO4/SoftSunShadow.hlsli"
 
-#include "FO4/InverseSquareLightingRaster.hlsli"
+#include "FO4/LightLimitFixRaster.hlsli"
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 // FO4: directional RGB accumulators carry upstream's chromatic multiplier.
@@ -2391,8 +2391,8 @@ float2 goboUV = float2(omniUV.x,
 		float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 #	endif
 		FO4_SOFT_SHADOW_NATIVE(softShadow, shadow);
-#	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-		FO4_SHADOW_LIGHT_MUL(shadow, softShadow, TerrainShadows::GetTerrainShadowMultFromViewPosition(posView));
+#	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
+		FO4_SHADOW_LIGHT_MUL(shadow, softShadow, WorldShadow::GetMultFromViewPosition(posView));
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 		FO4_SHADOW_LIGHT_MUL(shadow, softShadow, ExtendedMaterials::GetParallaxShadow(input.position.xy));
@@ -3186,8 +3186,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 #	endif
 			FO4_SOFT_SHADOW_NATIVE(softShadow, shadow);
-#	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, TerrainShadows::GetTerrainShadowMultFromViewPosition(posView));
+#	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
+			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, WorldShadow::GetMultFromViewPosition(posView));
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, ExtendedMaterials::GetParallaxShadow(input.position.xy));
@@ -4185,8 +4185,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 #	endif
 			FO4_SOFT_SHADOW_NATIVE(softShadow, shadow);
-#	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, TerrainShadows::GetTerrainShadowMultFromViewPosition(posView));
+#	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
+			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, WorldShadow::GetMultFromViewPosition(posView));
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, ExtendedMaterials::GetParallaxShadow(input.position.xy));
@@ -5314,8 +5314,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #	endif
-#	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-			result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(posView);
+#	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
+			result *= WorldShadow::GetMultFromViewPosition(posView);
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 			result *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
@@ -5604,8 +5604,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #		endif
-#		if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-			result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(posView);
+#		if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
+			result *= WorldShadow::GetMultFromViewPosition(posView);
 #		endif
 #		if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 			result *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
@@ -5639,8 +5639,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 	splitShadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
 #		endif
-#		if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-	splitShadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(posView);
+#		if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
+	splitShadow *= WorldShadow::GetMultFromViewPosition(posView);
 #		endif
 #		if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 	splitShadow *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
@@ -6340,11 +6340,11 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += (forwardBlend * FO4LocalLightColor(LightColor_row0.xyz)) * albedoSample.xyz;
 #	endif
 
-#	if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-			float terrainShadowMult = TerrainShadows::GetTerrainShadowMultFromViewPosition(posView);
-			finalDiffuse *= terrainShadowMult;
-			FO4_SOFT_LOBE_SCALE(softDiffuse, terrainShadowMult);
-			brdfSpecular *= terrainShadowMult;
+#	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
+			float worldShadowMult = WorldShadow::GetMultFromViewPosition(posView);
+			finalDiffuse *= worldShadowMult;
+			FO4_SOFT_LOBE_SCALE(softDiffuse, worldShadowMult);
+			brdfSpecular *= worldShadowMult;
 #	endif
 #	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 			float parallaxShadowMult = ExtendedMaterials::GetParallaxShadow(input.position.xy);

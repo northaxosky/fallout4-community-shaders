@@ -10,6 +10,7 @@ Water parallax reads height from the water normal alpha; vanilla alpha-less norm
 | Forced | `NormalsScale` read in the water pixel shader | The vertex shader forwards it as `TEXCOORD8`; BSWater VS and PS are replaced as a pair | The FO4 water PS has no `NormalsScale` constant |
 | Forced | Interior cell water height | Stays -FLT_MAX | FO4's exterior-height accessor rejects interior cells |
 | N/A | WaterParallax FLOWMAP variants | | FO4 water has no flowmap path |
+| Forced | LLF lights in the water surface pass | Clustered lights replace FO4's SPECULAR-technique lights in world draws; see [Light Limit Fix](LightLimitFix.md) | FO4 water draws its local lights in a separate specular technique |
 | Pending | Secondary mode-0/21 BSLighting caustics | Not ported | Needs secondary-view BSLighting execution and camera/resource lifetime |
 
 ## Upstream bugs

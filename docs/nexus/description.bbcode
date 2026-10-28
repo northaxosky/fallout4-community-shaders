@@ -17,7 +17,7 @@ Every feature ships turned off, so you enable only what you want.
 [*][b]Screen Space GI:[/b] Ambient occlusion and indirect lighting.[/*]
 [*][b]Skylighting:[/b] Ambient light and reflections that respect how much sky a surface can see.[/*]
 [*][b]Image Based Lighting:[/b] Ambient light, reflections, and fog tint driven by the sky and environment. Requires Dynamic Cubemaps.[/*]
-[*][b]Inverse Square Lighting:[/b] Opt-in per-light falloff, authored in Lights TOML files. Existing lights stay unchanged.[/*]
+[*][b]Light Limit Fix:[/b] Smoke, fire, glow, rain and water receive every nearby light, with portal-strict lights bound to rooms and a clustered light count debug view; physically based inverse-square falloff for lights authored in Lights TOML files, with converting unauthored lights opt-in.[/*]
 [*][b]Extended Materials:[/b] Parallax on objects and terrain, with sun self-shadows. Objects need a height map in the specular texture's alpha.[/*]
 [*][b]Terrain Variation:[/b] Breaks up repeating terrain textures, including distant LOD.[/*]
 [*][b]Terrain Blending:[/b] Terrain blends into objects that sink into it, removing the hard seam.[/*]

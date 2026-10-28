@@ -189,6 +189,52 @@ namespace cs::engine
 			return true;
 		}
 
+		bool AddSkyDefines(
+			ShaderInjectionDefines& a_defines,
+			std::uint32_t a_descriptor)
+		{
+			switch (a_descriptor & 0xFFU) {
+			case 0:
+				Define(a_defines, "OCCLUSION");
+				break;
+			case 1:
+				Define(a_defines, "DITHER");
+				break;
+			case 2:
+				Define(a_defines, "TEX");
+				Define(a_defines, "MOONMASK");
+				break;
+			case 3:
+				Define(a_defines, "HORIZFADE");
+				break;
+			case 4:
+				Define(a_defines, "TEX");
+				break;
+			case 5:
+				Define(a_defines, "TEX");
+				Define(a_defines, "CLOUDS");
+				break;
+			case 6:
+				Define(a_defines, "TEX");
+				Define(a_defines, "CLOUDS");
+				Define(a_defines, "TEXLERP");
+				break;
+			case 7:
+				Define(a_defines, "TEX");
+				Define(a_defines, "CLOUDS");
+				if (a_descriptor == 7)
+					Define(a_defines, "TEXFADE");
+				break;
+			case 8:
+				Define(a_defines, "TEX");
+				Define(a_defines, "DITHER");
+				break;
+			default:
+				return false;
+			}
+			return true;
+		}
+
 		bool AddBsdfLightDefines(
 			ShaderInjectionDefines& a_defines,
 			ShaderStage a_stage,
@@ -635,6 +681,8 @@ namespace cs::engine
 					return false;
 				DefineBit(a_defines, d, 1, "RENDER_DEPTH");
 				return true;
+			case ShaderInjectionTarget::kBsSky:
+				return AddSkyDefines(a_defines, d);
 			case ShaderInjectionTarget::kBsWater:
 				return AddWaterDefines(a_defines, d);
 			case ShaderInjectionTarget::kBsdfLight:
@@ -703,6 +751,11 @@ namespace cs::engine
 				define = a_descriptor.stage == ShaderStage::kVertex ?
 				             "BSDISTANTTREE_VS_SOURCE" :
 				             "BSDISTANTTREE_PS_SOURCE";
+				break;
+			case ShaderInjectionTarget::kBsSky:
+				define = a_descriptor.stage == ShaderStage::kVertex ?
+				             "BSSKY_VERTEX_SHADER" :
+				             "BSSKY_PIXEL_SHADER";
 				break;
 			case ShaderInjectionTarget::kBsWater:
 				define = a_descriptor.stage == ShaderStage::kVertex ?

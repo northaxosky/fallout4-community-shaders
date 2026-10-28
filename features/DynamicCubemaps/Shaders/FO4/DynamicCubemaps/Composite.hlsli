@@ -5,8 +5,8 @@
 #include "FO4/SkylightingConsumer.hlsli"
 
 // FO4's composite feature resources occupy the lower slots.
-#define DYNAMIC_CUBEMAPS_ENVIRONMENT_REGISTER t34
-#define DYNAMIC_CUBEMAPS_REFLECTIONS_REGISTER t35
+#define DYNAMIC_CUBEMAPS_ENVIRONMENT_REGISTER t39
+#define DYNAMIC_CUBEMAPS_REFLECTIONS_REGISTER t40
 #include "FO4/DynamicCubemaps/DynamicCubemaps.hlsli"
 #undef DYNAMIC_CUBEMAPS_ENVIRONMENT_REGISTER
 #undef DYNAMIC_CUBEMAPS_REFLECTIONS_REGISTER

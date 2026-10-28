@@ -6,17 +6,19 @@
 
 namespace cs::feature_config
 {
-	inline constexpr std::array<std::string_view, 22> kAllFeatureKeys{
+	inline constexpr std::array<std::string_view, 24> kAllFeatureKeys{
 		"ScreenSpaceGI",
 		"Skylighting",
-		"InverseSquareLighting",
+		"LightLimitFix",
 		"DynamicCubemaps",
 		"ImageBasedLighting",
 		"WaterEffects",
 		"UnifiedWater",
 		"ScreenSpaceShadows",
 		"TerrainShadows",
+		"SkySync",
 		"VolumetricShadows",
+		"CloudShadows",
 		"LODBlending",
 		"TerrainVariation",
 		"TerrainBlending",
