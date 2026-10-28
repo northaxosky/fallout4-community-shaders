@@ -27,10 +27,6 @@ namespace cs::util
 		const std::filesystem::path& a_shaderRoot = kDefaultShaderRoot,
 		std::uint32_t a_flags1 = shader_cache::kCachedOptimizedFlags1);
 
-	std::vector<std::pair<const char*, const char*>> UtilityShaderDefines(
-		const std::vector<std::pair<const char*, const char*>>& a_defines,
-		const char* a_programType);
-
 	Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderToBlob(
 		const wchar_t* a_filePath,
 		const std::vector<std::pair<const char*, const char*>>& a_defines,

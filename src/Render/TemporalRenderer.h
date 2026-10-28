@@ -2,8 +2,8 @@
 
 #include "DebugView.h"
 #include "RE/I/ImageSpaceEffectTemporalAA.h"
-#include "Render/RenderUIOutputExtent.h"
 #include "Render/SwapChainHook.h"
+#include "Render/TemporalPipeline.h"
 #include "Render/TemporalRenderSettings.h"
 #include "Render/TemporalRenderSizing.h"
 #include "Utils/CSBuffer.h"
@@ -48,7 +48,7 @@ namespace cs::render
 		[[nodiscard]] bool DebugSnapshotPending() const noexcept;
 		void SetFrameGenerationDebugView(std::string_view) noexcept;
 		[[nodiscard]] FeatureDebugTexture GetFrameGenerationDebugTexture(
-			std::string_view) const;
+			FrameGenerationDebugResource) const;
 		void RefreshFrameGenerationDebugSnapshot() noexcept;
 		[[nodiscard]] bool HasFrameGenerationDebugSnapshotSelection() const noexcept;
 		[[nodiscard]] bool FrameGenerationDebugSnapshotPending() const noexcept;
@@ -56,7 +56,7 @@ namespace cs::render
 		void CaptureFrameGenerationHudlessDebugSnapshot();
 		void CaptureFrameGenerationFinalDebugSnapshot();
 		void InstallTemporalHooks();
-		void InstallTemporalMenuListener();
+		void InitializeTemporalState();
 		void ClearFrameGenerationCaptureState() noexcept;
 		void QuarantineAfterException(const char* a_where) noexcept;
 		// Decided once per frame at the pre-UI seam; Present reads the latch.
@@ -73,7 +73,6 @@ namespace cs::render
 
 	private:
 		enum class DebugView : std::uint8_t;
-		enum class FrameGenerationDebugView : std::uint8_t;
 
 		float2 jitter = { 0, 0 };
 
@@ -94,6 +93,16 @@ namespace cs::render
 
 		float2 resolutionScale = { 1.0f, 1.0f };
 		temporal::RenderSizeState _renderSize;
+		struct ResourceConfiguration
+		{
+			UpscaleMethod method = UpscaleMethod::kTAA;
+			temporal::SuperResolutionSizeRequest size;
+			Extent render;
+
+			bool operator==(const ResourceConfiguration&) const noexcept = default;
+		};
+		std::optional<ResourceConfiguration> _resourceConfiguration;
+		ResourceConfiguration GetResourceConfiguration(UpscaleMethod a_method) const noexcept;
 
 		bool IsUpscalingActive() const;
 		bool IsFrameGenerationDx12PathActive() const noexcept;
@@ -212,7 +221,7 @@ namespace cs::render
 			ID3D11ShaderResourceView* a_source);
 		void ResetDebugSnapshotResources() noexcept;
 		bool CaptureFrameGenerationDebugSnapshot(
-			FrameGenerationDebugView a_view,
+			FrameGenerationDebugResource a_view,
 			ID3D11ShaderResourceView* a_source);
 		void ResetFrameGenerationDebugSnapshotResources() noexcept;
 		void CaptureSelectedDebugSnapshot();
@@ -406,15 +415,6 @@ namespace cs::render
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		class MenuOpenCloseEventHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
-		{
-		public:
-			RE::BSEventNotifyControl ProcessEvent(
-				const RE::MenuOpenCloseEvent& a_event,
-				RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override;
-			static bool Register();
-		};
-
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _hooksInstalled{ false };
 		std::atomic_bool _quarantined{ false };
@@ -431,19 +431,10 @@ namespace cs::render
 			kMotionVectors,
 			kProviderOutput
 		};
-		enum class FrameGenerationDebugView : std::uint8_t
-		{
-			kOff,
-			kHudless,
-			kFinal,
-			kDepth,
-			kMotion
-		};
-
 		std::atomic<DebugView> _debugView{ DebugView::kOff };
 		FrozenTextureSnapshot _superResolutionDebugSnapshot;
-		std::atomic<FrameGenerationDebugView> _frameGenerationDebugView{
-			FrameGenerationDebugView::kOff
+		std::atomic<FrameGenerationDebugResource> _frameGenerationDebugView{
+			FrameGenerationDebugResource::kOff
 		};
 		FrozenTextureSnapshot _frameGenerationDebugSnapshot;
 		std::atomic<float> _mipBias{ 0.0f };

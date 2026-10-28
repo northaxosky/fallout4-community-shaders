@@ -8,15 +8,28 @@
 
 namespace cs::render::temporal
 {
-	enum class UpscaleMethod
+	enum class SuperResolutionMethod : std::uint8_t
 	{
-		kNONE,
+		kNone,
 		kTAA,
-		kFSR,
+		kFSR3,
 		kDLSS,
 		kFSR4,
 		kCount
 	};
+	using UpscaleMethod = SuperResolutionMethod;
+
+	enum class FrameGenerationMethod : std::uint8_t
+	{
+		kOff,
+		kFSR3,
+		kDLSSG,
+		kFSR4,
+		kCount
+	};
+
+	inline constexpr std::uint32_t kMaxFrameGenerationMethodValue =
+		static_cast<std::uint32_t>(FrameGenerationMethod::kFSR4);
 
 	inline constexpr std::uint32_t kMaxUpscaleMethodValue =
 		static_cast<std::uint32_t>(UpscaleMethod::kFSR4);
@@ -24,7 +37,7 @@ namespace cs::render::temporal
 	constexpr bool IsExternalUpscaler(UpscaleMethod a_method) noexcept
 	{
 		switch (a_method) {
-		case UpscaleMethod::kFSR:
+		case UpscaleMethod::kFSR3:
 		case UpscaleMethod::kDLSS:
 		case UpscaleMethod::kFSR4:
 			return true;

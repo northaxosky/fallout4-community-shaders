@@ -1,14 +1,15 @@
 #include "Host/HostClient.h"
 
 #include "Feature.h"
-#include "Host/HostClientOptions.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/ProfilingRenderer.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
+#include "Menu/SettingsLayout.h"
 #include "Plugin.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
-#include "Utils/Hotkey.h"
 
 #include "PerformanceOverlay.h"
 #include "RenderDoc.h"
@@ -27,6 +28,12 @@ namespace cs::host
 {
 	namespace
 	{
+		constexpr std::uint32_t kBindingPollFrames = 120;
+
+		constexpr dmui::ClientOptions kClientOptions{
+			.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT
+		};
+
 		auto* L = cs::log::Get("cs.host");
 
 		FeaturePageInput DescribeFeature(Feature& a_feature)
@@ -58,6 +65,23 @@ namespace cs::host
 			if (edit.Discrete(dmui::ui::Checkbox("Enabled", &enabled)))
 				a_feature.SetEnabled(enabled);
 		}
+	}
+
+	HostClient::FrameDemandAction HostClient::FrameDemandTracker::Next(bool a_wanted) const noexcept
+	{
+		if (a_wanted == _requested)
+			return FrameDemandAction::kNone;
+		return a_wanted ? FrameDemandAction::kRequest : FrameDemandAction::kRelease;
+	}
+
+	void HostClient::FrameDemandTracker::Complete(FrameDemandAction a_action, bool a_succeeded) noexcept
+	{
+		if (!a_succeeded)
+			return;
+		if (a_action == FrameDemandAction::kRequest)
+			_requested = true;
+		else if (a_action == FrameDemandAction::kRelease)
+			_requested = false;
 	}
 
 	HostClient::HostClient() :
@@ -162,7 +186,8 @@ namespace cs::host
 				.categoryId = page->descriptor.categoryId.c_str(),
 				.summary = page->descriptor.summary.c_str(),
 				.sortKey = page->descriptor.sortKey,
-				.kind = page->descriptor.kind == HostPageKind::kOverlay ?
+				.kind = page->descriptor.kind == HostPageKind::kOverlay ||
+				                page->descriptor.kind == HostPageKind::kShaderCompileOverlay ?
 				            DMUI_PAGE_KIND_OVERLAY :
 				            DMUI_PAGE_KIND_SETTINGS
 			};
@@ -180,7 +205,9 @@ namespace cs::host
 			}
 			stored->handle = *handle;
 			if (stored->descriptor.kind == HostPageKind::kOverlay)
-				_overlayPage = stored;
+				_performanceOverlay.page = stored;
+			else if (stored->descriptor.kind == HostPageKind::kShaderCompileOverlay)
+				_shaderCompileOverlay.page = stored;
 		}
 		return true;
 	}
@@ -219,15 +246,31 @@ namespace cs::host
 		return succeeded;
 	}
 
+	bool HostClient::RegisterHotkey(
+		HotkeyChannel& a_channel,
+		const char* a_id,
+		const char* a_displayName,
+		const char* a_suggestedChord,
+		std::function<void(bool)> a_callback,
+		std::function<bool()> a_enabled,
+		DMUI_HotkeyContextPolicy a_contextPolicy)
+	{
+		a_channel.enabled = std::move(a_enabled);
+		a_channel.handle = _client.AddHotkeyAction(
+			a_id, a_displayName, a_suggestedChord, std::move(a_callback), a_contextPolicy);
+		if (!a_channel.handle) {
+			LogFailure(std::format("register {} hotkey", a_channel.name));
+			return false;
+		}
+		SetHotkeyEnabled(a_channel);
+		return !a_channel.enableFailure;
+	}
+
 	bool HostClient::RegisterHotkeys()
 	{
 		bool succeeded = true;
 		auto* performance = features::PerformanceOverlay::GetSingleton();
-		_overlayHotkey = _client.AddHotkeyAction(
-			"dearmodding.cs.performance-overlay.toggle",
-			"Toggle Performance Overlay",
-			performance->SuggestedToggleHotkey().c_str(),
-			[this](bool pressed) {
+		succeeded &= RegisterHotkey(_hotkeys[kOverlay], "dearmodding.cs.performance-overlay.toggle", "Toggle Performance Overlay", performance->SuggestedToggleHotkey().c_str(), [this](bool pressed) {
 				auto* feature = features::PerformanceOverlay::GetSingleton();
 				if (pressed &&
 					_registrationComplete.load(std::memory_order_acquire) &&
@@ -236,74 +279,23 @@ namespace cs::host
 					_overlayVisible.store(
 						!_overlayVisible.load(std::memory_order_relaxed),
 						std::memory_order_relaxed);
-				}
-			},
-			DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
-		if (!_overlayHotkey) {
-			LogFailure("register performance overlay hotkey");
-			succeeded = false;
-		} else {
-			std::optional<DMUI_Result> failure;
-			SetHotkeyEnabled(
-				"performance overlay",
-				_overlayHotkey,
-				performance->IsHealthy() && performance->IsOverlayActive(),
-				failure);
-			succeeded &= !failure.has_value();
-		}
+				} }, [performance] { return performance->IsHealthy() && performance->IsOverlayActive(); });
 
 		auto* renderDoc = features::RenderDoc::GetSingleton();
-		// Preserve the established policy that multi-frame capture wins when both
-		// suggested chords are the same by registering it first.
-		_multiCaptureHotkey = _client.AddHotkeyAction(
-			"dearmodding.cs.renderdoc.multi-capture",
-			"Capture Configured Frames (alternate)",
-			renderDoc->SuggestedMultiCaptureHotkey().c_str(),
-			[this, renderDoc](bool pressed) {
+		// Multi-frame capture wins conflicting defaults by registering first.
+		succeeded &= RegisterHotkey(_hotkeys[kMultiCapture], "dearmodding.cs.renderdoc.multi-capture", "Capture Configured Frames (alternate)", renderDoc->SuggestedMultiCaptureHotkey().c_str(), [this, renderDoc](bool pressed) {
 				if (pressed &&
 					_registrationComplete.load(std::memory_order_acquire) &&
 					renderDoc->IsHealthy() &&
 					renderDoc->CaptureHotkeysEnabled())
-					renderDoc->TriggerMultiFrameCapture();
-			},
-			DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
-		if (!_multiCaptureHotkey) {
-			LogFailure("register RenderDoc multi-capture hotkey");
-			succeeded = false;
-		} else {
-			std::optional<DMUI_Result> failure;
-			SetHotkeyEnabled(
-				"RenderDoc multi-frame capture",
-				_multiCaptureHotkey,
-				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
-				failure);
-			succeeded &= !failure.has_value();
-		}
+					renderDoc->TriggerMultiFrameCapture(); }, [renderDoc] { return renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(); });
 
-		_captureHotkey = _client.AddHotkeyAction(
-			"dearmodding.cs.renderdoc.capture",
-			"Capture Configured Frames",
-			renderDoc->SuggestedCaptureHotkey().c_str(),
-			[this, renderDoc](bool pressed) {
+		succeeded &= RegisterHotkey(_hotkeys[kCapture], "dearmodding.cs.renderdoc.capture", "Capture Configured Frames", renderDoc->SuggestedCaptureHotkey().c_str(), [this, renderDoc](bool pressed) {
 				if (pressed &&
 					_registrationComplete.load(std::memory_order_acquire) &&
 					renderDoc->IsHealthy() &&
 					renderDoc->CaptureHotkeysEnabled())
-					renderDoc->TriggerCapture();
-			},
-			DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
-		if (!_captureHotkey) {
-			LogFailure("register RenderDoc capture hotkey");
-			succeeded = false;
-		} else {
-			std::optional<DMUI_Result> failure;
-			SetHotkeyEnabled(
-				"RenderDoc single-frame capture",
-				_captureHotkey,
-				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
-				failure);
-			succeeded &= !failure.has_value();
-		}
+					renderDoc->TriggerCapture(); }, [renderDoc] { return renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(); });
 
 		if (renderDoc->SuggestedCaptureHotkey() ==
 			renderDoc->SuggestedMultiCaptureHotkey()) {
@@ -313,21 +305,10 @@ namespace cs::host
 				renderDoc->SuggestedMultiCaptureHotkey());
 		}
 
-		const auto dump = log::GetDumpHotkey().ToString();
-		_dumpHotkey = _client.AddHotkeyAction(
-			"dearmodding.cs.logging.dump",
-			"Dump Community Shaders Log",
-			dump.c_str(),
-			[this](bool pressed) {
+		succeeded &= RegisterHotkey(_hotkeys[kDump], "dearmodding.cs.logging.dump", "Dump Community Shaders Log", log::GetDumpHotkey().c_str(), [this](bool pressed) {
 				if (pressed &&
 					_registrationComplete.load(std::memory_order_acquire))
-					telemetry::pump::RequestDump();
-			},
-			DMUI_HOTKEY_CONTEXT_ALWAYS);
-		if (!_dumpHotkey) {
-			LogFailure("register log dump hotkey");
-			succeeded = false;
-		}
+					telemetry::pump::RequestDump(); }, [] { return true; }, DMUI_HOTKEY_CONTEXT_ALWAYS);
 		return succeeded;
 	}
 
@@ -380,6 +361,9 @@ namespace cs::host
 		case HostPageKind::kAdvanced:
 			Menu::Get().DrawAdvanced(_client);
 			break;
+		case HostPageKind::kProfiling:
+			ProfilingRenderer::RenderStatistics();
+			break;
 		case HostPageKind::kPresets:
 			Menu::Get().DrawPresets(_client);
 			break;
@@ -393,6 +377,9 @@ namespace cs::host
 		case HostPageKind::kOverlay:
 			DrawOverlayPage();
 			break;
+		case HostPageKind::kShaderCompileOverlay:
+			DrawShaderCompileOverlayPage();
+			break;
 		}
 	}
 
@@ -405,7 +392,6 @@ namespace cs::host
 				a_feature,
 				a_phase,
 				a_detail);
-			FeatureManager::Get().FinishRuntimeCallbackPass();
 			if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 					a_feature.GetName().data(),
 					a_summary,
@@ -416,33 +402,10 @@ namespace cs::host
 
 		const bool loadAtBoot = LoadAtBoot(a_feature);
 		const auto& state = a_feature.GetState();
-		dmui::SettingsTableScope table{
-			_client,
-			std::format("feature-settings-{}", a_feature.GetName()).c_str()
-		};
-		if (table.Result() != DMUI_RESULT_OK) {
-			LogFailure("begin feature settings table");
-			return;
-		}
-		if (!table.Visible())
-			return;
-
-		if (state.runtimeState == FeatureRuntimeState::kFailed ||
-			state.runtimeState == FeatureRuntimeState::kDegraded) {
-			dmui::SettingsRowScope row{
-				_client,
-				"feature-failure",
-				state.runtimeState == FeatureRuntimeState::kFailed ?
-					"Error" :
-					"Warning",
-				"",
-				dmui::RowPresentation::Layout::kFullSpan
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				LogFailure("begin feature failure row");
-				return;
-			}
-			if (row.Visible()) {
+		if (!ui::DrawTable(_client, std::format("feature-settings-{}", a_feature.GetName()).c_str(), [&] {
+				if (state.runtimeState == FeatureRuntimeState::kFailed ||
+					state.runtimeState == FeatureRuntimeState::kDegraded) {
+					return ui::DrawRow(_client, "feature-failure", state.runtimeState == FeatureRuntimeState::kFailed ? "Error" : "Warning", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool {
 				const auto tone =
 					state.runtimeState == FeatureRuntimeState::kFailed ?
 						dmui::TextTone::kStatusError :
@@ -454,7 +417,7 @@ namespace cs::host
 							state.detail,
 						{ .tone = tone })) {
 					LogFailure("draw feature failure detail");
-					return;
+					return false;
 				}
 				try {
 					a_feature.DrawFailLoadMessage();
@@ -471,30 +434,11 @@ namespace cs::host
 						"non-standard exception");
 					throw;
 				}
-			}
-			if (!row.End()) {
-				LogFailure("end feature failure row");
-				return;
-			}
-			if (!table.End())
-				LogFailure("end feature settings table");
-			return;
-		}
+				return true; });
+				}
 
-		if (!a_feature.IsActive()) {
-			dmui::SettingsRowScope row{
-				_client,
-				"inactive-feature",
-				"Availability",
-				"",
-				dmui::RowPresentation::Layout::kFullSpan
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				LogFailure("begin inactive feature row");
-				return;
-			}
-			if (!row.Visible())
-				return;
+				if (!a_feature.IsActive()) {
+					return ui::DrawRow(_client, "inactive-feature", "Availability", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool {
 			if (a_feature.IsInstalled()) {
 				if (loadAtBoot) {
 					if (!dmui::DrawStyledText(
@@ -503,7 +447,7 @@ namespace cs::host
 							{ .tone =
 									dmui::TextTone::kStatusRestartNeeded })) {
 						LogFailure("draw feature restart availability");
-						return;
+						return false;
 					}
 				} else {
 					if (!dmui::DrawStyledText(
@@ -511,7 +455,7 @@ namespace cs::host
 							"Not loaded. Enable it in Advanced > Load on startup, then restart.",
 							{ .tone = dmui::TextTone::kStatusDisable })) {
 						LogFailure("draw feature disabled availability");
-						return;
+						return false;
 					}
 				}
 			} else {
@@ -559,32 +503,15 @@ namespace cs::host
 						LogFailure("draw feature mod link");
 				}
 			}
-			if (!row.End()) {
-				LogFailure("end inactive feature row");
-				return;
-			}
-			if (!table.End())
-				LogFailure("end feature settings table");
-			return;
-		}
+			return true; });
+				}
 
-		bool restoreDefaults{};
-		{
-			dmui::SettingsRowScope row{
-				_client,
-				"feature-controls",
-				"",
-				"",
-				dmui::RowPresentation::Layout::kFullSpan
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				LogFailure("begin feature controls row");
-				return;
-			}
-			if (row.Visible()) {
+				bool restoreDefaults{};
+				{
+					if (!ui::DrawRow(_client, "feature-controls", "", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto& row) -> bool {
 				if (!FeatureManager::Get().PrepareMenuCallback(
 						a_feature, "DearModdingUI::DrawSettings"))
-					return;
+					return false;
 				CS_FEATURE_ZONE(&a_feature, "DrawSettings");
 				const bool comparing = settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
 				try {
@@ -593,13 +520,18 @@ namespace cs::host
 						DrawEnabledToggle(a_feature);
 						a_feature.DrawSettings();
 					}
+					const std::string name{ a_feature.GetName() };
+					if (ProfilingRenderer::HasFeatureTimers(name)) {
+						// FO4: a host section stands in for ImGui::SeparatorText.
+						if (const ui::Section section{ "feature-profiling", "Profiling" }; section)
+							ProfilingRenderer::RenderFeatureTimers(name);
+					}
 					a_feature.FlushSettings(true);
 				} catch (const std::exception& error) {
 					FeatureManager::Get().QuarantineRuntimeCallback(
 						a_feature,
 						"DearModdingUI::DrawSettings",
 						error.what());
-					FeatureManager::Get().FinishRuntimeCallbackPass();
 					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 							a_feature.GetName().data(),
 							"Feature settings callback failed",
@@ -612,7 +544,6 @@ namespace cs::host
 						a_feature,
 						"DearModdingUI::DrawSettings",
 						"non-standard exception");
-					FeatureManager::Get().FinishRuntimeCallbackPass();
 					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 							a_feature.GetName().data(),
 							"Feature settings callback failed",
@@ -642,63 +573,44 @@ namespace cs::host
 				const auto reset = row.End(resettable && !comparing, modified && !comparing);
 				if (!reset) {
 					LogFailure("end feature controls row");
-					return;
+					return false;
 				}
 				restoreDefaults = *reset;
-			}
-		}
-
-		if (restoreDefaults) {
-			try {
-				a_feature.RestoreDefaults();
-			} catch (const std::exception& error) {
-				reportCallbackFailure(
-					"DearModdingUI::RestoreDefaultSettings",
-					"Feature reset callback failed",
-					error.what());
-				throw;
-			} catch (...) {
-				reportCallbackFailure(
-					"DearModdingUI::RestoreDefaultSettings",
-					"Feature reset callback failed",
-					"non-standard exception");
-				throw;
-			}
-		}
-
-		const auto restartSettings = a_feature.GetRestartSettings();
-		for (const auto field : restartSettings) {
-			const auto id =
-				std::format("restart-required-{}", field);
-			const auto label = std::string(field);
-			dmui::SettingsRowScope row{
-				_client,
-				id.c_str(),
-				"Restart required",
-				"",
-				dmui::RowPresentation::Layout::kFullSpan
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				LogFailure("begin restart required row");
-				return;
-			}
-			if (row.Visible()) {
-				if (!dmui::DrawStyledText(
-						_client,
-						label,
-						{ .tone =
-								dmui::TextTone::kStatusRestartNeeded })) {
-					LogFailure("draw restart required setting");
-					return;
+				return true; }))
+						return false;
 				}
-			}
-			if (!row.End()) {
-				LogFailure("end restart required row");
-				return;
-			}
-		}
-		if (!table.End())
-			LogFailure("end feature settings table");
+
+				if (restoreDefaults) {
+					try {
+						a_feature.RestoreDefaults();
+					} catch (const std::exception& error) {
+						reportCallbackFailure(
+							"DearModdingUI::RestoreDefaultSettings",
+							"Feature reset callback failed",
+							error.what());
+						throw;
+					} catch (...) {
+						reportCallbackFailure(
+							"DearModdingUI::RestoreDefaultSettings",
+							"Feature reset callback failed",
+							"non-standard exception");
+						throw;
+					}
+				}
+
+				const auto restartSettings = a_feature.GetRestartSettings();
+				for (const auto field : restartSettings) {
+					const auto id =
+						std::format("restart-required-{}", field);
+					const auto label = std::string(field);
+					if (!ui::DrawRow(_client, id.c_str(), "Restart required", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(_client, label, { .tone = dmui::TextTone::kStatusRestartNeeded }); })) {
+						LogFailure("draw restart required row");
+						return false;
+					}
+				}
+				return true;
+			}))
+			LogFailure("draw feature settings table");
 	}
 
 	void HostClient::DrawOverlayPage()
@@ -716,16 +628,19 @@ namespace cs::host
 				*performance,
 				"DearModdingUI::DrawOverlay",
 				error.what());
-			FeatureManager::Get().FinishRuntimeCallbackPass();
 			throw;
 		} catch (...) {
 			FeatureManager::Get().QuarantineRuntimeCallback(
 				*performance,
 				"DearModdingUI::DrawOverlay",
 				"non-standard exception");
-			FeatureManager::Get().FinishRuntimeCallbackPass();
 			throw;
 		}
+	}
+
+	void HostClient::DrawShaderCompileOverlayPage()
+	{
+		_shaderCompile.Draw();
 	}
 
 	void HostClient::ObserveFrame() noexcept
@@ -750,8 +665,15 @@ namespace cs::host
 
 			auto* performance = features::PerformanceOverlay::GetSingleton();
 			FeatureManager::Get().RunRuntimeCallback(*performance, "DearModdingUI::TickHostFrame", [&] {
-				const auto videoMemory = _client.QueryVideoMemory();
-				if (videoMemory) {
+				// Memory is shown by the visible overlay and in telemetry only.
+				const bool wantsMemory = telemetry::pump::Enabled() ||
+				                         (_overlayVisible.load(std::memory_order_relaxed) && performance->IsHealthy() && performance->IsOverlayActive());
+				decltype(_client.QueryVideoMemory()) videoMemory;
+				if (wantsMemory)
+					videoMemory = _client.QueryVideoMemory();
+				if (!wantsMemory) {
+					_videoMemoryFailure.reset();
+				} else if (videoMemory) {
 					_videoMemoryFailure.reset();
 				} else {
 					LogFailureOnce("video-memory query", _videoMemoryFailure);
@@ -760,25 +682,17 @@ namespace cs::host
 					videoMemory ? videoMemory->used : 0,
 					videoMemory ? videoMemory->budget : 0);
 			});
-			auto* renderDoc = features::RenderDoc::GetSingleton();
-
-			SetHotkeyEnabled(
-				"performance overlay",
-				_overlayHotkey,
-				performance->IsHealthy() && performance->IsOverlayActive(),
-				_hotkeyEnableFailures[0]);
-			SetHotkeyEnabled(
-				"RenderDoc single-frame capture",
-				_captureHotkey,
-				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
-				_hotkeyEnableFailures[1]);
-			SetHotkeyEnabled(
-				"RenderDoc multi-frame capture",
-				_multiCaptureHotkey,
-				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
-				_hotkeyEnableFailures[2]);
-			ObserveHotkeyBindings();
-			SyncOverlay();
+			for (auto& channel : _hotkeys)
+				SetHotkeyEnabled(channel);
+			// Bindings change only through host UI and are only logged.
+			if (_bindingPollCountdown == 0) {
+				_bindingPollCountdown = kBindingPollFrames;
+				ObserveHotkeyBindings();
+			} else {
+				--_bindingPollCountdown;
+			}
+			SyncPerformanceOverlay();
+			SyncShaderCompileOverlay();
 		} catch (...) {
 			L->error("DearModdingUI frame observer failed");
 		}
@@ -805,93 +719,98 @@ namespace cs::host
 				feature.FlushSettings();
 			} catch (const std::exception& error) {
 				manager.QuarantineRuntimeCallback(feature, phase, error.what());
-				manager.FinishRuntimeCallbackPass();
 			} catch (...) {
 				manager.QuarantineRuntimeCallback(feature, phase, "non-standard exception");
-				manager.FinishRuntimeCallbackPass();
 			}
 			return;
 		}
 	}
 
-	void HostClient::SyncOverlay() noexcept
+	void HostClient::SyncPerformanceOverlay() noexcept
 	{
-		if (!_overlayPage)
-			return;
 		auto* performance = features::PerformanceOverlay::GetSingleton();
 		const bool wanted =
 			_overlayVisible.load(std::memory_order_relaxed) &&
 			performance->IsHealthy() &&
 			performance->IsOverlayActive();
-		const auto demandAction = _overlayFrameDemand.Next(wanted);
+		SyncOverlay(
+			_performanceOverlay,
+			"performance overlay",
+			wanted,
+			performance->ManagedOverlayOptions());
+	}
+
+	void HostClient::SyncShaderCompileOverlay() noexcept
+	{
+		SyncOverlay(
+			_shaderCompileOverlay,
+			"shader compilation overlay",
+			_shaderCompile.Observe(),
+			ShaderCompileOverlay::ManagedOverlayOptions());
+	}
+
+	void HostClient::SyncOverlay(
+		OverlayChannel& a_overlay,
+		std::string_view a_name,
+		bool a_wanted,
+		const DMUI_ManagedOverlayOptions& a_options) noexcept
+	{
+		if (!a_overlay.page)
+			return;
+		const auto demandAction = a_overlay.demand.Next(a_wanted);
 		if (demandAction == FrameDemandAction::kRelease) {
-			const bool released = _client.ReleaseFrame(_overlayPage->handle);
-			_overlayFrameDemand.Complete(demandAction, released);
+			const bool released = _client.ReleaseFrame(a_overlay.page->handle);
+			a_overlay.demand.Complete(demandAction, released);
 			if (released)
-				_overlayDemandFailure.reset();
+				a_overlay.demandFailure.reset();
 			else
 				LogFailureOnce(
-					"performance overlay frame release",
-					_overlayDemandFailure);
+					std::format("{} frame release", a_name),
+					a_overlay.demandFailure);
 			return;
 		}
-		if (!wanted)
+		if (!a_wanted)
 			return;
 
-		const auto options = performance->ManagedOverlayOptions();
-		if (_client.ConfigureOverlay(_overlayPage->handle, options))
-			_overlayConfigurationFailure.reset();
-		else
+		// Hosts reject options their ABI lacks; never show an unconfigured overlay.
+		if (!_client.ConfigureOverlay(a_overlay.page->handle, a_options)) {
 			LogFailureOnce(
-				"performance overlay configuration",
-				_overlayConfigurationFailure);
+				std::format("{} configuration", a_name),
+				a_overlay.configurationFailure);
+			return;
+		}
+		a_overlay.configurationFailure.reset();
 		if (demandAction == FrameDemandAction::kRequest) {
-			const bool requested = _client.RequestFrame(_overlayPage->handle);
-			_overlayFrameDemand.Complete(demandAction, requested);
+			const bool requested = _client.RequestFrame(a_overlay.page->handle);
+			a_overlay.demand.Complete(demandAction, requested);
 			if (requested)
-				_overlayDemandFailure.reset();
+				a_overlay.demandFailure.reset();
 			else
 				LogFailureOnce(
-					"performance overlay frame request",
-					_overlayDemandFailure);
+					std::format("{} frame request", a_name),
+					a_overlay.demandFailure);
 		}
 	}
 
 	void HostClient::ObserveHotkeyBindings() noexcept
 	{
-		ObserveHotkeyBinding(
-			"Performance Overlay",
-			_overlayHotkey,
-			_hotkeyBindingSnapshots[0]);
-		ObserveHotkeyBinding(
-			"RenderDoc multi-frame capture",
-			_multiCaptureHotkey,
-			_hotkeyBindingSnapshots[1]);
-		ObserveHotkeyBinding(
-			"RenderDoc single-frame capture",
-			_captureHotkey,
-			_hotkeyBindingSnapshots[2]);
-		ObserveHotkeyBinding(
-			"telemetry dump",
-			_dumpHotkey,
-			_hotkeyBindingSnapshots[3]);
+		for (auto& channel : _hotkeys)
+			ObserveHotkeyBinding(channel);
 	}
 
 	void HostClient::ObserveHotkeyBinding(
-		const char* a_name,
-		const std::optional<DMUI_HotkeyActionHandle>& a_handle,
-		std::string& a_snapshot) noexcept
+		HotkeyChannel& a_channel) noexcept
 	{
-		if (!a_handle)
+		if (!a_channel.handle)
 			return;
-		const auto binding = _client.QueryHotkeyBinding(*a_handle);
+		const auto binding = _client.QueryHotkeyBinding(*a_channel.handle);
 		if (!binding) {
 			const auto snapshot = std::format(
 				"query-error:{}",
 				_client.LastResult());
-			if (snapshot != a_snapshot) {
-				a_snapshot = snapshot;
-				LogFailure(std::format("query {} hotkey", a_name));
+			if (snapshot != a_channel.bindingSnapshot) {
+				a_channel.bindingSnapshot = snapshot;
+				LogFailure(std::format("query {} hotkey", a_channel.name));
 			}
 			return;
 		}
@@ -900,54 +819,54 @@ namespace cs::host
 			"{}:{}",
 			binding->state,
 			binding->chord);
-		if (snapshot == a_snapshot)
+		if (snapshot == a_channel.bindingSnapshot)
 			return;
-		a_snapshot = snapshot;
+		a_channel.bindingSnapshot = snapshot;
 		switch (binding->state) {
 		case DMUI_HOTKEY_BINDING_BOUND:
-			L->info("{} hotkey bound to {}", a_name, binding->chord);
+			L->info("{} hotkey bound to {}", a_channel.name, binding->chord);
 			break;
 		case DMUI_HOTKEY_BINDING_UNBOUND_USER:
-			L->info("{} hotkey is unbound by the user", a_name);
+			L->info("{} hotkey is unbound by the user", a_channel.name);
 			break;
 		case DMUI_HOTKEY_BINDING_UNBOUND_DEFAULT_CONFLICT:
-			L->warn("{} hotkey default conflicts with another action", a_name);
+			L->warn("{} hotkey default conflicts with another action", a_channel.name);
 			break;
 		case DMUI_HOTKEY_BINDING_UNBOUND_OVERRIDE_CONFLICT:
-			L->warn("{} hotkey override conflicts with another action", a_name);
+			L->warn("{} hotkey override conflicts with another action", a_channel.name);
 			break;
 		case DMUI_HOTKEY_BINDING_UNBOUND_INVALID_OVERRIDE:
-			L->warn("{} hotkey override is invalid", a_name);
+			L->warn("{} hotkey override is invalid", a_channel.name);
 			break;
 		case DMUI_HOTKEY_BINDING_UNBOUND_NEVER_SET:
-			L->warn("{} hotkey has no binding", a_name);
+			L->warn("{} hotkey has no binding", a_channel.name);
 			break;
 		default:
-			L->warn("{} hotkey returned unknown binding state {}", a_name, binding->state);
+			L->warn("{} hotkey returned unknown binding state {}", a_channel.name, binding->state);
 			break;
 		}
 	}
 
-	void HostClient::SetHotkeyEnabled(
-		const char* a_name,
-		const std::optional<DMUI_HotkeyActionHandle>& a_handle,
-		bool a_enabled,
-		std::optional<DMUI_Result>& a_failure) noexcept
+	void HostClient::SetHotkeyEnabled(HotkeyChannel& a_channel) noexcept
 	{
-		if (!a_handle)
+		if (!a_channel.handle)
 			return;
-		if (_client.SetHotkeyActionEnabled(*a_handle, a_enabled)) {
-			a_failure.reset();
+		const bool wanted = a_channel.enabled();
+		if (a_channel.appliedEnabled == wanted)
+			return;
+		if (_client.SetHotkeyActionEnabled(*a_channel.handle, wanted)) {
+			a_channel.enableFailure.reset();
+			a_channel.appliedEnabled = wanted;
 			return;
 		}
 
 		const auto result = _client.LastResult();
-		if (!a_failure || *a_failure != result) {
+		if (!a_channel.enableFailure || *a_channel.enableFailure != result) {
 			L->warn(
 				"DearModdingUI failed to update {} hotkey enablement: {}",
-				a_name,
+				a_channel.name,
 				DMUI_ResultToString(result));
-			a_failure = result;
+			a_channel.enableFailure = result;
 		}
 	}
 
@@ -1042,7 +961,7 @@ namespace cs::host
 
 	void HostClient::ResetOverlay() noexcept
 	{
-		if (_overlayPage && !_client.ResetOverlay(_overlayPage->handle))
+		if (_performanceOverlay.page && !_client.ResetOverlay(_performanceOverlay.page->handle))
 			LogFailure("reset performance overlay layout");
 	}
 

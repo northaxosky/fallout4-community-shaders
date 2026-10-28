@@ -1,13 +1,14 @@
 #pragma once
 
-#include "World/WaterData.h"
-
 #include <DirectXMath.h>
 #include <array>
 #include <cstdint>
+#include <limits>
 
 namespace cs::engine
 {
+	inline constexpr float kNoWaterHeight = -(std::numeric_limits<float>::max)();
+
 	struct WaterDataStatus
 	{
 		std::uint32_t waterCells;

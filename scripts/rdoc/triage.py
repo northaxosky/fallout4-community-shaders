@@ -2,6 +2,8 @@ from bindings import decode_cbuffer, output_targets, pipeline_state, rasterizer_
 from common import resource_id
 from resources import texture_stats, usage_name, usage_records
 
+_FSR_MARKERS = ("Upscaling::FSR3", "Upscaling::FSR4")
+
 
 def _finding(rank, severity, kind, message, evidence, event_id, resource=None,
              marker=None):
@@ -199,7 +201,7 @@ def _find_resolution_constants(session, actions):
         dispatches,
         key=lambda action: (
             actions.marker_name_for_event(action["eventId"])
-            != "Upscaling/FSR",
+            not in _FSR_MARKERS,
             action["eventId"]))
     for action in candidates:
         state = pipeline_state(session, action["eventId"], False)
@@ -296,7 +298,8 @@ def _resolution_contract(session, actions):
     finding = _finding(
         96, "error", "render_resolution_mismatch",
         "Render size, upscale allocation, viewport, and downscale factor disagree.",
-        evidence, decoded["eventId"], None, "Upscaling/FSR")
+        evidence, decoded["eventId"], None,
+        actions.marker_name_for_event(decoded["eventId"]))
     return result, [finding]
 
 

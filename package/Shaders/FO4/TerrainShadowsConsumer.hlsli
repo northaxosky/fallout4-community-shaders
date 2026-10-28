@@ -9,10 +9,16 @@
 
 namespace TerrainShadows
 {
+	float GetTerrainShadowMultFromWorldPosition(float3 worldPosition)
+	{
+		[branch] if (!SharedData::terraOccSettings.EnableTerrainShadow) return 1.0;
+		// FO4: b4 supplies the absolute origin for upstream heightfield sampling.
+		return ShadowSampling::GetWorldShadow(worldPosition, FrameBuffer::CameraPosAdjust.xyz);
+	}
+
 	float GetTerrainShadowMultFromViewPosition(float3 viewPosition)
 	{
-		// FO4: b4 supplies the absolute origin for upstream heightfield sampling.
-		return ShadowSampling::GetWorldShadow(FrameBuffer::ViewToWorld(viewPosition), FrameBuffer::CameraPosAdjust.xyz);
+		return GetTerrainShadowMultFromWorldPosition(FrameBuffer::ViewToWorld(viewPosition));
 	}
 
 	float GetShadowFromScreenPosition(float3 screenPosition)

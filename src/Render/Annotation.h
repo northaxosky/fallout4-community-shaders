@@ -3,6 +3,7 @@
 #include <d3d11_1.h>
 #include <d3d12.h>
 
+#include <optional>
 #include <string_view>
 
 namespace cs::render::annotation
@@ -11,6 +12,8 @@ namespace cs::render::annotation
 	using BeginPassCallback = bool (*)(std::string_view);
 	using EndPassCallback = void (*)();
 	void SetProfilerCallbacks(BeginPassCallback a_begin, EndPassCallback a_end) noexcept;
+	// A capture tool attached at device creation receives the events.
+	[[nodiscard]] bool EventsConsumed() noexcept;
 
 	class ScopedEvent
 	{
@@ -31,6 +34,17 @@ namespace cs::render::annotation
 		ID3DUserDefinedAnnotation* _d3d11{};
 		ID3D12GraphicsCommandList* _d3d12{};
 		bool _profile{};
+	};
+
+	// Spans a Pre/Post hook pair, so no C++ scope can own it.
+	class SpannedEvent
+	{
+	public:
+		void Begin(std::string_view a_name, bool a_profile = true) noexcept { _event.emplace(a_name, a_profile); }
+		void End() noexcept { _event.reset(); }
+
+	private:
+		std::optional<ScopedEvent> _event;
 	};
 
 	void SetMarker(std::string_view a_name) noexcept;

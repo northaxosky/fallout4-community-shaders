@@ -2,8 +2,47 @@
 #include "Render/SharedData.h"
 #include "Render/TemporalRendererInternals.h"
 
+#include <cmath>
+#include <cstdint>
+
 namespace cs::render
 {
+	namespace
+	{
+		enum class RenderUIOutputExtent : std::uint8_t
+		{
+			kInvalid,
+			kCommitted,
+			kFull
+		};
+
+		RenderUIOutputExtent ClassifyRenderUIOutputExtent(
+			float a_topLeftX,
+			float a_topLeftY,
+			float a_width,
+			float a_height,
+			std::uint32_t a_committedWidth,
+			std::uint32_t a_committedHeight,
+			std::uint32_t a_fullWidth,
+			std::uint32_t a_fullHeight) noexcept
+		{
+			const auto isNear = [](float a_value, std::uint32_t a_expected) {
+				return std::isfinite(a_value) &&
+				       std::abs(a_value - static_cast<float>(a_expected)) <= 0.5f;
+			};
+			if (!isNear(a_topLeftX, 0) || !isNear(a_topLeftY, 0) ||
+				!a_committedWidth || !a_committedHeight ||
+				!a_fullWidth || !a_fullHeight)
+				return RenderUIOutputExtent::kInvalid;
+			if (isNear(a_width, a_fullWidth) && isNear(a_height, a_fullHeight))
+				return RenderUIOutputExtent::kFull;
+			if (isNear(a_width, a_committedWidth) &&
+				isNear(a_height, a_committedHeight))
+				return RenderUIOutputExtent::kCommitted;
+			return RenderUIOutputExtent::kInvalid;
+		}
+	}
+
 	using namespace renderer_detail;
 
 	bool TemporalRenderer::PreflightExternalResolve(UpscaleMethod a_method)
@@ -75,7 +114,7 @@ namespace cs::render
 
 			{
 				cs::render::annotation::ScopedEvent encodeScope(
-					"Upscaling/EncodeTextures");
+					"Upscaling::EncodeTextures");
 				cs::ComputeScope computeScope(context);
 
 				// Null t0 and the G-buffer normal's unused channel produce the accepted zero masks.
@@ -209,18 +248,17 @@ namespace cs::render
 
 			render::temporal::ProviderResult providerResult;
 			if (upscaleMethod == UpscaleMethod::kDLSS) {
-				cs::render::annotation::ScopedEvent providerScope("Upscaling/DLSS");
+				cs::render::annotation::ScopedEvent providerScope("Upscaling::DLSS");
 				providerResult =
 					render::TemporalPipeline::Get().EvaluateSuperResolution(
 						render::temporal::SuperResolutionMethod::kDLSS, request);
-			} else if (upscaleMethod == UpscaleMethod::kFSR ||
+			} else if (upscaleMethod == UpscaleMethod::kFSR3 ||
 					   upscaleMethod == UpscaleMethod::kFSR4) {
 				cs::render::annotation::ScopedEvent providerScope(
-					upscaleMethod == UpscaleMethod::kFSR4 ? "Upscaling/FSR4" : "Upscaling/FSR3");
+					upscaleMethod == UpscaleMethod::kFSR4 ? "Upscaling::FSR4" : "Upscaling::FSR3");
 				providerResult =
 					render::TemporalPipeline::Get().EvaluateSuperResolution(
-						upscaleMethod == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3,
-						request);
+						upscaleMethod, request);
 			}
 			upscaled = providerResult.CanPublishOutput();
 			providerSkipped =
@@ -269,7 +307,7 @@ namespace cs::render
 
 	bool TemporalRenderer::PerformUpscaling()
 	{
-		cs::render::annotation::ScopedEvent upscaleScope("Upscaling/SuperResolution", false);
+		cs::render::annotation::ScopedEvent upscaleScope("Upscaling::SuperResolution", false);
 		_upscaledThisFrame = false;
 		_spatialFallbackThisFrame.store(false, std::memory_order_release);
 		_superResolutionSubmissionUnsafe = false;
@@ -304,7 +342,7 @@ namespace cs::render
 
 		{
 			cs::render::annotation::ScopedEvent inputScope(
-				"Upscaling/CaptureInputColor");
+				"Upscaling::CaptureInputColor");
 			cs::engine::CopyResourcePreservingOM(
 				context, upscalingTexture->resource.get(), frameBuffer.get());
 		}
@@ -357,7 +395,7 @@ namespace cs::render
 
 		const auto method = GetUpscaleMethod();
 		bool published = false;
-		if (method == UpscaleMethod::kFSR ||
+		if (method == UpscaleMethod::kFSR3 ||
 			method == UpscaleMethod::kFSR4) {
 			published = PublishUpscalingOutput(
 				context, frameBuffer.get(),
@@ -412,12 +450,12 @@ namespace cs::render
 		context->RSGetViewports(&viewportCount, &sourceViewport);
 		const auto [renderWidth, renderHeight] = GetRenderSize();
 		const auto outputExtent =
-			viewportCount == 1 ? cs::engine::ClassifyRenderUIOutputExtent(
+			viewportCount == 1 ? ClassifyRenderUIOutputExtent(
 									 sourceViewport.TopLeftX, sourceViewport.TopLeftY,
 									 sourceViewport.Width, sourceViewport.Height, renderWidth,
 									 renderHeight, frameBufferDesc.Width, frameBufferDesc.Height) :
-								 cs::engine::RenderUIOutputExtent::kInvalid;
-		if (outputExtent == cs::engine::RenderUIOutputExtent::kInvalid) {
+								 RenderUIOutputExtent::kInvalid;
+		if (outputExtent == RenderUIOutputExtent::kInvalid) {
 			_renderUiRecoverySourceWidth.store(0, std::memory_order_relaxed);
 			_renderUiRecoverySourceHeight.store(0, std::memory_order_relaxed);
 			_renderUiRecoveryPassthrough.store(false, std::memory_order_release);
@@ -426,7 +464,7 @@ namespace cs::render
 		}
 
 		const bool passthrough =
-			outputExtent == cs::engine::RenderUIOutputExtent::kFull;
+			outputExtent == RenderUIOutputExtent::kFull;
 		const auto sourceWidth = passthrough ? frameBufferDesc.Width : renderWidth;
 		const auto sourceHeight = passthrough ? frameBufferDesc.Height : renderHeight;
 		_renderUiRecoverySourceWidth.store(sourceWidth, std::memory_order_relaxed);
@@ -435,7 +473,7 @@ namespace cs::render
 
 		{
 			cs::render::annotation::ScopedEvent inputScope(
-				"Upscaling/CaptureMissedResolveInputColor");
+				"Upscaling::CaptureMissedResolveInputColor");
 			cs::engine::CopyResourcePreservingOM(
 				context, upscalingTexture->resource.get(), frameBuffer.get());
 		}
@@ -484,7 +522,7 @@ namespace cs::render
 
 		{
 			cs::render::annotation::ScopedEvent fallbackScope(
-				"Upscaling/SpatialFallback");
+				"Upscaling::SpatialFallback");
 			cs::engine::OMScope omScope(context);
 			context->IASetInputLayout(nullptr);
 			context->IASetVertexBuffers(0, 0, nullptr, nullptr, nullptr);
@@ -543,7 +581,7 @@ namespace cs::render
 		}
 
 		cs::render::annotation::ScopedEvent passthroughScope(
-			"Upscaling/FullExtentPassthrough", false);
+			"Upscaling::FullExtentPassthrough", false);
 		if (!PrepareUpscalingPassthrough(a_context,
 				publicationTexture->resource.get(),
 				upscalingTexture->resource.get())) {
@@ -605,7 +643,7 @@ namespace cs::render
 		if (!fullscreenVS || !depthUpscalePS) {
 			return;
 		}
-		cs::render::annotation::ScopedEvent annotationScope("Upscaling/UpscaleDepth");
+		cs::render::annotation::ScopedEvent annotationScope("Upscaling::UpscaleDepth");
 
 		// Restore the engine's exact OM bindings after the depth pass.
 		cs::engine::OMScope omScope(context);

@@ -8,6 +8,7 @@
 #include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
+#include "Render/RuntimeCallback.h"
 #include "World/Sky.h"
 #include "World/Weather.h"
 
@@ -123,6 +124,7 @@ namespace cs::engine
 			std::string name;
 			std::function<bool()> wantsCube;
 			std::function<bool()> wantsLod;
+			Feature* owner;
 		};
 
 		struct Counters
@@ -196,18 +198,29 @@ namespace cs::engine
 			return player && player->parentCell && RE::UI::GetSingleton() && !IsMainOrLoadingMenuOpen();
 		}
 
-		[[nodiscard]] bool AnyConsumerWantsCube()
+		[[nodiscard]] bool AnyConsumerWants(
+			std::function<bool()> Consumer::* a_callback,
+			std::string_view a_phase) noexcept
 		{
-			return std::ranges::any_of(g_consumers, [](const Consumer& a_consumer) {
-				return a_consumer.wantsCube();
+			return std::ranges::any_of(g_consumers, [a_callback, a_phase](const Consumer& a_consumer) {
+				const auto& callback = a_consumer.*a_callback;
+				if (!callback)
+					return false;
+				bool wants = false;
+				return render::RunRenderCallback(a_consumer.owner, a_phase, [&] {
+					wants = callback();
+				}) && wants;
 			});
 		}
 
-		[[nodiscard]] bool AnyConsumerWantsLod()
+		[[nodiscard]] bool AnyConsumerWantsCube() noexcept
 		{
-			return std::ranges::any_of(g_consumers, [](const Consumer& a_consumer) {
-				return a_consumer.wantsLod && a_consumer.wantsLod();
-			});
+			return AnyConsumerWants(&Consumer::wantsCube, "SkyReflectionCube::wantsCube");
+		}
+
+		[[nodiscard]] bool AnyConsumerWantsLod() noexcept
+		{
+			return AnyConsumerWants(&Consumer::wantsLod, "SkyReflectionCube::wantsLod");
 		}
 
 		[[nodiscard]] RE::BSGraphics::CubeMapRenderTarget* GetEngineCube() noexcept
@@ -649,7 +662,8 @@ namespace cs::engine
 		}
 	}
 
-	bool RegisterSkyReflectionCubeConsumer(
+	static bool RegisterConsumer(
+		Feature* a_owner,
 		std::string_view a_name,
 		std::function<bool()> a_wantsCube,
 		std::function<bool()> a_wantsLod)
@@ -666,9 +680,26 @@ namespace cs::engine
 			InstallCubeSizeHook();
 			g_hookInstalled.store(true, std::memory_order_release);
 		}
-		g_consumers.push_back({ std::string(a_name), std::move(a_wantsCube), std::move(a_wantsLod) });
+		g_consumers.push_back({ std::string(a_name), std::move(a_wantsCube), std::move(a_wantsLod), a_owner });
 		L->info("Sky reflection cube consumer registered: {}", a_name);
 		return true;
+	}
+
+	bool RegisterSkyReflectionCubeConsumer(
+		std::string_view a_name,
+		std::function<bool()> a_wantsCube,
+		std::function<bool()> a_wantsLod)
+	{
+		return RegisterConsumer(nullptr, a_name, std::move(a_wantsCube), std::move(a_wantsLod));
+	}
+
+	bool RegisterSkyReflectionCubeConsumer(
+		Feature& a_owner,
+		std::string_view a_name,
+		std::function<bool()> a_wantsCube,
+		std::function<bool()> a_wantsLod)
+	{
+		return RegisterConsumer(&a_owner, a_name, std::move(a_wantsCube), std::move(a_wantsLod));
 	}
 
 	void SetSkyReflectionCubeSize(std::uint32_t a_size) noexcept

@@ -44,13 +44,15 @@ namespace Skylighting
 	// FO4: MRT4 alpha stores 1 - vertexAO, upstream's Masks2.x.
 	Texture2D<float4> VertexAOTexture : register(t52);
 
-	// FO4: shadow visibility of the last probe sample; ambient and lobes share it.
+	// FO4: shadow visibility of the last SampleShadowVisibility; lobes share it.
 	static float ShadowVisibility = 1.0;
 
 	sh2 SampleProbes(float3 positionMS, float3 normalWS)
 	{
 #	ifdef SKYLIGHTING_SHADOW_VIS
-		return Sample(positionMS, normalWS, ShadowVisibility);
+		// Upstream samples shadow visibility separately, height clamped.
+		float unusedVisibility;
+		return Sample(positionMS, normalWS, unusedVisibility, false);
 #	else
 		return Sample(positionMS, normalWS);
 #	endif
@@ -63,15 +65,18 @@ namespace Skylighting
 		return GetSkylightingDiffuse(skylightingSH, positionMS, normalWS, vertexAO);
 	}
 
-	// Upstream's composite takes the raw cosine lobe: no fade, no vertex AO.
+	// Upstream's composite takes the faded cosine lobe, without vertex AO.
 	float GetCompositeDiffuse(float3 positionMS, float3 normalWS)
 	{
-		return EvaluateDiffuse(SampleProbes(positionMS, normalWS), normalWS);
+		// FO4: Skylighting toggles live; disabled probes are unoccluded.
+		[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
+		return EvaluateDiffuse(SampleProbes(positionMS, normalWS), normalWS, GetFadeOutFactor(positionMS));
 	}
 
 	// FO4: ambient is a linear addend and gamma is the identity, so scale it.
 	float3 GetAmbientScale(float3 viewPosition, float3 normalView, float3 albedo, float vertexAO)
 	{
+		[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
 		return MultiBounceAO(albedo, GetDiffuseVisibility(positionMS, normalWS, vertexAO));
@@ -79,6 +84,7 @@ namespace Skylighting
 
 	float3 GetAmbientScale(float2 pixelPosition, float3 viewPosition, float3 normalView)
 	{
+		[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 		int3 texel = int3(int2(pixelPosition), 0);
 		return GetAmbientScale(viewPosition, normalView, AlbedoTexture.Load(texel).xyz, 1.0 - VertexAOTexture.Load(texel).w);
 	}
@@ -95,20 +101,20 @@ namespace Skylighting
 	SpecularVisibility GetSpecularVisibility(float3 viewPosition, float3 normalView, float glossiness)
 	{
 		// FO4: the interior branch samples EnvTexture and never reads visibility.
-		if (SharedData::InInterior)
-			return FO4_SPECULAR_UNOCCLUDED;
+		[branch] if (SharedData::InInterior || FO4SharedData::EnabledSkylighting == 0) return FO4_SPECULAR_UNOCCLUDED;
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
 		float3 V = -normalize(positionMS);
 		float3 R = reflect(-V, normalWS);
-		sh2 skylightingSH = SampleProbes(positionMS, R);
+		sh2 skylightingSH = SampleProbes(ClampToArrayHeight(positionMS), R);
+		float fadeOut = GetHorizontalFadeOutFactor(positionMS);
 #	ifdef IBL
 		SpecularVisibility result;
-		result.specular = EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, 1.0 - glossiness));
-		result.visibility = EvaluateVisibility(skylightingSH);
+		result.specular = EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, 1.0 - glossiness), fadeOut);
+		result.visibility = EvaluateVisibility(skylightingSH, fadeOut);
 		return result;
 #	else
-		return EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, 1.0 - glossiness));
+		return EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, 1.0 - glossiness), fadeOut);
 #	endif
 	}
 
@@ -116,12 +122,13 @@ namespace Skylighting
 	static float3 AmbientScale = 1.0;
 
 #	ifdef SKYLIGHTING_SHADOW_VIS
-	// FO4: passes without the ambient term sample probes only for visibility.
 	void SampleShadowVisibility(float3 viewPosition, float3 normalView)
 	{
+		[branch] if (FO4SharedData::EnabledSkylighting == 0) return;
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
-		SampleProbes(positionMS, normalWS);
+		// Height clamped so visibility stays valid above the volume, unlike the diffuse fade.
+		Sample(ClampToArrayHeight(positionMS), normalWS, ShadowVisibility);
 	}
 
 #	endif
@@ -158,13 +165,8 @@ namespace Skylighting
 
 // Sun lobes use probe visibility where upstream's SHADOW_VIS does.
 #ifdef SKYLIGHTING_SHADOW_VIS
-// The ambient set already sampled the probes.
-#	ifdef AMBIENT
-#		define FO4_SKYLIGHTING_SOFT_SHADOW(softShadow, viewPosition, normalView) float softShadow = Skylighting::ShadowVisibility
-#	else
-#		define FO4_SKYLIGHTING_SOFT_SHADOW(softShadow, viewPosition, normalView) \
-			Skylighting::SampleShadowVisibility(viewPosition, normalView);        \
-			float softShadow = Skylighting::ShadowVisibility
-#	endif
+#	define FO4_SKYLIGHTING_SOFT_SHADOW(softShadow, viewPosition, normalView) \
+		Skylighting::SampleShadowVisibility(viewPosition, normalView);        \
+		float softShadow = Skylighting::ShadowVisibility
 #endif
 #endif

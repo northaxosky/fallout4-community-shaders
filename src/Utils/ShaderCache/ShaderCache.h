@@ -47,6 +47,7 @@ namespace cs::shader_cache
 
 	void ResetShaderCacheCounters() noexcept;
 	ShaderCacheCounters GetShaderCacheCounters() noexcept;
+	void SetShaderCacheMaxBytes(std::uint64_t a_maxBytes) noexcept;
 
 	struct ShaderCacheOptions
 	{

@@ -130,13 +130,10 @@ namespace cs::engine
 
 	using CaptureClock = std::chrono::steady_clock;
 
-	// Capture CPU time; the hook parts run inside it, possibly on worker threads.
+	// Pass-level capture CPU time.
 	struct CaptureTimings
 	{
 		std::atomic<CaptureClock::rep> capture{ 0 };
-		std::atomic<CaptureClock::rep> hookPredicate{ 0 };
-		std::atomic<CaptureClock::rep> hookStock{ 0 };
-		std::atomic<CaptureClock::rep> hookOwn{ 0 };
 	};
 
 	[[nodiscard]] CaptureTimings& GetCaptureTimings() noexcept;

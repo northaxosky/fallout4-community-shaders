@@ -5,6 +5,7 @@
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
 #include "Render/OccluderPasses.h"
+#include "Telemetry/Telemetry.h"
 
 #include <d3d11.h>
 
@@ -177,11 +178,13 @@ namespace cs::engine
 				_precipitation.ComputeProjection(_precipitation.occlusionData.camera);
 				_primed = true;
 				{
-					const cs::render::annotation::ScopedEvent event{ "Skylighting/OcclusionMask" };
+					const cs::render::annotation::ScopedEvent event{ "Skylighting::OcclusionMask" };
 					const ScopedPreCullBypass bypass;
-					const auto begin = CaptureClock::now();
+					const bool timed = telemetry::pump::Enabled();
+					const auto begin = timed ? CaptureClock::now() : CaptureClock::time_point{};
 					_precipitation.RenderOcclusionMapImpl(nullptr);
-					g_timings.capture.fetch_add((CaptureClock::now() - begin).count(), std::memory_order_relaxed);
+					if (timed)
+						g_timings.capture.fetch_add((CaptureClock::now() - begin).count(), std::memory_order_relaxed);
 				}
 				std::memcpy(&a_matrix, RE::Precipitation::GetOcclusionMatrix(), sizeof(a_matrix));
 			}

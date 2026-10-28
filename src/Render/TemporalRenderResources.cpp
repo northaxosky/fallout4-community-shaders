@@ -4,12 +4,27 @@ namespace cs::render
 {
 	using namespace renderer_detail;
 
+	TemporalRenderer::ResourceConfiguration TemporalRenderer::GetResourceConfiguration(UpscaleMethod a_method) const noexcept
+	{
+		const auto* state = cs::engine::GetGraphicsState();
+		const auto [width, height] = GetRenderSize();
+		return {
+			.method = a_method,
+			.size = {
+				.outputWidth = state ? state->screenWidth : 0,
+				.outputHeight = state ? state->screenHeight : 0,
+				.qualityMode = settings.qualityMode },
+			.render = { width, height }
+		};
+	}
+
 	bool TemporalRenderer::CreateUpscalingTextureResources(UpscaleMethod a_upscalemethod)
 	{
 		L->debug("Creating texture resources for method {} ({})",
 			static_cast<int>(a_upscalemethod), magic_enum::enum_name(a_upscalemethod));
 
 		if (!IsExternalUpscaler(a_upscalemethod)) {
+			_resourceConfiguration = GetResourceConfiguration(a_upscalemethod);
 			return true;
 		}
 
@@ -112,7 +127,10 @@ namespace cs::render
 				publicationDesc, "Upscaling/PublicationScratch");
 		}
 
-		return HasRequiredResources(a_upscalemethod);
+		const bool ready = HasRequiredResources(a_upscalemethod);
+		if (ready)
+			_resourceConfiguration = GetResourceConfiguration(a_upscalemethod);
+		return ready;
 	}
 
 	bool TemporalRenderer::HasRequiredResources(UpscaleMethod a_upscalemethod) const noexcept
@@ -148,11 +166,10 @@ namespace cs::render
 			return false;
 		}
 
-		if (a_upscalemethod == UpscaleMethod::kFSR ||
+		if (a_upscalemethod == UpscaleMethod::kFSR3 ||
 			a_upscalemethod == UpscaleMethod::kFSR4) {
 			return render::TemporalPipeline::Get()
-			           .IsSuperResolutionRuntimeReady(
-						   a_upscalemethod == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3) &&
+			           .IsSuperResolutionRuntimeReady(a_upscalemethod) &&
 			       sharpenerTexture &&
 			       publicationTexture &&
 			       sharpenerTexture->resource.get() != upscalingTexture->resource.get() &&
@@ -182,6 +199,7 @@ namespace cs::render
 
 	void TemporalRenderer::DestroyUpscalingTextureResources(UpscaleMethod a_upscalemethod)
 	{
+		_resourceConfiguration.reset();
 		L->debug("Destroying texture resources for method {} ({})",
 			static_cast<int>(a_upscalemethod), magic_enum::enum_name(a_upscalemethod));
 
@@ -244,26 +262,16 @@ namespace cs::render
 
 	bool TemporalRenderer::CheckResources(UpscaleMethod a_upscalemethod)
 	{
-		static auto previousUpscaleMode = UpscaleMethod::kTAA;
-		static auto previousQualityMode = std::numeric_limits<std::uint32_t>::max();
-		static std::uint32_t previousRenderWidth = 0;
-		static std::uint32_t previousRenderHeight = 0;
-		static std::uint32_t previousOutputWidth = 0;
-		static std::uint32_t previousOutputHeight = 0;
-		const auto* currentState = cs::engine::GetGraphicsState();
-		const auto [currentRenderWidth, currentRenderHeight] = GetRenderSize();
-		const std::uint32_t currentOutputWidth =
-			currentState ? currentState->screenWidth : 0;
-		const std::uint32_t currentOutputHeight =
-			currentState ? currentState->screenHeight : 0;
+		const auto configuration = GetResourceConfiguration(a_upscalemethod);
+		const auto previousUpscaleMode = _resourceConfiguration ?
+		                                     _resourceConfiguration->method :
+		                                     UpscaleMethod::kTAA;
+		const auto previousQualityMode = _resourceConfiguration ?
+		                                     _resourceConfiguration->size.qualityMode :
+		                                     std::numeric_limits<std::uint32_t>::max();
 
 		// Provider contexts are quality-sized.
-		if (previousUpscaleMode == a_upscalemethod &&
-			previousQualityMode == settings.qualityMode &&
-			previousRenderWidth == currentRenderWidth &&
-			previousRenderHeight == currentRenderHeight &&
-			previousOutputWidth == currentOutputWidth &&
-			previousOutputHeight == currentOutputHeight &&
+		if (_resourceConfiguration == configuration &&
 			HasRequiredResources(a_upscalemethod)) {
 			return true;
 		}
@@ -273,19 +281,8 @@ namespace cs::render
 			static_cast<int>(a_upscalemethod), magic_enum::enum_name(a_upscalemethod),
 			previousQualityMode, settings.qualityMode);
 
-		render::temporal::ProviderResult release{
-			.code = render::temporal::ProviderResultCode::kSuccess
-		};
-		if (previousUpscaleMode == UpscaleMethod::kDLSS) {
-			release =
-				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-					render::temporal::SuperResolutionMethod::kDLSS);
-		} else if (previousUpscaleMode == UpscaleMethod::kFSR ||
-				   previousUpscaleMode == UpscaleMethod::kFSR4) {
-			release =
-				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-					previousUpscaleMode == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3);
-		}
+		const auto release =
+			render::TemporalPipeline::Get().DestroySuperResolutionResources(previousUpscaleMode);
 		if (!release.Succeeded()) {
 			render::TemporalPipeline::Get().PostFailure(
 				release.failureDomain ==
@@ -300,12 +297,6 @@ namespace cs::render
 
 		const bool ok = CreateUpscalingTextureResources(a_upscalemethod);
 
-		previousUpscaleMode = a_upscalemethod;
-		previousQualityMode = settings.qualityMode;
-		previousRenderWidth = currentRenderWidth;
-		previousRenderHeight = currentRenderHeight;
-		previousOutputWidth = currentOutputWidth;
-		previousOutputHeight = currentOutputHeight;
 		render::TemporalPipeline::Get().RequestSuperResolutionReset();
 		render::TemporalPipeline::Get().RequestFrameGenerationReset();
 		return ok;
@@ -327,7 +318,7 @@ namespace cs::render
 			case UpscaleMethod::kDLSS:
 				defines.push_back({ "DLSS", "" });
 				break;
-			case UpscaleMethod::kFSR:
+			case UpscaleMethod::kFSR3:
 			case UpscaleMethod::kFSR4:
 				defines.push_back({ "FSR", "" });
 				break;
@@ -518,19 +509,8 @@ namespace cs::render
 		_spatialFallbackPreflightReady.store(false, std::memory_order_release);
 
 		const auto method = GetUpscaleMethod();
-		render::temporal::ProviderResult release{
-			.code = render::temporal::ProviderResultCode::kSuccess
-		};
-		if (method == UpscaleMethod::kDLSS) {
-			release =
-				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-					render::temporal::SuperResolutionMethod::kDLSS);
-		} else if (method == UpscaleMethod::kFSR ||
-				   method == UpscaleMethod::kFSR4) {
-			release =
-				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-					method == UpscaleMethod::kFSR4 ? render::temporal::SuperResolutionMethod::kFSR4 : render::temporal::SuperResolutionMethod::kFSR3);
-		}
+		const auto release =
+			render::TemporalPipeline::Get().DestroySuperResolutionResources(method);
 		if (!release.Succeeded()) {
 			render::TemporalPipeline::Get().PostFailure(
 				release.failureDomain ==

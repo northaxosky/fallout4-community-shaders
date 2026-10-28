@@ -11,6 +11,11 @@
 #include <utility>
 #include <vector>
 
+namespace cs
+{
+	class Feature;
+}
+
 namespace cs::engine
 {
 	using ShaderDefineOptions = std::vector<std::pair<std::string_view, std::string_view>>;
@@ -27,6 +32,7 @@ namespace cs::engine
 			return ShaderStageBit(a_target == ShaderInjectionTarget::kDfTiledLighting ? ShaderStage::kCompute : ShaderStage::kPixel);
 		}
 		virtual bool IsLoaded() const { return true; }
+		virtual Feature* GetRuntimeOwner() const noexcept { return nullptr; }
 		virtual bool RequiresShaderGraphicsPair(ShaderInjectionTarget) const { return false; }
 
 		bool IsFullscreenDebugSelected() const noexcept { return _fullscreenDebugSelected.load(std::memory_order_acquire); }
@@ -65,6 +71,7 @@ namespace cs::engine
 		bool HasShaderDefine(ShaderInjectionTarget a_target) const override { return _declaration.HasShaderDefine(a_target); }
 		ShaderStageMask GetShaderDefineStages(ShaderInjectionTarget a_target) const override { return _declaration.GetShaderDefineStages(a_target); }
 		bool IsLoaded() const override { return _owner.IsLoaded(); }
+		Feature* GetRuntimeOwner() const noexcept override { return _owner.GetRuntimeOwner(); }
 		bool RequiresShaderGraphicsPair(ShaderInjectionTarget a_target) const override { return _declaration.RequiresShaderGraphicsPair(a_target); }
 
 	private:

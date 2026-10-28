@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Host/HostRuntimeModel.h"
 #include "Menu/DebugViewSelection.h"
 
 #include <DearModdingUI/Client.h>
@@ -9,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <toml++/toml.hpp>
 #include <unordered_map>
 
 namespace cs
@@ -46,6 +46,31 @@ namespace cs
 	private:
 		Menu();
 
+		class StartupLoadSnapshot
+		{
+		public:
+			void Capture(const toml::table& a_root);
+			[[nodiscard]] bool RequiresRestart(std::string_view a_key, bool a_requested) const;
+
+		private:
+			std::unordered_map<std::string, bool> _loads;
+		};
+
+		enum class ImageImportFailure : std::uint8_t
+		{
+			kNone,
+			kTransient,
+			kPermanent
+		};
+
+		[[nodiscard]] static bool ShouldImportImage(
+			bool a_hasHandle,
+			ImageImportFailure a_previousFailure,
+			bool a_sourceChanged,
+			bool a_querySucceeded,
+			bool a_imageReady,
+			bool a_retryDue) noexcept;
+
 		enum class ClearRequest : std::uint8_t
 		{
 			kNone,
@@ -60,8 +85,8 @@ namespace cs
 			std::uint32_t height{};
 			std::uint64_t generation{};
 			std::uint64_t retryAfterFrame{};
-			host::ImageImportFailure importFailure{
-				host::ImageImportFailure::kNone
+			ImageImportFailure importFailure{
+				ImageImportFailure::kNone
 			};
 			std::optional<DMUI_Result> loggedFailure;
 			dmui::ImageResource image;
@@ -76,13 +101,14 @@ namespace cs
 			const DMUI_DialogDescriptor& a_descriptor,
 			dmui::DialogSession::Submit a_submit);
 		bool ClearShaderCache(std::string& a_error);
+		bool DrawRestartRequired(dmui::Client& a_client, std::string_view a_operation);
 		bool CheckHostResult(
 			dmui::Client& a_client,
 			bool a_succeeded,
 			std::string_view a_operation);
 
 		debug_view::SelectionState _debugViews;
-		host::StartupLoadSnapshot _startupLoads;
+		StartupLoadSnapshot _startupLoads;
 		std::unordered_map<std::string, DebugImage> _debugImages;
 		std::unordered_map<std::string, DMUI_Result> _hostCallFailures;
 		dmui::DialogSession _dialog;

@@ -5,11 +5,11 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/Engine.h"
+#include "Render/FrameAnnotations.h"
 #include "Render/FrameProfiler.h"
 #include "Render/NativeShaderFamily.h"
 #include "Render/PrepassTechnique.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderSubclassContext.h"
 #include "Telemetry/Telemetry.h"
 
 #include <Windows.h>
@@ -21,22 +21,11 @@
 #include <exception>
 #include <format>
 #include <mutex>
-#include <optional>
 #include <string_view>
 
-#include "RE/B/BSBloodSplatterShader.h"
-#include "RE/B/BSDFCompositeShader.h"
-#include "RE/B/BSDFLightShader.h"
 #include "RE/B/BSDFPrePassShader.h"
-#include "RE/B/BSDistantTreeShader.h"
-#include "RE/B/BSEffectShader.h"
 #include "RE/B/BSGeometry.h"
-#include "RE/B/BSLightingShader.h"
-#include "RE/B/BSParticleShader.h"
 #include "RE/B/BSRenderPass.h"
-#include "RE/B/BSSkyShader.h"
-#include "RE/B/BSUtilityShader.h"
-#include "RE/B/BSWaterShader.h"
 
 namespace cs::engine
 {
@@ -44,7 +33,6 @@ namespace cs::engine
 	{
 		auto* L = cs::log::Get("cs.render.shadersubclass");
 
-		ShaderSubclassHookInstallStats g_setupStats{};
 		std::once_flag g_installOnce;
 
 		struct ActiveBeginTechnique
@@ -104,6 +92,7 @@ namespace cs::engine
 				if (result) {
 					const auto* name = a_shader->GetFxpFilename();
 					render::profiling::SetShaderFamily(a_shader->shaderType, name ? name : "Unknown");
+					render::frame_annotations::OnTechniqueBound(a_shader, a_pixelShaderId);
 				}
 				return result;
 			}
@@ -207,23 +196,6 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		template <class Tag>
-		struct SetupTechniqueHook
-		{
-			static constexpr std::size_t size = 0x02;
-
-			static bool thunk(
-				RE::BSShader* a_self,
-				std::uint32_t a_techniqueBits)
-			{
-				shader_context::Scope scope(
-					a_self, Tag::Name(), a_techniqueBits);
-				return func(a_self, a_techniqueBits);
-			}
-
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
 		constexpr std::size_t kPrepassLaneComponents = 4;
 		constexpr std::size_t kPrepassBakePaths = 2;
 
@@ -306,9 +278,11 @@ namespace cs::engine
 				if (!classifier)
 					continue;
 				const bool flagged = classifier(a_pass, a_path);
-				auto& counts = g_classifierCounts[component][static_cast<std::size_t>(a_path)];
-				counts.classified.fetch_add(1, std::memory_order_relaxed);
-				counts.flagged.fetch_add(flagged ? 1u : 0u, std::memory_order_relaxed);
+				if (telemetry::pump::Enabled()) {
+					auto& counts = g_classifierCounts[component][static_cast<std::size_t>(a_path)];
+					counts.classified.fetch_add(1, std::memory_order_relaxed);
+					counts.flagged.fetch_add(flagged ? 1u : 0u, std::memory_order_relaxed);
+				}
 				request.lane[component] = flagged ? 1.0f : 0.0f;
 			}
 			return request;
@@ -428,26 +402,6 @@ namespace cs::engine
 			return false;
 		}
 
-		void CountRoutingHook(bool a_patched) noexcept
-		{
-			++g_setupStats.attempted;
-			++(a_patched ? g_setupStats.succeeded : g_setupStats.failed);
-		}
-
-		template <class Subclass, class Tag>
-		void TryInstallSetupTechnique()
-		{
-			CountRoutingHook(TryPatch(
-				std::format("SetupTechnique for {}", Tag::Name()),
-				[] { stl::write_vfunc<Subclass, 0, SetupTechniqueHook<Tag>>(); }));
-		}
-
-#define CS_HOOK_SHADER_SUBCLASS(klass, target)       \
-	struct Tag_##klass                               \
-	{                                                \
-		static const char* Name() { return #klass; } \
-	};                                               \
-	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
 	}
 
 	bool RegisterPrepassDrawClassifier(PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier)
@@ -506,18 +460,6 @@ namespace cs::engine
 	void InstallShaderSubclassHooks()
 	{
 		std::call_once(g_installOnce, [] {
-			CS_HOOK_SHADER_SUBCLASS(BSBloodSplatterShader, kBloodSplatter);
-			CS_HOOK_SHADER_SUBCLASS(BSDFCompositeShader, kBsdfComposite);
-			CS_HOOK_SHADER_SUBCLASS(BSDFLightShader, kBsdfLight);
-			CS_HOOK_SHADER_SUBCLASS(BSDFPrePassShader, kDeferredPrepass);
-			CS_HOOK_SHADER_SUBCLASS(BSDistantTreeShader, kDistantTree);
-			CS_HOOK_SHADER_SUBCLASS(BSEffectShader, kEffect);
-			CS_HOOK_SHADER_SUBCLASS(BSLightingShader, kBsLighting);
-			CS_HOOK_SHADER_SUBCLASS(BSParticleShader, kParticle);
-			CS_HOOK_SHADER_SUBCLASS(BSSkyShader, kBsSky);
-			CS_HOOK_SHADER_SUBCLASS(BSUtilityShader, kUtility);
-			CS_HOOK_SHADER_SUBCLASS(BSWaterShader, kBsWater);
-
 			TryPatch("BSShader archive loader observer", [] {
 				stl::detour_thunk<ReloadFromStreamHook>(RE::ID::BSShader::Load);
 			});
@@ -530,20 +472,9 @@ namespace cs::engine
 			TryPatch("standalone compute shader observers", [] {
 				stl::detour_thunk<ReloadStandaloneComputeHook>(RE::ID::BSComputeShader::LoadTechniquesFromStream);
 			});
-			CountRoutingHook(TryPatch("BSShader native technique binder", [] {
+			TryPatch("BSShader native technique binder", [] {
 				stl::detour_thunk<BeginTechniqueHook>(RE::ID::BSShader::BeginTechnique);
-			}));
-
-			L->info(
-				"Subclass SetupTechnique hooks: {}/{} patched ({} failed)",
-				g_setupStats.succeeded,
-				g_setupStats.attempted,
-				g_setupStats.failed);
-			if (g_setupStats.succeeded == 0)
-				L->error("Native shader descriptor routing unavailable.");
-			else
-				L->info(
-					"Shader injection dispatch mode: native family/stage descriptor.");
+			});
 		});
 	}
 }

@@ -173,7 +173,7 @@ namespace cs::features
 			L->warn("Animated-object correction unavailable: {}", site.error());
 		}
 
-		if (!cs::engine::RegisterPreLightingRenderPasses(&CorrectPreviousWorld)) {
+		if (!cs::engine::RegisterPreLightingRenderPasses(*this, &CorrectPreviousWorld)) {
 			FailLoad("Motion Vector Fixes pass-list hook registration failed.");
 			return;
 		}

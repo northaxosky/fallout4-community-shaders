@@ -20,8 +20,7 @@ namespace ScreenSpaceGI
 	float3 ComposeDiffuse(float2 screenPosition, float3x3 viewToWorld,
 		float3 albedo, float3 diffuseColor, float vertexAOStore)
 	{
-		if (!Enabled)
-			return diffuseColor;
+		[branch] if (!Enabled) return diffuseColor;
 		int3 texel = int3(int2(screenPosition), 0);
 		float3 normalVS = GBuffer::DecodeNormal(NormalTexture.Load(texel).xy);
 		float3 normalWS = normalize(mul(viewToWorld, normalVS));
@@ -57,8 +56,7 @@ namespace ScreenSpaceGI
 	float3 ComposeSpecular(float2 screenPosition, float3x3 viewToWorld,
 		float3 viewVS, float3 irradiance, float glossiness, float vertexAOStore)
 	{
-		if (!Enabled)
-			return irradiance;
+		[branch] if (!Enabled) return irradiance;
 		int3 texel = int3(int2(screenPosition), 0);
 		float3 normalVS = GBuffer::DecodeNormal(NormalTexture.Load(texel).xy);
 		float3 normalWS = normalize(mul(viewToWorld, normalVS));

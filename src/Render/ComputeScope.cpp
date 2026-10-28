@@ -18,7 +18,6 @@ namespace cs
 		_uavCount(std::min(a_uavCount, 8u)),
 		_constantBufferCount(std::min(a_constantBufferCount, 8u))
 	{
-		(void)_ctx;
 	}
 
 	ComputeScope::~ComputeScope() noexcept

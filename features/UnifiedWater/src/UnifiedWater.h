@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "RE/B/BSTriShape.h"
 #include "Render/TerrainWater.h"
 #include "ShaderDefines.h"
@@ -26,7 +25,7 @@ namespace cs::features
 			return "Replaces distant terrain water tiles with close water and unifies their optical distance response. Placed water retains its vanilla distance rendering.";
 		}
 		void Load() override;
-		cs::UnifiedWaterFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		void OnPostPostLoad() override;
 		void OnDataLoaded() override;
 		void OnLoadingMenuClosed() override;

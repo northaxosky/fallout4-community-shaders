@@ -2,6 +2,7 @@
 
 #include "Log.h"
 #include "Render/HookRegistry.h"
+#include "Render/RuntimeCallback.h"
 
 #include "RE/B/BSShaderProperty.h"
 
@@ -22,6 +23,7 @@ namespace cs::engine
 		{
 			HookPriority priority;
 			Callback callback;
+			Feature* owner;
 		};
 
 		std::vector<Entry<PreLightingRenderPassesCallback>> g_pre;
@@ -37,7 +39,7 @@ namespace cs::engine
 			{
 				const LightingRenderPassesCall call{ a_property, a_geometry, a_renderMode, a_accumulator };
 				for (const auto& entry : g_pre)
-					entry.callback(call);
+					render::RunRenderCallback(entry.owner, "PreLightingRenderPasses", [&] { entry.callback(call); });
 				return func(a_property, a_geometry, a_renderMode, a_accumulator);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -60,11 +62,21 @@ namespace cs::engine
 		}
 	}
 
-	bool RegisterPreLightingRenderPasses(PreLightingRenderPassesCallback a_callback, HookPriority a_priority)
+	static bool RegisterLightingRenderPasses(PreLightingRenderPassesCallback a_callback, HookPriority a_priority, Feature* a_owner)
 	{
 		if (!RenderHookRegistrationAllowed("PreLightingRenderPasses") || !EnsureInstalled())
 			return false;
-		InsertByPriority(g_pre, Entry<PreLightingRenderPassesCallback>{ a_priority, a_callback });
+		InsertByPriority(g_pre, Entry<PreLightingRenderPassesCallback>{ a_priority, a_callback, a_owner });
 		return true;
+	}
+
+	bool RegisterPreLightingRenderPasses(PreLightingRenderPassesCallback a_callback, HookPriority a_priority)
+	{
+		return RegisterLightingRenderPasses(a_callback, a_priority, nullptr);
+	}
+
+	bool RegisterPreLightingRenderPasses(Feature& a_owner, PreLightingRenderPassesCallback a_callback, HookPriority a_priority)
+	{
+		return RegisterLightingRenderPasses(a_callback, a_priority, &a_owner);
 	}
 }

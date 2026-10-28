@@ -3,8 +3,11 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/FrameAnnotations.h"
 #include "Render/FrameBoundary.h"
 #include "Render/FrameBuffer.h"
+#include "Render/FrameProfiler.h"
+#include "Render/ShaderCompileGate.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SwapChainHook.h"
@@ -60,6 +63,7 @@ static void OnMessage(F4SE::MessagingInterface::Message* a_msg)
 		break;
 	case F4SE::MessagingInterface::kGameDataReady:
 		cs::FeatureManager::Get().OnDataLoadedAll();
+		cs::render::frame_annotations::OnDataLoaded();
 		cs::render::TemporalPipeline::Get().OnDataLoaded();
 		break;
 	default:
@@ -83,11 +87,11 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	const auto config = cs::feature_config::Initialize(std::move(registry));
 	if (!config.error.empty())
 		L->error("Settings initialization: {}", config.error);
+	for (const auto& warning : config.warnings)
+		L->warn("{}", warning);
 	toml::table loggingConfig;
 	if (const auto* logging = config.root["logging"].as_table()) {
 		loggingConfig = *logging;
-	} else if (config.root.contains("logging")) {
-		L->warn("Unified config [logging] must be a table; using logging defaults");
 	}
 	cs::log::ApplyConfigFromToml(loggingConfig);
 	const auto shaderOwnership =
@@ -116,6 +120,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	}
 
 	cs::engine::InstallShaderSubclassHooks();
+	cs::engine::InstallShaderCompileLoadGate();
 	cs::render::TemporalPipeline::Get().RegisterCreationRouter();
 
 	auto& featureManager = cs::FeatureManager::Get();
@@ -124,6 +129,11 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	cs::Menu::Get().Load();
 	cs::engine::InstallFrameBuffer();
 	cs::telemetry::Install();
+	if (!cs::render::profiling::InstallDeferredCompositePass())
+		L->error("DeferredComposite profiler pass registration failed");
+	cs::render::frame_annotations::Install();
+	// Registration closes once the boundary installs.
+	cs::render::RegisterPostSwap(&cs::engine::StopShaderCompileOnQuit);
 	cs::render::InstallFrameBoundary();
 	if (!cs::render::InstallSwapChainHook()) {
 		L->error("D3D11 swap-chain hook installation failed");

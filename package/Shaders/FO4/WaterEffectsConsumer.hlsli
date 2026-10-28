@@ -17,6 +17,7 @@ namespace WaterEffects
 		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2,
 		float4 cameraPosAdjust)
 	{
+		[branch] if (FO4SharedData::EnabledWaterEffects == 0) return 1.0.xxx;
 		uint2 dimensions;
 		WaterCaustics.GetDimensions(dimensions.x, dimensions.y);
 		// FO4: an absent SRV keeps disabled or unready lighting neutral.

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "LODBlendingSettings.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -33,7 +32,7 @@ namespace cs::features
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
-		cs::LODBlendingFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4) override;
 
 		using Settings = lod_blending::Settings;
 

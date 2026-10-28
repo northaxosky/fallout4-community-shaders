@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "ShaderDefines.h"
 
@@ -42,7 +41,7 @@ namespace cs::features
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
-		cs::TerrainBlendingFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&) override;
 
 		// Render thread: offset near terrain depth, hold landscape, replay blended.
 		bool HoldsTechnique(std::uint32_t a_technique) const noexcept;

@@ -1,4 +1,5 @@
 #include "Skylighting.h"
+#include "Render/SharedDataLayout.h"
 
 #include <DearModdingUI/Client.h>
 #include <d3d11.h>
@@ -18,6 +19,7 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
@@ -50,7 +52,7 @@ namespace cs::features
 		// Same square as the stock precipitation occlusion depth and color targets.
 		constexpr std::uint32_t kOcclusionResolution = 512;
 		constexpr std::uint64_t kSummaryIntervalFrames = 300;
-		constexpr std::string_view kProbeUpdatePass = "Skylighting/ProbeUpdate";
+		constexpr std::string_view kProbeUpdatePass = "Skylighting::ProbeUpdate";
 
 		constexpr float kRadiansToDegrees = 180.0f / std::numbers::pi_v<float>;
 
@@ -105,7 +107,7 @@ namespace cs::features
 			CaptureLog->info("hook {}: {} ({})", hook.name, hook.installed ? "installed" : "unavailable", hook.detail);
 			installed = installed && hook.installed;
 		}
-		const bool registered = cs::engine::RegisterPostPrecipitationOcclusion([this] { RenderOcclusion(); });
+		const bool registered = cs::engine::RegisterPostPrecipitationOcclusion(*this, [this] { RenderOcclusion(); });
 		CaptureLog->info("hook Precipitation::RenderOcclusionMap detour: {}", registered ? "installed" : "unavailable");
 		if (!installed || !registered) {
 			FailLoad("the precipitation occlusion capture hooks could not be installed");
@@ -124,11 +126,12 @@ namespace cs::features
 			return;
 		}
 		// FO4: the stock array holds the sun cascades until focus shadows reuse it.
-		if (!cs::engine::RegisterPostSunShadowRender([this] { CopySunCascades(); })) {
+		if (!cs::engine::RegisterPostSunShadowRender(*this, [this] { CopySunCascades(); })) {
 			FailLoad("Skylighting shadow history needs the main sun shadow render hook");
 			return;
 		}
 		if (!cs::engine::RegisterPreDeferredComposite(
+				*this,
 				[this] {
 					if (auto* context = cs::engine::GetImmediateContext())
 						RenderDebug(context);
@@ -210,11 +213,6 @@ namespace cs::features
 		                a_consumer == Consumer::kLight     ? _probeCounters.lightDraws :
 		                                                     _probeCounters.tiledDispatches;
 		counter.fetch_add(1, std::memory_order_relaxed);
-	}
-
-	void Skylighting::OnLoadingMenuClosed()
-	{
-		QueueReset(kResetLoad);
 	}
 
 	void Skylighting::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
@@ -401,8 +399,8 @@ namespace cs::features
 		const auto extent = cs::render::GetActiveExtent(graphics->screenWidth, graphics->screenHeight);
 		if (!extent.width || !extent.height)
 			return;
-		try {
-			if (!_debugTexture || _debugTexture->desc.Width != graphics->screenWidth || _debugTexture->desc.Height != graphics->screenHeight) {
+		if (!_debugTexture || _debugTexture->desc.Width != graphics->screenWidth || _debugTexture->desc.Height != graphics->screenHeight) {
+			try {
 				D3D11_TEXTURE2D_DESC desc{};
 				desc.Width = graphics->screenWidth;
 				desc.Height = graphics->screenHeight;
@@ -423,22 +421,26 @@ namespace cs::features
 				texture->CreateUAV(uav);
 				texture->SetName("Skylighting/Debug.Texture", "Skylighting/Debug.SRV", "Skylighting/Debug.UAV");
 				_debugTexture = std::move(texture);
+			} catch (const std::exception& e) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Skylighting debug target unavailable: {}", e.what());
+				return;
+			} catch (...) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Skylighting debug target unavailable.");
+				return;
 			}
-			cs::engine::ComputeOMScope scope(a_context, 2, 0, 1, 0);
-			cs::render::ScopedComputeSharedDataBinding substrate(a_context);
-			cs::render::annotation::ScopedEvent event("Skylighting/Debug", false);
-			ID3D11ShaderResourceView* srvs[]{ normals, _texProbeArray->srv.get() };
-			ID3D11UnorderedAccessView* uavs[]{ _debugTexture->uav.get() };
-			a_context->CSSetShaderResources(0, 2, srvs);
-			a_context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-			a_context->CSSetShader(shader, nullptr, 0);
-			a_context->Dispatch((extent.width + 7) / 8, (extent.height + 7) / 8, 1);
-			_debugFrameReady = true;
-			cs::render::InvalidateFullscreenDebugData();
-			_probeCounters.debugFrames.fetch_add(1, std::memory_order_relaxed);
-		} catch (const std::exception& e) {
-			L->warn("Skylighting debug rendering failed: {}", e.what());
 		}
+		cs::engine::ComputeOMScope scope(a_context, 2, 0, 1, 0);
+		cs::render::ScopedComputeSharedDataBinding substrate(a_context);
+		cs::render::annotation::ScopedEvent event("Skylighting::Debug", false);
+		ID3D11ShaderResourceView* srvs[]{ normals, _texProbeArray->srv.get() };
+		ID3D11UnorderedAccessView* uavs[]{ _debugTexture->uav.get() };
+		a_context->CSSetShaderResources(0, 2, srvs);
+		a_context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+		a_context->CSSetShader(shader, nullptr, 0);
+		a_context->Dispatch((extent.width + 7) / 8, (extent.height + 7) / 8, 1);
+		_debugFrameReady = true;
+		cs::render::InvalidateFullscreenDebugData();
+		_probeCounters.debugFrames.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	FeatureDebugTexture Skylighting::GetOcclusionDebugTexture() const
@@ -456,44 +458,41 @@ namespace cs::features
 	{
 		const auto state = CaptureFrame();
 		// Keyed on anchor frames so skipped frames report; state changes log at once.
-		if (++_anchorFrames == 1 || _anchorFrames % kSummaryIntervalFrames == 0 || state != _loggedState || std::exchange(_summaryPending, false))
-			LogCaptureSummary(state);
+		const bool periodic = ++_anchorFrames % kSummaryIntervalFrames == 0;
+		const bool changed = _anchorFrames == 1 || state != _loggedState || std::exchange(_summaryPending, false);
+		if (changed || periodic)
+			LogCaptureSummary(state, changed ? spdlog::level::info : spdlog::level::debug);
+	}
+
+	Skylighting::CaptureState Skylighting::CaptureReadiness() const
+	{
+		if (!IsHealthy() || !IsEnabled() || !_occlusionDSV || !_probesReady.load(std::memory_order_acquire))
+			return CaptureState::kDisabled;
+		return cs::engine::IsInterior() ? CaptureState::kInterior : CaptureState::kCaptured;
 	}
 
 	Skylighting::CaptureState Skylighting::CaptureFrame()
 	{
-		if (!IsHealthy() || !_occlusionDSV || !_probesReady.load(std::memory_order_acquire)) {
-			_counters.skippedDisabled.fetch_add(1, std::memory_order_relaxed);
-			return CaptureState::kDisabled;
-		}
-		if (!IsEnabled()) {
-			_wasEnabled = false;
+		const auto readiness = CaptureReadiness();
+		if (readiness == CaptureState::kDisabled) {
+			if (!IsEnabled())
+				_wasEnabled = false;
 			_counters.skippedDisabled.fetch_add(1, std::memory_order_relaxed);
 			return CaptureState::kDisabled;
 		}
 		// Re-enabling must not show history from before the disabled stretch.
 		if (!std::exchange(_wasEnabled, true))
 			QueueReset(kResetEnable);
-		if (cs::engine::IsInterior()) {
+		if (readiness == CaptureState::kInterior) {
 			_counters.skippedInterior.fetch_add(1, std::memory_order_relaxed);
 			return CaptureState::kInterior;
 		}
 
-		if (const auto reasons = _queuedReset.exchange(0, std::memory_order_acq_rel)) {
-			ResetSkylighting(cs::engine::GetImmediateContext());
-			_probeCounters.resets.fetch_add(1, std::memory_order_relaxed);
-			if (reasons & kResetLoad)
-				_probeCounters.resetsLoad.fetch_add(1, std::memory_order_relaxed);
-			if (reasons & kResetRebuild)
-				_probeCounters.resetsRebuild.fetch_add(1, std::memory_order_relaxed);
-			if (reasons & kResetEnable)
-				_probeCounters.resetsEnable.fetch_add(1, std::memory_order_relaxed);
-			// FO4: capture can fail at load; the update waits for a fresh matrix.
-			_hasOcclusion = false;
-			_summaryPending = true;
-		}
+		ApplyQueuedReset();
 
-		const auto start = std::chrono::steady_clock::now();
+		// Clock reads only feed the summary log and telemetry.
+		const bool timed = cs::telemetry::pump::Enabled();
+		const auto start = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
 		frameCount++;
 
@@ -560,15 +559,17 @@ namespace cs::features
 
 		_counters.captures.fetch_add(1, std::memory_order_relaxed);
 		_counters.stockTargetRestored.store(result.stockTargetRestored, std::memory_order_relaxed);
-		const auto cpuMs = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
-		_windowCpuMsSum += cpuMs;
-		_windowCpuMsMax = std::max(_windowCpuMsMax, cpuMs);
-		++_windowCaptures;
+		if (timed) {
+			const auto cpuMs = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
+			_windowCpuMsSum += cpuMs;
+			_windowCpuMsMax = std::max(_windowCpuMsMax, cpuMs);
+			++_windowCaptures;
+		}
 		return CaptureState::kCaptured;
 	}
 
 	// Render thread only; one line per window keeps the capture log cheap.
-	void Skylighting::LogCaptureSummary(CaptureState a_state)
+	void Skylighting::LogCaptureSummary(CaptureState a_state, spdlog::level::level_enum a_level)
 	{
 		_loggedState = a_state;
 		const auto& a_matrix = OcclusionTransform;
@@ -599,17 +600,10 @@ namespace cs::features
 		const auto own = [&](Own a_reason) { return count(stats.ownBuilt[static_cast<std::size_t>(a_reason)]); };
 		const auto ownTotal = own(Own::kLandscape) + own(Own::kNotCasting) + own(Own::kAlphaBlended) + own(Own::kOther);
 
-		// Per-capture window milliseconds; the hook parts run inside the capture.
 		const auto& timings = cs::engine::GetCaptureTimings();
-		const std::array<cs::engine::CaptureClock::rep, 4> ticks{
-			timings.capture.load(std::memory_order_relaxed), timings.hookPredicate.load(std::memory_order_relaxed),
-			timings.hookStock.load(std::memory_order_relaxed), timings.hookOwn.load(std::memory_order_relaxed)
-		};
-		std::array<float, 4> stageMs{};
-		for (std::size_t i = 0; i < stageMs.size(); ++i) {
-			stageMs[i] = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(ticks[i] - _timingSnapshot[i]) / _windowCaptures) : 0.0f;
-			_counters.stageMs[i].store(stageMs[i], std::memory_order_relaxed);
-		}
+		const auto ticks = timings.capture.load(std::memory_order_relaxed);
+		const auto captureMs = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(ticks - _timingSnapshot) / _windowCaptures) : 0.0f;
+		_counters.captureMs.store(captureMs, std::memory_order_relaxed);
 		_timingSnapshot = ticks;
 
 		const auto cascadeSkipped = [&](CascadeSkip a_reason) { return count(_cascadeCounters.skipped[static_cast<std::size_t>(a_reason)]); };
@@ -628,12 +622,13 @@ namespace cs::features
 			if (result.valid && result.name == kProbeUpdatePass)
 				_probeCounters.gpuMs.store(result.gpuTimeMs, std::memory_order_relaxed);
 		}
-		CaptureLog->info(
+		CaptureLog->log(
+			a_level,
 			"summary enabled={} state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
 			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
-			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_hook_predicate={:.3f} ms_hook_stock={:.3f} ms_hook_own={:.3f} stock_ds8_restored={} "
+			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"sun_copies={} sun_copy_skipped_unavailable={} sun_copy_skipped_not_full_sky={} sun_copy_skipped_no_light={} sun_copy_skipped_unsupported_count={} sun_copy_skipped_no_target={} sun_copy_skipped_invalid={} sun_copy_skipped_copy_target={} sun_copy_skipped_disabled={} "
 			"cascade_count={} split_end=({:.1f},{:.1f},{:.1f}) "
@@ -645,7 +640,7 @@ namespace cs::features
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
-			cpuMsAverage, _windowCpuMsMax, stageMs[0], stageMs[1], stageMs[2], stageMs[3], _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
+			cpuMsAverage, _windowCpuMsMax, captureMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange,
 			count(_cascadeCounters.copies), cascadeSkipped(CascadeSkip::kUnavailable), cascadeSkipped(CascadeSkip::kNotFullSky), statusSkipped(cs::engine::SunCascadeStatus::kNoLight),
 			statusSkipped(cs::engine::SunCascadeStatus::kUnsupportedCount), statusSkipped(cs::engine::SunCascadeStatus::kNoTarget), statusSkipped(cs::engine::SunCascadeStatus::kInvalid), cascadeSkipped(CascadeSkip::kCopyTarget), cascadeSkipped(CascadeSkip::kDisabled),
@@ -676,10 +671,7 @@ namespace cs::features
 			.Field("capture_cpu_ms_avg", static_cast<double>(_counters.cpuMsAverage.load(std::memory_order_relaxed)))
 			.Field("capture_cpu_ms_max", static_cast<double>(_counters.cpuMsMax.load(std::memory_order_relaxed)))
 			.Field("stock_ds8_restored", _counters.stockTargetRestored.load(std::memory_order_relaxed))
-			.Field("ms_capture", static_cast<double>(_counters.stageMs[0].load(std::memory_order_relaxed)))
-			.Field("ms_hook_predicate", static_cast<double>(_counters.stageMs[1].load(std::memory_order_relaxed)))
-			.Field("ms_hook_stock", static_cast<double>(_counters.stageMs[2].load(std::memory_order_relaxed)))
-			.Field("ms_hook_own", static_cast<double>(_counters.stageMs[3].load(std::memory_order_relaxed)))
+			.Field("ms_capture", static_cast<double>(_counters.captureMs.load(std::memory_order_relaxed)))
 			.Field("occluders_accepted", count(stats.accepted))
 			.Field("occluders_delegated", count(stats.delegated))
 			.Field("occluders_own_new", count(stats.ownNew))
@@ -732,21 +724,24 @@ namespace cs::features
 			.Field("split_end_1", static_cast<double>(_cascadeCounters.splitEnd[1].load(std::memory_order_relaxed)))
 			.Field("split_end_2", static_cast<double>(_cascadeCounters.splitEnd[2].load(std::memory_order_relaxed)))
 			.Field("cascade_overlap", static_cast<double>(_cascadeCounters.overlap.load(std::memory_order_relaxed)));
-		cs::render::profiling::CollectPassTimings(a_sink, "Skylighting/");
+		cs::render::profiling::CollectPassTimings(a_sink, "Skylighting::");
 	}
 
-	cs::SkylightingFeatureData Skylighting::GetCommonBufferData()
+	void Skylighting::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4)
 	{
 		const auto* graphics = cs::engine::GetGraphicsState();
-		if (!graphics || !IsEnabled())
-			return {};
+		if (!graphics)
+			return;
 		// FO4: packs repeat within a frame and the advance must happen once.
-		if (_grid.frame == graphics->frameCount)
-			return { .shared = _grid.block, .Enabled = 1u };
+		if (_grid.frame == graphics->frameCount) {
+			a_feature.skylightingSettings = _grid.block;
+			a_fo4.EnabledSkylighting = 1u;
+			return;
+		}
 		// FO4: the captured world camera replaces Util::GetEyePosition.
 		const auto camera = cs::engine::GetCapturedWorldCameraRecord(graphics->frameCount);
 		if (!camera)
-			return {};
+			return;
 
 		const auto eye = cs::engine::CameraWorldOrigin(*camera);
 		const DirectX::XMFLOAT3 cellSize{
@@ -776,11 +771,35 @@ namespace cs::features
 			.MinSpecularVisibility = _settings.MinSpecularVisibility
 		};
 		_grid.frame = graphics->frameCount;
-		return { .shared = _grid.block, .Enabled = 1u };
+		a_feature.skylightingSettings = _grid.block;
+		a_fo4.EnabledSkylighting = 1u;
+	}
+
+	void Skylighting::ApplyQueuedReset()
+	{
+		if (const auto reasons = _queuedReset.exchange(0, std::memory_order_acq_rel)) {
+			ResetSkylighting(cs::engine::GetImmediateContext());
+			_probeCounters.resets.fetch_add(1, std::memory_order_relaxed);
+			if (reasons & kResetLoad)
+				_probeCounters.resetsLoad.fetch_add(1, std::memory_order_relaxed);
+			if (reasons & kResetRebuild)
+				_probeCounters.resetsRebuild.fetch_add(1, std::memory_order_relaxed);
+			if (reasons & kResetEnable)
+				_probeCounters.resetsEnable.fetch_add(1, std::memory_order_relaxed);
+			// FO4: capture can fail at load; the update waits for a fresh matrix.
+			_hasOcclusion = false;
+			_summaryPending = true;
+		}
 	}
 
 	void Skylighting::Prepass()
 	{
+		// FO4 captures occlusion before the world-frame reset is latched.
+		if (cs::render::IsHistoryResetFrame()) {
+			QueueReset(kResetLoad);
+			if (CaptureReadiness() == CaptureState::kCaptured)
+				ApplyQueuedReset();
+		}
 		auto state = ProbeState::kDispatched;
 		if (!IsEnabled()) {
 			state = ProbeState::kDisabled;

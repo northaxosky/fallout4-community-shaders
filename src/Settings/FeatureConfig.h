@@ -40,6 +40,7 @@ namespace cs::feature_config
 		toml::table root;
 		FileLoadStatus status{ FileLoadStatus::kMissing };
 		std::string error;
+		std::vector<std::string> warnings;
 	};
 
 	std::string RenderDocument(const settings::Registry& a_registry, const toml::table& a_root);
@@ -81,6 +82,7 @@ namespace cs::feature_config
 	};
 
 	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root);
+	// Invalid or missing values use the default; a_error names an invalid one.
 
 	struct WriteResult
 	{
@@ -107,7 +109,10 @@ namespace cs::feature_config
 		const toml::table& a_delta);
 	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load);
 	WriteResult UpdateFeatureEnabled(std::string_view a_featureKey, bool a_enabled);
-	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value);
+	WriteResult UpdateTopLevelSection(
+		std::string_view a_section,
+		const toml::table& a_value,
+		SectionWrite a_mode = SectionWrite::kReplace);
 
 	enum class ScalarReadStatus
 	{

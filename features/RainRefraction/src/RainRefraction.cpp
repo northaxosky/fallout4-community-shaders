@@ -21,6 +21,7 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
+#include "Render/SharedDataLayout.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
@@ -197,7 +198,7 @@ namespace cs::features
 		return true;
 	}
 
-	cs::RainRefractionFeatureData RainRefraction::GetCommonBufferData()
+	void RainRefraction::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&)
 	{
 		Settings settings;
 		{
@@ -208,7 +209,7 @@ namespace cs::features
 		                    _resourcesReady.load(std::memory_order_acquire) &&
 		                    DynamicCubemaps::GetSingleton()->GetReflectionsSRV() != nullptr;
 		_packedEnable.store(enable, std::memory_order_release);
-		return {
+		a_feature.rainRefractionSettings = {
 			.Enable = enable ? 1u : 0u,
 			.MotionStretch = settings.MotionStretch,
 			.MotionTransparency = settings.MotionTransparency
@@ -221,7 +222,7 @@ namespace cs::features
 			_packedEnable.store(false, std::memory_order_release);
 	}
 
-	void RainRefraction::OnRuntimeQuarantined() noexcept
+	void RainRefraction::OnRuntimeQuarantined(std::string_view, std::string_view) noexcept
 	{
 		_packedEnable.store(false, std::memory_order_release);
 	}

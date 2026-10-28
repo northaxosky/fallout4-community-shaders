@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
+#include <unordered_set>
 
 #include <spdlog/spdlog.h>
 
@@ -15,6 +16,16 @@
 			csLogOnceLogged = true;                       \
 			(logger)->log((level), __VA_ARGS__);          \
 		}                                                 \
+	} while (0)
+
+#define CS_LOG_ONCE_BY_KEY(logger, level, key, ...)                        \
+	do {                                                                   \
+		const auto csLogOnceKey = (key);                                   \
+		using CsLogOnceKey = std::decay_t<decltype(csLogOnceKey)>;         \
+		static thread_local std::unordered_set<CsLogOnceKey> csLogOnceSet; \
+		if (csLogOnceSet.insert(csLogOnceKey).second) {                    \
+			(logger)->log((level), __VA_ARGS__);                           \
+		}                                                                  \
 	} while (0)
 
 // CS_LOG_EVERY_N logs on first hit and every N hits after; suppress 4127 because constant n makes the guard constant.

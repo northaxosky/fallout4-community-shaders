@@ -18,6 +18,7 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/LocalLights.h"
 #include "Render/ShaderFamilyDescriptor.h"
+#include "Render/SharedDataLayout.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
@@ -475,12 +476,16 @@ namespace cs::features
 		InstallHook<Luminance>(RE::ID::BSLight::GetLuminanceAtPoint);
 		g_state.hooks = true;
 	}
-	void InverseSquareLighting::OnRuntimeQuarantined() noexcept
+	void InverseSquareLighting::OnRuntimeQuarantined(std::string_view, std::string_view) noexcept
 	{
 		g_state.validated = false;
 		std::scoped_lock lock(g_state.mutex);
 		g_state.sidecar.RestoreNativeRadii();
 		g_state.snapshots = {};
+	}
+	void InverseSquareLighting::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
+	{
+		a_fo4.EnabledInverseSquareLighting = Enabled() ? 1u : 0u;
 	}
 	void InverseSquareLighting::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{

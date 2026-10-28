@@ -29,7 +29,8 @@ float FO4LocalLightAttenuation(float distance, float nativeAttenuation)
 bool FO4LocalLightNegligible(float attenuation)
 {
 #ifdef INVERSE_SQUARE_LIGHTING
-	if ((InverseSquareLight.lightFlags & LightLimitFix::LightFlags::InverseSquare) != 0)
+	if (FO4SharedData::EnabledInverseSquareLighting != 0 &&
+		(InverseSquareLight.lightFlags & LightLimitFix::LightFlags::InverseSquare) != 0)
 		return attenuation < 1e-5;
 #endif
 	return attenuation <= 0.001;

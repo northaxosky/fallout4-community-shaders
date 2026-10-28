@@ -54,9 +54,7 @@ namespace cs::shader_cache
 					resolution.requestedName = a_fileName;
 					resolution.parentLocator = _rootLocator;
 
-					if (a_parentData && a_parentData == _rootData) {
-						resolution.parentLocator = _rootLocator;
-					} else if (a_parentData) {
+					if (a_parentData && a_parentData != _rootData) {
 						const auto parent = _openedFiles.find(a_parentData);
 						if (parent != _openedFiles.end()) {
 							resolution.parentLocator = parent->second.locator;

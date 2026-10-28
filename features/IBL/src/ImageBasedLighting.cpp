@@ -1,4 +1,5 @@
 #include "ImageBasedLighting.h"
+#include "Render/SharedDataLayout.h"
 
 #include <DearModdingUI/Client.h>
 #include <d3d11.h>
@@ -34,8 +35,8 @@ namespace cs::features
 
 		namespace ibl = image_based_lighting;
 
-		constexpr std::string_view kEnvironmentPass = "IBL::EnvDiffuseIBL";
-		constexpr std::string_view kSkyPass = "IBL::SkyDiffuseIBL";
+		constexpr std::string_view kEnvironmentPass = "ImageBasedLighting::EnvDiffuseIBL";
+		constexpr std::string_view kSkyPass = "ImageBasedLighting::SkyDiffuseIBL";
 
 		void Tooltip(const char* a_text)
 		{
@@ -87,7 +88,7 @@ namespace cs::features
 			return;
 		}
 		// FO4: vanilla never renders the reflections cube; the host does.
-		if (!engine::RegisterSkyReflectionCubeConsumer("ImageBasedLighting", [this] {
+		if (!engine::RegisterSkyReflectionCubeConsumer(*this, "ImageBasedLighting", [this] {
 				return IsEnabled() && _wantsSkyCube.load(std::memory_order_acquire);
 			})) {
 			FailLoad("Image Based Lighting needs the host sky reflection cube.");
@@ -188,11 +189,11 @@ namespace cs::features
 		return _frame;
 	}
 
-	render::IBLSettings ImageBasedLighting::GetCommonBufferData()
+	void ImageBasedLighting::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&)
 	{
 		const auto& frame = EvaluateFrame();
 		const auto& settings = frame.settings;
-		return {
+		a_feature.iblSettings = {
 			.EnableIBL = frame.active ? 1u : 0u,
 			.PreserveFogLuminance = settings.PreserveFogLuminance ? 1u : 0u,
 			.UseStaticIBL = 0u,
@@ -296,7 +297,7 @@ namespace cs::features
 			.Field("cleared_projections", count(_counters.cleared))
 			.Field("skipped_scene", count(_counters.skippedScene))
 			.Field("consumer_binds", count(_counters.consumerBinds));
-		render::profiling::CollectPassTimings(a_sink, "IBL::");
+		render::profiling::CollectPassTimings(a_sink, "ImageBasedLighting::");
 	}
 
 	void ImageBasedLighting::DrawSettings()

@@ -1,13 +1,11 @@
 #include "Render/SharedData.h"
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
-#include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedDataLayout.h"
@@ -35,6 +33,8 @@ namespace cs::render
 	namespace
 	{
 		auto* L = cs::log::Get("cs.render.shareddata");
+		std::atomic_bool g_historyResetRequested{ false };
+		std::atomic_uint64_t g_historyResetFrame{ UINT64_MAX };
 		struct SubstrateData
 		{
 			FrameDataCB frame{};
@@ -147,8 +147,10 @@ namespace cs::render
 			return data;
 		}
 
-		void PackFeatures(SubstrateData& a_data, const FeatureDataCB& a_features)
+		void PackFeatures(SubstrateData& a_data)
 		{
+			const auto& state = GetSubstrateState();
+			a_data.feature = {};
 			// FO4 colors are linear: identity diffuse decode, no pi on sun radiance.
 			a_data.feature.linearLightingSettings = {
 				.isMainOrLoadingMenu = 0,
@@ -171,28 +173,14 @@ namespace cs::render
 				.diffuseCurve = 1.0f,
 				.diffuseWhiteReflectance = 1.0f
 			};
-			auto& fo4 = a_data.fo4;
-			fo4.EnabledSSR = a_features.dynamicCubemapsSettings.EnabledSSR;
-			fo4.EnabledDynamicCubemaps = a_features.dynamicCubemapsSettings.Enabled;
-			fo4.DynamicMaterialReflections = a_features.dynamicCubemapsSettings.MaterialReflections;
-			fo4.EnabledWaterParallax = a_features.waterEffectsSettings.EnabledParallax;
-			fo4.EnabledUnifiedWater = a_features.unifiedWaterSettings.Enabled;
-			auto& terrain = a_data.feature.terraOccSettings;
-			terrain.EnableTerrainShadow = a_features.terrainShadowsSettings.EnableTerrainShadow;
-			std::ranges::copy(a_features.terrainShadowsSettings.Scale, terrain.Scale);
-			std::ranges::copy(a_features.terrainShadowsSettings.ZRange, terrain.ZRange);
-			std::ranges::copy(a_features.terrainShadowsSettings.Offset, terrain.Offset);
-			terrain.ZBlur = a_features.terrainShadowsSettings.ZBlur;
-			a_data.feature.lodBlendingSettings = a_features.lodBlendingSettings;
-			a_data.feature.terrainVariationSettings = a_features.terrainVariationSettings.shared;
-			a_data.feature.skylightingSettings = a_features.skylightingSettings.shared;
-			a_data.feature.iblSettings = a_features.iblSettings;
-			a_data.feature.extendedMaterialSettings = a_features.extendedMaterialsSettings;
-			a_data.feature.terrainBlendingSettings = a_features.terrainBlendingSettings;
-			a_data.feature.rainRefractionSettings = a_features.rainRefractionSettings;
-			fo4.EnabledTerrainVariation = a_features.terrainVariationSettings.Enabled;
-			fo4.EnabledSkylighting = a_features.skylightingSettings.Enabled;
-			fo4.EnabledScreenSpaceGI = a_features.screenSpaceGISettings.Enabled;
+			a_data.fo4 = {
+				.DebugOwner = state.fo4.DebugOwner,
+				.DebugMode = state.fo4.DebugMode,
+				.DeltaTime = state.fo4.DeltaTime,
+				.DebugParams = state.fo4.DebugParams
+			};
+			std::ranges::copy(state.fo4.DirectionalAmbient, a_data.fo4.DirectionalAmbient);
+			FeatureManager::Get().WriteSharedDataAll(a_data.feature, a_data.fo4);
 		}
 
 		constexpr std::array<std::size_t, kSubstrateBufferCount> kBufferSizes{
@@ -254,8 +242,7 @@ namespace cs::render
 				if (a_updateDepth)
 					UpdateCanonicalDepth(context, *camera);
 				SubstrateData data{};
-				data.fo4 = state.fo4;
-				PackFeatures(data, GetFeatureBufferData());
+				PackFeatures(data);
 				if (current) {
 					// Terrain prepares after material draws; refresh b6/b7, not camera history.
 					if (!WriteSubstrate(context, data, kFeatureDataSlot - kFrameDataSlot))
@@ -286,6 +273,7 @@ namespace cs::render
 				const float clamp = REX::FModule::IsRuntimeOG() ? (std::trunc(size * ratio.x) - 1.0f) / size : ratio.x - 0.5f / size;
 				data.frame = PackFrameData(*camera, ratio, previousRatio, ratio.x - clamp);
 				data.fo4.DeltaTime = delta;
+				data.shared.ResetHistory = IsHistoryResetFrame() ? 1u : 0u;
 				if (!WriteSubstrate(context, data)) {
 					CS_LOG_EVERY_MS(
 						L,
@@ -332,12 +320,16 @@ namespace cs::render
 			const auto* graphics = engine::GetGraphicsState();
 			if (!graphics || !a_context || !IsSharedDataReady())
 				return;
-			if (state.debugFrame == graphics->frameCount && !a_refresh)
-				return;
 			if (state.debugSelectionFrame != graphics->frameCount) {
 				state.debugFeature = FeatureManager::Get().GetFullscreenDebugFeature();
 				state.debugSelectionFrame = graphics->frameCount;
 			}
+			if (state.debugFeature && !state.debugFeature->IsHealthy()) {
+				state.debugFeature = nullptr;
+				a_refresh = true;
+			}
+			if (state.debugFrame == graphics->frameCount && !a_refresh)
+				return;
 			auto debug = state.debugFeature ? state.debugFeature->GetFullscreenDebugData() : FullscreenDebugData{};
 			if (debug.mode == 0)
 				debug = {};
@@ -411,6 +403,25 @@ namespace cs::render
 	ID3D11SamplerState* GetLinearClampSampler() noexcept
 	{
 		return GetSubstrateState().linearClamp.get();
+	}
+
+	void RequestHistoryReset() noexcept
+	{
+		g_historyResetRequested.store(true, std::memory_order_release);
+	}
+
+	void LatchHistoryResetFrame() noexcept
+	{
+		const auto* graphics = engine::GetGraphicsState();
+		if (graphics && !engine::IsMainOrLoadingMenuOpen() &&
+			g_historyResetRequested.exchange(false, std::memory_order_acq_rel))
+			g_historyResetFrame.store(graphics->frameCount, std::memory_order_release);
+	}
+
+	bool IsHistoryResetFrame() noexcept
+	{
+		const auto* graphics = engine::GetGraphicsState();
+		return graphics && g_historyResetFrame.load(std::memory_order_acquire) == graphics->frameCount;
 	}
 
 	bool IsSharedDataReady() noexcept

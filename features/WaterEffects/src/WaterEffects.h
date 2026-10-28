@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
@@ -60,7 +59,7 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
-		cs::WaterEffectsFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;

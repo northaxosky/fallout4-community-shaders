@@ -61,6 +61,7 @@ namespace cs::settings
 	using Registry = std::vector<Section>;
 
 	std::string FormatValue(const Value& a_value);
+	void WriteValue(toml::table& a_table, std::string_view a_key, const Value& a_value);
 	// Every field at its default; the base a partial document overlays.
 	toml::table DefaultValues(const SchemaView& a_schema);
 }

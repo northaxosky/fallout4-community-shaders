@@ -64,6 +64,11 @@ namespace cs::render::annotation
 		endPass = a_end;
 	}
 
+	bool EventsConsumed() noexcept
+	{
+		return annotation != nullptr;
+	}
+
 	ScopedEvent::ScopedEvent(std::string_view a_name, bool a_profile) noexcept
 	{
 		_profile = a_profile && beginPass && endPass && beginPass(a_name);

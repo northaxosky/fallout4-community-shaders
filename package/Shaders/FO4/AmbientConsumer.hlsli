@@ -34,7 +34,8 @@ namespace FO4Ambient
 		ambient *= Skylighting::GetAmbientScale(Skylighting::GetViewPosition(screenPosition), normalView, albedo, vertexAO);
 #	endif
 #	ifdef IBL
-		if (SharedData::iblSettings.EnableIBL) {
+		[branch] if (SharedData::iblSettings.EnableIBL)
+		{
 			float3 vanillaDALC = FO4SharedData::GetAmbientLinear(normalWS);
 #		ifdef SKYLIGHTING
 			float3 positionMS = FrameBuffer::ViewToWorld(Skylighting::GetViewPosition(screenPosition));

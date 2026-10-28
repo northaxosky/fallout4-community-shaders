@@ -3,6 +3,7 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Menu/ProfilingRenderer.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/FrameProfiler.h"
@@ -12,9 +13,9 @@
 #include "Settings/SettingsPersistence.h"
 #include "Shared/PerfUtils.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/UI.h"
 
 #include <DearModdingUI/Client.h>
-#include <DearModdingUI/FontMetrics.h>
 #include <RE/B/BSShaderManager.h>
 
 #include <algorithm>
@@ -66,22 +67,26 @@ namespace cs::features
 			}
 		}
 
-		void SortHeader(std::span<const char* const> a_labels, int& a_column, bool& a_descending)
+		// Name columns sort A to Z first and metric columns slowest first.
+		template <std::size_t N>
+		Util::TableSortSpec SortHeaders(const char* const (&a_labels)[N], int a_defaultColumn)
 		{
-			dmui::ui::TableNextRow();
-			for (std::size_t i = 0; i < a_labels.size(); ++i) {
-				(void)dmui::ui::TableSetColumnIndex(static_cast<int>(i));
-				if (dmui::ui::Selectable(a_labels[i])) {
-					a_descending = a_column == static_cast<int>(i) ? !a_descending : true;
-					a_column = static_cast<int>(i);
-				}
+			using dmui::ui::TableColumnFlags;
+			for (std::size_t i = 0; i < N; ++i) {
+				auto flags = i ? TableColumnFlags::kPreferSortDescending : TableColumnFlags::kNone;
+				if (static_cast<int>(i) == a_defaultColumn)
+					flags |= TableColumnFlags::kDefaultSort;
+				dmui::ui::TableSetupColumn(a_labels[i], flags);
 			}
+			dmui::ui::TableHeadersRow();
+			return Util::ReadTableSortSpec(a_defaultColumn, false);
 		}
 
 		template <class Row, class Metric>
-		void SortRows(std::vector<Row>& a_rows, int a_column, bool a_descending, Metric a_metric)
+		void SortRows(std::vector<Row>& a_rows, const Util::TableSortSpec& a_sort, Metric a_metric)
 		{
-			std::ranges::stable_sort(a_rows, [&](const auto& a, const auto& b) {
+			const int column = a_sort.column;
+			Util::SortTableRowsWith<Row>(a_rows, a_sort, [&](const Row& a, const Row& b, bool a_ascending) {
 				if constexpr (requires { a.shaderType; }) {
 					if (a.shaderType < 0 || b.shaderType < 0) {
 						if (a.shaderType < 0 && b.shaderType < 0)
@@ -90,8 +95,8 @@ namespace cs::features
 					}
 				}
 				const auto left = a_metric(a), right = a_metric(b);
-				const int order = a_column == 0 ? a.label.compare(b.label) : (left > right) - (left < right);
-				return a_descending ? order > 0 : order < 0;
+				const int order = column == 0 ? a.label.compare(b.label) : (left > right) - (left < right);
+				return a_ascending ? order < 0 : order > 0;
 			});
 		}
 
@@ -136,46 +141,6 @@ namespace cs::features
 				text += std::format(" ({:+.1f}%)", percent);
 			(void)dmui::DrawStyledText(host::HostClient::Get().Client(), text,
 				{ .tone = ComparisonTone(a_test, a_baseline) });
-		}
-
-		struct TimingRow
-		{
-			std::string label;
-			float average{}, p95{}, p99{}, percent{};
-		};
-
-		void DrawTimingTable(const char* a_id, std::vector<TimingRow> a_rows, int& a_sort, bool& a_descending)
-		{
-			if (!dmui::ui::BeginTable(a_id, 5))
-				return;
-			const char* labels[]{ "Feature / Pass", "Avg", "P95", "P99", "%" };
-			SortHeader(labels, a_sort, a_descending);
-			SortRows(a_rows, a_sort, a_descending, [a_sort](const auto& a_row) {
-				switch (a_sort) {
-				case 2:
-					return a_row.p95;
-				case 3:
-					return a_row.p99;
-				case 4:
-					return a_row.percent;
-				default:
-					return a_row.average;
-				}
-			});
-			for (const auto& row : a_rows) {
-				dmui::ui::TableNextRow();
-				(void)dmui::ui::TableSetColumnIndex(0);
-				dmui::ui::TextUnformatted(row.label.c_str());
-				const float values[]{ row.average, row.p95, row.p99, row.percent };
-				for (int i = 0; i < 4; ++i) {
-					(void)dmui::ui::TableSetColumnIndex(i + 1);
-					if (i == 3)
-						dmui::ui::Text("%.1f%%", values[i]);
-					else
-						DrawMilliseconds(values[i]);
-				}
-			}
-			dmui::ui::EndTable();
 		}
 
 		nlohmann::json SnapshotJson(const std::map<Feature*, toml::table>& a_snapshot)
@@ -238,7 +203,7 @@ namespace cs::features
 			_refreshHz = std::max(30.0f, static_cast<float>(mode.dmDisplayFrequency));
 	}
 
-	void PerformanceOverlay::OnRuntimeQuarantined() noexcept
+	void PerformanceOverlay::OnRuntimeQuarantined(std::string_view, std::string_view) noexcept
 	{
 		render::profiling::SetEnabled(false);
 		AbortTest("Performance Overlay was quarantined; restart required");
@@ -378,10 +343,8 @@ namespace cs::features
 		_lastUpdate = counter;
 
 		// The open hitch would dominate the graph scale.
-		if (_graphWarmup > 0) {
-			--_graphWarmup;
+		if (!_graphGate.ShouldSample(++_hostTick))
 			return;
-		}
 
 		const float oldFrame = _history.GetData()[_history.GetHeadIdx()];
 		_history.Push(_frameMs);
@@ -407,7 +370,7 @@ namespace cs::features
 		_graphMax += Settings::kSmoothingFactor * (_averageMs + spread - _graphMax);
 		_frameGeneration = render::TemporalPipeline::Get().GetFrameGenerationDiagnostics(false).active;
 		if (_frameGeneration) {
-			// FO4: the pinned active-FG branch always selects the calculated 2x fallback.
+			// Upstream derives post-FG figures from the fixed multiplier.
 			const float postMs = _frameMs / Settings::kFrameGenerationMultiplier;
 			if (_updateTimer <= 0.0f) {
 				_postDisplayMs = postMs;
@@ -431,7 +394,7 @@ namespace cs::features
 		if (!settings.ShowInOverlay && !_testing) {
 			QueryPerformanceCounter(&_lastFrame);
 			_overlayFrequency = {};
-			_graphWarmup = Settings::kGraphWarmupFrames;
+			_graphGate = {};
 			return;
 		}
 		// FO4: DearModdingUI supplies the native-frame UI cadence independently of the deferred scene.
@@ -490,7 +453,7 @@ namespace cs::features
 				.scaleMinimum = _graphMin,
 				// The host rejects an empty scale range.
 				.scaleMaximum = std::max(_graphMax, _graphMin + 0.001f),
-				.size = { OverlayContentWidth(), 50.0f * dmui::ui::GetFontSize() / DearModdingUI::Theme::kBaselineFontSize * settings.TextSize },
+				.size = { OverlayContentWidth(), 50.0f * Util::GetUIScale() * settings.TextSize },
 				.overlayText = a_overlay,
 				.referenceLines = references.data(),
 				.referenceLineCount = static_cast<std::uint32_t>(references.size()) });
@@ -507,12 +470,12 @@ namespace cs::features
 	void PerformanceOverlay::DrawDrawCalls(const std::vector<DrawCallRow>& a_rows)
 	{
 		auto rows = a_rows;
-		if (!dmui::ui::BeginTable("ShaderTimings", 4))
+		if (!dmui::ui::BeginTable("ShaderTimings", 4, dmui::ui::TableFlags::kSortable))
 			return;
 		const char* labels[]{ "Shader Type", "Draw Calls", "Frame Time", "Cost/Call" };
-		SortHeader(labels, _drawSort, _drawDescending);
-		SortRows(rows, _drawSort, _drawDescending, [this](const auto& a_row) {
-			switch (_drawSort) {
+		const auto sort = SortHeaders(labels, 2);
+		SortRows(rows, sort, [&sort](const auto& a_row) {
+			switch (sort.column) {
 			case 1:
 				return static_cast<float>(a_row.drawCalls);
 			case 3:
@@ -541,54 +504,6 @@ namespace cs::features
 				dmui::ui::TextUnformatted("-");
 		}
 		dmui::ui::EndTable();
-	}
-
-	void PerformanceOverlay::DrawPasses()
-	{
-		const auto now = Util::GetNowSecs();
-		if (_statistics.empty() || now - _statisticsTime >= Settings::kStatisticsRefreshSeconds) {
-			_statistics = render::profiling::GetProfiler().GetStatistics();
-			_statisticsTime = now;
-		}
-		const auto& results = _statistics;
-		(void)dmui::ui::Checkbox("CPU timings", &_cpuTimings);
-		if (results.empty()) {
-			dmui::ui::TextDisabled("No timing data available (enter game world)");
-			return;
-		}
-		std::map<std::string, TimingRow> groups;
-		std::vector<TimingRow> passes;
-		float total{};
-		for (const auto& result : results) {
-			if (!result.valid)
-				continue;
-			const auto split = result.name.find("::");
-			const auto name = result.name.substr(0, split == std::string::npos ? result.name.find('/') : split);
-			TimingRow row{ result.name,
-				_cpuTimings ? result.cpuAvgMs : result.avgMs,
-				_cpuTimings ? result.cpuP95Ms : result.p95Ms,
-				_cpuTimings ? result.cpuP99Ms : result.p99Ms };
-			auto& group = groups[name];
-			group.label = name;
-			group.average += row.average;
-			group.p95 += row.p95;
-			group.p99 += row.p99;
-			total += row.average;
-			passes.push_back(std::move(row));
-		}
-		std::vector<TimingRow> summary;
-		for (auto& [name, group] : groups) {
-			(void)name;
-			group.percent = Percentage(group.average, total);
-			summary.push_back(group);
-		}
-		for (auto& row : passes)
-			row.percent = Percentage(row.average, total);
-		DrawTimingTable("CSFeatures", std::move(summary), _groupSort, _groupDescending);
-		DrawTimingTable("CSPasses", std::move(passes), _passSort, _passDescending);
-		dmui::ui::Text("CS total: %.3f GPU ms / %.3f CPU ms",
-			render::profiling::GetProfiler().GetTotalTimeMs(),
-			render::profiling::GetProfiler().GetCpuTotalTimeMs());
 	}
 
 	void PerformanceOverlay::DrawTestResults()
@@ -643,13 +558,13 @@ namespace cs::features
 		                       hasBothVariants && frames >= kMinimumSamplesForMarginal && duration >= kMinimumDurationForMarginal ? "Marginal" :
 		                                                                                                                            "Insufficient";
 		dmui::ui::Text("%s: %d frames, %.1f seconds, %d excluded, %.1f%% valid", validity, frames, duration, excluded, validPercent);
-		if (!dmui::ui::BeginTable("ABResults", 7))
+		if (!dmui::ui::BeginTable("ABResults", 7, dmui::ui::TableFlags::kSortable))
 			return;
 		const char* labels[]{ "Shader Type", "A Avg", "B Avg", "Delta", "A Median", "B Median", "Median Delta" };
-		SortHeader(labels, _testSort, _testDescending);
+		const auto sort = SortHeaders(labels, 3);
 		auto rows = _aggregator.GetAggregatedResults();
-		SortRows(rows, _testSort, _testDescending, [this](const auto& row) {
-			switch (_testSort) {
+		SortRows(rows, sort, [&sort](const auto& row) {
+			switch (sort.column) {
 			case 1:
 				return row.meanA;
 			case 2:
@@ -729,7 +644,7 @@ namespace cs::features
 			if (settings.ShowDrawCalls)
 				DrawDrawCalls(BuildRows());
 			if (settings.ShowCSPasses)
-				DrawPasses();
+				ProfilingRenderer::RenderStatistics(false, false);
 		}
 		DrawTestResults();
 	}

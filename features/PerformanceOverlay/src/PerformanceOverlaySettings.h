@@ -16,9 +16,6 @@ namespace cs::features::performance_overlay
 		static constexpr float kGraphSpreadMultiplier = 2.0f;
 		static constexpr float kGraphMinSpread = 2.0f;
 		static constexpr float kGraphMaxSpread = 20.0f;
-		// Covers the open hitch plus the profiler's 3-frame readback latency.
-		static constexpr std::uint32_t kGraphWarmupFrames = 10;
-		static constexpr double kStatisticsRefreshSeconds = 1.0;
 		static constexpr float kFrameGenerationMultiplier = 2.0f;
 
 		bool ShowInOverlay = true;

@@ -1,4 +1,5 @@
 #include "UnifiedWater.h"
+#include "Render/SharedDataLayout.h"
 
 #include "Log.h"
 #include "RE/B/BSModelDB.h"
@@ -48,15 +49,12 @@ namespace cs::features
 		return &instance;
 	}
 
-	cs::UnifiedWaterFeatureData UnifiedWater::GetCommonBufferData() const
+	void UnifiedWater::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
 	{
-		cs::UnifiedWaterFeatureData data{};
-		data.Enabled = _ready.load(std::memory_order_acquire) &&
-		                       _injections.load(std::memory_order_acquire) &&
-		                       IsEnabled() ?
-		                   1u :
-		                   0u;
-		return data;
+		a_fo4.EnabledUnifiedWater = _ready.load(std::memory_order_acquire) &&
+		                                    _injections.load(std::memory_order_acquire) ?
+		                                1u :
+		                                0u;
 	}
 
 	void UnifiedWater::Load()

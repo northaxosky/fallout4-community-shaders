@@ -1,10 +1,10 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/PrecipitationOcclusion.h"
 #include "Render/ShadowCascades.h"
+#include "Render/SharedFeatureData.h"
 #include "Render/SunShadowLights.h"
 #include "ShaderDefines.h"
 #include "SkylightingSettings.h"
@@ -49,7 +49,6 @@ namespace cs::features
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
-		void OnLoadingMenuClosed() override;
 		void Prepass() override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
@@ -61,7 +60,7 @@ namespace cs::features
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		// Packs b6; repeated packs within a frame must not advance the grid again.
-		cs::SkylightingFeatureData GetCommonBufferData();
+		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4) override;
 
 	private:
 		Skylighting() = default;
@@ -80,13 +79,14 @@ namespace cs::features
 			kFailed
 		};
 		CaptureState CaptureFrame();
+		CaptureState CaptureReadiness() const;
 		void CreateOcclusionResources(ID3D11Device* a_device);
 		void CreateProbeResources(ID3D11Device* a_device);
 		void CreateDebugResources();
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
-		void LogCaptureSummary(CaptureState a_state);
+		void LogCaptureSummary(CaptureState a_state, spdlog::level::level_enum a_level = spdlog::level::info);
 
-		// Reasons accumulate until the next exterior capture consumes them.
+		// Reasons accumulate until render-thread reset handling consumes them.
 		enum ResetReason : std::uint8_t
 		{
 			kResetLoad = 1,
@@ -94,6 +94,7 @@ namespace cs::features
 			kResetEnable = 4
 		};
 		void QueueReset(ResetReason a_reason) noexcept { _queuedReset.fetch_or(a_reason, std::memory_order_acq_rel); }
+		void ApplyQueuedReset();
 		void ResetSkylighting(ID3D11DeviceContext* a_context);
 
 		enum class ProbeState : std::uint8_t
@@ -209,8 +210,7 @@ namespace cs::features
 			std::atomic<std::uint64_t> failed{ 0 };
 			std::atomic<float> cpuMsAverage{ 0.0f };
 			std::atomic<float> cpuMsMax{ 0.0f };
-			// Per-capture window averages: capture, hook predicate, hook stock, hook own.
-			std::array<std::atomic<float>, 4> stageMs{};
+			std::atomic<float> captureMs{ 0 };
 			std::atomic_bool stockTargetRestored{ true };
 		} _counters;
 		struct ProbeCounters
@@ -252,8 +252,7 @@ namespace cs::features
 		double _windowCpuMsSum = 0.0;
 		float _windowCpuMsMax = 0.0f;
 		std::uint32_t _windowCaptures = 0;
-		// Stage tick totals at the last summary, in CaptureTimings order.
-		std::array<cs::engine::CaptureClock::rep, 4> _timingSnapshot{};
+		cs::engine::CaptureClock::rep _timingSnapshot = 0;
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
 		ProbeState _probeState = ProbeState::kPending;

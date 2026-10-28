@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
 #include "ScreenSpaceGIConstants.h"
@@ -21,7 +20,7 @@ namespace cs::features
 	{
 	public:
 		static ScreenSpaceGI* GetSingleton();
-		cs::ScreenSpaceGIFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		std::string_view GetName() const override { return "ScreenSpaceGI"; }
 		std::string_view GetDisplayName() const override { return "Screen Space GI"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
@@ -29,7 +28,6 @@ namespace cs::features
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
 		void Prepass() override;
-		void OnLoadingMenuClosed() override;
 		void OnEnabledChanged(bool) noexcept override { QueueReset("enabled_changed"); }
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void DrawSettings() override;

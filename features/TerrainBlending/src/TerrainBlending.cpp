@@ -1,4 +1,5 @@
 #include "TerrainBlending.h"
+#include "Render/SharedDataLayout.h"
 
 #include "Log.h"
 #include "Render/Annotation.h"
@@ -17,6 +18,7 @@
 #include "RE/B/BSGeometry.h"
 #include "RE/B/BSRenderPass.h"
 #include "RE/B/BSShaderProperty.h"
+#include <REX/TScopeExit.h>
 
 #include <array>
 #include <d3d11.h>
@@ -143,7 +145,7 @@ namespace cs::features
 			return;
 		}
 		if (!cs::engine::RegisterWorldPrepassHold(
-				&Hold, [this](std::span<const cs::engine::HeldPrepassBucket> a_buckets) { Replay(a_buckets); })) {
+				*this, &Hold, [this](std::span<const cs::engine::HeldPrepassBucket> a_buckets) { Replay(a_buckets); })) {
 			FailLoad("Terrain Blending needs the world prepass bucket hold-back.");
 			return;
 		}
@@ -192,9 +194,9 @@ namespace cs::features
 		       _injectionsOperational.load(std::memory_order_acquire);
 	}
 
-	cs::TerrainBlendingFeatureData TerrainBlending::GetCommonBufferData() const
+	void TerrainBlending::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&)
 	{
-		return { .Enabled = IsOperational() ? 1u : 0u };
+		a_feature.terrainBlendingSettings.Enabled = IsOperational() ? 1u : 0u;
 	}
 
 	bool TerrainBlending::HoldsTechnique(std::uint32_t a_technique) const noexcept
@@ -255,7 +257,7 @@ namespace cs::features
 			g_replay.depthSRV = std::move(view);
 			g_replay.depthDesc = copyDesc;
 		}
-		cs::render::annotation::ScopedEvent timing("TerrainBlending/DepthCopy");
+		cs::render::annotation::ScopedEvent timing("TerrainBlending::DepthCopy");
 		cs::engine::CopyResourcePreservingOM(a_context, g_replay.depth.get(), source);
 		_depthCopies.fetch_add(1, std::memory_order_relaxed);
 		return true;
@@ -264,9 +266,9 @@ namespace cs::features
 	void TerrainBlending::DrawHeld(std::span<const cs::engine::HeldPrepassBucket> a_buckets, std::uint32_t a_pass)
 	{
 		g_replay.replaying = static_cast<ReplayPass>(a_pass);
+		const REX::TScopeExit restore{ []() noexcept { g_replay.replaying = kStock; } };
 		for (const auto& bucket : a_buckets)
 			cs::engine::ReplayHeldPrepassBucket(bucket);
-		g_replay.replaying = kStock;
 	}
 
 	void TerrainBlending::Replay(std::span<const cs::engine::HeldPrepassBucket> a_buckets)
@@ -288,13 +290,15 @@ namespace cs::features
 			DrawHeld(a_buckets, kStock);
 			return;
 		}
-		cs::render::annotation::ScopedEvent timing("TerrainBlending/Replay");
+		cs::render::annotation::ScopedEvent timing("TerrainBlending::Replay");
+		const REX::TScopeExit clear{ [context]() noexcept {
+			ID3D11ShaderResourceView* noView = nullptr;
+			ID3D11Buffer* noBuffer = nullptr;
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kObjectDepthSlot, 1, &noView);
+			cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, kReplayPassSlot, 1, &noBuffer);
+		} };
 		DrawHeld(a_buckets, kColor);
 		DrawHeld(a_buckets, kData);
-		ID3D11ShaderResourceView* noView = nullptr;
-		ID3D11Buffer* noBuffer = nullptr;
-		context->PSSetShaderResources(kObjectDepthSlot, 1, &noView);
-		context->PSSetConstantBuffers(kReplayPassSlot, 1, &noBuffer);
 	}
 
 	void TerrainBlending::BindReplayDraw(ID3D11DeviceContext* a_context) noexcept
@@ -326,7 +330,7 @@ namespace cs::features
 			.Field("data_draws", _dataDraws.load(std::memory_order_relaxed))
 			.Field("depth_copies", _depthCopies.load(std::memory_order_relaxed))
 			.Field("z_passes_offset", _zPassesOffset.load(std::memory_order_relaxed));
-		cs::render::profiling::CollectPassTimings(a_sink, "TerrainBlending/");
+		cs::render::profiling::CollectPassTimings(a_sink, "TerrainBlending::");
 	}
 
 	namespace

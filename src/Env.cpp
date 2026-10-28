@@ -22,6 +22,7 @@ namespace cs::env
 
 		constexpr std::array kIncompatiblePlugins{
 			PluginRule{ "Motion Vector Fixes", "MotionVectorFixes.dll", "CS includes Motion Vector Fixes; remove the standalone mod" },
+			PluginRule{ "Dynamic Cubemaps F4", "DynamicCubemapF4.dll", "CS includes Dynamic Cubemaps; remove the standalone mod" },
 		};
 		constexpr std::array<PluginRule, 0> kRequiredPlugins{};
 

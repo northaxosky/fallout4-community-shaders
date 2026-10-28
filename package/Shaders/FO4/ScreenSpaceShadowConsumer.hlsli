@@ -2,10 +2,13 @@
 #define FO4_SCREEN_SPACE_SHADOW_CONSUMER
 
 #include "FO4/Depth.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 #include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
 
 float2 FO4ScreenSpaceShadowVisibility(float3 position, float rawDepth)
 {
+	// FO4: SSS toggles live, so a disabled mask is not read.
+	[branch] if (FO4SharedData::EnabledScreenSpaceShadows == 0) return 1.0.xx;
 	// FO4: gate deferred first-person receivers to match forward-lit first person.
 	return !FO4Depth::IsFirstPerson(rawDepth) ? ScreenSpaceShadows::GetScreenSpaceShadows(position, 0.0.xx, 0.0) : 1.0.xx;
 }

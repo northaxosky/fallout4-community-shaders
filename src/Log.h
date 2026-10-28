@@ -8,11 +8,6 @@
 
 #include <toml++/toml.hpp>
 
-namespace cs::input
-{
-	struct Hotkey;
-}
-
 namespace cs::log
 {
 	// Safe to call before F4SE::Init; returns a sinkless fallback until AttachToDefaultLogger fires.
@@ -31,5 +26,5 @@ namespace cs::log
 	void ApplyConfigFromToml(const toml::table& a_logging);
 	bool SaveConfigToToml();
 	toml::table ConfigAsToml();
-	cs::input::Hotkey GetDumpHotkey();
+	std::string GetDumpHotkey();
 }

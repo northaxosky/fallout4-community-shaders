@@ -9,7 +9,9 @@
 
 #include <atomic>
 #include <exception>
+#include <mutex>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -20,6 +22,12 @@
 
 struct IDXGIAdapter;
 struct ID3D11Device;
+namespace cs::render
+{
+	struct SharedFeatureDataCB;
+	struct FO4SharedDataCB;
+}
+
 namespace cs
 {
 	namespace settings
@@ -27,7 +35,6 @@ namespace cs
 		class SettingsEdit;
 	}
 
-	struct PresetApplyContext;
 	namespace weather
 	{
 		class Profiles;
@@ -48,11 +55,20 @@ namespace cs
 		spdlog::logger* Log() const;
 		virtual bool IsInstalled() const;
 
-		const FeatureState& GetState() const noexcept { return _state; }
-		bool IsActive() const noexcept { return _state.IsActive(); }
-		bool IsDegraded() const noexcept { return _state.IsDegraded(); }
-		bool IsHealthy() const noexcept { return _state.IsHealthy(); }
+		FeatureState GetState() const
+		{
+			std::scoped_lock lock(_stateMutex);
+			return { _desiredActive, _runtimeState.load(std::memory_order_acquire), _stateDetail };
+		}
+		bool IsActive() const noexcept
+		{
+			const auto state = _runtimeState.load(std::memory_order_acquire);
+			return state == FeatureRuntimeState::kActive || state == FeatureRuntimeState::kDegraded;
+		}
+		bool IsDegraded() const noexcept { return _runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kDegraded; }
+		bool IsHealthy() const noexcept { return _runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kActive; }
 		bool IsLoaded() const noexcept override { return _loaded; }
+		Feature* GetRuntimeOwner() const noexcept override { return const_cast<Feature*>(this); }
 
 		// Framework-owned live switch; opt-outs always report enabled.
 		virtual bool SupportsEnableToggle() const { return true; }
@@ -72,7 +88,8 @@ namespace cs
 		// Runs on the UI event thread; queue render-thread work instead of doing it.
 		virtual void OnLoadingMenuClosed() {}
 		virtual void Prepass() {}
-		virtual void OnRuntimeQuarantined() noexcept {}
+		virtual void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) {}
+		virtual void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept {}
 		// Fires after IsEnabled() flips; resources stay alive while disabled.
 		virtual void OnEnabledChanged(bool) noexcept {}
 
@@ -89,6 +106,7 @@ namespace cs
 		virtual void DrawSettings() {}
 		// False keeps recorded edits pending for a later flush.
 		virtual bool SaveSettings() { return true; }
+		bool Persist();
 		virtual settings::SettingsBinding GetSettingsBinding() const { return {}; }
 		settings::SchemaView GetSettingsSchema() const
 		{
@@ -116,7 +134,7 @@ namespace cs
 		virtual FullscreenDebugData GetFullscreenDebugData() const noexcept { return {}; }
 
 		virtual void RestoreDefaultSettings() {}
-		void RestoreDefaults();
+		bool RestoreDefaults();
 
 		bool HasResettableSettings() const { return SupportsEnableToggle() || static_cast<bool>(GetSettingsBinding()); }
 		bool HasModifiedSettings() const
@@ -152,43 +170,38 @@ namespace cs
 		// Show load failures instead of silently skipping.
 		virtual void DrawFailLoadMessage() {}
 
-		// Features join presets by default.
-		virtual bool ParticipatesInPresets() const { return false; }
-
-		// Presets skip test-mode features.
-		virtual bool IsInTestMode() const { return false; }
-
-		// Multi-word features should override the snake_case key.
-		virtual std::string GetPresetKey() const;
-
-		// Staging must not mutate live state.
-		virtual bool StageFromPreset(const toml::table&,
-			const PresetApplyContext&,
-			std::string&) { return true; }
-
-		// Swap all staged state before finalization.
-		virtual void CommitStagedSwap() noexcept {}
-		virtual void CommitStagedFinalize() {}
-
-		// Empty output opts out of saving.
-		virtual void ExportToPreset(toml::table&) {}
-
 	protected:
+		bool SaveEnabled();
 		settings::LiveSettingsAccess _liveSettings;
 
 	private:
 		friend class settings::SettingsEdit;
 		friend class FeatureManager;
-		void SetState(FeatureState a_state) { _state = std::move(a_state); }
+		void SetState(FeatureState a_state)
+		{
+			std::scoped_lock lock(_stateMutex);
+			_desiredActive = a_state.desiredActive;
+			_stateDetail = std::move(a_state.detail);
+			_runtimeState.store(a_state.runtimeState, std::memory_order_release);
+		}
 		void SetRuntimeState(FeatureRuntimeState a_state, std::string a_detail = {})
 		{
-			_state.runtimeState = a_state;
-			_state.detail = std::move(a_detail);
+			std::scoped_lock lock(_stateMutex);
+			_stateDetail = std::move(a_detail);
+			_runtimeState.store(a_state, std::memory_order_release);
 		}
-		void ApplyActivationResult(const ActivationResult& a_result) { _state.ApplyActivationResult(a_result); }
-		void SetRuntimeStateOnly(FeatureRuntimeState a_state) noexcept { _state.runtimeState = a_state; }
+		void ApplyActivationResult(const ActivationResult& a_result)
+		{
+			auto state = GetState();
+			state.ApplyActivationResult(a_result);
+			SetState(std::move(state));
+		}
+		bool BeginRuntimeQuarantine() noexcept
+		{
+			auto expected = FeatureRuntimeState::kActive;
+			return _runtimeState.compare_exchange_strong(expected, FeatureRuntimeState::kDegraded, std::memory_order_acq_rel);
+		}
 		void ComposeEnabledLiveSettings();
-		bool SaveEnabled();
 		void ResetLoadFailure() noexcept
 		{
 			_loadFailed = false;
@@ -197,7 +210,10 @@ namespace cs
 		bool HasLoadFailed() const noexcept { return _loadFailed; }
 		const std::string& LoadFailureReason() const noexcept { return _loadFailureReason; }
 
-		FeatureState _state;
+		mutable std::mutex _stateMutex;
+		bool _desiredActive = false;
+		std::string _stateDetail;
+		std::atomic<FeatureRuntimeState> _runtimeState{ FeatureRuntimeState::kPending };
 		mutable spdlog::logger* _log = nullptr;
 		bool _loadFailed = false;
 		bool _loaded = false;
@@ -255,7 +271,6 @@ namespace cs
 			Feature& a_feature,
 			std::string_view a_phase,
 			std::string_view a_reason) noexcept;
-		void FinishRuntimeCallbackPass() noexcept;
 
 		// Health-gates a_fn and quarantines the feature if it throws.
 		template <class Fn>
@@ -267,16 +282,20 @@ namespace cs
 				a_fn();
 			} catch (const std::exception& e) {
 				QuarantineRuntimeCallback(a_feature, a_phase, e.what());
-				FinishRuntimeCallbackPass();
 			} catch (...) {
 				QuarantineRuntimeCallback(a_feature, a_phase, "non-standard exception");
-				FinishRuntimeCallbackPass();
 			}
 		}
 
 		std::optional<settings::PreparedLiveSettings> PrepareLiveSettings(
 			Feature& a_feature,
 			const toml::table& a_values,
+			std::string_view a_phase,
+			std::string& a_error);
+		std::optional<settings::PreparedLiveSettings> PrepareLiveSettingsFromOverrides(
+			Feature& a_feature,
+			const toml::table* a_overrides,
+			const toml::node* a_enabled,
 			std::string_view a_phase,
 			std::string& a_error);
 		bool SaveAllSettings(std::string& a_error);
@@ -289,10 +308,20 @@ namespace cs
 		// Runs after the injection freeze so features can reject a partial delivery path.
 		void ValidateShaderInjectionsAll();
 
-		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
+		void WriteSharedDataAll(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4);
+
+		auto GetAll() const noexcept
+		{
+			return _loadedFeatures | std::views::filter([](Feature* a_feature) noexcept {
+				return a_feature && a_feature->IsHealthy();
+			});
+		}
 		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }
 		bool ApplyDebugViews(std::span<const FeatureDebugSelection> a_selections);
-		Feature* GetFullscreenDebugFeature() const noexcept { return _fullscreenDebugFeature.load(std::memory_order_acquire); }
+		Feature* GetFullscreenDebugFeature() const noexcept
+		{
+			return _fullscreenDebugFeature.load(std::memory_order_acquire);
+		}
 
 	private:
 		FeatureManager() = default;

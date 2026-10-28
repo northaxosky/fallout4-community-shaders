@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "FrameGenerationSettings.h"
+#include "Render/TemporalPipeline.h"
 
 #include <cstdint>
 #include <optional>
@@ -20,7 +21,6 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "FrameGeneration"; }
 		std::string_view GetDisplayName() const override { return "Frame Generation"; }
-		std::string GetPresetKey() const override { return "frame_generation"; }
 		bool SupportsEnableToggle() const override { return false; }
 		std::string GetCategory() const override { return FeatureCategories::kDisplay; }
 		std::string GetFeatureSummary() const override
@@ -35,30 +35,13 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
-		bool ParticipatesInPresets() const override { return true; }
-		bool StageFromPreset(const toml::table& a_table,
-			const PresetApplyContext& a_context,
-			std::string& a_error) override;
-		void CommitStagedSwap() noexcept override;
-		void CommitStagedFinalize() override;
-		void ExportToPreset(toml::table& a_out) override;
+		void OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept override;
 
 		Settings settings;
 
 	private:
-		enum class DebugView : std::uint8_t
-		{
-			kOff,
-			kHudless,
-			kFinal,
-			kDepth,
-			kMotion
-		};
-
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(frame_generation::kSchema, settings); }
-		FeatureDebugTexture GetDebugTexture(DebugView a_view) const;
-
-		std::optional<Settings> _stagedSettings;
+		FeatureDebugTexture GetDebugTexture(render::FrameGenerationDebugResource a_view) const;
 	};
 }

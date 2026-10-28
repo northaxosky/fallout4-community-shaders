@@ -94,7 +94,8 @@ namespace DynamicCubemaps
 		float3 normalized;
 		float level = saturate(1.0 - glossiness) * 8.0;
 #ifdef IBL
-		if (SharedData::iblSettings.EnableIBL) {
+		[branch] if (SharedData::iblSettings.EnableIBL)
+		{
 			// FO4: sky (depth 1) has no light for the product to restore.
 			if (!any(nativeWeight > 0.0))
 				return 0.0;

@@ -31,6 +31,27 @@ namespace cs::settings
 			std::tuple{ Field{ "enable_shaders", "Use custom shaders; disabling this effectively disables all features.", &ShaderOwnership::enableShaders } }
 		};
 
+		struct ShaderCache
+		{
+			bool backgroundCompilation = false;
+			std::uint32_t maxSizeMb = 4096;
+		};
+
+		inline constexpr Schema kShaderCache{
+			std::tuple{
+				Field{ "background_compilation", "Play while shaders compile instead of holding Continue, Load, and New Game until they finish; shaders not yet compiled render as stock.", &ShaderCache::backgroundCompilation, {}, ApplyTiming::kNextLaunch },
+				Field{ "max_size_mb", "Maximum disk shader cache size in MiB.", &ShaderCache::maxSizeMb, Range{ 512u, 32768u }, ApplyTiming::kNextLaunch } }
+		};
+
+		struct Diagnostics
+		{
+			bool frameAnnotations = false;
+		};
+
+		inline constexpr Schema kDiagnostics{
+			std::tuple{ Field{ "frame_annotations", "Name engine passes and draws in GPU captures (RenderDoc, Nsight); adds CPU cost.", &Diagnostics::frameAnnotations, {}, ApplyTiming::kNextLaunch } }
+		};
+
 		struct ShaderTarget
 		{
 			bool enabled = true;
@@ -84,6 +105,21 @@ namespace cs::settings
 		};
 	}
 
+	template <class... Fields>
+	typename Schema<Fields...>::SettingsType ParseCoreSection(
+		const Schema<Fields...>& a_schema,
+		const toml::table& a_root,
+		std::string_view a_section,
+		std::string& a_error)
+	{
+		typename Schema<Fields...>::SettingsType value{};
+		if (const auto* table = a_root[a_section].as_table()) {
+			if (!ParseTable(a_schema, *table, value, a_error))
+				a_error.insert(0, std::string(a_section) + ".");
+		}
+		return value;
+	}
+
 	inline Registry BuildCoreRegistry()
 	{
 		Registry registry{
@@ -92,6 +128,8 @@ namespace cs::settings
 			{ { "shader_ownership" }, MakeSchemaView(core::kShaderOwnership) },
 			{ { "shader_ownership", "targets" }, {}, false,
 				"Off binds the game's shader for that type, including feature changes to it." },
+			{ { "shader_cache" }, MakeSchemaView(core::kShaderCache) },
+			{ { "diagnostics" }, MakeSchemaView(core::kDiagnostics) },
 			{ { "menu" }, MakeSchemaView(core::kMenu) },
 			{ { "menu", "debug_view_previews" }, {}, true },
 			{ { "preset" }, MakeSchemaView(core::kPreset) }

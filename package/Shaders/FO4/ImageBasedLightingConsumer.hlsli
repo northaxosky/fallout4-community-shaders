@@ -12,8 +12,7 @@ namespace FO4IBL
 	// FO4: lighting carries view-space normals; IBL samples along the world one.
 	float3 Diffuse(float3 vanillaAmbient, float3 normalView)
 	{
-		if (!SharedData::iblSettings.EnableIBL)
-			return vanillaAmbient;
+		[branch] if (!SharedData::iblSettings.EnableIBL) return vanillaAmbient;
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
 		return ImageBasedLighting::GetDiffuseIBL(vanillaAmbient, -normalWS);
 	}
@@ -21,8 +20,7 @@ namespace FO4IBL
 	// FO4: forward draws have no G-buffer normal; derive it from position.
 	float3 ForwardDiffuse(float3 vanillaAmbient, float3 screenPosition)
 	{
-		if (!SharedData::iblSettings.EnableIBL)
-			return vanillaAmbient;
+		[branch] if (!SharedData::iblSettings.EnableIBL) return vanillaAmbient;
 		float3 position = FO4Forward::WorldPosition(screenPosition);
 		float3 normal = -normalize(cross(ddx_coarse(position), ddy_coarse(position)));
 		return ImageBasedLighting::GetDiffuseIBL(FO4SharedData::GetAmbientLinear(normal), -normal);
@@ -30,7 +28,8 @@ namespace FO4IBL
 
 	float3 Fog(float3 fogColor)
 	{
-		return SharedData::iblSettings.EnableIBL ? ImageBasedLighting::GetFogIBLColor(fogColor) : fogColor;
+		[branch] if (!SharedData::iblSettings.EnableIBL) return fogColor;
+		return ImageBasedLighting::GetFogIBLColor(fogColor);
 	}
 }
 #	define FO4_IBL_FORWARD_AMBIENT(ambient, screenPosition) FO4IBL::ForwardDiffuse(ambient, screenPosition)

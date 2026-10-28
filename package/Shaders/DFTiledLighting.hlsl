@@ -249,8 +249,12 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 		{
 			TiledLight light = Lights[TileLists[tileIndex].Indices[i]];
 #	ifdef INVERSE_SQUARE_LIGHTING
-			FO4InverseSquareLighting::PerLightData lightData = InverseSquareLights[TileLists[tileIndex].Indices[i]];
-			light.Color = FO4InverseSquareLighting::GetColor(light.Color, lightData);
+			FO4InverseSquareLighting::PerLightData lightData = (FO4InverseSquareLighting::PerLightData)0;
+			[branch] if (FO4SharedData::EnabledInverseSquareLighting != 0)
+			{
+				lightData = InverseSquareLights[TileLists[tileIndex].Indices[i]];
+				light.Color = FO4InverseSquareLighting::GetColor(light.Color, lightData);
+			}
 #	endif
 			float3 toLight = light.PositionRadius.xyz - positionView;
 			float distanceSquared = dot(toLight, toLight);

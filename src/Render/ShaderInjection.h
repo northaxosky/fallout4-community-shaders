@@ -2,7 +2,6 @@
 
 #include "Render/FrameBindings.h"
 #include "Render/GameRuntime.h"
-#include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderDefineProvider.h"
 #include "Render/ShaderInjectionTargets.h"
 #include "Render/SharedData.h"
@@ -39,6 +38,7 @@ namespace RE
 	{
 		class ComputeShader;
 		class PixelShader;
+		class RendererShadowState;
 		class VertexShader;
 	}
 }
@@ -60,18 +60,16 @@ namespace cs::engine
 		kSampler,
 		kShaderResource,
 		kUnorderedAccess,
-		kRenderTarget
+		kBlendState
 	};
 
 	struct ShaderInjectionDrawMetrics
 	{
 		std::uint32_t frame = 0;
 		std::uint64_t scopes = 0;
-		std::uint64_t scopeNanoseconds = 0;
 		std::uint64_t captures = 0;
 		std::uint64_t restores = 0;
 		std::uint64_t d3dBinds = 0;
-		std::uint64_t undispatchedDraws = 0;
 		FrameBindingMetrics frameBindings;
 	};
 
@@ -82,9 +80,28 @@ namespace cs::engine
 	void BindInjectionShaderResources(ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*) noexcept;
 	void BindInjectionSamplers(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*) noexcept;
 	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
-	void CaptureShaderInjectionOutputs(ID3D11DeviceContext*) noexcept;
+	// The active draw scope restores the blend state when its draw returns.
+	void CaptureShaderInjectionBlendState(ID3D11DeviceContext*) noexcept;
 	// Overrides the draw's blend state; the active scope restores it afterward.
 	void SetInjectionBlendState(ID3D11DeviceContext*, ID3D11BlendState*, const float (&)[4], UINT) noexcept;
+	// Plugin GPU work or engine resets may change bindings the caches trust.
+	void InvalidateShaderInjectionBindings() noexcept;
+
+	// Brackets one engine SetDirtyStates flush and the injection after it.
+	class ScopedEngineDrawFlush
+	{
+	public:
+		// Construct before the flush; it picks the overrides the engine restores.
+		ScopedEngineDrawFlush(bool a_outputStateOnly, bool a_compute, bool a_dispatches) noexcept;
+		~ScopedEngineDrawFlush() noexcept;
+		ScopedEngineDrawFlush(const ScopedEngineDrawFlush&) = delete;
+		ScopedEngineDrawFlush& operator=(const ScopedEngineDrawFlush&) = delete;
+
+	private:
+		RE::BSGraphics::RendererShadowState* _state = nullptr;
+		std::uint16_t _released = 0;
+		bool _active = false;
+	};
 
 	class ScopedShaderInjectionBindings
 	{
@@ -123,13 +140,10 @@ namespace cs::engine
 		std::uint32_t _resourceCount = 0;
 		std::uint32_t _samplerCount = 0;
 		std::uint32_t _bufferCount = 0;
-		ID3D11RenderTargetView* _targets[8]{};
-		ID3D11DepthStencilView* _depth = nullptr;
 		ID3D11BlendState* _blend = nullptr;
 		float _blendFactor[4]{};
 		std::uint32_t _sampleMask = 0;
-		bool _outputCaptured = false;
-		std::chrono::steady_clock::time_point _started;
+		bool _blendCaptured = false;
 	};
 	using ScopedPixelShaderInjectionBindings = ScopedShaderInjectionBindings;
 
@@ -154,21 +168,12 @@ namespace cs::engine
 		ShaderInjectionDefines defines;
 	};
 
-	enum class DeveloperShaderOverride : std::uint8_t
-	{
-		kAuto,
-		kForceOn,
-		kForceOff
-	};
-
 	struct ShaderInjectionTargetSnapshot
 	{
 		ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
 		std::string name;
-		bool requested = false;
 		bool enabled = false;
 		bool published = false;
-		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 		std::size_t contributors = 0;
 		std::size_t observedComputeShaders = 0;
 		std::uint64_t computeBindCalls = 0;
@@ -178,7 +183,6 @@ namespace cs::engine
 		std::uint64_t substitutions = 0;
 		std::uint64_t passthroughCompileFail = 0;
 		std::uint64_t passthroughNotReady = 0;
-		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
 	};
 
@@ -200,20 +204,35 @@ namespace cs::engine
 
 	struct ShaderInjectionSummary
 	{
-		std::size_t requested = 0;
 		std::size_t published = 0;
 		std::uint64_t matches = 0;
 		std::uint64_t substitutions = 0;
 		std::uint64_t passthroughCompileFail = 0;
 		std::uint64_t passthroughNotReady = 0;
-		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
 		ComputeDispatchBridgeStatus computeBridge;
 		ShaderInjectionDrawMetrics draw;
 	};
 
-	std::string DescribeShaderInjectionDefines(
-		const ShaderInjectionDefines& a_defines);
+	template <class Defines>
+	std::string DescribeShaderInjectionDefines(const Defines& a_defines)
+	{
+		std::string names;
+		for (const auto& [name, value] : a_defines) {
+			if (!names.empty())
+				names += ",";
+			names += name;
+			names += "=";
+			names += value;
+		}
+		return names.empty() ? std::string("none") : names;
+	}
+
+	std::optional<ShaderInjectionDefines> GatherShaderInjectionDefines(
+		ShaderInjectionTarget a_target,
+		ShaderStageMask a_stages,
+		std::span<const ShaderReplacementRegistration> a_contributions,
+		std::string* a_error = nullptr);
 
 	std::optional<ShaderVariantCompilationDescriptor>
 	BuildEffectiveShaderCompileRequest(
@@ -231,9 +250,6 @@ namespace cs::engine
 	bool SetBaselineShaderOwnership(
 		ShaderInjectionTarget a_target,
 		bool a_enabled);
-	bool SetDeveloperShaderForceOffEnabled(bool a_enabled);
-	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
-	bool SetDeveloperShaderSourceRoot(std::wstring a_sourceRoot);
 	bool SetShaderInjectionEnabled(bool a_enabled);
 	bool SetShaderInjectionRuntime(GameRuntime a_runtime);
 	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config);
@@ -242,6 +258,8 @@ namespace cs::engine
 		std::string& a_error);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
+	// Queues every stock variant of contributed targets ahead of observed binds.
+	std::size_t PrewarmShaderInjectionVariants();
 	bool EnsureComputeDispatchBridgeInstalled(
 		ID3D11DeviceContext* a_immediateContext) noexcept;
 	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;
@@ -257,9 +275,6 @@ namespace cs::engine
 		ID3D11DeviceContext* a_context,
 		util::ShaderSamplerUse a_samplers = {}) noexcept;
 	void DispatchInjectionsForBoundPixelShader(
-		ID3D11DeviceContext* a_context) noexcept;
-	// Counts draw flushes outside every route that bind an injected pixel shader.
-	void RecordUndispatchedInjectedDraw(
 		ID3D11DeviceContext* a_context) noexcept;
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
 		RE::BSShader* a_shader,
@@ -277,12 +292,23 @@ namespace cs::engine
 		ShaderInjectionTarget a_target,
 		std::string_view a_nativeName,
 		bool a_streamIsGood) noexcept;
-	void ObserveNativeShaderBytecode(
-		ShaderStage a_stage,
-		const void* a_bytecode,
-		std::size_t a_bytecodeLength,
-		ID3D11DeviceChild* a_shader) noexcept;
+	void InstallNativeShaderCreationHooks(ID3D11Device* a_device);
+
+	class ScopedNativeShaderObservationBypass
+	{
+	public:
+		ScopedNativeShaderObservationBypass() noexcept;
+		~ScopedNativeShaderObservationBypass() noexcept;
+
+		ScopedNativeShaderObservationBypass(const ScopedNativeShaderObservationBypass&) = delete;
+		ScopedNativeShaderObservationBypass(ScopedNativeShaderObservationBypass&&) = delete;
+		ScopedNativeShaderObservationBypass& operator=(const ScopedNativeShaderObservationBypass&) = delete;
+		ScopedNativeShaderObservationBypass& operator=(ScopedNativeShaderObservationBypass&&) = delete;
+	};
+
 	void InvalidateNativeShaderVariantCompilations() noexcept;
+	// Drops queued compiles and joins the workers; later requests fail fast.
+	void StopNativeShaderVariantCompilations() noexcept;
 	// Define changes retire target lookups and native identities, retaining immutable compiled variants.
 	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept;
 

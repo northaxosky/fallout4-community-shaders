@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "RainRefractionSettings.h"
 #include "ShaderDefines.h"
@@ -42,13 +41,13 @@ namespace cs::features
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		void OnEnabledChanged(bool a_enabled) noexcept override;
-		void OnRuntimeQuarantined() noexcept override;
+		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(telemetry::Sink& a_sink) const override;
 
 		// Enable clears while the texture, blend state or reflections cube is missing.
-		cs::RainRefractionFeatureData GetCommonBufferData();
+		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&) override;
 
 	private:
 		RainRefraction() = default;

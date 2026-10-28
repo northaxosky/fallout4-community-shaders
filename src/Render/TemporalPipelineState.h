@@ -7,32 +7,12 @@
 #include <string_view>
 #include <utility>
 
+#include "Render/Extent.h"
 #include "Render/TemporalProvider.h"
+#include "Render/TemporalRenderSettings.h"
 
 namespace cs::render::temporal
 {
-	enum class SuperResolutionMethod : std::uint8_t
-	{
-		kNone,
-		kTAA,
-		kFSR3,
-		kDLSS,
-		kFSR4,
-		kCount
-	};
-
-	enum class FrameGenerationMethod : std::uint8_t
-	{
-		kOff,
-		kFSR3,
-		kDLSSG,
-		kFSR4,
-		kCount
-	};
-
-	inline constexpr std::uint32_t kMaxFrameGenerationMethodValue =
-		static_cast<std::uint32_t>(FrameGenerationMethod::kFSR4);
-
 	struct FailureImpact
 	{
 		bool superResolution = false;
@@ -64,15 +44,6 @@ namespace cs::render::temporal
 						a_fg == FrameGenerationMethod::kDLSSG))
 		};
 	}
-
-	struct Extent
-	{
-		std::uint32_t width = 0;
-		std::uint32_t height = 0;
-
-		[[nodiscard]] bool IsValid() const noexcept { return width != 0 && height != 0; }
-		auto operator<=>(const Extent&) const = default;
-	};
 
 	struct RequestedTopology
 	{

@@ -1,4 +1,5 @@
 #include "ScreenSpaceShadows.h"
+#include "Render/SharedDataLayout.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXMath.h>
@@ -149,7 +150,7 @@ namespace cs::features
 			return;
 		}
 
-		cs::engine::RegisterPreDeferredLightsImpl([] {
+		cs::engine::RegisterPreDeferredLightsImpl(*this, [] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 			ScreenSpaceShadows::GetSingleton()->Prepass();
 		});
@@ -167,8 +168,8 @@ namespace cs::features
 	}
 
 	bool ScreenSpaceShadows::TryGetMaskExtents(
-		sss_resources::Extent& a_required,
-		sss_resources::Extent& a_allocation) const
+		render::Extent& a_required,
+		render::Extent& a_allocation) const
 	{
 		auto* state = cs::engine::GetGraphicsState();
 		if (!state || state->screenWidth == 0 || state->screenHeight == 0)
@@ -203,7 +204,7 @@ namespace cs::features
 
 	bool ScreenSpaceShadows::CreateWhiteFallback(
 		ID3D11Device* a_device,
-		sss_resources::Extent a_allocation)
+		render::Extent a_allocation)
 	{
 		if (!a_device || a_allocation.width == 0 || a_allocation.height == 0 || a_allocation.width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || a_allocation.height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || a_allocation.width > std::numeric_limits<std::size_t>::max() / a_allocation.height) {
 			if (L->should_log(spdlog::level::err)) {
@@ -298,8 +299,8 @@ namespace cs::features
 
 	bool ScreenSpaceShadows::EnsureWhiteFallback(
 		ID3D11Device* a_device,
-		sss_resources::Extent a_required,
-		sss_resources::Extent a_allocation)
+		render::Extent a_required,
+		render::Extent a_allocation)
 	{
 		const sss_resources::FallbackAllocationKey key{
 			a_allocation,
@@ -361,8 +362,8 @@ namespace cs::features
 			_whiteFallbackExtent = {};
 			_whiteFallbackBackoff.RecordSuccess();
 		}
-		sss_resources::Extent required;
-		sss_resources::Extent allocation;
+		render::Extent required;
+		render::Extent allocation;
 		if (TryGetMaskExtents(required, allocation)) {
 			(void)EnsureWhiteFallback(
 				a_device,
@@ -379,13 +380,18 @@ namespace cs::features
 		(void)EnsureResources();
 	}
 
+	void ScreenSpaceShadows::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
+	{
+		a_fo4.EnabledScreenSpaceShadows = 1u;
+	}
+
 	bool ScreenSpaceShadows::IsShadowMaskReady()
 	{
 		if (!_started.load(std::memory_order_acquire))
 			return false;
 		(void)EnsureResources();
-		sss_resources::Extent required;
-		sss_resources::Extent allocation;
+		render::Extent required;
+		render::Extent allocation;
 		auto* device = cs::util::GetD3DDevice();
 		const bool fallbackReady =
 			device && TryGetMaskExtents(required, allocation) && EnsureWhiteFallback(device, required, allocation);
@@ -434,8 +440,8 @@ namespace cs::features
 			cs::render::annotation::SetName(
 				_pointBorderSampler.get(), "ScreenSpaceShadows/PointBorder.Sampler");
 
-			sss_resources::Extent required;
-			sss_resources::Extent allocation;
+			render::Extent required;
+			render::Extent allocation;
 			if (!TryGetMaskExtents(required, allocation)) {
 				throw std::runtime_error("graphics state has no screen dimensions");
 			}
@@ -512,8 +518,8 @@ namespace cs::features
 
 		_dispatchedLastFrame.store(0, std::memory_order_relaxed);
 		_maskBoundLastFrame.store(false, std::memory_order_relaxed);
-		sss_resources::Extent required;
-		sss_resources::Extent allocation;
+		render::Extent required;
+		render::Extent allocation;
 		auto* device = cs::util::GetD3DDevice();
 		const bool extentsValid =
 			device && TryGetMaskExtents(required, allocation);
@@ -556,18 +562,20 @@ namespace cs::features
 					allocation.width,
 					allocation.height);
 			} catch (const std::exception& e) {
-				L->error("Mask resize failed: {}", e.what());
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Mask resize failed: {}", e.what());
+				return;
 			} catch (...) {
-				L->error("Mask resize failed.");
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Mask resize failed.");
+				return;
 			}
 		}
-		const sss_resources::Extent realExtent{
+		const render::Extent realExtent{
 			_allocWidth,
 			_allocHeight
 		};
 		if (_maskTexture && _maskTexture->uav && sss_resources::Covers(realExtent, required)) {
 			cs::render::annotation::ScopedEvent annotationScope(
-				"ScreenSpaceShadows/ClearMask");
+				"ScreenSpaceShadows::ClearMask");
 			context->ClearUnorderedAccessViewFloat(
 				_maskTexture->uav.get(),
 				white);
@@ -576,108 +584,102 @@ namespace cs::features
 		if (!_realMaskReadyForDraw)
 			return;
 
-		try {
-			auto* shader = (IsEnabled() && cs::engine::IsFullSky()) ?
-			                   GetComputeRaymarch() :
-			                   nullptr;
+		auto* shader = (IsEnabled() && cs::engine::IsFullSky()) ?
+		                   GetComputeRaymarch() :
+		                   nullptr;
 
-			float sx = 0.0f;
-			float sy = 0.0f;
-			float sz = 0.0f;
-			if (shader && cs::engine::TryGetSunDirectionWS(sx, sy, sz)) {
-				// FO4: canonical depth puts first-person casters in the world projection.
-				auto* depthSRV = cs::render::GetCanonicalSceneDepthSRV();
-				auto* rtm = cs::engine::GetRenderTargetManager();
-				if (depthSRV && rtm && _raymarchCB && _pointBorderSampler) {
-					const float widthRatio = rtm->GetDynamicWidthRatio();
-					const float heightRatio = rtm->GetDynamicHeightRatio();
-					const float renderWidth = static_cast<float>(state->screenWidth) * widthRatio;
-					const float renderHeight = static_cast<float>(state->screenHeight) * heightRatio;
-					int viewportSize[2] = {
-						static_cast<int>(renderWidth),
-						static_cast<int>(renderHeight)
+		float sx = 0.0f;
+		float sy = 0.0f;
+		float sz = 0.0f;
+		if (shader && cs::engine::TryGetSunDirectionWS(sx, sy, sz)) {
+			// FO4: canonical depth puts first-person casters in the world projection.
+			auto* depthSRV = cs::render::GetCanonicalSceneDepthSRV();
+			auto* rtm = cs::engine::GetRenderTargetManager();
+			if (depthSRV && rtm && _raymarchCB && _pointBorderSampler) {
+				const float widthRatio = rtm->GetDynamicWidthRatio();
+				const float heightRatio = rtm->GetDynamicHeightRatio();
+				const float renderWidth = static_cast<float>(state->screenWidth) * widthRatio;
+				const float renderHeight = static_cast<float>(state->screenHeight) * heightRatio;
+				int viewportSize[2] = {
+					static_cast<int>(renderWidth),
+					static_cast<int>(renderHeight)
+				};
+
+				if (viewportSize[0] > 0 && viewportSize[1] > 0) {
+					cs::render::annotation::ScopedEvent annotationScope(
+						"ScreenSpaceShadows::Raymarch");
+					cs::engine::ComputeOMScope scope(context);
+
+					const auto sceneCamera = cs::engine::GetWorldCameraRecord();
+					if (!sceneCamera) {
+						return;
+					}
+					// FO4: sun row zero propagates light; Bend projects the toward-light direction.
+					DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sx, -sy, -sz, 0.0f);
+					DirectX::XMMATRIX vp = DirectX::XMLoadFloat4x4(&sceneCamera->ViewProjection);
+					DirectX::XMVECTOR clip = DirectX::XMVector4Transform(sunDir, vp);
+					float lightProj[4] = {
+						DirectX::XMVectorGetX(clip),
+						DirectX::XMVectorGetY(clip),
+						DirectX::XMVectorGetZ(clip),
+						DirectX::XMVectorGetW(clip)
 					};
 
-					if (viewportSize[0] > 0 && viewportSize[1] > 0) {
-						cs::render::annotation::ScopedEvent annotationScope(
-							"ScreenSpaceShadows/Raymarch");
-						cs::engine::ComputeOMScope scope(context);
+					int minBounds[2] = { 0, 0 };
+					int maxBounds[2] = { viewportSize[0], viewportSize[1] };
+					auto dispatchList = Bend::BuildDispatchList(lightProj, viewportSize, minBounds, maxBounds);
 
-						const auto sceneCamera = cs::engine::GetWorldCameraRecord();
-						if (!sceneCamera) {
-							return;
+					_sunX.store(sx, std::memory_order_relaxed);
+					_sunY.store(sy, std::memory_order_relaxed);
+					_sunZ.store(sz, std::memory_order_relaxed);
+					_lightX.store(dispatchList.LightCoordinate_Shader[0], std::memory_order_relaxed);
+					_lightY.store(dispatchList.LightCoordinate_Shader[1], std::memory_order_relaxed);
+					_clipW.store(lightProj[3], std::memory_order_relaxed);
+
+					// Bend handles both sun directions; degenerate frames stay lit.
+					{
+						ID3D11ShaderResourceView* srvs[1] = { depthSRV };
+						ID3D11UnorderedAccessView* uavs[1] = { _maskTexture->uav.get() };
+						ID3D11SamplerState* samplers[1] = { _pointBorderSampler.get() };
+						ID3D11Buffer* buffers[1] = { _raymarchCB->CB() };
+						context->CSSetShaderResources(0, 1, srvs);
+						context->CSSetSamplers(0, 1, samplers);
+						context->CSSetConstantBuffers(1, 1, buffers);
+						context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+						context->CSSetShader(shader, nullptr, 0);
+
+						for (int i = 0; i < dispatchList.DispatchCount; ++i) {
+							const auto& dispatch = dispatchList.Dispatch[i];
+							RaymarchCB cb{};
+							std::copy_n(dispatchList.LightCoordinate_Shader, 4, cb.LightCoordinate);
+							std::copy_n(dispatch.WaveOffset_Shader, 2, cb.WaveOffset);
+							cb.FarDepthValue = kFarDepthValue;
+							cb.NearDepthValue = kNearDepthValue;
+							cb.InvDepthTextureSize[0] = 1.0f / static_cast<float>(viewportSize[0]);
+							cb.InvDepthTextureSize[1] = 1.0f / static_cast<float>(viewportSize[1]);
+							cb.DynamicRes[0] = widthRatio;
+							cb.DynamicRes[1] = heightRatio;
+							cb.settings = _settings;
+							_raymarchCB->Update(cb);
+							context->Dispatch(
+								static_cast<UINT>(dispatch.WaveCount[0]),
+								static_cast<UINT>(dispatch.WaveCount[1]),
+								static_cast<UINT>(dispatch.WaveCount[2]));
+							_dispatchedLastFrame.fetch_add(1, std::memory_order_relaxed);
 						}
-						// FO4: sun row zero propagates light; Bend projects the toward-light direction.
-						DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sx, -sy, -sz, 0.0f);
-						DirectX::XMMATRIX vp = DirectX::XMLoadFloat4x4(&sceneCamera->ViewProjection);
-						DirectX::XMVECTOR clip = DirectX::XMVector4Transform(sunDir, vp);
-						float lightProj[4] = {
-							DirectX::XMVectorGetX(clip),
-							DirectX::XMVectorGetY(clip),
-							DirectX::XMVectorGetZ(clip),
-							DirectX::XMVectorGetW(clip)
-						};
 
-						int minBounds[2] = { 0, 0 };
-						int maxBounds[2] = { viewportSize[0], viewportSize[1] };
-						auto dispatchList = Bend::BuildDispatchList(lightProj, viewportSize, minBounds, maxBounds);
-
-						_sunX.store(sx, std::memory_order_relaxed);
-						_sunY.store(sy, std::memory_order_relaxed);
-						_sunZ.store(sz, std::memory_order_relaxed);
-						_lightX.store(dispatchList.LightCoordinate_Shader[0], std::memory_order_relaxed);
-						_lightY.store(dispatchList.LightCoordinate_Shader[1], std::memory_order_relaxed);
-						_clipW.store(lightProj[3], std::memory_order_relaxed);
-
-						// Bend handles both sun directions; degenerate frames stay lit.
-						{
-							ID3D11ShaderResourceView* srvs[1] = { depthSRV };
-							ID3D11UnorderedAccessView* uavs[1] = { _maskTexture->uav.get() };
-							ID3D11SamplerState* samplers[1] = { _pointBorderSampler.get() };
-							ID3D11Buffer* buffers[1] = { _raymarchCB->CB() };
-							context->CSSetShaderResources(0, 1, srvs);
-							context->CSSetSamplers(0, 1, samplers);
-							context->CSSetConstantBuffers(1, 1, buffers);
-							context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-							context->CSSetShader(shader, nullptr, 0);
-
-							for (int i = 0; i < dispatchList.DispatchCount; ++i) {
-								const auto& dispatch = dispatchList.Dispatch[i];
-								RaymarchCB cb{};
-								std::copy_n(dispatchList.LightCoordinate_Shader, 4, cb.LightCoordinate);
-								std::copy_n(dispatch.WaveOffset_Shader, 2, cb.WaveOffset);
-								cb.FarDepthValue = kFarDepthValue;
-								cb.NearDepthValue = kNearDepthValue;
-								cb.InvDepthTextureSize[0] = 1.0f / static_cast<float>(viewportSize[0]);
-								cb.InvDepthTextureSize[1] = 1.0f / static_cast<float>(viewportSize[1]);
-								cb.DynamicRes[0] = widthRatio;
-								cb.DynamicRes[1] = heightRatio;
-								cb.settings = _settings;
-								_raymarchCB->Update(cb);
-								context->Dispatch(
-									static_cast<UINT>(dispatch.WaveCount[0]),
-									static_cast<UINT>(dispatch.WaveCount[1]),
-									static_cast<UINT>(dispatch.WaveCount[2]));
-								_dispatchedLastFrame.fetch_add(1, std::memory_order_relaxed);
-							}
-
-							ID3D11ShaderResourceView* nullSRVs[1] = { nullptr };
-							ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
-							ID3D11SamplerState* nullSamplers[1] = { nullptr };
-							ID3D11Buffer* nullBuffers[1] = { nullptr };
-							context->CSSetShaderResources(0, 1, nullSRVs);
-							context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
-							context->CSSetShader(nullptr, nullptr, 0);
-							context->CSSetSamplers(0, 1, nullSamplers);
-							context->CSSetConstantBuffers(1, 1, nullBuffers);
-						}
+						ID3D11ShaderResourceView* nullSRVs[1] = { nullptr };
+						ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+						ID3D11SamplerState* nullSamplers[1] = { nullptr };
+						ID3D11Buffer* nullBuffers[1] = { nullptr };
+						context->CSSetShaderResources(0, 1, nullSRVs);
+						context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+						context->CSSetShader(nullptr, nullptr, 0);
+						context->CSSetSamplers(0, 1, nullSamplers);
+						context->CSSetConstantBuffers(1, 1, nullBuffers);
 					}
 				}
 			}
-		} catch (const std::exception& e) {
-			L->error("Raymarch dispatch failed: {}", e.what());
-		} catch (...) {
-			L->error("Raymarch dispatch failed.");
 		}
 	}
 

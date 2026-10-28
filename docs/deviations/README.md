@@ -28,10 +28,12 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 | Forced | Skyrim point-light term in `Effect.hlsl` | FO4's four-light term stays | FO4 `PerGeometry` layout |
 | Pending | Effect-lighting `EffectRadius` shadow filter, `CLOUD_SHADOWS`, `LIGHT_LIMIT_FIX`, Interior Sun | Compiled out | Features not ported |
 | Divergence | Stock shader families | Effect and DistantTree are replaced for feature consumers; Utility, Sky, Particle, BloodSplatter and Lighting stay stock | No current feature consumes the stock ones |
+| Forced | Startup shader compilation blocks the main thread at `kDataLoaded` | `Main::GetCanLoad` is deferred so the main menu keeps Continue, Load, and New Game queued behind its own spinner until compilation ends; loads that bypass the menu are not gated | FO4 presents on the main thread, so blocking it freezes the window |
 | Divergence | `D3D11CreateDeviceAndSwapChain` requests `{ 11_1 }` only | Native creation requests `{ 11_1, 11_0 }`; the D3D12 proxy still requires `11_1` | Feature-level 11.0 GPUs crashed at startup |
 
 ## Features
 
+- [Frame Annotations](FrameAnnotations.md)
 - [InverseSquareLighting](InverseSquareLighting.md)
 - [WaterEffects](WaterEffects.md)
 - [Unified Water](UnifiedWater.md)

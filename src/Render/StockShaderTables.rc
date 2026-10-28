@@ -1,0 +1,4 @@
+#include "Render/StockShaderTablesResource.h"
+
+IDR_STOCK_SHADERS_AE RCDATA "tests/data/stock-shader-identity.tsv"
+IDR_STOCK_SHADERS_OG RCDATA "tests/data/stock-shader-identity-OG-1.10.163.tsv"

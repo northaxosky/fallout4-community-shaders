@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Host/HostPageCatalog.h"
-#include "Host/HostRuntimeModel.h"
+#include "Host/ShaderCompileOverlay.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -50,6 +50,24 @@ namespace cs::host
 	private:
 		HostClient();
 
+		enum class FrameDemandAction : std::uint8_t
+		{
+			kNone,
+			kRequest,
+			kRelease
+		};
+
+		class FrameDemandTracker
+		{
+		public:
+			[[nodiscard]] FrameDemandAction Next(bool a_wanted) const noexcept;
+			void Complete(FrameDemandAction a_action, bool a_succeeded) noexcept;
+			[[nodiscard]] bool Requested() const noexcept { return _requested; }
+
+		private:
+			bool _requested{};
+		};
+
 		struct Page
 		{
 			HostPageDescriptor descriptor;
@@ -57,26 +75,63 @@ namespace cs::host
 			DMUI_PageHandle handle{ DMUI_INVALID_PAGE_HANDLE };
 		};
 
+		struct OverlayChannel
+		{
+			Page* page{};
+			FrameDemandTracker demand;
+			std::optional<DMUI_Result> configurationFailure;
+			std::optional<DMUI_Result> demandFailure;
+		};
+
+		struct HotkeyChannel
+		{
+			const char* name;
+			std::optional<DMUI_HotkeyActionHandle> handle;
+			std::string bindingSnapshot;
+			std::optional<DMUI_Result> enableFailure;
+			// Last state the host accepted; the host is called only on change.
+			std::optional<bool> appliedEnabled;
+			std::function<bool()> enabled;
+		};
+
+		enum Hotkey : std::size_t
+		{
+			kOverlay,
+			kMultiCapture,
+			kCapture,
+			kDump,
+			kHotkeyCount
+		};
+
 		bool RegisterPages();
 		bool RegisterActionsAndObservers();
 		bool RegisterHotkeys();
+		bool RegisterHotkey(
+			HotkeyChannel& a_channel,
+			const char* a_id,
+			const char* a_displayName,
+			const char* a_suggestedChord,
+			std::function<void(bool)> a_callback,
+			std::function<bool()> a_enabled,
+			DMUI_HotkeyContextPolicy a_contextPolicy = DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
 		void PublishInitialStatus() noexcept;
 		void DrawPage(Page& a_page);
 		void DrawFeaturePage(Feature& a_feature);
 		void DrawOverlayPage();
+		void DrawShaderCompileOverlayPage();
 		void ObserveFrame() noexcept;
 		void ObservePageActivity(const dmui::PageActivity& a_activity) noexcept;
-		void SyncOverlay() noexcept;
+		void SyncPerformanceOverlay() noexcept;
+		void SyncShaderCompileOverlay() noexcept;
+		void SyncOverlay(
+			OverlayChannel& a_overlay,
+			std::string_view a_name,
+			bool a_wanted,
+			const DMUI_ManagedOverlayOptions& a_options) noexcept;
 		void ObserveHotkeyBindings() noexcept;
 		void ObserveHotkeyBinding(
-			const char* a_name,
-			const std::optional<DMUI_HotkeyActionHandle>& a_handle,
-			std::string& a_snapshot) noexcept;
-		void SetHotkeyEnabled(
-			const char* a_name,
-			const std::optional<DMUI_HotkeyActionHandle>& a_handle,
-			bool a_enabled,
-			std::optional<DMUI_Result>& a_failure) noexcept;
+			HotkeyChannel& a_channel) noexcept;
+		void SetHotkeyEnabled(HotkeyChannel& a_channel) noexcept;
 		void RetrySwapChain() noexcept;
 		void LogFailure(std::string_view a_operation) const noexcept;
 		void LogFailureOnce(
@@ -85,19 +140,19 @@ namespace cs::host
 
 		dmui::Client _client;
 		std::vector<std::unique_ptr<Page>> _pages;
-		Page* _overlayPage{};
-		std::optional<DMUI_HotkeyActionHandle> _overlayHotkey;
-		std::optional<DMUI_HotkeyActionHandle> _captureHotkey;
-		std::optional<DMUI_HotkeyActionHandle> _multiCaptureHotkey;
-		std::optional<DMUI_HotkeyActionHandle> _dumpHotkey;
-		std::array<std::string, 4> _hotkeyBindingSnapshots;
-		std::array<std::optional<DMUI_Result>, 3> _hotkeyEnableFailures;
+		OverlayChannel _performanceOverlay;
+		OverlayChannel _shaderCompileOverlay;
+		ShaderCompileOverlay _shaderCompile;
+		std::array<HotkeyChannel, kHotkeyCount> _hotkeys{
+			HotkeyChannel{ "Performance Overlay" },
+			HotkeyChannel{ "RenderDoc multi-frame capture" },
+			HotkeyChannel{ "RenderDoc single-frame capture" },
+			HotkeyChannel{ "telemetry dump" }
+		};
 		std::optional<DMUI_Result> _videoMemoryFailure;
-		std::optional<DMUI_Result> _overlayConfigurationFailure;
-		std::optional<DMUI_Result> _overlayDemandFailure;
+		std::uint32_t _bindingPollCountdown{};
 		std::atomic_bool _overlayVisible{ false };
 		std::atomic_bool _registrationComplete{};
-		FrameDemandTracker _overlayFrameDemand;
 		std::atomic_bool _readyLogged{};
 		std::atomic_bool _unavailableLogged{};
 		std::mutex _swapChainMutex;

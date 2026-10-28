@@ -9,6 +9,7 @@
 #include "Log.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameDispatcher.h"
+#include "Render/RuntimeCallback.h"
 
 namespace cs::render
 {
@@ -26,30 +27,28 @@ namespace cs::render
 		std::mutex registrationMutex;
 		std::atomic<bool> installed{ false };
 		std::atomic<bool> attempted{ false };
-		std::vector<FrameBoundaryCallback> preSwap;
-		std::vector<FrameBoundaryCallback> postSwap;
+		struct Entry
+		{
+			FrameBoundaryCallback callback;
+			Feature* owner;
+		};
+		std::vector<Entry> preSwap;
+		std::vector<Entry> postSwap;
 
-		bool Register(std::vector<FrameBoundaryCallback>& a_list, FrameBoundaryCallback a_callback)
+		bool Register(std::vector<Entry>& a_list, FrameBoundaryCallback a_callback, Feature* a_owner)
 		{
 			std::scoped_lock lock(registrationMutex);
 			if (!a_callback || attempted.load(std::memory_order_acquire))
 				return false;
-			a_list.push_back(std::move(a_callback));
+			a_list.push_back({ std::move(a_callback), a_owner });
 			return true;
 		}
 
 		// A throwing callback must never unwind into the engine's main loop.
-		void RunAll(const std::vector<FrameBoundaryCallback>& a_list, const char* a_phase) noexcept
+		void RunAll(const std::vector<Entry>& a_list, const char* a_phase) noexcept
 		{
-			for (const auto& callback : a_list) {
-				try {
-					callback();
-				} catch (const std::exception& e) {
-					L->error("Frame boundary {} callback threw: {}", a_phase, e.what());
-				} catch (...) {
-					L->error("Frame boundary {} callback threw", a_phase);
-				}
-			}
+			for (const auto& entry : a_list)
+				RunRenderCallback(entry.owner, a_phase, entry.callback);
 		}
 
 		struct OnIdle_Swap
@@ -69,12 +68,22 @@ namespace cs::render
 
 	bool RegisterPreSwap(FrameBoundaryCallback a_callback)
 	{
-		return Register(preSwap, std::move(a_callback));
+		return Register(preSwap, std::move(a_callback), nullptr);
+	}
+
+	bool RegisterPreSwap(Feature& a_owner, FrameBoundaryCallback a_callback)
+	{
+		return Register(preSwap, std::move(a_callback), &a_owner);
 	}
 
 	bool RegisterPostSwap(FrameBoundaryCallback a_callback)
 	{
-		return Register(postSwap, std::move(a_callback));
+		return Register(postSwap, std::move(a_callback), nullptr);
+	}
+
+	bool RegisterPostSwap(Feature& a_owner, FrameBoundaryCallback a_callback)
+	{
+		return Register(postSwap, std::move(a_callback), &a_owner);
 	}
 
 	bool InstallFrameBoundary()

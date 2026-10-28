@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "Render/FrameAnnotations.h"
 #include "RenderDocSettings.h"
 
 #include <array>
@@ -167,6 +168,8 @@ namespace cs::features
 
 		mutable std::mutex _captureMutex;
 		std::optional<ActiveCapture> _active;
+		// Captures show every annotation event from request to completion.
+		std::optional<render::frame_annotations::ScopedForce> _annotationForce;
 		std::optional<AwaitedFiles> _awaited;
 		std::vector<CaptureObserver> _observers;
 		RequestId _lastRequestId{};

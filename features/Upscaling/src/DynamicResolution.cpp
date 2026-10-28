@@ -374,7 +374,7 @@ namespace cs::features
 			return;
 		}
 		cs::render::annotation::ScopedEvent annotationScope(
-			"Upscaling/DynamicResolution/CopyToProxies");
+			"Upscaling::DynamicResolution/CopyToProxies");
 
 		for (const auto target : kProxiedTargets) {
 			OverrideRenderTarget(target, Contains(a_toCopy, target));
@@ -428,7 +428,7 @@ namespace cs::features
 			return;
 		}
 		cs::render::annotation::ScopedEvent annotationScope(
-			"Upscaling/DynamicResolution/CopyFromProxies");
+			"Upscaling::DynamicResolution/CopyFromProxies");
 
 		for (const auto target : kProxiedTargets) {
 			ResetRenderTarget(target, a_toCopy.size() == 0 || Contains(a_toCopy, target));
@@ -627,7 +627,7 @@ namespace cs::features
 
 		{
 			cs::render::annotation::ScopedEvent annotationScope(
-				"Upscaling/DynamicResolution/LinearizeDepth");
+				"Upscaling::DynamicResolution/LinearizeDepth");
 			ID3D11ShaderResourceView* views[] = { depthSRV };
 			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 			ID3D11UnorderedAccessView* uavs[] = { linearDepthUAV };
@@ -641,7 +641,7 @@ namespace cs::features
 
 		{
 			cs::render::annotation::ScopedEvent annotationScope(
-				"Upscaling/DynamicResolution/OverrideDepth");
+				"Upscaling::DynamicResolution/OverrideDepth");
 			ID3D11ShaderResourceView* views[] = { depthSRV };
 			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 			ID3D11UnorderedAccessView* uavs[] = { depthUAV };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Render/ShaderStage.h"
 #include "Utils/CSSha256.h"
 #include "Utils/ShaderCache/CompilerIdentity.h"
 
@@ -13,12 +14,7 @@
 
 namespace cs::shader_cache
 {
-	enum class ShaderCacheStage : std::uint8_t
-	{
-		kVertex = 0,
-		kPixel = 1,
-		kCompute = 2
-	};
+	using ShaderCacheStage = engine::ShaderStage;
 
 	// Cached shipped shaders do not need FXC's validation pass.
 	inline constexpr std::uint32_t kCachedOptimizedFlags1 = 0x00008802u;

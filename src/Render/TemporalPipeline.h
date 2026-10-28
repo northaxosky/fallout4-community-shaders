@@ -95,7 +95,8 @@ namespace cs::render
 		kHudless,
 		kFinal,
 		kDepth,
-		kMotion
+		kMotion,
+		kOff = 255
 	};
 
 	struct FrameGenerationDiagnostics
@@ -184,8 +185,8 @@ namespace cs::render
 		[[nodiscard]] bool ApplyFrozenFrameConstants(
 			temporal::SuperResolutionRequest& a_request) const noexcept;
 		bool RecordInputPacket(std::uint64_t a_engineFrame,
-			temporal::Extent a_renderExtent,
-			temporal::Extent a_outputExtent,
+			Extent a_renderExtent,
+			Extent a_outputExtent,
 			std::uint32_t a_slot) noexcept;
 		bool PreparePresent(std::uint32_t a_slot) noexcept;
 		void SetFrameGenerationPrepared(std::uint32_t a_slot,

@@ -1,7 +1,6 @@
 #pragma once
 
-#include "FeatureBuffer.h"
-#include "Render/FrameBufferMath.h"
+#include "Render/FrameBuffer.h"
 #include "Render/SharedFeatureData.h"
 
 #include <array>
@@ -93,15 +92,18 @@ namespace cs::render
 		DirectX::XMFLOAT4 DebugParams{};
 		std::uint32_t EnabledDynamicCubemaps = 0;
 		float DynamicMaterialReflections = 0.0f;
-		std::uint32_t EnabledWaterParallax = 0;
+		std::uint32_t EnabledWaterEffects = 0;
 		std::uint32_t EnabledTerrainVariation = 0;
 		std::uint32_t EnabledSkylighting = 0, EnabledScreenSpaceGI = 0;
 		std::uint32_t EnabledUnifiedWater = 0;
-		std::uint32_t pad0 = 0;
+		std::uint32_t EnabledScreenSpaceShadows = 0;
 		// Engine DALC rows, so vanilla ambient replays exactly beside the linear SH.
 		DirectX::XMFLOAT4 DirectionalAmbient[3]{};
+		std::uint32_t EnabledVolumetricShadows = 0, EnabledLODBlending = 0;
+		std::uint32_t EnabledInverseSquareLighting = 0;
+		std::uint32_t pad0 = 0;
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 112);
+	static_assert(sizeof(FO4SharedDataCB) == 128);
 	static_assert(offsetof(FO4SharedDataCB, DebugOwner) == 0);
 	static_assert(offsetof(FO4SharedDataCB, DebugMode) == 4);
 	static_assert(offsetof(FO4SharedDataCB, EnabledSSR) == 8);
@@ -109,13 +111,17 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, DebugParams) == 16);
 	static_assert(offsetof(FO4SharedDataCB, EnabledDynamicCubemaps) == 32);
 	static_assert(offsetof(FO4SharedDataCB, DynamicMaterialReflections) == 36);
-	static_assert(offsetof(FO4SharedDataCB, EnabledWaterParallax) == 40);
+	static_assert(offsetof(FO4SharedDataCB, EnabledWaterEffects) == 40);
 	static_assert(offsetof(FO4SharedDataCB, EnabledTerrainVariation) == 44);
 	static_assert(offsetof(FO4SharedDataCB, EnabledSkylighting) == 48);
 	static_assert(offsetof(FO4SharedDataCB, EnabledScreenSpaceGI) == 52);
 	static_assert(offsetof(FO4SharedDataCB, EnabledUnifiedWater) == 56);
-	static_assert(offsetof(FO4SharedDataCB, pad0) == 60);
+	static_assert(offsetof(FO4SharedDataCB, EnabledScreenSpaceShadows) == 60);
 	static_assert(offsetof(FO4SharedDataCB, DirectionalAmbient) == 64);
+	static_assert(offsetof(FO4SharedDataCB, EnabledVolumetricShadows) == 112);
+	static_assert(offsetof(FO4SharedDataCB, EnabledLODBlending) == 116);
+	static_assert(offsetof(FO4SharedDataCB, EnabledInverseSquareLighting) == 120);
+	static_assert(offsetof(FO4SharedDataCB, pad0) == 124);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

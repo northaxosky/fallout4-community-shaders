@@ -1,4 +1,5 @@
 #include "VolumetricShadows.h"
+#include "Render/SharedDataLayout.h"
 
 #include <d3d11.h>
 
@@ -41,9 +42,9 @@ namespace cs::features
 			return a_cascade == decltype(a_cascade)::kCascade0 ? 1 : 0;
 		}
 
-		constexpr std::array<std::string_view, kMipCount> kDownsamplePasses{ "VolumetricShadows/DownsampleMip0", "VolumetricShadows/DownsampleMip1" };
-		constexpr std::array<std::array<std::string_view, 2>, kMipCount> kBlurPasses{ { { "VolumetricShadows/BlurHMip0", "VolumetricShadows/BlurVMip0" },
-			{ "VolumetricShadows/BlurHMip1", "VolumetricShadows/BlurVMip1" } } };
+		constexpr std::array<std::string_view, kMipCount> kDownsamplePasses{ "VolumetricShadows::DownsampleMip0", "VolumetricShadows::DownsampleMip1" };
+		constexpr std::array<std::array<std::string_view, 2>, kMipCount> kBlurPasses{ { { "VolumetricShadows::BlurHMip0", "VolumetricShadows::BlurVMip0" },
+			{ "VolumetricShadows::BlurHMip1", "VolumetricShadows::BlurVMip1" } } };
 
 		// A group covers 16 source texels per axis; a 32x reduction gathers 2x2 quads.
 		std::uint32_t DownsampleGroups(std::uint32_t a_sourceSize, std::uint32_t a_mapSize)
@@ -80,7 +81,7 @@ namespace cs::features
 			FailLoad("Volumetric Shadows needs the shared sun shadow light data");
 			return;
 		}
-		if (!cs::engine::RegisterPostSunShadowRender([this] { Produce(); })) {
+		if (!cs::engine::RegisterPostSunShadowRender(*this, [this] { Produce(); })) {
 			FailLoad("Volumetric Shadows needs the main sun shadow render hook");
 			return;
 		}
@@ -296,7 +297,7 @@ namespace cs::features
 		if (cascade == DebugCascade::kNone || !a_context || !_previewCS)
 			return;
 		const std::size_t mip = CascadeMip(cascade);
-		cs::render::annotation::ScopedEvent event("VolumetricShadows/Preview");
+		cs::render::annotation::ScopedEvent event("VolumetricShadows::Preview");
 		_preview[mip].Convert(a_context, _previewCS.get(), _map.mipSRV[mip].get());
 	}
 
@@ -354,6 +355,11 @@ namespace cs::features
 		return _preview[CascadeMip(a_cascade)].GetDebugTexture("Shadow map preview not populated.");
 	}
 
+	void VolumetricShadows::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
+	{
+		a_fo4.EnabledVolumetricShadows = _injectionsOperational.load(std::memory_order_acquire) ? 1u : 0u;
+	}
+
 	void VolumetricShadows::DrawSettings()
 	{
 		Menu::Get().DrawDebugViewSelector(*this);
@@ -377,7 +383,7 @@ namespace cs::features
 			.Field("dflight_draws_bound", count(_counters.lightDraws))
 			.Field("water_draws_bound", count(_counters.waterDraws))
 			.Field("effect_draws_bound", count(_counters.effectDraws));
-		cs::render::profiling::CollectPassTimings(a_sink, "VolumetricShadows/");
+		cs::render::profiling::CollectPassTimings(a_sink, "VolumetricShadows::");
 	}
 
 	namespace

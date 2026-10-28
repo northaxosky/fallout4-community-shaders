@@ -56,7 +56,7 @@ namespace cs::features
 		void CollectTelemetry(telemetry::Sink& a_sink) const override;
 
 		// Packs b6; weather evaluation is frame-keyed as packs repeat.
-		render::IBLSettings GetCommonBufferData();
+		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&) override;
 
 	private:
 		ImageBasedLighting() = default;

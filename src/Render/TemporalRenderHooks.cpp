@@ -1,4 +1,5 @@
 #include "RE/D/DrawWorld.h"
+#include "Render/SharedData.h"
 #include "Render/TemporalRendererInternals.h"
 
 namespace cs::render
@@ -64,12 +65,9 @@ namespace cs::render
 		L->info("Installed hooks");
 	}
 
-	void TemporalRenderer::InstallTemporalMenuListener()
+	void TemporalRenderer::InitializeTemporalState()
 	{
 		SetTemporalEnabled(false);
-		if (!MenuOpenCloseEventHandler::Register()) {
-			L->warn("Loading-menu reset listener was not registered");
-		}
 	}
 
 	void TemporalRenderer::BSShaderRenderTargets_Create::thunk(void* a_this)
@@ -276,6 +274,12 @@ namespace cs::render
 	void TemporalRenderer::DrawWorldRenderUI::thunk(void* a_this)
 	{
 		auto* upscaling = GetSingleton();
+		GuardedThunkBody("Upscaling scene history reset", [] {
+			if (IsHistoryResetFrame()) {
+				TemporalPipeline::Get().RequestSuperResolutionReset();
+				TemporalPipeline::Get().RequestFrameGenerationReset();
+			}
+		});
 		const bool fullEffectsPath = RE::DrawWorld::GetEndOfFrameImagespaceEffectsEnabled();
 		upscaling->_renderUiFullEffectsPath.store(
 			fullEffectsPath, std::memory_order_release);
@@ -558,25 +562,4 @@ namespace cs::render
 		});
 	}
 
-	RE::BSEventNotifyControl TemporalRenderer::MenuOpenCloseEventHandler::ProcessEvent(
-		const RE::MenuOpenCloseEvent& a_event,
-		RE::BSTEventSource<RE::MenuOpenCloseEvent>*)
-	{
-		if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening) {
-			render::TemporalPipeline::Get().RequestSuperResolutionReset();
-			render::TemporalPipeline::Get().RequestFrameGenerationReset();
-		}
-		return RE::BSEventNotifyControl::kContinue;
-	}
-
-	bool TemporalRenderer::MenuOpenCloseEventHandler::Register()
-	{
-		static MenuOpenCloseEventHandler handler;
-		auto* ui = RE::UI::GetSingleton();
-		if (!ui) {
-			return false;
-		}
-		ui->RegisterSink<RE::MenuOpenCloseEvent>(&handler);
-		return true;
-	}
 }

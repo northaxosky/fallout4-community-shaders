@@ -3,7 +3,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "Render/ShaderInjection.h"
-#include "Render/TemporalPipeline.h"
+#include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
 #include "Settings/PresetManager.h"
@@ -17,7 +17,7 @@
 #include <format>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace
@@ -31,19 +31,13 @@ namespace
 		Callback&& a_callback) noexcept
 	{
 		for (auto* feature : a_manager.GetAll()) {
-			if (!feature || !a_manager.PrepareRuntimeCallback(*feature, a_phase)) {
+			if (!feature) {
 				continue;
 			}
-
-			try {
+			a_manager.RunRuntimeCallback(*feature, a_phase, [&] {
 				a_callback(*feature);
-			} catch (const std::exception& e) {
-				a_manager.QuarantineRuntimeCallback(*feature, a_phase, e.what());
-			} catch (...) {
-				a_manager.QuarantineRuntimeCallback(*feature, a_phase, "non-standard exception");
-			}
+			});
 		}
-		a_manager.FinishRuntimeCallbackPass();
 	}
 
 	class LoadingMenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
@@ -53,8 +47,10 @@ namespace
 			const RE::MenuOpenCloseEvent& a_event,
 			RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 		{
-			if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening)
+			if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening) {
+				cs::render::RequestHistoryReset();
 				cs::FeatureManager::Get().OnLoadingMenuClosedAll();
+			}
 			return RE::BSEventNotifyControl::kContinue;
 		}
 	};
@@ -88,22 +84,27 @@ namespace cs
 		return !SupportsEnableToggle() || settings::SaveEnabled(GetConfigKey(), IsEnabled(), *Log());
 	}
 
+	bool Feature::Persist()
+	{
+		return SaveSettings() && SaveEnabled();
+	}
+
 	void Feature::FlushSettings(bool a_completedOnly)
 	{
 		if (!_settingsSavePending || (a_completedOnly && !_settingsEditCompleted))
 			return;
 		_settingsEditCompleted = false;
-		if (SaveSettings() && SaveEnabled())
+		if (Persist())
 			_settingsSavePending = false;
 	}
 
-	void Feature::RestoreDefaults()
+	bool Feature::RestoreDefaults()
 	{
 		RestoreDefaultSettings();
 		if (SupportsEnableToggle()) {
 			SetEnabled(DefaultEnabled());
-			SaveEnabled();
 		}
+		return Persist();
 	}
 
 	void Feature::ComposeEnabledLiveSettings()
@@ -158,19 +159,6 @@ namespace cs
 		return _log;
 	}
 
-	std::string Feature::GetPresetKey() const
-	{
-		const auto name = GetName();
-		std::string out;
-		out.reserve(name.size());
-		for (char c : name) {
-			const auto lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-			const bool ok = (lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9') || lc == '_';
-			out.push_back(ok ? lc : '_');
-		}
-		return out;
-	}
-
 	FeatureManager& FeatureManager::Get()
 	{
 		static FeatureManager instance;
@@ -204,14 +192,10 @@ namespace cs
 
 	bool FeatureManager::PrepareMenuCallback(Feature& a_feature, std::string_view a_phase) noexcept
 	{
-		const auto& state = a_feature.GetState();
-		if (!state.installed) {
-			return false;
-		}
 		if (a_feature.IsHealthy()) {
 			return PrepareRuntimeCallback(a_feature, a_phase);
 		}
-		return state.runtimeState == FeatureRuntimeState::kInactive;
+		return a_feature._runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kInactive;
 	}
 
 	void FeatureManager::QuarantineRuntimeCallback(
@@ -219,18 +203,11 @@ namespace cs
 		std::string_view a_phase,
 		std::string_view a_reason) noexcept
 	{
-		if (!a_feature.IsHealthy()) {
+		if (!a_feature.BeginRuntimeQuarantine()) {
 			return;
 		}
 
-		a_feature.SetRuntimeStateOnly(FeatureRuntimeState::kDegraded);
-		a_feature.OnRuntimeQuarantined();
-		const auto featureName = a_feature.GetName();
-		if (featureName == "FrameGeneration" || featureName == "Upscaling") {
-			render::TemporalPipeline::Get().PostFailure(
-				featureName == "FrameGeneration" ? render::temporal::FailureDomain::kFrameGeneration : render::temporal::FailureDomain::kSuperResolution,
-				std::string(a_phase) + ": " + std::string(a_reason));
-		}
+		a_feature.OnRuntimeQuarantined(a_phase, a_reason);
 		try {
 			const auto phase = a_phase.empty() ? std::string_view("runtime callback") : a_phase.substr(0, 64);
 			const auto reason = a_reason.empty() ? std::string_view("unknown failure") : a_reason.substr(0, 256);
@@ -259,18 +236,6 @@ namespace cs
 		}
 	}
 
-	void FeatureManager::FinishRuntimeCallbackPass() noexcept
-	{
-		_loadedFeatures.erase(
-			std::remove_if(
-				_loadedFeatures.begin(),
-				_loadedFeatures.end(),
-				[](const Feature* a_feature) {
-					return !a_feature || !a_feature->IsHealthy();
-				}),
-			_loadedFeatures.end());
-	}
-
 	std::optional<settings::PreparedLiveSettings> FeatureManager::PrepareLiveSettings(
 		Feature& a_feature,
 		const toml::table& a_values,
@@ -291,16 +256,33 @@ namespace cs
 					finalize();
 				} catch (const std::exception& error) {
 					QuarantineRuntimeCallback(*feature, phase, error.what());
-					FinishRuntimeCallbackPass();
 					throw;
 				} catch (...) {
 					QuarantineRuntimeCallback(*feature, phase, "non-standard exception");
-					FinishRuntimeCallbackPass();
 					throw;
 				}
 			};
 		}
 		return value;
+	}
+
+	std::optional<settings::PreparedLiveSettings> FeatureManager::PrepareLiveSettingsFromOverrides(
+		Feature& a_feature,
+		const toml::table* a_overrides,
+		const toml::node* a_enabled,
+		std::string_view a_phase,
+		std::string& a_error)
+	{
+		// The file stores only non-default values, so absent keys mean the default.
+		auto values = settings::DefaultValues(a_feature.GetSettingsSchema());
+		values.insert_or_assign("enabled", a_feature.DefaultEnabled());
+		if (a_enabled)
+			values.insert_or_assign("enabled", *a_enabled);
+		if (a_overrides) {
+			for (const auto& [key, node] : *a_overrides)
+				values.insert_or_assign(key, node);
+		}
+		return PrepareLiveSettings(a_feature, values, a_phase, a_error);
 	}
 
 	bool FeatureManager::SaveAllSettings(std::string& a_error)
@@ -311,7 +293,7 @@ namespace cs
 			if (!PrepareMenuCallback(*feature, phase))
 				continue;
 			try {
-				if (feature->SaveSettings() && feature->SaveEnabled())
+				if (feature->Persist())
 					continue;
 			} catch (const std::exception& error) {
 				L->error("{} {} threw: {}", phase, feature->GetName(), error.what());
@@ -334,23 +316,18 @@ namespace cs
 			a_error = reloaded.error;
 			return false;
 		}
+		for (const auto& warning : reloaded.warnings)
+			L->warn("{}", warning);
 		std::vector<settings::PreparedLiveSettings> prepared;
-		for (auto* feature : _loadedFeatures) {
-			if (!feature->IsHealthy() || !feature->GetLiveSettingsAccess().prepare)
+		for (auto* feature : GetAll()) {
+			if (!feature->GetLiveSettingsAccess().prepare)
 				continue;
-			// The file stores only non-default values, so absent keys mean the default.
-			auto values = settings::DefaultValues(feature->GetSettingsSchema());
-			values.insert_or_assign("enabled", feature->DefaultEnabled());
-			if (const auto stored = feature_config::GetFeature(feature->GetConfigKey())) {
-				if (const auto* enabled = stored->get("enabled"))
-					values.insert_or_assign("enabled", *enabled);
-				if (const auto* overrides = stored->get_as<toml::table>("settings")) {
-					for (const auto& [key, node] : *overrides)
-						values.insert_or_assign(key, node);
-				}
-			}
+			const auto stored = feature_config::GetFeature(feature->GetConfigKey());
+			const auto* enabled = stored ? stored->get("enabled") : nullptr;
+			const auto* overrides = stored ? stored->get_as<toml::table>("settings") : nullptr;
 			std::string error;
-			auto value = PrepareLiveSettings(*feature, values, "LoadAllSettings::Finalize", error);
+			auto value = PrepareLiveSettingsFromOverrides(
+				*feature, overrides, enabled, "LoadAllSettings::Finalize", error);
 			if (!value) {
 				a_error = std::format("{}: {}", feature->GetName(), error);
 				return false;
@@ -372,13 +349,13 @@ namespace cs
 	bool FeatureManager::ResetAllSettings(std::string& a_error)
 	{
 		constexpr std::string_view phase = "ResetAllSettings";
-		// Restoring republishes engine-side state, which only loaded features have.
-		const auto loaded = _loadedFeatures;
-		for (auto* feature : loaded) {
+		std::string failed;
+		for (auto* feature : GetAll()) {
 			if (!PrepareRuntimeCallback(*feature, phase))
 				continue;
 			try {
-				feature->RestoreDefaults();
+				if (feature->RestoreDefaults())
+					continue;
 			} catch (const std::exception& error) {
 				a_error = std::format("{}: {}", feature->GetName(), error.what());
 				return false;
@@ -386,8 +363,12 @@ namespace cs
 				a_error = std::format("{}: non-standard exception", feature->GetName());
 				return false;
 			}
+			failed += (failed.empty() ? "" : ", ");
+			failed += feature->GetName();
 		}
-		return SaveAllSettings(a_error);
+		if (!failed.empty())
+			a_error = "failed to save: " + failed;
+		return failed.empty();
 	}
 
 	bool FeatureManager::ApplyDebugViews(
@@ -395,12 +376,13 @@ namespace cs
 	{
 		std::unordered_map<Feature*, std::string_view> selected;
 		Feature* fullscreen = nullptr;
+		auto healthy = GetAll();
 		for (const auto& selection : a_selections) {
 			if (selection.feature.empty() || selection.view.empty())
 				return false;
 			const auto featureIt = std::ranges::find(
-				_loadedFeatures, selection.feature, &Feature::GetName);
-			if (featureIt == _loadedFeatures.end())
+				healthy, selection.feature, &Feature::GetName);
+			if (featureIt == healthy.end())
 				return false;
 			const auto views = (*featureIt)->GetDebugViews();
 			const auto viewIt = std::ranges::find(
@@ -445,42 +427,6 @@ namespace cs
 
 		const auto configRoot = feature_config::GetRoot();
 		const auto* features = configRoot["features"].as_table();
-		std::unordered_set<std::string> registeredKeys;
-		registeredKeys.reserve(_registeredFeatures.size());
-		for (auto* feature : _registeredFeatures) {
-			registeredKeys.insert(feature->GetConfigKey());
-		}
-		if (features) {
-			for (const auto& [key, node] : *features) {
-				if (!registeredKeys.contains(std::string(key.str()))) {
-					L->warn("Ignoring unknown unified configuration feature key '{}'", key.str());
-				}
-			}
-		}
-
-		std::vector<std::string> missingKeys;
-		for (auto* feature : _registeredFeatures) {
-			const auto key = feature->GetConfigKey();
-			const auto* featureNode = features ? features->get(key) : nullptr;
-			const bool installed = featureNode && featureNode->is_table();
-			if (!installed) {
-				missingKeys.push_back(key);
-			}
-			feature->SetState({ .installed = installed,
-				.desiredActive = false,
-				.runtimeState = installed ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-				.detail = installed ? std::string{} : "Unified feature configuration is missing" });
-		}
-		if (!missingKeys.empty()) {
-			std::string names;
-			for (const auto& key : missingKeys) {
-				if (!names.empty()) {
-					names += ", ";
-				}
-				names += key;
-			}
-			L->warn("Registered features absent from unified configuration: {}", names);
-		}
 
 		const auto failConfiguration = [](Feature* a_feature, std::string a_detail) {
 			if (a_detail.empty()) {
@@ -491,10 +437,6 @@ namespace cs
 		};
 
 		for (auto* feature : _registeredFeatures) {
-			if (!feature->GetState().installed) {
-				continue;
-			}
-
 			const auto key = feature->GetConfigKey();
 			const auto* featureTable = features->get(key)->as_table();
 			const auto activation = feature_config::ParseActivation(*featureTable);
@@ -518,8 +460,7 @@ namespace cs
 
 				const bool deactivatedForEnb = cs::env::IsENBLoaded();
 				const bool desiredActive = activation.valid && activation.load && !deactivatedForEnb;
-				feature->SetState({ .installed = true,
-					.desiredActive = desiredActive,
+				feature->SetState({ .desiredActive = desiredActive,
 					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
 					.detail = deactivatedForEnb ? "ENB is loaded; this feature is inactive." : std::string{} });
 			} catch (const std::exception& e) {
@@ -535,6 +476,14 @@ namespace cs
 		DispatchRuntimeCallbacks(*this, "Prepass", [](Feature& a_feature) { a_feature.Prepass(); });
 	}
 
+	void FeatureManager::WriteSharedDataAll(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4)
+	{
+		for (auto* feature : GetAll()) {
+			if (feature->IsEnabled())
+				feature->WriteSharedData(a_feature, a_fo4);
+		}
+	}
+
 	void FeatureManager::ActivateAll()
 	{
 		_loadedFeatures.clear();
@@ -545,11 +494,7 @@ namespace cs
 				continue;
 			}
 			if (state.runtimeState == FeatureRuntimeState::kInactive) {
-				if (state.installed) {
-					L->info("Feature {} inactive per TOML configuration; skipping", feature->GetName());
-				} else {
-					L->info("Feature {} not installed (no TOML configuration); skipping", feature->GetName());
-				}
+				L->info("Feature {} inactive per TOML configuration; skipping", feature->GetName());
 				continue;
 			}
 			const bool wasActive = state.runtimeState == FeatureRuntimeState::kActive;
@@ -592,18 +537,16 @@ namespace cs
 			try {
 				if (state.detail.empty()) {
 					L->info(
-						"Feature state: {} state={} installed={} desired={} enabled={}",
+						"Feature state: {} state={} desired={} enabled={}",
 						feature->GetName(),
 						FeatureRuntimeStateName(state.runtimeState),
-						state.installed,
 						state.desiredActive,
 						feature->IsEnabled());
 				} else {
 					L->info(
-						"Feature state: {} state={} installed={} desired={} enabled={} detail={}",
+						"Feature state: {} state={} desired={} enabled={} detail={}",
 						feature->GetName(),
 						FeatureRuntimeStateName(state.runtimeState),
-						state.installed,
 						state.desiredActive,
 						feature->IsEnabled(),
 						std::string_view(state.detail).substr(0, 256));
@@ -680,6 +623,5 @@ namespace cs
 				reason);
 			feature->SetRuntimeState(FeatureRuntimeState::kFailed, std::move(reason));
 		}
-		FinishRuntimeCallbackPass();
 	}
 }

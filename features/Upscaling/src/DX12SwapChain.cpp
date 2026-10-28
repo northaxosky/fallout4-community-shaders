@@ -2211,7 +2211,7 @@ namespace cs::features
 		}
 		const float clear[4]{};
 		cs::render::annotation::ScopedEvent annotationScope(
-			"Upscaling/FrameGeneration/ClearSharedBuffers");
+			"FrameGeneration::ClearSharedBuffers");
 		if (_proxyBuffer && _proxyBuffer->rtv11) {
 			_context11->ClearRenderTargetView(_proxyBuffer->rtv11.get(), clear);
 		}

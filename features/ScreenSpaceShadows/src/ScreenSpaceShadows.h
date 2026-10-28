@@ -32,6 +32,7 @@ namespace cs::features
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool IsShadowMaskReady();
+		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -62,15 +63,15 @@ namespace cs::features
 		void BindShadowMask(ID3D11DeviceContext* a_context);
 		bool EnsureResources();
 		bool TryGetMaskExtents(
-			sss_resources::Extent& a_required,
-			sss_resources::Extent& a_allocation) const;
+			render::Extent& a_required,
+			render::Extent& a_allocation) const;
 		bool EnsureWhiteFallback(
 			ID3D11Device* a_device,
-			sss_resources::Extent a_required,
-			sss_resources::Extent a_allocation);
+			render::Extent a_required,
+			render::Extent a_allocation);
 		bool CreateWhiteFallback(
 			ID3D11Device* a_device,
-			sss_resources::Extent a_allocation);
+			render::Extent a_allocation);
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
@@ -102,7 +103,7 @@ namespace cs::features
 		bool _realMaskReadyForDraw = false;
 		ID3D11Device* _deviceIdentity = nullptr;
 		std::uint64_t _deviceGeneration = 0;
-		sss_resources::Extent _requiredMaskExtent;
+		render::Extent _requiredMaskExtent;
 		sss_resources::ExtentState _whiteFallbackExtent;
 		sss_resources::FallbackAllocationBackoff
 			_whiteFallbackBackoff;

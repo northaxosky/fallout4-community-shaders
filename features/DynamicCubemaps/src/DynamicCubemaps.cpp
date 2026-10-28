@@ -14,12 +14,12 @@
 #include <string_view>
 #include <vector>
 
-#include "FeatureBuffer.h"
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
+#include "RE/D/DrawWorld.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
@@ -28,8 +28,8 @@
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderStage.h"
-#include "Render/ShaderVariantRuntimeResolver.h"
 #include "Render/SharedData.h"
+#include "Render/SharedDataLayout.h"
 #include "Render/SkyReflectionCube.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -268,14 +268,14 @@ namespace cs::features
 
 		// FO4 vanilla never renders the reflections cube; the host does.
 		cs::engine::SetSkyReflectionCubeSize(static_cast<std::uint32_t>(_bootSettings.engineCubeSize));
-		if (!cs::engine::RegisterSkyReflectionCubeConsumer("DynamicCubemaps", [this] { return IsEnabled() &&
-			                                                                                  _resourcesReady.load(std::memory_order_acquire) &&
-			                                                                                  _injectionsOperational.load(std::memory_order_acquire); }, [this] { return _engineCubeLod.load(std::memory_order_acquire); })) {
+		if (!cs::engine::RegisterSkyReflectionCubeConsumer(*this, "DynamicCubemaps", [this] { return IsEnabled() &&
+			                                                                                         _resourcesReady.load(std::memory_order_acquire) &&
+			                                                                                         _injectionsOperational.load(std::memory_order_acquire); }, [this] { return _engineCubeLod.load(std::memory_order_acquire); })) {
 			L->warn("Sky reflection cube unavailable; reflections capture the sky from the scene.");
 		}
 
 		// FO4 draws the sky inside DrawWorld::Forward after the composite, so capture and publication follow it.
-		if (!cs::engine::RegisterPostForwardSky([] {
+		if (!cs::engine::RegisterPostForwardSky(*this, [] {
 				auto* feature = DynamicCubemaps::GetSingleton();
 				feature->UpdateCubemap();
 				feature->Prepass();
@@ -343,11 +343,6 @@ namespace cs::features
 			return nullptr;
 		}
 		return (a_reflections ? _reflections : _environment).srv.get();
-	}
-
-	void DynamicCubemaps::OnLoadingMenuClosed()
-	{
-		_queuedReset.store(true, std::memory_order_release);
 	}
 
 	void DynamicCubemaps::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
@@ -817,7 +812,7 @@ namespace cs::features
 		_lastCallbackFrame = state->frameCount;
 		_lastCallbackFrameValid = true;
 
-		if (_queuedReset.exchange(false, std::memory_order_acq_rel)) {
+		if (_queuedReset.exchange(false, std::memory_order_acq_rel) || cs::render::IsHistoryResetFrame()) {
 			ResetCapture();
 		}
 		// Reset capture when game time jumps (wait menu, timescale changes, console commands).
@@ -944,7 +939,7 @@ namespace cs::features
 		UpdateBuffer(context, _prepareBuffer.get(), &preparation, sizeof(preparation));
 
 		auto& stream = Stream(a_reflections);
-		const bool tiledLighting = cs::engine::QueryTiledLightingEnabled();
+		const bool tiledLighting = RE::DrawWorld::QTiledLighting();
 		std::array<ID3D11ShaderResourceView*, 6> srvs{
 			depthSRV,
 			colorSRV,
@@ -1285,18 +1280,14 @@ namespace cs::features
 					_repeatCallbacks.load(std::memory_order_relaxed)));
 	}
 
-	cs::DynamicCubemapsFeatureData
-	DynamicCubemaps::GetCommonBufferData() const
+	void DynamicCubemaps::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
 	{
-		cs::DynamicCubemapsFeatureData data{};
 		if (_injectionsOperational.load(std::memory_order_acquire)) {
-			data.Enabled = IsEnabled() ? 1u : 0u;
-			data.EnabledSSR =
+			a_fo4.EnabledDynamicCubemaps = 1u;
+			a_fo4.EnabledSSR =
 				_enabledSSR.load(std::memory_order_acquire) ? 1u : 0u;
-			if (data.Enabled)
-				data.MaterialReflections = _materialReflections.load(std::memory_order_acquire);
+			a_fo4.DynamicMaterialReflections = _materialReflections.load(std::memory_order_acquire);
 		}
-		return data;
 	}
 
 	void DynamicCubemaps::DrawSettings()

@@ -25,6 +25,7 @@
 #include "Render/RendererContext.h"
 #include "Render/SwapChainHook.h"
 #include "Render/TemporalPipeline.h"
+#include "Render/TemporalPresentation.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "UpscalingAnchors.h"
@@ -57,7 +58,7 @@ namespace cs::features
 		}
 
 		cs::render::annotation::ScopedEvent annotationScope(
-			"Upscaling/PreparePassthrough");
+			"Upscaling::PreparePassthrough");
 		cs::engine::CopyResourcePreservingOM(
 			a_context, a_privateOutput, a_input);
 		return true;
@@ -75,7 +76,7 @@ namespace cs::features
 		}
 
 		cs::render::annotation::ScopedEvent annotationScope(
-			"Upscaling/PublishOutput");
+			"Upscaling::PublishOutput");
 		cs::engine::CopyResourcePreservingOM(a_context, a_frameBuffer, a_providerOutput);
 		return true;
 	}
@@ -104,36 +105,10 @@ namespace cs::render::renderer_detail
 
 	inline std::string_view UpscaleMethodName(TemporalRenderer::UpscaleMethod a_method) noexcept
 	{
-		switch (a_method) {
-		case TemporalRenderer::UpscaleMethod::kNONE:
-			return "None";
-		case TemporalRenderer::UpscaleMethod::kTAA:
-			return "TAA";
-		case TemporalRenderer::UpscaleMethod::kFSR:
-			return "FSR 3";
-		case TemporalRenderer::UpscaleMethod::kDLSS:
-			return "DLSS";
-		case TemporalRenderer::UpscaleMethod::kFSR4:
-			return "FSR 4";
-		}
-		return "Unknown";
-	}
-
-	inline render::temporal::SuperResolutionMethod ToCoreMethod(
-		TemporalRenderer::UpscaleMethod a_method) noexcept
-	{
-		switch (a_method) {
-		case TemporalRenderer::UpscaleMethod::kTAA:
-			return render::temporal::SuperResolutionMethod::kTAA;
-		case TemporalRenderer::UpscaleMethod::kFSR:
-			return render::temporal::SuperResolutionMethod::kFSR3;
-		case TemporalRenderer::UpscaleMethod::kDLSS:
-			return render::temporal::SuperResolutionMethod::kDLSS;
-		case TemporalRenderer::UpscaleMethod::kFSR4:
-			return render::temporal::SuperResolutionMethod::kFSR4;
-		default:
-			return render::temporal::SuperResolutionMethod::kNone;
-		}
+		// Renderer telemetry historically names disabled super resolution "None".
+		return a_method == TemporalRenderer::UpscaleMethod::kNone ?
+		           "None" :
+		           temporal::presentation::Name(a_method);
 	}
 
 	inline std::string_view QualityModeName(std::uint32_t a_mode) noexcept

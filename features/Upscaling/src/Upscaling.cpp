@@ -26,41 +26,8 @@ namespace cs::features
 
 		std::string_view MethodName(std::uint32_t a_method) noexcept
 		{
-			switch (static_cast<Upscaling::UpscaleMethod>(a_method)) {
-			case Upscaling::UpscaleMethod::kNONE:
-				return "Off";
-			case Upscaling::UpscaleMethod::kTAA:
-				return "TAA";
-			case Upscaling::UpscaleMethod::kFSR:
-				return "FSR 3";
-			case Upscaling::UpscaleMethod::kDLSS:
-				return "DLSS";
-			case Upscaling::UpscaleMethod::kFSR4:
-				return "FSR 4";
-			case Upscaling::UpscaleMethod::kCount:
-				break;
-			}
-			return "Unknown";
-		}
-
-		std::string_view MethodName(
-			render::temporal::SuperResolutionMethod a_method) noexcept
-		{
-			switch (a_method) {
-			case render::temporal::SuperResolutionMethod::kNone:
-				return "Off";
-			case render::temporal::SuperResolutionMethod::kTAA:
-				return "TAA";
-			case render::temporal::SuperResolutionMethod::kFSR3:
-				return "FSR 3";
-			case render::temporal::SuperResolutionMethod::kDLSS:
-				return "DLSS";
-			case render::temporal::SuperResolutionMethod::kFSR4:
-				return "FSR 4";
-			case render::temporal::SuperResolutionMethod::kCount:
-				break;
-			}
-			return "Unknown";
+			return render::temporal::presentation::Name(
+				static_cast<Upscaling::UpscaleMethod>(a_method));
 		}
 
 	}
@@ -80,11 +47,11 @@ namespace cs::features
 
 		candidate.enabled =
 			candidate.upscaleMethod !=
-			static_cast<std::uint32_t>(UpscaleMethod::kNONE);
+			static_cast<std::uint32_t>(UpscaleMethod::kNone);
 		settings = candidate;
 		_bootSettings = candidate;
 		_liveSettings = cs::settings::BindLiveSettings(render::temporal::kSchema, settings, [this] {
-			settings.enabled = settings.upscaleMethod != static_cast<std::uint32_t>(UpscaleMethod::kNONE);
+			settings.enabled = settings.upscaleMethod != static_cast<std::uint32_t>(UpscaleMethod::kNone);
 			render::TemporalPipeline::Get().SubmitLiveConfiguration();
 		});
 		return true;
@@ -119,44 +86,11 @@ namespace cs::features
 		       cs::engine::ValidateShaderInjectionRoutes("UpscalingImageSpaceUv", a_error);
 	}
 
-	bool Upscaling::StageFromPreset(
-		const toml::table& a_table,
-		const PresetApplyContext&,
-		std::string& a_error)
+	void Upscaling::OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept
 	{
-		toml::table config;
-		config.insert_or_assign("settings", a_table);
-		auto candidate = settings;
-		if (!settings::Parse(render::temporal::kSchema, config, candidate, a_error)) {
-			return false;
-		}
-		candidate.enabled =
-			candidate.upscaleMethod !=
-			static_cast<std::uint32_t>(UpscaleMethod::kNONE);
-		_stagedSettings = candidate;
-		return true;
-	}
-
-	void Upscaling::CommitStagedSwap() noexcept
-	{
-		if (_stagedSettings) {
-			settings = *_stagedSettings;
-		}
-	}
-
-	void Upscaling::CommitStagedFinalize()
-	{
-		if (!_stagedSettings) {
-			return;
-		}
-		_stagedSettings.reset();
-		SaveSettings();
-		render::TemporalPipeline::Get().SubmitLiveConfiguration();
-	}
-
-	void Upscaling::ExportToPreset(toml::table& a_out)
-	{
-		a_out = settings::SerializeFull(render::temporal::kSchema, settings);
+		render::TemporalPipeline::Get().PostFailure(
+			render::temporal::FailureDomain::kSuperResolution,
+			std::string(a_phase) + ": " + std::string(a_reason));
 	}
 
 	std::vector<std::string_view> Upscaling::GetRestartSettings() const
@@ -207,17 +141,12 @@ namespace cs::features
 				settings.upscaleMethod = *method.selected;
 				settings.enabled =
 					settings.upscaleMethod !=
-					static_cast<std::uint32_t>(UpscaleMethod::kNONE);
+					static_cast<std::uint32_t>(UpscaleMethod::kNone);
 				changed = true;
 			}
 
 			const bool externalMethod =
-				settings.upscaleMethod ==
-					static_cast<std::uint32_t>(UpscaleMethod::kFSR) ||
-				settings.upscaleMethod ==
-					static_cast<std::uint32_t>(UpscaleMethod::kDLSS) ||
-				settings.upscaleMethod ==
-					static_cast<std::uint32_t>(UpscaleMethod::kFSR4);
+				render::temporal::IsExternalUpscaler(static_cast<UpscaleMethod>(settings.upscaleMethod));
 			if (externalMethod) {
 				const std::array qualityModes{
 					dmui::ChoiceOption<std::uint32_t>{

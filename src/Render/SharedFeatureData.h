@@ -11,6 +11,7 @@ namespace cs::render
 		float Glossiness, SpecularStrength, SubsurfaceScatteringAmount;
 		std::uint32_t OverrideComplexGrassSettings;
 		float BasicGrassBrightness, ComplexGrassThreshold, MidLODBrightness, FarLODBrightness;
+		float PBRWrappedLightingAmount, SubsurfaceBalance, CanopyOcclusion, ClumpShading;
 	};
 	struct CPMSettings
 	{
@@ -134,7 +135,7 @@ namespace cs::render
 		float CloudsLightingDesaturation, CloudsLightingForwardScattering, CloudsLightingDensity;
 		float CloudsColorFilter[3], CloudsIntensity;
 		float CloudsVertexAlphaBoost, CloudsEdgeClamp, CloudsEdgeFadePower, SunBillboardTan;
-		float MasserBillboardTan, SecundaBillboardTan, SkyScatteringPad0[2];
+		float MasserBillboardTan, SecundaBillboardTan, SkyScaleMultiplier, SkyScatteringPad0;
 		std::uint32_t EnableWater;
 		float WaterWavesAmplitude, WaterMuddiness, WaterSunLightingMultiplier;
 		float WaterSunSpecularMultiplier, WaterFresnelMin, WaterFresnelMax, WaterFresnelMultiplier;
@@ -230,27 +231,27 @@ namespace cs::render
 #define CS_FEATURE_LAYOUT(member, offset, size)                     \
 	static_assert(offsetof(SharedFeatureDataCB, member) == offset); \
 	static_assert(sizeof(SharedFeatureDataCB::member) == size)
-	CS_FEATURE_LAYOUT(grassLightingSettings, 0, 32);
-	CS_FEATURE_LAYOUT(extendedMaterialSettings, 32, 32);
-	CS_FEATURE_LAYOUT(cubemapCreatorSettings, 64, 32);
-	CS_FEATURE_LAYOUT(terraOccSettings, 96, 48);
-	CS_FEATURE_LAYOUT(lightLimitFixSettings, 144, 48);
-	CS_FEATURE_LAYOUT(wetnessEffectsSettings, 192, 192);
-	CS_FEATURE_LAYOUT(skylightingSettings, 384, 144);
-	CS_FEATURE_LAYOUT(cloudShadowsSettings, 528, 16);
-	CS_FEATURE_LAYOUT(lodBlendingSettings, 544, 32);
-	CS_FEATURE_LAYOUT(hairSpecularSettings, 576, 80);
-	CS_FEATURE_LAYOUT(terrainVariationSettings, 656, 16);
-	CS_FEATURE_LAYOUT(iblSettings, 672, 48);
-	CS_FEATURE_LAYOUT(extendedTranslucencySettings, 720, 16);
-	CS_FEATURE_LAYOUT(linearLightingSettings, 736, 80);
-	CS_FEATURE_LAYOUT(enbSettings, 816, 512);
-	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1328, 16);
-	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1344, 240);
-	CS_FEATURE_LAYOUT(truePBRSettings, 1584, 16);
-	CS_FEATURE_LAYOUT(skinData, 1600, 112);
-	CS_FEATURE_LAYOUT(horizonFixSettings, 1712, 16);
-	CS_FEATURE_LAYOUT(rainRefractionSettings, 1728, 16);
+	CS_FEATURE_LAYOUT(grassLightingSettings, 0, 48);
+	CS_FEATURE_LAYOUT(extendedMaterialSettings, 48, 32);
+	CS_FEATURE_LAYOUT(cubemapCreatorSettings, 80, 32);
+	CS_FEATURE_LAYOUT(terraOccSettings, 112, 48);
+	CS_FEATURE_LAYOUT(lightLimitFixSettings, 160, 48);
+	CS_FEATURE_LAYOUT(wetnessEffectsSettings, 208, 192);
+	CS_FEATURE_LAYOUT(skylightingSettings, 400, 144);
+	CS_FEATURE_LAYOUT(cloudShadowsSettings, 544, 16);
+	CS_FEATURE_LAYOUT(lodBlendingSettings, 560, 32);
+	CS_FEATURE_LAYOUT(hairSpecularSettings, 592, 80);
+	CS_FEATURE_LAYOUT(terrainVariationSettings, 672, 16);
+	CS_FEATURE_LAYOUT(iblSettings, 688, 48);
+	CS_FEATURE_LAYOUT(extendedTranslucencySettings, 736, 16);
+	CS_FEATURE_LAYOUT(linearLightingSettings, 752, 80);
+	CS_FEATURE_LAYOUT(enbSettings, 832, 512);
+	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1344, 16);
+	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1360, 240);
+	CS_FEATURE_LAYOUT(truePBRSettings, 1600, 16);
+	CS_FEATURE_LAYOUT(skinData, 1616, 112);
+	CS_FEATURE_LAYOUT(horizonFixSettings, 1728, 16);
+	CS_FEATURE_LAYOUT(rainRefractionSettings, 1744, 16);
 #undef CS_FEATURE_LAYOUT
-	static_assert(sizeof(SharedFeatureDataCB) == 1744);
+	static_assert(sizeof(SharedFeatureDataCB) == 1760);
 }

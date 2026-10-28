@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/SharedFeatureData.h"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -249,35 +251,26 @@ namespace cs::features::terrain_shadows
 		return range;
 	}
 
-	struct FeatureBlock
-	{
-		std::uint32_t enableTerrainShadow = 0;
-		std::array<float, 3> scale{};
-		std::array<float, 2> zRange{};
-		std::array<float, 2> offset{};
-		float zBlur = 0.0f;
-	};
-
-	[[nodiscard]] inline FeatureBlock BuildFeatureBlock(
+	[[nodiscard]] inline render::TerraOccSettings BuildFeatureBlock(
 		const HeightMapMetadata& a_metadata,
 		bool a_enabled,
 		std::uint32_t a_width,
 		std::uint32_t a_height,
 		std::array<float, 2> a_lightDeltaZ) noexcept
 	{
-		FeatureBlock block;
-		block.enableTerrainShadow = a_enabled ? 1u : 0u;
+		render::TerraOccSettings block{};
+		block.EnableTerrainShadow = a_enabled ? 1u : 0u;
 		const std::array<float, 3> invScale{
 			a_metadata.pos1[0] - a_metadata.pos0[0],
 			a_metadata.pos1[1] - a_metadata.pos0[1],
 			a_metadata.pos1[2] - a_metadata.pos0[2]
 		};
 		for (std::size_t axis = 0; axis < 3; ++axis)
-			block.scale[axis] = invScale[axis] != 0.0f ? 1.0f / invScale[axis] : 0.0f;
-		block.offset[0] = -a_metadata.pos0[0] * block.scale[0] + 0.5f / static_cast<float>(a_width);
-		block.offset[1] = -a_metadata.pos0[1] * block.scale[1] - 0.5f / static_cast<float>(a_height);
-		block.zRange = a_metadata.zRange;
-		block.zBlur = -0.5f * (a_lightDeltaZ[0] + a_lightDeltaZ[1]) * (block.zRange[1] - block.zRange[0]);
+			block.Scale[axis] = invScale[axis] != 0.0f ? 1.0f / invScale[axis] : 0.0f;
+		block.Offset[0] = -a_metadata.pos0[0] * block.Scale[0] + 0.5f / static_cast<float>(a_width);
+		block.Offset[1] = -a_metadata.pos0[1] * block.Scale[1] - 0.5f / static_cast<float>(a_height);
+		std::ranges::copy(a_metadata.zRange, block.ZRange);
+		block.ZBlur = -0.5f * (a_lightDeltaZ[0] + a_lightDeltaZ[1]) * (block.ZRange[1] - block.ZRange[0]);
 		return block;
 	}
 

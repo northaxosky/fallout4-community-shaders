@@ -25,7 +25,11 @@ namespace cs::render::profiling
 	// Overlay consumer; GPU queries run while it or telemetry is enabled.
 	void SetEnabled(bool a_enabled) noexcept;
 	bool BeginPass(std::string_view a_name);
+	// CS passes begun inside an engine pass pause it instead of being refused.
+	bool BeginEnginePass(std::string_view a_name);
 	void EndPass() noexcept;
+	// Startup only: registration closes at the first render hook.
+	bool InstallDeferredCompositePass();
 
 	// Empty prefix publishes fully qualified annotation names; feature prefixes preserve local fields.
 	template <class Sink>

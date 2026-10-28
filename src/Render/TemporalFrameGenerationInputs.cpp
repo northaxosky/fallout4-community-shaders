@@ -78,7 +78,7 @@ namespace cs::render
 
 		{
 			cs::render::annotation::ScopedEvent annotationScope(
-				"Upscaling/FrameGeneration/CapturePreAlphaColor");
+				"FrameGeneration::CapturePreAlphaColor");
 			cs::engine::CopyResourcePreservingOM(
 				context, preAlphaColor, postAlphaColor);
 		}
@@ -158,7 +158,7 @@ namespace cs::render
 				},
 				[&]() {
 					cs::render::annotation::ScopedEvent annotationScope(
-						"FG_CaptureDepthMotion");
+						"FrameGeneration::CaptureDepthMotion");
 					cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
 					_frameGenerationCopyCB->Update(dimensions);
 					ID3D11Buffer* constantBuffer = _frameGenerationCopyCB->CB();
@@ -314,7 +314,7 @@ namespace cs::render
 					},
 					[&]() {
 						cs::render::annotation::ScopedEvent annotationScope(
-							"FG_CaptureDepthMotion");
+							"FrameGeneration::CaptureDepthMotion");
 						cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
 						const FrameGenerationCopyCB dimensions{
 							renderWidth,
@@ -417,7 +417,7 @@ namespace cs::render
 				},
 				[&]() {
 					cs::render::annotation::ScopedEvent annotationScope(
-						"FG_CaptureHUDLess_RT0_PostImagespace");
+						"FrameGeneration::CaptureHUDLess_RT0_PostImagespace");
 					cs::engine::CopyResourcePreservingOM(
 						context,
 						hudless.resource,

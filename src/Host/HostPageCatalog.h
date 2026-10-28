@@ -13,10 +13,12 @@ namespace cs::host
 	{
 		kHome,
 		kAdvanced,
+		kProfiling,
 		kPresets,
 		kChangelog,
 		kFeature,
-		kOverlay
+		kOverlay,
+		kShaderCompileOverlay
 	};
 
 	struct FeaturePageInput
@@ -64,8 +66,7 @@ namespace cs::host
 	inline constexpr std::string_view kOverlayCategoryId = "overlay";
 	inline constexpr std::string_view kOverlayCategory = "Overlay";
 	inline constexpr std::string_view kOverlayPageId = "overlay";
-
-	std::string MakeAsciiId(std::string_view a_text);
+	inline constexpr std::string_view kShaderCompileOverlayPageId = "shader-compile-overlay";
 
 	HostPageCatalog BuildPageCatalog(const std::vector<FeaturePageInput>& a_features);
 }

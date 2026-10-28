@@ -1,4 +1,5 @@
 #include "TerrainVariation.h"
+#include "Render/SharedDataLayout.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -193,15 +194,13 @@ namespace cs::features
 		return true;
 	}
 
-	cs::TerrainVariationFeatureData TerrainVariation::GetCommonBufferData() const
+	void TerrainVariation::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4)
 	{
 		if (!_injectionsOperational.load(std::memory_order_acquire))
-			return {};
-		cs::TerrainVariationFeatureData data{};
-		data.Enabled = IsEnabled() ? 1u : 0u;
-		data.shared.enableLODTerrainTilingFix = _settings.enableLODTerrainTilingFix ? 1u : 0u;
-		data.shared.enableMeshSupport = _settings.enableMeshSupport ? 1u : 0u;
-		return data;
+			return;
+		a_fo4.EnabledTerrainVariation = 1u;
+		a_feature.terrainVariationSettings.enableLODTerrainTilingFix = _settings.enableLODTerrainTilingFix ? 1u : 0u;
+		a_feature.terrainVariationSettings.enableMeshSupport = _settings.enableMeshSupport ? 1u : 0u;
 	}
 
 	void TerrainVariation::DrawSettings()

@@ -1,4 +1,5 @@
 #include "Render/TerrainWater.h"
+#include "Render/EngineCallSite.h"
 
 #include "Log.h"
 #include "RE/B/BSGeometry.h"
@@ -145,13 +146,21 @@ namespace cs::engine::water
 
 	bool InstallTileWaterOverride()
 	{
-		static REL::Relocation<std::uintptr_t> addLODWater{ RE::ID::TESWaterSystem::AddLODWater };
-		const auto sites = REX::FModule::IsRuntimeOG() ?
-		                       std::vector<std::uintptr_t>{ addLODWater.address() + 0xC8, addLODWater.address() + 0x106 } :
-		                       std::vector<std::uintptr_t>{ addLODWater.address() + 0x139 };
-		for (const auto site : sites)
-			if (*reinterpret_cast<const std::uint8_t*>(site) != 0xE8)
+		const std::array anchors{
+			CallSiteAnchor{ "AddLODWater AddWater", RE::ID::TESWaterSystem::AddLODWater,
+				{ 0xC8, 0x139, 0x139 }, RE::ID::TESWaterSystem::AddWater },
+			CallSiteAnchor{ "AddLODWater alternate AddWater", RE::ID::TESWaterSystem::AddLODWater,
+				{ 0x106, 0, 0 }, RE::ID::TESWaterSystem::AddWater }
+		};
+		std::vector<std::uintptr_t> sites;
+		for (std::size_t i = 0; i < (REX::FModule::IsRuntimeOG() ? 2u : 1u); ++i) {
+			const auto site = ResolveCallSite(anchors[i]);
+			if (!site) {
+				cs::log::Get("cs.render.terrainwater")->error("{}", site.error());
 				return false;
+			}
+			sites.push_back(*site);
+		}
 		for (const auto site : sites)
 			stl::write_thunk_call<LODWaterAddWater>(site);
 		return true;
@@ -188,9 +197,9 @@ namespace cs::engine::water
 				return false;
 		for (std::size_t i = 0; i < addresses.size(); ++i) {
 			constexpr std::uint8_t patch[]{ 0x90, 0xE9 };
-			if (!REL::WriteSafe(addresses[i], patch, sizeof(patch))) {
+			if (!WriteVerifiedPatch(addresses[i], patch)) {
 				for (std::size_t j = 0; j <= i; ++j)
-					REL::WriteSafe(addresses[j], expected[j].data(), sizeof(patch));
+					(void)WriteVerifiedPatch(addresses[j], std::span(expected[j]).first(sizeof(patch)));
 				return false;
 			}
 		}

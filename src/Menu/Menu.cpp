@@ -4,8 +4,10 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Section.h"
+#include "Menu/SettingsLayout.h"
 #include "Plugin.h"
 #include "Render/Engine.h"
+#include "Render/FrameAnnotations.h"
 #include "Render/ShaderCacheClear.h"
 #include "Render/ShaderInjection.h"
 #include "RenderDoc.h"
@@ -130,6 +132,41 @@ namespace
 
 namespace cs
 {
+	void Menu::StartupLoadSnapshot::Capture(const toml::table& a_root)
+	{
+		_loads.clear();
+		if (const auto* features = a_root["features"].as_table()) {
+			for (const auto& [key, node] : *features) {
+				if (const auto* feature = node.as_table())
+					_loads.emplace(std::string(key.str()), (*feature)["load"].value_or(false));
+			}
+		}
+	}
+
+	bool Menu::StartupLoadSnapshot::RequiresRestart(
+		std::string_view a_key, bool a_requested) const
+	{
+		const auto found = _loads.find(std::string(a_key));
+		const bool atStartup = found != _loads.end() && found->second;
+		return a_requested != atStartup;
+	}
+
+	bool Menu::ShouldImportImage(
+		bool a_hasHandle,
+		ImageImportFailure a_previousFailure,
+		bool a_sourceChanged,
+		bool a_querySucceeded,
+		bool a_imageReady,
+		bool a_retryDue) noexcept
+	{
+		return a_sourceChanged ||
+		       (a_hasHandle && (!a_querySucceeded || !a_imageReady)) ||
+		       (!a_hasHandle &&
+				   (a_previousFailure == ImageImportFailure::kNone ||
+					   (a_previousFailure == ImageImportFailure::kTransient &&
+						   a_retryDue)));
+	}
+
 	Menu::Menu()
 	{
 		// The client must outlive the menu's owned dialog session.
@@ -334,7 +371,7 @@ namespace cs
 				cached.loggedFailure.reset();
 			}
 		}
-		if (host::ShouldImportImage(
+		if (ShouldImportImage(
 				static_cast<bool>(cached.image.Handle()),
 				cached.importFailure,
 				sourceChanged,
@@ -356,8 +393,8 @@ namespace cs
 				cached.importFailure =
 					result == DMUI_RESULT_UNSUPPORTED_RESOURCE ||
 							result == DMUI_RESULT_INVALID_ARGUMENT ?
-						host::ImageImportFailure::kPermanent :
-						host::ImageImportFailure::kTransient;
+						ImageImportFailure::kPermanent :
+						ImageImportFailure::kTransient;
 				cached.retryAfterFrame = _hostFrameSerial + kImageRetryFrames;
 				if (!cached.loggedFailure || *cached.loggedFailure != result) {
 					D3D11_SHADER_RESOURCE_VIEW_DESC descriptor{};
@@ -387,7 +424,7 @@ namespace cs
 			cached.generation = _debugImageGeneration;
 			cached.image = std::move(*imported);
 		}
-		if (cached.importFailure != host::ImageImportFailure::kNone) {
+		if (cached.importFailure != ImageImportFailure::kNone) {
 			dmui::ui::TextDisabled(
 				"Preview unavailable. See FO4CommunityShaders.log.");
 			return;
@@ -480,75 +517,56 @@ namespace cs
 				a_client.DrawSectionHeader("Feature status"),
 				"draw feature status section"))
 			return;
-		dmui::SettingsTableScope table{ a_client, "home-feature-status" };
-		if (table.Result() != DMUI_RESULT_OK) {
-			CheckHostResult(a_client, false, "begin feature status table");
-			return;
-		}
-		if (!table.Visible())
-			return;
-		for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
-			if (!feature || !feature->IsInMenu())
-				continue;
-			const auto& state = feature->GetState();
-			const char* status = "Not loaded";
-			DMUI_StatusSeverity severity = DMUI_STATUS_SEVERITY_INFO;
-			switch (state.runtimeState) {
-			case FeatureRuntimeState::kActive:
-				status = "Loaded";
-				severity = DMUI_STATUS_SEVERITY_SUCCESS;
-				break;
-			case FeatureRuntimeState::kDegraded:
-				status = "Unavailable";
-				severity = DMUI_STATUS_SEVERITY_WARNING;
-				break;
-			case FeatureRuntimeState::kFailed:
-				status = "Failed";
-				severity = DMUI_STATUS_SEVERITY_ERROR;
-				break;
-			default:
-				break;
+		(void)CheckHostResult(a_client, ui::DrawTable(a_client, "home-feature-status", [&] {
+			for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
+				if (!feature || !feature->IsInMenu())
+					continue;
+				const auto& state = feature->GetState();
+				const char* status = "Not loaded";
+				DMUI_StatusSeverity severity = DMUI_STATUS_SEVERITY_INFO;
+				switch (state.runtimeState) {
+				case FeatureRuntimeState::kActive:
+					status = "Loaded";
+					severity = DMUI_STATUS_SEVERITY_SUCCESS;
+					break;
+				case FeatureRuntimeState::kDegraded:
+					status = "Unavailable";
+					severity = DMUI_STATUS_SEVERITY_WARNING;
+					break;
+				case FeatureRuntimeState::kFailed:
+					status = "Failed";
+					severity = DMUI_STATUS_SEVERITY_ERROR;
+					break;
+				default:
+					break;
+				}
+				const auto id = std::format("feature-status-{}", feature->GetName());
+				const auto label = std::string(feature->GetDisplayName());
+				if (!ui::DrawRow(a_client, id.c_str(), label.c_str(), "", [&](auto&) {
+						if (!CheckHostResult(
+								a_client,
+								dmui::DrawStyledText(
+									a_client,
+									status,
+									{ .tone = StatusTone(severity) }),
+								"draw feature status"))
+							return false;
+						if (!state.detail.empty() &&
+							!CheckHostResult(
+								a_client,
+								dmui::DrawStyledText(
+									a_client,
+									state.detail,
+									{ .wrapped = true }),
+								"draw feature status detail"))
+							return false;
+						return true;
+					}))
+					return false;
 			}
-			const auto id = std::format("feature-status-{}", feature->GetName());
-			const auto label = std::string(feature->GetDisplayName());
-			dmui::SettingsRowScope row{
-				a_client,
-				id.c_str(),
-				label.c_str(),
-				""
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin feature status row");
-				return;
-			}
-			if (row.Visible()) {
-				if (!CheckHostResult(
-						a_client,
-						dmui::DrawStyledText(
-							a_client,
-							status,
-							{ .tone = StatusTone(severity) }),
-						"draw feature status"))
-					return;
-				if (!state.detail.empty() &&
-					!CheckHostResult(
-						a_client,
-						dmui::DrawStyledText(
-							a_client,
-							state.detail,
-							{ .wrapped = true }),
-						"draw feature status detail"))
-					return;
-			}
-			if (!row.End()) {
-				CheckHostResult(a_client, false, "end feature status row");
-				return;
-			}
-		}
-		(void)CheckHostResult(
-			a_client,
-			table.End(),
-			"end feature status table");
+			return true;
+		}),
+			"draw feature status table");
 	}
 
 	void Menu::DrawShaderSettings(dmui::Client& a_client)
@@ -561,85 +579,30 @@ namespace cs
 				"draw shader ownership section"))
 			return;
 		{
-			dmui::SettingsTableScope table{ a_client, "advanced-shader-ownership" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin shader ownership table");
-				return;
-			}
-			if (table.Visible()) {
-				{
-					dmui::SettingsRowScope status{
-						a_client,
-						"shader-ownership-status",
-						"Use Custom Shaders",
-						""
-					};
-					if (status.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin shader ownership status row");
-						return;
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-ownership", [&] {
+					{
+						if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
+								if (dmui::ui::Checkbox("##enable-shaders", &ownership.config.enableShaders))
+									SaveShaderOwnership(ownership.config);
+								return true;
+							}))
+							return false;
 					}
-					if (status.Visible()) {
-						if (dmui::ui::Checkbox("##enable-shaders", &ownership.config.enableShaders))
-							SaveShaderOwnership(ownership.config);
-					}
-					if (!status.End()) {
-						CheckHostResult(a_client, false, "end shader ownership status row");
-						return;
-					}
-				}
 
-				for (const auto& target : engine::GetShaderInjectionTargets()) {
-					dmui::SettingsRowScope row{
-						a_client,
-						target.name.data(),
-						target.label.data(),
-						""
-					};
-					if (row.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin shader ownership target row");
-						return;
+					for (const auto& target : engine::GetShaderInjectionTargets()) {
+						if (!ui::DrawRow(a_client, target.name.data(), target.label.data(), "", [&](auto&) {
+								if (dmui::ui::Checkbox("##enabled", &ownership.config.targets[target.id]))
+									SaveShaderOwnership(ownership.config);
+								return true;
+							}))
+							return false;
 					}
-					if (row.Visible()) {
-						if (dmui::ui::Checkbox("##enabled", &ownership.config.targets[target.id]))
-							SaveShaderOwnership(ownership.config);
+					if (!ownership.valid) {
+						return ui::DrawRow(a_client, "shader-ownership-error", "Configuration error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, ownership.error, { .tone = dmui::TextTone::kStatusError }); });
 					}
-					if (!row.End()) {
-						CheckHostResult(a_client, false, "end shader ownership target row");
-						return;
-					}
-				}
-				if (!ownership.valid) {
-					dmui::SettingsRowScope error{
-						a_client,
-						"shader-ownership-error",
-						"Configuration error",
-						"",
-						dmui::RowPresentation::Layout::kFullSpan
-					};
-					if (error.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin shader ownership error row");
-						return;
-					}
-					if (error.Visible()) {
-						if (!CheckHostResult(
-								a_client,
-								dmui::DrawStyledText(
-									a_client,
-									ownership.error,
-									{ .tone = dmui::TextTone::kStatusError }),
-								"draw shader ownership error"))
-							return;
-					}
-					if (!error.End()) {
-						CheckHostResult(a_client, false, "end shader ownership error row");
-						return;
-					}
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end shader ownership table"))
+					return true;
+				}),
+					"draw shader ownership table"))
 				return;
 		}
 
@@ -649,67 +612,33 @@ namespace cs
 				"draw shader cache section"))
 			return;
 		{
-			dmui::SettingsTableScope table{ a_client, "advanced-shader-cache" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin shader cache table");
-				return;
-			}
-			if (table.Visible()) {
-				const auto cacheRoot = shader_cache::DefaultCacheRoot();
-				{
-					dmui::SettingsRowScope location{
-						a_client,
-						"shader-cache-location",
-						"Cache directory",
-						""
-					};
-					if (location.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin shader cache location row");
-						return;
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-cache", [&] {
+					const auto cacheRoot = shader_cache::DefaultCacheRoot();
+					{
+						if (!ui::DrawRow(a_client, "shader-cache-location", "Cache directory", "", [&](auto&) {
+								return dmui::DrawStyledText(
+									a_client,
+									cacheRoot.string(),
+									{ .wrapped = true });
+							}))
+							return false;
 					}
-					if (location.Visible() &&
-						!CheckHostResult(
-							a_client,
-							dmui::DrawStyledText(
-								a_client,
-								cacheRoot.string(),
-								{ .wrapped = true }),
-							"draw shader cache location"))
-						return;
-					if (!location.End()) {
-						CheckHostResult(a_client, false, "end shader cache location row");
-						return;
-					}
-				}
 
-				dmui::SettingsRowScope open{
-					a_client,
-					"open-shader-cache",
-					"Open cache folder",
-					"Under MO2 this may be in Overwrite."
-				};
-				if (open.Result() != DMUI_RESULT_OK) {
-					CheckHostResult(a_client, false, "begin open shader cache row");
-					return;
-				}
-				if (open.Visible() && dmui::ui::Button("Open")) {
-					const auto identity = cacheRoot / shader_cache::kIdentityFileName;
-					std::error_code error;
-					if (!std::filesystem::exists(identity, error) && !error) {
-						ShowToast("The shader cache is not initialized. Restart to initialize it.", 4.0);
-					} else {
-						OpenFileLocation(a_client, identity);
-					}
-				}
-				if (!open.End()) {
-					CheckHostResult(a_client, false, "end open shader cache row");
-					return;
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end shader cache table"))
+					return ui::DrawRow(a_client, "open-shader-cache", "Open cache folder",
+						"Under MO2 this may be in Overwrite.", [&](auto&) {
+							if (dmui::ui::Button("Open")) {
+								const auto identity = cacheRoot / shader_cache::kIdentityFileName;
+								std::error_code error;
+								if (!std::filesystem::exists(identity, error) && !error) {
+									ShowToast("The shader cache is not initialized. Restart to initialize it.", 4.0);
+								} else {
+									OpenFileLocation(a_client, identity);
+								}
+							}
+							return true;
+						});
+				}),
+					"draw shader cache table"))
 				return;
 		}
 	}
@@ -722,34 +651,15 @@ namespace cs
 				"draw configuration section"))
 			return;
 		{
-			dmui::SettingsTableScope table{ a_client, "advanced-configuration" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin configuration table");
-				return;
-			}
-			if (table.Visible()) {
-				dmui::SettingsRowScope folder{
-					a_client,
-					"open-configuration-folder",
-					"Configuration file location",
-					""
-				};
-				if (folder.Result() != DMUI_RESULT_OK) {
-					CheckHostResult(a_client, false, "begin configuration folder row");
-					return;
-				}
-				if (folder.Visible() && dmui::ui::Button("Open")) {
-					OpenFileLocation(a_client, feature_config::kConfigPath);
-				}
-				if (!folder.End()) {
-					CheckHostResult(a_client, false, "end configuration folder row");
-					return;
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end configuration table"))
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-configuration", [&] {
+					return ui::DrawRow(a_client, "open-configuration-folder", "Configuration file location", "", [&](auto&) {
+						if (dmui::ui::Button("Open")) {
+							OpenFileLocation(a_client, feature_config::kConfigPath);
+						}
+						return true;
+					});
+				}),
+					"draw configuration table"))
 				return;
 		}
 
@@ -761,74 +671,48 @@ namespace cs
 		{
 			dmui::ui::TextWrapped(
 				"Changes require a restart.");
-			dmui::SettingsTableScope table{ a_client, "advanced-startup-loading" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin startup loading table");
-				return;
-			}
-			if (table.Visible()) {
-				auto features = FeatureManager::Get().GetRegisteredFeatures();
-				std::ranges::sort(
-					features,
-					{},
-					[](const Feature* a_feature) {
-						return a_feature->GetDisplayName();
-					});
-				for (auto* feature : features) {
-					if (!feature || !feature->IsInMenu())
-						continue;
-					const auto featureConfig =
-						feature_config::GetFeature(feature->GetConfigKey());
-					bool loadAtBoot = featureConfig &&
-					                  featureConfig->get("load") &&
-					                  featureConfig->get("load")->value_or(false);
-					const auto id =
-						std::format("load-on-startup-{}", feature->GetName());
-					const auto label = std::string(feature->GetDisplayName());
-					dmui::SettingsRowScope row{
-						a_client,
-						id.c_str(),
-						label.c_str(),
-						""
-					};
-					if (row.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin startup loading row");
-						return;
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-startup-loading", [&] {
+					auto features = FeatureManager::Get().GetRegisteredFeatures();
+					std::ranges::sort(
+						features,
+						{},
+						[](const Feature* a_feature) {
+							return a_feature->GetDisplayName();
+						});
+					for (auto* feature : features) {
+						if (!feature || !feature->IsInMenu())
+							continue;
+						const auto featureConfig =
+							feature_config::GetFeature(feature->GetConfigKey());
+						bool loadAtBoot = featureConfig &&
+					                      featureConfig->get("load") &&
+					                      featureConfig->get("load")->value_or(false);
+						const auto id =
+							std::format("load-on-startup-{}", feature->GetName());
+						const auto label = std::string(feature->GetDisplayName());
+						if (!ui::DrawRow(a_client, id.c_str(), label.c_str(), "", [&](auto&) {
+								if (dmui::ui::Checkbox("##load", &loadAtBoot)) {
+									const auto result = feature_config::UpdateFeatureLoad(
+										feature->GetConfigKey(), loadAtBoot);
+									if (!result) {
+										L->warn(
+											"Failed to save boot state for {}: {}",
+											feature->GetName(),
+											result.error);
+									}
+								}
+								if (_startupLoads.RequiresRestart(feature->GetConfigKey(), loadAtBoot)) {
+									dmui::ui::SameLine();
+									if (!DrawRestartRequired(a_client, "draw startup restart status"))
+										return false;
+								}
+								return true;
+							}))
+							return false;
 					}
-					if (row.Visible() &&
-						dmui::ui::Checkbox("##load", &loadAtBoot)) {
-						const auto result = feature_config::UpdateFeatureLoad(
-							feature->GetConfigKey(), loadAtBoot);
-						if (!result) {
-							L->warn(
-								"Failed to save boot state for {}: {}",
-								feature->GetName(),
-								result.error);
-						}
-					}
-					if (row.Visible() &&
-						_startupLoads.RequiresRestart(feature->GetConfigKey(), loadAtBoot)) {
-						dmui::ui::SameLine();
-						if (!CheckHostResult(
-								a_client,
-								dmui::DrawStyledText(
-									a_client,
-									"Restart required",
-									{ .tone =
-											dmui::TextTone::kStatusWarning }),
-								"draw startup restart status"))
-							return;
-					}
-					if (!row.End()) {
-						CheckHostResult(a_client, false, "end startup loading row");
-						return;
-					}
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end startup loading table"))
+					return true;
+				}),
+					"draw startup loading table"))
 				return;
 		}
 
@@ -840,44 +724,23 @@ namespace cs
 				"draw logging section"))
 			return;
 		{
-			dmui::SettingsTableScope table{ a_client, "advanced-logging" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin global logging table");
-				return;
-			}
-			if (table.Visible()) {
-				dmui::SettingsRowScope global{
-					a_client,
-					"global-log-level",
-					"Global level",
-					""
-				};
-				if (global.Result() != DMUI_RESULT_OK) {
-					CheckHostResult(a_client, false, "begin global logging row");
-					return;
-				}
-				if (global.Visible()) {
-					const auto selected =
-						dmui::DrawChoice<spdlog::level::level_enum>(
-							"global-log-level-choice",
-							log::GlobalLevel(),
-							std::span<const dmui::ChoiceOption<
-								spdlog::level::level_enum>>{
-								kLogLevelOptions });
-					if (selected.changed) {
-						log::SetGlobalLevel(*selected.selected);
-						(void)log::SaveConfigToToml();
-					}
-				}
-				if (!global.End()) {
-					CheckHostResult(a_client, false, "end global logging row");
-					return;
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end global logging table"))
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-logging", [&] {
+					return ui::DrawRow(a_client, "global-log-level", "Global level", "", [&](auto&) {
+						const auto selected =
+							dmui::DrawChoice<spdlog::level::level_enum>(
+								"global-log-level-choice",
+								log::GlobalLevel(),
+								std::span<const dmui::ChoiceOption<
+									spdlog::level::level_enum>>{
+									kLogLevelOptions });
+						if (selected.changed) {
+							log::SetGlobalLevel(*selected.selected);
+							(void)log::SaveConfigToToml();
+						}
+						return true;
+					});
+				}),
+					"draw global logging table"))
 				return;
 		}
 
@@ -890,52 +753,33 @@ namespace cs
 			return;
 		}
 		{
-			dmui::SettingsTableScope table{ a_client, "advanced-log-channels" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin log channels table");
-				return;
-			}
-			if (table.Visible()) {
-				for (const auto& name : log::ListLoggers()) {
-					if (!dmui::ContainsFolded(name, loggerSearch))
-						continue;
-					auto* logger = log::Get(name.c_str());
-					const auto current =
-						logger ? logger->level() : log::GlobalLevel();
-					const auto id = "log-channel-" + name;
-					dmui::SettingsRowScope row{
-						a_client,
-						id.c_str(),
-						name.c_str(),
-						""
-					};
-					if (row.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin log channel row");
-						return;
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-log-channels", [&] {
+					for (const auto& name : log::ListLoggers()) {
+						if (!dmui::ContainsFolded(name, loggerSearch))
+							continue;
+						auto* logger = log::Get(name.c_str());
+						const auto current =
+							logger ? logger->level() : log::GlobalLevel();
+						const auto id = "log-channel-" + name;
+						if (!ui::DrawRow(a_client, id.c_str(), name.c_str(), "", [&](auto&) {
+								const auto selected =
+									dmui::DrawChoice<spdlog::level::level_enum>(
+										"log-channel-level-choice",
+										current,
+										std::span<const dmui::ChoiceOption<
+											spdlog::level::level_enum>>{
+											kLogLevelOptions });
+								if (selected.changed) {
+									log::SetLevel(name.c_str(), *selected.selected);
+									(void)log::SaveConfigToToml();
+								}
+								return true;
+							}))
+							return false;
 					}
-					if (row.Visible()) {
-						const auto selected =
-							dmui::DrawChoice<spdlog::level::level_enum>(
-								"log-channel-level-choice",
-								current,
-								std::span<const dmui::ChoiceOption<
-									spdlog::level::level_enum>>{
-									kLogLevelOptions });
-						if (selected.changed) {
-							log::SetLevel(name.c_str(), *selected.selected);
-							(void)log::SaveConfigToToml();
-						}
-					}
-					if (!row.End()) {
-						CheckHostResult(a_client, false, "end log channel row");
-						return;
-					}
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end log channels table"))
+					return true;
+				}),
+					"draw log channels table"))
 				return;
 		}
 
@@ -945,56 +789,25 @@ namespace cs
 				"draw telemetry section"))
 			return;
 		{
-			dmui::SettingsTableScope table{ a_client, "advanced-telemetry" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin telemetry table");
-				return;
-			}
-			if (table.Visible()) {
-				{
-					dmui::SettingsRowScope enabledRow{
-						a_client,
-						"telemetry-enabled",
-						"Emit telemetry",
-						""
-					};
-					if (enabledRow.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin telemetry enabled row");
-						return;
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-telemetry", [&] {
+					{
+						if (!ui::DrawRow(a_client, "telemetry-enabled", "Emit telemetry", "", [&](auto&) {
+								bool enabled = telemetry::pump::Enabled();
+								if (dmui::ui::Checkbox("##enabled", &enabled)) {
+									telemetry::pump::SetEnabled(enabled);
+									(void)log::SaveConfigToToml();
+								}
+								return true;
+							}))
+							return false;
 					}
-					if (enabledRow.Visible()) {
-						bool enabled = telemetry::pump::Enabled();
-						if (dmui::ui::Checkbox("##enabled", &enabled)) {
-							telemetry::pump::SetEnabled(enabled);
-							(void)log::SaveConfigToToml();
-						}
-					}
-					if (!enabledRow.End()) {
-						CheckHostResult(a_client, false, "end telemetry enabled row");
-						return;
-					}
-				}
-				dmui::SettingsRowScope dump{
-					a_client,
-					"telemetry-dump",
-					"Dump now",
-					""
-				};
-				if (dump.Result() != DMUI_RESULT_OK) {
-					CheckHostResult(a_client, false, "begin telemetry dump row");
-					return;
-				}
-				if (dump.Visible() && dmui::ui::Button("Dump"))
-					telemetry::pump::RequestDump();
-				if (!dump.End()) {
-					CheckHostResult(a_client, false, "end telemetry dump row");
-					return;
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end telemetry table"))
+					return ui::DrawRow(a_client, "telemetry-dump", "Dump now", "", [&](auto&) {
+						if (dmui::ui::Button("Dump"))
+							telemetry::pump::RequestDump();
+						return true;
+					});
+				}),
+					"draw telemetry table"))
 				return;
 		}
 
@@ -1004,48 +817,40 @@ namespace cs
 				"draw diagnostics section"))
 			return;
 		{
-			dmui::SettingsTableScope table{ a_client, "advanced-diagnostics" };
-			if (table.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin diagnostics table");
-				return;
-			}
-			if (table.Visible()) {
-				const std::array values{
-					std::pair{ "Plugin version", Plugin::VERSION.string(".") },
-					std::pair{ "Build", std::string(CS_BUILD_DESCRIBE) },
-					std::pair{ "GPU adapter", util::AdapterDescription(engine::GetDevice()) }
-				};
-				for (std::size_t index = 0; index < values.size(); ++index) {
-					const auto id = std::format("diagnostic-{}", index);
-					dmui::SettingsRowScope row{
-						a_client,
-						id.c_str(),
-						values[index].first,
-						""
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-diagnostics", [&] {
+					{
+						if (!ui::DrawRow(a_client, "frame-annotations", "Frame annotations",
+								"Names engine passes and draws in GPU captures such as RenderDoc. Adds CPU cost.", [&](auto&) {
+									bool requested = render::frame_annotations::Requested();
+									if (dmui::ui::Checkbox("##frame-annotations", &requested))
+										(void)render::frame_annotations::SetRequested(requested);
+									if (render::frame_annotations::Requested() != render::frame_annotations::Installed()) {
+										dmui::ui::SameLine();
+										if (!DrawRestartRequired(a_client, "draw frame annotations restart status"))
+											return false;
+									}
+									return true;
+								}))
+							return false;
+					}
+					const std::array values{
+						std::pair{ "Plugin version", Plugin::VERSION.string(".") },
+						std::pair{ "Build", std::string(CS_BUILD_DESCRIBE) },
+						std::pair{ "GPU adapter", util::AdapterDescription(engine::GetDevice()) }
 					};
-					if (row.Result() != DMUI_RESULT_OK) {
-						CheckHostResult(a_client, false, "begin diagnostic row");
-						return;
+					for (std::size_t index = 0; index < values.size(); ++index) {
+						const auto id = std::format("diagnostic-{}", index);
+						if (!ui::DrawRow(a_client, id.c_str(), values[index].first, "", [&](auto&) {
+								return dmui::DrawStyledText(
+									a_client,
+									values[index].second,
+									{ .wrapped = true });
+							}))
+							return false;
 					}
-					if (row.Visible() &&
-						!CheckHostResult(
-							a_client,
-							dmui::DrawStyledText(
-								a_client,
-								values[index].second,
-								{ .wrapped = true }),
-							"draw diagnostic value"))
-						return;
-					if (!row.End()) {
-						CheckHostResult(a_client, false, "end diagnostic row");
-						return;
-					}
-				}
-			}
-			if (!CheckHostResult(
-					a_client,
-					table.End(),
-					"end diagnostics table"))
+					return true;
+				}),
+					"draw diagnostics table"))
 				return;
 		}
 	}
@@ -1057,124 +862,50 @@ namespace cs
 		if (presets.pendingComboIdentity.empty() && !list.empty())
 			presets.pendingComboIdentity = list.front().identity;
 
-		const auto* pending = presets.FindByIdentity(presets.pendingComboIdentity);
-		const auto* active = presets.FindByIdentity(presets.activeIdentity);
-		dmui::SettingsTableScope table{ a_client, "presets" };
-		if (table.Result() != DMUI_RESULT_OK) {
-			CheckHostResult(a_client, false, "begin presets table");
-			return;
-		}
-		if (!table.Visible())
-			return;
-		{
-			dmui::SettingsRowScope row{
-				a_client,
-				"active-preset",
-				"Active preset",
-				""
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin active preset row");
-				return;
-			}
-			if (row.Visible()) {
-				if (!CheckHostResult(
-						a_client,
-						dmui::DrawStyledText(
+		(void)CheckHostResult(a_client, ui::DrawTable(a_client, "presets", [&] {
+			{
+				if (!ui::DrawRow(a_client, "active-preset", "Active preset", "", [&](auto&) {
+						return dmui::DrawStyledText(
 							a_client,
 							presets.activeName.empty() ?
 								"(none)" :
-								presets.activeName),
-						"draw active preset"))
-					return;
+								presets.activeName);
+					}))
+					return false;
 			}
-			if (!row.End()) {
-				CheckHostResult(a_client, false, "end active preset row");
-				return;
+			if (!presets.lastError.empty()) {
+				if (!ui::DrawRow(a_client, "preset-error", "Preset error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, presets.lastError, { .tone = dmui::TextTone::kStatusError }); }))
+					return false;
 			}
-		}
-		if (!presets.lastError.empty()) {
-			dmui::SettingsRowScope row{
-				a_client,
-				"preset-error",
-				"Preset error",
-				"",
-				dmui::RowPresentation::Layout::kFullSpan
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin preset error row");
-				return;
-			}
-			if (row.Visible()) {
-				if (!CheckHostResult(
-						a_client,
-						dmui::DrawStyledText(
-							a_client,
-							presets.lastError,
-							{ .tone = dmui::TextTone::kStatusError }),
-						"draw preset error"))
-					return;
-			}
-			if (!row.End()) {
-				CheckHostResult(a_client, false, "end preset error row");
-				return;
-			}
-		}
 
-		{
-			dmui::SettingsRowScope row{
-				a_client,
-				"preset-selection",
-				"Preset",
-				""
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin preset selection row");
-				return;
+			{
+				if (!ui::DrawRow(a_client, "preset-selection", "Preset", "", [&](auto&) {
+						std::vector<dmui::ChoiceOption<std::string>> options;
+						options.reserve(list.size());
+						for (const auto& preset : list) {
+							options.push_back({ preset.identity,
+								std::format(
+									"{}: {}",
+									preset.builtin ? "B" : "U",
+									preset.name),
+								preset.identity });
+						}
+						const auto selection = dmui::DrawChoice<std::string>(
+							"preset-selection-choice",
+							presets.pendingComboIdentity,
+							std::span<const dmui::ChoiceOption<std::string>>{
+								options },
+							"(no presets found)");
+						if (selection.changed)
+							presets.pendingComboIdentity = *selection.selected;
+						return true;
+					}))
+					return false;
 			}
-			if (row.Visible()) {
-				std::vector<dmui::ChoiceOption<std::string>> options;
-				options.reserve(list.size());
-				for (const auto& preset : list) {
-					options.push_back({ preset.identity,
-						std::format(
-							"{}: {}",
-							preset.builtin ? "B" : "U",
-							preset.name),
-						preset.identity });
-				}
-				const auto selection = dmui::DrawChoice<std::string>(
-					"preset-selection-choice",
-					presets.pendingComboIdentity,
-					std::span<const dmui::ChoiceOption<std::string>>{
-						options },
-					"(no presets found)");
-				if (selection.changed)
-					presets.pendingComboIdentity = *selection.selected;
-			}
-			if (!row.End()) {
-				CheckHostResult(a_client, false, "end preset selection row");
-				return;
-			}
-		}
 
-		pending = presets.FindByIdentity(presets.pendingComboIdentity);
-		active = presets.FindByIdentity(presets.activeIdentity);
-		dmui::SettingsRowScope actions{
-			a_client,
-			"preset-actions",
-			"",
-			"",
-			dmui::RowPresentation::Layout::kFullSpan
-		};
-		if (actions.Result() != DMUI_RESULT_OK) {
-			CheckHostResult(a_client, false, "begin preset actions row");
-			return;
-		}
-		if (!actions.Visible()) {
-			(void)CheckHostResult(a_client, table.End(), "end presets table");
-			return;
-		}
+			const auto* pending = presets.FindByIdentity(presets.pendingComboIdentity);
+			const auto* active = presets.FindByIdentity(presets.activeIdentity);
+			if (!ui::DrawRow(a_client, "preset-actions", "", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool {
 		{
 			const dmui::DisabledScope disabled{ !pending };
 			if (dmui::ui::Button("Load") && pending) {
@@ -1229,7 +960,7 @@ namespace cs
 				if (!manager.Save(path, name, error))
 					return error;
 				manager.Refresh();
-				if (const auto* saved = manager.FindByName(name, true)) {
+				if (const auto* saved = manager.FindByName(name)) {
 					manager.activeIdentity = saved->identity;
 					manager.activeName = saved->name;
 					manager.pendingComboIdentity = saved->identity;
@@ -1287,31 +1018,18 @@ namespace cs
 				presets.pendingComboIdentity.clear();
 			presets.lastError.clear();
 		}
-		if (!actions.End()) {
-			CheckHostResult(a_client, false, "end preset actions row");
-			return;
-		}
+			return true; }))
+				return false;
 
-		{
-			dmui::SettingsRowScope row{
-				a_client,
-				"preset-auto-load",
-				"Auto-load on boot",
-				""
-			};
-			if (row.Result() != DMUI_RESULT_OK) {
-				CheckHostResult(a_client, false, "begin preset auto-load row");
-				return;
+			{
+				return ui::DrawRow(a_client, "preset-auto-load", "Auto-load on boot", "", [&](auto&) {
+					if (dmui::ui::Checkbox("##auto-load", &presets.autoLoadOnBoot))
+						(void)presets.SaveCoreConfig();
+					return true;
+				});
 			}
-			if (row.Visible() &&
-				dmui::ui::Checkbox("##auto-load", &presets.autoLoadOnBoot))
-				(void)presets.SaveCoreConfig();
-			if (!row.End()) {
-				CheckHostResult(a_client, false, "end preset auto-load row");
-				return;
-			}
-		}
-		(void)CheckHostResult(a_client, table.End(), "end presets table");
+		}),
+			"draw presets table");
 	}
 
 	void Menu::ObserveHostFrame(dmui::Client& a_client)
@@ -1410,6 +1128,17 @@ namespace cs
 	void Menu::RequestClearRenderDocCaptures() noexcept
 	{
 		_clearRequested.store(ClearRequest::kClearRenderDocCaptures, std::memory_order_release);
+	}
+
+	bool Menu::DrawRestartRequired(dmui::Client& a_client, std::string_view a_operation)
+	{
+		return CheckHostResult(
+			a_client,
+			dmui::DrawStyledText(
+				a_client,
+				"Restart required",
+				{ .tone = dmui::TextTone::kStatusWarning }),
+			a_operation);
 	}
 
 	bool Menu::CheckHostResult(

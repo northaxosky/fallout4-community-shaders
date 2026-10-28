@@ -30,26 +30,6 @@ namespace cs::features::cs_editor
 			return range;
 		}
 
-		void WriteValue(toml::table& a_table, const std::string& a_key, const settings::Value& a_value)
-		{
-			std::visit([&](const auto& a_v) {
-				using T = std::remove_cvref_t<decltype(a_v)>;
-				if constexpr (std::same_as<T, settings::Float2> || std::same_as<T, settings::Float3> || std::same_as<T, settings::Color4>) {
-					toml::array array;
-					for (const auto component : a_v)
-						array.push_back(static_cast<double>(component));
-					a_table.insert_or_assign(a_key, std::move(array));
-				} else if constexpr (std::floating_point<T>) {
-					a_table.insert_or_assign(a_key, static_cast<double>(a_v));
-				} else if constexpr (std::same_as<T, std::uint64_t>) {
-					a_table.insert_or_assign(a_key, static_cast<std::int64_t>(a_v));
-				} else {
-					a_table.insert_or_assign(a_key, a_v);
-				}
-			},
-				a_value);
-		}
-
 		// The variable's widget; returns the edit and the possibly changed value.
 		ui::EditResult EditValue(const settings::FieldView& a_field, settings::Value& a_value)
 		{
@@ -145,7 +125,7 @@ namespace cs::features::cs_editor
 				const auto edit = EditValue(variable, value);
 				dmui::ui::EndDisabled();
 				if (active && (edit.changed || !profile.contains(variable.key))) {
-					WriteValue(profile, variable.key, value);
+					settings::WriteValue(profile, variable.key, value);
 					changed = true;
 				}
 				completed |= edit.completed;

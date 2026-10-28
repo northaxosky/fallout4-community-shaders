@@ -17,7 +17,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](xmake.lua)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
-<sub>[Install](#installation) · [Features](#features) · [Activation](#feature-activation) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
+<sub>[Install](#installation) · [Features](#features) · [Activation](#feature-activation) · [Shaders](#shader-compilation) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
 
 </div>
 
@@ -30,11 +30,11 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 
 | | |
 |---|---|
-| **Game** | Fallout 4 runtime **1.11.240**. |
+| **Game** | Fallout 4 runtime **1.11.240**. OG and NG code paths exist but are untested. |
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
-| **[DearModdingUI](https://github.com/Dear-Modding-FO4/DearModdingUI)** | Recommended. Provides the in-game menu and performance overlay. |
+| **[DearModdingUI](https://github.com/Dear-Modding-FO4/DearModdingUI)** | Recommended. Provides the in-game menu, performance overlay, and shader compilation window. Use DearModdingUI 2.2 or a later 2.x release; older 2.x releases lack the shader compilation window, and other versions are logged and ignored, leaving Community Shaders headless. |
 
 ---
 
@@ -57,20 +57,24 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 |---|---|
 | **Screen Space Shadows** | Contact shadows and finer shadow detail. |
 | **Terrain Shadows** | Long-range shadows from terrain. |
+| **Volumetric Shadows** | Blurred sun shadow maps that soften the sun's soft, rim, and back lighting and shadow the sun on water and effects. |
 | **Terrain Variation** | Stochastic terrain texture sampling to reduce tiling, including LOD terrain and landscape-textured meshes. |
 | **Terrain Blending** | Terrain blends into objects that sink into it, removing the hard seam. |
 | **Rain Refraction** | Rain drops reflect and refract the surrounding environment; requires Dynamic Cubemaps. |
+| **Extended Materials** | Parallax on objects and terrain, with sun parallax shadows; object parallax needs a height map in the specular texture's alpha. |
 | **LOD Blending** | LOD terrain and object brightness and gamma matching, optional terrain vertex-color removal. |
 | **Screen Space GI** | Ambient occlusion and indirect lighting. |
+| **Skylighting** | Scales ambient light and reflections by how much sky a surface can see. |
 | **Inverse Square Lighting** | Opt-in per-light falloff; requires [authored light TOML files](features/InverseSquareLighting/README.md). Existing lights stay unchanged. |
 | **Dynamic Cubemaps** | Reflections that respond to the surrounding scene. |
 | **Image Based Lighting** | Ambient light and fog tint from environment and sky cubemaps; requires Dynamic Cubemaps. |
-| **Water Effects** | Sunlight caustics on submerged surfaces. |
+| **Water Effects** | Water parallax and sunlight caustics on submerged surfaces. |
 | **Unified Water** | Distant water matches near water; placed water keeps vanilla distance rendering. |
 | **Motion Vector Fixes** | Motion-data corrections for temporal rendering. |
 | **Upscaling** | TAA, FSR 3/4, and DLSS. |
 | **Frame Generation** | FSR 3/4, DLSS, and supported Multi Frame Generation modes. |
-| **Performance Overlay** | FPS, frame-time, and latency graphs. |
+| **Performance Overlay** | FPS, frame-time, and latency graphs, plus per-feature GPU timings. |
+| **CS Editor** | Weather picker, weather lock, time controls, and per-weather feature overrides. |
 | **RenderDoc** | In-game frame capture for debugging. |
 | **Remote Control** | Drives Community Shaders from AI assistants and scripts through the [DevBench](https://github.com/northaxosky/bethesda-devbench) plugin. |
 
@@ -91,6 +95,14 @@ The menu writes only changed values. Reset restores each setting's commented def
 
 ---
 
+## Shader compilation
+
+Shaders compile at startup when they are not already cached, such as on first launch or after an update that changes them. When compilation takes over a second, Continue, Load, and New Game wait behind the main menu's loading spinner until it finishes, and DearModdingUI shows a progress window.
+
+Set `background_compilation = true` under `[shader_cache]` to play while shaders compile instead. It applies at the next launch, and shaders not yet compiled render as stock. Loads that bypass the main menu, such as the console `load` command or autoload mods, are never held and render stock shaders until compilation finishes.
+
+---
+
 ## In-game Menu
 
 Settings, feature toggles, and the performance overlay use [DearModdingUI](https://github.com/Dear-Modding-FO4/dearmoddingui). Without it, edit the TOML file instead.
@@ -106,7 +118,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 ## Compatibility notes
 
 - ENB is unsupported.
-- The standalone Motion Vector Fixes plugin is incompatible; CS disables itself while `MotionVectorFixes.dll` is installed.
+- The standalone Motion Vector Fixes (`MotionVectorFixes.dll`) and Dynamic Cubemaps F4 (`DynamicCubemapF4.dll`) plugins are incompatible; CS includes both, so remove them. While either is in `Data\F4SE\Plugins`, CS disables all hooks and features and shows a message at launch.
 - Native HDR mods (RenoDX, Special K HDR) are unsupported with Upscaling or Frame Generation and untested otherwise.
 - Linux/Proton needs a Windows 10 `d3dcompiler_47.dll` in the prefix's `system32` or next to `Fallout4.exe`; Proton's built-in compiler cannot build the shaders.
 - Upscaling requires a DX12-capable GPU. DLSS requires compatible NVIDIA RTX hardware.

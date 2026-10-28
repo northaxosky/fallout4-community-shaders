@@ -2,7 +2,6 @@
 
 #include "ExtendedMaterialsSettings.h"
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
@@ -33,7 +32,7 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		void Prepass() override;
 
-		cs::ExtendedMaterialsFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&) override;
 
 		using Settings = extended_materials::Settings;
 
@@ -42,7 +41,7 @@ namespace cs::features
 
 		bool SaveSettings() override;
 		[[nodiscard]] bool ShadowsActive() const noexcept;
-		void BindShadowTarget(ID3D11DeviceContext* a_context) const;
+		void BindShadowTarget(ID3D11DeviceContext* a_context);
 		void PublishShadows(ID3D11DeviceContext* a_context) const;
 
 		static constexpr std::uint32_t kParallaxShadowRTVSlot = 6;
@@ -55,5 +54,6 @@ namespace cs::features
 		// Render thread only: written by the prepass, read by DFLight's sun.
 		std::unique_ptr<cs::buffer::Texture2D> _shadowTexture;
 		bool _shadowFrameReady = false;
+		std::uint64_t _shadowTargetEpoch = UINT64_MAX;
 	};
 }

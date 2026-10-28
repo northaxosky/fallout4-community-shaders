@@ -72,7 +72,6 @@ namespace cs
 
 	struct FeatureState
 	{
-		bool installed{ false };
 		bool desiredActive{ false };
 		FeatureRuntimeState runtimeState{ FeatureRuntimeState::kPending };
 		std::string detail;

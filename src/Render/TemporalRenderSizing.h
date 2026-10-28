@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Render/Extent.h"
 #include "Render/TemporalProvider.h"
 
 #include <cmath>
@@ -8,14 +9,6 @@
 
 namespace cs::render::temporal
 {
-	struct RenderExtent
-	{
-		std::uint32_t width = 0;
-		std::uint32_t height = 0;
-
-		[[nodiscard]] bool operator==(const RenderExtent&) const noexcept = default;
-	};
-
 	[[nodiscard]] inline float RatioForExactExtent(
 		std::uint32_t a_renderExtent,
 		std::uint32_t a_outputExtent) noexcept
@@ -78,12 +71,12 @@ namespace cs::render::temporal
 			_committed = _requested;
 		}
 
-		[[nodiscard]] RenderExtent Requested() const noexcept
+		[[nodiscard]] Extent Requested() const noexcept
 		{
 			return _requested;
 		}
 
-		[[nodiscard]] RenderExtent Committed() const noexcept
+		[[nodiscard]] Extent Committed() const noexcept
 		{
 			return _committed;
 		}
@@ -99,8 +92,8 @@ namespace cs::render::temporal
 		}
 
 	private:
-		RenderExtent _output;
-		RenderExtent _requested;
-		RenderExtent _committed;
+		Extent _output;
+		Extent _requested;
+		Extent _committed;
 	};
 }

@@ -34,6 +34,17 @@ namespace cs::shader_cache
 		const std::filesystem::path& a_cacheRoot,
 		std::error_code& a_error);
 
+	struct CacheTrimResult
+	{
+		std::uint64_t records = 0;
+		std::uint64_t bytes = 0;
+		std::uint64_t trimmed = 0;
+	};
+
+	CacheTrimResult TrimCacheRecords(
+		const std::filesystem::path& a_cacheRoot,
+		std::uint64_t a_maxBytes) noexcept;
+
 	struct CacheIdentitySyncResult
 	{
 		bool firstRun = false;

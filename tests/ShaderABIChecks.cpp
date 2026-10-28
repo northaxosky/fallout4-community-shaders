@@ -57,7 +57,8 @@ namespace
 #define F(Field) ABI(T, Field)
 #define FIELDS(Type, ...) [] { using T = Type; return std::array{ __VA_ARGS__ }; }()
 		const auto grass = FIELDS(GrassLightingSettings, F(Glossiness), F(SpecularStrength), F(SubsurfaceScatteringAmount), F(OverrideComplexGrassSettings),
-			F(BasicGrassBrightness), F(ComplexGrassThreshold), F(MidLODBrightness), F(FarLODBrightness));
+			F(BasicGrassBrightness), F(ComplexGrassThreshold), F(MidLODBrightness), F(FarLODBrightness),
+			F(PBRWrappedLightingAmount), F(SubsurfaceBalance), F(CanopyOcclusion), F(ClumpShading));
 		const auto material = FIELDS(CPMSettings, F(EnableComplexMaterial), F(EnableParallax), F(EnableTerrainParallax), F(EnableHeightBlending),
 			F(EnableShadows), F(EnableParallaxWarpingFix), F(pad0));
 		const auto cube = FIELDS(CubemapCreatorSettings, F(Enabled), F(pad0), F(CubemapColor));
@@ -98,7 +99,7 @@ namespace
 			F(SkyScatteringSunIntensity), F(CloudsLightingSunIntensity), F(CloudsLightingMoonIntensity), F(EnableCloudsLightingFromMoon),
 			F(CalculateCloudsEdgeFromScattering), F(CloudsLightingDesaturation), F(CloudsLightingForwardScattering), F(CloudsLightingDensity),
 			F(CloudsColorFilter), F(CloudsIntensity), F(CloudsVertexAlphaBoost), F(CloudsEdgeClamp), F(CloudsEdgeFadePower), F(SunBillboardTan),
-			F(MasserBillboardTan), F(SecundaBillboardTan), F(SkyScatteringPad0), F(EnableWater), F(WaterWavesAmplitude), F(WaterMuddiness),
+			F(MasserBillboardTan), F(SecundaBillboardTan), F(SkyScaleMultiplier), F(SkyScatteringPad0), F(EnableWater), F(WaterWavesAmplitude), F(WaterMuddiness),
 			F(WaterSunLightingMultiplier), F(WaterSunSpecularMultiplier), F(WaterFresnelMin), F(WaterFresnelMax), F(WaterFresnelMultiplier),
 			F(WaterReflectionAmount), F(WaterPad0), F(WaterPad1), F(WaterPad2), F(StarsCurve), F(StarsIntensity), F(MoonCurve),
 			F(EnableAnimatedStars), F(StarsAnimationTime), F(StarsAnimationDensity), F(StarsAnimationIntensity), F(AuroraIntensity),
@@ -212,10 +213,12 @@ namespace
 			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams),
 			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, DynamicMaterialReflections),
-			ABI(FO4SharedDataCB, EnabledWaterParallax), ABI(FO4SharedDataCB, EnabledTerrainVariation),
+			ABI(FO4SharedDataCB, EnabledWaterEffects), ABI(FO4SharedDataCB, EnabledTerrainVariation),
 			ABI(FO4SharedDataCB, EnabledSkylighting), ABI(FO4SharedDataCB, EnabledScreenSpaceGI),
-			ABI(FO4SharedDataCB, EnabledUnifiedWater), ABI(FO4SharedDataCB, pad0),
-			ABI(FO4SharedDataCB, DirectionalAmbient)
+			ABI(FO4SharedDataCB, EnabledUnifiedWater), ABI(FO4SharedDataCB, EnabledScreenSpaceShadows),
+			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
+			ABI(FO4SharedDataCB, EnabledLODBlending), ABI(FO4SharedDataCB, EnabledInverseSquareLighting),
+			ABI(FO4SharedDataCB, pad0)
 		};
 		struct Buffer
 		{

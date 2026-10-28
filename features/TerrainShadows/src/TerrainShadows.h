@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Feature.h"
-#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "ShaderDefines.h"
 #include "TerrainShadowsMath.h"
@@ -59,7 +58,7 @@ namespace cs::features
 		void SetDebugView(std::string_view a_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
-		cs::TerrainShadowsFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&) override;
 		ID3D11ShaderResourceView* GetShadowHeightSRV() const;
 
 	private:
@@ -109,6 +108,8 @@ namespace cs::features
 
 		[[nodiscard]] terrain_shadows::BootstrapReadiness
 		GetBootstrapReadiness() const noexcept;
+		[[nodiscard]] bool IsShadowFieldReady() const noexcept;
+		[[nodiscard]] render::TerraOccSettings BuildActiveFeatureBlock() const noexcept;
 
 		void OnPostDeferredPrePass();
 		bool PollGameHourJump();

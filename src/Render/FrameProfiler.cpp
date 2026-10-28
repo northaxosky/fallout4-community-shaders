@@ -2,12 +2,13 @@
 
 #include "Log.h"
 #include "Render/Annotation.h"
+#include "Render/RenderHooks.h"
 #include "Shared/PerfUtils.h"
 
 #include <algorithm>
 #include <atomic>
 #include <map>
-#include <mutex>
+#include <utility>
 
 #ifdef TRACY_SUPPORT
 #	include <tracy/Tracy.hpp>
@@ -30,7 +31,6 @@ namespace cs::render::profiling
 #endif
 			}
 
-			std::mutex mutex;
 #ifdef TRACY_SUPPORT
 			TracyD3D11Ctx tracyContext{};
 #endif
@@ -41,6 +41,8 @@ namespace cs::render::profiling
 			bool enabled{};
 			bool queriesWanted{};
 			std::string activePass;
+			bool activeYields{};
+			std::string pausedPass;
 			std::map<int, ShaderTiming> shaderFrame;
 			std::vector<ShaderTiming> shaderTimings;
 			int shaderType = -1;
@@ -62,7 +64,6 @@ namespace cs::render::profiling
 		if (!a_device || !a_context)
 			return;
 		auto& state = State();
-		const std::scoped_lock lock{ state.mutex };
 		state.device = a_device;
 		state.context = a_context;
 #ifdef TRACY_SUPPORT
@@ -78,7 +79,6 @@ namespace cs::render::profiling
 		FrameMark;
 #endif
 		auto& state = State();
-		const std::scoped_lock lock{ state.mutex };
 #ifdef TRACY_SUPPORT
 		if (state.tracyContext)
 			TracyD3D11Collect(state.tracyContext);
@@ -88,6 +88,8 @@ namespace cs::render::profiling
 			state.profiler.EndPass();
 			state.activePass.clear();
 		}
+		state.activeYields = false;
+		state.pausedPass.clear();
 		state.profiler.EndFrame();
 		state.queriesWanted = a_telemetryEnabled || state.enabled;
 		if (state.queriesWanted && state.device && !state.initialized) {
@@ -102,13 +104,16 @@ namespace cs::render::profiling
 			state.initialized = false;
 		}
 		++state.sequence;
+		state.shaderType = -1;
+		// Per-shader timings are collected only while the overlay wants them.
+		if (!state.enabled)
+			return;
 		for (auto& timing : state.shaderTimings) {
 			const auto& sample = state.shaderFrame[timing.type];
 			timing.calls = timing.calls * 0.95f + sample.calls * 0.05f;
 			timing.milliseconds = timing.milliseconds * 0.95f + sample.milliseconds * 0.05f;
 		}
 		state.shaderFrame.clear();
-		state.shaderType = -1;
 		state.lastDraw = Util::GetNowSecs();
 	}
 
@@ -132,10 +137,26 @@ namespace cs::render::profiling
 	{
 		auto& state = State();
 		// FO4: annotation scopes can nest, but the shared profiler requires disjoint passes.
-		if (!state.queriesWanted || !state.initialized || !state.activePass.empty())
+		if (!state.queriesWanted || !state.initialized)
 			return false;
+		if (!state.activePass.empty()) {
+			if (!state.activeYields)
+				return false;
+			// An engine pass pauses so the nested CS pass is timed once, outside it.
+			state.profiler.EndPass();
+			state.pausedPass = std::move(state.activePass);
+			state.activeYields = false;
+		}
 		state.activePass = a_name;
 		state.profiler.BeginPass(state.activePass);
+		return true;
+	}
+
+	bool BeginEnginePass(std::string_view a_name)
+	{
+		if (!BeginPass(a_name))
+			return false;
+		State().activeYields = true;
 		return true;
 	}
 
@@ -146,6 +167,35 @@ namespace cs::render::profiling
 			return;
 		state.profiler.EndPass();
 		state.activePass.clear();
+		state.activeYields = false;
+		if (!state.pausedPass.empty()) {
+			state.activePass = std::move(state.pausedPass);
+			state.pausedPass.clear();
+			state.activeYields = true;
+			state.profiler.BeginPass(state.activePass);
+		}
+	}
+
+	bool InstallDeferredCompositePass()
+	{
+		// Stock composite only; feature callbacks stay outside the pass.
+		// Timestamp queries touch no bindings, so both hooks only observe.
+		static bool began = false;
+		static annotation::SpannedEvent event;
+		constexpr auto kPass = "DeferredComposite";
+		return engine::RegisterPostDeferredComposite(
+				   [] {
+					   event.End();
+					   if (std::exchange(began, false))
+						   EndPass();
+				   },
+				   engine::HookPriority::InnermostPost) &&
+		       engine::RegisterPreDeferredComposite(
+				   [] {
+					   began = BeginEnginePass(kPass);
+					   event.Begin(kPass, false);
+				   },
+				   engine::HookPriority::InnermostPre);
 	}
 
 	void SetShaderFamily(int a_type, std::string_view a_name)

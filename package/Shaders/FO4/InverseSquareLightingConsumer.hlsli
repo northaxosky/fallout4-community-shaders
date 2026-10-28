@@ -1,6 +1,8 @@
 #ifndef FO4_INVERSE_SQUARE_LIGHTING_CONSUMER_HLSLI
 #define FO4_INVERSE_SQUARE_LIGHTING_CONSUMER_HLSLI
 
+#include "FO4/FO4SharedData.hlsli"
+
 #include "Common/ColorManagement.hlsli"
 #include "LightLimitFix/Attenuation.hlsli"
 
@@ -20,6 +22,8 @@ namespace FO4InverseSquareLighting
 
 	float3 GetColor(float3 nativeColor, PerLightData data)
 	{
+		// FO4: the health-gated flag bypasses stale metadata after quarantine.
+		[branch] if (FO4SharedData::EnabledInverseSquareLighting == 0) return nativeColor;
 		if ((data.lightFlags & LightLimitFix::LightFlags::Disabled) != 0)
 			return 0.0;
 		if ((data.lightFlags & LightLimitFix::LightFlags::InverseSquare) == 0)
@@ -34,6 +38,7 @@ namespace FO4InverseSquareLighting
 
 	float GetAttenuation(PerLightData data, float distance, float nativeAttenuation)
 	{
+		[branch] if (FO4SharedData::EnabledInverseSquareLighting == 0) return nativeAttenuation;
 		if ((data.lightFlags & LightLimitFix::LightFlags::Disabled) != 0)
 			return 0.0;
 		// FO4: unflagged lights retain the native radial curve, not LLF's regular curve.

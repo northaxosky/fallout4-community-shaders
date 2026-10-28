@@ -43,27 +43,31 @@ namespace cs::settings
 			a_value);
 	}
 
+	void WriteValue(toml::table& a_table, std::string_view a_key, const Value& a_value)
+	{
+		std::visit([&](const auto& value) {
+			using T = std::remove_cvref_t<decltype(value)>;
+			if constexpr (std::same_as<T, Float2> || std::same_as<T, Float3> || std::same_as<T, Color4>) {
+				toml::array components;
+				for (float component : value)
+					components.push_back(static_cast<double>(component));
+				a_table.insert_or_assign(a_key, std::move(components));
+			} else if constexpr (std::same_as<T, float>) {
+				a_table.insert_or_assign(a_key, static_cast<double>(value));
+			} else if constexpr (std::same_as<T, std::uint64_t>) {
+				a_table.insert_or_assign(a_key, static_cast<std::int64_t>(value));
+			} else {
+				a_table.insert_or_assign(a_key, value);
+			}
+		},
+			a_value);
+	}
+
 	toml::table DefaultValues(const SchemaView& a_schema)
 	{
 		toml::table table;
-		for (const auto& field : a_schema) {
-			std::visit([&](const auto& value) {
-				using T = std::remove_cvref_t<decltype(value)>;
-				if constexpr (std::same_as<T, Float2> || std::same_as<T, Float3> || std::same_as<T, Color4>) {
-					toml::array components;
-					for (float component : value)
-						components.push_back(static_cast<double>(component));
-					table.insert_or_assign(field.key, std::move(components));
-				} else if constexpr (std::same_as<T, float>) {
-					table.insert_or_assign(field.key, static_cast<double>(value));
-				} else if constexpr (std::same_as<T, std::uint64_t>) {
-					table.insert_or_assign(field.key, static_cast<std::int64_t>(value));
-				} else {
-					table.insert_or_assign(field.key, value);
-				}
-			},
-				field.defaultValue);
-		}
+		for (const auto& field : a_schema)
+			WriteValue(table, field.key, field.defaultValue);
 		return table;
 	}
 }
@@ -326,16 +330,50 @@ namespace cs::feature_config
 
 	namespace
 	{
+		void CollectUnknownConfigurationWarnings(
+			const toml::table& a_table,
+			const settings::Registry& a_registry,
+			std::vector<std::string>& a_path,
+			std::vector<std::string>& a_warnings)
+		{
+			const auto* section = FindSection(a_registry, a_path);
+			if (section && section->openMap)
+				return;
+			for (const auto& [key, value] : a_table) {
+				if (section &&
+					std::ranges::find(section->fields, key.str(), &settings::FieldView::key) != section->fields.end())
+					continue;
+				a_path.emplace_back(key.str());
+				const bool knownSection = std::ranges::any_of(a_registry, [&](const auto& candidate) {
+					return candidate.path.size() >= a_path.size() &&
+					       std::equal(a_path.begin(), a_path.end(), candidate.path.begin());
+				});
+				if (!knownSection) {
+					a_warnings.push_back("Unknown configuration key or section '" + FormatPath(a_path) + "'; ignoring");
+				} else if (const auto* table = value.as_table()) {
+					CollectUnknownConfigurationWarnings(*table, a_registry, a_path, a_warnings);
+				} else {
+					a_warnings.push_back("Configuration section '" + FormatPath(a_path) + "' must be a table; using defaults");
+				}
+				a_path.pop_back();
+			}
+		}
+
 		// A reload keeps the stored settings when the read fails.
 		RefreshResult Install(const std::filesystem::path& a_path, settings::Registry a_registry, const FileLoadResult& loaded, bool a_keepOnFailure)
 		{
 			auto& store = Config();
 			std::scoped_lock lock(store.mutex);
 			if (a_keepOnFailure && (loaded.status == FileLoadStatus::kParseError || loaded.status == FileLoadStatus::kIoError))
-				return { store.root, loaded.status, loaded.error };
+				return { store.root, loaded.status, loaded.error, {} };
 			store.registry = std::move(a_registry);
 			store.path = a_path;
 			store.readError = loaded.error;
+			std::vector<std::string> warnings;
+			if (loaded.status == FileLoadStatus::kParsed) {
+				std::vector<std::string> path;
+				CollectUnknownConfigurationWarnings(loaded.table, store.registry, path, warnings);
+			}
 			const auto document = RenderDocument(store.registry, loaded.table);
 			store.root = toml::parse(document);
 			std::string error = loaded.error;
@@ -343,7 +381,7 @@ namespace cs::feature_config
 				const auto written = WriteIfChanged(a_path, document);
 				error = written.error;
 			}
-			return { store.root, loaded.status, std::move(error) };
+			return { store.root, loaded.status, std::move(error), std::move(warnings) };
 		}
 	}
 
@@ -425,10 +463,10 @@ namespace cs::feature_config
 		return UpdateOwnedSettingsAt(kConfigPath, path, toml::table{ { "enabled", a_enabled } }, SectionWrite::kMerge);
 	}
 
-	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value)
+	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value, SectionWrite a_mode)
 	{
 		const std::array path{ a_section };
-		return UpdateOwnedSettingsAt(kConfigPath, path, a_value);
+		return UpdateOwnedSettingsAt(kConfigPath, path, a_value, a_mode);
 	}
 
 	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root)

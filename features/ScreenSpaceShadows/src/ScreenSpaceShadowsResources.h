@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/Extent.h"
+
 #include <compare>
 #include <cstdint>
 
@@ -7,32 +9,24 @@ namespace cs::features::sss_resources
 {
 	inline constexpr std::uint8_t kWhiteR8Unorm = 0xFF;
 
-	struct Extent
-	{
-		std::uint32_t width = 0;
-		std::uint32_t height = 0;
-
-		auto operator<=>(const Extent&) const = default;
-	};
-
 	inline constexpr bool Covers(
-		Extent a_available,
-		Extent a_required) noexcept
+		render::Extent a_available,
+		render::Extent a_required) noexcept
 	{
 		return a_required.width != 0 && a_required.height != 0 && a_available.width >= a_required.width && a_available.height >= a_required.height;
 	}
 
 	struct ExtentState
 	{
-		Extent allocated;
+		render::Extent allocated;
 
-		constexpr void Commit(Extent a_extent) noexcept
+		constexpr void Commit(render::Extent a_extent) noexcept
 		{
 			allocated = a_extent;
 		}
 
 		constexpr bool CompleteAllocation(
-			Extent a_extent,
+			render::Extent a_extent,
 			bool a_succeeded) noexcept
 		{
 			if (a_succeeded)
@@ -41,7 +35,7 @@ namespace cs::features::sss_resources
 		}
 
 		[[nodiscard]] constexpr bool IsCompatible(
-			Extent a_required) const noexcept
+			render::Extent a_required) const noexcept
 		{
 			return Covers(allocated, a_required);
 		}
@@ -49,7 +43,7 @@ namespace cs::features::sss_resources
 
 	struct FallbackAllocationKey
 	{
-		Extent extent;
+		render::Extent extent;
 		std::uint64_t deviceGeneration = 0;
 
 		auto operator<=>(const FallbackAllocationKey&) const = default;

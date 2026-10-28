@@ -11,6 +11,12 @@ namespace FO4VolumetricShadows
 
 	float GetSoftShadow(float3 viewPosition)
 	{
+		// FO4: VSM toggles live, so a disabled map leaves the lobes native.
+		[branch] if (FO4SharedData::EnabledVolumetricShadows == 0)
+		{
+			Published = false;
+			return 1.0;
+		}
 		Published = DirectionalShadowLights[0].EndSplitDistances.y > 0.0;
 		float3 worldPosition = FrameBuffer::ViewToWorld(viewPosition);
 		float detailedShadow;

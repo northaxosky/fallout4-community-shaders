@@ -1,5 +1,4 @@
 #include "Render/TemporalPipeline.h"
-#include "Render/TemporalStartup.h"
 
 #include <algorithm>
 #include <cstring>
@@ -16,10 +15,10 @@
 #include "PresentationProviders.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
+#include "Render/EngineCallSite.h"
 #include "Render/FrameBoundary.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RendererContext.h"
-#include "Render/TemporalPipelineAnchors.h"
 #include "Render/TemporalRenderer.h"
 #include "RenderDoc.h"
 #include "Streamline.h"
@@ -28,6 +27,57 @@
 
 namespace cs::render::temporal
 {
+	namespace
+	{
+		struct SuperResolutionAdmission
+		{
+			std::array<bool, static_cast<std::size_t>(SuperResolutionMethod::kCount)> methods{};
+			std::string detail;
+		};
+
+		template <class Initialize>
+		[[nodiscard]] SuperResolutionAdmission InitializeSelectedSuperResolution(
+			const RequestedTopology& a_request,
+			Initialize&& a_initialize)
+		{
+			SuperResolutionAdmission admission;
+			if (!a_request.upscalingEligible)
+				return admission;
+
+			admission.methods[static_cast<std::size_t>(SuperResolutionMethod::kNone)] = true;
+			admission.methods[static_cast<std::size_t>(SuperResolutionMethod::kTAA)] = true;
+			const auto initialize = [&](SuperResolutionMethod a_method) -> ProviderResult {
+				const auto index = static_cast<std::size_t>(a_method);
+				if (index >= admission.methods.size()) {
+					return {
+						.code = ProviderResultCode::kUnavailable,
+						.message = "Invalid startup super-resolution method."
+					};
+				}
+				if (a_method == SuperResolutionMethod::kNone || a_method == SuperResolutionMethod::kTAA)
+					return { .code = ProviderResultCode::kSuccess };
+				auto result = a_initialize(a_method);
+				admission.methods[index] = result.Succeeded();
+				return result;
+			};
+
+			const auto requested = initialize(a_request.superResolution);
+			if (requested.Succeeded())
+				return admission;
+
+			admission.detail = std::format(
+				"Requested super resolution is unavailable: {} (SDK {}).",
+				requested.message, requested.sdkResult);
+			const bool externalRequested =
+				a_request.superResolution == SuperResolutionMethod::kFSR3 ||
+				a_request.superResolution == SuperResolutionMethod::kDLSS ||
+				a_request.superResolution == SuperResolutionMethod::kFSR4;
+			if (externalRequested)
+				admission.detail += " Native TAA remains active for this startup.";
+			return admission;
+		}
+	}
+
 	FrameGenerationCamera
 	BuildFrameGenerationCamera(const std::optional<engine::WorldCameraRecord>& a_snapshot,
 		std::uint32_t a_outputWidth,
@@ -74,6 +124,13 @@ namespace cs::render
 {
 	namespace
 	{
+		constexpr engine::CallSiteAnchor kMainLoopMessageLoopCall{
+			.name = "Main::MainLoop -> Main::WindowsMessageLoop",
+			.function = RE::ID::Main::Run,
+			.offset = { 0x1E, 0x4E, 0x2E },
+			.target = RE::ID::Main::Run_WindowsMessageLoop
+		};
+
 		auto* L = cs::log::Get("cs.render.temporalpipeline");
 
 		struct MainLoop_WindowsMessageLoop
@@ -106,44 +163,6 @@ namespace cs::render
 			return mode.dmDisplayFrequency > 1 ? static_cast<double>(mode.dmDisplayFrequency) : 0.0;
 		}
 
-		temporal::SuperResolutionMethod
-		ToCore(features::Upscaling::UpscaleMethod a_method) noexcept
-		{
-			using Source = features::Upscaling::UpscaleMethod;
-			using Target = temporal::SuperResolutionMethod;
-			switch (a_method) {
-			case Source::kNONE:
-				return Target::kNone;
-			case Source::kTAA:
-				return Target::kTAA;
-			case Source::kFSR:
-				return Target::kFSR3;
-			case Source::kDLSS:
-				return Target::kDLSS;
-			case Source::kFSR4:
-				return Target::kFSR4;
-			}
-			return Target::kNone;
-		}
-
-		temporal::FrameGenerationMethod
-		ToCore(features::FrameGeneration::Method a_method) noexcept
-		{
-			using Source = features::FrameGeneration::Method;
-			using Target = temporal::FrameGenerationMethod;
-			switch (a_method) {
-			case Source::kOff:
-				return Target::kOff;
-			case Source::kFSR3:
-				return Target::kFSR3;
-			case Source::kDLSSG:
-				return Target::kDLSSG;
-			case Source::kFSR4:
-				return Target::kFSR4;
-			}
-			return Target::kOff;
-		}
-
 		temporal::FrameGenerationConfiguration
 		ToCoreFrameGenerationConfiguration(
 			const features::FrameGeneration::Settings& a_settings) noexcept
@@ -171,28 +190,6 @@ namespace cs::render
 			}
 			options.useMarkers = a_settings.reflexUseMarkersToOptimize;
 			return options;
-		}
-
-		features::Upscaling::UpscaleMethod
-		ToFeature(temporal::SuperResolutionMethod a_method) noexcept
-		{
-			using Source = temporal::SuperResolutionMethod;
-			using Target = features::Upscaling::UpscaleMethod;
-			switch (a_method) {
-			case Source::kNone:
-				return Target::kNONE;
-			case Source::kTAA:
-				return Target::kTAA;
-			case Source::kFSR3:
-				return Target::kFSR;
-			case Source::kDLSS:
-				return Target::kDLSS;
-			case Source::kFSR4:
-				return Target::kFSR4;
-			case Source::kCount:
-				break;
-			}
-			return Target::kNONE;
 		}
 
 		bool UsesSharedStreamlineConstants(
@@ -365,8 +362,6 @@ namespace cs::render
 
 	bool TemporalPipeline::InstallLatencyHooks() noexcept
 	{
-		using namespace temporal_anchors;
-
 		if (_impl->latencyHooksInstalled.load(std::memory_order_acquire)) {
 			return true;
 		}
@@ -447,8 +442,8 @@ namespace cs::render
 		if (upscaling) {
 			_impl->requestedRenderSettings = upscaling->settings;
 			requested.superResolution =
-				ToCore(static_cast<features::Upscaling::UpscaleMethod>(
-					upscaling->settings.upscaleMethod));
+				static_cast<temporal::SuperResolutionMethod>(
+					upscaling->settings.upscaleMethod);
 			requested.superResolutionEnabled =
 				requested.superResolution !=
 				temporal::SuperResolutionMethod::kNone;
@@ -457,8 +452,8 @@ namespace cs::render
 		}
 		if (frameGeneration) {
 			requested.frameGeneration =
-				ToCore(static_cast<features::FrameGeneration::Method>(
-					frameGeneration->settings.frameGenerationMethod));
+				static_cast<temporal::FrameGenerationMethod>(
+					frameGeneration->settings.frameGenerationMethod);
 			requested.frameGenerationEnabled =
 				requested.frameGeneration !=
 				temporal::FrameGenerationMethod::kOff;
@@ -515,11 +510,11 @@ namespace cs::render
 		std::scoped_lock lock(_impl->mutex);
 		_impl->requestedRenderSettings = upscaling->settings;
 		const auto superResolution =
-			ToCore(static_cast<features::Upscaling::UpscaleMethod>(
-				upscaling->settings.upscaleMethod));
+			static_cast<temporal::SuperResolutionMethod>(
+				upscaling->settings.upscaleMethod);
 		const auto frameGenerationMethod =
-			ToCore(static_cast<features::FrameGeneration::Method>(
-				frameGeneration->settings.frameGenerationMethod));
+			static_cast<temporal::FrameGenerationMethod>(
+				frameGeneration->settings.frameGenerationMethod);
 		_impl->topology.SubmitLive(
 			superResolution != temporal::SuperResolutionMethod::kNone,
 			superResolution,
@@ -754,8 +749,7 @@ namespace cs::render
 								_impl->topology.Effective();
 							_impl->effectiveRenderSettings.upscaleMethod =
 								static_cast<std::uint32_t>(
-									ToFeature(
-										effective.superResolution));
+									effective.superResolution);
 							_impl->effectiveRenderSettings.qualityMode =
 								effective.qualityMode;
 							_impl->effectiveRenderSettings.enabled =
@@ -807,7 +801,7 @@ namespace cs::render
 					_impl->requestedRenderSettings;
 				_impl->effectiveRenderSettings.upscaleMethod =
 					static_cast<std::uint32_t>(
-						ToFeature(effective.superResolution));
+						effective.superResolution);
 				_impl->effectiveRenderSettings.qualityMode =
 					effective.qualityMode;
 				_impl->effectiveRenderSettings.enabled =
@@ -891,14 +885,13 @@ namespace cs::render
 			const auto& effective = _impl->topology.Effective();
 			renderSettings.upscaleMethod =
 				static_cast<std::uint32_t>(
-					ToFeature(effective.superResolution));
+					effective.superResolution);
 			renderSettings.qualityMode = effective.qualityMode;
 			renderSettings.enabled = effective.superResolutionEnabled;
 			_impl->effectiveRenderSettings = renderSettings;
 			eligible = _impl->rendererEligible;
 		}
 		_impl->renderer.ApplyConfiguration(renderSettings, eligible);
-		cs::engine::RefreshFrameBufferContextHooks();
 		if (LatencyActive()) {
 			ReportLatencyResult(
 				_impl->latencyProvider->Configure(ToLatencyOptions(renderSettings)));
@@ -1000,7 +993,7 @@ namespace cs::render
 		const auto& request = _impl->topology.Request();
 		if (request &&
 			(request->upscalingEligible || request->frameGenerationEligible)) {
-			_impl->renderer.InstallTemporalMenuListener();
+			_impl->renderer.InitializeTemporalState();
 		}
 	}
 
@@ -1380,7 +1373,7 @@ namespace cs::render
 				const auto& effective = _impl->topology.Effective();
 				_impl->effectiveRenderSettings.upscaleMethod =
 					static_cast<std::uint32_t>(
-						ToFeature(effective.superResolution));
+						effective.superResolution);
 				_impl->effectiveRenderSettings.qualityMode =
 					effective.qualityMode;
 				_impl->effectiveRenderSettings.enabled =
@@ -1625,8 +1618,8 @@ namespace cs::render
 	}
 
 	bool TemporalPipeline::RecordInputPacket(std::uint64_t a_engineFrame,
-		temporal::Extent a_renderExtent,
-		temporal::Extent a_outputExtent,
+		Extent a_renderExtent,
+		Extent a_outputExtent,
 		std::uint32_t a_slot) noexcept
 	{
 		if (a_slot >= _impl->frames.size()) {
@@ -2130,6 +2123,8 @@ namespace cs::render
 			break;
 		case FrameGenerationDebugResource::kMotion:
 			resource = _impl->swapChain.GetMotionTexture();
+			break;
+		case FrameGenerationDebugResource::kOff:
 			break;
 		}
 		return resource && resource->srv11 ? FrameGenerationDebugTexture{ .srv = resource->srv11.get(),

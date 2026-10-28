@@ -1,15 +1,23 @@
 #pragma once
 
+#include "Render/ShaderStage.h"
 #include "Utils/ShaderCache/RevalidationContext.h"
 
 #include <d3d11.h>
 
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace cs::util
 {
+	HRESULT CreateShaderChild(
+		ID3D11Device& a_device,
+		engine::ShaderStage a_stage,
+		std::span<const std::uint8_t> a_bytecode,
+		ID3D11DeviceChild*& a_shader) noexcept;
+
 	class ShaderCompilationBatch
 	{
 	public:

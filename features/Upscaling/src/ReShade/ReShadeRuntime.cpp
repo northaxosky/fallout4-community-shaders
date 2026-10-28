@@ -307,7 +307,7 @@ namespace cs::features
 	void ReShadeRuntime::RenderEffects(ID3D11DeviceContext& a_context, ID3D11Resource& a_color,
 		ID3D11ShaderResourceView* a_depth) noexcept
 	{
-		WithColorCopy(a_context, a_color, "Upscaling/ReShade/Effects", [&](Impl& a_impl) {
+		WithColorCopy(a_context, a_color, "Upscaling::ReShade/Effects", [&](Impl& a_impl) {
 			cs::render::ScopedContextState state(&a_context, a_impl.contextState.get());
 			if (!state.IsActive()) {
 				return;
@@ -321,7 +321,7 @@ namespace cs::features
 
 	void ReShadeRuntime::Present(ID3D11DeviceContext& a_context, ID3D11Resource& a_color) noexcept
 	{
-		WithColorCopy(a_context, a_color, "Upscaling/ReShade/Present", [](Impl& a_impl) {
+		WithColorCopy(a_context, a_color, "Upscaling::ReShade/Present", [](Impl& a_impl) {
 			::reshade::update_and_present_effect_runtime(a_impl.runtime);
 		});
 	}

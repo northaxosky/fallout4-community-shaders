@@ -1,4 +1,5 @@
 #include "RCAS.h"
+#include "Utils/ShaderCache/ShaderCache.h"
 
 #include "Log.h"
 #include "Render/Annotation.h"
@@ -50,12 +51,14 @@ namespace cs::features
 		}
 		ResetD3D12();
 
-		std::string compileError;
-		auto shader = cs::util::CompileShaderToBlob(
+		const auto recipe = cs::util::BuildUtilityShaderRecipe(
 			L"Data\\Shaders\\Upscaling\\RCAS\\RCAS.hlsl", {}, "cs_5_1",
-			"main", &compileError);
-		if (!shader) {
-			L->error("Could not compile D3D12 RCAS: {}", compileError);
+			"main");
+		if (!recipe)
+			return false;
+		auto outcome = cs::shader_cache::LoadOrCompileShader(*recipe);
+		if (!outcome.succeeded) {
+			L->error("Could not compile D3D12 RCAS: {}", outcome.error);
 			return false;
 		}
 
@@ -118,12 +121,27 @@ namespace cs::features
 
 		D3D12_COMPUTE_PIPELINE_STATE_DESC pipelineDesc{};
 		pipelineDesc.pRootSignature = rcasRootSignature12.get();
-		pipelineDesc.CS = {
-			.pShaderBytecode = shader->GetBufferPointer(),
-			.BytecodeLength = shader->GetBufferSize()
+		const auto createPipeline = [&]() {
+			pipelineDesc.CS = {
+				.pShaderBytecode = outcome.bytecode.data(),
+				.BytecodeLength = outcome.bytecode.size()
+			};
+			rcasPipeline12 = nullptr;
+			return a_device->CreateComputePipelineState(
+				&pipelineDesc, IID_PPV_ARGS(rcasPipeline12.put()));
 		};
-		if (FAILED(a_device->CreateComputePipelineState(
-				&pipelineDesc, IID_PPV_ARGS(rcasPipeline12.put())))) {
+		auto createResult = createPipeline();
+		if (FAILED(createResult) && outcome.origin == cs::shader_cache::CompileOrigin::kCacheHit) {
+			outcome = cs::shader_cache::LoadOrCompileShader(
+				*recipe, {}, cs::shader_cache::CacheMode::kRecompile);
+			if (!outcome.succeeded) {
+				L->error("Could not recompile D3D12 RCAS: {}", outcome.error);
+				ResetD3D12();
+				return false;
+			}
+			createResult = createPipeline();
+		}
+		if (FAILED(createResult)) {
 			L->error("Could not create D3D12 RCAS pipeline state");
 			ResetD3D12();
 			return false;

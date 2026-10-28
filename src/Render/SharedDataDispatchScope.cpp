@@ -1,30 +1,20 @@
 #include "Render/SharedData.h"
 
-#include "Render/PixelShaderSwapBroker.h"
+#include "Render/FrameBindings.h"
 
 namespace cs::render
 {
 	void SubstrateBindingSnapshot::Save(ID3D11DeviceContext* a_context, engine::ShaderStage a_stage) noexcept
 	{
+		if (a_stage == engine::ShaderStage::kCount)
+			return;
 		ID3D11Buffer* buffers[kSubstrateBufferCount]{};
 		ID3D11ShaderResourceView* depth = nullptr;
-		switch (a_stage) {
-		case engine::ShaderStage::kVertex:
-			a_context->VSGetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->VSGetShaderResources(kCanonicalDepthSlot, 1, &depth);
-			break;
-		case engine::ShaderStage::kPixel:
-			a_context->PSGetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->PSGetShaderResources(kCanonicalDepthSlot, 1, &depth);
+		engine::GetStageBindings(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+		engine::GetStageBindings(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
+		if (a_stage == engine::ShaderStage::kPixel) {
 			_debugTexture = nullptr;
-			a_context->PSGetShaderResources(kFullscreenDebugTextureSlot, 1, _debugTexture.put());
-			break;
-		case engine::ShaderStage::kCompute:
-			a_context->CSGetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->CSGetShaderResources(kCanonicalDepthSlot, 1, &depth);
-			break;
-		case engine::ShaderStage::kCount:
-			return;
+			engine::GetStageBindings(a_context, a_stage, kFullscreenDebugTextureSlot, 1, _debugTexture.put());
 		}
 		for (std::size_t index = 0; index < _buffers.size(); ++index)
 			_buffers[index].attach(buffers[index]);
@@ -38,23 +28,10 @@ namespace cs::render
 			buffers[index] = _buffers[index].get();
 		auto* depth = _depth.get();
 		auto* debugTexture = _debugTexture.get();
-		switch (a_stage) {
-		case engine::ShaderStage::kVertex:
-			a_context->VSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->VSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
-			break;
-		case engine::ShaderStage::kPixel:
-			a_context->PSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->PSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
-			a_context->PSSetShaderResources(kFullscreenDebugTextureSlot, 1, &debugTexture);
-			break;
-		case engine::ShaderStage::kCompute:
-			a_context->CSSetConstantBuffers(kFrameDataSlot, kSubstrateBufferCount, buffers);
-			a_context->CSSetShaderResources(kCanonicalDepthSlot, 1, &depth);
-			break;
-		case engine::ShaderStage::kCount:
-			break;
-		}
+		engine::SetStageBindings(a_context, a_stage, kFrameDataSlot, kSubstrateBufferCount, buffers);
+		engine::SetStageBindings(a_context, a_stage, kCanonicalDepthSlot, 1, &depth);
+		if (a_stage == engine::ShaderStage::kPixel)
+			engine::SetStageBindings(a_context, a_stage, kFullscreenDebugTextureSlot, 1, &debugTexture);
 		for (auto& buffer : _buffers)
 			buffer = nullptr;
 		_depth = nullptr;

@@ -3,6 +3,7 @@
 #include "PCH.h"
 
 #include "Log.h"
+#include "Utils/HookOwner.h"
 
 #include <cstring>
 #include <format>
@@ -13,6 +14,44 @@ namespace cs::engine
 {
 	namespace
 	{
+		enum class CallSiteKind : std::uint8_t
+		{
+			kExpected,
+			kNotACall,
+			kWrongTarget
+		};
+
+		struct CallSiteClassification
+		{
+			CallSiteKind kind = CallSiteKind::kNotACall;
+			std::uintptr_t target = 0;
+		};
+
+		[[nodiscard]] constexpr CallSiteClassification ClassifyCallSite(
+			std::span<const std::uint8_t, 5> a_bytes,
+			std::uintptr_t a_site,
+			std::uintptr_t a_expectedTarget) noexcept
+		{
+			if (a_bytes[0] != 0xE8)
+				return {};
+			const auto displacement = static_cast<std::int32_t>(
+				static_cast<std::uint32_t>(a_bytes[1]) |
+				(static_cast<std::uint32_t>(a_bytes[2]) << 8) |
+				(static_cast<std::uint32_t>(a_bytes[3]) << 16) |
+				(static_cast<std::uint32_t>(a_bytes[4]) << 24));
+			const auto target = a_site + 5 + static_cast<std::intptr_t>(displacement);
+			return { target == a_expectedTarget ? CallSiteKind::kExpected : CallSiteKind::kWrongTarget, target };
+		}
+
+		// COM call on the object in rcx: mov rax,[rcx]; call [rax+disp8].
+		[[nodiscard]] constexpr bool IsContextVirtualCall(
+			std::span<const std::uint8_t, 6> a_bytes,
+			std::uint8_t a_vtableOffset) noexcept
+		{
+			return a_bytes[0] == 0x48 && a_bytes[1] == 0x8B && a_bytes[2] == 0x01 &&
+			       a_bytes[3] == 0xFF && a_bytes[4] == 0x50 && a_bytes[5] == a_vtableOffset;
+		}
+
 		std::string RuntimeLabel()
 		{
 			return std::format(
@@ -71,9 +110,13 @@ namespace cs::engine
 				a_anchor.name, RuntimeLabel(), site,
 				bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]));
 		case CallSiteKind::kWrongTarget:
-			return std::unexpected(std::format(
-				"{}: {} call at {:#x} targets {:#x}, expected {:#x}",
-				a_anchor.name, RuntimeLabel(), site, classification.target, expected));
+			{
+				const auto owner = cs::util::ForeignOwner(classification.target);
+				return std::unexpected(std::format(
+					"{}: {} call at {:#x} targets {:#x}, expected {:#x}{}",
+					a_anchor.name, RuntimeLabel(), site, classification.target, expected,
+					owner ? std::format(" (redirected by {})", *owner) : std::string{}));
+			}
 		}
 		std::unreachable();
 	}

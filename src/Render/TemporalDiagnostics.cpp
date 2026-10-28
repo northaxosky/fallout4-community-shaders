@@ -155,7 +155,7 @@ namespace cs::render
 			a_snapshot.sourceDesc = sourceDesc;
 		}
 
-		cs::render::annotation::ScopedEvent event("Temporal/CaptureDebugSnapshot");
+		cs::render::annotation::ScopedEvent event("Temporal::CaptureDebugSnapshot");
 		cs::engine::CopyResourcePreservingOM(
 			context, a_snapshot.texture.get(), a_source);
 		a_snapshot.capturedView = a_view;
@@ -211,22 +211,22 @@ namespace cs::render
 	void TemporalRenderer::SetFrameGenerationDebugView(
 		std::string_view a_view) noexcept
 	{
-		FrameGenerationDebugView view = FrameGenerationDebugView::kOff;
+		FrameGenerationDebugResource view = FrameGenerationDebugResource::kOff;
 		if (a_view == "hudless_color") {
-			view = FrameGenerationDebugView::kHudless;
+			view = FrameGenerationDebugResource::kHudless;
 		} else if (a_view == "final_color") {
-			view = FrameGenerationDebugView::kFinal;
+			view = FrameGenerationDebugResource::kFinal;
 		} else if (a_view == "conditioned_depth") {
-			view = FrameGenerationDebugView::kDepth;
+			view = FrameGenerationDebugResource::kDepth;
 		} else if (a_view == "conditioned_motion") {
-			view = FrameGenerationDebugView::kMotion;
+			view = FrameGenerationDebugResource::kMotion;
 		}
 		const auto previous =
 			_frameGenerationDebugView.exchange(view, std::memory_order_acq_rel);
 		if (previous != view) {
 			_frameGenerationDebugSnapshot.request.Reset();
 			_frameGenerationDebugSnapshot.request.Select(
-				view != FrameGenerationDebugView::kOff);
+				view != FrameGenerationDebugResource::kOff);
 			ResetFrameGenerationDebugSnapshotResources();
 		}
 	}
@@ -240,7 +240,7 @@ namespace cs::render
 	bool TemporalRenderer::HasFrameGenerationDebugSnapshotSelection() const noexcept
 	{
 		return _frameGenerationDebugView.load(std::memory_order_acquire) !=
-		       FrameGenerationDebugView::kOff;
+		       FrameGenerationDebugResource::kOff;
 	}
 
 	bool TemporalRenderer::FrameGenerationDebugSnapshotPending() const noexcept
@@ -254,7 +254,7 @@ namespace cs::render
 	}
 
 	bool TemporalRenderer::CaptureFrameGenerationDebugSnapshot(
-		FrameGenerationDebugView a_view,
+		FrameGenerationDebugResource a_view,
 		ID3D11ShaderResourceView* a_source)
 	{
 		if (_frameGenerationDebugView.load(std::memory_order_acquire) != a_view ||
@@ -283,24 +283,13 @@ namespace cs::render
 	}
 
 	FeatureDebugTexture TemporalRenderer::GetFrameGenerationDebugTexture(
-		std::string_view a_view) const
+		FrameGenerationDebugResource a_view) const
 	{
-		FrameGenerationDebugView view = FrameGenerationDebugView::kOff;
-		if (a_view == "hudless_color") {
-			view = FrameGenerationDebugView::kHudless;
-		} else if (a_view == "final_color") {
-			view = FrameGenerationDebugView::kFinal;
-		} else if (a_view == "conditioned_depth") {
-			view = FrameGenerationDebugView::kDepth;
-		} else if (a_view == "conditioned_motion") {
-			view = FrameGenerationDebugView::kMotion;
-		}
-
 		return GetFrozenTextureSnapshot(
 			_frameGenerationDebugSnapshot,
-			static_cast<std::uint8_t>(view),
-			view != FrameGenerationDebugView::kOff &&
-				_frameGenerationDebugView.load(std::memory_order_acquire) == view,
+			static_cast<std::uint8_t>(a_view),
+			a_view != FrameGenerationDebugResource::kOff &&
+				_frameGenerationDebugView.load(std::memory_order_acquire) == a_view,
 			"Frozen frame-generation snapshot is pending.");
 	}
 
@@ -308,17 +297,13 @@ namespace cs::render
 	{
 		const auto selected =
 			_frameGenerationDebugView.load(std::memory_order_acquire);
-		render::FrameGenerationDebugResource resource;
-		if (selected == FrameGenerationDebugView::kDepth) {
-			resource = render::FrameGenerationDebugResource::kDepth;
-		} else if (selected == FrameGenerationDebugView::kMotion) {
-			resource = render::FrameGenerationDebugResource::kMotion;
-		} else {
+		if (selected != FrameGenerationDebugResource::kDepth &&
+			selected != FrameGenerationDebugResource::kMotion) {
 			return;
 		}
 		const auto source =
 			render::TemporalPipeline::Get().GetFrameGenerationDebugTexture(
-				resource);
+				selected);
 		CaptureFrameGenerationDebugSnapshot(
 			selected, source.srv);
 	}
@@ -326,28 +311,28 @@ namespace cs::render
 	void TemporalRenderer::CaptureFrameGenerationHudlessDebugSnapshot()
 	{
 		if (_frameGenerationDebugView.load(std::memory_order_acquire) !=
-			FrameGenerationDebugView::kHudless) {
+			FrameGenerationDebugResource::kHudless) {
 			return;
 		}
 		const auto source =
 			render::TemporalPipeline::Get().GetFrameGenerationDebugTexture(
 				render::FrameGenerationDebugResource::kHudless);
 		CaptureFrameGenerationDebugSnapshot(
-			FrameGenerationDebugView::kHudless,
+			FrameGenerationDebugResource::kHudless,
 			source.srv);
 	}
 
 	void TemporalRenderer::CaptureFrameGenerationFinalDebugSnapshot()
 	{
 		if (_frameGenerationDebugView.load(std::memory_order_acquire) !=
-			FrameGenerationDebugView::kFinal) {
+			FrameGenerationDebugResource::kFinal) {
 			return;
 		}
 		const auto source =
 			render::TemporalPipeline::Get().GetFrameGenerationDebugTexture(
 				render::FrameGenerationDebugResource::kFinal);
 		CaptureFrameGenerationDebugSnapshot(
-			FrameGenerationDebugView::kFinal,
+			FrameGenerationDebugResource::kFinal,
 			source.srv);
 	}
 

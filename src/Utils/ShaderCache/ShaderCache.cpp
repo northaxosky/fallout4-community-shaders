@@ -6,6 +6,7 @@
 #include "Utils/ShaderCache/SourceCompile.h"
 
 #include <atomic>
+#include <mutex>
 #include <span>
 #include <utility>
 
@@ -18,6 +19,21 @@ namespace cs::shader_cache
 		std::atomic<std::uint64_t> g_stale{ 0 };
 		std::atomic<std::uint64_t> g_rejected{ 0 };
 		std::atomic<std::uint64_t> g_written{ 0 };
+		std::atomic<std::uint64_t> g_maxBytes{ 0 };
+		std::atomic<std::uint64_t> g_bytesSinceTrim{ 0 };
+		std::mutex g_trimMutex;
+
+		void TrimAfterWrite(const std::filesystem::path& a_cacheRoot, std::uint64_t a_bytes)
+		{
+			const auto cap = g_maxBytes.load(std::memory_order_relaxed);
+			if (!cap || g_bytesSinceTrim.fetch_add(a_bytes, std::memory_order_relaxed) + a_bytes < cap / 16)
+				return;
+			const std::unique_lock lock(g_trimMutex, std::try_to_lock);
+			if (!lock.owns_lock())
+				return;
+			g_bytesSinceTrim.store(0, std::memory_order_relaxed);
+			TrimCacheRecords(a_cacheRoot, cap);
+		}
 
 		struct LookupResult
 		{
@@ -95,10 +111,13 @@ namespace cs::shader_cache
 			LookupResult hit;
 			hit.disposition = CacheDisposition::kHit;
 			hit.payload = std::move(record.payload);
+			std::error_code error;
+			std::filesystem::last_write_time(a_recordPath, std::filesystem::file_time_type::clock::now(), error);
 			return hit;
 		}
 
 		void PublishRecord(
+			const std::filesystem::path& a_cacheRoot,
 			const std::filesystem::path& a_recordPath,
 			const ShaderRecipe& a_recipe,
 			const sha256::Sha256Result& a_logicalDigest,
@@ -139,6 +158,7 @@ namespace cs::shader_cache
 				case RecordWriteStatus::kWritten:
 					a_outcome.recordWritten = true;
 					g_written.fetch_add(1, std::memory_order_relaxed);
+					TrimAfterWrite(a_cacheRoot, recordBytes.size());
 					break;
 				case RecordWriteStatus::kConcurrentPublication:
 					a_outcome.cacheNote.clear();
@@ -192,6 +212,12 @@ namespace cs::shader_cache
 		};
 	}
 
+	void SetShaderCacheMaxBytes(std::uint64_t a_maxBytes) noexcept
+	{
+		g_maxBytes.store(a_maxBytes, std::memory_order_relaxed);
+		g_bytesSinceTrim.store(0, std::memory_order_relaxed);
+	}
+
 	std::string DescribeCacheOutcome(const ShaderCacheOutcome& a_outcome)
 	{
 		std::string description =
@@ -208,6 +234,7 @@ namespace cs::shader_cache
 	{
 		ShaderCacheOutcome outcome;
 		try {
+			const auto cacheRoot = a_options.cacheRoot.empty() ? DefaultCacheRoot() : a_options.cacheRoot;
 			const auto& identity = GetD3DCompilerIdentity();
 			if (!identity.established) {
 				outcome.disposition = CacheDisposition::kNoCompilerIdentity;
@@ -228,7 +255,7 @@ namespace cs::shader_cache
 			}
 			if (cacheAvailable) {
 				outcome.recordPath = BuildRecordPath(
-					a_options.cacheRoot.empty() ? DefaultCacheRoot() : a_options.cacheRoot,
+					cacheRoot,
 					a_recipe.stage,
 					logicalDigest);
 
@@ -275,6 +302,7 @@ namespace cs::shader_cache
 			// publication failure must not discard compiled bytecode
 			if (cacheAvailable) {
 				PublishRecord(
+					cacheRoot,
 					outcome.recordPath,
 					a_recipe,
 					logicalDigest,

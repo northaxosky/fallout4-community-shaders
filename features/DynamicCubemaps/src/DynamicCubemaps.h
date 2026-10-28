@@ -61,7 +61,6 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void Prepass() override;
-		void OnLoadingMenuClosed() override;
 		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
@@ -74,7 +73,7 @@ namespace cs::features
 		void SetDebugView(std::string_view a_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
-		cs::DynamicCubemapsFeatureData GetCommonBufferData() const;
+		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		std::vector<std::string_view> GetRestartSettings() const override;
 
 		// Null unless enabled, operational and published, so consumers fail neutral.

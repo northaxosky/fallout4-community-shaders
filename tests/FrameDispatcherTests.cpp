@@ -1,6 +1,8 @@
 #include "Render/FrameDispatcher.h"
 
+#include "Check.h"
 #include <atomic>
+
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -10,18 +12,6 @@ namespace
 {
 	using namespace std::chrono_literals;
 	using cs::render::FrameDispatcher;
-
-	int failures{};
-
-	void Check(bool a_condition, std::string_view a_expression, int a_line)
-	{
-		if (!a_condition) {
-			std::cerr << "CHECK failed at line " << a_line << ": " << a_expression << '\n';
-			++failures;
-		}
-	}
-
-#define CHECK(a_expression) Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
 
 	void TestRunsOnDrainingThread()
 	{
@@ -89,7 +79,7 @@ int main()
 	TestTimeoutCancelsLateTask();
 	TestExceptionsReturnAsErrors();
 	TestPostFailuresAndBackpressure();
-	if (failures)
+	if (cs::tests::failures)
 		return 1;
 	std::cout << "Frame dispatcher tests passed\n";
 	return 0;

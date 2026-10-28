@@ -2,10 +2,30 @@
 
 ## 0.5.0
 
-- Dynamic Cubemaps: `material_reflections` now defaults to 0.25.
-- Skylighting: fixed a bright patch around the player with 3 shadow cascades (`iDirShadowSplits=3`, the High/Ultra default).
-- Volumetric Shadows: new feature ported from Skyrim CS; softens the sun's soft, rim and back lighting and shadows the sun on water.
+- Terrain Blending: new feature ported from Skyrim CS; blends terrain into objects that sink into it by depth, removing the hard seam; no per-mesh opt-out yet.
+- Volumetric Shadows: new feature ported from Skyrim CS; softens the sun's soft, rim and back lighting and shadows the sun on water and effects; Skylighting's sky visibility drives those lobes instead while it is enabled.
 - Rain Refraction: new feature ported from Skyrim CS; rain drops reflect and refract the Dynamic Cubemaps environment (required) and are lit by the sun and the engine's effect lights.
+- When shaders take over a second to compile, Continue, Load, and New Game wait behind the main menu's loading spinner until they finish, with a progress window when DearModdingUI is installed; set `background_compilation` in `[shader_cache]` (restart required) to play while they compile, with uncompiled shaders rendering as stock. Every stock shader variant a loaded feature modifies now precompiles at startup instead of as the game first draws it.
+- Shader cache: `max_size_mb` in `[shader_cache]` caps the disk cache (default 4096 MiB); least recently used shaders are removed first.
+- Community Shaders now disables all hooks and features and shows a message when the standalone Motion Vector Fixes (`MotionVectorFixes.dll`) or Dynamic Cubemaps F4 (`DynamicCubemapF4.dll`) plugin is installed; remove them, as Community Shaders includes both.
+- Frame annotations: `diagnostics.frame_annotations` (Advanced > Diagnostics, restart required) names engine passes, draws and render targets in GPU captures; RenderDoc captures include every event even if the live toggle is off.
+- Performance Overlay: added DeferredComposite timing; A/B results read Valid or Marginal only with samples from both variants.
+- Performance Overlay: GPU timings no longer overwrite pending queries, and a pass timed several times in one frame counts as one sample.
+- Profiling page and per-feature Profiling sections with Skyrim CS's stacked GPU/CPU pass graph and sortable heat tables; the overlay's CS Render Passes view uses the same graph.
+- Dynamic Cubemaps: `material_reflections` now defaults to 0.25; interior water reflects only the live cubemap, and water without the Reflections flag now reflects it too.
+- Image Based Lighting: now applies in interiors; the `DisableInInteriors` setting is removed.
+- Skylighting: fixed a bright patch around the player with 1 or 3 sun shadow cascades (`iDirShadowSplits`); only 2 were supported before.
+- Skylighting: specular and sun soft-shadow sampling now clamp to the probe volume's height as in Skyrim CS, fixing a specular edge at that height.
+- Inverse Square Lighting: a derived light radius of zero now falls back to 1, as an undefined one already did.
+- LOD Blending: disabling the feature no longer normalizes landscape vertex colors or applies LOD brightness and gamma.
+- RenderDoc: the capture list, size and Clear All Captures only touch `.rdc` files in the capture directory.
+- CS Editor: unlocking the weather keeps the current weather instead of picking a new one.
+- Presets now save and apply every feature's settings.
+- Settings: unknown keys and sections in `FO4CommunityShaders.toml` are logged as warnings at startup and on reload, and still ignored.
+- Feature shaders now receive their inputs on every engine draw route, including instanced, dynamic, particle and command-buffer draws, not only plain triangle-shape draws.
+- Disabling a feature's `enabled` toggle now skips its shader lookups for Skylighting, Screen Space Shadows, Terrain Shadows, Volumetric Shadows, Water Effects, Extended Materials parallax shadows and LOD Blending.
+- Lower CPU cost per injected draw: bindings are cached, Extended Materials skips unchanged target rebinds, draw counters run only with telemetry on, and per-shader timings run only while the Performance Overlay needs them.
+- Fixed an intermittent crash at startup while shaders compile.
 
 ## 0.4.1
 

@@ -13,12 +13,19 @@ namespace cs::FeatureCategories
 	inline constexpr char kUtility[] = "Utility";
 	inline constexpr char kWater[] = "Water";
 
-	inline constexpr std::array<std::string_view, 6> kRenderOrder{
-		kDisplay,
-		kUtility,
-		kLighting,
-		kMaterials,
-		kLandscapeAndTextures,
-		kWater
+	struct Category
+	{
+		std::string_view id;
+		std::string_view displayName;
+		std::string_view iconName{};
+	};
+
+	inline constexpr std::array kCategories{
+		Category{ "display", kDisplay, "monitor" },
+		Category{ "utility", kUtility, "wrench" },
+		Category{ "lighting", kLighting, "sun-horizon" },
+		Category{ "materials", kMaterials, "cube" },
+		Category{ "landscape-textures", kLandscapeAndTextures, "mountains" },
+		Category{ "water", kWater, "waves" }
 	};
 }

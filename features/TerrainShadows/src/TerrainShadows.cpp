@@ -1,4 +1,5 @@
 #include "TerrainShadows.h"
+#include "Render/SharedDataLayout.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
@@ -224,6 +225,7 @@ namespace cs::features
 		_registrationsReady.store(true, std::memory_order_release);
 
 		if (!cs::engine::RegisterPostDeferredPrePass(
+				*this,
 				[] { TerrainShadows::GetSingleton()->OnPostDeferredPrePass(); TerrainShadows::GetSingleton()->Prepass(); },
 				static_cast<cs::engine::HookPriority>(-200))) {
 			FailLoad(
@@ -654,7 +656,7 @@ namespace cs::features
 		// D3D leaves UAV contents undefined.
 		if (a_context && shadow->uav) {
 			cs::render::annotation::ScopedEvent annotationScope(
-				"TerrainShadows/ClearShadowField");
+				"TerrainShadows::ClearShadowField");
 			const float clear[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
 			a_context->ClearUnorderedAccessViewFloat(shadow->uav.get(), clear);
 		}
@@ -821,7 +823,7 @@ namespace cs::features
 		const std::uint32_t updateCount =
 			a_refreshImmediately ? _plan.maxUpdates : 1u;
 		cs::render::annotation::ScopedEvent annotationScope(
-			"TerrainShadows/Update");
+			"TerrainShadows::Update");
 		const ScopedShadowHeightBindings shadowBindings(a_context);
 		cs::engine::ComputeOMScope scope(a_context, 1, 0, 1, 1);
 		ID3D11ShaderResourceView* srvs[1] = { _heightTexture->srv.get() };
@@ -873,7 +875,7 @@ namespace cs::features
 
 		if (_shadowStatsPending) {
 			cs::render::annotation::ScopedEvent annotationScope(
-				"TerrainShadows/StatisticsReadback");
+				"TerrainShadows::StatisticsReadback");
 			D3D11_MAPPED_SUBRESOURCE mapped{};
 			const HRESULT hr = a_context->Map(
 				_shadowStatsStaging.get(),
@@ -925,7 +927,7 @@ namespace cs::features
 			return;
 		}
 
-		if (!cs::telemetry::pump::Enabled() || !IsEnabled() || !_injectionsOperational.load(std::memory_order_acquire) || !_mapLoaded.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire) || !_heightTexture || !_heightTexture->srv || !_shadowTexture || !_shadowTexture->srv) {
+		if (!cs::telemetry::pump::Enabled() || !IsShadowFieldReady() || !_heightTexture || !_heightTexture->srv) {
 			return;
 		}
 		const auto interval = std::chrono::seconds(
@@ -948,13 +950,7 @@ namespace cs::features
 		std::memcpy(cbMapped.pData, &cbData, sizeof(cbData));
 		a_context->Unmap(_shadowStatsCB.get(), 0);
 		cs::render::SharedFeatureDataCB feature{};
-		const auto terrain = ts::BuildFeatureBlock(_loadedMetadata, true,
-			_heightTexture->desc.Width, _heightTexture->desc.Height, _plan.lightDeltaZ);
-		feature.terraOccSettings.EnableTerrainShadow = terrain.enableTerrainShadow;
-		std::ranges::copy(terrain.scale, feature.terraOccSettings.Scale);
-		std::ranges::copy(terrain.zRange, feature.terraOccSettings.ZRange);
-		std::ranges::copy(terrain.offset, feature.terraOccSettings.Offset);
-		feature.terraOccSettings.ZBlur = terrain.zBlur;
+		feature.terraOccSettings = BuildActiveFeatureBlock();
 		if (FAILED(a_context->Map(_shadowStatsFeatureCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped)))
 			return;
 		std::memcpy(cbMapped.pData, &feature, sizeof(feature));
@@ -968,7 +964,7 @@ namespace cs::features
 
 		{
 			cs::render::annotation::ScopedEvent annotationScope(
-				"TerrainShadows/Statistics");
+				"TerrainShadows::Statistics");
 			const ScopedShadowHeightBindings shadowBindings(a_context, true);
 			cs::ComputeScope scope(a_context, 1, 1, 1, 1);
 			ID3D11ShaderResourceView* height = _heightTexture->srv.get();
@@ -990,7 +986,7 @@ namespace cs::features
 
 		{
 			cs::render::annotation::ScopedEvent annotationScope(
-				"TerrainShadows/CopyStatisticsReadback");
+				"TerrainShadows::CopyStatisticsReadback");
 			a_context->CopyResource(
 				_shadowStatsStaging.get(), _shadowStatsBuffer.get());
 		}
@@ -1006,44 +1002,27 @@ namespace cs::features
 			return;
 		_prepassRuns.fetch_add(1, std::memory_order_relaxed);
 
-		// Render hooks do not catch callback exceptions.
-		try {
-			if (PollGameHourJump())
-				refreshGeneration.fetch_add(1, std::memory_order_release);
-			const auto requestedRefresh = refreshGeneration.load(std::memory_order_acquire);
-			const bool timeJump = requestedRefresh != _handledRefreshGeneration;
-			const auto* sky = RE::Sky::GetSingleton();
-			// FO4: a time-jump refresh waits for the sky to consume the requested hour.
-			const bool celestialReady = !timeJump || (sky && std::abs(sky->currentGameHour - _lastGameHour) < 1e-4f);
-			EnsureLiveResources(context);
+		if (PollGameHourJump())
+			refreshGeneration.fetch_add(1, std::memory_order_release);
+		const auto requestedRefresh = refreshGeneration.load(std::memory_order_acquire);
+		const bool timeJump = requestedRefresh != _handledRefreshGeneration;
+		const auto* sky = RE::Sky::GetSingleton();
+		// FO4: a time-jump refresh waits for the sky to consume the requested hour.
+		const bool celestialReady = !timeJump || (sky && std::abs(sky->currentGameHour - _lastGameHour) < 1e-4f);
+		EnsureLiveResources(context);
 
-			const bool enabled = IsEnabled() && _injectionsOperational.load(std::memory_order_acquire);
-			if (enabled && celestialReady && _mapLoaded.load(std::memory_order_acquire) && _shadowResourcesReady.load(std::memory_order_acquire)) {
-				const bool refresh = _pendingFullRefresh || timeJump;
-				if (UpdateShadow(context, refresh)) {
-					_pendingFullRefresh = false;
-					_handledRefreshGeneration = requestedRefresh;
-				} else
-					_pendingFullRefresh = _pendingFullRefresh || refresh;
-			} else if (timeJump) {
-				_pendingFullRefresh = true;
-			}
-			UpdateShadowStatistics(context);
-
-		} catch (const std::exception& e) {
-			CS_LOG_EVERY_MS(
-				L,
-				kMissingMapLogIntervalMs,
-				spdlog::level::err,
-				"Terrain shadow update failed: {}.",
-				e.what());
-		} catch (...) {
-			CS_LOG_EVERY_MS(
-				L,
-				kMissingMapLogIntervalMs,
-				spdlog::level::err,
-				"Terrain shadow update failed.");
+		const bool enabled = IsEnabled() && _injectionsOperational.load(std::memory_order_acquire);
+		if (enabled && celestialReady && _mapLoaded.load(std::memory_order_acquire) && _shadowResourcesReady.load(std::memory_order_acquire)) {
+			const bool refresh = _pendingFullRefresh || timeJump;
+			if (UpdateShadow(context, refresh)) {
+				_pendingFullRefresh = false;
+				_handledRefreshGeneration = requestedRefresh;
+			} else
+				_pendingFullRefresh = _pendingFullRefresh || refresh;
+		} else if (timeJump) {
+			_pendingFullRefresh = true;
 		}
+		UpdateShadowStatistics(context);
 	}
 
 	void TerrainShadows::Prepass()
@@ -1069,31 +1048,32 @@ namespace cs::features
 			.texture = heightmap ? _heightTexture->srv.get() : nullptr };
 	}
 
-	cs::TerrainShadowsFeatureData TerrainShadows::GetCommonBufferData() const
+	bool TerrainShadows::IsShadowFieldReady() const noexcept
 	{
-		if (!_injectionsOperational.load(std::memory_order_acquire) || !IsEnabled() || !_mapLoaded.load(std::memory_order_acquire) || !_shadowResourcesReady.load(std::memory_order_acquire) || !_shadowPopulated.load(std::memory_order_acquire)) {
-			return {};
-		}
+		return IsEnabled() &&
+		       _injectionsOperational.load(std::memory_order_acquire) &&
+		       _mapLoaded.load(std::memory_order_acquire) &&
+		       _shadowResourcesReady.load(std::memory_order_acquire) &&
+		       _shadowPopulated.load(std::memory_order_acquire) &&
+		       _heightTexture && _shadowTexture && _shadowTexture->srv;
+	}
 
-		const auto block = ts::BuildFeatureBlock(_loadedMetadata, true,
-			_heightTexture->desc.Width, _heightTexture->desc.Height, _plan.lightDeltaZ);
-		cs::TerrainShadowsFeatureData data{};
-		data.EnableTerrainShadow = block.enableTerrainShadow;
-		data.Scale[0] = block.scale[0];
-		data.Scale[1] = block.scale[1];
-		data.Scale[2] = block.scale[2];
-		data.ZRange[0] = block.zRange[0];
-		data.ZRange[1] = block.zRange[1];
-		data.Offset[0] = block.offset[0];
-		data.Offset[1] = block.offset[1];
-		data.ZBlur = block.zBlur;
-		return data;
+	render::TerraOccSettings TerrainShadows::BuildActiveFeatureBlock() const noexcept
+	{
+		return ts::BuildFeatureBlock(
+			_loadedMetadata, true, _heightTexture->desc.Width, _heightTexture->desc.Height, _plan.lightDeltaZ);
+	}
+
+	void TerrainShadows::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&)
+	{
+		if (IsShadowFieldReady())
+			a_feature.terraOccSettings = BuildActiveFeatureBlock();
 	}
 
 	ID3D11ShaderResourceView* TerrainShadows::GetShadowHeightSRV() const
 	{
 		// FO4: volumetric scattering consumes the same validated terrain field as materials.
-		return GetCommonBufferData().EnableTerrainShadow && _shadowTexture ? _shadowTexture->srv.get() : nullptr;
+		return IsShadowFieldReady() ? _shadowTexture->srv.get() : nullptr;
 	}
 
 	void TerrainShadows::PublishStatus(

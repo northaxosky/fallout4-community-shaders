@@ -15,6 +15,7 @@ namespace cs::engine
 		auto* L = log::Get("cs.weather");
 
 		std::atomic<RE::TESWeather*> g_lockedWeather{ nullptr };
+		RE::TESRegion* g_regionBeforeLock = nullptr;
 		std::atomic_bool g_hooksInstalled{ false };
 
 		struct SetWeather_Hook
@@ -49,8 +50,14 @@ namespace cs::engine
 		// Claims the override slot so nothing lerps away from the lock.
 		void ReapplyLock(RE::Sky* a_sky, RE::TESWeather* a_weather)
 		{
-			if (a_sky && a_weather)
+			if (!a_sky || !a_weather)
+				return;
+			if (a_sky->currentWeather == a_weather && !a_sky->lastWeather) {
+				a_sky->overrideWeather = a_weather;
+				a_sky->lastWeatherUpdate = a_sky->currentGameHour;
+			} else {
 				ForceWeatherOriginal(a_sky, a_weather, true);
+			}
 		}
 
 		void SetWeather_Hook::thunk(RE::Sky* a_sky, RE::TESWeather* a_weather, bool a_override, bool a_accelerate)
@@ -121,6 +128,8 @@ namespace cs::engine
 	{
 		if (!a_weather)
 			return;
+		if (auto* sky = RE::Sky::GetSingleton(); sky && !GetLockedWeather())
+			g_regionBeforeLock = sky->currentRegion;
 		g_lockedWeather.store(a_weather, std::memory_order_release);
 		MaintainWeatherLock();
 		L->info("Weather locked: {}", DescribeWeather(a_weather));
@@ -131,8 +140,14 @@ namespace cs::engine
 		auto* locked = g_lockedWeather.exchange(nullptr, std::memory_order_acq_rel);
 		if (!locked)
 			return;
-		if (auto* sky = RE::Sky::GetSingleton())
-			sky->ReleaseWeatherOverride();
+		if (auto* sky = RE::Sky::GetSingleton()) {
+			// FO4's pending release flag also forces a new region weather.
+			sky->flags.reset(RE::Sky::Flags::kReleaseWeatherOverride);
+			sky->overrideWeather = nullptr;
+			sky->defaultWeather = sky->currentWeather;
+			sky->currentRegion = g_regionBeforeLock;
+		}
+		g_regionBeforeLock = nullptr;
 		L->info("Weather unlocked: {}", DescribeWeather(locked));
 	}
 

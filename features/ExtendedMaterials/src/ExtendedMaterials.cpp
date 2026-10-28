@@ -1,4 +1,5 @@
 #include "ExtendedMaterials.h"
+#include "Render/SharedDataLayout.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -105,9 +106,9 @@ namespace cs::features
 		const auto* graphics = cs::engine::GetGraphicsState();
 		if (!graphics || !ShadowsActive())
 			return;
-		try {
-			if (!_shadowTexture || _shadowTexture->desc.Width != graphics->screenWidth ||
-				_shadowTexture->desc.Height != graphics->screenHeight) {
+		if (!_shadowTexture || _shadowTexture->desc.Width != graphics->screenWidth ||
+			_shadowTexture->desc.Height != graphics->screenHeight) {
+			try {
 				D3D11_TEXTURE2D_DESC desc{};
 				desc.Width = graphics->screenWidth;
 				desc.Height = graphics->screenHeight;
@@ -124,19 +125,26 @@ namespace cs::features
 				DX::ThrowIfFailed(device->CreateRenderTargetView(texture->resource.get(), nullptr, texture->rtv.put()));
 				texture->SetName("ExtendedMaterials/ParallaxShadow.Texture", "ExtendedMaterials/ParallaxShadow.SRV", "", "ExtendedMaterials/ParallaxShadow.RTV");
 				_shadowTexture = std::move(texture);
+			} catch (const std::exception& e) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Extended Materials parallax shadow target unavailable: {}", e.what());
+				return;
+			} catch (...) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Extended Materials parallax shadow target unavailable.");
+				return;
 			}
-			const float lit[4]{ 1, 1, 1, 1 };
-			context->ClearRenderTargetView(_shadowTexture->rtv.get(), lit);
-			_shadowFrameReady = true;
-		} catch (const std::exception& e) {
-			CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Extended Materials parallax shadow target unavailable: {}", e.what());
 		}
+		const float lit[4]{ 1, 1, 1, 1 };
+		context->ClearRenderTargetView(_shadowTexture->rtv.get(), lit);
+		_shadowFrameReady = true;
 	}
 
-	void ExtendedMaterials::BindShadowTarget(ID3D11DeviceContext* a_context) const
+	void ExtendedMaterials::BindShadowTarget(ID3D11DeviceContext* a_context)
 	{
-		if (!_shadowFrameReady)
+		// Only an engine output commit or plugin work can unbind Target6.
+		const auto epoch = cs::engine::GetFrameBindingEpoch();
+		if (!_shadowFrameReady || epoch == _shadowTargetEpoch)
 			return;
+		_shadowTargetEpoch = epoch;
 		// FO4: SV_Target6 follows the engine's six G-buffer targets, left as bound.
 		std::array<ID3D11RenderTargetView*, kParallaxShadowRTVSlot + 1> targets{};
 		winrt::com_ptr<ID3D11DepthStencilView> depth;
@@ -184,7 +192,7 @@ namespace cs::features
 			FailLoad("Extended Materials shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPostDeferredPrePass([this] {
+		if (!cs::engine::RegisterPostDeferredPrePass(*this, [this] {
 				if (auto* rendererData = RE::BSGraphics::GetRendererData())
 					PublishShadows(reinterpret_cast<ID3D11DeviceContext*>(rendererData->context));
 			})) {
@@ -223,17 +231,16 @@ namespace cs::features
 		return true;
 	}
 
-	cs::ExtendedMaterialsFeatureData ExtendedMaterials::GetCommonBufferData() const
+	void ExtendedMaterials::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&)
 	{
 		if (!_injectionsOperational.load(std::memory_order_acquire))
-			return {};
-		cs::ExtendedMaterialsFeatureData data{};
+			return;
+		auto& data = a_feature.extendedMaterialSettings;
 		data.EnableParallax = _settings.EnableParallax ? 1u : 0u;
 		data.EnableTerrainParallax = _settings.EnableTerrain ? 1u : 0u;
 		data.EnableHeightBlending = _settings.EnableHeightBlending ? 1u : 0u;
 		data.EnableShadows = _settings.EnableShadows ? 1u : 0u;
 		data.EnableParallaxWarpingFix = _settings.EnableParallaxWarpingFix ? 1u : 0u;
-		return data;
 	}
 
 	void ExtendedMaterials::DrawSettings()

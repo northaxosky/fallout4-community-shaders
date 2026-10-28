@@ -1,16 +1,11 @@
 #pragma once
 
+#include "Render/TemporalRenderSettings.h"
 #include "Settings/SettingsSchema.h"
 
 namespace cs::features::frame_generation
 {
-	enum class Method : std::uint32_t
-	{
-		kOff,
-		kFSR3,
-		kDLSSG,
-		kFSR4
-	};
+	using Method = render::temporal::FrameGenerationMethod;
 
 	struct Settings
 	{

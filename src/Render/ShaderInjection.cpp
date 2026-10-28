@@ -6,23 +6,29 @@
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
 #include "Render/NativeShaderFamily.h"
-#include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
+#include "Render/RuntimeCallback.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
+#include "Render/StockShaderVariants.h"
 #include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
+#include "Utils/ShaderInclude.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <map>
 #include <memory>
@@ -44,10 +50,69 @@ namespace cs::engine
 		thread_local bool t_drawFrameStarted = false;
 		std::mutex g_drawMetricsMutex;
 		ShaderInjectionDrawMetrics g_completedDrawMetrics;
+		// Sampled once per frame; counters are skipped unless telemetry is on.
+		std::atomic<bool> g_collectMetrics{ false };
+
+		template <class Counter>
+		void Tally(Counter& a_counter, std::uint64_t a_amount = 1) noexcept
+		{
+			if (!g_collectMetrics.load(std::memory_order_relaxed))
+				return;
+			if constexpr (requires { a_counter.fetch_add(a_amount, std::memory_order_relaxed); })
+				a_counter.fetch_add(a_amount, std::memory_order_relaxed);
+			else
+				a_counter += a_amount;
+		}
 
 		ShaderStage ActiveBindingStage() noexcept
 		{
 			return t_bindings ? t_bindings->GetStage() : ShaderStage::kPixel;
+		}
+
+		// Engine-facts: PS shadow state owns t0-t15/s0-s15 and b0-b2/b12/b13 only.
+		constexpr bool EngineOwnsPixelSlot(ShaderResourceType a_type, UINT a_slot) noexcept
+		{
+			switch (a_type) {
+			case ShaderResourceType::kShaderResource:
+				return a_slot < 16;
+			case ShaderResourceType::kConstantBuffer:
+				return a_slot <= 2 || a_slot == 12 || a_slot == 13;
+			default:
+				return true;
+			}
+		}
+
+		// Engine-unowned pixel slots persist, so they bind through the change cache.
+		bool UsesDrawBindingCache(ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
+		{
+			if (ActiveBindingStage() != ShaderStage::kPixel)
+				return false;
+			for (UINT slot = a_start; slot < a_start + a_count; ++slot)
+				if (EngineOwnsPixelSlot(a_type, slot))
+					return false;
+			return true;
+		}
+
+		// One restore call per contiguous slot run; releases each capture.
+		template <class Entry>
+		std::uint32_t RestoreRuns(ID3D11DeviceContext* a_context, ShaderStage a_stage, std::span<Entry> a_entries) noexcept
+		{
+			std::array<decltype(Entry::value), D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> values{};
+			std::uint32_t calls = 0;
+			for (std::size_t i = 0; i < a_entries.size();) {
+				std::size_t run = 0;
+				while (i + run < a_entries.size() && a_entries[i + run].slot == a_entries[i].slot + run) {
+					values[run] = a_entries[i + run].value;
+					++run;
+				}
+				SetStageBindings(a_context, a_stage, a_entries[i].slot, static_cast<UINT>(run), values.data());
+				for (std::size_t j = 0; j < run; ++j)
+					if (values[j])
+						values[j]->Release();
+				++calls;
+				i += run;
+			}
+			return calls;
 		}
 
 		void CaptureBindings(ID3D11DeviceContext* a_context, ShaderResourceType a_type, UINT a_start, UINT a_count) noexcept
@@ -58,24 +123,97 @@ namespace cs::engine
 				t_bindings->Capture(a_context, a_type, slot);
 			}
 		}
+
+		// PS samplers left bound across draws; the engine's dirty mask restores them.
+		struct SamplerOverrides
+		{
+			std::uint16_t mask = 0;
+			std::array<ID3D11SamplerState*, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT> values{};
+		};
+
+		// Logical outputs; the engine leaves DIRTY_RENDERTARGET set when unchanged.
+		using RE::BSGraphics::RendererShadowState;
+		constexpr std::size_t kOutputStateBegin = offsetof(RendererShadowState, readOnlyDepth);
+		constexpr std::size_t kOutputStateEnd = offsetof(RendererShadowState, currentRenderTargetIndex);
+		static_assert(offsetof(RendererShadowState, renderTargets) > kOutputStateBegin &&
+					  offsetof(RendererShadowState, setDepthStencilMode) < kOutputStateEnd);
+		using OutputState = std::array<std::byte, kOutputStateEnd - kOutputStateBegin>;
+		thread_local std::optional<OutputState> t_committedOutputs;
+
+		bool OutputsChanged(const RendererShadowState& a_state) noexcept
+		{
+			OutputState current;
+			std::memcpy(current.data(), reinterpret_cast<const std::byte*>(&a_state) + kOutputStateBegin, current.size());
+			if (t_committedOutputs == current)
+				return false;
+			t_committedOutputs = current;
+			return true;
+		}
+
+		struct NativeVariant;
+
+		// The engine draw flush whose injection dispatch is running.
+		struct EngineDrawFlushState
+		{
+			NativeVariant* variant = nullptr;
+			// PS sampler slots the engine resubmits during this flush.
+			std::uint16_t resubmitted = 0;
+			std::uint16_t requested = 0;
+		};
+
+		thread_local SamplerOverrides t_samplerOverrides;
+		thread_local EngineDrawFlushState t_engineFlush;
+		std::atomic_bool g_engineSamplerRestore{ true };
+
+		RE::BSGraphics::RendererShadowState* GetEngineShadowState() noexcept
+		{
+			auto* context = GetActiveContext();
+			return context ? &context->shadowState : nullptr;
+		}
+
+		void ReleaseSamplerOverrides(RE::BSGraphics::RendererShadowState* a_state) noexcept
+		{
+			if (!t_samplerOverrides.mask)
+				return;
+			if (a_state)
+				a_state->psSamplerModifiedBits |= t_samplerOverrides.mask;
+			t_samplerOverrides = {};
+		}
+
+		void BindEngineFlushSampler(EngineDrawFlushState& a_flush, ID3D11DeviceContext* a_context, UINT a_slot, ID3D11SamplerState* a_sampler) noexcept
+		{
+			auto& overrides = t_samplerOverrides;
+			const auto bit = static_cast<std::uint16_t>(1u << a_slot);
+			a_flush.requested |= bit;
+			if ((overrides.mask & bit) && overrides.values[a_slot] == a_sampler && !(a_flush.resubmitted & bit))
+				return;
+			a_context->PSSetSamplers(a_slot, 1, &a_sampler);
+			RecordShaderInjectionD3DBinds();
+			overrides.mask |= bit;
+			overrides.values[a_slot] = a_sampler;
+		}
 	}
 
 	void BindInjectionShaderResources(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11ShaderResourceView* const* a_values) noexcept
 	{
+		if (UsesDrawBindingCache(ShaderResourceType::kShaderResource, a_start, a_count)) {
+			RecordShaderInjectionD3DBinds(BindDrawShaderResources(a_context, ShaderStage::kPixel, a_start, a_count, a_values));
+			return;
+		}
 		CaptureBindings(a_context, ShaderResourceType::kShaderResource, a_start, a_count);
-		if (ActiveBindingStage() == ShaderStage::kCompute)
-			a_context->CSSetShaderResources(a_start, a_count, a_values);
-		else
-			a_context->PSSetShaderResources(a_start, a_count, a_values);
+		SetStageBindings(a_context, ActiveBindingStage(), a_start, a_count, a_values);
 		RecordShaderInjectionD3DBinds();
 	}
 
 	void BindInjectionSamplers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11SamplerState* const* a_values) noexcept
 	{
 		for (UINT slot = a_start; slot < a_start + a_count; ++slot) {
-			if (ActiveBindingStage() == ShaderStage::kPixel && (t_samplerMask & (1u << slot)) == 0)
+			const bool pixel = ActiveBindingStage() == ShaderStage::kPixel;
+			if (pixel && (t_samplerMask & (1u << slot)) == 0)
 				continue;
-			if (t_bindings) {
+			if (pixel && t_engineFlush.variant) {
+				BindEngineFlushSampler(t_engineFlush, a_context, slot, a_values[slot - a_start]);
+			} else if (t_bindings) {
 				t_bindings->BindSampler(a_context, slot, a_values[slot - a_start]);
 			} else {
 				a_context->PSSetSamplers(slot, 1, &a_values[slot - a_start]);
@@ -86,22 +224,29 @@ namespace cs::engine
 
 	void BindInjectionConstantBuffers(ID3D11DeviceContext* a_context, UINT a_start, UINT a_count, ID3D11Buffer* const* a_values) noexcept
 	{
+		if (UsesDrawBindingCache(ShaderResourceType::kConstantBuffer, a_start, a_count)) {
+			RecordShaderInjectionD3DBinds(BindDrawConstantBuffers(a_context, ShaderStage::kPixel, a_start, a_count, a_values));
+			return;
+		}
 		CaptureBindings(a_context, ShaderResourceType::kConstantBuffer, a_start, a_count);
-		if (ActiveBindingStage() == ShaderStage::kCompute)
-			a_context->CSSetConstantBuffers(a_start, a_count, a_values);
-		else
-			a_context->PSSetConstantBuffers(a_start, a_count, a_values);
+		SetStageBindings(a_context, ActiveBindingStage(), a_start, a_count, a_values);
 		RecordShaderInjectionD3DBinds();
 	}
 
-	void CaptureShaderInjectionOutputs(ID3D11DeviceContext* a_context) noexcept
+	void CaptureShaderInjectionBlendState(ID3D11DeviceContext* a_context) noexcept
 	{
-		CaptureBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
+		CaptureBindings(a_context, ShaderResourceType::kBlendState, 0, 1);
+	}
+
+	void InvalidateShaderInjectionBindings() noexcept
+	{
+		InvalidateFrameBindings();
+		ReleaseSamplerOverrides(GetEngineShadowState());
 	}
 
 	void SetInjectionBlendState(ID3D11DeviceContext* a_context, ID3D11BlendState* a_blend, const float (&a_blendFactor)[4], UINT a_sampleMask) noexcept
 	{
-		CaptureShaderInjectionOutputs(a_context);
+		CaptureShaderInjectionBlendState(a_context);
 		a_context->OMSetBlendState(a_blend, a_blendFactor, a_sampleMask);
 		RecordShaderInjectionD3DBinds();
 	}
@@ -110,85 +255,55 @@ namespace cs::engine
 	{
 		if (t_drawFrameStarted && t_drawMetrics.frame == a_frame)
 			return;
-		{
+		if (g_collectMetrics.load(std::memory_order_relaxed)) {
 			std::scoped_lock lock(g_drawMetricsMutex);
 			t_drawMetrics.frameBindings = GetFrameBindingMetrics();
 			g_completedDrawMetrics = t_drawMetrics;
 		}
+		const bool collect = telemetry::pump::Enabled();
+		g_collectMetrics.store(collect, std::memory_order_relaxed);
 		t_drawMetrics = { .frame = a_frame };
-		ResetFrameBindings();
+		ResetFrameBindings(collect);
+		ReleaseSamplerOverrides(GetEngineShadowState());
+		t_committedOutputs.reset();
 		t_drawFrameStarted = true;
 	}
 
 	void RecordShaderInjectionD3DBinds(std::uint32_t a_count) noexcept
 	{
 		if (t_bindings && ActiveBindingStage() == ShaderStage::kPixel)
-			t_drawMetrics.d3dBinds += a_count;
+			Tally(t_drawMetrics.d3dBinds, a_count);
 	}
 
 	ScopedShaderInjectionBindings::ScopedShaderInjectionBindings(ShaderStage a_stage) noexcept :
 		_stage(a_stage),
-		_previous(std::exchange(t_bindings, this)),
-		_started(std::chrono::steady_clock::now())
+		_previous(std::exchange(t_bindings, this))
 	{}
 
 	ScopedShaderInjectionBindings::~ScopedShaderInjectionBindings() noexcept
 	{
 		const auto finish = [this] {
 			t_bindings = _previous;
-			if (_stage == ShaderStage::kPixel) {
-				if (!_previous || _previous->GetStage() != ShaderStage::kPixel) {
-					++t_drawMetrics.scopes;
-					t_drawMetrics.scopeNanoseconds += static_cast<std::uint64_t>(
-						std::chrono::duration_cast<std::chrono::nanoseconds>(
-							std::chrono::steady_clock::now() - _started)
-							.count());
-				}
-			}
+			if (_stage == ShaderStage::kPixel && (!_previous || _previous->GetStage() != ShaderStage::kPixel))
+				Tally(t_drawMetrics.scopes);
 		};
-		const auto restores = _bufferCount + _resourceCount + _samplerCount + (_outputCaptured ? 2u : 0u);
-		if (_stage == ShaderStage::kPixel) {
-			t_drawMetrics.restores += restores;
-			t_drawMetrics.d3dBinds += restores;
-		}
 		if (!_context) {
 			finish();
 			return;
 		}
-		if (_outputCaptured) {
-			_context->OMSetRenderTargets(8, _targets, _depth);
+		std::uint32_t calls = 0;
+		if (_blendCaptured) {
 			_context->OMSetBlendState(_blend, _blendFactor, _sampleMask);
-			for (auto* target : _targets)
-				if (target)
-					target->Release();
-			if (_depth)
-				_depth->Release();
 			if (_blend)
 				_blend->Release();
+			++calls;
 		}
-		for (const auto& buffer : std::span(_buffers).first(_bufferCount)) {
-			if (_stage == ShaderStage::kCompute)
-				_context->CSSetConstantBuffers(buffer.slot, 1, &buffer.value);
-			else
-				_context->PSSetConstantBuffers(buffer.slot, 1, &buffer.value);
-			if (buffer.value)
-				buffer.value->Release();
-		}
-		for (const auto& resource : std::span(_resources).first(_resourceCount)) {
-			if (_stage == ShaderStage::kCompute)
-				_context->CSSetShaderResources(resource.slot, 1, &resource.value);
-			else
-				_context->PSSetShaderResources(resource.slot, 1, &resource.value);
-			if (resource.value)
-				resource.value->Release();
-		}
-		for (const auto& sampler : std::span(_samplers).first(_samplerCount)) {
-			if (_stage == ShaderStage::kCompute)
-				_context->CSSetSamplers(sampler.slot, 1, &sampler.value);
-			else
-				_context->PSSetSamplers(sampler.slot, 1, &sampler.value);
-			if (sampler.value)
-				sampler.value->Release();
+		calls += RestoreRuns(_context, _stage, std::span(_buffers).first(_bufferCount));
+		calls += RestoreRuns(_context, _stage, std::span(_resources).first(_resourceCount));
+		calls += RestoreRuns(_context, _stage, std::span(_samplers).first(_samplerCount));
+		if (_stage == ShaderStage::kPixel) {
+			Tally(t_drawMetrics.restores, _bufferCount + _resourceCount + _samplerCount + (_blendCaptured ? 1u : 0u));
+			Tally(t_drawMetrics.d3dBinds, calls);
 		}
 		finish();
 	}
@@ -201,38 +316,28 @@ namespace cs::engine
 		if (!_context)
 			_context = a_context;
 		{
-			// Engine-facts: PS shadow state owns t0-t15/s0-s15 and b0-b2/b12/b13 only.
-			if (_stage == ShaderStage::kPixel &&
-				((a_type == ShaderResourceType::kShaderResource && a_slot >= 16) ||
-					(a_type == ShaderResourceType::kConstantBuffer && a_slot > 2 && a_slot != 12 && a_slot != 13)))
+			if (_stage == ShaderStage::kPixel && !EngineOwnsPixelSlot(a_type, a_slot))
 				return;
-			if (a_type == ShaderResourceType::kRenderTarget && !_outputCaptured) {
-				_context->OMGetRenderTargets(8, _targets, &_depth);
+			if (a_type == ShaderResourceType::kBlendState && !_blendCaptured) {
 				_context->OMGetBlendState(&_blend, _blendFactor, &_sampleMask);
-				_outputCaptured = true;
+				_blendCaptured = true;
 				if (_stage == ShaderStage::kPixel)
-					t_drawMetrics.captures += 2;
+					Tally(t_drawMetrics.captures);
 			}
 			if (a_type == ShaderResourceType::kShaderResource &&
 				std::ranges::none_of(std::span(_resources).first(_resourceCount), [&](const auto& r) { return r.slot == a_slot; })) {
 				auto& resource = _resources[_resourceCount++];
 				resource = { a_slot, nullptr };
 				if (_stage == ShaderStage::kPixel)
-					++t_drawMetrics.captures;
-				if (_stage == ShaderStage::kCompute)
-					_context->CSGetShaderResources(a_slot, 1, &resource.value);
-				else
-					_context->PSGetShaderResources(a_slot, 1, &resource.value);
+					Tally(t_drawMetrics.captures);
+				GetStageBindings(_context, _stage, a_slot, 1, &resource.value);
 			} else if (a_type == ShaderResourceType::kConstantBuffer &&
 					   std::ranges::none_of(std::span(_buffers).first(_bufferCount), [&](const auto& b) { return b.slot == a_slot; })) {
 				auto& buffer = _buffers[_bufferCount++];
 				buffer = { a_slot, nullptr };
 				if (_stage == ShaderStage::kPixel)
-					++t_drawMetrics.captures;
-				if (_stage == ShaderStage::kCompute)
-					_context->CSGetConstantBuffers(a_slot, 1, &buffer.value);
-				else
-					_context->PSGetConstantBuffers(a_slot, 1, &buffer.value);
+					Tally(t_drawMetrics.captures);
+				GetStageBindings(_context, _stage, a_slot, 1, &buffer.value);
 			}
 		}
 	}
@@ -245,10 +350,7 @@ namespace cs::engine
 		auto* binding = found == samplers.end() ? nullptr : &*found;
 		if (!binding) {
 			ID3D11SamplerState* original = nullptr;
-			if (_stage == ShaderStage::kCompute)
-				a_context->CSGetSamplers(a_slot, 1, &original);
-			else
-				a_context->PSGetSamplers(a_slot, 1, &original);
+			GetStageBindings(a_context, _stage, a_slot, 1, &original);
 			if (original == a_sampler) {
 				if (original)
 					original->Release();
@@ -258,15 +360,12 @@ namespace cs::engine
 			binding = &_samplers[_samplerCount++];
 			*binding = { a_slot, original, original };
 			if (_stage == ShaderStage::kPixel)
-				++t_drawMetrics.captures;
+				Tally(t_drawMetrics.captures);
 		}
 		if (binding->current == a_sampler)
 			return;
-		// AE SetDirtyStates (0x18247D0) skips clean slots; overrides must not outlive this draw.
-		if (_stage == ShaderStage::kCompute)
-			a_context->CSSetSamplers(a_slot, 1, &a_sampler);
-		else
-			a_context->PSSetSamplers(a_slot, 1, &a_sampler);
+		// Capture/restore path (no engine flush): the override is undone after this draw.
+		SetStageBindings(a_context, _stage, a_slot, 1, &a_sampler);
 		binding->current = a_sampler;
 		RecordShaderInjectionD3DBinds();
 	}
@@ -275,41 +374,9 @@ namespace cs::engine
 	{
 		constexpr auto& kTargets = kShaderInjectionTargets;
 
-		constexpr std::string_view StageName(ShaderStage a_stage) noexcept
-		{
-			static_assert(
-				static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
-			switch (a_stage) {
-			case ShaderStage::kVertex:
-				return "vertex";
-			case ShaderStage::kPixel:
-				return "pixel";
-			case ShaderStage::kCompute:
-				return "compute";
-			}
-			std::unreachable();
-		}
-
-		constexpr std::string_view StageAbbreviation(
-			ShaderStage a_stage) noexcept
-		{
-			static_assert(
-				static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
-			switch (a_stage) {
-			case ShaderStage::kVertex:
-				return "vs";
-			case ShaderStage::kPixel:
-				return "ps";
-			case ShaderStage::kCompute:
-				return "cs";
-			}
-			std::unreachable();
-		}
-
 		constexpr ShaderStageMask kValidShaderStages =
 			ShaderStageBit(ShaderStage::kVertex) | ShaderStageBit(ShaderStage::kPixel) | ShaderStageBit(ShaderStage::kCompute);
 
-		constexpr auto kDefaultShaderRoot = L"Data\\Shaders";
 		auto* L = cs::log::Get("cs.render.shaderinjection");
 
 		enum class Lifecycle : std::uint8_t
@@ -321,16 +388,13 @@ namespace cs::engine
 
 		struct TargetRuntimeState
 		{
-			std::atomic<bool> requested{ false };
 			std::atomic<std::size_t> contributors{ 0 };
 			std::atomic<std::uint64_t> computeBindCalls{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
 			std::atomic<std::uint64_t> passthroughNotReady{ 0 };
-			std::atomic<std::uint64_t> passthroughDisabled{ 0 };
 			std::atomic<std::uint64_t> dispatches{ 0 };
-			DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 			ShaderInjectionDefines defines;
 			std::string publicationError;
 		};
@@ -344,6 +408,7 @@ namespace cs::engine
 			{
 				ShaderStageMask stages = 0;
 				ShaderInjectionBindCallback callback;
+				Feature* owner = nullptr;
 			};
 			std::vector<Bind> binds;
 			std::size_t contributors = 0;
@@ -362,7 +427,6 @@ namespace cs::engine
 			std::shared_ptr<ShaderVariantCompilationCache>
 				compilationCache;
 			winrt::com_ptr<ID3D11Device> device;
-			std::wstring developerSourceRoot;
 			GameRuntime runtime = GameRuntime::kAE;
 			std::vector<PublishedTarget> targets;
 		};
@@ -415,6 +479,8 @@ namespace cs::engine
 			// Published after preparation stores its final compilation (or none).
 			std::atomic<bool> settled{ false };
 			std::atomic<util::ShaderSamplerUse> samplers{ util::ShaderSamplerUse{} };
+			// Render thread: PS sampler slots its last engine-flush dispatch bound.
+			std::uint16_t samplerRequests = 0;
 			static_assert(std::atomic<util::ShaderSamplerUse>::is_always_lock_free);
 		};
 
@@ -457,23 +523,17 @@ namespace cs::engine
 			std::mutex mutex;
 			Lifecycle lifecycle = Lifecycle::kCollecting;
 			std::atomic_bool enabled = true;
-			bool developerForceOffEnabled = false;
-			std::wstring developerSourceRoot;
 			GameRuntime gameRuntime = GameRuntime::kAE;
 			std::array<std::atomic_bool,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				baselineOwnership{};
-			std::array<DeveloperShaderOverride,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
-				developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
 			std::mutex nativeVariantMutex;
-			std::map<std::pair<std::filesystem::path, std::string>, bool>
-				shaderSourceAvailability;
+			std::unordered_map<std::string, bool> shaderSourceAvailability;
 			std::unordered_map<NativeVariantKey, std::shared_ptr<NativeVariant>,
 				NativeVariantKeyHash>
 				nativeVariants;
@@ -680,82 +740,13 @@ namespace cs::engine
 			return metadata ? metadata->supportedStages : 0;
 		}
 
-		enum class MatchedShaderOutcome : std::uint8_t
-		{
-			kKeptStock,
-			kCompileFailed,
-			kNotReady,
-			kDisabled,
-			kReplaced
-		};
-
-		struct RecordedSwapCounts
-		{
-			std::uint64_t targetSubstitutions = 0;
-			std::uint64_t totalSubstitutions = 0;
-		};
-
-		RecordedSwapCounts RecordMatchedShaderOutcome(
-			ShaderInjectionTarget a_target,
-			MatchedShaderOutcome a_outcome) noexcept
-		{
-			auto& service = GetService();
-			SwapCountersGuard guard(service);
-			auto& runtime = service.runtime[ToIndex(a_target)];
-			runtime.matches.fetch_add(1, std::memory_order_relaxed);
-			switch (a_outcome) {
-			case MatchedShaderOutcome::kCompileFailed:
-				runtime.passthroughCompileFail.fetch_add(
-					1, std::memory_order_relaxed);
-				break;
-			case MatchedShaderOutcome::kNotReady:
-				runtime.passthroughNotReady.fetch_add(
-					1, std::memory_order_relaxed);
-				break;
-			case MatchedShaderOutcome::kDisabled:
-				runtime.passthroughDisabled.fetch_add(
-					1, std::memory_order_relaxed);
-				break;
-			case MatchedShaderOutcome::kReplaced:
-				runtime.substitutions.fetch_add(
-					1, std::memory_order_relaxed);
-				break;
-			case MatchedShaderOutcome::kKeptStock:
-				break;
-			}
-
-			RecordedSwapCounts counts;
-			counts.targetSubstitutions =
-				runtime.substitutions.load(std::memory_order_relaxed);
-			for (const auto& targetRuntime : service.runtime) {
-				counts.totalSubstitutions +=
-					targetRuntime.substitutions.load(
-						std::memory_order_relaxed);
-			}
-			return counts;
-		}
-
 		void LogLateMutation(std::string_view a_operation)
 		{
 			L->warn("{} rejected after shader-injection freeze; restart required.", a_operation);
 		}
 
-		ShaderInjectionDefines GetDefines(const ShaderReplacementRegistration& a_registration)
-		{
-			const auto* feature = a_registration.feature;
-			if (!feature || !feature->IsLoaded() || !feature->HasShaderDefine(a_registration.targetId))
-				return {};
-			ShaderInjectionDefines defines{ { std::string(feature->GetShaderDefineName()), "1" } };
-			for (const auto& [name, value] : feature->GetShaderDefineOptions(a_registration.targetId))
-				defines.emplace(name, value);
-			return defines;
-		}
-
 		std::vector<FrozenTarget> FreezeTargets(
-			const std::vector<ShaderReplacementRegistration>& a_registrations,
-			bool a_developerForceOffEnabled,
-			const std::array<DeveloperShaderOverride,
-				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>& a_developerOverrides)
+			const std::vector<ShaderReplacementRegistration>& a_registrations)
 		{
 			std::vector<FrozenTarget> frozen;
 			frozen.reserve(kTargets.size());
@@ -764,9 +755,6 @@ namespace cs::engine
 				FrozenTarget target;
 				target.metadata = &metadata;
 				const auto targetIndex = ToIndex(metadata.id);
-				auto developerOverride = a_developerOverrides[targetIndex];
-				if (developerOverride == DeveloperShaderOverride::kForceOff && !a_developerForceOffEnabled)
-					developerOverride = DeveloperShaderOverride::kAuto;
 
 				for (std::size_t registrationIndex = 0;
 					registrationIndex < a_registrations.size();
@@ -779,17 +767,12 @@ namespace cs::engine
 					}
 
 					++target.contributors;
-					const auto defines = GetDefines(registration);
-					target.defines.insert(defines.begin(), defines.end());
 					target.contributions.push_back(registration);
 					if (registration.bind) {
 						target.binds.push_back({ registration.stages,
-							registration.bind });
+							registration.bind, registration.feature ? registration.feature->GetRuntimeOwner() : nullptr });
 					}
 				}
-
-				const bool requested =
-					developerOverride != DeveloperShaderOverride::kForceOff;
 
 				for (const auto& contribution : target.contributions) {
 					const bool stageMatched =
@@ -802,25 +785,20 @@ namespace cs::engine
 					}
 				}
 
+				std::string defineError;
+				if (auto defines = GatherShaderInjectionDefines(
+						metadata.id, SupportedStages(metadata.id), target.contributions, &defineError)) {
+					target.defines = std::move(*defines);
+				} else {
+					L->error("Shader target '{}': {}", metadata.name, defineError);
+				}
 				auto& runtime = GetService().runtime[targetIndex];
-				runtime.requested.store(requested, std::memory_order_relaxed);
 				runtime.contributors.store(target.contributors, std::memory_order_relaxed);
-				runtime.developerOverride = developerOverride;
 				runtime.defines = target.defines;
 
-				if (requested)
-					frozen.push_back(std::move(target));
+				frozen.push_back(std::move(target));
 			}
 			return frozen;
-		}
-
-		std::filesystem::path ResolveShaderRoot(
-			DeveloperShaderOverride a_developerOverride,
-			const std::wstring& a_developerSourceRoot)
-		{
-			const bool useDeveloperRoot =
-				a_developerOverride == DeveloperShaderOverride::kForceOn && !a_developerSourceRoot.empty();
-			return useDeveloperRoot ? a_developerSourceRoot : kDefaultShaderRoot;
 		}
 
 		const PublishedTarget* FindPublishedTarget(
@@ -840,9 +818,6 @@ namespace cs::engine
 			const NativeVariantKey& a_key)
 		{
 			auto& service = GetService();
-			const auto shaderRoot = ResolveShaderRoot(
-				service.runtime[ToIndex(a_key.target)].developerOverride,
-				a_plan.developerSourceRoot);
 			const auto descriptor = DescribeNativeVariant(a_key);
 			std::shared_ptr<NativeVariant> candidate;
 			{
@@ -852,9 +827,9 @@ namespace cs::engine
 					return entry->second;
 				const std::string sourceName(ResolveShaderSourceName(descriptor));
 				const auto [source, inserted] = service.shaderSourceAvailability.try_emplace(
-					std::make_pair(shaderRoot, sourceName), false);
+					sourceName, false);
 				if (inserted)
-					source->second = IsShaderSourceAvailable(shaderRoot, sourceName);
+					source->second = IsShaderSourceAvailable(util::kDefaultShaderRoot, sourceName);
 				if (!source->second)
 					return nullptr;
 				candidate = std::make_shared<NativeVariant>();
@@ -909,7 +884,7 @@ namespace cs::engine
 				L->error(
 					"Native descriptor compile request rejected for '{}/{}/{:#010x}': {}",
 					metadata->name,
-					StageName(descriptor.stage),
+					ShaderStageName(descriptor.stage),
 					descriptor.descriptor,
 					error);
 				return candidate;
@@ -917,7 +892,7 @@ namespace cs::engine
 
 			ShaderVariantCompilationRequest request;
 			request.device = a_plan.device;
-			request.sourcePath = shaderRoot / effective->sourcePath;
+			request.sourcePath = std::filesystem::path(util::kDefaultShaderRoot) / effective->sourcePath;
 			request.entryPoint = effective->entryPoint;
 			request.profile = effective->profile;
 			request.stage = descriptor.stage;
@@ -942,7 +917,7 @@ namespace cs::engine
 				L->error(
 					"Native descriptor compile failed for '{}/{}/{:#010x}': {}",
 					metadata->name,
-					StageName(descriptor.stage),
+					ShaderStageName(descriptor.stage),
 					descriptor.descriptor,
 					"compilation cache rejected request");
 				service.runtime[ToIndex(descriptor.target)]
@@ -1037,6 +1012,7 @@ namespace cs::engine
 					settled = false;
 					if (!variant->pendingObserved.exchange(
 							true, std::memory_order_relaxed)) {
+						a_plan.compilationCache->Demand(compilation);
 						runtime.passthroughNotReady.fetch_add(
 							1, std::memory_order_relaxed);
 					}
@@ -1053,6 +1029,7 @@ namespace cs::engine
 				std::scoped_lock lock(service.nativeVariantMutex);
 				service.nativeShaderIdentities.insert_or_assign(
 					shader.get(), Service::NativeShaderIdentity{ a_key, variant });
+				service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
 			}
 			return static_cast<TShader*>(shader.detach());
 		}
@@ -1171,32 +1148,14 @@ namespace cs::engine
 			ShaderStage a_stage,
 			ID3D11DeviceContext* a_context) noexcept
 		{
-			VerifyFrameBindings(a_context, a_stage, a_target.id);
-			if (a_stage == ShaderStage::kPixel)
-				VerifyFrameBindings(a_context, ShaderStage::kVertex, a_target.id);
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
 			for (const auto& bind : a_target.binds) {
 				if ((bind.stages & ShaderStageBit(a_stage)) == 0)
 					continue;
-				try {
+				render::RunRenderCallback(bind.owner, kTargets[ToIndex(a_target.id)].name, [&] {
 					bind.callback(a_context);
-					runtime.dispatches.fetch_add(1, std::memory_order_relaxed);
-				} catch (const std::exception& e) {
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::warn,
-						"Shader injection for '{}' failed: {}.",
-						kTargets[ToIndex(a_target.id)].name,
-						e.what());
-				} catch (...) {
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::warn,
-						"Shader injection for '{}' failed.",
-						kTargets[ToIndex(a_target.id)].name);
-				}
+					Tally(runtime.dispatches);
+				});
 			}
 		}
 
@@ -1206,7 +1165,7 @@ namespace cs::engine
 			UINT a_threadGroupCountY,
 			UINT a_threadGroupCountZ) noexcept
 		{
-			g_computeBridgeCalls.fetch_add(1, std::memory_order_relaxed);
+			Tally(g_computeBridgeCalls);
 			if (!a_context) {
 				g_computeContextRejections.fetch_add(
 					1, std::memory_order_relaxed);
@@ -1501,50 +1460,6 @@ namespace cs::engine
 		return true;
 	}
 
-	bool SetDeveloperShaderForceOffEnabled(bool a_enabled)
-	{
-		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Developer override state");
-			return false;
-		}
-		service.developerForceOffEnabled = a_enabled;
-		return true;
-	}
-
-	bool SetDeveloperShaderOverride(
-		ShaderInjectionTarget a_target,
-		DeveloperShaderOverride a_override)
-	{
-		if (!IsValidTarget(a_target))
-			return false;
-
-		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Developer target override");
-			return false;
-		}
-		service.developerOverrides[ToIndex(a_target)] = a_override;
-		return true;
-	}
-
-	bool SetDeveloperShaderSourceRoot(std::wstring a_sourceRoot)
-	{
-		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Developer shader source root");
-			return false;
-		}
-		service.developerSourceRoot = std::move(a_sourceRoot);
-		std::scoped_lock variantLock(service.nativeVariantMutex);
-		service.shaderSourceAvailability.clear();
-		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
-		return true;
-	}
-
 	bool SetShaderInjectionEnabled(bool a_enabled)
 	{
 		auto& service = GetService();
@@ -1750,17 +1665,8 @@ namespace cs::engine
 
 	bool ComputeDispatchBridgeInstalled() noexcept
 	{
-		const auto tail =
-			g_computeDispatchBridgeTail.load(
-				std::memory_order_acquire);
-		if (!tail || !g_computeDispatchContext.load(
-						 std::memory_order_acquire)) {
-			return false;
-		}
-		return std::memcmp(
-				   reinterpret_cast<const void*>(tail),
-				   g_computeDispatchBridgePatch.data(),
-				   g_computeDispatchBridgePatch.size()) == 0;
+		return g_computeDispatchBridgeTail.load(std::memory_order_acquire) != 0 &&
+		       g_computeDispatchContext.load(std::memory_order_acquire) != nullptr;
 	}
 
 	ComputeDispatchBridgeStatus GetComputeDispatchBridgeStatus() noexcept
@@ -1784,11 +1690,6 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		std::vector<ShaderReplacementRegistration> registrations;
-		std::array<DeveloperShaderOverride,
-			static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
-			developerOverrides{};
-		std::wstring developerSourceRoot;
-		bool developerForceOffEnabled = false;
 		GameRuntime gameRuntime = GameRuntime::kAE;
 
 		{
@@ -1796,9 +1697,6 @@ namespace cs::engine
 			if (service.lifecycle != Lifecycle::kCollecting)
 				return;
 			service.lifecycle = Lifecycle::kFrozen;
-			developerForceOffEnabled = service.developerForceOffEnabled;
-			developerOverrides = service.developerOverrides;
-			developerSourceRoot = service.developerSourceRoot;
 			gameRuntime = service.gameRuntime;
 			registrations = service.registrations;
 		}
@@ -1807,13 +1705,9 @@ namespace cs::engine
 		plan->compilationCache =
 			CreateCachingShaderVariantCompilationCache();
 		plan->device.copy_from(a_device);
-		plan->developerSourceRoot = developerSourceRoot;
 		plan->runtime = gameRuntime;
 		std::size_t publishedTargets = 0;
-		auto frozenTargets = FreezeTargets(
-			registrations,
-			developerForceOffEnabled,
-			developerOverrides);
+		auto frozenTargets = FreezeTargets(registrations);
 
 		if (!a_device) {
 			L->error("Shader injection freeze failed: no D3D11 device.");
@@ -1864,9 +1758,45 @@ namespace cs::engine
 		}
 		const auto summary = GetShaderInjectionSummary();
 		L->info(
-			"Shader injection freeze: targets requested={} published={}; native variants compile asynchronously from observed descriptors.",
-			summary.requested,
+			"Shader injection freeze: targets published={}; native variants compile asynchronously from observed descriptors.",
 			summary.published);
+	}
+
+	std::size_t PrewarmShaderInjectionVariants()
+	{
+		auto& service = GetService();
+		const auto plan = service.published.load(std::memory_order_acquire);
+		if (!plan)
+			return 0;
+		std::array<std::size_t, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> perTarget{};
+		std::size_t total = 0;
+		const auto rows = GetStockShaderVariants(plan->runtime);
+		for (const auto& row : rows) {
+			// Rows without a native name have no shader the engine could bind.
+			if (row.nativeName.empty() || !ShaderEnabled(row.target) ||
+				(SupportedStages(row.target) & ShaderStageBit(row.stage)) == 0)
+				continue;
+			const auto* target = FindPublishedTarget(*plan, row.target);
+			if (!target || target->contributions.empty())
+				continue;
+			const auto variant = FindOrPrepareNativeVariant(
+				*plan, *target, MakeNativeVariantKey(row.Family()));
+			if (!variant)
+				continue;
+			std::scoped_lock lock(variant->mutex);
+			if (variant->compilation) {
+				++perTarget[ToIndex(row.target)];
+				++total;
+			}
+		}
+		std::string breakdown;
+		for (const auto& metadata : kTargets) {
+			if (const auto count = perTarget[ToIndex(metadata.id)]) {
+				breakdown += std::format("{}{}={}", breakdown.empty() ? "" : ", ", metadata.name, count);
+			}
+		}
+		L->info("Shader prewarm: {} variants queued ({})", total, breakdown.empty() ? "none" : breakdown);
+		return total;
 	}
 
 	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept
@@ -1899,6 +1829,14 @@ namespace cs::engine
 		service.unsupportedNativeVariantReported.fill(false);
 		service.nativeShaderIdentities.clear();
 		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
+	}
+
+	void StopNativeShaderVariantCompilations() noexcept
+	{
+		const auto plan =
+			GetService().published.load(std::memory_order_acquire);
+		if (plan && plan->compilationCache)
+			plan->compilationCache->Stop();
 	}
 
 	void DispatchShaderInjections(
@@ -2197,10 +2135,8 @@ namespace cs::engine
 		if (!ShaderEnabled(resolution->target))
 			return native;
 		auto& runtime = GetService().runtime[ToIndex(resolution->target)];
-		runtime.matches.fetch_add(resolution->matches, std::memory_order_relaxed);
-		runtime.substitutions.fetch_add(
-			(resolution->binding.vertex != a_nativeVertex) + (resolution->binding.pixel != a_nativePixel),
-			std::memory_order_relaxed);
+		Tally(runtime.matches, resolution->matches);
+		Tally(runtime.substitutions, (resolution->binding.vertex != a_nativeVertex) + (resolution->binding.pixel != a_nativePixel));
 		return resolution->binding;
 	}
 
@@ -2227,7 +2163,7 @@ namespace cs::engine
 			}
 			if (!owner)
 				return a_nativeCompute;
-			GetService().runtime[ToIndex(owner->target)].computeBindCalls.fetch_add(1, std::memory_order_relaxed);
+			Tally(GetService().runtime[ToIndex(owner->target)].computeBindCalls);
 			if (!ShaderEnabled(owner->target))
 				return a_nativeCompute;
 			const auto* target =
@@ -2245,7 +2181,7 @@ namespace cs::engine
 
 			auto& runtime =
 				GetService().runtime[ToIndex(owner->target)];
-			runtime.matches.fetch_add(1, std::memory_order_relaxed);
+			Tally(runtime.matches);
 			auto* replacement =
 				AcquireNativeReplacementWrapper<
 					RE::BSGraphics::ComputeShader,
@@ -2256,8 +2192,7 @@ namespace cs::engine
 					a_nativeCompute);
 			if (!replacement)
 				return a_nativeCompute;
-			runtime.substitutions.fetch_add(
-				1, std::memory_order_relaxed);
+			Tally(runtime.substitutions);
 			return replacement;
 		} catch (const std::exception& e) {
 			CS_LOG_EVERY_MS(
@@ -2315,33 +2250,86 @@ namespace cs::engine
 		}
 	}
 
-	void ObserveNativeShaderBytecode(
-		ShaderStage a_stage,
-		const void* a_bytecode,
-		std::size_t a_bytecodeLength,
-		ID3D11DeviceChild* a_shader) noexcept
+	namespace
 	{
-		if (a_stage != ShaderStage::kPixel || !a_bytecode || a_bytecodeLength == 0 || !a_shader) {
-			return;
+		thread_local unsigned g_observationBypassDepth = 0;
+		std::mutex g_creationHookMutex;
+
+		void ObserveNativePixelShaderBytecode(
+			const void* a_bytecode,
+			std::size_t a_bytecodeLength,
+			ID3D11DeviceChild* a_shader) noexcept
+		{
+			if (!a_bytecode || a_bytecodeLength == 0 || !a_shader) {
+				return;
+			}
+			winrt::com_ptr<ID3D11ShaderReflection> reflection;
+			if (FAILED(D3DReflect(
+					a_bytecode,
+					a_bytecodeLength,
+					IID_PPV_ARGS(reflection.put())))) {
+				return;
+			}
+			Service::NativeShaderMetadata metadata;
+			metadata.forceEarlyDepthStencil =
+				(reflection->GetRequiresFlags() & D3D_SHADER_REQUIRES_EARLY_DEPTH_STENCIL) != 0;
+			auto& service = GetService();
+			std::scoped_lock lock(service.nativeVariantMutex);
+			service.nativeShaderMetadata.insert_or_assign(a_shader, metadata);
 		}
-		winrt::com_ptr<ID3D11ShaderReflection> reflection;
-		if (FAILED(D3DReflect(
-				a_bytecode,
-				a_bytecodeLength,
-				IID_PPV_ARGS(reflection.put())))) {
+
+		struct CreatePixelShaderHook
+		{
+			static HRESULT STDMETHODCALLTYPE thunk(
+				ID3D11Device* a_this,
+				const void* a_bytecode,
+				SIZE_T a_bytecodeLength,
+				ID3D11ClassLinkage* a_linkage,
+				ID3D11PixelShader** a_out)
+			{
+				const auto result = func(
+					a_this, a_bytecode, a_bytecodeLength, a_linkage, a_out);
+				if (SUCCEEDED(result) && a_out && *a_out && g_observationBypassDepth == 0)
+					ObserveNativePixelShaderBytecode(a_bytecode, a_bytecodeLength, *a_out);
+				return result;
+			}
+
+			static inline decltype(&thunk) func = nullptr;
+		};
+	}
+
+	void InstallNativeShaderCreationHooks(ID3D11Device* a_device)
+	{
+		if (!a_device)
 			return;
-		}
-		Service::NativeShaderMetadata metadata;
-		metadata.forceEarlyDepthStencil =
-			(reflection->GetRequiresFlags() & D3D_SHADER_REQUIRES_EARLY_DEPTH_STENCIL) != 0;
-		auto& service = GetService();
-		std::scoped_lock lock(service.nativeVariantMutex);
-		service.nativeShaderMetadata.insert_or_assign(a_shader, metadata);
+		std::scoped_lock lock(g_creationHookMutex);
+		if (!CreatePixelShaderHook::func)
+			stl::detour_vfunc<15, CreatePixelShaderHook>(a_device);
+	}
+
+	ScopedNativeShaderObservationBypass::ScopedNativeShaderObservationBypass() noexcept
+	{
+		++g_observationBypassDepth;
+	}
+
+	ScopedNativeShaderObservationBypass::~ScopedNativeShaderObservationBypass() noexcept
+	{
+		--g_observationBypassDepth;
 	}
 
 	namespace
 	{
-		std::shared_ptr<NativeVariant> FindBoundPixelVariant(
+		// Consecutive draws mostly share a shader; identity changes bump generation.
+		struct BoundVariantCache
+		{
+			ID3D11PixelShader* shader = nullptr;
+			std::uint64_t generation = UINT64_MAX;
+			std::shared_ptr<NativeVariant> variant;
+		};
+
+		thread_local BoundVariantCache t_boundVariant;
+
+		NativeVariant* FindBoundPixelVariant(
 			ID3D11DeviceContext* a_context) noexcept
 		{
 			auto& service = GetService();
@@ -2352,6 +2340,13 @@ namespace cs::engine
 			a_context->PSGetShader(&boundShader, nullptr, nullptr);
 			if (!boundShader)
 				return nullptr;
+			// Identity only; the context keeps the shader alive.
+			boundShader->Release();
+
+			auto& cache = t_boundVariant;
+			const auto generation = service.nativeBindingGeneration.load(std::memory_order_acquire);
+			if (cache.shader == boundShader && cache.generation == generation)
+				return cache.variant.get();
 
 			std::shared_ptr<NativeVariant> variant;
 			{
@@ -2361,25 +2356,67 @@ namespace cs::engine
 				if (identity != service.nativeShaderIdentities.end())
 					variant = identity->second.variant;
 			}
-			boundShader->Release();
-			return variant;
+			cache = { boundShader, generation, std::move(variant) };
+			return cache.variant.get();
+		}
+	}
+
+	ScopedEngineDrawFlush::ScopedEngineDrawFlush(bool a_outputStateOnly, bool a_compute, bool a_dispatches) noexcept :
+		_state(GetEngineShadowState())
+	{
+		if (!_state)
+			return;
+		using RE::BSGraphics::ShaderFlags;
+		// Invalidate sets every flag after direct device work such as NVGodrays.
+		const bool invalidated = _state->stateUpdateFlags == UINT32_MAX;
+		if (invalidated || ((_state->stateUpdateFlags & std::to_underlying(ShaderFlags::DIRTY_RENDERTARGET)) && OutputsChanged(*_state)) || a_compute)
+			InvalidateFrameBindings();
+		// Output-only flushes skip the engine's slot masks.
+		if (a_outputStateOnly || !g_engineSamplerRestore.load(std::memory_order_relaxed))
+			return;
+		auto* variant = a_dispatches ? FindBoundPixelVariant(GetImmediateContext()) : nullptr;
+		// Keep overrides this variant last requested; the engine restores the rest.
+		auto& overrides = t_samplerOverrides;
+		if (const auto release = static_cast<std::uint16_t>(overrides.mask & ~(variant ? variant->samplerRequests : 0))) {
+			_released = release;
+			_state->psSamplerModifiedBits |= release;
+			overrides.mask &= static_cast<std::uint16_t>(~release);
+		}
+		if (variant) {
+			_active = true;
+			t_engineFlush = { .variant = variant, .resubmitted = static_cast<std::uint16_t>(_state->psSamplerModifiedBits) };
+		}
+	}
+
+	ScopedEngineDrawFlush::~ScopedEngineDrawFlush() noexcept
+	{
+		const auto flush = _active ? std::exchange(t_engineFlush, {}) : EngineDrawFlushState{};
+		if (!_state)
+			return;
+		if (_released && (_state->psSamplerModifiedBits & _released)) {
+			// The flush used another shadow state; fall back to capture and restore.
+			g_engineSamplerRestore.store(false, std::memory_order_relaxed);
+			L->error("Engine sampler restore disabled: SetDirtyStates did not consume the dirtied PS sampler slots.");
+		}
+		if (!_active)
+			return;
+		flush.variant->samplerRequests = flush.requested;
+		auto& overrides = t_samplerOverrides;
+		// The engine resubmitted these slots over overrides this draw left unused.
+		overrides.mask &= static_cast<std::uint16_t>(~(flush.resubmitted & ~flush.requested));
+		if (const auto stale = static_cast<std::uint16_t>(overrides.mask & ~flush.requested)) {
+			_state->psSamplerModifiedBits |= stale;
+			overrides.mask &= static_cast<std::uint16_t>(~stale);
 		}
 	}
 
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept
 	{
-		if (const auto variant = FindBoundPixelVariant(a_context)) {
-			const ActiveVariantScope scope(variant.get());
+		if (auto* variant = t_engineFlush.variant ? t_engineFlush.variant : FindBoundPixelVariant(a_context)) {
+			const ActiveVariantScope scope(variant);
 			DispatchShaderInjections(variant->target, a_context, variant->samplers.load(std::memory_order_relaxed));
 		}
-	}
-
-	void RecordUndispatchedInjectedDraw(
-		ID3D11DeviceContext* a_context) noexcept
-	{
-		if (FindBoundPixelVariant(a_context))
-			++t_drawMetrics.undispatchedDraws;
 	}
 
 	bool ActiveShaderInjectionVariantHasDefine(
@@ -2436,11 +2473,8 @@ namespace cs::engine
 			snapshot.id = a_target;
 			snapshot.enabled = ShaderEnabled(a_target);
 			snapshot.name = metadata.name;
-			snapshot.requested =
-				runtime.requested.load(std::memory_order_relaxed);
 			snapshot.published =
 				plan && FindPublishedTarget(*plan, a_target);
-			snapshot.developerOverride = runtime.developerOverride;
 			snapshot.contributors =
 				runtime.contributors.load(std::memory_order_relaxed);
 			snapshot.defines = runtime.defines;
@@ -2456,9 +2490,6 @@ namespace cs::engine
 						std::memory_order_relaxed);
 				snapshot.passthroughNotReady =
 					runtime.passthroughNotReady.load(
-						std::memory_order_relaxed);
-				snapshot.passthroughDisabled =
-					runtime.passthroughDisabled.load(
 						std::memory_order_relaxed);
 			}
 			snapshot.dispatches =
@@ -2483,8 +2514,6 @@ namespace cs::engine
 		{
 			SwapCountersGuard counterGuard(service);
 			for (const auto& runtime : service.runtime) {
-				if (runtime.requested.load(std::memory_order_relaxed))
-					++summary.requested;
 				summary.matches += runtime.matches.load(std::memory_order_relaxed);
 				summary.substitutions += runtime.substitutions.load(std::memory_order_relaxed);
 				summary.passthroughCompileFail +=
@@ -2492,9 +2521,6 @@ namespace cs::engine
 						std::memory_order_relaxed);
 				summary.passthroughNotReady +=
 					runtime.passthroughNotReady.load(
-						std::memory_order_relaxed);
-				summary.passthroughDisabled +=
-					runtime.passthroughDisabled.load(
 						std::memory_order_relaxed);
 				summary.dispatches += runtime.dispatches.load(std::memory_order_relaxed);
 			}

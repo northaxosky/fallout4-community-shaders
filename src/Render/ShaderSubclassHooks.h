@@ -15,15 +15,22 @@ namespace cs::telemetry
 	class Sink;
 }
 
+// Shader subclasses with their own vtable, for hooks wrapping a virtual.
+#define CS_SHADER_SUBCLASSES(X)               \
+	X(BSBloodSplatterShader, kBloodSplatter); \
+	X(BSDFCompositeShader, kBsdfComposite);   \
+	X(BSDFLightShader, kBsdfLight);           \
+	X(BSDFPrePassShader, kDeferredPrepass);   \
+	X(BSDistantTreeShader, kDistantTree);     \
+	X(BSEffectShader, kEffect);               \
+	X(BSLightingShader, kBsLighting);         \
+	X(BSParticleShader, kParticle);           \
+	X(BSSkyShader, kBsSky);                   \
+	X(BSUtilityShader, kUtility);             \
+	X(BSWaterShader, kBsWater)
+
 namespace cs::engine
 {
-	struct ShaderSubclassHookInstallStats
-	{
-		unsigned attempted = 0;
-		unsigned succeeded = 0;
-		unsigned failed = 0;
-	};
-
 	void InstallShaderSubclassHooks();
 
 	// The engine path that baked a prepass draw's per-draw constants.

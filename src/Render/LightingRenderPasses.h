@@ -22,8 +22,9 @@ namespace cs::engine
 	};
 
 	// Runs before the engine builds or reuses the property's pass list.
-	using PreLightingRenderPassesCallback = void (*)(const LightingRenderPassesCall&) noexcept;
+	using PreLightingRenderPassesCallback = void (*)(const LightingRenderPassesCall&);
 
 	// Register in Load/OnPostPostLoad; callbacks run on accumulation threads.
 	bool RegisterPreLightingRenderPasses(PreLightingRenderPassesCallback a_callback, HookPriority a_priority = HookPriority::Default);
+	bool RegisterPreLightingRenderPasses(Feature& a_owner, PreLightingRenderPassesCallback a_callback, HookPriority a_priority = HookPriority::Default);
 }

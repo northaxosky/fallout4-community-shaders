@@ -332,6 +332,57 @@ namespace cs::shader_cache
 		return removed;
 	}
 
+	CacheTrimResult TrimCacheRecords(
+		const std::filesystem::path& a_cacheRoot,
+		std::uint64_t a_maxBytes) noexcept
+	{
+		CacheTrimResult result;
+		try {
+			struct Entry
+			{
+				std::filesystem::path path;
+				std::uint64_t bytes;
+				std::filesystem::file_time_type time;
+			};
+			std::vector<Entry> records;
+			std::error_code error;
+			for (auto entries = std::filesystem::recursive_directory_iterator(
+					 a_cacheRoot, std::filesystem::directory_options::skip_permission_denied, error);
+				!error && entries != std::filesystem::recursive_directory_iterator{};
+				entries.increment(error)) {
+				if (entries->path().extension() != L".fxc")
+					continue;
+				std::error_code entryError;
+				if (!entries->is_regular_file(entryError) || entryError)
+					continue;
+				const auto bytes = entries->file_size(entryError);
+				if (entryError)
+					continue;
+				const auto time = entries->last_write_time(entryError);
+				if (entryError)
+					continue;
+				records.push_back({ entries->path(), bytes, time });
+				++result.records;
+				result.bytes += bytes;
+			}
+			if (result.bytes > a_maxBytes) {
+				std::ranges::sort(records, {}, &Entry::time);
+				for (const auto& record : records) {
+					if (result.bytes <= a_maxBytes)
+						break;
+					const bool removed = std::filesystem::remove(record.path, error);
+					if (error)
+						continue;
+					result.bytes -= record.bytes;
+					--result.records;
+					result.trimmed += removed ? 1u : 0u;
+				}
+			}
+		} catch (...) {
+		}
+		return result;
+	}
+
 	CacheIdentitySyncResult SynchronizeCacheIdentity(
 		const std::filesystem::path& a_cacheRoot,
 		const CompilerIdentity& a_identity,

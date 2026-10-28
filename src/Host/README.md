@@ -16,10 +16,10 @@ CommonLibF4-pinned DearModdingUI API; no
 compatibility shim is provided for superseded development snapshots. It then registers all category
 descriptors before any page that references their stable IDs:
 
-- Home, Advanced, Presets, and Changelog pages under the General category;
+- Home, Advanced, Profiling, Presets, and Changelog pages under the General category;
 - one settings page for every menu-visible registered feature, including inactive features under
   Unloaded;
-- the managed Performance Overlay page;
+- the managed Performance Overlay and Shader Compilation Overlay pages;
 - the Clear Shader Cache action;
 - frame and page-activity observers;
 - contextual Performance Overlay, RenderDoc, and log-dump hotkeys.
@@ -32,6 +32,9 @@ a fallback menu if discovery, registration, readiness, or swapchain attachment f
 With no compatible host, shader features, presets, TOML configuration, telemetry, and fullscreen
 debug selections continue headless. There is intentionally no menu, overlay, notification UI, or
 diagnostic hotkey path.
+
+Frame annotations (`diagnostics.frame_annotations`, Advanced > Diagnostics) install hooks only when on at
+startup; the checkbox toggles per-draw events live. RenderDoc captures force them on.
 
 Startup loading is edited only in Advanced with positive checked-to-load controls. Home reports
 startup results; feature pages retain live effect controls and actionable failure/restart notices.
@@ -79,6 +82,13 @@ settings row enables Reset only while `Feature::HasModifiedSettings()` reports a
 the schema defaults. Notifications carry a title (feature or preset name, else Community Shaders).
 The Performance Overlay frame graphs are host annotated plots with 30/60/120 FPS reference lines
 in theme colors.
+
+The Shader Compilation Overlay shows once a batch has compiled for over a second, then a brief
+"Shaders ready" summary, so a warm cache never flashes it. It is informational. While
+`shader_cache.background_compilation` is off, the engine-native `Main::GetCanLoad` hook keeps the
+main menu's Continue, Load, and New Game queued behind its own spinner; loads that bypass the menu
+(console `load`, autoload mods) proceed with stock shaders. Quitting stops pending compiles. The
+window is centered with the ABI 2.2 `SCREEN_POSITION` anchor; older hosts do not show it.
 
 Performance Overlay offset and size are author defaults. DearModdingUI persists the user's
 arrangement in its `imgui.ini`; Reset Layout discards it and reapplies the defaults.

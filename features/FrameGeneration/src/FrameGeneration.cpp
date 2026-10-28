@@ -28,17 +28,8 @@ namespace cs::features
 
 		std::string_view MethodName(std::uint32_t a_method) noexcept
 		{
-			switch (static_cast<FrameGeneration::Method>(a_method)) {
-			case FrameGeneration::Method::kOff:
-				return "Off";
-			case FrameGeneration::Method::kFSR3:
-				return "FSR 3";
-			case FrameGeneration::Method::kDLSSG:
-				return "DLSS";
-			case FrameGeneration::Method::kFSR4:
-				return "FSR 4";
-			}
-			return "Unknown";
+			return render::temporal::presentation::Name(
+				static_cast<FrameGeneration::Method>(a_method));
 		}
 
 		struct RetirementCounterField
@@ -190,7 +181,11 @@ namespace cs::features
 		}
 		settings = candidate;
 		_liveSettings = cs::settings::BindLiveSettings(frame_generation::kSchema, settings,
-			[] { render::TemporalPipeline::Get().SubmitLiveConfiguration(); }, { "detailed_diagnostics" });
+			[this] {
+				render::TemporalPipeline::Get().SetDetailedTracing(settings.detailedDiagnostics);
+				render::TemporalPipeline::Get().SubmitLiveConfiguration();
+			},
+			{ "detailed_diagnostics" });
 		return true;
 	}
 
@@ -200,43 +195,11 @@ namespace cs::features
 			settings.detailedDiagnostics);
 	}
 
-	bool FrameGeneration::StageFromPreset(
-		const toml::table& a_table,
-		const PresetApplyContext&,
-		std::string& a_error)
+	void FrameGeneration::OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept
 	{
-		toml::table config;
-		config.insert_or_assign("settings", a_table);
-		auto candidate = settings;
-		if (!settings::Parse(frame_generation::kSchema, config, candidate, a_error)) {
-			return false;
-		}
-		_stagedSettings = candidate;
-		return true;
-	}
-
-	void FrameGeneration::CommitStagedSwap() noexcept
-	{
-		if (_stagedSettings) {
-			settings = *_stagedSettings;
-		}
-	}
-
-	void FrameGeneration::CommitStagedFinalize()
-	{
-		if (!_stagedSettings) {
-			return;
-		}
-		_stagedSettings.reset();
-		SaveSettings();
-		render::TemporalPipeline::Get().SetDetailedTracing(
-			settings.detailedDiagnostics);
-		render::TemporalPipeline::Get().SubmitLiveConfiguration();
-	}
-
-	void FrameGeneration::ExportToPreset(toml::table& a_out)
-	{
-		a_out = settings::SerializeFull(frame_generation::kSchema, settings);
+		render::TemporalPipeline::Get().PostFailure(
+			render::temporal::FailureDomain::kFrameGeneration,
+			std::string(a_phase) + ": " + std::string(a_reason));
 	}
 
 	bool FrameGeneration::SaveSettings()
@@ -451,7 +414,7 @@ namespace cs::features
 					[](const Feature& a_feature) {
 						return static_cast<const FrameGeneration&>(
 							a_feature)
-			                .GetDebugTexture(DebugView::kHudless);
+			                .GetDebugTexture(render::FrameGenerationDebugResource::kHudless);
 					} },
 			FeatureDebugView{ .id = "final_color",
 				.label = "Final color",
@@ -460,7 +423,7 @@ namespace cs::features
 					[](const Feature& a_feature) {
 						return static_cast<const FrameGeneration&>(
 							a_feature)
-			                .GetDebugTexture(DebugView::kFinal);
+			                .GetDebugTexture(render::FrameGenerationDebugResource::kFinal);
 					} },
 			FeatureDebugView{ .id = "conditioned_depth",
 				.label = "FG-conditioned depth",
@@ -469,14 +432,14 @@ namespace cs::features
 					[](const Feature& a_feature) {
 						return static_cast<const FrameGeneration&>(
 							a_feature)
-			                .GetDebugTexture(DebugView::kDepth);
+			                .GetDebugTexture(render::FrameGenerationDebugResource::kDepth);
 					} },
 			FeatureDebugView{ .id = "conditioned_motion",
 				.label = "FG-conditioned motion",
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const FrameGeneration&>(a_feature)
-			            .GetDebugTexture(DebugView::kMotion);
+			            .GetDebugTexture(render::FrameGenerationDebugResource::kMotion);
 				} }
 		};
 		return views;
@@ -488,28 +451,11 @@ namespace cs::features
 			a_view);
 	}
 
-	FeatureDebugTexture FrameGeneration::GetDebugTexture(DebugView a_view) const
+	FeatureDebugTexture FrameGeneration::GetDebugTexture(render::FrameGenerationDebugResource a_view) const
 	{
-		std::string_view view;
-		switch (a_view) {
-		case DebugView::kHudless:
-			view = "hudless_color";
-			break;
-		case DebugView::kFinal:
-			view = "final_color";
-			break;
-		case DebugView::kDepth:
-			view = "conditioned_depth";
-			break;
-		case DebugView::kMotion:
-			view = "conditioned_motion";
-			break;
-		case DebugView::kOff:
-			break;
-		}
 		return render::TemporalPipeline::Get()
 		    .Renderer()
-		    .GetFrameGenerationDebugTexture(view);
+		    .GetFrameGenerationDebugTexture(a_view);
 	}
 
 	void FrameGeneration::DrawSettings()

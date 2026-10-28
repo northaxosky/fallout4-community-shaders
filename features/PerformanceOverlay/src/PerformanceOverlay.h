@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "PerformanceOverlaySettings.h"
+#include "Utils/GraphSampleGate.h"
 #include <DearModdingUI/API.h>
 #include <DearModdingUI/UI.h>
 #include <Features/PerformanceOverlay/ABTesting/ABTestAggregator.h>
@@ -23,7 +24,7 @@ namespace cs::features
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
 		void OnDataLoaded() override;
-		void OnRuntimeQuarantined() noexcept override;
+		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override;
 		void DrawSettings() override;
 		void DrawOverlay() override;
 		bool IsOverlayActive() const override { return settings.ShowInOverlay || _testing || _restorePending; }
@@ -46,7 +47,6 @@ namespace cs::features
 		void AbortTest(std::string_view a_reason) noexcept;
 		void UpdateTest(double);
 		void DrawTestResults();
-		void DrawPasses();
 		void DrawDrawCalls(const std::vector<DrawCallRow>&);
 		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4 DMUI_ThemeColors::*);
 		static float OverlayContentWidth() noexcept;
@@ -66,12 +66,9 @@ namespace cs::features
 		Snapshot _baseline, _test;
 		ABTestAggregator _aggregator;
 		bool _testing{}, _variantB = true, _restorePending{};
-		int _testInterval{}, _passSort = 1, _drawSort = 2, _groupSort = 1, _testSort = 3;
-		bool _passDescending = true, _drawDescending = true, _groupDescending = true, _testDescending = true;
-		bool _cpuTimings{};
-		std::uint32_t _graphWarmup = Settings::kGraphWarmupFrames;
-		double _statisticsTime{};
-		std::vector<Profiler::TimerResult> _statistics;
+		int _testInterval{};
+		Util::GraphSampleGate _graphGate;
+		std::uint64_t _hostTick{};
 		std::string _testError;
 	};
 }

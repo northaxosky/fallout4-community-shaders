@@ -15,24 +15,7 @@ namespace cs::render
 	{
 		const auto effective =
 			render::TemporalPipeline::Get().GetEffectiveConfiguration();
-		if (!effective.superResolutionEnabled) {
-			return UpscaleMethod::kNONE;
-		}
-		switch (effective.superResolution) {
-		case render::temporal::SuperResolutionMethod::kNone:
-			return UpscaleMethod::kNONE;
-		case render::temporal::SuperResolutionMethod::kTAA:
-			return UpscaleMethod::kTAA;
-		case render::temporal::SuperResolutionMethod::kFSR3:
-			return UpscaleMethod::kFSR;
-		case render::temporal::SuperResolutionMethod::kDLSS:
-			return UpscaleMethod::kDLSS;
-		case render::temporal::SuperResolutionMethod::kFSR4:
-			return UpscaleMethod::kFSR4;
-		case render::temporal::SuperResolutionMethod::kCount:
-			break;
-		}
-		return UpscaleMethod::kNONE;
+		return effective.superResolutionEnabled ? effective.superResolution : UpscaleMethod::kNone;
 	}
 
 	bool TemporalRenderer::IsUpscalingActive() const
@@ -117,14 +100,14 @@ namespace cs::render
 
 	bool TemporalRenderer::IsTemporalActive() const
 	{
-		return GetUpscaleMethod() != UpscaleMethod::kNONE;
+		return GetUpscaleMethod() != UpscaleMethod::kNone;
 	}
 
 	void TemporalRenderer::ConfigureTAA()
 	{
 		auto upscaleMethod = GetUpscaleMethod();
 
-		SetTemporalEnabled(upscaleMethod != UpscaleMethod::kNONE);
+		SetTemporalEnabled(upscaleMethod != UpscaleMethod::kNone);
 	}
 
 	temporal::ProviderResult TemporalRenderer::PrepareRenderSize(
@@ -154,7 +137,7 @@ namespace cs::render
 		};
 		const auto result =
 			render::TemporalPipeline::Get().QuerySuperResolutionRenderSize(
-				ToCoreMethod(a_method), request);
+				a_method, request);
 		if (!_renderSize.SetRequested(request, result)) {
 			if (!result.result.Succeeded()) {
 				return result.result;

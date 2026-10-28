@@ -1,12 +1,10 @@
 #include "World/GameTime.h"
 
 #include "Log.h"
-#include "World/WeatherControl.h"
 
 #include "RE/C/Calendar.h"
 #include "RE/L/LoadingMenu.h"
 #include "RE/P/PipboyMenu.h"
-#include "RE/S/Sky.h"
 #include "RE/T/TESGlobal.h"
 #include "RE/U/UI.h"
 
@@ -194,8 +192,5 @@ namespace cs::engine
 		if (!calendar || !calendar->gameHour)
 			return;
 		calendar->gameHour->value = a_hour;
-		// Backward edits look like a midnight wrap and expire the override.
-		if (auto* sky = RE::Sky::GetSingleton(); sky && GetLockedWeather())
-			sky->lastWeatherUpdate = a_hour;
 	}
 }

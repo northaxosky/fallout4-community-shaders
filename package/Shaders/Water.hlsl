@@ -199,9 +199,21 @@ VS_OUTPUT main(VS_INPUT input)
 #	endif
 #	ifdef VOLUMETRIC_SHADOWS
 #		include "FO4/VolumetricShadowsConsumer.hlsli"
-#		define FO4_WATER_SUN_SHADOW(worldPosition, screenPosition) FO4VolumetricShadows::GetWaterSurfaceShadow(worldPosition, screenPosition)
-#	elif defined(TERRAIN_SHADOWS)
-#		define FO4_WATER_SUN_SHADOW(worldPosition, screenPosition) ShadowSampling::GetWorldShadow(worldPosition, FrameBuffer::CameraPosAdjust.xyz)
+#	endif
+#	if defined(VOLUMETRIC_SHADOWS) || defined(TERRAIN_SHADOWS)
+// FO4: a disabled VSM falls back to the terrain term it adds to.
+float FO4WaterSunShadow(float3 worldPosition, float2 screenPosition)
+{
+#		ifdef VOLUMETRIC_SHADOWS
+	[branch] if (FO4SharedData::EnabledVolumetricShadows != 0) return FO4VolumetricShadows::GetWaterSurfaceShadow(worldPosition, screenPosition);
+#		endif
+#		ifdef TERRAIN_SHADOWS
+	return TerrainShadows::GetTerrainShadowMultFromWorldPosition(worldPosition);
+#		else
+	return 1.0;
+#		endif
+}
+#		define FO4_WATER_SUN_SHADOW(worldPosition, screenPosition) FO4WaterSunShadow(worldPosition, screenPosition)
 #	endif
 #	ifdef UNIFIED_WATER
 #		include "FO4/FO4ShaderData.hlsli"
@@ -385,7 +397,8 @@ float3 surfaceNormal(PS_INPUT input, float fade)
 	float2 uv1 = input.normalUv01.zw;
 	float2 uv2 = input.normalUv2.xy;
 #		ifdef WATER_PARALLAX
-	if (FO4SharedData::EnabledWaterParallax != 0) {
+	[branch] if (FO4SharedData::EnabledWaterEffects != 0)
+	{
 		float3 normalScalesRcp = rcp(input.normalsScale);
 		float2 parallaxOffset = WaterEffects::GetParallaxOffset(input, perMaterial[9].xyz, normalScalesRcp);
 		uv0 += parallaxOffset * normalScalesRcp.x;
@@ -434,6 +447,7 @@ float3 refractedScene(float2 screenPosition, float3 normal, out float3 unclipped
 float skylightingSpecularVisibility(float3 positionMS, float3 normal, float3 eyeDirection)
 {
 #	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
+	[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 	// FO4: callers pass eyeVector.xyz, the camera-relative position OG lacks.
 	sh2 skylightingSH = Skylighting::SampleNoBias(positionMS);
 	sh2 specularLobe = SphericalHarmonics::FauxSpecularLobe(normal, -eyeDirection, 0.0);
@@ -460,7 +474,8 @@ float3 surfaceColor(
 	uint cubeWidth, cubeHeight, envWidth, envHeight;
 	DynamicCubemaps::EnvReflectionsTexture.GetDimensions(cubeWidth, cubeHeight);
 	DynamicCubemaps::EnvTexture.GetDimensions(envWidth, envHeight);
-	if (FO4SharedData::EnabledDynamicCubemaps != 0 && cubeWidth != 0 && envWidth != 0) {
+	[branch] if (FO4SharedData::EnabledDynamicCubemaps != 0 && cubeWidth != 0 && envWidth != 0)
+	{
 #			if defined(REFLECTIONS)
 		// FO4: without a fresh engine cube the sky gradient stays the far reflection.
 		uint engineWidth, engineHeight;
@@ -509,7 +524,8 @@ float3 surfaceColor(
 	float2 clamped = min(screenUv, perGeometry[1].xy);
 #			endif
 #			if defined(DYNAMIC_CUBEMAPS) && !defined(LOD)
-	if (FO4SharedData::EnabledDynamicCubemaps != 0) {
+	[branch] if (FO4SharedData::EnabledDynamicCubemaps != 0)
+	{
 		float pointingDirection = dot(eyeDirection, reflectionDirection) * 0.5 + 0.5;
 		float pointingAlignment = dot(reflect(eyeDirection, float3(0, 0, 1)), reflectionDirection) * 0.5 + 0.5;
 		float ssrAmount = sqrt(min(pointingAlignment, pointingDirection));

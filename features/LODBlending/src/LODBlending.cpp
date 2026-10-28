@@ -1,4 +1,5 @@
 #include "LODBlending.h"
+#include "Render/SharedDataLayout.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -98,17 +99,18 @@ namespace cs::features
 		return true;
 	}
 
-	cs::LODBlendingFeatureData LODBlending::GetCommonBufferData() const
+	void LODBlending::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4)
 	{
 		if (!_injectionsOperational.load(std::memory_order_acquire))
-			return {};
-		cs::LODBlendingFeatureData data{};
-		data.LODTerrainBrightness = _settings.LODTerrainBrightness;
-		data.LODObjectBrightness = _settings.LODObjectBrightness;
-		data.LODTerrainGamma = _settings.LODTerrainGamma;
-		data.LODObjectGamma = _settings.LODObjectGamma;
-		data.DisableTerrainVertexColors = _settings.DisableTerrainVertexColors ? 1u : 0u;
-		return data;
+			return;
+		a_fo4.EnabledLODBlending = 1u;
+		a_feature.lodBlendingSettings = {
+			.LODTerrainBrightness = _settings.LODTerrainBrightness,
+			.LODObjectBrightness = _settings.LODObjectBrightness,
+			.DisableTerrainVertexColors = _settings.DisableTerrainVertexColors ? 1u : 0u,
+			.LODTerrainGamma = _settings.LODTerrainGamma,
+			.LODObjectGamma = _settings.LODObjectGamma
+		};
 	}
 
 	void LODBlending::DrawSettings()

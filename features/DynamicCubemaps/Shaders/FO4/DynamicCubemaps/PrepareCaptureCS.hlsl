@@ -1,7 +1,7 @@
 #include "Common/FrameBuffer.hlsli"
 #include "Common/SharedData.hlsli"
+#include "DynamicCubemaps/CubemapCommon.hlsli"
 #include "FO4/Depth.hlsli"
-#include "FO4/DynamicCubemaps/CubemapCommon.hlsli"
 
 Texture2D<float> DepthTexture : register(t0);
 Texture2D<float4> ColorTexture : register(t1);
@@ -25,10 +25,8 @@ cbuffer PrepareData : register(b0)
 	CaptureUV[texel] = 0;
 	uint width, height, faces;
 	CapturePosition.GetDimensions(width, height, faces);
-	float2 st = (texel.xy + 0.5) / float2(width, height);
-	float2 faceUV = 2.0 * float2(st.x, 1.0 - st.y) - 1.0;
 	// FO4 views down +Z; the host projection preserves upstream's visible cube directions.
-	float3 viewDirection = FrameBuffer::WorldToView(DynamicCubemaps::CubeFaceDirection(texel.z, faceUV), false);
+	float3 viewDirection = FrameBuffer::WorldToView(GetCubemapSamplingVector(texel, float2(width, height)), false);
 	float2 uv = FrameBuffer::ViewToUV(viewDirection, false);
 	if (viewDirection.z <= 0.0 || !all(isfinite(uv)) || FrameBuffer::IsOutsideFrame(uv))
 		return;

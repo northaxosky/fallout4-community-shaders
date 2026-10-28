@@ -6,6 +6,11 @@
 
 struct ID3D11ShaderResourceView;
 
+namespace cs
+{
+	class Feature;
+}
+
 namespace cs::engine
 {
 	// The host renders the sky into the engine reflection cube for consumers.
@@ -13,6 +18,11 @@ namespace cs::engine
 	// Call during Load or OnPostPostLoad; false keeps the consumer's fallback.
 	// a_wantsLod (optional) asks for LOD land, objects and trees on the side faces.
 	[[nodiscard]] bool RegisterSkyReflectionCubeConsumer(
+		std::string_view a_name,
+		std::function<bool()> a_wantsCube,
+		std::function<bool()> a_wantsLod = {});
+	[[nodiscard]] bool RegisterSkyReflectionCubeConsumer(
+		Feature& a_owner,
 		std::string_view a_name,
 		std::function<bool()> a_wantsCube,
 		std::function<bool()> a_wantsLod = {});

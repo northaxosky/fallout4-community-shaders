@@ -23,8 +23,32 @@
 namespace FO4EffectLighting
 {
 #	if defined(FO4_EFFECT_LIGHTING)
+	// FO4: features toggle live; a disabled scaler skips its lookups.
+	bool SunShadowEnabled()
+	{
+		bool enabled = false;
+#		if defined(TERRAIN_SHADOWS)
+		enabled = enabled || SharedData::terraOccSettings.EnableTerrainShadow;
+#		endif
+#		if defined(VOLUMETRIC_SHADOWS)
+		enabled = enabled || FO4SharedData::EnabledVolumetricShadows != 0;
+#		endif
+		return enabled;
+	}
+
+	bool SkylightingEnabled()
+	{
+#		if defined(SKYLIGHTING)
+		return FO4SharedData::EnabledSkylighting != 0;
+#		else
+		return false;
+#		endif
+	}
+
 	float3 GetLightingColor(float3 dLightColor, float3 screenPosition)
 	{
+		// FO4: with every scaler off the split recombines to the unloaded input.
+		[branch] if (!SkylightingEnabled() && !SunShadowEnabled()) return dLightColor;
 		float3 viewPosition = FO4Forward::ViewPosition(screenPosition);
 		float3 worldPosition = FrameBuffer::ViewToWorld(viewPosition);
 
@@ -36,7 +60,8 @@ namespace FO4EffectLighting
 
 #		if defined(SKYLIGHTING)
 		float skylightingDiffuse = 1.0;
-		if (!SharedData::InInterior) {
+		[branch] if (!SharedData::InInterior && SkylightingEnabled())
+		{
 			float3 positionMSSkylight = worldPosition;
 
 			sh2 skylightingSH = Skylighting::SampleNoBias(positionMSSkylight);
@@ -55,7 +80,7 @@ namespace FO4EffectLighting
 
 		const bool inWorld = (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::InWorld);
 
-		if (inWorld && ShadowSampling::HasDirectionalShadows())
+		[branch] if (inWorld && ShadowSampling::HasDirectionalShadows() && SunShadowEnabled())
 			dirShadow = ShadowSampling::Get3DFilteredShadow(worldPosition.xyz, viewDirection, screenPosition.xy, unusedSurfaceShadow);
 
 		dirColor *= dirShadow;
@@ -76,6 +101,8 @@ namespace FO4EffectLighting
 #	if defined(FO4_EFFECT_FALLOFF_SHADOW)
 	float3 GetLightingShadow(float3 color, float3 screenPosition, float depth)
 	{
+		// FO4: only terrain shadows this volume.
+		[branch] if (!SharedData::terraOccSettings.EnableTerrainShadow) return color;
 		float3 viewPosition = FO4Forward::ViewPosition(screenPosition);
 		float3 worldPosition = FrameBuffer::ViewToWorld(viewPosition);
 

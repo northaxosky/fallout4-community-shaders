@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Render/ShaderCompileBatch.h"
 #include "Render/ShaderStage.h"
 #include "Utils/ShaderSamplerBindings.h"
 
@@ -55,6 +56,7 @@ namespace cs::engine
 		winrt::com_ptr<ID3D11DeviceChild> shader;
 		std::string error;
 		util::ShaderSamplerUse samplers;
+		bool cacheHit = false;
 	};
 
 	using ShaderVariantCompiler =
@@ -68,18 +70,9 @@ namespace cs::engine
 
 		virtual std::shared_ptr<ShaderVariantCompilationHandle> Request(
 			ShaderVariantCompilationRequest a_request) = 0;
+		virtual void Demand(const std::shared_ptr<ShaderVariantCompilationHandle>& a_handle) = 0;
 		virtual void Invalidate() = 0;
 		virtual void Stop() noexcept = 0;
-	};
-
-	// A batch runs from the first queued variant to the last one finishing.
-	struct ShaderCompileBatch
-	{
-		std::uint32_t completedTasks = 0;
-		std::uint32_t failedTasks = 0;
-		std::uint32_t totalTasks = 0;
-		std::chrono::milliseconds duration{};
-		bool active = false;
 	};
 
 	using ShaderCompileBatchObserver = std::function<void(const ShaderCompileBatch&)>;
@@ -87,6 +80,8 @@ namespace cs::engine
 	// Observers run on compile worker threads and must not block.
 	void AddShaderCompileBatchObserver(ShaderCompileBatchObserver a_observer);
 	ShaderCompileBatch GetShaderCompileBatch();
+	// True from the first enqueued task until the batch settles.
+	[[nodiscard]] bool IsShaderCompileBatchActive() noexcept;
 
 	std::shared_ptr<ShaderVariantCompilationCache>
 	CreateAsyncShaderVariantCompilationCache(

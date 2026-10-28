@@ -626,13 +626,15 @@ struct PS_OUTPUT
 		float screenNoise = Random::InterleavedGradientNoise(input.position.xy, SharedData::FrameCount);
 #	endif
 #	if defined(LOD_BLENDING) && (LANDSCAPE || GRASS) && VC
-		// FO4: the vertex-color consumer moved from Lighting/RunGrass into this prepass.
-		if (SharedData::lodBlendingSettings.DisableTerrainVertexColors)
-			input.vertexColor.xyz = 1;
+		// FO4: vertex colors moved from Lighting/RunGrass; off keeps stock colors.
+		if (FO4SharedData::EnabledLODBlending != 0) {
+			if (SharedData::lodBlendingSettings.DisableTerrainVertexColors)
+				input.vertexColor.xyz = 1;
 #		if LANDSCAPE
-		else
-			input.vertexColor.xyz /= max(max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z), EPSILON_DIVISION);
+			else
+				input.vertexColor.xyz /= max(max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z), EPSILON_DIVISION);
 #		endif
+		}
 #	endif
 
 #	if GRASS && VC && defined(FO4_PREPASS_VERTEX_AO)
@@ -770,7 +772,8 @@ struct PS_OUTPUT
 
 #	if defined(EMAT_OBJECT)
 		// FO4: PrepassFeatureLane.z marks non-LOD meshes whose _s format stores alpha.
-		if (SharedData::extendedMaterialSettings.EnableParallax && PrepassFeatureLane.z != 0.0) {
+		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && PrepassFeatureLane.z != 0.0)
+		{
 			displacementParams.HeightScale *= HeightScaleOf(g_tMaterial, g_sMaterial);
 			[branch] if (displacementParams.HeightScale > 0.0)
 			{
@@ -811,7 +814,8 @@ struct PS_OUTPUT
 		EMLandscapeInput landInput;
 		landInput.LandBlendWeights1 = landWeightSum > 0.0 ? input.layerWeights / landWeightSum : input.layerWeights;
 		landInput.LandBlendWeights2 = 0.0;
-		if (SharedData::extendedMaterialSettings.EnableTerrainParallax) {
+		[branch] if (SharedData::extendedMaterialSettings.EnableTerrainParallax)
+		{
 			float mipLevels[6];
 			float terrainMaxTexDim = 0.0;
 			ExtendedMaterials::InitializeTerrainMipLevels(uv, mipLevels, terrainMaxTexDim);
@@ -933,7 +937,8 @@ struct PS_OUTPUT
 #		endif
 #		if defined(LOD_BLENDING) && LAND_LOD_BLEND
 		// FO4: applied to the raw sampled LOD albedo; there is no ColorToLinear*VanillaDiffuseColorMult step here.
-		landLodAlbedo = pow(abs(landLodAlbedo), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
+		if (FO4SharedData::EnabledLODBlending != 0)
+			landLodAlbedo = pow(abs(landLodAlbedo), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		endif
 #		if LAND_LOD_BLEND
 		float4 landNoiseUV = (input.lodBlend.xyxy + LandLODParamsPS.zwzw) * float4(0.000250, 0.000250, 0.000350, 0.000350);
@@ -988,10 +993,11 @@ struct PS_OUTPUT
 		}
 #			endif
 		// FO4: maps Skyrim's LODLANDSCAPE onto the prepass LOD terrain variant.
-		albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
+		if (FO4SharedData::EnabledLODBlending != 0)
+			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		elif !LANDSCAPE && !GRASS
 		// FO4: object LOD has no technique define; the host bakes the BTO flag into PrepassFeatureLane, which stock never reads.
-		if (PrepassFeatureLane.x != 0.0)
+		if (PrepassFeatureLane.x != 0.0 && FO4SharedData::EnabledLODBlending != 0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
 #		endif
 #	endif

@@ -4,8 +4,10 @@
 
 #include "CaptureService.h"
 
+#include "Check.h"
 #include <cstring>
 #include <fstream>
+
 #include <iostream>
 #include <renderdoc_app.h>
 #include <stdexcept>
@@ -13,19 +15,8 @@
 
 namespace
 {
-	int failures{};
 	std::uint32_t completedCaptures{};
 	std::vector<std::pair<std::string, std::string>> comments;
-
-	void Check(bool a_condition, std::string_view a_expression, int a_line)
-	{
-		if (!a_condition) {
-			std::cerr << "CHECK failed at line " << a_line << ": " << a_expression << '\n';
-			++failures;
-		}
-	}
-
-#define CHECK(a_expression) Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
 
 	std::uint32_t RENDERDOC_CC GetNumCaptures() { return completedCaptures; }
 	std::uint32_t RENDERDOC_CC GetCapture(std::uint32_t a_index, char* a_filename,
@@ -143,11 +134,11 @@ int main(int a_argc, char** a_argv)
 		TestDiskAndInventory(directory);
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
-		++failures;
+		++cs::tests::failures;
 	}
 	std::error_code ignored;
 	std::filesystem::remove_all(directory, ignored);
-	if (failures)
+	if (cs::tests::failures)
 		return 1;
 	std::cout << "RenderDoc capture service tests passed\n";
 	return 0;

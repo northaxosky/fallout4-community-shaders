@@ -14,13 +14,17 @@ namespace FO4SharedData
 		float4 DebugParams;
 		uint EnabledDynamicCubemaps;
 		float DynamicMaterialReflections;
-		uint EnabledWaterParallax;
+		uint EnabledWaterEffects;
 		uint EnabledTerrainVariation;
 		uint EnabledSkylighting;
 		uint EnabledScreenSpaceGI;
 		uint EnabledUnifiedWater;
-		uint pad0;
+		uint EnabledScreenSpaceShadows;
 		float4 DirectionalAmbient[3];
+		uint EnabledVolumetricShadows;
+		uint EnabledLODBlending;
+		uint EnabledInverseSquareLighting;
+		uint pad0;
 	};
 #if defined(FO4CS_SUBSTRATE) && (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(SKYLIGHTING_FULLSCREEN_DEBUG))
 	Texture2D<float4> DebugTexture : register(t61);

@@ -26,6 +26,7 @@ namespace cs::shader_cache
 			{ "ps_5_0", ShaderCacheStage::kPixel },
 			{ "vs_5_0", ShaderCacheStage::kVertex },
 			{ "cs_5_0", ShaderCacheStage::kCompute },
+			{ "cs_5_1", ShaderCacheStage::kCompute },
 			{ "cs_4_0", ShaderCacheStage::kCompute }
 		};
 		for (const auto& [profile, stage] : stages) {
@@ -46,6 +47,8 @@ namespace cs::shader_cache
 			return "ps";
 		case ShaderCacheStage::kCompute:
 			return "cs";
+		default:
+			break;
 		}
 		return "??";
 	}
