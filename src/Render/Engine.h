@@ -130,6 +130,26 @@ namespace cs::engine
 			RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_SAO_CS));
 	}
 
+	// Native SSS and character-light controls; DeferredComposite and DFLight read them.
+	struct NativeSubsurfaceControls
+	{
+		bool& screenSpaceSubsurfaceScatteringEnabled;
+		bool& characterLightEnabled;
+		RE::NiColorA& characterLightParams;
+	};
+
+	[[nodiscard]] inline std::optional<NativeSubsurfaceControls> GetNativeSubsurfaceControls() noexcept
+	{
+		auto* state = RE::BSShaderManager::State::GetSingleton();
+		if (!state)
+			return std::nullopt;
+		return NativeSubsurfaceControls{
+			state->GetScreenSpaceSubsurfaceScatteringEnabled(),
+			state->GetCharacterLightEnabled(),
+			state->GetCharacterLightParams()
+		};
+	}
+
 	inline void SetDynamicResolutionRatios(float a_widthRatio, float a_heightRatio)
 	{
 		if (auto* renderTargetManager = GetRenderTargetManager()) {
@@ -275,6 +295,23 @@ namespace cs::engine
 		const auto matrix = DirectX::XMLoadFloat4x4(&result);
 		const float determinant = DirectX::XMVectorGetX(DirectX::XMMatrixDeterminant(matrix));
 		return HasFiniteMatrix(result) && std::isfinite(determinant) && determinant != 0.0f ? std::optional{ result } : std::nullopt;
+	}
+
+	// Dirties every PS shadow slot holding a_srv so the next engine draw resubmits it;
+	// D3D11 unbinds an SRV when its resource is bound as a UAV behind the engine.
+	inline std::uint32_t ResubmitPixelShaderResource(const ID3D11ShaderResourceView* a_srv) noexcept
+	{
+		auto* context = GetActiveContext();
+		if (!context || !a_srv)
+			return 0;
+		auto& state = context->shadowState;
+		std::uint32_t dirtied = 0;
+		for (std::uint32_t slot = 0; slot < std::size(state.psTexture); ++slot) {
+			if (state.psTexture[slot] == reinterpret_cast<const void*>(a_srv))
+				dirtied |= 1u << slot;
+		}
+		state.psResourceModifiedBits |= dirtied;
+		return dirtied;
 	}
 
 	// Mirrors Interface3D::Renderer::RenderPrepassesAndMenus target selection.
