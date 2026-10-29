@@ -2,6 +2,7 @@
 
 #include "Render/FrameGenerationCpuTiming.h"
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/LatencyBackend.h"
 #include "Render/SwapChainHook.h"
 #include "Render/TemporalPipelineState.h"
 #include "Render/TemporalProvider.h"
@@ -74,6 +75,8 @@ namespace cs::render
 		bool latencyHooksInstalled = false;
 		bool latencySdkActive = false;
 		temporal::LatencyDiagnostics latency;
+		temporal::LatencyBackend latencyBackend = temporal::LatencyBackend::kNone;
+		temporal::AntiLag2Diagnostics antiLag2;
 		temporal::LatencyPhase latencyPhase = temporal::LatencyPhase::kIdle;
 		temporal::FramePhase framePhase = temporal::FramePhase::kIdle;
 		std::uint64_t realFrame = 0;
@@ -258,6 +261,7 @@ namespace cs::render
 			ID3D11Device** a_device,
 			IDXGISwapChain** a_swapChain);
 		bool InstallLatencyHooks() noexcept;
+		temporal::LatencyBackend UpdateLatencyBackend(bool a_antiLag2Requested) noexcept;
 		[[nodiscard]] bool LatencyActive() const noexcept;
 		void EmitLatencyMarkers(
 			std::initializer_list<temporal::LatencyMarker> a_markers,

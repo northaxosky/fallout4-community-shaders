@@ -63,6 +63,7 @@ namespace cs::render::temporal
 		bool reflexUseMarkersToOptimize = false;
 		bool reflexUseFpsLimit = false;
 		float reflexFpsLimit = 60.0f;
+		bool antiLag2 = false;
 	};
 
 	inline constexpr settings::Schema kSchema{
@@ -78,6 +79,7 @@ namespace cs::render::temporal
 			settings::Field{ "reflex_low_latency_boost", "Enable Reflex Low Latency Boost.", &UpscalingSettings::reflexLowLatencyBoost },
 			settings::Field{ "reflex_use_markers_to_optimize", "Let Reflex optimize pacing from PCL markers.", &UpscalingSettings::reflexUseMarkersToOptimize },
 			settings::Field{ "reflex_use_fps_limit", "Enable the Reflex frame rate limit.", &UpscalingSettings::reflexUseFpsLimit },
-			settings::Field{ "reflex_fps_limit", "Reflex frame rate limit in FPS.", &UpscalingSettings::reflexFpsLimit, settings::Range{ 20.0f, 240.0f } } }
+			settings::Field{ "reflex_fps_limit", "Reflex frame rate limit in FPS.", &UpscalingSettings::reflexFpsLimit, settings::Range{ 20.0f, 240.0f } },
+			settings::Field{ "anti_lag_2", "Experimental: AMD Radeon Anti-Lag 2 on supported Radeon GPUs.", &UpscalingSettings::antiLag2 } }
 	};
 }

@@ -8,6 +8,7 @@
 #include <numbers>
 #include <utility>
 
+#include "AntiLag2Latency.h"
 #include "DX12SwapChain.h"
 #include "Feature.h"
 #include "FrameGeneration.h"
@@ -176,6 +177,12 @@ namespace cs::render
 			};
 		}
 
+		temporal::LatencyOptions ToAntiLag2Options(
+			const temporal::UpscalingSettings& a_settings) noexcept
+		{
+			return { .mode = a_settings.antiLag2 ? temporal::LatencyMode::kLowLatency : temporal::LatencyMode::kOff };
+		}
+
 		temporal::LatencyOptions ToLatencyOptions(
 			const temporal::UpscalingSettings& a_settings) noexcept
 		{
@@ -264,7 +271,10 @@ namespace cs::render
 		FrameGenerationCpuTimingCollector<> frameGenerationCpuTimings;
 		features::Streamline streamline;
 		features::StreamlineLatency streamlineLatency{ streamline };
-		temporal::ILatencyProvider* latencyProvider = &streamlineLatency;
+		// Declared before swapChain so it outlives every presentation swap chain.
+		features::AntiLag2Latency antiLag2;
+		std::atomic<temporal::ILatencyProvider*> latencyProvider{ &streamlineLatency };
+		std::atomic<temporal::LatencyBackend> latencyBackend{ temporal::LatencyBackend::kNone };
 		features::StreamlineSuperResolution dlssProvider{
 			streamline,
 			features::StreamlineSuperResolution::Method::kDLSS
@@ -828,7 +838,7 @@ namespace cs::render
 	bool TemporalPipeline::LatencyActive() const noexcept
 	{
 		return _impl->latencyHooksInstalled.load(std::memory_order_acquire) &&
-		       _impl->latencyProvider->IsAvailable();
+		       _impl->latencyProvider.load(std::memory_order_acquire)->IsAvailable();
 	}
 
 	void TemporalPipeline::ReportLatencyResult(
@@ -857,8 +867,13 @@ namespace cs::render
 		if (!LatencyActive()) {
 			return;
 		}
+		// Only Streamline implements PCL markers; they keep flowing whichever backend owns the sleep.
+		temporal::ILatencyProvider* provider = _impl->latencyProvider.load(std::memory_order_acquire);
+		if (_impl->streamlineLatency.IsAvailable()) {
+			provider = &_impl->streamlineLatency;
+		}
 		for (const auto marker : a_markers) {
-			ReportLatencyResult(_impl->latencyProvider->SetLatencyMarker(
+			ReportLatencyResult(provider->SetLatencyMarker(
 				marker, static_cast<std::uint32_t>(a_frame)));
 		}
 	}
@@ -892,18 +907,44 @@ namespace cs::render
 			eligible = _impl->rendererEligible;
 		}
 		_impl->renderer.ApplyConfiguration(renderSettings, eligible);
+		const auto backend = UpdateLatencyBackend(renderSettings.antiLag2);
 		if (LatencyActive()) {
-			ReportLatencyResult(
-				_impl->latencyProvider->Configure(ToLatencyOptions(renderSettings)));
+			auto* provider = _impl->latencyProvider.load(std::memory_order_acquire);
+			ReportLatencyResult(provider->Configure(
+				backend == temporal::LatencyBackend::kAntiLag2 ? ToAntiLag2Options(renderSettings) : ToLatencyOptions(renderSettings)));
 			const auto result = [&] {
 				auto timing = MeasureFrameGenerationCpuPhase(
 					FrameGenerationCpuPhase::kLatencySleep);
-				return _impl->latencyProvider->Sleep(
+				return provider->Sleep(
 					static_cast<std::uint32_t>(frame));
 			}();
 			ReportLatencyResult(result);
 		}
 		cs::render::annotation::SetMarker("Temporal/Latency/Sleep");
+	}
+
+	temporal::LatencyBackend TemporalPipeline::UpdateLatencyBackend(
+		bool a_antiLag2Requested) noexcept
+	{
+		const bool reflexOwnsLatency = temporal::ReflexOwnsLatency(
+			_impl->streamlineLatency.IsAvailable(),
+			_impl->streamlineLatency.GetLatencyDiagnostics().lowLatencyAvailable);
+		const bool presentationQuarantined = _impl->swapChain.IsQuarantined();
+		const bool antiLag2Initialized = _impl->antiLag2.Prepare(
+			a_antiLag2Requested, reflexOwnsLatency, presentationQuarantined);
+		const auto backend = temporal::SelectLatencyBackend(
+			reflexOwnsLatency, antiLag2Initialized, presentationQuarantined);
+		temporal::ILatencyProvider* provider = &_impl->streamlineLatency;
+		if (backend == temporal::LatencyBackend::kAntiLag2) {
+			provider = &_impl->antiLag2;
+		}
+		_impl->latencyProvider.store(provider, std::memory_order_release);
+		const auto previous = _impl->latencyBackend.exchange(backend, std::memory_order_acq_rel);
+		if (previous != backend &&
+			(previous == temporal::LatencyBackend::kAntiLag2 || backend == temporal::LatencyBackend::kAntiLag2)) {
+			L->info("Latency backend: {}", temporal::Name(backend));
+		}
+		return backend;
 	}
 
 	void TemporalPipeline::BeginSimulation() noexcept
@@ -1102,6 +1143,7 @@ namespace cs::render
 		const std::string_view providerName =
 			provider ? provider->Name() : "plain D3D12";
 		try {
+			_impl->swapChain.AttachAntiLag2(&_impl->antiLag2);
 			proxyResult = _impl->swapChain.Initialize(
 				a_context.adapter, device, immediateContext, *a_context.swapChainDesc,
 				&_impl->streamline, provider,
@@ -1778,7 +1820,10 @@ namespace cs::render
 		status.latencyHooksInstalled =
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire);
 		status.latencySdkActive = LatencyActive();
-		status.latency = _impl->latencyProvider->GetLatencyDiagnostics();
+		// The Reflex controls read Streamline's diagnostics whichever backend owns latency.
+		status.latency = _impl->streamlineLatency.GetLatencyDiagnostics();
+		status.latencyBackend = _impl->latencyBackend.load(std::memory_order_acquire);
+		status.antiLag2 = _impl->antiLag2.GetAntiLag2Diagnostics();
 		status.latencyPhase = _impl->latency.Phase();
 		const auto& frame = _impl->frames[_impl->currentFrameSlot];
 		status.framePhase = frame.Phase();

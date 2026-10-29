@@ -267,6 +267,35 @@ namespace cs::features
 			dmui::ui::EndDisabled();
 		}
 
+		if (const ui::Section section{ "upscaling-antilag2", "AMD Radeon Anti-Lag 2 (Experimental)" }; section) {
+			using render::temporal::AntiLag2Status;
+			const bool reflexOwnsLatency = render::temporal::ReflexOwnsLatency(
+				status.latency.available, status.latency.lowLatencyAvailable);
+			switch (render::temporal::GetAntiLag2Status(reflexOwnsLatency, status.antiLag2)) {
+			case AntiLag2Status::kReflexOwnsLatency:
+				dmui::ui::TextDisabled("NVIDIA Reflex handles latency on this GPU.");
+				break;
+			case AntiLag2Status::kUnavailable:
+				dmui::ui::TextDisabled("Anti-Lag 2 is unavailable on this GPU or driver.");
+				break;
+			case AntiLag2Status::kNeedsD3D12Presentation:
+				dmui::ui::TextDisabled("Requires Upscaling or Frame Generation in borderless windowed mode.");
+				break;
+			case AntiLag2Status::kPresentationFailed:
+				dmui::ui::TextDisabled("Inactive because Direct3D 12 presentation failed.");
+				break;
+			case AntiLag2Status::kUpdateFailing:
+				dmui::ui::TextDisabled("The driver is rejecting Anti-Lag 2 updates.");
+				break;
+			case AntiLag2Status::kReady:
+				break;
+			}
+			dmui::ui::BeginDisabled(reflexOwnsLatency);
+			changed |= edit.Discrete(dmui::ui::Checkbox("Anti-Lag 2", &settings.antiLag2));
+			ui::Tooltip("Experimental. May reduce input latency on supported Radeon GPUs by delaying each frame until just before input is read. The benefit varies by system and is unverified with frame generation.");
+			dmui::ui::EndDisabled();
+		}
+
 		if (changed) {
 			pipeline.SubmitLiveConfiguration();
 		}

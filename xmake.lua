@@ -333,6 +333,8 @@ target(plugin_name, function()
     add_installfiles("features/Upscaling/(Shaders/Upscaling/Streamline/**)",
         { prefixdir = "." })
     add_installfiles("LICENSE", "EXCEPTIONS.md", { prefixdir = "." })
+    add_installfiles("extern/AntiLag2-SDK/LICENSE-AMD-AntiLag2-MIT.txt",
+        { prefixdir = "F4SE/Plugins/FO4CommunityShaders/Licenses" })
 end)
 
 -- Host tests remain ordinary, non-default C++ executable targets.
@@ -372,6 +374,15 @@ target("RenderDocCaptureServiceTests", function()
     add_tests("RenderDocCaptureService", {
         runargs = { path.join(os.projectdir(), "build/RenderDocCaptureServiceTests") }
     })
+end)
+
+target("LatencyBackendTests", function()
+    set_kind("binary")
+    set_default(false)
+    set_group("unit")
+    add_files("tests/LatencyBackendTests.cpp")
+    add_headerfiles("src/Render/LatencyBackend.h")
+    add_tests("LatencyBackend")
 end)
 
 target("FrameDispatcherTests", function()
