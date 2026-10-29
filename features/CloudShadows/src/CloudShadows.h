@@ -45,7 +45,7 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void Prepass() override;
 		void DrawSettings() override;
-		bool HasDebugUI() const override { return true; }
+		bool HasDebugUI() const override;
 		void DrawDebug() override;
 		void RestoreDefaultSettings() override;
 

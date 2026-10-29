@@ -533,10 +533,13 @@ namespace cs::features
 		_legend = std::move(rows);
 	}
 
+	bool CloudShadows::HasDebugUI() const
+	{
+		return _overlayMode.load(std::memory_order_acquire) == kModeLayers;
+	}
+
 	void CloudShadows::DrawDebug()
 	{
-		if (_overlayMode.load(std::memory_order_acquire) != kModeLayers)
-			return;
 		std::vector<LegendRow> rows;
 		{
 			const std::lock_guard lock(_legendMutex);

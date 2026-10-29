@@ -23,7 +23,6 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Section.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
