@@ -24,6 +24,8 @@ namespace cs::render
 	bool IsHistoryResetFrame() noexcept;
 	// Host-owned linear clamp sampler; null until the substrate is initialized.
 	[[nodiscard]] ID3D11SamplerState* GetLinearClampSampler() noexcept;
+	// Host-owned point clamp sampler; null until the substrate is initialized.
+	[[nodiscard]] ID3D11SamplerState* GetPointClampSampler() noexcept;
 	// Debug producers invalidate the cached packet when replacing or updating its texture.
 	void InvalidateFullscreenDebugData() noexcept;
 

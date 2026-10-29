@@ -84,7 +84,6 @@ namespace cs::features
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
 		std::optional<ConsumerCB> _consumerData;
 		winrt::com_ptr<ID3D11ShaderResourceView> _noise;
-		winrt::com_ptr<ID3D11SamplerState> _pointSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _prepare;
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 7> _shaders;
 		DirectX::XMFLOAT4X4 _previousViewInverse{};

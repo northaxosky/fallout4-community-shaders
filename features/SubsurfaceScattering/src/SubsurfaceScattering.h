@@ -93,7 +93,6 @@ namespace cs::features
 		bool _kernelsBuilt = false;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
 		std::optional<ConsumerCB> _consumerData;
-		winrt::com_ptr<ID3D11SamplerState> _pointSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _prepare, _extract, _horizontal, _vertical, _burley;
 		std::optional<NativeSnapshot> _native;
 		std::atomic_bool _started{ false }, _resourcesReady{ false }, _failed{ false };

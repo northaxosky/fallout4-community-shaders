@@ -63,6 +63,7 @@ namespace cs::render
 			Feature* debugFeature = nullptr;
 			winrt::com_ptr<ID3D11ShaderResourceView> debugTexture;
 			winrt::com_ptr<ID3D11SamplerState> linearClamp;
+			winrt::com_ptr<ID3D11SamplerState> pointClamp;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -394,6 +395,9 @@ namespace cs::render
 		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
 		DX::ThrowIfFailed(a_device->CreateSamplerState(&samplerDesc, state.linearClamp.put()));
 		annotation::SetName(state.linearClamp.get(), "Render/LinearClamp.Sampler");
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+		DX::ThrowIfFailed(a_device->CreateSamplerState(&samplerDesc, state.pointClamp.put()));
+		annotation::SetName(state.pointClamp.get(), "Render/PointClamp.Sampler");
 
 		// engine state is unavailable during D3D bootstrap
 		if (!WriteSubstrate(a_context, SubstrateData{})) {
@@ -410,6 +414,11 @@ namespace cs::render
 	ID3D11SamplerState* GetLinearClampSampler() noexcept
 	{
 		return GetSubstrateState().linearClamp.get();
+	}
+
+	ID3D11SamplerState* GetPointClampSampler() noexcept
+	{
+		return GetSubstrateState().pointClamp.get();
 	}
 
 	void RequestHistoryReset() noexcept

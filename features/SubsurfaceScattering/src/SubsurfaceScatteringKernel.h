@@ -14,6 +14,7 @@ namespace cs::features::subsurface_scattering
 	{
 		using Float3 = std::array<float, 3>;
 
+		// Falloff widens or narrows the profile per channel.
 		inline Float3 Gaussian(const Float3& a_falloff, float a_variance, float a_r)
 		{
 			Float3 g{};
@@ -24,6 +25,7 @@ namespace cs::features::subsurface_scattering
 			return g;
 		}
 
+		// d'Eon07 red-channel profile reused for all channels via falloff.
 		inline Float3 Profile(const Float3& a_falloff, float a_r)
 		{
 			constexpr std::array<std::array<float, 2>, 5> terms{ { { 0.100f, 0.0484f }, { 0.118f, 0.187f }, { 0.113f, 0.567f }, { 0.358f, 1.99f }, { 0.078f, 7.41f } } };

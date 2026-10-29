@@ -112,19 +112,6 @@ namespace cs::features
 			_consumerData.reset();
 			_constants->SetName("SubsurfaceScattering/Constants.Buffer");
 			_consumer->SetName("SubsurfaceScattering/Consumer.Buffer");
-			D3D11_SAMPLER_DESC desc{};
-			desc.AddressU = desc.AddressV = desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-			desc.MaxAnisotropy = 1;
-			desc.MaxLOD = D3D11_FLOAT32_MAX;
-			desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-			DX::ThrowIfFailed(a_device->CreateSamplerState(&desc, _pointSampler.put()));
-			cs::render::annotation::SetName(_pointSampler.get(), "SubsurfaceScattering/PointClamp.Sampler");
-			// Hooks stay registered so the composite still binds its stock-blur flag.
-			if (!SupportsTypedUAV(a_device, DXGI_FORMAT_R11G11B10_FLOAT)) {
-				_unsupported = true;
-				L->error("Subsurface Scattering is unavailable: the device lacks typed UAV loads for R11G11B10_FLOAT.");
-				return;
-			}
 			_failed = !CompileShaders();
 		} catch (const std::exception& e) {
 			_failed = true;
@@ -289,7 +276,7 @@ namespace cs::features
 			// FO4: the main copy is the second composite's t10; blur it in place.
 			cs::engine::ComputeOMScope scope(context, 8, 2, 6, 2);
 			cs::render::ScopedComputeSharedDataBinding substrate(context);
-			auto* sampler = _pointSampler.get();
+			auto* sampler = cs::render::GetPointClampSampler();
 			context->CSSetSamplers(0, 1, &sampler);
 			auto* constants = _constants->CB();
 			context->CSSetConstantBuffers(kConstantsSlot, 1, &constants);

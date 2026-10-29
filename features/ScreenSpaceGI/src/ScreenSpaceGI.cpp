@@ -149,13 +149,6 @@ namespace cs::features
 			DX::ThrowIfFailed(DirectX::CreateShaderResourceView(a_device, image.GetImages(),
 				image.GetImageCount(), image.GetMetadata(), _noise.put()));
 			cs::render::annotation::SetName(_noise.get(), "SSGI/Noise.SRV");
-			D3D11_SAMPLER_DESC desc{};
-			desc.AddressU = desc.AddressV = desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-			desc.MaxAnisotropy = 1;
-			desc.MaxLOD = D3D11_FLOAT32_MAX;
-			desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-			DX::ThrowIfFailed(a_device->CreateSamplerState(&desc, _pointSampler.put()));
-			cs::render::annotation::SetName(_pointSampler.get(), "SSGI/PointClamp.Sampler");
 			_failed = !CompileShaders() || !_prepare;
 			EnsureResources();
 		} catch (const std::exception& e) {
@@ -376,7 +369,7 @@ namespace cs::features
 			auto* cb = _constants->CB();
 			context->CSSetConstantBuffers(1, 1, &cb);
 			UpdateConsumer(true, tiled);
-			ID3D11SamplerState* samplers[]{ _pointSampler.get(), cs::render::GetLinearClampSampler() };
+			ID3D11SamplerState* samplers[]{ cs::render::GetPointClampSampler(), cs::render::GetLinearClampSampler() };
 			context->CSSetSamplers(0, 2, samplers);
 			ComputePasses pass(context, kConsumerSlot, _consumer->CB());
 			cs::render::annotation::ScopedEvent generation("ScreenSpaceGI::Generate", false);
