@@ -58,6 +58,9 @@ namespace cs::features
 
 		void Release();
 
+		// Proxy holds the source's current contents until either side may change.
+		void InvalidateProxy(RE::BSGraphics::RenderTargetID a_target) noexcept;
+
 		[[nodiscard]] bool HasProxies() const noexcept { return _hasProxies; }
 		[[nodiscard]] ProxyTexture GetProxyTexture(RE::BSGraphics::RenderTargetID a_target) const noexcept;
 
@@ -72,8 +75,6 @@ namespace cs::features
 		void RestoreEngineSlot(RE::BSGraphics::RenderTargetID a_target);
 		bool IsProxyTexture(const void* a_texture) const noexcept;
 		void AbortProxyPass();
-		// Proxy holds the source's current contents until either side may change.
-		void InvalidateProxy(RE::BSGraphics::RenderTargetID a_target) noexcept;
 		void InvalidateAllProxies() noexcept;
 
 		ID3D11ComputeShader* GetOverrideDepthCS();
