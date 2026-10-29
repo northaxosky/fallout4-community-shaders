@@ -15,5 +15,5 @@ namespace SubsurfaceScattering
 
 // Skips the stock skin blur once SSS has already blurred the composite's t10.
 // FO4: first-person pixels (raw depth) are never scattered, so they keep it.
-#define FO4_SSS_IF_PRODUCED(rawDepth, statement) [branch] if (SubsurfaceScattering::Produced && !FO4Depth::IsFirstPerson(rawDepth)) statement
+#define FO4_SSS_IF_SCATTERED(rawDepth, statement) [branch] if (SubsurfaceScattering::Produced && !FO4Depth::IsFirstPerson(rawDepth)) statement
 #endif
