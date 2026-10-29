@@ -251,7 +251,7 @@ namespace cs::features
 			edit.Toggle(parallax, _settings, "Enables parallax on standard meshes made for parallax.");
 			edit.Toggle(terrain, _settings,
 				"Enables terrain parallax using the alpha channel of each landscape specular (_s) texture. "
-				"Therefore, all landscape textures must support parallax for this effect to work properly. ");
+				"Layers without a height map stay flat.");
 			edit.Toggle(heightBlending, _settings, "Enables landscape texture blending based on parallax. ");
 			edit.Toggle(warpingFix, _settings, "Enables a fix reducing parallax scale on curved and smooth normal triangles.");
 		}
