@@ -4,8 +4,8 @@
 #include "PCH.h"
 #include "Render/Engine.h"
 #include "Render/RuntimeCallback.h"
-#include "Render/ShaderGeometryHooks.h"
 #include "Render/ShaderInjection.h"
+#include "Render/ShaderObservers.h"
 #include "Render/SubstrateSlots.h"
 #include "Utils/CSBuffer.h"
 

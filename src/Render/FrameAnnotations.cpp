@@ -6,7 +6,7 @@
 #include "Render/Engine.h"
 #include "Render/HookRegistry.h"
 #include "Render/RenderHooks.h"
-#include "Render/ShaderGeometryHooks.h"
+#include "Render/ShaderObservers.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsRegistry.h"

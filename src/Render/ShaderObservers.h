@@ -22,8 +22,7 @@ namespace cs::engine
 	// Startup only; the first observer of a target hooks its vtable pair once.
 	void ObserveShaderGeometry(ShaderInjectionTarget a_target, GeometryObserver a_observer);
 
-	// Receives the raw BSRenderPass::passEnum, ahead of both command-buffer replay
-	// and immediate draws.
+	// Raw passEnum; fires for replayed and immediate draws alike.
 	struct TechniqueObserver
 	{
 		void (*setup)(RE::BSShader*, std::uint32_t a_technique) noexcept;  // before SetupTechnique

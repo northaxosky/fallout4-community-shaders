@@ -1,4 +1,4 @@
-#include "Render/ShaderGeometryHooks.h"
+#include "Render/ShaderObservers.h"
 
 #include "PCH.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -36,7 +36,7 @@ namespace cs::engine
 			std::size_t count = 0;
 			bool hooked = false;
 		};
-		std::array<Observers<GeometryObserver>, kTargetCount> g_observers;
+		std::array<Observers<GeometryObserver>, kTargetCount> g_geometryObservers;
 		std::array<Observers<TechniqueObserver>, kTargetCount> g_techniqueObservers;
 
 		template <ShaderInjectionTarget Target>
@@ -46,7 +46,7 @@ namespace cs::engine
 
 			static void thunk(RE::BSShader* a_self, RE::BSRenderPass* a_pass)
 			{
-				const auto& observers = g_observers[static_cast<std::size_t>(Target)];
+				const auto& observers = g_geometryObservers[static_cast<std::size_t>(Target)];
 				for (std::size_t i = 0; i < observers.count; ++i)
 					observers.list[i].setup(a_self, a_pass);
 				func(a_self, a_pass);
@@ -63,7 +63,7 @@ namespace cs::engine
 			static void thunk(RE::BSShader* a_self, RE::BSRenderPass* a_pass)
 			{
 				func(a_self, a_pass);
-				const auto& observers = g_observers[static_cast<std::size_t>(Target)];
+				const auto& observers = g_geometryObservers[static_cast<std::size_t>(Target)];
 				for (std::size_t i = observers.count; i-- > 0;)
 					observers.list[i].restore(a_self, a_pass);
 			}
@@ -106,7 +106,6 @@ namespace cs::engine
 			}
 		};
 
-		// The first observer of a target installs its hook set once.
 		template <class Hooks, class Observer>
 		void Observe(std::array<Observers<Observer>, kTargetCount>& a_lists, ShaderInjectionTarget a_target, Observer a_observer, const char* a_overflow)
 		{
@@ -131,7 +130,7 @@ namespace cs::engine
 
 	void ObserveShaderGeometry(ShaderInjectionTarget a_target, GeometryObserver a_observer)
 	{
-		Observe<GeometryHooks>(g_observers, a_target, a_observer, "Too many geometry observers");
+		Observe<GeometryHooks>(g_geometryObservers, a_target, a_observer, "Too many geometry observers");
 	}
 
 	void ObserveShaderTechnique(ShaderInjectionTarget a_target, TechniqueObserver a_observer)

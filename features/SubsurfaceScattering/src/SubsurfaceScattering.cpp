@@ -19,7 +19,7 @@
 #include "Render/PrepassTechnique.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
-#include "Render/ShaderGeometryHooks.h"
+#include "Render/ShaderObservers.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
