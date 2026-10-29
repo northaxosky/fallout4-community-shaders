@@ -20,7 +20,7 @@ namespace cs::engine
 {
 	struct ShaderReplacementRegistration;
 
-	// A feature-owned render target the deferred prepass writes beside the G-buffer.
+	// A feature-owned target the deferred prepass writes beside the G-buffer.
 	struct PrepassExtraTarget
 	{
 		std::string name;                          // debug-name prefix
@@ -37,6 +37,6 @@ namespace cs::engine
 	[[nodiscard]] std::optional<PrepassExtraTargetId> RegisterPrepassExtraTarget(Feature& a_owner, PrepassExtraTarget a_target);
 	// Plugs the target bind into a feature's kDeferredPrepass registration.
 	void AttachPrepassExtraTargets(ShaderReplacementRegistration& a_registration);
-	// The target's SRV for a compute consumer; null unless it was written this frame.
+	// The target's SRV for a compute consumer; null unless written this frame.
 	[[nodiscard]] ID3D11ShaderResourceView* GetPrepassExtraTargetSRV(PrepassExtraTargetId a_id) noexcept;
 }

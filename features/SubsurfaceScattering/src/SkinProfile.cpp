@@ -6,7 +6,7 @@
 #include "RE/A/Actor.h"
 #include "RE/B/BGSKeyword.h"
 #include "RE/B/BSRenderPass.h"
-#include "RE/T/TESDataHandler.h"
+#include "RE/T/TESForm.h"
 #include "RE/T/TESObjectREFR.h"
 #include "RE/T/TESRace.h"
 
@@ -20,21 +20,15 @@ namespace cs::features::subsurface_scattering
 	{
 		auto* L = cs::log::Get("cs.feature.subsurfacescattering");
 
-		// FO4: no IsBeastRace keyword; races with these Fallout4.esm keywords are Base.
-		struct BaseRaceKeyword
-		{
-			RE::TESFormID formID;
-			std::string_view name;
-		};
-		constexpr std::array kBaseRaceKeywords{
-			BaseRaceKeyword{ 0x000EAFB7, "ActorTypeGhoul" },
-			BaseRaceKeyword{ 0x0006D7B6, "ActorTypeSuperMutant" },
-			BaseRaceKeyword{ 0x0014F6A5, "ActorTypeSuperMutantBehemoth" },
-			BaseRaceKeyword{ 0x00013795, "ActorTypeCreature" },
-			BaseRaceKeyword{ 0x00013798, "ActorTypeAnimal" }
+		// FO4: no IsBeastRace keyword; races with any of these are Base.
+		constexpr std::array<std::string_view, 5> kBaseRaceKeywords{
+			"ActorTypeGhoul",
+			"ActorTypeSuperMutant",
+			"ActorTypeSuperMutantBehemoth",
+			"ActorTypeCreature",
+			"ActorTypeAnimal"
 		};
 
-		// Written once at DataLoaded, before the first render.
 		std::array<const RE::BGSKeyword*, kBaseRaceKeywords.size()> g_baseRaceKeywords{};
 		bool g_baseRaceKeywordsResolved = false;
 	}
@@ -42,11 +36,10 @@ namespace cs::features::subsurface_scattering
 	void ResolveBaseRaceKeywords()
 	{
 		g_baseRaceKeywordsResolved = false;
-		auto* handler = RE::TESDataHandler::GetSingleton();
 		for (std::size_t i = 0; i < kBaseRaceKeywords.size(); ++i) {
-			g_baseRaceKeywords[i] = handler ? handler->LookupForm<RE::BGSKeyword>(kBaseRaceKeywords[i].formID, "Fallout4.esm") : nullptr;
+			g_baseRaceKeywords[i] = RE::TESForm::GetFormByEditorID<RE::BGSKeyword>(kBaseRaceKeywords[i]);
 			if (!g_baseRaceKeywords[i]) {
-				L->warn("{} keyword is unavailable; using the default SSS skin classification", kBaseRaceKeywords[i].name);
+				L->warn("{} keyword is unavailable; using the default SSS skin classification", kBaseRaceKeywords[i]);
 				return;
 			}
 		}

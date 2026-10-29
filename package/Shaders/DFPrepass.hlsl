@@ -598,7 +598,7 @@ struct PS_OUTPUT
 	float4 parallaxShadow: SV_Target6;
 #	endif
 #	if defined(SUBSURFACE_SCATTERING)
-	// FO4: upstream marks the Human profile in the lighting mask; SSS reads it from here.
+	// FO4: upstream's lighting mask carries the Human profile; SSS reads it here.
 	float4 sssProfile: SV_Target7;
 #	endif
 };

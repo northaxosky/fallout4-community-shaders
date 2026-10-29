@@ -15,7 +15,7 @@ RWTexture2D<float4> AlbedoOut : register(u2);
 	// FO4: class 5 outside first person is skin.
 	const bool skinClass = abs(Material[pixel].w * 255.0 - 5.0) < 0.25;
 	const float skin = skinClass && !FO4Depth::IsFirstPerson(SceneDepth[pixel]) ? 1.0 : 0.0;
-	// FO4: amount is 1 as skin diffuse alpha is a cutout; the prepass bakes the profile.
+	// FO4: skin alpha is a cutout, so amount is 1; the prepass bakes the profile.
 	Mask[pixel] = float2(skin, skin * Profile[pixel]);
 	// FO4: spherical native normals become upstream's negated octahedral one.
 	ViewNormal[pixel] = GBuffer::EncodeNormal(FO4GBuffer::DecodeViewNormal(Normal[pixel]));
