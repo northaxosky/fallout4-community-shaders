@@ -183,7 +183,7 @@ namespace cs::features
 		diagnostics.markersDelivered = _markersDelivered.load(std::memory_order_relaxed);
 		diagnostics.sleepCalls = _updateCalls.load(std::memory_order_relaxed);
 		diagnostics.sleepFailures = _updateFailures.load(std::memory_order_relaxed);
-		// Update's HRESULT comes from the driver's delay call; a failure is assumed to insert no delay.
+		// A failed Update is assumed to insert no delay.
 		if (_presentationQuarantined) {
 			diagnostics.unavailableReason = Reason::kPresentationFailed;
 		} else if (_initializationFailed) {

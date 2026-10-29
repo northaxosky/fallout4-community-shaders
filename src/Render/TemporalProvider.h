@@ -404,7 +404,7 @@ namespace cs::render::temporal
 	public:
 		virtual ~ILatencyProvider() = default;
 
-		// Rebinding with the same device only swaps the swap chain (null while it is rebuilt).
+		// Same-device rebinds only swap the swap chain (null while rebuilt).
 		virtual void BindPresentation(const PresentationBinding&) noexcept {}
 		// Only after the swap chain and any presenter thread are gone.
 		virtual void UnbindPresentation() noexcept {}

@@ -47,7 +47,7 @@ namespace cs::features
 		void InitializeLocked() noexcept;
 		void ShutdownLocked() noexcept;
 		void MarkEndOfFrameRenderingLocked() noexcept;
-		// Lets the FidelityFX frame-generation swap chain tag real and interpolated frames.
+		// Lets the FidelityFX FG swap chain tag real vs interpolated frames.
 		void PublishFrameTypeTaggingLocked() noexcept;
 
 		// Sleep holds this across Update, which can block for the driver's delay; callers run on the game thread.

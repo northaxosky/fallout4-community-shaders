@@ -51,7 +51,7 @@ namespace cs::render::temporal
 		return none;
 	}
 
-	// Sleeps and configures through the first backend whose driver reports low latency.
+	// Routes to the first backend whose driver reports low latency.
 	class LatencyRouter final : public ILatencyProvider
 	{
 	public:

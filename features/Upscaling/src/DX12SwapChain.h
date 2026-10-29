@@ -47,9 +47,9 @@ namespace cs::features
 		std::function<render::temporal::FrameGenerationRequest()> queryFrameState;
 		std::function<void(ID3D12Device*, HWND)> bindD3D12CaptureTarget;
 		std::function<void(ID3D12Device*)> unbindD3D12CaptureTarget;
-		// Fired on publish and whenever the presentation swap chain is rebuilt or released.
+		// On publish and whenever the swap chain is rebuilt or released.
 		std::function<void(const render::temporal::PresentationBinding&)> bindPresentation;
-		// Fired by Rollback only after the swap chain and any presenter thread are gone.
+		// Rollback only, after the swap chain and presenter thread are gone.
 		std::function<void()> unbindPresentation;
 		std::function<void()> quarantinePresentation;
 		// The D3D11 device has no swap chain of its own, so game frames end here.
