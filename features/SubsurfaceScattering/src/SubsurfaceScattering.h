@@ -75,6 +75,7 @@ namespace cs::features
 		bool EnsureResources(ID3D11Texture2D* a_target);
 		void UpdateKernels();
 		void UpdateConstants(const cs::engine::WorldCameraRecord&);
+		bool CanRun() const noexcept { return _started && IsEnabled() && !_unsupported && !_failed; }
 		void ApplyNativeControls();
 		void RestoreNativeControls() noexcept;
 		void OnPreDeferredComposite();

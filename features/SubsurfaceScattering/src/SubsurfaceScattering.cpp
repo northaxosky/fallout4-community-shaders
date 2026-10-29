@@ -20,6 +20,7 @@
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/SharedData.h"
+#include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
 #include "SubsurfaceScatteringKernel.h"
 #include "Telemetry/Telemetry.h"
@@ -205,7 +206,8 @@ namespace cs::features
 		const auto controls = cs::engine::GetNativeSubsurfaceControls();
 		if (!controls)
 			return;
-		if (!IsEnabled()) {
+		// A feature that cannot dispatch must leave the native pipeline stock.
+		if (!CanRun()) {
 			RestoreNativeControls();
 			return;
 		}
@@ -261,7 +263,7 @@ namespace cs::features
 	{
 		auto* context = cs::engine::GetImmediateContext();
 		auto* manager = cs::engine::GetRenderTargetManager();
-		if (!_started || !IsEnabled() || _unsupported || _failed || !context || !manager || !_consumer ||
+		if (!CanRun() || !context || !manager || !_consumer ||
 			!_prepare || !_extract || !_horizontal || !_vertical || !_burley)
 			return;
 		const auto camera = cs::engine::GetWorldCameraRecord();
@@ -312,6 +314,8 @@ namespace cs::features
 		}
 		// The UAV write unbinds the main copy behind the engine's t10 and SSLR t3 shadow state.
 		cs::engine::ResubmitPixelShaderResource(color);
+		// The second composite's proxy copy of the main copy predates this write.
+		cs::render::TemporalRenderer::GetSingleton()->InvalidateProxy(RT::kMainCopy);
 		++_dispatches;
 		_produced = true;
 		UpdateConsumer(true);
