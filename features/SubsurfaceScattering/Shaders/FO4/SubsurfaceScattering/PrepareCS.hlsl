@@ -12,7 +12,7 @@ RWTexture2D<float4> AlbedoOut : register(u2);
 
 [numthreads(8, 8, 1)] void main(uint2 pixel : SV_DispatchThreadID) {
 	// FO4: class 5 stands in for upstream's per-pixel amount and Human profile.
-	// FO4: first-person skin keeps the stock blur; the composite gates on the same test.
+	// FO4: first-person skin keeps the stock blur (composite gates identically).
 	const bool skinClass = abs(Material[pixel].w * 255.0 - 5.0) < 0.25;
 	const float skin = skinClass && !FO4Depth::IsFirstPerson(SceneDepth[pixel]) ? 1.0 : 0.0;
 	Mask[pixel] = float2(skin, skin);
