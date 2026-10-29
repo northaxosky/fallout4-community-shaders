@@ -120,7 +120,7 @@ namespace cs::features
 			desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
 			DX::ThrowIfFailed(a_device->CreateSamplerState(&desc, _pointSampler.put()));
 			cs::render::annotation::SetName(_pointSampler.get(), "SubsurfaceScattering/PointClamp.Sampler");
-			// The hooks stay registered so the composite keeps binding its stock-blur flag.
+			// Hooks stay registered so the composite still binds its stock-blur flag.
 			if (!SupportsTypedUAV(a_device, DXGI_FORMAT_R11G11B10_FLOAT)) {
 				_unsupported = true;
 				L->error("Subsurface Scattering is unavailable: the device lacks typed UAV loads for R11G11B10_FLOAT.");
@@ -214,11 +214,11 @@ namespace cs::features
 		if (!_native)
 			_native = NativeSnapshot{ controls->screenSpaceSubsurfaceScatteringEnabled, controls->characterLightEnabled,
 				controls->characterLightParams.r, controls->characterLightParams.g };
-		// FO4: the t15 bind that precedes the second composite exists only while the native flag is on.
+		// FO4: the hooked t15 bind only runs while the native flag is on.
 		controls->screenSpaceSubsurfaceScatteringEnabled = true;
 		controls->characterLightEnabled = _settings.enableCharacterLighting;
 		if (_settings.enableCharacterLighting) {
-			// FO4: DFLight reads only the rim (x) and fill (y) lanes of the character light.
+			// FO4: DFLight reads only the rim (x) and fill (y) character light lanes.
 			controls->characterLightParams.r = _native->rim * _settings.characterLightingStrength;
 			controls->characterLightParams.g = _native->fill * _settings.characterLightingStrength;
 		}
@@ -285,12 +285,14 @@ namespace cs::features
 			return;
 		try {
 			UpdateConstants(*camera);
-			// FO4: the main copy is the second composite's t10, so the blur writes it in place.
+			// FO4: the main copy is the second composite's t10; blur it in place.
 			cs::engine::ComputeOMScope scope(context, 8, 2, 6, 2);
 			cs::render::ScopedComputeSharedDataBinding substrate(context);
 			auto* sampler = _pointSampler.get();
 			context->CSSetSamplers(0, 1, &sampler);
-			ComputePasses pass(context, kConstantsSlot, _constants->CB());
+			auto* constants = _constants->CB();
+			context->CSSetConstantBuffers(kConstantsSlot, 1, &constants);
+			ComputePasses pass(context);
 			cs::render::annotation::ScopedEvent dispatch("SubsurfaceScattering::Dispatch", false);
 			const auto scatter = [&](ID3D11ComputeShader* a_shader, ID3D11ShaderResourceView* a_input,
 									 ID3D11UnorderedAccessView* a_output, const char* a_name) {
@@ -312,9 +314,9 @@ namespace cs::features
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Subsurface Scattering dispatch failed: {}", e.what());
 			return;
 		}
-		// The UAV write unbinds the main copy behind the engine's t10 and SSLR t3 shadow state.
+		// UAV write unbound the main copy behind engine t10/t3 shadow state.
 		cs::engine::ResubmitPixelShaderResource(color);
-		// The second composite's proxy copy of the main copy predates this write.
+		// The second composite's proxy copy predates this write.
 		cs::render::TemporalRenderer::GetSingleton()->InvalidateProxy(RT::kMainCopy);
 		++_dispatches;
 		_produced = true;

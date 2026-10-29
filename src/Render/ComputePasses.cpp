@@ -35,10 +35,16 @@ namespace cs::render
 	}
 
 	ComputePasses::ComputePasses(ID3D11DeviceContext* a_context, UINT a_preservedSlot, ID3D11Buffer* a_buffer) :
-		_context(a_context), _bufferSlot(a_preservedSlot)
+		ComputePasses(a_context)
 	{
+		_bufferSlot = a_preservedSlot;
 		_context->CSGetConstantBuffers(_bufferSlot, 1, _engineBuffer.put());
 		_context->CSSetConstantBuffers(_bufferSlot, 1, &a_buffer);
+	}
+
+	ComputePasses::ComputePasses(ID3D11DeviceContext* a_context) :
+		_context(a_context)
+	{
 		ID3D11ShaderResourceView* tail[2]{};
 		_context->CSGetShaderResources(8, 2, tail);
 		for (UINT i = 0; i < 2; ++i)
@@ -53,6 +59,8 @@ namespace cs::render
 	{
 		ID3D11ShaderResourceView* tail[]{ _tail[0].get(), _tail[1].get() };
 		_context->CSSetShaderResources(8, 2, tail);
+		if (_bufferSlot == kNoSlot)
+			return;
 		auto* engineBuffer = _engineBuffer.get();
 		_context->CSSetConstantBuffers(_bufferSlot, 1, &engineBuffer);
 	}

@@ -58,7 +58,7 @@ namespace cs::features
 
 		void Release();
 
-		// Proxy holds the source's current contents until either side may change.
+		// Proxy holds the source's contents until either side may change.
 		void InvalidateProxy(RE::BSGraphics::RenderTargetID a_target) noexcept;
 
 		[[nodiscard]] bool HasProxies() const noexcept { return _hasProxies; }

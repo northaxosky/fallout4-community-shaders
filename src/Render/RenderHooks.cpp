@@ -357,7 +357,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// DeferredComposite's only t15 = logical 40 bind; it precedes the second pass.
+		// DeferredComposite's only t15 (logical 40) bind; precedes the second pass.
 		struct SecondCompositeBind_Hook
 		{
 			static void thunk(

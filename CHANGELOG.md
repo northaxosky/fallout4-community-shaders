@@ -2,7 +2,7 @@
 
 ## 0.5.0
 
-- Subsurface Scattering: new feature ported from Skyrim CS; blurs skin with separable or Burley scattering instead of the vanilla blur (which returns when the feature is disabled); it also turns the vanilla character light off unless enabled in its settings.
+- Subsurface Scattering: new feature ported from Skyrim CS; blurs skin with separable or Burley scattering instead of the vanilla blur; turns the vanilla character light off unless enabled in its settings.
 - Terrain Blending: new feature ported from Skyrim CS; blends terrain into objects that sink into it by depth, removing the hard seam; no per-mesh opt-out yet.
 - Volumetric Shadows: new feature ported from Skyrim CS; softens the sun's soft, rim and back lighting and shadows the sun on water and effects; Skylighting's sky visibility drives those lobes instead while it is enabled.
 - When shaders take over a second to compile, Continue, Load, and New Game wait behind the main menu's loading spinner until they finish, with a progress window when DearModdingUI is installed; set `background_compilation` in `[shader_cache]` (restart required) to play while they compile, with uncompiled shaders rendering as stock. Every stock shader variant a loaded feature modifies now precompiles at startup instead of as the game first draws it.

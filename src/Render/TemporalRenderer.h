@@ -66,7 +66,7 @@ namespace cs::render
 		[[nodiscard]] float2 GetAppliedJitter() const noexcept { return jitter; }
 		[[nodiscard]] float GetMipBias() const;
 		[[nodiscard]] bool IsTemporalActive() const;
-		// For passes that write an engine target a render-resolution proxy may cache.
+		// Passes writing an engine target that a render-resolution proxy may cache.
 		void InvalidateProxy(RE::BSGraphics::RenderTargetID a_target) noexcept { dynamicResolution.InvalidateProxy(a_target); }
 		std::pair<float, bool> GetReadiness() const noexcept
 		{

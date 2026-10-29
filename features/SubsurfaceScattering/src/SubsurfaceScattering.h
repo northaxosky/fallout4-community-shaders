@@ -17,7 +17,7 @@
 
 namespace cs::features
 {
-	// Replaces the stock skin blur with upstream's separable or Burley scattering.
+	// Replaces the stock skin blur with upstream's separable or Burley blur.
 	class SubsurfaceScattering :
 		public ShaderFeature<subsurface_scattering_shader::kShaderDefines>
 	{
@@ -47,7 +47,7 @@ namespace cs::features
 			std::uint32_t Produced{}, pad[3]{};
 		};
 
-		// Inputs shaped like upstream's mask, normal and albedo, plus the blur intermediates.
+		// Upstream-shaped mask, normal and albedo inputs plus blur intermediates.
 		struct Resources
 		{
 			Texture mask, normal, albedo, diffuseNoAlbedo, horizontal;
@@ -83,7 +83,7 @@ namespace cs::features
 		void UpdateConsumer(bool a_produced);
 		FeatureDebugTexture GetDebugTexture(Preview a_view) const;
 
-		// FO4: the native composite owns b0, b2 and b12; the consumer takes the free b9.
+		// FO4: the native composite owns b0, b2 and b12; b9 is free.
 		static constexpr UINT kConsumerSlot = 9;
 		static constexpr UINT kConstantsSlot = 1;
 		Settings _settings;

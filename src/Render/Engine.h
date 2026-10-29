@@ -130,7 +130,7 @@ namespace cs::engine
 			RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_SAO_CS));
 	}
 
-	// Native SSS and character-light controls; DeferredComposite and DFLight read them.
+	// Read by DeferredComposite (SSS flag) and DFLight (character light).
 	struct NativeSubsurfaceControls
 	{
 		bool& screenSpaceSubsurfaceScatteringEnabled;
@@ -297,8 +297,7 @@ namespace cs::engine
 		return HasFiniteMatrix(result) && std::isfinite(determinant) && determinant != 0.0f ? std::optional{ result } : std::nullopt;
 	}
 
-	// Dirties every PS shadow slot holding a_srv so the next engine draw resubmits it;
-	// D3D11 unbinds an SRV when its resource is bound as a UAV behind the engine.
+	// A UAV bind silently drops the PS SRV; dirty its slots for engine resubmit.
 	inline std::uint32_t ResubmitPixelShaderResource(const ID3D11ShaderResourceView* a_srv) noexcept
 	{
 		auto* context = GetActiveContext();

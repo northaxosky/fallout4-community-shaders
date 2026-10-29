@@ -3,7 +3,7 @@
 
 namespace SubsurfaceScattering
 {
-	// FO4: set only after SSS blurred this frame; otherwise the stock skin blur runs.
+	// FO4: set after SSS blurred this frame; otherwise the stock skin blur runs.
 	cbuffer Consumer : register(b9)
 	{
 		bool Produced;
