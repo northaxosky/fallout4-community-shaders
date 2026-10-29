@@ -16,8 +16,10 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBindings.h"
 #include "Render/FrameProfiler.h"
+#include "Render/PrepassTechnique.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
+#include "Render/ShaderGeometryHooks.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
@@ -76,6 +78,12 @@ namespace cs::features
 			!cs::engine::RegisterPreDeferredComposite(*this, [] { GetSingleton()->OnPreDeferredComposite(); }) ||
 			!cs::engine::RegisterPreSecondDeferredComposite(*this, [] { GetSingleton()->OnPreSecondDeferredComposite(); })) {
 			FailLoad("Subsurface Scattering render hooks could not register.");
+			return;
+		}
+		try {
+			cs::engine::ObserveShaderTechnique(cs::engine::ShaderInjectionTarget::kDeferredPrepass, { &OnPrepassTechnique });
+		} catch (const std::exception& e) {
+			FailLoad(std::format("Subsurface Scattering skin-draw hook failed: {}", e.what()));
 			return;
 		}
 		_started = true;
@@ -233,6 +241,16 @@ namespace cs::features
 		_consumerData = data;
 	}
 
+	void SubsurfaceScattering::OnPrepassTechnique(RE::BSShader*, std::uint32_t a_technique) noexcept
+	{
+		namespace pt = cs::engine::prepass_technique;
+		if (!(a_technique & (pt::kSkinTint | pt::kFace)))
+			return;
+		auto* self = GetSingleton();
+		self->_skinFrame.store(cs::engine::GetFrameCount(), std::memory_order_relaxed);
+		self->_skinBuckets.fetch_add(1, std::memory_order_relaxed);
+	}
+
 	void SubsurfaceScattering::OnPreDeferredComposite()
 	{
 		_produced = false;
@@ -252,6 +270,11 @@ namespace cs::features
 		if (!CanRun() || !context || !manager || !_consumer ||
 			!_prepare || !_extract || !_horizontal || !_vertical || !_burley)
 			return;
+		// Upstream dispatches only on frames that drew skin.
+		if (_skinFrame.load(std::memory_order_relaxed) != cs::engine::GetFrameCount()) {
+			_skippedFrames.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
 		const auto camera = cs::engine::GetWorldCameraRecord();
 		auto* depth = cs::render::GetCanonicalSceneDepthSRV();
 		// FO4: raw depth marks first-person pixels, which canonical depth cannot.
@@ -344,7 +367,7 @@ namespace cs::features
 
 	void SubsurfaceScattering::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		a_sink.Field("hooks_registered", _started.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
+		a_sink.Field("hooks_registered", _started.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("skin_drawn", _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount()).Field("skin_buckets", static_cast<std::int64_t>(_skinBuckets.load(std::memory_order_relaxed))).Field("skipped_frames", static_cast<std::int64_t>(_skippedFrames.load(std::memory_order_relaxed))).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
 		cs::render::profiling::CollectPassTimings(a_sink, "SubsurfaceScattering::");
 	}
 

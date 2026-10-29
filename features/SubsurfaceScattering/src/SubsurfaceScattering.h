@@ -80,6 +80,7 @@ namespace cs::features
 		void RestoreNativeControls() noexcept;
 		void OnPreDeferredComposite();
 		void OnPreSecondDeferredComposite();
+		static void OnPrepassTechnique(RE::BSShader*, std::uint32_t a_technique) noexcept;
 		void UpdateConsumer(bool a_produced);
 		FeatureDebugTexture GetDebugTexture(Preview a_view) const;
 
@@ -99,7 +100,8 @@ namespace cs::features
 		std::atomic_bool _unsupported{ false }, _produced{ false };
 		std::atomic<Preview> _preview{ Preview::kNone };
 		std::atomic_bool _nativeApplied{ false };
-		std::atomic_uint32_t _dispatches{ 0 };
+		std::atomic_uint32_t _dispatches{ 0 }, _skinBuckets{ 0 }, _skippedFrames{ 0 };
+		std::atomic_uint32_t _skinFrame{ UINT32_MAX };
 		std::atomic<std::uint8_t> _lastMode{ 0 };
 	};
 }
