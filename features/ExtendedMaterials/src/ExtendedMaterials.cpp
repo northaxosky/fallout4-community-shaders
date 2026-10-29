@@ -14,9 +14,9 @@
 #include "Menu/SettingsEdit.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
-#include "Render/FrameBindings.h"
 #include "Render/ObjectLOD.h"
 #include "Render/OverlayShape.h"
+#include "Render/PrepassExtraTargets.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -34,6 +34,9 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.extendedmaterials");
+
+		constexpr std::uint32_t kParallaxShadowRTVSlot = 6;
+		constexpr std::uint32_t kParallaxShadowPSSlot = 66;
 
 		// Height lives in the _s alpha, so only formats that store alpha can carry it.
 		[[nodiscard]] bool HasAlphaChannel(DXGI_FORMAT a_format) noexcept
@@ -93,110 +96,14 @@ namespace cs::features
 		       (_settings.EnableParallax || _settings.EnableTerrain);
 	}
 
-	void ExtendedMaterials::Prepass()
-	{
-		_shadowFrameReady = false;
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
-		if (!context)
-			return;
-		// Unbind DFLight's SRV before the prepass renders into the target.
-		ID3D11ShaderResourceView* none = nullptr;
-		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kParallaxShadowPSSlot, 1, &none);
-		const auto* graphics = cs::engine::GetGraphicsState();
-		if (!graphics || !ShadowsActive())
-			return;
-		if (!_shadowTexture || _shadowTexture->desc.Width != graphics->screenWidth ||
-			_shadowTexture->desc.Height != graphics->screenHeight) {
-			try {
-				D3D11_TEXTURE2D_DESC desc{};
-				desc.Width = graphics->screenWidth;
-				desc.Height = graphics->screenHeight;
-				desc.MipLevels = 1;
-				desc.ArraySize = 1;
-				desc.Format = DXGI_FORMAT_R8_UNORM;
-				desc.SampleDesc.Count = 1;
-				desc.Usage = D3D11_USAGE_DEFAULT;
-				desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-				auto texture = std::make_unique<cs::buffer::Texture2D>(desc);
-				texture->CreateSRV({ .Format = desc.Format, .ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D, .Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 } });
-				winrt::com_ptr<ID3D11Device> device;
-				context->GetDevice(device.put());
-				DX::ThrowIfFailed(device->CreateRenderTargetView(texture->resource.get(), nullptr, texture->rtv.put()));
-				texture->SetName("ExtendedMaterials/ParallaxShadow.Texture", "ExtendedMaterials/ParallaxShadow.SRV", "", "ExtendedMaterials/ParallaxShadow.RTV");
-				_shadowTexture = std::move(texture);
-			} catch (const std::exception& e) {
-				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Extended Materials parallax shadow target unavailable: {}", e.what());
-				return;
-			} catch (...) {
-				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Extended Materials parallax shadow target unavailable.");
-				return;
-			}
-		}
-		const float lit[4]{ 1, 1, 1, 1 };
-		context->ClearRenderTargetView(_shadowTexture->rtv.get(), lit);
-		_shadowFrameReady = true;
-	}
-
-	void ExtendedMaterials::BindShadowTarget(ID3D11DeviceContext* a_context)
-	{
-		// Only an engine output commit or plugin work can unbind Target6.
-		const auto epoch = cs::engine::GetFrameBindingEpoch();
-		if (!_shadowFrameReady || epoch == _shadowTargetEpoch)
-			return;
-		_shadowTargetEpoch = epoch;
-		// FO4: SV_Target6 follows the engine's six G-buffer targets, left as bound.
-		std::array<ID3D11RenderTargetView*, kParallaxShadowRTVSlot + 1> targets{};
-		winrt::com_ptr<ID3D11DepthStencilView> depth;
-		a_context->OMGetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), depth.put());
-		auto* const bound = targets[kParallaxShadowRTVSlot];
-		if (bound != _shadowTexture->rtv.get()) {
-			targets[kParallaxShadowRTVSlot] = _shadowTexture->rtv.get();
-			a_context->OMSetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), depth.get());
-		}
-		targets[kParallaxShadowRTVSlot] = bound;
-		for (auto* target : targets) {
-			if (target)
-				target->Release();
-		}
-	}
-
-	void ExtendedMaterials::PublishShadows(ID3D11DeviceContext* a_context) const
-	{
-		if (!_shadowFrameReady)
-			return;
-		std::array<ID3D11RenderTargetView*, kParallaxShadowRTVSlot + 1> targets{};
-		winrt::com_ptr<ID3D11DepthStencilView> depth;
-		a_context->OMGetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), depth.put());
-		if (targets[kParallaxShadowRTVSlot] == _shadowTexture->rtv.get()) {
-			targets[kParallaxShadowRTVSlot]->Release();
-			targets[kParallaxShadowRTVSlot] = nullptr;
-			a_context->OMSetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), depth.get());
-		} else if (targets[kParallaxShadowRTVSlot]) {
-			targets[kParallaxShadowRTVSlot]->Release();
-		}
-		for (std::size_t slot = 0; slot < kParallaxShadowRTVSlot; ++slot) {
-			if (targets[slot])
-				targets[slot]->Release();
-		}
-		auto* srv = _shadowTexture->srv.get();
-		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kParallaxShadowPSSlot, 1, &srv);
-	}
-
 	void ExtendedMaterials::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("ExtendedMaterials", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
-				if (registration.targetId == cs::engine::ShaderInjectionTarget::kDeferredPrepass)
-					registration.bind = [this](ID3D11DeviceContext* a_context) { BindShadowTarget(a_context); };
-			})) {
+		if (!cs::engine::RegisterFeatureShaderBindings("ExtendedMaterials", *this, cs::engine::AttachPrepassExtraTargets)) {
 			FailLoad("Extended Materials shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPostDeferredPrePass(*this, [this] {
-				if (auto* rendererData = RE::BSGraphics::GetRendererData())
-					PublishShadows(reinterpret_cast<ID3D11DeviceContext*>(rendererData->context));
-			})) {
-			FailLoad("Extended Materials parallax shadows need the post-prepass hook.");
+		if (!cs::engine::RegisterPrepassExtraTarget(*this, { .name = "ExtendedMaterials/ParallaxShadow", .rtvSlot = kParallaxShadowRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .clear = { 1, 1, 1, 1 }, .publishSlot = kParallaxShadowPSSlot, .active = [this] { return ShadowsActive(); } })) {
+			FailLoad("Extended Materials parallax shadows need the prepass target.");
 			return;
 		}
 		if (!cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kZ, &IsParallaxEligible)) {
