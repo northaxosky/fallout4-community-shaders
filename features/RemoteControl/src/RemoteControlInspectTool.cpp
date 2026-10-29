@@ -3,6 +3,7 @@
 #include "Plugin.h"
 #include "Render/FrameProfiler.h"
 #include "Render/ShaderVariantCompilation.h"
+#include "Render/TemporalPipeline.h"
 #include "Utils/ShaderCache/ShaderCache.h"
 
 #include <string>
@@ -46,10 +47,12 @@ namespace cs::features::remote_control
 					continue;
 				shaders.push_back({ { "name", shader.name }, { "calls", shader.calls }, { "ms", shader.milliseconds } });
 			}
+			const auto frame = profiler.GetFrameStats();
 			Json result{
 				{ "totalGpuMs", profiler.GetTotalTimeMs() },
 				{ "totalCpuMs", profiler.GetCpuTotalTimeMs() },
 				{ "frame_count", render::profiling::FrameSequence() },
+				{ "frame", { { "ms", frame.lastMs }, { "avgMs", frame.avgMs }, { "p95Ms", frame.p95Ms }, { "p99Ms", frame.p99Ms }, { "samples", frame.count }, { "frameGeneration", render::TemporalPipeline::Get().GetFrameGenerationDiagnostics(false).active } } },
 				{ "passes", std::move(passes) },
 				{ "shaders", std::move(shaders) },
 			};
@@ -90,7 +93,7 @@ namespace cs::features::remote_control
 
 	const Tool kInspectTool{
 		"communityshaders.inspect",
-		R"({"description":"Read Community Shaders engine state. Kind-dispatched; the response is a JSON object. kind=state -> {plugin,version,frame_count}. kind=shadercache -> {compiling,completedTasks,totalTasks,failedTasks,durationMs,cache:{hit,absent,stale,rejected,written},frame_count}; the task counts describe the running runtime shader compile batch, else the last finished one (see the communityshaders.shaderRecompiled event). kind=profiler -> {totalGpuMs,totalCpuMs,frame_count,passes:[{name,gpuMs,gpuAvgMs,gpuP95Ms,gpuP99Ms,cpuMs,cpuAvgMs,gpuHistory:[...]}],shaders:[{name,calls,ms}]}; optional filter param matches pass and shader names.","readOnly":true,"inputSchema":{"type":"object","properties":{"kind":{"type":"string","enum":["state","shadercache","profiler"]},"filter":{"type":"string"}},"required":["kind"]}})",
+		R"({"description":"Read Community Shaders engine state. Kind-dispatched; the response is a JSON object. kind=state -> {plugin,version,frame_count}. kind=shadercache -> {compiling,completedTasks,totalTasks,failedTasks,durationMs,cache:{hit,absent,stale,rejected,written},frame_count}; the task counts describe the running runtime shader compile batch, else the last finished one (see the communityshaders.shaderRecompiled event). kind=profiler -> {totalGpuMs,totalCpuMs,frame_count,frame:{ms,avgMs,p95Ms,p99Ms,samples,frameGeneration} (engine-frame wall clock; presents run ~2x when frameGeneration),passes:[{name,gpuMs,gpuAvgMs,gpuP95Ms,gpuP99Ms,cpuMs,cpuAvgMs,gpuHistory:[...]}],shaders:[{name,calls,ms}]}; optional filter param matches pass and shader names.","readOnly":true,"inputSchema":{"type":"object","properties":{"kind":{"type":"string","enum":["state","shadercache","profiler"]},"filter":{"type":"string"}},"required":["kind"]}})",
 		&Handle
 	};
 }
