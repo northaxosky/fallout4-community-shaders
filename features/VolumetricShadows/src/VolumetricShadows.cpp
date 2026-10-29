@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "Log.h"
-#include "Menu/Menu.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
@@ -358,11 +357,6 @@ namespace cs::features
 	void VolumetricShadows::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
 	{
 		a_fo4.EnabledVolumetricShadows = _injectionsOperational.load(std::memory_order_acquire) ? 1u : 0u;
-	}
-
-	void VolumetricShadows::DrawSettings()
-	{
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void VolumetricShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const

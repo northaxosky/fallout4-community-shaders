@@ -8,7 +8,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
@@ -433,7 +432,6 @@ namespace cs::features
 			if (_settings.enableCharacterLighting)
 				slider("Strength##sss-character-light-strength", "sss-character-light-strength", &Settings::characterLightingStrength, "Scale of the character light's rim and fill.");
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void SubsurfaceScattering::RestoreDefaultSettings()

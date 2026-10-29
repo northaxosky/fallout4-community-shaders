@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Render/SharedFeatureData.h"
+#include "Utils/CSUtil.h"
 
 #include <algorithm>
 #include <array>
@@ -63,25 +64,6 @@ namespace cs::features::terrain_shadows
 		return fields;
 	}
 
-	[[nodiscard]] inline bool EqualsIgnoreCase(
-		std::string_view a_left,
-		std::string_view a_right) noexcept
-	{
-		if (a_left.size() != a_right.size())
-			return false;
-		for (std::size_t index = 0; index < a_left.size(); ++index) {
-			const auto left = static_cast<unsigned char>(a_left[index]);
-			const auto right = static_cast<unsigned char>(a_right[index]);
-			const unsigned lowerLeft =
-				left >= 'A' && left <= 'Z' ? left + 32u : left;
-			const unsigned lowerRight =
-				right >= 'A' && right <= 'Z' ? right + 32u : right;
-			if (lowerLeft != lowerRight)
-				return false;
-		}
-		return true;
-	}
-
 	[[nodiscard]] inline bool ParseInteger(
 		std::string_view a_field,
 		std::int32_t& a_value) noexcept
@@ -111,10 +93,10 @@ namespace cs::features::terrain_shadows
 		if (fields.size() != (xlodgen ? 9u : 10u))
 			return std::nullopt;
 		if (xlodgen) {
-			if (!EqualsIgnoreCase(fields[1], "Terrain") || !EqualsIgnoreCase(fields[2], "HeightMap")) {
+			if (!cs::util::EqualsIgnoreCase(fields[1], "Terrain") || !cs::util::EqualsIgnoreCase(fields[2], "HeightMap")) {
 				return std::nullopt;
 			}
-		} else if (!EqualsIgnoreCase(fields[1], "HeightMap")) {
+		} else if (!cs::util::EqualsIgnoreCase(fields[1], "HeightMap")) {
 			return std::nullopt;
 		}
 

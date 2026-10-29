@@ -1,10 +1,11 @@
+#include "Authoring/LightAuthoring.h"
+#include "CloudShadowsSettings.h"
 #include "DynamicCubemapsSettings.h"
 #include "ExtendedMaterialsSettings.h"
 #include "FrameGenerationSettings.h"
 #include "ImageBasedLightingSettings.h"
-#include "InverseSquareLightingSettings.h"
 #include "LODBlendingSettings.h"
-#include "LightAuthoring.h"
+#include "LightLimitFixSettings.h"
 #include "PerformanceOverlaySettings.h"
 #include "Render/TemporalRenderSettings.h"
 #include "RenderDocSettings.h"
@@ -14,6 +15,7 @@
 #include "Settings/FeatureKeys.h"
 #include "Settings/LiveSettings.h"
 #include "Settings/SettingsRegistry.h"
+#include "SkySyncSettings.h"
 #include "SkylightingSettings.h"
 #include "SubsurfaceScatteringSettings.h"
 #include "TerrainVariationSettings.h"
@@ -46,6 +48,7 @@ namespace
 		float thickness = 0.02f;
 		Target target = Target::kEngine;
 		Float2 span{ 1.0f, 2.0f };
+		StringList worlds;
 
 		bool operator==(const TestSettings&) const = default;
 	};
@@ -60,7 +63,8 @@ namespace
 			Field{ "count", "Count.", &TestSettings::count, Range{ 1u, 4u }, ApplyTiming::kNextLaunch },
 			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } },
 			ChoiceField{ "target", "Target.", &TestSettings::target, kTargets },
-			Float2Field<TestSettings>{ "span", "Span.", &TestSettings::span } }
+			Float2Field<TestSettings>{ "span", "Span.", &TestSettings::span },
+			StringListField<TestSettings>{ "worlds", "Worlds.", &TestSettings::worlds } }
 	};
 
 	Registry BuildFullRegistry()
@@ -71,14 +75,16 @@ namespace
 			std::pair{ "ScreenSpaceGI", MakeSchemaView(ssgi_settings::kSchema) },
 			std::pair{ "SubsurfaceScattering", MakeSchemaView(subsurface_scattering::kSchema) },
 			std::pair{ "Skylighting", MakeSchemaView(skylighting::kSchema) },
-			std::pair{ "InverseSquareLighting", MakeSchemaView(inverse_square_lighting::kSchema) },
+			std::pair{ "LightLimitFix", MakeSchemaView(light_limit_fix::kSchema) },
 			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },
 			std::pair{ "ImageBasedLighting", MakeSchemaView(image_based_lighting::kSchema) },
 			std::pair{ "WaterEffects", SchemaView{} },
 			std::pair{ "UnifiedWater", SchemaView{} },
 			std::pair{ "ScreenSpaceShadows", MakeSchemaView(sss_settings::kSchema) },
 			std::pair{ "TerrainShadows", SchemaView{} },
+			std::pair{ "SkySync", MakeSchemaView(sky_sync::kSchema) },
 			std::pair{ "VolumetricShadows", SchemaView{} },
+			std::pair{ "CloudShadows", MakeSchemaView(cloud_shadows::kSchema) },
 			std::pair{ "LODBlending", MakeSchemaView(lod_blending::kSchema) },
 			std::pair{ "TerrainVariation", MakeSchemaView(terrain_variation::kSchema) },
 			std::pair{ "TerrainBlending", SchemaView{} },
@@ -94,7 +100,7 @@ namespace
 		CHECK(features.size() == kAllFeatureKeys.size());
 		// Mirrors Feature::SupportsEnableToggle and DefaultEnabled.
 		const auto enabledDefault = [](std::string_view a_key) -> std::optional<bool> {
-			for (const auto optOut : { "InverseSquareLighting", "Upscaling", "FrameGeneration", "PerformanceOverlay", "RenderDoc", "CSEditor" }) {
+			for (const auto optOut : { "LightLimitFix", "Upscaling", "FrameGeneration", "PerformanceOverlay", "RenderDoc", "CSEditor" }) {
 				if (a_key == optOut)
 					return std::nullopt;
 			}
@@ -165,6 +171,18 @@ namespace
 			CHECK(!Parse(kTestSchema, toml::parse(document), candidate, error));
 			CHECK(error == message);
 			CHECK(candidate == expected);
+		}
+		auto listed = expected;
+		CHECK(Parse(kTestSchema, toml::parse("[settings]\nworlds = ['Commonwealth', 'DiamondCity']\n"), listed, error));
+		CHECK((listed.worlds == StringList{ "Commonwealth", "DiamondCity" }));
+		TestSettings listRoundTrip;
+		CHECK(Parse(kTestSchema, toml::table{ { "settings", SerializeDelta(kTestSchema, listed, expected) } }, listRoundTrip, error));
+		CHECK(listRoundTrip.worlds == listed.worlds);
+		for (const auto document : { "[settings]\nworlds = 'Commonwealth'\n", "[settings]\nworlds = ['Commonwealth', 1]\n" }) {
+			auto candidate = listed;
+			CHECK(!Parse(kTestSchema, toml::parse(document), candidate, error));
+			CHECK(error == "settings.worlds: expected array of strings");
+			CHECK(candidate.worlds == listed.worlds);
 		}
 		auto kept = spanned;
 		CHECK(!Parse(kTestSchema, toml::parse("[settings]\nspan = [10000, nan]\n"), kept, error));
@@ -360,7 +378,7 @@ namespace
 
 	void TestLightAuthoring()
 	{
-		using namespace cs::features::inverse_square_lighting;
+		using namespace cs::features::light_limit_fix;
 		std::vector<LightDefinition> definitions;
 		std::string error;
 		CHECK(ParseLightDefinitions(toml::parse(R"(

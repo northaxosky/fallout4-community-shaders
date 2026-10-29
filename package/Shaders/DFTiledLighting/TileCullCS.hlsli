@@ -110,8 +110,8 @@ groupshared uint VisibleCount;
 		if (visible) {
 			uint slot;
 			InterlockedAdd(VisibleCount, 1, slot);
-#ifdef INVERSE_SQUARE_LIGHTING
-			// FO4: expanded authored radii must not overrun the native 127-index tile.
+#ifdef LIGHT_LIMIT_FIX
+			// FO4: bounds native's unguarded 127-index tile vs enlarged radii.
 			if (slot < 127)
 #endif
 				TileLists[tileIndex].Indices[slot] = lightIndex;
@@ -120,6 +120,10 @@ groupshared uint VisibleCount;
 
 	GroupMemoryBarrierWithGroupSync();
 	if (groupIndex == 0) {
+#ifdef LIGHT_LIMIT_FIX
+		TileLists[tileIndex].Count = min(VisibleCount, 127);
+#else
 		TileLists[tileIndex].Count = VisibleCount;
+#endif
 	}
 }

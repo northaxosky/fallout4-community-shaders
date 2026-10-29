@@ -23,6 +23,13 @@ namespace cs::settings
 					text += FormatValue(component);
 				}
 				return text + "]";
+			} else if constexpr (std::same_as<T, StringList>) {
+				toml::array texts;
+				for (const auto& text : value)
+					texts.push_back(text);
+				std::ostringstream output;
+				output << texts;
+				return output.str();
 			} else if constexpr (std::same_as<T, bool> || std::same_as<T, std::string>) {
 				std::ostringstream output;
 				output << toml::value{ value };
@@ -52,6 +59,11 @@ namespace cs::settings
 				for (float component : value)
 					components.push_back(static_cast<double>(component));
 				a_table.insert_or_assign(a_key, std::move(components));
+			} else if constexpr (std::same_as<T, StringList>) {
+				toml::array texts;
+				for (const auto& text : value)
+					texts.push_back(text);
+				a_table.insert_or_assign(a_key, std::move(texts));
 			} else if constexpr (std::same_as<T, float>) {
 				a_table.insert_or_assign(a_key, static_cast<double>(value));
 			} else if constexpr (std::same_as<T, std::uint64_t>) {

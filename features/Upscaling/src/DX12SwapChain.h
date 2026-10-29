@@ -47,6 +47,11 @@ namespace cs::features
 		std::function<render::temporal::FrameGenerationRequest()> queryFrameState;
 		std::function<void(ID3D12Device*, HWND)> bindD3D12CaptureTarget;
 		std::function<void(ID3D12Device*)> unbindD3D12CaptureTarget;
+		// On publish and whenever the swap chain is rebuilt or released.
+		std::function<void(const render::temporal::PresentationBinding&)> bindPresentation;
+		// Rollback only, after the swap chain and presenter thread are gone.
+		std::function<void()> unbindPresentation;
+		std::function<void()> quarantinePresentation;
 		// The D3D11 device has no swap chain of its own, so game frames end here.
 		std::function<void()> gameFramePresented;
 	};
@@ -207,6 +212,8 @@ namespace cs::features
 		void ReleaseReShade() noexcept;
 		void SetProxyInner(IDXGISwapChain4* a_inner) noexcept;
 		void QuarantineTransport(std::string_view a_reason) noexcept;
+		void MarkQuarantined() noexcept;
+		void NotifyPresentationBinding(IDXGISwapChain* a_swapChain) noexcept;
 		void
 		RecordGlobalDrain(std::string_view a_reason,
 			const render::temporal::ProviderResult& a_result) noexcept;
@@ -263,6 +270,8 @@ namespace cs::features
 		std::uint64_t _preparedRealFrame = 0;
 		std::uint64_t _inputResourceGeneration = 0;
 		bool _published = false;
+		bool _presentationBound = false;
+		std::uint32_t _adapterVendorId = 0;
 		bool _quarantined = false;
 		render::temporal::AtomicPresentInputRetirementDiagnostics
 			_retirementDiagnostics;

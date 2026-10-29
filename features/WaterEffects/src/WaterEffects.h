@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "Render/FullscreenPass.h"
 #include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 
@@ -55,7 +56,6 @@ namespace cs::features
 		void Prepass() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
-		void DrawSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -92,10 +92,8 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Texture2D> _causticsTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView> _causticsSrv;
 		winrt::com_ptr<ID3D11SamplerState> _causticsSampler;
-		winrt::com_ptr<ID3DDeviceContextState> _debugContextState;
-		winrt::com_ptr<ID3D11VertexShader> _debugVS;
+		cs::render::FullscreenPass _debugPass;
 		std::array<winrt::com_ptr<ID3D11PixelShader>, 2> _debugPS;
-		winrt::com_ptr<ID3D11RasterizerState> _debugRasterizer;
 		std::unique_ptr<cs::buffer::Texture2D> _debugTexture;
 		bool _debugFrameReady = false;
 

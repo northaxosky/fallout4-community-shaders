@@ -30,6 +30,8 @@ namespace cs::features
 		void Load() override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
+		bool HasDebugUI() const override { return true; }
+		void DrawDebug() override;
 		std::vector<std::string_view> GetRestartSettings() const override;
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }

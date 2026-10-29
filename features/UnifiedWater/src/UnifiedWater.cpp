@@ -5,7 +5,6 @@
 #include "RE/B/BSModelDB.h"
 #include "RE/N/NiCloningProcess.h"
 #include "RE/N/NiUpdateData.h"
-#include "RE/P/PlayerCharacter.h"
 #include "RE/T/TES.h"
 #include "RE/U/UI.h"
 #include "Render/FeatureShaderBindings.h"
@@ -19,16 +18,6 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.unifiedwater");
-
-		bool InteriorCellActive()
-		{
-			const auto tes = RE::TES::GetSingleton();
-			if (tes && tes->interiorCell)
-				return true;
-			const auto player = RE::PlayerCharacter::GetSingleton();
-			const auto cell = player ? player->GetParentCell() : nullptr;
-			return cell && cell->IsInterior();
-		}
 
 		std::vector<RE::NiPointer<RE::NiAVObject>> DetachChildren(RE::NiNode* a_parent)
 		{
@@ -72,18 +61,18 @@ namespace cs::features
 		// FO4: terrain and worldspace cleanup have distinct native signatures.
 		stl::detour_thunk<Attach>(RE::ID::BGSTerrainChunk::Attach);
 		stl::detour_thunk<Detach>(RE::ID::BGSTerrainChunk::Detach);
+		stl::detour_thunk<AttachWater>(RE::ID::BGSTerrainChunk::AttachWater);
 		stl::detour_thunk<Visibility>(RE::ID::BGSTerrainNode::UpdateWaterVisibility);
 		stl::detour_thunk<SetWorldSpace>(RE::ID::TES::SetWorldSpace);
 		stl::detour_thunk<ReleaseWorld>(RE::ID::TESWorldSpace::ReleaseLowResMaxHeightData);
-		stl::detour_thunk<UpdateDisplacement>(RE::ID::TESWaterSystem::UpdateWaterDisplacementGeometry);
 		stl::detour_thunk<UpdateWaterSystem>(RE::ID::TESWaterSystem::UpdateWaterSystem);
 		if (!engine::water::InstallWaterMaterialIdentity())
 			throw std::runtime_error("Unified Water AddWater material call site did not match.");
 		if (!engine::water::InstallTileWaterOverride())
 			throw std::runtime_error("Unified Water AddLODWater call site did not match.");
-		if (!Attach::func.address() || !Detach::func.address() || !Visibility::func.address() ||
+		if (!Attach::func.address() || !Detach::func.address() || !AttachWater::func.address() || !Visibility::func.address() ||
 			!SetWorldSpace::func.address() || !ReleaseWorld::func.address() ||
-			!UpdateDisplacement::func.address() || !UpdateWaterSystem::func.address()) {
+			!UpdateWaterSystem::func.address()) {
 			throw std::runtime_error("Unified Water native hook installation failed.");
 		}
 		_hooks.store(true, std::memory_order_release);
@@ -138,9 +127,23 @@ namespace cs::features
 	{
 		if (!a_alreadyAttached)
 			Attach::func(a_chunk);
-		engine::water::RegisterVanillaWater(a_chunk);
+		RegisterChunkWater(a_chunk);
 		_vanillaFallbacks.fetch_add(1);
-		UpdateWaterLODCull();
+	}
+
+	void UnifiedWater::RegisterChunkWater(Chunk* a_chunk)
+	{
+		// FO4: AttachWater(false) detaches terrain water; defer registration.
+		if (!_lodWaterAttached.load(std::memory_order_acquire)) {
+			a_chunk->waterAttached = false;
+			return;
+		}
+		const auto it = _managed.find(a_chunk->water.get());
+		if (it != _managed.end())
+			engine::water::RegisterTileWater(a_chunk, it->second.water);
+		else
+			engine::water::RegisterVanillaWater(a_chunk);
+		a_chunk->waterAttached = true;
 	}
 
 	void UnifiedWater::Attach::thunk(Chunk* a_chunk)
@@ -217,17 +220,14 @@ namespace cs::features
 		tiles.reserve(built.size());
 		for (const auto& [shape, instruction] : built)
 			tiles.push_back({ shape, static_cast<RE::TESWaterForm*>(instruction->form.ptr), instruction->waterHeight });
-		// FO4: terrain water is drawn only once AddLODWater registers it.
-		engine::water::RegisterTileWater(a_chunk, tiles);
-		for (const auto& [shape, instruction] : built)
-			engine::water::ConfigureTileProperty(shape);
+		managed.water = std::move(tiles);
 		self._managed.insert_or_assign(parent, std::move(managed));
+		// FO4: terrain water is drawn only once AddLODWater registers it.
+		self.RegisterChunkWater(a_chunk);
 		RE::NiUpdateData update{};
 		parent->Update(update);
-		engine::water::EnableWaterSystem();
 		self._tilesBuilt.fetch_add(built.size());
 		self._chunksAttached.fetch_add(1);
-		self.UpdateWaterLODCull();
 	}
 
 	void UnifiedWater::Detach::thunk(Chunk* a_chunk)
@@ -253,14 +253,14 @@ namespace cs::features
 			func(a_chunk);
 			return;
 		}
-		engine::water::UnregisterVanillaWater(a_chunk);
+		// Hidden water is already unregistered.
+		if (self._lodWaterAttached.load(std::memory_order_acquire))
+			engine::water::UnregisterVanillaWater(a_chunk);
 		// Hide UW-managed water from vanilla detach so it does not delete it
 		a_chunk->water = nullptr;
 		func(a_chunk);
 		if (owned)
 			self.RestoreOriginal(water.get(), managed);
-		if (const auto root = engine::water::GetWaterLOD())
-			root->DetachChild(water.get());
 		// Park water under the detached chunk so block->water stays valid
 		if (a_chunk->chunk) {
 			a_chunk->chunk->AttachChild(water.get(), true);
@@ -268,7 +268,30 @@ namespace cs::features
 		}
 		a_chunk->waterAttached = false;
 		self._chunksDetached.fetch_add(1);
-		self.UpdateWaterLODCull();
+	}
+
+	void UnifiedWater::AttachWater::thunk(bool a_attach)
+	{
+		func(a_attach);
+		auto& self = *GetSingleton();
+		if (!self._ready.load(std::memory_order_acquire))
+			return;
+		const std::scoped_lock lock(self._mutex);
+		// The engine re-issues Hide every terrain update.
+		if (self._lodWaterAttached.exchange(a_attach, std::memory_order_acq_rel) == a_attach)
+			return;
+		for (const auto chunk : self._attached) {
+			if (!chunk || !chunk->water)
+				continue;
+			if (a_attach) {
+				self.RegisterChunkWater(chunk);
+			} else {
+				engine::water::UnregisterVanillaWater(chunk);
+				chunk->waterAttached = false;
+			}
+		}
+		if (a_attach)
+			self.RefreshTileVisibility();
 	}
 
 	void UnifiedWater::Visibility::thunk(Node* a_node, RE::NiNode* a_parent)
@@ -281,7 +304,7 @@ namespace cs::features
 		const std::scoped_lock lock(self._mutex);
 		const auto it = self._managed.find(a_parent);
 		// FO4: mixed parents cannot use unchecked native segment traversal.
-		engine::water::UpdateVisibility(a_node, a_parent, it != self._managed.end() ? std::span<const engine::water::TileCell>{ it->second.tiles } : std::span<const engine::water::TileCell>{}, self.TilesHidden(), InteriorCellActive());
+		engine::water::UpdateVisibility(a_node, a_parent, it != self._managed.end() ? std::span<const engine::water::TileCell>{ it->second.tiles } : std::span<const engine::water::TileCell>{}, self.TilesHidden());
 		self._visibilityUpdates.fetch_add(1);
 	}
 
@@ -291,7 +314,6 @@ namespace cs::features
 		auto& self = *GetSingleton();
 		self._exterior.store(a_world && a_exterior, std::memory_order_release);
 		self._refreshTiles.store(true, std::memory_order_release);
-		self.UpdateWaterLODCull();
 	}
 
 	void UnifiedWater::ReleaseWorld::thunk(RE::TESWorldSpace* a_world)
@@ -300,13 +322,6 @@ namespace cs::features
 		auto& self = *GetSingleton();
 		self._exterior.store(false, std::memory_order_release);
 		self._refreshTiles.store(true, std::memory_order_release);
-		self.UpdateWaterLODCull();
-	}
-
-	void UnifiedWater::UpdateDisplacement::thunk(engine::water::WaterSystem* a_system)
-	{
-		func(a_system);
-		GetSingleton()->UpdateWaterLODCull();
 	}
 
 	void UnifiedWater::ApplyEnabledState()
@@ -341,40 +356,23 @@ namespace cs::features
 		func(a_system, a_process);
 	}
 
-	void UnifiedWater::OnLoadingMenuClosed()
-	{
-		// Some interiors keep exterior state alive until the load screen closes
-		_refreshTiles.store(true, std::memory_order_release);
-		UpdateWaterLODCull();
-	}
-
 	bool UnifiedWater::TilesHidden() const
 	{
-		// Interiors can inherit stale exterior worldspace state during transitions
-		return !_exterior.load(std::memory_order_acquire) || InteriorCellActive();
+		// FO4: the Pip-Boy map has no Skyrim exterior-LOD MapMenu rendering path.
+		return !_exterior.load(std::memory_order_acquire);
 	}
 
 	void UnifiedWater::RefreshTileVisibility()
 	{
 		const std::scoped_lock lock(_mutex);
 		const auto hide = TilesHidden();
-		UpdateWaterLODCull();
 		for (const auto chunk : _attached) {
 			if (!chunk || !chunk->node || !chunk->water)
 				continue;
 			const auto it = _managed.find(chunk->water.get());
 			if (it != _managed.end())
-				engine::water::UpdateVisibility(chunk->node, chunk->water.get(), it->second.tiles, hide, InteriorCellActive());
+				engine::water::UpdateVisibility(chunk->node, chunk->water.get(), it->second.tiles, hide);
 		}
-	}
-
-	void UnifiedWater::UpdateWaterLODCull() const
-	{
-		if (!_ready.load(std::memory_order_acquire))
-			return;
-		// FO4: the Pip-Boy map has no Skyrim exterior-LOD MapMenu rendering path.
-		if (const auto root = engine::water::GetWaterLOD())
-			root->SetAppCulled(TilesHidden());
 	}
 
 	void UnifiedWater::DrawSettings()
@@ -421,7 +419,7 @@ namespace cs::features
 			.Field("tile_water_overrides", engine::water::TileWaterOverrides())
 			.Field("exterior", _exterior.load())
 			.Field("tiles_hidden", TilesHidden())
-			.Field("lod_root_culled", engine::water::GetWaterLOD() && engine::water::GetWaterLOD()->GetAppCulled());
+			.Field("lod_water_attached", _lodWaterAttached.load());
 	}
 
 	namespace

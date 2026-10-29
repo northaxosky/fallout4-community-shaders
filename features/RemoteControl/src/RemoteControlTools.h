@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <span>
 #include <string>
@@ -36,11 +37,15 @@ namespace cs::features::remote_control
 	extern const Tool kShaderCacheTool;
 	extern const Tool kSettingsTool;
 	extern const Tool kCaptureTool;
+	extern const Tool kNvPerfTool;
 
 	[[nodiscard]] std::span<const Tool* const> GetTools() noexcept;
 
 	void SubscribeShaderCacheEvents();
 	void SubscribeCaptureEvents();
+	void SubscribeNvPerfEvents();
+
+	void DrawNvPerfPanel();
 
 	std::vector<std::string_view> RegisterTools(DevBenchAPI::IDevBenchInterface001& a_host);
 

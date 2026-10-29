@@ -47,6 +47,13 @@ namespace cs::engine
 				a_sky->ForceWeather(a_weather, a_override);
 		}
 
+		// Overrides expire on a stale stamp; mid-transition it drives the blend.
+		void RenewOverrideExpiry(RE::Sky* a_sky)
+		{
+			if (!a_sky->lastWeather)
+				a_sky->lastWeatherUpdate = a_sky->currentGameHour;
+		}
+
 		// Claims the override slot so nothing lerps away from the lock.
 		void ReapplyLock(RE::Sky* a_sky, RE::TESWeather* a_weather)
 		{
@@ -54,7 +61,7 @@ namespace cs::engine
 				return;
 			if (a_sky->currentWeather == a_weather && !a_sky->lastWeather) {
 				a_sky->overrideWeather = a_weather;
-				a_sky->lastWeatherUpdate = a_sky->currentGameHour;
+				RenewOverrideExpiry(a_sky);
 			} else {
 				ForceWeatherOriginal(a_sky, a_weather, true);
 			}
@@ -106,10 +113,12 @@ namespace cs::engine
 		auto* sky = RE::Sky::GetSingleton();
 		if (!sky || !a_weather)
 			return;
-		if (a_instant)
+		if (a_instant) {
 			ForceWeatherOriginal(sky, a_weather, false);
-		else
+		} else {
+			RenewOverrideExpiry(sky);
 			SetWeatherOriginal(sky, a_weather, true, false);
+		}
 		// Retarget the lock so upkeep enforces the new choice.
 		if (GetLockedWeather())
 			LockWeather(a_weather);

@@ -194,21 +194,19 @@ VS_OUTPUT main(VS_INPUT input)
 
 #ifdef BSWATER_PIXEL_SHADER
 #	include "FO4/FogConsumer.hlsli"
-#	ifdef TERRAIN_SHADOWS
-#		include "FO4/TerrainShadowsConsumer.hlsli"
-#	endif
+#	include "FO4/WorldShadowConsumer.hlsli"
 #	ifdef VOLUMETRIC_SHADOWS
 #		include "FO4/VolumetricShadowsConsumer.hlsli"
 #	endif
-#	if defined(VOLUMETRIC_SHADOWS) || defined(TERRAIN_SHADOWS)
-// FO4: a disabled VSM falls back to the terrain term it adds to.
+#	if defined(VOLUMETRIC_SHADOWS) || defined(FO4_WORLD_SHADOW)
+// FO4: a disabled VSM falls back to the world term it adds to.
 float FO4WaterSunShadow(float3 worldPosition, float2 screenPosition)
 {
 #		ifdef VOLUMETRIC_SHADOWS
 	[branch] if (FO4SharedData::EnabledVolumetricShadows != 0) return FO4VolumetricShadows::GetWaterSurfaceShadow(worldPosition, screenPosition);
 #		endif
-#		ifdef TERRAIN_SHADOWS
-	return TerrainShadows::GetTerrainShadowMultFromWorldPosition(worldPosition);
+#		ifdef FO4_WORLD_SHADOW
+	return WorldShadow::GetMultFromWorldPosition(worldPosition);
 #		else
 	return 1.0;
 #		endif
@@ -217,6 +215,9 @@ float FO4WaterSunShadow(float3 worldPosition, float2 screenPosition)
 #	endif
 #	ifdef UNIFIED_WATER
 #		include "FO4/FO4ShaderData.hlsli"
+#	endif
+#	ifdef LIGHT_LIMIT_FIX
+#		include "FO4/LightLimitFixForward.hlsli"
 #	endif
 
 #	ifdef DYNAMIC_CUBEMAPS
@@ -675,6 +676,10 @@ float4 main(PS_INPUT input) : SV_Target0
 	float fresnel = fresnelTerm(grazing);
 
 	float3 specular = 0.0;
+#		ifdef LIGHT_LIMIT_FIX
+	// FO4: the surface shader's cluster loop replaces these lights.
+	[branch] if (FO4LightLimitFix::UseClusteredLights()) return float4(0.0, 0.0, 0.0, 1.0);
+#		endif
 	for (int i = 0; i < NUM_SPECULAR_LIGHTS; i++) {
 		float3 delta = perTechnique[i + 6].xyz - PosAdjust.xyz;
 		float3 halfVector = normalize(normalize(delta) - eyeDirection);
@@ -722,6 +727,10 @@ float4 main(PS_INPUT input) : SV_Target0
 	float slope = reflectionDirection.z;
 	float grazing = 1.0 - saturate(dot(-eyeDirection, -normal));
 	float3 water = lerp(perMaterial[0].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, eyeDirection, normal, reflectionDirection, input.eyeVector.w, WaterDistanceBlendFactor(fade), skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection)), 0.5);
+#		ifdef LIGHT_LIMIT_FIX
+	[branch] if (FO4LightLimitFix::UseClusteredLights())
+		water += 0.5 * FO4LightLimitFix::GetWaterSpecularLighting(input.eyeToPosition, FrameBuffer::ViewToWorld(input.eyeToPosition), normal, perMaterial[13].w);
+#		endif
 	return float4(lerp(water, refraction, 1.0 - fresnelTerm(grazing)), 0.0);
 }
 
@@ -983,6 +992,10 @@ float4 main(PS_INPUT input) : SV_Target0
 #		endif
 	float3 color = lerp(refraction, water, reflectionWeight);
 	color = lerp(tinted, color, WaterDistanceBlendFactor(fade));
+#		ifdef LIGHT_LIMIT_FIX
+	[branch] if (FO4LightLimitFix::UseClusteredLights())
+		color += fresnel * FO4LightLimitFix::GetWaterSpecularLighting(input.eyeToPosition, FrameBuffer::ViewToWorld(input.eyeToPosition), normal, perMaterial[13].w);
+#		endif
 #		ifndef INTERIOR
 	color = color + lighting;
 #		endif

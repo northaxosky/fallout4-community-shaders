@@ -1,5 +1,6 @@
 #include "Utils/ShaderCache/ShaderRecipe.h"
 
+#include "Utils/PathUtf8.h"
 #include "Utils/ShaderCache/ByteCodec.h"
 
 #include <algorithm>
@@ -70,13 +71,7 @@ namespace cs::shader_cache
 
 		// unencodable paths only cost a cache miss
 		try {
-			const auto encoded = resolved.lexically_normal().u8string();
-			std::string result(encoded.size(), '\0');
-			std::ranges::transform(
-				encoded,
-				result.begin(),
-				[](char8_t a_character) { return static_cast<char>(a_character); });
-			return result;
+			return util::PathToUtf8(resolved.lexically_normal());
 		} catch (...) {
 			return {};
 		}

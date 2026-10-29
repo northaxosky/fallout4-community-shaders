@@ -33,6 +33,9 @@ namespace cs::engine
 {
 	void InstallShaderSubclassHooks();
 
+	// The last BSSkyShader::SetupGeometry pass on this thread.
+	[[nodiscard]] const RE::BSRenderPass* GetCurrentSkyPass() noexcept;
+
 	// The engine path that baked a prepass draw's per-draw constants.
 	enum class PrepassBakePath
 	{

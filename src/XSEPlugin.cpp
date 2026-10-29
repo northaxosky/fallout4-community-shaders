@@ -1,8 +1,10 @@
+#include "BuildIdentity.h"
 #include "Env.h"
 #include "Feature.h"
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/ForwardDraw.h"
 #include "Render/FrameAnnotations.h"
 #include "Render/FrameBoundary.h"
 #include "Render/FrameBuffer.h"
@@ -131,6 +133,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	cs::telemetry::Install();
 	if (!cs::render::profiling::InstallDeferredCompositePass())
 		L->error("DeferredComposite profiler pass registration failed");
+	cs::render::forward_draw::Install();
 	cs::render::frame_annotations::Install();
 	// Registration closes once the boundary installs.
 	cs::render::RegisterPostSwap(&cs::engine::StopShaderCompileOnQuit);

@@ -20,7 +20,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
@@ -960,12 +959,9 @@ namespace cs::features
 	{
 		settings::SettingsEdit edit{ *this };
 		const auto& [maxZenith, minDiffuse, minSpecular] = skylighting::kSchema.fields;
-		const auto labelOf = [](const auto& a_field) {
-			return std::string(a_field.description) + "##" + std::string(a_field.key);
-		};
 		const auto drawVisibility = [&](const auto& a_field) {
 			const auto range = skylighting::kSchema.EditRange(a_field.member);
-			edit.Continuous(dmui::ui::SliderScalar(labelOf(a_field).c_str(), &(_settings.*a_field.member), &range.min, &range.max, "%.2f"));
+			edit.Continuous(dmui::ui::SliderScalar(ui::FieldLabel(a_field).c_str(), &(_settings.*a_field.member), &range.min, &range.max, "%.2f"));
 		};
 
 		if (const ui::Section section{ "skylighting-visibility", "Visibility" }; section) {
@@ -985,14 +981,13 @@ namespace cs::features
 			const float minDegrees = range.min * kRadiansToDegrees;
 			const float maxDegrees = range.max * kRadiansToDegrees;
 			float degrees = _settings.MaxZenith * kRadiansToDegrees;
-			const bool changed = dmui::ui::SliderScalar(labelOf(maxZenith).c_str(), &degrees, &minDegrees, &maxDegrees, "%.0f deg", dmui::ui::SliderFlags::kAlwaysClamp);
+			const bool changed = dmui::ui::SliderScalar(ui::FieldLabel(maxZenith).c_str(), &degrees, &minDegrees, &maxDegrees, "%.0f deg", dmui::ui::SliderFlags::kAlwaysClamp);
 			if (changed)
 				_settings.MaxZenith = degrees / kRadiansToDegrees;
 			edit.Continuous(changed);
 			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
 				dmui::ui::Text("%s", "Smaller angles creates more focused top-down shadow.");
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void Skylighting::RestoreDefaultSettings()

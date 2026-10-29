@@ -8,6 +8,7 @@
 #include <numbers>
 #include <utility>
 
+#include "AntiLag2Latency.h"
 #include "DX12SwapChain.h"
 #include "Feature.h"
 #include "FrameGeneration.h"
@@ -180,15 +181,22 @@ namespace cs::render
 			const temporal::UpscalingSettings& a_settings) noexcept
 		{
 			temporal::LatencyOptions options;
-			if (a_settings.reflexLowLatencyMode) {
-				options.mode = a_settings.reflexLowLatencyBoost ? temporal::LatencyMode::kBoost : temporal::LatencyMode::kLowLatency;
+			switch (a_settings.latencyReduction) {
+			case 1:
+				options.mode = temporal::LatencyMode::kLowLatency;
+				break;
+			case 2:
+				options.mode = temporal::LatencyMode::kBoost;
+				break;
+			default:
+				break;
 			}
-			if (a_settings.reflexUseFpsLimit) {
-				const auto range = temporal::kSchema.EditRange(&temporal::UpscalingSettings::reflexFpsLimit);
-				const auto fps = std::isfinite(a_settings.reflexFpsLimit) ? std::clamp(a_settings.reflexFpsLimit, range.min, range.max) : range.min;
+			if (a_settings.latencyFpsLimitEnabled) {
+				const auto range = temporal::kSchema.EditRange(&temporal::UpscalingSettings::latencyFpsLimit);
+				const auto fps = std::isfinite(a_settings.latencyFpsLimit) ? std::clamp(a_settings.latencyFpsLimit, range.min, range.max) : range.min;
 				options.frameLimitUs = static_cast<std::uint32_t>(std::lround(1'000'000.0 / fps));
 			}
-			options.useMarkers = a_settings.reflexUseMarkersToOptimize;
+			options.useMarkers = a_settings.latencyUseMarkers;
 			return options;
 		}
 
@@ -264,7 +272,12 @@ namespace cs::render
 		FrameGenerationCpuTimingCollector<> frameGenerationCpuTimings;
 		features::Streamline streamline;
 		features::StreamlineLatency streamlineLatency{ streamline };
-		temporal::ILatencyProvider* latencyProvider = &streamlineLatency;
+		// Declared before swapChain so it outlives every presentation swap chain.
+		features::AntiLag2Latency antiLag2;
+		temporal::LatencyRouter latencyRouter{
+			{ temporal::LatencyBackend::kReflex, &streamlineLatency },
+			{ temporal::LatencyBackend::kAntiLag2, &antiLag2 }
+		};
 		features::StreamlineSuperResolution dlssProvider{
 			streamline,
 			features::StreamlineSuperResolution::Method::kDLSS
@@ -828,7 +841,7 @@ namespace cs::render
 	bool TemporalPipeline::LatencyActive() const noexcept
 	{
 		return _impl->latencyHooksInstalled.load(std::memory_order_acquire) &&
-		       _impl->latencyProvider->IsAvailable();
+		       _impl->latencyRouter.IsAvailable();
 	}
 
 	void TemporalPipeline::ReportLatencyResult(
@@ -858,7 +871,7 @@ namespace cs::render
 			return;
 		}
 		for (const auto marker : a_markers) {
-			ReportLatencyResult(_impl->latencyProvider->SetLatencyMarker(
+			ReportLatencyResult(_impl->latencyRouter.SetLatencyMarker(
 				marker, static_cast<std::uint32_t>(a_frame)));
 		}
 	}
@@ -892,16 +905,18 @@ namespace cs::render
 			eligible = _impl->rendererEligible;
 		}
 		_impl->renderer.ApplyConfiguration(renderSettings, eligible);
-		if (LatencyActive()) {
-			ReportLatencyResult(
-				_impl->latencyProvider->Configure(ToLatencyOptions(renderSettings)));
-			const auto result = [&] {
-				auto timing = MeasureFrameGenerationCpuPhase(
-					FrameGenerationCpuPhase::kLatencySleep);
-				return _impl->latencyProvider->Sleep(
-					static_cast<std::uint32_t>(frame));
-			}();
-			ReportLatencyResult(result);
+		if (_impl->latencyHooksInstalled.load(std::memory_order_acquire)) {
+			// Configure also lets a backend initialize before it can report availability.
+			ReportLatencyResult(_impl->latencyRouter.Configure(ToLatencyOptions(renderSettings)));
+			if (_impl->latencyRouter.IsAvailable()) {
+				const auto result = [&] {
+					auto timing = MeasureFrameGenerationCpuPhase(
+						FrameGenerationCpuPhase::kLatencySleep);
+					return _impl->latencyRouter.Sleep(
+						static_cast<std::uint32_t>(frame));
+				}();
+				ReportLatencyResult(result);
+			}
 		}
 		cs::render::annotation::SetMarker("Temporal/Latency/Sleep");
 	}
@@ -1196,6 +1211,14 @@ namespace cs::render
 							features::RenderDoc::GetSingleton()
 								->UnbindD3D12CaptureTarget(a_device);
 						},
+					.bindPresentation =
+						[this](const temporal::PresentationBinding& a_binding) {
+							_impl->latencyRouter.BindPresentation(a_binding);
+						},
+					.unbindPresentation =
+						[this] { _impl->latencyRouter.UnbindPresentation(); },
+					.quarantinePresentation =
+						[this] { _impl->latencyRouter.QuarantinePresentation(); },
 					.gameFramePresented =
 						[] {
 							features::RenderDoc::GetSingleton()
@@ -1264,6 +1287,14 @@ namespace cs::render
 				return;
 			}
 			request = *_impl->topology.StartupRequest();
+		}
+		if (a_swapChain && *a_swapChain) {
+			DXGI_SWAP_CHAIN_DESC desc{};
+			if (SUCCEEDED((*a_swapChain)->GetDesc(&desc))) {
+				std::scoped_lock lock(_impl->mutex);
+				// Startup raises no resize event, so seed the output size here.
+				_impl->display.output = { desc.BufferDesc.Width, desc.BufferDesc.Height };
+			}
 		}
 
 		const bool temporalProxyPath =
@@ -1778,7 +1809,9 @@ namespace cs::render
 		status.latencyHooksInstalled =
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire);
 		status.latencySdkActive = LatencyActive();
-		status.latency = _impl->latencyProvider->GetLatencyDiagnostics();
+		status.latency = _impl->latencyRouter.GetLatencyDiagnostics();
+		status.latencyBackend = _impl->latencyRouter.Selected();
+		status.latencyBackends = _impl->latencyRouter.BackendStatus();
 		status.latencyPhase = _impl->latency.Phase();
 		const auto& frame = _impl->frames[_impl->currentFrameSlot];
 		status.framePhase = frame.Phase();

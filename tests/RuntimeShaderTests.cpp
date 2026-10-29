@@ -56,9 +56,12 @@ namespace
 			{ "DynamicCubemaps/InferCubemapCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { { {}, { { "REFLECTIONS", "" } }, { { "FAKEREFLECTIONS", "" } } } } },
 			{ "DynamicCubemaps/SpecularIrradianceCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
 			{ "DynamicCubemaps/BC6HEncodeCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
-			{ "FO4/DynamicCubemaps/CubemapPreviewCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
+			{ "FO4/CubemapPreviewCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { Toggle("SINGLE_CHANNEL") } },
 
 			{ "IBL/DiffuseIBLCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
+
+			{ "LightLimitFix/ClusterBuildingCS.hlsl" },
+			{ "LightLimitFix/ClusterCullingCS.hlsl" },
 
 			{ "FrameGeneration/CopyDepthForFrameGenerationCS.hlsl" },
 
@@ -96,9 +99,10 @@ namespace
 			{ "Upscaling/OverrideLinearDepthCS.hlsl" },
 			{ "Upscaling/RCAS/RCAS.hlsl", "cs_5_1" },
 
+			{ "FO4/FullscreenVS.hlsl", "vs_5_0" },
 			{ "FO4/ZPrePass.hlsl", "vs_5_0", { { "OFFSET_DEPTH", "" } } },
 
-			{ "FO4/WaterEffects/Debug.hlsl", "vs_5_0" },
+			{ "FO4/CloudShadows/DebugOverlay.hlsl", "ps_5_0", { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, { { { {}, { { "CLOUD_SKY_OVERLAY", "1" } }, { { "CLOUD_LAYERS", "1" } } } } } },
 			{ "FO4/WaterEffects/Debug.hlsl", "ps_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { Toggle("WATER_SUBMERSION_DEBUG", "1") } }
 		};
 		return shaders;

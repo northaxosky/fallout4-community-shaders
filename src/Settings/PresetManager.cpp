@@ -5,6 +5,7 @@
 #include "Menu/Menu.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsRegistry.h"
+#include "Utils/CSUtil.h"
 
 #include <algorithm>
 #include <array>
@@ -84,18 +85,6 @@ namespace
 		return out;
 	}
 
-	bool IEquals(std::string_view a, std::string_view b)
-	{
-		if (a.size() != b.size())
-			return false;
-		for (std::size_t i = 0; i < a.size(); ++i) {
-			if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) {
-				return false;
-			}
-		}
-		return true;
-	}
-
 	std::string Iso8601UtcNow()
 	{
 		const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -140,7 +129,7 @@ namespace
 			"LPT9",
 		} };
 		for (const auto& r : kReserved) {
-			if (IEquals(a_name, r))
+			if (cs::util::EqualsIgnoreCase(a_name, r))
 				return true;
 		}
 		return false;
@@ -222,7 +211,7 @@ namespace cs
 		for (std::size_t i = 0; i < _entries.size(); ++i) {
 			for (std::size_t j = i + 1; j < _entries.size(); ++j) {
 				if (_entries[i].builtin != _entries[j].builtin &&
-					IEquals(_entries[i].name, _entries[j].name)) {
+					cs::util::EqualsIgnoreCase(_entries[i].name, _entries[j].name)) {
 					L->warn("preset name '{}' exists as both builtin and user; bare-name lookups prefer the user copy",
 						_entries[i].name);
 				}
@@ -251,7 +240,7 @@ namespace cs
 		const PresetMeta* builtinHit = nullptr;
 		const PresetMeta* userHit = nullptr;
 		for (const auto& e : _entries) {
-			if (IEquals(e.name, a_name)) {
+			if (cs::util::EqualsIgnoreCase(e.name, a_name)) {
 				if (e.builtin)
 					builtinHit = &e;
 				else
@@ -640,7 +629,7 @@ namespace cs
 				return false;
 			}
 		}
-		if (IEquals(a_name, "Builtin")) {
+		if (cs::util::EqualsIgnoreCase(a_name, "Builtin")) {
 			a_err = "'Builtin' is reserved";
 			return false;
 		}
@@ -649,7 +638,7 @@ namespace cs
 			return false;
 		}
 		for (const auto& e : a_existing) {
-			if (IEquals(e.name, a_name)) {
+			if (cs::util::EqualsIgnoreCase(e.name, a_name)) {
 				a_err = "a preset named '" + std::string(a_name) + "' already exists";
 				return false;
 			}

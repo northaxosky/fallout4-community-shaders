@@ -57,6 +57,8 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 |---|---|
 | **Screen Space Shadows** | Contact shadows and finer shadow detail. |
 | **Terrain Shadows** | Long-range shadows from terrain. |
+| **Sky Sync** | Sun, moon and godray lighting follow the bodies in the sky, with an optional alternate sun path. |
+| **Cloud Shadows** | Shadows from clouds that move across the landscape and water. |
 | **Volumetric Shadows** | Blurred sun shadow maps that soften the sun's soft, rim, and back lighting and shadow the sun on water and effects. |
 | **Terrain Variation** | Stochastic terrain texture sampling to reduce tiling, including LOD terrain and landscape-textured meshes. |
 | **Terrain Blending** | Terrain blends into objects that sink into it, removing the hard seam. |
@@ -65,7 +67,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Screen Space GI** | Ambient occlusion and indirect lighting. |
 | **Subsurface Scattering** | Separable or Burley scattering for skin, replacing the vanilla skin blur. |
 | **Skylighting** | Scales ambient light and reflections by how much sky a surface can see. |
-| **Inverse Square Lighting** | Physically based light falloff. Lights are converted from their vanilla falloff by default; [light TOML files](features/InverseSquareLighting/README.md) override individual lights. |
+| **Light Limit Fix** | Smoke, fire, glow, rain and water receive every nearby light, with portal-strict lights bound to rooms and a clustered light count debug view; physically based inverse-square falloff for lights authored in [light TOML files](features/LightLimitFix/README.md), with converting unauthored lights opt-in. |
 | **Dynamic Cubemaps** | Reflections that respond to the surrounding scene. |
 | **Image Based Lighting** | Ambient light and fog tint from environment and sky cubemaps; requires Dynamic Cubemaps. |
 | **Water Effects** | Water parallax and sunlight caustics on submerged surfaces. |

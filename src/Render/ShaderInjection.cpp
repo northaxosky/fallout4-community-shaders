@@ -5,6 +5,7 @@
 #include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
+#include "Render/ForwardDraw.h"
 #include "Render/NativeShaderFamily.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
@@ -238,6 +239,20 @@ namespace cs::engine
 		CaptureBindings(a_context, ShaderResourceType::kBlendState, 0, 1);
 	}
 
+	void CaptureShaderInjectionRenderTargets(ID3D11DeviceContext* a_context) noexcept
+	{
+		CaptureBindings(a_context, ShaderResourceType::kRenderTarget, 0, 1);
+	}
+
+	void OverrideInjectionFrameShaderResource(ID3D11DeviceContext* a_context, UINT a_slot, ID3D11ShaderResourceView* a_value) noexcept
+	{
+		if (!t_bindings)
+			return;
+		t_bindings->Capture(a_context, ShaderResourceType::kShaderResource, a_slot, true);
+		a_context->PSSetShaderResources(a_slot, 1, &a_value);
+		RecordShaderInjectionD3DBinds();
+	}
+
 	void InvalidateShaderInjectionBindings() noexcept
 	{
 		InvalidateFrameBindings();
@@ -285,6 +300,15 @@ namespace cs::engine
 			return;
 		}
 		std::uint32_t calls = 0;
+		if (_targetsCaptured) {
+			_context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _targets, _depth);
+			for (auto* target : _targets)
+				if (target)
+					target->Release();
+			if (_depth)
+				_depth->Release();
+			++calls;
+		}
 		if (_blendCaptured) {
 			_context->OMSetBlendState(_blend, _blendFactor, _sampleMask);
 			if (_blend)
@@ -302,15 +326,21 @@ namespace cs::engine
 	}
 
 	void ScopedShaderInjectionBindings::Capture(
-		ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept
+		ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot, bool a_frameOwned) noexcept
 	{
 		if (!a_context)
 			return;
 		if (!_context)
 			_context = a_context;
 		{
-			if (_stage == ShaderStage::kPixel && !EngineOwnsPixelSlot(a_type, a_slot))
+			if (!a_frameOwned && _stage == ShaderStage::kPixel && !EngineOwnsPixelSlot(a_type, a_slot))
 				return;
+			if (a_type == ShaderResourceType::kRenderTarget && !_targetsCaptured) {
+				_context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _targets, &_depth);
+				_targetsCaptured = true;
+				if (_stage == ShaderStage::kPixel)
+					Tally(t_drawMetrics.captures);
+			}
 			if (a_type == ShaderResourceType::kBlendState && !_blendCaptured) {
 				_context->OMGetBlendState(&_blend, _blendFactor, &_sampleMask);
 				_blendCaptured = true;
@@ -1849,6 +1879,8 @@ namespace cs::engine
 			auto* sampler = render::GetLinearClampSampler();
 			BindInjectionSamplers(a_context, render::kLinearClampSamplerSlot, 1, &sampler);
 		}
+		if (render::forward_draw::Covers(a_target))
+			render::forward_draw::BindDescriptor(a_context);
 		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
 		t_samplerMask = previousMask;
 	}

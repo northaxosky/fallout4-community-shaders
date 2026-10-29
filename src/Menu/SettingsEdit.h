@@ -34,7 +34,7 @@ namespace cs::settings
 		template <class Field, class Settings>
 		bool Toggle(const Field& a_field, Settings& a_settings, const char* a_tooltip)
 		{
-			const std::string label = std::string(a_field.description) + "##" + std::string(a_field.key);
+			const std::string label = ui::FieldLabel(a_field);
 			const bool changed = Discrete(dmui::ui::Checkbox(label.c_str(), &(a_settings.*a_field.member)));
 			ui::Tooltip(a_tooltip);
 			return changed;

@@ -23,8 +23,6 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
-#include "Menu/Section.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
@@ -35,6 +33,7 @@
 #include "Render/SharedFeatureData.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
+#include "World/CelestialTransition.h"
 #include "World/Sky.h"
 
 namespace cs::features
@@ -54,7 +53,6 @@ namespace cs::features
 
 		constexpr std::uint32_t kMissingMapLogIntervalMs = 30000;
 		constexpr std::uint32_t kShadowStatsGridSize = 256;
-		std::atomic_uint32_t refreshGeneration{ 0 };
 
 		class ScopedShadowHeightBindings
 		{
@@ -89,33 +87,6 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Buffer> _featureBuffer;
 		};
 
-		template <class Event>
-		class RefreshEventSink final : public RE::BSTEventSink<Event>
-		{
-		public:
-			RE::BSEventNotifyControl ProcessEvent(const Event& a_event, RE::BSTEventSource<Event>*) override
-			{
-				if constexpr (std::is_same_v<Event, RE::BGSActorCellEvent>) {
-					if (!a_event.flags.any(RE::BGSActorCellEvent::CellFlag::kLeave))
-						return RE::BSEventNotifyControl::kContinue;
-					const auto* cell = RE::TESForm::GetFormByID<RE::TESObjectCELL>(a_event.cellID);
-					if (!cell || cell->IsExterior())
-						return RE::BSEventNotifyControl::kContinue;
-				}
-				refreshGeneration.fetch_add(1, std::memory_order_release);
-				return RE::BSEventNotifyControl::kContinue;
-			}
-		};
-
-		template <class Event>
-		void RegisterRefreshEvent(RE::BSTEventSource<Event>* a_source)
-		{
-			static RefreshEventSink<Event> sink;
-			if (a_source)
-				a_source->RegisterSink(&sink);
-			else
-				L->error("Terrain shadow time-change event source is unavailable.");
-		}
 		constexpr std::array<FeatureDebugView, 2> kDebugViews{ { { "shadow_term",
 																	 "Shadow term",
 																	 FeatureDebugViewKind::kFullscreen },
@@ -203,17 +174,12 @@ namespace cs::features
 	{
 		// The shadow field is stale after a disabled gap.
 		if (a_enabled)
-			refreshGeneration.fetch_add(1, std::memory_order_release);
+			cs::engine::RequestTimeJumpTransition();
 	}
 
 	void TerrainShadows::OnDataLoaded()
 	{
-		// FO4: native completion events translate upstream time-jump requests.
-		RegisterRefreshEvent(RE::TESWaitStopEvent::GetEventSource());
-		RegisterRefreshEvent(RE::TESSleepStopEvent::GetEventSource());
-		RegisterRefreshEvent(RE::TESLoadGameEvent::GetEventSource());
-		RegisterRefreshEvent(static_cast<RE::BSTEventSource<RE::BGSActorCellEvent>*>(
-			RE::PlayerCharacter::GetSingleton()));
+		cs::engine::RegisterCelestialTransitionSources();
 	}
 
 	void TerrainShadows::Load()
@@ -267,7 +233,7 @@ namespace cs::features
 		if (!std::filesystem::is_regular_file(a_path, ec) || ec)
 			return;
 		const auto extension = a_path.extension().string();
-		if (!ts::EqualsIgnoreCase(extension, ".dds"))
+		if (!util::EqualsIgnoreCase(extension, ".dds"))
 			return;
 
 		const auto stem = a_path.stem().string();
@@ -1003,8 +969,8 @@ namespace cs::features
 		_prepassRuns.fetch_add(1, std::memory_order_relaxed);
 
 		if (PollGameHourJump())
-			refreshGeneration.fetch_add(1, std::memory_order_release);
-		const auto requestedRefresh = refreshGeneration.load(std::memory_order_acquire);
+			cs::engine::RequestTimeJumpTransition();
+		const auto requestedRefresh = cs::engine::GetCompletedCelestialTransitionGeneration();
 		const bool timeJump = requestedRefresh != _handledRefreshGeneration;
 		const auto* sky = RE::Sky::GetSingleton();
 		// FO4: a time-jump refresh waits for the sky to consume the requested hour.
@@ -1181,38 +1147,33 @@ namespace cs::features
 
 	void TerrainShadows::DrawSettings()
 	{
-		if (const ui::Section section{ "terrain-shadows-general", "General" }; section) {
-			std::string worldspace;
-			std::string detail;
-			bool failed = false;
-			{
-				const std::lock_guard<std::mutex> guard(_statusMutex);
-				worldspace = _statusWorldspace;
-				detail = _statusDetail;
-				failed = _statusFailed;
-			}
-			if (failed) {
-				dmui::ui::Separator();
-				auto& client = host::HostClient::Get().Client();
-				const auto warning = std::format(
-					"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
-					"are doing nothing; regenerate "
-					"the map.",
-					worldspace.empty() ? "none" : worldspace,
-					detail.empty() ? "unknown failure" : detail);
-				if (!dmui::DrawStyledText(
-						client,
-						warning,
-						{ .tone = dmui::TextTone::kWarning,
-							.wrapped = true })) {
-					L->warn(
-						"DearModdingUI draw terrain warning failed: {}",
-						DMUI_ResultToString(client.LastResult()));
-					return;
-				}
+		std::string worldspace;
+		std::string detail;
+		bool failed = false;
+		{
+			const std::lock_guard<std::mutex> guard(_statusMutex);
+			worldspace = _statusWorldspace;
+			detail = _statusDetail;
+			failed = _statusFailed;
+		}
+		if (failed) {
+			auto& client = host::HostClient::Get().Client();
+			const auto warning = std::format(
+				"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
+				"are doing nothing; regenerate "
+				"the map.",
+				worldspace.empty() ? "none" : worldspace,
+				detail.empty() ? "unknown failure" : detail);
+			if (!dmui::DrawStyledText(
+					client,
+					warning,
+					{ .tone = dmui::TextTone::kWarning,
+						.wrapped = true })) {
+				L->warn(
+					"DearModdingUI draw terrain warning failed: {}",
+					DMUI_ResultToString(client.LastResult()));
 			}
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	namespace

@@ -65,6 +65,29 @@ namespace cs::host
 			if (edit.Discrete(dmui::ui::Checkbox("Enabled", &enabled)))
 				a_feature.SetEnabled(enabled);
 		}
+
+		// One collapsed Debug section: views, feature tooling, then profiling.
+		void DrawFeatureDebugSection(Feature& a_feature)
+		{
+			const std::string name{ a_feature.GetName() };
+			const bool views = !a_feature.GetDebugViews().empty();
+			const bool tooling = a_feature.HasDebugUI();
+			const bool timers = ProfilingRenderer::HasFeatureTimers(name);
+			if (!views && !tooling && !timers)
+				return;
+			const auto id = std::format("feature-debug-{}", name);
+			const ui::Section section{ id.c_str(), "Debug", ui::Collapsible{ std::size_t{ views } + tooling + timers } };
+			if (!section)
+				return;
+			if (views)
+				Menu::Get().DrawDebugViewSelector(a_feature);
+			if (tooling) {
+				CS_FEATURE_ZONE(&a_feature, "DrawDebug");
+				a_feature.DrawDebug();
+			}
+			if (timers)
+				ProfilingRenderer::RenderFeatureTimers(name);
+		}
 	}
 
 	HostClient::FrameDemandAction HostClient::FrameDemandTracker::Next(bool a_wanted) const noexcept
@@ -514,23 +537,20 @@ namespace cs::host
 					return false;
 				CS_FEATURE_ZONE(&a_feature, "DrawSettings");
 				const bool comparing = settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
+				const char* callback = "DearModdingUI::DrawSettings";
 				try {
 					{
 						const dmui::DisabledScope disabled{ comparing };
 						DrawEnabledToggle(a_feature);
 						a_feature.DrawSettings();
-					}
-					const std::string name{ a_feature.GetName() };
-					if (ProfilingRenderer::HasFeatureTimers(name)) {
-						// FO4: a host section stands in for ImGui::SeparatorText.
-						if (const ui::Section section{ "feature-profiling", "Profiling" }; section)
-							ProfilingRenderer::RenderFeatureTimers(name);
+						callback = "DearModdingUI::DrawDebug";
+						DrawFeatureDebugSection(a_feature);
 					}
 					a_feature.FlushSettings(true);
 				} catch (const std::exception& error) {
 					FeatureManager::Get().QuarantineRuntimeCallback(
 						a_feature,
-						"DearModdingUI::DrawSettings",
+						callback,
 						error.what());
 					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 							a_feature.GetName().data(),
@@ -542,7 +562,7 @@ namespace cs::host
 				} catch (...) {
 					FeatureManager::Get().QuarantineRuntimeCallback(
 						a_feature,
-						"DearModdingUI::DrawSettings",
+						callback,
 						"non-standard exception");
 					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
 							a_feature.GetName().data(),

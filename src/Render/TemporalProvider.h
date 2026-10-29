@@ -360,13 +360,28 @@ namespace cs::render::temporal
 		auto operator<=>(const LatencyOptions&) const = default;
 	};
 
+	enum class LatencyUnavailableReason : std::uint8_t
+	{
+		kNone,
+		kUnsupportedAdapter,
+		kNeedsD3D12Presentation,
+		kPresentationFailed,
+		kInitializeFailed,
+		kUpdateFailing
+	};
+
 	struct LatencyDiagnostics
 	{
 		bool available = false;
 		bool lowLatencyAvailable = false;
 		bool latencyReportAvailable = false;
 		bool markersAvailable = false;
+		bool frameTypeTagging = false;
+		LatencyUnavailableReason unavailableReason = LatencyUnavailableReason::kNone;
 		LatencyOptions effective;
+		std::int32_t initializeResult = 0;
+		std::int32_t lastCallResult = 0;
+		std::uint64_t markersDelivered = 0;
 		std::uint64_t sleepCalls = 0;
 		std::uint64_t sleepFailures = 0;
 		std::uint64_t markerFailures = 0;
@@ -375,11 +390,26 @@ namespace cs::render::temporal
 		std::uint32_t gpuFrameTimeUs = 0;
 	};
 
+	// The native device and swap chain that a latency backend may talk to.
+	struct PresentationBinding
+	{
+		ID3D12Device* device = nullptr;
+		std::uint32_t adapterVendorId = 0;
+		IDXGISwapChain* swapChain = nullptr;
+	};
+
 	// Latency belongs to the device, not the presentation path.
 	class ILatencyProvider
 	{
 	public:
 		virtual ~ILatencyProvider() = default;
+
+		// Same-device rebinds only swap the swap chain (null while rebuilt).
+		virtual void BindPresentation(const PresentationBinding&) noexcept {}
+		// Only after the swap chain and any presenter thread are gone.
+		virtual void UnbindPresentation() noexcept {}
+		// Stops driver calls without releasing anything.
+		virtual void QuarantinePresentation() noexcept {}
 
 		[[nodiscard]] virtual ProviderResult Configure(const LatencyOptions& a_options) = 0;
 		[[nodiscard]] virtual ProviderResult Sleep(std::uint32_t a_frame) = 0;

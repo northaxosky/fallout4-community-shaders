@@ -1,14 +1,7 @@
-#ifdef VSHADER
-float4 main(uint vertex : SV_VertexID) : SV_Position
-{
-	float2 uv = float2((vertex << 1) & 2, vertex & 2);
-	return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
-}
-#else
-#	include "FO4/FO4ShaderData.hlsli"
+#include "FO4/FO4ShaderData.hlsli"
 // FO4: an isolated pass preserves composite's native s14.
 SamplerState SampColorSampler : register(s14);
-#	include "WaterEffects/WaterCaustics.hlsli"
+#include "WaterEffects/WaterCaustics.hlsli"
 
 float4 main(float4 screenPosition : SV_Position) : SV_Target
 {
@@ -22,12 +15,11 @@ float4 main(float4 screenPosition : SV_Position) : SV_Target
 	float distance = water.w - position.z;
 	float3 color = 0.0;
 	if (distance > 0.0 && depth < 1.0) {
-#	ifdef WATER_SUBMERSION_DEBUG
+#ifdef WATER_SUBMERSION_DEBUG
 		color = saturate(distance / 1024.0).xxx;
-#	else
+#else
 		color = saturate(WaterEffects::ComputeCaustics(water, position.xyz) * 0.25);
-#	endif
+#endif
 	}
 	return float4(color, 1);
 }
-#endif

@@ -18,7 +18,9 @@ local features = {
     "FrameGeneration",
     "ScreenSpaceShadows",
     "TerrainShadows",
+    "SkySync",
     "VolumetricShadows",
+    "CloudShadows",
     "LODBlending",
     "TerrainVariation",
     "TerrainBlending",
@@ -26,7 +28,7 @@ local features = {
     "ScreenSpaceGI",
     "SubsurfaceScattering",
     "Skylighting",
-    "InverseSquareLighting",
+    "LightLimitFix",
     "DynamicCubemaps",
     "IBL",
     "WaterEffects",
@@ -61,6 +63,12 @@ add_rules("plugin.vsxmake.autoupdate")
 option("tracy", function()
     set_default(false)
     set_description("Enable Tracy profiler instrumentation")
+end)
+
+option("nvperf_sdk", function()
+    set_default("")
+    set_showmenu(true)
+    set_description("Nsight Perf SDK folder holding include/nvperf_host.h; empty disables the GPU counter profiler")
 end)
 
 option("release_identity", function()
@@ -183,7 +191,6 @@ target(plugin_name .. "Version", function()
                 "release_identity must be a stable or dev release tag")
             describe = identity
         end
-        local content = io.readfile("xmake/Plugin.h.in")
         local variables = {
             BUILD_DESCRIBE = describe,
             BUILD_GIT_SHA = sha,
@@ -193,14 +200,18 @@ target(plugin_name .. "Version", function()
             PROJECT_VERSION_PATCH = plugin_version_patch
         }
 
-        for name, value in pairs(variables) do
-            content = content:gsub("@" .. name .. "@", value)
-        end
+        -- BuildIdentity.h changes every commit; only the TUs that print it include it.
+        for _, header in ipairs({ "Plugin.h", "BuildIdentity.h" }) do
+            local content = io.readfile(path.join("xmake", header .. ".in"))
+            for name, value in pairs(variables) do
+                content = content:gsub("@" .. name .. "@", value)
+            end
 
-        local output = path.join(generated_include, "Plugin.h")
-        if not os.isfile(output) or io.readfile(output) ~= content then
-            os.mkdir(path.directory(output))
-            io.writefile(output, content)
+            local output = path.join(generated_include, header)
+            if not os.isfile(output) or io.readfile(output) ~= content then
+                os.mkdir(path.directory(output))
+                io.writefile(output, content)
+            end
         end
     end)
 end)
@@ -249,6 +260,22 @@ target(plugin_name, function()
     add_includedirs(generated_include, "src", "extern")
     on_load(function(target)
         import("xmake.shared", { rootdir = os.projectdir() }).main(target)
+        local sdk = get_config("nvperf_sdk")
+        if not sdk or sdk == "" then
+            return
+        end
+        -- The SDK is a login-gated download; its DLL is staged next to the plugin data.
+        local library = path.join(sdk, "bin", "x64", "nvperf_grfx_host.lib")
+        local runtime = path.join(sdk, "bin", "x64", "nvperf_grfx_host.dll")
+        assert(os.isfile(path.join(sdk, "include", "nvperf_host.h")) and os.isfile(library) and os.isfile(runtime),
+            "nvperf_sdk lacks include/nvperf_host.h or bin/x64/nvperf_grfx_host.{lib,dll}: " .. sdk)
+        target:add("defines", "NVPERF_ENABLED")
+        target:add("sysincludedirs", path.join(sdk, "include"))
+        target:add("linkdirs", path.directory(library))
+        target:add("links", "nvperf_grfx_host")
+        target:add("syslinks", "delayimp")
+        target:add("shflags", "/DELAYLOAD:nvperf_grfx_host.dll", { force = true })
+        target:add("installfiles", runtime, { prefixdir = "F4SE/Plugins/FO4CommunityShaders/NvPerf" })
     end)
     for _, feature in ipairs(features) do
         add_includedirs(path.join("features", feature, "src"))
@@ -293,7 +320,9 @@ target(plugin_name, function()
         "COMMONLIB_RUNTIMECOUNT=3"
     )
     if is_mode("release", "releasedbg") then
-        set_policy("build.optimization.lto", true)
+        -- The LTO policy appends a full -LTCG that overrides incremental codegen.
+        add_cxflags("/GL", { force = true })
+        add_shflags("/LTCG:INCREMENTAL", { force = true })
     end
 
     set_pcxxheader("src/PCH.h")
@@ -305,6 +334,8 @@ target(plugin_name, function()
     add_installfiles("features/Upscaling/(Shaders/Upscaling/Streamline/**)",
         { prefixdir = "." })
     add_installfiles("LICENSE", "EXCEPTIONS.md", { prefixdir = "." })
+    add_installfiles("extern/AntiLag2-SDK/LICENSE-AMD-AntiLag2-MIT.txt",
+        { prefixdir = "F4SE/Plugins/FO4CommunityShaders/Licenses" })
 end)
 
 -- Host tests remain ordinary, non-default C++ executable targets.
@@ -319,7 +350,7 @@ target("FeatureConfigTests", function()
     set_group("unit")
     add_files(
         "tests/FeatureConfigTests.cpp",
-        "features/InverseSquareLighting/src/LightAuthoring.cpp",
+        "features/LightLimitFix/src/Authoring/LightAuthoring.cpp",
         "src/Settings/FeatureConfig.cpp"
     )
     add_headerfiles(
@@ -405,6 +436,13 @@ local shader_cache_sources = {
     "src/Utils/ShaderCache/SourceCompile.cpp"
 }
 
+-- Local default; an explicit FO4CS_SHADER_TEST_CACHE wins.
+local function use_shader_test_cache()
+    if not os.getenv("FO4CS_SHADER_TEST_CACHE") then
+        set_runenv("FO4CS_SHADER_TEST_CACHE", path.join(os.projectdir(), ".shader-test-cache"))
+    end
+end
+
 -- One gate binary per compiler: d3dcompiler_47.dll resolves from the executable directory.
 -- A nil compiler selects the pinned Windows SDK copy; otherwise it is a project-relative path.
 local function stock_shader_identity_target(name, compiler, tests)
@@ -414,6 +452,7 @@ local function stock_shader_identity_target(name, compiler, tests)
         set_group("shaders")
         set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/" .. name)
         add_deps("ShaderStage")
+        use_shader_test_cache()
         add_files(
             "tests/StockShaderIdentityTests.cpp",
             "tests/ShaderABIChecks.cpp",
@@ -464,6 +503,7 @@ target("RuntimeShaderTests", function()
     set_group("shaders")
     set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/RuntimeShaderTests")
     add_deps("ShaderStage")
+    use_shader_test_cache()
     add_files("tests/RuntimeShaderTests.cpp", "src/Utils/ShaderCompile.cpp")
     add_files(shader_cache_sources)
     add_packages("vcpkg::directxmath")

@@ -122,7 +122,7 @@ namespace cs::features
 				edit.Toggle(field, _settings,
 					"Disables vertex coloring on nearby terrain. Best combined with terrain LOD generated in xLODGen with Vertex Color Intensity set to 0.");
 			} else {
-				const std::string label = std::string(field.description) + "##" + std::string(field.key);
+				const std::string label = ui::FieldLabel(field);
 				const auto range = lod_blending::kSchema.EditRange(field.member);
 				edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &value, &range.min, &range.max, "%.2f"));
 			}

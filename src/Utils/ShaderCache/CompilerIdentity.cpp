@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "Utils/ModuleInfo.h"
+#include "Utils/PathUtf8.h"
 
 // IAT slot, not &D3DCompile; that names our own thunk
 extern "C" void* __imp_D3DCompile;
@@ -73,16 +74,6 @@ namespace cs::shader_cache
 			return true;
 		}
 
-		std::string PathToUtf8(const std::filesystem::path& a_path)
-		{
-			const auto encoded = a_path.u8string();
-			std::string result;
-			result.reserve(encoded.size());
-			for (const char8_t character : encoded)
-				result.push_back(static_cast<char>(character));
-			return result;
-		}
-
 		std::string FormatVersion(CompilerFileVersion a_version)
 		{
 			char buffer[64]{};
@@ -128,7 +119,7 @@ namespace cs::shader_cache
 	{
 		if (!a_identity.established)
 			return "unavailable";
-		return PathToUtf8(a_identity.modulePath.filename()) + " " + DescribeCompilerIdentityValue(a_identity);
+		return util::PathToUtf8(a_identity.modulePath.filename()) + " " + DescribeCompilerIdentityValue(a_identity);
 	}
 
 	CompilerIdentity MakeVersionCompilerIdentity(

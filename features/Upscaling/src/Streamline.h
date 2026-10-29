@@ -259,6 +259,7 @@ namespace cs::features
 		std::atomic_uint64_t _latencySleepCalls{ 0 };
 		std::atomic_uint64_t _latencySleepFailures{ 0 };
 		std::atomic_uint64_t _latencyMarkerFailures{ 0 };
+		std::atomic_bool _reflexStatePolled{ false };
 		std::atomic_bool _reflexLowLatencyAvailable{ false };
 		std::atomic_bool _reflexReportAvailable{ false };
 		std::atomic_uint64_t _reflexReportFrame{ 0 };

@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string_view>
 
 struct ID3D11ShaderResourceView;
+struct ID3D11Texture2D;
 
 namespace cs
 {
@@ -29,6 +31,22 @@ namespace cs::engine
 
 	// Render thread. Null unless all six faces are fresh.
 	[[nodiscard]] ID3D11ShaderResourceView* GetSkyReflectionCubeSRV() noexcept;
+
+	// Render thread. The engine cube texture, to mirror its shape.
+	[[nodiscard]] ID3D11Texture2D* GetSkyReflectionCubeTexture() noexcept;
+
+	struct SkyReflectionCubeCapture
+	{
+		std::uint32_t face = 0;
+		// Unique per face render, so a draw hook can act once per face.
+		std::uint64_t serial = 0;
+	};
+
+	// Render thread. Set only while the host clicks a face of the engine cube.
+	[[nodiscard]] std::optional<SkyReflectionCubeCapture> GetSkyReflectionCubeCapture() noexcept;
+
+	// Render thread. Reapplies the face cull; LOD passes leave a stale one.
+	void ReselectSkyReflectionCubeCull() noexcept;
 
 	// Engine cube and depth face size; set before the renderer creates targets.
 	void SetSkyReflectionCubeSize(std::uint32_t a_size) noexcept;

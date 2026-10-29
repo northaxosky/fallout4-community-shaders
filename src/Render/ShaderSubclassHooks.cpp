@@ -10,6 +10,7 @@
 #include "Render/NativeShaderFamily.h"
 #include "Render/PrepassTechnique.h"
 #include "Render/ShaderInjection.h"
+#include "Render/SkyReflectionCube.h"
 #include "Telemetry/Telemetry.h"
 
 #include <Windows.h>
@@ -26,6 +27,7 @@
 #include "RE/B/BSDFPrePassShader.h"
 #include "RE/B/BSGeometry.h"
 #include "RE/B/BSRenderPass.h"
+#include "RE/B/BSSkyShader.h"
 
 namespace cs::engine
 {
@@ -288,6 +290,24 @@ namespace cs::engine
 			return request;
 		}
 
+		thread_local const RE::BSRenderPass* t_skyPass = nullptr;
+
+		// A sky draw follows its SetupGeometry, so draw hooks can read the pass.
+		struct SkySetupGeometryHook
+		{
+			static constexpr std::size_t size = 0x07;
+
+			static void thunk(RE::BSShader* a_self, RE::BSRenderPass* a_pass)
+			{
+				t_skyPass = a_pass;
+				// Sky techniques never write the cull selector.
+				ReselectSkyReflectionCubeCull();
+				func(a_self, a_pass);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		// Immediate draws fill cb2 inside SetupGeometry: write the lane at the map on NG/AE, at the pre-unmap flush on OG (each inlines the other).
 		struct PrepassSetupGeometryHook
 		{
@@ -404,6 +424,11 @@ namespace cs::engine
 
 	}
 
+	const RE::BSRenderPass* GetCurrentSkyPass() noexcept
+	{
+		return t_skyPass;
+	}
+
 	bool RegisterPrepassDrawClassifier(PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier)
 	{
 		static const bool installed =
@@ -472,6 +497,7 @@ namespace cs::engine
 			TryPatch("standalone compute shader observers", [] {
 				stl::detour_thunk<ReloadStandaloneComputeHook>(RE::ID::BSComputeShader::LoadTechniquesFromStream);
 			});
+			TryPatch("BSSkyShader SetupGeometry pass", [] { stl::write_vfunc<RE::BSSkyShader, SkySetupGeometryHook>(); });
 			TryPatch("BSShader native technique binder", [] {
 				stl::detour_thunk<BeginTechniqueHook>(RE::ID::BSShader::BeginTechnique);
 			});

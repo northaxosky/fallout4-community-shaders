@@ -43,10 +43,8 @@ namespace cs::engine::water
 	bool InstallWaterMaterialIdentity();
 	std::uint64_t TileWaterOverrides() noexcept;
 	void UnregisterVanillaWater(TerrainChunk* a_chunk);
-	void ConfigureTileProperty(RE::BSGeometry* a_shape);
 	void RemoveWater(RE::NiAVObject* a_shape);
-	void EnableWaterSystem();
-	void UpdateVisibility(TerrainNode* a_node, RE::NiNode* a_parent, std::span<const TileCell> a_tiles, bool a_hideTiles, bool a_interior);
+	void UpdateVisibility(TerrainNode* a_node, RE::NiNode* a_parent, std::span<const TileCell> a_tiles, bool a_hideTiles);
 
 	// FO4: read engine-owned cursors at DataLoaded, before terrain streaming.
 	bool ReadCellData(RE::TESWorldSpace* a_world, std::int32_t a_x, std::int32_t a_y,

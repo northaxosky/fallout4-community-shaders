@@ -121,6 +121,10 @@ namespace cs::features
 		if (!IsLatencyAvailable()) {
 			return { .code = ProviderResultCode::kUnavailable };
 		}
+		// Support is known before the first sleep, so backend selection need not wait.
+		if (!_reflexStatePolled.load(std::memory_order_relaxed)) {
+			PollReflexState();
+		}
 		std::scoped_lock lock(_latencyMutex);
 		_latencyRequested = a_options;
 		const auto result = ApplyLatencyOptions();
@@ -190,6 +194,7 @@ namespace cs::features
 			return;
 		}
 		_reflexLowLatencyAvailable.store(state->lowLatencyAvailable, std::memory_order_relaxed);
+		_reflexStatePolled.store(true, std::memory_order_relaxed);
 		_reflexReportAvailable.store(state->latencyReportAvailable, std::memory_order_relaxed);
 		if (!state->latencyReportAvailable) {
 			return;

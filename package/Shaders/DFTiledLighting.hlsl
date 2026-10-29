@@ -12,9 +12,9 @@
 #	include "DFTiledLighting/TileCullCS.hlsli"
 #else
 
-#	ifdef INVERSE_SQUARE_LIGHTING
-#		include "FO4/InverseSquareLightingConsumer.hlsli"
-StructuredBuffer<FO4InverseSquareLighting::PerLightData> InverseSquareLights : register(t8);
+#	ifdef LIGHT_LIMIT_FIX
+#		include "FO4/LightLimitFixConsumer.hlsli"
+StructuredBuffer<LightLimitFix::Light> LightLimitFixLights : register(t8);
 #	endif
 
 cbuffer TiledLightingParameters : register(b0)
@@ -248,12 +248,12 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 		[loop] for (uint i = 0; i < lightCount; ++i)
 		{
 			TiledLight light = Lights[TileLists[tileIndex].Indices[i]];
-#	ifdef INVERSE_SQUARE_LIGHTING
-			FO4InverseSquareLighting::PerLightData lightData = (FO4InverseSquareLighting::PerLightData)0;
-			[branch] if (FO4SharedData::EnabledInverseSquareLighting != 0)
+#	ifdef LIGHT_LIMIT_FIX
+			LightLimitFix::Light lightData = (LightLimitFix::Light)0;
+			[branch] if (FO4SharedData::EnabledLightLimitFix != 0)
 			{
-				lightData = InverseSquareLights[TileLists[tileIndex].Indices[i]];
-				light.Color = FO4InverseSquareLighting::GetColor(light.Color, lightData);
+				lightData = LightLimitFixLights[TileLists[tileIndex].Indices[i]];
+				light.Color = FO4LightLimitFix::GetColor(light.Color, lightData);
 			}
 #	endif
 			float3 toLight = light.PositionRadius.xyz - positionView;
@@ -467,9 +467,9 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 				light.Attenuation.x);
 			float attenuation =
 				exp2(log2(1.0 - falloff) * 2.2);
-#	ifdef INVERSE_SQUARE_LIGHTING
+#	ifdef LIGHT_LIMIT_FIX
 			// FO4: t8 uses the same accepted-append index as native t6.
-			attenuation = FO4InverseSquareLighting::GetAttenuation(
+			attenuation = FO4LightLimitFix::GetAttenuation(
 				lightData, sqrt(distanceSquared), attenuation);
 #	endif
 

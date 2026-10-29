@@ -220,6 +220,8 @@ namespace cs::features
 	{
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
+		const auto& antiLag2 = render::temporal::FindDiagnostics(
+			status.latencyBackends, render::temporal::LatencyBackend::kAntiLag2);
 		const auto diagnostics =
 			pipeline.GetFrameGenerationDiagnostics(false);
 		const auto fidelityFxCapabilities =
@@ -378,6 +380,14 @@ namespace cs::features
 			.Field("latency_hooks_installed", status.latencyHooksInstalled)
 			.Field("latency_sdk_active", status.latencySdkActive)
 			.Field("latency_phase", static_cast<std::uint8_t>(status.latencyPhase))
+			.Field("latency_backend", static_cast<std::uint8_t>(status.latencyBackend))
+			.Field("antilag2_enabled", antiLag2.effective.mode != render::temporal::LatencyMode::kOff)
+			.Field("antilag2_initialize_result", antiLag2.initializeResult)
+			.Field("antilag2_frame_type_tagging", antiLag2.frameTypeTagging)
+			.Field("antilag2_updates", antiLag2.sleepCalls)
+			.Field("antilag2_update_failures", antiLag2.sleepFailures)
+			.Field("antilag2_last_update_result", antiLag2.lastCallResult)
+			.Field("antilag2_end_of_frame_marks", antiLag2.markersDelivered)
 			.Field("frame_slot", status.frameSlot)
 			.Field("present_attempts", status.presentAttempts)
 			.Field("reset_epoch_requested", status.frameGenerationResetRequested)
@@ -646,138 +656,97 @@ namespace cs::features
 					}
 				}
 			}
-		}
 
-		if (const ui::Section section{ "frame-generation-advanced", "Advanced", ui::Collapsible{ 1 } }; section) {
 			changed |= edit.Discrete(dmui::ui::Checkbox(
 				"Allow in menus",
 				&settings.frameGenerationAllowInMenus));
-		}
 
-		if (changed) {
-			pipeline.SubmitLiveConfiguration();
-		}
-
-		const auto currentStatus = pipeline.GetStatus();
-		const auto effectiveName =
-			render::temporal::presentation::Name(
-				currentStatus.effective.frameGeneration);
-		if (const ui::Section section{ "frame-generation-status", "Status" }; section) {
-			if (currentStatus.transitionInFlight) {
+			const auto effectiveName =
+				render::temporal::presentation::Name(status.effective.frameGeneration);
+			const auto selectedName = MethodName(settings.frameGenerationMethod);
+			const auto selectedAvailability = availability(settings.frameGenerationMethod);
+			if (status.transitionInFlight) {
 				dmui::ui::TextDisabled(
 					"Switching to %.*s...",
-					static_cast<int>(
-						MethodName(settings.frameGenerationMethod).size()),
-					MethodName(settings.frameGenerationMethod).data());
-			} else if (!currentStatus.effective.frameGenerationEnabled) {
-				dmui::ui::TextDisabled("Active: Off");
-			} else if (
-				currentStatus.effective.frameGeneration ==
-					render::temporal::FrameGenerationMethod::kDLSSG &&
-				currentStatus.effective.frameGenerationConfiguration.mode ==
-					render::temporal::FrameGenerationMode::kDynamic) {
-				dmui::ui::TextDisabled("Active: DLSS Dynamic");
-			} else if (
-				currentStatus.effective.frameGeneration ==
-				render::temporal::FrameGenerationMethod::kDLSSG) {
-				dmui::ui::TextDisabled(
-					"Active: DLSS %ux",
-					currentStatus.effective.frameGenerationConfiguration
-						.fixedMultiplier);
-			} else {
-				dmui::ui::TextDisabled(
-					"Active: %.*s",
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			}
-			const auto selectedAvailability =
-				render::temporal::presentation::Describe(
-					static_cast<render::temporal::FrameGenerationMethod>(
-						settings.frameGenerationMethod),
-					currentStatus,
-					dlssCapabilities,
-					fidelityFx);
-			if (selectedAvailability.kind !=
-				render::temporal::presentation::AvailabilityKind::kAvailable) {
+					static_cast<int>(selectedName.size()),
+					selectedName.data());
+			} else if (selectedAvailability.kind !=
+					   render::temporal::presentation::AvailabilityKind::kAvailable) {
 				dmui::ui::TextWrapped(
 					"%s. %.*s remains active.",
 					selectedAvailability.reason.c_str(),
 					static_cast<int>(effectiveName.size()),
 					effectiveName.data());
-			} else if (
-				!currentStatus.transitionInFlight &&
-				currentStatus.effective.frameGeneration !=
-					static_cast<render::temporal::FrameGenerationMethod>(
-						settings.frameGenerationMethod) &&
-				!currentStatus.failure.empty()) {
+			} else if (status.effective.frameGeneration !=
+						   static_cast<render::temporal::FrameGenerationMethod>(
+							   settings.frameGenerationMethod) &&
+					   !status.failure.empty()) {
 				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
-					static_cast<int>(
-						MethodName(settings.frameGenerationMethod).size()),
-					MethodName(settings.frameGenerationMethod).data(),
+					"Could not activate %.*s. %.*s remains active; see Debug.",
+					static_cast<int>(selectedName.size()),
+					selectedName.data(),
 					static_cast<int>(effectiveName.size()),
 					effectiveName.data());
 			}
 		}
 
+		if (changed) {
+			pipeline.SubmitLiveConfiguration();
+		}
+	}
+
+	void FrameGeneration::DrawDebug()
+	{
+		settings::SettingsEdit edit{ *this };
+		auto& pipeline = render::TemporalPipeline::Get();
+		const auto currentStatus = pipeline.GetStatus();
+		const auto dlssCapabilities =
+			pipeline.GetFrameGenerationCapabilities();
 		const auto diagnostics =
 			pipeline.GetFrameGenerationDiagnostics();
-		const auto diagnosticRows =
-			std::size_t{ 3 } +
-			diagnostics.generatedFrameCountAvailable +
-			(fidelityFx.fsr4FrameGeneration.availability !=
-				render::temporal::CapabilityAvailability::kUnknown) +
-			currentStatus.pending.required +
-			!currentStatus.failure.empty();
-		if (const ui::Section section{ "frame-generation-diagnostics", "Diagnostics", ui::Collapsible{ diagnosticRows } }; section) {
-			if (edit.Discrete(dmui::ui::Checkbox(
-					"Detailed diagnostics",
-					&settings.detailedDiagnostics))) {
-				pipeline.SetDetailedTracing(
-					settings.detailedDiagnostics);
-			}
-			dmui::ui::TextDisabled(
-				"Ready: %s | active: %s | dispatches: %llu | failures: %llu",
-				diagnostics.ready ? "yes" : "no",
-				diagnostics.active ? "yes" : "no",
-				static_cast<unsigned long long>(diagnostics.dispatches),
-				static_cast<unsigned long long>(diagnostics.failures));
-			if (diagnostics.generatedFrameCountAvailable) {
-				dmui::ui::TextDisabled(
-					"Provider generated frames: %llu",
-					static_cast<unsigned long long>(
-						diagnostics.generatedFrames));
-			}
-			dmui::ui::TextDisabled(
-				"DLSS capability: %u | current: %s | max generation: %ux | dynamic: %s | status: %u",
-				static_cast<unsigned>(
-					dlssCapabilities.availability),
-				dlssCapabilities.IsCurrent() ? "yes" : "no",
-				dlssCapabilities.maxGeneratedFrames ? dlssCapabilities.maxGeneratedFrames + 1 : 0,
-				dlssCapabilities.dynamicModeSupported ? "yes" : "no",
-				dlssCapabilities.providerStatus);
-			if (currentStatus.pending.required) {
-				dmui::ui::TextDisabled(
-					"Restart required: %s",
-					currentStatus.pending.reason.c_str());
-			}
-			if (!currentStatus.failure.empty()) {
-				dmui::ui::TextDisabled(
-					"%s",
-					currentStatus.failure.c_str());
-			}
+		if (edit.Discrete(dmui::ui::Checkbox(
+				"Detailed diagnostics",
+				&settings.detailedDiagnostics))) {
+			pipeline.SetDetailedTracing(
+				settings.detailedDiagnostics);
 		}
-
-		Menu::Get().DrawDebugViewSelector(*this);
+		dmui::ui::TextDisabled(
+			"Ready: %s | active: %s | dispatches: %llu | failures: %llu",
+			diagnostics.ready ? "yes" : "no",
+			diagnostics.active ? "yes" : "no",
+			static_cast<unsigned long long>(diagnostics.dispatches),
+			static_cast<unsigned long long>(diagnostics.failures));
+		if (diagnostics.generatedFrameCountAvailable) {
+			dmui::ui::TextDisabled(
+				"Provider generated frames: %llu",
+				static_cast<unsigned long long>(
+					diagnostics.generatedFrames));
+		}
+		dmui::ui::TextDisabled(
+			"DLSS capability: %u | current: %s | max generation: %ux | dynamic: %s | status: %u",
+			static_cast<unsigned>(
+				dlssCapabilities.availability),
+			dlssCapabilities.IsCurrent() ? "yes" : "no",
+			dlssCapabilities.maxGeneratedFrames ? dlssCapabilities.maxGeneratedFrames + 1 : 0,
+			dlssCapabilities.dynamicModeSupported ? "yes" : "no",
+			dlssCapabilities.providerStatus);
+		if (currentStatus.pending.required) {
+			dmui::ui::TextDisabled(
+				"Restart required: %s",
+				currentStatus.pending.reason.c_str());
+		}
+		if (!currentStatus.failure.empty()) {
+			dmui::ui::TextDisabled(
+				"%s",
+				currentStatus.failure.c_str());
+		}
 		auto& renderer = pipeline.Renderer();
 		if (renderer.HasFrameGenerationDebugSnapshotSelection()) {
-			if (const ui::Section section{ "frame-generation-debug-snapshot", "Debug Snapshot" }; section) {
-				if (dmui::ui::Button("Refresh snapshot"))
-					renderer.RefreshFrameGenerationDebugSnapshot();
-				if (renderer.FrameGenerationDebugSnapshotPending())
-					dmui::ui::TextDisabled(
-						"Refresh pending; the previous snapshot remains visible.");
-			}
+			if (dmui::ui::Button("Refresh snapshot"))
+				renderer.RefreshFrameGenerationDebugSnapshot();
+			if (renderer.FrameGenerationDebugSnapshotPending())
+				dmui::ui::TextDisabled(
+					"Refresh pending; the previous snapshot remains visible.");
 		}
 	}
 

@@ -8,7 +8,8 @@ local shader_directories = {
     "features/WaterEffects/Shaders",
     "features/Skylighting/Shaders",
     "features/SubsurfaceScattering/Shaders",
-    "features/VolumetricShadows/Shaders"
+    "features/VolumetricShadows/Shaders",
+    "features/CloudShadows/Shaders"
 }
 
 local shader_files = {
@@ -21,6 +22,7 @@ local root = os.projectdir()
 local engine_entry_points = {
     ["effect.hlsl"] = true,
     ["distanttree.hlsl"] = true,
+    ["sky.hlsl"] = true,
     ["water.hlsl"] = true
 }
 

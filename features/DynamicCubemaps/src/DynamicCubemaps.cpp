@@ -16,7 +16,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "RE/D/DrawWorld.h"
@@ -56,7 +55,7 @@ namespace cs::features
 		constexpr const wchar_t* kBc6hPath =
 			L"Data\\Shaders\\DynamicCubemaps\\BC6HEncodeCS.hlsl";
 		constexpr const wchar_t* kPreviewPath =
-			L"Data\\Shaders\\FO4\\DynamicCubemaps\\CubemapPreviewCS.hlsl";
+			L"Data\\Shaders\\FO4\\CubemapPreviewCS.hlsl";
 		constexpr std::string_view kPreviewUnavailable = "Cubemap preview not populated.";
 		constexpr const wchar_t* kDefaultCubemapPath =
 			L"Data\\Shaders\\DynamicCubemaps\\defaultcubemap.dds";
@@ -1326,7 +1325,6 @@ namespace cs::features
 		if (changed) {
 			PublishSettings();
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void DynamicCubemaps::RestoreDefaultSettings()

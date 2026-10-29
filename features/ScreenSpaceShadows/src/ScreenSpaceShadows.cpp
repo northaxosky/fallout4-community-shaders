@@ -20,7 +20,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
@@ -789,7 +788,6 @@ namespace cs::features
 				_settings.SampleCount = static_cast<std::uint32_t>(sampleCount);
 			}
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void ScreenSpaceShadows::RestoreDefaultSettings()

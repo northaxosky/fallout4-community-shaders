@@ -28,7 +28,6 @@ namespace cs::features
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		void OnPostPostLoad() override;
 		void OnDataLoaded() override;
-		void OnLoadingMenuClosed() override;
 		void DrawSettings() override;
 		void DrawOverlay() override;
 		bool IsOverlayActive() const override;
@@ -41,6 +40,7 @@ namespace cs::features
 		{
 			std::vector<RE::NiPointer<RE::NiAVObject>> original;
 			std::vector<engine::water::TileCell> tiles;
+			std::vector<engine::water::TileWater> water;
 		};
 		using Chunk = engine::water::TerrainChunk;
 		using Node = engine::water::TerrainNode;
@@ -52,6 +52,11 @@ namespace cs::features
 		struct Detach
 		{
 			static void thunk(Chunk* a_chunk);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+		struct AttachWater
+		{
+			static void thunk(bool a_attach);
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 		struct Visibility
@@ -69,18 +74,13 @@ namespace cs::features
 			static void thunk(RE::TESWorldSpace* a_world);
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
-		struct UpdateDisplacement
-		{
-			static void thunk(engine::water::WaterSystem* a_system);
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
 		struct UpdateWaterSystem
 		{
 			static void thunk(engine::water::WaterSystem* a_system, RE::BSCullingProcess* a_process);
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 		void ApplyEnabledState();
-		void UpdateWaterLODCull() const;
+		void RegisterChunkWater(Chunk* a_chunk);
 		bool TilesHidden() const;
 		void RefreshTileVisibility();
 		void RestoreOriginal(RE::BSMultiBoundNode* a_parent, ManagedWater& a_water);
@@ -98,6 +98,7 @@ namespace cs::features
 		std::atomic_bool _hooks{ false };
 		std::atomic_bool _injections{ false };
 		std::atomic_bool _exterior{ false };
+		std::atomic_bool _lodWaterAttached{ true };
 		std::atomic_bool _refreshTiles{ false };
 		std::atomic_uint64_t _tilesBuilt{ 0 };
 		std::atomic_uint64_t _chunksAttached{ 0 };

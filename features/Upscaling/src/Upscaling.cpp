@@ -7,7 +7,6 @@
 #include <DearModdingUI/Client.h>
 
 #include "Log.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/FeatureShaderBindings.h"
@@ -199,189 +198,199 @@ namespace cs::features
 						&sharpnessRange.min,
 						&sharpnessRange.max));
 				}
-			}
-		}
-
-		if (settings.upscaleMethod ==
-			static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
-			if (const ui::Section section{ "upscaling-advanced", "Advanced", ui::Collapsible{ 1 } }; section) {
-				static const std::array presets{
-					dmui::ChoiceOption<std::uint32_t>{
-						0, "Default", "default" },
-					dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
-					dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
-					dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
-					dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
-				};
-				const auto preset = dmui::DrawChoice<std::uint32_t>(
-					"upscaling-dlss-preset",
-					settings.presetDLSS,
-					std::span<const dmui::ChoiceOption<std::uint32_t>>{
-						presets },
-					"Unavailable",
-					"DLSS preset");
-				if (edit.Discrete(preset.changed)) {
-					settings.presetDLSS = *preset.selected;
-					changed = true;
+				if (settings.upscaleMethod ==
+					static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
+					static const std::array presets{
+						dmui::ChoiceOption<std::uint32_t>{
+							0, "Default", "default" },
+						dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
+						dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
+						dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
+						dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
+					};
+					const auto preset = dmui::DrawChoice<std::uint32_t>(
+						"upscaling-dlss-preset",
+						settings.presetDLSS,
+						std::span<const dmui::ChoiceOption<std::uint32_t>>{
+							presets },
+						"Unavailable",
+						"DLSS preset");
+					if (edit.Discrete(preset.changed)) {
+						settings.presetDLSS = *preset.selected;
+						changed = true;
+					}
 				}
 			}
+
+			const auto effectiveName =
+				render::temporal::presentation::Name(status.effective.superResolution);
+			const auto selectedName = MethodName(settings.upscaleMethod);
+			const auto selectedAvailability = availability(settings.upscaleMethod);
+			if (status.transitionInFlight) {
+				dmui::ui::TextDisabled(
+					"Switching to %.*s...",
+					static_cast<int>(selectedName.size()),
+					selectedName.data());
+			} else if (selectedAvailability.kind !=
+					   render::temporal::presentation::AvailabilityKind::kAvailable) {
+				dmui::ui::TextWrapped(
+					"%s. %.*s remains active.",
+					selectedAvailability.reason.c_str(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			} else if (status.effective.superResolution !=
+						   static_cast<render::temporal::SuperResolutionMethod>(
+							   settings.upscaleMethod) &&
+					   !status.failure.empty()) {
+				dmui::ui::TextWrapped(
+					"Could not activate %.*s. %.*s remains active; see Debug.",
+					static_cast<int>(selectedName.size()),
+					selectedName.data(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			}
 		}
 
-		if (const ui::Section section{ "upscaling-reflex", "NVIDIA Reflex" }; section) {
+		if (const ui::Section section{ "upscaling-latency", "Latency" }; section) {
+			using render::temporal::LatencyBackend;
+			using render::temporal::LatencyUnavailableReason;
 			const auto& latency = status.latency;
-			if (!latency.available) {
-				dmui::ui::TextDisabled("Reflex is unavailable on this GPU or driver.");
-			} else if (
+			const bool reflexActive = status.latencyBackend == LatencyBackend::kReflex;
+			const bool dlssgForcesLatency =
 				status.effective.frameGenerationEnabled &&
 				status.effective.frameGeneration ==
-					render::temporal::FrameGenerationMethod::kDLSSG) {
-				dmui::ui::TextDisabled(
-					"Low Latency forced on by DLSS Frame Generation");
+					render::temporal::FrameGenerationMethod::kDLSSG;
+			const char* latencyStatus = "Unavailable on this GPU or driver";
+			switch (status.latencyBackend) {
+			case LatencyBackend::kReflex:
+				latencyStatus = dlssgForcesLatency ?
+				                    "Using NVIDIA Reflex, forced on by DLSS Frame Generation" :
+				                    "Using NVIDIA Reflex";
+				break;
+			case LatencyBackend::kAntiLag2:
+				latencyStatus = "Using AMD Radeon Anti-Lag 2 (Experimental)";
+				break;
+			case LatencyBackend::kNone:
+				switch (latency.unavailableReason) {
+				case LatencyUnavailableReason::kNeedsD3D12Presentation:
+					latencyStatus = "AMD Anti-Lag 2 requires Upscaling or Frame Generation in borderless windowed mode";
+					break;
+				case LatencyUnavailableReason::kPresentationFailed:
+					latencyStatus = "Inactive because Direct3D 12 presentation failed";
+					break;
+				case LatencyUnavailableReason::kUpdateFailing:
+					latencyStatus = "The driver is rejecting Anti-Lag 2 updates";
+					break;
+				case LatencyUnavailableReason::kNone:
+					if (settings.latencyReduction == 0) {
+						latencyStatus = "Turn Latency Reduction on to detect a supported backend";
+					}
+					break;
+				case LatencyUnavailableReason::kUnsupportedAdapter:
+				case LatencyUnavailableReason::kInitializeFailed:
+					break;
+				}
+				break;
 			}
-			dmui::ui::BeginDisabled(!latency.available);
+			dmui::ui::TextDisabled("%s", latencyStatus);
+			const std::array reductions{
+				dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
+				dmui::ChoiceOption<std::uint32_t>{ 1, "On", "on" },
+				dmui::ChoiceOption<std::uint32_t>{ 2, "On + Boost", "on-boost", reflexActive }
+			};
+			const auto reduction = dmui::DrawChoice<std::uint32_t>(
+				"upscaling-latency-reduction",
+				settings.latencyReduction,
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{
+					reductions },
+				"Unavailable",
+				"Latency Reduction");
+			ui::Tooltip("Reduces input latency by pacing CPU work against the GPU. Boost keeps GPU clocks high and is NVIDIA Reflex only.");
+			if (edit.Discrete(reduction.changed)) {
+				settings.latencyReduction = *reduction.selected;
+				changed = true;
+			}
 			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Low Latency Mode", &settings.reflexLowLatencyMode));
-			ui::Tooltip("Reduces input latency by pacing CPU work against the GPU.");
-			dmui::ui::BeginDisabled(!settings.reflexLowLatencyMode);
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Low Latency Boost", &settings.reflexLowLatencyBoost));
-			ui::Tooltip("Keeps the GPU clocks high to cut latency further at the cost of power.");
-			dmui::ui::EndDisabled();
-			dmui::ui::BeginDisabled(!latency.markersAvailable);
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Use Markers To Optimize", &settings.reflexUseMarkersToOptimize));
-			ui::Tooltip("Lets Reflex tune pacing from frame markers; only helps in specific cases.");
-			dmui::ui::EndDisabled();
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Use FPS Limit", &settings.reflexUseFpsLimit));
-			ui::Tooltip("Caps the frame rate through Reflex for steadier frame times.");
-			dmui::ui::BeginDisabled(!settings.reflexUseFpsLimit);
-			const auto fpsRange = render::temporal::kSchema.EditRange(&Settings::reflexFpsLimit);
+				"Frame Rate Limit", &settings.latencyFpsLimitEnabled));
+			ui::Tooltip("Caps the frame rate through the active latency backend for steadier frame times.");
+			dmui::ui::BeginDisabled(!settings.latencyFpsLimitEnabled);
+			const auto fpsRange = render::temporal::kSchema.EditRange(&Settings::latencyFpsLimit);
 			changed |= edit.Continuous(dmui::ui::SliderScalar(
-				"FPS Limit",
-				&settings.reflexFpsLimit,
+				"Limit",
+				&settings.latencyFpsLimit,
 				&fpsRange.min,
 				&fpsRange.max,
 				"%.0f"));
 			dmui::ui::EndDisabled();
+			dmui::ui::BeginDisabled(!status.latency.markersAvailable);
+			changed |= edit.Discrete(dmui::ui::Checkbox(
+				"Use Markers To Optimize", &settings.latencyUseMarkers));
+			ui::Tooltip("Lets NVIDIA Reflex tune pacing from frame markers; only helps in specific cases.");
 			dmui::ui::EndDisabled();
 		}
 
 		if (changed) {
 			pipeline.SubmitLiveConfiguration();
 		}
+	}
 
+	void Upscaling::DrawDebug()
+	{
+		settings::SettingsEdit edit{ *this };
+		auto& pipeline = render::TemporalPipeline::Get();
 		const auto currentStatus = pipeline.GetStatus();
 		const auto [renderWidth, renderHeight] =
 			pipeline.Renderer().GetRenderSize();
 		const auto effectiveName =
 			render::temporal::presentation::Name(
 				currentStatus.effective.superResolution);
-		if (const ui::Section section{ "upscaling-status", "Status" }; section) {
-			if (currentStatus.transitionInFlight) {
-				dmui::ui::TextDisabled(
-					"Switching to %.*s...",
-					static_cast<int>(MethodName(settings.upscaleMethod).size()),
-					MethodName(settings.upscaleMethod).data());
-			} else if (!currentStatus.effective.superResolutionEnabled) {
-				dmui::ui::TextDisabled("Active: Off");
-			} else if (renderWidth && renderHeight &&
-					   currentStatus.display.output.IsValid()) {
-				dmui::ui::TextDisabled(
-					"Active: %.*s | %ux%u -> %ux%u",
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data(),
-					renderWidth,
-					renderHeight,
-					currentStatus.display.output.width,
-					currentStatus.display.output.height);
-			} else {
-				dmui::ui::TextDisabled(
-					"Active: %.*s",
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			}
-			const auto selectedAvailability = render::temporal::presentation::Describe(
-				static_cast<render::temporal::SuperResolutionMethod>(
-					settings.upscaleMethod),
-				currentStatus,
-				fidelityFx);
-			if (selectedAvailability.kind !=
-				render::temporal::presentation::AvailabilityKind::kAvailable) {
-				dmui::ui::TextWrapped(
-					"%s. %.*s remains active.",
-					selectedAvailability.reason.c_str(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			} else if (
-				!currentStatus.transitionInFlight &&
-				currentStatus.effective.superResolution !=
-					static_cast<render::temporal::SuperResolutionMethod>(
-						settings.upscaleMethod) &&
-				!currentStatus.failure.empty()) {
-				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
-					static_cast<int>(MethodName(settings.upscaleMethod).size()),
-					MethodName(settings.upscaleMethod).data(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			}
-		}
 
-		const auto diagnosticRows =
-			std::size_t{ 3 } +
-			(fidelityFx.fsr4SuperResolution.availability !=
-				render::temporal::CapabilityAvailability::kUnknown) +
-			currentStatus.pending.required +
-			!currentStatus.failure.empty();
-		if (const ui::Section section{ "upscaling-diagnostics", "Diagnostics", ui::Collapsible{ diagnosticRows } }; section) {
-			static const std::array logLevels{
-				dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
-				dmui::ChoiceOption<std::uint32_t>{
-					1, "Default", "default" },
-				dmui::ChoiceOption<std::uint32_t>{
-					2, "Verbose", "verbose" }
-			};
-			const auto logLevel = dmui::DrawChoice<std::uint32_t>(
-				"upscaling-streamline-log-level",
-				settings.streamlineLogLevel,
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{
-					logLevels },
-				"Unavailable",
-				"Streamline logging");
-			if (edit.Discrete(logLevel.changed)) {
-				settings.streamlineLogLevel = *logLevel.selected;
-			}
-			const auto [scale, ready] = pipeline.Renderer().GetReadiness();
-			dmui::ui::TextDisabled(
-				"Render scale: %.0f%% | resources: %s",
-				static_cast<double>(scale) * 100.0,
-				ready ? "ready" : "not ready");
-			dmui::ui::TextDisabled(
-				"Requested: %.*s | effective: %.*s",
-				static_cast<int>(MethodName(settings.upscaleMethod).size()),
-				MethodName(settings.upscaleMethod).data(),
-				static_cast<int>(effectiveName.size()),
-				effectiveName.data());
-			if (currentStatus.pending.required)
-				dmui::ui::TextDisabled(
-					"Restart required: %s",
-					currentStatus.pending.reason.c_str());
-			if (!currentStatus.failure.empty())
-				dmui::ui::TextDisabled(
-					"%s",
-					currentStatus.failure.c_str());
+		static const std::array logLevels{
+			dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
+			dmui::ChoiceOption<std::uint32_t>{
+				1, "Default", "default" },
+			dmui::ChoiceOption<std::uint32_t>{
+				2, "Verbose", "verbose" }
+		};
+		const auto logLevel = dmui::DrawChoice<std::uint32_t>(
+			"upscaling-streamline-log-level",
+			settings.streamlineLogLevel,
+			std::span<const dmui::ChoiceOption<std::uint32_t>>{
+				logLevels },
+			"Unavailable",
+			"Streamline logging");
+		if (edit.Discrete(logLevel.changed)) {
+			settings.streamlineLogLevel = *logLevel.selected;
 		}
-
-		Menu::Get().DrawDebugViewSelector(*this);
+		const auto [scale, ready] = pipeline.Renderer().GetReadiness();
+		dmui::ui::TextDisabled(
+			"Render: %ux%u -> %ux%u (%.0f%%) | resources: %s",
+			renderWidth,
+			renderHeight,
+			currentStatus.display.output.width,
+			currentStatus.display.output.height,
+			static_cast<double>(scale) * 100.0,
+			ready ? "ready" : "not ready");
+		dmui::ui::TextDisabled(
+			"Requested: %.*s | effective: %.*s",
+			static_cast<int>(MethodName(settings.upscaleMethod).size()),
+			MethodName(settings.upscaleMethod).data(),
+			static_cast<int>(effectiveName.size()),
+			effectiveName.data());
+		if (currentStatus.pending.required)
+			dmui::ui::TextDisabled(
+				"Restart required: %s",
+				currentStatus.pending.reason.c_str());
+		if (!currentStatus.failure.empty())
+			dmui::ui::TextDisabled(
+				"%s",
+				currentStatus.failure.c_str());
 		if (pipeline.Renderer().HasDebugSnapshotSelection()) {
-			if (const ui::Section section{ "upscaling-debug-snapshot", "Debug Snapshot" }; section) {
-				if (dmui::ui::Button("Refresh snapshot"))
-					pipeline.Renderer().RefreshDebugSnapshot();
-				if (pipeline.Renderer().DebugSnapshotPending())
-					dmui::ui::TextDisabled(
-						"Refresh pending; the previous snapshot remains visible.");
-			}
+			if (dmui::ui::Button("Refresh snapshot"))
+				pipeline.Renderer().RefreshDebugSnapshot();
+			if (pipeline.Renderer().DebugSnapshotPending())
+				dmui::ui::TextDisabled(
+					"Refresh pending; the previous snapshot remains visible.");
 		}
 	}
 
@@ -391,7 +400,9 @@ namespace cs::features
 		const auto capabilities =
 			render::TemporalPipeline::Get()
 				.GetFidelityFXCapabilities();
-		const auto latency = render::TemporalPipeline::Get().GetStatus().latency;
+		const auto latency = render::temporal::FindDiagnostics(
+			render::TemporalPipeline::Get().GetStatus().latencyBackends,
+			render::temporal::LatencyBackend::kReflex);
 		a_sink
 			.Field("reflex_available", latency.available)
 			.Field("reflex_low_latency_available", latency.lowLatencyAvailable)

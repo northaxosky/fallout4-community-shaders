@@ -6,6 +6,7 @@
 #include "Render/Engine.h"
 #include "Render/HookRegistry.h"
 #include "Render/RenderHooks.h"
+#include "Render/ShaderGeometryHooks.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsRegistry.h"
@@ -110,47 +111,25 @@ namespace cs::render::frame_annotations
 		thread_local BoundTechnique t_bound;
 		thread_local annotation::SpannedEvent t_geometry;
 
-		template <class Shader>
-		struct SetupGeometry_Hook
+		void AnnotateSetupGeometry(RE::BSShader* a_self, RE::BSRenderPass* a_pass) noexcept
 		{
-			static constexpr std::size_t size = 0x07;
-
-			static void thunk(RE::BSShader* a_self, RE::BSRenderPass* a_pass)
-			{
-				if (AnnotateDraws() && a_pass) {
-					t_geometry.Begin(
-						std::format("[{}:{:X}] ({:X}) {}",
-							ShaderLabel(a_self),
-							t_bound.shader == a_self ? t_bound.pixelShaderId : 0,
-							a_pass->passEnum,
-							a_pass->geometry ? a_pass->geometry->name.c_str() : ""),
-						false);
-				}
-				func(a_self, a_pass);
+			if (!AnnotateDraws() || !a_pass)
+				return;
+			try {
+				t_geometry.Begin(
+					std::format("[{}:{:X}] ({:X}) {}",
+						ShaderLabel(a_self),
+						t_bound.shader == a_self ? t_bound.pixelShaderId : 0,
+						a_pass->passEnum,
+						a_pass->geometry ? a_pass->geometry->name.c_str() : ""),
+					false);
+			} catch (...) {
 			}
+		}
 
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
-		template <class Shader>
-		struct RestoreGeometry_Hook
+		void AnnotateRestoreGeometry(RE::BSShader*, RE::BSRenderPass*) noexcept
 		{
-			static constexpr std::size_t size = 0x08;
-
-			static void thunk(RE::BSShader* a_self, RE::BSRenderPass* a_pass)
-			{
-				func(a_self, a_pass);
-				t_geometry.End();
-			}
-
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
-		template <class Shader>
-		void InstallGeometryHooks()
-		{
-			stl::write_vfunc<Shader, SetupGeometry_Hook<Shader>>();
-			stl::write_vfunc<Shader, RestoreGeometry_Hook<Shader>>();
+			t_geometry.End();
 		}
 
 		// Shared by every imagespace shader; `this` is the embedded effect base.
@@ -385,7 +364,7 @@ namespace cs::render::frame_annotations
 			Vfunc<0x2E, FinishAccumulating_Hook<FinishPhase::kPreResolveDepth>>(RE::VTABLE::BSShaderAccumulator);
 			Vfunc<0x2F, FinishAccumulating_Hook<FinishPhase::kPostResolveDepth>>(RE::VTABLE::BSShaderAccumulator);
 
-#define CS_HOOK_GEOMETRY(klass, target) InstallGeometryHooks<RE::klass>()
+#define CS_HOOK_GEOMETRY(klass, target) engine::ObserveShaderGeometry(engine::ShaderInjectionTarget::target, { &AnnotateSetupGeometry, &AnnotateRestoreGeometry })
 			CS_SHADER_SUBCLASSES(CS_HOOK_GEOMETRY);
 #undef CS_HOOK_GEOMETRY
 		}

@@ -4,6 +4,7 @@
 #include "RenderDoc.h"
 
 #include "Render/FrameProfiler.h"
+#include "Utils/PathUtf8.h"
 
 #include <algorithm>
 #include <string_view>
@@ -78,8 +79,7 @@ namespace cs::features::remote_control
 			if (a_done.error.empty()) {
 				auto captures = Json::array();
 				for (const auto& file : a_done.captures) {
-					const auto path = file.path.u8string();
-					captures.push_back({ { "path", std::string(path.begin(), path.end()) }, { "bytes", file.bytes } });
+					captures.push_back({ { "path", util::PathToUtf8(file.path) }, { "bytes", file.bytes } });
 				}
 				payload["frames"] = a_done.frames;
 				payload["captures"] = std::move(captures);

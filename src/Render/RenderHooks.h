@@ -79,6 +79,9 @@ namespace cs::engine
 	CS_DECLARE_RENDER_HOOK(RegisterPreShadowLightRender, ShadowLightKind a_kind, );
 	CS_DECLARE_RENDER_HOOK(RegisterPostShadowLightRender, ShadowLightKind a_kind, );
 
+	// After the ImageSpace effects and resolve, before the UI.
+	CS_DECLARE_RENDER_HOOK(RegisterPostImagespace);
+
 	// After all sky and cloud draws in the main color target, before water and alpha.
 	CS_DECLARE_RENDER_HOOK(RegisterPostForwardSky);
 

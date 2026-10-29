@@ -60,7 +60,8 @@ namespace cs::engine
 		kSampler,
 		kShaderResource,
 		kUnorderedAccess,
-		kBlendState
+		kBlendState,
+		kRenderTarget
 	};
 
 	struct ShaderInjectionDrawMetrics
@@ -82,6 +83,10 @@ namespace cs::engine
 	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
 	// The active draw scope restores the blend state when its draw returns.
 	void CaptureShaderInjectionBlendState(ID3D11DeviceContext*) noexcept;
+	// The active draw scope restores the render targets and depth view.
+	void CaptureShaderInjectionRenderTargets(ID3D11DeviceContext*) noexcept;
+	// Overrides a frame-bound PS slot for one draw; the draw scope restores it.
+	void OverrideInjectionFrameShaderResource(ID3D11DeviceContext*, UINT, ID3D11ShaderResourceView*) noexcept;
 	// Plugin GPU work or engine resets may change bindings the caches trust.
 	void InvalidateShaderInjectionBindings() noexcept;
 
@@ -109,7 +114,8 @@ namespace cs::engine
 		ScopedShaderInjectionBindings(const ScopedShaderInjectionBindings&) = delete;
 		ScopedShaderInjectionBindings& operator=(const ScopedShaderInjectionBindings&) = delete;
 		ShaderStage GetStage() const noexcept { return _stage; }
-		void Capture(ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot) noexcept;
+		// a_frameOwned captures a per-frame host slot above the engine range.
+		void Capture(ID3D11DeviceContext* a_context, ShaderResourceType a_type, std::uint32_t a_slot, bool a_frameOwned = false) noexcept;
 		void BindSampler(ID3D11DeviceContext* a_context, std::uint32_t a_slot, ID3D11SamplerState* a_sampler) noexcept;
 
 	private:
@@ -142,6 +148,9 @@ namespace cs::engine
 		float _blendFactor[4]{};
 		std::uint32_t _sampleMask = 0;
 		bool _blendCaptured = false;
+		ID3D11RenderTargetView* _targets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+		ID3D11DepthStencilView* _depth = nullptr;
+		bool _targetsCaptured = false;
 	};
 	using ScopedPixelShaderInjectionBindings = ScopedShaderInjectionBindings;
 

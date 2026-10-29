@@ -15,15 +15,14 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/FullscreenPass.h"
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
-#include "Render/ScopedContextState.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
 #include "Telemetry/Telemetry.h"
@@ -223,7 +222,7 @@ namespace cs::features
 		L->info("Water caustics texture and sampler ready.");
 		try {
 			BuildDebugResources(a_device);
-			_debugResourcesReady.store(_debugVS && _debugPS[0] && _debugPS[1], std::memory_order_release);
+			_debugResourcesReady.store(_debugPass.Ready() && _debugPS[0] && _debugPS[1], std::memory_order_release);
 		} catch (const std::exception& e) {
 			L->warn("Water debug resources unavailable: {}", e.what());
 		}
@@ -231,15 +230,7 @@ namespace cs::features
 
 	void WaterEffects::BuildDebugResources(ID3D11Device* a_device)
 	{
-		winrt::com_ptr<ID3D11Device1> device;
-		DX::ThrowIfFailed(a_device->QueryInterface(IID_PPV_ARGS(device.put())));
-		const auto level = a_device->GetFeatureLevel();
-		D3D_FEATURE_LEVEL selected{};
-		DX::ThrowIfFailed(device->CreateDeviceContextState(
-			0, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), &selected,
-			_debugContextState.put()));
-		_debugVS.attach(static_cast<ID3D11VertexShader*>(cs::util::CompileShader(
-			L"Data\\Shaders\\FO4\\WaterEffects\\Debug.hlsl", {}, "vs_5_0")));
+		_debugPass.Create(a_device);
 		for (std::size_t index = 0; index < _debugPS.size(); ++index) {
 			std::vector<std::pair<const char*, const char*>> defines{ { "FO4CS_SUBSTRATE", "1" } };
 			if (index == 1)
@@ -247,11 +238,6 @@ namespace cs::features
 			_debugPS[index].attach(static_cast<ID3D11PixelShader*>(cs::util::CompileShader(
 				L"Data\\Shaders\\FO4\\WaterEffects\\Debug.hlsl", defines, "ps_5_0")));
 		}
-		D3D11_RASTERIZER_DESC rasterizer{};
-		rasterizer.FillMode = D3D11_FILL_SOLID;
-		rasterizer.CullMode = D3D11_CULL_NONE;
-		rasterizer.DepthClipEnable = true;
-		DX::ThrowIfFailed(a_device->CreateRasterizerState(&rasterizer, _debugRasterizer.put()));
 	}
 
 	void WaterEffects::RenderDebug(ID3D11DeviceContext* a_context)
@@ -301,20 +287,11 @@ namespace cs::features
 				return;
 			}
 		}
-		// FO4: restore the complete context because native bindings are shadow-cached.
-		cs::render::ScopedContextState state(a_context, _debugContextState.get());
-		if (!state.IsActive())
+		auto* target = _debugTexture->rtv.get();
+		const cs::render::FullscreenPass::Scope pass(_debugPass, a_context, target, extent.width, extent.height);
+		if (!pass.IsActive())
 			return;
 		cs::render::annotation::ScopedEvent annotation("WaterEffects::Debug");
-		a_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		a_context->VSSetShader(_debugVS.get(), nullptr, 0);
-		a_context->PSSetShader(_debugPS[mode == DebugVisualization::kSubmersion ? 1 : 0].get(), nullptr, 0);
-		a_context->RSSetState(_debugRasterizer.get());
-		const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(extent.width),
-			static_cast<float>(extent.height), 0, 1 };
-		a_context->RSSetViewports(1, &viewport);
-		auto* target = _debugTexture->rtv.get();
-		a_context->OMSetRenderTargets(1, &target, nullptr);
 		const float clear[4]{ 0, 0, 0, 1 };
 		a_context->ClearRenderTargetView(target, clear);
 		cs::render::BindSharedData(a_context, cs::engine::ShaderStage::kPixel);
@@ -322,7 +299,7 @@ namespace cs::features
 		auto* sampler = _causticsSampler.get();
 		a_context->PSSetShaderResources(kCausticsPSSlot, 1, &texture);
 		a_context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &sampler);
-		a_context->Draw(3, 0);
+		pass.Draw(_debugPS[mode == DebugVisualization::kSubmersion ? 1 : 0].get());
 		_debugFrameReady = true;
 		cs::render::InvalidateFullscreenDebugData();
 		_debugFrames.fetch_add(1, std::memory_order_relaxed);
@@ -460,11 +437,6 @@ namespace cs::features
 			.Field(
 				"validation_detail",
 				detail.empty() ? "operational" : detail);
-	}
-
-	void WaterEffects::DrawSettings()
-	{
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	namespace

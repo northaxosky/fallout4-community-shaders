@@ -1,6 +1,10 @@
 #ifdef BSEFFECT_PS_SOURCE
 #	include "FO4/FogConsumer.hlsli"
 #	include "FO4/EffectLightingConsumer.hlsli"
+#	if defined(LIGHTING) && defined(LIGHT_LIMIT_FIX)
+#		include "FO4/ForwardPosition.hlsli"
+#		include "FO4/LightLimitFixForward.hlsli"
+#	endif
 #	if defined(ENVCUBE_RAIN) || defined(ENVCUBE_SNOW)
 #		define WEATHER
 #	endif
@@ -181,6 +185,10 @@ float3 GetLightingColor(float3 msPosition
 	float3 color = DLightColor.xyz;
 #		if defined(FO4_EFFECT_LIGHTING)
 	color = FO4EffectLighting::GetLightingColor(color, screenPosition);
+#		endif
+#		if defined(LIGHT_LIMIT_FIX)
+	// FO4: the cluster loop in main replaces native lanes while LLF is healthy.
+	[branch] if (FO4LightLimitFix::UseClusteredLights()) return color;
 #		endif
 	color.x += dot(PLightColorR * lightFadeMul, 1.0.xxxx);
 	color.y += dot(PLightColorG * lightFadeMul, 1.0.xxxx);
@@ -753,6 +761,14 @@ PSOutput main(PSInput input)
 		input.Position.xyz
 #				endif
 	);
+#				if defined(LIGHT_LIMIT_FIX)
+	uint lightCount = 0;
+	[branch] if (FO4LightLimitFix::UseClusteredLights())
+	{
+		float3 viewPosition = FO4Forward::ViewPosition(input.Position.xyz);
+		propertyColor += FO4LightLimitFix::GetEffectLighting(viewPosition, FrameBuffer::ViewToWorld(viewPosition), lightCount);
+	}
+#				endif
 #			endif
 	float3 propertyBaseColor = propertyColor;
 	propertyBaseColor *= baseColor.xyz;
@@ -855,6 +871,17 @@ PSOutput main(PSInput input)
 	output.Color = finalColor;
 #		elif defined(PIPBOY_SCREEN)
 	output.Color = finalColor;
+#		endif
+#		if defined(LIGHTING) && defined(LIGHT_LIMIT_FIX) && defined(LLFDEBUG) && !defined(MEMBRANE)
+	if (SharedData::lightLimitFixSettings.EnableLightsVisualisation) {
+		if (SharedData::lightLimitFixSettings.LightsVisualisationMode == 0) {
+			output.Color.xyz = Color::TurboColormap(0.0);
+		} else if (SharedData::lightLimitFixSettings.LightsVisualisationMode == 1) {
+			output.Color.xyz = Color::TurboColormap(0.0);
+		} else {
+			output.Color.xyz = Color::TurboColormap((float)lightCount / MAX_CLUSTER_LIGHTS);
+		}
+	}
 #		endif
 #	endif
 	return output;

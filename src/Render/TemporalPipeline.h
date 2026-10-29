@@ -2,6 +2,7 @@
 
 #include "Render/FrameGenerationCpuTiming.h"
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/LatencyRouter.h"
 #include "Render/SwapChainHook.h"
 #include "Render/TemporalPipelineState.h"
 #include "Render/TemporalProvider.h"
@@ -12,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct IDXGIAdapter;
 struct ID3D11Device;
@@ -73,7 +75,10 @@ namespace cs::render
 		bool d3d11Ready = false;
 		bool latencyHooksInstalled = false;
 		bool latencySdkActive = false;
+		// The selected backend's diagnostics, or the reason none is usable.
 		temporal::LatencyDiagnostics latency;
+		temporal::LatencyBackend latencyBackend = temporal::LatencyBackend::kNone;
+		std::vector<temporal::LatencyBackendStatus> latencyBackends;
 		temporal::LatencyPhase latencyPhase = temporal::LatencyPhase::kIdle;
 		temporal::FramePhase framePhase = temporal::FramePhase::kIdle;
 		std::uint64_t realFrame = 0;

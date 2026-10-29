@@ -49,6 +49,7 @@ namespace cs::engine
 		bool EnsureForwardSkyInstalled();
 		bool EnsureSecondCompositeInstalled();
 		bool EnsurePrecipitationOcclusionInstalled();
+		bool EnsureImagespaceInstalled();
 		bool EnsureSunShadowRenderInstalled();
 		bool EnsureWaterUpdateInstalled();
 		bool EnsureCommandBufferRouteInstalled();
@@ -72,6 +73,7 @@ namespace cs::engine
 		HookPoint g_postDeferredComposite{ "PostDeferredComposite", {}, EnsureDeferredCompositeInstalled };
 		HookPoint g_preSecondDeferredComposite{ "PreSecondDeferredComposite", {}, EnsureSecondCompositeInstalled };
 		HookPoint g_postForwardSky{ "PostForwardSky", {}, EnsureForwardSkyInstalled };
+		HookPoint g_postImagespace{ "PostImagespace", {}, EnsureImagespaceInstalled };
 		HookPoint g_prePrecipitationOcclusion{ "PrePrecipitationOcclusion", {}, EnsurePrecipitationOcclusionInstalled };
 		HookPoint g_postPrecipitationOcclusion{ "PostPrecipitationOcclusion", {}, EnsurePrecipitationOcclusionInstalled };
 		HookPoint g_postSunShadowRender{ "PostSunShadowRender", {}, EnsureSunShadowRenderInstalled };
@@ -117,6 +119,7 @@ namespace cs::engine
 		bool g_forwardSkyInstalled = false;
 		bool g_secondCompositeInstalled = false;
 		bool g_precipitationOcclusionInstalled = false;
+		bool g_imagespaceInstalled = false;
 		bool g_sunShadowRenderInstalled = false;
 		bool g_frustumShadowRenderInstalled = false;
 		bool g_parabolicShadowRenderInstalled = false;
@@ -376,6 +379,17 @@ namespace cs::engine
 				func;
 		};
 
+		struct Imagespace_Hook
+		{
+			static void thunk(void* a_this)
+			{
+				MarkRegistrationClosed();
+				func(a_this);
+				Dispatch(g_postImagespace, "Imagespace post");
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct PrecipitationOcclusion_Hook
 		{
 			static void thunk()
@@ -601,6 +615,12 @@ namespace cs::engine
 			g_secondCompositeInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredComposite t15 bind (pre-second-composite boundary)");
 			return true;
+		}
+
+		bool EnsureImagespaceInstalled()
+		{
+			return EnsureDetourInstalled<Imagespace_Hook>(
+				g_imagespaceInstalled, RE::ID::DrawWorld::Imagespace, "DrawWorld::Imagespace");
 		}
 
 		bool EnsurePrecipitationOcclusionInstalled()
@@ -897,6 +917,7 @@ namespace cs::engine
 	CS_DEFINE_RENDER_HOOK(RegisterPostShadowLightRender, g_postShadowLightRender[static_cast<std::size_t>(a_kind)], ShadowLightKind a_kind, )
 	CS_DEFINE_RENDER_HOOK(RegisterPostResetState, g_postResetState)
 	CS_DEFINE_RENDER_HOOK(RegisterPostForwardSky, g_postForwardSky)
+	CS_DEFINE_RENDER_HOOK(RegisterPostImagespace, g_postImagespace)
 	CS_DEFINE_RENDER_HOOK(RegisterPostSunShadowRender, g_postSunShadowRender)
 	CS_DEFINE_RENDER_HOOK(RegisterPrePrecipitationOcclusion, g_prePrecipitationOcclusion)
 	CS_DEFINE_RENDER_HOOK(RegisterPostPrecipitationOcclusion, g_postPrecipitationOcclusion)

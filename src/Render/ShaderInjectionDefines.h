@@ -7,7 +7,7 @@ namespace cs::engine::shader_injection_defines
 
 	inline constexpr auto kScreenSpaceShadows = "SCREEN_SPACE_SHADOWS";
 	inline constexpr auto kScreenSpaceGi = "SSGI";
-	inline constexpr auto kInverseSquareLighting = "INVERSE_SQUARE_LIGHTING";
+	inline constexpr auto kLightLimitFix = "LIGHT_LIMIT_FIX";
 	inline constexpr auto kDynamicCubemaps = "DYNAMIC_CUBEMAPS";
 	inline constexpr auto kTerrainShadows = "TERRAIN_SHADOWS";
 	inline constexpr auto kTerrainShadowsFullscreenDebug =

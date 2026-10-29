@@ -100,10 +100,12 @@ namespace cs::render
 		// Engine DALC rows, so vanilla ambient replays exactly beside the linear SH.
 		DirectX::XMFLOAT4 DirectionalAmbient[3]{};
 		std::uint32_t EnabledVolumetricShadows = 0, EnabledLODBlending = 0;
-		std::uint32_t EnabledInverseSquareLighting = 0;
+		std::uint32_t EnabledLightLimitFix = 0;
 		std::uint32_t pad0 = 0;
+		// Unit direction to the drawn sun disc; the light's if unavailable.
+		DirectX::XMFLOAT4 SunDiscDirection{};
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 128);
+	static_assert(sizeof(FO4SharedDataCB) == 144);
 	static_assert(offsetof(FO4SharedDataCB, DebugOwner) == 0);
 	static_assert(offsetof(FO4SharedDataCB, DebugMode) == 4);
 	static_assert(offsetof(FO4SharedDataCB, EnabledSSR) == 8);
@@ -120,8 +122,9 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, DirectionalAmbient) == 64);
 	static_assert(offsetof(FO4SharedDataCB, EnabledVolumetricShadows) == 112);
 	static_assert(offsetof(FO4SharedDataCB, EnabledLODBlending) == 116);
-	static_assert(offsetof(FO4SharedDataCB, EnabledInverseSquareLighting) == 120);
+	static_assert(offsetof(FO4SharedDataCB, EnabledLightLimitFix) == 120);
 	static_assert(offsetof(FO4SharedDataCB, pad0) == 124);
+	static_assert(offsetof(FO4SharedDataCB, SunDiscDirection) == 128);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,
@@ -146,8 +149,10 @@ namespace cs::render
 		data.CameraPosAdjust = a_camera.PosAdjust;
 		data.CameraPreviousPosAdjust = a_camera.PreviousPosAdjust;
 		data.CameraPreviousPosAdjust.w = a_clampOffset;
-		// FO4 has no validated inverse-gamma or Skyrim frame-flag source.
+		// FO4 has no validated inverse-gamma source; x, z and w stay 0.
 		data.FrameParams = {};
+		// FO4: world view only; LLF GetClusterIndex collapses uv at y == 0.
+		data.FrameParams.y = 1.0f;
 		data.DynamicResolutionParams1 = { a_ratio.x, a_ratio.y, a_previousRatio.x, a_previousRatio.y };
 		data.DynamicResolutionParams2 = { 1.0f / a_ratio.x, 1.0f / a_ratio.y,
 			a_ratio.x - a_clampOffset, a_previousRatio.x - a_clampOffset };
