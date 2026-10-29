@@ -622,33 +622,58 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "ssgi-quality", "Quality/Performance" }; section) {
 			dmui::ui::BeginDisabled(!IsEnabled());
-			if (dmui::ui::Button("AO only"))
-				preset(1, 6, -1, false);
-			dmui::ui::SameLine();
-			if (dmui::ui::Button("Low"))
-				preset(10, 12, 2, true);
-			dmui::ui::SameLine();
-			if (dmui::ui::Button("Standard"))
-				preset(4, 8, 1, true);
-			dmui::ui::SameLine();
-			if (dmui::ui::Button("Extreme"))
-				preset(4, 8, 0, true);
-			dmui::ui::SameLine();
-			if (dmui::ui::Button("Reference"))
-				preset(8, 10, 0, true);
+			struct Preset
+			{
+				const char* label;
+				const char* key;
+				int slices;
+				int steps;
+				int resolution;
+				bool gi;
+			};
+			static constexpr std::array presets{
+				Preset{ "AO only", "ao-only", 1, 6, -1, false },
+				Preset{ "Low", "low", 10, 12, 2, true },
+				Preset{ "Standard", "standard", 4, 8, 1, true },
+				Preset{ "Extreme", "extreme", 4, 8, 0, true },
+				Preset{ "Reference", "reference", 8, 10, 0, true }
+			};
+			// Presets are shortcuts; any other combination reads as Custom.
+			std::uint32_t current = 0;
+			std::vector<dmui::ChoiceOption<std::uint32_t>> presetOptions{ { 0, "Custom", "custom", false } };
+			for (std::uint32_t i = 0; i < presets.size(); ++i) {
+				const auto& p = presets[i];
+				presetOptions.push_back({ i + 1, p.label, p.key });
+				if (!current && _settings.numSlices == p.slices && _settings.numSteps == p.steps &&
+					_settings.enableGI == p.gi && _settings.enableBlur &&
+					(p.resolution < 0 || _settings.resolutionMode == p.resolution))
+					current = i + 1;
+			}
+			const auto chosen = dmui::DrawChoice<std::uint32_t>(
+				"ssgi-preset", current,
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{ presetOptions },
+				"Unavailable", "Preset");
+			if (chosen.changed && *chosen.selected > 0) {
+				const auto& p = presets[*chosen.selected - 1];
+				preset(p.slices, p.steps, p.resolution, p.gi);
+			}
 			if (showAdvanced) {
 				slider("Slices", &Settings::numSlices);
 				slider("Steps Per Slice", &Settings::numSteps);
 			}
-			static constexpr std::array<const char*, kResolutionModes> labels{ "Full Res", "Half Res", "Quarter Res" };
-			for (int mode = 0; mode < static_cast<int>(kResolutionModes); ++mode) {
-				if (mode != 0)
-					dmui::ui::SameLine();
-				if (dmui::ui::Selectable(labels[mode], _settings.resolutionMode == mode, dmui::ui::SelectableFlags::kNone, { 120.0f, 0.0f })) {
-					_settings.resolutionMode = mode;
-					_recompile = true;
-					edit.Discrete(true);
-				}
+			static const std::array resolutions{
+				dmui::ChoiceOption<std::uint32_t>{ 0, "Full", "full" },
+				dmui::ChoiceOption<std::uint32_t>{ 1, "Half", "half" },
+				dmui::ChoiceOption<std::uint32_t>{ 2, "Quarter", "quarter" }
+			};
+			const auto resolution = dmui::DrawChoice<std::uint32_t>(
+				"ssgi-resolution", static_cast<std::uint32_t>(_settings.resolutionMode),
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{ resolutions },
+				"Unavailable", "Resolution");
+			if (resolution.changed) {
+				_settings.resolutionMode = static_cast<int>(*resolution.selected);
+				_recompile = true;
+				edit.Discrete(true);
 			}
 			dmui::ui::EndDisabled();
 		}

@@ -1148,35 +1148,31 @@ namespace cs::features
 
 	void TerrainShadows::DrawSettings()
 	{
-		if (const ui::Section section{ "terrain-shadows-general", "General" }; section) {
-			std::string worldspace;
-			std::string detail;
-			bool failed = false;
-			{
-				const std::lock_guard<std::mutex> guard(_statusMutex);
-				worldspace = _statusWorldspace;
-				detail = _statusDetail;
-				failed = _statusFailed;
-			}
-			if (failed) {
-				dmui::ui::Separator();
-				auto& client = host::HostClient::Get().Client();
-				const auto warning = std::format(
-					"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
-					"are doing nothing; regenerate "
-					"the map.",
-					worldspace.empty() ? "none" : worldspace,
-					detail.empty() ? "unknown failure" : detail);
-				if (!dmui::DrawStyledText(
-						client,
-						warning,
-						{ .tone = dmui::TextTone::kWarning,
-							.wrapped = true })) {
-					L->warn(
-						"DearModdingUI draw terrain warning failed: {}",
-						DMUI_ResultToString(client.LastResult()));
-					return;
-				}
+		std::string worldspace;
+		std::string detail;
+		bool failed = false;
+		{
+			const std::lock_guard<std::mutex> guard(_statusMutex);
+			worldspace = _statusWorldspace;
+			detail = _statusDetail;
+			failed = _statusFailed;
+		}
+		if (failed) {
+			auto& client = host::HostClient::Get().Client();
+			const auto warning = std::format(
+				"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
+				"are doing nothing; regenerate "
+				"the map.",
+				worldspace.empty() ? "none" : worldspace,
+				detail.empty() ? "unknown failure" : detail);
+			if (!dmui::DrawStyledText(
+					client,
+					warning,
+					{ .tone = dmui::TextTone::kWarning,
+						.wrapped = true })) {
+				L->warn(
+					"DearModdingUI draw terrain warning failed: {}",
+					DMUI_ResultToString(client.LastResult()));
 			}
 		}
 	}

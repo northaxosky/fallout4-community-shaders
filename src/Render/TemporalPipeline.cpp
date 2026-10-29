@@ -1288,6 +1288,14 @@ namespace cs::render
 			}
 			request = *_impl->topology.StartupRequest();
 		}
+		if (a_swapChain && *a_swapChain) {
+			DXGI_SWAP_CHAIN_DESC desc{};
+			if (SUCCEEDED((*a_swapChain)->GetDesc(&desc))) {
+				std::scoped_lock lock(_impl->mutex);
+				// Startup raises no resize event, so seed the output size here.
+				_impl->display.output = { desc.BufferDesc.Width, desc.BufferDesc.Height };
+			}
+		}
 
 		const bool temporalProxyPath =
 			a_swapChain && _impl->swapChain.Owns(*a_swapChain);
