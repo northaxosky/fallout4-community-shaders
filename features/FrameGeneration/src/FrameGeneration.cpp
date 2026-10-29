@@ -656,12 +656,38 @@ namespace cs::features
 					}
 				}
 			}
-		}
 
-		if (const ui::Section section{ "frame-generation-advanced", "Advanced", ui::Collapsible{ 1 } }; section) {
 			changed |= edit.Discrete(dmui::ui::Checkbox(
 				"Allow in menus",
 				&settings.frameGenerationAllowInMenus));
+
+			const auto effectiveName =
+				render::temporal::presentation::Name(status.effective.frameGeneration);
+			const auto selectedName = MethodName(settings.frameGenerationMethod);
+			const auto selectedAvailability = availability(settings.frameGenerationMethod);
+			if (status.transitionInFlight) {
+				dmui::ui::TextDisabled(
+					"Switching to %.*s...",
+					static_cast<int>(selectedName.size()),
+					selectedName.data());
+			} else if (selectedAvailability.kind !=
+					   render::temporal::presentation::AvailabilityKind::kAvailable) {
+				dmui::ui::TextWrapped(
+					"%s. %.*s remains active.",
+					selectedAvailability.reason.c_str(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			} else if (status.effective.frameGeneration !=
+						   static_cast<render::temporal::FrameGenerationMethod>(
+							   settings.frameGenerationMethod) &&
+					   !status.failure.empty()) {
+				dmui::ui::TextWrapped(
+					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
+					static_cast<int>(selectedName.size()),
+					selectedName.data(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			}
 		}
 
 		if (changed) {
@@ -669,66 +695,6 @@ namespace cs::features
 		}
 
 		const auto currentStatus = pipeline.GetStatus();
-		const auto effectiveName =
-			render::temporal::presentation::Name(
-				currentStatus.effective.frameGeneration);
-		if (const ui::Section section{ "frame-generation-status", "Status" }; section) {
-			if (currentStatus.transitionInFlight) {
-				dmui::ui::TextDisabled(
-					"Switching to %.*s...",
-					static_cast<int>(
-						MethodName(settings.frameGenerationMethod).size()),
-					MethodName(settings.frameGenerationMethod).data());
-			} else if (!currentStatus.effective.frameGenerationEnabled) {
-				dmui::ui::TextDisabled("Active: Off");
-			} else if (
-				currentStatus.effective.frameGeneration ==
-					render::temporal::FrameGenerationMethod::kDLSSG &&
-				currentStatus.effective.frameGenerationConfiguration.mode ==
-					render::temporal::FrameGenerationMode::kDynamic) {
-				dmui::ui::TextDisabled("Active: DLSS Dynamic");
-			} else if (
-				currentStatus.effective.frameGeneration ==
-				render::temporal::FrameGenerationMethod::kDLSSG) {
-				dmui::ui::TextDisabled(
-					"Active: DLSS %ux",
-					currentStatus.effective.frameGenerationConfiguration
-						.fixedMultiplier);
-			} else {
-				dmui::ui::TextDisabled(
-					"Active: %.*s",
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			}
-			const auto selectedAvailability =
-				render::temporal::presentation::Describe(
-					static_cast<render::temporal::FrameGenerationMethod>(
-						settings.frameGenerationMethod),
-					currentStatus,
-					dlssCapabilities,
-					fidelityFx);
-			if (selectedAvailability.kind !=
-				render::temporal::presentation::AvailabilityKind::kAvailable) {
-				dmui::ui::TextWrapped(
-					"%s. %.*s remains active.",
-					selectedAvailability.reason.c_str(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			} else if (
-				!currentStatus.transitionInFlight &&
-				currentStatus.effective.frameGeneration !=
-					static_cast<render::temporal::FrameGenerationMethod>(
-						settings.frameGenerationMethod) &&
-				!currentStatus.failure.empty()) {
-				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
-					static_cast<int>(
-						MethodName(settings.frameGenerationMethod).size()),
-					MethodName(settings.frameGenerationMethod).data(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			}
-		}
 
 		const auto diagnostics =
 			pipeline.GetFrameGenerationDiagnostics();

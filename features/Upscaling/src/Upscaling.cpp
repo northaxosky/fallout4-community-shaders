@@ -199,6 +199,56 @@ namespace cs::features
 						&sharpnessRange.min,
 						&sharpnessRange.max));
 				}
+				if (settings.upscaleMethod ==
+					static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
+					static const std::array presets{
+						dmui::ChoiceOption<std::uint32_t>{
+							0, "Default", "default" },
+						dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
+						dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
+						dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
+						dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
+					};
+					const auto preset = dmui::DrawChoice<std::uint32_t>(
+						"upscaling-dlss-preset",
+						settings.presetDLSS,
+						std::span<const dmui::ChoiceOption<std::uint32_t>>{
+							presets },
+						"Unavailable",
+						"DLSS preset");
+					if (edit.Discrete(preset.changed)) {
+						settings.presetDLSS = *preset.selected;
+						changed = true;
+					}
+				}
+			}
+
+			const auto effectiveName =
+				render::temporal::presentation::Name(status.effective.superResolution);
+			const auto selectedName = MethodName(settings.upscaleMethod);
+			const auto selectedAvailability = availability(settings.upscaleMethod);
+			if (status.transitionInFlight) {
+				dmui::ui::TextDisabled(
+					"Switching to %.*s...",
+					static_cast<int>(selectedName.size()),
+					selectedName.data());
+			} else if (selectedAvailability.kind !=
+					   render::temporal::presentation::AvailabilityKind::kAvailable) {
+				dmui::ui::TextWrapped(
+					"%s. %.*s remains active.",
+					selectedAvailability.reason.c_str(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
+			} else if (status.effective.superResolution !=
+						   static_cast<render::temporal::SuperResolutionMethod>(
+							   settings.upscaleMethod) &&
+					   !status.failure.empty()) {
+				dmui::ui::TextWrapped(
+					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
+					static_cast<int>(selectedName.size()),
+					selectedName.data(),
+					static_cast<int>(effectiveName.size()),
+					effectiveName.data());
 			}
 		}
 
@@ -273,31 +323,6 @@ namespace cs::features
 				&fpsRange.max,
 				"%.0f"));
 			dmui::ui::EndDisabled();
-		}
-
-		const bool dlss = settings.upscaleMethod == static_cast<std::uint32_t>(UpscaleMethod::kDLSS);
-		if (const ui::Section section{ "upscaling-advanced", "Advanced", ui::Collapsible{ dlss ? 2u : 1u } }; section) {
-			if (dlss) {
-				static const std::array presets{
-					dmui::ChoiceOption<std::uint32_t>{
-						0, "Default", "default" },
-					dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
-					dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
-					dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
-					dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
-				};
-				const auto preset = dmui::DrawChoice<std::uint32_t>(
-					"upscaling-dlss-preset",
-					settings.presetDLSS,
-					std::span<const dmui::ChoiceOption<std::uint32_t>>{
-						presets },
-					"Unavailable",
-					"DLSS preset");
-				if (edit.Discrete(preset.changed)) {
-					settings.presetDLSS = *preset.selected;
-					changed = true;
-				}
-			}
 			dmui::ui::BeginDisabled(!status.latency.markersAvailable);
 			changed |= edit.Discrete(dmui::ui::Checkbox(
 				"Use Markers To Optimize", &settings.latencyUseMarkers));
@@ -315,56 +340,6 @@ namespace cs::features
 		const auto effectiveName =
 			render::temporal::presentation::Name(
 				currentStatus.effective.superResolution);
-		if (const ui::Section section{ "upscaling-status", "Status" }; section) {
-			if (currentStatus.transitionInFlight) {
-				dmui::ui::TextDisabled(
-					"Switching to %.*s...",
-					static_cast<int>(MethodName(settings.upscaleMethod).size()),
-					MethodName(settings.upscaleMethod).data());
-			} else if (!currentStatus.effective.superResolutionEnabled) {
-				dmui::ui::TextDisabled("Active: Off");
-			} else if (renderWidth && renderHeight &&
-					   currentStatus.display.output.IsValid()) {
-				dmui::ui::TextDisabled(
-					"Active: %.*s | %ux%u -> %ux%u",
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data(),
-					renderWidth,
-					renderHeight,
-					currentStatus.display.output.width,
-					currentStatus.display.output.height);
-			} else {
-				dmui::ui::TextDisabled(
-					"Active: %.*s",
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			}
-			const auto selectedAvailability = render::temporal::presentation::Describe(
-				static_cast<render::temporal::SuperResolutionMethod>(
-					settings.upscaleMethod),
-				currentStatus,
-				fidelityFx);
-			if (selectedAvailability.kind !=
-				render::temporal::presentation::AvailabilityKind::kAvailable) {
-				dmui::ui::TextWrapped(
-					"%s. %.*s remains active.",
-					selectedAvailability.reason.c_str(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			} else if (
-				!currentStatus.transitionInFlight &&
-				currentStatus.effective.superResolution !=
-					static_cast<render::temporal::SuperResolutionMethod>(
-						settings.upscaleMethod) &&
-				!currentStatus.failure.empty()) {
-				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
-					static_cast<int>(MethodName(settings.upscaleMethod).size()),
-					MethodName(settings.upscaleMethod).data(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			}
-		}
 
 		const auto diagnosticRows =
 			std::size_t{ 3 } +
@@ -392,7 +367,11 @@ namespace cs::features
 			}
 			const auto [scale, ready] = pipeline.Renderer().GetReadiness();
 			dmui::ui::TextDisabled(
-				"Render scale: %.0f%% | resources: %s",
+				"Render: %ux%u -> %ux%u (%.0f%%) | resources: %s",
+				renderWidth,
+				renderHeight,
+				currentStatus.display.output.width,
+				currentStatus.display.output.height,
 				static_cast<double>(scale) * 100.0,
 				ready ? "ready" : "not ready");
 			dmui::ui::TextDisabled(
