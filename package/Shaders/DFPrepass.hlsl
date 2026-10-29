@@ -439,11 +439,13 @@ SamplerState g_sLandNormalNoise : register(s15);
 // FO4: landscape spans 2x Skyrim's units per UV (uv/48 vs /96), so halve depth.
 static const float FO4DepthScale = 0.5;
 
-// FO4: no material marks height; an _s alpha averaging 1 carries none.
+// FO4: no height marker; need a mipped _s whose alpha doesn't average 1.
 float HeightScaleOf(Texture2D<float4> a_texture, SamplerState a_sampler)
 {
 	uint width, height, mips;
 	a_texture.GetDimensions(0, width, height, mips);
+	if ((max(width, height) >> (mips - 1)) > 4)
+		return 0.0;
 	return a_texture.SampleLevel(a_sampler, 0.5, mips - 1).a < 254.5 / 255.0 ? FO4DepthScale : 0.0;
 }
 #	endif
