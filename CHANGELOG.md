@@ -7,6 +7,8 @@
 - Pip-Boy and inventory effects no longer sample world sun shadows.
 - Upscaling: Latency Reduction now picks NVIDIA Reflex or, on Radeon GPUs, experimental AMD Anti-Lag 2; Anti-Lag 2 needs Upscaling or Frame Generation presenting through Direct3D 12.
 - Upscaling: the Reflex settings moved to vendor-neutral `latency_reduction`, `latency_fps_limit_enabled`, `latency_fps_limit` and `latency_use_markers` keys and reset to their defaults.
+- Unified Water: interiors such as the Concord Speakeasy no longer draw the outdoor water plane over the room.
+- Menu: each feature's debug views, diagnostics and profiling now share one collapsed Debug section; Upscaling and Frame Generation drop their Status and Advanced sections, and Screen Space GI's presets and resolution are dropdowns.
 
 ## 0.5.0
 
