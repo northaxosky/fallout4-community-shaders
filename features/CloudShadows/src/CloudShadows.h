@@ -45,6 +45,8 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void Prepass() override;
 		void DrawSettings() override;
+		bool HasDebugUI() const override { return true; }
+		void DrawDebug() override;
 		void RestoreDefaultSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
@@ -83,7 +85,6 @@ namespace cs::features
 		// Debug-only per-layer cube, made when the layers view first captures.
 		bool EnsureLayerCube();
 		void RefreshLegend();
-		void DrawLegend();
 		// Unit direction to the drawn sun disc in w=1, else zero.
 		void UpdateOverlayConstants(ID3D11DeviceContext* a_context);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;

@@ -16,7 +16,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "RE/D/DrawWorld.h"
@@ -1326,7 +1325,6 @@ namespace cs::features
 		if (changed) {
 			PublishSettings();
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void DynamicCubemaps::RestoreDefaultSettings()

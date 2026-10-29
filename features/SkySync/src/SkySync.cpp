@@ -865,9 +865,6 @@ namespace cs::features
 			if (listChanged)
 				RefreshWorldspaceDisabledLocked();
 		}
-
-		if (const ui::Section section{ "sky-sync-debug", "Debug", ui::Collapsible{} }; section)
-			DrawDebug();
 	}
 
 	void SkySync::DrawDebug()

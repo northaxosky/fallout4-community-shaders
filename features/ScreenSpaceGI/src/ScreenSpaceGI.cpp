@@ -11,7 +11,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "RE/D/DrawWorld.h"
@@ -698,7 +697,6 @@ namespace cs::features
 			}
 			dmui::ui::EndDisabled();
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void ScreenSpaceGI::RestoreDefaultSettings()

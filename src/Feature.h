@@ -128,6 +128,10 @@ namespace cs
 		// Telemetry must read only cached or atomic state.
 		virtual void CollectTelemetry(telemetry::Sink&) const {}
 
+		// Feature-specific diagnostics drawn in the host's Debug section.
+		virtual bool HasDebugUI() const { return false; }
+		virtual void DrawDebug() {}
+
 		virtual std::span<const FeatureDebugView> GetDebugViews() const noexcept { return {}; }
 		virtual void SetDebugView(std::string_view) noexcept {}
 		// Render thread only; the texture is borrowed until the next render callback.

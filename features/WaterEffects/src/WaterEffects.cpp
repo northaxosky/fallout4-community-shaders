@@ -15,7 +15,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
@@ -438,11 +437,6 @@ namespace cs::features
 			.Field(
 				"validation_detail",
 				detail.empty() ? "operational" : detail);
-	}
-
-	void WaterEffects::DrawSettings()
-	{
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	namespace

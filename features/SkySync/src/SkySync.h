@@ -47,6 +47,8 @@ namespace cs::features
 		void Load() override;
 		void OnDataLoaded() override;
 		void DrawSettings() override;
+		bool HasDebugUI() const override { return true; }
+		void DrawDebug() override;
 		void RestoreDefaultSettings() override;
 
 		// Game-thread hooks. After Sky::Update: steers lights, consumes transitions.
@@ -209,6 +211,5 @@ namespace cs::features
 		static RE::NiPoint3 CalculateAlternateSunDirection(float a_hour, float a_sunrise, float a_sunset, float a_sunAngle);
 
 		void PublishTelemetry(bool a_completedTransition);
-		void DrawDebug();
 	};
 }

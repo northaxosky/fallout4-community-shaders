@@ -682,7 +682,7 @@ namespace cs::features
 							   settings.frameGenerationMethod) &&
 					   !status.failure.empty()) {
 				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
+					"Could not activate %.*s. %.*s remains active; see Debug.",
 					static_cast<int>(selectedName.size()),
 					selectedName.data(),
 					static_cast<int>(effectiveName.size()),
@@ -693,67 +693,60 @@ namespace cs::features
 		if (changed) {
 			pipeline.SubmitLiveConfiguration();
 		}
+	}
 
+	void FrameGeneration::DrawDebug()
+	{
+		settings::SettingsEdit edit{ *this };
+		auto& pipeline = render::TemporalPipeline::Get();
 		const auto currentStatus = pipeline.GetStatus();
-
+		const auto dlssCapabilities =
+			pipeline.GetFrameGenerationCapabilities();
 		const auto diagnostics =
 			pipeline.GetFrameGenerationDiagnostics();
-		const auto diagnosticRows =
-			std::size_t{ 3 } +
-			diagnostics.generatedFrameCountAvailable +
-			(fidelityFx.fsr4FrameGeneration.availability !=
-				render::temporal::CapabilityAvailability::kUnknown) +
-			currentStatus.pending.required +
-			!currentStatus.failure.empty();
-		if (const ui::Section section{ "frame-generation-diagnostics", "Diagnostics", ui::Collapsible{ diagnosticRows } }; section) {
-			if (edit.Discrete(dmui::ui::Checkbox(
-					"Detailed diagnostics",
-					&settings.detailedDiagnostics))) {
-				pipeline.SetDetailedTracing(
-					settings.detailedDiagnostics);
-			}
-			dmui::ui::TextDisabled(
-				"Ready: %s | active: %s | dispatches: %llu | failures: %llu",
-				diagnostics.ready ? "yes" : "no",
-				diagnostics.active ? "yes" : "no",
-				static_cast<unsigned long long>(diagnostics.dispatches),
-				static_cast<unsigned long long>(diagnostics.failures));
-			if (diagnostics.generatedFrameCountAvailable) {
-				dmui::ui::TextDisabled(
-					"Provider generated frames: %llu",
-					static_cast<unsigned long long>(
-						diagnostics.generatedFrames));
-			}
-			dmui::ui::TextDisabled(
-				"DLSS capability: %u | current: %s | max generation: %ux | dynamic: %s | status: %u",
-				static_cast<unsigned>(
-					dlssCapabilities.availability),
-				dlssCapabilities.IsCurrent() ? "yes" : "no",
-				dlssCapabilities.maxGeneratedFrames ? dlssCapabilities.maxGeneratedFrames + 1 : 0,
-				dlssCapabilities.dynamicModeSupported ? "yes" : "no",
-				dlssCapabilities.providerStatus);
-			if (currentStatus.pending.required) {
-				dmui::ui::TextDisabled(
-					"Restart required: %s",
-					currentStatus.pending.reason.c_str());
-			}
-			if (!currentStatus.failure.empty()) {
-				dmui::ui::TextDisabled(
-					"%s",
-					currentStatus.failure.c_str());
-			}
+		if (edit.Discrete(dmui::ui::Checkbox(
+				"Detailed diagnostics",
+				&settings.detailedDiagnostics))) {
+			pipeline.SetDetailedTracing(
+				settings.detailedDiagnostics);
 		}
-
-		Menu::Get().DrawDebugViewSelector(*this);
+		dmui::ui::TextDisabled(
+			"Ready: %s | active: %s | dispatches: %llu | failures: %llu",
+			diagnostics.ready ? "yes" : "no",
+			diagnostics.active ? "yes" : "no",
+			static_cast<unsigned long long>(diagnostics.dispatches),
+			static_cast<unsigned long long>(diagnostics.failures));
+		if (diagnostics.generatedFrameCountAvailable) {
+			dmui::ui::TextDisabled(
+				"Provider generated frames: %llu",
+				static_cast<unsigned long long>(
+					diagnostics.generatedFrames));
+		}
+		dmui::ui::TextDisabled(
+			"DLSS capability: %u | current: %s | max generation: %ux | dynamic: %s | status: %u",
+			static_cast<unsigned>(
+				dlssCapabilities.availability),
+			dlssCapabilities.IsCurrent() ? "yes" : "no",
+			dlssCapabilities.maxGeneratedFrames ? dlssCapabilities.maxGeneratedFrames + 1 : 0,
+			dlssCapabilities.dynamicModeSupported ? "yes" : "no",
+			dlssCapabilities.providerStatus);
+		if (currentStatus.pending.required) {
+			dmui::ui::TextDisabled(
+				"Restart required: %s",
+				currentStatus.pending.reason.c_str());
+		}
+		if (!currentStatus.failure.empty()) {
+			dmui::ui::TextDisabled(
+				"%s",
+				currentStatus.failure.c_str());
+		}
 		auto& renderer = pipeline.Renderer();
 		if (renderer.HasFrameGenerationDebugSnapshotSelection()) {
-			if (const ui::Section section{ "frame-generation-debug-snapshot", "Debug Snapshot" }; section) {
-				if (dmui::ui::Button("Refresh snapshot"))
-					renderer.RefreshFrameGenerationDebugSnapshot();
-				if (renderer.FrameGenerationDebugSnapshotPending())
-					dmui::ui::TextDisabled(
-						"Refresh pending; the previous snapshot remains visible.");
-			}
+			if (dmui::ui::Button("Refresh snapshot"))
+				renderer.RefreshFrameGenerationDebugSnapshot();
+			if (renderer.FrameGenerationDebugSnapshotPending())
+				dmui::ui::TextDisabled(
+					"Refresh pending; the previous snapshot remains visible.");
 		}
 	}
 

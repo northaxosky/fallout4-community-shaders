@@ -20,7 +20,6 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
@@ -989,7 +988,6 @@ namespace cs::features
 			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
 				dmui::ui::Text("%s", "Smaller angles creates more focused top-down shadow.");
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void Skylighting::RestoreDefaultSettings()

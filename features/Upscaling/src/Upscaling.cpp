@@ -7,7 +7,6 @@
 #include <DearModdingUI/Client.h>
 
 #include "Log.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/FeatureShaderBindings.h"
@@ -244,7 +243,7 @@ namespace cs::features
 							   settings.upscaleMethod) &&
 					   !status.failure.empty()) {
 				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Diagnostics.",
+					"Could not activate %.*s. %.*s remains active; see Debug.",
 					static_cast<int>(selectedName.size()),
 					selectedName.data(),
 					static_cast<int>(effectiveName.size()),
@@ -333,7 +332,12 @@ namespace cs::features
 		if (changed) {
 			pipeline.SubmitLiveConfiguration();
 		}
+	}
 
+	void Upscaling::DrawDebug()
+	{
+		settings::SettingsEdit edit{ *this };
+		auto& pipeline = render::TemporalPipeline::Get();
 		const auto currentStatus = pipeline.GetStatus();
 		const auto [renderWidth, renderHeight] =
 			pipeline.Renderer().GetRenderSize();
@@ -341,64 +345,52 @@ namespace cs::features
 			render::temporal::presentation::Name(
 				currentStatus.effective.superResolution);
 
-		const auto diagnosticRows =
-			std::size_t{ 3 } +
-			(fidelityFx.fsr4SuperResolution.availability !=
-				render::temporal::CapabilityAvailability::kUnknown) +
-			currentStatus.pending.required +
-			!currentStatus.failure.empty();
-		if (const ui::Section section{ "upscaling-diagnostics", "Diagnostics", ui::Collapsible{ diagnosticRows } }; section) {
-			static const std::array logLevels{
-				dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
-				dmui::ChoiceOption<std::uint32_t>{
-					1, "Default", "default" },
-				dmui::ChoiceOption<std::uint32_t>{
-					2, "Verbose", "verbose" }
-			};
-			const auto logLevel = dmui::DrawChoice<std::uint32_t>(
-				"upscaling-streamline-log-level",
-				settings.streamlineLogLevel,
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{
-					logLevels },
-				"Unavailable",
-				"Streamline logging");
-			if (edit.Discrete(logLevel.changed)) {
-				settings.streamlineLogLevel = *logLevel.selected;
-			}
-			const auto [scale, ready] = pipeline.Renderer().GetReadiness();
-			dmui::ui::TextDisabled(
-				"Render: %ux%u -> %ux%u (%.0f%%) | resources: %s",
-				renderWidth,
-				renderHeight,
-				currentStatus.display.output.width,
-				currentStatus.display.output.height,
-				static_cast<double>(scale) * 100.0,
-				ready ? "ready" : "not ready");
-			dmui::ui::TextDisabled(
-				"Requested: %.*s | effective: %.*s",
-				static_cast<int>(MethodName(settings.upscaleMethod).size()),
-				MethodName(settings.upscaleMethod).data(),
-				static_cast<int>(effectiveName.size()),
-				effectiveName.data());
-			if (currentStatus.pending.required)
-				dmui::ui::TextDisabled(
-					"Restart required: %s",
-					currentStatus.pending.reason.c_str());
-			if (!currentStatus.failure.empty())
-				dmui::ui::TextDisabled(
-					"%s",
-					currentStatus.failure.c_str());
+		static const std::array logLevels{
+			dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
+			dmui::ChoiceOption<std::uint32_t>{
+				1, "Default", "default" },
+			dmui::ChoiceOption<std::uint32_t>{
+				2, "Verbose", "verbose" }
+		};
+		const auto logLevel = dmui::DrawChoice<std::uint32_t>(
+			"upscaling-streamline-log-level",
+			settings.streamlineLogLevel,
+			std::span<const dmui::ChoiceOption<std::uint32_t>>{
+				logLevels },
+			"Unavailable",
+			"Streamline logging");
+		if (edit.Discrete(logLevel.changed)) {
+			settings.streamlineLogLevel = *logLevel.selected;
 		}
-
-		Menu::Get().DrawDebugViewSelector(*this);
+		const auto [scale, ready] = pipeline.Renderer().GetReadiness();
+		dmui::ui::TextDisabled(
+			"Render: %ux%u -> %ux%u (%.0f%%) | resources: %s",
+			renderWidth,
+			renderHeight,
+			currentStatus.display.output.width,
+			currentStatus.display.output.height,
+			static_cast<double>(scale) * 100.0,
+			ready ? "ready" : "not ready");
+		dmui::ui::TextDisabled(
+			"Requested: %.*s | effective: %.*s",
+			static_cast<int>(MethodName(settings.upscaleMethod).size()),
+			MethodName(settings.upscaleMethod).data(),
+			static_cast<int>(effectiveName.size()),
+			effectiveName.data());
+		if (currentStatus.pending.required)
+			dmui::ui::TextDisabled(
+				"Restart required: %s",
+				currentStatus.pending.reason.c_str());
+		if (!currentStatus.failure.empty())
+			dmui::ui::TextDisabled(
+				"%s",
+				currentStatus.failure.c_str());
 		if (pipeline.Renderer().HasDebugSnapshotSelection()) {
-			if (const ui::Section section{ "upscaling-debug-snapshot", "Debug Snapshot" }; section) {
-				if (dmui::ui::Button("Refresh snapshot"))
-					pipeline.Renderer().RefreshDebugSnapshot();
-				if (pipeline.Renderer().DebugSnapshotPending())
-					dmui::ui::TextDisabled(
-						"Refresh pending; the previous snapshot remains visible.");
-			}
+			if (dmui::ui::Button("Refresh snapshot"))
+				pipeline.Renderer().RefreshDebugSnapshot();
+			if (pipeline.Renderer().DebugSnapshotPending())
+				dmui::ui::TextDisabled(
+					"Refresh pending; the previous snapshot remains visible.");
 		}
 	}
 

@@ -292,9 +292,6 @@ namespace cs
 		if (views.empty())
 			return;
 
-		const ui::Section section{ "feature-debug", "Debug" };
-		if (!section)
-			return;
 		const auto selectedId = _debugViews.SelectedView(a_feature.GetName());
 		std::vector<dmui::ChoiceOption<std::string>> options;
 		options.reserve(views.size() + 1);

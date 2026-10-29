@@ -15,7 +15,6 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
-#include "Menu/Menu.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
@@ -534,8 +533,10 @@ namespace cs::features
 		_legend = std::move(rows);
 	}
 
-	void CloudShadows::DrawLegend()
+	void CloudShadows::DrawDebug()
 	{
+		if (_overlayMode.load(std::memory_order_acquire) != kModeLayers)
+			return;
 		std::vector<LegendRow> rows;
 		{
 			const std::lock_guard lock(_legendMutex);
@@ -670,9 +671,6 @@ namespace cs::features
 		edit.Continuous(dmui::ui::SliderScalar("Opacity##Opacity", &_settings.Opacity, &range.min, &range.max, "%.1f"));
 		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
 			dmui::ui::Text("%s", "Higher values make cloud shadows darker.");
-		Menu::Get().DrawDebugViewSelector(*this);
-		if (_overlayMode.load(std::memory_order_acquire) == kModeLayers)
-			DrawLegend();
 	}
 
 	void CloudShadows::RestoreDefaultSettings()

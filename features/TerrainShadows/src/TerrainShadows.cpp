@@ -23,7 +23,6 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
@@ -1180,7 +1179,6 @@ namespace cs::features
 				}
 			}
 		}
-		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	namespace
