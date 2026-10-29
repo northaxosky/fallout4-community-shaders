@@ -12,3 +12,4 @@
 | Forced | Scales `characterLightParams[2]` | Scales the rim and fill lanes | FO4's character light reads only those lanes |
 | Divergence | Character lighting off by default | Enabling the feature turns FO4's default-on character light off until `EnableCharacterLighting` is set | Upstream default kept |
 | Forced | Typed UAV load on the main color target | The feature stays inert on GPUs without typed UAV loads for R11G11B10 | Burley and the vertical pass read the target in place |
+| Forced | Nested `BaseProfile` and `HumanProfile` settings | Profile settings are flat TOML keys such as `BaseProfileBlurRadius` | Spec-agreed flat settings layout |
