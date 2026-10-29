@@ -81,8 +81,8 @@ are FO4-only rule-4 port features.
   (`Lighting.hlsl:1175-1217`), so it ships as one EM slice in `DFPrepass` before material sampling. Vanilla
   textures carry no height, but FO4 parallax texture packs store it in the `_s` (specular/smoothness) alpha,
   which `DFPrepass` already binds at t2 (landscape t8+). Reading it is a relocated upstream datum, so the
-  slice is a port. BGSMs carry no parallax marker, so the host admits objects whose `_s` format stores alpha
-  and the shader rejects maps that are unmipped or whose last mip averages alpha 1, as ENB does. Terrain shares Terrain Variation's UV offsets.
+  slice is a port. BGSMs carry no parallax marker, so, following ENB's `_s` alpha convention, the host admits objects whose
+  `_s` format stores alpha and the shader rejects maps that are unmipped or whose last mip averages alpha 1. Terrain shares Terrain Variation's UV offsets.
 - **Subsurface Scattering.** Replace FO4's fixed second-composite blur with upstream separable/Burley on
   native class-5 eligibility; never stack both.
 - **Light Limit Fix.** Opaque surfaces keep FO4's native tiled lighting (625 lights, 127 per tile). Forward
