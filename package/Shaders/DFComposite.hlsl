@@ -13,7 +13,7 @@
 #ifdef SUBSURFACE_SCATTERING
 #	include "FO4/SubsurfaceScattering/Consumer.hlsli"
 #else
-#	define FO4_SSS_IF_PRODUCED(statement)
+#	define FO4_SSS_IF_PRODUCED(rawDepth, statement)
 #endif
 
 #ifdef DYNAMIC_CUBEMAPS
@@ -309,7 +309,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 blurAccum = SSSS_CENTER_WEIGHT * blurSourceCenter;
 		[unroll] for (int i = 0; i < 10; ++i)
 		{
-			FO4_SSS_IF_PRODUCED(continue);
+			FO4_SSS_IF_PRODUCED(depth, continue);
 			float2 tapUV = uv + tapBase * SSSS_RING_OFFSETS[i];
 			float tapMatId = g_tGbufferShadingData.SampleLevel(
 													  g_sGbufferShadingData, tapUV, 0)
@@ -332,7 +332,7 @@ PS_OUTPUT main(PS_INPUT input)
 			}
 			blurAccum += tapBlended * SSSS_RING_WEIGHTS[i];
 		}
-		FO4_SSS_IF_PRODUCED(blurAccum = blurSourceCenter);
+		FO4_SSS_IF_PRODUCED(depth, blurAccum = blurSourceCenter);
 		float3 probeA = g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
 #		if AMBIENT_DIFFUSE_SET_B
 		float3 probeB = g_tAmbientProbeB.SampleLevel(g_sAmbientProbeB, uv, 0).xyz;
@@ -661,7 +661,7 @@ PS_OUTPUT main(PS_INPUT input)
 		float3 blurAccum = blurSourceCenter * SSSS_CENTER_WEIGHT;
 		[unroll] for (int i = 0; i < 10; ++i)
 		{
-			FO4_SSS_IF_PRODUCED(continue);
+			FO4_SSS_IF_PRODUCED(depth, continue);
 			float2 tapUv = uv + tapBase * SSSS_RING_OFFSETS[i];
 			float tapMaterialId = g_tGbufferShadingData.SampleLevel(
 														   g_sGbufferShadingData, tapUv, 0)
@@ -683,7 +683,7 @@ PS_OUTPUT main(PS_INPUT input)
 			}
 			blurAccum += tapColor * SSSS_RING_WEIGHTS[i];
 		}
-		FO4_SSS_IF_PRODUCED(blurAccum = blurSourceCenter);
+		FO4_SSS_IF_PRODUCED(depth, blurAccum = blurSourceCenter);
 
 		float3 probeA =
 			g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
@@ -908,9 +908,9 @@ Texture2D<float4> skinProbeTexture : register(t12);
 #	endif
 Texture2D<float4> linearDepthTexture : register(t15);
 
-float3 sampleSkinTap(float2 coordinate, float depthScale, float centerDepth, float3 centerColor)
+float3 sampleSkinTap(float rawDepth, float2 coordinate, float depthScale, float centerDepth, float3 centerColor)
 {
-	FO4_SSS_IF_PRODUCED(return centerColor);
+	FO4_SSS_IF_PRODUCED(rawDepth, return centerColor);
 	float materialId = surfaceTexture.SampleLevel(surfaceSampler, coordinate, 0.0).w;
 	float3 tapColor;
 
@@ -1105,35 +1105,35 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float2 tapStep = SSSSSParams[0].x * float2(0.078125, 0.13889) / centerDepth;
 
 		float4 tapCoordinates = coordinate.xyxy + tapStep.xyxy * float4(-2.0, -2.0, -1.28, -1.28);
-		float3 firstTap = sampleSkinTap(tapCoordinates.xy, depthScale, centerDepth, centerColor);
+		float3 firstTap = sampleSkinTap(deviceDepth, tapCoordinates.xy, depthScale, centerDepth, centerColor);
 		float3 blurred = firstTap * float3(0.00471690995618701, 0.0001847709936555475, 0.00005075660010334104);
 
 		blurred = centerColor * float3(0.560479, 0.669086, 0.784728) + asfloat(asuint(blurred));
-		blurred += sampleSkinTap(tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.019283099099993706, 0.002820180030539632, 0.000842139997985214);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.019283099099993706, 0.002820180030539632, 0.000842139997985214);
 
 		tapCoordinates = coordinate.xyxy + tapStep.xyxy * float4(-0.72, -0.72, -0.32, -0.32);
-		blurred += sampleSkinTap(tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.036390, 0.01309990044683218, 0.006436849944293499);
-		blurred += sampleSkinTap(tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.08219040185213089, 0.03586079925298691, 0.0209260992705822);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.036390, 0.01309990044683218, 0.006436849944293499);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.08219040185213089, 0.03586079925298691, 0.0209260992705822);
 
 		tapCoordinates = coordinate.xyxy + tapStep.xyxy * float4(-0.08, -0.08, 0.08, 0.08);
-		blurred += sampleSkinTap(tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.07718019932508469, 0.113491, 0.07938030362129211);
-		blurred += sampleSkinTap(tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.07718019932508469, 0.113491, 0.07938030362129211);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.07718019932508469, 0.113491, 0.07938030362129211);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.07718019932508469, 0.113491, 0.07938030362129211);
 
 		tapCoordinates = coordinate.xyxy + tapStep.xyxy * float4(0.32, 0.32, 0.72, 0.72);
-		blurred += sampleSkinTap(tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.08219040185213089, 0.03586079925298691, 0.0209260992705822);
-		blurred += sampleSkinTap(tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.036390, 0.01309990044683218, 0.006436849944293499);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.08219040185213089, 0.03586079925298691, 0.0209260992705822);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.036390, 0.01309990044683218, 0.006436849944293499);
 
 		tapCoordinates.zw = coordinate + tapStep * 1.28;
-		blurred += sampleSkinTap(tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.019283099099993706, 0.002820180030539632, 0.000842139997985214);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.zw, depthScale, centerDepth, centerColor) * float3(0.019283099099993706, 0.002820180030539632, 0.000842139997985214);
 		tapCoordinates.xy = coordinate + tapStep * 2.0;
-		blurred += sampleSkinTap(tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.00471690995618701, 0.0001847709936555475, 0.000050756498239934444);
+		blurred += sampleSkinTap(deviceDepth, tapCoordinates.xy, depthScale, centerDepth, centerColor) * float3(0.00471690995618701, 0.0001847709936555475, 0.000050756498239934444);
 
 		float3 skinBase = skinLightTexture.SampleLevel(skinLightSampler, coordinate, 0.0).xyz;
 #	if TILELIGHT
 		skinBase += skinProbeTexture.SampleLevel(skinProbeSampler, coordinate, 0.0).xyz;
 #	endif
 		skinBase += skinAux;
-		FO4_SSS_IF_PRODUCED(blurred = centerColor);
+		FO4_SSS_IF_PRODUCED(deviceDepth, blurred = centerColor);
 		centerColor = blurred + skinBase;
 	}
 

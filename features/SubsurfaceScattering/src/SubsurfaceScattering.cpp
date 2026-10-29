@@ -268,6 +268,8 @@ namespace cs::features
 			return;
 		const auto camera = cs::engine::GetWorldCameraRecord();
 		auto* depth = cs::render::GetCanonicalSceneDepthSRV();
+		// FO4: raw depth marks first-person pixels, which canonical depth cannot.
+		auto* rawDepth = cs::engine::GetSceneDepthSRV();
 		auto* normals = cs::engine::GetRenderTargetSRV(RT::kGBufferNormal);
 		// FO4: GBufferAmbient carries the material class in its alpha.
 		auto* material = cs::engine::GetRenderTargetSRV(RT::kGBufferAmbient);
@@ -275,7 +277,7 @@ namespace cs::features
 		auto* color = cs::engine::GetRenderTargetSRV(RT::kMainCopy);
 		auto* colorUAV = cs::engine::GetRenderTargetUAV(RT::kMainCopy);
 		auto* colorTexture = cs::engine::GetRenderTargetTexture(RT::kMainCopy);
-		if (!camera || !depth || !normals || !material || !albedo || !color || !colorUAV || !colorTexture ||
+		if (!camera || !depth || !rawDepth || !normals || !material || !albedo || !color || !colorUAV || !colorTexture ||
 			!cs::render::IsSharedDataReady() || !EnsureResources(colorTexture))
 			return;
 		auto& t = _textures;
@@ -299,7 +301,7 @@ namespace cs::features
 				pass.Run(a_shader, { a_input, depth, t.mask->srv.get(), t.albedo->srv.get(), t.normal->srv.get() },
 					{ a_output }, width, height, 8, a_name);
 			};
-			pass.Run(_prepare.get(), { normals, material, albedo },
+			pass.Run(_prepare.get(), { normals, material, albedo, rawDepth },
 				{ t.mask->uav.get(), t.normal->uav.get(), t.albedo->uav.get() }, width, height, 8, "SubsurfaceScattering::Prepare");
 			pass.Run(_extract.get(), { color, nullptr, nullptr, t.albedo->srv.get() },
 				{ t.diffuseNoAlbedo->uav.get() }, width, height, 8, "SubsurfaceScattering::DiffuseExtraction");

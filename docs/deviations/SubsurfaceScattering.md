@@ -2,7 +2,8 @@
 
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
-| Forced | Per-pixel amount and Base/Human profile in the masks; runs only after a skin draw | Native class-5 pixels get full amount and the Human profile; Base settings stay but go unused; the pass runs every frame and skips other pixels | FO4 has no per-pixel amount or profile channel and no skin-draw signal |
+| Forced | Per-pixel amount and Base/Human profile in the masks; runs only after a skin draw | Native class-5 pixels outside first person get full amount and the Human profile; Base settings stay but go unused; the pass runs every frame and skips other pixels | FO4 has no per-pixel amount or profile channel and no skin-draw signal |
+| Forced | First-person meshes are drawn after the pass and never scattered | First-person skin keeps the stock ring blur and its first-person depth scale; the pass skips those pixels | FO4 draws first-person in the deferred pass with its own projection, so it would otherwise be scattered at the wrong scale |
 | Pending | Per-pixel amount and profile selection | Needs the per-pixel profile extension | |
 | Forced | Octahedral normals and opaque albedo alpha | Native spherical normals are re-encoded and albedo alpha is 1 | FO4's alpha is a material scalar |
 | Forced | Blur runs before SSGI in `DeferredCompositeCS` | SSS also blurs SSGI's diffuse on skin | FO4 composes SSGI in the first composite |
