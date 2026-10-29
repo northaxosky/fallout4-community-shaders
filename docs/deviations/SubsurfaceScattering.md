@@ -2,7 +2,8 @@
 
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
-| Forced | Per-pixel amount and Base/Human profile in the masks | Native class-5 pixels outside first person get full amount and the Human profile; Base settings stay but go unused, pending the per-pixel profile extension | FO4 has no per-pixel amount or profile channel |
+| Forced | Amount from diffuse alpha | Amount is 1 on skin | FO4 skin diffuse alpha is an alpha-test cutout, so it has no authored amount |
+| Forced | Base profile when the race has `IsBeastRace` | Base when the race has the Ghoul, SuperMutant, SuperMutantBehemoth, Creature or Animal actor-type keyword; Human otherwise | FO4 has no `IsBeastRace` keyword |
 | Forced | First-person meshes are drawn after the pass and never scattered | First-person skin keeps the stock ring blur and its first-person depth scale; the pass skips those pixels | FO4 draws first-person in the deferred pass with its own projection, so it would otherwise be scattered at the wrong scale |
 | Forced | Octahedral normals and opaque albedo alpha | Native spherical normals are re-encoded and albedo alpha is 1 | FO4's alpha is a material scalar |
 | Forced | Blur runs before SSGI in `DeferredCompositeCS` | SSS also blurs SSGI's diffuse on skin, pending SSGI split from the first composite | FO4 composes SSGI in the first composite |

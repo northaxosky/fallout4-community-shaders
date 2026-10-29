@@ -597,6 +597,10 @@ struct PS_OUTPUT
 	// FO4: upstream shades parallax shadows forward; DFLight reads them from here.
 	float4 parallaxShadow: SV_Target6;
 #	endif
+#	if defined(SUBSURFACE_SCATTERING)
+	// FO4: upstream marks the Human profile in the lighting mask; SSS reads it from here.
+	float4 sssProfile: SV_Target7;
+#	endif
 };
 
 // FO4: early depth would write depth for pixels the blend clip discards.
@@ -1708,6 +1712,19 @@ struct PS_OUTPUT
 		output.parallaxShadow = float4(parallaxShadow, 0, 0, 1);
 #		endif
 #	endif
+#	if defined(SUBSURFACE_SCATTERING)
+	// Every draw writes, so surfaces drawn over skin never keep its profile.
+#		if LANDSCAPE
+		const float sssProfile = 0.0;
+#		else
+		const float sssProfile = PrepassFeatureLane.w != 0.0 ? 1.0 : 0.0;
+#		endif
+#		if BLEND
+		output.sssProfile = float4(sssProfile, 0, 0, output.albedo.w);
+#		else
+		output.sssProfile = float4(sssProfile, 0, 0, 1);
+#		endif
+#	endif
 #	if defined(FO4_TERRAIN_BLENDING)
 		// The colour draw reads every blended target's alpha as the lerp factor.
 		[branch] if (TerrainBlendingPass == 1)
@@ -1721,6 +1738,9 @@ struct PS_OUTPUT
 #		endif
 #		if defined(EXTENDED_MATERIALS)
 			output.parallaxShadow.w = terrainBlendFactor;
+#		endif
+#		if defined(SUBSURFACE_SCATTERING)
+			output.sssProfile.w = terrainBlendFactor;
 #		endif
 		}
 #	endif

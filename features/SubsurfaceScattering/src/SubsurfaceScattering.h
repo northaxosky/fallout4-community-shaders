@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
+#include "Render/PrepassExtraTargets.h"
 #include "ShaderDefines.h"
 #include "SubsurfaceScatteringConstants.h"
 #include "SubsurfaceScatteringSettings.h"
@@ -29,6 +30,7 @@ namespace cs::features
 		std::string GetFeatureSummary() const override { return "Screen-space subsurface scattering for skin."; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
+		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override { RestoreNativeControls(); }
 		void DrawSettings() override;
@@ -87,12 +89,15 @@ namespace cs::features
 		// FO4: the native composite owns b0, b2 and b12; b9 is free.
 		static constexpr UINT kConsumerSlot = 9;
 		static constexpr UINT kConstantsSlot = 1;
+		// FO4: SV_Target7 follows the six G-buffer targets and Extended Materials at 6.
+		static constexpr std::uint32_t kProfileRTVSlot = 7;
 		Settings _settings;
 		Resources _textures;
 		subsurface_scattering::Constants _data{};
 		std::array<float, 12> _kernelKey{};
 		bool _kernelsBuilt = false;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
+		std::optional<cs::engine::PrepassExtraTargetId> _profileTarget;
 		std::optional<ConsumerCB> _consumerData;
 		winrt::com_ptr<ID3D11ComputeShader> _prepare, _extract, _horizontal, _vertical, _burley;
 		std::optional<NativeSnapshot> _native;

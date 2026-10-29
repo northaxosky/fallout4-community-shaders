@@ -16,13 +16,16 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBindings.h"
 #include "Render/FrameProfiler.h"
+#include "Render/PrepassExtraTargets.h"
 #include "Render/PrepassTechnique.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderObservers.h"
+#include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
+#include "SkinProfile.h"
 #include "SubsurfaceScatteringKernel.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -70,8 +73,13 @@ namespace cs::features
 
 	void SubsurfaceScattering::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("SubsurfaceScattering", *this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings("SubsurfaceScattering", *this, cs::engine::AttachPrepassExtraTargets)) {
 			FailLoad("Subsurface Scattering shader contribution registration failed.");
+			return;
+		}
+		_profileTarget = cs::engine::RegisterPrepassExtraTarget(*this, { .name = "SubsurfaceScattering/Profile", .rtvSlot = kProfileRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .active = [this] { return CanRun(); } });
+		if (!_profileTarget || !cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kW, &sss::IsHumanSkinDraw)) {
+			FailLoad("Subsurface Scattering skin profile registration failed.");
 			return;
 		}
 		if (!cs::engine::RegisterPreDeferredLightsImpl(*this, [] { GetSingleton()->ApplyNativeControls(); }) ||
@@ -87,6 +95,11 @@ namespace cs::features
 			return;
 		}
 		_started = true;
+	}
+
+	void SubsurfaceScattering::OnDataLoaded()
+	{
+		sss::ResolveBaseRaceKeywords();
 	}
 
 	bool SubsurfaceScattering::CompileShaders()
@@ -283,10 +296,11 @@ namespace cs::features
 		// FO4: GBufferAmbient carries the material class in its alpha.
 		auto* material = cs::engine::GetRenderTargetSRV(RT::kGBufferAmbient);
 		auto* albedo = cs::engine::GetRenderTargetSRV(RT::kGBufferAlbedoSpecular);
+		auto* profile = _profileTarget ? cs::engine::GetPrepassExtraTargetSRV(*_profileTarget) : nullptr;
 		auto* color = cs::engine::GetRenderTargetSRV(RT::kMainCopy);
 		auto* colorUAV = cs::engine::GetRenderTargetUAV(RT::kMainCopy);
 		auto* colorTexture = cs::engine::GetRenderTargetTexture(RT::kMainCopy);
-		if (!camera || !depth || !rawDepth || !normals || !material || !albedo || !color || !colorUAV || !colorTexture ||
+		if (!camera || !depth || !rawDepth || !normals || !material || !albedo || !profile || !color || !colorUAV || !colorTexture ||
 			!cs::render::IsSharedDataReady() || !EnsureResources(colorTexture))
 			return;
 		auto& t = _textures;
@@ -310,7 +324,7 @@ namespace cs::features
 				pass.Run(a_shader, { a_input, depth, t.mask->srv.get(), t.albedo->srv.get(), t.normal->srv.get() },
 					{ a_output }, width, height, 8, a_name);
 			};
-			pass.Run(_prepare.get(), { normals, material, albedo, rawDepth },
+			pass.Run(_prepare.get(), { normals, material, albedo, rawDepth, profile },
 				{ t.mask->uav.get(), t.normal->uav.get(), t.albedo->uav.get() }, width, height, 8, "SubsurfaceScattering::Prepare");
 			pass.Run(_extract.get(), { color, nullptr, nullptr, t.albedo->srv.get() },
 				{ t.diffuseNoAlbedo->uav.get() }, width, height, 8, "SubsurfaceScattering::DiffuseExtraction");

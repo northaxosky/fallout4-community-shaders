@@ -59,7 +59,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Screenshot | Port | SDR/crop/async/clipboard, temporal source, HDR PNG (needs HDR Display) | — | NS | M | M | High |
 | Skin | Mixed | Detail normal/color, default dual-lobe*, transmittance*, sweat inputs* | Ext: RFAOS/wet textures, wet-skin film | NS | H | M | Med |
 | [Sky Sync](deviations/SkySync.md) | Port | Alternate sun path, moon casting*, dawn/dusk + godray dimming, celestial transitions | N/A: Skyrim compat checks | Pt | M | M | Med |
-| [Subsurface Scattering](deviations/SubsurfaceScattering.md) | Mixed | Separable and Burley on native class-5 skin (single profile), character light | Ext: per-pixel amount/profile channel | Pt | H | M | Med |
+| [Subsurface Scattering](deviations/SubsurfaceScattering.md) | Mixed | Separable and Burley on native class-5 skin, per-draw Human/Base profile, character light | — | Pt | H | M | Med |
 | [Terrain Blending](deviations/TerrainBlending.md) | Port | Deferred landscape replay, depth-ramp alpha blend into the G-buffer, offset Z-prepass for near terrain | Pending: no-blend mesh flag | Pt | H | L | Med |
 | Terrain Helper | Mixed | Displacement-slot gather/bind* | Ext: default-land ESP package | NS | M | M | Low |
 | [Terrain Shadows](deviations/TerrainShadows.md) | Port | Height-field producer, world receivers, time/transition events, secondary/remaining receivers, diagnostics | — | Pt | H | L | High |
@@ -84,7 +84,7 @@ are FO4-only rule-4 port features.
   slice is a port. BGSMs carry no parallax marker, so, following ENB's `_s` alpha convention, the host admits objects whose
   `_s` format stores alpha and the shader rejects maps that are unmipped or whose last mip averages alpha 1. Terrain shares Terrain Variation's UV offsets.
 - **Subsurface Scattering.** Replace FO4's fixed second-composite blur with upstream separable/Burley on
-  native class-5 eligibility; never stack both.
+  native class-5 eligibility and a per-draw Human/Base profile from race keywords; never stack both.
 - **Light Limit Fix.** Opaque surfaces keep FO4's native tiled lighting (625 lights, 127 per tile). Forward
   consumers (Effect, Water; Rain Refraction pending) read a clustered grid of every nearby light, with
   portal-strict lights bound to rooms. Particle lights are N/A: upstream lights only texture stems listed in
@@ -121,4 +121,4 @@ Ordered by user value over effort, respecting dependencies.
 
 Not planned: DC authored reflectance/material workflow; LLF vanilla glow-card particle lights. Candidates: TruePBR
 full materials; Extended Materials complex materials (envmask-alpha height, RGB metal/colour); Grass Optimizations renderer;
-Terrain Helper ESP; Cloud Shadows Effect/particle sun term; Skin RFAOS; SSS profiles; Hair Kajiya-Kay and blended hair.
+Terrain Helper ESP; Cloud Shadows Effect/particle sun term; Skin RFAOS; Hair Kajiya-Kay and blended hair.
