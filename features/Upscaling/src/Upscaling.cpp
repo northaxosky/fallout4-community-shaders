@@ -202,75 +202,48 @@ namespace cs::features
 			}
 		}
 
-		if (settings.upscaleMethod ==
-			static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
-			if (const ui::Section section{ "upscaling-advanced", "Advanced", ui::Collapsible{ 1 } }; section) {
-				static const std::array presets{
-					dmui::ChoiceOption<std::uint32_t>{
-						0, "Default", "default" },
-					dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
-					dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
-					dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
-					dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
-				};
-				const auto preset = dmui::DrawChoice<std::uint32_t>(
-					"upscaling-dlss-preset",
-					settings.presetDLSS,
-					std::span<const dmui::ChoiceOption<std::uint32_t>>{
-						presets },
-					"Unavailable",
-					"DLSS preset");
-				if (edit.Discrete(preset.changed)) {
-					settings.presetDLSS = *preset.selected;
-					changed = true;
-				}
-			}
-		}
-
 		if (const ui::Section section{ "upscaling-latency", "Latency" }; section) {
 			using render::temporal::LatencyBackend;
 			using render::temporal::LatencyUnavailableReason;
 			const auto& latency = status.latency;
 			const bool reflexActive = status.latencyBackend == LatencyBackend::kReflex;
+			const bool dlssgForcesLatency =
+				status.effective.frameGenerationEnabled &&
+				status.effective.frameGeneration ==
+					render::temporal::FrameGenerationMethod::kDLSSG;
+			const char* latencyStatus = "Unavailable on this GPU or driver";
 			switch (status.latencyBackend) {
 			case LatencyBackend::kReflex:
-				dmui::ui::TextDisabled("Using NVIDIA Reflex");
+				latencyStatus = dlssgForcesLatency ?
+				                    "Using NVIDIA Reflex, forced on by DLSS Frame Generation" :
+				                    "Using NVIDIA Reflex";
 				break;
 			case LatencyBackend::kAntiLag2:
-				dmui::ui::TextDisabled("Using AMD Radeon Anti-Lag 2 (Experimental)");
+				latencyStatus = "Using AMD Radeon Anti-Lag 2 (Experimental)";
 				break;
 			case LatencyBackend::kNone:
-				break;
-			}
-			switch (latency.unavailableReason) {
-			case LatencyUnavailableReason::kNeedsD3D12Presentation:
-				dmui::ui::TextDisabled("AMD Anti-Lag 2 requires Upscaling or Frame Generation in borderless windowed mode");
-				break;
-			case LatencyUnavailableReason::kPresentationFailed:
-				dmui::ui::TextDisabled("Inactive because Direct3D 12 presentation failed");
-				break;
-			case LatencyUnavailableReason::kUpdateFailing:
-				dmui::ui::TextDisabled("The driver is rejecting Anti-Lag 2 updates");
-				break;
-			case LatencyUnavailableReason::kUnsupportedAdapter:
-			case LatencyUnavailableReason::kInitializeFailed:
-				dmui::ui::TextDisabled("Unavailable on this GPU or driver");
-				break;
-			case LatencyUnavailableReason::kNone:
-				if (status.latencyBackend == LatencyBackend::kNone) {
-					dmui::ui::TextDisabled(
-						settings.latencyReduction == 0 ?
-							"Turn Latency Reduction on to detect a supported backend" :
-							"Unavailable on this GPU or driver");
+				switch (latency.unavailableReason) {
+				case LatencyUnavailableReason::kNeedsD3D12Presentation:
+					latencyStatus = "AMD Anti-Lag 2 requires Upscaling or Frame Generation in borderless windowed mode";
+					break;
+				case LatencyUnavailableReason::kPresentationFailed:
+					latencyStatus = "Inactive because Direct3D 12 presentation failed";
+					break;
+				case LatencyUnavailableReason::kUpdateFailing:
+					latencyStatus = "The driver is rejecting Anti-Lag 2 updates";
+					break;
+				case LatencyUnavailableReason::kNone:
+					if (settings.latencyReduction == 0) {
+						latencyStatus = "Turn Latency Reduction on to detect a supported backend";
+					}
+					break;
+				case LatencyUnavailableReason::kUnsupportedAdapter:
+				case LatencyUnavailableReason::kInitializeFailed:
+					break;
 				}
 				break;
 			}
-			if (status.effective.frameGenerationEnabled &&
-				status.effective.frameGeneration ==
-					render::temporal::FrameGenerationMethod::kDLSSG) {
-				dmui::ui::TextDisabled(
-					"Low Latency forced on by DLSS Frame Generation");
-			}
+			dmui::ui::TextDisabled("%s", latencyStatus);
 			const std::array reductions{
 				dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
 				dmui::ChoiceOption<std::uint32_t>{ 1, "On", "on" },
@@ -302,7 +275,29 @@ namespace cs::features
 			dmui::ui::EndDisabled();
 		}
 
-		if (const ui::Section section{ "upscaling-latency-advanced", "Advanced", ui::Collapsible{ 1 } }; section) {
+		const bool dlss = settings.upscaleMethod == static_cast<std::uint32_t>(UpscaleMethod::kDLSS);
+		if (const ui::Section section{ "upscaling-advanced", "Advanced", ui::Collapsible{ dlss ? 2u : 1u } }; section) {
+			if (dlss) {
+				static const std::array presets{
+					dmui::ChoiceOption<std::uint32_t>{
+						0, "Default", "default" },
+					dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
+					dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
+					dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
+					dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
+				};
+				const auto preset = dmui::DrawChoice<std::uint32_t>(
+					"upscaling-dlss-preset",
+					settings.presetDLSS,
+					std::span<const dmui::ChoiceOption<std::uint32_t>>{
+						presets },
+					"Unavailable",
+					"DLSS preset");
+				if (edit.Discrete(preset.changed)) {
+					settings.presetDLSS = *preset.selected;
+					changed = true;
+				}
+			}
 			dmui::ui::BeginDisabled(!status.latency.markersAvailable);
 			changed |= edit.Discrete(dmui::ui::Checkbox(
 				"Use Markers To Optimize", &settings.latencyUseMarkers));
