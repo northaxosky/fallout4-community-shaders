@@ -39,7 +39,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | [Dynamic Cubemaps](deviations/DynamicCubemaps.md) | Mixed | Capture/filter/inference, water, native envmap materials, Skylighting/IBL-specular providers, Creator tool | Ext: authored sentinel/reflectance selection, FO4 material workflow | Pt | H | S/M | High |
 | Effects11 | Port | `.fx` host and effect chain, color correction, editor, weather/light controls, volumetric rays, water shore fade/sun specular | N/A: ENB preset/binary compatibility | NS | H | L | Med |
 | Exponential Height Fog | Port | Analytic height fog; volumetric fog (froxel in-scatter with transmittance from sun cascades, Terrain/Cloud Shadows, Skylighting, local lights); waits for upstream Physical Sky | — | NS | H | L | Med |
-| [Extended Materials](deviations/ExtendedMaterials.md) | Mixed | Object POM + contact refinement, warping fix, terrain POM/height blend (height from `_s` alpha); parallax material gate pending | Ext: complex envmask material; sun parallax soft shadows (done). N/A: point-light parallax shadows | Pt | H | M | Med |
+| [Extended Materials](deviations/ExtendedMaterials.md) | Mixed | Object POM + contact refinement, warping fix, terrain POM/height blend (height from `_s` alpha) | Ext: complex envmask material; sun parallax soft shadows (done). N/A: point-light parallax shadows | Pt | H | M | Med |
 | Extended Translucency | N/A | — | N/A: FO4 never forward-renders lit alpha-blended world geometry; vanilla has no translucent lit fabric | — | L | — | High |
 | Grass Collision | Port | Contact field, blade deformation/motion, optimized-grass consumer | — | NS | H | M | Med |
 | Grass Lighting | Mixed | Brightness/facing, complex-atlas decode, LOD brightness | Ext: exact specular/transmission/AO, PBR grass. N/A: forward activation | NS | M | S/M | Med |
@@ -81,9 +81,8 @@ are FO4-only rule-4 port features.
   (`Lighting.hlsl:1175-1217`), so it ships as one EM slice in `DFPrepass` before material sampling. Vanilla
   textures carry no height, but FO4 parallax texture packs store it in the `_s` (specular/smoothness) alpha,
   which `DFPrepass` already binds at t2 (landscape t8+). Reading it is a relocated upstream datum, so the
-  slice is a port. No draw identifies a parallax material: the engine drops the BGSM parallax flag and no
-  prepass bit or constant carries one, so the host admits objects whose `_s` format stores alpha until the
-  BGSM flag is recovered. Terrain shares Terrain Variation's UV offsets.
+  slice is a port. BGSMs carry no parallax marker, so the host admits objects whose `_s` format stores alpha
+  and the shader rejects maps that are unmipped or whose last mip averages alpha 1, as ENB does. Terrain shares Terrain Variation's UV offsets.
 - **Subsurface Scattering.** Replace FO4's fixed second-composite blur with upstream separable/Burley on
   native class-5 eligibility; never stack both.
 - **Light Limit Fix.** Opaque surfaces keep FO4's native tiled lighting (625 lights, 127 per tile). Forward
