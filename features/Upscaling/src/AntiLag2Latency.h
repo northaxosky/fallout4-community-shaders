@@ -9,7 +9,6 @@
 #include <dxgi.h>
 #include <winrt/base.h>
 
-#include "Render/LatencyBackend.h"
 #include "Render/TemporalProvider.h"
 
 namespace AMD::AntiLag2DX12
@@ -20,6 +19,7 @@ namespace AMD::AntiLag2DX12
 namespace cs::features
 {
 	// AMD Radeon Anti-Lag 2 on the native D3D12 device that presents CS's proxy swap chain.
+	// No driver call happens until Configure first asks for a mode other than off.
 	class AntiLag2Latency final : public render::temporal::ILatencyProvider
 	{
 	public:
@@ -28,13 +28,6 @@ namespace cs::features
 
 		AntiLag2Latency(const AntiLag2Latency&) = delete;
 		AntiLag2Latency& operator=(const AntiLag2Latency&) = delete;
-
-		// No driver call happens until Anti-Lag 2 is requested.
-		void AttachDevice(ID3D12Device* a_nativeDevice, std::uint32_t a_adapterVendorId) noexcept;
-		// Call only after the presentation swap chain and any frame-generation presenter thread are gone.
-		void DetachDevice() noexcept;
-		// Once per frame: initializes on the first request, never on a quarantined device, and returns whether it is initialized.
-		bool Prepare(bool a_requested, bool a_reflexOwnsLatency, bool a_presentationQuarantined) noexcept;
 
 		[[nodiscard]] render::temporal::ProviderResult
 		Configure(const render::temporal::LatencyOptions& a_options) override;
@@ -46,16 +39,16 @@ namespace cs::features
 		[[nodiscard]] render::temporal::LatencyDiagnostics
 		GetLatencyDiagnostics() const noexcept override;
 		[[nodiscard]] bool IsAvailable() const noexcept override;
-
-		// After the real frame's D3D12 submission, before the presentation Present.
-		void MarkEndOfFrameRendering() noexcept;
-		// Lets the FidelityFX frame-generation swap chain tag real and interpolated frames.
-		void PublishFrameTypeTagging(IDXGISwapChain* a_swapChain) noexcept;
-		[[nodiscard]] render::temporal::AntiLag2Diagnostics
-		GetAntiLag2Diagnostics() const noexcept;
+		void BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept override;
+		void UnbindPresentation() noexcept override;
+		void QuarantinePresentation() noexcept override;
 
 	private:
+		void InitializeLocked() noexcept;
 		void ShutdownLocked() noexcept;
+		void MarkEndOfFrameRenderingLocked() noexcept;
+		// Lets the FidelityFX frame-generation swap chain tag real and interpolated frames.
+		void PublishFrameTypeTaggingLocked() noexcept;
 
 		// Sleep holds this across Update, which can block for the driver's delay; callers run on the game thread.
 		mutable std::mutex _mutex;
@@ -63,17 +56,19 @@ namespace cs::features
 		const std::unique_ptr<AMD::AntiLag2DX12::Context> _context;
 		winrt::com_ptr<ID3D12Device> _device;
 		std::uint32_t _adapterVendorId = 0;
+		IDXGISwapChain* _swapChain = nullptr;
 		IDXGISwapChain* _taggedSwapChain = nullptr;
 		bool _taggedEnabled = false;
 		bool _presentationQuarantined = false;
 		bool _initialized = false;
 		bool _initializationFailed = false;
 		bool _enabled = false;
+		std::uint32_t _maxFps = 0;
 		std::uint32_t _lastSleepFrame = UINT32_MAX;
 		HRESULT _initializeResult = S_OK;
 		std::atomic<HRESULT> _lastUpdateResult{ S_OK };
 		std::atomic_uint64_t _updateCalls{ 0 };
 		std::atomic_uint64_t _updateFailures{ 0 };
-		std::atomic_uint64_t _endOfFrameMarks{ 0 };
+		std::atomic_uint64_t _markersDelivered{ 0 };
 	};
 }

@@ -5,7 +5,8 @@
 - Light Limit Fix: replaces Inverse Square Lighting; the config section is now `[features.LightLimitFix]` and `derive_unauthored_lights` now defaults to off, so converting unauthored lights to inverse-square falloff needs opting in.
 - Light Limit Fix: effects (smoke, fire, glow, rain) and water now receive every nearby light instead of at most 4 (effects) or 7 (water); portal-strict lights respect rooms; the magic light limit is lifted; adds a Clustered Lights Count debug view.
 - Pip-Boy and inventory effects no longer sample world sun shadows.
-- Upscaling: experimental, opt-in AMD Radeon Anti-Lag 2 (`anti_lag_2`) for supported Radeon GPUs when Upscaling or Frame Generation presents through Direct3D 12; latency benefit is not yet verified across hardware.
+- Upscaling: one Latency section now uses NVIDIA Reflex or, on Radeon GPUs, experimental AMD Radeon Anti-Lag 2 automatically when Latency Reduction is on; Anti-Lag 2 needs Upscaling or Frame Generation presenting through Direct3D 12, and its benefit is not yet verified across hardware.
+- Upscaling: the Reflex settings moved to vendor-neutral `latency_reduction`, `latency_fps_limit_enabled`, `latency_fps_limit` and `latency_use_markers` keys and reset to their defaults.
 
 ## 0.5.0
 

@@ -1,5 +1,4 @@
 #include "DX12SwapChain.h"
-#include "AntiLag2Latency.h"
 #include "DXGISwapChainFacadeContract.h"
 
 #include "AgilityBootstrap.h"
@@ -12,6 +11,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <REX/TScopeExit.h>
@@ -270,7 +270,7 @@ namespace cs::features
 						[this]() { ReleasePrivatePresentationResources(); });
 				RecordGlobalDrain("startup", release);
 				if (!release.Succeeded()) {
-					_quarantined = true;
+					MarkQuarantined();
 					result = E_FAIL;
 				} else {
 					_providerPresentationActive = false;
@@ -298,6 +298,8 @@ namespace cs::features
 				_captureDevice12.get(),
 				a_desc.OutputWindow);
 		}
+		_presentationBound = true;
+		NotifyPresentationBinding(_swapChain.get());
 		ClearSharedBuffers();
 		L->info("Published D3D11-facing {} proxy at {}x{} R8G8B8A8_UNORM",
 			_provider ? _provider->Name() : "plain D3D12", _innerDesc.Width,
@@ -318,7 +320,11 @@ namespace cs::features
 			_proxy->DetachOwner();
 			_proxy = nullptr;
 		}
+		// Teardown below can still quarantine, so that callback outlives the clear.
+		const auto unbindPresentation = std::exchange(_callbacks.unbindPresentation, nullptr);
+		auto quarantinePresentation = std::exchange(_callbacks.quarantinePresentation, nullptr);
 		_callbacks = {};
+		_callbacks.quarantinePresentation = std::move(quarantinePresentation);
 		_published = false;
 		ReleaseReShade();
 		if (_quarantined) {
@@ -331,7 +337,7 @@ namespace cs::features
 					[this]() { ReleasePrivatePresentationResources(); });
 			RecordGlobalDrain("teardown", release);
 			if (!release.Succeeded()) {
-				_quarantined = true;
+				MarkQuarantined();
 				L->critical(
 					"Temporal D3D12 resources quarantined after failed provider "
 					"drain: {}",
@@ -339,7 +345,7 @@ namespace cs::features
 				return E_FAIL;
 			}
 		} else if (_queue && FAILED(Drain())) {
-			_quarantined = true;
+			MarkQuarantined();
 			L->critical(
 				"Temporal D3D12 resources quarantined after failed plain "
 				"presentation drain");
@@ -363,8 +369,8 @@ namespace cs::features
 			backBuffer = nullptr;
 		}
 		_swapChain = nullptr;
-		if (_antiLag2) {
-			_antiLag2->DetachDevice();
+		if (std::exchange(_presentationBound, false) && unbindPresentation) {
+			unbindPresentation();
 		}
 		_inputRetirementFence11 = nullptr;
 		_inputRetirementFence12 = nullptr;
@@ -402,6 +408,7 @@ namespace cs::features
 			_preparedFrameGeneration, _vendorConsumptionPossible,
 			_preparedTransaction);
 		_presentSubmissionMayBeInFlight = false;
+		_callbacks.quarantinePresentation = nullptr;
 		_quarantined = false;
 		return S_OK;
 	}
@@ -540,11 +547,8 @@ namespace cs::features
 				"Native D3D12 capture target is unavailable; RenderDoc temporal "
 				"captures will remain disabled");
 		}
-		if (_antiLag2) {
-			DXGI_ADAPTER_DESC adapterDesc{};
-			const bool adapterKnown = SUCCEEDED(actualAdapter->GetDesc(&adapterDesc));
-			_antiLag2->AttachDevice(_captureDevice12.get(), adapterKnown ? adapterDesc.VendorId : 0);
-		}
+		DXGI_ADAPTER_DESC adapterDesc{};
+		_adapterVendorId = SUCCEEDED(actualAdapter->GetDesc(&adapterDesc)) ? adapterDesc.VendorId : 0;
 		cs::render::annotation::SetName(_device12.get(),
 			"Upscaling/FrameGeneration.Device");
 
@@ -722,7 +726,7 @@ namespace cs::features
 				const auto destroy = failedProvider->DestroyAfterDrain();
 				const auto deactivate = destroy.Succeeded() ? failedProvider->SetPresentationActive(false) : destroy;
 				if (!deactivate.Succeeded()) {
-					_quarantined = true;
+					MarkQuarantined();
 					return E_FAIL;
 				}
 				_providerPresentationActive = false;
@@ -991,11 +995,6 @@ namespace cs::features
 		       _backBuffers[0] && _backBuffers[1];
 	}
 
-	bool DX12SwapChain::IsQuarantined() const noexcept
-	{
-		return _quarantined;
-	}
-
 	bool DX12SwapChain::IsBridgeReady() const noexcept
 	{
 		return IsReady();
@@ -1110,6 +1109,7 @@ namespace cs::features
 			backBuffer = nullptr;
 		}
 		SetProxyInner(nullptr);
+		NotifyPresentationBinding(nullptr);
 		_swapChain = nullptr;
 		++_inputResourceGeneration;
 		render::temporal::ResetPresentationProtocol(
@@ -1195,6 +1195,7 @@ namespace cs::features
 			_frameGenerationDisabled = false;
 		}
 		SetProxyInner(_swapChain.get());
+		NotifyPresentationBinding(_swapChain.get());
 		_creationDesc.BufferDesc.Width = _innerDesc.Width;
 		_creationDesc.BufferDesc.Height = _innerDesc.Height;
 		_creationDesc.Windowed = _proxyDesc.Windowed;
@@ -1354,11 +1355,28 @@ namespace cs::features
 		}
 	}
 
+	void DX12SwapChain::MarkQuarantined() noexcept
+	{
+		_quarantined = true;
+		if (_presentationBound && _callbacks.quarantinePresentation) {
+			_callbacks.quarantinePresentation();
+		}
+	}
+
+	void DX12SwapChain::NotifyPresentationBinding(IDXGISwapChain* a_swapChain) noexcept
+	{
+		if (_presentationBound && _captureDevice12 && _callbacks.bindPresentation) {
+			_callbacks.bindPresentation({ .device = _captureDevice12.get(),
+				.adapterVendorId = _adapterVendorId,
+				.swapChain = a_swapChain });
+		}
+	}
+
 	void DX12SwapChain::QuarantineTransport(
 		std::string_view a_reason) noexcept
 	{
 		const bool firstFailure = !_quarantined;
-		_quarantined = true;
+		MarkQuarantined();
 		if (firstFailure) {
 			try {
 				render::TemporalPipeline::Get().PostFailure(
@@ -1511,7 +1529,7 @@ namespace cs::features
 			return providerResult;
 		} catch (const winrt::hresult_error& e) {
 			const auto error = static_cast<HRESULT>(e.code());
-			_quarantined = true;
+			MarkQuarantined();
 			L->error("D3D12 super-resolution bridge failed: {}",
 				winrt::to_string(e.message()));
 			return {
@@ -1522,7 +1540,7 @@ namespace cs::features
 				.workState = submissionMayBeInFlight ? render::temporal::ProviderWorkState::kSubmitted : render::temporal::ProviderWorkState::kNone
 			};
 		} catch (const std::exception& e) {
-			_quarantined = true;
+			MarkQuarantined();
 			L->error("D3D12 super-resolution bridge failed: {}", e.what());
 			return {
 				.code = render::temporal::ProviderResultCode::kFailure,
@@ -2019,9 +2037,6 @@ namespace cs::features
 			DX::ThrowIfFailed(commandList->Close());
 			ID3D12CommandList* lists[] = { commandList };
 			_queue->ExecuteCommandLists(1, lists);
-			if (_antiLag2) {
-				_antiLag2->MarkEndOfFrameRendering();
-			}
 			_presentSubmissionMayBeInFlight = true;
 			const UINT64 d3d12Done = _nextFenceValue++;
 			DX::ThrowIfFailed(_queue->Signal(_fence12.get(), d3d12Done));
@@ -2039,9 +2054,6 @@ namespace cs::features
 		}
 
 		cs::render::annotation::SetMarker("Upscaling/FrameGeneration/Present");
-		if (_antiLag2) {
-			_antiLag2->PublishFrameTypeTagging(_swapChain.get());
-		}
 		auto& pipeline = render::TemporalPipeline::Get();
 		pipeline.BeginPresentAttempt(a_flags);
 		const HRESULT presentResult = [&] {
@@ -2502,7 +2514,7 @@ namespace cs::features
 		} else {
 			const HRESULT drainResult = Drain();
 			if (FAILED(drainResult)) {
-				_quarantined = true;
+				MarkQuarantined();
 				return drainResult;
 			}
 		}

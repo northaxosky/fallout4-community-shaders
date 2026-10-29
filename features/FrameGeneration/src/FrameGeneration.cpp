@@ -220,6 +220,8 @@ namespace cs::features
 	{
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
+		const auto& antiLag2 = render::temporal::FindDiagnostics(
+			status.latencyBackends, render::temporal::LatencyBackend::kAntiLag2);
 		const auto diagnostics =
 			pipeline.GetFrameGenerationDiagnostics(false);
 		const auto fidelityFxCapabilities =
@@ -379,13 +381,13 @@ namespace cs::features
 			.Field("latency_sdk_active", status.latencySdkActive)
 			.Field("latency_phase", static_cast<std::uint8_t>(status.latencyPhase))
 			.Field("latency_backend", static_cast<std::uint8_t>(status.latencyBackend))
-			.Field("antilag2_enabled", status.antiLag2.enabled)
-			.Field("antilag2_initialize_result", status.antiLag2.initializeResult)
-			.Field("antilag2_frame_type_tagging", status.antiLag2.frameTypeTagging)
-			.Field("antilag2_updates", status.antiLag2.updateCalls)
-			.Field("antilag2_update_failures", status.antiLag2.updateFailures)
-			.Field("antilag2_last_update_result", status.antiLag2.lastUpdateResult)
-			.Field("antilag2_end_of_frame_marks", status.antiLag2.endOfFrameMarks)
+			.Field("antilag2_enabled", antiLag2.effective.mode != render::temporal::LatencyMode::kOff)
+			.Field("antilag2_initialize_result", antiLag2.initializeResult)
+			.Field("antilag2_frame_type_tagging", antiLag2.frameTypeTagging)
+			.Field("antilag2_updates", antiLag2.sleepCalls)
+			.Field("antilag2_update_failures", antiLag2.sleepFailures)
+			.Field("antilag2_last_update_result", antiLag2.lastCallResult)
+			.Field("antilag2_end_of_frame_marks", antiLag2.markersDelivered)
 			.Field("frame_slot", status.frameSlot)
 			.Field("present_attempts", status.presentAttempts)
 			.Field("reset_epoch_requested", status.frameGenerationResetRequested)

@@ -4,6 +4,8 @@
 #include "AntiLag2-SDK/ffx_antilag2_dx12.h"
 #pragma warning(pop)
 
+#include <cmath>
+
 #include "Log.h"
 #include "LogThrottle.h"
 
@@ -18,6 +20,8 @@ namespace cs::features
 		using render::temporal::LatencyOptions;
 		using render::temporal::ProviderResult;
 		using render::temporal::ProviderResultCode;
+
+		constexpr std::uint32_t kAmdVendorId = 0x1002;
 
 		// AMD's AntiLag2Data and IID_IFfxAntiLag2Data, read by the FidelityFX frame-generation swap chain.
 		struct FrameTypeTaggingData
@@ -37,18 +41,29 @@ namespace cs::features
 	// The driver may already be unloaded during static destruction, so only DetachDevice releases it.
 	AntiLag2Latency::~AntiLag2Latency() = default;
 
-	void AntiLag2Latency::AttachDevice(ID3D12Device* a_nativeDevice, std::uint32_t a_adapterVendorId) noexcept
+	void AntiLag2Latency::BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept
 	{
 		std::scoped_lock lock(_mutex);
-		ShutdownLocked();
-		_device.copy_from(a_nativeDevice);
-		_adapterVendorId = a_adapterVendorId;
+		if (a_binding.device != _device.get()) {
+			ShutdownLocked();
+			_device.copy_from(a_binding.device);
+			_adapterVendorId = a_binding.adapterVendorId;
+		}
+		_swapChain = a_binding.swapChain;
+		_taggedSwapChain = nullptr;
+		_taggedEnabled = false;
 	}
 
-	void AntiLag2Latency::DetachDevice() noexcept
+	void AntiLag2Latency::UnbindPresentation() noexcept
 	{
 		std::scoped_lock lock(_mutex);
 		ShutdownLocked();
+	}
+
+	void AntiLag2Latency::QuarantinePresentation() noexcept
+	{
+		std::scoped_lock lock(_mutex);
+		_presentationQuarantined = true;
 	}
 
 	void AntiLag2Latency::ShutdownLocked() noexcept
@@ -60,31 +75,28 @@ namespace cs::features
 		*_context = {};
 		_device = nullptr;
 		_adapterVendorId = 0;
+		_swapChain = nullptr;
 		_taggedSwapChain = nullptr;
 		_taggedEnabled = false;
 		_presentationQuarantined = false;
 		_initialized = false;
 		_initializationFailed = false;
 		_enabled = false;
+		_maxFps = 0;
 		_lastSleepFrame = UINT32_MAX;
 		_initializeResult = S_OK;
 		_lastUpdateResult.store(S_OK, std::memory_order_relaxed);
 	}
 
-	bool AntiLag2Latency::Prepare(bool a_requested, bool a_reflexOwnsLatency, bool a_presentationQuarantined) noexcept
+	void AntiLag2Latency::InitializeLocked() noexcept
 	{
-		std::scoped_lock lock(_mutex);
-		_presentationQuarantined = a_presentationQuarantined;
-		if (a_requested && !a_reflexOwnsLatency && _device && !_initializationFailed &&
-			_adapterVendorId != render::temporal::kAmdVendorId) {
+		if (!_device || _initialized || _initializationFailed || _presentationQuarantined) {
+			return;
+		}
+		if (_adapterVendorId != kAmdVendorId) {
 			_initializationFailed = true;
 			L->warn("Anti-Lag 2 is unavailable: the presenting adapter is not AMD (vendor {:#06x})", _adapterVendorId);
-			return false;
-		}
-		if (!render::temporal::ShouldInitializeAntiLag2(
-				a_requested, a_reflexOwnsLatency, _adapterVendorId, _device != nullptr,
-				a_presentationQuarantined, _initialized, _initializationFailed)) {
-			return _initialized;
+			return;
 		}
 		*_context = {};
 		_initializeResult = AMD::AntiLag2DX12::Initialize(_context.get(), _device.get());
@@ -97,23 +109,27 @@ namespace cs::features
 		} else {
 			L->warn("Anti-Lag 2 is unavailable on this GPU or driver ({:#010x})", static_cast<std::uint32_t>(_initializeResult));
 		}
-		return _initialized;
 	}
 
 	ProviderResult AntiLag2Latency::Configure(const LatencyOptions& a_options)
 	{
 		std::scoped_lock lock(_mutex);
-		if (!_initialized) {
+		if (a_options.mode != LatencyMode::kOff) {
+			InitializeLocked();
+		}
+		if (!_initialized || _presentationQuarantined) {
 			return { .code = ProviderResultCode::kUnavailable };
 		}
+		// Anti-Lag 2 has no boost tier, so it treats boost as on.
 		_enabled = a_options.mode != LatencyMode::kOff;
+		_maxFps = a_options.frameLimitUs ? static_cast<std::uint32_t>(std::lround(1'000'000.0 / a_options.frameLimitUs)) : 0;
 		return ProviderResult::Ok();
 	}
 
 	ProviderResult AntiLag2Latency::Sleep(std::uint32_t a_frame)
 	{
 		std::scoped_lock lock(_mutex);
-		if (!_initialized) {
+		if (!_initialized || _presentationQuarantined) {
 			return { .code = ProviderResultCode::kUnavailable };
 		}
 		if (_lastSleepFrame == a_frame) {
@@ -121,8 +137,7 @@ namespace cs::features
 		}
 		_lastSleepFrame = a_frame;
 		++_updateCalls;
-		// maxFPS 0 keeps Anti-Lag 2's own frame limiter off so it never competes with another limiter.
-		const HRESULT result = AMD::AntiLag2DX12::Update(_context.get(), _enabled, 0);
+		const HRESULT result = AMD::AntiLag2DX12::Update(_context.get(), _enabled, _enabled ? _maxFps : 0);
 		_lastUpdateResult.store(result, std::memory_order_relaxed);
 		if (FAILED(result)) {
 			++_updateFailures;
@@ -137,82 +152,83 @@ namespace cs::features
 		return ProviderResult::Ok();
 	}
 
-	ProviderResult AntiLag2Latency::SetLatencyMarker(LatencyMarker, std::uint32_t)
+	ProviderResult AntiLag2Latency::SetLatencyMarker(LatencyMarker a_marker, std::uint32_t)
 	{
-		return { .code = ProviderResultCode::kUnavailable };
+		std::scoped_lock lock(_mutex);
+		if (_initialized && !_presentationQuarantined) {
+			if (a_marker == LatencyMarker::kRenderSubmitEnd) {
+				MarkEndOfFrameRenderingLocked();
+			} else if (a_marker == LatencyMarker::kPresentStart) {
+				PublishFrameTypeTaggingLocked();
+			}
+		}
+		return ProviderResult::Ok();
 	}
 
 	render::temporal::LatencyDiagnostics
 	AntiLag2Latency::GetLatencyDiagnostics() const noexcept
 	{
 		std::scoped_lock lock(_mutex);
+		using Reason = render::temporal::LatencyUnavailableReason;
+		const bool usable = _initialized && !_presentationQuarantined;
 		render::temporal::LatencyDiagnostics diagnostics;
-		diagnostics.available = _initialized;
-		diagnostics.lowLatencyAvailable = _initialized;
-		diagnostics.effective.mode = _initialized && _enabled ? LatencyMode::kLowLatency : LatencyMode::kOff;
+		diagnostics.available = usable;
+		diagnostics.lowLatencyAvailable = usable;
+		diagnostics.frameTypeTagging = _taggedEnabled;
+		diagnostics.effective.mode = usable && _enabled ? LatencyMode::kLowLatency : LatencyMode::kOff;
+		diagnostics.effective.frameLimitUs = usable && _enabled && _maxFps ? static_cast<std::uint32_t>(std::lround(1'000'000.0 / _maxFps)) : 0;
+		diagnostics.initializeResult = static_cast<std::int32_t>(_initializeResult);
+		const HRESULT lastUpdate = _lastUpdateResult.load(std::memory_order_relaxed);
+		diagnostics.lastCallResult = static_cast<std::int32_t>(lastUpdate);
+		diagnostics.markersDelivered = _markersDelivered.load(std::memory_order_relaxed);
 		diagnostics.sleepCalls = _updateCalls.load(std::memory_order_relaxed);
 		diagnostics.sleepFailures = _updateFailures.load(std::memory_order_relaxed);
+		// Update's HRESULT comes from the driver's delay call; a failure is assumed to insert no delay.
+		if (_presentationQuarantined) {
+			diagnostics.unavailableReason = Reason::kPresentationFailed;
+		} else if (_initializationFailed) {
+			diagnostics.unavailableReason = _adapterVendorId != kAmdVendorId ? Reason::kUnsupportedAdapter : Reason::kInitializeFailed;
+		} else if (!_device) {
+			diagnostics.unavailableReason = Reason::kNeedsD3D12Presentation;
+		} else if (usable && _enabled && lastUpdate < 0) {
+			diagnostics.unavailableReason = Reason::kUpdateFailing;
+		}
 		return diagnostics;
 	}
 
 	bool AntiLag2Latency::IsAvailable() const noexcept
 	{
 		std::scoped_lock lock(_mutex);
-		return _initialized;
+		return _initialized && !_presentationQuarantined;
 	}
 
-	void AntiLag2Latency::MarkEndOfFrameRendering() noexcept
+	void AntiLag2Latency::MarkEndOfFrameRenderingLocked() noexcept
 	{
-		std::scoped_lock lock(_mutex);
-		if (!_initialized || !_enabled) {
-			return;
-		}
-		if (SUCCEEDED(AMD::AntiLag2DX12::MarkEndOfFrameRendering(_context.get()))) {
-			++_endOfFrameMarks;
+		if (_enabled && SUCCEEDED(AMD::AntiLag2DX12::MarkEndOfFrameRendering(_context.get()))) {
+			++_markersDelivered;
 		}
 	}
 
-	void AntiLag2Latency::PublishFrameTypeTagging(IDXGISwapChain* a_swapChain) noexcept
+	void AntiLag2Latency::PublishFrameTypeTaggingLocked() noexcept
 	{
-		std::scoped_lock lock(_mutex);
-		if (!a_swapChain) {
+		if (!_swapChain) {
 			return;
 		}
-		const bool enabled = _initialized && _enabled;
-		const bool wasTagged = _taggedSwapChain == a_swapChain && _taggedEnabled;
-		if (!enabled && !wasTagged) {
+		const bool wasTagged = _taggedSwapChain == _swapChain && _taggedEnabled;
+		if (!_enabled && !wasTagged) {
 			return;
 		}
 		// AMD's guide writes this every frame; doing so also covers a rebuilt swap chain at the same address.
-		const FrameTypeTaggingData data{ .context = _context.get(), .enabled = enabled };
-		const HRESULT result = a_swapChain->SetPrivateData(kFrameTypeTaggingGuid, sizeof(data), &data);
+		const FrameTypeTaggingData data{ .context = _context.get(), .enabled = _enabled };
+		const HRESULT result = _swapChain->SetPrivateData(kFrameTypeTaggingGuid, sizeof(data), &data);
 		if (FAILED(result)) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Anti-Lag 2 frame-type tagging failed: {:#010x}", static_cast<std::uint32_t>(result));
 			return;
 		}
-		if (enabled && !wasTagged) {
+		if (_enabled && !wasTagged) {
 			L->info("Anti-Lag 2 frame-type tagging enabled on the presentation swap chain");
 		}
-		_taggedSwapChain = a_swapChain;
-		_taggedEnabled = enabled;
-	}
-
-	render::temporal::AntiLag2Diagnostics
-	AntiLag2Latency::GetAntiLag2Diagnostics() const noexcept
-	{
-		std::scoped_lock lock(_mutex);
-		return {
-			.deviceAttached = _device != nullptr,
-			.presentationQuarantined = _presentationQuarantined,
-			.initialized = _initialized,
-			.initializationFailed = _initializationFailed,
-			.enabled = _initialized && _enabled && !_presentationQuarantined,
-			.frameTypeTagging = _taggedEnabled,
-			.initializeResult = static_cast<std::int32_t>(_initializeResult),
-			.lastUpdateResult = static_cast<std::int32_t>(_lastUpdateResult.load(std::memory_order_relaxed)),
-			.updateCalls = _updateCalls.load(std::memory_order_relaxed),
-			.updateFailures = _updateFailures.load(std::memory_order_relaxed),
-			.endOfFrameMarks = _endOfFrameMarks.load(std::memory_order_relaxed)
-		};
+		_taggedSwapChain = _swapChain;
+		_taggedEnabled = _enabled;
 	}
 }

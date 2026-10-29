@@ -227,72 +227,86 @@ namespace cs::features
 			}
 		}
 
-		if (const ui::Section section{ "upscaling-reflex", "NVIDIA Reflex" }; section) {
+		if (const ui::Section section{ "upscaling-latency", "Latency" }; section) {
+			using render::temporal::LatencyBackend;
+			using render::temporal::LatencyUnavailableReason;
 			const auto& latency = status.latency;
-			if (!latency.available) {
-				dmui::ui::TextDisabled("Reflex is unavailable on this GPU or driver.");
-			} else if (
-				status.effective.frameGenerationEnabled &&
+			const bool reflexActive = status.latencyBackend == LatencyBackend::kReflex;
+			switch (status.latencyBackend) {
+			case LatencyBackend::kReflex:
+				dmui::ui::TextDisabled("Using NVIDIA Reflex");
+				break;
+			case LatencyBackend::kAntiLag2:
+				dmui::ui::TextDisabled("Using AMD Radeon Anti-Lag 2 (Experimental)");
+				break;
+			case LatencyBackend::kNone:
+				break;
+			}
+			switch (latency.unavailableReason) {
+			case LatencyUnavailableReason::kNeedsD3D12Presentation:
+				dmui::ui::TextDisabled("AMD Anti-Lag 2 requires Upscaling or Frame Generation in borderless windowed mode");
+				break;
+			case LatencyUnavailableReason::kPresentationFailed:
+				dmui::ui::TextDisabled("Inactive because Direct3D 12 presentation failed");
+				break;
+			case LatencyUnavailableReason::kUpdateFailing:
+				dmui::ui::TextDisabled("The driver is rejecting Anti-Lag 2 updates");
+				break;
+			case LatencyUnavailableReason::kUnsupportedAdapter:
+			case LatencyUnavailableReason::kInitializeFailed:
+				dmui::ui::TextDisabled("Unavailable on this GPU or driver");
+				break;
+			case LatencyUnavailableReason::kNone:
+				if (status.latencyBackend == LatencyBackend::kNone) {
+					dmui::ui::TextDisabled(
+						settings.latencyReduction == 0 ?
+							"Turn Latency Reduction on to detect a supported backend" :
+							"Unavailable on this GPU or driver");
+				}
+				break;
+			}
+			if (status.effective.frameGenerationEnabled &&
 				status.effective.frameGeneration ==
 					render::temporal::FrameGenerationMethod::kDLSSG) {
 				dmui::ui::TextDisabled(
 					"Low Latency forced on by DLSS Frame Generation");
 			}
-			dmui::ui::BeginDisabled(!latency.available);
+			const std::array reductions{
+				dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
+				dmui::ChoiceOption<std::uint32_t>{ 1, "On", "on" },
+				dmui::ChoiceOption<std::uint32_t>{ 2, "On + Boost", "on-boost", reflexActive }
+			};
+			const auto reduction = dmui::DrawChoice<std::uint32_t>(
+				"upscaling-latency-reduction",
+				settings.latencyReduction,
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{
+					reductions },
+				"Unavailable",
+				"Latency Reduction");
+			ui::Tooltip("Reduces input latency by pacing CPU work against the GPU. Boost keeps GPU clocks high and is NVIDIA Reflex only.");
+			if (edit.Discrete(reduction.changed)) {
+				settings.latencyReduction = *reduction.selected;
+				changed = true;
+			}
 			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Low Latency Mode", &settings.reflexLowLatencyMode));
-			ui::Tooltip("Reduces input latency by pacing CPU work against the GPU.");
-			dmui::ui::BeginDisabled(!settings.reflexLowLatencyMode);
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Low Latency Boost", &settings.reflexLowLatencyBoost));
-			ui::Tooltip("Keeps the GPU clocks high to cut latency further at the cost of power.");
-			dmui::ui::EndDisabled();
-			dmui::ui::BeginDisabled(!latency.markersAvailable);
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Use Markers To Optimize", &settings.reflexUseMarkersToOptimize));
-			ui::Tooltip("Lets Reflex tune pacing from frame markers; only helps in specific cases.");
-			dmui::ui::EndDisabled();
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Use FPS Limit", &settings.reflexUseFpsLimit));
-			ui::Tooltip("Caps the frame rate through Reflex for steadier frame times.");
-			dmui::ui::BeginDisabled(!settings.reflexUseFpsLimit);
-			const auto fpsRange = render::temporal::kSchema.EditRange(&Settings::reflexFpsLimit);
+				"Frame Rate Limit", &settings.latencyFpsLimitEnabled));
+			ui::Tooltip("Caps the frame rate through the active latency backend for steadier frame times.");
+			dmui::ui::BeginDisabled(!settings.latencyFpsLimitEnabled);
+			const auto fpsRange = render::temporal::kSchema.EditRange(&Settings::latencyFpsLimit);
 			changed |= edit.Continuous(dmui::ui::SliderScalar(
-				"FPS Limit",
-				&settings.reflexFpsLimit,
+				"Limit",
+				&settings.latencyFpsLimit,
 				&fpsRange.min,
 				&fpsRange.max,
 				"%.0f"));
 			dmui::ui::EndDisabled();
-			dmui::ui::EndDisabled();
 		}
 
-		if (const ui::Section section{ "upscaling-antilag2", "AMD Radeon Anti-Lag 2 (Experimental)" }; section) {
-			using render::temporal::AntiLag2Status;
-			const bool reflexOwnsLatency = render::temporal::ReflexOwnsLatency(
-				status.latency.available, status.latency.lowLatencyAvailable);
-			switch (render::temporal::GetAntiLag2Status(reflexOwnsLatency, status.antiLag2)) {
-			case AntiLag2Status::kReflexOwnsLatency:
-				dmui::ui::TextDisabled("NVIDIA Reflex handles latency on this GPU.");
-				break;
-			case AntiLag2Status::kUnavailable:
-				dmui::ui::TextDisabled("Anti-Lag 2 is unavailable on this GPU or driver.");
-				break;
-			case AntiLag2Status::kNeedsD3D12Presentation:
-				dmui::ui::TextDisabled("Requires Upscaling or Frame Generation in borderless windowed mode.");
-				break;
-			case AntiLag2Status::kPresentationFailed:
-				dmui::ui::TextDisabled("Inactive because Direct3D 12 presentation failed.");
-				break;
-			case AntiLag2Status::kUpdateFailing:
-				dmui::ui::TextDisabled("The driver is rejecting Anti-Lag 2 updates.");
-				break;
-			case AntiLag2Status::kReady:
-				break;
-			}
-			dmui::ui::BeginDisabled(reflexOwnsLatency);
-			changed |= edit.Discrete(dmui::ui::Checkbox("Anti-Lag 2", &settings.antiLag2));
-			ui::Tooltip("Experimental. May reduce input latency on supported Radeon GPUs by delaying each frame until just before input is read. The benefit varies by system and is unverified with frame generation.");
+		if (const ui::Section section{ "upscaling-latency-advanced", "Advanced", ui::Collapsible{ 1 } }; section) {
+			dmui::ui::BeginDisabled(!status.latency.markersAvailable);
+			changed |= edit.Discrete(dmui::ui::Checkbox(
+				"Use Markers To Optimize", &settings.latencyUseMarkers));
+			ui::Tooltip("Lets NVIDIA Reflex tune pacing from frame markers; only helps in specific cases.");
 			dmui::ui::EndDisabled();
 		}
 
@@ -420,7 +434,9 @@ namespace cs::features
 		const auto capabilities =
 			render::TemporalPipeline::Get()
 				.GetFidelityFXCapabilities();
-		const auto latency = render::TemporalPipeline::Get().GetStatus().latency;
+		const auto latency = render::temporal::FindDiagnostics(
+			render::TemporalPipeline::Get().GetStatus().latencyBackends,
+			render::temporal::LatencyBackend::kReflex);
 		a_sink
 			.Field("reflex_available", latency.available)
 			.Field("reflex_low_latency_available", latency.lowLatencyAvailable)
