@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
 
@@ -26,14 +27,17 @@ namespace cs::engine
 	namespace
 	{
 		constexpr std::size_t kMaxObservers = 4;
+		constexpr std::size_t kTargetCount = static_cast<std::size_t>(ShaderInjectionTarget::kCount);
 
+		template <class Observer>
 		struct Observers
 		{
-			std::array<GeometryObserver, kMaxObservers> list{};
+			std::array<Observer, kMaxObservers> list{};
 			std::size_t count = 0;
 			bool hooked = false;
 		};
-		std::array<Observers, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> g_observers;
+		std::array<Observers<GeometryObserver>, kTargetCount> g_observers;
+		std::array<Observers<TechniqueObserver>, kTargetCount> g_techniqueObservers;
 
 		template <ShaderInjectionTarget Target>
 		struct SetupGeometryHook
@@ -67,31 +71,71 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		template <class Shader, ShaderInjectionTarget Target>
-		void Hook()
+		template <ShaderInjectionTarget Target>
+		struct SetupTechniqueHook
 		{
-			stl::write_vfunc<Shader, SetupGeometryHook<Target>>();
-			stl::write_vfunc<Shader, RestoreGeometryHook<Target>>();
+			static constexpr std::size_t size = 0x02;
+
+			static bool thunk(RE::BSShader* a_self, std::uint32_t a_technique)
+			{
+				const auto& observers = g_techniqueObservers[static_cast<std::size_t>(Target)];
+				for (std::size_t i = 0; i < observers.count; ++i)
+					observers.list[i].setup(a_self, a_technique);
+				return func(a_self, a_technique);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct GeometryHooks
+		{
+			template <class Shader, ShaderInjectionTarget Target>
+			static void Install()
+			{
+				stl::write_vfunc<Shader, SetupGeometryHook<Target>>();
+				stl::write_vfunc<Shader, RestoreGeometryHook<Target>>();
+			}
+		};
+
+		struct TechniqueHooks
+		{
+			template <class Shader, ShaderInjectionTarget Target>
+			static void Install()
+			{
+				stl::write_vfunc<Shader, SetupTechniqueHook<Target>>();
+			}
+		};
+
+		// The first observer of a target installs its hook set once.
+		template <class Hooks, class Observer>
+		void Observe(std::array<Observers<Observer>, kTargetCount>& a_lists, ShaderInjectionTarget a_target, Observer a_observer, const char* a_overflow)
+		{
+			auto& entry = a_lists.at(static_cast<std::size_t>(a_target));
+			if (entry.count == kMaxObservers)
+				throw std::length_error(a_overflow);
+			entry.list[entry.count++] = a_observer;
+			if (std::exchange(entry.hooked, true))
+				return;
+			switch (a_target) {
+#define CS_HOOK_SHADER(klass, target)                                        \
+	case ShaderInjectionTarget::target:                                      \
+		Hooks::template Install<RE::klass, ShaderInjectionTarget::target>(); \
+		break
+				CS_SHADER_SUBCLASSES(CS_HOOK_SHADER);
+#undef CS_HOOK_SHADER
+			default:
+				break;
+			}
 		}
 	}
 
 	void ObserveShaderGeometry(ShaderInjectionTarget a_target, GeometryObserver a_observer)
 	{
-		auto& entry = g_observers.at(static_cast<std::size_t>(a_target));
-		if (entry.count == kMaxObservers)
-			throw std::length_error("Too many geometry observers");
-		entry.list[entry.count++] = a_observer;
-		if (std::exchange(entry.hooked, true))
-			return;
-		switch (a_target) {
-#define CS_HOOK_GEOMETRY(klass, target)                   \
-	case ShaderInjectionTarget::target:                   \
-		Hook<RE::klass, ShaderInjectionTarget::target>(); \
-		break
-			CS_SHADER_SUBCLASSES(CS_HOOK_GEOMETRY);
-#undef CS_HOOK_GEOMETRY
-		default:
-			break;
-		}
+		Observe<GeometryHooks>(g_observers, a_target, a_observer, "Too many geometry observers");
+	}
+
+	void ObserveShaderTechnique(ShaderInjectionTarget a_target, TechniqueObserver a_observer)
+	{
+		Observe<TechniqueHooks>(g_techniqueObservers, a_target, a_observer, "Too many technique observers");
 	}
 }
