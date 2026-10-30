@@ -138,8 +138,11 @@ namespace cs::features
 	void TerrainBlending::Load()
 	{
 		if (!cs::engine::RegisterFeatureShaderBindings("TerrainBlending", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
-				if (registration.targetId == cs::engine::ShaderInjectionTarget::kDeferredPrepass)
+				if (registration.targetId == cs::engine::ShaderInjectionTarget::kDeferredPrepass) {
 					registration.bind = [this](ID3D11DeviceContext* a_context) { BindReplayDraw(a_context); };
+					// A disable between hold and replay must still bind the held draws.
+					registration.bindWhileDisabled = true;
+				}
 			})) {
 			FailLoad("Terrain Blending shader contribution registration failed.");
 			return;
