@@ -6,6 +6,7 @@
 - Light Limit Fix: effects (smoke, fire, glow, rain) and water now receive every nearby light instead of at most 4 (effects) or 7 (water); portal-strict lights respect rooms; the magic light limit is lifted; adds a Clustered Lights Count debug view.
 - Pip-Boy and inventory effects no longer sample world sun shadows.
 - Upscaling: Latency Reduction now picks NVIDIA Reflex or, on Radeon GPUs, experimental AMD Anti-Lag 2; Anti-Lag 2 needs Upscaling or Frame Generation presenting through Direct3D 12.
+- Upscaling: DLSS and FSR below native resolution no longer flicker on grass and fine detail.
 - Upscaling: the Reflex settings moved to vendor-neutral `latency_reduction`, `latency_fps_limit_enabled`, `latency_fps_limit` and `latency_use_markers` keys and reset to their defaults.
 - Extended Materials: terrain parallax is on by default and renamed Enable Terrain Parallax; landscape layers without a height map stay flat.
 - Extended Materials: parallax skips `_s` maps without mipmaps, whose alpha is not a height map (e.g. weapon grunge masks).
