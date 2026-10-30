@@ -297,7 +297,7 @@ namespace cs::features
 	void UnifiedWater::Visibility::thunk(Node* a_node, RE::NiNode* a_parent)
 	{
 		auto& self = *GetSingleton();
-		if (!self._ready.load(std::memory_order_acquire)) {
+		if (!self._ready.load(std::memory_order_acquire) || !self._appliedEnabled.load(std::memory_order_acquire)) {
 			func(a_node, a_parent);
 			return;
 		}

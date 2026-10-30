@@ -131,6 +131,8 @@ namespace cs::features
 
 		void CorrectPreviousWorld(const cs::engine::LightingRenderPassesCall& a_call) noexcept
 		{
+			if (!Enabled())
+				return;
 			auto* main = RE::Main::GetSingleton();
 			const bool frozen =
 				main && main->gameActive && (main->inMenuMode || main->freezeTime);
@@ -140,7 +142,7 @@ namespace cs::features
 									   ShaderFlag::kLODLandscape,
 									   ShaderFlag::kLODLandBlend,
 									   ShaderFlag::kMultiTextureLandscape);
-			if (a_call.geometry && Enabled() && !g_loadingMenuOpen.load(std::memory_order_relaxed) &&
+			if (a_call.geometry && !g_loadingMenuOpen.load(std::memory_order_relaxed) &&
 				(frozen || lod)) {
 				a_call.geometry->previousWorld = a_call.geometry->world;
 				g_corrections.fetch_add(1, std::memory_order_relaxed);
