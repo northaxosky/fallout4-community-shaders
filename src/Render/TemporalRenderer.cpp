@@ -247,8 +247,9 @@ namespace cs::render
 		if (vendorMethod) {
 			const auto [renderWidth, renderHeight] = GetRenderSize();
 			if (renderWidth > 0 && renderHeight > 0) {
-				state->offsetX = -2.0f * jitter.x / static_cast<float>(renderWidth);
-				state->offsetY = 2.0f * jitter.y / static_cast<float>(renderHeight);
+				// FO4: the camera builder divides these offsets by the dynamic ratio.
+				state->offsetX = -2.0f * jitter.x * widthRatio / static_cast<float>(renderWidth);
+				state->offsetY = 2.0f * jitter.y * heightRatio / static_cast<float>(renderHeight);
 			}
 		}
 
