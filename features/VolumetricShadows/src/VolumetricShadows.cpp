@@ -303,7 +303,7 @@ namespace cs::features
 	void VolumetricShadows::BindConsumer(ID3D11DeviceContext* a_context, cs::engine::ShaderInjectionTarget a_target)
 	{
 		// Disabled: ClearState nulls t98 each frame, so lobes stay native.
-		if (!a_context || !IsHealthy() || !_injectionsOperational.load(std::memory_order_acquire) || !IsEnabled() || !_map.srv)
+		if (!a_context || !IsHealthy() || !_injectionsOperational.load(std::memory_order_acquire) || !_map.srv)
 			return;
 		// Skylighting variants still read the VSM while Skylighting is disabled.
 		if (a_target == cs::engine::ShaderInjectionTarget::kBsdfLight && !cs::engine::ActiveLightHasSunShadowedFamily())

@@ -287,7 +287,6 @@ namespace cs::engine
 				const auto& [classifier, owner] = g_prepassClassifiers[component];
 				if (!classifier)
 					continue;
-				// Baked records outlive a toggle, so only per-frame draws skip.
 				if (a_path == PrepassBakePath::kImmediate && !owner->IsEnabled())
 					continue;
 				const bool flagged = classifier(draw);

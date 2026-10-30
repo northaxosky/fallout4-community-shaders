@@ -83,7 +83,6 @@ namespace cs::features
 		}
 		if (!engine::RegisterFeatureShaderBindings("ImageBasedLighting", *this, [this](engine::ShaderReplacementRegistration& registration) {
 				registration.bind = [this](ID3D11DeviceContext* a_context) { BindConsumer(a_context); };
-				registration.bindWhileDisabled = true;
 			})) {
 			FailLoad("Image Based Lighting shader contribution registration failed.");
 			return;

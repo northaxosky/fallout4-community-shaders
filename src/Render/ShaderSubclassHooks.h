@@ -96,8 +96,7 @@ namespace cs::engine
 	};
 
 	// Load/OnPostPostLoad only; false if patching failed or the component is taken.
-	// Immediate draws skip a disabled owner; baked records outlive a toggle, so
-	// command-buffer draws always classify.
+	// Immediate draws skip a disabled owner; baked records always classify.
 	[[nodiscard]] bool RegisterPrepassDrawClassifier(Feature& a_owner, PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier);
 	[[nodiscard]] PrepassLaneStats GetPrepassLaneStats() noexcept;
 	[[nodiscard]] PrepassClassifierStats GetPrepassClassifierStats(PrepassLaneComponent a_component, PrepassBakePath a_path) noexcept;

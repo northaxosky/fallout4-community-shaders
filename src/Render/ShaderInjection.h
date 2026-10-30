@@ -164,7 +164,7 @@ namespace cs::engine
 		std::string contributor;
 		const ShaderDefineProvider* feature = nullptr;
 		ShaderInjectionBindCallback bind;
-		// The dispatcher skips a disabled owner's bind unless this is set.
+		// For binds the shader needs while off (declared RTs, depth reads).
 		bool bindWhileDisabled = false;
 		bool requiresGraphicsPair = false;
 	};

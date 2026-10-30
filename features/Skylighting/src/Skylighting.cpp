@@ -188,7 +188,6 @@ namespace cs::features
 
 	void Skylighting::BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer)
 	{
-		// Disabled keeps the bindings: the neutral b6 block never reads them.
 		auto* probes = GetBindableProbeArraySRV();
 		if (!a_context || !probes)
 			return;
