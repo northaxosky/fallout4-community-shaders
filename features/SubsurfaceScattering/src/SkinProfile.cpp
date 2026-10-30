@@ -46,17 +46,18 @@ namespace cs::features::subsurface_scattering
 		g_baseRaceKeywordsResolved = true;
 	}
 
-	bool IsHumanSkinDraw(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
+	bool IsHumanSkinDraw(cs::engine::PrepassDrawContext& a_draw) noexcept
 	{
+		auto* pass = a_draw.pass;
 		namespace pt = cs::engine::prepass_technique;
 		// FO4: the pass enum carries the skin flags; every prepass draw is deferred.
-		if (!g_baseRaceKeywordsResolved || !a_pass || !(a_pass->passEnum & (pt::kSkinTint | pt::kFace)))
+		if (!g_baseRaceKeywordsResolved || !pass || !(pass->passEnum & (pt::kSkinTint | pt::kFace)))
 			return false;
 
 		bool isBeastRace = true;
 
 		// FO4: the actor is the geometry's scene-graph owner; there is no user data.
-		if (auto* reference = RE::TESObjectREFR::FindReferenceFor3D(a_pass->geometry))
+		if (auto* reference = RE::TESObjectREFR::FindReferenceFor3D(pass->geometry))
 			if (auto* actor = reference->As<RE::Actor>())
 				if (auto* race = actor->race)
 					isBeastRace = std::ranges::any_of(g_baseRaceKeywords, [race](const RE::BGSKeyword* a_keyword) { return race->HasKeyword(a_keyword); });

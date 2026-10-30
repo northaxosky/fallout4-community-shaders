@@ -8,5 +8,5 @@ namespace cs::features::subsurface_scattering
 	void ResolveBaseRaceKeywords();
 
 	// True when the skin draw belongs to a Human-profile race.
-	[[nodiscard]] bool IsHumanSkinDraw(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath a_path) noexcept;
+	[[nodiscard]] bool IsHumanSkinDraw(cs::engine::PrepassDrawContext& a_draw) noexcept;
 }

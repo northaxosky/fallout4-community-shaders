@@ -34,9 +34,9 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.lodblending");
 
-		bool ClassifyObjectLOD(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
+		bool ClassifyObjectLOD(cs::engine::PrepassDrawContext& a_draw) noexcept
 		{
-			return cs::engine::IsObjectLODShape(a_pass);
+			return a_draw.InObjectLOD();
 		}
 	}
 
@@ -67,7 +67,7 @@ namespace cs::features
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kX, &ClassifyObjectLOD)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kX, &ClassifyObjectLOD)) {
 			FailLoad("LOD Blending prepass draw classifier installation failed.");
 			return;
 		}

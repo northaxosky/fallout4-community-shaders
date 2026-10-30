@@ -2,6 +2,7 @@
 #include "RE/B/BSComputeShader.h"
 #include "RE/B/BSIStream.h"
 
+#include "Feature.h"
 #include "Log.h"
 #include "PCH.h"
 #include "Render/Engine.h"
@@ -207,8 +208,14 @@ namespace cs::engine
 			std::atomic<std::uint64_t> flagged{ 0 };
 		};
 
+		struct RegisteredClassifier
+		{
+			PrepassDrawClassifier classify = nullptr;
+			Feature* owner = nullptr;
+		};
+
 		// Written only during Load, before rendering, so reads need no lock.
-		std::array<PrepassDrawClassifier, kPrepassLaneComponents> g_prepassClassifiers{};
+		std::array<RegisteredClassifier, kPrepassLaneComponents> g_prepassClassifiers{};
 		bool g_prepassLaneActive = false;
 		std::array<std::array<ClassifierCounts, kPrepassBakePaths>, kPrepassLaneComponents> g_classifierCounts;
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
@@ -275,11 +282,15 @@ namespace cs::engine
 				.lane = {},
 				.offset = PrepassLaneOffset(FindPrepassPixelShader(a_shader, a_pass->passEnum))
 			};
+			PrepassDrawContext draw(a_pass, a_path);
 			for (std::size_t component = 0; component < kPrepassLaneComponents; ++component) {
-				const auto classifier = g_prepassClassifiers[component];
+				const auto& [classifier, owner] = g_prepassClassifiers[component];
 				if (!classifier)
 					continue;
-				const bool flagged = classifier(a_pass, a_path);
+				// Baked records outlive a toggle, so only per-frame draws skip.
+				if (a_path == PrepassBakePath::kImmediate && !owner->IsEnabled())
+					continue;
+				const bool flagged = classifier(draw);
 				if (telemetry::pump::Enabled()) {
 					auto& counts = g_classifierCounts[component][static_cast<std::size_t>(a_path)];
 					counts.classified.fetch_add(1, std::memory_order_relaxed);
@@ -429,7 +440,7 @@ namespace cs::engine
 		return t_skyPass;
 	}
 
-	bool RegisterPrepassDrawClassifier(PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier)
+	bool RegisterPrepassDrawClassifier(Feature& a_owner, PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier)
 	{
 		static const bool installed =
 			TryPatch(
@@ -450,9 +461,9 @@ namespace cs::engine
 				"command-buffer builder lane",
 				[] { stl::detour_thunk<BuildCommandBufferHook>(RE::ID::BSShader::BuildCommandBuffer); });
 		auto& slot = g_prepassClassifiers[static_cast<std::size_t>(a_component)];
-		if (!installed || !a_classifier || slot)
+		if (!installed || !a_classifier || slot.classify)
 			return false;
-		slot = a_classifier;
+		slot = { a_classifier, &a_owner };
 		g_prepassLaneActive = true;
 		return true;
 	}

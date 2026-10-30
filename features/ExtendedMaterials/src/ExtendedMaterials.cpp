@@ -59,11 +59,12 @@ namespace cs::features
 		}
 
 		// FO4: the _s format stands in for the parallax flag; no LOD or overlays.
-		bool IsParallaxEligible(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
+		bool IsParallaxEligible(cs::engine::PrepassDrawContext& a_draw) noexcept
 		{
-			if (cs::engine::IsObjectLODShape(a_pass) || cs::engine::IsOverlayShape(a_pass))
+			auto* pass = a_draw.pass;
+			if (a_draw.InObjectLOD() || cs::engine::IsOverlayShape(pass))
 				return false;
-			const auto* property = netimmerse_cast<RE::BSLightingShaderProperty*>(a_pass->GetShaderProperty());
+			const auto* property = netimmerse_cast<RE::BSLightingShaderProperty*>(pass->GetShaderProperty());
 			const auto* material = property ? static_cast<const RE::BSLightingShaderMaterialBase*>(property->material) : nullptr;
 			return material && HasAlphaChannel(cs::engine::GetTextureFormat(material->smoothnessSpecMaskTexture.get()));
 		}
@@ -106,7 +107,7 @@ namespace cs::features
 			FailLoad("Extended Materials parallax shadows need the prepass target.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kZ, &IsParallaxEligible)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kZ, &IsParallaxEligible)) {
 			FailLoad("Extended Materials prepass draw classifier installation failed.");
 			return;
 		}

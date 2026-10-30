@@ -3,11 +3,19 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <optional>
 #include <string_view>
+
+#include "Render/ObjectLOD.h"
 
 namespace RE
 {
 	class BSRenderPass;
+}
+
+namespace cs
+{
+	class Feature;
 }
 
 namespace cs::telemetry
@@ -52,7 +60,28 @@ namespace cs::engine
 		kW
 	};
 
-	using PrepassDrawClassifier = bool (*)(RE::BSRenderPass* a_pass, PrepassBakePath a_path) noexcept;
+	// Per-draw facts shared by every classifier; each is computed at most once.
+	class PrepassDrawContext
+	{
+	public:
+		PrepassDrawContext(RE::BSRenderPass* a_pass, PrepassBakePath a_path) noexcept :
+			pass(a_pass), path(a_path) {}
+
+		[[nodiscard]] bool InObjectLOD() noexcept
+		{
+			if (!_inObjectLOD)
+				_inObjectLOD = IsObjectLODShape(pass);
+			return *_inObjectLOD;
+		}
+
+		RE::BSRenderPass* pass;
+		PrepassBakePath path;
+
+	private:
+		std::optional<bool> _inObjectLOD;
+	};
+
+	using PrepassDrawClassifier = bool (*)(PrepassDrawContext& a_draw) noexcept;
 
 	struct PrepassLaneStats
 	{
@@ -67,7 +96,9 @@ namespace cs::engine
 	};
 
 	// Load/OnPostPostLoad only; false if patching failed or the component is taken.
-	[[nodiscard]] bool RegisterPrepassDrawClassifier(PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier);
+	// Immediate draws skip a disabled owner; baked records outlive a toggle, so
+	// command-buffer draws always classify.
+	[[nodiscard]] bool RegisterPrepassDrawClassifier(Feature& a_owner, PrepassLaneComponent a_component, PrepassDrawClassifier a_classifier);
 	[[nodiscard]] PrepassLaneStats GetPrepassLaneStats() noexcept;
 	[[nodiscard]] PrepassClassifierStats GetPrepassClassifierStats(PrepassLaneComponent a_component, PrepassBakePath a_path) noexcept;
 

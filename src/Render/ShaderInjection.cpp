@@ -432,6 +432,7 @@ namespace cs::engine
 				ShaderStageMask stages = 0;
 				ShaderInjectionBindCallback callback;
 				Feature* owner = nullptr;
+				bool whileDisabled = false;
 			};
 			std::vector<Bind> binds;
 			std::size_t contributors = 0;
@@ -793,7 +794,8 @@ namespace cs::engine
 					target.contributions.push_back(registration);
 					if (registration.bind) {
 						target.binds.push_back({ registration.stages,
-							registration.bind, registration.feature ? registration.feature->GetRuntimeOwner() : nullptr });
+							registration.bind, registration.feature ? registration.feature->GetRuntimeOwner() : nullptr,
+							registration.bindWhileDisabled });
 					}
 				}
 
@@ -1174,6 +1176,8 @@ namespace cs::engine
 			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
 			for (const auto& bind : a_target.binds) {
 				if ((bind.stages & ShaderStageBit(a_stage)) == 0)
+					continue;
+				if (bind.owner && !bind.whileDisabled && !bind.owner->IsEnabled())
 					continue;
 				render::RunRenderCallback(bind.owner, kTargets[ToIndex(a_target.id)].name, [&] {
 					bind.callback(a_context);

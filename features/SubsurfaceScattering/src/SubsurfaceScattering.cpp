@@ -78,7 +78,7 @@ namespace cs::features
 			return;
 		}
 		_profileTarget = cs::engine::RegisterPrepassExtraTarget(*this, { .name = "SubsurfaceScattering/Profile", .rtvSlot = kProfileRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .active = [this] { return CanRun(); } });
-		if (!_profileTarget || !cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kW, &sss::IsHumanSkinDraw)) {
+		if (!_profileTarget || !cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kW, &sss::IsHumanSkinDraw)) {
 			FailLoad("Subsurface Scattering skin profile registration failed.");
 			return;
 		}

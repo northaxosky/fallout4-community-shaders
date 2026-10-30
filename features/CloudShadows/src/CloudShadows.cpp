@@ -139,8 +139,10 @@ namespace cs::features
 	void CloudShadows::Load()
 	{
 		if (!cs::engine::RegisterFeatureShaderBindings("CloudShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
-				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsSky)
+				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsSky) {
 					registration.bind = [this](ID3D11DeviceContext* a_context) { BindSkyDraw(a_context); };
+					registration.bindWhileDisabled = true;
+				}
 			})) {
 			FailLoad("Cloud Shadows shader contribution registration failed.");
 			return;

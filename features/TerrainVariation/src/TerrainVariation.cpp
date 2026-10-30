@@ -111,11 +111,12 @@ namespace cs::features
 		}
 
 		// FO4: baked records are immutable, so the shader gates enableMeshSupport.
-		bool IsLandscapeTexturedMesh(RE::BSRenderPass* a_pass, cs::engine::PrepassBakePath) noexcept
+		bool IsLandscapeTexturedMesh(cs::engine::PrepassDrawContext& a_draw) noexcept
 		{
-			auto* geometry = a_pass->GetGeometry();
-			auto* lightProperty = netimmerse_cast<RE::BSLightingShaderProperty*>(a_pass->GetShaderProperty());
-			if (!geometry || !lightProperty || cs::engine::IsObjectLODShape(a_pass) || cs::engine::IsOverlayShape(a_pass)) {
+			auto* pass = a_draw.pass;
+			auto* geometry = pass->GetGeometry();
+			auto* lightProperty = netimmerse_cast<RE::BSLightingShaderProperty*>(pass->GetShaderProperty());
+			if (!geometry || !lightProperty || a_draw.InObjectLOD() || cs::engine::IsOverlayShape(pass)) {
 				return false;
 			}
 
@@ -162,7 +163,7 @@ namespace cs::features
 			FailLoad("Terrain Variation shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(cs::engine::PrepassLaneComponent::kY, &IsLandscapeTexturedMesh)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kY, &IsLandscapeTexturedMesh)) {
 			FailLoad("Terrain Variation prepass draw classifier installation failed.");
 			return;
 		}
