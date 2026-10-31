@@ -7,6 +7,7 @@
 - Pip-Boy and inventory effects no longer sample world sun shadows.
 - Upscaling: Latency Reduction now picks NVIDIA Reflex or, on Radeon GPUs, experimental AMD Anti-Lag 2; Anti-Lag 2 needs Upscaling or Frame Generation presenting through Direct3D 12.
 - Upscaling: DLSS and FSR below native resolution no longer flicker on grass and fine detail.
+- Screen Space GI: ambient occlusion no longer flickers, especially without upscaling or with TAA; Temporal Denoiser and Max Accum Frames now apply to it.
 - Upscaling: the Reflex settings moved to vendor-neutral `latency_reduction`, `latency_fps_limit_enabled`, `latency_fps_limit` and `latency_use_markers` keys and reset to their defaults.
 - Extended Materials: terrain parallax is on by default and renamed Enable Terrain Parallax; landscape layers without a height map stay flat.
 - Extended Materials: parallax skips `_s` maps without mipmaps, whose alpha is not a height map (e.g. weapon grunge masks).
