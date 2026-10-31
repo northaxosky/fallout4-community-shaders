@@ -162,9 +162,15 @@ namespace
 		CHECK(Parse(kTestSchema, toml::table{ { "settings", SerializeDelta(kTestSchema, spanned, expected) } }, spanRoundTrip, error));
 		CHECK(spanRoundTrip.span == spanned.span);
 
+		// Configs saved under a wider range load clamped instead of failing the feature.
+		auto clamped = expected;
+		CHECK(Parse(kTestSchema, toml::parse("[settings]\ncount = -3\nthickness = 9\n"), clamped, error));
+		CHECK(clamped.count == 1 && clamped.thickness == 0.05f);
+		CHECK(Parse(kTestSchema, toml::parse("[settings]\ncount = 64\n"), clamped, error));
+		CHECK(clamped.count == 4);
+
 		for (const auto& [document, message] : {
 				 std::pair{ "[settings]\nenabled = 1\n", "settings.enabled: expected boolean" },
-				 std::pair{ "[settings]\ncount = 5\n", "settings.count: value is out of range" },
 				 std::pair{ "[settings]\nthickness = nan\n", "settings.thickness: invalid value" },
 				 std::pair{ "[settings]\ncount = 3\ntarget = 'other'\n", "settings.target: invalid value" } }) {
 			auto candidate = expected;

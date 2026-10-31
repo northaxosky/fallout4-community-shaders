@@ -3,6 +3,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsMetadata.h"
 
+#include <algorithm>
 #include <array>
 #include <concepts>
 #include <limits>
@@ -111,25 +112,27 @@ namespace cs::settings
 				status = ReadBool(a_table, key, value);
 				expected = "boolean";
 			} else if constexpr (std::integral<T> || std::is_enum_v<T>) {
-				if constexpr (std::is_signed_v<ScalarType>) {
-					auto integer = static_cast<std::int64_t>(value);
-					status = ReadSignedInteger(a_table, key, integer,
-						static_cast<ScalarType>(accepted.min), static_cast<ScalarType>(accepted.max));
-					if (status == ScalarReadStatus::kValid)
-						value = static_cast<T>(integer);
-				} else {
-					auto integer = static_cast<std::uint64_t>(value);
-					status = ReadUnsignedInteger(a_table, key, integer,
-						static_cast<ScalarType>(accepted.min), static_cast<ScalarType>(accepted.max));
-					if (status == ScalarReadStatus::kValid)
-						value = static_cast<T>(integer);
+				// Clamp so a config saved under a wider range keeps its feature loading.
+				std::int64_t integer = 0;
+				status = ReadSignedInteger(a_table, key, integer,
+					std::numeric_limits<std::int64_t>::lowest(), std::numeric_limits<std::int64_t>::max());
+				if (status == ScalarReadStatus::kValid) {
+					const auto lo = static_cast<ScalarType>(accepted.min);
+					const auto hi = static_cast<ScalarType>(accepted.max);
+					if constexpr (std::is_signed_v<ScalarType>)
+						value = static_cast<T>(std::clamp<std::int64_t>(integer, lo, hi));
+					else
+						value = static_cast<T>(integer < 0 ? lo : std::clamp<std::uint64_t>(static_cast<std::uint64_t>(integer), lo, hi));
 				}
 				expected = "integer";
-			} else if constexpr (std::same_as<T, float>) {
-				status = ReadFloat(a_table, key, value, accepted.min, accepted.max);
-				expected = "number";
-			} else if constexpr (std::same_as<T, double>) {
-				status = ReadDouble(a_table, key, value, accepted.min, accepted.max);
+			} else if constexpr (std::same_as<T, float> || std::same_as<T, double>) {
+				T number{};
+				if constexpr (std::same_as<T, float>)
+					status = ReadFloat(a_table, key, number, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max());
+				else
+					status = ReadDouble(a_table, key, number, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max());
+				if (status == ScalarReadStatus::kValid)
+					value = std::clamp(number, accepted.min, accepted.max);
 				expected = "number";
 			} else {
 				status = ReadString(a_table, key, value);
