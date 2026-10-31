@@ -219,7 +219,7 @@ namespace cs::features
 				for (UINT i = 0; i < 2; ++i)
 					a_pair[i] = CreateComputeTexture(width, height, a_format, std::format("{}[{}]", a_name, i));
 			};
-			pair(resources.ao, DXGI_FORMAT_R8_UNORM, "SSGI/AO");
+			pair(resources.ao, DXGI_FORMAT_R16_UNORM, "SSGI/AO");
 			pair(resources.accumulation, DXGI_FORMAT_R8_UNORM, "SSGI/Accumulation");
 			pair(resources.luma, DXGI_FORMAT_R16G16B16A16_FLOAT, "SSGI/Luma");
 			pair(resources.chroma, DXGI_FORMAT_R16G16_FLOAT, "SSGI/Chroma");
