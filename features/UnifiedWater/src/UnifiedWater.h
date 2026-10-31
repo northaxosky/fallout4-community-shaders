@@ -6,6 +6,7 @@
 #include "ShaderDefines.h"
 #include "WaterCache.h"
 
+#include <array>
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
@@ -36,14 +37,21 @@ namespace cs::features
 		void CollectTelemetry(telemetry::Sink& a_sink) const override;
 
 	private:
+		using Chunk = engine::water::TerrainChunk;
+		using Node = engine::water::TerrainNode;
 		struct ManagedWater
 		{
 			std::vector<RE::NiPointer<RE::NiAVObject>> original;
 			std::vector<engine::water::TileCell> tiles;
 			std::vector<engine::water::TileWater> water;
+			std::uint32_t level{};
 		};
-		using Chunk = engine::water::TerrainChunk;
-		using Node = engine::water::TerrainNode;
+		struct BuiltTile
+		{
+			RE::NiPointer<RE::BSTriShape> shape;
+			const unified_water::Instruction* instruction;
+			bool merged;
+		};
 		struct Attach
 		{
 			static void thunk(Chunk* a_chunk);
@@ -84,6 +92,10 @@ namespace cs::features
 		bool TilesHidden() const;
 		void RefreshTileVisibility();
 		void RestoreOriginal(RE::BSMultiBoundNode* a_parent, ManagedWater& a_water);
+		RE::NiPointer<RE::BSTriShape> CreateTile(const Node* a_node, RE::NiProperty* a_prepared, const unified_water::Instruction& a_instruction) const;
+		RE::NiPointer<RE::BSTriShape> CreateMergedTile(const Node* a_node, RE::NiProperty* a_prepared, const unified_water::TileGroup& a_group) const;
+		void CountShapes(const ManagedWater& a_water, std::int64_t a_sign);
+		bool CreateTiles(const Node* a_node, RE::NiProperty* a_prepared, const std::vector<unified_water::Instruction>& a_instructions, std::vector<BuiltTile>& a_built);
 		void AttachVanilla(Chunk* a_chunk, bool a_alreadyAttached = false);
 
 		RE::NiPointer<RE::BSTriShape> _mesh;
@@ -105,5 +117,7 @@ namespace cs::features
 		std::atomic_uint64_t _chunksDetached{ 0 };
 		std::atomic_uint64_t _vanillaFallbacks{ 0 };
 		std::atomic_uint64_t _visibilityUpdates{ 0 };
+		std::atomic_uint64_t _squaresMerged{ 0 };
+		std::array<std::atomic_int64_t, 4> _shapesLive{};
 	};
 }

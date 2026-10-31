@@ -10,6 +10,10 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Telemetry/Telemetry.h"
 
+#include "RE/B/BSShaderResourceManager.h"
+
+#include <bit>
+
 #include <DearModdingUI/Client.h>
 #include <DearModdingUI/UI.h>
 
@@ -18,6 +22,9 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.unifiedwater");
+
+		// Outside every cell index, so loaded-cell hiding never matches.
+		constexpr std::int32_t kNoCell = -1'000'000;
 
 		std::vector<RE::NiPointer<RE::NiAVObject>> DetachChildren(RE::NiNode* a_parent)
 		{
@@ -184,43 +191,22 @@ namespace cs::features
 			self.AttachVanilla(a_chunk);
 			return;
 		}
-		std::vector<std::pair<RE::BSTriShape*, const unified_water::Instruction*>> built;
-		for (const auto& instruction : *result.instructions) {
-			if (!instruction.form.ptr)
-				continue;
-			RE::NiCloningProcess clone{};
-			clone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
-			clone.scale = { 1.0f, 1.0f, 1.0f };
-			const auto object = self._mesh->CreateClone(clone);
-			const auto shape = object ? object->IsTriShape() : nullptr;
-			if (!shape)
-				break;
-			const auto posX = (instruction.x - node->baseCellX) * 4096.0f + instruction.size * 2048.0f;
-			const auto posY = (instruction.y - node->baseCellY) * 4096.0f + instruction.size * 2048.0f;
-			RE::NiCloningProcess propertyClone{};
-			propertyClone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
-			const auto property = static_cast<RE::NiProperty*>(prepared->CreateClone(propertyClone));
-			if (!property)
-				break;
-			shape->properties[1] = RE::NiPointer<RE::NiProperty>{ property };
-			shape->local.scale = static_cast<float>(instruction.size);
-			shape->local.translate = { posX, posY, instruction.waterHeight };
-			parent->AttachChild(shape, true);
-			managed.tiles.push_back({ shape, instruction.x, instruction.y });
-			built.emplace_back(shape, &instruction);
-		}
-		if (built.size() != result.instructions->size()) {
+		std::vector<BuiltTile> built;
+		if (!self.CreateTiles(node, prepared, *result.instructions, built)) {
 			self.RestoreOriginal(parent, managed);
 			self.AttachVanilla(a_chunk);
 			return;
 		}
+		for (const auto& [shape, instruction, merged] : built) {
+			parent->AttachChild(shape.get(), true);
+			// Merged shapes span cells, so no single cell can hide them.
+			managed.tiles.push_back({ shape.get(), merged ? kNoCell : instruction->x, merged ? kNoCell : instruction->y });
+			managed.water.push_back({ shape.get(), static_cast<RE::TESWaterForm*>(instruction->form.ptr), instruction->waterHeight });
+		}
+		managed.level = node->GetLODLevel();
 		// FO4: the attach gate bypasses unchecked tile segment getters.
 		func(a_chunk);
-		std::vector<engine::water::TileWater> tiles;
-		tiles.reserve(built.size());
-		for (const auto& [shape, instruction] : built)
-			tiles.push_back({ shape, static_cast<RE::TESWaterForm*>(instruction->form.ptr), instruction->waterHeight });
-		managed.water = std::move(tiles);
+		self.CountShapes(managed, 1);
 		self._managed.insert_or_assign(parent, std::move(managed));
 		// FO4: terrain water is drawn only once AddLODWater registers it.
 		self.RegisterChunkWater(a_chunk);
@@ -228,6 +214,119 @@ namespace cs::features
 		parent->Update(update);
 		self._tilesBuilt.fetch_add(built.size());
 		self._chunksAttached.fetch_add(1);
+	}
+
+	RE::NiPointer<RE::BSTriShape> UnifiedWater::CreateTile(const Node* a_node, RE::NiProperty* a_prepared,
+		const unified_water::Instruction& a_instruction) const
+	{
+		RE::NiCloningProcess clone{};
+		clone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
+		clone.scale = { 1.0f, 1.0f, 1.0f };
+		const auto object = _mesh->CreateClone(clone);
+		const auto shape = object ? object->IsTriShape() : nullptr;
+		if (!shape)
+			return {};
+		RE::NiPointer<RE::BSTriShape> owned{ shape };
+		RE::NiCloningProcess propertyClone{};
+		propertyClone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
+		const auto property = static_cast<RE::NiProperty*>(a_prepared->CreateClone(propertyClone));
+		if (!property)
+			return {};
+		shape->properties[1] = RE::NiPointer<RE::NiProperty>{ property };
+		shape->local.scale = static_cast<float>(a_instruction.size);
+		shape->local.translate = {
+			(a_instruction.x - a_node->baseCellX) * 4096.0f + a_instruction.size * 2048.0f,
+			(a_instruction.y - a_node->baseCellY) * 4096.0f + a_instruction.size * 2048.0f,
+			a_instruction.waterHeight
+		};
+		return owned;
+	}
+
+	RE::NiPointer<RE::BSTriShape> UnifiedWater::CreateMergedTile(const Node* a_node, RE::NiProperty* a_prepared,
+		const unified_water::TileGroup& a_group) const
+	{
+		unified_water::MergedMesh mesh;
+		const auto manager = RE::BSShaderResourceManager::GetSingleton();
+		if (!manager || !unified_water::BuildMergedMesh(a_group, a_node->baseCellX, a_node->baseCellY, mesh))
+			return {};
+		std::vector<RE::NiPoint3> positions;
+		std::vector<RE::NiPoint2> uvs;
+		positions.reserve(mesh.vertices.size());
+		uvs.reserve(mesh.vertices.size());
+		for (const auto& vertex : mesh.vertices) {
+			positions.push_back({ vertex.x, vertex.y, 0.0f });
+			uvs.push_back({ vertex.u, vertex.v });
+		}
+		// The engine builds the vertex and index buffers; the tile clone supplies everything else.
+		RE::NiPointer<RE::BSTriShape> source{ manager->CreateTriShape(static_cast<std::uint32_t>(mesh.indices.size() / 3),
+			static_cast<std::uint32_t>(mesh.vertices.size()), positions.data(), uvs.data(), nullptr, mesh.indices.data()) };
+		if (!source || !source->rendererData)
+			return {};
+		RE::NiCloningProcess clone{};
+		clone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
+		clone.scale = { 1.0f, 1.0f, 1.0f };
+		const auto object = _mesh->CreateClone(clone);
+		const auto shape = object ? object->IsTriShape() : nullptr;
+		if (!shape)
+			return {};
+		RE::NiPointer<RE::BSTriShape> owned{ shape };
+		RE::NiCloningProcess propertyClone{};
+		propertyClone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
+		const auto property = static_cast<RE::NiProperty*>(a_prepared->CreateClone(propertyClone));
+		if (!property)
+			return {};
+		manager->IncRefTriShape(source->rendererData);
+		manager->DecRefTriShape(shape->rendererData);
+		shape->rendererData = source->rendererData;
+		shape->vertexDesc = source->vertexDesc;
+		shape->numTriangles = source->numTriangles;
+		shape->numVertices = source->numVertices;
+		shape->modelBound.center = { 0.0f, 0.0f, 0.0f };
+		shape->modelBound.fRadius = mesh.radius;
+		shape->properties[1] = RE::NiPointer<RE::NiProperty>{ property };
+		shape->local.scale = mesh.scale;
+		shape->local.translate = { mesh.originX, mesh.originY, a_group.height };
+		return owned;
+	}
+
+	bool UnifiedWater::CreateTiles(const Node* a_node, RE::NiProperty* a_prepared,
+		const std::vector<unified_water::Instruction>& a_instructions, std::vector<BuiltTile>& a_built)
+	{
+		const auto addSquares = [&](std::span<const unified_water::Instruction* const> a_rects) {
+			for (const auto* rect : a_rects) {
+				auto shape = CreateTile(a_node, a_prepared, *rect);
+				if (!shape)
+					return false;
+				a_built.push_back({ std::move(shape), rect, false });
+			}
+			return true;
+		};
+		// LOD4 stays per cell so loaded cells can hide it; coarser levels fold a form and height into one shape.
+		if (a_node->GetLODLevel() <= 4) {
+			std::vector<const unified_water::Instruction*> rects;
+			for (const auto& instruction : a_instructions)
+				if (instruction.form.ptr)
+					rects.push_back(&instruction);
+			return addSquares(rects);
+		}
+		for (const auto& group : unified_water::GroupInstructions(a_instructions)) {
+			if (group.rects.size() > 1) {
+				if (auto shape = CreateMergedTile(a_node, a_prepared, group)) {
+					a_built.push_back({ std::move(shape), group.rects.front(), true });
+					_squaresMerged.fetch_add(group.rects.size());
+					continue;
+				}
+			}
+			if (!addSquares(group.rects))
+				return false;
+		}
+		return true;
+	}
+
+	void UnifiedWater::CountShapes(const ManagedWater& a_water, std::int64_t a_sign)
+	{
+		if (const auto index = std::countr_zero(a_water.level); index >= 2 && index - 2 < static_cast<int>(_shapesLive.size()))
+			_shapesLive[index - 2].fetch_add(a_sign * static_cast<std::int64_t>(a_water.tiles.size()));
 	}
 
 	void UnifiedWater::Detach::thunk(Chunk* a_chunk)
@@ -246,6 +345,7 @@ namespace cs::features
 			if (it != self._managed.end()) {
 				managed = std::move(it->second);
 				self._managed.erase(it);
+				self.CountShapes(managed, -1);
 				owned = true;
 			}
 		}
@@ -416,6 +516,11 @@ namespace cs::features
 			.Field("chunks_detached", _chunksDetached.load())
 			.Field("vanilla_fallbacks", _vanillaFallbacks.load())
 			.Field("visibility_updates", _visibilityUpdates.load())
+			.Field("shapes_live_lod4", _shapesLive[0].load())
+			.Field("shapes_live_lod8", _shapesLive[1].load())
+			.Field("shapes_live_lod16", _shapesLive[2].load())
+			.Field("shapes_live_lod32", _shapesLive[3].load())
+			.Field("squares_merged", _squaresMerged.load())
 			.Field("tile_water_overrides", engine::water::TileWaterOverrides())
 			.Field("exterior", _exterior.load())
 			.Field("tiles_hidden", TilesHidden())

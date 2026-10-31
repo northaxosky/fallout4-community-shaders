@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -142,5 +144,80 @@ namespace cs::features::unified_water
 				}
 			}
 		}
+	}
+	// Squares of one chunk that share a water form and height.
+	struct TileGroup
+	{
+		void* form{};
+		float height{};
+		std::vector<const Instruction*> rects;
+	};
+
+	inline std::vector<TileGroup> GroupInstructions(const std::vector<Instruction>& a_instructions)
+	{
+		std::vector<TileGroup> groups;
+		for (const auto& instruction : a_instructions) {
+			if (!instruction.form.ptr)
+				continue;
+			auto found = std::ranges::find_if(groups, [&](const TileGroup& group) {
+				return group.form == instruction.form.ptr && group.height == instruction.waterHeight;
+			});
+			if (found == groups.end())
+				found = groups.insert(groups.end(), TileGroup{ instruction.form.ptr, instruction.waterHeight, {} });
+			found->rects.push_back(&instruction);
+		}
+		return groups;
+	}
+
+	// One flat quad per square, positions relative to (originX, originY) divided by scale.
+	struct MergedMesh
+	{
+		struct Vertex
+		{
+			float x, y, u, v;
+		};
+		std::vector<Vertex> vertices;
+		std::vector<std::uint16_t> indices;
+		float originX{};
+		float originY{};
+		float scale{ 1.0f };
+		float radius{};
+	};
+
+	// Vertices go to the engine as half floats; origin and scale keep every coordinate exact.
+	inline bool BuildMergedMesh(const TileGroup& a_group, std::int32_t a_baseX, std::int32_t a_baseY, MergedMesh& a_mesh)
+	{
+		constexpr float kCell = 4096.0f;
+		constexpr std::size_t kMaxRects = 0xFFFF / 4;
+		if (a_group.rects.empty() || a_group.rects.size() > kMaxRects)
+			return false;
+		float minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+		for (const auto* rect : a_group.rects) {
+			minX = std::min(minX, (rect->x - a_baseX) * kCell);
+			minY = std::min(minY, (rect->y - a_baseY) * kCell);
+			maxX = std::max(maxX, (rect->x - a_baseX + static_cast<std::int32_t>(rect->size)) * kCell);
+			maxY = std::max(maxY, (rect->y - a_baseY + static_cast<std::int32_t>(rect->size)) * kCell);
+		}
+		a_mesh.originX = (minX + maxX) * 0.5f;
+		a_mesh.originY = (minY + maxY) * 0.5f;
+		const float halfX = (maxX - minX) * 0.5f;
+		const float halfY = (maxY - minY) * 0.5f;
+		// Half floats top out at 65504; a power-of-two scale stays exact.
+		a_mesh.scale = std::max(halfX, halfY) > 32768.0f ? 2.0f : 1.0f;
+		a_mesh.radius = std::sqrt(halfX * halfX + halfY * halfY) / a_mesh.scale;
+		for (const auto* rect : a_group.rects) {
+			const float left = ((rect->x - a_baseX) * kCell - a_mesh.originX) / a_mesh.scale;
+			const float bottom = ((rect->y - a_baseY) * kCell - a_mesh.originY) / a_mesh.scale;
+			const float span = rect->size * kCell / a_mesh.scale;
+			const auto base = static_cast<std::uint16_t>(a_mesh.vertices.size());
+			// Corner order and UVs match the tile mesh quad.
+			a_mesh.vertices.push_back({ left, bottom, 0.0f, 1.0f });
+			a_mesh.vertices.push_back({ left + span, bottom, 1.0f, 1.0f });
+			a_mesh.vertices.push_back({ left + span, bottom + span, 1.0f, 0.0f });
+			a_mesh.vertices.push_back({ left, bottom + span, 0.0f, 0.0f });
+			for (const std::uint16_t index : std::array<std::uint16_t, 6>{ 0, 1, 2, 2, 3, 0 })
+				a_mesh.indices.push_back(static_cast<std::uint16_t>(base + index));
+		}
+		return true;
 	}
 }
