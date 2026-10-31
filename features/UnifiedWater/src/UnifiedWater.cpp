@@ -216,8 +216,7 @@ namespace cs::features
 		self._chunksAttached.fetch_add(1);
 	}
 
-	RE::NiPointer<RE::BSTriShape> UnifiedWater::CreateTile(const Node* a_node, RE::NiProperty* a_prepared,
-		const unified_water::Instruction& a_instruction) const
+	RE::NiPointer<RE::BSTriShape> UnifiedWater::CloneTile(RE::NiProperty* a_prepared) const
 	{
 		RE::NiCloningProcess clone{};
 		clone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
@@ -233,6 +232,16 @@ namespace cs::features
 		if (!property)
 			return {};
 		shape->properties[1] = RE::NiPointer<RE::NiProperty>{ property };
+		return owned;
+	}
+
+	RE::NiPointer<RE::BSTriShape> UnifiedWater::CreateTile(const Node* a_node, RE::NiProperty* a_prepared,
+		const unified_water::Instruction& a_instruction) const
+	{
+		auto owned = CloneTile(a_prepared);
+		if (!owned)
+			return {};
+		const auto shape = owned.get();
 		shape->local.scale = static_cast<float>(a_instruction.size);
 		shape->local.translate = {
 			(a_instruction.x - a_node->baseCellX) * 4096.0f + a_instruction.size * 2048.0f,
@@ -257,24 +266,15 @@ namespace cs::features
 			positions.push_back({ vertex.x, vertex.y, 0.0f });
 			uvs.push_back({ vertex.u, vertex.v });
 		}
-		// The engine builds the vertex and index buffers; the tile clone supplies everything else.
+		// The engine builds the buffers; the tile clone supplies everything else.
 		RE::NiPointer<RE::BSTriShape> source{ manager->CreateTriShape(static_cast<std::uint32_t>(mesh.indices.size() / 3),
 			static_cast<std::uint32_t>(mesh.vertices.size()), positions.data(), uvs.data(), nullptr, mesh.indices.data()) };
 		if (!source || !source->rendererData)
 			return {};
-		RE::NiCloningProcess clone{};
-		clone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
-		clone.scale = { 1.0f, 1.0f, 1.0f };
-		const auto object = _mesh->CreateClone(clone);
-		const auto shape = object ? object->IsTriShape() : nullptr;
-		if (!shape)
+		auto owned = CloneTile(a_prepared);
+		if (!owned)
 			return {};
-		RE::NiPointer<RE::BSTriShape> owned{ shape };
-		RE::NiCloningProcess propertyClone{};
-		propertyClone.copyType = RE::NiCloningProcess::CopyType::kCopyExact;
-		const auto property = static_cast<RE::NiProperty*>(a_prepared->CreateClone(propertyClone));
-		if (!property)
-			return {};
+		const auto shape = owned.get();
 		manager->IncRefTriShape(source->rendererData);
 		manager->DecRefTriShape(shape->rendererData);
 		shape->rendererData = source->rendererData;
@@ -283,7 +283,6 @@ namespace cs::features
 		shape->numVertices = source->numVertices;
 		shape->modelBound.center = { 0.0f, 0.0f, 0.0f };
 		shape->modelBound.fRadius = mesh.radius;
-		shape->properties[1] = RE::NiPointer<RE::NiProperty>{ property };
 		shape->local.scale = mesh.scale;
 		shape->local.translate = { mesh.originX, mesh.originY, a_group.height };
 		return owned;
@@ -301,7 +300,7 @@ namespace cs::features
 			}
 			return true;
 		};
-		// LOD4 stays per cell so loaded cells can hide it; coarser levels fold a form and height into one shape.
+		// LOD4 stays per cell for loaded-cell hiding; coarser levels merge per form.
 		if (a_node->GetLODLevel() <= 4) {
 			std::vector<const unified_water::Instruction*> rects;
 			for (const auto& instruction : a_instructions)

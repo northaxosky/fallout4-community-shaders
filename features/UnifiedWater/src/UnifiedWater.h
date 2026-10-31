@@ -92,6 +92,7 @@ namespace cs::features
 		bool TilesHidden() const;
 		void RefreshTileVisibility();
 		void RestoreOriginal(RE::BSMultiBoundNode* a_parent, ManagedWater& a_water);
+		RE::NiPointer<RE::BSTriShape> CloneTile(RE::NiProperty* a_prepared) const;
 		RE::NiPointer<RE::BSTriShape> CreateTile(const Node* a_node, RE::NiProperty* a_prepared, const unified_water::Instruction& a_instruction) const;
 		RE::NiPointer<RE::BSTriShape> CreateMergedTile(const Node* a_node, RE::NiProperty* a_prepared, const unified_water::TileGroup& a_group) const;
 		void CountShapes(const ManagedWater& a_water, std::int64_t a_sign);
