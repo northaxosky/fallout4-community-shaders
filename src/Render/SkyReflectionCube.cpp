@@ -48,8 +48,6 @@ namespace cs::engine
 		constexpr std::uint32_t kMaxCameraAgeFrames = 2;
 		// The hook skips interiors and loads; a longer gap means stale faces.
 		constexpr std::uint32_t kMaxRenderGapFrames = 1;
-		// Update sets this on the sky root while it renders the cube.
-		constexpr std::uint64_t kSkyRootCubeFlag = 1ull << 11;
 		// Sky-Lower: the color below the dome.
 		constexpr std::size_t kSkyLowerColor = 7;
 
@@ -274,20 +272,21 @@ namespace cs::engine
 			RE::BSGraphics::RendererShadowState& _state;
 		};
 
+		// Update sets always-draw on the sky root while it renders the cube.
 		class ScopedSkyRootCubeFlag
 		{
 		public:
 			explicit ScopedSkyRootCubeFlag(RE::NiAVObject& a_root) noexcept :
 				_root(a_root),
-				_wasSet((a_root.flags.flags & kSkyRootCubeFlag) != 0)
+				_wasSet(a_root.HasFlag(RE::NiAVObject::Flag::kAlwaysDraw))
 			{
-				_root.flags.flags |= kSkyRootCubeFlag;
+				_root.flags.flags |= static_cast<std::uint64_t>(RE::NiAVObject::Flag::kAlwaysDraw);
 			}
 
 			~ScopedSkyRootCubeFlag()
 			{
 				if (!_wasSet)
-					_root.flags.flags &= ~kSkyRootCubeFlag;
+					_root.flags.flags &= ~static_cast<std::uint64_t>(RE::NiAVObject::Flag::kAlwaysDraw);
 			}
 
 			ScopedSkyRootCubeFlag(const ScopedSkyRootCubeFlag&) = delete;

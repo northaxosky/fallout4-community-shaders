@@ -21,9 +21,6 @@ namespace cs::engine
 			.target = RE::ID::BSCullingGroup::Add
 		};
 
-		// NiAVObject flag of nodes with an authored bound instead of a merged one.
-		constexpr std::uint64_t kFixedBound = 1ull << 11;
-
 		// Keeps the container test looser than the culler's own plane test.
 		constexpr float kRadiusScale = 1.01f;
 		constexpr float kRadiusPad = 1.0f;
@@ -35,10 +32,10 @@ namespace cs::engine
 			std::uint64_t leaves = 0;
 		};
 
-		// The stock walk skips boundless objects: radius zero without an authored bound.
+		// The stock walk skips radius-zero objects unless flagged always-draw.
 		[[nodiscard]] bool HasUsableBound(const RE::NiAVObject& a_object) noexcept
 		{
-			return (a_object.GetFlags() & kFixedBound) || a_object.worldBound.fRadius != 0.0f;
+			return a_object.HasFlag(RE::NiAVObject::Flag::kAlwaysDraw) || a_object.worldBound.fRadius != 0.0f;
 		}
 
 		[[nodiscard]] OrthoFrustum MakeFrustum(const RE::NiCamera& a_camera) noexcept
@@ -72,7 +69,7 @@ namespace cs::engine
 			return a_object.IsFadeNode() ? nullptr : a_object.IsNode();
 		}
 
-		// The stock flatten of a container, but handing leaves to the culler's own tests.
+		// The stock container flatten, leaving leaf tests to the culler.
 		template <class Add>
 		void FeedLeaves(RE::NiNode& a_container, const Add& a_add, GatherCounters& a_counters)
 		{
