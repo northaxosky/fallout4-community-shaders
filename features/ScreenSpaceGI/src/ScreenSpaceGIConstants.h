@@ -13,7 +13,8 @@ namespace cs::features::ssgi
 		DirectX::XMFLOAT4X4 PrevInvViewMat{};
 		DirectX::XMFLOAT4 NDCToViewMul{}, NDCToViewAdd{};
 		DirectX::XMFLOAT2 TexDim{}, RcpTexDim{}, FrameDim{}, RcpFrameDim{};
-		std::uint32_t FrameIndex{}, NumSlices{}, NumSteps{};
+		float pad0{};
+		std::uint32_t NumSlices{}, NumSteps{};
 		float MinScreenRadius{}, AORadius{}, GIRadius{}, EffectRadius{}, Thickness{};
 		DirectX::XMFLOAT2 DepthFadeRange{};
 		float DepthFadeScaleConst{}, GISaturation{}, GIDistanceCompensation{};
@@ -23,6 +24,6 @@ namespace cs::features::ssgi
 		float BlurRadius{}, DistanceNormalisation{}, pad[2]{};
 	};
 	static_assert(sizeof(Constants) == 224);
-	static_assert(offsetof(Constants, FrameIndex) == 128);
+	static_assert(offsetof(Constants, NumSlices) == 132);
 	static_assert(offsetof(Constants, MaxAccumFrames) == 204);
 }

@@ -301,7 +301,7 @@ namespace
 		const ABIField fields[]{
 			ABI(Constants, PrevInvViewMat), ABI(Constants, NDCToViewMul), ABI(Constants, NDCToViewAdd),
 			ABI(Constants, TexDim), ABI(Constants, RcpTexDim), ABI(Constants, FrameDim), ABI(Constants, RcpFrameDim),
-			ABI(Constants, FrameIndex), ABI(Constants, NumSlices), ABI(Constants, NumSteps), ABI(Constants, MinScreenRadius),
+			ABI(Constants, pad0), ABI(Constants, NumSlices), ABI(Constants, NumSteps), ABI(Constants, MinScreenRadius),
 			ABI(Constants, AORadius), ABI(Constants, GIRadius), ABI(Constants, EffectRadius), ABI(Constants, Thickness),
 			ABI(Constants, DepthFadeRange), ABI(Constants, DepthFadeScaleConst), ABI(Constants, GISaturation),
 			ABI(Constants, GIDistanceCompensation), ABI(Constants, GICompensationMaxDist), ABI(Constants, pad1),

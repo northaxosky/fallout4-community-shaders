@@ -65,7 +65,7 @@ namespace cs::features
 		bool EnsureResources();
 		void EnsurePrepareResources(Resources&, UINT, UINT);
 		bool CompileShaders();
-		void UpdateConstants(const cs::engine::WorldCameraRecord&, UINT, UINT, UINT);
+		void UpdateConstants(const cs::engine::WorldCameraRecord&, UINT, UINT);
 		void QueueReset(const char*) noexcept;
 		void OnPostDeferredLights();
 		void ApplyVanillaSSAO();

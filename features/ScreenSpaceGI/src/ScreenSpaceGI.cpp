@@ -246,7 +246,7 @@ namespace cs::features
 	}
 
 	void ScreenSpaceGI::UpdateConstants(const cs::engine::WorldCameraRecord& a_camera,
-		UINT a_width, UINT a_height, UINT a_frame)
+		UINT a_width, UINT a_height)
 	{
 		SSGICB data{};
 		// FO4: b1 is column-major, so native row-vector storage supplies its transpose.
@@ -258,7 +258,6 @@ namespace cs::features
 		data.RcpTexDim = { 1.0f / _width, 1.0f / _height };
 		data.FrameDim = { static_cast<float>(a_width), static_cast<float>(a_height) };
 		data.RcpFrameDim = { 1.0f / a_width, 1.0f / a_height };
-		data.FrameIndex = a_frame;
 		data.NumSlices = static_cast<UINT>(_settings.numSlices);
 		data.NumSteps = static_cast<UINT>(_settings.numSteps);
 		data.MinScreenRadius = _settings.minScreenRadius * a_width;
@@ -365,7 +364,7 @@ namespace cs::features
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
 				++_resetCount;
 			}
-			UpdateConstants(*camera, width, height, state->frameCount);
+			UpdateConstants(*camera, width, height);
 			auto* cb = _constants->CB();
 			context->CSSetConstantBuffers(1, 1, &cb);
 			UpdateConsumer(true, tiled);
@@ -393,7 +392,7 @@ namespace cs::features
 			gi = !gi;
 			_lastAccum = !_lastAccum;
 			prefilter(3, t.normalGloss->srv.get(), t.normals, internalWidth, internalHeight, "ScreenSpaceGI::PrefilterNormals");
-			pass.Run(_shaders[4].get(), { t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.radiance.texture->srv.get(), _noise.get(), t.accumulation[_lastAccum]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao), t.normals.texture->srv.get() },
+			pass.Run(_shaders[4].get(), { t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.radiance.texture->srv.get(), _noise.get(), t.accumulation[_lastAccum]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao), t.normals.texture->srv.get(), t.ao[ao]->srv.get() },
 				{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(),
 					specularUAV(!ao), t.previousGeometry->uav.get() },
 				internalWidth, internalHeight, 8, "ScreenSpaceGI::GI");
@@ -492,7 +491,7 @@ namespace cs::features
 
 	void ScreenSpaceGI::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		a_sink.Field("injection_registered", _started.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("ao_produced", _produced.load()).Field("ao_denoised", false).Field("vanilla_ssao_applied", _vanillaSSAOApplied.load()).Field("radiance_available", _produced.load()).Field("bounce_produced", _produced && _settings.enableGI).Field("bounce_denoised", _produced && _settings.enableGI && _settings.enableBlur).Field("normal_bound", _binds > 0 && _produced).Field("history_valid", _produced && _historyUsed).Field("motion_available", _motionAvailable.load()).Field("temporal_dispatches", static_cast<std::int64_t>(_produced && _settings.enableTemporalDenoiser ? 2 + _settings.enableBlur : 0)).Field("reset_count", static_cast<std::int64_t>(_resetCount.load())).Field("last_reset_reason", std::string_view(_resetReason.load())).Field("tiled_b_available", _tiledAvailable.load()).Field("tiled_lighting_active", _tiled.load()).Field("camera_ready", _cameraReady.load()).Field("camera_origin", std::format("{} {} {}", _origin[0].load(), _origin[1].load(), _origin[2].load())).Field("camera_previous_origin", std::format("{} {} {}", _previousOrigin[0].load(), _previousOrigin[1].load(), _previousOrigin[2].load())).Field("radiance_source_count", static_cast<std::int64_t>(_produced && _settings.enableGI ? (_tiled ? 2 : 1) : 0)).Field("composition_binds", static_cast<std::int64_t>(_binds.load())).Field("repeat_callbacks", static_cast<std::int64_t>(_repeats.load())).Field("contaminated_light_classes", std::int64_t{ 16 }).Field("contaminated_routes", std::int64_t{ 24 }).Field("resolution_mode", static_cast<std::int64_t>(_settings.resolutionMode)).Field("generation", static_cast<std::int64_t>(_generation)).Dimensions("working", _width, _height);
+		a_sink.Field("injection_registered", _started.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("ao_produced", _produced.load()).Field("ao_denoised", _produced && _settings.enableTemporalDenoiser).Field("vanilla_ssao_applied", _vanillaSSAOApplied.load()).Field("radiance_available", _produced.load()).Field("bounce_produced", _produced && _settings.enableGI).Field("bounce_denoised", _produced && _settings.enableGI && _settings.enableBlur).Field("normal_bound", _binds > 0 && _produced).Field("history_valid", _produced && _historyUsed).Field("motion_available", _motionAvailable.load()).Field("temporal_dispatches", static_cast<std::int64_t>(_produced && _settings.enableTemporalDenoiser ? 2 + _settings.enableBlur : 0)).Field("reset_count", static_cast<std::int64_t>(_resetCount.load())).Field("last_reset_reason", std::string_view(_resetReason.load())).Field("tiled_b_available", _tiledAvailable.load()).Field("tiled_lighting_active", _tiled.load()).Field("camera_ready", _cameraReady.load()).Field("camera_origin", std::format("{} {} {}", _origin[0].load(), _origin[1].load(), _origin[2].load())).Field("camera_previous_origin", std::format("{} {} {}", _previousOrigin[0].load(), _previousOrigin[1].load(), _previousOrigin[2].load())).Field("radiance_source_count", static_cast<std::int64_t>(_produced && _settings.enableGI ? (_tiled ? 2 : 1) : 0)).Field("composition_binds", static_cast<std::int64_t>(_binds.load())).Field("repeat_callbacks", static_cast<std::int64_t>(_repeats.load())).Field("contaminated_light_classes", std::int64_t{ 16 }).Field("contaminated_routes", std::int64_t{ 24 }).Field("resolution_mode", static_cast<std::int64_t>(_settings.resolutionMode)).Field("generation", static_cast<std::int64_t>(_generation)).Dimensions("working", _width, _height);
 	}
 
 	void ScreenSpaceGI::DrawSettings()
