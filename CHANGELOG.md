@@ -13,6 +13,7 @@
 - Extended Materials: parallax skips `_s` maps without mipmaps, whose alpha is not a height map (e.g. weapon grunge masks).
 - Unified Water: interiors such as the Concord Speakeasy no longer draw the outdoor water plane over the room.
 - Render thread CPU: injected immediate draws, most visibly water in the deferred composite, no longer rebuild their shader binding every draw.
+- Render thread CPU: bindings for pending or disabled replacements are cached too, so steady-state shader binds no longer rebuild keys.
 - CS Editor: a weather picked without Accelerate Weather Change is no longer dropped on the next sky update.
 - Features switched off in the menu no longer cost CPU time on every draw.
 - Skylighting: the sky occlusion capture costs less CPU in dense exteriors; objects fully faded out no longer shade the sky.
