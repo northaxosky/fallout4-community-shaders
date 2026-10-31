@@ -656,6 +656,7 @@ namespace cs::features
 	{
 		const auto count = [](const std::atomic<std::uint64_t>& a_value) { return a_value.load(std::memory_order_relaxed); };
 		const auto& stats = cs::engine::GetOccluderStats();
+		const auto& gather = cs::engine::GetGatherStats();
 		using Reject = cs::engine::OccluderReject;
 		const auto rejected = [&](Reject a_reason) { return count(stats.rejected[static_cast<std::size_t>(a_reason)]); };
 		const auto cascadeSkipped = [&](CascadeSkip a_reason) { return count(_cascadeCounters.skipped[static_cast<std::size_t>(a_reason)]); };
@@ -683,6 +684,9 @@ namespace cs::features
 			.Field("rejected_radius", rejected(Reject::kRadius))
 			.Field("rejected_below_grid", rejected(Reject::kBelowGrid))
 			.Field("rejected_bsx", rejected(Reject::kBsx))
+			.Field("gather_roots_tested", count(gather.rootsTested))
+			.Field("gather_roots_culled", count(gather.rootsCulled))
+			.Field("gather_leaves_fed", count(gather.leavesFed))
 			.Field("probe_dispatches", count(_probeCounters.dispatches))
 			.Field("probe_skipped_not_full_sky", count(_probeCounters.skippedNotFullSky))
 			.Field("probe_skipped_no_occlusion", count(_probeCounters.skippedNoOcclusion))

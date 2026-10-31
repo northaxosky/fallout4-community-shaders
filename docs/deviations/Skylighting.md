@@ -4,6 +4,7 @@
 |---|---|---|---|
 | Forced | Rain occlusion mask replaced by the Skylighting capture | Capture runs after the stock rain pass into an owned 512x512 depth; stock rain keeps its own mask | The stock mask must stay intact |
 | Forced | Occluders follow the stock render-pass list | An owned utility pass covers occluders stock rejects: loaded-cell landscape, geometry without Cast Shadows, alpha-blended geometry, faded materials | The stock rain-mask pass list excludes them |
+| Divergence | Occluders follow the stock rain-mask gather | The gather seeds the culler with the fade nodes and geometry of cells that reach the capture frustum instead of whole cells; objects the culler treats as fully faded out (fade amount 0) no longer occlude | The stock fallback walk registers every object of each reached cell, which costs CPU in dense exteriors |
 | Forced | Water specular reads `input.WPosition` and the probe array | Water binds the probe array and replaces the constant that fed the cube lerp with probe specular visibility | FO4 water has no world-position input |
 | N/A | Water ambient scaled by `skylightingDiffuse` | | FO4 water ambient is a sun lobe independent of sky or DALC |
 | Forced | `ApplySkylighting` subtracts ambient, rescales and adds it back | Multiplies the ambient addend by `MultiBounceAO(albedo, diffuse visibility)`; upstream's over-subtraction (ambient removed that was never added for ENVMAP, multi-layer parallax, eye, LOD-land PBR) is not reproduced | FO4 ambient is a separate linear addend |

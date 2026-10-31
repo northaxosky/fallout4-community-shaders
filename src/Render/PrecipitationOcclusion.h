@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/EngineCallSite.h"
+
 #include <DirectXMath.h>
 
 #include <array>
@@ -16,6 +18,7 @@ struct ID3D11Texture2D;
 namespace RE
 {
 	class BSShaderAccumulator;
+	class NiCamera;
 }
 
 namespace cs::engine
@@ -73,6 +76,9 @@ namespace cs::engine
 	// Registers the capture thunks and the occluder pass hook; call during Load.
 	[[nodiscard]] std::vector<HookInstall> InstallOcclusionCaptureHooks();
 
+	// Redirects a verified call site through a_install, e.g. stl::write_thunk_call<Hook>.
+	[[nodiscard]] HookInstall InstallCallSiteHook(const CallSiteAnchor& a_anchor, void (*a_install)(std::uintptr_t));
+
 	// Runs one capture after the stock pass; restores every engine override.
 	[[nodiscard]] OcclusionCaptureStatus CaptureOcclusion(
 		const OcclusionCaptureRequest& a_request,
@@ -87,10 +93,16 @@ namespace cs::engine
 		std::atomic<const RE::BSShaderAccumulator*> accumulator{ nullptr };
 		std::uint32_t quadrant = 0;
 		OccluderPolicy occluders;
+		const RE::NiCamera* camera = nullptr;
+		// The thread that runs the capture's scene walk.
+		std::uint32_t walkThread = 0;
 	};
 
 	// Null unless a capture runs and the accumulator is its occlusion one.
 	[[nodiscard]] const ActiveCapture* GetActiveCapture(const RE::BSShaderAccumulator* a_accumulator) noexcept;
+
+	// Null unless a capture runs and the caller is on its walk thread.
+	[[nodiscard]] const ActiveCapture* GetActiveCaptureOnWalkThread() noexcept;
 
 	// Telemetry counters; slot 44 runs on worker threads, so relaxed atomics.
 	enum class OccluderReject : std::uint8_t
@@ -127,6 +139,16 @@ namespace cs::engine
 	};
 
 	[[nodiscard]] OccluderStats& GetOccluderStats() noexcept;
+
+	// Culling-group seeding counters; written once per scene root, relaxed atomics.
+	struct GatherStats
+	{
+		std::atomic<std::uint64_t> rootsTested{ 0 };
+		std::atomic<std::uint64_t> rootsCulled{ 0 };
+		std::atomic<std::uint64_t> leavesFed{ 0 };
+	};
+
+	[[nodiscard]] GatherStats& GetGatherStats() noexcept;
 
 	using CaptureClock = std::chrono::steady_clock;
 

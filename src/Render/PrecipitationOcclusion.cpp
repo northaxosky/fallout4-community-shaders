@@ -4,6 +4,7 @@
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
+#include "Render/OccluderGather.h"
 #include "Render/OccluderPasses.h"
 #include "Telemetry/Telemetry.h"
 
@@ -24,6 +25,7 @@ namespace cs::engine
 
 		ActiveCapture g_active;
 		OccluderStats g_stats;
+		GatherStats g_gather;
 		CaptureTimings g_timings;
 
 		[[nodiscard]] bool CaptureActive() noexcept
@@ -75,22 +77,6 @@ namespace cs::engine
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
-
-		template <class Hook>
-		HookInstall InstallCallSiteHook(const CallSiteAnchor& a_anchor)
-		{
-			HookInstall install{ .name = std::string(a_anchor.name) };
-			const auto site = ResolveCallSite(a_anchor);
-			if (!site) {
-				install.detail = site.error();
-				L->error("Hook {} unavailable: {}", install.name, install.detail);
-				return install;
-			}
-			stl::write_thunk_call<Hook>(*site);
-			install.installed = true;
-			install.detail = std::format("call site {:#x}", *site);
-			return install;
-		}
 
 		[[nodiscard]] std::string_view FormatName(DXGI_FORMAT a_format) noexcept
 		{
@@ -164,6 +150,8 @@ namespace cs::engine
 
 				g_active.quadrant = a_request.quadrant;
 				g_active.occluders = a_request.occluders;
+				g_active.camera = a_precipitation.occlusionData.camera.get();
+				g_active.walkThread = ::GetCurrentThreadId();
 				g_active.accumulator.store(a_precipitation.occlusionData.accumulator.get(), std::memory_order_release);
 			}
 
@@ -229,9 +217,34 @@ namespace cs::engine
 		return active && active == a_accumulator ? &g_active : nullptr;
 	}
 
+	const ActiveCapture* GetActiveCaptureOnWalkThread() noexcept
+	{
+		return CaptureActive() && g_active.walkThread == ::GetCurrentThreadId() ? &g_active : nullptr;
+	}
+
 	OccluderStats& GetOccluderStats() noexcept
 	{
 		return g_stats;
+	}
+
+	GatherStats& GetGatherStats() noexcept
+	{
+		return g_gather;
+	}
+
+	HookInstall InstallCallSiteHook(const CallSiteAnchor& a_anchor, void (*a_install)(std::uintptr_t))
+	{
+		HookInstall install{ .name = std::string(a_anchor.name) };
+		const auto site = ResolveCallSite(a_anchor);
+		if (!site) {
+			install.detail = site.error();
+			L->error("Hook {} unavailable: {}", install.name, install.detail);
+			return install;
+		}
+		a_install(*site);
+		install.installed = true;
+		install.detail = std::format("call site {:#x}", *site);
+		return install;
 	}
 
 	CaptureTimings& GetCaptureTimings() noexcept
@@ -242,8 +255,9 @@ namespace cs::engine
 	std::vector<HookInstall> InstallOcclusionCaptureHooks()
 	{
 		std::vector<HookInstall> installs;
-		installs.push_back(InstallCallSiteHook<SetViewFrustum_Hook>(kProjectionSetViewFrustum));
+		installs.push_back(InstallCallSiteHook(kProjectionSetViewFrustum, &stl::write_thunk_call<SetViewFrustum_Hook>));
 		installs.push_back(InstallOccluderPassHook());
+		installs.push_back(InstallOccluderGatherHook());
 		return installs;
 	}
 
