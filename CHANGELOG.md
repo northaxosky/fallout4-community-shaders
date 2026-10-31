@@ -11,6 +11,7 @@
 - Upscaling: the Reflex settings moved to vendor-neutral `latency_reduction`, `latency_fps_limit_enabled`, `latency_fps_limit` and `latency_use_markers` keys and reset to their defaults.
 - Extended Materials: terrain parallax is on by default and renamed Enable Terrain Parallax; landscape layers without a height map stay flat.
 - Extended Materials: parallax skips `_s` maps without mipmaps, whose alpha is not a height map (e.g. weapon grunge masks).
+- Unified Water: distant water squares of one type and height now draw as a single shape per terrain chunk, cutting water draw calls and CPU time in views over large water.
 - Unified Water: interiors such as the Concord Speakeasy no longer draw the outdoor water plane over the room.
 - Render thread CPU: injected immediate draws, most visibly water in the deferred composite, no longer rebuild their shader binding every draw.
 - Render thread CPU: bindings for pending or disabled replacements are cached too, so steady-state shader binds no longer rebuild keys.
