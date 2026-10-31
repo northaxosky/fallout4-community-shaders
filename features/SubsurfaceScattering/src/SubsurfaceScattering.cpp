@@ -221,7 +221,7 @@ namespace cs::features
 		if (!_native)
 			_native = NativeSnapshot{ controls->screenSpaceSubsurfaceScatteringEnabled, controls->characterLightEnabled,
 				controls->characterLightParams.r, controls->characterLightParams.g };
-		// FO4: the hooked t15 bind needs the native flag, which also forces a second composite pass.
+		// FO4: the t15 hook needs the native flag, which adds a second composite pass.
 		controls->screenSpaceSubsurfaceScatteringEnabled = SkinDrawnThisFrame();
 		controls->characterLightEnabled = _settings.enableCharacterLighting;
 		if (_settings.enableCharacterLighting) {

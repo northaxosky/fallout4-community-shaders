@@ -53,7 +53,7 @@ namespace cs::engine
 			for (RE::NiNode* parent = a_geometry.parent; parent && !fadeNode; parent = parent->parent)
 				fadeNode = parent->IsFadeNode();
 
-			// FO4: only the REFR's root fade node carries userData; leaf geometry never does.
+			// FO4: only the REFR's root fade node carries userData, never leaf geometry.
 			if (!fadeNode || !fadeNode->userData)
 				return std::nullopt;
 

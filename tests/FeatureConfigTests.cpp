@@ -162,7 +162,7 @@ namespace
 		CHECK(Parse(kTestSchema, toml::table{ { "settings", SerializeDelta(kTestSchema, spanned, expected) } }, spanRoundTrip, error));
 		CHECK(spanRoundTrip.span == spanned.span);
 
-		// Configs saved under a wider range load clamped instead of failing the feature.
+		// Configs saved under a wider range load clamped, not failing the feature.
 		auto clamped = expected;
 		CHECK(Parse(kTestSchema, toml::parse("[settings]\ncount = -3\nthickness = 9\n"), clamped, error));
 		CHECK(clamped.count == 1 && clamped.thickness == 0.05f);

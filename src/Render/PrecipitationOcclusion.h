@@ -76,7 +76,7 @@ namespace cs::engine
 	// Registers the capture thunks and the occluder pass hook; call during Load.
 	[[nodiscard]] std::vector<HookInstall> InstallOcclusionCaptureHooks();
 
-	// Redirects a verified call site through a_install, e.g. stl::write_thunk_call<Hook>.
+	// Redirects a verified call site through a_install (stl::write_thunk_call).
 	[[nodiscard]] HookInstall InstallCallSiteHook(const CallSiteAnchor& a_anchor, void (*a_install)(std::uintptr_t));
 
 	// Runs one capture after the stock pass; restores every engine override.

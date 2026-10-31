@@ -169,7 +169,7 @@ namespace cs::features::unified_water
 		return groups;
 	}
 
-	// One flat quad per square, positions relative to (originX, originY) divided by scale.
+	// One flat quad per square, positions relative to origin and divided by scale.
 	struct MergedMesh
 	{
 		struct Vertex
@@ -184,7 +184,7 @@ namespace cs::features::unified_water
 		float radius{};
 	};
 
-	// Vertices go to the engine as half floats; origin and scale keep every coordinate exact.
+	// Half-float vertices: origin and scale keep every coordinate exact.
 	inline bool BuildMergedMesh(const TileGroup& a_group, std::int32_t a_baseX, std::int32_t a_baseY, MergedMesh& a_mesh)
 	{
 		constexpr float kCell = 4096.0f;

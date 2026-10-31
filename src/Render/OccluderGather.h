@@ -4,6 +4,6 @@
 
 namespace cs::engine
 {
-	// Seeds the capture's culling group with frustum-testable leaves, not whole cells.
+	// Seeds the capture's culling group with leaves, not whole cells.
 	[[nodiscard]] HookInstall InstallOccluderGatherHook();
 }

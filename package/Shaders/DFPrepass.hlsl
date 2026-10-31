@@ -619,7 +619,7 @@ struct PS_OUTPUT
 			terrainBlendFactor = saturate((depthSampledLinear - depthPixelLinear) / 10.0);
 			if (input.position.z == depthSampled)
 				terrainBlendFactor = 1;
-			// Opaque owns fully-in terrain; colour and data draws only the ramp, data where at least half in.
+			// Opaque owns fully-in terrain; colour and data own the ramp, data from half in.
 			const float lower = TerrainBlendingPass == 1 ? 1.0 / 255.0 : (TerrainBlendingPass == 2 ? 0.5 : 1.0);
 			// Returning after discard keeps rejected waves from shading the layers.
 			[branch] if (terrainBlendFactor < lower || (TerrainBlendingPass != 3 && terrainBlendFactor >= 1.0))

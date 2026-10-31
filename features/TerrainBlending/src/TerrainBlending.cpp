@@ -104,7 +104,7 @@ namespace cs::features
 			return desc;
 		}
 
-		// Fully-in terrain writes exactly what the colour and data draws would together.
+		// Fully-in terrain writes what the colour and data draws would together.
 		D3D11_BLEND_DESC OpaqueBlendDesc()
 		{
 			D3D11_BLEND_DESC desc{};
