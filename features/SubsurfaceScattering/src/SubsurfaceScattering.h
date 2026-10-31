@@ -78,6 +78,7 @@ namespace cs::features
 		void UpdateKernels();
 		void UpdateConstants(const cs::engine::WorldCameraRecord&);
 		bool CanRun() const noexcept { return _started && IsEnabled() && !_unsupported && !_failed; }
+		bool SkinDrawnThisFrame() const noexcept { return _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount(); }
 		void ApplyNativeControls();
 		void RestoreNativeControls() noexcept;
 		void OnPreDeferredComposite();

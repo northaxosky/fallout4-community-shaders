@@ -221,8 +221,8 @@ namespace cs::features
 		if (!_native)
 			_native = NativeSnapshot{ controls->screenSpaceSubsurfaceScatteringEnabled, controls->characterLightEnabled,
 				controls->characterLightParams.r, controls->characterLightParams.g };
-		// FO4: the hooked t15 bind only runs while the native flag is on.
-		controls->screenSpaceSubsurfaceScatteringEnabled = true;
+		// FO4: the hooked t15 bind needs the native flag, which also forces a second composite pass.
+		controls->screenSpaceSubsurfaceScatteringEnabled = SkinDrawnThisFrame();
 		controls->characterLightEnabled = _settings.enableCharacterLighting;
 		if (_settings.enableCharacterLighting) {
 			// FO4: DFLight reads only the rim (x) and fill (y) character light lanes.
@@ -284,7 +284,7 @@ namespace cs::features
 			!_prepare || !_extract || !_horizontal || !_vertical || !_burley)
 			return;
 		// Upstream dispatches only on frames that drew skin.
-		if (_skinFrame.load(std::memory_order_relaxed) != cs::engine::GetFrameCount()) {
+		if (!SkinDrawnThisFrame()) {
 			_skippedFrames.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
