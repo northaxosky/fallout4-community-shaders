@@ -49,31 +49,27 @@ namespace cs::engine
 			if (a_geometry.worldBound.center.z + a_geometry.worldBound.fRadius < a_policy.probeGridBottomZ - a_policy.belowGridMargin)
 				return OccluderReject::kBelowGrid;
 
-			if (a_geometry.userData) {
-				RE::BSFadeNode* fadeNode = nullptr;
+			RE::BSFadeNode* fadeNode = nullptr;
+			for (RE::NiNode* parent = a_geometry.parent; parent && !fadeNode; parent = parent->parent)
+				fadeNode = parent->IsFadeNode();
 
-				RE::NiNode* parent = a_geometry.parent;
-				while (parent && !fadeNode) {
-					fadeNode = parent->IsFadeNode();
-					parent = parent->parent;
-				}
+			// FO4: only the REFR's root fade node carries userData; leaf geometry never does.
+			if (!fadeNode || !fadeNode->userData)
+				return std::nullopt;
 
-				if (fadeNode) {
-					static const RE::BSFixedString bsxKey{ "BSX" };
-					if (const auto* bsx = fadeNode->GetExtraData<RE::BSXFlags>(bsxKey)) {
-						using Flag = RE::BSXFlags::Flag;
-						if (bsx->GetFlags().any(
-								Flag::kRagdoll,
-								Flag::kDynamic,
-								Flag::kAddon,
-								Flag::kNeedsTransformUpdate,
-								Flag::kMagicShaderParticles,
-								Flag::kLights,
-								Flag::kBreakable,
-								Flag::kSearchedBreakable))
-							return OccluderReject::kBsx;
-					}
-				}
+			static const RE::BSFixedString bsxKey{ "BSX" };
+			if (const auto* bsx = fadeNode->GetExtraData<RE::BSXFlags>(bsxKey)) {
+				using Flag = RE::BSXFlags::Flag;
+				if (bsx->GetFlags().any(
+						Flag::kRagdoll,
+						Flag::kDynamic,
+						Flag::kAddon,
+						Flag::kNeedsTransformUpdate,
+						Flag::kMagicShaderParticles,
+						Flag::kLights,
+						Flag::kBreakable,
+						Flag::kSearchedBreakable))
+					return OccluderReject::kBsx;
 			}
 			return std::nullopt;
 		}
