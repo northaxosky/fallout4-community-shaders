@@ -152,6 +152,10 @@ namespace cs::engine
 		}
 
 		struct NativeVariant;
+		struct ResolvedBinding;
+
+		// Last binding SetShaders resolved on this thread; null when unknown.
+		thread_local const ResolvedBinding* t_bound = nullptr;
 
 		// The engine draw flush whose injection dispatch is running.
 		struct EngineDrawFlushState
@@ -257,6 +261,12 @@ namespace cs::engine
 	{
 		InvalidateFrameBindings();
 		ReleaseSamplerOverrides(GetEngineShadowState());
+		t_bound = nullptr;
+	}
+
+	void ClearBoundShaderBinding() noexcept
+	{
+		t_bound = nullptr;
 	}
 
 	void BeginShaderInjectionFrame(std::uint32_t a_frame) noexcept
@@ -508,6 +518,16 @@ namespace cs::engine
 			static_assert(std::atomic<util::ShaderSamplerUse>::is_always_lock_free);
 		};
 
+		struct NativeShaderFamilyContext
+		{
+			ShaderInjectionTarget target =
+				ShaderInjectionTarget::kCount;
+			std::string nativeName;
+			std::string nativeClassName;
+			std::string nativeSourceGroup;
+			ShaderInjectionDefines nativeMacros;
+		};
+
 		struct NativeReplacementWrapperKey
 		{
 			const void* nativeWrapper = nullptr;
@@ -564,13 +584,9 @@ namespace cs::engine
 			std::array<bool,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>
 				unsupportedNativeVariantReported{};
-			struct NativeShaderIdentity
-			{
-				NativeVariantKey key;
-				std::shared_ptr<NativeVariant> variant;
-			};
-			std::unordered_map<ID3D11DeviceChild*, NativeShaderIdentity>
-				nativeShaderIdentities;
+			// Interned per BSShader so binding misses do not rebuild family strings.
+			std::unordered_map<const RE::BSShader*, std::shared_ptr<const NativeShaderFamilyContext>>
+				shaderFamilies;
 			struct NativeShaderMetadata
 			{
 				bool forceEarlyDepthStencil = false;
@@ -584,8 +600,8 @@ namespace cs::engine
 				NativeReplacementWrapper,
 				NativeReplacementWrapperKeyHash>
 				nativeReplacementWrappers;
-			// Bumped whenever a cached native binding resolution may change.
-			std::atomic<std::uint64_t> nativeBindingGeneration{ 0 };
+			// Bumped on publish, define invalidation and shader reload.
+			std::atomic<std::uint64_t> bindingEpoch{ 0 };
 			std::atomic_flag swapCountersLock = ATOMIC_FLAG_INIT;
 		};
 
@@ -662,16 +678,6 @@ namespace cs::engine
 				name ? name : "");
 		}
 
-		struct NativeShaderFamilyContext
-		{
-			ShaderInjectionTarget target =
-				ShaderInjectionTarget::kCount;
-			std::string_view nativeName;
-			std::string_view nativeClassName;
-			std::string_view nativeSourceGroup;
-			ShaderInjectionDefines nativeMacros;
-		};
-
 		std::optional<NativeShaderFamilyContext>
 		ResolveNativeShaderFamilyContext(RE::BSShader* a_shader)
 		{
@@ -705,6 +711,31 @@ namespace cs::engine
 					emitted->values[index].second);
 			}
 			return result;
+		}
+
+		// Rebuilds the shader's family; reload is the only event that changes it.
+		std::shared_ptr<const NativeShaderFamilyContext> InternShaderFamily(RE::BSShader* a_shader)
+		{
+			std::shared_ptr<const NativeShaderFamilyContext> family;
+			if (auto built = ResolveNativeShaderFamilyContext(a_shader))
+				family = std::make_shared<const NativeShaderFamilyContext>(std::move(*built));
+			auto& service = GetService();
+			std::scoped_lock lock(service.nativeVariantMutex);
+			service.shaderFamilies.insert_or_assign(a_shader, family);
+			return family;
+		}
+
+		std::shared_ptr<const NativeShaderFamilyContext> FindShaderFamily(RE::BSShader* a_shader)
+		{
+			if (!a_shader)
+				return nullptr;
+			{
+				auto& service = GetService();
+				std::scoped_lock lock(service.nativeVariantMutex);
+				if (const auto found = service.shaderFamilies.find(a_shader); found != service.shaderFamilies.end())
+					return found->second;
+			}
+			return InternShaderFamily(a_shader);
 		}
 
 		NativeVariantKey MakeNativeVariantKey(
@@ -993,36 +1024,52 @@ namespace cs::engine
 				std::ignore = QueueNativeVariant(a_key);
 		}
 
-		// a_settled reports whether the outcome is final until the next binding generation.
+		// A compile a cached binding waits on before it can upgrade.
+		struct PendingCompile
+		{
+			std::shared_ptr<NativeVariant> variant;
+			std::shared_ptr<ShaderVariantCompilationHandle> handle;
+
+			bool Done() const noexcept
+			{
+				return variant->settled.load(std::memory_order_acquire) &&
+				       (!handle || handle->GetState() != ShaderVariantCompilationState::kPending);
+			}
+		};
+
+		struct AcquireOutcome
+		{
+			std::shared_ptr<NativeVariant> variant;
+			// Set while the result may still change.
+			PendingCompile pending;
+		};
+
 		template <class TShader>
 		TShader* AcquireNativeReplacement(
 			const PublishedPlan& a_plan,
 			const PublishedTarget& a_target,
 			const NativeVariantKey& a_key,
-			bool* a_settled = nullptr)
+			AcquireOutcome* a_outcome = nullptr)
 		{
-			bool settled = true;
-			const auto report = [&] {
-				if (a_settled)
-					*a_settled = settled;
-			};
-			auto variant = FindOrPrepareNativeVariant(
+			AcquireOutcome local;
+			auto& outcome = a_outcome ? *a_outcome : local;
+			outcome = {};
+			outcome.variant = FindOrPrepareNativeVariant(
 				a_plan, a_target, a_key);
-			if (!variant) {
-				report();
+			const auto& variant = outcome.variant;
+			if (!variant)
 				return nullptr;
-			}
 			// Read before the compilation so a concurrently prepared one is visible.
-			settled = variant->settled.load(std::memory_order_acquire);
+			const bool settled = variant->settled.load(std::memory_order_acquire);
 			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
 			{
 				std::scoped_lock lock(variant->mutex);
 				compilation = variant->compilation;
 			}
-			if (!compilation) {
-				report();
+			if (!settled)
+				outcome.pending = { variant, compilation };
+			if (!compilation)
 				return nullptr;
-			}
 			auto shader = compilation->Acquire();
 			if (!shader) {
 				auto& runtime =
@@ -1034,7 +1081,7 @@ namespace cs::engine
 							1, std::memory_order_relaxed);
 					}
 				} else {
-					settled = false;
+					outcome.pending = { variant, compilation };
 					if (!variant->pendingObserved.exchange(
 							true, std::memory_order_relaxed)) {
 						a_plan.compilationCache->Demand(compilation);
@@ -1042,24 +1089,11 @@ namespace cs::engine
 							1, std::memory_order_relaxed);
 					}
 				}
-				report();
 				return nullptr;
 			}
-			settled = true;
-			report();
+			outcome.pending = {};
 
 			variant->samplers.store(compilation->GetSamplerUse(), std::memory_order_relaxed);
-			{
-				auto& service = GetService();
-				std::scoped_lock lock(service.nativeVariantMutex);
-				const auto known = service.nativeShaderIdentities.find(shader.get());
-				// A re-acquire must not move the generation, or every cached binding misses.
-				if (known == service.nativeShaderIdentities.end() || known->second.variant != variant) {
-					service.nativeShaderIdentities.insert_or_assign(
-						shader.get(), Service::NativeShaderIdentity{ a_key, variant });
-					service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
-				}
-			}
 			return static_cast<TShader*>(shader.detach());
 		}
 
@@ -1126,12 +1160,12 @@ namespace cs::engine
 			const PublishedTarget& a_target,
 			const NativeVariantKey& a_key,
 			TWrapper* a_nativeWrapper,
-			bool* a_settled = nullptr)
+			AcquireOutcome* a_outcome = nullptr)
 		{
 			if (!a_nativeWrapper)
 				return nullptr;
 			auto* replacement = AcquireNativeReplacement<TD3DShader>(
-				a_plan, a_target, a_key, a_settled);
+				a_plan, a_target, a_key, a_outcome);
 			if (!replacement)
 				return nullptr;
 			winrt::com_ptr<TD3DShader> replacementReference;
@@ -1171,6 +1205,14 @@ namespace cs::engine
 			const ShaderInjectionDefines* _previousDefines;
 			ShaderInjectionTarget _previousTarget;
 		};
+
+		// Set by the compute bind hook for the dispatch RunComputeShader makes next.
+		struct ComputeBinding
+		{
+			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
+			std::shared_ptr<NativeVariant> variant;
+		};
+		thread_local ComputeBinding t_computeBound;
 
 		void DispatchPublishedTarget(
 			const PublishedTarget& a_target,
@@ -1226,33 +1268,8 @@ namespace cs::engine
 				return;
 			}
 
-			ID3D11ComputeShader* shader = nullptr;
-			a_context->CSGetShader(&shader, nullptr, nullptr);
-			winrt::com_ptr<ID3D11ComputeShader> boundShader;
-			boundShader.attach(shader);
-			if (!shader) {
-				g_computeShaderRejections.fetch_add(
-					1, std::memory_order_relaxed);
-				a_context->Dispatch(
-					a_threadGroupCountX,
-					a_threadGroupCountY,
-					a_threadGroupCountZ);
-				return;
-			}
-
-			std::optional<NativeVariantKey> owner;
-			std::shared_ptr<NativeVariant> variant;
-			{
-				auto& service = GetService();
-				std::scoped_lock lock(service.nativeVariantMutex);
-				const auto identity =
-					service.nativeShaderIdentities.find(shader);
-				if (identity != service.nativeShaderIdentities.end()) {
-					owner = identity->second.key;
-					variant = identity->second.variant;
-				}
-			}
-			if (!owner) {
+			const auto owner = std::exchange(t_computeBound, {});
+			if (owner.target == ShaderInjectionTarget::kCount) {
 				g_computeShaderRejections.fetch_add(
 					1, std::memory_order_relaxed);
 				a_context->Dispatch(
@@ -1262,7 +1279,7 @@ namespace cs::engine
 				return;
 			}
 			const auto* target =
-				FindPublishedTarget(*plan, owner->target);
+				FindPublishedTarget(*plan, owner.target);
 			if (!target) {
 				g_computeShaderRejections.fetch_add(
 					1, std::memory_order_relaxed);
@@ -1278,7 +1295,7 @@ namespace cs::engine
 			const bool hasFeatureBindings =
 				(target->contributedStages & ShaderStageBit(ShaderStage::kCompute)) != 0;
 			if (hasFeatureBindings) {
-				if (owner->target !=
+				if (owner.target !=
 						ShaderInjectionTarget::kDfTiledLighting ||
 					!render::IsDeferredLightsActive()) {
 					g_computePhaseRejections.fetch_add(
@@ -1298,7 +1315,7 @@ namespace cs::engine
 						a_threadGroupCountZ);
 					return;
 				}
-				const ActiveVariantScope variantScope(variant.get());
+				const ActiveVariantScope variantScope(owner.variant.get());
 				// FO4 rebuilds the native low-slot inputs for each tiled dispatch.
 				ScopedShaderInjectionBindings contributionBindings(ShaderStage::kCompute);
 				DispatchPublishedTarget(
@@ -1777,7 +1794,7 @@ namespace cs::engine
 			}
 		}
 		service.published.store(plan, std::memory_order_release);
-		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
+		service.bindingEpoch.fetch_add(1, std::memory_order_release);
 		{
 			std::scoped_lock lock(service.mutex);
 			service.lifecycle = Lifecycle::kPublished;
@@ -1839,10 +1856,7 @@ namespace cs::engine
 		std::erase_if(service.nativeVariants, [a_targets](const auto& a_entry) {
 			return std::ranges::find(a_targets, a_entry.first.target) != a_targets.end();
 		});
-		std::erase_if(service.nativeShaderIdentities, [a_targets](const auto& a_entry) {
-			return std::ranges::find(a_targets, a_entry.second.key.target) != a_targets.end();
-		});
-		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
+		service.bindingEpoch.fetch_add(1, std::memory_order_release);
 	}
 
 	void InvalidateNativeShaderVariantCompilations() noexcept
@@ -1858,8 +1872,7 @@ namespace cs::engine
 		service.nativeVariants.clear();
 		service.shaderSourceAvailability.clear();
 		service.unsupportedNativeVariantReported.fill(false);
-		service.nativeShaderIdentities.clear();
-		service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
+		service.bindingEpoch.fetch_add(1, std::memory_order_release);
 	}
 
 	void StopNativeShaderVariantCompilations() noexcept
@@ -1868,6 +1881,27 @@ namespace cs::engine
 			GetService().published.load(std::memory_order_acquire);
 		if (plan && plan->compilationCache)
 			plan->compilationCache->Stop();
+	}
+
+	namespace
+	{
+		void DispatchTarget(
+			const PublishedTarget& a_target,
+			ID3D11DeviceContext* a_context,
+			util::ShaderSamplerUse a_samplers) noexcept
+		{
+			const auto previousMask = std::exchange(t_samplerMask, a_samplers.declared);
+			if (a_samplers.hostLinearClamp) {
+				auto* sampler = render::GetLinearClampSampler();
+				BindInjectionSamplers(a_context, render::kLinearClampSamplerSlot, 1, &sampler);
+			}
+			if (a_target.id == ShaderInjectionTarget::kBsWater)
+				Tally(t_drawMetrics.waterDraws);
+			if (render::forward_draw::Covers(a_target.id))
+				render::forward_draw::BindDescriptor(a_context);
+			DispatchPublishedTarget(a_target, ShaderStage::kPixel, a_context);
+			t_samplerMask = previousMask;
+		}
 	}
 
 	void DispatchShaderInjections(
@@ -1879,20 +1913,8 @@ namespace cs::engine
 			return;
 
 		const auto plan = GetService().published.load(std::memory_order_acquire);
-		const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr;
-		if (!target)
-			return;
-		const auto previousMask = std::exchange(t_samplerMask, a_samplers.declared);
-		if (a_samplers.hostLinearClamp) {
-			auto* sampler = render::GetLinearClampSampler();
-			BindInjectionSamplers(a_context, render::kLinearClampSamplerSlot, 1, &sampler);
-		}
-		if (a_target == ShaderInjectionTarget::kBsWater)
-			Tally(t_drawMetrics.waterDraws);
-		if (render::forward_draw::Covers(a_target))
-			render::forward_draw::BindDescriptor(a_context);
-		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
-		t_samplerMask = previousMask;
+		if (const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr)
+			DispatchTarget(*target, a_context, a_samplers);
 	}
 
 	namespace
@@ -1917,8 +1939,8 @@ namespace cs::engine
 			if (!a_shader || !a_streamIsGood)
 				return;
 			try {
-				const auto family =
-					ResolveNativeShaderFamilyContext(a_shader);
+				const auto family = InternShaderFamily(a_shader);
+				GetService().bindingEpoch.fetch_add(1, std::memory_order_release);
 				if (!family)
 					return;
 				const auto supportedStages =
@@ -1977,87 +1999,107 @@ namespace cs::engine
 			}
 		}
 
-		struct NativeGraphicsResolution
+		struct BindingKey
 		{
-			NativeGraphicsShaderBinding binding;
-			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
-			std::uint8_t matches = 0;
-			// Unsettled outcomes (pending compiles, disabled targets, failures) are not cached.
-			bool settled = true;
+			const void* vertex = nullptr;
+			const void* pixel = nullptr;
+			std::uint32_t vertexId = 0;
+			std::uint32_t pixelId = 0;
+
+			bool operator==(const BindingKey&) const = default;
 		};
 
-		NativeGraphicsResolution ResolveNativeGraphicsShaderBindingImpl(
-			const NativeShaderFamilyContext& a_family,
-			std::uint32_t a_vertexShaderId,
-			std::uint32_t a_pixelShaderId,
-			RE::BSGraphics::VertexShader* a_nativeVertex,
-			RE::BSGraphics::PixelShader* a_nativePixel) noexcept
+		struct BindingKeyHash
 		{
-			NativeGraphicsResolution resolution{
-				.binding = { .vertex = a_nativeVertex, .pixel = a_nativePixel },
-				.target = a_family.target
-			};
-			auto& result = resolution.binding;
-			if (!ShaderEnabled(a_family.target)) {
-				resolution.settled = false;
-				return resolution;
+			std::size_t operator()(const BindingKey& a_key) const noexcept
+			{
+				auto value = std::hash<const void*>{}(a_key.vertex);
+				value = value * 131U + std::hash<const void*>{}(a_key.pixel);
+				value = value * 131U + a_key.vertexId;
+				return value * 131U + a_key.pixelId;
 			}
+		};
 
-			bool requiresGraphicsPair = false;
+		// One SetShaders outcome; pending and disabled results are cached too.
+		struct ResolvedBinding
+		{
+			NativeGraphicsShaderBinding native;
+			NativeGraphicsShaderBinding replaced;
+			std::shared_ptr<const NativeShaderFamilyContext> family;
+			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
+			std::uint32_t vertexId = 0;
+			std::uint32_t pixelId = 0;
+			std::uint8_t matches = 0;
+			bool resolved = false;
+			const PublishedTarget* published = nullptr;
+			// Set only when the engine will run the replacement pixel shader.
+			std::shared_ptr<NativeVariant> pixelVariant;
+			std::array<PendingCompile, 2> pending;
+
+			bool PendingDone() const noexcept
+			{
+				return std::ranges::any_of(pending, [](const auto& a_compile) {
+					return a_compile.variant && a_compile.Done();
+				});
+			}
+		};
+
+		void ResolveBinding(const PublishedPlan* a_plan, ResolvedBinding& a_entry) noexcept
+		{
+			a_entry.resolved = true;
+			a_entry.replaced = a_entry.native;
+			a_entry.matches = 0;
+			a_entry.published = nullptr;
+			a_entry.pixelVariant.reset();
+			a_entry.pending = {};
+			const auto& family = *a_entry.family;
+			const auto& native = a_entry.native;
 			try {
-				const auto plan =
-					GetService().published.load(std::memory_order_acquire);
-				const auto* target =
-					plan ? FindPublishedTarget(*plan, a_family.target) : nullptr;
+				const auto* target = a_plan ? FindPublishedTarget(*a_plan, family.target) : nullptr;
 				if (!target)
-					return resolution;
-				requiresGraphicsPair = std::ranges::any_of(target->contributions, [](const auto& contribution) {
+					return;
+				a_entry.published = target;
+				const bool requiresGraphicsPair = std::ranges::any_of(target->contributions, [](const auto& contribution) {
 					return contribution.requiresGraphicsPair;
 				});
+				std::size_t pendingCount = 0;
+				const auto notePending = [&](AcquireOutcome& a_outcome) {
+					if (a_outcome.pending.variant)
+						a_entry.pending[pendingCount++] = std::move(a_outcome.pending);
+				};
 
-				if (a_nativeVertex && a_nativeVertex->id == a_vertexShaderId) {
-					++resolution.matches;
-					bool settled = true;
+				AcquireOutcome pixel;
+				if (native.vertex && native.vertex->id == a_entry.vertexId) {
+					++a_entry.matches;
+					AcquireOutcome outcome;
 					if (auto* replacement =
-							AcquireNativeReplacementWrapper<
-								RE::BSGraphics::VertexShader,
-								ID3D11VertexShader>(
-								*plan,
-								*target,
-								MakeNativeVariantKey(
-									a_family,
-									ShaderStage::kVertex,
-									a_vertexShaderId),
-								a_nativeVertex,
-								&settled)) {
-						result.vertex = replacement;
+							AcquireNativeReplacementWrapper<RE::BSGraphics::VertexShader, ID3D11VertexShader>(
+								*a_plan, *target,
+								MakeNativeVariantKey(family, ShaderStage::kVertex, a_entry.vertexId),
+								native.vertex, &outcome)) {
+						a_entry.replaced.vertex = replacement;
 					}
-					resolution.settled &= settled;
+					notePending(outcome);
 				}
-
-				if (a_nativePixel && a_nativePixel->id == a_pixelShaderId) {
-					++resolution.matches;
-					bool settled = true;
+				if (native.pixel && native.pixel->id == a_entry.pixelId) {
+					++a_entry.matches;
 					if (auto* replacement =
-							AcquireNativeReplacementWrapper<
-								RE::BSGraphics::PixelShader,
-								ID3D11PixelShader>(
-								*plan,
-								*target,
-								MakeNativeVariantKey(
-									a_family,
-									ShaderStage::kPixel,
-									a_pixelShaderId,
-									NativePixelForcesEarlyDepthStencil(
-										a_nativePixel)),
-								a_nativePixel,
-								&settled)) {
-						result.pixel = replacement;
+							AcquireNativeReplacementWrapper<RE::BSGraphics::PixelShader, ID3D11PixelShader>(
+								*a_plan, *target,
+								MakeNativeVariantKey(family, ShaderStage::kPixel, a_entry.pixelId,
+									NativePixelForcesEarlyDepthStencil(native.pixel)),
+								native.pixel, &pixel)) {
+						a_entry.replaced.pixel = replacement;
 					}
-					resolution.settled &= settled;
+					notePending(pixel);
 				}
+				// Host-added interpolators cannot pair a replacement stage with its native counterpart.
+				if (requiresGraphicsPair && (a_entry.replaced.vertex == native.vertex || a_entry.replaced.pixel == native.pixel))
+					a_entry.replaced = native;
+				if (a_entry.replaced.pixel != native.pixel)
+					a_entry.pixelVariant = std::move(pixel.variant);
 			} catch (const std::exception& e) {
-				resolution.settled = false;
+				a_entry.resolved = false;
 				CS_LOG_EVERY_MS(
 					L,
 					2000,
@@ -2065,55 +2107,24 @@ namespace cs::engine
 					"Native shader descriptor routing failed: {}.",
 					e.what());
 			} catch (...) {
-				resolution.settled = false;
+				a_entry.resolved = false;
 				CS_LOG_EVERY_MS(
 					L,
 					2000,
 					spdlog::level::warn,
 					"Native shader descriptor routing failed.");
 			}
-			// Host-added interpolators cannot pair a replacement stage with its native counterpart.
-			if (requiresGraphicsPair && (result.vertex == a_nativeVertex || result.pixel == a_nativePixel)) {
-				result = { a_nativeVertex, a_nativePixel };
-			}
-			return resolution;
 		}
 
-		struct NativeGraphicsBindingKey
+		// Per-thread so the per-draw path takes no lock; cleared when the epoch moves.
+		struct BindingCache
 		{
-			const RE::BSShader* shader = nullptr;
-			const void* vertex = nullptr;
-			const void* pixel = nullptr;
-			const void* vertexShader = nullptr;
-			const void* pixelShader = nullptr;
-			std::uint32_t vertexShaderId = 0;
-			std::uint32_t pixelShaderId = 0;
-			std::uint32_t nativeVertexId = 0;
-			std::uint32_t nativePixelId = 0;
-
-			bool operator==(const NativeGraphicsBindingKey&) const = default;
+			std::uint64_t epoch = UINT64_MAX;
+			// Keeps the targets that entries point into alive for the epoch.
+			std::shared_ptr<const PublishedPlan> plan;
+			std::unordered_map<BindingKey, ResolvedBinding, BindingKeyHash> entries;
 		};
-
-		struct NativeGraphicsBindingKeyHash
-		{
-			std::size_t operator()(const NativeGraphicsBindingKey& a_key) const noexcept
-			{
-				auto value = std::hash<const void*>{}(a_key.shader);
-				for (const void* pointer : { a_key.vertex, a_key.pixel, a_key.vertexShader, a_key.pixelShader })
-					value = value * 131U + std::hash<const void*>{}(pointer);
-				for (const auto id : { a_key.vertexShaderId, a_key.pixelShaderId, a_key.nativeVertexId, a_key.nativePixelId })
-					value = value * 131U + id;
-				return value;
-			}
-		};
-
-		// Per-thread so the per-draw hit path takes no lock; cleared when the generation moves.
-		struct NativeGraphicsBindingCache
-		{
-			std::uint64_t generation = UINT64_MAX;
-			std::unordered_map<NativeGraphicsBindingKey, NativeGraphicsResolution, NativeGraphicsBindingKeyHash> entries;
-		};
-		thread_local NativeGraphicsBindingCache t_nativeGraphicsBindings;
+		thread_local BindingCache t_bindingCache;
 	}
 
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
@@ -2127,59 +2138,55 @@ namespace cs::engine
 			.vertex = a_nativeVertex,
 			.pixel = a_nativePixel
 		};
-		auto& cache = t_nativeGraphicsBindings;
-		const auto generation = GetService().nativeBindingGeneration.load(std::memory_order_acquire);
-		if (cache.generation != generation) {
+		auto& service = GetService();
+		auto& cache = t_bindingCache;
+		const auto epoch = service.bindingEpoch.load(std::memory_order_acquire);
+		if (cache.epoch != epoch) {
+			t_bound = nullptr;
 			cache.entries.clear();
-			cache.generation = generation;
+			cache.plan = service.published.load(std::memory_order_acquire);
+			cache.epoch = epoch;
 		}
-		const NativeGraphicsBindingKey key{
-			.shader = a_shader,
-			.vertex = a_nativeVertex,
-			.pixel = a_nativePixel,
-			.vertexShader = a_nativeVertex ? a_nativeVertex->shader : nullptr,
-			.pixelShader = a_nativePixel ? a_nativePixel->shader : nullptr,
-			.vertexShaderId = a_vertexShaderId,
-			.pixelShaderId = a_pixelShaderId,
-			.nativeVertexId = a_nativeVertex ? a_nativeVertex->id : 0,
-			.nativePixelId = a_nativePixel ? a_nativePixel->id : 0
-		};
-		NativeGraphicsResolution fresh;
-		const NativeGraphicsResolution* resolution = nullptr;
 		Tally(t_drawMetrics.bindResolves);
-		if (const auto found = cache.entries.find(key); found != cache.entries.end()) {
-			resolution = &found->second;
-		} else {
-			Tally(t_drawMetrics.bindResolveMisses);
-			if (const auto family = ResolveNativeShaderFamilyContext(a_shader)) {
-				fresh = ResolveNativeGraphicsShaderBindingImpl(
-					*family,
-					a_vertexShaderId,
-					a_pixelShaderId,
-					a_nativeVertex,
-					a_nativePixel);
-			} else {
-				fresh.binding = native;
-			}
-			resolution = &fresh;
-			if (fresh.settled) {
-				try {
-					resolution = &cache.entries.emplace(key, fresh).first->second;
-				} catch (...) {
-				}
+		const BindingKey key{ a_nativeVertex, a_nativePixel, a_vertexShaderId, a_pixelShaderId };
+		bool miss = false;
+		auto found = cache.entries.find(key);
+		if (found == cache.entries.end()) {
+			miss = true;
+			try {
+				ResolvedBinding fresh{ .native = native, .replaced = native, .family = FindShaderFamily(a_shader), .vertexId = a_vertexShaderId, .pixelId = a_pixelShaderId };
+				if (fresh.family)
+					fresh.target = fresh.family->target;
+				found = cache.entries.emplace(key, std::move(fresh)).first;
+			} catch (...) {
+				t_bound = nullptr;
+				return native;
 			}
 		}
-		if (!ShaderEnabled(resolution->target))
+		auto& entry = found->second;
+		if (!entry.family || !ShaderEnabled(entry.target)) {
+			if (miss)
+				Tally(t_drawMetrics.bindResolveMisses);
+			t_bound = nullptr;
 			return native;
-		auto& runtime = GetService().runtime[ToIndex(resolution->target)];
-		Tally(runtime.matches, resolution->matches);
-		Tally(runtime.substitutions, (resolution->binding.vertex != a_nativeVertex) + (resolution->binding.pixel != a_nativePixel));
-		return resolution->binding;
+		}
+		if (!entry.resolved || entry.PendingDone()) {
+			miss = true;
+			ResolveBinding(cache.plan.get(), entry);
+		}
+		if (miss)
+			Tally(t_drawMetrics.bindResolveMisses);
+		t_bound = &entry;
+		auto& runtime = service.runtime[ToIndex(entry.target)];
+		Tally(runtime.matches, entry.matches);
+		Tally(runtime.substitutions, (entry.replaced.vertex != native.vertex) + (entry.replaced.pixel != native.pixel));
+		return entry.replaced;
 	}
 
 	RE::BSGraphics::ComputeShader* ResolveNativeComputeShaderBinding(
 		RE::BSGraphics::ComputeShader* a_nativeCompute) noexcept
 	{
+		t_computeBound = {};
 		if (!a_nativeCompute || !a_nativeCompute->shader)
 			return a_nativeCompute;
 		try {
@@ -2219,6 +2226,7 @@ namespace cs::engine
 			auto& runtime =
 				GetService().runtime[ToIndex(owner->target)];
 			Tally(runtime.matches);
+			AcquireOutcome outcome;
 			auto* replacement =
 				AcquireNativeReplacementWrapper<
 					RE::BSGraphics::ComputeShader,
@@ -2226,9 +2234,11 @@ namespace cs::engine
 					*plan,
 					*target,
 					*owner,
-					a_nativeCompute);
+					a_nativeCompute,
+					&outcome);
 			if (!replacement)
 				return a_nativeCompute;
+			t_computeBound = { owner->target, std::move(outcome.variant) };
 			Tally(runtime.substitutions);
 			return replacement;
 		} catch (const std::exception& e) {
@@ -2356,45 +2366,26 @@ namespace cs::engine
 
 	namespace
 	{
-		// Consecutive draws mostly share a shader; identity changes bump generation.
-		struct BoundVariantCache
+		// The binding SetShaders resolved, if it is still the one the engine will draw with.
+		const ResolvedBinding* FindBoundPixelBinding([[maybe_unused]] ID3D11DeviceContext* a_context) noexcept
 		{
-			ID3D11PixelShader* shader = nullptr;
-			std::uint64_t generation = UINT64_MAX;
-			std::shared_ptr<NativeVariant> variant;
-		};
-
-		thread_local BoundVariantCache t_boundVariant;
-
-		NativeVariant* FindBoundPixelVariant(
-			ID3D11DeviceContext* a_context) noexcept
-		{
-			auto& service = GetService();
-			if (!a_context || !service.published.load(std::memory_order_acquire))
+			const auto* bound = t_bound;
+			if (!bound || !bound->pixelVariant)
 				return nullptr;
-
-			ID3D11PixelShader* boundShader = nullptr;
-			a_context->PSGetShader(&boundShader, nullptr, nullptr);
-			if (!boundShader)
+			// Direct state writes bypass SetShaders but not the shadow state.
+			const auto* state = GetEngineShadowState();
+			if (!state || state->currentPixelShader != bound->replaced.pixel)
 				return nullptr;
-			// Identity only; the context keeps the shader alive.
-			boundShader->Release();
-
-			auto& cache = t_boundVariant;
-			const auto generation = service.nativeBindingGeneration.load(std::memory_order_acquire);
-			if (cache.shader == boundShader && cache.generation == generation)
-				return cache.variant.get();
-
-			std::shared_ptr<NativeVariant> variant;
-			{
-				std::scoped_lock lock(service.nativeVariantMutex);
-				const auto identity =
-					service.nativeShaderIdentities.find(boundShader);
-				if (identity != service.nativeShaderIdentities.end())
-					variant = identity->second.variant;
+#ifdef _DEBUG
+			if (a_context) {
+				ID3D11PixelShader* deviceShader = nullptr;
+				a_context->PSGetShader(&deviceShader, nullptr, nullptr);
+				if (deviceShader)
+					deviceShader->Release();
+				assert(deviceShader == reinterpret_cast<ID3D11PixelShader*>(bound->replaced.pixel->shader));
 			}
-			cache = { boundShader, generation, std::move(variant) };
-			return cache.variant.get();
+#endif
+			return bound;
 		}
 	}
 
@@ -2411,7 +2402,8 @@ namespace cs::engine
 		// Output-only flushes skip the engine's slot masks.
 		if (a_outputStateOnly || !g_engineSamplerRestore.load(std::memory_order_relaxed))
 			return;
-		auto* variant = a_dispatches ? FindBoundPixelVariant(GetImmediateContext()) : nullptr;
+		const auto* bound = a_dispatches ? FindBoundPixelBinding(GetImmediateContext()) : nullptr;
+		auto* variant = bound ? bound->pixelVariant.get() : nullptr;
 		// Keep overrides this variant last requested; the engine restores the rest.
 		auto& overrides = t_samplerOverrides;
 		if (const auto release = static_cast<std::uint16_t>(overrides.mask & ~(variant ? variant->samplerRequests : 0))) {
@@ -2450,9 +2442,10 @@ namespace cs::engine
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept
 	{
-		if (auto* variant = t_engineFlush.variant ? t_engineFlush.variant : FindBoundPixelVariant(a_context)) {
+		if (const auto* bound = a_context ? FindBoundPixelBinding(a_context) : nullptr) {
+			const auto* variant = bound->pixelVariant.get();
 			const ActiveVariantScope scope(variant);
-			DispatchShaderInjections(variant->target, a_context, variant->samplers.load(std::memory_order_relaxed));
+			DispatchTarget(*bound->published, a_context, variant->samplers.load(std::memory_order_relaxed));
 		}
 	}
 

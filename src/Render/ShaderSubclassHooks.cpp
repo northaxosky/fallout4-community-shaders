@@ -113,6 +113,7 @@ namespace cs::engine
 				RE::BSGraphics::PixelShader* a_pixel)
 			{
 				if (!t_activeBeginTechnique) {
+					ClearBoundShaderBinding();
 					func(
 						a_renderer,
 						a_vertex,

@@ -93,6 +93,8 @@ namespace cs::engine
 	void OverrideInjectionFrameShaderResource(ID3D11DeviceContext*, UINT, ID3D11ShaderResourceView*) noexcept;
 	// Plugin GPU work or engine resets may change bindings the caches trust.
 	void InvalidateShaderInjectionBindings() noexcept;
+	// For shaders set outside a technique bind; nothing resolved to dispatch.
+	void ClearBoundShaderBinding() noexcept;
 
 	// Brackets one engine SetDirtyStates flush and the injection after it.
 	class ScopedEngineDrawFlush
