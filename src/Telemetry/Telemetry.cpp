@@ -129,7 +129,6 @@ namespace cs::telemetry
 				.Field("draw_d3d_binds", TomlInteger(summary.draw.d3dBinds))
 				.Field("draw_bind_resolves", TomlInteger(summary.draw.bindResolves))
 				.Field("draw_bind_resolve_misses", TomlInteger(summary.draw.bindResolveMisses))
-				.Field("draw_water_draws", TomlInteger(summary.draw.waterDraws))
 				.Field("frame_binding_skipped", TomlInteger(summary.draw.frameBindings.skipped))
 				.Field(
 					"compute_bridge_installed",
@@ -176,7 +175,8 @@ namespace cs::telemetry
 						TomlInteger(target.substitutions))
 					.Field(
 						target.name + "_dispatches",
-						TomlInteger(target.dispatches));
+						TomlInteger(target.dispatches))
+					.Field(target.name + "_draws", TomlInteger(target.draws));
 				if ((cs::engine::ShaderInjectionTargetStages(target.id) &
 						cs::engine::ShaderStageBit(cs::engine::ShaderStage::kCompute)) != 0) {
 					a_sink

@@ -74,7 +74,6 @@ namespace cs::engine
 		// Native shader binding resolutions; a miss rebuilds keys and takes locks.
 		std::uint64_t bindResolves = 0;
 		std::uint64_t bindResolveMisses = 0;
-		std::uint64_t waterDraws = 0;
 		FrameBindingMetrics frameBindings;
 	};
 
@@ -199,6 +198,7 @@ namespace cs::engine
 		std::uint64_t passthroughCompileFail = 0;
 		std::uint64_t passthroughNotReady = 0;
 		std::uint64_t dispatches = 0;
+		std::uint64_t draws = 0;
 	};
 
 	struct ShaderInjectionOutcomeSnapshot

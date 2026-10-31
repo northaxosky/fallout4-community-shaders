@@ -428,6 +428,7 @@ namespace cs::engine
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
 			std::atomic<std::uint64_t> passthroughNotReady{ 0 };
 			std::atomic<std::uint64_t> dispatches{ 0 };
+			std::atomic<std::uint64_t> draws{ 0 };
 			ShaderInjectionDefines defines;
 			std::string publicationError;
 		};
@@ -1895,8 +1896,7 @@ namespace cs::engine
 				auto* sampler = render::GetLinearClampSampler();
 				BindInjectionSamplers(a_context, render::kLinearClampSamplerSlot, 1, &sampler);
 			}
-			if (a_target.id == ShaderInjectionTarget::kBsWater)
-				Tally(t_drawMetrics.waterDraws);
+			Tally(GetService().runtime[ToIndex(a_target.id)].draws);
 			if (render::forward_draw::Covers(a_target.id))
 				render::forward_draw::BindDescriptor(a_context);
 			DispatchPublishedTarget(a_target, ShaderStage::kPixel, a_context);
@@ -2093,7 +2093,7 @@ namespace cs::engine
 					}
 					notePending(pixel);
 				}
-				// Host-added interpolators cannot pair a replacement stage with its native counterpart.
+				// Host-added interpolators cannot pair a replacement with a native stage.
 				if (requiresGraphicsPair && (a_entry.replaced.vertex == native.vertex || a_entry.replaced.pixel == native.pixel))
 					a_entry.replaced = native;
 				if (a_entry.replaced.pixel != native.pixel)
@@ -2366,8 +2366,8 @@ namespace cs::engine
 
 	namespace
 	{
-		// The binding SetShaders resolved, if it is still the one the engine will draw with.
-		const ResolvedBinding* FindBoundPixelBinding([[maybe_unused]] ID3D11DeviceContext* a_context) noexcept
+		// The SetShaders binding, if the engine will still draw with it.
+		const ResolvedBinding* FindBoundPixelBinding() noexcept
 		{
 			const auto* bound = t_bound;
 			if (!bound || !bound->pixelVariant)
@@ -2376,15 +2376,6 @@ namespace cs::engine
 			const auto* state = GetEngineShadowState();
 			if (!state || state->currentPixelShader != bound->replaced.pixel)
 				return nullptr;
-#ifdef _DEBUG
-			if (a_context) {
-				ID3D11PixelShader* deviceShader = nullptr;
-				a_context->PSGetShader(&deviceShader, nullptr, nullptr);
-				if (deviceShader)
-					deviceShader->Release();
-				assert(deviceShader == reinterpret_cast<ID3D11PixelShader*>(bound->replaced.pixel->shader));
-			}
-#endif
 			return bound;
 		}
 	}
@@ -2402,7 +2393,7 @@ namespace cs::engine
 		// Output-only flushes skip the engine's slot masks.
 		if (a_outputStateOnly || !g_engineSamplerRestore.load(std::memory_order_relaxed))
 			return;
-		const auto* bound = a_dispatches ? FindBoundPixelBinding(GetImmediateContext()) : nullptr;
+		const auto* bound = a_dispatches ? FindBoundPixelBinding() : nullptr;
 		auto* variant = bound ? bound->pixelVariant.get() : nullptr;
 		// Keep overrides this variant last requested; the engine restores the rest.
 		auto& overrides = t_samplerOverrides;
@@ -2442,7 +2433,7 @@ namespace cs::engine
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept
 	{
-		if (const auto* bound = a_context ? FindBoundPixelBinding(a_context) : nullptr) {
+		if (const auto* bound = FindBoundPixelBinding()) {
 			const auto* variant = bound->pixelVariant.get();
 			const ActiveVariantScope scope(variant);
 			DispatchTarget(*bound->published, a_context, variant->samplers.load(std::memory_order_relaxed));
@@ -2524,6 +2515,7 @@ namespace cs::engine
 			}
 			snapshot.dispatches =
 				runtime.dispatches.load(std::memory_order_relaxed);
+			snapshot.draws = runtime.draws.load(std::memory_order_relaxed);
 			snapshot.computeBindCalls = runtime.computeBindCalls.load(std::memory_order_relaxed);
 		}
 		if ((SupportedStages(a_target) & ShaderStageBit(ShaderStage::kCompute)) != 0) {
