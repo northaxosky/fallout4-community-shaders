@@ -14,6 +14,7 @@
 - Unified Water: interiors such as the Concord Speakeasy no longer draw the outdoor water plane over the room.
 - CS Editor: a weather picked without Accelerate Weather Change is no longer dropped on the next sky update.
 - Features switched off in the menu no longer cost CPU time on every draw.
+- Skylighting: the sky occlusion capture costs less CPU in dense exteriors; objects fully faded out no longer shade the sky.
 - Menu: each feature's debug views, diagnostics and profiling now share one collapsed Debug section; Upscaling and Frame Generation drop their Status and Advanced sections, and Screen Space GI's presets and resolution are dropdowns.
 
 ## 0.5.0
