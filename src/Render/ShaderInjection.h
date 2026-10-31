@@ -71,6 +71,10 @@ namespace cs::engine
 		std::uint64_t captures = 0;
 		std::uint64_t restores = 0;
 		std::uint64_t d3dBinds = 0;
+		// Native shader binding resolutions; a miss rebuilds keys and takes locks.
+		std::uint64_t bindResolves = 0;
+		std::uint64_t bindResolveMisses = 0;
+		std::uint64_t waterDraws = 0;
 		FrameBindingMetrics frameBindings;
 	};
 

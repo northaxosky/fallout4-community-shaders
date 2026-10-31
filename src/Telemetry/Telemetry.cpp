@@ -127,6 +127,9 @@ namespace cs::telemetry
 				.Field("draw_captures", TomlInteger(summary.draw.captures))
 				.Field("draw_restores", TomlInteger(summary.draw.restores))
 				.Field("draw_d3d_binds", TomlInteger(summary.draw.d3dBinds))
+				.Field("draw_bind_resolves", TomlInteger(summary.draw.bindResolves))
+				.Field("draw_bind_resolve_misses", TomlInteger(summary.draw.bindResolveMisses))
+				.Field("draw_water_draws", TomlInteger(summary.draw.waterDraws))
 				.Field("frame_binding_skipped", TomlInteger(summary.draw.frameBindings.skipped))
 				.Field(
 					"compute_bridge_installed",

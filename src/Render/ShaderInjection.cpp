@@ -1052,9 +1052,13 @@ namespace cs::engine
 			{
 				auto& service = GetService();
 				std::scoped_lock lock(service.nativeVariantMutex);
-				service.nativeShaderIdentities.insert_or_assign(
-					shader.get(), Service::NativeShaderIdentity{ a_key, variant });
-				service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
+				const auto known = service.nativeShaderIdentities.find(shader.get());
+				// A re-acquire must not move the generation, or every cached binding misses.
+				if (known == service.nativeShaderIdentities.end() || known->second.variant != variant) {
+					service.nativeShaderIdentities.insert_or_assign(
+						shader.get(), Service::NativeShaderIdentity{ a_key, variant });
+					service.nativeBindingGeneration.fetch_add(1, std::memory_order_release);
+				}
 			}
 			return static_cast<TShader*>(shader.detach());
 		}
@@ -1883,6 +1887,8 @@ namespace cs::engine
 			auto* sampler = render::GetLinearClampSampler();
 			BindInjectionSamplers(a_context, render::kLinearClampSamplerSlot, 1, &sampler);
 		}
+		if (a_target == ShaderInjectionTarget::kBsWater)
+			Tally(t_drawMetrics.waterDraws);
 		if (render::forward_draw::Covers(a_target))
 			render::forward_draw::BindDescriptor(a_context);
 		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
@@ -2140,9 +2146,11 @@ namespace cs::engine
 		};
 		NativeGraphicsResolution fresh;
 		const NativeGraphicsResolution* resolution = nullptr;
+		Tally(t_drawMetrics.bindResolves);
 		if (const auto found = cache.entries.find(key); found != cache.entries.end()) {
 			resolution = &found->second;
 		} else {
+			Tally(t_drawMetrics.bindResolveMisses);
 			if (const auto family = ResolveNativeShaderFamilyContext(a_shader)) {
 				fresh = ResolveNativeGraphicsShaderBindingImpl(
 					*family,
