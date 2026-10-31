@@ -159,7 +159,7 @@
 // FO4: b8 is bound only during landscape replay; unbound reads zero.
 cbuffer TerrainBlendingDraw : register(b8)
 {
-	uint TerrainBlendingPass;  // 1 colour lerp, 2 data replace
+	uint TerrainBlendingPass;  // 1 colour lerp, 2 data replace, 3 opaque
 	uint3 TerrainBlendingPad;
 };
 #	endif
@@ -619,8 +619,14 @@ struct PS_OUTPUT
 			terrainBlendFactor = saturate((depthSampledLinear - depthPixelLinear) / 10.0);
 			if (input.position.z == depthSampled)
 				terrainBlendFactor = 1;
-			// The data draw owns pixels where terrain is at least half in.
-			clip(terrainBlendFactor - (TerrainBlendingPass == 1 ? 1.0 / 255.0 : 0.5));
+			// Opaque owns fully-in terrain; colour and data draws only the ramp, data where at least half in.
+			const float lower = TerrainBlendingPass == 1 ? 1.0 / 255.0 : (TerrainBlendingPass == 2 ? 0.5 : 1.0);
+			// Returning after discard keeps rejected waves from shading the layers.
+			[branch] if (terrainBlendFactor < lower || (TerrainBlendingPass != 3 && terrainBlendFactor >= 1.0))
+			{
+				discard;
+				return output;
+			}
 		}
 #	else
 	PS_OUTPUT output;

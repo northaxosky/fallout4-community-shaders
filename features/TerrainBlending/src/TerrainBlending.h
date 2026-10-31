@@ -65,6 +65,7 @@ namespace cs::features
 		std::atomic_uint64_t _passesHeld{ 0 };
 		std::atomic_uint64_t _replays{ 0 };
 		std::atomic_uint64_t _unblendedReplays{ 0 };
+		std::atomic_uint64_t _opaqueDraws{ 0 };
 		std::atomic_uint64_t _colorDraws{ 0 };
 		std::atomic_uint64_t _dataDraws{ 0 };
 		std::atomic_uint64_t _depthCopies{ 0 };

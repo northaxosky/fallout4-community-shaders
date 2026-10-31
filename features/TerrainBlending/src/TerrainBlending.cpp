@@ -44,7 +44,8 @@ namespace cs::features
 		{
 			kStock = 0,
 			kColor = 1,
-			kData = 2
+			kData = 2,
+			kOpaque = 3
 		};
 
 		struct ReplayResources
@@ -52,8 +53,8 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Texture2D> depth;
 			winrt::com_ptr<ID3D11ShaderResourceView> depthSRV;
 			D3D11_TEXTURE2D_DESC depthDesc{};
-			std::array<winrt::com_ptr<ID3D11BlendState>, 3> blend;
-			std::array<winrt::com_ptr<ID3D11Buffer>, 3> passBuffer;
+			std::array<winrt::com_ptr<ID3D11BlendState>, 4> blend;
+			std::array<winrt::com_ptr<ID3D11Buffer>, 4> passBuffer;
 			winrt::com_ptr<ID3D11VertexShader> offsetDepthVS;
 			ReplayPass replaying = kStock;
 		};
@@ -103,8 +104,22 @@ namespace cs::features
 			return desc;
 		}
 
+		// Fully-in terrain writes exactly what the colour and data draws would together.
+		D3D11_BLEND_DESC OpaqueBlendDesc()
+		{
+			D3D11_BLEND_DESC desc{};
+			desc.IndependentBlendEnable = TRUE;
+			const auto color = ColorBlendDesc();
+			const auto data = DataBlendDesc();
+			for (std::size_t slot = 0; slot < std::size(desc.RenderTarget); ++slot)
+				SetBlendTarget(desc.RenderTarget[slot], false, color.RenderTarget[slot].RenderTargetWriteMask | data.RenderTarget[slot].RenderTargetWriteMask);
+			return desc;
+		}
+
 		void CreateReplayState(ID3D11Device* a_device, ReplayPass a_pass, const D3D11_BLEND_DESC& a_blend)
 		{
+			static constexpr std::array<const char*, 4> kBlendNames{ "", "TerrainBlending/ColorBlend", "TerrainBlending/DataBlend", "TerrainBlending/OpaqueBlend" };
+			static constexpr std::array<const char*, 4> kBufferNames{ "", "TerrainBlending/ColorPass.CB", "TerrainBlending/DataPass.CB", "TerrainBlending/OpaquePass.CB" };
 			DX::ThrowIfFailed(a_device->CreateBlendState(&a_blend, g_replay.blend[a_pass].put()));
 			const std::array<std::uint32_t, 4> constants{ a_pass, 0, 0, 0 };
 			const D3D11_BUFFER_DESC bufferDesc{
@@ -114,8 +129,8 @@ namespace cs::features
 			};
 			const D3D11_SUBRESOURCE_DATA data{ .pSysMem = constants.data() };
 			DX::ThrowIfFailed(a_device->CreateBuffer(&bufferDesc, &data, g_replay.passBuffer[a_pass].put()));
-			cs::render::annotation::SetName(g_replay.blend[a_pass].get(), a_pass == kColor ? "TerrainBlending/ColorBlend" : "TerrainBlending/DataBlend");
-			cs::render::annotation::SetName(g_replay.passBuffer[a_pass].get(), a_pass == kColor ? "TerrainBlending/ColorPass.CB" : "TerrainBlending/DataPass.CB");
+			cs::render::annotation::SetName(g_replay.blend[a_pass].get(), kBlendNames[a_pass]);
+			cs::render::annotation::SetName(g_replay.passBuffer[a_pass].get(), kBufferNames[a_pass]);
 		}
 
 		bool Hold(std::uint32_t a_technique) noexcept
@@ -163,6 +178,7 @@ namespace cs::features
 	{
 		CreateReplayState(a_device, kColor, ColorBlendDesc());
 		CreateReplayState(a_device, kData, DataBlendDesc());
+		CreateReplayState(a_device, kOpaque, OpaqueBlendDesc());
 		g_replay.offsetDepthVS.attach(static_cast<ID3D11VertexShader*>(cs::util::CompileShader(
 			L"Data\\Shaders\\FO4\\ZPrePass.hlsl", { { "OFFSET_DEPTH", "" } }, "vs_5_0")));
 		if (!g_replay.offsetDepthVS) {
@@ -293,14 +309,21 @@ namespace cs::features
 			DrawHeld(a_buckets, kStock);
 			return;
 		}
-		cs::render::annotation::ScopedEvent timing("TerrainBlending::Replay");
 		const REX::TScopeExit clear{ [context]() noexcept {
 			ID3D11ShaderResourceView* noView = nullptr;
 			ID3D11Buffer* noBuffer = nullptr;
 			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kObjectDepthSlot, 1, &noView);
 			cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, kReplayPassSlot, 1, &noBuffer);
 		} };
-		DrawHeld(a_buckets, kColor);
+		{
+			cs::render::annotation::ScopedEvent timing("TerrainBlending::OpaqueReplay");
+			DrawHeld(a_buckets, kOpaque);
+		}
+		{
+			cs::render::annotation::ScopedEvent timing("TerrainBlending::ColorReplay");
+			DrawHeld(a_buckets, kColor);
+		}
+		cs::render::annotation::ScopedEvent timing("TerrainBlending::DataReplay");
 		DrawHeld(a_buckets, kData);
 	}
 
@@ -317,7 +340,9 @@ namespace cs::features
 		cs::engine::CaptureShaderInjectionBlendState(a_context);
 		constexpr float blendFactor[4]{};
 		a_context->OMSetBlendState(g_replay.blend[pass].get(), blendFactor, 0xFFFFFFFFu);
-		(pass == kColor ? _colorDraws : _dataDraws).fetch_add(1, std::memory_order_relaxed);
+		(pass == kOpaque ? _opaqueDraws : pass == kColor ? _colorDraws :
+														   _dataDraws)
+			.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void TerrainBlending::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -331,6 +356,7 @@ namespace cs::features
 			.Field("passes_held", _passesHeld.load(std::memory_order_relaxed))
 			.Field("replays", _replays.load(std::memory_order_relaxed))
 			.Field("unblended_replays", _unblendedReplays.load(std::memory_order_relaxed))
+			.Field("opaque_draws", _opaqueDraws.load(std::memory_order_relaxed))
 			.Field("color_draws", _colorDraws.load(std::memory_order_relaxed))
 			.Field("data_draws", _dataDraws.load(std::memory_order_relaxed))
 			.Field("depth_copies", _depthCopies.load(std::memory_order_relaxed))
