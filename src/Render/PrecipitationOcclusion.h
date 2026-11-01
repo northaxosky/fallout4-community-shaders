@@ -165,7 +165,7 @@ namespace cs::engine
 
 	[[nodiscard]] CaptureTimings& GetCaptureTimings() noexcept;
 
-	// Adds its scope's duration to a timing slot; reads no clock unless telemetry runs.
+	// Adds the scope's duration to a slot; reads no clock unless telemetry runs.
 	class ScopedCaptureTimer
 	{
 	public:

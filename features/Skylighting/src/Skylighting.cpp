@@ -599,16 +599,14 @@ namespace cs::features
 		const auto ownTotal = own(Own::kLandscape) + own(Own::kNotCasting) + own(Own::kAlphaBlended) + own(Own::kOther);
 
 		const auto& timings = cs::engine::GetCaptureTimings();
-		const auto ticks = timings.capture.load(std::memory_order_relaxed);
-		const auto captureMs = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(ticks - _timingSnapshot) / _windowCaptures) : 0.0f;
-		_counters.captureMs.store(captureMs, std::memory_order_relaxed);
-		_timingSnapshot = ticks;
 		const auto windowMs = [&](const std::atomic<cs::engine::CaptureClock::rep>& a_slot, cs::engine::CaptureClock::rep& a_snapshot) {
 			const auto now = a_slot.load(std::memory_order_relaxed);
 			const auto ms = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(now - a_snapshot) / _windowCaptures) : 0.0f;
 			a_snapshot = now;
 			return ms;
 		};
+		const float captureMs = windowMs(timings.capture, _timingSnapshot);
+		_counters.captureMs.store(captureMs, std::memory_order_relaxed);
 		const float gatherMs = windowMs(timings.gather, _gatherSnapshot);
 		const float passesMs = windowMs(timings.passes, _passesSnapshot);
 		_counters.gatherMs.store(gatherMs, std::memory_order_relaxed);
@@ -681,8 +679,8 @@ namespace cs::features
 			.Field("capture_cpu_ms_max", static_cast<double>(_counters.cpuMsMax.load(std::memory_order_relaxed)))
 			.Field("stock_ds8_restored", _counters.stockTargetRestored.load(std::memory_order_relaxed))
 			.Field("ms_capture", static_cast<double>(_counters.captureMs.load(std::memory_order_relaxed)))
-			.Field("gather_cpu_ms_avg", static_cast<double>(_counters.gatherMs.load(std::memory_order_relaxed)))
-			.Field("passes_cpu_ms_avg", static_cast<double>(_counters.passesMs.load(std::memory_order_relaxed)))
+			.Field("ms_gather", static_cast<double>(_counters.gatherMs.load(std::memory_order_relaxed)))
+			.Field("ms_passes", static_cast<double>(_counters.passesMs.load(std::memory_order_relaxed)))
 			.Field("occluders_accepted", count(stats.accepted))
 			.Field("occluders_delegated", count(stats.delegated))
 			.Field("occluders_own_new", count(stats.ownNew))
