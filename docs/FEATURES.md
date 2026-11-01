@@ -96,7 +96,7 @@ are FO4-only rule-4 port features.
   them) and decals; glass and see-through fabric are BSEffect.
 - **Grass.** Grass wind/collision/placement is already reconstructed in `DFPrepass.hlsl`; remaining stock
   grass variants are port work.
-- **Shadow receivers** (fallout4-re `docs/cloud-volumetric-shadows-contract.md`). FO4 Effect LIGHTING carries
+- **Shadow receivers** (bethesda-re `games/fallout4/docs/cloud-volumetric-shadows-contract.md`). FO4 Effect LIGHTING carries
   the weather Effect Lighting colour, not sun light, and its PS has no world position; FO4 water has no
   refraction sun term; particles draw through Effect PARTICLES routes. Upstream's Effect/particle shadow
   consumers therefore need an FO4 sun term (extension); water takes shadows on its sun specular only.
