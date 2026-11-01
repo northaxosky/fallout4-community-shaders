@@ -33,8 +33,6 @@ namespace cs::engine
 			std::uint64_t pruned = 0;
 		};
 
-		// NiAVObject flag that makes UpdateWorldBound leave the bound untouched.
-		constexpr std::uint64_t kFixedWorldBound = 1ull << 13;
 		constexpr std::size_t kUpdateWorldBoundSlot = 0x33;
 
 		// The stock walk skips radius-zero objects unless flagged always-draw.
@@ -83,7 +81,7 @@ namespace cs::engine
 			static const auto stock = reinterpret_cast<const std::uintptr_t*>(
 				REL::Relocation<std::uintptr_t>{ RE::VTABLE::NiNode[0] }.address())[kUpdateWorldBoundSlot];
 			const auto* vtable = *reinterpret_cast<const std::uintptr_t* const*>(&a_node);
-			return vtable[kUpdateWorldBoundSlot] == stock && !(a_node.GetFlags() & kFixedWorldBound);
+			return vtable[kUpdateWorldBoundSlot] == stock && !a_node.HasFlag(RE::NiAVObject::Flag::kFixedWorldBound);
 		}
 
 		// Fade nodes and geometry are what the culler frustum-tests, fades and expands.
