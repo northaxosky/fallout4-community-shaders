@@ -699,6 +699,7 @@ namespace cs::features
 			.Field("gather_roots_tested", count(gather.rootsTested))
 			.Field("gather_roots_culled", count(gather.rootsCulled))
 			.Field("gather_leaves_fed", count(gather.leavesFed))
+			.Field("gather_nodes_pruned", count(gather.nodesPruned))
 			.Field("probe_dispatches", count(_probeCounters.dispatches))
 			.Field("probe_skipped_not_full_sky", count(_probeCounters.skippedNotFullSky))
 			.Field("probe_skipped_no_occlusion", count(_probeCounters.skippedNoOcclusion))

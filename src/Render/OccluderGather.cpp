@@ -30,7 +30,12 @@ namespace cs::engine
 			std::uint64_t tested = 0;
 			std::uint64_t culled = 0;
 			std::uint64_t leaves = 0;
+			std::uint64_t pruned = 0;
 		};
+
+		// NiAVObject flag that makes UpdateWorldBound leave the bound untouched.
+		constexpr std::uint64_t kFixedWorldBound = 1ull << 13;
+		constexpr std::size_t kUpdateWorldBoundSlot = 0x33;
 
 		// The stock walk skips radius-zero objects unless flagged always-draw.
 		[[nodiscard]] bool HasUsableBound(const RE::NiAVObject& a_object) noexcept
@@ -63,6 +68,24 @@ namespace cs::engine
 			};
 		}
 
+		[[nodiscard]] bool BoundOutside(const OrthoFrustum& a_frustum, const RE::NiBound& a_bound) noexcept
+		{
+			return a_bound.fRadius > 0.0f &&
+			       SphereOutside(
+					   a_frustum,
+					   { a_bound.center.x, a_bound.center.y, a_bound.center.z },
+					   a_bound.fRadius * kRadiusScale + kRadiusPad);
+		}
+
+		// FO4: only NiNode's own UpdateWorldBound merges every child into the bound.
+		[[nodiscard]] bool BoundEnclosesChildren(const RE::NiNode& a_node) noexcept
+		{
+			static const auto stock = reinterpret_cast<const std::uintptr_t*>(
+				REL::Relocation<std::uintptr_t>{ RE::VTABLE::NiNode[0] }.address())[kUpdateWorldBoundSlot];
+			const auto* vtable = *reinterpret_cast<const std::uintptr_t* const*>(&a_node);
+			return vtable[kUpdateWorldBoundSlot] == stock && !(a_node.GetFlags() & kFixedWorldBound);
+		}
+
 		// Fade nodes and geometry are what the culler frustum-tests, fades and expands.
 		[[nodiscard]] RE::NiNode* AsContainer(RE::NiAVObject& a_object) noexcept
 		{
@@ -71,17 +94,27 @@ namespace cs::engine
 
 		// The stock container flatten, leaving leaf tests to the culler.
 		template <class Add>
-		void FeedLeaves(RE::NiNode& a_container, const Add& a_add, GatherCounters& a_counters)
+		void FeedLeaves(RE::NiNode& a_container, const OrthoFrustum& a_frustum, const Add& a_add, GatherCounters& a_counters)
 		{
 			for (const auto& entry : a_container.children) {
 				auto* child = entry.get();
 				if (!child || child->GetAppCulled() || !HasUsableBound(*child))
 					continue;
-				if (child->IsGeometry() || child->IsFadeNode()) {
+				const bool leaf = child->IsGeometry() || child->IsFadeNode();
+				auto* node = leaf ? nullptr : child->IsNode();
+				if (!leaf && !node)
+					continue;
+				// FO4: the culler keeps kAlwaysDraw entries whatever their bound.
+				const bool prunable = !child->HasFlag(RE::NiAVObject::Flag::kAlwaysDraw) && (leaf || BoundEnclosesChildren(*node));
+				if (prunable && BoundOutside(a_frustum, child->worldBound)) {
+					++a_counters.pruned;
+					continue;
+				}
+				if (leaf) {
 					a_add(child, &child->worldBound);
 					++a_counters.leaves;
-				} else if (auto* node = child->IsNode()) {
-					FeedLeaves(*node, a_add, a_counters);
+				} else {
+					FeedLeaves(*node, a_frustum, a_add, a_counters);
 				}
 			}
 		}
@@ -103,17 +136,13 @@ namespace cs::engine
 				GatherCounters counters;
 				if (HasUsableBound(*a_root)) {
 					++counters.tested;
-					const auto& bound = a_root->worldBound;
-					const bool outside = bound.fRadius > 0.0f &&
-					                     SphereOutside(
-											 MakeFrustum(*capture->camera),
-											 { bound.center.x, bound.center.y, bound.center.z },
-											 bound.fRadius * kRadiusScale + kRadiusPad);
-					if (outside) {
+					const auto frustum = MakeFrustum(*capture->camera);
+					if (BoundOutside(frustum, a_root->worldBound)) {
 						++counters.culled;
 					} else {
 						FeedLeaves(
 							*container,
+							frustum,
 							[&](RE::NiAVObject* a_leaf, const RE::NiBound* a_leafBound) { func(a_group, a_leaf, a_leafBound, 0); },
 							counters);
 					}
@@ -124,6 +153,7 @@ namespace cs::engine
 					stats.rootsTested.fetch_add(counters.tested, std::memory_order_relaxed);
 					stats.rootsCulled.fetch_add(counters.culled, std::memory_order_relaxed);
 					stats.leavesFed.fetch_add(counters.leaves, std::memory_order_relaxed);
+					stats.nodesPruned.fetch_add(counters.pruned, std::memory_order_relaxed);
 				}
 				return 0;
 			}

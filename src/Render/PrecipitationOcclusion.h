@@ -147,6 +147,8 @@ namespace cs::engine
 		std::atomic<std::uint64_t> rootsTested{ 0 };
 		std::atomic<std::uint64_t> rootsCulled{ 0 };
 		std::atomic<std::uint64_t> leavesFed{ 0 };
+		// Child subtrees and leaves skipped as outside the capture frustum.
+		std::atomic<std::uint64_t> nodesPruned{ 0 };
 	};
 
 	[[nodiscard]] GatherStats& GetGatherStats() noexcept;
