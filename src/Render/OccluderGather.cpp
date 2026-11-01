@@ -99,6 +99,7 @@ namespace cs::engine
 				if (!container)
 					return func(a_group, a_root, a_bound, a_flags);
 
+				const ScopedCaptureTimer timer{ GetCaptureTimings().gather };
 				GatherCounters counters;
 				if (HasUsableBound(*a_root)) {
 					++counters.tested;

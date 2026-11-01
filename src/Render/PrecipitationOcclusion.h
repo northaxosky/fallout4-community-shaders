@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Render/EngineCallSite.h"
+#include "Telemetry/Telemetry.h"
 
 #include <DirectXMath.h>
 
@@ -152,13 +153,41 @@ namespace cs::engine
 
 	using CaptureClock = std::chrono::steady_clock;
 
-	// Pass-level capture CPU time.
+	// Capture CPU time; passes sums every worker thread's slot-44 time.
 	struct CaptureTimings
 	{
 		std::atomic<CaptureClock::rep> capture{ 0 };
+		std::atomic<CaptureClock::rep> gather{ 0 };
+		std::atomic<CaptureClock::rep> passes{ 0 };
 	};
 
 	[[nodiscard]] CaptureTimings& GetCaptureTimings() noexcept;
+
+	// Adds its scope's duration to a timing slot; reads no clock unless telemetry runs.
+	class ScopedCaptureTimer
+	{
+	public:
+		explicit ScopedCaptureTimer(std::atomic<CaptureClock::rep>& a_slot) noexcept :
+			_slot(a_slot), _timed(telemetry::pump::Enabled())
+		{
+			if (_timed)
+				_begin = CaptureClock::now();
+		}
+
+		~ScopedCaptureTimer() noexcept
+		{
+			if (_timed)
+				_slot.fetch_add((CaptureClock::now() - _begin).count(), std::memory_order_relaxed);
+		}
+
+		ScopedCaptureTimer(const ScopedCaptureTimer&) = delete;
+		ScopedCaptureTimer& operator=(const ScopedCaptureTimer&) = delete;
+
+	private:
+		std::atomic<CaptureClock::rep>& _slot;
+		CaptureClock::time_point _begin{};
+		bool _timed;
+	};
 
 	[[nodiscard]] inline double TicksToMs(CaptureClock::rep a_ticks) noexcept
 	{

@@ -165,6 +165,7 @@ namespace cs::engine
 				if (!capture)
 					return func(a_property, a_geometry, a_renderMode, a_accumulator);
 
+				const ScopedCaptureTimer timer{ GetCaptureTimings().passes };
 				auto& stats = GetOccluderStats();
 				const bool counting = telemetry::pump::Enabled();
 				const auto reject = RejectOccluder(*a_property, *a_geometry, capture->occluders);

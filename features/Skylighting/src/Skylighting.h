@@ -211,6 +211,8 @@ namespace cs::features
 			std::atomic<float> cpuMsAverage{ 0.0f };
 			std::atomic<float> cpuMsMax{ 0.0f };
 			std::atomic<float> captureMs{ 0 };
+			std::atomic<float> gatherMs{ 0 };
+			std::atomic<float> passesMs{ 0 };
 			std::atomic_bool stockTargetRestored{ true };
 		} _counters;
 		struct ProbeCounters
@@ -253,6 +255,8 @@ namespace cs::features
 		float _windowCpuMsMax = 0.0f;
 		std::uint32_t _windowCaptures = 0;
 		cs::engine::CaptureClock::rep _timingSnapshot = 0;
+		cs::engine::CaptureClock::rep _gatherSnapshot = 0;
+		cs::engine::CaptureClock::rep _passesSnapshot = 0;
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
 		ProbeState _probeState = ProbeState::kPending;

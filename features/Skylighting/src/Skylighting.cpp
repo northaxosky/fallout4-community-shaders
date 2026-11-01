@@ -603,6 +603,16 @@ namespace cs::features
 		const auto captureMs = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(ticks - _timingSnapshot) / _windowCaptures) : 0.0f;
 		_counters.captureMs.store(captureMs, std::memory_order_relaxed);
 		_timingSnapshot = ticks;
+		const auto windowMs = [&](const std::atomic<cs::engine::CaptureClock::rep>& a_slot, cs::engine::CaptureClock::rep& a_snapshot) {
+			const auto now = a_slot.load(std::memory_order_relaxed);
+			const auto ms = _windowCaptures ? static_cast<float>(cs::engine::TicksToMs(now - a_snapshot) / _windowCaptures) : 0.0f;
+			a_snapshot = now;
+			return ms;
+		};
+		const float gatherMs = windowMs(timings.gather, _gatherSnapshot);
+		const float passesMs = windowMs(timings.passes, _passesSnapshot);
+		_counters.gatherMs.store(gatherMs, std::memory_order_relaxed);
+		_counters.passesMs.store(passesMs, std::memory_order_relaxed);
 
 		const auto cascadeSkipped = [&](CascadeSkip a_reason) { return count(_cascadeCounters.skipped[static_cast<std::size_t>(a_reason)]); };
 		const auto statusSkipped = [&](cs::engine::SunCascadeStatus a_status) { return count(_cascadeCounters.statusSkipped[static_cast<std::size_t>(a_status)]); };
@@ -626,7 +636,7 @@ namespace cs::features
 			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
-			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} stock_ds8_restored={} "
+			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_gather={:.3f} ms_passes={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"sun_copies={} sun_copy_skipped_unavailable={} sun_copy_skipped_not_full_sky={} sun_copy_skipped_no_light={} sun_copy_skipped_unsupported_count={} sun_copy_skipped_no_target={} sun_copy_skipped_invalid={} sun_copy_skipped_copy_target={} sun_copy_skipped_disabled={} "
 			"cascade_count={} split_end=({:.1f},{:.1f},{:.1f}) "
@@ -638,7 +648,7 @@ namespace cs::features
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
-			cpuMsAverage, _windowCpuMsMax, captureMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
+			cpuMsAverage, _windowCpuMsMax, captureMs, gatherMs, passesMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange,
 			count(_cascadeCounters.copies), cascadeSkipped(CascadeSkip::kUnavailable), cascadeSkipped(CascadeSkip::kNotFullSky), statusSkipped(cs::engine::SunCascadeStatus::kNoLight),
 			statusSkipped(cs::engine::SunCascadeStatus::kUnsupportedCount), statusSkipped(cs::engine::SunCascadeStatus::kNoTarget), statusSkipped(cs::engine::SunCascadeStatus::kInvalid), cascadeSkipped(CascadeSkip::kCopyTarget), cascadeSkipped(CascadeSkip::kDisabled),
@@ -671,6 +681,8 @@ namespace cs::features
 			.Field("capture_cpu_ms_max", static_cast<double>(_counters.cpuMsMax.load(std::memory_order_relaxed)))
 			.Field("stock_ds8_restored", _counters.stockTargetRestored.load(std::memory_order_relaxed))
 			.Field("ms_capture", static_cast<double>(_counters.captureMs.load(std::memory_order_relaxed)))
+			.Field("gather_cpu_ms_avg", static_cast<double>(_counters.gatherMs.load(std::memory_order_relaxed)))
+			.Field("passes_cpu_ms_avg", static_cast<double>(_counters.passesMs.load(std::memory_order_relaxed)))
 			.Field("occluders_accepted", count(stats.accepted))
 			.Field("occluders_delegated", count(stats.delegated))
 			.Field("occluders_own_new", count(stats.ownNew))
