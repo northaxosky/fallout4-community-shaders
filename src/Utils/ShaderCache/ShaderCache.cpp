@@ -6,6 +6,7 @@
 #include "Utils/ShaderCache/SourceCompile.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <span>
 #include <utility>
@@ -111,8 +112,13 @@ namespace cs::shader_cache
 			LookupResult hit;
 			hit.disposition = CacheDisposition::kHit;
 			hit.payload = std::move(record.payload);
+			// Trim ranks by mtime; a day of slack avoids a metadata write per hit.
+			constexpr auto kTouchInterval = std::chrono::hours(24);
 			std::error_code error;
-			std::filesystem::last_write_time(a_recordPath, std::filesystem::file_time_type::clock::now(), error);
+			const auto now = std::filesystem::file_time_type::clock::now();
+			const auto written = std::filesystem::last_write_time(a_recordPath, error);
+			if (error || now - written >= kTouchInterval)
+				std::filesystem::last_write_time(a_recordPath, now, error);
 			return hit;
 		}
 
