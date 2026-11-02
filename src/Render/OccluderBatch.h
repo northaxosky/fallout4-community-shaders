@@ -61,8 +61,10 @@ namespace cs::engine
 		std::atomic<std::uint32_t> countDiffers{ 0 };
 		// The engine pass was built at a mesh LOD mode other than the default.
 		std::atomic<std::uint32_t> lodNotDefault{ 0 };
-		// The engine built no pass for a shape we recorded, so it is dropped from the batch.
+		// The engine built no pass for a shape we recorded.
 		std::atomic<std::uint32_t> noEnginePass{ 0 };
+		// Water passes the engine took in the running capture; the batch never covers them.
+		std::atomic<std::uint32_t> waterPasses{ 0 };
 	};
 
 	[[nodiscard]] BatchStats& GetBatchStats() noexcept;
@@ -72,9 +74,7 @@ namespace cs::engine
 		// Build the engine pass as usual.
 		kStock,
 		// Recorded for the batch; the thunk returns no pass.
-		kRecorded,
-		// Left out of this capture entirely.
-		kSkip
+		kRecorded
 	};
 
 	// Where a recorded occluder lives in its arena, for validation to reconcile.
@@ -93,12 +93,14 @@ namespace cs::engine
 		std::uint32_t a_technique,
 		BatchSlot& a_slot);
 
-	// Validation, any thread: the engine bakes the world and index count into its pass when
-	// it builds one, so the record adopts them to compare like with like. A null pass drops it.
+	// Validation, any thread: counts how a record differs from the engine pass built for
+	// the same shape: baked world, index count, LOD mode, or no pass at all.
 	void ReconcileWithEnginePass(const BatchSlot& a_slot, const RE::BSRenderPass* a_pass);
 
-	// Validation, render thread: which classes (bit per BatchClass) are recorded.
-	void SetValidationClasses(std::uint32_t a_mask) noexcept;
+	// Validation, render thread: the captures between these batch only the classes in
+	// a_mask (a bit per BatchClass) and leave the telemetry counters alone.
+	void BeginValidationCapture(std::uint32_t a_mask) noexcept;
+	void EndValidationCapture() noexcept;
 	void ResetReconcileStats() noexcept;
 
 	// Render thread, before a capture: false when this runtime or device cannot batch.

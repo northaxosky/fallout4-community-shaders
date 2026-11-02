@@ -39,7 +39,8 @@ namespace cs::engine
 		kOff,
 		// Record batchable occluders and skip the engine's pass; draw them afterward.
 		kBatch,
-		// Record and let the engine draw them too, and skip the rest, to diff the two.
+		// Record batchable occluders to reconcile them with the engine's passes; the engine
+		// still draws everything and the batch draws nothing.
 		kValidate
 	};
 

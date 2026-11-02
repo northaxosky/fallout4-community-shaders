@@ -79,8 +79,9 @@ namespace cs::engine
 		constexpr std::uint32_t kHalfPosition = 1u << 12;
 
 		BatchStats g_stats;
-		// Validation can record one class at a time to bisect a mismatch.
+		// Validation can batch one class at a time to bisect a mismatch.
 		std::atomic<std::uint32_t> g_classMask{ ~0u };
+		std::atomic<bool> g_validating{ false };
 
 		[[nodiscard]] bool RuntimeSupported() noexcept
 		{
@@ -572,24 +573,35 @@ namespace cs::engine
 			return BatchDecision::kStock;
 		auto batchClass = BatchClass::kPlain;
 		const auto reason = TryRecord(a_property, a_geometry, a_technique, batchClass, a_slot);
+		// Validation records only to reconcile; the engine draws everything.
 		if (a_mode == OccluderBatchMode::kValidate)
-			return reason ? BatchDecision::kSkip : BatchDecision::kStock;
+			return BatchDecision::kStock;
+		const bool counting = !g_validating.load(std::memory_order_relaxed);
 		if (reason) {
-			Count(*reason);
+			if (counting)
+				Count(*reason);
 			return BatchDecision::kStock;
 		}
-		g_stats.batched[static_cast<std::size_t>(batchClass)].fetch_add(1, std::memory_order_relaxed);
+		if (counting)
+			g_stats.batched[static_cast<std::size_t>(batchClass)].fetch_add(1, std::memory_order_relaxed);
 		return BatchDecision::kRecorded;
 	}
 
-	void SetValidationClasses(std::uint32_t a_mask) noexcept
+	void BeginValidationCapture(std::uint32_t a_mask) noexcept
 	{
 		g_classMask.store(a_mask, std::memory_order_relaxed);
+		g_validating.store(true, std::memory_order_relaxed);
+	}
+
+	void EndValidationCapture() noexcept
+	{
+		g_classMask.store(~0u, std::memory_order_relaxed);
+		g_validating.store(false, std::memory_order_relaxed);
 	}
 
 	void ResetReconcileStats() noexcept
 	{
-		for (auto* counter : { &g_stats.reconciled, &g_stats.staleWorld, &g_stats.countDiffers, &g_stats.lodNotDefault, &g_stats.noEnginePass })
+		for (auto* counter : { &g_stats.reconciled, &g_stats.staleWorld, &g_stats.countDiffers, &g_stats.lodNotDefault, &g_stats.noEnginePass, &g_stats.waterPasses })
 			counter->store(0, std::memory_order_relaxed);
 	}
 
@@ -599,7 +611,6 @@ namespace cs::engine
 			return;
 		const auto* buffer = a_pass ? a_pass->commandBuffer : nullptr;
 		if (!buffer) {
-			*a_slot.indexCount = 0;
 			g_stats.noEnginePass.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
@@ -615,11 +626,8 @@ namespace cs::engine
 
 		float world[16];
 		std::memcpy(world, buffer + kCommandBufferWorld, sizeof(world));
-		// Only a plausible matrix is adopted: the last row ends in 1.
-		if (world[15] == 1.0f && std::memcmp(world, a_slot.world, sizeof(world)) != 0) {
+		if (std::memcmp(world, a_slot.world, sizeof(world)) != 0)
 			g_stats.staleWorld.fetch_add(1, std::memory_order_relaxed);
-			std::memcpy(a_slot.world, world, sizeof(world));
-		}
 	}
 
 	bool PrepareOccluderBatch()

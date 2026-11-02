@@ -127,6 +127,23 @@ namespace cs::engine
 			return &list;
 		}
 
+		// Counts the water passes the engine draws in a capture; the batch never covers them.
+		struct WaterShaderProperty_OcclusionPasses
+		{
+			static RE::BSShaderProperty::RenderPassArray* thunk(
+				RE::BSShaderProperty* a_property,
+				RE::BSGeometry* a_geometry,
+				std::uint32_t a_renderMode,
+				RE::BSShaderAccumulator* a_accumulator)
+			{
+				auto* passes = func(a_property, a_geometry, a_renderMode, a_accumulator);
+				if (passes && GetActiveCapture(a_accumulator))
+					GetBatchStats().waterPasses.fetch_add(1, std::memory_order_relaxed);
+				return passes;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct LightingShaderProperty_OcclusionPasses
 		{
 			static RE::BSShaderProperty::RenderPassArray* thunk(
@@ -231,6 +248,7 @@ namespace cs::engine
 	{
 		HookInstall install{ .name = "BSLightingShaderProperty vslot 44 (GetRenderPasses_ShadowMapOrMask)" };
 		stl::write_vfunc<44, LightingShaderProperty_OcclusionPasses>(RE::VTABLE::BSLightingShaderProperty[0]);
+		stl::write_vfunc<44, WaterShaderProperty_OcclusionPasses>(RE::VTABLE::BSWaterShaderProperty[0]);
 		install.installed = LightingShaderProperty_OcclusionPasses::func.address() != 0;
 		install.detail = std::format("stock builder {:#x}", LightingShaderProperty_OcclusionPasses::func.address());
 		if (!install.installed)
