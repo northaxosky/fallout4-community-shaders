@@ -181,6 +181,16 @@ namespace
 		return signature;
 	}
 
+	// SHA-1 of the reflection-stripped DXBC, the table's identity.
+	std::string StrippedIdentity(const auto& a_bytecode)
+	{
+		winrt::com_ptr<ID3DBlob> stripped;
+		if (FAILED(D3DStripShader(a_bytecode.data(), a_bytecode.size(),
+				D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.put())))
+			return "strip-error";
+		return cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(stripped->GetBufferPointer(), stripped->GetBufferSize()));
+	}
+
 	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn, cs::engine::GameRuntime a_runtime)
 	{
 		const auto family = a_row.source.Family();
@@ -206,11 +216,7 @@ namespace
 			}
 			return {};
 		}
-		winrt::com_ptr<ID3DBlob> stripped;
-		if (FAILED(D3DStripShader(compiled.bytecode.data(), compiled.bytecode.size(),
-				D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.put())))
-			return "strip-error";
-		return cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(stripped->GetBufferPointer(), stripped->GetBufferSize()));
+		return StrippedIdentity(compiled.bytecode);
 	}
 
 	// Engine-internal shaders outside the table; stripped SHA-1 of the stock DXBC.
@@ -224,7 +230,7 @@ namespace
 
 	constexpr EngineShader kEngineShaders[]{
 		// DoZPrePass alpha test; Upscaling biases it with SAMPLE_MATERIAL.
-		{ "FO4/Upscaling/ZPrepassAlphaPS.hlsl", "ps_5_0", cs::engine::ShaderStage::kPixel, "2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725" }
+		{ "FO4/ZPrePassAlpha.hlsl", "ps_5_0", cs::engine::ShaderStage::kPixel, "2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725" }
 	};
 
 	std::size_t CheckEngineShaders(const std::filesystem::path& a_shaderRoot)
@@ -240,11 +246,7 @@ namespace
 				variant.stage = shader.stage;
 				const auto compiled = cs::shader_test::Compile(cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot));
 				Require(compiled.succeeded, "compile-error: " + FirstErrorLine(compiled.error));
-				winrt::com_ptr<ID3DBlob> stripped;
-				Require(SUCCEEDED(D3DStripShader(compiled.bytecode.data(), compiled.bytecode.size(),
-							D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.put())),
-					"strip-error");
-				actual = cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(stripped->GetBufferPointer(), stripped->GetBufferSize()));
+				actual = StrippedIdentity(compiled.bytecode);
 			} catch (const std::exception& error) {
 				actual = std::string("error: ") + error.what();
 			}
