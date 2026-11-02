@@ -13,10 +13,27 @@
 
 namespace cs::ui
 {
+	// The one item-tooltip path: the host's hover delay and gamepad focus apply.
 	inline void Tooltip(const char* a_text)
 	{
-		if (dmui::ui::IsItemHovered())
+		if (dmui::ui::IsItemHovered(dmui::ui::HoveredFlags::kForTooltip))
 			dmui::ui::SetTooltip("%s", a_text);
+	}
+
+	template <class... Args>
+		requires(sizeof...(Args) > 0)
+	void Tooltip(const char* a_format, Args... a_args)
+	{
+		if (dmui::ui::IsItemHovered(dmui::ui::HoveredFlags::kForTooltip))
+			dmui::ui::SetTooltip(a_format, a_args...);
+	}
+
+	// Builds the text only while the tooltip shows.
+	template <std::invocable Make>
+	void Tooltip(Make&& a_make)
+	{
+		if (dmui::ui::IsItemHovered(dmui::ui::HoveredFlags::kForTooltip))
+			dmui::ui::SetTooltip("%s", std::string(a_make()).c_str());
 	}
 
 	struct EditResult

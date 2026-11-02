@@ -498,10 +498,6 @@ namespace cs::features
 	{
 		static bool showAdvanced = false;
 		settings::SettingsEdit edit{ *this };
-		const auto tooltip = [](const char* a_text) {
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("%s", a_text);
-		};
 		const auto slider = [&](const char* a_label, auto Settings::* a_member, const char* a_format = nullptr) {
 			const auto range = ssgi_settings::kSchema.EditRange(a_member);
 			edit.Continuous(dmui::ui::SliderScalar(a_label, &(_settings.*a_member), &range.min, &range.max, a_format));
@@ -533,10 +529,10 @@ namespace cs::features
 			toggle("Indirect Lighting (IL)", _settings.enableGI, true);
 			dmui::ui::EndDisabled();
 			toggle("Vanilla SSAO", _settings.enableVanillaSSAO);
-			tooltip("Enable Fallout 4's built-in SSAO. Usually disabled when using SSGI to avoid double-darkening.");
+			ui::Tooltip("Enable Fallout 4's built-in SSAO. Usually disabled when using SSGI to avoid double-darkening.");
 			if (showAdvanced) {
 				toggle("(Experimental) HQ Specular IL", _settings.enableExperimentalSpecularGI, true);
-				tooltip("An experimental specular GI that is more accurate but requires more samples. Won't be blurred.");
+				ui::Tooltip("An experimental specular GI that is more accurate but requires more samples. Won't be blurred.");
 			}
 		}
 		if (const ui::Section section{ "ssgi-quality", "Quality/Performance" }; section) {

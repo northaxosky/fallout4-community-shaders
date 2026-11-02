@@ -118,8 +118,7 @@ namespace cs::features::cs_editor
 					if (!active)
 						profile.erase(variable.key);
 				}
-				if (dmui::ui::IsItemHovered())
-					dmui::ui::SetTooltip("Override %s for this weather", variable.key.c_str());
+				ui::Tooltip("Override %s for this weather", variable.key.c_str());
 				dmui::ui::SameLine();
 				dmui::ui::BeginDisabled(!active);
 				const auto edit = EditValue(variable, value);

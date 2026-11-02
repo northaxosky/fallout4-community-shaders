@@ -139,11 +139,11 @@ namespace cs::features::cs_editor
 				return;
 			}
 			dmui::ui::TextColored(WeatherColor(a_weather), "- %s", FormatWeather(a_weather).c_str());
-			if (dmui::ui::IsItemHovered()) {
+			ui::Tooltip([&] {
 				const auto editorID = engine::GetEditorID(a_weather);
-				dmui::ui::SetTooltip("Editor ID: %s\nForm ID: 0x%08X\nFlags: %s",
-					editorID.empty() ? "None" : std::string(editorID).c_str(), a_weather->GetFormID(), FlagNames(*a_weather).c_str());
-			}
+				return std::format("Editor ID: {}\nForm ID: 0x{:08X}\nFlags: {}",
+					editorID.empty() ? "None" : std::string(editorID), a_weather->GetFormID(), FlagNames(*a_weather));
+			});
 			if (a_pct >= 0.0f)
 				Bullet("Weather Percentage: {:.1f}%", a_pct * 100.0f);
 		}
@@ -277,8 +277,7 @@ namespace cs::features::cs_editor
 			engine::ResetTimeScale();
 			_timeScaleSlider = engine::kVanillaTimeScale;
 		}
-		if (dmui::ui::IsItemHovered())
-			dmui::ui::SetTooltip("Reset time speed to vanilla (%.1fx)", engine::kVanillaTimeScale);
+		ui::Tooltip("Reset time speed to vanilla (%.1fx)", engine::kVanillaTimeScale);
 		dmui::ui::SameLine();
 		dmui::ui::BeginDisabled(paused);
 		constexpr float scaleMin = kTimeScaleMin, scaleMax = kTimeScaleMax;
@@ -288,8 +287,7 @@ namespace cs::features::cs_editor
 		dmui::ui::EndDisabled();
 		dmui::ui::SameLine();
 		dmui::ui::Text("%.1fx", *scale);
-		if (dmui::ui::IsItemHovered())
-			dmui::ui::SetTooltip("Adjust how fast time passes (vanilla: %.1fx)", engine::kVanillaTimeScale);
+		ui::Tooltip("Adjust how fast time passes (vanilla: %.1fx)", engine::kVanillaTimeScale);
 	}
 
 	void WeatherPanel::DrawStatus(RE::Sky& a_sky)
@@ -427,11 +425,11 @@ namespace cs::features::cs_editor
 				_search.clear();
 				break;
 			}
-			if (dmui::ui::IsItemHovered()) {
+			ui::Tooltip([&] {
 				const auto editorID = engine::GetEditorID(weather);
-				dmui::ui::SetTooltip("Editor ID: %s\nForm ID: 0x%08X",
-					editorID.empty() ? "None" : std::string(editorID).c_str(), weather->GetFormID());
-			}
+				return std::format("Editor ID: {}\nForm ID: 0x{:08X}",
+					editorID.empty() ? "None" : std::string(editorID), weather->GetFormID());
+			});
 			if (isSelected)
 				dmui::ui::SetItemDefaultFocus();
 		}

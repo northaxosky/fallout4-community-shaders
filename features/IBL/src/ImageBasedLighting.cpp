@@ -38,11 +38,6 @@ namespace cs::features
 		constexpr std::string_view kEnvironmentPass = "ImageBasedLighting::EnvDiffuseIBL";
 		constexpr std::string_view kSkyPass = "ImageBasedLighting::SkyDiffuseIBL";
 
-		void Tooltip(const char* a_text)
-		{
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("%s", a_text);
-		}
 	}
 
 	ImageBasedLighting* ImageBasedLighting::GetSingleton()
@@ -306,12 +301,12 @@ namespace cs::features
 		bool changed = false;
 		const auto toggle = [&](const char* a_label, bool& a_value, const char* a_tooltip) {
 			changed |= edit.Discrete(dmui::ui::Checkbox(a_label, &a_value));
-			Tooltip(a_tooltip);
+			ui::Tooltip(a_tooltip);
 		};
 		const auto slider = [&](const char* a_label, float ibl::Settings::* a_member, const char* a_tooltip) {
 			const auto range = ibl::kSchema.EditRange(a_member);
 			changed |= edit.Continuous(dmui::ui::SliderScalar(a_label, &(_settings.*a_member), &range.min, &range.max, "%.2f"));
-			Tooltip(a_tooltip);
+			ui::Tooltip(a_tooltip);
 		};
 
 		if (const ui::Section section{ "ibl-general", "General" }; section) {
@@ -343,7 +338,7 @@ namespace cs::features
 				_settings.DALCMode = *mode.selected;
 				changed = true;
 			}
-			Tooltip(
+			ui::Tooltip(
 				"How the DALC-to-IBL brightness ratio is computed:\n"
 				"Luminance Ratio: Scalar ratio from overall luminance (loses DALC color tint).\n"
 				"Color Ratio: Per-channel ratio (preserves DALC color tint).\n"

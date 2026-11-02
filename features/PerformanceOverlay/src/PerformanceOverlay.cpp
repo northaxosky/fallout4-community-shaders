@@ -458,8 +458,7 @@ namespace cs::features
 				.referenceLines = references.data(),
 				.referenceLineCount = static_cast<std::uint32_t>(references.size()) });
 		dmui::ui::PopStyleColor();
-		if (dmui::ui::IsItemHovered())
-			dmui::ui::SetTooltip("Reference lines: 30 FPS = 33.3 ms, 60 FPS = 16.7 ms, 120 FPS = 8.3 ms");
+		ui::Tooltip("Reference lines: 30 FPS = 33.3 ms, 60 FPS = 16.7 ms, 120 FPS = 8.3 ms");
 	}
 
 	float PerformanceOverlay::OverlayContentWidth() noexcept
@@ -488,8 +487,7 @@ namespace cs::features
 			dmui::ui::TableNextRow();
 			(void)dmui::ui::TableSetColumnIndex(0);
 			dmui::ui::TextUnformatted(row.label.c_str());
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("%s", row.tooltip.c_str());
+			ui::Tooltip(row.tooltip.c_str());
 			(void)dmui::ui::TableSetColumnIndex(1);
 			if (row.drawCalls >= 0)
 				dmui::ui::Text("%d", row.drawCalls);
@@ -602,8 +600,8 @@ namespace cs::features
 					                      dmui::TextTone::kInherit;
 					DrawMilliseconds(values[i], tone);
 				}
-				if (row.shaderType == -1 && row.frameCountA > 0 && row.frameCountB > 0 && dmui::ui::IsItemHovered())
-					dmui::ui::SetTooltip("A (USER): %.2f FPS; B (TEST): %.2f FPS", Util::CalcFPS(row.meanA), Util::CalcFPS(row.meanB));
+				if (row.shaderType == -1 && row.frameCountA > 0 && row.frameCountB > 0)
+					ui::Tooltip("A (USER): %.2f FPS; B (TEST): %.2f FPS", Util::CalcFPS(row.meanA), Util::CalcFPS(row.meanB));
 			}
 		}
 		dmui::ui::EndTable();

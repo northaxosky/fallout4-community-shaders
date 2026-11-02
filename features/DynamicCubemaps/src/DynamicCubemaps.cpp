@@ -1295,13 +1295,11 @@ namespace cs::features
 		bool changed = false;
 		if (const ui::Section section{ "dynamic-cubemaps-ssr", "Screen Space Reflections" }; section) {
 			changed |= edit.Discrete(dmui::ui::Checkbox("Enable Screen Space Reflections", &_settings.enabledSSR));
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("Enable all screen-space reflections, including water.");
+			ui::Tooltip("Enable all screen-space reflections, including water.");
 		}
 		if (const ui::Section section{ "dynamic-cubemaps-engine-cube", "Engine Reflection Cube" }; section) {
 			changed |= edit.Discrete(dmui::ui::Checkbox("Engine Cube LOD", &_settings.engineCubeLod));
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("Draw LOD land, objects and trees into the engine reflection cube that far water blends toward.");
+			ui::Tooltip("Draw LOD land, objects and trees into the engine reflection cube that far water blends toward.");
 			using dynamic_cubemaps::EngineCubeSize;
 			static constexpr std::array kSizes{
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k256, "256", "256", true },
@@ -1313,14 +1311,12 @@ namespace cs::features
 				std::span<const dmui::ChoiceOption<EngineCubeSize>>{ kSizes }, "Unavailable", "Engine Cube Size");
 			if (edit.Discrete(size.changed))
 				_settings.engineCubeSize = *size.selected;
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("Engine reflection cube face size in texels; FO4 object LOD needs 1024 or more to stay stable.");
+			ui::Tooltip("Engine reflection cube face size in texels; FO4 object LOD needs 1024 or more to stay stable.");
 		}
 		if (const ui::Section section{ "dynamic-cubemaps-material", "Material Reflections" }; section) {
 			const auto range = dynamic_cubemaps::kSchema.EditRange(&Settings::materialReflections);
 			changed |= edit.Continuous(dmui::ui::SliderScalar("Material Reflections", &_settings.materialReflections, &range.min, &range.max));
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("Blend from authored material cubemaps to dynamic reflections on environment-mapped surfaces.");
+			ui::Tooltip("Blend from authored material cubemaps to dynamic reflections on environment-mapped surfaces.");
 		}
 		if (changed) {
 			PublishSettings();

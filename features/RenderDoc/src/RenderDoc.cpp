@@ -804,8 +804,7 @@ namespace cs::features
 			(void)dmui::ui::TableSetColumnIndex(0);
 			if (dmui::ui::Button(filename.c_str()))
 				OpenCaptureLocation(file.path, DMUI_EXTERNAL_TARGET_VIRTUAL_FILE);
-			if (dmui::ui::IsItemHovered())
-				dmui::ui::SetTooltip("%s", path.c_str());
+			ui::Tooltip(path.c_str());
 			if (!file.deletionError.empty())
 				dmui::ui::TextWrapped("Deletion failed: %s", file.deletionError.c_str());
 			(void)dmui::ui::TableSetColumnIndex(1);
