@@ -117,15 +117,7 @@ namespace cs::features
 	{
 		settings::SettingsEdit edit{ *this };
 		const auto draw = [&](const auto& field) {
-			auto& value = _settings.*field.member;
-			if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, bool>) {
-				edit.Toggle(field, _settings,
-					"Disables vertex coloring on nearby terrain. Best combined with terrain LOD generated in xLODGen with Vertex Color Intensity set to 0.");
-			} else {
-				const std::string label = ui::FieldLabel(field);
-				const auto range = lod_blending::kSchema.EditRange(field.member);
-				edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &value, &range.min, &range.max, "%.2f"));
-			}
+			edit.Apply(ui::EditSetting(field, _settings, nullptr, "%.2f"));
 		};
 		const auto& fields = lod_blending::kSchema.fields;
 		if (const ui::Section section{ "lod-brightness", "Brightness" }; section) {
@@ -137,7 +129,8 @@ namespace cs::features
 			draw(std::get<3>(fields));
 		}
 		if (const ui::Section section{ "lod-terrain", "Terrain" }; section)
-			draw(std::get<4>(fields));
+			edit.Toggle(std::get<4>(fields), _settings,
+				"Disables vertex coloring on nearby terrain. Best combined with terrain LOD generated in xLODGen with Vertex Color Intensity set to 0.");
 	}
 
 	void LODBlending::RestoreDefaultSettings()

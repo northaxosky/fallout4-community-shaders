@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Log.h"
+#include "Menu/SettingField.h"
 #include "Settings/SettingsSchema.h"
 
 #include <DearModdingUI/UI.h>
@@ -35,13 +36,6 @@ namespace cs::ui
 		if (dmui::ui::IsItemHovered(dmui::ui::HoveredFlags::kForTooltip))
 			dmui::ui::SetTooltip("%s", std::string(a_make()).c_str());
 	}
-
-	struct EditResult
-	{
-		bool changed = false;
-		// True once the edit is finished: a toggle, or a released slider or input.
-		bool completed = false;
-	};
 
 	// A schema field's widget label: its description, with the key as the id.
 	template <class Field>
@@ -117,5 +111,19 @@ namespace cs::ui
 			result.completed = dmui::ui::IsItemDeactivatedAfterEdit();
 		}
 		return result;
+	}
+
+	// A schema scalar as a host field with a Reset to its default.
+	template <class Field, class Settings>
+		requires requires(const Field& a_field) { a_field.member; a_field.edit; }
+	EditResult EditSetting(const Field& a_field, Settings& a_settings, const char* a_help = nullptr,
+		const char* a_format = nullptr, dmui::ui::SliderFlags a_flags = dmui::ui::SliderFlags::kNone)
+	{
+		auto& value = a_settings.*a_field.member;
+		const auto defaultValue = Settings{}.*a_field.member;
+		return DrawField(
+			{ a_field.key, a_field.description, a_help }, value != defaultValue,
+			[&](const char* a_label) { return EditSetting(a_label, a_field.key, value, a_field.edit, a_format, a_flags); },
+			[&] { value = defaultValue; });
 	}
 }

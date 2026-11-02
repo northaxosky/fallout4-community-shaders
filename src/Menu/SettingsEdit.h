@@ -30,14 +30,11 @@ namespace cs::settings
 			return Record(a_result.changed, a_result.completed);
 		}
 
-		// A schema bool as a checkbox labeled by its description, with a tooltip.
+		// A schema bool as a checkbox labeled by its description, with help text.
 		template <class Field, class Settings>
-		bool Toggle(const Field& a_field, Settings& a_settings, const char* a_tooltip)
+		bool Toggle(const Field& a_field, Settings& a_settings, const char* a_help)
 		{
-			const std::string label = ui::FieldLabel(a_field);
-			const bool changed = Discrete(dmui::ui::Checkbox(label.c_str(), &(a_settings.*a_field.member)));
-			ui::Tooltip(a_tooltip);
-			return changed;
+			return Apply(ui::EditSetting(a_field, a_settings, a_help));
 		}
 
 	private:

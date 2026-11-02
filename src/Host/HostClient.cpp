@@ -5,6 +5,7 @@
 #include "Menu/Menu.h"
 #include "Menu/ProfilingRenderer.h"
 #include "Menu/Section.h"
+#include "Menu/SettingField.h"
 #include "Menu/SettingsEdit.h"
 #include "Menu/SettingsLayout.h"
 #include "Plugin.h"
@@ -443,6 +444,97 @@ namespace cs::host
 			}
 		};
 
+		const auto isComparing = [&] {
+			return settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
+		};
+
+		// Enabled toggle, settings and Debug section, saved once an edit completes.
+		const auto drawControls = [&]() -> bool {
+			if (!FeatureManager::Get().PrepareMenuCallback(
+					a_feature, "DearModdingUI::DrawSettings"))
+				return false;
+			CS_FEATURE_ZONE(&a_feature, "DrawSettings");
+			const bool comparing = isComparing();
+			const char* callback = "DearModdingUI::DrawSettings";
+			try {
+				{
+					const dmui::DisabledScope disabled{ comparing };
+					DrawEnabledToggle(a_feature);
+					a_feature.DrawSettings();
+					callback = "DearModdingUI::DrawDebug";
+					DrawFeatureDebugSection(a_feature);
+				}
+				a_feature.FlushSettings(true);
+			} catch (const std::exception& error) {
+				FeatureManager::Get().QuarantineRuntimeCallback(
+					a_feature,
+					callback,
+					error.what());
+				if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
+						a_feature.GetName().data(),
+						"Feature settings callback failed",
+						error.what() })) {
+					LogFailure("report feature settings callback diagnostic");
+				}
+				throw;
+			} catch (...) {
+				FeatureManager::Get().QuarantineRuntimeCallback(
+					a_feature,
+					callback,
+					"non-standard exception");
+				if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
+						a_feature.GetName().data(),
+						"Feature settings callback failed",
+						"non-standard exception" })) {
+					LogFailure("report feature settings callback diagnostic");
+				}
+				throw;
+			}
+			return true;
+		};
+
+		struct ResetState
+		{
+			bool resettable{};
+			bool modified{};
+		};
+		const auto queryResetState = [&]() -> ResetState {
+			try {
+				const bool resettable = a_feature.HasResettableSettings();
+				return { resettable, resettable && a_feature.HasModifiedSettings() };
+			} catch (const std::exception& error) {
+				reportCallbackFailure(
+					"DearModdingUI::SettingsRowMetadata",
+					"Feature reset metadata callback failed",
+					error.what());
+				throw;
+			} catch (...) {
+				reportCallbackFailure(
+					"DearModdingUI::SettingsRowMetadata",
+					"Feature reset metadata callback failed",
+					"non-standard exception");
+				throw;
+			}
+		};
+
+		const auto restoreFeatureDefaults = [&] {
+			try {
+				a_feature.RestoreDefaults();
+			} catch (const std::exception& error) {
+				reportCallbackFailure(
+					"DearModdingUI::RestoreDefaultSettings",
+					"Feature reset callback failed",
+					error.what());
+				throw;
+			} catch (...) {
+				reportCallbackFailure(
+					"DearModdingUI::RestoreDefaultSettings",
+					"Feature reset callback failed",
+					"non-standard exception");
+				throw;
+			}
+		};
+
 		const bool loadAtBoot = LoadAtBoot(a_feature);
 		const auto& state = a_feature.GetState();
 		if (!ui::DrawTable(_client, std::format("feature-settings-{}", a_feature.GetName()).c_str(), [&] {
@@ -549,68 +641,18 @@ namespace cs::host
 			return true; });
 				}
 
+				// Legacy pages draw one full-span row; field pages draw after the table.
+				if (a_feature.UsesFieldSettings())
+					return true;
+
 				bool restoreDefaults{};
 				{
 					if (!ui::DrawRow(_client, "feature-controls", "", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto& row) -> bool {
-				if (!FeatureManager::Get().PrepareMenuCallback(
-						a_feature, "DearModdingUI::DrawSettings"))
+				if (!drawControls())
 					return false;
-				CS_FEATURE_ZONE(&a_feature, "DrawSettings");
-				const bool comparing = settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
-				const char* callback = "DearModdingUI::DrawSettings";
-				try {
-					{
-						const dmui::DisabledScope disabled{ comparing };
-						DrawEnabledToggle(a_feature);
-						a_feature.DrawSettings();
-						callback = "DearModdingUI::DrawDebug";
-						DrawFeatureDebugSection(a_feature);
-					}
-					a_feature.FlushSettings(true);
-				} catch (const std::exception& error) {
-					FeatureManager::Get().QuarantineRuntimeCallback(
-						a_feature,
-						callback,
-						error.what());
-					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
-							a_feature.GetName().data(),
-							"Feature settings callback failed",
-							error.what() })) {
-						LogFailure("report feature settings callback diagnostic");
-					}
-					throw;
-				} catch (...) {
-					FeatureManager::Get().QuarantineRuntimeCallback(
-						a_feature,
-						callback,
-						"non-standard exception");
-					if (!_client.ReportDiagnostic({ DMUI_STATUS_SEVERITY_ERROR,
-							a_feature.GetName().data(),
-							"Feature settings callback failed",
-							"non-standard exception" })) {
-						LogFailure("report feature settings callback diagnostic");
-					}
-					throw;
-				}
-				bool resettable{};
-				bool modified{};
-				try {
-					resettable = a_feature.HasResettableSettings();
-					modified = resettable && a_feature.HasModifiedSettings();
-				} catch (const std::exception& error) {
-					reportCallbackFailure(
-						"DearModdingUI::SettingsRowMetadata",
-						"Feature reset metadata callback failed",
-						error.what());
-					throw;
-				} catch (...) {
-					reportCallbackFailure(
-						"DearModdingUI::SettingsRowMetadata",
-						"Feature reset metadata callback failed",
-						"non-standard exception");
-					throw;
-				}
-				const auto reset = row.End(resettable && !comparing, modified && !comparing);
+				const auto resetState = queryResetState();
+				const auto comparing = isComparing();
+				const auto reset = row.End(resetState.resettable && !comparing, resetState.modified && !comparing);
 				if (!reset) {
 					LogFailure("end feature controls row");
 					return false;
@@ -620,23 +662,8 @@ namespace cs::host
 						return false;
 				}
 
-				if (restoreDefaults) {
-					try {
-						a_feature.RestoreDefaults();
-					} catch (const std::exception& error) {
-						reportCallbackFailure(
-							"DearModdingUI::RestoreDefaultSettings",
-							"Feature reset callback failed",
-							error.what());
-						throw;
-					} catch (...) {
-						reportCallbackFailure(
-							"DearModdingUI::RestoreDefaultSettings",
-							"Feature reset callback failed",
-							"non-standard exception");
-						throw;
-					}
-				}
+				if (restoreDefaults)
+					restoreFeatureDefaults();
 
 				const auto restartSettings = a_feature.GetRestartSettings();
 				for (const auto field : restartSettings) {
@@ -651,6 +678,22 @@ namespace cs::host
 				return true;
 			}))
 			LogFailure("draw feature settings table");
+
+		if (a_feature.IsActive() && a_feature.UsesFieldSettings()) {
+			// Fields cannot nest in a host row, so the controls sit outside the table.
+			const auto restartSettings = a_feature.GetRestartSettings();
+			const ui::FieldPage page{ restartSettings };
+			if (!drawControls())
+				return;
+			const auto resetState = queryResetState();
+			const auto comparing = isComparing();
+			dmui::FieldScope reset{ _client, "feature-reset", "Restore defaults" };
+			if (reset.Visible()) {
+				const auto pressed = reset.End(resetState.resettable && !comparing, resetState.modified && !comparing);
+				if (pressed.value_or(false))
+					restoreFeatureDefaults();
+			}
+		}
 	}
 
 	void HostClient::DrawOverlayPage()

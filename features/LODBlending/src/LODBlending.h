@@ -28,6 +28,7 @@ namespace cs::features
 		void Load() override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
+		bool UsesFieldSettings() const override { return true; }
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
