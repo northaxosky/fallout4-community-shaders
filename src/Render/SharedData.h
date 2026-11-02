@@ -40,6 +40,9 @@ namespace cs::render
 	// shadow, occlusion and cube draws never see the upscaler bias.
 	void SetMainViewMipBias(float a_bias) noexcept;
 
+	// Render thread. The bias SetMainViewMipBias last published; 0 outside the scope.
+	[[nodiscard]] float GetMainViewMipBias() noexcept;
+
 	class ScopedMainViewMipBias
 	{
 	public:

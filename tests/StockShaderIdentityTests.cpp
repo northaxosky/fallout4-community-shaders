@@ -213,6 +213,49 @@ namespace
 		return cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(stripped->GetBufferPointer(), stripped->GetBufferSize()));
 	}
 
+	// Engine-internal shaders outside the table; stripped SHA-1 of the stock DXBC.
+	struct EngineShader
+	{
+		const char* file;
+		const char* profile;
+		cs::engine::ShaderStage stage;
+		const char* expected;
+	};
+
+	constexpr EngineShader kEngineShaders[]{
+		// DoZPrePass alpha test; Upscaling biases it with SAMPLE_MATERIAL.
+		{ "FO4/Upscaling/ZPrepassAlphaPS.hlsl", "ps_5_0", cs::engine::ShaderStage::kPixel, "2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725" }
+	};
+
+	std::size_t CheckEngineShaders(const std::filesystem::path& a_shaderRoot)
+	{
+		std::size_t failed = 0;
+		for (const auto& shader : kEngineShaders) {
+			std::string actual;
+			try {
+				cs::engine::ShaderVariantCompilationRequest variant;
+				variant.sourcePath = a_shaderRoot / shader.file;
+				variant.entryPoint = "main";
+				variant.profile = shader.profile;
+				variant.stage = shader.stage;
+				const auto compiled = cs::shader_test::Compile(cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot));
+				Require(compiled.succeeded, "compile-error: " + FirstErrorLine(compiled.error));
+				winrt::com_ptr<ID3DBlob> stripped;
+				Require(SUCCEEDED(D3DStripShader(compiled.bytecode.data(), compiled.bytecode.size(),
+							D3DCOMPILER_STRIP_REFLECTION_DATA, stripped.put())),
+					"strip-error");
+				actual = cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(stripped->GetBufferPointer(), stripped->GetBufferSize()));
+			} catch (const std::exception& error) {
+				actual = std::string("error: ") + error.what();
+			}
+			if (actual == shader.expected)
+				continue;
+			++failed;
+			std::printf("engine shader %s expected=%s actual=%s\n", shader.file, shader.expected, actual.c_str());
+		}
+		return failed;
+	}
+
 	// Features load alone, so each must compile without others' includes.
 	std::string CompileIsolated(const Row& a_row, const std::filesystem::path& a_shaderRoot, cs::engine::GameRuntime a_runtime)
 	{
@@ -297,6 +340,8 @@ int main(int a_argc, char** a_argv)
 		}
 		if (!featuresOn && failed > 50)
 			std::printf("... %zu additional failures omitted\n", failed - 50);
+		if (!featuresOn && table.runtime == cs::engine::GameRuntime::kAE)
+			failed += CheckEngineShaders(shaderRoot);
 		for (const auto& [target, result] : targetResults)
 			std::printf("  %s: %zu passed, %zu failed\n", target.c_str(), result.first, result.second);
 		cs::shader_test::ReportCache();

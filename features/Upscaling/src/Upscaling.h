@@ -5,7 +5,11 @@
 #include "Render/TemporalRenderSettings.h"
 #include "ShaderDefines.h"
 
+#include <d3d11.h>
+
 #include <optional>
+
+#include <winrt/base.h>
 
 namespace cs::features
 {
@@ -28,6 +32,7 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
+		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		bool HasDebugUI() const override { return true; }
@@ -42,10 +47,14 @@ namespace cs::features
 
 		Settings settings;
 
+		// The Z-prepass alpha test while the main-view mip bias is active, else null.
+		[[nodiscard]] ID3D11PixelShader* GetZPrepassAlphaPS() const noexcept;
+
 	private:
 		Upscaling() = default;
 		engine::OwnedShaderDefineProvider _mipBiasDefines{ upscaling::kMipBiasShaderDefines, *this };
 		engine::OwnedShaderDefineProvider _imageSpaceUvDefines{ upscaling::kImageSpaceUvShaderDefines, *this };
+		winrt::com_ptr<ID3D11PixelShader> _zPrepassAlphaPS;
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(render::temporal::kSchema, settings); }
 		Settings _bootSettings;

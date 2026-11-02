@@ -107,6 +107,13 @@ namespace cs::engine
 			ZPrepassVertexShaderSelector selector;
 		};
 		std::vector<ZPrepassShaderSelection> g_zPrepassShaders;
+		struct ZPrepassPixelShaderSelection
+		{
+			HookPriority priority;
+			ZPrepassPixelShaderSelector selector;
+		};
+		std::vector<ZPrepassPixelShaderSelection> g_zPrepassPixelShaders;
+		bool g_alphaZPrepassDrawInstalled = false;
 		bool g_prePassInstalled = false;
 		bool g_prepassHoldInstalled = false;
 		bool g_zPrepassDrawInstalled = false;
@@ -756,6 +763,68 @@ namespace cs::engine
 			return true;
 		}
 
+		// CommonLibF4 lacks BSGraphics::RenderAlphaTestZPrePass; OG and NG/AE ids.
+		inline constexpr REL::VariantID kRenderAlphaTestZPrePass{ 767228, 2277053 };
+
+		// DoZPrePass alpha-test loops (first-person and world); the PS is bound once per loop.
+		struct AlphaTestZPrepassDraw_Hook
+		{
+			static void thunk(
+				RE::BSGraphics::RendererShadowState& a_state,
+				void* a_data,
+				std::uint64_t& a_vertexDesc,
+				std::uint16_t& a_cullMode,
+				std::uint16_t& a_depthBiasMode,
+				void* a_samplers)
+			{
+				ID3D11PixelShader* shader = nullptr;
+				for (const auto& entry : g_zPrepassPixelShaders) {
+					if ((shader = entry.selector()))
+						break;
+				}
+				auto* context = shader ? GetImmediateContext() : nullptr;
+				if (!context)
+					return func(a_state, a_data, a_vertexDesc, a_cullMode, a_depthBiasMode, a_samplers);
+				winrt::com_ptr<ID3D11PixelShader> engineShader;
+				context->PSGetShader(engineShader.put(), nullptr, nullptr);
+				context->PSSetShader(shader, nullptr, 0);
+				func(a_state, a_data, a_vertexDesc, a_cullMode, a_depthBiasMode, a_samplers);
+				context->PSSetShader(engineShader.get(), nullptr, 0);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		bool EnsureAlphaTestZPrepassDrawInstalled()
+		{
+			if (g_alphaZPrepassDrawInstalled)
+				return true;
+			constexpr CallSiteAnchor kFirstPersonDraw{
+				.name = "DoZPrePass -> first-person alpha-test Z-prepass draw",
+				.function = RE::ID::BSGraphics::Renderer::DoZPrePass,
+				.offset = { 0x315, 0x314, 0x314 },
+				.target = kRenderAlphaTestZPrePass
+			};
+			constexpr CallSiteAnchor kWorldDraw{
+				.name = "DoZPrePass -> world alpha-test Z-prepass draw",
+				.function = RE::ID::BSGraphics::Renderer::DoZPrePass,
+				.offset = { 0x553, 0x553, 0x553 },
+				.target = kRenderAlphaTestZPrePass
+			};
+			const auto firstPerson = ResolveCallSite(kFirstPersonDraw);
+			const auto world = ResolveCallSite(kWorldDraw);
+			for (const auto* site : { &firstPerson, &world }) {
+				if (!*site) {
+					L->error("Alpha-test Z-prepass draw hook unavailable: {}", site->error());
+					return false;
+				}
+			}
+			stl::write_thunk_call<AlphaTestZPrepassDraw_Hook>(*firstPerson);
+			stl::write_thunk_call<AlphaTestZPrepassDraw_Hook>(*world);
+			g_alphaZPrepassDrawInstalled = true;
+			L->info("Hooks installed on {} and {}", kFirstPersonDraw.name, kWorldDraw.name);
+			return true;
+		}
+
 		bool EnsureWorldZPrepassDrawInstalled()
 		{
 			if (g_zPrepassDrawInstalled)
@@ -956,6 +1025,14 @@ namespace cs::engine
 	void ReplayHeldPrepassBucket(const HeldPrepassBucket& a_bucket)
 	{
 		PrepassBucket_Hook::func(a_bucket.renderer, a_bucket.head, a_bucket.technique, a_bucket.alpha);
+	}
+
+	bool RegisterAlphaTestZPrepassPixelShader(ZPrepassPixelShaderSelector a_selector, HookPriority a_priority)
+	{
+		if (!RegistrationAllowed("AlphaTestZPrepassPixelShader") || !EnsureAlphaTestZPrepassDrawInstalled())
+			return false;
+		InsertByPriority(g_zPrepassPixelShaders, ZPrepassPixelShaderSelection{ a_priority, a_selector });
+		return true;
 	}
 
 	bool RegisterWorldZPrepassVertexShader(ZPrepassVertexShaderSelector a_selector, HookPriority a_priority)

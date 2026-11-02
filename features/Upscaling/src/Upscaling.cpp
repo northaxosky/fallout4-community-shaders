@@ -9,13 +9,16 @@
 #include "Log.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
+#include "Render/Annotation.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/RenderHooks.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/CSUtil.h"
 
 namespace cs::features
 {
@@ -68,8 +71,35 @@ namespace cs::features
 		render::TemporalPipeline::Get().SubmitLiveConfiguration();
 	}
 
+	namespace
+	{
+		ID3D11PixelShader* SelectZPrepassAlphaPS() noexcept
+		{
+			return Upscaling::GetSingleton()->GetZPrepassAlphaPS();
+		}
+	}
+
+	ID3D11PixelShader* Upscaling::GetZPrepassAlphaPS() const noexcept
+	{
+		return render::GetMainViewMipBias() != 0.0f ? _zPrepassAlphaPS.get() : nullptr;
+	}
+
+	void Upscaling::OnD3D11Ready(IDXGIAdapter*, ID3D11Device*)
+	{
+		_zPrepassAlphaPS.attach(static_cast<ID3D11PixelShader*>(cs::util::CompileShader(
+			L"Data\\Shaders\\FO4\\Upscaling\\ZPrepassAlphaPS.hlsl", { { "FO4CS_SUBSTRATE", "1" } }, "ps_5_0")));
+		if (!_zPrepassAlphaPS) {
+			FailLoad("Upscaling could not compile the biased Z-prepass alpha-test pixel shader");
+			return;
+		}
+		render::annotation::SetName(_zPrepassAlphaPS.get(), "Upscaling/ZPrepassAlpha.PS");
+	}
+
 	void Upscaling::Load()
 	{
+		if (!cs::engine::RegisterAlphaTestZPrepassPixelShader(&SelectZPrepassAlphaPS)) {
+			FailLoad("Upscaling needs the alpha-test Z-prepass draw hook to bias its alpha test");
+		}
 		// Own contributor, so stock targets cannot fail Upscaling.
 		if (!cs::engine::RegisterFeatureShaderBindings("UpscalingMipBias", _mipBiasDefines)) {
 			FailLoad("Upscaling could not register its mip bias shader define");

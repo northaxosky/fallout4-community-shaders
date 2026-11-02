@@ -419,6 +419,11 @@ namespace cs::render
 			kBufferSizes[0], kBufferSizes[1], kBufferSizes[2], kBufferSizes[3]);
 	}
 
+	float GetMainViewMipBias() noexcept
+	{
+		return GetSubstrateState().mipBias;
+	}
+
 	void SetMainViewMipBias(float a_bias) noexcept
 	{
 		auto& state = GetSubstrateState();
