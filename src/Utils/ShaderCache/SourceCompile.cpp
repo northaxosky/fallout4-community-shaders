@@ -3,7 +3,7 @@
 #endif
 
 #include "Utils/ShaderCache/SourceCompile.h"
-#include "Utils/ShaderBufferBindings.h"
+#include "Utils/ShaderBytecodeInfo.h"
 
 #include "Utils/ShaderCache/CacheStorage.h"
 #include "Utils/ShaderInclude.h"
@@ -240,11 +240,13 @@ namespace cs::shader_cache
 			return outcome;
 		}
 
-		if (const auto error = util::ValidateSubstrateSlots(blob.Get()); !error.empty()) {
-			outcome.error = error;
+		const auto* payload = static_cast<const std::uint8_t*>(blob->GetBufferPointer());
+		auto info = util::InspectShaderBytecode({ payload, blob->GetBufferSize() });
+		if (!info.slotError.empty()) {
+			outcome.error = std::move(info.slotError);
 			return outcome;
 		}
-		const auto* payload = static_cast<const std::uint8_t*>(blob->GetBufferPointer());
+		outcome.samplers = info.samplers;
 		outcome.bytecode.assign(payload, payload + blob->GetBufferSize());
 		outcome.succeeded = true;
 		outcome.error.clear();

@@ -131,7 +131,7 @@ namespace cs::engine
 																																										  ".PS");
 			render::annotation::SetName(shader.get(), shaderName);
 
-			result.samplers = util::ReflectShaderSamplers(outcome.bytecode.data(), outcome.bytecode.size()).value_or(util::ShaderSamplerUse{});
+			result.samplers = outcome.samplers.value_or(util::ShaderSamplerUse{});
 			result.shader = std::move(shader);
 			result.cacheHit = outcome.origin == shader_cache::CompileOrigin::kCacheHit;
 			return result;

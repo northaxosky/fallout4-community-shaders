@@ -3,9 +3,11 @@
 #include "Utils/ShaderCache/CacheRecord.h"
 #include "Utils/ShaderCache/RevalidationContext.h"
 #include "Utils/ShaderCache/ShaderRecipe.h"
+#include "Utils/ShaderSamplerBindings.h"
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -62,6 +64,8 @@ namespace cs::shader_cache
 		CompileOrigin origin = CompileOrigin::kFreshCompile;
 		CacheDisposition disposition = CacheDisposition::kAbsent;
 		std::vector<std::uint8_t> bytecode;
+		// Reflected with the slot check; empty when reflection failed.
+		std::optional<util::ShaderSamplerUse> samplers;
 		std::filesystem::path recordPath;
 		bool recordWritten = false;
 		std::string error;

@@ -1,6 +1,6 @@
 #include "Utils/ShaderCache/ShaderCache.h"
 
-#include "Utils/ShaderBufferBindings.h"
+#include "Utils/ShaderBytecodeInfo.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 #include "Utils/ShaderCache/CompilerIdentity.h"
 #include "Utils/ShaderCache/SourceCompile.h"
@@ -280,8 +280,12 @@ namespace cs::shader_cache
 							"record validation failed");
 					}
 					// Slot rules are not in the recipe key, so hits are rechecked.
-					if (lookup.disposition == CacheDisposition::kHit && !util::ValidateSubstrateSlots(lookup.payload).empty())
-						lookup = Reject(CacheDisposition::kStale, "substrate slot validation failed");
+					util::ShaderBytecodeInfo info;
+					if (lookup.disposition == CacheDisposition::kHit) {
+						info = util::InspectShaderBytecode(lookup.payload);
+						if (!info.slotError.empty())
+							lookup = Reject(CacheDisposition::kStale, "substrate slot validation failed");
+					}
 					outcome.disposition = lookup.disposition;
 					outcome.cacheNote = std::move(lookup.note);
 					CountDisposition(outcome.disposition);
@@ -289,6 +293,7 @@ namespace cs::shader_cache
 						outcome.succeeded = true;
 						outcome.origin = CompileOrigin::kCacheHit;
 						outcome.bytecode = std::move(lookup.payload);
+						outcome.samplers = info.samplers;
 						return outcome;
 					}
 				} else {
@@ -318,6 +323,7 @@ namespace cs::shader_cache
 			}
 
 			outcome.bytecode = std::move(compiled.bytecode);
+			outcome.samplers = compiled.samplers;
 			return outcome;
 		} catch (const std::exception& exception) {
 			outcome.succeeded = false;

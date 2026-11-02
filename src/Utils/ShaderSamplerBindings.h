@@ -19,11 +19,8 @@ namespace cs::util
 		bool hostLinearClamp = false;
 	};
 
-	[[nodiscard]] inline std::optional<ShaderSamplerUse> ReflectShaderSamplers(const void* a_bytecode, std::size_t a_size)
+	[[nodiscard]] inline std::optional<ShaderSamplerUse> ReflectShaderSamplers(ID3D11ShaderReflection* reflection)
 	{
-		winrt::com_ptr<ID3D11ShaderReflection> reflection;
-		if (FAILED(D3DReflect(a_bytecode, a_size, IID_PPV_ARGS(reflection.put()))))
-			return std::nullopt;
 		D3D11_SHADER_DESC desc{};
 		if (FAILED(reflection->GetDesc(&desc)))
 			return std::nullopt;
@@ -40,5 +37,13 @@ namespace cs::util
 				use.hostLinearClamp = true;
 		}
 		return use;
+	}
+
+	[[nodiscard]] inline std::optional<ShaderSamplerUse> ReflectShaderSamplers(const void* a_bytecode, std::size_t a_size)
+	{
+		winrt::com_ptr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(a_bytecode, a_size, IID_PPV_ARGS(reflection.put()))))
+			return std::nullopt;
+		return ReflectShaderSamplers(reflection.get());
 	}
 }
