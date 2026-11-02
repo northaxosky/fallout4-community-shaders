@@ -20,51 +20,13 @@ namespace cs::engine
 	{
 		auto* L = cs::log::Get("cs.feature.skylighting.capture");
 
-		// Same square as the occlusion map the batch is checked against.
-		constexpr std::uint32_t kMapSize = 512;
 		constexpr std::uint32_t kThreadGroup = 8;
 		constexpr std::uint32_t kResultWords = 8;
 
-		struct ScratchMap
-		{
-			winrt::com_ptr<ID3D11Texture2D> texture;
-			winrt::com_ptr<ID3D11DepthStencilView> depthView;
-			winrt::com_ptr<ID3D11ShaderResourceView> depthSRV;
-
-			void Create(ID3D11Device* a_device, std::string_view a_name)
-			{
-				const D3D11_TEXTURE2D_DESC textureDesc{
-					.Width = kMapSize,
-					.Height = kMapSize,
-					.MipLevels = 1,
-					.ArraySize = 1,
-					.Format = DXGI_FORMAT_R16_TYPELESS,
-					.SampleDesc = { 1, 0 },
-					.Usage = D3D11_USAGE_DEFAULT,
-					.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE
-				};
-				const D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{
-					.Format = DXGI_FORMAT_D16_UNORM,
-					.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D
-				};
-				const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
-					.Format = DXGI_FORMAT_R16_UNORM,
-					.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
-					.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
-				};
-				DX::ThrowIfFailed(a_device->CreateTexture2D(&textureDesc, nullptr, texture.put()));
-				DX::ThrowIfFailed(a_device->CreateDepthStencilView(texture.get(), &dsvDesc, depthView.put()));
-				DX::ThrowIfFailed(a_device->CreateShaderResourceView(texture.get(), &srvDesc, depthSRV.put()));
-				cs::render::annotation::SetName(texture.get(), a_name);
-			}
-
-			[[nodiscard]] OcclusionCaptureTarget Target() const noexcept { return { texture.get(), depthView.get(), depthSRV.get() }; }
-		};
-
 		struct Validation
 		{
-			ScratchMap engine;
-			ScratchMap batch;
+			OcclusionDepthMap engine;
+			OcclusionDepthMap batch;
 			winrt::com_ptr<ID3DDeviceContextState> state;
 			winrt::com_ptr<ID3D11ComputeShader> compare;
 			std::unique_ptr<cs::buffer::ConstantBuffer> extent;
@@ -150,12 +112,12 @@ namespace cs::engine
 		constexpr std::uint32_t initial[kResultWords]{ 0, 0, 0, 0, ~0u, ~0u, 0, 0 };
 		context->UpdateSubresource(validation.result.get(), 0, nullptr, initial, 0, 0);
 		const std::uint32_t extent[4]{ a_extent, a_extent, 0, 0 };
-		context->UpdateSubresource(validation.extent->CB(), 0, nullptr, extent, 0, 0);
+		validation.extent->Update(extent, sizeof(extent));
 		{
 			const cs::render::ScopedContextState state{ context, validation.state.get() };
 			if (!state.IsActive())
 				return {};
-			ID3D11ShaderResourceView* views[]{ validation.engine.depthSRV.get(), validation.batch.depthSRV.get() };
+			ID3D11ShaderResourceView* views[]{ validation.engine.Target().depthSRV, validation.batch.Target().depthSRV };
 			ID3D11UnorderedAccessView* uavs[]{ validation.resultView.get() };
 			ID3D11Buffer* constants[]{ validation.extent->CB() };
 			context->CSSetShader(validation.compare.get(), nullptr, 0);

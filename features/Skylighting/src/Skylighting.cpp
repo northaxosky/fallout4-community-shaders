@@ -49,8 +49,6 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.skylighting");
 		auto* CaptureLog = cs::log::Get("cs.feature.skylighting.capture");
 
-		// Same square as the stock precipitation occlusion depth and color targets.
-		constexpr std::uint32_t kOcclusionResolution = 512;
 		constexpr std::uint64_t kSummaryIntervalFrames = 300;
 		constexpr std::string_view kProbeUpdatePass = "Skylighting::ProbeUpdate";
 
@@ -320,33 +318,8 @@ namespace cs::features
 
 	void Skylighting::CreateOcclusionResources(ID3D11Device* a_device)
 	{
-		const D3D11_TEXTURE2D_DESC textureDesc{
-			.Width = kOcclusionResolution,
-			.Height = kOcclusionResolution,
-			.MipLevels = 1,
-			.ArraySize = 1,
-			.Format = DXGI_FORMAT_R16_TYPELESS,
-			.SampleDesc = { 1, 0 },
-			.Usage = D3D11_USAGE_DEFAULT,
-			.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE
-		};
-		const D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{
-			.Format = DXGI_FORMAT_D16_UNORM,
-			.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D,
-			.Texture2D = { .MipSlice = 0 }
-		};
-		const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
-			.Format = DXGI_FORMAT_R16_UNORM,
-			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
-			.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
-		};
-		DX::ThrowIfFailed(a_device->CreateTexture2D(&textureDesc, nullptr, _occlusionTexture.put()));
-		DX::ThrowIfFailed(a_device->CreateDepthStencilView(_occlusionTexture.get(), &dsvDesc, _occlusionDSV.put()));
-		DX::ThrowIfFailed(a_device->CreateShaderResourceView(_occlusionTexture.get(), &srvDesc, _occlusionSRV.put()));
-		cs::render::annotation::SetName(_occlusionTexture.get(), "Skylighting/Occlusion");
-		cs::render::annotation::SetName(_occlusionDSV.get(), "Skylighting/Occlusion.DSV");
-		cs::render::annotation::SetName(_occlusionSRV.get(), "Skylighting/Occlusion.SRV");
-		CaptureLog->info("occlusion depth target: {}x{} R16_TYPELESS, DSV D16_UNORM, SRV R16_UNORM", kOcclusionResolution, kOcclusionResolution);
+		_occlusionMap.Create(a_device, "Skylighting/Occlusion");
+		CaptureLog->info("occlusion depth target: {0}x{0} R16_TYPELESS, DSV D16_UNORM, SRV R16_UNORM", cs::engine::kOcclusionMapSize);
 	}
 
 	std::span<const FeatureDebugView> Skylighting::GetDebugViews() const noexcept
@@ -445,11 +418,11 @@ namespace cs::features
 	FeatureDebugTexture Skylighting::GetOcclusionDebugTexture() const
 	{
 		FeatureDebugTexture texture{ .unavailableText = "Occlusion depth not allocated." };
-		if (!_debugPreviewEnabled.load(std::memory_order_acquire) || !_occlusionSRV)
+		if (!_debugPreviewEnabled.load(std::memory_order_acquire) || !_occlusionMap.Ready())
 			return texture;
-		texture.texture = _occlusionSRV.get();
-		texture.width = kOcclusionResolution;
-		texture.height = kOcclusionResolution;
+		texture.texture = _occlusionMap.Target().depthSRV;
+		texture.width = cs::engine::kOcclusionMapSize;
+		texture.height = cs::engine::kOcclusionMapSize;
 		return texture;
 	}
 
@@ -465,7 +438,7 @@ namespace cs::features
 
 	Skylighting::CaptureState Skylighting::CaptureReadiness() const
 	{
-		if (!IsHealthy() || !IsEnabled() || !_occlusionDSV || !_probesReady.load(std::memory_order_acquire))
+		if (!IsHealthy() || !IsEnabled() || !_occlusionMap.Ready() || !_probesReady.load(std::memory_order_acquire))
 			return CaptureState::kDisabled;
 		return cs::engine::IsInterior() ? CaptureState::kInterior : CaptureState::kCaptured;
 	}
@@ -536,8 +509,8 @@ namespace cs::features
 				.minOccluderRadius = MIN_OCCLUDER_RADIUS,
 				.belowGridMargin = OCCLUSION_BELOW_GRID_MARGIN,
 				.probeGridBottomZ = probeGridBottomZ },
-			.batching = { _settings.BatchOccluders, _settings.BatchValidationInterval },
-			.target = { _occlusionTexture.get(), _occlusionDSV.get(), _occlusionSRV.get() }
+			.batching = { _settings.BatchOccluders, _batchValidationInterval.load(std::memory_order_relaxed) },
+			.target = _occlusionMap.Target()
 		};
 		cs::engine::OcclusionCaptureResult result;
 		const auto status = cs::engine::CaptureOcclusion(request, result);
@@ -974,7 +947,7 @@ namespace cs::features
 		const bool fresh = lights.published && lights.generation == _copyGeneration;
 		auto* cascades = fresh ? _cascadeCopySRV.get() : nullptr;
 		std::array<ID3D11ShaderResourceView*, 4> srvs = {
-			_occlusionSRV.get(),
+			_occlusionMap.Target().depthSRV,
 			cascades,
 			fresh ? cs::engine::GetSunShadowLightsSRV<cs::engine::kMaxSunCascades>() : nullptr,
 			cascades
@@ -1003,8 +976,7 @@ namespace cs::features
 	void Skylighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto& [maxZenith, minDiffuse, minSpecular, batchOccluders, validationInterval] = skylighting::kSchema.fields;
-		static_cast<void>(validationInterval);
+		const auto& [maxZenith, minDiffuse, minSpecular, batchOccluders] = skylighting::kSchema.fields;
 		const auto drawVisibility = [&](const auto& a_field) {
 			const auto range = skylighting::kSchema.EditRange(a_field.member);
 			edit.Continuous(dmui::ui::SliderScalar(ui::FieldLabel(a_field).c_str(), &(_settings.*a_field.member), &range.min, &range.max, "%.2f"));
@@ -1041,11 +1013,12 @@ namespace cs::features
 
 	void Skylighting::DrawDebug()
 	{
-		settings::SettingsEdit edit{ *this };
-		const auto& validationInterval = std::get<4>(skylighting::kSchema.fields);
-		const auto range = skylighting::kSchema.EditRange(validationInterval.member);
-		edit.Discrete(dmui::ui::SliderScalar(ui::FieldLabel(validationInterval).c_str(), &_settings.BatchValidationInterval, &range.min, &range.max, "%u"));
-		ui::Tooltip("Every Nth capture also renders the batchable occluders through the engine and through the batch and logs the texels that differ. 0 is off.");
+		constexpr std::uint32_t kMin = 0;
+		constexpr std::uint32_t kMax = 3600;
+		auto interval = _batchValidationInterval.load(std::memory_order_relaxed);
+		if (dmui::ui::SliderScalar("Batch Validation Interval", &interval, &kMin, &kMax, "%u"))
+			_batchValidationInterval.store(interval, std::memory_order_relaxed);
+		ui::Tooltip("Every Nth capture also renders the batchable occluders through the engine and the batch and logs the texels that differ. 0 is off.");
 	}
 
 	void Skylighting::RestoreDefaultSettings()

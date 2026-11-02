@@ -10,8 +10,12 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <winrt/base.h>
+
+struct ID3D11Device;
 struct ID3D11DepthStencilView;
 struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
@@ -37,19 +41,19 @@ namespace cs::engine
 	enum class OccluderBatchMode : std::uint8_t
 	{
 		kOff,
-		// Record batchable occluders and skip the engine's pass; draw them afterward.
-		kBatch,
-		// Record batchable occluders to reconcile them with the engine's passes; the engine
-		// still draws everything and the batch draws nothing.
-		kValidate
+		// Record batchable occluders, skip their engine pass, draw them after.
+		kBatch
 	};
 
 	struct OccluderBatchOptions
 	{
 		bool enabled = false;
-		// Every Nth capture also diffs the engine's depth against the batch's; 0 is off.
+		// Every Nth capture also diffs the engine against the batch; 0 is off.
 		std::uint32_t validationInterval = 0;
 	};
+
+	// Stock RT 86 and DS8 are both this square.
+	inline constexpr std::uint32_t kOcclusionMapSize = 512;
 
 	// Replaces the engine's precipitation occlusion depth target for one capture.
 	struct OcclusionCaptureTarget
@@ -57,6 +61,21 @@ namespace cs::engine
 		ID3D11Texture2D* texture = nullptr;
 		ID3D11DepthStencilView* depthView = nullptr;
 		ID3D11ShaderResourceView* depthSRV = nullptr;
+	};
+
+	// An owned occlusion map: R16_TYPELESS with D16 and R16_UNORM views.
+	class OcclusionDepthMap
+	{
+	public:
+		// Throws on device failure. a_name prefixes the debug names.
+		void Create(ID3D11Device* a_device, std::string_view a_name);
+		[[nodiscard]] bool Ready() const noexcept { return _texture != nullptr; }
+		[[nodiscard]] OcclusionCaptureTarget Target() const noexcept { return { _texture.get(), _depthView.get(), _depthSRV.get() }; }
+
+	private:
+		winrt::com_ptr<ID3D11Texture2D> _texture;
+		winrt::com_ptr<ID3D11DepthStencilView> _depthView;
+		winrt::com_ptr<ID3D11ShaderResourceView> _depthSRV;
 	};
 
 	struct OcclusionCaptureRequest

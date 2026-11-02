@@ -147,10 +147,10 @@ namespace cs::features
 
 		Settings _settings;
 
-		winrt::com_ptr<ID3D11Texture2D> _occlusionTexture;
-		winrt::com_ptr<ID3D11DepthStencilView> _occlusionDSV;
-		winrt::com_ptr<ID3D11ShaderResourceView> _occlusionSRV;
+		cs::engine::OcclusionDepthMap _occlusionMap;
 		std::atomic_bool _debugPreviewEnabled{ false };
+		// Debug only: every Nth capture diffs the batch against the engine; 0 is off.
+		std::atomic<std::uint32_t> _batchValidationInterval{ 0 };
 		std::atomic<DebugVisualization> _debugVisualization{ DebugVisualization::kOff };
 
 		static constexpr std::array<std::uint32_t, 3> kProbeArrayDims{ 256, 256, 128 };

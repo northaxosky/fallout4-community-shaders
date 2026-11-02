@@ -35,22 +35,18 @@ namespace cs::engine
 		using ShaderFlag = RE::BSShaderProperty::EShaderPropertyFlag;
 
 		constexpr std::uint32_t kHeapCount = 8;
-		// Records per class and cull group; an overflowing occluder stays on the engine path.
+		// Records per class and cull group; overflow stays on the engine.
 		constexpr std::uint32_t kArenaCapacity = 8192;
 		constexpr std::uint32_t kGroupCount = static_cast<std::uint32_t>(BatchClass::kCount) * 2;
 		// Triangles per instance; each chunk draws 64 triangles of one record.
 		constexpr std::uint32_t kChunkIndices = 192;
 		constexpr std::uint32_t kInstanceStride = 80;
 		constexpr std::uint32_t kPoolRecords = 1u << 18;
-		// Captures an engine record buffer may go unseen before its pool copy is freed.
+		// Captures a record buffer may go unseen before its copy is freed.
 		constexpr std::uint64_t kPoolIdleCaptures = 600;
 		constexpr std::uint8_t kPlainType = 3;
 		constexpr std::uint8_t kMeshLODType = 5;
 		constexpr std::uint32_t kShaderResourceCount = 11;
-		// BSShader::BuildCommandBuffer: index count, and the first constant group for a
-		// shape without a skin instance, which starts with the world rows.
-		constexpr std::size_t kCommandBufferIndexCount = 60;
-		constexpr std::size_t kCommandBufferWorld = 136;
 
 		// Techniques the batch reproduces; anything else keeps the engine's pass.
 		constexpr std::uint32_t kBatchableTechnique =
@@ -94,7 +90,7 @@ namespace cs::engine
 			return std::atomic_ref<std::uint32_t>{ const_cast<std::uint32_t&>(a_value) }.load(std::memory_order_acquire);
 		}
 
-		// The engine fills a buffer's heap block asynchronously; draw it only once settled.
+		// Heap blocks fill asynchronously; draw only settled buffers.
 		[[nodiscard]] bool Ready(const RE::BSGraphics::Buffer* a_buffer) noexcept
 		{
 			return a_buffer && a_buffer->buffer && a_buffer->heapAllocated && !a_buffer->pendingCopy &&
@@ -169,8 +165,7 @@ namespace cs::engine
 			std::mutex _mutex;
 		};
 
-		// Merge-instanced shapes keep their 80-byte records in standalone buffers; one
-		// structured pool mirrors them so a single draw reads every shape.
+		// A pool mirrors each merge shape's record buffer for one draw.
 		class InstancePool
 		{
 		public:
@@ -368,7 +363,7 @@ namespace cs::engine
 			g_stats.fallback[static_cast<std::size_t>(a_reason)].fetch_add(1, std::memory_order_relaxed);
 		}
 
-		// SetupGeometry's cb2 rows: the transposed scaled rotation, translation in the last column.
+		// SetupGeometry's cb2 rows: scaled rotation transposed, then translation.
 		void FillWorld(Record& a_record, const RE::NiTransform& a_world) noexcept
 		{
 			const auto& rotate = a_world.rotate;
@@ -397,8 +392,7 @@ namespace cs::engine
 			const RE::BSLightingShaderProperty& a_property,
 			RE::BSGeometry& a_geometry,
 			std::uint32_t a_technique,
-			BatchClass& a_class,
-			BatchSlot& a_slot)
+			BatchClass& a_class)
 		{
 			if ((a_technique & ~kBatchableTechnique) != 0 || a_property.flags.any(ShaderFlag::kVATSTarget))
 				return BatchFallback::kTechnique;
@@ -424,7 +418,7 @@ namespace cs::engine
 				merged = a_geometry.IsBSMergeInstancedTriShape();
 				if (!merged)
 					return BatchFallback::kTechnique;
-				// BuildCommandBuffer reads the LOD bands only for type 5, else numTriangles.
+				// The engine reads the LOD bands only for type 5, else numTriangles.
 				indexCount = (a_geometry.type == kMeshLODType ? a_geometry.GetRenderableTris(kDefaultLodMode) : shape->numTriangles) * 3;
 			} else if (a_geometry.type == kPlainType) {
 				indexCount = shape->numTriangles * 3;
@@ -463,7 +457,7 @@ namespace cs::engine
 			} else {
 				auto& desc = renderer->vertexDesc;
 				record.stride = desc.GetSize();
-				// Exactly one of the vertex and full-precision bits means half-float positions.
+				// Exactly one of the vertex and full-precision bits means half floats.
 				using Vertex = RE::BSGraphics::Vertex;
 				if (desc.HasFlag(Vertex::VF_VERTEX) != desc.HasFlag(Vertex::VF_FULLPREC))
 					record.heaps |= kHalfPosition;
@@ -476,8 +470,6 @@ namespace cs::engine
 			if (slot >= kArenaCapacity)
 				return BatchFallback::kArenaFull;
 			arena.records[slot] = record;
-			a_slot.world = &arena.records[slot].world[0][0];
-			a_slot.indexCount = &arena.records[slot].indexCount;
 			return std::nullopt;
 		}
 
@@ -566,16 +558,12 @@ namespace cs::engine
 		OccluderBatchMode a_mode,
 		const RE::BSLightingShaderProperty& a_property,
 		RE::BSGeometry& a_geometry,
-		std::uint32_t a_technique,
-		BatchSlot& a_slot)
+		std::uint32_t a_technique)
 	{
 		if (a_mode == OccluderBatchMode::kOff)
 			return BatchDecision::kStock;
 		auto batchClass = BatchClass::kPlain;
-		const auto reason = TryRecord(a_property, a_geometry, a_technique, batchClass, a_slot);
-		// Validation records only to reconcile; the engine draws everything.
-		if (a_mode == OccluderBatchMode::kValidate)
-			return BatchDecision::kStock;
+		const auto reason = TryRecord(a_property, a_geometry, a_technique, batchClass);
 		const bool counting = !g_validating.load(std::memory_order_relaxed);
 		if (reason) {
 			if (counting)
@@ -599,40 +587,15 @@ namespace cs::engine
 		g_validating.store(false, std::memory_order_relaxed);
 	}
 
-	void ResetReconcileStats() noexcept
-	{
-		for (auto* counter : { &g_stats.reconciled, &g_stats.staleWorld, &g_stats.countDiffers, &g_stats.lodNotDefault, &g_stats.noEnginePass, &g_stats.waterPasses })
-			counter->store(0, std::memory_order_relaxed);
-	}
-
-	void ReconcileWithEnginePass(const BatchSlot& a_slot, const RE::BSRenderPass* a_pass)
-	{
-		if (!a_slot.world)
-			return;
-		const auto* buffer = a_pass ? a_pass->commandBuffer : nullptr;
-		if (!buffer) {
-			g_stats.noEnginePass.fetch_add(1, std::memory_order_relaxed);
-			return;
-		}
-		g_stats.reconciled.fetch_add(1, std::memory_order_relaxed);
-		if (a_pass->lodMode != kDefaultLodMode)
-			g_stats.lodNotDefault.fetch_add(1, std::memory_order_relaxed);
-
-		// BuildCommandBuffer lays out the index count at +60 and the cb2 copy at +136.
-		std::uint32_t baked = 0;
-		std::memcpy(&baked, buffer + kCommandBufferIndexCount, sizeof(baked));
-		if (baked != *a_slot.indexCount)
-			g_stats.countDiffers.fetch_add(1, std::memory_order_relaxed);
-
-		float world[16];
-		std::memcpy(world, buffer + kCommandBufferWorld, sizeof(world));
-		if (std::memcmp(world, a_slot.world, sizeof(world)) != 0)
-			g_stats.staleWorld.fetch_add(1, std::memory_order_relaxed);
-	}
-
 	bool PrepareOccluderBatch()
 	{
-		if (!RuntimeSupported() || g_resourcesFailed)
+		if (!RuntimeSupported()) {
+			static bool logged = false;
+			if (!std::exchange(logged, true))
+				L->info("occluder batch unavailable on OG");
+			return false;
+		}
+		if (g_resourcesFailed)
 			return false;
 		if (!g_resources) {
 			try {
@@ -664,7 +627,7 @@ namespace cs::engine
 		};
 	}
 
-	void DrawOccluderBatch(ID3D11DepthStencilView* a_target, std::uint32_t a_extent, bool a_clear)
+	void DrawOccluderBatch(ID3D11DepthStencilView* a_target, std::uint32_t a_extent)
 	{
 		auto* context = GetImmediateContext();
 		auto* engineContext = GetActiveContext();
@@ -672,7 +635,7 @@ namespace cs::engine
 			return;
 		auto& resources = *g_resources;
 
-		// Records pack back to back across groups; each group owns a contiguous chunk range.
+		// Records pack back to back; each group owns a contiguous chunk range.
 		std::array<std::uint32_t, kGroupCount> chunkBase{};
 		std::array<std::uint32_t, kGroupCount> chunkCount{};
 		g_recordScratch.clear();
@@ -698,8 +661,6 @@ namespace cs::engine
 		EnsureChunkCapacity(resources, static_cast<std::uint32_t>(g_chunkScratch.size()));
 		resources.records->Update(g_recordScratch.data(), g_recordScratch.size() * sizeof(Record));
 		resources.chunks->Update(g_chunkScratch.data(), g_chunkScratch.size() * sizeof(Chunk));
-		if (a_clear)
-			context->ClearDepthStencilView(a_target, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
 		const cs::render::ScopedContextState state{ context, resources.state.get() };
 		if (!state.IsActive())
@@ -710,7 +671,7 @@ namespace cs::engine
 		views[9] = resources.chunks->SRV();
 		views[10] = resources.records->SRV();
 		context->VSSetShaderResources(0, static_cast<UINT>(views.size()), views.data());
-		// The engine's per-frame buffer still holds the occlusion camera.
+		// The per-frame buffer still holds the occlusion camera.
 		ID3D11Buffer* constants[]{ resources.drawConstants->CB(), reinterpret_cast<ID3D11Buffer*>(engineContext->perFrameConstantBuffer) };
 		context->VSSetConstantBuffers(0, 1, &constants[0]);
 		context->VSSetConstantBuffers(12, 1, &constants[1]);
@@ -725,7 +686,7 @@ namespace cs::engine
 			if (!chunkCount[group])
 				continue;
 			const std::uint32_t drawConstants[4]{ chunkBase[group], 0, 0, 0 };
-			context->UpdateSubresource(resources.drawConstants->CB(), 0, nullptr, drawConstants, 0, 0);
+			resources.drawConstants->Update(drawConstants, sizeof(drawConstants));
 			context->VSSetShader(resources.shaders[group / 2].get(), nullptr, 0);
 			context->RSSetState((group & 1 ? resources.cullNone : resources.cullBack).get());
 			context->DrawInstanced(kChunkIndices, chunkCount[group], 0, 0);

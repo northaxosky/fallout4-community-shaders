@@ -5,7 +5,7 @@
 
 namespace cs::render
 {
-	// A blank state at the device's feature level, for passes that bind everything themselves.
+	// A blank state at the device's feature level; the pass binds everything.
 	[[nodiscard]] inline winrt::com_ptr<ID3DDeviceContextState> CreateContextState(ID3D11Device* a_device)
 	{
 		winrt::com_ptr<ID3D11Device1> device;

@@ -101,7 +101,7 @@ namespace
 
 			{ "FO4/FullscreenVS.hlsl", "vs_5_0" },
 			{ "FO4/ZPrePass.hlsl", "vs_5_0", { { "OFFSET_DEPTH", "" } } },
-			{ "FO4/OccluderBatchVS.hlsl", "vs_5_0", {}, { { { {}, { { "MERGE_INSTANCED", "" } } } } } },
+			{ "FO4/OccluderBatchVS.hlsl", "vs_5_0", {}, { Toggle("MERGE_INSTANCED") } },
 			{ "FO4/OccluderBatchCompareCS.hlsl" },
 
 			{ "FO4/CloudShadows/DebugOverlay.hlsl", "ps_5_0", { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, { { { {}, { { "CLOUD_SKY_OVERLAY", "1" } }, { { "CLOUD_LAYERS", "1" } } } } } },

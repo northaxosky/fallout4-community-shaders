@@ -22,9 +22,6 @@ namespace cs::engine
 	{
 		auto* L = cs::log::Get("cs.feature.skylighting.capture");
 
-		// Stock RT 86 and DS8 are both this square.
-		constexpr std::uint32_t kOcclusionMapSize = 512;
-
 		ActiveCapture g_active;
 		OccluderStats g_stats;
 		GatherStats g_gather;
@@ -124,14 +121,6 @@ namespace cs::engine
 			       (!color || IsOcclusionSquare(reinterpret_cast<ID3D11Texture2D*>(color->texture)));
 		}
 
-		// What the capture does with batchable occluders and where the batch draws.
-		struct BatchPlan
-		{
-			OccluderBatchMode mode = OccluderBatchMode::kOff;
-			ID3D11DepthStencilView* target = nullptr;
-			bool clear = false;
-		};
-
 		// Owns the capture overrides; ScopedPreCullBypass covers only the Impl call.
 		class ScopedOcclusionCapture
 		{
@@ -140,10 +129,11 @@ namespace cs::engine
 				const OcclusionCaptureRequest& a_request,
 				RE::Precipitation& a_precipitation,
 				RE::BSGraphics::DepthStencilTarget& a_stockTarget,
-				const BatchPlan& a_batch) noexcept :
+				OccluderBatchMode a_batchMode) noexcept :
 				_precipitation(a_precipitation),
 				_stockTarget(a_stockTarget),
-				_batch(a_batch),
+				_batchMode(a_batchMode),
+				_batchTarget(a_request.target.depthView),
 				_savedTarget(a_stockTarget),
 				_savedBoxSize(RE::Precipitation::GetBoxSize()),
 				_savedDirection(RE::Precipitation::GetDirection())
@@ -164,7 +154,7 @@ namespace cs::engine
 				g_active.occluders = a_request.occluders;
 				g_active.camera = a_precipitation.occlusionData.camera.get();
 				g_active.walkThread = ::GetCurrentThreadId();
-				g_active.batchMode = a_batch.mode;
+				g_active.batchMode = a_batchMode;
 				g_active.accumulator.store(a_precipitation.occlusionData.accumulator.get(), std::memory_order_release);
 			}
 
@@ -185,8 +175,8 @@ namespace cs::engine
 						const ScopedCaptureTimer timer{ g_timings.capture };
 						_precipitation.RenderOcclusionMapImpl(nullptr);
 					}
-					if (_batch.mode == OccluderBatchMode::kBatch)
-						DrawOccluderBatch(_batch.target, kOcclusionMapSize, _batch.clear);
+					if (_batchMode == OccluderBatchMode::kBatch)
+						DrawOccluderBatch(_batchTarget, kOcclusionMapSize);
 				}
 				std::memcpy(&a_matrix, RE::Precipitation::GetOcclusionMatrix(), sizeof(a_matrix));
 			}
@@ -216,7 +206,8 @@ namespace cs::engine
 		private:
 			RE::Precipitation& _precipitation;
 			RE::BSGraphics::DepthStencilTarget& _stockTarget;
-			const BatchPlan _batch;
+			const OccluderBatchMode _batchMode;
+			ID3D11DepthStencilView* const _batchTarget;
 			const RE::BSGraphics::DepthStencilTarget _savedTarget;
 			const float _savedBoxSize;
 			const RE::NiPoint3 _savedDirection;
@@ -225,6 +216,37 @@ namespace cs::engine
 			bool _restored = false;
 			bool _targetRestored = false;
 		};
+	}
+
+	void OcclusionDepthMap::Create(ID3D11Device* a_device, std::string_view a_name)
+	{
+		const D3D11_TEXTURE2D_DESC textureDesc{
+			.Width = kOcclusionMapSize,
+			.Height = kOcclusionMapSize,
+			.MipLevels = 1,
+			.ArraySize = 1,
+			.Format = DXGI_FORMAT_R16_TYPELESS,
+			.SampleDesc = { 1, 0 },
+			.Usage = D3D11_USAGE_DEFAULT,
+			.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE
+		};
+		const D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{
+			.Format = DXGI_FORMAT_D16_UNORM,
+			.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D,
+			.Texture2D = { .MipSlice = 0 }
+		};
+		const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
+			.Format = DXGI_FORMAT_R16_UNORM,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 }
+		};
+		DX::ThrowIfFailed(a_device->CreateTexture2D(&textureDesc, nullptr, _texture.put()));
+		DX::ThrowIfFailed(a_device->CreateDepthStencilView(_texture.get(), &dsvDesc, _depthView.put()));
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(_texture.get(), &srvDesc, _depthSRV.put()));
+		const std::string name{ a_name };
+		cs::render::annotation::SetName(_texture.get(), name);
+		cs::render::annotation::SetName(_depthView.get(), name + ".DSV");
+		cs::render::annotation::SetName(_depthSRV.get(), name + ".SRV");
 	}
 
 	const ActiveCapture* GetActiveCapture(const RE::BSShaderAccumulator* a_accumulator) noexcept
@@ -305,15 +327,10 @@ namespace cs::engine
 		{
 			BatchValidationResult result;
 			BatchRecorded recorded;
-			// Water passes the engine drew into each map.
-			std::uint32_t waterEngine = 0;
-			std::uint32_t waterBatch = 0;
 		};
 
-		// Two extra captures of the same view into scratch maps. Both run the whole engine
-		// pass, water included. The first keeps every occluder on the engine and reconciles
-		// the batchable ones with their passes; the second batches the classes in a_classes
-		// and draws them into its own map. The live map is untouched.
+		// Two more captures of the view into scratch maps, the engine's whole pass
+		// each. One keeps every occluder on the engine; the other batches a_classes.
 		[[nodiscard]] std::optional<ValidationRun> RunValidation(
 			const OcclusionCaptureRequest& a_request,
 			RE::Precipitation& a_precipitation,
@@ -323,31 +340,22 @@ namespace cs::engine
 			BatchValidationTargets targets;
 			if (!AcquireValidationTargets(targets))
 				return std::nullopt;
-			auto& stats = GetBatchStats();
-			ValidationRun run;
-			ResetReconcileStats();
 			BeginValidationCapture(a_classes);
-			const auto capture = [&](const OcclusionCaptureTarget& a_target, OccluderBatchMode a_mode, std::uint32_t& a_water) {
-				if (!PrepareOccluderBatch())
+			const auto capture = [&](const OcclusionCaptureTarget& a_target, OccluderBatchMode a_mode) {
+				if (a_mode == OccluderBatchMode::kBatch && !PrepareOccluderBatch())
 					return false;
-				stats.waterPasses.store(0, std::memory_order_relaxed);
 				auto request = a_request;
 				request.target = a_target;
-				{
-					ScopedOcclusionCapture scoped{ request, a_precipitation, a_stockTarget, { a_mode, a_target.depthView, false } };
-					DirectX::XMFLOAT4X4 ignored;
-					scoped.Capture(ignored);
-				}
-				a_water = stats.waterPasses.load(std::memory_order_relaxed);
+				ScopedOcclusionCapture scoped{ request, a_precipitation, a_stockTarget, a_mode };
+				DirectX::XMFLOAT4X4 ignored;
+				scoped.Capture(ignored);
 				return true;
 			};
-			const bool ok = capture(targets.engine, OccluderBatchMode::kValidate, run.waterEngine) &&
-			                capture(targets.batch, OccluderBatchMode::kBatch, run.waterBatch);
+			const bool ok = capture(targets.engine, OccluderBatchMode::kOff) && capture(targets.batch, OccluderBatchMode::kBatch);
 			EndValidationCapture();
 			if (!ok)
 				return std::nullopt;
-			run.recorded = GetBatchRecorded();
-			run.result = CompareValidationTargets(kOcclusionMapSize);
+			ValidationRun run{ .result = CompareValidationTargets(kOcclusionMapSize), .recorded = GetBatchRecorded() };
 			if (!run.result.ok)
 				return std::nullopt;
 			return run;
@@ -355,17 +363,12 @@ namespace cs::engine
 
 		void LogValidation(std::string_view a_label, const ValidationRun& a_run)
 		{
-			const auto& stats = GetBatchStats();
-			const auto count = [](const std::atomic<std::uint32_t>& a_value) { return a_value.load(std::memory_order_relaxed); };
 			const auto& result = a_run.result;
 			L->log(result.mismatchedTexels ? spdlog::level::warn : spdlog::level::info,
 				"occluder batch validation [{}]: mismatched_texels={} max_delta={} batch_nearer={} engine_nearer={} "
-				"bounds=({},{})-({},{}) plain={} merge={} water_engine={} water_batch={} "
-				"reconciled={} stale_world={} count_differs={} lod_not_default={} no_engine_pass={}",
+				"bounds=({},{})-({},{}) plain={} merge={}",
 				a_label, result.mismatchedTexels, result.maxDelta, result.batchNearer, result.engineNearer,
-				result.bounds[0], result.bounds[1], result.bounds[2], result.bounds[3], a_run.recorded.plain, a_run.recorded.mergeInstanced,
-				a_run.waterEngine, a_run.waterBatch,
-				count(stats.reconciled), count(stats.staleWorld), count(stats.countDiffers), count(stats.lodNotDefault), count(stats.noEnginePass));
+				result.bounds[0], result.bounds[1], result.bounds[2], result.bounds[3], a_run.recorded.plain, a_run.recorded.mergeInstanced);
 		}
 
 		// On a mismatch each class is batched alone to say which one differs.
@@ -411,7 +414,7 @@ namespace cs::engine
 
 		const bool batched = a_request.batching.enabled && PrepareOccluderBatch();
 		ScopedOcclusionCapture capture{ a_request, *precipitation, *stock,
-			{ batched ? OccluderBatchMode::kBatch : OccluderBatchMode::kOff, target.depthView, false } };
+			batched ? OccluderBatchMode::kBatch : OccluderBatchMode::kOff };
 		capture.Capture(a_result.matrix);
 		capture.Restore();
 		a_result.stockTargetRestored = capture.TargetRestored();

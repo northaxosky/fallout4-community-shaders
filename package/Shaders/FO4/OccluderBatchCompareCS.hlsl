@@ -8,8 +8,7 @@ cbuffer Compare : register(b0)
 
 Texture2D<float> Engine : register(t0);
 Texture2D<float> Batch : register(t1);
-// Mismatched texels, largest D16 step difference, batch-nearer texels, engine-nearer texels,
-// then the mismatch bounds as min x, min y, max x, max y.
+// Words: count, max delta, batch-nearer, engine-nearer, then min/max x/y.
 RWByteAddressBuffer Result : register(u0);
 
 [numthreads(8, 8, 1)] void main(uint2 texel : SV_DispatchThreadID) {

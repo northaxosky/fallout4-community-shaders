@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Batched occlusion-map depth: the stock Utility VS math, vertices pulled from the engine heaps.
+// Batched occlusion depth: the Utility VS math, vertices from the heaps.
 
 cbuffer PerFrame : register(b12)
 {
@@ -51,30 +51,35 @@ StructuredBuffer<uint2> Chunks : register(t9);
 StructuredBuffer<Record> Records : register(t10);
 
 // SM 5.0 cannot index a resource array, so each load switches on the heap.
-#define HEAP_SWITCH(call)                       \
-	switch (heap) {                             \
-	case 0: return Heap0.call;                  \
-	case 1: return Heap1.call;                  \
-	case 2: return Heap2.call;                  \
-	case 3: return Heap3.call;                  \
-	case 4: return Heap4.call;                  \
-	case 5: return Heap5.call;                  \
-	case 6: return Heap6.call;                  \
-	default: return Heap7.call;                 \
+#define HEAP_SWITCH(call)  \
+	switch (heap) {        \
+	case 0:                \
+		return Heap0.call; \
+	case 1:                \
+		return Heap1.call; \
+	case 2:                \
+		return Heap2.call; \
+	case 3:                \
+		return Heap3.call; \
+	case 4:                \
+		return Heap4.call; \
+	case 5:                \
+		return Heap5.call; \
+	case 6:                \
+		return Heap6.call; \
+	default:               \
+		return Heap7.call; \
 	}
 
-uint HeapLoad(uint heap, uint address)
-{
+uint HeapLoad(uint heap, uint address){
 	HEAP_SWITCH(Load(address))
 }
 
-uint2 HeapLoad2(uint heap, uint address)
-{
+uint2 HeapLoad2(uint heap, uint address){
 	HEAP_SWITCH(Load2(address))
 }
 
-uint3 HeapLoad3(uint heap, uint address)
-{
+uint3 HeapLoad3(uint heap, uint address){
 	HEAP_SWITCH(Load3(address))
 }
 
