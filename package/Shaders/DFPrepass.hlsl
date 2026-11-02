@@ -168,7 +168,7 @@ float4 SampleTerrainVariation(Texture2D tex, SamplerState samp, float2 uv, Stoch
 {
 	float4 result;
 	[branch] if (FO4SharedData::EnabledTerrainVariation != 0)
-		result = StochasticEffect(tex, samp, uv, offsets);
+		result = StochasticEffectBias(tex, samp, uv, offsets, SharedData::MipBias);
 	else result = SAMPLE_MATERIAL(tex, samp, uv);
 	return result;
 }
@@ -696,15 +696,15 @@ struct PS_OUTPUT
 		{
 			meshOffset = ComputeStochasticOffsetsMesh(uv, input.position.xy);
 		}
-#		define MESH_TV_SAMPLE(DEST, TEX, SAMP, UV)                 \
-			float4 DEST;                                            \
-			[branch] if (applyMeshTV)                               \
-			{                                                       \
-				DEST = StochasticEffect(TEX, SAMP, UV, meshOffset); \
-			}                                                       \
-			else                                                    \
-			{                                                       \
-				DEST = SAMPLE_MATERIAL(TEX, SAMP, UV);              \
+#		define MESH_TV_SAMPLE(DEST, TEX, SAMP, UV)                                          \
+			float4 DEST;                                                                     \
+			[branch] if (applyMeshTV)                                                        \
+			{                                                                                \
+				DEST = StochasticEffectBias(TEX, SAMP, UV, meshOffset, SharedData::MipBias); \
+			}                                                                                \
+			else                                                                             \
+			{                                                                                \
+				DEST = SAMPLE_MATERIAL(TEX, SAMP, UV);                                       \
 			}
 #	else
 #		if defined(EMAT_OBJECT)
