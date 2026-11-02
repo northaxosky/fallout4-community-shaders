@@ -112,7 +112,7 @@ namespace cs::features
 			return;
 		}
 
-		if (!cs::engine::RegisterFeatureShaderBindings("Skylighting", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				if (const auto consumer = ConsumerFor(registration.targetId))
 					registration.bind = [this, consumer = *consumer](ID3D11DeviceContext* a_context) { BindConsumer(a_context, consumer); };
 			})) {
@@ -141,22 +141,9 @@ namespace cs::features
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
-	bool Skylighting::ValidateShaderInjections(std::string& a_error)
+	bool Skylighting::ValidateInjectionPrerequisites(std::string& a_error)
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "the shader contribution did not register";
-			return false;
-		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so b6 carries no probe grid";
-			return false;
-		}
-		// Raster and tiled ambient vary per frame; every route must publish.
-		if (!cs::engine::ValidateShaderInjectionRoutes("Skylighting", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return RequireSharedData(a_error, "b6 carries no probe grid");
 	}
 
 	ID3D11ShaderResourceView* Skylighting::GetBindableProbeArraySRV() const noexcept

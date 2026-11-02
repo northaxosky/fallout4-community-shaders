@@ -26,7 +26,6 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
@@ -37,13 +36,13 @@ namespace cs::features
 		using Settings = lod_blending::Settings;
 
 	private:
+		std::string_view GetRegistrationFailureMessage() const override;
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		LODBlending() = default;
 
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(lod_blending::kSchema, _settings); }
 
 		Settings _settings;
-		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 	};
 }

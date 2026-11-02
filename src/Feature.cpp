@@ -595,6 +595,44 @@ namespace cs
 		});
 	}
 
+	bool ShaderInjectionFeature::ValidateShaderInjections(std::string& a_error)
+	{
+		_injectionsOperational.store(false, std::memory_order_release);
+		const bool valid = [&] {
+			if (!_registrationsReady.load(std::memory_order_acquire)) {
+				a_error = GetRegistrationFailureMessage();
+				return false;
+			}
+			return ValidateInjectionPrerequisites(a_error) &&
+			       engine::ValidateShaderInjectionRoutes(GetName(), a_error) &&
+			       PrepareInjectionVariants(a_error);
+		}();
+		{
+			std::scoped_lock lock(_injectionErrorMutex);
+			_injectionError = valid ? std::string{} : a_error;
+		}
+		_injectionsOperational.store(valid, std::memory_order_release);
+		return valid;
+	}
+
+	std::string ShaderInjectionFeature::GetInjectionValidationError() const
+	{
+		std::scoped_lock lock(_injectionErrorMutex);
+		return _injectionError;
+	}
+
+	bool ShaderInjectionFeature::RequireSharedData(std::string& a_error, std::string_view a_consequence)
+	{
+		if (render::IsSharedDataReady())
+			return true;
+		a_error = "the shared substrate is unavailable";
+		if (!a_consequence.empty()) {
+			a_error += ", so ";
+			a_error += a_consequence;
+		}
+		return false;
+	}
+
 	void FeatureManager::ValidateShaderInjectionsAll()
 	{
 		for (auto* feature : _loadedFeatures) {

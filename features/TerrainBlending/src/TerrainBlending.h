@@ -37,7 +37,6 @@ namespace cs::features
 
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
@@ -50,14 +49,14 @@ namespace cs::features
 		ID3D11VertexShader* SelectZPrepassShader(const RE::BSGeometry& a_geometry) noexcept;
 
 	private:
+		std::string_view GetRegistrationFailureMessage() const override;
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		TerrainBlending() = default;
 		bool IsOperational() const noexcept;
 		bool CopyObjectDepth(ID3D11DeviceContext* a_context);
 		void DrawHeld(std::span<const engine::HeldPrepassBucket> a_buckets, std::uint32_t a_pass);
 
-		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _resourcesReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 
 		std::atomic_uint32_t _frameBuckets{ 0 };
 		std::atomic_uint32_t _framePasses{ 0 };

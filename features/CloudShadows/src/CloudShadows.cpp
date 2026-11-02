@@ -139,7 +139,7 @@ namespace cs::features
 
 	void CloudShadows::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("CloudShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsSky) {
 					registration.bind = [this](ID3D11DeviceContext* a_context) { BindSkyDraw(a_context); };
 					registration.bindWhileDisabled = true;
@@ -157,21 +157,14 @@ namespace cs::features
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
-	bool CloudShadows::ValidateShaderInjections(std::string& a_error)
+	std::string_view CloudShadows::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "the shader contribution or sky reflection cube did not register";
-			return false;
-		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so the receivers read no sun direction";
-			return false;
-		}
-		if (!cs::engine::ValidateShaderInjectionRoutes("CloudShadows", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return "the shader contribution or sky reflection cube did not register";
+	}
+
+	bool CloudShadows::ValidateInjectionPrerequisites(std::string& a_error)
+	{
+		return RequireSharedData(a_error, "the receivers read no sun direction");
 	}
 
 	void CloudShadows::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)

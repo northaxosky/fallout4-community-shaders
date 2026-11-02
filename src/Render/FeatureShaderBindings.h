@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Feature.h"
 #include "Render/ShaderDefineProvider.h"
 #include "Render/ShaderInjection.h"
 
@@ -41,5 +42,17 @@ namespace cs::engine
 	inline bool RegisterFeatureShaderBindings(std::string_view a_name, const ShaderDefineProvider& a_feature)
 	{
 		return RegisterFeatureShaderBindings(a_name, a_feature, [](ShaderReplacementRegistration&) {});
+	}
+
+	// A feature contributes under its own name.
+	template <class Configure>
+	bool RegisterFeatureShaderBindings(const Feature& a_feature, Configure&& a_configure)
+	{
+		return RegisterFeatureShaderBindings(a_feature.GetName(), a_feature, std::forward<Configure>(a_configure));
+	}
+
+	inline bool RegisterFeatureShaderBindings(const Feature& a_feature)
+	{
+		return RegisterFeatureShaderBindings(a_feature.GetName(), a_feature);
 	}
 }

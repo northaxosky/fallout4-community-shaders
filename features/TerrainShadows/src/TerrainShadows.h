@@ -48,7 +48,6 @@ namespace cs::features
 		void Prepass() override;
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void OnEnabledChanged(bool a_enabled) noexcept override;
 
@@ -62,6 +61,8 @@ namespace cs::features
 		ID3D11ShaderResourceView* GetShadowHeightSRV() const;
 
 	private:
+		std::string_view GetRegistrationFailureMessage() const override;
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		struct alignas(16) ShadowUpdateCB
 		{
 			float LightPxDir[2];
@@ -135,11 +136,9 @@ namespace cs::features
 		};
 
 		std::atomic_bool _started{ false };
-		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _renderCallbacksReady{ false };
 		std::atomic_bool _computeShaderReady{ false };
 		std::atomic_bool _constantBufferReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 		std::atomic_bool _shadowResourcesReady{ false };
 		std::atomic_bool _shadowPopulated{ false };
 		std::atomic_bool _mapLoaded{ false };
@@ -173,7 +172,6 @@ namespace cs::features
 		std::string _statusWorldspace;
 		std::string _statusDetail;
 		bool _statusFailed = false;
-		std::string _validationDetail;
 
 		// Render thread only.
 		std::unordered_map<std::string, HeightMapRecord> _heightMaps;

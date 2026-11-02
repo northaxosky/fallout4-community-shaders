@@ -152,7 +152,7 @@ namespace cs::features
 
 	void TerrainBlending::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("TerrainBlending", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				if (registration.targetId == cs::engine::ShaderInjectionTarget::kDeferredPrepass) {
 					registration.bind = [this](ID3D11DeviceContext* a_context) { BindReplayDraw(a_context); };
 					// A disable between hold and replay must still bind the held draws.
@@ -189,21 +189,14 @@ namespace cs::features
 		_resourcesReady.store(true, std::memory_order_release);
 	}
 
-	bool TerrainBlending::ValidateShaderInjections(std::string& a_error)
+	std::string_view TerrainBlending::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "hooks or shader contributions did not all register";
-			return false;
-		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so b6 carries no Terrain Blending state";
-			return false;
-		}
-		if (!cs::engine::ValidateShaderInjectionRoutes("TerrainBlending", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return "hooks or shader contributions did not all register";
+	}
+
+	bool TerrainBlending::ValidateInjectionPrerequisites(std::string& a_error)
+	{
+		return RequireSharedData(a_error, "b6 carries no Terrain Blending state");
 	}
 
 	bool TerrainBlending::IsOperational() const noexcept

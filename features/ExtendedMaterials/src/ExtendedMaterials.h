@@ -23,7 +23,6 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
@@ -34,6 +33,8 @@ namespace cs::features
 		using Settings = extended_materials::Settings;
 
 	private:
+		std::string_view GetRegistrationFailureMessage() const override;
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		ExtendedMaterials() = default;
 
 		bool SaveSettings() override;
@@ -41,7 +42,5 @@ namespace cs::features
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(extended_materials::kSchema, _settings); }
 
 		Settings _settings;
-		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 	};
 }

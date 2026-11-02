@@ -61,7 +61,7 @@ namespace cs::features
 			std::atomic<std::uint64_t> clusterDispatches{ 0 }, clusterSkips{ 0 };
 			std::atomic<std::uint32_t> clusterLights{ 0 }, clusterShadowLights{ 0 }, clusterConeLights{ 0 }, clusterStrictLights{ 0 };
 			std::atomic<std::uint32_t> clusterDropped{ 0 }, clusterX{ 0 }, clusterY{ 0 }, clusterZ{ 0 };
-			std::atomic<bool> resources{ false }, validated{ false }, hooks{ false }, dataLoaded{ false };
+			std::atomic<bool> resources{ false }, hooks{ false }, dataLoaded{ false };
 			std::atomic<std::uint64_t> authored{ 0 }, created{ 0 }, removed{ 0 };
 			std::atomic<std::uint64_t> removedLights{ 0 }, orphaned{ 0 };
 			std::atomic<std::uint64_t> derived{ 0 }, keptNative{ 0 };
@@ -76,7 +76,7 @@ namespace cs::features
 
 		bool Enabled()
 		{
-			return g_state.validated.load() && g_state.dataLoaded.load() &&
+			return LightLimitFix::GetSingleton()->IsInjectionOperational() && g_state.dataLoaded.load() &&
 			       LightLimitFix::GetSingleton()->IsActive();
 		}
 		bool IsInverseSquare(const LightData& a_data)
@@ -425,7 +425,7 @@ namespace cs::features
 			return;
 		}
 		render::forward_draw::Subscribe(this, "LLF strict lights", &OnForwardDraw);
-		if (!engine::RegisterFeatureShaderBindings("LightLimitFix", *this, [](engine::ShaderReplacementRegistration& registration) {
+		if (!engine::RegisterFeatureShaderBindings(*this, [](engine::ShaderReplacementRegistration& registration) {
 				switch (registration.targetId) {
 				case engine::ShaderInjectionTarget::kDfTiledLighting:
 					registration.bind = [](ID3D11DeviceContext* context) {
@@ -468,6 +468,7 @@ namespace cs::features
 			FailLoad("Unable to register the LLF consumers");
 			return;
 		}
+		_registrationsReady.store(true, std::memory_order_release);
 	}
 	void LightLimitFix::OnDataLoaded()
 	{
@@ -508,7 +509,7 @@ namespace cs::features
 	}
 	void LightLimitFix::OnRuntimeQuarantined(std::string_view, std::string_view) noexcept
 	{
-		g_state.validated = false;
+		_injectionsOperational.store(false, std::memory_order_release);
 		std::scoped_lock lock(g_state.mutex);
 		g_state.gridBuilt = false;
 		g_state.sidecar.RestoreNativeRadii();
@@ -573,7 +574,7 @@ namespace cs::features
 		g_state.clusterZ = size[2];
 		++g_state.clusterDispatches;
 	}
-	bool LightLimitFix::ValidateShaderInjections(std::string& a_error)
+	bool LightLimitFix::PrepareInjectionVariants(std::string& a_error)
 	{
 		std::vector<engine::ShaderFamilyDescriptor> variants;
 		for (std::uint32_t descriptor = 1; descriptor <= 18; ++descriptor)
@@ -581,9 +582,7 @@ namespace cs::features
 				.stage = engine::ShaderStage::kCompute,
 				.descriptor = descriptor,
 				.nativeName = "DFTiledLighting" });
-		g_state.validated = engine::ValidateShaderInjectionRoutes(GetName(), a_error) &&
-		                    engine::PrepareShaderInjectionVariants(variants, a_error);
-		return g_state.validated;
+		return engine::PrepareShaderInjectionVariants(variants, a_error);
 	}
 	void LightLimitFix::DrawSettings()
 	{
@@ -600,7 +599,7 @@ namespace cs::features
 	}
 	void LightLimitFix::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		a_sink.Field("injection_operational", g_state.validated.load() && g_state.resources.load() &&
+		a_sink.Field("injection_operational", IsInjectionOperational() && g_state.resources.load() &&
 												  g_state.hooks.load() && g_state.dataLoaded.load())
 			.Field("hooks_installed", g_state.hooks.load())
 			.Field("authored_definitions", g_state.authored.load())

@@ -42,7 +42,6 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		void Prepass() override;
 		void DrawSettings() override;
 		bool HasDebugUI() const override;
@@ -57,6 +56,8 @@ namespace cs::features
 		void WriteSharedData(cs::render::SharedFeatureDataCB& a_feature, cs::render::FO4SharedDataCB&) override;
 
 	private:
+		std::string_view GetRegistrationFailureMessage() const override;
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		CloudShadows() = default;
 
 		bool SaveSettings() override;
@@ -132,9 +133,6 @@ namespace cs::features
 		mutable std::mutex _legendMutex;
 		std::vector<LegendRow> _legend;
 		std::atomic_bool _overlayReady{ false };
-
-		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 
 		struct Counters
 		{

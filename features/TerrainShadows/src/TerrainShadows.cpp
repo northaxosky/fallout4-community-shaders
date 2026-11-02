@@ -184,7 +184,7 @@ namespace cs::features
 
 	void TerrainShadows::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("TerrainShadows", *this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad("Terrain shadow shader contribution registration failed.");
 			return;
 		}
@@ -412,31 +412,19 @@ namespace cs::features
 		}
 	}
 
-	bool TerrainShadows::ValidateShaderInjections(std::string& a_error)
+	std::string_view TerrainShadows::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
+		return "terrain shadow bootstrap is incomplete (shader replacement registration)";
+	}
+
+	bool TerrainShadows::ValidateInjectionPrerequisites(std::string& a_error)
+	{
 		const auto readiness = GetBootstrapReadiness();
 		if (!ts::IsReadyForInjectionFreeze(readiness)) {
 			a_error = "terrain shadow bootstrap is incomplete (" + ts::MissingBootstrapPrerequisites(readiness) + ")";
-			_validationDetail = a_error;
 			return false;
 		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error =
-				"the shared substrate is unavailable, so b5 and b6 carry no terrain shadow data";
-			_validationDetail = a_error;
-			return false;
-		}
-
-		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"TerrainShadows", a_error)) {
-			_validationDetail = a_error;
-			return false;
-		}
-
-		_validationDetail.clear();
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return RequireSharedData(a_error, "b5 and b6 carry no terrain shadow data");
 	}
 
 	std::string TerrainShadows::ResolveWorldspaceEditorId()

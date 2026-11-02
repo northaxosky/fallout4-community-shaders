@@ -44,7 +44,6 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		void Prepass() override;
 		void DrawSettings() override;
 		void OnEnabledChanged(bool a_enabled) noexcept override;
@@ -59,6 +58,8 @@ namespace cs::features
 		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&) override;
 
 	private:
+		std::string_view GetRegistrationFailureMessage() const override;
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		ImageBasedLighting() = default;
 
 		bool SaveSettings() override;
@@ -92,9 +93,7 @@ namespace cs::features
 		// Two 3x1 R16G16B16A16_FLOAT textures: the SH coefficients of R, G and B.
 		std::unique_ptr<buffer::Texture2D> _envSH, _skySH;
 		winrt::com_ptr<ID3D11ComputeShader> _projectCompute;
-		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _resourcesReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 		// The sky cube provider runs before the pack.
 		std::atomic_bool _wantsSkyCube{ false };
 		// The SH textures hold projections until cleared once after a disable.

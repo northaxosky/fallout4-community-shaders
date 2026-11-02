@@ -48,7 +48,7 @@ namespace cs::features
 	void UnifiedWater::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
 	{
 		a_fo4.EnabledUnifiedWater = _ready.load(std::memory_order_acquire) &&
-		                                    _injections.load(std::memory_order_acquire) ?
+		                                    _injectionsOperational.load(std::memory_order_acquire) ?
 		                                1u :
 		                                0u;
 	}
@@ -56,11 +56,11 @@ namespace cs::features
 	void UnifiedWater::Load()
 	{
 		_appliedEnabled.store(IsEnabled());
-		if (!engine::RegisterFeatureShaderBindings("UnifiedWater", *this)) {
+		if (!engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad("Unified Water shader contribution registration failed.");
 			return;
 		}
-		_registrations.store(true, std::memory_order_release);
+		_registrationsReady.store(true, std::memory_order_release);
 	}
 
 	void UnifiedWater::OnPostPostLoad()
@@ -83,18 +83,6 @@ namespace cs::features
 			throw std::runtime_error("Unified Water native hook installation failed.");
 		}
 		_hooks.store(true, std::memory_order_release);
-	}
-
-	bool UnifiedWater::ValidateShaderInjections(std::string& a_error)
-	{
-		if (!_registrations.load(std::memory_order_acquire)) {
-			a_error = "shader contribution did not register";
-			return false;
-		}
-		if (!engine::ValidateShaderInjectionRoutes("UnifiedWater", a_error))
-			return false;
-		_injections.store(true, std::memory_order_release);
-		return true;
 	}
 
 	void UnifiedWater::OnDataLoaded()
@@ -503,7 +491,7 @@ namespace cs::features
 	void UnifiedWater::CollectTelemetry(telemetry::Sink& a_sink) const
 	{
 		const auto progress = _cache.GetProgress();
-		a_sink.Field("operational", _ready.load() && _injections.load())
+		a_sink.Field("operational", _ready.load() && _injectionsOperational.load())
 			.Field("applied_enabled", _appliedEnabled.load())
 			.Field("hooks_ready", _hooks.load())
 			.Field("cache_ready", _cache.IsReady())

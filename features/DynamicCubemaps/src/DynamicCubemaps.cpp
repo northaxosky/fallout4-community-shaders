@@ -258,7 +258,7 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		if (!cs::engine::RegisterFeatureShaderBindings("DynamicCubemaps", *this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad(
 				"DynamicCubemaps could not register its water, composite, "
 				"deferred lighting, or SSLR shader contributions");
@@ -683,34 +683,18 @@ namespace cs::features
 		return true;
 	}
 
-	bool DynamicCubemaps::ValidateShaderInjections(std::string& a_error)
+	std::string_view DynamicCubemaps::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "shader contribution and hooks did not all register";
-			_validationDetail = a_error;
-			return false;
-		}
+		return "shader contribution and hooks did not all register";
+	}
+
+	bool DynamicCubemaps::ValidateInjectionPrerequisites(std::string& a_error)
+	{
 		if (!_resourcesReady.load(std::memory_order_acquire)) {
 			a_error = "cubemap resources or compute shaders are unavailable";
-			_validationDetail = a_error;
 			return false;
 		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable";
-			_validationDetail = a_error;
-			return false;
-		}
-
-		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"DynamicCubemaps", a_error)) {
-			_validationDetail = a_error;
-			return false;
-		}
-
-		_validationDetail.clear();
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return RequireSharedData(a_error);
 	}
 
 	void DynamicCubemaps::PostDeferred()

@@ -70,7 +70,7 @@ namespace cs::features
 
 	void VolumetricShadows::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("VolumetricShadows", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				registration.bind = [this, target = registration.targetId](ID3D11DeviceContext* a_context) { BindConsumer(a_context, target); };
 			})) {
 			FailLoad("Volumetric Shadows shader contribution registration failed.");
@@ -87,21 +87,9 @@ namespace cs::features
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
-	bool VolumetricShadows::ValidateShaderInjections(std::string& a_error)
+	bool VolumetricShadows::ValidateInjectionPrerequisites(std::string& a_error)
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "the shader contribution did not register";
-			return false;
-		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so the consumers read no camera data";
-			return false;
-		}
-		if (!cs::engine::ValidateShaderInjectionRoutes("VolumetricShadows", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return RequireSharedData(a_error, "the consumers read no camera data");
 	}
 
 	VolumetricShadows::MipChain VolumetricShadows::CreateMipChain(ID3D11Device* a_device, std::string_view a_name)

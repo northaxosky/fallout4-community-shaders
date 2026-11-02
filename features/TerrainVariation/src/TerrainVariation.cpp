@@ -159,7 +159,7 @@ namespace cs::features
 
 	void TerrainVariation::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("TerrainVariation", *this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad("Terrain Variation shader contribution registration failed.");
 			return;
 		}
@@ -178,21 +178,14 @@ namespace cs::features
 		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kY, "mesh");
 	}
 
-	bool TerrainVariation::ValidateShaderInjections(std::string& a_error)
+	std::string_view TerrainVariation::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "shader contributions did not all register";
-			return false;
-		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so b6 carries no Terrain Variation settings";
-			return false;
-		}
-		if (!cs::engine::ValidateShaderInjectionRoutes("TerrainVariation", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return "shader contributions did not all register";
+	}
+
+	bool TerrainVariation::ValidateInjectionPrerequisites(std::string& a_error)
+	{
+		return RequireSharedData(a_error, "b6 carries no Terrain Variation settings");
 	}
 
 	void TerrainVariation::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4)

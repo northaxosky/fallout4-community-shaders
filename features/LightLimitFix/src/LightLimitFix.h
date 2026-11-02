@@ -26,7 +26,6 @@ namespace cs::features
 		void Prepass() override;
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
@@ -42,6 +41,7 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 	private:
+		bool PrepareInjectionVariants(std::string& a_error) override;
 		LightLimitFix() = default;
 
 		light_limit_fix::Settings _settings;

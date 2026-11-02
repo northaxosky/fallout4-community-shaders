@@ -143,7 +143,7 @@ namespace cs::features
 	{
 		// FO4: directional consumers execute inside DeferredLightsImpl under shader ownership.
 		const bool replacementRegistered =
-			cs::engine::RegisterFeatureShaderBindings("ScreenSpaceShadows", *this);
+			cs::engine::RegisterFeatureShaderBindings(*this);
 		if (!replacementRegistered) {
 			FailLoad("Failed to register the ScreenSpaceShadows BSDF light shader replacement");
 			return;
@@ -153,7 +153,7 @@ namespace cs::features
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 			ScreenSpaceShadows::GetSingleton()->Prepass();
 		});
-		_started.store(true, std::memory_order_release);
+		_registrationsReady.store(true, std::memory_order_release);
 		L->info(
 			"Registered deferred-lights callbacks (enabled={}).",
 			IsEnabled());
@@ -341,7 +341,7 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		if (!_started.load(std::memory_order_acquire) || !a_device)
+		if (!_registrationsReady.load(std::memory_order_acquire) || !a_device)
 			return;
 		if (_deviceIdentity != a_device) {
 			_deviceIdentity = a_device;
@@ -386,7 +386,7 @@ namespace cs::features
 
 	bool ScreenSpaceShadows::IsShadowMaskReady()
 	{
-		if (!_started.load(std::memory_order_acquire))
+		if (!_registrationsReady.load(std::memory_order_acquire))
 			return false;
 		(void)EnsureResources();
 		render::Extent required;
@@ -511,7 +511,7 @@ namespace cs::features
 	void ScreenSpaceShadows::OnPreDeferredLights()
 	{
 		_realMaskReadyForDraw = false;
-		if (!_started.load(std::memory_order_acquire)) {
+		if (!_registrationsReady.load(std::memory_order_acquire)) {
 			return;
 		}
 

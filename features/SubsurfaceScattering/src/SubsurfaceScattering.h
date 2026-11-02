@@ -77,7 +77,7 @@ namespace cs::features
 		bool EnsureResources(ID3D11Texture2D* a_target);
 		void UpdateKernels();
 		void UpdateConstants(const cs::engine::WorldCameraRecord&);
-		bool CanRun() const noexcept { return _started && IsEnabled() && !_unsupported && !_failed; }
+		bool CanRun() const noexcept { return _registrationsReady && IsEnabled() && !_unsupported && !_failed; }
 		bool SkinDrawnThisFrame() const noexcept { return _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount(); }
 		void ApplyNativeControls();
 		void RestoreNativeControls() noexcept;
@@ -102,7 +102,7 @@ namespace cs::features
 		std::optional<ConsumerCB> _consumerData;
 		winrt::com_ptr<ID3D11ComputeShader> _prepare, _extract, _horizontal, _vertical, _burley;
 		std::optional<NativeSnapshot> _native;
-		std::atomic_bool _started{ false }, _resourcesReady{ false }, _failed{ false };
+		std::atomic_bool _resourcesReady{ false }, _failed{ false };
 		std::atomic_bool _unsupported{ false }, _produced{ false };
 		std::atomic<Preview> _preview{ Preview::kNone };
 		std::atomic_bool _nativeApplied{ false };

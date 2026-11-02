@@ -63,7 +63,6 @@ namespace cs::features
 		void Prepass() override;
 		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 
@@ -82,6 +81,8 @@ namespace cs::features
 		ID3D11ShaderResourceView* GetReflectionsSRV() const noexcept;
 
 	private:
+		std::string_view GetRegistrationFailureMessage() const override;
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		static constexpr std::uint32_t kCubemapSize = 256;
 		static constexpr std::uint32_t kMipLevels = 9;
 		static constexpr std::uint32_t kBc6hMipLevels = kMipLevels;
@@ -190,8 +191,6 @@ namespace cs::features
 		bool Operational() const noexcept;
 		ID3D11ShaderResourceView* PublishedSRV(bool a_reflections) const noexcept;
 
-		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _enabledSSR{ true };
 		std::atomic<float> _materialReflections{ 0.25f };
@@ -270,6 +269,5 @@ namespace cs::features
 		float _previousHoursPassed = 0.0f;
 		std::uint32_t _lastCallbackFrame = 0;
 		bool _lastCallbackFrameValid = false;
-		std::string _validationDetail;
 	};
 }

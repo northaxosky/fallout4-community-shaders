@@ -88,7 +88,7 @@ namespace cs::features
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 7> _shaders;
 		DirectX::XMFLOAT4X4 _previousViewInverse{};
 		std::optional<bool> _vanillaSSAOSnapshot;
-		std::atomic_bool _started{ false }, _resourcesReady{ false }, _produced{ false };
+		std::atomic_bool _resourcesReady{ false }, _produced{ false };
 		std::atomic_bool _recompile{ true }, _queuedReset{ true }, _preview{ false };
 		std::atomic_bool _tiled{ false }, _cameraReady{ false }, _failed{ false };
 		std::atomic_bool _tiledAvailable{ false }, _motionAvailable{ false }, _historyUsed{ false };

@@ -32,7 +32,6 @@ namespace cs::features
 		void DrawSettings() override;
 		void DrawOverlay() override;
 		bool IsOverlayActive() const override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(telemetry::Sink& a_sink) const override;
 
@@ -107,9 +106,7 @@ namespace cs::features
 		std::atomic_bool _appliedEnabled{ true };
 		bool _applying = false;
 		std::atomic_bool _ready{ false };
-		std::atomic_bool _registrations{ false };
 		std::atomic_bool _hooks{ false };
-		std::atomic_bool _injections{ false };
 		std::atomic_bool _exterior{ false };
 		std::atomic_bool _lodWaterAttached{ true };
 		std::atomic_bool _refreshTiles{ false };

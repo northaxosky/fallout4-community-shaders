@@ -227,8 +227,33 @@ namespace cs
 		std::string _loadFailureReason;
 	};
 
+	// Owns the registration/operational flags and the common injection validation.
+	class ShaderInjectionFeature : public Feature
+	{
+	public:
+		// Registrations -> prerequisites -> routes -> variants; operational only if all pass.
+		bool ValidateShaderInjections(std::string& a_error) final;
+		bool IsInjectionOperational() const noexcept { return _injectionsOperational.load(std::memory_order_acquire); }
+		std::string GetInjectionValidationError() const;
+
+	protected:
+		virtual std::string_view GetRegistrationFailureMessage() const { return "the shader contribution did not register"; }
+		// Runs before route validation; the feature's own readiness checks.
+		virtual bool ValidateInjectionPrerequisites(std::string&) { return true; }
+		// Runs after route validation, once the routes exist.
+		virtual bool PrepareInjectionVariants(std::string&) { return true; }
+		static bool RequireSharedData(std::string& a_error, std::string_view a_consequence = {});
+
+		std::atomic_bool _registrationsReady{ false };
+		std::atomic_bool _injectionsOperational{ false };
+
+	private:
+		mutable std::mutex _injectionErrorMutex;
+		std::string _injectionError;
+	};
+
 	template <const engine::ShaderDefineDeclaration& Declaration>
-	class ShaderFeature : public Feature
+	class ShaderFeature : public ShaderInjectionFeature
 	{
 	public:
 		std::string_view GetShaderDefineName() const override { return Declaration.GetShaderDefineName(); }

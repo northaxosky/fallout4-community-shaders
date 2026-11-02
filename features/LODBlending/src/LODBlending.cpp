@@ -63,7 +63,7 @@ namespace cs::features
 
 	void LODBlending::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("LODBlending", *this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
@@ -82,21 +82,14 @@ namespace cs::features
 		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kX, "lod");
 	}
 
-	bool LODBlending::ValidateShaderInjections(std::string& a_error)
+	std::string_view LODBlending::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "shader contributions did not all register";
-			return false;
-		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so b6 carries no LOD blending settings";
-			return false;
-		}
-		if (!cs::engine::ValidateShaderInjectionRoutes("LODBlending", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return "shader contributions did not all register";
+	}
+
+	bool LODBlending::ValidateInjectionPrerequisites(std::string& a_error)
+	{
+		return RequireSharedData(a_error, "b6 carries no LOD blending settings");
 	}
 
 	void LODBlending::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4)

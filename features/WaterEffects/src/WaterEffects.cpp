@@ -94,7 +94,7 @@ namespace cs::features
 	void WaterEffects::Load()
 	{
 		// FO4: only owned, validated routes may activate a live contribution.
-		if (!cs::engine::RegisterFeatureShaderBindings("WaterEffects", *this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, [this](cs::engine::ShaderReplacementRegistration& registration) {
 				if (registration.targetId == cs::engine::ShaderInjectionTarget::kBsdfLight) {
 					registration.bind = [this](ID3D11DeviceContext* a_context) { BindCaustics(a_context); };
 				}
@@ -317,17 +317,10 @@ namespace cs::features
 		return _validationDetail;
 	}
 
-	bool WaterEffects::ValidateShaderInjections(std::string& a_error)
+	bool WaterEffects::ValidateInjectionPrerequisites(std::string& a_error)
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "the shader contribution did not register";
-			SetValidationDetail(a_error);
-			return false;
-		}
 		if (!_renderCallbacksReady.load(std::memory_order_acquire)) {
 			a_error = "the deferred binding scopes did not install";
-			SetValidationDetail(a_error);
 			return false;
 		}
 		if (!_resourcesReady.load(std::memory_order_acquire)) {
@@ -335,25 +328,9 @@ namespace cs::features
 			a_error = detail.empty() ?
 			              "the caustics texture is unavailable" :
 			              "the caustics texture is unavailable: " + detail;
-			SetValidationDetail(a_error);
 			return false;
 		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error =
-				"the shared substrate is unavailable, so b5 carries no water grid";
-			SetValidationDetail(a_error);
-			return false;
-		}
-
-		if (!cs::engine::ValidateShaderInjectionRoutes(
-				"WaterEffects", a_error)) {
-			SetValidationDetail(a_error);
-			return false;
-		}
-
-		SetValidationDetail({});
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return RequireSharedData(a_error, "b5 carries no water grid");
 	}
 
 	bool WaterEffects::CanBind() const noexcept
@@ -397,7 +374,9 @@ namespace cs::features
 		const auto water = cs::engine::GetWaterDataStatus();
 		const auto lightSnapshot = cs::engine::GetShaderInjectionTargetSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfLight);
-		const auto detail = GetValidationDetail();
+		auto detail = GetInjectionValidationError();
+		if (detail.empty())
+			detail = GetValidationDetail();
 		a_sink
 			.Field("has_water", water.cameraCellHeight != cs::engine::kNoWaterHeight)
 			.Field(

@@ -48,7 +48,6 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 		void Prepass() override;
 		void DrawSettings() override;
 		bool HasDebugUI() const override { return true; }
@@ -65,6 +64,7 @@ namespace cs::features
 		void WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4) override;
 
 	private:
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		Skylighting() = default;
 
 		bool SaveSettings() override;
@@ -266,8 +266,5 @@ namespace cs::features
 		ProbeState _probeState = ProbeState::kPending;
 		bool _loggedFirstCapture = false;
 		bool _loggedTargetFailure = false;
-
-		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 	};
 }

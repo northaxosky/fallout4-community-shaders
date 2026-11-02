@@ -80,7 +80,6 @@ namespace cs::features
 		static constexpr uint kMaskPSSlot = 45;
 
 		Settings _settings;
-		std::atomic_bool _started{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _whiteFallbackReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };

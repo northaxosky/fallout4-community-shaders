@@ -37,6 +37,7 @@ namespace cs::features
 
 		constexpr std::string_view kEnvironmentPass = "ImageBasedLighting::EnvDiffuseIBL";
 		constexpr std::string_view kSkyPass = "ImageBasedLighting::SkyDiffuseIBL";
+		constexpr std::string_view kUnavailable = "the shader contribution or SH resources are unavailable";
 
 	}
 
@@ -76,7 +77,7 @@ namespace cs::features
 			FailLoad("Image Based Lighting requires Dynamic Cubemaps to be loaded.");
 			return;
 		}
-		if (!engine::RegisterFeatureShaderBindings("ImageBasedLighting", *this, [this](engine::ShaderReplacementRegistration& registration) {
+		if (!engine::RegisterFeatureShaderBindings(*this, [this](engine::ShaderReplacementRegistration& registration) {
 				registration.bind = [this](ID3D11DeviceContext* a_context) { BindConsumer(a_context); };
 			})) {
 			FailLoad("Image Based Lighting shader contribution registration failed.");
@@ -140,21 +141,18 @@ namespace cs::features
 		L->info("SH textures ready: 2x 3x1 R16G16B16A16_FLOAT at t{}-t{}.", kSHSlot, kSHSlot + kSHSlotCount - 1);
 	}
 
-	bool ImageBasedLighting::ValidateShaderInjections(std::string& a_error)
+	std::string_view ImageBasedLighting::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire) || !_resourcesReady.load(std::memory_order_acquire)) {
-			a_error = "the shader contribution or SH resources are unavailable";
+		return kUnavailable;
+	}
+
+	bool ImageBasedLighting::ValidateInjectionPrerequisites(std::string& a_error)
+	{
+		if (!_resourcesReady.load(std::memory_order_acquire)) {
+			a_error = kUnavailable;
 			return false;
 		}
-		if (!render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so b6 carries no IBL settings";
-			return false;
-		}
-		if (!engine::ValidateShaderInjectionRoutes("ImageBasedLighting", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return RequireSharedData(a_error, "b6 carries no IBL settings");
 	}
 
 	bool ImageBasedLighting::IsSceneDisabled(const Settings& a_settings)

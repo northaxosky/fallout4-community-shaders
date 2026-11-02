@@ -61,14 +61,14 @@ namespace cs::features
 
 	void ScreenSpaceGI::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("ScreenSpaceGI", *this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad("SSGI shader contribution registration failed.");
 			return;
 		}
 		cs::engine::RegisterPostDeferredLightsImpl(*this, [] { GetSingleton()->OnPostDeferredLights(); GetSingleton()->Prepass(); });
 		if (!cs::engine::RegisterPostDeferredPrePass(*this, [] { GetSingleton()->ApplyVanillaSSAO(); }))
 			L->warn("Vanilla SSAO control could not register; the engine's AO stays as configured.");
-		_started = true;
+		_registrationsReady = true;
 	}
 
 	void ScreenSpaceGI::ApplyVanillaSSAO()
@@ -135,7 +135,7 @@ namespace cs::features
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		if (!_started || !a_device)
+		if (!_registrationsReady || !a_device)
 			return;
 		try {
 			_constants = std::make_unique<cs::buffer::ConstantBuffer>(cs::buffer::ConstantBufferDesc<SSGICB>());
@@ -284,7 +284,7 @@ namespace cs::features
 	{
 		auto* state = cs::engine::GetGraphicsState();
 		auto* context = cs::engine::GetImmediateContext();
-		if (!_started || !state || !context)
+		if (!_registrationsReady || !state || !context)
 			return;
 		if (_hasFrame && _lastFrame == state->frameCount) {
 			++_repeats;
@@ -491,7 +491,7 @@ namespace cs::features
 
 	void ScreenSpaceGI::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		a_sink.Field("injection_registered", _started.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("ao_produced", _produced.load()).Field("ao_denoised", _produced && _settings.enableTemporalDenoiser).Field("vanilla_ssao_applied", _vanillaSSAOApplied.load()).Field("radiance_available", _produced.load()).Field("bounce_produced", _produced && _settings.enableGI).Field("bounce_denoised", _produced && _settings.enableGI && _settings.enableBlur).Field("normal_bound", _binds > 0 && _produced).Field("history_valid", _produced && _historyUsed).Field("motion_available", _motionAvailable.load()).Field("temporal_dispatches", static_cast<std::int64_t>(_produced && _settings.enableTemporalDenoiser ? 2 + _settings.enableBlur : 0)).Field("reset_count", static_cast<std::int64_t>(_resetCount.load())).Field("last_reset_reason", std::string_view(_resetReason.load())).Field("tiled_b_available", _tiledAvailable.load()).Field("tiled_lighting_active", _tiled.load()).Field("camera_ready", _cameraReady.load()).Field("camera_origin", std::format("{} {} {}", _origin[0].load(), _origin[1].load(), _origin[2].load())).Field("camera_previous_origin", std::format("{} {} {}", _previousOrigin[0].load(), _previousOrigin[1].load(), _previousOrigin[2].load())).Field("radiance_source_count", static_cast<std::int64_t>(_produced && _settings.enableGI ? (_tiled ? 2 : 1) : 0)).Field("composition_binds", static_cast<std::int64_t>(_binds.load())).Field("repeat_callbacks", static_cast<std::int64_t>(_repeats.load())).Field("contaminated_light_classes", std::int64_t{ 16 }).Field("contaminated_routes", std::int64_t{ 24 }).Field("resolution_mode", static_cast<std::int64_t>(_settings.resolutionMode)).Field("generation", static_cast<std::int64_t>(_generation)).Dimensions("working", _width, _height);
+		a_sink.Field("injection_registered", _registrationsReady.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("ao_produced", _produced.load()).Field("ao_denoised", _produced && _settings.enableTemporalDenoiser).Field("vanilla_ssao_applied", _vanillaSSAOApplied.load()).Field("radiance_available", _produced.load()).Field("bounce_produced", _produced && _settings.enableGI).Field("bounce_denoised", _produced && _settings.enableGI && _settings.enableBlur).Field("normal_bound", _binds > 0 && _produced).Field("history_valid", _produced && _historyUsed).Field("motion_available", _motionAvailable.load()).Field("temporal_dispatches", static_cast<std::int64_t>(_produced && _settings.enableTemporalDenoiser ? 2 + _settings.enableBlur : 0)).Field("reset_count", static_cast<std::int64_t>(_resetCount.load())).Field("last_reset_reason", std::string_view(_resetReason.load())).Field("tiled_b_available", _tiledAvailable.load()).Field("tiled_lighting_active", _tiled.load()).Field("camera_ready", _cameraReady.load()).Field("camera_origin", std::format("{} {} {}", _origin[0].load(), _origin[1].load(), _origin[2].load())).Field("camera_previous_origin", std::format("{} {} {}", _previousOrigin[0].load(), _previousOrigin[1].load(), _previousOrigin[2].load())).Field("radiance_source_count", static_cast<std::int64_t>(_produced && _settings.enableGI ? (_tiled ? 2 : 1) : 0)).Field("composition_binds", static_cast<std::int64_t>(_binds.load())).Field("repeat_callbacks", static_cast<std::int64_t>(_repeats.load())).Field("contaminated_light_classes", std::int64_t{ 16 }).Field("contaminated_routes", std::int64_t{ 24 }).Field("resolution_mode", static_cast<std::int64_t>(_settings.resolutionMode)).Field("generation", static_cast<std::int64_t>(_generation)).Dimensions("working", _width, _height);
 	}
 
 	void ScreenSpaceGI::DrawSettings()

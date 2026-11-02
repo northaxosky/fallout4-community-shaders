@@ -55,7 +55,6 @@ namespace cs::features
 		void Load() override;
 		void Prepass() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
-		bool ValidateShaderInjections(std::string& a_error) override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -65,6 +64,7 @@ namespace cs::features
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 	private:
+		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		WaterEffects() = default;
 
 		bool BuildCausticsResources(ID3D11Device* a_device, std::string& a_error);
@@ -80,11 +80,9 @@ namespace cs::features
 		std::atomic<DebugVisualization> _debugVisualization{
 			DebugVisualization::kOff
 		};
-		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _renderCallbacksReady{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _debugResourcesReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
 		std::atomic_uint64_t _binds{ 0 };
 		std::atomic_uint64_t _debugFrames{ 0 };
 		std::atomic_uint64_t _debugDepthMissing{ 0 };

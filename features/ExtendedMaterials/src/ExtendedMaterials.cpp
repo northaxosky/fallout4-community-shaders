@@ -99,7 +99,7 @@ namespace cs::features
 
 	void ExtendedMaterials::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings("ExtendedMaterials", *this, cs::engine::AttachPrepassExtraTargets)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, cs::engine::AttachPrepassExtraTargets)) {
 			FailLoad("Extended Materials shader contribution registration failed.");
 			return;
 		}
@@ -122,21 +122,14 @@ namespace cs::features
 		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kZ, "eligible");
 	}
 
-	bool ExtendedMaterials::ValidateShaderInjections(std::string& a_error)
+	std::string_view ExtendedMaterials::GetRegistrationFailureMessage() const
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "shader contributions did not all register";
-			return false;
-		}
-		if (!cs::render::IsSharedDataReady()) {
-			a_error = "the shared substrate is unavailable, so b6 carries no Extended Materials settings";
-			return false;
-		}
-		if (!cs::engine::ValidateShaderInjectionRoutes("ExtendedMaterials", a_error))
-			return false;
-		_injectionsOperational.store(true, std::memory_order_release);
-		return true;
+		return "shader contributions did not all register";
+	}
+
+	bool ExtendedMaterials::ValidateInjectionPrerequisites(std::string& a_error)
+	{
+		return RequireSharedData(a_error, "b6 carries no Extended Materials settings");
 	}
 
 	void ExtendedMaterials::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB&)
