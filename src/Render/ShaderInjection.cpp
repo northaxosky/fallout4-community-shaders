@@ -1811,7 +1811,7 @@ namespace cs::engine
 			summary.published);
 	}
 
-	std::size_t PrewarmShaderInjectionVariants()
+	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets)
 	{
 		auto& service = GetService();
 		const auto plan = service.published.load(std::memory_order_acquire);
@@ -1823,6 +1823,7 @@ namespace cs::engine
 		for (const auto& row : rows) {
 			// Rows without a native name have no shader the engine could bind.
 			if (row.nativeName.empty() || !ShaderEnabled(row.target) ||
+				(!a_targets.empty() && std::ranges::find(a_targets, row.target) == a_targets.end()) ||
 				(SupportedStages(row.target) & ShaderStageBit(row.stage)) == 0)
 				continue;
 			const auto* target = FindPublishedTarget(*plan, row.target);
