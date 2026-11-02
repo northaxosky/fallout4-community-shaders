@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
 #include <d3dcompiler.h>
 #include <system_error>
+#include <unordered_map>
 
 static_assert(
 	cs::shader_cache::kCachedOptimizedFlags1 == (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_SKIP_VALIDATION),
@@ -61,6 +63,16 @@ namespace cs::shader_cache
 
 	std::string EncodeLocator(const std::filesystem::path& a_path)
 	{
+		// Canonicalization hits the filesystem; sources and roots repeat per variant.
+		static std::mutex memoMutex;
+		static std::unordered_map<std::filesystem::path::string_type, std::string> memo;
+		constexpr std::size_t kMemoLimit = 8192;
+		{
+			const std::scoped_lock lock(memoMutex);
+			if (const auto found = memo.find(a_path.native()); found != memo.end())
+				return found->second;
+		}
+
 		std::error_code error;
 		std::filesystem::path resolved = std::filesystem::weakly_canonical(a_path, error);
 		if (error || resolved.empty()) {
@@ -70,11 +82,17 @@ namespace cs::shader_cache
 		}
 
 		// unencodable paths only cost a cache miss
+		std::string locator;
 		try {
-			return util::PathToUtf8(resolved.lexically_normal());
+			locator = util::PathToUtf8(resolved.lexically_normal());
 		} catch (...) {
 			return {};
 		}
+		const std::scoped_lock lock(memoMutex);
+		if (memo.size() >= kMemoLimit)
+			memo.clear();
+		memo.emplace(a_path.native(), locator);
+		return locator;
 	}
 
 	std::filesystem::path DecodeLocator(std::string_view a_locator)
