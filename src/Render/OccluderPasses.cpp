@@ -151,12 +151,29 @@ namespace cs::engine
 				if (counting)
 					stats.accepted.fetch_add(1, std::memory_order_relaxed);
 
+				BatchSlot slot;
 				if (capture->batchMode != OccluderBatchMode::kOff) {
-					const auto decision = RecordOccluder(capture->batchMode, *a_property, *a_geometry, OcclusionTechnique(*a_property, *a_geometry));
+					const auto decision = RecordOccluder(capture->batchMode, *a_property, *a_geometry, OcclusionTechnique(*a_property, *a_geometry), slot);
 					if (decision != BatchDecision::kStock)
 						return nullptr;
 				}
 
+				auto* passes = EnginePasses(a_property, a_geometry, a_renderMode, a_accumulator, counting);
+				// The engine's pass of a recorded shape is the validation reference.
+				if (slot.world)
+					ReconcileWithEnginePass(slot, passes ? passes->passList : nullptr);
+				return passes;
+			}
+
+		private:
+			static RE::BSShaderProperty::RenderPassArray* EnginePasses(
+				RE::BSLightingShaderProperty* a_property,
+				RE::BSGeometry* a_geometry,
+				std::uint32_t a_renderMode,
+				RE::BSShaderAccumulator* a_accumulator,
+				bool counting)
+			{
+				auto& stats = GetOccluderStats();
 				auto* passes = func(a_property, a_geometry, a_renderMode, a_accumulator);
 				if (passes) {
 					if (counting)
@@ -178,6 +195,8 @@ namespace cs::engine
 				}
 				return passes;
 			}
+
+		public:
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 	}

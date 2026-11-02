@@ -10,8 +10,10 @@
 
 #include <d3d11.h>
 
+#include <array>
 #include <cstring>
 #include <format>
+#include <optional>
 #include <string_view>
 
 namespace cs::engine
@@ -299,19 +301,21 @@ namespace cs::engine
 			return a_options.validationInterval && ++captures % a_options.validationInterval == 0;
 		}
 
-		// A second capture of the same view: the engine draws the batchable occluders into
-		// one map and the batch draws the same set into another; the live map is untouched.
-		void ValidateBatch(
+		// A second capture of the same view: the engine draws the batchable occluders of
+		// a_classes into one map and the batch draws the same set into another; the live
+		// map is untouched.
+		[[nodiscard]] std::optional<BatchValidationResult> RunValidation(
 			const OcclusionCaptureRequest& a_request,
 			RE::Precipitation& a_precipitation,
-			RE::BSGraphics::DepthStencilTarget& a_stockTarget)
+			RE::BSGraphics::DepthStencilTarget& a_stockTarget,
+			std::uint32_t a_classes,
+			BatchRecorded& a_recorded)
 		{
 			BatchValidationTargets targets;
-			auto& stats = GetBatchStats();
-			if (!AcquireValidationTargets(targets) || !PrepareOccluderBatch()) {
-				stats.validationFailures.fetch_add(1, std::memory_order_relaxed);
-				return;
-			}
+			if (!AcquireValidationTargets(targets) || !PrepareOccluderBatch())
+				return std::nullopt;
+			ResetReconcileStats();
+			SetValidationClasses(a_classes);
 			auto request = a_request;
 			request.target = targets.engine;
 			{
@@ -320,19 +324,51 @@ namespace cs::engine
 				DirectX::XMFLOAT4X4 ignored;
 				capture.Capture(ignored);
 			}
-			const auto recorded = GetBatchRecorded();
+			SetValidationClasses(~0u);
+			a_recorded = GetBatchRecorded();
 			const auto result = CompareValidationTargets(kOcclusionMapSize);
-			if (!result.ok) {
+			if (!result.ok)
+				return std::nullopt;
+			return result;
+		}
+
+		void LogValidation(std::string_view a_label, const BatchValidationResult& a_result, const BatchRecorded& a_recorded)
+		{
+			const auto& stats = GetBatchStats();
+			const auto count = [](const std::atomic<std::uint32_t>& a_value) { return a_value.load(std::memory_order_relaxed); };
+			L->log(a_result.mismatchedTexels ? spdlog::level::warn : spdlog::level::info,
+				"occluder batch validation [{}]: mismatched_texels={} max_delta={} batch_nearer={} engine_nearer={} "
+				"bounds=({},{})-({},{}) plain={} merge={} reconciled={} stale_world={} count_differs={} lod_not_default={} no_engine_pass={}",
+				a_label, a_result.mismatchedTexels, a_result.maxDelta, a_result.batchNearer, a_result.engineNearer,
+				a_result.bounds[0], a_result.bounds[1], a_result.bounds[2], a_result.bounds[3], a_recorded.plain, a_recorded.mergeInstanced,
+				count(stats.reconciled), count(stats.staleWorld), count(stats.countDiffers), count(stats.lodNotDefault), count(stats.noEnginePass));
+		}
+
+		// On a mismatch each class is checked alone to say which one differs.
+		void ValidateBatch(
+			const OcclusionCaptureRequest& a_request,
+			RE::Precipitation& a_precipitation,
+			RE::BSGraphics::DepthStencilTarget& a_stockTarget)
+		{
+			auto& stats = GetBatchStats();
+			BatchRecorded recorded;
+			const auto result = RunValidation(a_request, a_precipitation, a_stockTarget, ~0u, recorded);
+			if (!result) {
 				stats.validationFailures.fetch_add(1, std::memory_order_relaxed);
-				L->warn("occluder batch validation could not read back its comparison");
+				L->warn("occluder batch validation could not run");
 				return;
 			}
 			stats.validations.fetch_add(1, std::memory_order_relaxed);
-			stats.mismatchedTexels.store(result.mismatchedTexels, std::memory_order_relaxed);
-			stats.maxDelta.store(result.maxDelta, std::memory_order_relaxed);
-			L->log(result.mismatchedTexels ? spdlog::level::warn : spdlog::level::info,
-				"occluder batch validation: mismatched_texels={} max_delta={} plain={} merge={}",
-				result.mismatchedTexels, result.maxDelta, recorded.plain, recorded.mergeInstanced);
+			stats.mismatchedTexels.store(result->mismatchedTexels, std::memory_order_relaxed);
+			stats.maxDelta.store(result->maxDelta, std::memory_order_relaxed);
+			LogValidation("all", *result, recorded);
+			if (!result->mismatchedTexels)
+				return;
+			constexpr std::array<std::pair<std::string_view, BatchClass>, 2> kClasses{ { { "plain", BatchClass::kPlain }, { "merge", BatchClass::kMergeInstanced } } };
+			for (const auto& [label, batchClass] : kClasses) {
+				if (const auto alone = RunValidation(a_request, a_precipitation, a_stockTarget, 1u << static_cast<unsigned>(batchClass), recorded))
+					LogValidation(label, *alone, recorded);
+			}
 		}
 	}
 

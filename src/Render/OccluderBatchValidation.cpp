@@ -23,6 +23,7 @@ namespace cs::engine
 		// Same square as the occlusion map the batch is checked against.
 		constexpr std::uint32_t kMapSize = 512;
 		constexpr std::uint32_t kThreadGroup = 8;
+		constexpr std::uint32_t kResultWords = 8;
 
 		struct ScratchMap
 		{
@@ -91,7 +92,7 @@ namespace cs::engine
 			validation->extent = std::make_unique<cs::buffer::ConstantBuffer>(cs::buffer::ConstantBufferDesc(16, false));
 
 			D3D11_BUFFER_DESC desc{};
-			desc.ByteWidth = 8;
+			desc.ByteWidth = sizeof(std::uint32_t) * kResultWords;
 			desc.Usage = D3D11_USAGE_DEFAULT;
 			desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
 			desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
@@ -99,7 +100,7 @@ namespace cs::engine
 			const D3D11_UNORDERED_ACCESS_VIEW_DESC view{
 				.Format = DXGI_FORMAT_R32_TYPELESS,
 				.ViewDimension = D3D11_UAV_DIMENSION_BUFFER,
-				.Buffer = { .FirstElement = 0, .NumElements = 2, .Flags = D3D11_BUFFER_UAV_FLAG_RAW }
+				.Buffer = { .FirstElement = 0, .NumElements = kResultWords, .Flags = D3D11_BUFFER_UAV_FLAG_RAW }
 			};
 			DX::ThrowIfFailed(device->CreateUnorderedAccessView(validation->result.get(), &view, validation->resultView.put()));
 			desc.Usage = D3D11_USAGE_STAGING;
@@ -145,8 +146,9 @@ namespace cs::engine
 			return {};
 		auto& validation = *g_validation;
 
-		const UINT clear[4]{};
-		context->ClearUnorderedAccessViewUint(validation.resultView.get(), clear);
+		// The bounds start inverted so the first mismatch sets them.
+		constexpr std::uint32_t initial[kResultWords]{ 0, 0, 0, 0, ~0u, ~0u, 0, 0 };
+		context->UpdateSubresource(validation.result.get(), 0, nullptr, initial, 0, 0);
 		const std::uint32_t extent[4]{ a_extent, a_extent, 0, 0 };
 		context->UpdateSubresource(validation.extent->CB(), 0, nullptr, extent, 0, 0);
 		{
@@ -169,7 +171,14 @@ namespace cs::engine
 		if (FAILED(context->Map(validation.readback.get(), 0, D3D11_MAP_READ, 0, &mapped)))
 			return {};
 		const auto* values = static_cast<const std::uint32_t*>(mapped.pData);
-		const BatchValidationResult result{ .ok = true, .mismatchedTexels = values[0], .maxDelta = values[1] };
+		const BatchValidationResult result{
+			.ok = true,
+			.mismatchedTexels = values[0],
+			.maxDelta = values[1],
+			.batchNearer = values[2],
+			.engineNearer = values[3],
+			.bounds = { values[4], values[5], values[6], values[7] }
+		};
 		context->Unmap(validation.readback.get(), 0);
 		return result;
 	}

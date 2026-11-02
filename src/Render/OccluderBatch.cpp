@@ -12,6 +12,7 @@
 #include <d3d11.h>
 
 #include <algorithm>
+#include <cstring>
 #include <exception>
 #include <map>
 #include <memory>
@@ -46,6 +47,10 @@ namespace cs::engine
 		constexpr std::uint8_t kPlainType = 3;
 		constexpr std::uint8_t kMeshLODType = 5;
 		constexpr std::uint32_t kShaderResourceCount = 11;
+		// BSShader::BuildCommandBuffer: index count, and the first constant group for a
+		// shape without a skin instance, which starts with the world rows.
+		constexpr std::size_t kCommandBufferIndexCount = 60;
+		constexpr std::size_t kCommandBufferWorld = 136;
 
 		// Techniques the batch reproduces; anything else keeps the engine's pass.
 		constexpr std::uint32_t kBatchableTechnique =
@@ -74,6 +79,8 @@ namespace cs::engine
 		constexpr std::uint32_t kHalfPosition = 1u << 12;
 
 		BatchStats g_stats;
+		// Validation can record one class at a time to bisect a mismatch.
+		std::atomic<std::uint32_t> g_classMask{ ~0u };
 
 		[[nodiscard]] bool RuntimeSupported() noexcept
 		{
@@ -389,7 +396,8 @@ namespace cs::engine
 			const RE::BSLightingShaderProperty& a_property,
 			RE::BSGeometry& a_geometry,
 			std::uint32_t a_technique,
-			BatchClass& a_class)
+			BatchClass& a_class,
+			BatchSlot& a_slot)
 		{
 			if ((a_technique & ~kBatchableTechnique) != 0 || a_property.flags.any(ShaderFlag::kVATSTarget))
 				return BatchFallback::kTechnique;
@@ -399,6 +407,8 @@ namespace cs::engine
 				return BatchFallback::kAnimated;
 
 			const bool merge = (a_technique & kMergeTechnique) == kMergeTechnique;
+			if (!(g_classMask.load(std::memory_order_relaxed) & 1u << static_cast<unsigned>(merge ? BatchClass::kMergeInstanced : BatchClass::kPlain)))
+				return BatchFallback::kTechnique;
 			auto* shape = static_cast<RE::BSTriShape*>(&a_geometry);
 			auto* renderer = static_cast<RE::BSGraphics::TriShape*>(a_geometry.rendererData);
 			if (!renderer)
@@ -413,7 +423,8 @@ namespace cs::engine
 				merged = a_geometry.IsBSMergeInstancedTriShape();
 				if (!merged)
 					return BatchFallback::kTechnique;
-				indexCount = a_geometry.GetRenderableTris(kDefaultLodMode) * 3;
+				// BuildCommandBuffer reads the LOD bands only for type 5, else numTriangles.
+				indexCount = (a_geometry.type == kMeshLODType ? a_geometry.GetRenderableTris(kDefaultLodMode) : shape->numTriangles) * 3;
 			} else if (a_geometry.type == kPlainType) {
 				indexCount = shape->numTriangles * 3;
 			} else if (a_geometry.type == kMeshLODType && IsMeshLOD(a_geometry)) {
@@ -464,6 +475,8 @@ namespace cs::engine
 			if (slot >= kArenaCapacity)
 				return BatchFallback::kArenaFull;
 			arena.records[slot] = record;
+			a_slot.world = &arena.records[slot].world[0][0];
+			a_slot.indexCount = &arena.records[slot].indexCount;
 			return std::nullopt;
 		}
 
@@ -552,12 +565,13 @@ namespace cs::engine
 		OccluderBatchMode a_mode,
 		const RE::BSLightingShaderProperty& a_property,
 		RE::BSGeometry& a_geometry,
-		std::uint32_t a_technique)
+		std::uint32_t a_technique,
+		BatchSlot& a_slot)
 	{
 		if (a_mode == OccluderBatchMode::kOff)
 			return BatchDecision::kStock;
 		auto batchClass = BatchClass::kPlain;
-		const auto reason = TryRecord(a_property, a_geometry, a_technique, batchClass);
+		const auto reason = TryRecord(a_property, a_geometry, a_technique, batchClass, a_slot);
 		if (a_mode == OccluderBatchMode::kValidate)
 			return reason ? BatchDecision::kSkip : BatchDecision::kStock;
 		if (reason) {
@@ -566,6 +580,46 @@ namespace cs::engine
 		}
 		g_stats.batched[static_cast<std::size_t>(batchClass)].fetch_add(1, std::memory_order_relaxed);
 		return BatchDecision::kRecorded;
+	}
+
+	void SetValidationClasses(std::uint32_t a_mask) noexcept
+	{
+		g_classMask.store(a_mask, std::memory_order_relaxed);
+	}
+
+	void ResetReconcileStats() noexcept
+	{
+		for (auto* counter : { &g_stats.reconciled, &g_stats.staleWorld, &g_stats.countDiffers, &g_stats.lodNotDefault, &g_stats.noEnginePass })
+			counter->store(0, std::memory_order_relaxed);
+	}
+
+	void ReconcileWithEnginePass(const BatchSlot& a_slot, const RE::BSRenderPass* a_pass)
+	{
+		if (!a_slot.world)
+			return;
+		const auto* buffer = a_pass ? a_pass->commandBuffer : nullptr;
+		if (!buffer) {
+			*a_slot.indexCount = 0;
+			g_stats.noEnginePass.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+		g_stats.reconciled.fetch_add(1, std::memory_order_relaxed);
+		if (a_pass->lodMode != kDefaultLodMode)
+			g_stats.lodNotDefault.fetch_add(1, std::memory_order_relaxed);
+
+		// BuildCommandBuffer lays out the index count at +60 and the cb2 copy at +136.
+		std::uint32_t baked = 0;
+		std::memcpy(&baked, buffer + kCommandBufferIndexCount, sizeof(baked));
+		if (baked != *a_slot.indexCount)
+			g_stats.countDiffers.fetch_add(1, std::memory_order_relaxed);
+
+		float world[16];
+		std::memcpy(world, buffer + kCommandBufferWorld, sizeof(world));
+		// Only a plausible matrix is adopted: the last row ends in 1.
+		if (world[15] == 1.0f && std::memcmp(world, a_slot.world, sizeof(world)) != 0) {
+			g_stats.staleWorld.fetch_add(1, std::memory_order_relaxed);
+			std::memcpy(a_slot.world, world, sizeof(world));
+		}
 	}
 
 	bool PrepareOccluderBatch()
