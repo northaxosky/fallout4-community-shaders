@@ -134,11 +134,10 @@ namespace cs
 
 		for (std::size_t index = 0; index < history.releases.size(); ++index) {
 			const auto& release = history.releases[index];
-			dmui::ui::PushID(release.version.c_str());
-			const auto flags = index == 0 ?
-			                       dmui::ui::TreeNodeFlags::kDefaultOpen :
-			                       dmui::ui::TreeNodeFlags{};
-			if (dmui::ui::CollapsingHeader(release.version.c_str(), flags)) {
+			const auto id = "changelog-" + release.version;
+			const ui::Section entry{ id.c_str(), release.version.c_str(),
+				ui::Collapsible{ .count = release.items.size(), .expandedByDefault = index == 0, .framed = false } };
+			if (entry) {
 				dmui::ui::PushTextWrapPos(0.0f);
 				for (const auto& item : release.items) {
 					CheckHostResult(
@@ -148,7 +147,6 @@ namespace cs
 				}
 				dmui::ui::PopTextWrapPos();
 			}
-			dmui::ui::PopID();
 		}
 	}
 }
