@@ -30,16 +30,22 @@ namespace FO4Ambient
 	{
 		float3 ambient = FO4_AMBIENT_VANILLA_DIFFUSE(FO4SharedData::GetAmbientLinear(normalWS), normalView) * albedo;
 #	ifdef SKYLIGHTING
-		// FO4: lighting scaled the ambient addend; scale the separated term too.
-		ambient *= Skylighting::GetAmbientScale(Skylighting::GetViewPosition(screenPosition), normalView, albedo, vertexAO);
+		// FO4: one probe fetch feeds both the ambient scale and the IBL occlusion.
+		float skylightingDiffuse = 1.0;
+		[branch] if (FO4SharedData::EnabledSkylighting != 0)
+		{
+			float3 positionMS = FrameBuffer::ViewToWorld(Skylighting::GetViewPosition(screenPosition));
+			sh2 skylightingSH = Skylighting::SampleProbes(positionMS, normalWS);
+			// FO4: lighting scaled the ambient addend; scale the separated term too.
+			ambient *= Skylighting::GetAmbientScale(skylightingSH, positionMS, normalWS, albedo, vertexAO);
+			skylightingDiffuse = Skylighting::GetCompositeDiffuse(skylightingSH, positionMS, normalWS);
+		}
 #	endif
 #	ifdef IBL
 		[branch] if (SharedData::iblSettings.EnableIBL)
 		{
 			float3 vanillaDALC = FO4SharedData::GetAmbientLinear(normalWS);
 #		ifdef SKYLIGHTING
-			float3 positionMS = FrameBuffer::ViewToWorld(Skylighting::GetViewPosition(screenPosition));
-			float skylightingDiffuse = Skylighting::GetCompositeDiffuse(positionMS, normalWS);
 			float3 directionalAmbientColor = ImageBasedLighting::GetDiffuseIBLOccluded(vanillaDALC, -normalWS, skylightingDiffuse) * albedo;
 #		else
 			float3 directionalAmbientColor = ImageBasedLighting::GetDiffuseIBL(vanillaDALC, -normalWS) * albedo;
