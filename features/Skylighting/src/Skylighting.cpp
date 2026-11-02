@@ -989,8 +989,7 @@ namespace cs::features
 			if (dmui::ui::Button("Rebuild Skylighting"))
 				QueueReset(kResetRebuild);
 
-			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
-				dmui::ui::Text("%s", "Changes below require rebuilding, a loading screen, or moving away from the current location to apply.");
+			ui::Tooltip("Changes below require rebuilding, a loading screen, or moving away from the current location to apply.");
 
 			// Stored in radians; the slider edits degrees like upstream's SliderAngle.
 			field(&Settings::MaxZenith, { .format = "%.0f deg", .flags = dmui::ui::SliderFlags::kAlwaysClamp, .scale = kRadiansToDegrees });
