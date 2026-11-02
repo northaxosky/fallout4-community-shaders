@@ -74,6 +74,16 @@ namespace cs::engine
 			{ ShaderInjectionTarget::kDfTiledLighting, "df_tiled_lighting",
 				"DFTiledLighting" } } };
 
+	constexpr bool TargetTableMatchesEnum() noexcept
+	{
+		for (std::size_t i = 0; i < kShaderInjectionTargets.size(); ++i) {
+			if (static_cast<std::size_t>(kShaderInjectionTargets[i].id) != i)
+				return false;
+		}
+		return true;
+	}
+	static_assert(TargetTableMatchesEnum(), "target table order must match ShaderInjectionTarget ids");
+
 	inline std::span<const ShaderInjectionTargetMetadata>
 	GetShaderInjectionTargets() noexcept
 	{

@@ -259,9 +259,6 @@ namespace cs::engine
 		std::string* a_error = nullptr);
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
-	bool RegisterReplacementIfEnabled(
-		bool a_enabled,
-		ShaderReplacementRegistration a_registration);
 	bool SetBaselineShaderOwnership(
 		ShaderInjectionTarget a_target,
 		bool a_enabled);

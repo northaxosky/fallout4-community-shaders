@@ -1487,13 +1487,6 @@ namespace cs::engine
 		return true;
 	}
 
-	bool RegisterReplacementIfEnabled(
-		bool a_enabled,
-		ShaderReplacementRegistration a_registration)
-	{
-		return !a_enabled || RegisterReplacement(std::move(a_registration));
-	}
-
 	bool SetBaselineShaderOwnership(
 		ShaderInjectionTarget a_target,
 		bool a_enabled)
@@ -1604,6 +1597,10 @@ namespace cs::engine
 				GetShaderInjectionTarget(registration.targetId);
 			if (!metadata) {
 				a_error = "contributor '" + std::string(a_contributor) + "' registered an unknown shader-injection target";
+				return false;
+			}
+			if (!ShaderEnabled(registration.targetId)) {
+				a_error = "'" + std::string(metadata->name) + "' is not enabled (enable_shaders or [shader_ownership]) but contributor '" + std::string(a_contributor) + "' registered for it";
 				return false;
 			}
 			if ((registration.stages & metadata->supportedStages) == 0) {
