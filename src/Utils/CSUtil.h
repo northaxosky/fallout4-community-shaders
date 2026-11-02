@@ -57,67 +57,66 @@ namespace cs::util
 
 	using ShaderDefines = std::vector<std::pair<const char*, const char*>>;
 
-	// Typed CompileShader results; null on failure.
-	[[nodiscard]] inline winrt::com_ptr<ID3D11ComputeShader> CompileComputeShader(const wchar_t* a_filePath, const ShaderDefines& a_defines = {}, const char* a_program = "main")
-	{
-		winrt::com_ptr<ID3D11ComputeShader> shader;
-		shader.attach(static_cast<ID3D11ComputeShader*>(CompileShader(a_filePath, a_defines, "cs_5_0", a_program)));
-		return shader;
-	}
-
-	[[nodiscard]] inline winrt::com_ptr<ID3D11PixelShader> CompilePixelShader(const wchar_t* a_filePath, const ShaderDefines& a_defines = {}, const char* a_program = "main")
-	{
-		winrt::com_ptr<ID3D11PixelShader> shader;
-		shader.attach(static_cast<ID3D11PixelShader*>(CompileShader(a_filePath, a_defines, "ps_5_0", a_program)));
-		return shader;
-	}
-
-	[[nodiscard]] inline winrt::com_ptr<ID3D11VertexShader> CompileVertexShader(const wchar_t* a_filePath, const ShaderDefines& a_defines = {}, const char* a_program = "main")
-	{
-		winrt::com_ptr<ID3D11VertexShader> shader;
-		shader.attach(static_cast<ID3D11VertexShader*>(CompileShader(a_filePath, a_defines, "vs_5_0", a_program)));
-		return shader;
-	}
-
 	namespace detail
 	{
 		void SetShaderName(ID3D11DeviceChild* a_shader, std::string_view a_name) noexcept;
 		[[noreturn]] void ThrowShaderCompileFailure(std::string_view a_name, const wchar_t* a_filePath);
+
+		template <class T>
+		struct ShaderProfile;
+		template <>
+		struct ShaderProfile<ID3D11ComputeShader>
+		{
+			static constexpr const char* value = "cs_5_0";
+		};
+		template <>
+		struct ShaderProfile<ID3D11PixelShader>
+		{
+			static constexpr const char* value = "ps_5_0";
+		};
+		template <>
+		struct ShaderProfile<ID3D11VertexShader>
+		{
+			static constexpr const char* value = "vs_5_0";
+		};
 	}
 
-	// Named forms label the shader; null on failure, which CompileShader already logged.
-	[[nodiscard]] inline winrt::com_ptr<ID3D11ComputeShader> CompileComputeShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
+	// Null on failure, which CompileShader already logged.
+	template <class T>
+	[[nodiscard]] winrt::com_ptr<T> CompileShaderAs(const wchar_t* a_filePath, const ShaderDefines& a_defines = {}, const char* a_program = "main")
 	{
-		auto shader = CompileComputeShader(a_filePath, a_defines);
+		winrt::com_ptr<T> shader;
+		shader.attach(static_cast<T*>(CompileShader(a_filePath, a_defines, detail::ShaderProfile<T>::value, a_program)));
+		return shader;
+	}
+
+	template <class T>
+	[[nodiscard]] winrt::com_ptr<T> CompileShaderAs(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
+	{
+		auto shader = CompileShaderAs<T>(a_filePath, a_defines);
 		if (shader)
 			detail::SetShaderName(shader.get(), a_name);
 		return shader;
 	}
 
-	[[nodiscard]] inline winrt::com_ptr<ID3D11PixelShader> CompilePixelShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
+	// For shaders the caller cannot run without: throws std::runtime_error.
+	template <class T>
+	[[nodiscard]] winrt::com_ptr<T> RequireShaderAs(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
 	{
-		auto shader = CompilePixelShader(a_filePath, a_defines);
-		if (shader)
-			detail::SetShaderName(shader.get(), a_name);
-		return shader;
-	}
-
-	[[nodiscard]] inline winrt::com_ptr<ID3D11VertexShader> CompileVertexShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
-	{
-		auto shader = CompileVertexShader(a_filePath, a_defines);
-		if (shader)
-			detail::SetShaderName(shader.get(), a_name);
-		return shader;
-	}
-
-	// For shaders the caller cannot run without: throws std::runtime_error on failure.
-	[[nodiscard]] inline winrt::com_ptr<ID3D11ComputeShader> RequireComputeShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
-	{
-		auto shader = CompileComputeShader(a_name, a_filePath, a_defines);
+		auto shader = CompileShaderAs<T>(a_name, a_filePath, a_defines);
 		if (!shader)
 			detail::ThrowShaderCompileFailure(a_name, a_filePath);
 		return shader;
 	}
+
+	// Unnamed and named per-stage forwarders.
+	[[nodiscard]] inline auto CompileComputeShader(const wchar_t* a_path, const ShaderDefines& a_defines = {}) { return CompileShaderAs<ID3D11ComputeShader>(a_path, a_defines); }
+	[[nodiscard]] inline auto CompileComputeShader(std::string_view a_name, const wchar_t* a_path, const ShaderDefines& a_defines = {}) { return CompileShaderAs<ID3D11ComputeShader>(a_name, a_path, a_defines); }
+	[[nodiscard]] inline auto CompilePixelShader(const wchar_t* a_path, const ShaderDefines& a_defines = {}) { return CompileShaderAs<ID3D11PixelShader>(a_path, a_defines); }
+	[[nodiscard]] inline auto CompilePixelShader(std::string_view a_name, const wchar_t* a_path, const ShaderDefines& a_defines = {}) { return CompileShaderAs<ID3D11PixelShader>(a_name, a_path, a_defines); }
+	[[nodiscard]] inline auto CompileVertexShader(const wchar_t* a_path, const ShaderDefines& a_defines = {}) { return CompileShaderAs<ID3D11VertexShader>(a_path, a_defines); }
+	[[nodiscard]] inline auto CompileVertexShader(std::string_view a_name, const wchar_t* a_path, const ShaderDefines& a_defines = {}) { return CompileShaderAs<ID3D11VertexShader>(a_name, a_path, a_defines); }
+	[[nodiscard]] inline auto RequireComputeShader(std::string_view a_name, const wchar_t* a_path, const ShaderDefines& a_defines = {}) { return RequireShaderAs<ID3D11ComputeShader>(a_name, a_path, a_defines); }
 
 	// Returns null before the engine device is ready.
 	[[nodiscard]] ID3D11Device* GetD3DDevice();
