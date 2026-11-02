@@ -3,8 +3,10 @@
 #endif
 
 #include "Utils/ShaderCompile.h"
+#include "Render/ShaderInjectionDefines.h"
 #include "Utils/ShaderCache/SourceCompile.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace cs::util
@@ -22,7 +24,10 @@ namespace cs::util
 			shader_cache::ShaderRecipe recipe;
 			recipe.source = a_filePath;
 			recipe.includeRoots.push_back(a_shaderRoot);
-			recipe.defines.reserve(a_defines.size());
+			recipe.defines.reserve(a_defines.size() + 1);
+			// Runtime shaders always read the substrate, as injected ones do.
+			if (std::ranges::none_of(a_defines, [](const auto& a_define) { return std::strcmp(a_define.first, cs::engine::shader_injection_defines::kSubstrate) == 0; }))
+				recipe.defines.emplace_back(cs::engine::shader_injection_defines::kSubstrate, "1");
 			for (const auto& [name, value] : a_defines)
 				recipe.defines.emplace_back(name, value);
 			recipe.profile = a_programType ? a_programType : "";

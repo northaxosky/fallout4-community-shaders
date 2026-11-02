@@ -50,15 +50,15 @@ namespace
 		static const std::vector<Shader> shaders{
 			{ "FO4/CanonicalDepthCS.hlsl" },
 
-			{ "FO4/DynamicCubemaps/PrepareCaptureCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { Toggle("REFLECTIONS") } },
-			{ "DynamicCubemaps/DetectCaptureLightingCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } } },
-			{ "DynamicCubemaps/UpdateCubemapCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" }, { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, { Toggle("REFLECTIONS"), Toggle("FAKEREFLECTIONS") } },
-			{ "DynamicCubemaps/InferCubemapCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { { {}, { { "REFLECTIONS", "" } }, { { "FAKEREFLECTIONS", "" } } } } },
-			{ "DynamicCubemaps/SpecularIrradianceCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
-			{ "DynamicCubemaps/BC6HEncodeCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
-			{ "FO4/CubemapPreviewCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { Toggle("SINGLE_CHANNEL") } },
+			{ "FO4/DynamicCubemaps/PrepareCaptureCS.hlsl", "cs_5_0", {}, { Toggle("REFLECTIONS") } },
+			{ "DynamicCubemaps/DetectCaptureLightingCS.hlsl", "cs_5_0", { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } } },
+			{ "DynamicCubemaps/UpdateCubemapCS.hlsl", "cs_5_0", { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, { Toggle("REFLECTIONS"), Toggle("FAKEREFLECTIONS") } },
+			{ "DynamicCubemaps/InferCubemapCS.hlsl", "cs_5_0", {}, { { {}, { { "REFLECTIONS", "" } }, { { "FAKEREFLECTIONS", "" } } } } },
+			{ "DynamicCubemaps/SpecularIrradianceCS.hlsl" },
+			{ "DynamicCubemaps/BC6HEncodeCS.hlsl" },
+			{ "FO4/CubemapPreviewCS.hlsl", "cs_5_0", {}, { Toggle("SINGLE_CHANNEL") } },
 
-			{ "IBL/DiffuseIBLCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
+			{ "IBL/DiffuseIBLCS.hlsl" },
 
 			{ "LightLimitFix/ClusterBuildingCS.hlsl" },
 			{ "LightLimitFix/ClusterCullingCS.hlsl" },
@@ -81,8 +81,8 @@ namespace
 			// The shader's sample count is a scaled runtime value; compile its bounds.
 			{ "ScreenSpaceShadows/RaymarchCS.hlsl", "cs_5_0", { { "TERRAIN_BLENDING", "" } }, { { { { "SAMPLE_COUNT", "8" } }, { { "SAMPLE_COUNT", "480" } } } } },
 
-			{ "Skylighting/UpdateProbesCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" }, { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } } },
-			{ "FO4/Skylighting/DebugCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { Toggle("SKYLIGHTING_UP_VISIBILITY", "1") } },
+			{ "Skylighting/UpdateProbesCS.hlsl", "cs_5_0", { { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } } },
+			{ "FO4/Skylighting/DebugCS.hlsl", "cs_5_0", {}, { Toggle("SKYLIGHTING_UP_VISIBILITY", "1") } },
 
 			{ "TerrainShadows/ShadowUpdate.cs.hlsl" },
 			{ "TerrainShadows/ShadowStatistics.cs.hlsl" },
@@ -91,9 +91,9 @@ namespace
 			{ "FO4/VolumetricShadows/ShadowPreviewCS.hlsl" },
 			{ "VolumetricShadows/BlurShadowCS.hlsl", "cs_5_0", {}, { { { { "BLUR_HORIZONTAL", "1" } }, { { "BLUR_VERTICAL", "1" } } } } },
 
-			{ "FO4/Upscaling/EncodeTexturesCS.hlsl", "cs_5_0", { { "FO4CS_SUBSTRATE", "1" }, { "DEPTH_OUTPUT", "1" } }, { { {}, { { "DLSS", "" } }, { { "FSR", "" } } } } },
-			{ "FO4/Upscaling/DepthRefractionUpscalePS.hlsl", "ps_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
-			{ "FO4/ZPrePassAlpha.hlsl", "ps_5_0", { { "FO4CS_SUBSTRATE", "1" } } },
+			{ "FO4/Upscaling/EncodeTexturesCS.hlsl", "cs_5_0", { { "DEPTH_OUTPUT", "1" } }, { { {}, { { "DLSS", "" } }, { { "FSR", "" } } } } },
+			{ "FO4/Upscaling/DepthRefractionUpscalePS.hlsl", "ps_5_0", {} },
+			{ "FO4/ZPrePassAlpha.hlsl", "ps_5_0", {} },
 			{ "FO4/Upscaling/UpscaleVS.hlsl", "vs_5_0" },
 			{ "Upscaling/SpatialFallbackPS.hlsl", "ps_5_0" },
 			{ "Upscaling/OverrideDepthCS.hlsl" },
@@ -105,8 +105,8 @@ namespace
 			{ "FO4/OccluderBatchVS.hlsl", "vs_5_0", {}, { Toggle("MERGE_INSTANCED") } },
 			{ "FO4/OccluderBatchCompareCS.hlsl" },
 
-			{ "FO4/CloudShadows/DebugOverlay.hlsl", "ps_5_0", { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, { { { {}, { { "CLOUD_SKY_OVERLAY", "1" } }, { { "CLOUD_LAYERS", "1" } } } } } },
-			{ "FO4/WaterEffects/Debug.hlsl", "ps_5_0", { { "FO4CS_SUBSTRATE", "1" } }, { Toggle("WATER_SUBMERSION_DEBUG", "1") } }
+			{ "FO4/CloudShadows/DebugOverlay.hlsl", "ps_5_0", { { "CLOUD_SHADOWS", "1" } }, { { { {}, { { "CLOUD_SKY_OVERLAY", "1" } }, { { "CLOUD_LAYERS", "1" } } } } } },
+			{ "FO4/WaterEffects/Debug.hlsl", "ps_5_0", {}, { Toggle("WATER_SUBMERSION_DEBUG", "1") } }
 		};
 		return shaders;
 	}
