@@ -36,11 +36,10 @@ namespace cs::render
 		ID3D11DeviceContext* a_context,
 		engine::ShaderStage a_stage) noexcept;
 
-	// Render thread. SharedData::MipBias is zero except inside this scope, so
-	// shadow, occlusion and cube draws never see the upscaler bias.
+	// Render thread; zero outside the scope so shadow and cube draws see none.
 	void SetMainViewMipBias(float a_bias) noexcept;
 
-	// Render thread. The bias SetMainViewMipBias last published; 0 outside the scope.
+	// Render thread. The bias last published; 0 outside the scope.
 	[[nodiscard]] float GetMainViewMipBias() noexcept;
 
 	class ScopedMainViewMipBias

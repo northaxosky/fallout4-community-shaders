@@ -122,7 +122,7 @@ namespace cs::engine
 		ZPrepassVertexShaderSelector a_selector,
 		HookPriority a_priority = HookPriority::Default);
 
-	// Pixel shader for alpha-tested Z-prepass draws (plain and merge-instanced); null keeps the engine's.
+	// PS for alpha-tested Z-prepass draws; null keeps the engine's.
 	using ZPrepassPixelShaderSelector = ID3D11PixelShader* (*)() noexcept;
 	// The first non-null selection binds for that draw only.
 	bool RegisterAlphaTestZPrepassPixelShader(

@@ -794,7 +794,7 @@ namespace cs::engine
 			winrt::com_ptr<ID3D11PixelShader> _engineShader;
 		};
 
-		// DoZPrePass alpha-test loops (first-person and world); the PS is bound once per loop.
+		// DoZPrePass alpha-test loops; the PS is bound once per loop.
 		struct AlphaTestZPrepassDraw_Hook
 		{
 			static void thunk(
@@ -811,7 +811,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// The merge-instanced alpha-test loop is inline in DoZPrePass and ends in a context Draw.
+		// Inline merge-instanced alpha-test loop; ends in a context Draw.
 		void STDMETHODCALLTYPE InstancedAlphaTestZPrepassDraw(ID3D11DeviceContext* a_context, UINT a_vertexCount, UINT a_start)
 		{
 			const ScopedAlphaTestPixelShader scope;
