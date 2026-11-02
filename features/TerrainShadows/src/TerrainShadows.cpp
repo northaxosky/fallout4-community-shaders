@@ -336,7 +336,7 @@ namespace cs::features
 			return;
 		}
 
-		_shadowUpdateCS = cs::util::CompileComputeShader(kShadowUpdatePath);
+		_shadowUpdateCS = cs::util::CompileComputeShader("TerrainShadows/Update.CS", kShadowUpdatePath);
 		if (!_shadowUpdateCS) {
 			_resourceInitFailed = true;
 			L->error(
@@ -344,8 +344,6 @@ namespace cs::features
 				"cannot produce shadow heights.");
 			return;
 		}
-		cs::render::annotation::SetName(
-			_shadowUpdateCS.get(), "TerrainShadows/Update.CS");
 		_computeShaderReady.store(true, std::memory_order_release);
 
 		// Statistics are optional.
@@ -394,14 +392,11 @@ namespace cs::features
 			cs::render::annotation::SetName(
 				_shadowStatsCB.get(), "TerrainShadows/StatisticsConstants.Buffer");
 
-			_shadowStatsCS = cs::util::CompileComputeShader(kShadowStatisticsPath);
+			_shadowStatsCS = cs::util::CompileComputeShader("TerrainShadows/Statistics.CS", kShadowStatisticsPath);
 			if (!_shadowStatsCS) {
 				L->warn(
 					"Terrain shadow statistics compute shader failed to compile; "
 					"telemetry will report no shadow field statistics.");
-			} else {
-				cs::render::annotation::SetName(
-					_shadowStatsCS.get(), "TerrainShadows/Statistics.CS");
 			}
 		} catch (const std::exception& e) {
 			L->warn("Terrain shadow statistics resources failed: {}", e.what());

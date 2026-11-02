@@ -51,15 +51,6 @@ namespace cs::features
 			return a_sourceSize / 16 / std::max(a_sourceSize / a_mapSize / 16, 1u);
 		}
 
-		winrt::com_ptr<ID3D11ComputeShader> CompileCompute(const wchar_t* a_path, const char* a_define = nullptr)
-		{
-			winrt::com_ptr<ID3D11ComputeShader> shader;
-			const auto defines = a_define ? std::vector<std::pair<const char*, const char*>>{ { a_define, "1" } } : std::vector<std::pair<const char*, const char*>>{};
-			shader = cs::util::CompileComputeShader(a_path, defines);
-			if (!shader)
-				L->warn("{} failed to compile.", a_define ? a_define : "ShadowPreviewCS");
-			return shader;
-		}
 	}
 
 	VolumetricShadows* VolumetricShadows::GetSingleton()
@@ -135,11 +126,11 @@ namespace cs::features
 		_map = CreateMipChain(a_device, "VolumetricShadows/ShadowCopy");
 		_blurTemp = CreateMipChain(a_device, "VolumetricShadows/ShadowBlurTemp");
 
-		_downsampleMip0 = CompileCompute(L"Data\\Shaders\\VolumetricShadows\\DownsampleShadowCS.hlsl", "DOWNSAMPLE_SHADOW_MIP0");
-		_downsampleMip1 = CompileCompute(L"Data\\Shaders\\VolumetricShadows\\DownsampleShadowCS.hlsl", "DOWNSAMPLE_SHADOW_MIP1");
-		_blurHorizontal = CompileCompute(L"Data\\Shaders\\VolumetricShadows\\BlurShadowCS.hlsl", "BLUR_HORIZONTAL");
-		_blurVertical = CompileCompute(L"Data\\Shaders\\VolumetricShadows\\BlurShadowCS.hlsl", "BLUR_VERTICAL");
-		_previewCS = CompileCompute(kPreviewPath);
+		_downsampleMip0 = cs::util::CompileComputeShader("VolumetricShadows/DownsampleMip0.CS", L"Data\\Shaders\\VolumetricShadows\\DownsampleShadowCS.hlsl", { { "DOWNSAMPLE_SHADOW_MIP0", "1" } });
+		_downsampleMip1 = cs::util::CompileComputeShader("VolumetricShadows/DownsampleMip1.CS", L"Data\\Shaders\\VolumetricShadows\\DownsampleShadowCS.hlsl", { { "DOWNSAMPLE_SHADOW_MIP1", "1" } });
+		_blurHorizontal = cs::util::CompileComputeShader("VolumetricShadows/BlurHorizontal.CS", L"Data\\Shaders\\VolumetricShadows\\BlurShadowCS.hlsl", { { "BLUR_HORIZONTAL", "1" } });
+		_blurVertical = cs::util::CompileComputeShader("VolumetricShadows/BlurVertical.CS", L"Data\\Shaders\\VolumetricShadows\\BlurShadowCS.hlsl", { { "BLUR_VERTICAL", "1" } });
+		_previewCS = cs::util::CompileComputeShader("VolumetricShadows/ShadowPreview.CS", kPreviewPath);
 		for (std::size_t mip = 0; mip < _preview.size(); ++mip)
 			_preview[mip].Create(a_device, kMapSize >> mip, kMapSize >> mip, std::format("VolumetricShadows/Preview{}", mip));
 

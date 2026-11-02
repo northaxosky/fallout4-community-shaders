@@ -705,11 +705,7 @@ namespace cs::features
 	{
 		if (!_overrideDepthCS) {
 			L->debug("Compiling OverrideDepthCS.hlsl");
-			_overrideDepthCS = cs::util::CompileComputeShader(kOverrideDepthPath);
-			if (_overrideDepthCS) {
-				cs::render::annotation::SetName(
-					_overrideDepthCS.get(), "Upscaling/OverrideDepth.CS");
-			}
+			_overrideDepthCS = cs::util::CompileComputeShader("Upscaling/OverrideDepth.CS", kOverrideDepthPath);
 		}
 		return _overrideDepthCS.get();
 	}
@@ -718,11 +714,7 @@ namespace cs::features
 	{
 		if (!_overrideLinearDepthCS) {
 			L->debug("Compiling OverrideLinearDepthCS.hlsl");
-			_overrideLinearDepthCS = cs::util::CompileComputeShader(kOverrideLinearDepthPath);
-			if (_overrideLinearDepthCS) {
-				cs::render::annotation::SetName(
-					_overrideLinearDepthCS.get(), "Upscaling/OverrideLinearDepth.CS");
-			}
+			_overrideLinearDepthCS = cs::util::CompileComputeShader("Upscaling/OverrideLinearDepth.CS", kOverrideLinearDepthPath);
 		}
 		return _overrideLinearDepthCS.get();
 	}

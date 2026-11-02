@@ -131,10 +131,7 @@ namespace cs::features
 		create(_envSH, "IBL/EnvSH");
 		create(_skySH, "IBL/SkySH");
 
-		_projectCompute = util::CompileComputeShader(L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl");
-		if (!_projectCompute)
-			throw std::runtime_error("the diffuse IBL compute shader failed to compile");
-		render::annotation::SetName(_projectCompute.get(), "IBL/DiffuseIBL.CS");
+		_projectCompute = util::RequireComputeShader("IBL/DiffuseIBL.CS", L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl");
 		_resourcesReady.store(true, std::memory_order_release);
 		L->info("SH textures ready: 2x 3x1 R16G16B16A16_FLOAT at t{}-t{}.", kSHSlot, kSHSlot + kSHSlotCount - 1);
 	}

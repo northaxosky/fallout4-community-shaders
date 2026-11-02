@@ -128,9 +128,7 @@ namespace cs::render
 	{
 		if (!a_device)
 			return;
-		shader = util::CompileComputeShader(L"Data\\Shaders\\FO4\\CanonicalDepthCS.hlsl");
-		if (!shader)
-			throw std::runtime_error("Canonical depth shader compilation failed.");
+		shader = util::RequireComputeShader("Render/CanonicalDepth.CS", L"Data\\Shaders\\FO4\\CanonicalDepthCS.hlsl");
 		constants = std::make_unique<buffer::ConstantBuffer>(buffer::ConstantBufferDesc<CanonicalDepthData>());
 		constants->SetName("Render/CanonicalDepth.Constants");
 	}

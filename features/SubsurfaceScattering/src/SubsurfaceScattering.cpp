@@ -104,22 +104,14 @@ namespace cs::features
 
 	bool SubsurfaceScattering::CompileShaders()
 	{
-		using Defines = std::vector<std::pair<const char*, const char*>>;
-		const auto compile = [](const wchar_t* a_path, const Defines& a_defines,
-								 winrt::com_ptr<ID3D11ComputeShader>& a_shader, const char* a_name) {
-			a_shader = nullptr;
-			a_shader = cs::util::CompileComputeShader(a_path, a_defines);
-			if (a_shader)
-				cs::render::annotation::SetName(a_shader.get(), a_name);
-			return static_cast<bool>(a_shader);
-		};
 		constexpr auto extract = L"Data\\Shaders\\SubsurfaceScattering\\DiffuseExtractionCS.hlsl";
 		constexpr auto separable = L"Data\\Shaders\\SubsurfaceScattering\\SeparableSSSCS.hlsl";
-		bool ready = compile(L"Data\\Shaders\\FO4\\SubsurfaceScattering\\PrepareCS.hlsl", {}, _prepare, "SubsurfaceScattering/Prepare.CS");
-		ready &= compile(extract, {}, _extract, "SubsurfaceScattering/DiffuseExtraction.CS");
-		ready &= compile(separable, { { "HORIZONTAL", "" } }, _horizontal, "SubsurfaceScattering/HorizontalBlur.CS");
-		ready &= compile(separable, {}, _vertical, "SubsurfaceScattering/VerticalBlur.CS");
-		ready &= compile(separable, { { "BURLEY", "" } }, _burley, "SubsurfaceScattering/Burley.CS");
+		_prepare = cs::util::CompileComputeShader("SubsurfaceScattering/Prepare.CS", L"Data\\Shaders\\FO4\\SubsurfaceScattering\\PrepareCS.hlsl");
+		_extract = cs::util::CompileComputeShader("SubsurfaceScattering/DiffuseExtraction.CS", extract);
+		_horizontal = cs::util::CompileComputeShader("SubsurfaceScattering/HorizontalBlur.CS", separable, { { "HORIZONTAL", "" } });
+		_vertical = cs::util::CompileComputeShader("SubsurfaceScattering/VerticalBlur.CS", separable);
+		_burley = cs::util::CompileComputeShader("SubsurfaceScattering/Burley.CS", separable, { { "BURLEY", "" } });
+		const bool ready = static_cast<bool>(_prepare) && static_cast<bool>(_extract) && static_cast<bool>(_horizontal) && static_cast<bool>(_vertical) && static_cast<bool>(_burley);
 		return ready;
 	}
 

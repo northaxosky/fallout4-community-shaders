@@ -252,10 +252,7 @@ namespace cs::features
 		}
 
 		// FO4: the substrate defines the CS camera and shared-data inputs.
-		_probeUpdateCompute = cs::util::CompileComputeShader(L"Data\\Shaders\\Skylighting\\UpdateProbesCS.hlsl", { { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } });
-		if (!_probeUpdateCompute)
-			throw std::runtime_error("the probe update compute shader failed to compile");
-		cs::render::annotation::SetName(_probeUpdateCompute.get(), "Skylighting/UpdateProbes.CS");
+		_probeUpdateCompute = cs::util::RequireComputeShader("Skylighting/UpdateProbes.CS", L"Data\\Shaders\\Skylighting\\UpdateProbesCS.hlsl", { { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } });
 
 		winrt::com_ptr<ID3D11DeviceContext> context;
 		a_device->GetImmediateContext(context.put());
@@ -271,11 +268,9 @@ namespace cs::features
 			cs::util::ShaderDefines defines;
 			if (index == 1)
 				defines.emplace_back("SKYLIGHTING_UP_VISIBILITY", "1");
-			_debugCompute[index] = cs::util::CompileComputeShader(L"Data\\Shaders\\FO4\\Skylighting\\DebugCS.hlsl", defines);
+			_debugCompute[index] = cs::util::CompileComputeShader(index ? "Skylighting/DebugUp.CS" : "Skylighting/DebugDiffuse.CS", L"Data\\Shaders\\FO4\\Skylighting\\DebugCS.hlsl", defines);
 			if (!_debugCompute[index])
 				L->warn("Skylighting debug shader {} failed to compile; the fullscreen views are unavailable.", index);
-			else
-				cs::render::annotation::SetName(_debugCompute[index].get(), index ? "Skylighting/DebugUp.CS" : "Skylighting/DebugDiffuse.CS");
 		}
 	}
 

@@ -352,33 +352,20 @@ namespace cs::features
 		}
 
 		try {
-			const auto compile = [](
-									 winrt::com_ptr<ID3D11ComputeShader>& a_target,
-									 const wchar_t* a_path,
-									 const cs::util::ShaderDefines& a_defines,
-									 std::string_view a_name) {
-				a_target = cs::util::CompileComputeShader(a_path, a_defines);
-				if (!a_target) {
-					throw std::runtime_error(
-						"compute shader compilation failed");
-				}
-				cs::render::annotation::SetName(a_target.get(), a_name);
-			};
-
 			// FO4 capture preparation translates native inputs without replacing upstream accumulation.
-			compile(_prepareCS, kPreparePath, {}, "DynamicCubemaps/Prepare.CS");
-			compile(_prepareReflectionsCS, kPreparePath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/PrepareReflections.CS");
-			compile(_detectLightingCS, kDetectLightingPath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, "DynamicCubemaps/DetectLighting.CS");
-			compile(_updateCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, "DynamicCubemaps/Update.CS");
-			compile(_updateReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" } }, "DynamicCubemaps/UpdateReflections.CS");
-			compile(_updateFakeReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateFakeReflections.CS");
-			compile(_updateSkyReflectionsCS, kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/UpdateSkyReflections.CS");
-			compile(_inferCS, kInferPath, {}, "DynamicCubemaps/Infer.CS");
-			compile(_inferReflectionsCS, kInferPath, { { "REFLECTIONS", "" } }, "DynamicCubemaps/InferReflections.CS");
-			compile(_inferFakeReflectionsCS, kInferPath, { { "FAKEREFLECTIONS", "" } }, "DynamicCubemaps/InferFakeReflections.CS");
-			compile(_irradianceCS, kIrradiancePath, {}, "DynamicCubemaps/SpecularIrradiance.CS");
-			compile(_bc6hEncodeCS, kBc6hPath, {}, "DynamicCubemaps/BC6HEncode.CS");
-			compile(_previewCS, kPreviewPath, {}, "DynamicCubemaps/CubemapPreview.CS");
+			_prepareCS = cs::util::RequireComputeShader("DynamicCubemaps/Prepare.CS", kPreparePath);
+			_prepareReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/PrepareReflections.CS", kPreparePath, { { "REFLECTIONS", "" } });
+			_detectLightingCS = cs::util::RequireComputeShader("DynamicCubemaps/DetectLighting.CS", kDetectLightingPath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } });
+			_updateCS = cs::util::RequireComputeShader("DynamicCubemaps/Update.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } });
+			_updateReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/UpdateReflections.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" } });
+			_updateFakeReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/UpdateFakeReflections.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "FAKEREFLECTIONS", "" } });
+			_updateSkyReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/UpdateSkyReflections.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } });
+			_inferCS = cs::util::RequireComputeShader("DynamicCubemaps/Infer.CS", kInferPath);
+			_inferReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/InferReflections.CS", kInferPath, { { "REFLECTIONS", "" } });
+			_inferFakeReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/InferFakeReflections.CS", kInferPath, { { "FAKEREFLECTIONS", "" } });
+			_irradianceCS = cs::util::RequireComputeShader("DynamicCubemaps/SpecularIrradiance.CS", kIrradiancePath);
+			_bc6hEncodeCS = cs::util::RequireComputeShader("DynamicCubemaps/BC6HEncode.CS", kBc6hPath);
+			_previewCS = cs::util::RequireComputeShader("DynamicCubemaps/CubemapPreview.CS", kPreviewPath);
 
 			if (!CreateResources(a_device)) {
 				throw std::runtime_error("resource creation failed");

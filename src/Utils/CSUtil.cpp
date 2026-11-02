@@ -1,4 +1,5 @@
 #include "Utils/CSUtil.h"
+#include "Render/Annotation.h"
 #include "Render/ShaderInjection.h"
 #include "Utils/ShaderCache/ShaderCache.h"
 #include "Utils/ShaderCompile.h"
@@ -181,6 +182,22 @@ namespace cs::util
 		if (!data || !data->device)
 			return nullptr;
 		return reinterpret_cast<ID3D11Device*>(data->device);
+	}
+
+	namespace detail
+	{
+		void SetShaderName(ID3D11DeviceChild* a_shader, std::string_view a_name) noexcept
+		{
+			render::annotation::SetName(a_shader, a_name);
+		}
+
+		void ThrowShaderCompileFailure(std::string_view a_name, const wchar_t* a_filePath)
+		{
+			std::string path;
+			for (const auto* c = a_filePath; c && *c; ++c)
+				path.push_back(static_cast<char>(*c));
+			throw std::runtime_error(std::format("{} ({}) failed to compile", a_name, path));
+		}
 	}
 
 	ID3D11DeviceChild* CompileShader(

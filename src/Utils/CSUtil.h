@@ -8,6 +8,7 @@
 
 #include <cctype>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -75,6 +76,46 @@ namespace cs::util
 	{
 		winrt::com_ptr<ID3D11VertexShader> shader;
 		shader.attach(static_cast<ID3D11VertexShader*>(CompileShader(a_filePath, a_defines, "vs_5_0", a_program)));
+		return shader;
+	}
+
+	namespace detail
+	{
+		void SetShaderName(ID3D11DeviceChild* a_shader, std::string_view a_name) noexcept;
+		[[noreturn]] void ThrowShaderCompileFailure(std::string_view a_name, const wchar_t* a_filePath);
+	}
+
+	// Named forms label the shader; null on failure, which CompileShader already logged.
+	[[nodiscard]] inline winrt::com_ptr<ID3D11ComputeShader> CompileComputeShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
+	{
+		auto shader = CompileComputeShader(a_filePath, a_defines);
+		if (shader)
+			detail::SetShaderName(shader.get(), a_name);
+		return shader;
+	}
+
+	[[nodiscard]] inline winrt::com_ptr<ID3D11PixelShader> CompilePixelShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
+	{
+		auto shader = CompilePixelShader(a_filePath, a_defines);
+		if (shader)
+			detail::SetShaderName(shader.get(), a_name);
+		return shader;
+	}
+
+	[[nodiscard]] inline winrt::com_ptr<ID3D11VertexShader> CompileVertexShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
+	{
+		auto shader = CompileVertexShader(a_filePath, a_defines);
+		if (shader)
+			detail::SetShaderName(shader.get(), a_name);
+		return shader;
+	}
+
+	// For shaders the caller cannot run without: throws std::runtime_error on failure.
+	[[nodiscard]] inline winrt::com_ptr<ID3D11ComputeShader> RequireComputeShader(std::string_view a_name, const wchar_t* a_filePath, const ShaderDefines& a_defines = {})
+	{
+		auto shader = CompileComputeShader(a_name, a_filePath, a_defines);
+		if (!shader)
+			detail::ThrowShaderCompileFailure(a_name, a_filePath);
 		return shader;
 	}
 

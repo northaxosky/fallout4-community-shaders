@@ -497,12 +497,9 @@ namespace cs::features
 				// FO4: upstream's R32_FLOAT declaration also serves canonical depth.
 				{ "TERRAIN_BLENDING", "" }
 			};
-			_raymarchCS = cs::util::CompileComputeShader(kRaymarchPath, defines);
-			if (_raymarchCS) {
-				cs::render::annotation::SetName(
-					_raymarchCS.get(), "ScreenSpaceShadows/Raymarch.CS");
+			_raymarchCS = cs::util::CompileComputeShader("ScreenSpaceShadows/Raymarch.CS", kRaymarchPath, defines);
+			if (_raymarchCS)
 				L->info("Compiled raymarch shader with {} samples.", scaledSampleCount);
-			}
 		}
 		return _raymarchCS.get();
 	}

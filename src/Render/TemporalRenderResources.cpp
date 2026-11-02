@@ -324,10 +324,7 @@ namespace cs::render
 				break;
 			}
 
-			encodeTexturesCS[methodIndex] = cs::util::CompileComputeShader(kEncodeTexturesPath, defines);
-			cs::render::annotation::SetName(
-				encodeTexturesCS[methodIndex].get(),
-				std::format("Upscaling/EncodeTextures[{}].CS", methodIndex));
+			encodeTexturesCS[methodIndex] = cs::util::CompileComputeShader(std::format("Upscaling/EncodeTextures[{}].CS", methodIndex), kEncodeTexturesPath, defines);
 		}
 		return encodeTexturesCS[methodIndex].get();
 	}
@@ -336,10 +333,7 @@ namespace cs::render
 	{
 		if (!depthRefractionUpscalePS) {
 			L->debug("Compiling DepthRefractionUpscalePS.hlsl");
-			depthRefractionUpscalePS = cs::util::CompilePixelShader(kDepthRefractionUpscalePath);
-			cs::render::annotation::SetName(
-				depthRefractionUpscalePS.get(),
-				"Upscaling/DepthRefractionUpscale.PS");
+			depthRefractionUpscalePS = cs::util::CompilePixelShader("Upscaling/DepthRefractionUpscale.PS", kDepthRefractionUpscalePath);
 		}
 
 		return depthRefractionUpscalePS.get();
@@ -349,9 +343,7 @@ namespace cs::render
 	{
 		if (!upscaleVS) {
 			L->debug("Compiling UpscaleVS.hlsl");
-			upscaleVS = cs::util::CompileVertexShader(kUpscaleVSPath);
-			cs::render::annotation::SetName(
-				upscaleVS.get(), "Upscaling/Fullscreen.VS");
+			upscaleVS = cs::util::CompileVertexShader("Upscaling/Fullscreen.VS", kUpscaleVSPath);
 		}
 
 		return upscaleVS.get();
@@ -361,9 +353,7 @@ namespace cs::render
 	{
 		if (!spatialFallbackPS) {
 			L->debug("Compiling SpatialFallbackPS.hlsl");
-			spatialFallbackPS = cs::util::CompilePixelShader(kSpatialFallbackPath);
-			cs::render::annotation::SetName(
-				spatialFallbackPS.get(), "Upscaling/SpatialFallback.PS");
+			spatialFallbackPS = cs::util::CompilePixelShader("Upscaling/SpatialFallback.PS", kSpatialFallbackPath);
 		}
 		return spatialFallbackPS.get();
 	}
@@ -438,14 +428,10 @@ namespace cs::render
 		_spatialFallbackPreflightReady.store(ok, std::memory_order_release);
 
 		if (IsFrameGenerationDx12PathActive() && !_copyDepthForFrameGenerationCS) {
-			_copyDepthForFrameGenerationCS = cs::util::CompileComputeShader(kCopyDepthForFrameGenerationPath);
+			_copyDepthForFrameGenerationCS = cs::util::CompileComputeShader("Upscaling/CopyDepthForFrameGeneration.CS", kCopyDepthForFrameGenerationPath);
 			if (!_copyDepthForFrameGenerationCS) {
 				render::TemporalPipeline::Get().FailFrameGenerationFrame(
 					"depth capture shader compilation failed");
-			} else {
-				cs::render::annotation::SetName(
-					_copyDepthForFrameGenerationCS.get(),
-					"Upscaling/CopyDepthForFrameGeneration.CS");
 			}
 		}
 

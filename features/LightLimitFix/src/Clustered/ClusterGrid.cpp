@@ -28,15 +28,6 @@ namespace cs::features::light_limit_fix
 			return result;
 		}
 
-		winrt::com_ptr<ID3D11ComputeShader> Compile(const wchar_t* a_path, std::string_view a_name)
-		{
-			winrt::com_ptr<ID3D11ComputeShader> shader;
-			shader = util::CompileComputeShader(a_path);
-			if (!shader)
-				throw std::runtime_error("the LLF cluster compute shader failed to compile");
-			render::annotation::SetName(shader.get(), a_name);
-			return shader;
-		}
 	}
 
 	ClusterDimensions ClusterGrid::Dimensions(std::uint32_t a_width, std::uint32_t a_height) noexcept
@@ -61,8 +52,8 @@ namespace cs::features::light_limit_fix
 		const auto size = Dimensions(state->screenWidth, state->screenHeight);
 		_capacity = size[0] * size[1] * size[2];
 
-		_buildShader = Compile(kBuildPath, "LightLimitFix/ClusterBuilding.CS");
-		_cullShader = Compile(kCullPath, "LightLimitFix/ClusterCulling.CS");
+		_buildShader = util::RequireComputeShader("LightLimitFix/ClusterBuilding.CS", kBuildPath);
+		_cullShader = util::RequireComputeShader("LightLimitFix/ClusterCulling.CS", kCullPath);
 		_buildCB = std::make_unique<buffer::ConstantBuffer>(buffer::ConstantBufferDesc<LightBuildingCB>());
 		_cullCB = std::make_unique<buffer::ConstantBuffer>(buffer::ConstantBufferDesc<LightCullingCB>());
 		_buildCB->SetName("LLF Cluster Building CB");
