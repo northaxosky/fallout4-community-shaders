@@ -259,6 +259,8 @@ namespace cs::engine
 		std::string* a_error = nullptr);
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
+	// The provider's declaration must be in the contribution registry under a_name.
+	bool ValidateShaderContributionName(std::string_view a_name, const ShaderDefineProvider& a_provider);
 	bool SetBaselineShaderOwnership(
 		ShaderInjectionTarget a_target,
 		bool a_enabled);

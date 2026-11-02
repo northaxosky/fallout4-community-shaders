@@ -34,6 +34,8 @@ namespace cs::engine
 		virtual bool IsLoaded() const { return true; }
 		virtual Feature* GetRuntimeOwner() const noexcept { return nullptr; }
 		virtual bool RequiresShaderGraphicsPair(ShaderInjectionTarget) const { return false; }
+		// The registered declaration behind this provider; null when it has none.
+		virtual const ShaderDefineProvider* GetShaderDefineDeclaration() const noexcept { return nullptr; }
 
 		bool IsFullscreenDebugSelected() const noexcept { return _fullscreenDebugSelected.load(std::memory_order_acquire); }
 
@@ -94,6 +96,7 @@ namespace cs::engine
 		bool IsLoaded() const override { return _owner.IsLoaded(); }
 		Feature* GetRuntimeOwner() const noexcept override { return _owner.GetRuntimeOwner(); }
 		bool RequiresShaderGraphicsPair(ShaderInjectionTarget a_target) const override { return _declaration.RequiresShaderGraphicsPair(a_target); }
+		const ShaderDefineProvider* GetShaderDefineDeclaration() const noexcept override { return _declaration.GetShaderDefineDeclaration(); }
 
 	private:
 		const ShaderDefineProvider& _declaration;
@@ -112,6 +115,7 @@ namespace cs::engine
 		{}
 
 		std::string_view GetShaderDefineName() const override { return name; }
+		const ShaderDefineProvider* GetShaderDefineDeclaration() const noexcept override { return this; }
 		ShaderDefineOptions GetShaderDefineOptions(ShaderInjectionTarget a_target = ShaderInjectionTarget::kCount) const override
 		{
 			return GetShaderDefineOptions(a_target, IsFullscreenDebugSelected());

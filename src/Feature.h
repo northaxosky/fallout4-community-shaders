@@ -260,6 +260,7 @@ namespace cs
 		engine::ShaderDefineOptions GetShaderDefineOptions(engine::ShaderInjectionTarget a_target = engine::ShaderInjectionTarget::kCount) const override { return Declaration.GetShaderDefineOptions(a_target, IsFullscreenDebugSelected()); }
 		bool HasShaderDefine(engine::ShaderInjectionTarget a_target) const override { return Declaration.HasShaderDefine(a_target); }
 		bool RequiresShaderGraphicsPair(engine::ShaderInjectionTarget a_target) const override { return Declaration.RequiresShaderGraphicsPair(a_target); }
+		const engine::ShaderDefineProvider* GetShaderDefineDeclaration() const noexcept override { return &Declaration; }
 	};
 
 #ifdef TRACY_SUPPORT

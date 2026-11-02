@@ -1487,6 +1487,26 @@ namespace cs::engine
 		return true;
 	}
 
+	bool ValidateShaderContributionName(std::string_view a_name, const ShaderDefineProvider& a_provider)
+	{
+		const auto* declaration = a_provider.GetShaderDefineDeclaration();
+		if (!declaration) {
+			L->error("Shader contribution '{}' has no declaration.", a_name);
+			return false;
+		}
+		const auto& registry = GetShaderContributionRegistry();
+		const auto found = std::ranges::find(registry, declaration, &ShaderContribution::provider);
+		if (found == registry.end()) {
+			L->error("Shader contribution '{}' is not registered in its ShaderDefines.h.", a_name);
+			return false;
+		}
+		if (found->name != a_name) {
+			L->error("Shader contribution '{}' is registered in ShaderDefines.h as '{}'.", a_name, found->name);
+			return false;
+		}
+		return true;
+	}
+
 	bool SetBaselineShaderOwnership(
 		ShaderInjectionTarget a_target,
 		bool a_enabled)

@@ -30,6 +30,8 @@ namespace cs::engine
 	template <class Configure>
 	bool RegisterFeatureShaderBindings(std::string_view a_name, const ShaderDefineProvider& a_feature, Configure&& a_configure)
 	{
+		if (!ValidateShaderContributionName(a_name, a_feature))
+			return false;
 		auto registrations = DescribeFeatureShaderBindings(a_name, a_feature);
 		for (auto& registration : registrations) {
 			a_configure(registration);
