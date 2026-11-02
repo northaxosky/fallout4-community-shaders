@@ -2020,7 +2020,8 @@ PS_OUTPUT main(PS_INPUT input)
 #	if !COMPOSITE_HAS_LIGHT && !COMPOSITE_MATERIAL_5
 		float3 ambientWeighted = litColor * 3.0;
 		ambientWeighted += secondaryColor;
-#		ifdef SSGI
+		// FO4: unblended fog uses this only as the desaturation luminance.
+#		if defined(SSGI) && COMPOSITE_SCENE_BLEND
 		ambientWeighted = ScreenSpaceGI::ComposeDiffuse(
 			input.position.xy,
 			float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
