@@ -34,7 +34,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
-| **[DearModdingUI](https://github.com/Dear-Modding-FO4/DearModdingUI)** | Recommended. Provides the in-game menu, performance overlay, and shader compilation window. Use DearModdingUI plugin 0.2.2 (host ABI 2.2) or a later 2.x release; older ABI 2.x hosts lack the shader compilation window, table sorting and heat colors, and other ABI majors are logged and ignored, leaving Community Shaders headless. |
+| **[DearModdingUI](https://github.com/Dear-Modding-FO4/DearModdingUI)** | Recommended. Provides the in-game menu, performance overlay, and shader compilation window. Use DearModdingUI plugin 0.2.2 (host ABI 2.2) or a later 2.x release; hosts that lack a feature simply do not show it, and other ABI majors are logged and ignored, leaving Community Shaders headless. |
 
 ---
 

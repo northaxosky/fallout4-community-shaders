@@ -31,10 +31,6 @@ namespace cs::host
 	{
 		constexpr std::uint32_t kBindingPollFrames = 120;
 
-		// Calls added in ABI 2.2 fail softly on older 2.x hosts.
-		constexpr std::uint32_t kFullAbiMinor = 2;
-		constexpr const char* kOlderHostLoss = "compile overlay, table sort and heat colors";
-
 		constexpr dmui::ClientOptions kClientOptions{
 			.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT
 		};
@@ -342,15 +338,6 @@ namespace cs::host
 
 	void HostClient::PublishInitialStatus() noexcept
 	{
-		const auto olderHost = _client.AbiMinor() < kFullAbiMinor;
-		if (olderHost) {
-			L->warn(
-				"DearModdingUI host ABI 2.{} predates 2.{}; unavailable: {}",
-				_client.AbiMinor(),
-				kFullAbiMinor,
-				kOlderHostLoss);
-		}
-
 		std::size_t active{};
 		std::size_t failed{};
 		for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
@@ -372,25 +359,18 @@ namespace cs::host
 			}
 		}
 
-		auto status = failed ?
-		                  std::format(
-							  "{} feature{} active; {} failed. See diagnostics.",
-							  active,
-							  active == 1 ? "" : "s",
-							  failed) :
-		                  std::format(
-							  "{} feature{} active.",
-							  active,
-							  active == 1 ? "" : "s");
-		if (olderHost) {
-			status += std::format(
-				" Host ABI 2.{} lacks the {}; update DearModdingUI to 2.{}.",
-				_client.AbiMinor(),
-				kOlderHostLoss,
-				kFullAbiMinor);
-		}
+		const auto status = failed ?
+		                        std::format(
+									"{} feature{} active; {} failed. See diagnostics.",
+									active,
+									active == 1 ? "" : "s",
+									failed) :
+		                        std::format(
+									"{} feature{} active.",
+									active,
+									active == 1 ? "" : "s");
 		if (!_client.SetStatus(
-				failed || olderHost ? DMUI_STATUS_SEVERITY_WARNING : DMUI_STATUS_SEVERITY_INFO,
+				failed ? DMUI_STATUS_SEVERITY_WARNING : DMUI_STATUS_SEVERITY_INFO,
 				status.c_str())) {
 			LogFailure("publish client status");
 		}
