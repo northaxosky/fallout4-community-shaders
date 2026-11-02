@@ -71,8 +71,8 @@ namespace cs::features
 	void Upscaling::Load()
 	{
 		// Own contributor, so stock targets cannot fail Upscaling.
-		if (!cs::engine::RegisterFeatureShaderBindings("UpscalingSamplerBias", _samplerBiasDefines)) {
-			FailLoad("Upscaling could not register its sampler bias shader define");
+		if (!cs::engine::RegisterFeatureShaderBindings("UpscalingMipBias", _mipBiasDefines)) {
+			FailLoad("Upscaling could not register its mip bias shader define");
 		}
 		if (!cs::engine::RegisterFeatureShaderBindings("UpscalingImageSpaceUv", _imageSpaceUvDefines)) {
 			FailLoad("Upscaling could not register its imagespace UV shader define");
@@ -81,7 +81,7 @@ namespace cs::features
 
 	bool Upscaling::ValidateShaderInjections(std::string& a_error)
 	{
-		return cs::engine::ValidateShaderInjectionRoutes("UpscalingSamplerBias", a_error) &&
+		return cs::engine::ValidateShaderInjectionRoutes("UpscalingMipBias", a_error) &&
 		       cs::engine::ValidateShaderInjectionRoutes("UpscalingImageSpaceUv", a_error);
 	}
 

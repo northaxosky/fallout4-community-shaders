@@ -193,6 +193,7 @@ VS_OUTPUT main(VS_INPUT input)
 #endif
 
 #ifdef BSWATER_PIXEL_SHADER
+#	include "FO4/FO4ShaderData.hlsli"
 #	include "FO4/FogConsumer.hlsli"
 #	include "FO4/WorldShadowConsumer.hlsli"
 #	ifdef VOLUMETRIC_SHADOWS
@@ -212,9 +213,6 @@ float FO4WaterSunShadow(float3 worldPosition, float2 screenPosition)
 #		endif
 }
 #		define FO4_WATER_SUN_SHADOW(worldPosition, screenPosition) FO4WaterSunShadow(worldPosition, screenPosition)
-#	endif
-#	ifdef UNIFIED_WATER
-#		include "FO4/FO4ShaderData.hlsli"
 #	endif
 #	ifdef LIGHT_LIMIT_FIX
 #		include "FO4/LightLimitFixForward.hlsli"
@@ -378,10 +376,10 @@ float WaterDistanceBlendFactor(float distanceFactor)
 
 float3 blendedNormal(float2 uv0, float2 uv1, float2 uv2, float fade)
 {
-	float3 detail0 = unpackNormal(texture4.Sample(sampler4, uv0).xy);
+	float3 detail0 = unpackNormal(SAMPLE_MATERIAL(texture4, sampler4, uv0).xy);
 	float3 normal = lerp(float3(0.0, 0.0, 1.0), detail0, perMaterial[9].x);
-	float3 detail1 = unpackNormal(texture5.Sample(sampler5, uv1).xy);
-	float3 detail2 = unpackNormal(texture6.Sample(sampler6, uv2).xy);
+	float3 detail1 = unpackNormal(SAMPLE_MATERIAL(texture5, sampler5, uv1).xy);
+	float3 detail2 = unpackNormal(SAMPLE_MATERIAL(texture6, sampler6, uv2).xy);
 	detail1 = detail1 * perMaterial[9].y;
 	detail2 = detail2 * perMaterial[9].z;
 	normal = detail1 * fade + normal;
@@ -624,7 +622,7 @@ float4 main(PS_INPUT input) : SV_Target0
 
 float4 main(PS_INPUT input) : SV_Target0
 {
-	float3 normal = unpackNormal(texture4.Sample(sampler4, input.normalUv01.xy).xy);
+	float3 normal = unpackNormal(SAMPLE_MATERIAL(texture4, sampler4, input.normalUv01.xy).xy);
 	normal = lerp(float3(0.0, 0.0, 1.0), lerp(float3(0.0, 0.0, 1.0), normal, perMaterial[9].x), perMaterial[11].y);
 	normal = normalize(normal);
 
@@ -824,7 +822,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float3 start = startClip.xyz / startClip.w;
 	float3 startScreen = start * float3(0.5, -0.5, 1.0) + float3(0.5, 0.5, 0.0);
 
-	float3 normal = unpackNormal(texture4.Sample(sampler4, input.normalUv01.xy).xy);
+	float3 normal = unpackNormal(SAMPLE_MATERIAL(texture4, sampler4, input.normalUv01.xy).xy);
 	normal = lerp(float3(0.0, 0.0, 1.0), lerp(float3(0.0, 0.0, 1.0), normal, perMaterial[9].x), 0.5 * perMaterial[11].y);
 	normal = normalize(normal);
 #		elif defined(BSWATER_RAY_UNDERWATER)

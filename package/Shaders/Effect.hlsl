@@ -1,4 +1,5 @@
 #ifdef BSEFFECT_PS_SOURCE
+#	include "FO4/FO4ShaderData.hlsli"
 #	include "FO4/FogConsumer.hlsli"
 #	include "FO4/EffectLightingConsumer.hlsli"
 #	if defined(LIGHTING) && defined(LIGHT_LIMIT_FIX)
@@ -202,7 +203,7 @@ PSOutput main(PSInput input)
 	PSOutput output;
 #	if defined(UI_MASK_RECTS)
 	float baseTextureAlpha =
-		TexBaseSampler.Sample(SampBaseSampler, input.TexCoord0.xy).w;
+		SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, input.TexCoord0.xy).w;
 	float baseAlpha = baseTextureAlpha * BaseColor.w;
 	float alpha = baseAlpha * PropertyColor.w;
 
@@ -359,7 +360,7 @@ PSOutput main(PSInput input)
 #			endif
 #			if !(defined(GRAYSCALE_TO_COLOR) && defined(GRAYSCALE_TO_ALPHA))
 	float4 baseTexColor =
-		TexBaseSampler.Sample(SampBaseSampler, input.TexCoord0.xy);
+		SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, input.TexCoord0.xy);
 	float4 baseColor = baseTexColor;
 #				if defined(IGNORE_TEX_ALPHA) || defined(GRAYSCALE_TO_ALPHA)
 	baseColor.w = 1.0;
@@ -380,9 +381,7 @@ PSOutput main(PSInput input)
 	float3 membraneNormal = input.TBN0;
 #			else
 	float3 membraneNormal =
-		TexNormalDistortionSampler.Sample(
-									  SampNormalDistortionSampler,
-									  input.TexCoord0.zw)
+		SAMPLE_MATERIAL(TexNormalDistortionSampler, SampNormalDistortionSampler, input.TexCoord0.zw)
 				.xzy *
 			2.0 -
 		1.0;
@@ -411,7 +410,7 @@ PSOutput main(PSInput input)
 	float2 membraneGrayscaleScale =
 		grayscaleBaseScale * input.EyeVector.ww;
 	float4 baseTexColor =
-		TexBaseSampler.Sample(SampBaseSampler, input.TexCoord0.xy);
+		SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, input.TexCoord0.xy);
 	float4 baseColor = baseTexColor;
 #			endif
 #			if defined(ALPHA_TEST) && !(defined(GRAYSCALE_TO_COLOR) && (defined(GRAYSCALE_TO_ALPHA) || defined(IGNORE_TEX_ALPHA)))
@@ -432,9 +431,7 @@ PSOutput main(PSInput input)
 	float4 baseColor = 1.0.xxxx;
 #			if defined(PARTICLE_DISTORTION)
 	float2 distortion =
-		TexNormalDistortionSampler.Sample(
-									  SampNormalDistortionSampler,
-									  input.TexCoord0.zw)
+		SAMPLE_MATERIAL(TexNormalDistortionSampler, SampNormalDistortionSampler, input.TexCoord0.zw)
 				.xy *
 			2.0 -
 		1.0;
@@ -442,18 +439,16 @@ PSOutput main(PSInput input)
 	float4 distortedTexCoord =
 		distortion.xyxy * distortionScale + input.TexCoord0.zwxy;
 	baseTexColor =
-		TexBaseSampler.Sample(SampBaseSampler, distortedTexCoord.xy);
+		SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, distortedTexCoord.xy);
 #				if defined(GRAYSCALE_TO_COLOR)
 	baseTexColor.y = pow(baseTexColor.y, 1.0 / 2.2);
 #				endif
 	float4 distortionMaskColor =
-		TexEffectMaskSampler.Sample(
-			SampEffectMaskSampler,
-			distortedTexCoord.zw);
+		SAMPLE_MATERIAL(TexEffectMaskSampler, SampEffectMaskSampler, distortedTexCoord.zw);
 	baseTexColor *= distortionMaskColor;
 	baseColor *= baseTexColor;
 #			elif defined(TEXTURE) && !(defined(GRAYSCALE_TO_COLOR) && defined(GRAYSCALE_TO_ALPHA))
-	baseTexColor = TexBaseSampler.Sample(SampBaseSampler, input.TexCoord0.xy);
+	baseTexColor = SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, input.TexCoord0.xy);
 	baseColor *= baseTexColor;
 #			endif
 #		endif
@@ -658,7 +653,7 @@ PSOutput main(PSInput input)
 #			endif
 #		endif
 #		if !defined(MEMBRANE) && !defined(PARTICLE_DISTORTION) && ((defined(GRAYSCALE_TO_COLOR) && defined(GRAYSCALE_TO_ALPHA)) || (!defined(TEXTURE) && defined(GRAYSCALE_TO_COLOR)))
-	baseTexColor = TexBaseSampler.Sample(SampBaseSampler, input.TexCoord0.xy);
+	baseTexColor = SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, input.TexCoord0.xy);
 #		endif
 #		if defined(GRAYSCALE_TO_COLOR)
 #			if defined(PARTICLE_DISTORTION)
@@ -684,7 +679,7 @@ PSOutput main(PSInput input)
 	grayscaleAlphaScale *= softFade;
 #			endif
 #			if !defined(TEXTURE) && !defined(GRAYSCALE_TO_COLOR)
-	baseTexColor = TexBaseSampler.Sample(SampBaseSampler, input.TexCoord0.xy);
+	baseTexColor = SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, input.TexCoord0.xy);
 #			endif
 	baseColor.w =
 		TexGrayscaleSampler.Sample(
@@ -718,9 +713,7 @@ PSOutput main(PSInput input)
 
 #		if defined(ENVMAP)
 	float3 normalColor =
-		TexNormalDistortionSampler.Sample(
-									  SampNormalDistortionSampler,
-									  input.TexCoord0.xy)
+		SAMPLE_MATERIAL(TexNormalDistortionSampler, SampNormalDistortionSampler, input.TexCoord0.xy)
 			.xyw;
 	float2 normalXY = normalColor.xy * 2.0 - 1.0;
 	float normalZ = sqrt(1.0 - min(dot(normalXY, normalXY), 1.0));
@@ -738,9 +731,7 @@ PSOutput main(PSInput input)
 	envmapColor *= EnvmapScale_row0.x;
 	envmapColor *= normalColor.z;
 	envmapColor *=
-		TexEffectMaskSampler.Sample(
-								SampEffectMaskSampler,
-								input.TexCoord0.xy)
+		SAMPLE_MATERIAL(TexEffectMaskSampler, SampEffectMaskSampler, input.TexCoord0.xy)
 			.x;
 #			if defined(GRAYSCALE_TO_COLOR) || defined(GRAYSCALE_TO_ALPHA)
 	baseColor.xyz = baseColor.xyz + envmapColor;
@@ -859,7 +850,7 @@ PSOutput main(PSInput input)
 		clip(AlphaTestRef.y - baseTexColor.w);
 #		else
 		clip(AlphaTestRef.y -
-			 TexBaseSampler.Sample(SampBaseSampler, input.TexCoord0.xy).w);
+			 SAMPLE_MATERIAL(TexBaseSampler, SampBaseSampler, input.TexCoord0.xy).w);
 #		endif
 	}
 #		if defined(PREMULTIPLY_ALPHA)

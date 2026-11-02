@@ -134,9 +134,7 @@
 #		endif
 #	endif
 
-#	if defined(LOD_BLENDING) || defined(TERRAIN_VARIATION) || defined(FO4_PREPASS_VERTEX_AO) || defined(EMAT) || defined(FO4_TERRAIN_BLENDING)
-#		include "FO4/FO4ShaderData.hlsli"
-#	endif
+#	include "FO4/FO4ShaderData.hlsli"
 
 // FO4: Skyrim mesh exclusions as prepass variants; host rejects object LOD.
 #	if defined(TERRAIN_VARIATION) && TEXTURE && !LANDSCAPE && !(LOD_LANDSCAPE || SKIN_TINT || HAIR || EYE || TREE_ANIM || DISMEMBERMENT_MEATCUFF)
@@ -171,7 +169,7 @@ float4 SampleTerrainVariation(Texture2D tex, SamplerState samp, float2 uv, Stoch
 	float4 result;
 	[branch] if (FO4SharedData::EnabledTerrainVariation != 0)
 		result = StochasticEffect(tex, samp, uv, offsets);
-	else result = tex.Sample(samp, uv);
+	else result = SAMPLE_MATERIAL(tex, samp, uv);
 	return result;
 }
 #	endif
@@ -668,9 +666,7 @@ struct PS_OUTPUT
 			clip(cb2_alpha_mask_params.y * (0.5 - ditherValue) + cb2_alpha_mask_params.z - 0.5);
 		}
 		if (cb2_alpha_mask_params.w) {
-			float maskAlpha = g_tAlphaMask.Sample(
-											  g_sAlphaMask,
-											  uv)
+			float maskAlpha = SAMPLE_MATERIAL(g_tAlphaMask, g_sAlphaMask, uv)
 		                          .w;
 			clip(cb2_alpha_mask_params.x - maskAlpha);
 		}
@@ -708,14 +704,14 @@ struct PS_OUTPUT
 			}                                                       \
 			else                                                    \
 			{                                                       \
-				DEST = TEX.Sample(SAMP, UV);                        \
+				DEST = SAMPLE_MATERIAL(TEX, SAMP, UV);              \
 			}
 #	else
 #		if defined(EMAT_OBJECT)
 	StochasticOffsets meshOffset = (StochasticOffsets)0;
 	const bool applyMeshTV = false;
 #		endif
-#		define MESH_TV_SAMPLE(DEST, TEX, SAMP, UV) float4 DEST = TEX.Sample(SAMP, UV)
+#		define MESH_TV_SAMPLE(DEST, TEX, SAMP, UV) float4 DEST = SAMPLE_MATERIAL(TEX, SAMP, UV)
 #	endif
 
 #	if defined(EMAT)
@@ -884,7 +880,7 @@ struct PS_OUTPUT
 #		if defined(TERRAIN_VARIATION) && !INSTANCED
 #			define SampleTerrain(TEX, SAMP, UV, OFFSET) SampleTerrainVariation(TEX, SAMP, UV, OFFSET)
 #		else
-#			define SampleTerrain(TEX, SAMP, UV, OFFSET) TEX.Sample(SAMP, UV)
+#			define SampleTerrain(TEX, SAMP, UV, OFFSET) SAMPLE_MATERIAL(TEX, SAMP, UV)
 #		endif
 		bool4 landActive = (input.layerWeights > 0.0);
 		float3 landAlbedo = 0.0;
@@ -896,12 +892,10 @@ struct PS_OUTPUT
 				float landWeight = input.layerWeights[landLayer];
 #		if INSTANCED
 				float3 landAlbedoUV = float3(uv, landSlices[landLayer * 3]);
-				landAlbedo += landWeight * g_tLandAlbedo.Sample(
-															g_sLandAlbedo, landAlbedoUV)
+				landAlbedo += landWeight * SAMPLE_MATERIAL(g_tLandAlbedo, g_sLandAlbedo, landAlbedoUV)
 			                                   .xyz;
 				float3 landNormalUV = float3(uv, landSlices[landLayer * 3 + 1]);
-				float2 landNormalXY = g_tLandNormal.Sample(
-													   g_sLandNormal, landNormalUV)
+				float2 landNormalXY = SAMPLE_MATERIAL(g_tLandNormal, g_sLandNormal, landNormalUV)
 			                              .xy;
 #		else
 				landAlbedo += landWeight * SampleTerrain(g_tLandAlbedo[landLayer], g_sLandAlbedo[landLayer], uv, sharedOffset).xyz;
@@ -913,8 +907,7 @@ struct PS_OUTPUT
 				landNormal += landWeight * float3(landNormalXY, landNormalZ);
 #		if INSTANCED
 				float3 landMaterialUV = float3(uv, landSlices[landLayer * 3 + 2]);
-				landMaterial += landWeight * g_tLandMaterial.Sample(
-																g_sLandMaterial, landMaterialUV)
+				landMaterial += landWeight * SAMPLE_MATERIAL(g_tLandMaterial, g_sLandMaterial, landMaterialUV)
 			                                     .xy;
 #		else
 				landMaterial += landWeight * SampleTerrain(g_tLandMaterial[landLayer], g_sLandMaterial[landLayer], uv, sharedOffset).xy;
@@ -923,16 +916,13 @@ struct PS_OUTPUT
 		}
 #		undef SampleTerrain
 #		if LAND_LOD_BLEND && INSTANCED
-		float3 landLodAlbedo = g_tLandLodAlbedo.Sample(
-												   g_sLandLodAlbedo,
-												   float3(input.lodAlbedoUV,
-													   g_bLandInstances[input.instanceIndex].lodSlice))
+		float3 landLodAlbedo = SAMPLE_MATERIAL(g_tLandLodAlbedo, g_sLandLodAlbedo, float3(input.lodAlbedoUV, g_bLandInstances[input.instanceIndex].lodSlice))
 	                               .xyz;
 #		elif LAND_LOD_BLEND
 #			if defined(TERRAIN_VARIATION)
 		float3 landLodAlbedo;
 		[branch] if (FO4SharedData::EnabledTerrainVariation == 0)
-			landLodAlbedo = g_tLandLodAlbedo.Sample(g_sLandLodAlbedo, input.lodAlbedoUV).xyz;
+			landLodAlbedo = SAMPLE_MATERIAL(g_tLandLodAlbedo, g_sLandLodAlbedo, input.lodAlbedoUV).xyz;
 		else[branch] if (SharedData::terrainVariationSettings.enableLODTerrainTilingFix)
 		{
 			// FO4: prepass albedo is raw, so the DiffuseToWorking result is unused.
@@ -942,8 +932,7 @@ struct PS_OUTPUT
 		}
 		else landLodAlbedo = g_tLandLodAlbedo.SampleBias(g_sLandLodAlbedo, input.lodAlbedoUV, SharedData::MipBias).xyz;
 #			else
-		float3 landLodAlbedo = g_tLandLodAlbedo.Sample(
-												   g_sLandLodAlbedo, input.lodAlbedoUV)
+		float3 landLodAlbedo = SAMPLE_MATERIAL(g_tLandLodAlbedo, g_sLandLodAlbedo, input.lodAlbedoUV)
 	                               .xyz;
 #			endif
 #		endif
@@ -983,11 +972,9 @@ struct PS_OUTPUT
 			landMaterial, LandLODParamsPS.yx, input.lodBlend.z);
 #		endif
 #	elif EYE && COMBINED
-	float4 albedoSample = g_tEyeAlbedo.Sample(
-		g_sAlbedo,
-		float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.x));
+	float4 albedoSample = SAMPLE_MATERIAL(g_tEyeAlbedo, g_sAlbedo, float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.x));
 #	elif DISMEMBERMENT_MEATCUFF
-	float4 albedoSample = g_tAlbedo.Sample(g_sAlbedo, uv);
+	float4 albedoSample = SAMPLE_MATERIAL(g_tAlbedo, g_sAlbedo, uv);
 #	elif TEXTURE
 	MESH_TV_SAMPLE(albedoSample, g_tAlbedo, g_sAlbedo, uv);
 #	else
@@ -1042,11 +1029,9 @@ struct PS_OUTPUT
 
 #	if !LANDSCAPE
 #		if DISMEMBERMENT_MEATCUFF
-		float4 normalMapSample = g_tNormalMap.Sample(g_sNormalMap, uv);
+		float4 normalMapSample = SAMPLE_MATERIAL(g_tNormalMap, g_sNormalMap, uv);
 #		elif EYE && COMBINED
-		float4 normalMapSample = g_tEyeNormalMap.Sample(
-			g_sNormalMap,
-			float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.y));
+		float4 normalMapSample = SAMPLE_MATERIAL(g_tEyeNormalMap, g_sNormalMap, float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.y));
 #		elif TEXTURE
 		MESH_TV_SAMPLE(normalMapSample, g_tNormalMap, g_sNormalMap, uv);
 #		else
@@ -1055,7 +1040,7 @@ struct PS_OUTPUT
 #		if MODELSPACENORMALS
 #			if FACE
 		float3 modelNormal = normalMapSample.xzy * 2.0 - 1.0;
-		float4 faceDetail = g_tFaceDetail.Sample(g_sFaceDetail, uv) * 2.0 - 1.0;
+		float4 faceDetail = SAMPLE_MATERIAL(g_tFaceDetail, g_sFaceDetail, uv) * 2.0 - 1.0;
 		float3 blendedModelNormal = lerp(
 			modelNormal, faceDetail.xzy, input.faceMask);
 #			else
@@ -1066,7 +1051,7 @@ struct PS_OUTPUT
 		float nts_xy_lenSq = saturate(dot(nts_xy, nts_xy));
 		float nts_z = sqrt(1.0 - nts_xy_lenSq);
 #			if FACE
-		float4 faceDetail = g_tFaceDetail.Sample(g_sFaceDetail, uv);
+		float4 faceDetail = SAMPLE_MATERIAL(g_tFaceDetail, g_sFaceDetail, uv);
 		float2 faceNormalXY = faceDetail.xy * 2.0 - 1.0;
 		float faceNormalZ = sqrt(
 			1.0 - saturate(dot(faceNormalXY, faceNormalXY)));
@@ -1084,12 +1069,10 @@ struct PS_OUTPUT
 		float auxRoughness = landMaterial.y;
 #	elif !(HAIR && !BLEND) && !(GRADIENT_REMAP && HAIR && BLEND && !ADDITIONAL_ALPHA_MASK)
 #		if DISMEMBERMENT_MEATCUFF
-	float auxRoughness = g_tMaterial.Sample(g_sMaterial, uv).y;
-	float materialX = g_tMaterial.Sample(g_sMaterial, uv).x;
+	float auxRoughness = SAMPLE_MATERIAL(g_tMaterial, g_sMaterial, uv).y;
+	float materialX = SAMPLE_MATERIAL(g_tMaterial, g_sMaterial, uv).x;
 #		elif EYE && COMBINED
-	float4 materialSample = g_tEyeMaterial.Sample(
-		g_sMaterial,
-		float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.z));
+	float4 materialSample = SAMPLE_MATERIAL(g_tEyeMaterial, g_sMaterial, float3(uv, g_bEyeInstances[input.instanceIndex].textureSlices.z));
 #		elif TEXTURE
 	MESH_TV_SAMPLE(materialSample, g_tMaterial, g_sMaterial, uv);
 #		else
@@ -1111,10 +1094,10 @@ struct PS_OUTPUT
 #	if EYE && DISMEMBERMENT
 		bool dismembered = input.dismemberWeight.y > 0.0;
 		if (dismembered) {
-			auxRoughness = g_tCutMaterial.Sample(g_sCutMaterial, input.cutCoord).y;
+			auxRoughness = SAMPLE_MATERIAL(g_tCutMaterial, g_sCutMaterial, input.cutCoord).y;
 		}
 		if (dismembered) {
-			materialSample.x = g_tCutMaterial.Sample(g_sCutMaterial, input.cutCoord).x;
+			materialSample.x = SAMPLE_MATERIAL(g_tCutMaterial, g_sCutMaterial, input.cutCoord).x;
 		}
 #	endif
 
@@ -1216,12 +1199,12 @@ struct PS_OUTPUT
 			g_sGradient, float2(gradientU, gradientV), 0.0);
 #		if BLEND
 		gradientSample.xyz *= gradientScale;
-		float4 materialSample = g_tMaterial.Sample(g_sMaterial, uv);
+		float4 materialSample = SAMPLE_MATERIAL(g_tMaterial, g_sMaterial, uv);
 		float auxRoughness = materialSample.y * gradientSample.w;
 #		endif
 #	endif
 #	if GLOWMAP && (!HAIR || BLEND)
-		float4 glowMapSample = g_tGlowMap.Sample(g_sGlowMap, uv);
+		float4 glowMapSample = SAMPLE_MATERIAL(g_tGlowMap, g_sGlowMap, uv);
 #	endif
 
 #	if !DISMEMBERMENT_MEATCUFF || GLOWMAP
@@ -1296,17 +1279,16 @@ struct PS_OUTPUT
 			float2 cuffSurfaceUV = 1.0 - cuffNormalUV;
 #		if GRADIENT_REMAP
 			gradientSample =
-				g_tCutAlbedo.Sample(g_sCutAlbedo, cuffSurfaceUV);
+				SAMPLE_MATERIAL(g_tCutAlbedo, g_sCutAlbedo, cuffSurfaceUV);
 			albedoSample = gradientSample;
 #		else
-			albedoSample = g_tCutAlbedo.Sample(g_sCutAlbedo, cuffSurfaceUV);
+			albedoSample = SAMPLE_MATERIAL(g_tCutAlbedo, g_sCutAlbedo, cuffSurfaceUV);
 #		endif
 			auxRoughness =
-				g_tCutMaterial.Sample(g_sCutMaterial, cuffSurfaceUV).y;
+				SAMPLE_MATERIAL(g_tCutMaterial, g_sCutMaterial, cuffSurfaceUV).y;
 			materialX =
-				g_tCutMaterial.Sample(g_sCutMaterial, cuffSurfaceUV).x;
-			float2 cutNtsXY = g_tCutNormalMap.Sample(
-												 g_sCutNormalMap, cuffNormalUV)
+				SAMPLE_MATERIAL(g_tCutMaterial, g_sCutMaterial, cuffSurfaceUV).x;
+			float2 cutNtsXY = SAMPLE_MATERIAL(g_tCutNormalMap, g_sCutNormalMap, cuffNormalUV)
 		                              .xy *
 		                          2.0 -
 		                      1.0;
@@ -1332,8 +1314,7 @@ struct PS_OUTPUT
 // The cut normal is oriented by a constant cap frame, not the interpolated one.
 #	if EYE && DISMEMBERMENT
 		if (dismembered) {
-			float2 cutNtsXY = g_tCutNormalMap.Sample(
-												 g_sCutNormalMap, input.cutCoord)
+			float2 cutNtsXY = SAMPLE_MATERIAL(g_tCutNormalMap, g_sCutNormalMap, input.cutCoord)
 		                              .xy *
 		                          2.0 -
 		                      1.0;
@@ -1466,8 +1447,7 @@ struct PS_OUTPUT
 #	endif
 
 #	if HAIR && !BLEND
-		float3 hairMaterialVector = g_tHairMaterial.Sample(
-													   g_sHairMaterial, uv)
+		float3 hairMaterialVector = SAMPLE_MATERIAL(g_tHairMaterial, g_sHairMaterial, uv)
 	                                        .xyz *
 	                                    2.0 -
 	                                1.0;
@@ -1590,7 +1570,7 @@ struct PS_OUTPUT
 #	endif
 
 #	if BONE_TINTING
-		float4 boneIndex = g_tBoneIndex.Sample(g_sBoneIndex, uv);
+		float4 boneIndex = SAMPLE_MATERIAL(g_tBoneIndex, g_sBoneIndex, uv);
 		float2 boneUv = float2(boneIndex.y, frac(cb2_bone_tint_params.x));
 		float4 boneTint = g_tBoneTint.Sample(g_sBoneTint, boneUv);
 		float3 boneContribution = boneTint.xyz * boneTint.w * boneIndex.w * input.boneTint.w * 4.0;
@@ -1654,7 +1634,7 @@ struct PS_OUTPUT
 // The cut cap is its own surface: it replaces the composed colour, then takes the fade.
 #	if EYE && DISMEMBERMENT
 		if (dismembered) {
-			output.albedo.xyz = g_tCutAlbedo.Sample(g_sCutAlbedo, input.cutCoord).xyz;
+			output.albedo.xyz = SAMPLE_MATERIAL(g_tCutAlbedo, g_sCutAlbedo, input.cutCoord).xyz;
 		}
 #		if VC && BLEND
 		else {

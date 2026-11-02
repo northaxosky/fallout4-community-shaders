@@ -4,11 +4,11 @@
 
 namespace cs::features::upscaling
 {
-	// Owned targets drawn inside a SamplerBias override window.
-	inline const engine::ShaderDefineDeclaration kSamplerBiasShaderDefines{
-		"SAMPLER_MIP_BIAS",
+	// Owned pixel shaders that sample materials with SharedData::MipBias.
+	inline const engine::ShaderDefineDeclaration kMipBiasShaderDefines{
+		engine::shader_injection_defines::kSubstrate,
 		{ engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kDistantTree,
-			engine::ShaderInjectionTarget::kEffect }
+			engine::ShaderInjectionTarget::kEffect, engine::ShaderInjectionTarget::kBsWater }
 	};
 
 	// Imagespace fullscreen VS draws read the exact render scale from b4.

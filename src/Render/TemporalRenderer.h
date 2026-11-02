@@ -10,7 +10,6 @@
 
 #include "DynamicResolution.h"
 #include "RCAS/RCAS.h"
-#include "SamplerBias.h"
 
 #include <atomic>
 #include <cstdint>
@@ -257,7 +256,6 @@ namespace cs::render
 		FeatureDebugTexture GetProviderOutputDebugTexture() const;
 
 		features::DynamicResolution dynamicResolution;
-		features::SamplerBias samplerBias;
 
 		bool IsDrivingFrameState() const noexcept;
 		bool IsDrivingVendorUpscaler() const;

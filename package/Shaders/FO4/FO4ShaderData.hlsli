@@ -1,18 +1,7 @@
 #ifndef FO4_SHADER_DATA_HLSLI
 #define FO4_SHADER_DATA_HLSLI
 #ifdef FO4CS_SUBSTRATE
-#	ifdef SAMPLER_MIP_BIAS
-// FO4: the bound samplers already carry MipBias.
-#		define MipBias SamplerMipBiasCB
-#	endif
 #	include "Common/SharedData.hlsli"
-#	ifdef SAMPLER_MIP_BIAS
-#		undef MipBias
-namespace SharedData
-{
-	static const float MipBias = 0.0;
-}
-#	endif
 #	include "FO4/FO4SharedData.hlsli"
 namespace FO4SharedData
 {
@@ -24,5 +13,11 @@ namespace FO4SharedData
 		return pow(max(0.0, ambient), 2.2);
 	}
 }
+#endif
+// FO4: material samples carry the upscaler mip bias; no substrate stays stock.
+#ifdef FO4CS_SUBSTRATE
+#	define SAMPLE_MATERIAL(tex, samp, uv) tex.SampleBias(samp, uv, SharedData::MipBias)
+#else
+#	define SAMPLE_MATERIAL(tex, samp, uv) tex.Sample(samp, uv)
 #endif
 #endif

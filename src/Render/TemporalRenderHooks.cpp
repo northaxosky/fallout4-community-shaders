@@ -10,8 +10,6 @@ namespace cs::render
 	{
 		using namespace upscaling_anchors;
 
-		samplerBias.Initialize();
-
 		struct CallHook
 		{
 			const cs::engine::CallSiteAnchor* anchor;
@@ -508,12 +506,10 @@ namespace cs::render
 			return;
 		}
 		try {
-			upscaling->samplerBias.Override();
+			const ScopedMainViewMipBias mipBias(upscaling->GetMipBias());
 			func(a_this);
-			upscaling->samplerBias.Reset();
 		} catch (...) {
-			upscaling->samplerBias.Reset();
-			upscaling->QuarantineAfterException("Upscaling sampler override (deferred prepass)");
+			upscaling->QuarantineAfterException("Upscaling mip bias scope (deferred prepass)");
 		}
 	}
 
@@ -525,12 +521,10 @@ namespace cs::render
 			return;
 		}
 		try {
-			upscaling->samplerBias.Override();
+			const ScopedMainViewMipBias mipBias(upscaling->GetMipBias());
 			func(a_this);
-			upscaling->samplerBias.Reset();
 		} catch (...) {
-			upscaling->samplerBias.Reset();
-			upscaling->QuarantineAfterException("Upscaling sampler override (forward)");
+			upscaling->QuarantineAfterException("Upscaling mip bias scope (forward)");
 		}
 	}
 

@@ -1,4 +1,5 @@
 #if defined(BSDISTANTTREE_PS_SOURCE)
+#	include "FO4/FO4ShaderData.hlsli"
 #	ifndef RENDER_DEPTH
 #		include "FO4/FogConsumer.hlsli"
 #		include "FO4/ImageBasedLightingConsumer.hlsli"
@@ -44,7 +45,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float depth = input.Depth.x / input.Depth.y;
 	psout.Color = float4(depth, depth, depth, 1);
 #	else
-	float4 baseColor = TexDiffuse.Sample(SampDiffuse, input.TexCoord.xy);
+	float4 baseColor = SAMPLE_MATERIAL(TexDiffuse, SampDiffuse, input.TexCoord.xy);
 	float3 diffuseColor =
 #		ifdef TERRAIN_SHADOWS
 		baseColor.xyz * (input.TexCoord.z * DiffuseColor *

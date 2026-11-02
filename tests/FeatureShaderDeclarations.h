@@ -43,7 +43,7 @@ namespace cs::engine
 				{ "ExtendedMaterials", &extended_materials_shader::kShaderDefines },
 				{ "WaterEffects", &water_effects::kShaderDefines },
 				{ "UnifiedWater", &unified_water::kShaderDefines },
-				{ "UpscalingSamplerBias", &upscaling::kSamplerBiasShaderDefines },
+				{ "UpscalingMipBias", &upscaling::kMipBiasShaderDefines },
 				{ "UpscalingImageSpaceUv", &upscaling::kImageSpaceUvShaderDefines }
 			};
 			for (const auto& [name, feature] : features) {

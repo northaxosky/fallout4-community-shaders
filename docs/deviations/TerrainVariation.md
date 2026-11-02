@@ -7,7 +7,6 @@
 | Forced | Six landscape layers; spec/gloss in the normal alpha | Four layers with a separate per-layer material map sampled with the same offsets | FO4 landscape material layout |
 | Forced | Per-draw mesh-variation bit in the feature descriptor | Host classifies each prepass draw; the shader applies `enableMeshSupport` live | The prepass has no feature descriptor |
 | Divergence | Landscape texture eligibility: `landscape/<file>` with no subfolder | `landscape/<folder>/...` for `rocks`, `dlc06rocks`, `ground`, `trees`, `dirtcliffs`, excluding `rockriverstones*`; roads, piers, `stonewall*`, grass, plants, glowingseaash, rrtracks, sinkhole excluded | FO4 stores every terrain texture one folder deep; excluded sets tile poorly |
-| Divergence | Non-variation sampling uses `SampleBias(..., MipBias)` | Non-variation draws keep stock plain `Sample`; variation samples read `MipBias` as 0 under `SAMPLER_MIP_BIAS` ([Upscaling](Upscaling.md)) | Engine samplers are biased instead, and the bias must not apply twice |
 | Forced | Variation on instanced terrain | Not applied | The engine never binds it |
 | Pending | Stochastic RMAOS for `TRUE_PBR` landscape and meshes | No TruePBR consumer yet | |
 | Pending | Residual seams in admitted textures | Mild cases remain (`rockslab02`, `driedgrass01`, some mud/silt specs, `dirtclifferoded`) | |

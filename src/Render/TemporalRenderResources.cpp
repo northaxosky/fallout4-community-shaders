@@ -497,7 +497,6 @@ namespace cs::render
 		render::TemporalPipeline::Get().AdvanceEngineResourceGeneration();
 		InvalidateFirstPersonAlphaState();
 		dynamicResolution.Release();
-		samplerBias.Release();
 		_superResolutionDebugSnapshot.request.Invalidate();
 		ResetDebugSnapshotResources();
 		_frameGenerationDebugSnapshot.request.Invalidate();

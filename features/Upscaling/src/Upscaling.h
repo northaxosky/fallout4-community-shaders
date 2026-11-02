@@ -44,7 +44,7 @@ namespace cs::features
 
 	private:
 		Upscaling() = default;
-		engine::OwnedShaderDefineProvider _samplerBiasDefines{ upscaling::kSamplerBiasShaderDefines, *this };
+		engine::OwnedShaderDefineProvider _mipBiasDefines{ upscaling::kMipBiasShaderDefines, *this };
 		engine::OwnedShaderDefineProvider _imageSpaceUvDefines{ upscaling::kImageSpaceUvShaderDefines, *this };
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(render::temporal::kSchema, settings); }

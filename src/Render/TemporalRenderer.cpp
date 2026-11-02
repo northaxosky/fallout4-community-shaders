@@ -221,10 +221,6 @@ namespace cs::render
 												   upscaleMethod == UpscaleMethod::kDLSS) :
 		                                       0.0f;
 		_mipBias.store(mipBias, std::memory_order_relaxed);
-		if (!samplerBias.Update(mipBias)) {
-			// Retry until the engine has populated every sampler slot.
-			return;
-		}
 	}
 
 	void TemporalRenderer::PublishDynamicResolution()
@@ -355,10 +351,6 @@ namespace cs::render
 		}
 		try {
 			dynamicResolution.Release();
-		} catch (...) {
-		}
-		try {
-			samplerBias.Release();
 		} catch (...) {
 		}
 		_imagespaceRatiosNeutralized = false;

@@ -36,6 +36,20 @@ namespace cs::render
 		ID3D11DeviceContext* a_context,
 		engine::ShaderStage a_stage) noexcept;
 
+	// Render thread. SharedData::MipBias is zero except inside this scope, so
+	// shadow, occlusion and cube draws never see the upscaler bias.
+	void SetMainViewMipBias(float a_bias) noexcept;
+
+	class ScopedMainViewMipBias
+	{
+	public:
+		explicit ScopedMainViewMipBias(float a_bias) noexcept { SetMainViewMipBias(a_bias); }
+		~ScopedMainViewMipBias() noexcept { SetMainViewMipBias(0.0f); }
+
+		ScopedMainViewMipBias(const ScopedMainViewMipBias&) = delete;
+		ScopedMainViewMipBias& operator=(const ScopedMainViewMipBias&) = delete;
+	};
+
 	class SubstrateBindingSnapshot
 	{
 	public:

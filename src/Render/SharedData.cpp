@@ -51,6 +51,10 @@ namespace cs::render
 			std::atomic_uint32_t lastFrame{ UINT32_MAX };
 			std::uint32_t lastAttemptFrame = UINT32_MAX;
 			FO4SharedDataCB fo4{};
+			// Last full b5 upload, patched in place when the mip bias scope changes.
+			SharedDataCB shared{};
+			bool sharedWritten = false;
+			float mipBias = 0.0f;
 			DirectX::XMFLOAT2 previousRatio{ 1.0f, 1.0f };
 			bool hasResolutionHistory = false;
 			// Render thread only.
@@ -122,7 +126,7 @@ namespace cs::render
 			}
 
 			data.CameraData = engine::GetCameraDepthParameters(a_camera);
-			data.MipBias = TemporalRenderer::GetSingleton()->GetMipBias();
+			data.MipBias = GetSubstrateState().mipBias;
 			// FO4: heights and tile selection share b4's position-adjust anchor.
 			engine::FillWaterData(data.WaterData, data.WaterSystemHeight,
 				{ a_camera.PosAdjust.x, a_camera.PosAdjust.y, a_camera.PosAdjust.z });
@@ -318,6 +322,10 @@ namespace cs::render
 				if (!WriteConstantBuffer(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index]))
 					return false;
 			state.fo4 = a_data.fo4;
+			if (a_firstBuffer == 0) {
+				state.shared = a_data.shared;
+				state.sharedWritten = true;
+			}
 			return true;
 		}
 
@@ -409,6 +417,21 @@ namespace cs::render
 		L->info(
 			"Shared substrate ready: b4/b5/b6/b7 sizes={}/{}/{}/{} bytes; canonical depth at t17.",
 			kBufferSizes[0], kBufferSizes[1], kBufferSizes[2], kBufferSizes[3]);
+	}
+
+	void SetMainViewMipBias(float a_bias) noexcept
+	{
+		auto& state = GetSubstrateState();
+		if (state.mipBias == a_bias)
+			return;
+		state.mipBias = a_bias;
+		// Without a prior upload the next full write picks the value up.
+		auto* context = GetImmediateContext();
+		if (!state.sharedWritten || !context)
+			return;
+		state.shared.MipBias = a_bias;
+		if (!WriteConstantBuffer(context, state.buffers[kSharedDataSlot - kFrameDataSlot].get(), &state.shared, sizeof(state.shared)))
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared mip bias constant-buffer map failed.");
 	}
 
 	ID3D11SamplerState* GetLinearClampSampler() noexcept
