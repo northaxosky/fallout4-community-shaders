@@ -705,8 +705,7 @@ namespace cs::features
 	{
 		if (!_overrideDepthCS) {
 			L->debug("Compiling OverrideDepthCS.hlsl");
-			_overrideDepthCS.attach(
-				static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(kOverrideDepthPath, {}, "cs_5_0")));
+			_overrideDepthCS = cs::util::CompileComputeShader(kOverrideDepthPath);
 			if (_overrideDepthCS) {
 				cs::render::annotation::SetName(
 					_overrideDepthCS.get(), "Upscaling/OverrideDepth.CS");
@@ -719,8 +718,7 @@ namespace cs::features
 	{
 		if (!_overrideLinearDepthCS) {
 			L->debug("Compiling OverrideLinearDepthCS.hlsl");
-			_overrideLinearDepthCS.attach(
-				static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(kOverrideLinearDepthPath, {}, "cs_5_0")));
+			_overrideLinearDepthCS = cs::util::CompileComputeShader(kOverrideLinearDepthPath);
 			if (_overrideLinearDepthCS) {
 				cs::render::annotation::SetName(
 					_overrideLinearDepthCS.get(), "Upscaling/OverrideLinearDepth.CS");

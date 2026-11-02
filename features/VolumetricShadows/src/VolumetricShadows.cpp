@@ -55,7 +55,7 @@ namespace cs::features
 		{
 			winrt::com_ptr<ID3D11ComputeShader> shader;
 			const auto defines = a_define ? std::vector<std::pair<const char*, const char*>>{ { a_define, "1" } } : std::vector<std::pair<const char*, const char*>>{};
-			shader.attach(static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(a_path, defines, "cs_5_0")));
+			shader = cs::util::CompileComputeShader(a_path, defines);
 			if (!shader)
 				L->warn("{} failed to compile.", a_define ? a_define : "ShadowPreviewCS");
 			return shader;

@@ -4,6 +4,7 @@
 #include "Utils/ShaderCache/RevalidationContext.h"
 
 #include <d3d11.h>
+#include <winrt/base.h>
 
 #include <cctype>
 #include <span>
@@ -52,6 +53,30 @@ namespace cs::util
 		const std::vector<std::pair<const char*, const char*>>& a_defines,
 		const char* a_programType,
 		const char* a_program = "main");
+
+	using ShaderDefines = std::vector<std::pair<const char*, const char*>>;
+
+	// Typed CompileShader results; null on failure.
+	[[nodiscard]] inline winrt::com_ptr<ID3D11ComputeShader> CompileComputeShader(const wchar_t* a_filePath, const ShaderDefines& a_defines = {}, const char* a_program = "main")
+	{
+		winrt::com_ptr<ID3D11ComputeShader> shader;
+		shader.attach(static_cast<ID3D11ComputeShader*>(CompileShader(a_filePath, a_defines, "cs_5_0", a_program)));
+		return shader;
+	}
+
+	[[nodiscard]] inline winrt::com_ptr<ID3D11PixelShader> CompilePixelShader(const wchar_t* a_filePath, const ShaderDefines& a_defines = {}, const char* a_program = "main")
+	{
+		winrt::com_ptr<ID3D11PixelShader> shader;
+		shader.attach(static_cast<ID3D11PixelShader*>(CompileShader(a_filePath, a_defines, "ps_5_0", a_program)));
+		return shader;
+	}
+
+	[[nodiscard]] inline winrt::com_ptr<ID3D11VertexShader> CompileVertexShader(const wchar_t* a_filePath, const ShaderDefines& a_defines = {}, const char* a_program = "main")
+	{
+		winrt::com_ptr<ID3D11VertexShader> shader;
+		shader.attach(static_cast<ID3D11VertexShader*>(CompileShader(a_filePath, a_defines, "vs_5_0", a_program)));
+		return shader;
+	}
 
 	// Returns null before the engine device is ready.
 	[[nodiscard]] ID3D11Device* GetD3DDevice();

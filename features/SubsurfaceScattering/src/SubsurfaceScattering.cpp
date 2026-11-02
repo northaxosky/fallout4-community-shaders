@@ -108,7 +108,7 @@ namespace cs::features
 		const auto compile = [](const wchar_t* a_path, const Defines& a_defines,
 								 winrt::com_ptr<ID3D11ComputeShader>& a_shader, const char* a_name) {
 			a_shader = nullptr;
-			a_shader.attach(reinterpret_cast<ID3D11ComputeShader*>(cs::util::CompileShader(a_path, a_defines, "cs_5_0")));
+			a_shader = cs::util::CompileComputeShader(a_path, a_defines);
 			if (a_shader)
 				cs::render::annotation::SetName(a_shader.get(), a_name);
 			return static_cast<bool>(a_shader);

@@ -128,8 +128,7 @@ namespace cs::render
 	{
 		if (!a_device)
 			return;
-		shader.attach(static_cast<ID3D11ComputeShader*>(util::CompileShader(
-			L"Data\\Shaders\\FO4\\CanonicalDepthCS.hlsl", {}, "cs_5_0")));
+		shader = util::CompileComputeShader(L"Data\\Shaders\\FO4\\CanonicalDepthCS.hlsl");
 		if (!shader)
 			throw std::runtime_error("Canonical depth shader compilation failed.");
 		constants = std::make_unique<buffer::ConstantBuffer>(buffer::ConstantBufferDesc<CanonicalDepthData>());

@@ -310,9 +310,7 @@ namespace cs::render
 		if (!encodeTexturesCS[methodIndex]) {
 			L->debug("Compiling EncodeTexturesCS.hlsl for upscale method {}", methodIndex);
 
-			std::vector<std::pair<const char*, const char*>> defines = {
-				{ "FO4CS_SUBSTRATE", "1" }, { "DEPTH_OUTPUT", "1" }
-			};
+			cs::util::ShaderDefines defines = { { "DEPTH_OUTPUT", "1" } };
 
 			switch (upscaleMethod) {
 			case UpscaleMethod::kDLSS:
@@ -326,8 +324,7 @@ namespace cs::render
 				break;
 			}
 
-			encodeTexturesCS[methodIndex].attach(
-				(ID3D11ComputeShader*)cs::util::CompileShader(kEncodeTexturesPath, defines, "cs_5_0"));
+			encodeTexturesCS[methodIndex] = cs::util::CompileComputeShader(kEncodeTexturesPath, defines);
 			cs::render::annotation::SetName(
 				encodeTexturesCS[methodIndex].get(),
 				std::format("Upscaling/EncodeTextures[{}].CS", methodIndex));
@@ -339,11 +336,7 @@ namespace cs::render
 	{
 		if (!depthRefractionUpscalePS) {
 			L->debug("Compiling DepthRefractionUpscalePS.hlsl");
-			std::vector<std::pair<const char*, const char*>> defines = {
-				{ "FO4CS_SUBSTRATE", "1" }
-			};
-			depthRefractionUpscalePS.attach(
-				(ID3D11PixelShader*)cs::util::CompileShader(kDepthRefractionUpscalePath, defines, "ps_5_0"));
+			depthRefractionUpscalePS = cs::util::CompilePixelShader(kDepthRefractionUpscalePath);
 			cs::render::annotation::SetName(
 				depthRefractionUpscalePS.get(),
 				"Upscaling/DepthRefractionUpscale.PS");
@@ -356,8 +349,7 @@ namespace cs::render
 	{
 		if (!upscaleVS) {
 			L->debug("Compiling UpscaleVS.hlsl");
-			upscaleVS.attach(
-				(ID3D11VertexShader*)cs::util::CompileShader(kUpscaleVSPath, {}, "vs_5_0"));
+			upscaleVS = cs::util::CompileVertexShader(kUpscaleVSPath);
 			cs::render::annotation::SetName(
 				upscaleVS.get(), "Upscaling/Fullscreen.VS");
 		}
@@ -369,9 +361,7 @@ namespace cs::render
 	{
 		if (!spatialFallbackPS) {
 			L->debug("Compiling SpatialFallbackPS.hlsl");
-			spatialFallbackPS.attach(
-				static_cast<ID3D11PixelShader*>(cs::util::CompileShader(
-					kSpatialFallbackPath, {}, "ps_5_0")));
+			spatialFallbackPS = cs::util::CompilePixelShader(kSpatialFallbackPath);
 			cs::render::annotation::SetName(
 				spatialFallbackPS.get(), "Upscaling/SpatialFallback.PS");
 		}
@@ -448,11 +438,7 @@ namespace cs::render
 		_spatialFallbackPreflightReady.store(ok, std::memory_order_release);
 
 		if (IsFrameGenerationDx12PathActive() && !_copyDepthForFrameGenerationCS) {
-			_copyDepthForFrameGenerationCS.attach(
-				static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(
-					kCopyDepthForFrameGenerationPath,
-					{},
-					"cs_5_0")));
+			_copyDepthForFrameGenerationCS = cs::util::CompileComputeShader(kCopyDepthForFrameGenerationPath);
 			if (!_copyDepthForFrameGenerationCS) {
 				render::TemporalPipeline::Get().FailFrameGenerationFrame(
 					"depth capture shader compilation failed");

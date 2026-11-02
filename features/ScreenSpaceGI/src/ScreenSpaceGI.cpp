@@ -105,8 +105,7 @@ namespace cs::features
 		if (_settings.enableExperimentalSpecularGI)
 			defines.emplace_back("GI_SPECULAR", "");
 		_prepare = nullptr;
-		_prepare.attach(reinterpret_cast<ID3D11ComputeShader*>(
-			cs::util::CompileShader(L"Data\\Shaders\\FO4\\ScreenSpaceGI\\Prepare.cs.hlsl", defines, "cs_5_0")));
+		_prepare = cs::util::CompileComputeShader(L"Data\\Shaders\\FO4\\ScreenSpaceGI\\Prepare.cs.hlsl", defines);
 		if (_prepare)
 			cs::render::annotation::SetName(_prepare.get(), "SSGI/Prepare.CS");
 		bool ready = static_cast<bool>(_prepare);
@@ -116,8 +115,7 @@ namespace cs::features
 				passDefines.emplace_back("LINEAR_FILTER", "");
 			const auto path = std::filesystem::path(L"Data\\Shaders\\ScreenSpaceGI") / files[i];
 			_shaders[i] = nullptr;
-			_shaders[i].attach(reinterpret_cast<ID3D11ComputeShader*>(
-				cs::util::CompileShader(path.c_str(), passDefines, "cs_5_0")));
+			_shaders[i] = cs::util::CompileComputeShader(path.c_str(), passDefines);
 			ready &= static_cast<bool>(_shaders[i]);
 			if (_shaders[i])
 				cs::render::annotation::SetName(_shaders[i].get(), std::format("SSGI/{}.CS", path.filename().string()));

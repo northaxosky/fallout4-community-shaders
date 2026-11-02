@@ -252,8 +252,7 @@ namespace cs::features
 		}
 
 		// FO4: the substrate defines the CS camera and shared-data inputs.
-		_probeUpdateCompute.attach(static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(
-			L"Data\\Shaders\\Skylighting\\UpdateProbesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } }, "cs_5_0")));
+		_probeUpdateCompute = cs::util::CompileComputeShader(L"Data\\Shaders\\Skylighting\\UpdateProbesCS.hlsl", { { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } });
 		if (!_probeUpdateCompute)
 			throw std::runtime_error("the probe update compute shader failed to compile");
 		cs::render::annotation::SetName(_probeUpdateCompute.get(), "Skylighting/UpdateProbes.CS");
@@ -269,11 +268,10 @@ namespace cs::features
 	void Skylighting::CreateDebugResources()
 	{
 		for (std::size_t index = 0; index < _debugCompute.size(); ++index) {
-			std::vector<std::pair<const char*, const char*>> defines{ { "FO4CS_SUBSTRATE", "1" } };
+			cs::util::ShaderDefines defines;
 			if (index == 1)
 				defines.emplace_back("SKYLIGHTING_UP_VISIBILITY", "1");
-			_debugCompute[index].attach(static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(
-				L"Data\\Shaders\\FO4\\Skylighting\\DebugCS.hlsl", defines, "cs_5_0")));
+			_debugCompute[index] = cs::util::CompileComputeShader(L"Data\\Shaders\\FO4\\Skylighting\\DebugCS.hlsl", defines);
 			if (!_debugCompute[index])
 				L->warn("Skylighting debug shader {} failed to compile; the fullscreen views are unavailable.", index);
 			else

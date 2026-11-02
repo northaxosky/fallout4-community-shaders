@@ -485,8 +485,7 @@ namespace cs::engine
 				std::vector<std::pair<const char*, const char*>> defines;
 				if (i == static_cast<std::size_t>(BatchClass::kMergeInstanced))
 					defines.emplace_back("MERGE_INSTANCED", "");
-				resources->shaders[i].attach(static_cast<ID3D11VertexShader*>(
-					cs::util::CompileShader(L"Data\\Shaders\\FO4\\OccluderBatchVS.hlsl", defines, "vs_5_0")));
+				resources->shaders[i] = cs::util::CompileVertexShader(L"Data\\Shaders\\FO4\\OccluderBatchVS.hlsl", defines);
 				if (!resources->shaders[i])
 					return nullptr;
 			}

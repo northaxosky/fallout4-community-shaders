@@ -232,11 +232,10 @@ namespace cs::features
 	{
 		_debugPass.Create(a_device);
 		for (std::size_t index = 0; index < _debugPS.size(); ++index) {
-			std::vector<std::pair<const char*, const char*>> defines{ { "FO4CS_SUBSTRATE", "1" } };
+			cs::util::ShaderDefines defines;
 			if (index == 1)
 				defines.emplace_back("WATER_SUBMERSION_DEBUG", "1");
-			_debugPS[index].attach(static_cast<ID3D11PixelShader*>(cs::util::CompileShader(
-				L"Data\\Shaders\\FO4\\WaterEffects\\Debug.hlsl", defines, "ps_5_0")));
+			_debugPS[index] = cs::util::CompilePixelShader(L"Data\\Shaders\\FO4\\WaterEffects\\Debug.hlsl", defines);
 		}
 	}
 

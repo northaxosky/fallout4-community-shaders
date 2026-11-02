@@ -86,8 +86,7 @@ namespace cs::features
 
 	void Upscaling::OnD3D11Ready(IDXGIAdapter*, ID3D11Device*)
 	{
-		_zPrepassAlphaPS.attach(static_cast<ID3D11PixelShader*>(cs::util::CompileShader(
-			L"Data\\Shaders\\FO4\\ZPrePassAlpha.hlsl", { { "FO4CS_SUBSTRATE", "1" } }, "ps_5_0")));
+		_zPrepassAlphaPS = cs::util::CompilePixelShader(L"Data\\Shaders\\FO4\\ZPrePassAlpha.hlsl");
 		if (!_zPrepassAlphaPS) {
 			FailLoad("Upscaling could not compile the biased Z-prepass alpha-test pixel shader");
 			return;

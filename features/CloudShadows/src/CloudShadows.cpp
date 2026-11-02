@@ -183,7 +183,7 @@ namespace cs::features
 		cs::render::annotation::SetName(_blend.get(), "CloudShadows/Blend");
 
 		_preview.Create(a_device, kPreviewWidth, kPreviewHeight, "CloudShadows/Preview");
-		_previewCS.attach(static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(kPreviewPath, { { "SINGLE_CHANNEL", "1" } }, "cs_5_0")));
+		_previewCS = cs::util::CompileComputeShader(kPreviewPath, { { "SINGLE_CHANNEL", "1" } });
 		if (!_previewCS)
 			L->warn("The occlusion preview shader failed to compile.");
 		try {
@@ -399,12 +399,12 @@ namespace cs::features
 	{
 		_overlayPass.Create(a_device);
 		for (std::size_t index = 0; index < _overlayPS.size(); ++index) {
-			std::vector<std::pair<const char*, const char*>> defines{ { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } };
+			std::vector<std::pair<const char*, const char*>> defines{ { "CLOUD_SHADOWS", "1" } };
 			if (index == 0)
 				defines.emplace_back("CLOUD_SKY_OVERLAY", "1");
 			else if (index == 2)
 				defines.emplace_back("CLOUD_LAYERS", "1");
-			_overlayPS[index].attach(static_cast<ID3D11PixelShader*>(cs::util::CompileShader(kOverlayPath, defines, "ps_5_0")));
+			_overlayPS[index] = cs::util::CompilePixelShader(kOverlayPath, defines);
 		}
 
 		D3D11_BLEND_DESC blendDesc{};

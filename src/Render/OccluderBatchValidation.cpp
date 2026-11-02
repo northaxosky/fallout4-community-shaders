@@ -47,8 +47,7 @@ namespace cs::engine
 			validation->engine.Create(device, "Skylighting/OccluderBatch.Validate.Engine");
 			validation->batch.Create(device, "Skylighting/OccluderBatch.Validate.Batch");
 			validation->state = cs::render::CreateContextState(device);
-			validation->compare.attach(static_cast<ID3D11ComputeShader*>(
-				cs::util::CompileShader(L"Data\\Shaders\\FO4\\OccluderBatchCompareCS.hlsl", {}, "cs_5_0")));
+			validation->compare = cs::util::CompileComputeShader(L"Data\\Shaders\\FO4\\OccluderBatchCompareCS.hlsl");
 			if (!validation->compare)
 				return nullptr;
 			validation->extent = std::make_unique<cs::buffer::ConstantBuffer>(cs::buffer::ConstantBufferDesc(16, false));

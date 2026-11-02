@@ -131,9 +131,7 @@ namespace cs::features
 		create(_envSH, "IBL/EnvSH");
 		create(_skySH, "IBL/SkySH");
 
-		// FO4: the substrate defines the CS shared-data inputs.
-		_projectCompute.attach(static_cast<ID3D11ComputeShader*>(util::CompileShader(
-			L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl", { { "FO4CS_SUBSTRATE", "1" } }, "cs_5_0")));
+		_projectCompute = util::CompileComputeShader(L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl");
 		if (!_projectCompute)
 			throw std::runtime_error("the diffuse IBL compute shader failed to compile");
 		render::annotation::SetName(_projectCompute.get(), "IBL/DiffuseIBL.CS");

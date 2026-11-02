@@ -7,8 +7,7 @@ namespace cs::render
 	void FullscreenPass::Create(ID3D11Device* a_device)
 	{
 		_state = CreateContextState(a_device);
-		_vertexShader.attach(static_cast<ID3D11VertexShader*>(
-			util::CompileShader(L"Data\\Shaders\\FO4\\FullscreenVS.hlsl", {}, "vs_5_0")));
+		_vertexShader = util::CompileVertexShader(L"Data\\Shaders\\FO4\\FullscreenVS.hlsl");
 		D3D11_RASTERIZER_DESC rasterizer{};
 		rasterizer.FillMode = D3D11_FILL_SOLID;
 		rasterizer.CullMode = D3D11_CULL_NONE;

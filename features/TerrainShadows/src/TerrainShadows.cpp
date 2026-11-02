@@ -336,8 +336,7 @@ namespace cs::features
 			return;
 		}
 
-		_shadowUpdateCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
-			cs::util::CompileShader(kShadowUpdatePath, {}, "cs_5_0")));
+		_shadowUpdateCS = cs::util::CompileComputeShader(kShadowUpdatePath);
 		if (!_shadowUpdateCS) {
 			_resourceInitFailed = true;
 			L->error(
@@ -395,8 +394,7 @@ namespace cs::features
 			cs::render::annotation::SetName(
 				_shadowStatsCB.get(), "TerrainShadows/StatisticsConstants.Buffer");
 
-			_shadowStatsCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
-				cs::util::CompileShader(kShadowStatisticsPath, {}, "cs_5_0")));
+			_shadowStatsCS = cs::util::CompileComputeShader(kShadowStatisticsPath);
 			if (!_shadowStatsCS) {
 				L->warn(
 					"Terrain shadow statistics compute shader failed to compile; "

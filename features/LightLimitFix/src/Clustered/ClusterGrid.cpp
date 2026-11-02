@@ -31,7 +31,7 @@ namespace cs::features::light_limit_fix
 		winrt::com_ptr<ID3D11ComputeShader> Compile(const wchar_t* a_path, std::string_view a_name)
 		{
 			winrt::com_ptr<ID3D11ComputeShader> shader;
-			shader.attach(static_cast<ID3D11ComputeShader*>(util::CompileShader(a_path, {}, "cs_5_0")));
+			shader = util::CompileComputeShader(a_path);
 			if (!shader)
 				throw std::runtime_error("the LLF cluster compute shader failed to compile");
 			render::annotation::SetName(shader.get(), a_name);

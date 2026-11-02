@@ -355,13 +355,9 @@ namespace cs::features
 			const auto compile = [](
 									 winrt::com_ptr<ID3D11ComputeShader>& a_target,
 									 const wchar_t* a_path,
-									 std::vector<std::pair<const char*, const char*>> a_defines,
+									 const cs::util::ShaderDefines& a_defines,
 									 std::string_view a_name) {
-				a_defines.emplace_back("FO4CS_SUBSTRATE", "1");
-				a_target.attach(
-					reinterpret_cast<ID3D11ComputeShader*>(
-						cs::util::CompileShader(
-							a_path, a_defines, "cs_5_0")));
+				a_target = cs::util::CompileComputeShader(a_path, a_defines);
 				if (!a_target) {
 					throw std::runtime_error(
 						"compute shader compilation failed");
