@@ -763,9 +763,6 @@ namespace cs::engine
 			return true;
 		}
 
-		// CommonLibF4 lacks BSGraphics::RenderAlphaTestZPrePass; OG and NG/AE ids.
-		inline constexpr REL::VariantID kRenderAlphaTestZPrePass{ 767228, 2277053 };
-
 		// Binds the selected alpha-test PS for one draw and restores the engine's.
 		class ScopedAlphaTestPixelShader
 		{
@@ -829,13 +826,13 @@ namespace cs::engine
 				.name = "DoZPrePass -> first-person alpha-test Z-prepass draw",
 				.function = RE::ID::BSGraphics::Renderer::DoZPrePass,
 				.offset = { 0x315, 0x314, 0x314 },
-				.target = kRenderAlphaTestZPrePass
+				.target = RE::ID::BSGraphics::RenderAlphaTestZPrePass
 			};
 			constexpr CallSiteAnchor kWorldDraw{
 				.name = "DoZPrePass -> world alpha-test Z-prepass draw",
 				.function = RE::ID::BSGraphics::Renderer::DoZPrePass,
 				.offset = { 0x553, 0x553, 0x553 },
-				.target = kRenderAlphaTestZPrePass
+				.target = RE::ID::BSGraphics::RenderAlphaTestZPrePass
 			};
 			constexpr ContextCallSiteAnchor kInstancedDraw{
 				.name = "DoZPrePass -> merge-instanced alpha-test ID3D11DeviceContext::Draw",
