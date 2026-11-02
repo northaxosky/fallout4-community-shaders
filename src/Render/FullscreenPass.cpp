@@ -6,12 +6,7 @@ namespace cs::render
 {
 	void FullscreenPass::Create(ID3D11Device* a_device)
 	{
-		winrt::com_ptr<ID3D11Device1> device;
-		DX::ThrowIfFailed(a_device->QueryInterface(IID_PPV_ARGS(device.put())));
-		const auto level = a_device->GetFeatureLevel();
-		D3D_FEATURE_LEVEL selected{};
-		DX::ThrowIfFailed(device->CreateDeviceContextState(
-			0, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), &selected, _state.put()));
+		_state = CreateContextState(a_device);
 		_vertexShader.attach(static_cast<ID3D11VertexShader*>(
 			util::CompileShader(L"Data\\Shaders\\FO4\\FullscreenVS.hlsl", {}, "vs_5_0")));
 		D3D11_RASTERIZER_DESC rasterizer{};

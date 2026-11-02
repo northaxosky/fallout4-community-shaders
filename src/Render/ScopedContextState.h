@@ -5,6 +5,19 @@
 
 namespace cs::render
 {
+	// A blank state at the device's feature level, for passes that bind everything themselves.
+	[[nodiscard]] inline winrt::com_ptr<ID3DDeviceContextState> CreateContextState(ID3D11Device* a_device)
+	{
+		winrt::com_ptr<ID3D11Device1> device;
+		DX::ThrowIfFailed(a_device->QueryInterface(IID_PPV_ARGS(device.put())));
+		const auto level = a_device->GetFeatureLevel();
+		D3D_FEATURE_LEVEL selected{};
+		winrt::com_ptr<ID3DDeviceContextState> state;
+		DX::ThrowIfFailed(device->CreateDeviceContextState(
+			0, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), &selected, state.put()));
+		return state;
+	}
+
 	class ScopedContextState
 	{
 	public:
