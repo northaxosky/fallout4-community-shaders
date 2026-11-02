@@ -274,8 +274,9 @@ namespace cs::engine
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
 	// Queues every stock variant of contributed targets ahead of observed binds.
-	// A non-empty span limits it to those targets, e.g. after invalidation.
-	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets = {});
+	std::size_t PrewarmAllShaderInjectionVariants();
+	// Limited to a_targets, e.g. after invalidation; empty queues nothing.
+	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets);
 	bool EnsureComputeDispatchBridgeInstalled(
 		ID3D11DeviceContext* a_immediateContext) noexcept;
 	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;

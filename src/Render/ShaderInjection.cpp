@@ -1811,42 +1811,55 @@ namespace cs::engine
 			summary.published);
 	}
 
+	namespace
+	{
+		std::size_t PrewarmVariants(std::span<const ShaderInjectionTarget> a_targets, bool a_all)
+		{
+			auto& service = GetService();
+			const auto plan = service.published.load(std::memory_order_acquire);
+			if (!plan)
+				return 0;
+			std::array<std::size_t, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> perTarget{};
+			std::size_t total = 0;
+			const auto rows = GetStockShaderVariants(plan->runtime);
+			for (const auto& row : rows) {
+				// Rows without a native name have no shader the engine could bind.
+				if (row.nativeName.empty() || !ShaderEnabled(row.target) ||
+					(!a_all && std::ranges::find(a_targets, row.target) == a_targets.end()) ||
+					(SupportedStages(row.target) & ShaderStageBit(row.stage)) == 0)
+					continue;
+				const auto* target = FindPublishedTarget(*plan, row.target);
+				if (!target || target->contributions.empty())
+					continue;
+				const auto variant = FindOrPrepareNativeVariant(
+					*plan, *target, MakeNativeVariantKey(row.Family()));
+				if (!variant)
+					continue;
+				std::scoped_lock lock(variant->mutex);
+				if (variant->compilation) {
+					++perTarget[ToIndex(row.target)];
+					++total;
+				}
+			}
+			std::string breakdown;
+			for (const auto& metadata : kTargets) {
+				if (const auto count = perTarget[ToIndex(metadata.id)]) {
+					breakdown += std::format("{}{}={}", breakdown.empty() ? "" : ", ", metadata.name, count);
+				}
+			}
+			L->info("Shader prewarm: {} variants queued ({})", total, breakdown.empty() ? "none" : breakdown);
+			return total;
+		}
+	}
+
+	std::size_t PrewarmAllShaderInjectionVariants()
+	{
+		return PrewarmVariants({}, true);
+	}
+
 	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets)
 	{
-		auto& service = GetService();
-		const auto plan = service.published.load(std::memory_order_acquire);
-		if (!plan)
-			return 0;
-		std::array<std::size_t, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> perTarget{};
-		std::size_t total = 0;
-		const auto rows = GetStockShaderVariants(plan->runtime);
-		for (const auto& row : rows) {
-			// Rows without a native name have no shader the engine could bind.
-			if (row.nativeName.empty() || !ShaderEnabled(row.target) ||
-				(!a_targets.empty() && std::ranges::find(a_targets, row.target) == a_targets.end()) ||
-				(SupportedStages(row.target) & ShaderStageBit(row.stage)) == 0)
-				continue;
-			const auto* target = FindPublishedTarget(*plan, row.target);
-			if (!target || target->contributions.empty())
-				continue;
-			const auto variant = FindOrPrepareNativeVariant(
-				*plan, *target, MakeNativeVariantKey(row.Family()));
-			if (!variant)
-				continue;
-			std::scoped_lock lock(variant->mutex);
-			if (variant->compilation) {
-				++perTarget[ToIndex(row.target)];
-				++total;
-			}
-		}
-		std::string breakdown;
-		for (const auto& metadata : kTargets) {
-			if (const auto count = perTarget[ToIndex(metadata.id)]) {
-				breakdown += std::format("{}{}={}", breakdown.empty() ? "" : ", ", metadata.name, count);
-			}
-		}
-		L->info("Shader prewarm: {} variants queued ({})", total, breakdown.empty() ? "none" : breakdown);
-		return total;
+		return a_targets.empty() ? 0 : PrewarmVariants(a_targets, false);
 	}
 
 	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept
