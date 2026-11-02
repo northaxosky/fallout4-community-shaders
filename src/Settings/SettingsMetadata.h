@@ -29,6 +29,8 @@ namespace cs::settings
 	{
 		std::string key;
 		std::string description;
+		// Long-form explanation for editors; empty for none.
+		std::string help;
 		Value defaultValue;
 		std::optional<Value> minimum;
 		std::optional<Value> maximum;

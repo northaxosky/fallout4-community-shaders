@@ -86,6 +86,8 @@ namespace cs::settings
 		Range<T> accepted;
 		Range<T> edit;
 		ApplyTiming timing;
+		// Long-form explanation shown beside the control; empty for none.
+		std::string_view help;
 
 		constexpr Field(std::string_view a_key, std::string_view a_description, T Settings::* a_member,
 			Range<T> a_range = {}, ApplyTiming a_timing = ApplyTiming::kImmediate) :
@@ -101,6 +103,13 @@ namespace cs::settings
 			ApplyTiming a_timing = ApplyTiming::kImmediate) :
 			key(a_key), description(a_description), member(a_member), accepted(a_accepted), edit(a_edit), timing(a_timing)
 		{}
+
+		constexpr Field Help(std::string_view a_help) const
+		{
+			auto result = *this;
+			result.help = a_help;
+			return result;
+		}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
@@ -174,6 +183,14 @@ namespace cs::settings
 		std::string_view description;
 		ValueType Settings::* member;
 		ApplyTiming timing = ApplyTiming::kImmediate;
+		std::string_view help = {};
+
+		constexpr FloatArrayField Help(std::string_view a_help) const
+		{
+			auto result = *this;
+			result.help = a_help;
+			return result;
+		}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
@@ -213,6 +230,14 @@ namespace cs::settings
 		std::string_view description;
 		ValueType Settings::* member;
 		ApplyTiming timing = ApplyTiming::kImmediate;
+		std::string_view help = {};
+
+		constexpr StringListField Help(std::string_view a_help) const
+		{
+			auto result = *this;
+			result.help = a_help;
+			return result;
+		}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
@@ -265,6 +290,7 @@ namespace cs::settings
 		T Settings::* member;
 		std::span<const Choice<T>> choices;
 		ApplyTiming timing;
+		std::string_view help;
 
 		template <std::size_t N>
 		constexpr ChoiceField(
@@ -275,6 +301,13 @@ namespace cs::settings
 			ApplyTiming a_timing = ApplyTiming::kImmediate) :
 			key(a_key), description(a_description), member(a_member), choices(a_choices), timing(a_timing)
 		{}
+
+		constexpr ChoiceField Help(std::string_view a_help) const
+		{
+			auto result = *this;
+			result.help = a_help;
+			return result;
+		}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
@@ -386,6 +419,7 @@ namespace cs::settings
 				FieldView view{
 					.key = std::string(field.key),
 					.description = std::string(field.description),
+					.help = std::string(field.help),
 					.defaultValue = FieldValue(field, typename F::SettingsType{}),
 					.timing = field.timing,
 					.read = [field](const toml::node& node) -> std::optional<Value> {
