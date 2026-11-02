@@ -650,35 +650,29 @@ namespace cs::features
 	void PerformanceOverlay::DrawSettings()
 	{
 		cs::settings::SettingsEdit edit{ *this };
-		const auto checkbox = [&](const char* label, bool& value) {
-			edit.Discrete(dmui::ui::Checkbox(label, &value));
-		};
-		const auto slider = [&](const char* label, auto member, const char* format) {
-			const auto range = performance_overlay::kSchema.EditRange(member);
-			edit.Continuous(dmui::ui::SliderScalar(label, &(settings.*member), &range.min, &range.max, format,
-				dmui::ui::SliderFlags::kAlwaysClamp));
-		};
+		const auto field = edit.Bind(performance_overlay::kSchema, settings);
+		constexpr auto clamped = dmui::ui::SliderFlags::kAlwaysClamp;
 		if (const ui::Section section{ "overlay-content", "Display Options" }; section) {
-			checkbox("Show in Overlay", settings.ShowInOverlay);
+			field(&Settings::ShowInOverlay);
 			if (settings.ShowInOverlay) {
-				checkbox("Show FPS Counter", settings.ShowFPS);
-				checkbox("Show Draw Calls", settings.ShowDrawCalls);
-				checkbox("Show VRAM Usage", settings.ShowVRAM);
-				checkbox("Show CS Render Passes", settings.ShowCSPasses);
+				field(&Settings::ShowFPS);
+				field(&Settings::ShowDrawCalls);
+				field(&Settings::ShowVRAM);
+				field(&Settings::ShowCSPasses);
 				if (settings.ShowFPS) {
-					checkbox(_frameGeneration ? "Show Pre-FG Frametime Graph" : "Show Frametime Graph", settings.ShowPreFGFrameTimeGraph);
+					field(&Settings::ShowPreFGFrameTimeGraph, { .label = _frameGeneration ? "Show Pre-FG Frametime Graph" : "Show Frametime Graph" });
 					if (_frameGeneration)
-						checkbox("Show Post-FG Frametime Graph", settings.ShowPostFGFrameTimeGraph);
+						field(&Settings::ShowPostFGFrameTimeGraph);
 				}
 			}
 		}
 		if (settings.ShowInOverlay) {
 			if (const ui::Section section{ "overlay-layout", "Appearance" }; section) {
-				slider("Text Size", &Settings::TextSize, "%.2f");
-				slider("Background Opacity", &Settings::BackgroundOpacity, "%.2f");
-				checkbox("Show Border", settings.ShowBorder);
-				slider("Update Interval", &Settings::UpdateInterval, "%.2f seconds");
-				slider("Frame History Size", &Settings::FrameHistorySize, "%d");
+				field(&Settings::TextSize, { .format = "%.2f", .flags = clamped });
+				field(&Settings::BackgroundOpacity, { .format = "%.2f", .flags = clamped });
+				field(&Settings::ShowBorder);
+				field(&Settings::UpdateInterval, { .format = "%.2f seconds", .flags = clamped });
+				field(&Settings::FrameHistorySize, { .format = "%d", .flags = clamped });
 				if (dmui::ui::Button("Reset Layout"))
 					host::HostClient::Get().ResetOverlay();
 			}
@@ -696,8 +690,7 @@ namespace cs::features
 			}
 			dmui::ui::EndDisabled();
 			int interval = _testInterval;
-			constexpr int minimum = 0, maximum = 10;
-			if (dmui::ui::SliderScalar("A/B Test Interval", &interval, &minimum, &maximum)) {
+			if (ui::EditSetting({ .id = "overlay-ab-test-interval", .label = "A/B Test Interval" }, interval, 0, cs::settings::Range{ 0, 10 }).changed) {
 				try {
 					SetTestInterval(interval);
 				} catch (const std::exception& error) {

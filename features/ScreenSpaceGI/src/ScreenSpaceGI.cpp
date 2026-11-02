@@ -498,19 +498,9 @@ namespace cs::features
 	{
 		static bool showAdvanced = false;
 		settings::SettingsEdit edit{ *this };
-		const auto slider = [&](const char* a_label, auto Settings::* a_member, const char* a_format = nullptr) {
-			const auto range = ssgi_settings::kSchema.EditRange(a_member);
-			edit.Continuous(dmui::ui::SliderScalar(a_label, &(_settings.*a_member), &range.min, &range.max, a_format));
-		};
-		const auto percentSlider = [&](const char* a_label, float Settings::* a_member) {
-			const auto range = ssgi_settings::kSchema.EditRange(a_member);
-			float percent = _settings.*a_member * 100.0f;
-			const float minimum = range.min * 100.0f, maximum = range.max * 100.0f;
-			if (edit.Continuous(dmui::ui::SliderScalar(a_label, &percent, &minimum, &maximum, "%.1f%%")))
-				_settings.*a_member = percent * 0.01f;
-		};
-		const auto toggle = [&](const char* a_label, bool& a_value, bool a_compile = false) {
-			if (edit.Discrete(dmui::ui::Checkbox(a_label, &a_value)) && a_compile)
+		const auto field = edit.Bind(ssgi_settings::kSchema, _settings);
+		const auto compile = [&](bool a_changed) {
+			if (a_changed)
 				_recompile = true;
 		};
 		const auto preset = [&](int a_slices, int a_steps, int a_resolution, bool a_gi) {
@@ -521,19 +511,16 @@ namespace cs::features
 			_settings.enableBlur = true;
 			_settings.enableGI = a_gi;
 			_recompile = true;
-			edit.Discrete(true);
+			edit.Apply({ true, true });
 		};
 		if (const ui::Section section{ "ssgi-toggles", "Toggles" }; section) {
-			static_cast<void>(dmui::ui::Checkbox("Show Advanced Options", &showAdvanced));
+			ui::EditSetting({ .id = "ssgi-show-advanced", .label = "Show Advanced Options" }, showAdvanced, false);
 			dmui::ui::BeginDisabled(!IsEnabled());
-			toggle("Indirect Lighting (IL)", _settings.enableGI, true);
+			compile(field(&Settings::enableGI, { .label = "Indirect Lighting (IL)" }));
 			dmui::ui::EndDisabled();
-			toggle("Vanilla SSAO", _settings.enableVanillaSSAO);
-			ui::Tooltip("Enable Fallout 4's built-in SSAO. Usually disabled when using SSGI to avoid double-darkening.");
-			if (showAdvanced) {
-				toggle("(Experimental) HQ Specular IL", _settings.enableExperimentalSpecularGI, true);
-				ui::Tooltip("An experimental specular GI that is more accurate but requires more samples. Won't be blurred.");
-			}
+			field(&Settings::enableVanillaSSAO, { .label = "Vanilla SSAO" });
+			if (showAdvanced)
+				compile(field(&Settings::enableExperimentalSpecularGI, { .label = "(Experimental) HQ Specular IL" }));
 		}
 		if (const ui::Section section{ "ssgi-quality", "Quality/Performance" }; section) {
 			dmui::ui::BeginDisabled(!IsEnabled());
@@ -564,75 +551,69 @@ namespace cs::features
 					(p.resolution < 0 || _settings.resolutionMode == p.resolution))
 					current = i + 1;
 			}
-			const auto chosen = dmui::DrawChoice<std::uint32_t>(
-				"ssgi-preset", current,
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{ presetOptions },
-				"Unavailable", "Preset");
-			if (chosen.changed && *chosen.selected > 0) {
-				const auto& p = presets[*chosen.selected - 1];
+			const auto chosen = ui::PickChoice<std::uint32_t>(
+				{ .id = "ssgi-preset", .label = "Preset", .help = "Sets slices, steps, resolution and indirect lighting together." },
+				current, presetOptions);
+			if (chosen && *chosen > 0) {
+				const auto& p = presets[*chosen - 1];
 				preset(p.slices, p.steps, p.resolution, p.gi);
 			}
 			if (showAdvanced) {
-				slider("Slices", &Settings::numSlices);
-				slider("Steps Per Slice", &Settings::numSteps);
+				field(&Settings::numSlices, { .label = "Slices" });
+				field(&Settings::numSteps, { .label = "Steps Per Slice" });
 			}
 			static const std::array resolutions{
-				dmui::ChoiceOption<std::uint32_t>{ 0, "Full", "full" },
-				dmui::ChoiceOption<std::uint32_t>{ 1, "Half", "half" },
-				dmui::ChoiceOption<std::uint32_t>{ 2, "Quarter", "quarter" }
+				dmui::ChoiceOption<int>{ 0, "Full", "full" },
+				dmui::ChoiceOption<int>{ 1, "Half", "half" },
+				dmui::ChoiceOption<int>{ 2, "Quarter", "quarter" }
 			};
-			const auto resolution = dmui::DrawChoice<std::uint32_t>(
-				"ssgi-resolution", static_cast<std::uint32_t>(_settings.resolutionMode),
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{ resolutions },
-				"Unavailable", "Resolution");
-			if (resolution.changed) {
-				_settings.resolutionMode = static_cast<int>(*resolution.selected);
-				_recompile = true;
-				edit.Discrete(true);
-			}
+			compile(field.Choice(&Settings::resolutionMode, resolutions, { .label = "Resolution", .help = "Resolution of the indirect lighting pass; lower is faster." }));
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual", "Visual" }; section) {
 			dmui::ui::BeginDisabled(!IsEnabled());
-			slider("AO Power", &Settings::aoPower, "%.2f");
+			field(&Settings::aoPower, { .label = "AO Power", .format = "%.2f" });
 			dmui::ui::BeginDisabled(!_settings.enableGI);
-			slider("IL Source Brightness", &Settings::giStrength, "%.2f");
+			field(&Settings::giStrength, { .label = "IL Source Brightness", .format = "%.2f" });
 			dmui::ui::EndDisabled();
-			slider("AO radius", &Settings::aoRadius, "%.1f units");
+			field(&Settings::aoRadius, { .label = "AO radius", .format = "%.1f units" });
 			dmui::ui::BeginDisabled(!_settings.enableGI);
-			slider("IL radius", &Settings::giRadius, "%.1f units");
+			field(&Settings::giRadius, { .label = "IL radius", .format = "%.1f units" });
 			dmui::ui::EndDisabled();
 			if (showAdvanced)
-				slider("Min Screen Radius", &Settings::minScreenRadius, "%.3f");
-			const float minimumFade = 10000.0f, maximumFade = 50000.0f;
-			edit.Continuous(dmui::ui::SliderScalar("Depth Fade Near", &_settings.depthFadeRange[0], &minimumFade, &maximumFade, "%.0f units"));
-			edit.Continuous(dmui::ui::SliderScalar("Depth Fade Far", &_settings.depthFadeRange[1], &minimumFade, &maximumFade, "%.0f units"));
+				field(&Settings::minScreenRadius, { .label = "Min Screen Radius", .format = "%.3f" });
+			// One schema array edited as two sliders.
+			const Settings defaults{};
+			const settings::Range fade{ 10000.0f, 50000.0f };
+			edit.Apply(ui::EditSetting({ .id = "DepthFadeNear", .label = "Depth Fade Near", .help = "Distance where the effect starts to fade out, in game units.", .format = "%.0f units" },
+				_settings.depthFadeRange[0], defaults.depthFadeRange[0], fade));
+			edit.Apply(ui::EditSetting({ .id = "DepthFadeFar", .label = "Depth Fade Far", .help = "Distance where the effect has fully faded out, in game units.", .format = "%.0f units" },
+				_settings.depthFadeRange[1], defaults.depthFadeRange[1], fade));
 			if (showAdvanced)
-				slider("Thickness", &Settings::thickness, "%.1f units");
+				field(&Settings::thickness, { .label = "Thickness", .format = "%.1f units" });
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual-il", "Visual - IL" }; section) {
 			dmui::ui::BeginDisabled(!IsEnabled() || !_settings.enableGI);
 			if (showAdvanced)
-				slider("IL Distance Compensation", &Settings::giDistanceCompensation, "%.1f");
-			percentSlider("IL Saturation", &Settings::giSaturation);
+				field(&Settings::giDistanceCompensation, { .label = "IL Distance Compensation", .format = "%.1f" });
+			field(&Settings::giSaturation, { .label = "IL Saturation", .format = "%.1f%%", .scale = 100.0f });
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-denoising", "Denoising" }; section) {
 			dmui::ui::BeginDisabled(!IsEnabled());
-			toggle("Temporal Denoiser", _settings.enableTemporalDenoiser, true);
-			dmui::ui::SameLine();
-			toggle("Blur", _settings.enableBlur);
+			compile(field(&Settings::enableTemporalDenoiser, { .label = "Temporal Denoiser" }));
+			field(&Settings::enableBlur, { .label = "Blur" });
 			if (showAdvanced) {
 				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser);
-				slider("Max Frame Accumulation", &Settings::maxAccumFrames);
+				field(&Settings::maxAccumFrames, { .label = "Max Frame Accumulation" });
 				dmui::ui::EndDisabled();
 				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser && !_settings.enableGI);
-				percentSlider("Movement Disocclusion", &Settings::depthDisocclusion);
+				field(&Settings::depthDisocclusion, { .label = "Movement Disocclusion", .format = "%.1f%%", .scale = 100.0f });
 				dmui::ui::EndDisabled();
 				dmui::ui::BeginDisabled(!_settings.enableBlur);
-				slider("Blur Radius", &Settings::blurRadius, "%.1f px");
-				slider("Geometry Weight", &Settings::distanceNormalisation, "%.2f");
+				field(&Settings::blurRadius, { .label = "Blur Radius", .format = "%.1f px" });
+				field(&Settings::distanceNormalisation, { .label = "Geometry Weight", .format = "%.2f" });
 				dmui::ui::EndDisabled();
 			}
 			dmui::ui::EndDisabled();

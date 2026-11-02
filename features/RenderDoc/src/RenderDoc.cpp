@@ -674,6 +674,7 @@ namespace cs::features
 	{
 		// FO4: visible controls and native dialogs are owned by the forwarding host.
 		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(renderdoc_settings::kSchema, _settings);
 
 		const bool d3d11Available =
 			_d3d11TargetAvailable.load(std::memory_order_acquire);
@@ -692,47 +693,32 @@ namespace cs::features
 				d3d12Available }
 		};
 		if (const ui::Section section{ "renderdoc-settings", "Capture Settings" }; section) {
-			const auto captureTarget = dmui::DrawChoice<CaptureTarget>(
-				"renderdoc-capture-target",
-				_settings.captureTarget,
-				std::span<const dmui::ChoiceOption<CaptureTarget>>{ captureTargets },
-				"Unavailable",
-				"Capture target");
-			if (edit.Discrete(captureTarget.changed)) {
-				_settings.captureTarget = *captureTarget.selected;
-			}
+			field.Choice(&Settings::captureTarget, captureTargets, { .label = "Capture target" });
 			if (!CaptureTargetAvailable()) {
 				dmui::ui::TextDisabled(
 					"Selected capture target is unavailable.");
 			}
 
-			char dllPathBuf[260];
-			strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
-			if (edit.Continuous(dmui::ui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf))))
-				_settings.dllPath = dllPathBuf;
-			dmui::ui::TextDisabled("Empty uses the installed RenderDoc. DLL path changes require a restart.");
-
-			char folderBuf[260];
-			strncpy_s(folderBuf, _settings.captureFolder.c_str(), _TRUNCATE);
-			if (edit.Continuous(dmui::ui::InputText("Capture folder", folderBuf, sizeof(folderBuf))))
-				_settings.captureFolder = folderBuf;
-			if (dmui::ui::IsItemDeactivatedAfterEdit()) {
+			field(&Settings::dllPath, { .label = "DLL path" });
+			if (field.Edit(&Settings::captureFolder, { .label = "Capture folder" }).completed)
 				ApplyCapturePath();
-			}
 
-			const auto frameRange = renderdoc_settings::kSchema.EditRange(&Settings::captureFrameCount);
-			(void)edit.Continuous(dmui::ui::SliderScalar(
-				"Capture Frame Count",
-				&_settings.captureFrameCount,
-				&frameRange.min,
-				&frameRange.max));
+			field(&Settings::captureFrameCount);
 			_settings.captureFrameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
 			dmui::ui::TextDisabled("Required free space: %llu MiB.",
 				renderdoc::RequiredSpaceBytes(_settings.captureFrameCount) / (1024 * 1024));
 
-			(void)dmui::ui::InputTextMultiline("Comments (embedded in next .rdc)",
-				_commentsBuf.data(), _commentsBuf.size(),
-				dmui::ui::Vec2{ 0, dmui::ui::GetTextLineHeightWithSpacing() * 3 });
+			// Not persisted: the text is embedded in the next capture, then cleared.
+			ui::DrawField(
+				{ .id = "renderdoc-comments", .label = "Comments", .help = "Embedded in the next .rdc." },
+				_commentsBuf[0] != 0,
+				[&](const char* a_label) {
+					const bool changed = dmui::ui::InputTextMultiline(a_label,
+						_commentsBuf.data(), _commentsBuf.size(),
+						dmui::ui::Vec2{ 0, dmui::ui::GetTextLineHeightWithSpacing() * 3 });
+					return ui::EditResult{ changed, dmui::ui::IsItemDeactivatedAfterEdit() };
+				},
+				[&] { _commentsBuf[0] = 0; });
 		}
 
 		if (const ui::Section section{ "renderdoc-capture", "Capture" }; section) {

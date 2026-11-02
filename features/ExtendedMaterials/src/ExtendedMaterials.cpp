@@ -154,18 +154,15 @@ namespace cs::features
 	void ExtendedMaterials::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto& [parallax, terrain, heightBlending, shadows, warpingFix] = extended_materials::kSchema.fields;
+		const auto field = edit.Bind(extended_materials::kSchema, _settings);
 		if (const ui::Section section{ "extended-materials-parallax", "Parallax" }; section) {
-			edit.Toggle(parallax, _settings, "Enables parallax on standard meshes made for parallax.");
-			edit.Toggle(terrain, _settings,
-				"Enables terrain parallax using the alpha channel of each landscape specular (_s) texture. "
-				"Layers without a height map stay flat.");
-			edit.Toggle(heightBlending, _settings, "Enables landscape texture blending based on parallax. ");
-			edit.Toggle(warpingFix, _settings, "Enables a fix reducing parallax scale on curved and smooth normal triangles.");
+			field(&Settings::EnableParallax);
+			field(&Settings::EnableTerrain);
+			field(&Settings::EnableHeightBlending);
+			field(&Settings::EnableParallaxWarpingFix);
 		}
-		if (const ui::Section section{ "extended-materials-shadows", "Approximate Soft Shadows" }; section) {
-			edit.Toggle(shadows, _settings, "Enables cheap soft shadows when using parallax. This applies to sunlight.");
-		}
+		if (const ui::Section section{ "extended-materials-shadows", "Approximate Soft Shadows" }; section)
+			field(&Settings::EnableShadows);
 	}
 
 	void ExtendedMaterials::RestoreDefaultSettings()

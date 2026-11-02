@@ -298,58 +298,30 @@ namespace cs::features
 	void ImageBasedLighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(ibl::kSchema, _settings);
 		bool changed = false;
-		const auto toggle = [&](const char* a_label, bool& a_value, const char* a_tooltip) {
-			changed |= edit.Discrete(dmui::ui::Checkbox(a_label, &a_value));
-			ui::Tooltip(a_tooltip);
-		};
-		const auto slider = [&](const char* a_label, float ibl::Settings::* a_member, const char* a_tooltip) {
-			const auto range = ibl::kSchema.EditRange(a_member);
-			changed |= edit.Continuous(dmui::ui::SliderScalar(a_label, &(_settings.*a_member), &range.min, &range.max, "%.2f"));
-			ui::Tooltip(a_tooltip);
-		};
 
-		if (const ui::Section section{ "ibl-general", "General" }; section) {
-			toggle("Disable in loading screens", _settings.DisableInLoadingScreen,
-				"Disables IBL during loading screens and the main menu.");
-		}
+		if (const ui::Section section{ "ibl-general", "General" }; section)
+			changed |= field(&ibl::Settings::DisableInLoadingScreen);
 		if (const ui::Section section{ "ibl-sources", "Sources" }; section) {
-			slider("Env IBL Scale", &ibl::Settings::EnvIBLScale,
-				"Intensity multiplier for the environment IBL (from Dynamic Cubemaps).\nControls how strongly the surrounding environment contributes to ambient lighting.");
-			slider("Sky IBL Scale", &ibl::Settings::SkyIBLScale,
-				"Intensity multiplier for the sky IBL (from the host sky reflection cubemap).\nControls how strongly the sky contributes to ambient lighting.");
-			slider("Env IBL Saturation", &ibl::Settings::EnvIBLSaturation,
-				"Color saturation of the environment IBL.\nLower values produce more neutral ambient light; higher values produce more vivid color.");
-			slider("Sky IBL Saturation", &ibl::Settings::SkyIBLSaturation,
-				"Color saturation of the sky IBL.\nLower values produce more neutral ambient light; higher values produce more vivid color.");
+			changed |= field(&ibl::Settings::EnvIBLScale, { .format = "%.2f" });
+			changed |= field(&ibl::Settings::SkyIBLScale, { .format = "%.2f" });
+			changed |= field(&ibl::Settings::EnvIBLSaturation, { .format = "%.2f" });
+			changed |= field(&ibl::Settings::SkyIBLSaturation, { .format = "%.2f" });
 		}
 		if (const ui::Section section{ "ibl-ambient", "Ambient Matching" }; section) {
-			slider("DALC Amount", &ibl::Settings::DALCAmount,
-				"Blends the IBL brightness toward the game's vanilla ambient (DALC) level.\n0 = no matching (pure IBL brightness), 1 = fully matched to vanilla ambient.");
-			const std::array modes{
+			changed |= field(&ibl::Settings::DALCAmount, { .format = "%.2f" });
+			static const std::array modes{
 				dmui::ChoiceOption<std::uint32_t>{ 0, "Luminance Ratio", "luminance-ratio" },
 				dmui::ChoiceOption<std::uint32_t>{ 1, "Color Ratio", "color-ratio" },
 				dmui::ChoiceOption<std::uint32_t>{ 2, "DALC + Sky", "dalc-sky" },
 				dmui::ChoiceOption<std::uint32_t>{ 3, "DALC + Sky (Directional)", "dalc-sky-directional" }
 			};
-			const auto mode = dmui::DrawChoice<std::uint32_t>(
-				"ibl-dalc-mode", _settings.DALCMode, std::span<const dmui::ChoiceOption<std::uint32_t>>{ modes }, "Unavailable", "DALC Mode");
-			if (edit.Discrete(mode.changed)) {
-				_settings.DALCMode = *mode.selected;
-				changed = true;
-			}
-			ui::Tooltip(
-				"How the DALC-to-IBL brightness ratio is computed:\n"
-				"Luminance Ratio: Scalar ratio from overall luminance (loses DALC color tint).\n"
-				"Color Ratio: Per-channel ratio (preserves DALC color tint).\n"
-				"DALC + Sky: Uses vanilla ambient as base, sky IBL on top. Skylighting only affects sky.\n"
-				"DALC + Sky (Directional): Same, but Skylighting also dims vanilla ambient per-direction.");
+			changed |= field.Choice(&ibl::Settings::DALCMode, modes);
 		}
 		if (const ui::Section section{ "ibl-fog", "Fog" }; section) {
-			slider("Fog Mix", &ibl::Settings::FogAmount,
-				"Blends the fog color toward the IBL ambient color.\n0 = vanilla fog, 1 = fog fully tinted by IBL.");
-			toggle("Preserve Fog Luminance", _settings.PreserveFogLuminance,
-				"When Fog Mix is active, rescales the IBL-tinted fog to keep the original fog brightness.\nPrevents fog from becoming too bright or too dark.");
+			changed |= field(&ibl::Settings::FogAmount, { .format = "%.2f" });
+			changed |= field(&ibl::Settings::PreserveFogLuminance);
 		}
 		if (changed)
 			PublishSettings();

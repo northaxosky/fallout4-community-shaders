@@ -1292,14 +1292,12 @@ namespace cs::features
 	void DynamicCubemaps::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(dynamic_cubemaps::kSchema, _settings);
 		bool changed = false;
-		if (const ui::Section section{ "dynamic-cubemaps-ssr", "Screen Space Reflections" }; section) {
-			changed |= edit.Discrete(dmui::ui::Checkbox("Enable Screen Space Reflections", &_settings.enabledSSR));
-			ui::Tooltip("Enable all screen-space reflections, including water.");
-		}
+		if (const ui::Section section{ "dynamic-cubemaps-ssr", "Screen Space Reflections" }; section)
+			changed |= field(&Settings::enabledSSR, { .label = "Enable Screen Space Reflections" });
 		if (const ui::Section section{ "dynamic-cubemaps-engine-cube", "Engine Reflection Cube" }; section) {
-			changed |= edit.Discrete(dmui::ui::Checkbox("Engine Cube LOD", &_settings.engineCubeLod));
-			ui::Tooltip("Draw LOD land, objects and trees into the engine reflection cube that far water blends toward.");
+			changed |= field(&Settings::engineCubeLod, { .label = "Engine Cube LOD" });
 			using dynamic_cubemaps::EngineCubeSize;
 			static constexpr std::array kSizes{
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k256, "256", "256", true },
@@ -1307,20 +1305,12 @@ namespace cs::features
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k1024, "1024", "1024", true },
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k2048, "2048", "2048", true }
 			};
-			const auto size = dmui::DrawChoice<EngineCubeSize>("dynamic-cubemaps-engine-cube-size", _settings.engineCubeSize,
-				std::span<const dmui::ChoiceOption<EngineCubeSize>>{ kSizes }, "Unavailable", "Engine Cube Size");
-			if (edit.Discrete(size.changed))
-				_settings.engineCubeSize = *size.selected;
-			ui::Tooltip("Engine reflection cube face size in texels; FO4 object LOD needs 1024 or more to stay stable.");
+			changed |= field.Choice(&Settings::engineCubeSize, kSizes, { .label = "Engine Cube Size" });
 		}
-		if (const ui::Section section{ "dynamic-cubemaps-material", "Material Reflections" }; section) {
-			const auto range = dynamic_cubemaps::kSchema.EditRange(&Settings::materialReflections);
-			changed |= edit.Continuous(dmui::ui::SliderScalar("Material Reflections", &_settings.materialReflections, &range.min, &range.max));
-			ui::Tooltip("Blend from authored material cubemaps to dynamic reflections on environment-mapped surfaces.");
-		}
-		if (changed) {
+		if (const ui::Section section{ "dynamic-cubemaps-material", "Material Reflections" }; section)
+			changed |= field(&Settings::materialReflections, { .label = "Material Reflections" });
+		if (changed)
 			PublishSettings();
-		}
 	}
 
 	void DynamicCubemaps::RestoreDefaultSettings()

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <format>
 #include <limits>
 #include <mutex>
 #include <utility>
@@ -587,13 +588,14 @@ namespace cs::features
 	void LightLimitFix::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(light_limit_fix::kSchema, _settings);
 		if (const ui::Section section{ "llf-general", "General" }; section) {
-			edit.Discrete(dmui::ui::Checkbox("Derive Unauthored Lights", &_settings.deriveUnauthoredLights));
-			dmui::ui::TextWrapped(
-				"Off: only lights authored in %s\\*.toml are inverse-square. On: lights "
+			const auto help = std::format(
+				"Off: only lights authored in {}\\*.toml are inverse-square. On: lights "
 				"without an entry convert from their native falloff; an entry is "
 				"authoritative and never merged. Changes require a restart.",
 				kDirectory);
+			field(&Settings::deriveUnauthoredLights, { .help = help });
 		}
 	}
 	void LightLimitFix::CollectTelemetry(cs::telemetry::Sink& a_sink) const

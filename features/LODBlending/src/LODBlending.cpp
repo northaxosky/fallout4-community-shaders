@@ -116,21 +116,17 @@ namespace cs::features
 	void LODBlending::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto draw = [&](const auto& field) {
-			edit.Apply(ui::EditSetting(field, _settings, nullptr, "%.2f"));
-		};
-		const auto& fields = lod_blending::kSchema.fields;
+		const auto field = edit.Bind(lod_blending::kSchema, _settings);
 		if (const ui::Section section{ "lod-brightness", "Brightness" }; section) {
-			draw(std::get<0>(fields));
-			draw(std::get<1>(fields));
+			field(&Settings::LODTerrainBrightness, { .format = "%.2f" });
+			field(&Settings::LODObjectBrightness, { .format = "%.2f" });
 		}
 		if (const ui::Section section{ "lod-gamma", "Gamma" }; section) {
-			draw(std::get<2>(fields));
-			draw(std::get<3>(fields));
+			field(&Settings::LODTerrainGamma, { .format = "%.2f" });
+			field(&Settings::LODObjectGamma, { .format = "%.2f" });
 		}
 		if (const ui::Section section{ "lod-terrain", "Terrain" }; section)
-			edit.Toggle(std::get<4>(fields), _settings,
-				"Disables vertex coloring on nearby terrain. Best combined with terrain LOD generated in xLODGen with Vertex Color Intensity set to 0.");
+			field(&Settings::DisableTerrainVertexColors);
 	}
 
 	void LODBlending::RestoreDefaultSettings()

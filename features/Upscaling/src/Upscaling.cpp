@@ -130,6 +130,7 @@ namespace cs::features
 	void Upscaling::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(render::temporal::kSchema, settings);
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto fidelityFx = pipeline.GetFidelityFXCapabilities();
@@ -160,14 +161,7 @@ namespace cs::features
 		bool changed = false;
 		if (const ui::Section section{ "upscaling-super-resolution", "Super Resolution" }; section) {
 			dmui::ui::TextDisabled("DLSS and FSR require borderless windowed mode.");
-			const auto method = dmui::DrawChoice<std::uint32_t>(
-				"upscaling-super-resolution-method",
-				settings.upscaleMethod,
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
-				"Unavailable",
-				"Method");
-			if (edit.Discrete(method.changed)) {
-				settings.upscaleMethod = *method.selected;
+			if (field.Choice(&Settings::upscaleMethod, methods, { .label = "Method" })) {
 				settings.enabled =
 					settings.upscaleMethod !=
 					static_cast<std::uint32_t>(UpscaleMethod::kNone);
@@ -193,27 +187,18 @@ namespace cs::features
 					dmui::ChoiceOption<std::uint32_t>{
 						4, "Ultra Performance", "ultra-performance" }
 				};
-				const auto qualityMode = dmui::DrawChoice<std::uint32_t>(
-					"upscaling-quality-mode",
-					settings.qualityMode,
-					std::span<const dmui::ChoiceOption<std::uint32_t>>{
-						qualityModes },
-					"Unavailable",
-					"Quality");
-				if (edit.Discrete(qualityMode.changed)) {
-					settings.qualityMode = *qualityMode.selected;
-					changed = true;
-				}
+				changed |= field.Choice(&Settings::qualityMode, qualityModes, { .label = "Quality" });
 
 				if (settings.upscaleMethod ==
 					static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
+					// One slider over the enable flag and strength; zero turns it off.
+					const Settings defaults{};
+					float sharpness = settings.sharpnessEnabledDLSS ? settings.sharpnessDLSS : 0.0f;
+					const float defaultSharpness = defaults.sharpnessEnabledDLSS ? defaults.sharpnessDLSS : 0.0f;
 					const auto sharpnessRange = render::temporal::kSchema.EditRange(&Settings::sharpnessDLSS);
-					auto sharpness = settings.sharpnessEnabledDLSS ? settings.sharpnessDLSS : 0.0f;
-					if (edit.Continuous(dmui::ui::SliderScalar(
-							"Sharpening",
-							&sharpness,
-							&sharpnessRange.min,
-							&sharpnessRange.max))) {
+					if (edit.Apply(ui::EditSetting(
+							{ .id = "sharpness_dlss", .label = "Sharpening", .help = "DLSS sharpening strength; 0 turns sharpening off." },
+							sharpness, defaultSharpness, sharpnessRange))) {
 						settings.sharpnessEnabledDLSS = sharpness > 0.0f;
 						if (settings.sharpnessEnabledDLSS) {
 							settings.sharpnessDLSS = sharpness;
@@ -221,12 +206,7 @@ namespace cs::features
 						changed = true;
 					}
 				} else {
-					const auto sharpnessRange = render::temporal::kSchema.EditRange(&Settings::sharpnessFSR);
-					changed |= edit.Continuous(dmui::ui::SliderScalar(
-						"Sharpening",
-						&settings.sharpnessFSR,
-						&sharpnessRange.min,
-						&sharpnessRange.max));
+					changed |= field(&Settings::sharpnessFSR, { .label = "Sharpening" });
 				}
 				if (settings.upscaleMethod ==
 					static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
@@ -238,17 +218,7 @@ namespace cs::features
 						dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
 						dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
 					};
-					const auto preset = dmui::DrawChoice<std::uint32_t>(
-						"upscaling-dlss-preset",
-						settings.presetDLSS,
-						std::span<const dmui::ChoiceOption<std::uint32_t>>{
-							presets },
-						"Unavailable",
-						"DLSS preset");
-					if (edit.Discrete(preset.changed)) {
-						settings.presetDLSS = *preset.selected;
-						changed = true;
-					}
+					changed |= field.Choice(&Settings::presetDLSS, presets, { .label = "DLSS preset" });
 				}
 			}
 
@@ -328,34 +298,13 @@ namespace cs::features
 				dmui::ChoiceOption<std::uint32_t>{ 1, "On", "on" },
 				dmui::ChoiceOption<std::uint32_t>{ 2, "On + Boost", "on-boost", reflexActive }
 			};
-			const auto reduction = dmui::DrawChoice<std::uint32_t>(
-				"upscaling-latency-reduction",
-				settings.latencyReduction,
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{
-					reductions },
-				"Unavailable",
-				"Latency Reduction");
-			ui::Tooltip("Reduces input latency by pacing CPU work against the GPU. Boost keeps GPU clocks high and is NVIDIA Reflex only.");
-			if (edit.Discrete(reduction.changed)) {
-				settings.latencyReduction = *reduction.selected;
-				changed = true;
-			}
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Frame Rate Limit", &settings.latencyFpsLimitEnabled));
-			ui::Tooltip("Caps the frame rate through the active latency backend for steadier frame times.");
+			changed |= field.Choice(&Settings::latencyReduction, reductions, { .label = "Latency Reduction" });
+			changed |= field(&Settings::latencyFpsLimitEnabled, { .label = "Frame Rate Limit" });
 			dmui::ui::BeginDisabled(!settings.latencyFpsLimitEnabled);
-			const auto fpsRange = render::temporal::kSchema.EditRange(&Settings::latencyFpsLimit);
-			changed |= edit.Continuous(dmui::ui::SliderScalar(
-				"Limit",
-				&settings.latencyFpsLimit,
-				&fpsRange.min,
-				&fpsRange.max,
-				"%.0f"));
+			changed |= field(&Settings::latencyFpsLimit, { .label = "Limit", .help = "Frame rate cap in FPS.", .format = "%.0f" });
 			dmui::ui::EndDisabled();
 			dmui::ui::BeginDisabled(!status.latency.markersAvailable);
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Use Markers To Optimize", &settings.latencyUseMarkers));
-			ui::Tooltip("Lets NVIDIA Reflex tune pacing from frame markers; only helps in specific cases.");
+			changed |= field(&Settings::latencyUseMarkers, { .label = "Use Markers To Optimize" });
 			dmui::ui::EndDisabled();
 		}
 
@@ -382,16 +331,8 @@ namespace cs::features
 			dmui::ChoiceOption<std::uint32_t>{
 				2, "Verbose", "verbose" }
 		};
-		const auto logLevel = dmui::DrawChoice<std::uint32_t>(
-			"upscaling-streamline-log-level",
-			settings.streamlineLogLevel,
-			std::span<const dmui::ChoiceOption<std::uint32_t>>{
-				logLevels },
-			"Unavailable",
-			"Streamline logging");
-		if (edit.Discrete(logLevel.changed)) {
-			settings.streamlineLogLevel = *logLevel.selected;
-		}
+		edit.Bind(render::temporal::kSchema, settings)
+			.Choice(&Settings::streamlineLogLevel, logLevels, { .label = "Streamline logging" });
 		const auto [scale, ready] = pipeline.Renderer().GetReadiness();
 		dmui::ui::TextDisabled(
 			"Render: %ux%u -> %ux%u (%.0f%%) | resources: %s",

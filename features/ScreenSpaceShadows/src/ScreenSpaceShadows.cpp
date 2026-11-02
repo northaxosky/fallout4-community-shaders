@@ -756,37 +756,12 @@ namespace cs::features
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(sss_settings::kSchema, _settings);
 		if (const ui::Section section{ "sss-general", "General" }; section) {
-			constexpr auto surfaceThickness = sss_settings::kSchema.EditRange(&Settings::SurfaceThickness);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Surface thickness",
-				&_settings.SurfaceThickness,
-				&surfaceThickness.min,
-				&surfaceThickness.max));
-			constexpr auto bilinearThreshold = sss_settings::kSchema.EditRange(&Settings::BilinearThreshold);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Bilinear threshold",
-				&_settings.BilinearThreshold,
-				&bilinearThreshold.min,
-				&bilinearThreshold.max));
-			constexpr auto shadowContrast = sss_settings::kSchema.EditRange(&Settings::ShadowContrast);
-			edit.Continuous(dmui::ui::SliderScalar(
-				"Shadow contrast",
-				&_settings.ShadowContrast,
-				&shadowContrast.min,
-				&shadowContrast.max));
-
-			auto sampleCount = static_cast<int>(_settings.SampleCount);
-			constexpr auto sampleCountRange = sss_settings::kSchema.EditRange(&Settings::SampleCount);
-			constexpr int sampleCountMin = static_cast<int>(sampleCountRange.min);
-			constexpr int sampleCountMax = static_cast<int>(sampleCountRange.max);
-			if (edit.Continuous(dmui::ui::SliderScalar(
-					"Sample count multiplier",
-					&sampleCount,
-					&sampleCountMin,
-					&sampleCountMax))) {
-				_settings.SampleCount = static_cast<std::uint32_t>(sampleCount);
-			}
+			field(&Settings::SurfaceThickness, { .label = "Surface thickness" });
+			field(&Settings::BilinearThreshold, { .label = "Bilinear threshold" });
+			field(&Settings::ShadowContrast, { .label = "Shadow contrast" });
+			field(&Settings::SampleCount, { .label = "Sample count multiplier" });
 		}
 	}
 

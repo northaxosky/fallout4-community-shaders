@@ -78,9 +78,15 @@ beside `load`) unless the feature opts out through `SupportsEnableToggle()`.
 
 Feature pages group controls with `cs::ui::Section` (`Menu\Section.h`): a host panel titled by the
 native section header. `ui::Collapsible` swaps in the host's collapsing header; the host keeps no
-expanded state, so the section remembers it per session and the host shows the item count. The
-settings row enables Reset only while `Feature::HasModifiedSettings()` reports a difference from
-the schema defaults. Notifications carry a title (feature or preset name, else Community Shaders).
+expanded state, so the section remembers it per session and the host shows the item count.
+Every control on a feature page is a host field row (`Menu\SettingField.h`, `Menu\SettingWidgets.h`):
+a label beside the control, a description from the schema `.Help()` text, a per-row Reset enabled
+while the value differs from its default, and a "Restart required" warning for settings in
+`Feature::GetRestartSettings()`. Fields cannot nest in a host settings row, so pages are
+`Section`s of standalone fields. `SettingsEdit::Bind(schema, settings)` draws schema members;
+`ui::EditSetting`, `ui::EditChoice` and `ui::DrawField` cover values outside a schema. The page ends
+with a "Restore defaults" field, enabled while `Feature::HasModifiedSettings()` reports a
+difference from the schema defaults. Notifications carry a title (feature or preset name, else Community Shaders).
 The Performance Overlay frame graphs are host annotated plots with 30/60/120 FPS reference lines
 in theme colors.
 

@@ -976,20 +976,15 @@ namespace cs::features
 	void Skylighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto& [maxZenith, minDiffuse, minSpecular, batchOccluders] = skylighting::kSchema.fields;
-		const auto drawVisibility = [&](const auto& a_field) {
-			const auto range = skylighting::kSchema.EditRange(a_field.member);
-			edit.Continuous(dmui::ui::SliderScalar(ui::FieldLabel(a_field).c_str(), &(_settings.*a_field.member), &range.min, &range.max, "%.2f"));
-		};
+		const auto field = edit.Bind(skylighting::kSchema, _settings);
 
 		if (const ui::Section section{ "skylighting-visibility", "Visibility" }; section) {
 			dmui::ui::Text("%s", "Minimum visibility values. Diffuse darkens objects. Specular removes the sky from reflections.");
-			drawVisibility(minDiffuse);
-			drawVisibility(minSpecular);
+			field(&Settings::MinDiffuseVisibility, { .format = "%.2f" });
+			field(&Settings::MinSpecularVisibility, { .format = "%.2f" });
 		}
-		if (const ui::Section section{ "skylighting-performance", "Performance" }; section) {
-			edit.Toggle(batchOccluders, _settings, "Draws opaque static occluders in a few batched calls. Off uses one engine draw each.");
-		}
+		if (const ui::Section section{ "skylighting-performance", "Performance" }; section)
+			field(&Settings::BatchOccluders);
 		if (const ui::Section section{ "skylighting-rebuild", "Rebuild" }; section) {
 			if (dmui::ui::Button("Rebuild Skylighting"))
 				QueueReset(kResetRebuild);
@@ -998,27 +993,21 @@ namespace cs::features
 				dmui::ui::Text("%s", "Changes below require rebuilding, a loading screen, or moving away from the current location to apply.");
 
 			// Stored in radians; the slider edits degrees like upstream's SliderAngle.
-			const auto range = skylighting::kSchema.EditRange(maxZenith.member);
-			const float minDegrees = range.min * kRadiansToDegrees;
-			const float maxDegrees = range.max * kRadiansToDegrees;
-			float degrees = _settings.MaxZenith * kRadiansToDegrees;
-			const bool changed = dmui::ui::SliderScalar(ui::FieldLabel(maxZenith).c_str(), &degrees, &minDegrees, &maxDegrees, "%.0f deg", dmui::ui::SliderFlags::kAlwaysClamp);
-			if (changed)
-				_settings.MaxZenith = degrees / kRadiansToDegrees;
-			edit.Continuous(changed);
-			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
-				dmui::ui::Text("%s", "Smaller angles creates more focused top-down shadow.");
+			field(&Settings::MaxZenith, { .format = "%.0f deg", .flags = dmui::ui::SliderFlags::kAlwaysClamp, .scale = kRadiansToDegrees });
 		}
 	}
 
 	void Skylighting::DrawDebug()
 	{
-		constexpr std::uint32_t kMin = 0;
-		constexpr std::uint32_t kMax = 3600;
+		// Runtime only: not part of the persisted settings.
 		auto interval = _batchValidationInterval.load(std::memory_order_relaxed);
-		if (dmui::ui::SliderScalar("Batch Validation Interval", &interval, &kMin, &kMax, "%u"))
+		const auto edit = ui::EditSetting(
+			{ .id = "skylighting-batch-validation-interval",
+				.label = "Batch Validation Interval",
+				.help = "Every Nth capture also renders the batchable occluders through the engine and the batch and logs the texels that differ. 0 is off." },
+			interval, std::uint32_t{ 0 }, settings::Range<std::uint32_t>{ 0, 3600 });
+		if (edit.changed)
 			_batchValidationInterval.store(interval, std::memory_order_relaxed);
-		ui::Tooltip("Every Nth capture also renders the batchable occluders through the engine and the batch and logs the texels that differ. 0 is off.");
 	}
 
 	void Skylighting::RestoreDefaultSettings()

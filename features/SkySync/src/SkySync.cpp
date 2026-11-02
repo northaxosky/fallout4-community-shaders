@@ -792,76 +792,68 @@ namespace cs::features
 
 	void SkySync::DrawSettings()
 	{
-		static constexpr const char* sunPathNames[] = { "Southern Sky", "Northern Sky", "Vanilla", "Custom" };
-		static constexpr const char* moonSourceNames[] = { "Brightest", "Masser", "Secunda" };
+		static const std::array sunPaths{
+			dmui::ChoiceOption<sky_sync::SunPathMode>{ sky_sync::SunPathMode::kSouthern, "Southern Sky", "southern" },
+			dmui::ChoiceOption<sky_sync::SunPathMode>{ sky_sync::SunPathMode::kNorthern, "Northern Sky", "northern" },
+			dmui::ChoiceOption<sky_sync::SunPathMode>{ sky_sync::SunPathMode::kVanilla, "Vanilla", "vanilla" },
+			dmui::ChoiceOption<sky_sync::SunPathMode>{ sky_sync::SunPathMode::kCustom, "Custom", "custom" }
+		};
+		static const std::array moonSources{
+			dmui::ChoiceOption<sky_sync::MoonSource>{ sky_sync::MoonSource::kBrightest, "Brightest", "brightest" },
+			dmui::ChoiceOption<sky_sync::MoonSource>{ sky_sync::MoonSource::kMasser, "Masser", "masser" },
+			dmui::ChoiceOption<sky_sync::MoonSource>{ sky_sync::MoonSource::kSecunda, "Secunda", "secunda" }
+		};
 
 		settings::SettingsEdit edit{ *this };
-		const auto toggle = [&](auto a_member, const char* a_tooltip) {
-			const auto label = ui::FieldLabel(sky_sync::kSchema.Find(a_member));
-			edit.Discrete(dmui::ui::Checkbox(label.c_str(), &(_settings.*a_member)));
-			ui::Tooltip(a_tooltip);
-		};
-		const auto slider = [&](auto a_member, const char* a_format, const char* a_tooltip) {
-			const auto label = ui::FieldLabel(sky_sync::kSchema.Find(a_member));
-			const auto range = sky_sync::kSchema.EditRange(a_member);
-			edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &(_settings.*a_member), &range.min, &range.max, a_format, dmui::ui::SliderFlags::kAlwaysClamp));
-			if (a_tooltip)
-				ui::Tooltip(a_tooltip);
-		};
-		const auto choice = [&](auto a_member, const char* const* a_names, const char* a_tooltip) {
-			const auto label = ui::FieldLabel(sky_sync::kSchema.Find(a_member));
-			const auto range = sky_sync::kSchema.EditRange(a_member);
-			auto value = static_cast<std::int32_t>(_settings.*a_member);
-			const auto minimum = static_cast<std::int32_t>(range.min);
-			const auto maximum = static_cast<std::int32_t>(range.max);
-			if (edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &value, &minimum, &maximum, a_names[value], dmui::ui::SliderFlags::kAlwaysClamp)))
-				_settings.*a_member = static_cast<std::remove_cvref_t<decltype(_settings.*a_member)>>(value);
-			ui::Tooltip(a_tooltip);
-		};
+		const auto field = edit.Bind(sky_sync::kSchema, _settings);
 
 		if (const ui::Section section{ "sky-sync-sun", "Sun" }; section) {
-			toggle(&Settings::UseAlternateSunPath, "Calculate sun position based on time of day and season instead of vanilla movement.");
+			field(&Settings::UseAlternateSunPath);
 			if (_settings.UseAlternateSunPath) {
-				choice(&Settings::SunPath, sunPathNames, "Choose the trajectory the sun takes across the sky.");
+				field.Choice(&Settings::SunPath, sunPaths);
 				if (_settings.SunPath == sky_sync::SunPathMode::kCustom)
-					slider(&Settings::CustomAngle, "%.0f", "Set a custom angle for the sun's trajectory.");
+					field(&Settings::CustomAngle, { .format = "%.0f", .flags = dmui::ui::SliderFlags::kAlwaysClamp });
 			}
 		}
 
 		if (const ui::Section section{ "sky-sync-moons", "Moons" }; section) {
-			choice(&Settings::MoonLightSource, moonSourceNames, "Select which moon casts shadows during the night.");
-			slider(&Settings::NewMoonIntensity, "%.3f", nullptr);
-			slider(&Settings::CrescentMoonIntensity, "%.3f", nullptr);
-			slider(&Settings::FullMoonIntensity, "%.3f", nullptr);
+			field.Choice(&Settings::MoonLightSource, moonSources);
+			field(&Settings::NewMoonIntensity, { .format = "%.3f", .flags = dmui::ui::SliderFlags::kAlwaysClamp });
+			field(&Settings::CrescentMoonIntensity, { .format = "%.3f", .flags = dmui::ui::SliderFlags::kAlwaysClamp });
+			field(&Settings::FullMoonIntensity, { .format = "%.3f", .flags = dmui::ui::SliderFlags::kAlwaysClamp });
 		}
 
 		if (const ui::Section section{ "sky-sync-shadows", "Shadows and Light" }; section) {
-			slider(&Settings::MinShadowElevation, "%.1f deg", "The minimum angle sunlight will set to. Caps shadow length. Higher = shorter shadows at sunset/sunrise.");
-			slider(&Settings::ShadowTransitionDuration, "%.0f", "How long (in game-time units) the shadow direction takes to fade between sources. 300 = ~15 seconds at timescale 20.");
-			slider(&Settings::HorizonElevation, "%.1f deg", "Elevation treated as the horizon, where light fades to zero and the sun and moons hand over. Lower it to let the light fade out slightly below the visible horizon.");
-			toggle(&Settings::DimSunlightUnderHorizon, "Fade directional light to zero as the sun or moon approaches the horizon.");
-			toggle(&Settings::DimVolumetricLighting, "Also fade godrays with the directional dim around dawn and dusk.");
+			constexpr auto clamped = dmui::ui::SliderFlags::kAlwaysClamp;
+			field(&Settings::MinShadowElevation, { .format = "%.1f deg", .flags = clamped });
+			field(&Settings::ShadowTransitionDuration, { .format = "%.0f", .flags = clamped });
+			field(&Settings::HorizonElevation, { .format = "%.1f deg", .flags = clamped });
+			field(&Settings::DimSunlightUnderHorizon);
+			field(&Settings::DimVolumetricLighting);
 			if (_settings.DimSunlightUnderHorizon || _settings.DimVolumetricLighting) {
-				slider(&Settings::HorizonFadeHours, "%.1f h", "How long (in game hours) moonlight takes to fade in once a moon casts shadows.");
-				slider(&Settings::HorizonFadeElevation, "%.1f deg", "Height above the horizon at which the sun or moon light starts fading out. Higher = longer fade.");
+				field(&Settings::HorizonFadeHours, { .format = "%.1f h", .flags = clamped });
+				field(&Settings::HorizonFadeElevation, { .format = "%.1f deg", .flags = clamped });
 			}
 		}
 
 		if (const ui::Section section{ "sky-sync-worldspaces", "Disabled Worldspaces", ui::Collapsible{ .count = _settings.DisabledWorldspaces.size() } }; section) {
-			dmui::ui::TextDisabled("Sky Sync leaves lighting to vanilla in these worldspaces.");
 			std::scoped_lock lock(_worldspaceMutex);
-			bool listChanged = edit.Apply(ui::EditSetting("Worldspace Editor IDs", "DisabledWorldspaces", _settings.DisabledWorldspaces, settings::Range<settings::StringList>{}));
+			bool listChanged = field(&Settings::DisabledWorldspaces, { .label = "Worldspace Editor IDs" });
 
 			const auto player = RE::PlayerCharacter::GetSingleton();
 			const auto cell = player ? player->GetParentCell() : nullptr;
 			const std::string editorID(GetEditorID(GetCellWorldspace(cell)));
 			const bool listed = IsWorldspaceListed(GetCellWorldspace(cell));
-			dmui::ui::BeginDisabled(editorID.empty() || listed);
-			if (edit.Discrete(dmui::ui::Button(("Add Current Worldspace (" + (editorID.empty() ? std::string("-") : editorID) + ")##addWorldspace").c_str()))) {
+			const dmui::DisabledScope disabled{ editorID.empty() || listed };
+			const auto add = ui::DrawActionField({ .id = "AddCurrentWorldspace", .label = "Current worldspace", .help = "Adds the player's current worldspace to the list." },
+				[&](const char* a_label) {
+					const bool pressed = dmui::ui::Button(("Add " + (editorID.empty() ? std::string("-") : editorID) + a_label).c_str());
+					return ui::EditResult{ pressed, pressed };
+				});
+			if (edit.Apply(add)) {
 				_settings.DisabledWorldspaces.push_back(editorID);
 				listChanged = true;
 			}
-			dmui::ui::EndDisabled();
 			if (listChanged)
 				RefreshWorldspaceDisabledLocked();
 		}

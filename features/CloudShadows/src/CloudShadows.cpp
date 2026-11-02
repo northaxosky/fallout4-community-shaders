@@ -15,6 +15,7 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/CanonicalDepth.h"
@@ -672,10 +673,9 @@ namespace cs::features
 	void CloudShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto range = cloud_shadows::kSchema.EditRange(&Settings::Opacity);
-		edit.Continuous(dmui::ui::SliderScalar("Opacity##Opacity", &_settings.Opacity, &range.min, &range.max, "%.1f"));
-		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
-			dmui::ui::Text("%s", "Higher values make cloud shadows darker.");
+		const auto field = edit.Bind(cloud_shadows::kSchema, _settings);
+		if (const ui::Section section{ "cloud-shadows-appearance", "Appearance" }; section)
+			field(&Settings::Opacity, { .format = "%.1f" });
 	}
 
 	void CloudShadows::RestoreDefaultSettings()

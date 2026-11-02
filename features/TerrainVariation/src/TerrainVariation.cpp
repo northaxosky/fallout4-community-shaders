@@ -207,10 +207,10 @@ namespace cs::features
 	void TerrainVariation::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto& [lodTiling, meshSupport] = terrain_variation::kSchema.fields;
+		const auto field = edit.Bind(terrain_variation::kSchema, _settings);
 		if (const ui::Section section{ "terrain-variation-coverage", "Coverage" }; section) {
-			edit.Toggle(lodTiling, _settings, "Applies the tiling fix to LOD terrain objects.\nThis helps reduce the visible tiling effect on distant terrain.");
-			edit.Toggle(meshSupport, _settings, "Applies the tiling fix to meshes that use landscape textures, such as dirt cliffs and mountain slabs.\nAlpha tested meshes like foliage and decals are never affected.");
+			field(&Settings::enableLODTerrainTilingFix);
+			field(&Settings::enableMeshSupport);
 		}
 	}
 

@@ -471,6 +471,8 @@ namespace cs::features
 	void FrameGeneration::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(frame_generation::kSchema, settings);
+		const Settings defaults{};
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto dlssCapabilities =
@@ -504,14 +506,7 @@ namespace cs::features
 		bool changed = false;
 		if (const ui::Section section{ "frame-generation-method", "Frame Generation" }; section) {
 			dmui::ui::TextDisabled("Requires borderless windowed mode.");
-			const auto method = dmui::DrawChoice<std::uint32_t>(
-				"frame-generation-provider", settings.frameGenerationMethod,
-				std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
-				"Unavailable", "Method");
-			if (edit.Discrete(method.changed)) {
-				settings.frameGenerationMethod = *method.selected;
-				changed = true;
-			}
+			changed |= field.Choice(&Settings::frameGenerationMethod, methods, { .label = "Method" });
 
 			if (settings.frameGenerationMethod ==
 				static_cast<std::uint32_t>(Method::kDLSSG)) {
@@ -589,21 +584,18 @@ namespace cs::features
 					generationOptions.front().enabled) {
 					dmui::ui::TextDisabled("Generation: 2x");
 				} else {
-					const auto generation =
-						dmui::DrawChoice<std::uint32_t>(
-							"dlss-generation",
-							currentGeneration,
-							std::span<const dmui::ChoiceOption<std::uint32_t>>{
-								generationOptions },
-							"Unavailable",
-							"Generation");
-					if (edit.Discrete(generation.changed)) {
-						if (*generation.selected == kDynamicChoice) {
+					// One dropdown over the mode and the fixed multiplier.
+					auto generation = currentGeneration;
+					const auto defaultGeneration =
+						defaults.dlssgMode == 1 ? kDynamicChoice : defaults.dlssgFixedMultiplier;
+					if (edit.Apply(ui::EditChoice(
+							{ .id = "dlssg_generation", .label = "Generation", .help = "Generated frames per real frame, or Dynamic to follow a target frame rate." },
+							generation, defaultGeneration, std::span<const dmui::ChoiceOption<std::uint32_t>>{ generationOptions }))) {
+						if (generation == kDynamicChoice) {
 							settings.dlssgMode = 1;
 						} else {
 							settings.dlssgMode = 0;
-							settings.dlssgFixedMultiplier =
-								*generation.selected;
+							settings.dlssgFixedMultiplier = generation;
 						}
 						changed = true;
 					}
@@ -618,24 +610,27 @@ namespace cs::features
 						dmui::ChoiceOption<std::uint32_t>{
 							1, "Custom", "custom" }
 					};
-					const auto target = dmui::DrawChoice<std::uint32_t>(
-						"dlss-dynamic-target",
-						currentTarget,
-						std::span<const dmui::ChoiceOption<std::uint32_t>>{
-							targets },
-						"Unavailable",
-						"Dynamic target");
-					if (edit.Discrete(target.changed)) {
+					auto targetKind = currentTarget;
+					const std::uint32_t defaultTarget = defaults.dlssgDynamicTargetFps > 0.0f ? 1u : 0u;
+					if (edit.Apply(ui::EditChoice(
+							{ .id = "dlssg_dynamic_target", .label = "Dynamic target", .help = "The frame rate Dynamic generation aims for: the display refresh rate or a custom value." },
+							targetKind, defaultTarget, std::span<const dmui::ChoiceOption<std::uint32_t>>{ targets }))) {
 						settings.dlssgDynamicTargetFps =
-							*target.selected == 0 ? 0.0f : 60.0f;
+							targetKind == 0 ? 0.0f : 60.0f;
 						changed = true;
 					}
 					if (settings.dlssgDynamicTargetFps > 0.0f) {
 						float customTarget =
 							settings.dlssgDynamicTargetFps;
-						if (edit.Continuous(dmui::ui::InputScalar(
-								"Custom target FPS",
-								&customTarget))) {
+						const auto input = ui::DrawActionField(
+							{ .id = "dlssg_dynamic_target_fps", .label = "Custom target FPS", .help = "Target frame rate in FPS; VSync overrides custom targets." },
+							[&](const char* a_label) {
+								ui::EditResult result;
+								result.changed = dmui::ui::InputScalar(a_label, &customTarget);
+								result.completed = dmui::ui::IsItemDeactivatedAfterEdit();
+								return result;
+							});
+						if (edit.Apply(input)) {
 							if (std::isfinite(customTarget) &&
 								customTarget > 0.0f) {
 								settings.dlssgDynamicTargetFps =
@@ -657,9 +652,7 @@ namespace cs::features
 				}
 			}
 
-			changed |= edit.Discrete(dmui::ui::Checkbox(
-				"Allow in menus",
-				&settings.frameGenerationAllowInMenus));
+			changed |= field(&Settings::frameGenerationAllowInMenus, { .label = "Allow in menus" });
 
 			const auto effectiveName =
 				render::temporal::presentation::Name(status.effective.frameGeneration);
@@ -704,9 +697,7 @@ namespace cs::features
 			pipeline.GetFrameGenerationCapabilities();
 		const auto diagnostics =
 			pipeline.GetFrameGenerationDiagnostics();
-		if (edit.Discrete(dmui::ui::Checkbox(
-				"Detailed diagnostics",
-				&settings.detailedDiagnostics))) {
+		if (edit.Bind(frame_generation::kSchema, settings)(&Settings::detailedDiagnostics, { .label = "Detailed diagnostics" })) {
 			pipeline.SetDetailedTracing(
 				settings.detailedDiagnostics);
 		}

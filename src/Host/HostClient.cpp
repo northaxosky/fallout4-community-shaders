@@ -67,7 +67,7 @@ namespace cs::host
 				return;
 			settings::SettingsEdit edit{ a_feature };
 			bool enabled = a_feature.IsEnabled();
-			if (edit.Discrete(dmui::ui::Checkbox("Enabled", &enabled)))
+			if (edit.Apply(ui::EditSetting({ .id = "enabled", .label = "Enabled" }, enabled, a_feature.DefaultEnabled())))
 				a_feature.SetEnabled(enabled);
 		}
 
@@ -641,59 +641,30 @@ namespace cs::host
 			return true; });
 				}
 
-				// Legacy pages draw one full-span row; field pages draw after the table.
-				if (a_feature.UsesFieldSettings())
-					return true;
-
-				bool restoreDefaults{};
-				{
-					if (!ui::DrawRow(_client, "feature-controls", "", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto& row) -> bool {
-				if (!drawControls())
-					return false;
-				const auto resetState = queryResetState();
-				const auto comparing = isComparing();
-				const auto reset = row.End(resetState.resettable && !comparing, resetState.modified && !comparing);
-				if (!reset) {
-					LogFailure("end feature controls row");
-					return false;
-				}
-				restoreDefaults = *reset;
-				return true; }))
-						return false;
-				}
-
-				if (restoreDefaults)
-					restoreFeatureDefaults();
-
-				const auto restartSettings = a_feature.GetRestartSettings();
-				for (const auto field : restartSettings) {
-					const auto id =
-						std::format("restart-required-{}", field);
-					const auto label = std::string(field);
-					if (!ui::DrawRow(_client, id.c_str(), "Restart required", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(_client, label, { .tone = dmui::TextTone::kStatusRestartNeeded }); })) {
-						LogFailure("draw restart required row");
-						return false;
-					}
-				}
 				return true;
 			}))
 			LogFailure("draw feature settings table");
 
-		if (a_feature.IsActive() && a_feature.UsesFieldSettings()) {
-			// Fields cannot nest in a host row, so the controls sit outside the table.
-			const auto restartSettings = a_feature.GetRestartSettings();
-			const ui::FieldPage page{ restartSettings };
-			if (!drawControls())
-				return;
-			const auto resetState = queryResetState();
-			const auto comparing = isComparing();
-			dmui::FieldScope reset{ _client, "feature-reset", "Restore defaults" };
-			if (reset.Visible()) {
-				const auto pressed = reset.End(resetState.resettable && !comparing, resetState.modified && !comparing);
-				if (pressed.value_or(false))
-					restoreFeatureDefaults();
-			}
-		}
+		// Fields cannot nest in a host row, so the controls sit outside the table.
+		if (!a_feature.IsActive())
+			return;
+		const auto restartSettings = a_feature.GetRestartSettings();
+		const ui::FieldPage page{ restartSettings };
+		if (!drawControls())
+			return;
+		const auto resetState = queryResetState();
+		if (!resetState.resettable)
+			return;
+		const auto comparing = isComparing();
+		const dmui::DisabledScope disabled{ comparing || !resetState.modified };
+		const auto restore = ui::DrawActionField(
+			{ .id = "feature-reset", .label = "Restore defaults", .help = "Resets every setting on this page to its default." },
+			[](const char* a_label) {
+				const bool pressed = dmui::ui::Button(std::format("Restore{}", a_label).c_str());
+				return ui::EditResult{ pressed, pressed };
+			});
+		if (restore.changed)
+			restoreFeatureDefaults();
 	}
 
 	void HostClient::DrawOverlayPage()

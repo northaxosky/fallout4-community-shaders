@@ -388,73 +388,62 @@ namespace cs::features
 	void SubsurfaceScattering::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto range = [](auto Settings::* a_member) { return sss::kSchema.EditRange(a_member); };
-		const auto choice = [&](const char* a_id, const char* a_label, int& a_value, std::span<const dmui::ChoiceOption<int>> a_options) {
-			const auto result = dmui::DrawChoice<int>(a_id, a_value, a_options, "Unavailable", a_label);
-			if (edit.Discrete(result.changed))
-				a_value = *result.selected;
-		};
-		const auto slider = [&](const char* a_label, std::string_view a_id, float Settings::* a_member, const char* a_tooltip) {
-			edit.Apply(ui::EditSetting(a_label, a_id, _settings.*a_member, range(a_member), "%.2f"));
-			ui::Tooltip(a_tooltip);
-		};
-		const auto vector3 = [&](const char* a_label, std::string_view a_id, settings::Float3& a_value) {
-			edit.Apply(ui::EditSetting(a_label, a_id, a_value, settings::Range<settings::Float3>{}));
-		};
-		const auto meanFreePath = [&](std::string_view a_id, settings::Color4& a_value) {
-			settings::Float3 color{ a_value[0], a_value[1], a_value[2] };
-			if (edit.Apply(ui::EditSetting("Mean Free Path Color", a_id, color, settings::Range<settings::Float3>{})))
-				std::ranges::copy(color, a_value.begin());
-			ui::Tooltip("How far light travels under the surface in red, green and blue; scaled by the distance.");
-			constexpr float minimum = 0.01f, maximum = 10.0f;
-			const std::string label = "Mean Free Path Distance##" + std::string(a_id);
-			edit.Continuous(dmui::ui::SliderScalar(label.c_str(), &a_value[3], &minimum, &maximum, "%.2f"));
-			ui::Tooltip("Distance that the mean free path color travels under the surface.");
+		const auto field = edit.Bind(sss::kSchema, _settings);
+		// The mean free path member splits into a color and a distance field.
+		const auto meanFreePath = [&](settings::Color4 Settings::* a_member) {
+			auto& value = _settings.*a_member;
+			const Settings defaultSettings{};
+			const auto& defaults = defaultSettings.*a_member;
+			const std::string key(sss::kSchema.Find(a_member).key);
+			settings::Float3 color{ value[0], value[1], value[2] };
+			const settings::Float3 defaultColor{ defaults[0], defaults[1], defaults[2] };
+			if (edit.Apply(ui::EditSetting({ .id = key + "-color", .label = "Mean Free Path Color", .help = "How far light travels under the surface in red, green and blue; scaled by the distance." }, color, defaultColor)))
+				std::ranges::copy(color, value.begin());
+			edit.Apply(ui::EditSetting({ .id = key + "-distance", .label = "Mean Free Path Distance", .help = "Distance that the mean free path color travels under the surface.", .format = "%.2f" },
+				value[3], defaults[3], settings::Range{ 0.01f, 10.0f }));
 		};
 		if (_unsupported)
 			dmui::ui::Text("%s", "Unavailable: this GPU lacks typed UAV loads for the main color format.");
 		if (const ui::Section section{ "sss-method", "Method" }; section) {
-			const std::array modes{
+			static const std::array modes{
 				dmui::ChoiceOption<int>{ sss::kSeparable, "Separable SSS", "separable" },
 				dmui::ChoiceOption<int>{ sss::kBurley, "Burley", "burley" }
 			};
-			choice("sss-mode", "Mode", _settings.ssMode, modes);
+			field.Choice(&Settings::ssMode, modes, { .label = "Mode" });
 			if (_settings.ssMode == sss::kSeparable) {
-				const std::array scatter{
+				static const std::array scatter{
 					dmui::ChoiceOption<int>{ sss::kPreScatter, "Pre-scatter", "pre" },
 					dmui::ChoiceOption<int>{ sss::kPostScatter, "Post-scatter", "post" },
 					dmui::ChoiceOption<int>{ sss::kPreAndPostScatter, "Pre and Post", "pre-post" }
 				};
-				choice("sss-scatter", "Albedo Handling", _settings.scatterMode, scatter);
-				ui::Tooltip("Pre-scatter blurs the lit color directly. Post-scatter divides out albedo, blurs the irradiance and multiplies albedo back. Pre and Post splits albedo across the blur.");
+				field.Choice(&Settings::scatterMode, scatter, { .label = "Albedo Handling" });
 			} else {
-				edit.Apply(ui::EditSetting("Burley Samples##sss-samples", "sss-samples", _settings.burleySamples, range(&Settings::burleySamples), "%u"));
+				field(&Settings::burleySamples, { .label = "Burley Samples" });
 			}
 		}
 		if (_settings.ssMode == sss::kSeparable) {
 			if (const ui::Section section{ "sss-base-profile", "Base Profile" }; section) {
-				slider("Blur Radius##sss-base-radius", "sss-base-radius", &Settings::baseProfileBlurRadius, "Blur radius.");
-				slider("Thickness##sss-base-thickness", "sss-base-thickness", &Settings::baseProfileThickness, "Blur radius relative to depth.");
-				vector3("Strength", "sss-base-strength", _settings.baseProfileStrength);
-				vector3("Falloff", "sss-base-falloff", _settings.baseProfileFalloff);
+				field(&Settings::baseProfileBlurRadius, { .label = "Blur Radius", .format = "%.2f" });
+				field(&Settings::baseProfileThickness, { .label = "Thickness", .format = "%.2f" });
+				field(&Settings::baseProfileStrength, { .label = "Strength" });
+				field(&Settings::baseProfileFalloff, { .label = "Falloff" });
 			}
 			if (const ui::Section section{ "sss-human-profile", "Human Profile" }; section) {
-				slider("Blur Radius##sss-human-radius", "sss-human-radius", &Settings::humanProfileBlurRadius, "Blur radius.");
-				slider("Thickness##sss-human-thickness", "sss-human-thickness", &Settings::humanProfileThickness, "Blur radius relative to depth.");
-				vector3("Strength", "sss-human-strength", _settings.humanProfileStrength);
-				vector3("Falloff", "sss-human-falloff", _settings.humanProfileFalloff);
+				field(&Settings::humanProfileBlurRadius, { .label = "Blur Radius", .format = "%.2f" });
+				field(&Settings::humanProfileThickness, { .label = "Thickness", .format = "%.2f" });
+				field(&Settings::humanProfileStrength, { .label = "Strength" });
+				field(&Settings::humanProfileFalloff, { .label = "Falloff" });
 			}
 		} else {
 			if (const ui::Section section{ "sss-base-profile", "Base Profile" }; section)
-				meanFreePath("sss-base-mfp", _settings.meanFreePathBase);
+				meanFreePath(&Settings::meanFreePathBase);
 			if (const ui::Section section{ "sss-human-profile", "Human Profile" }; section)
-				meanFreePath("sss-human-mfp", _settings.meanFreePathHuman);
+				meanFreePath(&Settings::meanFreePathHuman);
 		}
 		if (const ui::Section section{ "sss-character-light", "Character Light" }; section) {
-			edit.Discrete(dmui::ui::Checkbox("Enable Character Lighting##sss-character-light", &_settings.enableCharacterLighting));
-			ui::Tooltip("Fallout 4's character light. Vanilla feature, not recommended.");
+			field(&Settings::enableCharacterLighting, { .label = "Enable Character Lighting" });
 			if (_settings.enableCharacterLighting)
-				slider("Strength##sss-character-light-strength", "sss-character-light-strength", &Settings::characterLightingStrength, "Scale of the character light's rim and fill.");
+				field(&Settings::characterLightingStrength, { .label = "Strength", .format = "%.2f" });
 		}
 	}
 

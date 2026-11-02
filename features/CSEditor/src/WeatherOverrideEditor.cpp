@@ -30,19 +30,20 @@ namespace cs::features::cs_editor
 			return range;
 		}
 
-		// The variable's widget; returns the edit and the possibly changed value.
+		// The variable's control; returns the edit and the possibly changed value.
 		ui::EditResult EditValue(const settings::FieldView& a_field, settings::Value& a_value)
 		{
-			const auto& label = a_field.description.empty() ? a_field.key : a_field.description;
+			const ui::FieldSpec spec{ .id = a_field.key };
+			const std::string hidden = "##" + a_field.key;
 			return std::visit([&](auto& a_v) -> ui::EditResult {
 				using T = std::remove_cvref_t<decltype(a_v)>;
 				if constexpr (std::same_as<T, std::string> || std::same_as<T, settings::Float2> || std::same_as<T, settings::StringList>) {
-					dmui::ui::TextDisabled("%s: not editable here", label.c_str());
+					dmui::ui::TextDisabled("Not editable here");
 					return {};
 				} else if constexpr (std::same_as<T, settings::Float3> || std::same_as<T, settings::Color4>) {
-					return ui::EditSetting(label.c_str(), a_field.key, a_v, settings::Range<T>{});
+					return ui::EditControl(hidden.c_str(), spec, a_v, settings::Range<T>{});
 				} else {
-					return ui::EditSetting(label.c_str(), a_field.key, a_v, EditRange<T>(a_field));
+					return ui::EditControl(hidden.c_str(), spec, a_v, EditRange<T>(a_field));
 				}
 			},
 				a_value);
@@ -89,48 +90,59 @@ namespace cs::features::cs_editor
 				ui::Collapsible{ .count = overridden, .framed = false } };
 			if (!featureSection)
 				continue;
-			dmui::ui::PushID(id.c_str());
-
 			bool changed = false, completed = false;
 			bool enabled = profile[weather::kEnabledKey].value_or(false);
-			if (dmui::ui::Checkbox("Enable overrides for this weather", &enabled)) {
+			if (ui::EditSetting({ .id = id + "-enabled", .label = "Enable overrides for this weather" }, enabled, false).changed) {
 				profile.insert_or_assign(weather::kEnabledKey, enabled);
 				changed = completed = true;
 			}
-			dmui::ui::SameLine();
-			const bool exists = profiles->Get(key).has_value();
-			dmui::ui::BeginDisabled(!exists);
-			const bool clear = dmui::ui::Button("Clear");
-			dmui::ui::EndDisabled();
+			bool clear = false;
+			{
+				const bool exists = profiles->Get(key).has_value();
+				const dmui::DisabledScope disabled{ !exists };
+				clear = ui::DrawActionField(
+					{ .id = id + "-clear", .label = "Clear overrides", .help = "Removes every override for this weather." },
+					[](const char* a_label) {
+						const bool pressed = dmui::ui::Button(std::format("Clear{}", a_label).c_str());
+						return ui::EditResult{ pressed, pressed };
+					})
+				            .changed;
+			}
 
 			const auto& live = feature->GetLiveSettingsAccess();
 			const auto base = live.snapshot ? live.snapshot() : toml::table{};
 			for (const auto& variable : variables) {
-				dmui::ui::PushID(variable.key.c_str());
 				bool active = profile.contains(variable.key);
 				auto value = BaseValue(variable, base);
 				if (active) {
 					if (auto parsed = variable.read(*profile.get(variable.key)))
 						value = *parsed;
 				}
-				if (dmui::ui::Checkbox("##override", &active)) {
+				bool toggled = false;
+				// Reset drops the override.
+				const auto edit = ui::DrawField(
+					{ .id = id + "-" + variable.key, .label = variable.description.empty() ? variable.key : variable.description, .help = variable.help },
+					active,
+					[&](const char*) {
+						toggled = dmui::ui::Checkbox(("##override-" + variable.key).c_str(), &active);
+						ui::Tooltip("Override %s for this weather", variable.key.c_str());
+						dmui::ui::SameLine();
+						const dmui::DisabledScope disabled{ !active };
+						return EditValue(variable, value);
+					},
+					[&] { active = false; });
+				if (!active && profile.contains(variable.key)) {
+					profile.erase(variable.key);
 					changed = completed = true;
-					if (!active)
-						profile.erase(variable.key);
 				}
-				ui::Tooltip("Override %s for this weather", variable.key.c_str());
-				dmui::ui::SameLine();
-				dmui::ui::BeginDisabled(!active);
-				const auto edit = EditValue(variable, value);
-				dmui::ui::EndDisabled();
+				if (toggled)
+					changed = completed = true;
 				if (active && (edit.changed || !profile.contains(variable.key))) {
 					settings::WriteValue(profile, variable.key, value);
 					changed = true;
 				}
 				completed |= edit.completed;
-				dmui::ui::PopID();
 			}
-			dmui::ui::PopID();
 
 			const auto name = feature->GetName();
 			if (changed || clear) {
