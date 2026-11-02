@@ -7,4 +7,6 @@ namespace cs::features::light_limit_fix
 		"LIGHT_LIMIT_FIX", { engine::ShaderInjectionTarget::kBsdfLight, engine::ShaderInjectionTarget::kDfTiledLighting, engine::ShaderInjectionTarget::kEffect, engine::ShaderInjectionTarget::kBsWater },
 		"LLFDEBUG", engine::ShaderInjectionTarget::kCount, 0, { engine::ShaderInjectionTarget::kEffect }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "LightLimitFix", kShaderDefines };
 }

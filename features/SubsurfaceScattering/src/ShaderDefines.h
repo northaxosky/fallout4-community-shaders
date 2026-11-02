@@ -7,4 +7,6 @@ namespace cs::features::subsurface_scattering_shader
 	inline const engine::ShaderDefineDeclaration kShaderDefines{
 		"SUBSURFACE_SCATTERING", { engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kBsdfComposite }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "SubsurfaceScattering", kShaderDefines };
 }

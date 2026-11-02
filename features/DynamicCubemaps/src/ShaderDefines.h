@@ -8,4 +8,6 @@ namespace cs::features::dc
 		{ engine::ShaderInjectionTarget::kBsWater, engine::ShaderInjectionTarget::kBsdfComposite,
 			engine::ShaderInjectionTarget::kBsdfLight, engine::ShaderInjectionTarget::kDfTiledLighting, engine::ShaderInjectionTarget::kImageSpace }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "DynamicCubemaps", kShaderDefines };
 }

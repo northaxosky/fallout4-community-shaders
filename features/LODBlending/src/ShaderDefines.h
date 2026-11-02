@@ -6,4 +6,6 @@ namespace cs::features::lod_blending_shader
 	inline const engine::ShaderDefineDeclaration kShaderDefines{
 		"LOD_BLENDING", { engine::ShaderInjectionTarget::kDeferredPrepass }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "LODBlending", kShaderDefines };
 }

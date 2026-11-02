@@ -9,4 +9,6 @@ namespace cs::features::terrain_shader
 			engine::ShaderInjectionTarget::kBsWater, engine::ShaderInjectionTarget::kEffect, engine::ShaderInjectionTarget::kBsdfComposite },
 		"TERRAIN_SHADOWS_FULLSCREEN_DEBUG"
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "TerrainShadows", kShaderDefines };
 }

@@ -10,4 +10,6 @@ namespace cs::features::ibl_shader
 			engine::ShaderInjectionTarget::kBsdfComposite, engine::ShaderInjectionTarget::kBsWater,
 			engine::ShaderInjectionTarget::kEffect, engine::ShaderInjectionTarget::kDistantTree }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "ImageBasedLighting", kShaderDefines };
 }

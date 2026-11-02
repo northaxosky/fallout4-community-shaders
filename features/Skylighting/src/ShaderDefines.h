@@ -11,4 +11,6 @@ namespace cs::features::skylighting_shader
 			engine::ShaderInjectionTarget::kBsWater, engine::ShaderInjectionTarget::kEffect },
 		"SKYLIGHTING_FULLSCREEN_DEBUG"
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "Skylighting", kShaderDefines };
 }

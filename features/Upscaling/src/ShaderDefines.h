@@ -19,4 +19,7 @@ namespace cs::features::upscaling
 		engine::ShaderInjectionTarget::kCount,
 		engine::ShaderStageBit(engine::ShaderStage::kVertex)
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterMipBias{ "UpscalingMipBias", kMipBiasShaderDefines };
+	inline const engine::RegisterShaderContribution kRegisterImageSpaceUv{ "UpscalingImageSpaceUv", kImageSpaceUvShaderDefines };
 }

@@ -7,4 +7,6 @@ namespace cs::features::extended_materials_shader
 	inline const engine::ShaderDefineDeclaration kShaderDefines{
 		"EXTENDED_MATERIALS", { engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kBsdfLight }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "ExtendedMaterials", kShaderDefines };
 }

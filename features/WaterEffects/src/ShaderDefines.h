@@ -7,4 +7,6 @@ namespace cs::features::water_effects
 		"WATER_EFFECTS", { engine::ShaderInjectionTarget::kBsdfLight, engine::ShaderInjectionTarget::kBsdfComposite, engine::ShaderInjectionTarget::kBsWater },
 		"WATER_EFFECTS_FULLSCREEN_DEBUG", engine::ShaderInjectionTarget::kBsWater
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "WaterEffects", kShaderDefines };
 }

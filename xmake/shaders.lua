@@ -1,17 +1,3 @@
-local shader_directories = {
-    "package/Shaders",
-    "features/ScreenSpaceShadows/Shaders",
-    "features/TerrainShadows/Shaders",
-    "features/Upscaling/Shaders",
-    "features/FrameGeneration/Shaders",
-    "features/DynamicCubemaps/Shaders",
-    "features/WaterEffects/Shaders",
-    "features/Skylighting/Shaders",
-    "features/SubsurfaceScattering/Shaders",
-    "features/VolumetricShadows/Shaders",
-    "features/CloudShadows/Shaders"
-}
-
 local shader_files = {
     "tests/shaders/SharedDataProbe.hlsl"
 }
@@ -95,6 +81,11 @@ local function stage_shaders()
         }
     end
 
+    local shader_directories = { "package/Shaders" }
+    for _, directory in ipairs(os.dirs(path.join(root, "features/*/Shaders"))) do
+        table.insert(shader_directories, path.relative(directory, root))
+    end
+    table.sort(shader_directories)
     for _, directory in ipairs(shader_directories) do
         local source_root = path.join(root, directory)
         for _, source in ipairs(os.files(path.join(source_root, "**"))) do

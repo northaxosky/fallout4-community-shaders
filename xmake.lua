@@ -10,32 +10,36 @@ local plugin_version = "0.4.1"
 local plugin_version_major, plugin_version_minor, plugin_version_patch =
     plugin_version:match("^(%d+)%.(%d+)%.(%d+)$")
 
-local features = {
-    "RenderDoc",
-    "PerformanceOverlay",
-    "MotionVectorFixes",
-    "Upscaling",
-    "FrameGeneration",
-    "ScreenSpaceShadows",
-    "TerrainShadows",
-    "SkySync",
-    "VolumetricShadows",
-    "CloudShadows",
-    "LODBlending",
-    "TerrainVariation",
-    "TerrainBlending",
-    "ExtendedMaterials",
-    "ScreenSpaceGI",
-    "SubsurfaceScattering",
-    "Skylighting",
-    "LightLimitFix",
-    "DynamicCubemaps",
-    "IBL",
-    "WaterEffects",
-    "RemoteControl",
-    "UnifiedWater",
-    "CSEditor"
-}
+-- Every features/<Name>/src directory is a feature.
+local features = {}
+for _, directory in ipairs(os.dirs(path.join(os.scriptdir(), "features", "*", "src"))) do
+    table.insert(features, path.basename(path.directory(directory)))
+end
+table.sort(features)
+
+-- Tests enumerate shader contributions through each feature's self-registering header.
+local generated_defines = path.join("build", ".gens", "FeatureShaderDefines")
+
+target("FeatureShaderDefines", function()
+    set_kind("phony")
+    set_default(false)
+    set_policy("build.fence", true)
+
+    on_prepare(function()
+        local lines = { "#pragma once" }
+        for _, feature in ipairs(features) do
+            if os.isfile(path.join("features", feature, "src", "ShaderDefines.h")) then
+                table.insert(lines, '#include "../../../features/' .. feature .. '/src/ShaderDefines.h"')
+            end
+        end
+        local content = table.concat(lines, "\n") .. "\n"
+        local output = path.join(generated_defines, "FeatureShaderDefines.h")
+        if not os.isfile(output) or io.readfile(output) ~= content then
+            os.mkdir(path.directory(output))
+            io.writefile(output, content)
+        end
+    end)
+end)
 
 set_project(plugin_name)
 set_version(plugin_version)
@@ -451,7 +455,7 @@ local function stock_shader_identity_target(name, compiler, tests)
         set_default(false)
         set_group("shaders")
         set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/" .. name)
-        add_deps("ShaderStage")
+        add_deps("ShaderStage", "FeatureShaderDefines")
         use_shader_test_cache()
         add_files(
             "tests/StockShaderIdentityTests.cpp",
@@ -465,7 +469,7 @@ local function stock_shader_identity_target(name, compiler, tests)
         )
         add_files(shader_cache_sources)
         add_defines("NOMINMAX")
-        add_includedirs("features/ScreenSpaceGI/src", "features/SubsurfaceScattering/src")
+        add_includedirs(generated_defines, "features/ScreenSpaceGI/src", "features/SubsurfaceScattering/src")
         add_packages("spdlog", "vcpkg::directxmath", "vcpkg::tomlplusplus")
         add_syslinks("bcrypt", "d3dcompiler", "version")
         set_values("fo4cs.identity_compiler", compiler)

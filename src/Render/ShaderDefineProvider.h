@@ -58,6 +58,27 @@ namespace cs::engine
 		std::atomic_bool _fullscreenDebugSelected{ false };
 	};
 
+	struct ShaderContribution
+	{
+		std::string_view name;
+		const ShaderDefineProvider* provider = nullptr;
+	};
+
+	// Each feature's ShaderDefines.h registers here so tools can enumerate contributions.
+	inline std::vector<ShaderContribution>& GetShaderContributionRegistry()
+	{
+		static std::vector<ShaderContribution> registry;
+		return registry;
+	}
+
+	struct RegisterShaderContribution
+	{
+		RegisterShaderContribution(std::string_view a_name, const ShaderDefineProvider& a_provider)
+		{
+			GetShaderContributionRegistry().push_back({ a_name, &a_provider });
+		}
+	};
+
 	// A second contributor that follows its feature's load state.
 	class OwnedShaderDefineProvider final : public ShaderDefineProvider
 	{

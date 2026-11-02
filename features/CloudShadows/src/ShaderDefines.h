@@ -14,4 +14,6 @@ namespace cs::features::cloud_shadows_shader
 		"CLOUD_SHADOWS",
 		{ engine::ShaderInjectionTarget::kBsSky, engine::ShaderInjectionTarget::kBsdfLight, engine::ShaderInjectionTarget::kBsWater }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "CloudShadows", kShaderDefines };
 }

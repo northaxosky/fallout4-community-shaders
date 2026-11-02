@@ -6,4 +6,6 @@ namespace cs::features::terrain_variation_shader
 	inline const engine::ShaderDefineDeclaration kShaderDefines{
 		"TERRAIN_VARIATION", { engine::ShaderInjectionTarget::kDeferredPrepass }
 	};
+
+	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "TerrainVariation", kShaderDefines };
 }
