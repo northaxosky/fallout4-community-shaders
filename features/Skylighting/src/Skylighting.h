@@ -51,6 +51,8 @@ namespace cs::features
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void Prepass() override;
 		void DrawSettings() override;
+		bool HasDebugUI() const override { return true; }
+		void DrawDebug() override;
 		void RestoreDefaultSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
@@ -213,6 +215,7 @@ namespace cs::features
 			std::atomic<float> captureMs{ 0 };
 			std::atomic<float> gatherMs{ 0 };
 			std::atomic<float> passesMs{ 0 };
+			std::atomic<float> batchMs{ 0 };
 			std::atomic_bool stockTargetRestored{ true };
 		} _counters;
 		struct ProbeCounters
@@ -257,6 +260,7 @@ namespace cs::features
 		cs::engine::CaptureClock::rep _timingSnapshot = 0;
 		cs::engine::CaptureClock::rep _gatherSnapshot = 0;
 		cs::engine::CaptureClock::rep _passesSnapshot = 0;
+		cs::engine::CaptureClock::rep _batchSnapshot = 0;
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
 		ProbeState _probeState = ProbeState::kPending;

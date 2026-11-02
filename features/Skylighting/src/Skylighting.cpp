@@ -27,6 +27,7 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
 #include "Render/FrameProfiler.h"
+#include "Render/OccluderBatch.h"
 #include "Render/PrecipitationOcclusion.h"
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
@@ -535,6 +536,7 @@ namespace cs::features
 				.minOccluderRadius = MIN_OCCLUDER_RADIUS,
 				.belowGridMargin = OCCLUSION_BELOW_GRID_MARGIN,
 				.probeGridBottomZ = probeGridBottomZ },
+			.batching = { _settings.BatchOccluders, _settings.BatchValidationInterval },
 			.target = { _occlusionTexture.get(), _occlusionDSV.get(), _occlusionSRV.get() }
 		};
 		cs::engine::OcclusionCaptureResult result;
@@ -609,6 +611,11 @@ namespace cs::features
 		_counters.captureMs.store(captureMs, std::memory_order_relaxed);
 		const float gatherMs = windowMs(timings.gather, _gatherSnapshot);
 		const float passesMs = windowMs(timings.passes, _passesSnapshot);
+		const float batchMs = windowMs(timings.batch, _batchSnapshot);
+		_counters.batchMs.store(batchMs, std::memory_order_relaxed);
+		const auto& batch = cs::engine::GetBatchStats();
+		using BatchFallback = cs::engine::BatchFallback;
+		const auto fallback = [&](BatchFallback a_reason) { return count(batch.fallback[static_cast<std::size_t>(a_reason)]); };
 		_counters.gatherMs.store(gatherMs, std::memory_order_relaxed);
 		_counters.passesMs.store(passesMs, std::memory_order_relaxed);
 
@@ -634,7 +641,8 @@ namespace cs::features
 			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
-			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_gather={:.3f} ms_passes={:.3f} stock_ds8_restored={} "
+			"batched_plain={} batched_merge={} batch_draws={} batch_pool_records={} batch_fallback_technique={} batch_fallback_animated={} batch_fallback_renderer_data={} batch_fallback_buffer={} batch_fallback_structured={} batch_fallback_heap_view={} batch_fallback_pool_full={} batch_fallback_arena_full={} "
+			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_gather={:.3f} ms_passes={:.3f} ms_batch={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"sun_copies={} sun_copy_skipped_unavailable={} sun_copy_skipped_not_full_sky={} sun_copy_skipped_no_light={} sun_copy_skipped_unsupported_count={} sun_copy_skipped_no_target={} sun_copy_skipped_invalid={} sun_copy_skipped_copy_target={} sun_copy_skipped_disabled={} "
 			"cascade_count={} split_end=({:.1f},{:.1f},{:.1f}) "
@@ -646,7 +654,10 @@ namespace cs::features
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
-			cpuMsAverage, _windowCpuMsMax, captureMs, gatherMs, passesMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
+			count(batch.batched[0]), count(batch.batched[1]), count(batch.draws), batch.poolRecords.load(std::memory_order_relaxed),
+			fallback(BatchFallback::kTechnique), fallback(BatchFallback::kAnimated), fallback(BatchFallback::kRendererData), fallback(BatchFallback::kBufferNotReady),
+			fallback(BatchFallback::kStructuredNotReady), fallback(BatchFallback::kHeapView), fallback(BatchFallback::kPoolFull), fallback(BatchFallback::kArenaFull),
+			cpuMsAverage, _windowCpuMsMax, captureMs, gatherMs, passesMs, batchMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange,
 			count(_cascadeCounters.copies), cascadeSkipped(CascadeSkip::kUnavailable), cascadeSkipped(CascadeSkip::kNotFullSky), statusSkipped(cs::engine::SunCascadeStatus::kNoLight),
 			statusSkipped(cs::engine::SunCascadeStatus::kUnsupportedCount), statusSkipped(cs::engine::SunCascadeStatus::kNoTarget), statusSkipped(cs::engine::SunCascadeStatus::kInvalid), cascadeSkipped(CascadeSkip::kCopyTarget), cascadeSkipped(CascadeSkip::kDisabled),
@@ -665,6 +676,9 @@ namespace cs::features
 		const auto count = [](const std::atomic<std::uint64_t>& a_value) { return a_value.load(std::memory_order_relaxed); };
 		const auto& stats = cs::engine::GetOccluderStats();
 		const auto& gather = cs::engine::GetGatherStats();
+		const auto& batch = cs::engine::GetBatchStats();
+		using BatchFallback = cs::engine::BatchFallback;
+		const auto batchFallback = [&](BatchFallback a_reason) { return count(batch.fallback[static_cast<std::size_t>(a_reason)]); };
 		using Reject = cs::engine::OccluderReject;
 		const auto rejected = [&](Reject a_reason) { return count(stats.rejected[static_cast<std::size_t>(a_reason)]); };
 		const auto cascadeSkipped = [&](CascadeSkip a_reason) { return count(_cascadeCounters.skipped[static_cast<std::size_t>(a_reason)]); };
@@ -681,6 +695,23 @@ namespace cs::features
 			.Field("ms_capture", static_cast<double>(_counters.captureMs.load(std::memory_order_relaxed)))
 			.Field("ms_gather", static_cast<double>(_counters.gatherMs.load(std::memory_order_relaxed)))
 			.Field("ms_passes", static_cast<double>(_counters.passesMs.load(std::memory_order_relaxed)))
+			.Field("ms_batch", static_cast<double>(_counters.batchMs.load(std::memory_order_relaxed)))
+			.Field("batched_plain", count(batch.batched[static_cast<std::size_t>(cs::engine::BatchClass::kPlain)]))
+			.Field("batched_merge", count(batch.batched[static_cast<std::size_t>(cs::engine::BatchClass::kMergeInstanced)]))
+			.Field("batch_draws", count(batch.draws))
+			.Field("batch_pool_records", static_cast<std::uint64_t>(batch.poolRecords.load(std::memory_order_relaxed)))
+			.Field("batch_fallback_technique", batchFallback(BatchFallback::kTechnique))
+			.Field("batch_fallback_animated", batchFallback(BatchFallback::kAnimated))
+			.Field("batch_fallback_renderer_data", batchFallback(BatchFallback::kRendererData))
+			.Field("batch_fallback_buffer", batchFallback(BatchFallback::kBufferNotReady))
+			.Field("batch_fallback_structured", batchFallback(BatchFallback::kStructuredNotReady))
+			.Field("batch_fallback_heap_view", batchFallback(BatchFallback::kHeapView))
+			.Field("batch_fallback_pool_full", batchFallback(BatchFallback::kPoolFull))
+			.Field("batch_fallback_arena_full", batchFallback(BatchFallback::kArenaFull))
+			.Field("batch_validations", count(batch.validations))
+			.Field("batch_validation_failures", count(batch.validationFailures))
+			.Field("batch_mismatched_texels", static_cast<std::uint64_t>(batch.mismatchedTexels.load(std::memory_order_relaxed)))
+			.Field("batch_max_delta", static_cast<std::uint64_t>(batch.maxDelta.load(std::memory_order_relaxed)))
 			.Field("occluders_accepted", count(stats.accepted))
 			.Field("occluders_delegated", count(stats.delegated))
 			.Field("occluders_own_new", count(stats.ownNew))
@@ -972,7 +1003,8 @@ namespace cs::features
 	void Skylighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto& [maxZenith, minDiffuse, minSpecular] = skylighting::kSchema.fields;
+		const auto& [maxZenith, minDiffuse, minSpecular, batchOccluders, validationInterval] = skylighting::kSchema.fields;
+		static_cast<void>(validationInterval);
 		const auto drawVisibility = [&](const auto& a_field) {
 			const auto range = skylighting::kSchema.EditRange(a_field.member);
 			edit.Continuous(dmui::ui::SliderScalar(ui::FieldLabel(a_field).c_str(), &(_settings.*a_field.member), &range.min, &range.max, "%.2f"));
@@ -982,6 +1014,9 @@ namespace cs::features
 			dmui::ui::Text("%s", "Minimum visibility values. Diffuse darkens objects. Specular removes the sky from reflections.");
 			drawVisibility(minDiffuse);
 			drawVisibility(minSpecular);
+		}
+		if (const ui::Section section{ "skylighting-performance", "Performance" }; section) {
+			edit.Toggle(batchOccluders, _settings, "Draws opaque static occluders in a few batched calls. Off uses one engine draw each.");
 		}
 		if (const ui::Section section{ "skylighting-rebuild", "Rebuild" }; section) {
 			if (dmui::ui::Button("Rebuild Skylighting"))
@@ -1002,6 +1037,15 @@ namespace cs::features
 			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone }; tooltip.Visible())
 				dmui::ui::Text("%s", "Smaller angles creates more focused top-down shadow.");
 		}
+	}
+
+	void Skylighting::DrawDebug()
+	{
+		settings::SettingsEdit edit{ *this };
+		const auto& validationInterval = std::get<4>(skylighting::kSchema.fields);
+		const auto range = skylighting::kSchema.EditRange(validationInterval.member);
+		edit.Discrete(dmui::ui::SliderScalar(ui::FieldLabel(validationInterval).c_str(), &_settings.BatchValidationInterval, &range.min, &range.max, "%u"));
+		ui::Tooltip("Every Nth capture also renders the batchable occluders through the engine and through the batch and logs the texels that differ. 0 is off.");
 	}
 
 	void Skylighting::RestoreDefaultSettings()
