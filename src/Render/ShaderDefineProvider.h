@@ -66,7 +66,7 @@ namespace cs::engine
 		const ShaderDefineProvider* provider = nullptr;
 	};
 
-	// Each feature's ShaderDefines.h registers here so tools can enumerate contributions.
+	// ShaderDefines.h headers register here so tools can enumerate them.
 	inline std::vector<ShaderContribution>& GetShaderContributionRegistry()
 	{
 		static std::vector<ShaderContribution> registry;

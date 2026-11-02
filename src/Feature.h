@@ -231,7 +231,7 @@ namespace cs
 	class ShaderInjectionFeature : public Feature
 	{
 	public:
-		// Registrations -> prerequisites -> routes -> variants; operational only if all pass.
+		// Registered, prerequisites, routes, variants; operational if all pass.
 		bool ValidateShaderInjections(std::string& a_error) final;
 		bool IsInjectionOperational() const noexcept { return _injectionsOperational.load(std::memory_order_acquire); }
 		std::string GetInjectionValidationError() const;

@@ -17,7 +17,7 @@ for _, directory in ipairs(os.dirs(path.join(os.scriptdir(), "features", "*", "s
 end
 table.sort(features)
 
--- Tests enumerate shader contributions through each feature's self-registering header.
+-- Tests enumerate contributions via each feature's ShaderDefines.h.
 local generated_defines = path.join("build", ".gens", "FeatureShaderDefines")
 
 target("FeatureShaderDefines", function()
