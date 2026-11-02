@@ -68,16 +68,16 @@ namespace cs::render::temporal
 
 	inline constexpr settings::Schema kSchema{
 		std::tuple{
-			settings::Field{ "upscale_method", "Method: 0 Off, 1 TAA, 2 FSR 3, 3 DLSS, 4 FSR 4; admitted providers switch at a frame boundary.", &UpscalingSettings::upscaleMethod, settings::Range{ 0u, kMaxUpscaleMethodValue } },
-			settings::Field{ "quality_mode", "Quality: 0 Native AA, 1 Quality, 2 Balanced, 3 Performance, 4 Ultra Performance.", &UpscalingSettings::qualityMode, settings::Range{ 0u, 4u } },
-			settings::Field{ "streamline_log_level", "Streamline logging: 0 Off, 1 Default, 2 Verbose.", &UpscalingSettings::streamlineLogLevel, settings::Range{ 0u, 2u }, settings::ApplyTiming::kNextLaunch },
-			settings::Field{ "preset_dlss", "DLSS preset: 0 Default, 1 J, 2 K, 3 L, 4 M.", &UpscalingSettings::presetDLSS, settings::Range{ 0u, 4u } },
+			settings::Field{ "upscale_method", "Method: 0 Off, 1 TAA, 2 FSR 3, 3 DLSS, 4 FSR 4; admitted providers switch at a frame boundary.", &UpscalingSettings::upscaleMethod, settings::Range{ 0u, kMaxUpscaleMethodValue } }.Help("The upscaler to use. Methods that are unavailable are disabled and give the reason."),
+			settings::Field{ "quality_mode", "Quality: 0 Native AA, 1 Quality, 2 Balanced, 3 Performance, 4 Ultra Performance.", &UpscalingSettings::qualityMode, settings::Range{ 0u, 4u } }.Help("Render resolution relative to the output; lower quality renders fewer pixels."),
+			settings::Field{ "streamline_log_level", "Streamline logging: 0 Off, 1 Default, 2 Verbose.", &UpscalingSettings::streamlineLogLevel, settings::Range{ 0u, 2u }, settings::ApplyTiming::kNextLaunch }.Help("Streamline log verbosity."),
+			settings::Field{ "preset_dlss", "DLSS preset: 0 Default, 1 J, 2 K, 3 L, 4 M.", &UpscalingSettings::presetDLSS, settings::Range{ 0u, 4u } }.Help("DLSS model preset; Default lets DLSS choose."),
 			settings::Field{ "sharpness_fsr", "FSR sharpening strength.", &UpscalingSettings::sharpnessFSR, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "sharpness_enabled_dlss", "Enable DLSS sharpening.", &UpscalingSettings::sharpnessEnabledDLSS },
 			settings::Field{ "sharpness_dlss", "DLSS sharpening strength.", &UpscalingSettings::sharpnessDLSS, settings::Range{ 0.0f, 1.0f } },
-			settings::Field{ "latency_reduction", "Latency reduction: 0 Off, 1 On, 2 On + Boost; Boost is NVIDIA Reflex only.", &UpscalingSettings::latencyReduction, settings::Range{ 0u, kMaxLatencyReductionValue } },
-			settings::Field{ "latency_fps_limit_enabled", "Enable the latency backend's frame rate limit.", &UpscalingSettings::latencyFpsLimitEnabled },
+			settings::Field{ "latency_reduction", "Latency reduction: 0 Off, 1 On, 2 On + Boost; Boost is NVIDIA Reflex only.", &UpscalingSettings::latencyReduction, settings::Range{ 0u, kMaxLatencyReductionValue } }.Help("Reduces input latency by pacing CPU work against the GPU. Boost keeps GPU clocks high and is NVIDIA Reflex only."),
+			settings::Field{ "latency_fps_limit_enabled", "Enable the latency backend's frame rate limit.", &UpscalingSettings::latencyFpsLimitEnabled }.Help("Caps the frame rate through the active latency backend for steadier frame times."),
 			settings::Field{ "latency_fps_limit", "Latency backend frame rate limit in FPS.", &UpscalingSettings::latencyFpsLimit, settings::Range{ 20.0f, 240.0f } },
-			settings::Field{ "latency_use_markers", "Let NVIDIA Reflex optimize pacing from PCL markers.", &UpscalingSettings::latencyUseMarkers } }
+			settings::Field{ "latency_use_markers", "Let NVIDIA Reflex optimize pacing from PCL markers.", &UpscalingSettings::latencyUseMarkers }.Help("Lets NVIDIA Reflex tune pacing from frame markers; only helps in specific cases.") }
 	};
 }

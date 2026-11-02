@@ -36,8 +36,8 @@ namespace cs::features::ssgi_settings
 	inline constexpr settings::Schema kSchema{
 		std::tuple{
 			settings::Field{ "EnableGI", "Enable indirect lighting.", &Settings::enableGI },
-			settings::Field{ "EnableExperimentalSpecularGI", "Enable experimental unblurred specular indirect lighting.", &Settings::enableExperimentalSpecularGI },
-			settings::Field{ "EnableVanillaSSAO", "Enable Fallout 4's built-in SSAO.", &Settings::enableVanillaSSAO },
+			settings::Field{ "EnableExperimentalSpecularGI", "Enable experimental unblurred specular indirect lighting.", &Settings::enableExperimentalSpecularGI }.Help("An experimental specular GI that is more accurate but requires more samples. Won't be blurred."),
+			settings::Field{ "EnableVanillaSSAO", "Enable Fallout 4's built-in SSAO.", &Settings::enableVanillaSSAO }.Help("Enable Fallout 4's built-in SSAO. Usually disabled when using SSGI to avoid double-darkening."),
 			settings::Field{ "NumSlices", "How many directions the samples take.", &Settings::numSlices, settings::Range{ 1, 10 } },
 			settings::Field{ "NumSteps", "How many samples are taken in one direction.", &Settings::numSteps, settings::Range{ 1, 20 } },
 			settings::Field{ "ResolutionMode", "Indirect lighting resolution: 0 full, 1 half, 2 quarter.", &Settings::resolutionMode, settings::Range{ 0, 2 } },

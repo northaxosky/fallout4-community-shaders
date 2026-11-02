@@ -19,6 +19,6 @@ namespace cs::features::lod_blending
 			settings::Field{ "LODObjectBrightness", "LOD Object Brightness", &Settings::LODObjectBrightness, settings::Range{ 0.01f, 5.0f } },
 			settings::Field{ "LODTerrainGamma", "LOD Terrain Gamma", &Settings::LODTerrainGamma, settings::Range{ 0.1f, 3.0f } },
 			settings::Field{ "LODObjectGamma", "LOD Object Gamma", &Settings::LODObjectGamma, settings::Range{ 0.1f, 3.0f } },
-			settings::Field{ "DisableTerrainVertexColors", "Disable Terrain Vertex Colors", &Settings::DisableTerrainVertexColors } }
+			settings::Field{ "DisableTerrainVertexColors", "Disable Terrain Vertex Colors", &Settings::DisableTerrainVertexColors }.Help("Disables vertex coloring on nearby terrain. Best combined with terrain LOD generated in xLODGen with Vertex Color Intensity set to 0.") }
 	};
 }

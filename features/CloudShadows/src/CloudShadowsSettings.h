@@ -11,6 +11,6 @@ namespace cs::features::cloud_shadows
 
 	inline constexpr settings::Schema kSchema{
 		std::tuple{
-			settings::Field{ "Opacity", "Opacity", &Settings::Opacity, settings::Range{ 0.0f, 4.0f } } }
+			settings::Field{ "Opacity", "Opacity", &Settings::Opacity, settings::Range{ 0.0f, 4.0f } }.Help("Higher values make cloud shadows darker.") }
 	};
 }

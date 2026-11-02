@@ -31,7 +31,7 @@ namespace cs::features::renderdoc_settings
 
 	inline constexpr settings::Schema kSchema{
 		std::tuple{
-			settings::Field{ "dll_path", "Path to renderdoc.dll; empty uses the registered RenderDoc installation, then %ProgramFiles%\\RenderDoc\\renderdoc.dll.", &Settings::dllPath, {}, settings::ApplyTiming::kNextLaunch },
+			settings::Field{ "dll_path", "Path to renderdoc.dll; empty uses the registered RenderDoc installation, then %ProgramFiles%\\RenderDoc\\renderdoc.dll.", &Settings::dllPath, {}, settings::ApplyTiming::kNextLaunch }.Help("Empty uses the installed RenderDoc."),
 			settings::Field{ "capture_folder", "Capture folder; empty uses captures beside the F4SE log, with environment variables expanded.", &Settings::captureFolder },
 			settings::Field{ "Capture Frame Count", "Consecutive frames per capture; 1 uses a normal capture, higher counts use multi-frame capture.", &Settings::captureFrameCount, settings::Range{ renderdoc::kMinCaptureFrameCount, renderdoc::kMaxCaptureFrameCount } },
 			settings::ChoiceField{ "capture_target", "Capture API: engine_d3d11 or temporal_d3d12.", &Settings::captureTarget, kCaptureTargets },

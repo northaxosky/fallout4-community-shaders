@@ -21,9 +21,9 @@ namespace cs::features::skylighting
 
 	inline constexpr settings::Schema kSchema{
 		std::tuple{
-			settings::Field{ "MaxZenith", "Max Zenith Angle", &Settings::MaxZenith, settings::Range{ 0.0f, kMaxZenithLimit } },
+			settings::Field{ "MaxZenith", "Max Zenith Angle", &Settings::MaxZenith, settings::Range{ 0.0f, kMaxZenithLimit } }.Help("Smaller angles create a more focused top-down shadow."),
 			settings::Field{ "MinDiffuseVisibility", "Diffuse Min Visibility", &Settings::MinDiffuseVisibility, settings::Range{ 0.01f, 1.0f } },
 			settings::Field{ "MinSpecularVisibility", "Specular Min Visibility", &Settings::MinSpecularVisibility, settings::Range{ 0.01f, 1.0f } },
-			settings::Field{ "BatchOccluders", "Batch Occluder Draws", &Settings::BatchOccluders } }
+			settings::Field{ "BatchOccluders", "Batch Occluder Draws", &Settings::BatchOccluders }.Help("Draws opaque static occluders in a few batched calls. Off uses one engine draw each.") }
 	};
 }
