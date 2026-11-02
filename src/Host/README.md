@@ -10,9 +10,10 @@ window-procedure hook, or enumerate host modules itself.
 The menu-owned TOML state is parsed during core plugin startup, independently of host discovery.
 Persisted debug-view selections are applied after shader-injection validation when D3D11 becomes
 ready. At F4SE `kPostPostLoad`, after feature registration is complete, `HostClient` calls the
-official `dmui::Client::Connect`. The client requires exact-match ABI 2 before registering
-anything; all host and UI operations are required by that ABI. The client and host must use matching development headers from the
-CommonLibF4-pinned DearModdingUI API; no
+official `dmui::Client::Connect`. The client accepts any ABI 2.x host. Calls added in 2.2 (the
+compile overlay's screen anchor, table sort and heat colors) return `UNSUPPORTED_ABI` and fail
+softly on older hosts, so those features disappear; `HostClient` then logs a warning and shows it
+in the host status. Other major versions are rejected before registering anything. No
 compatibility shim is provided for superseded development snapshots. It then registers all category
 descriptors before any page that references their stable IDs:
 
