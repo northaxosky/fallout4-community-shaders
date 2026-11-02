@@ -67,8 +67,22 @@ namespace cs::settings
 		return false;
 	}
 
+	// The shared `.Help("...")` builder: a long-form description beside the control.
+	template <class Derived>
+	struct WithHelp
+	{
+		std::string_view help;
+
+		constexpr Derived Help(std::string_view a_help) const
+		{
+			auto result = static_cast<const Derived&>(*this);
+			result.help = a_help;
+			return result;
+		}
+	};
+
 	template <class Settings, class T>
-	struct Field
+	struct Field : WithHelp<Field<Settings, T>>
 	{
 		static_assert(
 			std::integral<T> || std::is_enum_v<T> ||
@@ -86,8 +100,6 @@ namespace cs::settings
 		Range<T> accepted;
 		Range<T> edit;
 		ApplyTiming timing;
-		// Long-form explanation shown beside the control; empty for none.
-		std::string_view help;
 
 		constexpr Field(std::string_view a_key, std::string_view a_description, T Settings::* a_member,
 			Range<T> a_range = {}, ApplyTiming a_timing = ApplyTiming::kImmediate) :
@@ -103,13 +115,6 @@ namespace cs::settings
 			ApplyTiming a_timing = ApplyTiming::kImmediate) :
 			key(a_key), description(a_description), member(a_member), accepted(a_accepted), edit(a_edit), timing(a_timing)
 		{}
-
-		constexpr Field Help(std::string_view a_help) const
-		{
-			auto result = *this;
-			result.help = a_help;
-			return result;
-		}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
@@ -174,7 +179,7 @@ namespace cs::settings
 	};
 
 	template <class Settings, std::size_t N>
-	struct FloatArrayField
+	struct FloatArrayField : WithHelp<FloatArrayField<Settings, N>>
 	{
 		using SettingsType = Settings;
 		using ValueType = std::array<float, N>;
@@ -182,15 +187,12 @@ namespace cs::settings
 		std::string_view key;
 		std::string_view description;
 		ValueType Settings::* member;
-		ApplyTiming timing = ApplyTiming::kImmediate;
-		std::string_view help = {};
+		ApplyTiming timing;
 
-		constexpr FloatArrayField Help(std::string_view a_help) const
-		{
-			auto result = *this;
-			result.help = a_help;
-			return result;
-		}
+		constexpr FloatArrayField(std::string_view a_key, std::string_view a_description, ValueType Settings::* a_member,
+			ApplyTiming a_timing = ApplyTiming::kImmediate) :
+			key(a_key), description(a_description), member(a_member), timing(a_timing)
+		{}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
@@ -221,7 +223,7 @@ namespace cs::settings
 	};
 
 	template <class Settings>
-	struct StringListField
+	struct StringListField : WithHelp<StringListField<Settings>>
 	{
 		using SettingsType = Settings;
 		using ValueType = StringList;
@@ -229,15 +231,12 @@ namespace cs::settings
 		std::string_view key;
 		std::string_view description;
 		ValueType Settings::* member;
-		ApplyTiming timing = ApplyTiming::kImmediate;
-		std::string_view help = {};
+		ApplyTiming timing;
 
-		constexpr StringListField Help(std::string_view a_help) const
-		{
-			auto result = *this;
-			result.help = a_help;
-			return result;
-		}
+		constexpr StringListField(std::string_view a_key, std::string_view a_description, ValueType Settings::* a_member,
+			ApplyTiming a_timing = ApplyTiming::kImmediate) :
+			key(a_key), description(a_description), member(a_member), timing(a_timing)
+		{}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
@@ -280,7 +279,7 @@ namespace cs::settings
 	using ColorField = FloatArrayField<Settings, 4>;
 
 	template <class Settings, class T>
-	struct ChoiceField
+	struct ChoiceField : WithHelp<ChoiceField<Settings, T>>
 	{
 		using SettingsType = Settings;
 		using ValueType = T;
@@ -290,7 +289,6 @@ namespace cs::settings
 		T Settings::* member;
 		std::span<const Choice<T>> choices;
 		ApplyTiming timing;
-		std::string_view help;
 
 		template <std::size_t N>
 		constexpr ChoiceField(
@@ -301,13 +299,6 @@ namespace cs::settings
 			ApplyTiming a_timing = ApplyTiming::kImmediate) :
 			key(a_key), description(a_description), member(a_member), choices(a_choices), timing(a_timing)
 		{}
-
-		constexpr ChoiceField Help(std::string_view a_help) const
-		{
-			auto result = *this;
-			result.help = a_help;
-			return result;
-		}
 
 		bool Read(const toml::table& a_table, Settings& a_value, std::string& a_error) const
 		{
