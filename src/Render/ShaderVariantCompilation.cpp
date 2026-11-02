@@ -280,6 +280,7 @@ namespace cs::engine
 					_queue.push_back({ .generation = _generation,
 						.request = std::move(a_request),
 						.handle = handle });
+					_queuedPositions.emplace(handle.get(), std::prev(_queue.end()));
 				}
 				_condition.notify_one();
 				return handle;
@@ -326,9 +327,11 @@ namespace cs::engine
 			void Demand(const std::shared_ptr<ShaderVariantCompilationHandle>& a_handle) override
 			{
 				std::scoped_lock lock(_mutex);
-				const auto task = std::ranges::find(_queue, a_handle, &CompilationTask::handle);
-				if (task != _queue.end())
-					_demandedQueue.splice(_demandedQueue.end(), _queue, task);
+				const auto queued = _queuedPositions.find(a_handle.get());
+				if (queued == _queuedPositions.end())
+					return;
+				_demandedQueue.splice(_demandedQueue.end(), _queue, queued->second);
+				_queuedPositions.erase(queued);
 			}
 
 		private:
@@ -337,6 +340,7 @@ namespace cs::engine
 				std::list<CompilationTask> tasks;
 				tasks.splice(tasks.end(), _demandedQueue);
 				tasks.splice(tasks.end(), _queue);
+				_queuedPositions.clear();
 				return tasks;
 			}
 
@@ -359,6 +363,7 @@ namespace cs::engine
 						auto& queue = _demandedQueue.empty() ? _queue : _demandedQueue;
 						task = std::move(queue.front());
 						queue.pop_front();
+						_queuedPositions.erase(task.handle.get());
 					}
 
 					ShaderVariantCompilationOutput output;
@@ -394,6 +399,11 @@ namespace cs::engine
 			bool _stopped = false;
 			std::list<CompilationTask> _queue;
 			std::list<CompilationTask> _demandedQueue;
+			// Undemanded queue positions, so Demand never scans the queue.
+			std::unordered_map<
+				const ShaderVariantCompilationHandle*,
+				std::list<CompilationTask>::iterator>
+				_queuedPositions;
 			std::unordered_map<
 				CompilationKey,
 				std::shared_ptr<AsyncShaderVariantCompilationHandle>,
