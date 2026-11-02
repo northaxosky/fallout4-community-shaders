@@ -329,8 +329,7 @@ namespace cs::engine
 			BatchRecorded recorded;
 		};
 
-		// Two more captures of the view into scratch maps, the engine's whole pass
-		// each. One keeps every occluder on the engine; the other batches a_classes.
+		// Two scratch captures: all engine, then a_classes batched.
 		[[nodiscard]] std::optional<ValidationRun> RunValidation(
 			const OcclusionCaptureRequest& a_request,
 			RE::Precipitation& a_precipitation,
