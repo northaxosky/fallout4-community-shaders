@@ -33,6 +33,23 @@ namespace cs::engine
 		float probeGridBottomZ = -3.402823466e+38f;
 	};
 
+	// How the slot-44 thunk routes batchable occluders during a capture.
+	enum class OccluderBatchMode : std::uint8_t
+	{
+		kOff,
+		// Record batchable occluders and skip the engine's pass; draw them afterward.
+		kBatch,
+		// Record and let the engine draw them too, and skip the rest, to diff the two.
+		kValidate
+	};
+
+	struct OccluderBatchOptions
+	{
+		bool enabled = false;
+		// Every Nth capture also diffs the engine's depth against the batch's; 0 is off.
+		std::uint32_t validationInterval = 0;
+	};
+
 	// Replaces the engine's precipitation occlusion depth target for one capture.
 	struct OcclusionCaptureTarget
 	{
@@ -49,6 +66,7 @@ namespace cs::engine
 		// Ortho frustum quarter of the box: 0 to 3.
 		std::uint32_t quadrant = 0;
 		OccluderPolicy occluders;
+		OccluderBatchOptions batching;
 		OcclusionCaptureTarget target;
 	};
 
@@ -95,6 +113,7 @@ namespace cs::engine
 		std::uint32_t quadrant = 0;
 		OccluderPolicy occluders;
 		const RE::NiCamera* camera = nullptr;
+		OccluderBatchMode batchMode = OccluderBatchMode::kOff;
 		// The thread that runs the capture's scene walk.
 		std::uint32_t walkThread = 0;
 	};
@@ -161,6 +180,8 @@ namespace cs::engine
 		std::atomic<CaptureClock::rep> capture{ 0 };
 		std::atomic<CaptureClock::rep> gather{ 0 };
 		std::atomic<CaptureClock::rep> passes{ 0 };
+		// The batched occluder draw, on the render thread.
+		std::atomic<CaptureClock::rep> batch{ 0 };
 	};
 
 	[[nodiscard]] CaptureTimings& GetCaptureTimings() noexcept;

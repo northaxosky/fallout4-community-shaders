@@ -4,6 +4,7 @@
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
+#include "Render/OccluderBatch.h"
 #include "Render/OccluderGather.h"
 #include "Render/OccluderPasses.h"
 
@@ -121,6 +122,14 @@ namespace cs::engine
 			       (!color || IsOcclusionSquare(reinterpret_cast<ID3D11Texture2D*>(color->texture)));
 		}
 
+		// What the capture does with batchable occluders and where the batch draws.
+		struct BatchPlan
+		{
+			OccluderBatchMode mode = OccluderBatchMode::kOff;
+			ID3D11DepthStencilView* target = nullptr;
+			bool clear = false;
+		};
+
 		// Owns the capture overrides; ScopedPreCullBypass covers only the Impl call.
 		class ScopedOcclusionCapture
 		{
@@ -128,9 +137,11 @@ namespace cs::engine
 			ScopedOcclusionCapture(
 				const OcclusionCaptureRequest& a_request,
 				RE::Precipitation& a_precipitation,
-				RE::BSGraphics::DepthStencilTarget& a_stockTarget) noexcept :
+				RE::BSGraphics::DepthStencilTarget& a_stockTarget,
+				const BatchPlan& a_batch) noexcept :
 				_precipitation(a_precipitation),
 				_stockTarget(a_stockTarget),
+				_batch(a_batch),
 				_savedTarget(a_stockTarget),
 				_savedBoxSize(RE::Precipitation::GetBoxSize()),
 				_savedDirection(RE::Precipitation::GetDirection())
@@ -151,6 +162,7 @@ namespace cs::engine
 				g_active.occluders = a_request.occluders;
 				g_active.camera = a_precipitation.occlusionData.camera.get();
 				g_active.walkThread = ::GetCurrentThreadId();
+				g_active.batchMode = a_batch.mode;
 				g_active.accumulator.store(a_precipitation.occlusionData.accumulator.get(), std::memory_order_release);
 			}
 
@@ -166,9 +178,13 @@ namespace cs::engine
 				_primed = true;
 				{
 					const cs::render::annotation::ScopedEvent event{ "Skylighting::OcclusionMask" };
-					const ScopedPreCullBypass bypass;
-					const ScopedCaptureTimer timer{ g_timings.capture };
-					_precipitation.RenderOcclusionMapImpl(nullptr);
+					{
+						const ScopedPreCullBypass bypass;
+						const ScopedCaptureTimer timer{ g_timings.capture };
+						_precipitation.RenderOcclusionMapImpl(nullptr);
+					}
+					if (_batch.mode != OccluderBatchMode::kOff)
+						DrawOccluderBatch(_batch.target, kOcclusionMapSize, _batch.clear);
 				}
 				std::memcpy(&a_matrix, RE::Precipitation::GetOcclusionMatrix(), sizeof(a_matrix));
 			}
@@ -180,6 +196,7 @@ namespace cs::engine
 				_restored = true;
 
 				g_active.accumulator.store(nullptr, std::memory_order_release);
+				g_active.batchMode = OccluderBatchMode::kOff;
 				RE::Precipitation::GetBoxSize() = _savedBoxSize;
 				RE::Precipitation::GetDirection() = _savedDirection;
 				std::memcpy(RE::Precipitation::GetOcclusionMatrix(), _savedMatrix, sizeof(_savedMatrix));
@@ -197,6 +214,7 @@ namespace cs::engine
 		private:
 			RE::Precipitation& _precipitation;
 			RE::BSGraphics::DepthStencilTarget& _stockTarget;
+			const BatchPlan _batch;
 			const RE::BSGraphics::DepthStencilTarget _savedTarget;
 			const float _savedBoxSize;
 			const RE::NiPoint3 _savedDirection;
@@ -273,6 +291,51 @@ namespace cs::engine
 		return text;
 	}
 
+	namespace
+	{
+		[[nodiscard]] bool ValidationDue(const OccluderBatchOptions& a_options) noexcept
+		{
+			static std::uint64_t captures = 0;
+			return a_options.validationInterval && ++captures % a_options.validationInterval == 0;
+		}
+
+		// A second capture of the same view: the engine draws the batchable occluders into
+		// one map and the batch draws the same set into another; the live map is untouched.
+		void ValidateBatch(
+			const OcclusionCaptureRequest& a_request,
+			RE::Precipitation& a_precipitation,
+			RE::BSGraphics::DepthStencilTarget& a_stockTarget)
+		{
+			BatchValidationTargets targets;
+			auto& stats = GetBatchStats();
+			if (!AcquireValidationTargets(targets) || !PrepareOccluderBatch()) {
+				stats.validationFailures.fetch_add(1, std::memory_order_relaxed);
+				return;
+			}
+			auto request = a_request;
+			request.target = targets.engine;
+			{
+				ScopedOcclusionCapture capture{ request, a_precipitation, a_stockTarget,
+					{ OccluderBatchMode::kValidate, targets.batch.depthView, true } };
+				DirectX::XMFLOAT4X4 ignored;
+				capture.Capture(ignored);
+			}
+			const auto recorded = GetBatchRecorded();
+			const auto result = CompareValidationTargets(kOcclusionMapSize);
+			if (!result.ok) {
+				stats.validationFailures.fetch_add(1, std::memory_order_relaxed);
+				L->warn("occluder batch validation could not read back its comparison");
+				return;
+			}
+			stats.validations.fetch_add(1, std::memory_order_relaxed);
+			stats.mismatchedTexels.store(result.mismatchedTexels, std::memory_order_relaxed);
+			stats.maxDelta.store(result.maxDelta, std::memory_order_relaxed);
+			L->log(result.mismatchedTexels ? spdlog::level::warn : spdlog::level::info,
+				"occluder batch validation: mismatched_texels={} max_delta={} plain={} merge={}",
+				result.mismatchedTexels, result.maxDelta, recorded.plain, recorded.mergeInstanced);
+		}
+	}
+
 	OcclusionCaptureStatus CaptureOcclusion(
 		const OcclusionCaptureRequest& a_request,
 		OcclusionCaptureResult& a_result)
@@ -287,10 +350,14 @@ namespace cs::engine
 		if (!stock || !target.texture || !target.depthView || !target.depthSRV || !StockTargetsMatch())
 			return OcclusionCaptureStatus::kTargetsUnavailable;
 
-		ScopedOcclusionCapture capture{ a_request, *precipitation, *stock };
+		const bool batched = a_request.batching.enabled && PrepareOccluderBatch();
+		ScopedOcclusionCapture capture{ a_request, *precipitation, *stock,
+			{ batched ? OccluderBatchMode::kBatch : OccluderBatchMode::kOff, target.depthView, false } };
 		capture.Capture(a_result.matrix);
 		capture.Restore();
 		a_result.stockTargetRestored = capture.TargetRestored();
+		if (batched && ValidationDue(a_request.batching))
+			ValidateBatch(a_request, *precipitation, *stock);
 		return OcclusionCaptureStatus::kCaptured;
 	}
 }

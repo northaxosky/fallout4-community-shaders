@@ -1,6 +1,7 @@
 #include "Render/OccluderPasses.h"
 
 #include "Log.h"
+#include "Render/OccluderBatch.h"
 #include "Telemetry/Telemetry.h"
 
 #include <cstdint>
@@ -88,32 +89,6 @@ namespace cs::engine
 			return OwnBuildReason::kOther;
 		}
 
-		// The stock technique for the occlusion mode, from the same inputs.
-		[[nodiscard]] std::uint32_t OcclusionTechnique(
-			const RE::BSLightingShaderProperty& a_property,
-			RE::BSGeometry& a_geometry)
-		{
-			REX::TEnumSet<UtilityFlag, std::uint32_t> technique{ static_cast<UtilityFlag>(a_property.DetermineUtilityShaderDecl()) };
-			// Landscape decl carries a land bit whose utility permutation has no code.
-			if (a_property.flags.any(ShaderFlag::kMultiTextureLandscape))
-				technique.reset(UtilityFlag::kLandscape);
-
-			if (a_geometry.type == kGeometryType15) {
-				technique.set(UtilityFlag::kCombined, UtilityFlag::kEye);
-				if (a_property.flags.any(ShaderFlag::kAlphaTest))
-					technique.set(UtilityFlag::kAlphaTest);
-			} else if (a_geometry.IsBSMergeInstancedTriShape()) {
-				technique.set(UtilityFlag::kInstanced, UtilityFlag::kCombined);
-			}
-
-			technique.set(UtilityFlag::kRenderShadowMap, UtilityFlag::kRenderShadowMapClamped);
-			if (const auto* alpha = a_geometry.GetAlphaProperty(); alpha && alpha->GetAlphaTesting())
-				technique.set(UtilityFlag::kAlphaTest);
-			if (a_property.effectData && a_property.effectData->blockOutTexture)
-				technique.set(UtilityFlag::kAdditionalAlphaMask);
-			return technique.underlying();
-		}
-
 		// Mirrors the stock else-branch for rejected pass lists; reuses the built list.
 		RE::BSShaderProperty::RenderPassArray* BuildOcclusionPasses(
 			RE::BSLightingShaderProperty& a_property,
@@ -177,6 +152,12 @@ namespace cs::engine
 				if (counting)
 					stats.accepted.fetch_add(1, std::memory_order_relaxed);
 
+				if (capture->batchMode != OccluderBatchMode::kOff) {
+					const auto decision = RecordOccluder(capture->batchMode, *a_property, *a_geometry, OcclusionTechnique(*a_property, *a_geometry));
+					if (decision != BatchDecision::kStock)
+						return nullptr;
+				}
+
 				auto* passes = func(a_property, a_geometry, a_renderMode, a_accumulator);
 				if (passes) {
 					if (counting)
@@ -200,6 +181,32 @@ namespace cs::engine
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+	}
+
+	// The stock technique for the occlusion mode, from the same inputs.
+	std::uint32_t OcclusionTechnique(
+		const RE::BSLightingShaderProperty& a_property,
+		RE::BSGeometry& a_geometry)
+	{
+		REX::TEnumSet<UtilityFlag, std::uint32_t> technique{ static_cast<UtilityFlag>(a_property.DetermineUtilityShaderDecl()) };
+		// Landscape decl carries a land bit whose utility permutation has no code.
+		if (a_property.flags.any(ShaderFlag::kMultiTextureLandscape))
+			technique.reset(UtilityFlag::kLandscape);
+
+		if (a_geometry.type == kGeometryType15) {
+			technique.set(UtilityFlag::kCombined, UtilityFlag::kEye);
+			if (a_property.flags.any(ShaderFlag::kAlphaTest))
+				technique.set(UtilityFlag::kAlphaTest);
+		} else if (a_geometry.IsBSMergeInstancedTriShape()) {
+			technique.set(UtilityFlag::kInstanced, UtilityFlag::kCombined);
+		}
+
+		technique.set(UtilityFlag::kRenderShadowMap, UtilityFlag::kRenderShadowMapClamped);
+		if (const auto* alpha = a_geometry.GetAlphaProperty(); alpha && alpha->GetAlphaTesting())
+			technique.set(UtilityFlag::kAlphaTest);
+		if (a_property.effectData && a_property.effectData->blockOutTexture)
+			technique.set(UtilityFlag::kAdditionalAlphaMask);
+		return technique.underlying();
 	}
 
 	HookInstall InstallOccluderPassHook()
