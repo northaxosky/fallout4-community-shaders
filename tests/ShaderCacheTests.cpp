@@ -416,6 +416,10 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			cache = cs::engine::CreateAsyncShaderVariantCompilationCache(
 				[this](cs::engine::ShaderVariantCompilationRequest a_request) {
 					attempts.fetch_add(1);
+					{
+						std::scoped_lock lock(orderMutex);
+						order.push_back(a_request.defines.front().second);
+					}
 					gate.Enter();
 					cs::engine::ShaderVariantCompilationOutput output;
 					const auto outcome = LoadOrCompileShader(workspace.Recipe(), workspace.Options());
@@ -445,6 +449,8 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		CompilerGate gate;
 		std::atomic<unsigned> attempts{ 0 };
 		std::atomic<bool> finished{ false };
+		std::mutex orderMutex;
+		std::vector<std::string> order;
 		std::shared_ptr<cs::engine::ShaderVariantCompilationCache> cache;
 	};
 
@@ -491,6 +497,34 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			"completed compilation must publish its shader and sampler usage");
 	}
 
+	void TestVariantCompilationDemandPromotes()
+	{
+		using namespace cs::engine;
+		VariantFixture fixture("variant-demand");
+		if (!fixture.device) {
+			Fail("could not create WARP device");
+			return;
+		}
+
+		const auto inflight = fixture.cache->Request(fixture.Request("A"));
+		const auto first = fixture.cache->Request(fixture.Request("B"));
+		const auto second = fixture.cache->Request(fixture.Request("C"));
+		const auto third = fixture.cache->Request(fixture.Request("D"));
+		fixture.gate.WaitEntered();
+		fixture.cache->Demand(third);
+		// A running or already promoted handle must not be requeued.
+		fixture.cache->Demand(inflight);
+		fixture.cache->Demand(third);
+		fixture.gate.Release();
+		Check(
+			WaitForState(first, ShaderVariantCompilationState::kReady) && WaitForState(second, ShaderVariantCompilationState::kReady) && WaitForState(third, ShaderVariantCompilationState::kReady),
+			"every queued compilation must still complete after promotion");
+		std::scoped_lock lock(fixture.orderMutex);
+		Check(
+			fixture.order == std::vector<std::string>{ "A", "D", "B", "C" },
+			"a demanded compilation must run ahead of earlier queued ones");
+	}
+
 	void TestVariantCompilationSafeShutdown()
 	{
 		using namespace cs::engine;
@@ -528,6 +562,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		{ "corrupt-record", &TestCorruptRecord },
 		{ "concurrent-writers", &TestConcurrentWriters },
 		{ "variant-compilation-coalesces", &TestVariantCompilationCoalescesAndPublishes },
+		{ "variant-compilation-demand", &TestVariantCompilationDemandPromotes },
 		{ "variant-compilation-shutdown", &TestVariantCompilationSafeShutdown }
 	};
 }
