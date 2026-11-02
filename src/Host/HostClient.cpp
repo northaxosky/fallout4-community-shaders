@@ -534,21 +534,6 @@ namespace cs::host
 					LogFailure("draw feature failure detail");
 					return false;
 				}
-				try {
-					a_feature.DrawFailLoadMessage();
-				} catch (const std::exception& error) {
-					reportCallbackFailure(
-						"DearModdingUI::DrawFailLoadMessage",
-						"Feature failure UI callback failed",
-						error.what());
-					throw;
-				} catch (...) {
-					reportCallbackFailure(
-						"DearModdingUI::DrawFailLoadMessage",
-						"Feature failure UI callback failed",
-						"non-standard exception");
-					throw;
-				}
 				return true; });
 				}
 
@@ -625,11 +610,29 @@ namespace cs::host
 			}))
 			LogFailure("draw feature settings table");
 
-		// Fields cannot nest in a host row, so the controls sit outside the table.
-		if (!a_feature.IsActive())
-			return;
+		// Fields cannot nest in a host row, so the failure UI and controls sit outside the table.
 		const auto restartSettings = a_feature.GetRestartSettings();
 		const ui::FieldPage page{ restartSettings };
+		if (state.runtimeState == FeatureRuntimeState::kFailed ||
+			state.runtimeState == FeatureRuntimeState::kDegraded) {
+			try {
+				a_feature.DrawFailLoadMessage();
+			} catch (const std::exception& error) {
+				reportCallbackFailure(
+					"DearModdingUI::DrawFailLoadMessage",
+					"Feature failure UI callback failed",
+					error.what());
+				throw;
+			} catch (...) {
+				reportCallbackFailure(
+					"DearModdingUI::DrawFailLoadMessage",
+					"Feature failure UI callback failed",
+					"non-standard exception");
+				throw;
+			}
+		}
+		if (!a_feature.IsActive())
+			return;
 		if (!drawControls())
 			return;
 		const auto resetState = queryResetState();
