@@ -766,6 +766,37 @@ namespace cs::engine
 		// CommonLibF4 lacks BSGraphics::RenderAlphaTestZPrePass; OG and NG/AE ids.
 		inline constexpr REL::VariantID kRenderAlphaTestZPrePass{ 767228, 2277053 };
 
+		// Binds the selected alpha-test PS for one draw and restores the engine's.
+		class ScopedAlphaTestPixelShader
+		{
+		public:
+			ScopedAlphaTestPixelShader()
+			{
+				ID3D11PixelShader* shader = nullptr;
+				for (const auto& entry : g_zPrepassPixelShaders) {
+					if ((shader = entry.selector()))
+						break;
+				}
+				_context = shader ? GetImmediateContext() : nullptr;
+				if (!_context)
+					return;
+				_context->PSGetShader(_engineShader.put(), nullptr, nullptr);
+				_context->PSSetShader(shader, nullptr, 0);
+			}
+			~ScopedAlphaTestPixelShader()
+			{
+				if (_context)
+					_context->PSSetShader(_engineShader.get(), nullptr, 0);
+			}
+
+			ScopedAlphaTestPixelShader(const ScopedAlphaTestPixelShader&) = delete;
+			ScopedAlphaTestPixelShader& operator=(const ScopedAlphaTestPixelShader&) = delete;
+
+		private:
+			ID3D11DeviceContext* _context = nullptr;
+			winrt::com_ptr<ID3D11PixelShader> _engineShader;
+		};
+
 		// DoZPrePass alpha-test loops (first-person and world); the PS is bound once per loop.
 		struct AlphaTestZPrepassDraw_Hook
 		{
@@ -777,22 +808,18 @@ namespace cs::engine
 				std::uint16_t& a_depthBiasMode,
 				void* a_samplers)
 			{
-				ID3D11PixelShader* shader = nullptr;
-				for (const auto& entry : g_zPrepassPixelShaders) {
-					if ((shader = entry.selector()))
-						break;
-				}
-				auto* context = shader ? GetImmediateContext() : nullptr;
-				if (!context)
-					return func(a_state, a_data, a_vertexDesc, a_cullMode, a_depthBiasMode, a_samplers);
-				winrt::com_ptr<ID3D11PixelShader> engineShader;
-				context->PSGetShader(engineShader.put(), nullptr, nullptr);
-				context->PSSetShader(shader, nullptr, 0);
+				const ScopedAlphaTestPixelShader scope;
 				func(a_state, a_data, a_vertexDesc, a_cullMode, a_depthBiasMode, a_samplers);
-				context->PSSetShader(engineShader.get(), nullptr, 0);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		// The merge-instanced alpha-test loop is inline in DoZPrePass and ends in a context Draw.
+		void STDMETHODCALLTYPE InstancedAlphaTestZPrepassDraw(ID3D11DeviceContext* a_context, UINT a_vertexCount, UINT a_start)
+		{
+			const ScopedAlphaTestPixelShader scope;
+			a_context->Draw(a_vertexCount, a_start);
+		}
 
 		bool EnsureAlphaTestZPrepassDrawInstalled()
 		{
@@ -810,18 +837,30 @@ namespace cs::engine
 				.offset = { 0x553, 0x553, 0x553 },
 				.target = kRenderAlphaTestZPrePass
 			};
+			constexpr ContextCallSiteAnchor kInstancedDraw{
+				.name = "DoZPrePass -> merge-instanced alpha-test ID3D11DeviceContext::Draw",
+				.function = RE::ID::BSGraphics::Renderer::DoZPrePass,
+				.offset = { 0xF61, 0x101A, 0x101A },
+				.target = { 0x68 }
+			};
+			// Prove every site before patching any.
 			const auto firstPerson = ResolveCallSite(kFirstPersonDraw);
 			const auto world = ResolveCallSite(kWorldDraw);
-			for (const auto* site : { &firstPerson, &world }) {
+			const auto instanced = ResolveCallSite(kInstancedDraw);
+			for (const auto* site : { &firstPerson, &world, &instanced }) {
 				if (!*site) {
 					L->error("Alpha-test Z-prepass draw hook unavailable: {}", site->error());
 					return false;
 				}
 			}
+			if (const auto redirected = RedirectContextCall(*instanced, reinterpret_cast<std::uintptr_t>(&InstancedAlphaTestZPrepassDraw)); !redirected) {
+				L->error("Alpha-test Z-prepass draw hook unavailable: {}", redirected.error());
+				return false;
+			}
 			stl::write_thunk_call<AlphaTestZPrepassDraw_Hook>(*firstPerson);
 			stl::write_thunk_call<AlphaTestZPrepassDraw_Hook>(*world);
 			g_alphaZPrepassDrawInstalled = true;
-			L->info("Hooks installed on {} and {}", kFirstPersonDraw.name, kWorldDraw.name);
+			L->info("Hooks installed on {}, {} and {}", kFirstPersonDraw.name, kWorldDraw.name, kInstancedDraw.name);
 			return true;
 		}
 
