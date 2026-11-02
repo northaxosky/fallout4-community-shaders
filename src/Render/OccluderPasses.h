@@ -10,6 +10,9 @@ namespace RE
 
 namespace cs::engine
 {
+	// The mesh LOD mode a pass is built with before any fade node writes it.
+	inline constexpr std::int8_t kDefaultLodMode = 3;
+
 	// Replaces BSLightingShaderProperty's occlusion-pass builder during a capture.
 	[[nodiscard]] HookInstall InstallOccluderPassHook();
 

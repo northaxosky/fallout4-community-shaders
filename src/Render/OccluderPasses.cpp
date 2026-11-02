@@ -22,7 +22,6 @@ namespace cs::engine
 		constexpr std::uint8_t kGeometryType15 = 15;
 		constexpr std::uint8_t kTreeAnimPassType = 11;
 		constexpr std::uint8_t kVatsPassType = 21;
-		constexpr std::int8_t kDefaultLodMode = 3;
 
 		[[nodiscard]] std::optional<OccluderReject> RejectOccluder(
 			const RE::BSLightingShaderProperty& a_property,

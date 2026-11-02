@@ -1,4 +1,5 @@
 #include "Render/OccluderBatch.h"
+#include "Render/OccluderPasses.h"
 
 #include "Log.h"
 #include "Render/Annotation.h"
@@ -412,11 +413,11 @@ namespace cs::engine
 				merged = a_geometry.IsBSMergeInstancedTriShape();
 				if (!merged)
 					return BatchFallback::kTechnique;
-				indexCount = merged->GetDefaultLODTriangleCount() * 3;
+				indexCount = a_geometry.GetRenderableTris(kDefaultLodMode) * 3;
 			} else if (a_geometry.type == kPlainType) {
 				indexCount = shape->numTriangles * 3;
 			} else if (a_geometry.type == kMeshLODType && IsMeshLOD(a_geometry)) {
-				indexCount = static_cast<RE::BSMeshLODTriShape*>(shape)->GetDefaultLODTriangleCount() * 3;
+				indexCount = a_geometry.GetRenderableTris(kDefaultLodMode) * 3;
 			} else {
 				return BatchFallback::kTechnique;
 			}
