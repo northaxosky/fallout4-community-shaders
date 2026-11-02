@@ -215,8 +215,6 @@ namespace cs::features
 	TerrainShadows::GetBootstrapReadiness() const noexcept
 	{
 		return {
-			.registrationsInstalled =
-				_registrationsReady.load(std::memory_order_acquire),
 			.renderCallbacksInstalled =
 				_renderCallbacksReady.load(std::memory_order_acquire),
 			.computeShaderReady = _computeShaderReady.load(std::memory_order_acquire),
@@ -403,11 +401,6 @@ namespace cs::features
 		} catch (...) {
 			L->warn("Terrain shadow statistics resources failed.");
 		}
-	}
-
-	std::string_view TerrainShadows::GetRegistrationFailureMessage() const
-	{
-		return "terrain shadow bootstrap is incomplete (shader replacement registration)";
 	}
 
 	bool TerrainShadows::ValidateInjectionPrerequisites(std::string& a_error)

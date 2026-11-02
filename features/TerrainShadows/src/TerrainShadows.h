@@ -61,7 +61,6 @@ namespace cs::features
 		ID3D11ShaderResourceView* GetShadowHeightSRV() const;
 
 	private:
-		std::string_view GetRegistrationFailureMessage() const override;
 		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		struct alignas(16) ShadowUpdateCB
 		{
