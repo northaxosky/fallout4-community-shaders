@@ -8,7 +8,7 @@ namespace cs::features::upscaling
 	inline const engine::ShaderDefineDeclaration kMipBiasShaderDefines{
 		engine::shader_injection_defines::kSubstrate,
 		{ engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kDistantTree,
-			engine::ShaderInjectionTarget::kEffect, engine::ShaderInjectionTarget::kBsWater }
+			engine::ShaderInjectionTarget::kBsWater }
 	};
 
 	// Imagespace fullscreen VS draws read the exact render scale from b4.
