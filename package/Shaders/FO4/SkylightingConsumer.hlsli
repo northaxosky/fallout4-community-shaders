@@ -58,12 +58,6 @@ namespace Skylighting
 #	endif
 	}
 
-	// FO4: scalar diffuse visibility, the input of the ambient scale.
-	float GetDiffuseVisibility(float3 positionMS, float3 normalWS, float vertexAO)
-	{
-		return GetSkylightingDiffuse(SampleProbes(positionMS, normalWS), positionMS, normalWS, vertexAO);
-	}
-
 	// Upstream's composite takes the faded cosine lobe, without vertex AO.
 	float GetCompositeDiffuse(sh2 skylightingSH, float3 positionMS, float3 normalWS)
 	{
@@ -81,7 +75,7 @@ namespace Skylighting
 		[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
-		return MultiBounceAO(albedo, GetDiffuseVisibility(positionMS, normalWS, vertexAO));
+		return GetAmbientScale(SampleProbes(positionMS, normalWS), positionMS, normalWS, albedo, vertexAO);
 	}
 
 	float3 GetAmbientScale(float2 pixelPosition, float3 viewPosition, float3 normalView)
