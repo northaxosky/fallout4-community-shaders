@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Shader ownership: a feature whose shader target is disabled (`enable_shaders` or `[shader_ownership]`) now fails shader-injection validation instead of running without effect; Screen Space GI, Subsurface Scattering and Screen Space Shadows are now validated too.
 - Settings: out-of-range values in the config file are clamped to the allowed range instead of failing the whole feature.
 - Light Limit Fix: replaces Inverse Square Lighting; the config section is now `[features.LightLimitFix]` and `derive_unauthored_lights` now defaults to off, so converting unauthored lights to inverse-square falloff needs opting in.
 - Light Limit Fix: effects (smoke, fire, glow, rain) and water now receive every nearby light instead of at most 4 (effects) or 7 (water); portal-strict lights respect rooms; the magic light limit is lifted; adds a Clustered Lights Count debug view.
