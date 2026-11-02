@@ -63,7 +63,7 @@ namespace cs::host
 				return;
 			settings::SettingsEdit edit{ a_feature };
 			bool enabled = a_feature.IsEnabled();
-			if (edit.Apply(ui::EditSetting({ .id = "enabled", .label = "Enabled" }, enabled, a_feature.DefaultEnabled())))
+			if (edit.Apply(ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled())))
 				a_feature.SetEnabled(enabled);
 		}
 
@@ -638,7 +638,7 @@ namespace cs::host
 		const auto comparing = isComparing();
 		const dmui::DisabledScope disabled{ comparing || !resetState.modified };
 		const auto restore = ui::DrawActionField(
-			{ .id = "feature-reset", .label = "Restore defaults", .help = "Resets every setting on this page to its default." },
+			{ "feature-reset", { .label = "Restore defaults", .help = "Resets every setting on this page to its default." } },
 			[](const char* a_label) {
 				const bool pressed = dmui::ui::Button(std::format("Restore{}", a_label).c_str());
 				return ui::EditResult{ pressed, pressed };

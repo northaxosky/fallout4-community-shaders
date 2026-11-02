@@ -113,19 +113,19 @@ namespace cs::ui
 				if (result.changed)
 					a_value = enabled ? 1 : 0;
 			} else {
-				result.changed = dmui::ui::SliderScalar(a_label, &a_value, &a_edit.min, &a_edit.max, a_spec.format ? a_spec.format : "%u", a_spec.flags);
+				result.changed = dmui::ui::SliderScalar(a_label, &a_value, &a_edit.min, &a_edit.max, a_spec.look.format ? a_spec.look.format : "%u", a_spec.look.flags);
 				result.completed = dmui::ui::IsItemDeactivatedAfterEdit();
 			}
 		} else if constexpr (std::floating_point<T>) {
-			const T scale = static_cast<T>(a_spec.scale);
+			const T scale = static_cast<T>(a_spec.look.scale);
 			T shown = a_value * scale;
 			const T minimum = a_edit.min * scale, maximum = a_edit.max * scale;
-			result.changed = dmui::ui::SliderScalar(a_label, &shown, &minimum, &maximum, a_spec.format, a_spec.flags);
+			result.changed = dmui::ui::SliderScalar(a_label, &shown, &minimum, &maximum, a_spec.look.format, a_spec.look.flags);
 			if (result.changed)
 				a_value = shown / scale;
 			result.completed = dmui::ui::IsItemDeactivatedAfterEdit();
 		} else {
-			result.changed = dmui::ui::SliderScalar(a_label, &a_value, &a_edit.min, &a_edit.max, a_spec.format, a_spec.flags);
+			result.changed = dmui::ui::SliderScalar(a_label, &a_value, &a_edit.min, &a_edit.max, a_spec.look.format, a_spec.look.flags);
 			result.completed = dmui::ui::IsItemDeactivatedAfterEdit();
 		}
 		return result;
@@ -181,31 +181,16 @@ namespace cs::ui
 		return picked;
 	}
 
-	// Call-site overrides of what a schema field supplies.
-	struct FieldOptions
-	{
-		// The schema description when empty.
-		std::string_view label;
-		// The schema help when empty; a renamed field falls back to its description.
-		std::string_view help;
-		const char* format = nullptr;
-		dmui::ui::SliderFlags flags = dmui::ui::SliderFlags::kNone;
-		float scale = 1.0f;
-	};
-
 	template <class Field>
 	FieldSpec SpecFor(const Field& a_field, const FieldOptions& a_options)
 	{
 		const auto help = !a_field.help.empty() || a_options.label.empty() ? a_field.help : a_field.description;
-		return {
-			.id = a_field.key,
-			.label = a_options.label.empty() ? a_field.description : a_options.label,
-			.help = a_options.help.empty() ? help : a_options.help,
-			.restart = a_field.description,
-			.format = a_options.format,
-			.flags = a_options.flags,
-			.scale = a_options.scale
-		};
+		FieldPresentation look = a_options;
+		if (look.label.empty())
+			look.label = a_field.description;
+		if (look.help.empty())
+			look.help = help;
+		return { .id = a_field.key, .look = look, .restart = a_field.description };
 	}
 
 	// A schema value as a field row with a Reset to its default.

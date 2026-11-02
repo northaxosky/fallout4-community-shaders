@@ -33,7 +33,7 @@ namespace cs::features::cs_editor
 		// The variable's control; returns the edit and the possibly changed value.
 		ui::EditResult EditValue(const settings::FieldView& a_field, settings::Value& a_value)
 		{
-			const ui::FieldSpec spec{ .id = a_field.key };
+			const ui::FieldSpec spec{ a_field.key };
 			const std::string hidden = "##" + a_field.key;
 			return std::visit([&](auto& a_v) -> ui::EditResult {
 				using T = std::remove_cvref_t<decltype(a_v)>;
@@ -92,7 +92,7 @@ namespace cs::features::cs_editor
 				continue;
 			bool changed = false, completed = false;
 			bool enabled = profile[weather::kEnabledKey].value_or(false);
-			if (ui::EditSetting({ .id = id + "-enabled", .label = "Enable overrides for this weather" }, enabled, false).changed) {
+			if (ui::EditSetting({ id + "-enabled", { .label = "Enable overrides for this weather" } }, enabled, false).changed) {
 				profile.insert_or_assign(weather::kEnabledKey, enabled);
 				changed = completed = true;
 			}
@@ -101,7 +101,7 @@ namespace cs::features::cs_editor
 				const bool exists = profiles->Get(key).has_value();
 				const dmui::DisabledScope disabled{ !exists };
 				clear = ui::DrawActionField(
-					{ .id = id + "-clear", .label = "Clear overrides", .help = "Removes every override for this weather." },
+					{ id + "-clear", { .label = "Clear overrides", .help = "Removes every override for this weather." } },
 					[](const char* a_label) {
 						const bool pressed = dmui::ui::Button(std::format("Clear{}", a_label).c_str());
 						return ui::EditResult{ pressed, pressed };
@@ -121,7 +121,7 @@ namespace cs::features::cs_editor
 				bool toggled = false;
 				// Reset drops the override.
 				const auto edit = ui::DrawField(
-					{ .id = id + "-" + variable.key, .label = variable.description.empty() ? variable.key : variable.description, .help = variable.help },
+					{ id + "-" + variable.key, { .label = variable.description.empty() ? variable.key : variable.description, .help = variable.help } },
 					active,
 					[&](const char*) {
 						toggled = dmui::ui::Checkbox(("##override-" + variable.key).c_str(), &active);

@@ -397,9 +397,9 @@ namespace cs::features
 			const std::string key(sss::kSchema.Find(a_member).key);
 			settings::Float3 color{ value[0], value[1], value[2] };
 			const settings::Float3 defaultColor{ defaults[0], defaults[1], defaults[2] };
-			if (edit.Apply(ui::EditSetting({ .id = key + "-color", .label = "Mean Free Path Color", .help = "How far light travels under the surface in red, green and blue; scaled by the distance." }, color, defaultColor)))
+			if (edit.Apply(ui::EditSetting({ key + "-color", { .label = "Mean Free Path Color", .help = "How far light travels under the surface in red, green and blue; scaled by the distance." } }, color, defaultColor)))
 				std::ranges::copy(color, value.begin());
-			edit.Apply(ui::EditSetting({ .id = key + "-distance", .label = "Mean Free Path Distance", .help = "Distance that the mean free path color travels under the surface.", .format = "%.2f" },
+			edit.Apply(ui::EditSetting({ key + "-distance", { .label = "Mean Free Path Distance", .help = "Distance that the mean free path color travels under the surface.", .format = "%.2f" } },
 				value[3], defaults[3], settings::Range{ 0.01f, 10.0f }));
 		};
 		if (_unsupported)

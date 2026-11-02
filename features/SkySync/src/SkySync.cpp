@@ -845,7 +845,7 @@ namespace cs::features
 			const std::string editorID(GetEditorID(GetCellWorldspace(cell)));
 			const bool listed = IsWorldspaceListed(GetCellWorldspace(cell));
 			const dmui::DisabledScope disabled{ editorID.empty() || listed };
-			const auto add = ui::DrawActionField({ .id = "AddCurrentWorldspace", .label = "Current worldspace", .help = "Adds the player's current worldspace to the list." },
+			const auto add = ui::DrawActionField({ "AddCurrentWorldspace", { .label = "Current worldspace", .help = "Adds the player's current worldspace to the list." } },
 				[&](const char* a_label) {
 					const bool pressed = dmui::ui::Button(("Add " + (editorID.empty() ? std::string("-") : editorID) + a_label).c_str());
 					return ui::EditResult{ pressed, pressed };

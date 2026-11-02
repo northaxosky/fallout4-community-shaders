@@ -514,7 +514,7 @@ namespace cs::features
 			edit.Apply({ true, true });
 		};
 		if (const ui::Section section{ "ssgi-toggles", "Toggles" }; section) {
-			ui::EditSetting({ .id = "ssgi-show-advanced", .label = "Show Advanced Options" }, showAdvanced, false);
+			ui::EditSetting({ "ssgi-show-advanced", { .label = "Show Advanced Options" } }, showAdvanced, false);
 			dmui::ui::BeginDisabled(!IsEnabled());
 			compile(field(&Settings::enableGI, { .label = "Indirect Lighting (IL)" }));
 			dmui::ui::EndDisabled();
@@ -552,7 +552,7 @@ namespace cs::features
 					current = i + 1;
 			}
 			const auto chosen = ui::PickChoice<std::uint32_t>(
-				{ .id = "ssgi-preset", .label = "Preset", .help = "Sets slices, steps, resolution and indirect lighting together." },
+				{ "ssgi-preset", { .label = "Preset", .help = "Sets slices, steps, resolution and indirect lighting together." } },
 				current, presetOptions);
 			if (chosen && *chosen > 0) {
 				const auto& p = presets[*chosen - 1];
@@ -585,9 +585,9 @@ namespace cs::features
 			// One schema array edited as two sliders.
 			const Settings defaults{};
 			const settings::Range fade{ 10000.0f, 50000.0f };
-			edit.Apply(ui::EditSetting({ .id = "DepthFadeNear", .label = "Depth Fade Near", .help = "Distance where the effect starts to fade out, in game units.", .format = "%.0f units" },
+			edit.Apply(ui::EditSetting({ "DepthFadeNear", { .label = "Depth Fade Near", .help = "Distance where the effect starts to fade out, in game units.", .format = "%.0f units" } },
 				_settings.depthFadeRange[0], defaults.depthFadeRange[0], fade));
-			edit.Apply(ui::EditSetting({ .id = "DepthFadeFar", .label = "Depth Fade Far", .help = "Distance where the effect has fully faded out, in game units.", .format = "%.0f units" },
+			edit.Apply(ui::EditSetting({ "DepthFadeFar", { .label = "Depth Fade Far", .help = "Distance where the effect has fully faded out, in game units.", .format = "%.0f units" } },
 				_settings.depthFadeRange[1], defaults.depthFadeRange[1], fade));
 			if (showAdvanced)
 				field(&Settings::thickness, { .label = "Thickness", .format = "%.1f units" });

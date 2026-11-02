@@ -690,7 +690,7 @@ namespace cs::features
 			}
 			dmui::ui::EndDisabled();
 			int interval = _testInterval;
-			if (ui::EditSetting({ .id = "overlay-ab-test-interval", .label = "A/B Test Interval" }, interval, 0, cs::settings::Range{ 0, 10 }).changed) {
+			if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed) {
 				try {
 					SetTestInterval(interval);
 				} catch (const std::exception& error) {

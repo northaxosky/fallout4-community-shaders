@@ -197,7 +197,7 @@ namespace cs::features
 					const float defaultSharpness = defaults.sharpnessEnabledDLSS ? defaults.sharpnessDLSS : 0.0f;
 					const auto sharpnessRange = render::temporal::kSchema.EditRange(&Settings::sharpnessDLSS);
 					if (edit.Apply(ui::EditSetting(
-							{ .id = "sharpness_dlss", .label = "Sharpening", .help = "DLSS sharpening strength; 0 turns sharpening off." },
+							{ "sharpness_dlss", { .label = "Sharpening", .help = "DLSS sharpening strength; 0 turns sharpening off." } },
 							sharpness, defaultSharpness, sharpnessRange))) {
 						settings.sharpnessEnabledDLSS = sharpness > 0.0f;
 						if (settings.sharpnessEnabledDLSS) {

@@ -589,7 +589,7 @@ namespace cs::features
 					const auto defaultGeneration =
 						defaults.dlssgMode == 1 ? kDynamicChoice : defaults.dlssgFixedMultiplier;
 					if (edit.Apply(ui::EditChoice(
-							{ .id = "dlssg_generation", .label = "Generation", .help = "Generated frames per real frame, or Dynamic to follow a target frame rate." },
+							{ "dlssg_generation", { .label = "Generation", .help = "Generated frames per real frame, or Dynamic to follow a target frame rate." } },
 							generation, defaultGeneration, std::span<const dmui::ChoiceOption<std::uint32_t>>{ generationOptions }))) {
 						if (generation == kDynamicChoice) {
 							settings.dlssgMode = 1;
@@ -613,7 +613,7 @@ namespace cs::features
 					auto targetKind = currentTarget;
 					const std::uint32_t defaultTarget = defaults.dlssgDynamicTargetFps > 0.0f ? 1u : 0u;
 					if (edit.Apply(ui::EditChoice(
-							{ .id = "dlssg_dynamic_target", .label = "Dynamic target", .help = "The frame rate Dynamic generation aims for: the display refresh rate or a custom value." },
+							{ "dlssg_dynamic_target", { .label = "Dynamic target", .help = "The frame rate Dynamic generation aims for: the display refresh rate or a custom value." } },
 							targetKind, defaultTarget, std::span<const dmui::ChoiceOption<std::uint32_t>>{ targets }))) {
 						settings.dlssgDynamicTargetFps =
 							targetKind == 0 ? 0.0f : 60.0f;
@@ -623,7 +623,7 @@ namespace cs::features
 						float customTarget =
 							settings.dlssgDynamicTargetFps;
 						const auto input = ui::DrawActionField(
-							{ .id = "dlssg_dynamic_target_fps", .label = "Custom target FPS", .help = "Target frame rate in FPS; VSync overrides custom targets." },
+							{ "dlssg_dynamic_target_fps", { .label = "Custom target FPS", .help = "Target frame rate in FPS; VSync overrides custom targets." } },
 							[&](const char* a_label) {
 								ui::EditResult result;
 								result.changed = dmui::ui::InputScalar(a_label, &customTarget);

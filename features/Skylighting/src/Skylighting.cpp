@@ -1002,9 +1002,7 @@ namespace cs::features
 		// Runtime only: not part of the persisted settings.
 		auto interval = _batchValidationInterval.load(std::memory_order_relaxed);
 		const auto edit = ui::EditSetting(
-			{ .id = "skylighting-batch-validation-interval",
-				.label = "Batch Validation Interval",
-				.help = "Every Nth capture also renders the batchable occluders through the engine and the batch and logs the texels that differ. 0 is off." },
+			{ "skylighting-batch-validation-interval", { .label = "Batch Validation Interval", .help = "Every Nth capture also renders the batchable occluders through the engine and the batch and logs the texels that differ. 0 is off." } },
 			interval, std::uint32_t{ 0 }, settings::Range<std::uint32_t>{ 0, 3600 });
 		if (edit.changed)
 			_batchValidationInterval.store(interval, std::memory_order_relaxed);

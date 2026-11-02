@@ -710,7 +710,7 @@ namespace cs::features
 
 			// Not persisted: the text is embedded in the next capture, then cleared.
 			ui::DrawField(
-				{ .id = "renderdoc-comments", .label = "Comments", .help = "Embedded in the next .rdc." },
+				{ "renderdoc-comments", { .label = "Comments", .help = "Embedded in the next .rdc." } },
 				_commentsBuf[0] != 0,
 				[&](const char* a_label) {
 					const bool changed = dmui::ui::InputTextMultiline(a_label,
