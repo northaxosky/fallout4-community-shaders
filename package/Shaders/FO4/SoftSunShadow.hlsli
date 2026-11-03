@@ -76,11 +76,15 @@ namespace FO4SoftSunShadow
 #	define FO4_SOFT_LOBES_DECLARE(softDiffuse) float3 softDiffuse = 0.0
 #	define FO4_SOFT_LOBE(directDiffuse, softDiffuse) softDiffuse
 #	define FO4_SOFT_LOBE_SCALE(softDiffuse, factor) softDiffuse *= (factor)
+// Detailed-term factors reach the lobes only when Skylighting is off.
+#	define FO4_SOFT_LOBE_SCALE_UNLOADED(softDiffuse, factor) \
+		FO4_SKYLIGHTING_DISABLED { softDiffuse *= (factor); }
 #	define FO4_SOFT_LOBES_APPLY(output, softDiffuse, softShadow) output.diffuse.xyz += (softDiffuse) * (softShadow) / 3.0
 #else
 #	define FO4_SOFT_LOBES_DECLARE(softDiffuse)
 #	define FO4_SOFT_LOBE(directDiffuse, softDiffuse) directDiffuse
 #	define FO4_SOFT_LOBE_SCALE(softDiffuse, factor)
+#	define FO4_SOFT_LOBE_SCALE_UNLOADED(softDiffuse, factor)
 #	define FO4_SOFT_LOBES_APPLY(output, softDiffuse, softShadow)
 #endif
 #endif

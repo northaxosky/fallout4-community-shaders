@@ -2390,12 +2390,13 @@ float2 goboUV = float2(omniUV.x,
 		shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 		float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 #	endif
+#	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
+		// Upstream: parallax shadows the detailed term only.
+		shadow *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
+#	endif
 		FO4_SOFT_SHADOW_NATIVE(softShadow, shadow);
 #	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
 		FO4_SHADOW_LIGHT_MUL(shadow, softShadow, WorldShadow::GetMultFromViewPosition(posView));
-#	endif
-#	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
-		FO4_SHADOW_LIGHT_MUL(shadow, softShadow, ExtendedMaterials::GetParallaxShadow(input.position.xy));
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 		float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
@@ -3185,12 +3186,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 #	endif
+#	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
+			// Upstream: parallax shadows the detailed term only.
+			shadow *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
+#	endif
 			FO4_SOFT_SHADOW_NATIVE(softShadow, shadow);
 #	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
 			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, WorldShadow::GetMultFromViewPosition(posView));
-#	endif
-#	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
-			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, ExtendedMaterials::GetParallaxShadow(input.position.xy));
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
@@ -4184,12 +4186,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			shadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 			float transmissionContactShadow = FO4BackTransmissionScreenSpaceShadow(input.position.xyz, depth, dot(normalView, LightVector.xyz));
 #	endif
+#	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
+			// Upstream: parallax shadows the detailed term only.
+			shadow *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
+#	endif
 			FO4_SOFT_SHADOW_NATIVE(softShadow, shadow);
 #	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
 			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, WorldShadow::GetMultFromViewPosition(posView));
-#	endif
-#	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
-			FO4_SHADOW_LIGHT_MUL(shadow, softShadow, ExtendedMaterials::GetParallaxShadow(input.position.xy));
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
 			float3 causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
@@ -6349,7 +6352,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
 			float parallaxShadowMult = ExtendedMaterials::GetParallaxShadow(input.position.xy);
 			finalDiffuse *= parallaxShadowMult;
-			FO4_SOFT_LOBE_SCALE(softDiffuse, parallaxShadowMult);
+			FO4_SOFT_LOBE_SCALE_UNLOADED(softDiffuse, parallaxShadowMult);
 			brdfSpecular *= parallaxShadowMult;
 #	endif
 #	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
