@@ -5,7 +5,7 @@
 .DESCRIPTION
 	Reads scripts/sdk-manifest.psd1, downloads each archive, verifies its SHA-256 against the
 	manifest pin or, for Repository packages, the latest release's SHA256SUMS.txt, and stages
-	the required files into their manifest destinations. Re-running is cheap: an archive whose digest
+	the required files into their manifest destinations, removing files the package no longer lists. Re-running is cheap: an archive whose digest
 	already matches the cached copy is not downloaded again. Archives are downloaded to a unique temp
 	file and renamed into place only after the digest verifies, and extraction uses a unique temp
 	directory, so concurrent runs can share one cache.
@@ -162,25 +162,30 @@ try {
 				Copy-Item -LiteralPath $extracted -Destination (Join-Path $destination $member.Value) -Force
 				Write-Host "  staged $($member.Value)"
 			}
-			Remove-Item -LiteralPath $extractRoot -Recurse -Force
-			Write-Host "[$($package.Name)] staged into $($package.Destination)"
-			continue
-		}
+			$owned = @($package.Members.Values)
+		} else {
+			Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
 
-		Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
-
-		foreach ($file in $package.Files) {
-			Copy-StagedFile -ExtractRoot $extractRoot -FileName $file -Destination $destination -Required $true
-		}
-		foreach ($license in $package.Licenses) {
-			Copy-StagedFile -ExtractRoot $extractRoot -FileName $license -Destination $destination -Required $true
-		}
-		if ($package.ContainsKey('Headers')) {
-			$headerDestination = Join-Path $repoRoot $package.HeaderDestination
-			New-Item -ItemType Directory -Force -Path $headerDestination | Out-Null
-			foreach ($header in $package.Headers) {
-				Copy-StagedFile -ExtractRoot $extractRoot -FileName $header -Destination $headerDestination -Required $true
+			foreach ($file in $package.Files) {
+				Copy-StagedFile -ExtractRoot $extractRoot -FileName $file -Destination $destination -Required $true
 			}
+			foreach ($license in $package.Licenses) {
+				Copy-StagedFile -ExtractRoot $extractRoot -FileName $license -Destination $destination -Required $true
+			}
+			if ($package.ContainsKey('Headers')) {
+				$headerDestination = Join-Path $repoRoot $package.HeaderDestination
+				New-Item -ItemType Directory -Force -Path $headerDestination | Out-Null
+				foreach ($header in $package.Headers) {
+					Copy-StagedFile -ExtractRoot $extractRoot -FileName $header -Destination $headerDestination -Required $true
+				}
+			}
+			$owned = @($package.Files) + @($package.Licenses) | ForEach-Object { Split-Path -Path $_ -Leaf }
+		}
+
+		# Destinations install by glob, so files a release dropped must not linger.
+		Get-ChildItem -LiteralPath $destination -File | Where-Object { $_.Name -notin $owned } | ForEach-Object {
+			Remove-Item -LiteralPath $_.FullName -Force
+			Write-Host "  removed stale $($_.Name)"
 		}
 
 		Remove-Item -LiteralPath $extractRoot -Recurse -Force
