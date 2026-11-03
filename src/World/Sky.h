@@ -6,6 +6,7 @@ namespace RE
 {
 	class BSGeometry;
 	class BSSkyShaderProperty;
+	class TESObjectCELL;
 }
 
 namespace cs::engine
@@ -31,6 +32,12 @@ namespace cs::engine
 
 	// Interior cell, no-sky worldspace, or Sky::mode != kFull.
 	bool IsInterior() noexcept;
+
+	// Interior cell with both sun-shadow bits: the engine renders sun cascades.
+	bool InteriorRendersSunShadows(const RE::TESObjectCELL& a_cell) noexcept;
+
+	// The engine's main sun-shadow eligibility for the current cell.
+	bool HasSunShadows() noexcept;
 
 	// The main menu or a loading screen is open.
 	bool IsMainOrLoadingMenuOpen() noexcept;

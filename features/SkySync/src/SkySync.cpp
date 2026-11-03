@@ -11,6 +11,7 @@
 #include "Utils/CSUtil.h"
 #include "World/CelestialTransition.h"
 #include "World/Moon.h"
+#include "World/Sky.h"
 #include "World/SunPlacement.h"
 
 #include "RE/B/BGSGodRays.h"
@@ -367,7 +368,7 @@ namespace cs::features
 
 		// Exteriors run unless disabled or skyless; interiors need the sun shadow bits.
 		const bool vanillaDrivesSun = _worldspaceDisabled.load(std::memory_order_relaxed) || a_sky->mode.get() == RE::Sky::Mode::kNone;
-		if (vanillaDrivesSun || (cell && cell->IsInterior() && !cell->cellFlags.all(RE::TESObjectCELL::Flag::kInteriorSunShadowsA, RE::TESObjectCELL::Flag::kInteriorSunShadowsB))) {
+		if (vanillaDrivesSun || (cell && cell->IsInterior() && !engine::InteriorRendersSunShadows(*cell))) {
 			// Vanilla drives the sun here, so a pending transition has nothing to wait for
 			return vanillaDrivesSun && std::exchange(_immediateTransitionReady, false);
 		}

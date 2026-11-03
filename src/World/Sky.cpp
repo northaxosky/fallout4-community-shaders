@@ -12,6 +12,7 @@
 #include "RE/S/Sky.h"
 #include "RE/S/Sun.h"
 #include "RE/T/TES.h"
+#include "RE/T/TESObjectCELL.h"
 #include "RE/T/TESWorldSpace.h"
 
 namespace cs::engine
@@ -104,6 +105,23 @@ namespace cs::engine
 			}
 		}
 		return true;
+	}
+
+	bool InteriorRendersSunShadows(const RE::TESObjectCELL& a_cell) noexcept
+	{
+		return a_cell.cellFlags.all(RE::TESObjectCELL::Flag::kInteriorSunShadowsA, RE::TESObjectCELL::Flag::kInteriorSunShadowsB);
+	}
+
+	bool HasSunShadows() noexcept
+	{
+		const auto* tes = RE::TES::GetSingleton();
+		if (!tes)
+			return false;
+		if (const auto* cell = tes->interiorCell)
+			return InteriorRendersSunShadows(*cell);
+		const auto* sky = RE::Sky::GetSingleton();
+		return tes->worldSpace && !tes->worldSpace->flags.any(RE::TESWorldSpace::FLAG::kNoSky) &&
+		       sky && sky->mode.get() != RE::Sky::Mode::kNone;
 	}
 
 	bool IsMainOrLoadingMenuOpen() noexcept

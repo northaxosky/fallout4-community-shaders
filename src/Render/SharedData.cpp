@@ -151,8 +151,7 @@ namespace cs::render
 			data.HideSky = engine::IsSkyHidden() ? 1u : 0u;
 
 			data.InInterior = engine::IsInterior() ? 1u : 0u;
-			// FO4: Interior Sun is not ported, so only exteriors have sun shadows.
-			data.HasDirectionalShadows = data.InInterior ? 0u : 1u;
+			data.HasDirectionalShadows = engine::HasSunShadows() ? 1u : 0u;
 
 			return data;
 		}
