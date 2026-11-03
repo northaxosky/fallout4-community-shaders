@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Upscaling/Frame Generation: no longer crashes at startup when the game window is resized, e.g. with HighFPSPhysicsFix BorderlessUpscale.
+- Upscaling/Frame Generation: no longer crash at startup and keep working when the game window is resized, e.g. with HighFPSPhysicsFix BorderlessUpscale.
 - Frame Generation: saved frame generation no longer freezes at startup on GPUs without DLSS Frame Generation (e.g. RTX 30-series); it now starts right after the first frame.
 - Sun lighting: fixed a darker square around the player in third person; cloud, terrain and contact shadows were applied twice inside the focused shadow pass.
 
