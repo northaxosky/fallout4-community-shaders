@@ -2,58 +2,88 @@
 [b]Modern rendering for Fallout 4.[/b]
 [color=#A8B5A8]Configured through Dear Modding UI[/color][/center]
 
+[size=5][color=#42FA60][b]✦ WHAT IS FO4 COMMUNITY SHADERS?[/b][/color][/size]
 [b]FO4 Community Shaders[/b] brings modern lighting, shadows, reflections, water, and upscaling to Fallout 4 as a single F4SE plugin. It is a port of [url=https://github.com/community-shaders/skyrim-community-shaders]Skyrim Community Shaders[/url], rebuilt on the game's own renderer.
 
 Every feature ships turned off, so you enable only what you want.
 
-[color=#FFB84D][b]Beta:[/b] Features are still being developed and tested. Expect rough edges, and please report what you find.[/color]
+[color=#FFB84D][b]⚠ Beta:[/b] Features are still being developed and tested. Expect rough edges, and please report what you find.[/color]
 
-[size=5][color=#42FA60][b]FEATURES[/b][/color][/size]
+[size=5][color=#42FA60][b]✦ WHY FO4 COMMUNITY SHADERS?[/b][/color][/size]
 [list]
-[*][b]Screen Space Shadows:[/b] Contact shadows and finer shadow detail.[/*]
-[*][b]Terrain Shadows:[/b] Long-range shadows cast by distant terrain.[/*]
-[*][b]Sky Sync:[/b] Sun, moon and godray lighting follow the bodies in the sky, with an optional alternate sun path and moonlight at night.[/*]
-[*][b]Cloud Shadows:[/b] Shadows from clouds that move across the landscape and water.[/*]
-[*][b]Volumetric Shadows:[/b] Blurred sun shadow maps that soften the sun's soft, rim, and back lighting and shadow the sun on water and effects.[/*]
-[*][b]LOD Blending:[/b] Brightness and gamma matching for distant terrain and objects, with optional terrain vertex-color removal.[/*]
+[*][b]Built into the game:[/b] One F4SE plugin that works inside Fallout 4's own renderer, with no plugin file and nothing written to your saves.[/*]
+[*][b]Pick what you want:[/b] Every feature is opt-in, and most can be switched on and off live once loaded.[/*]
+[*][b]Compile once:[/b] Shaders are cached on disk, so later launches skip compilation.[/*]
+[*][b]In-game menu:[/b] Tune every feature live through Dear Modding UI.[/*]
+[*][b]Open source:[/b] GPL-3.0-or-later. Anyone can audit, build, or contribute on [url=https://github.com/northaxosky/fallout4-community-shaders]GitHub[/url].[/*]
+[/list]
+
+[size=5][color=#42FA60][b]✦ FEATURES[/b][/color][/size]
+[color=#42FA60][b]NEW[/b][/color] marks features added in 0.5.0.
+
+[b]● Lighting[/b]
+[list]
 [*][b]Screen Space GI:[/b] Ambient occlusion and indirect lighting.[/*]
-[*][b]Subsurface Scattering:[/b] Separable or Burley scattering for skin, replacing the vanilla skin blur.[/*]
 [*][b]Skylighting:[/b] Ambient light and reflections that respect how much sky a surface can see.[/*]
 [*][b]Image Based Lighting:[/b] Ambient light, reflections, and fog tint driven by the sky and environment. Requires Dynamic Cubemaps.[/*]
-[*][b]Light Limit Fix:[/b] Smoke, fire, glow, rain and water receive every nearby light, with portal-strict lights bound to rooms and a clustered light count debug view; physically based inverse-square falloff for lights authored in Lights TOML files, with converting unauthored lights opt-in.[/*]
-[*][b]Extended Materials:[/b] Parallax on objects and terrain, with sun self-shadows. Objects need a height map in the specular texture's alpha.[/*]
-[*][b]Terrain Variation:[/b] Breaks up repeating terrain textures, including distant LOD.[/*]
-[*][b]Terrain Blending:[/b] Terrain blends into objects that sink into it, removing the hard seam.[/*]
+[*][b]Light Limit Fix:[/b] Smoke, fire, glow, rain and water receive every nearby light, with portal-strict lights bound to rooms; physically based inverse-square falloff for lights authored in Lights TOML files, with converting unauthored lights opt-in.[/*]
+[*][b]Screen Space Shadows:[/b] Contact shadows and finer shadow detail.[/*]
+[*][b]Sky Sync[/b] [color=#42FA60][b]NEW[/b][/color][b]:[/b] Sun, moon and godray lighting follow the bodies in the sky, with an optional alternate sun path and moonlight at night.[/*]
+[*][b]Volumetric Shadows[/b] [color=#42FA60][b]NEW[/b][/color][b]:[/b] Blurred sun shadow maps that soften the sun's soft, rim, and back lighting and shadow the sun on water and effects.[/*]
+[*][b]Cloud Shadows[/b] [color=#42FA60][b]NEW[/b][/color][b]:[/b] Shadows from clouds that move across the landscape and water.[/*]
+[/list]
+
+[b]● Materials[/b]
+[list]
+[*][b]Subsurface Scattering[/b] [color=#42FA60][b]NEW[/b][/color][b]:[/b] Separable or Burley scattering for skin, replacing the vanilla skin blur.[/*]
 [*][b]Dynamic Cubemaps:[/b] Reflections that respond to the surrounding scene, including water reflections of the sky and distant terrain.[/*]
+[*][b]Extended Materials:[/b] Parallax on objects and terrain, with sun self-shadows. Objects need a height map in the specular texture's alpha.[/*]
+[/list]
+
+[b]● Landscape & Textures[/b]
+[list]
+[*][b]Terrain Shadows:[/b] Long-range shadows cast by distant terrain.[/*]
+[*][b]Terrain Blending[/b] [color=#42FA60][b]NEW[/b][/color][b]:[/b] Terrain blends into objects that sink into it, removing the hard seam.[/*]
+[*][b]Terrain Variation:[/b] Breaks up repeating terrain textures, including distant LOD.[/*]
+[*][b]LOD Blending:[/b] Brightness and gamma matching for distant terrain and objects, with optional terrain vertex-color removal.[/*]
+[/list]
+
+[b]● Water[/b]
+[list]
 [*][b]Water Effects:[/b] Water parallax and sunlight caustics on submerged surfaces.[/*]
 [*][b]Unified Water:[/b] Distant water and terrain water tiles that match nearby water.[/*]
+[/list]
+
+[b]● Display[/b]
+[list]
 [*][b]Upscaling:[/b] TAA, FSR 3/4, and DLSS, with latency reduction through NVIDIA Reflex or, experimentally, AMD Anti-Lag 2.[/*]
 [*][b]Frame Generation:[/b] FSR 3/4 and DLSS, including supported Multi Frame Generation modes.[/*]
 [*][b]Motion Vector Fixes:[/b] Motion-data corrections for temporal rendering.[/*]
+[/list]
+
+[b]● Utility[/b]
+[list]
 [*][b]Performance Overlay:[/b] FPS, frame-time, and latency graphs, plus per-feature GPU timings.[/*]
 [*][b]CS Editor:[/b] Weather picker, weather lock, and time controls.[/*]
 [/list]
 
-[size=5][color=#42FA60][b]REQUIREMENTS[/b][/color][/size]
+[size=5][color=#42FA60][b]✦ INSTALLATION[/b][/color][/size]
+[b]Requirements[/b]
 [list]
 [*]Fallout 4 [b]1.11.240[/b] on Windows. OG and NG code paths exist but are untested.[/*]
-[*][url=https://f4se.silverlock.org/]F4SE[/url] matching your game version[/*]
-[*][url=https://www.nexusmods.com/fallout4/mods/47327]Address Library for F4SE Plugins[/url][/*]
-[*][url=https://github.com/Dear-Modding-FO4/DearModdingUI]Dear Modding UI[/url] 2.2 or a later 2.x release for the in-game menu and shader compilation window (recommended); older 2.x releases lack the compilation window, and other versions are logged and ignored[/*]
-[*][url=https://www.nexusmods.com/fallout4/mods/84214]Addictol[/url] for engine stability and bug fixes (recommended)[/*]
+[*][url=https://f4se.silverlock.org/]F4SE[/url] matching your game version.[/*]
+[*][url=https://www.nexusmods.com/fallout4/mods/47327]Address Library for F4SE Plugins[/url].[/*]
+[/list]
+
+[b]Strongly Recommended[/b]
+[list]
+[*][url=https://github.com/Dear-Modding-FO4/DearModdingUI]Dear Modding UI[/url] 2.2 or a later 2.x release ► the in-game menu and shader compilation window. Older 2.x releases lack the compilation window; other versions are logged and ignored.[/*]
+[*][url=https://www.nexusmods.com/fallout4/mods/84214]Addictol[/url] ► engine stability and bug fixes.[/*]
 [/list]
 
 Upscaling and frame generation need a DX12-capable GPU. DLSS requires an NVIDIA RTX card, and FSR 4 requires a compatible AMD Radeon card.
 
-[size=5][color=#42FA60][b]INCOMPATIBLE MODS[/b][/color][/size]
-FO4 Community Shaders includes these standalone mods, so [b]remove them[/b]:
-[list]
-[*][b]Motion Vector Fixes[/b] ([b]MotionVectorFixes.dll[/b])[/*]
-[*][b]Dynamic Cubemaps F4[/b] ([b]DynamicCubemapF4.dll[/b])[/*]
-[/list]
-If either is in [b]Data\F4SE\Plugins[/b], Community Shaders disables all of its hooks and features and shows a message at launch.
-
-[size=5][color=#42FA60][b]INSTALLATION & USAGE[/b][/color][/size]
+[b]Steps[/b]
 [list=1]
 [*]Install F4SE, Address Library, and Dear Modding UI.[/*]
 [*]Install FO4 Community Shaders through your mod manager.[/*]
@@ -61,6 +91,7 @@ If either is in [b]Data\F4SE\Plugins[/b], Community Shaders disables all of its 
 [*]Enable the features you want, then restart the game.[/*]
 [/list]
 
+[size=5][color=#42FA60][b]✦ HOW TO USE[/b][/color][/size]
 Loading or unloading a feature takes effect after a restart. Once loaded, most features can be switched on and off live with their [b]enabled[/b] toggle, and their settings apply live.
 
 Without Dear Modding UI, enable features in [b]Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml[/b], created on first launch (in MO2, under Overwrite). Uncomment and set:
@@ -69,7 +100,17 @@ load = true[/code]
 
 [b]Hotkeys:[/b] [b]F10[/b] toggles the performance overlay, and [b]Ctrl+F12[/b] writes a diagnostic dump. Rebind them in Dear Modding UI.
 
-[size=5][color=#42FA60][b]FAQ[/b][/color][/size]
+[size=5][color=#42FA60][b]✦ COMPATIBILITY[/b][/color][/size]
+[b]✗ Remove these:[/b] FO4 Community Shaders includes them.
+[list]
+[*][b]Motion Vector Fixes[/b] ([b]MotionVectorFixes.dll[/b])[/*]
+[*][b]Dynamic Cubemaps F4[/b] ([b]DynamicCubemapF4.dll[/b])[/*]
+[/list]
+If either is in [b]Data\F4SE\Plugins[/b], Community Shaders disables all of its hooks and features and shows a message at launch.
+
+[b]✗ ENB:[/b] Not supported. Community Shaders turns its features off when ENB is present.
+
+[size=5][color=#42FA60][b]✦ FAQ[/b][/color][/size]
 [b]Is this mod compatible with ENB?[/b]
 I will now have to publicly execute you.
 
@@ -112,7 +153,7 @@ Yes. It has no plugin file and writes nothing to your saves.
 [b]Will updating keep my settings?[/b]
 Yes. Settings are created on first launch and are not part of the download. In MO2 they live in the Overwrite folder.
 
-[size=5][color=#42FA60][b]LINKS & SUPPORT[/b][/color][/size]
+[size=5][color=#42FA60][b]✦ LINKS & SUPPORT[/b][/color][/size]
 [list]
 [*][url=https://github.com/northaxosky/fallout4-community-shaders][b]GitHub Repository[/b][/url][/*]
 [*][url=https://github.com/northaxosky/fallout4-community-shaders/issues/new/choose][b]Report an Issue[/b][/url][/*]
@@ -124,11 +165,11 @@ When reporting a problem, include your mod version, GPU, the features you enable
 
 Logs are saved in: [b]Documents\My Games\Fallout4\F4SE\[/b]
 
-[size=5][color=#42FA60][b]CREDITS[/b][/color][/size]
+[size=5][color=#42FA60][b]✦ CREDITS[/b][/color][/size]
 [list]
-[*]The [url=https://github.com/community-shaders/skyrim-community-shaders]Skyrim Community Shaders[/url] team, whose work this port is based on.[/*]
-[*][url=https://github.com/Dear-Modding-FO4]Dear Modding FO4[/url] for CommonLibF4 and Dear Modding UI.[/*]
-[*]NVIDIA Streamline and AMD FidelityFX for upscaling and frame generation.[/*]
+[*][url=https://github.com/community-shaders/skyrim-community-shaders]Skyrim Community Shaders[/url] team ► the work this port is based on.[/*]
+[*][url=https://github.com/Dear-Modding-FO4]Dear Modding FO4[/url] ► CommonLibF4 and Dear Modding UI.[/*]
+[*]NVIDIA Streamline and AMD FidelityFX ► upscaling and frame generation.[/*]
 [/list]
 
 Licensed under GPL-3.0-or-later with the project's modding and linking exceptions.
