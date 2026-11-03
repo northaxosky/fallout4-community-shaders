@@ -94,17 +94,19 @@ namespace cs::engine
 		return sky && sky->mode.get() == RE::Sky::Mode::kFull;
 	}
 
+	namespace
+	{
+		[[nodiscard]] bool ExteriorWorldspaceHasSky(const RE::TES& a_tes) noexcept
+		{
+			return !a_tes.interiorCell && a_tes.worldSpace && !a_tes.worldSpace->flags.any(RE::TESWorldSpace::FLAG::kNoSky);
+		}
+	}
+
 	bool IsInterior() noexcept
 	{
 		const auto* tes = RE::TES::GetSingleton();
-		if (tes && !tes->interiorCell) {
-			if (const auto* worldSpace = tes->worldSpace) {
-				// FO4: kFixedDimensions marks open-sky worlds; Sky::mode replaces it.
-				if (!worldSpace->flags.any(RE::TESWorldSpace::FLAG::kNoSky) && IsFullSky())
-					return false;
-			}
-		}
-		return true;
+		// FO4: kFixedDimensions marks open-sky worlds; Sky::mode replaces it.
+		return !(tes && ExteriorWorldspaceHasSky(*tes) && IsFullSky());
 	}
 
 	bool InteriorRendersSunShadows(const RE::TESObjectCELL& a_cell) noexcept
@@ -120,8 +122,7 @@ namespace cs::engine
 		if (const auto* cell = tes->interiorCell)
 			return InteriorRendersSunShadows(*cell);
 		const auto* sky = RE::Sky::GetSingleton();
-		return tes->worldSpace && !tes->worldSpace->flags.any(RE::TESWorldSpace::FLAG::kNoSky) &&
-		       sky && sky->mode.get() != RE::Sky::Mode::kNone;
+		return ExteriorWorldspaceHasSky(*tes) && sky && sky->mode.get() != RE::Sky::Mode::kNone;
 	}
 
 	bool IsMainOrLoadingMenuOpen() noexcept
