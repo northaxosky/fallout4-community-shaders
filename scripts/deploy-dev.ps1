@@ -21,7 +21,7 @@
 	Folder holding named mods.
 
 .PARAMETER RenderDoc
-	Also force-load the RenderDoc feature; its API hooks skew performance, so it is off by default.
+	Load the RenderDoc feature; without it the deploy turns RenderDoc off, as its API hooks skew performance.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -54,19 +54,20 @@ if ($PSCmdlet.ShouldProcess($modPath, "build, install and deploy with $Toml")) {
 	robocopy $install $modPath /MIR /NJH /NJS /NP /NDL /XF FO4CommunityShaders.toml meta.ini /XD ShaderCache Presets | Out-Null
 	if ($LASTEXITCODE -ge 8) { throw "robocopy failed (exit $LASTEXITCODE)." }
 	New-Item -ItemType Directory -Force (Join-Path $modPath $plugin) | Out-Null
-	# Force the dev tools on so every deployed build can be inspected.
+	# Pin dev tool loading so every deployed build can be inspected.
 	$settings = Get-Content -LiteralPath $Toml -Raw
-	$tools = @('RemoteControl', 'CSEditor') + ($RenderDoc ? @('RenderDoc') : @())
-	foreach ($tool in $tools) {
+	$tools = [ordered]@{ RemoteControl = $true; CSEditor = $true; RenderDoc = $RenderDoc.IsPresent }
+	foreach ($tool in $tools.Keys) {
+		$load = "load = $($tools[$tool].ToString().ToLower())"
 		$section = "(?ms)^\[features\.$tool\][ \t]*\r?\n(?:(?!^\[).)*?^[ \t]*#?[ \t]*load[ \t]*=[ \t]*\w+[^\r\n]*"
 		if ($settings -match "(?m)^\[features\.$tool\][ \t]*\r?$") {
 			if ($settings -match $section) {
-				$settings = [regex]::Replace($settings, $section, { param($m) $m.Value -replace '[ \t]*#?[ \t]*load[ \t]*=[ \t]*\w+[^\r\n]*$', 'load = true' }, 1)
+				$settings = [regex]::Replace($settings, $section, { param($m) $m.Value -replace '[ \t]*#?[ \t]*load[ \t]*=[ \t]*\w+[^\r\n]*$', $load }, 1)
 			} else {
-				$settings = $settings -replace "(?m)^\[features\.$tool\][ \t]*\r?$", "[features.$tool]`nload = true"
+				$settings = $settings -replace "(?m)^\[features\.$tool\][ \t]*\r?$", "[features.$tool]`n$load"
 			}
 		} else {
-			$settings = $settings.TrimEnd() + "`n`n[features.$tool]`nload = true`n"
+			$settings = $settings.TrimEnd() + "`n`n[features.$tool]`n$load`n"
 		}
 	}
 	Set-Content -LiteralPath (Join-Path $modPath "$plugin\FO4CommunityShaders.toml") -Value $settings -NoNewline
