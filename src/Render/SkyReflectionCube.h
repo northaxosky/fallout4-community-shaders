@@ -18,7 +18,7 @@ namespace cs::engine
 	// The host renders the sky into the engine reflection cube for consumers.
 
 	// Call during Load or OnPostPostLoad; false keeps the consumer's fallback.
-	// a_wantsLod (optional) asks for LOD land, objects and trees on the side faces.
+	// a_wantsLod (optional) asks for LOD on the side and down faces.
 	[[nodiscard]] bool RegisterSkyReflectionCubeConsumer(
 		std::string_view a_name,
 		std::function<bool()> a_wantsCube,

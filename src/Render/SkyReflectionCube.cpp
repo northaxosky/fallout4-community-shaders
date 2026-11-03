@@ -46,6 +46,7 @@ namespace cs::engine
 		constexpr float kEyeJumpLimit = 512.0f;
 		constexpr std::uint32_t kSideFaces = 0xF;
 		constexpr std::uint32_t kPolarFirstFace = 4;
+		constexpr std::uint32_t kDownFace = 5;
 		// The eye is the previous render's camera; reject pre-load records.
 		constexpr std::uint32_t kMaxCameraAgeFrames = 2;
 		// The hook skips interiors and loads; a longer gap means stale faces.
@@ -440,16 +441,18 @@ namespace cs::engine
 		constexpr auto kLandscapeBlendFlag = RE::BSShaderProperty::EShaderPropertyFlag::kMultiTextureLandscape;
 		constexpr std::uint32_t kMaxLodDepth = 16;
 
-		// Side-face view axes (forward, up, right); the engine's face basis table.
+		// Face axes (forward, up, right); polar up/right only need to span the face.
 		struct FaceBasis
 		{
 			RE::NiPoint3 forward, up, right;
 		};
-		constexpr std::array<FaceBasis, 4> kSideBasis{ {
+		constexpr std::array<FaceBasis, 6> kFaceBasis{ {
 			{ { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, -1 } },
 			{ { -1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } },
 			{ { 0, 1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } },
 			{ { 0, -1, 0 }, { 0, 0, 1 }, { 1, 0, 0 } },
+			{ { 0, 0, 1 }, { 0, 1, 0 }, { 1, 0, 0 } },
+			{ { 0, 0, -1 }, { 0, 1, 0 }, { 1, 0, 0 } },
 		} };
 
 		// Side planes of the face pyramid; near and far are left to the engine.
@@ -458,14 +461,14 @@ namespace cs::engine
 		public:
 			[[nodiscard]] static std::optional<FaceFrustum> Make(const CubeCamera& a_camera, std::uint32_t a_face)
 			{
-				if (a_face >= kSideBasis.size())
+				if (a_face >= kFaceBasis.size())
 					return std::nullopt;
 				const auto& f = a_camera.viewFrustum;
 				// Widest edge keeps the test conservative for any sign convention.
 				const float slope = std::max({ std::abs(f.left), std::abs(f.right), std::abs(f.top), std::abs(f.bottom) });
 				if (f.ortho || !std::isfinite(slope) || slope <= 0.0f)
 					return std::nullopt;
-				return FaceFrustum{ a_camera.local.translate, kSideBasis[a_face], slope };
+				return FaceFrustum{ a_camera.local.translate, kFaceBasis[a_face], slope };
 			}
 
 			// Inclusive; bounds the engine cannot cull on count as visible.
@@ -646,7 +649,7 @@ namespace cs::engine
 			g_counters.faces.fetch_add(1, std::memory_order_relaxed);
 		}
 
-		// One polar face (sky only) and at most one side face per frame; returns the faces drawn.
+		// One polar face and at most one side face per frame; returns the faces drawn.
 		[[nodiscard]] std::uint32_t RenderFaces(
 			CubeCamera& a_camera,
 			RE::BSMultiBoundNode& a_skyRoot,
@@ -661,7 +664,8 @@ namespace cs::engine
 			const bool lod = AnyConsumerWantsLod();
 			QueueLodRefresh(a_eye, lod);
 			const auto polar = kPolarFirstFace + g_polarNext;
-			ClickFace(a_camera, a_skyRoot, polar, false);
+			// Upstream draws LOD on every face; +Z stays sky only to bound the cost.
+			ClickFace(a_camera, a_skyRoot, polar, lod && polar == kDownFace);
 			g_polarNext ^= 1;
 			std::uint32_t faces = 1u << polar;
 			if (const auto side = NextSideFace()) {
