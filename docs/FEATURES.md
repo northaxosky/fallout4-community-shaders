@@ -53,6 +53,8 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Linear Lighting | N/A | Shared-color compatibility (done), optional calibration controls | N/A: linearization (FO4 is linear), ENB | Substrate | L | S | High |
 | [LOD Blending](deviations/LODBlending.md) | Port | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Port | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
+| Procedural Sun | Port | Analytic sun disc and corona in the Sky shader's sun pass; yields to an Effects11 preset's own procedural sun | � | NS | M | S/M | Med |
+| Rain Refraction | Port | Rain-drop refraction texture and consumer; reads Light Limit Fix's clustered lights | � | NS | M | M | Low |
 | [Remote Control](deviations/RemoteControl.md) | Port | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc capture and NvPerf tools and events; screenshot capture pending | — | Pt | H | M | High |
 | [Screen Space GI](deviations/ScreenSpaceGI.md) | Port | AO, GI, temporal, specular GI, vertex AO (relocated), provider wiring | — | Pt | H | M | High |
 | [Screen-Space Shadows](deviations/ScreenSpaceShadows.md) | Port | Bend raymarch, direct/back visibility, tree/alpha/secondary receivers, preview/telemetry | — | Pt | H | M | High |
