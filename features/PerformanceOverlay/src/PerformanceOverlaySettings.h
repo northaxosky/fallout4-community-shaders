@@ -17,6 +17,10 @@ namespace cs::features::performance_overlay
 		static constexpr float kGraphMinSpread = 2.0f;
 		static constexpr float kGraphMaxSpread = 20.0f;
 		static constexpr float kFrameGenerationMultiplier = 2.0f;
+		static constexpr float kStatsWindowSeconds = 5.0f;
+		static constexpr float kStatsMinSeconds = 1.0f;
+		static constexpr float kMinSmoothingSeconds = 0.01f;
+		static constexpr float kMinStatsRefreshSeconds = 0.25f;
 
 		bool ShowInOverlay = true;
 		bool ShowDrawCalls = true;
@@ -42,7 +46,7 @@ namespace cs::features::performance_overlay
 			settings::Field{ "ShowFPS", "Show FPS Counter", &Settings::ShowFPS },
 			settings::Field{ "ShowPreFGFrameTimeGraph", "Show Pre-FG Frametime Graph", &Settings::ShowPreFGFrameTimeGraph },
 			settings::Field{ "ShowPostFGFrameTimeGraph", "Show Post-FG Frametime Graph", &Settings::ShowPostFGFrameTimeGraph },
-			settings::Field{ "UpdateInterval", "Update Interval", &Settings::UpdateInterval, settings::Range{ 0.001f, 2.0f } },
+			settings::Field{ "UpdateInterval", "FPS Smoothing", &Settings::UpdateInterval, settings::Range{ 0.001f, 2.0f } },
 			settings::Field{ "FrameHistorySize", "Frame History Size", &Settings::FrameHistorySize, settings::Range{ 120, 1800 } },
 			settings::Field{ "TextSize", "Text Size", &Settings::TextSize, settings::Range{ 0.8f, 1.2f } },
 			settings::Field{ "BackgroundOpacity", "Background Opacity", &Settings::BackgroundOpacity, settings::Range{ 0.0f, 1.0f } },

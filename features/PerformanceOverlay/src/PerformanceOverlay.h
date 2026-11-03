@@ -8,6 +8,7 @@
 #include <Features/PerformanceOverlay/ABTesting/ABTestAggregator.h>
 #include <Features/PerformanceOverlay/CircularBuffer.h>
 #include <Profiler.h>
+#include <deque>
 #include <map>
 
 namespace cs::features
@@ -51,6 +52,9 @@ namespace cs::features
 		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4 DMUI_ThemeColors::*);
 		static float OverlayContentWidth() noexcept;
 		void UpdateGraphValues();
+		void ResetFrameStats();
+		void AccumulateFrameStats();
+		void UpdateFrameStats();
 		std::vector<DrawCallRow> BuildRows() const;
 
 		CircularBuffer<float> _history{ 600 }, _postHistory{ 600 };
@@ -61,6 +65,11 @@ namespace cs::features
 		float _graphMin{}, _graphMax = 50.0f;
 		float _minFrameMs = 1000.0f, _maxFrameMs{};
 		float _averageMs{}, _refreshHz{};
+		// Both sums decay with wall time, so smoothing is frame-rate independent.
+		double _smoothTimeSumMs{}, _smoothFrameWeight{};
+		std::deque<float> _windowFrameMs;
+		double _windowSumMs{};
+		float _windowAvgMs{}, _windowP99Ms{};
 		bool _frameGeneration{};
 		std::uint64_t _vramUsed{}, _vramBudget{};
 		Snapshot _baseline, _test;

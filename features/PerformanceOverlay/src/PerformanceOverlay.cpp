@@ -333,6 +333,7 @@ namespace cs::features
 		_frameMs = Util::CalcFrameTime(counter.QuadPart - _lastFrame.QuadPart, _frequency.QuadPart);
 		_lastFrame = counter;
 		_fps = Util::CalcFPS(_frameMs);
+		AccumulateFrameStats();
 		if (_overlayFrequency.QuadPart == 0) {
 			QueryPerformanceFrequency(&_overlayFrequency);
 			QueryPerformanceCounter(&_lastUpdate);
@@ -371,19 +372,70 @@ namespace cs::features
 		_frameGeneration = render::TemporalPipeline::Get().GetFrameGenerationDiagnostics(false).active;
 		if (_frameGeneration) {
 			// Upstream derives post-FG figures from the fixed multiplier.
-			const float postMs = _frameMs / Settings::kFrameGenerationMultiplier;
-			if (_updateTimer <= 0.0f) {
-				_postDisplayMs = postMs;
-				_postDisplayFps = _fps * Settings::kFrameGenerationMultiplier;
-			}
-			_postHistory.Push(postMs);
+			_postHistory.Push(_frameMs / Settings::kFrameGenerationMultiplier);
 		}
-		_updateTimer += delta;
-		if (_updateTimer >= settings.UpdateInterval) {
+		if (_smoothFrameWeight > 0.0 && _smoothTimeSumMs > 0.0) {
+			_displayMs = static_cast<float>(_smoothTimeSumMs / _smoothFrameWeight);
+			_displayFps = Util::CalcFPS(_displayMs);
+		} else {
 			_displayMs = _frameMs;
 			_displayFps = _fps;
+		}
+		if (_frameGeneration) {
+			_postDisplayMs = _displayMs / Settings::kFrameGenerationMultiplier;
+			_postDisplayFps = _displayFps * Settings::kFrameGenerationMultiplier;
+		}
+		// Avg and 1% low sort the whole window, so they refresh on an interval.
+		_updateTimer += delta;
+		if (_updateTimer >= std::max(settings.UpdateInterval, Settings::kMinStatsRefreshSeconds)) {
+			UpdateFrameStats();
 			_updateTimer = 0.0f;
 		}
+	}
+
+	void PerformanceOverlay::ResetFrameStats()
+	{
+		_smoothTimeSumMs = 0.0;
+		_smoothFrameWeight = 0.0;
+		_windowFrameMs.clear();
+		_windowSumMs = 0.0;
+		_windowAvgMs = 0.0f;
+		_windowP99Ms = 0.0f;
+	}
+
+	void PerformanceOverlay::AccumulateFrameStats()
+	{
+		if (_frameMs <= 0.0f)
+			return;
+		// Older frames fade by elapsed time, not frame count; the sums' ratio stays frames / time.
+		const double timeConstantMs = std::max(settings.UpdateInterval, Settings::kMinSmoothingSeconds) * 1000.0;
+		const double decay = std::exp(-_frameMs / timeConstantMs);
+		_smoothTimeSumMs = _smoothTimeSumMs * decay + _frameMs;
+		_smoothFrameWeight = _smoothFrameWeight * decay + 1.0;
+
+		// Hitches stay in so the average matches frames / elapsed time.
+		_windowFrameMs.push_back(_frameMs);
+		_windowSumMs += _frameMs;
+		constexpr double windowMs = Settings::kStatsWindowSeconds * 1000.0;
+		while (_windowFrameMs.size() > 1 && _windowSumMs - _windowFrameMs.front() >= windowMs) {
+			_windowSumMs -= _windowFrameMs.front();
+			_windowFrameMs.pop_front();
+		}
+	}
+
+	void PerformanceOverlay::UpdateFrameStats()
+	{
+		if (_windowFrameMs.empty() || _windowSumMs < Settings::kStatsMinSeconds * 1000.0) {
+			_windowAvgMs = 0.0f;
+			_windowP99Ms = 0.0f;
+			return;
+		}
+		_windowAvgMs = static_cast<float>(_windowSumMs / static_cast<double>(_windowFrameMs.size()));
+		// 1% low is the FPS of the 99th percentile frame time.
+		std::vector<float> sorted(_windowFrameMs.begin(), _windowFrameMs.end());
+		const auto index = static_cast<std::size_t>(0.99 * static_cast<double>(sorted.size() - 1));
+		std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(index), sorted.end());
+		_windowP99Ms = sorted[index];
 	}
 
 	void PerformanceOverlay::TickHostFrame(std::uint64_t a_used, std::uint64_t a_budget)
@@ -395,6 +447,7 @@ namespace cs::features
 			QueryPerformanceCounter(&_lastFrame);
 			_overlayFrequency = {};
 			_graphGate = {};
+			ResetFrameStats();
 			return;
 		}
 		// FO4: DearModdingUI supplies the native-frame UI cadence independently of the deferred scene.
@@ -614,9 +667,8 @@ namespace cs::features
 		if (settings.ShowInOverlay) {
 			if (settings.ShowFPS) {
 				dmui::ui::Text("%s %.1f FPS (%.2f ms)", _frameGeneration ? "[Pre-FG]" : "[Engine]", _displayFps, _displayMs);
-				const auto samples = _history.GetData();
-				if (std::ranges::all_of(samples, [](float a_sample) { return a_sample > 0.0f; }))
-					dmui::ui::Text("Avg: %.1f FPS", Util::CalcFPS(_averageMs));
+				if (_windowAvgMs > 0.0f)
+					dmui::ui::Text("Avg: %.1f FPS | 1%% Low: %.1f FPS", Util::CalcFPS(_windowAvgMs), Util::CalcFPS(_windowP99Ms));
 				if (settings.ShowPreFGFrameTimeGraph) {
 					const auto overlay = std::format("{}{:.2f} ms ({:.1f} FPS)", _frameGeneration ? "Pre-FG: " : "", _displayMs, _displayFps);
 					DrawGraph("##frametime", overlay.c_str(), _history, &DMUI_ThemeColors::success);
@@ -671,7 +723,7 @@ namespace cs::features
 				field(&Settings::TextSize, { .format = "%.2f", .flags = clamped });
 				field(&Settings::BackgroundOpacity, { .format = "%.2f", .flags = clamped });
 				field(&Settings::ShowBorder);
-				field(&Settings::UpdateInterval, { .format = "%.2f seconds", .flags = clamped });
+				field(&Settings::UpdateInterval, { .help = "How long the FPS readout averages over. It updates every frame; higher values steady it, lower values follow changes faster. Avg and 1% low refresh at this rate too (at most 4 times a second).", .format = "%.2f seconds", .flags = clamped });
 				field(&Settings::FrameHistorySize, { .format = "%d", .flags = clamped });
 				if (dmui::ui::Button("Reset Layout"))
 					host::HostClient::Get().ResetOverlay();
@@ -725,6 +777,7 @@ namespace cs::features
 		_history.Resize(600);
 		_postHistory.Resize(600);
 		_displayMs = _displayFps = _postDisplayMs = _postDisplayFps = 0.0f;
+		ResetFrameStats();
 		_graphMin = 0.0f;
 		_graphMax = 50.0f;
 		_minFrameMs = 1000.0f;
@@ -737,7 +790,7 @@ namespace cs::features
 		a_sink.Field("enabled", settings.ShowInOverlay)
 			.Field("fps", static_cast<double>(_displayFps))
 			.Field("frame_ms", static_cast<double>(_frameMs))
-			.Field("avg_ms", static_cast<double>(_averageMs))
+			.Field("avg_ms", static_cast<double>(_windowAvgMs))
 			.Field("refresh_hz", static_cast<double>(_refreshHz))
 			.Field("frame_history_size", static_cast<std::int64_t>(settings.FrameHistorySize))
 			.Field("engine_frame_sequence", static_cast<std::int64_t>(render::profiling::FrameSequence()))
