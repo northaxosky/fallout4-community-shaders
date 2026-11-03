@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
-#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+// SHADOW_ONLY multiplies the lit sun, so light-wide terms stay in the main pass.
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS) && !defined(SHADOW_ONLY)
 #	include "FO4/ScreenSpaceShadowConsumer.hlsli"
 #endif
 
-#if defined(DIRECTIONAL)
+#if defined(DIRECTIONAL) && !defined(SHADOW_ONLY)
 #	include "FO4/WorldShadowConsumer.hlsli"
 #endif
-#if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
+#if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS) && !defined(SHADOW_ONLY)
 #	include "FO4/ExtendedMaterialsConsumer.hlsli"
 #endif
 #include "FO4/AmbientConsumer.hlsli"
@@ -15,17 +16,9 @@
 
 #include "FO4/LightLimitFixRaster.hlsli"
 
-#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS) && !defined(SHADOW_ONLY)
 // FO4: directional RGB accumulators carry upstream's chromatic multiplier.
 #	include "FO4/WaterEffectsConsumer.hlsli"
-#endif
-
-// SHADOW_ONLY multiplies the lit sun; light-wide terms belong to the main pass.
-#ifdef SHADOW_ONLY
-#	define FO4DirectionalScreenSpaceShadow SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
-#	define GetMultFromViewPosition SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
-#	define GetParallaxShadow SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
-#	define GetCausticsMultFromViewPosition SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
 #endif
 
 #if defined(OG)
@@ -4981,14 +4974,6 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		cbuffer PerFrame_CB12 : register(b12)
 		{
 			DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-
-#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
-			float4 HairSpecularScaleAndPower;
-			float4 HairSpecularShift;
-			float4 WorldWetnessAndRainTransition;
-			row_major float4x4 PreviousWorldToClip;
-			float4 PosAdjust;
-#	endif
 		};
 
 		cbuffer PerCall_CB2 : register(b2)
@@ -5368,14 +5353,6 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		cbuffer PerFrame_CB12 : register(b12)
 		{
 			DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-
-#	if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
-			float4 HairSpecularScaleAndPower;
-			float4 HairSpecularShift;
-			float4 WorldWetnessAndRainTransition;
-			row_major float4x4 PreviousWorldToClip;
-			float4 PosAdjust;
-#	endif
 		};
 
 		cbuffer PerCall_CB2 : register(b2)

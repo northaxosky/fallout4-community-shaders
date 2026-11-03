@@ -5,7 +5,7 @@ Water parallax reads height from the water normal alpha; vanilla alpha-less norm
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
 | Forced | Skyrim cell lookup and water form | Loaded `GridCellArray` cells fill an eye-centered 5x5, 4096-unit grid; heights and averaged shallow/deep color times the sky water multiplier come from the cell | FO4 has no reference/player-height query |
-| Forced | RGB caustics multiply directional light color in `Lighting.hlsl` | Applied to direct diffuse/specular in all directional BSDFLight families; ambient and local light unaffected | FO4 accumulates direct light separately in RGB targets |
+| Forced | RGB caustics multiply directional light color in `Lighting.hlsl` | Applied to direct diffuse/specular in the directional BSDFLight lighting families; the focused SHADOW_ONLY pass, ambient and local light unaffected | FO4 accumulates direct light separately in RGB targets |
 | Divergence | `WaterSystemHeight` absent | Camera cell's resolved plane relative to b4, or -FLT_MAX; not a water-mesh intersection | Simplified data source |
 | Forced | `NormalsScale` read in the water pixel shader | The vertex shader forwards it as `TEXCOORD8`; BSWater VS and PS are replaced as a pair | The FO4 water PS has no `NormalsScale` constant |
 | Forced | Interior cell water height | Stays -FLT_MAX | FO4's exterior-height accessor rejects interior cells |
