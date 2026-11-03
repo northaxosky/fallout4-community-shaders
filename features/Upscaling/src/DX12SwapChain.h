@@ -66,7 +66,6 @@ namespace cs::features
 			ID3D11DeviceContext* a_context,
 			const DXGI_SWAP_CHAIN_DESC& a_desc,
 			Streamline* a_streamline,
-			render::temporal::IFrameGenerationProvider* a_provider,
 			TemporalPresentationCallbacks a_callbacks);
 		[[nodiscard]] HRESULT Rollback() noexcept;
 		[[nodiscard]] HRESULT Drain() noexcept;
@@ -164,7 +163,7 @@ namespace cs::features
 			ID3D11DeviceContext* a_context);
 		HRESULT CreateSwapChain(IDXGIAdapter* a_adapter,
 			const DXGI_SWAP_CHAIN_DESC& a_desc,
-			bool a_allowProviderFallback = true,
+			bool a_allowStreamlineFallback = true,
 			render::temporal::ProviderResult* a_providerFailure = nullptr);
 		[[nodiscard]] render::temporal::ProviderResult
 		RetireCurrentPresentationProvider();

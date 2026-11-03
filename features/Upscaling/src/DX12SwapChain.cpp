@@ -191,7 +191,6 @@ namespace cs::features
 		IDXGIAdapter* a_adapter, ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context, const DXGI_SWAP_CHAIN_DESC& a_desc,
 		Streamline* a_streamline,
-		render::temporal::IFrameGenerationProvider* a_provider,
 		TemporalPresentationCallbacks a_callbacks)
 	{
 		if (_published || _quarantined || !a_device || !a_context ||
@@ -205,7 +204,6 @@ namespace cs::features
 			return rollbackResult;
 		}
 		_streamline = a_streamline;
-		_provider = a_provider;
 		_callbacks = std::move(a_callbacks);
 		_creationDesc = a_desc;
 		_proxyDesc = a_desc;
@@ -231,14 +229,6 @@ namespace cs::features
 				result = FAILED(disableFsrG.hresult) ? disableFsrG.hresult : E_FAIL;
 			}
 		}
-		if (SUCCEEDED(result) && _provider && !_provider->IsAvailable()) {
-			if (_callbacks.recordFailure) {
-				_callbacks.recordFailure(
-					"The selected frame-generation provider is unavailable; "
-					"using plain D3D12 presentation.");
-			}
-			_provider = nullptr;
-		}
 		winrt::com_ptr<IDXGIAdapter> actualAdapter;
 		if (SUCCEEDED(result)) {
 			winrt::com_ptr<IDXGIDevice> dxgiDevice;
@@ -252,36 +242,6 @@ namespace cs::features
 		}
 		if (SUCCEEDED(result)) {
 			result = RecreateDisplayResources(_innerDesc.Width, _innerDesc.Height);
-		}
-		if (SUCCEEDED(result) && _provider) {
-			result =
-				RecreateFrameGenerationResources(_innerDesc.Width, _innerDesc.Height);
-			if (result != S_OK) {
-				if (_callbacks.recordFailure) {
-					_callbacks.recordFailure(
-						"Frame-generation resource initialization failed; "
-						"falling back to plain D3D12 presentation.");
-				}
-				auto* failedProvider = _provider;
-				const auto release =
-					render::temporal::RetirePresentationProvider(
-						*failedProvider,
-						[this]() { return SUCCEEDED(Drain()); },
-						[this]() { ReleasePrivatePresentationResources(); });
-				RecordGlobalDrain("startup", release);
-				if (!release.Succeeded()) {
-					MarkQuarantined();
-					result = E_FAIL;
-				} else {
-					_providerPresentationActive = false;
-					_provider = nullptr;
-					result = CreateSwapChain(actualAdapter.get(), a_desc);
-					if (SUCCEEDED(result)) {
-						result = RecreateDisplayResources(
-							_innerDesc.Width, _innerDesc.Height);
-					}
-				}
-			}
 		}
 		if (SUCCEEDED(result)) {
 			result = RefreshBackBuffers();
@@ -301,9 +261,8 @@ namespace cs::features
 		_presentationBound = true;
 		NotifyPresentationBinding(_swapChain.get());
 		ClearSharedBuffers();
-		L->info("Published D3D11-facing {} proxy at {}x{} R8G8B8A8_UNORM",
-			_provider ? _provider->Name() : "plain D3D12", _innerDesc.Width,
-			_innerDesc.Height);
+		L->info("Published D3D11-facing plain D3D12 proxy at {}x{} R8G8B8A8_UNORM",
+			_innerDesc.Width, _innerDesc.Height);
 		return S_OK;
 	}
 
@@ -598,7 +557,7 @@ namespace cs::features
 	}
 
 	HRESULT DX12SwapChain::CreateSwapChain(IDXGIAdapter* a_adapter,
-		const DXGI_SWAP_CHAIN_DESC& a_desc, bool a_allowProviderFallback,
+		const DXGI_SWAP_CHAIN_DESC& a_desc, bool a_allowStreamlineFallback,
 		render::temporal::ProviderResult* a_providerFailure)
 	{
 		if (!a_adapter) {
@@ -618,7 +577,7 @@ namespace cs::features
 				factory = std::move(upgradedFactory);
 			} else {
 				factory = std::move(rawFactory);
-				if (!a_allowProviderFallback) {
+				if (!a_allowStreamlineFallback) {
 					if (a_providerFailure) {
 						*a_providerFailure = {
 							.code =
@@ -676,21 +635,9 @@ namespace cs::features
 				if (a_providerFailure) {
 					*a_providerFailure = activation;
 				}
-				if (!a_allowProviderFallback) {
-					return FAILED(activation.hresult) ? activation.hresult : E_FAIL;
-				}
-				if (_callbacks.recordFailure) {
-					const auto reason =
-						render::temporal::FormatProviderFailure(
-							"Frame-generation presentation activation",
-							activation);
-					_callbacks.recordFailure(reason.c_str());
-				}
-				_provider = nullptr;
-				_frameGenerationDisabled = true;
-			} else {
-				_providerPresentationActive = true;
+				return FAILED(activation.hresult) ? activation.hresult : E_FAIL;
 			}
+			_providerPresentationActive = true;
 		}
 		if (_provider) {
 			const auto providerResult =
@@ -712,24 +659,7 @@ namespace cs::features
 				result = providerResult.sdkResult ? static_cast<HRESULT>(providerResult.sdkResult) : E_FAIL;
 			}
 			if (FAILED(result) || !swapChain) {
-				if (!a_allowProviderFallback) {
-					return FAILED(result) ? result : E_FAIL;
-				}
-				auto* failedProvider = _provider;
-				_provider = nullptr;
-				_frameGenerationDisabled = true;
-				if (_callbacks.recordFailure) {
-					const auto reason = render::temporal::FormatProviderFailure(
-						"Frame-generation presentation creation", providerResult);
-					_callbacks.recordFailure(reason.c_str());
-				}
-				const auto destroy = failedProvider->DestroyAfterDrain();
-				const auto deactivate = destroy.Succeeded() ? failedProvider->SetPresentationActive(false) : destroy;
-				if (!deactivate.Succeeded()) {
-					MarkQuarantined();
-					return E_FAIL;
-				}
-				_providerPresentationActive = false;
+				return FAILED(result) ? result : E_FAIL;
 			}
 		}
 		if (!_provider) {

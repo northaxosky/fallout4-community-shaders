@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Frame Generation: saved frame generation no longer freezes at startup on GPUs without DLSS Frame Generation (e.g. RTX 30-series); it now starts right after the first frame.
 - Sun lighting: fixed a darker square around the player in third person; cloud, terrain and contact shadows were applied twice inside the focused shadow pass.
 
 ## 0.5.0

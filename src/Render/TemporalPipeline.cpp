@@ -1075,10 +1075,6 @@ namespace cs::render
 		}
 		const double refreshRate =
 			GetRefreshRate(a_context.swapChainDesc->OutputWindow);
-		const bool frameGenerationEligible =
-			request.frameGenerationEligible &&
-			request.frameGenerationEnabled &&
-			request.frameGeneration != temporal::FrameGenerationMethod::kOff;
 		_impl->creationState.store(TemporalCreationState::kCreating,
 			std::memory_order_release);
 		ID3D11Device* device = nullptr;
@@ -1105,21 +1101,10 @@ namespace cs::render
 		}
 
 		HRESULT proxyResult = E_FAIL;
-		temporal::IFrameGenerationProvider* provider = nullptr;
-		if (frameGenerationEligible &&
-			request.frameGenerationEnabled &&
-			request.frameGeneration !=
-				temporal::FrameGenerationMethod::kOff) {
-			provider =
-				_impl->FrameGenerationProvider(
-					request.frameGeneration);
-		}
-		const std::string_view providerName =
-			provider ? provider->Name() : "plain D3D12";
 		try {
 			proxyResult = _impl->swapChain.Initialize(
 				a_context.adapter, device, immediateContext, *a_context.swapChainDesc,
-				&_impl->streamline, provider,
+				&_impl->streamline,
 				features::TemporalPresentationCallbacks{
 					.clearCapture =
 						[] {
@@ -1224,12 +1209,8 @@ namespace cs::render
 							features::RenderDoc::GetSingleton()
 								->OnGameFramePresented();
 						} });
-			if (SUCCEEDED(proxyResult) && provider &&
-				_impl->swapChain.IsFrameGenerationReady()) {
-				_impl->activePresentation = provider;
-			} else {
-				_impl->activePresentation = nullptr;
-			}
+			// Boot presents plain; saved FG starts through the live transition.
+			_impl->activePresentation = nullptr;
 		} catch (const std::exception& e) {
 			if (FAILED(_impl->swapChain.Rollback())) {
 				PostFailure(
@@ -1256,8 +1237,8 @@ namespace cs::render
 				proxyResult = E_FAIL;
 			}
 			L->error(
-				"{} proxy construction failed ({:#010x}); native creation remains safe",
-				providerName, static_cast<std::uint32_t>(proxyResult));
+				"Plain D3D12 proxy construction failed ({:#010x}); native creation remains safe",
+				static_cast<std::uint32_t>(proxyResult));
 			return std::nullopt;
 		}
 
@@ -1269,10 +1250,8 @@ namespace cs::render
 		}
 		_impl->creationState.store(TemporalCreationState::kProxy,
 			std::memory_order_release);
-		const std::string_view activePresentationName =
-			_impl->swapChain.IsFrameGenerationReady() ? providerName : "plain D3D12";
-		L->info("Temporal pipeline published the {} D3D11-facing proxy at {:.2f} Hz",
-			activePresentationName, refreshRate);
+		L->info("Temporal pipeline published the plain D3D12 D3D11-facing proxy at {:.2f} Hz",
+			refreshRate);
 		return S_OK;
 	}
 
@@ -1376,14 +1355,6 @@ namespace cs::render
 			temporal::FrameGenerationMethod::kFSR4)] =
 			request.frameGenerationEligible && fgDisplayEligible &&
 			_impl->streamlineFsr4Presentation.IsAvailable();
-		if (request.frameGenerationEnabled &&
-			request.frameGeneration != temporal::FrameGenerationMethod::kOff &&
-			!_impl->swapChain.IsFrameGenerationReady()) {
-			session.admittedFg[static_cast<std::size_t>(
-				request.frameGeneration)] = false;
-		}
-		session.activeFg =
-			_impl->swapChain.IsFrameGenerationReady() ? request.frameGeneration : temporal::FrameGenerationMethod::kOff;
 		if (a_adapter) {
 			DXGI_ADAPTER_DESC desc{};
 			if (SUCCEEDED(a_adapter->GetDesc(&desc))) {
@@ -1429,6 +1400,10 @@ namespace cs::render
 		if (admitted) {
 			_impl->renderer.ApplyConfiguration(
 				admittedSettings, _impl->rendererEligible);
+			// Boot presents plain; saved FG starts as a live transition.
+			if (request.frameGenerationEnabled) {
+				SubmitLiveConfiguration();
+			}
 		}
 	}
 
