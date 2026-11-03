@@ -34,6 +34,7 @@ namespace cs::util
 			AppendStandardShaderDefines(recipe.defines, recipe.profile);
 			recipe.entryPoint = a_program ? a_program : "";
 			recipe.flags1 = a_flags1;
+			shader_cache::ApplyDebugCompile(recipe);
 			return recipe;
 		}
 	}

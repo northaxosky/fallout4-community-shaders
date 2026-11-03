@@ -23,6 +23,7 @@
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/F4SEUserDirectory.h"
+#include "Utils/ShaderCache/ShaderRecipe.h"
 
 namespace cs::features
 {
@@ -271,6 +272,7 @@ namespace cs::features
 		ApplyCapturePath();
 		_captures.Attach(_api);
 		_captureCount.store(_captures.Count(), std::memory_order_relaxed);
+		shader_cache::SetDebugCompile(true);
 		L->info("RenderDoc runtime loaded from '{}'", pathUtf8);
 		return true;
 	}

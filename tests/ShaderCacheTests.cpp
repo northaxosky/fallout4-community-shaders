@@ -253,6 +253,23 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			"failed compilation must publish no cache artifact");
 	}
 
+	void TestDebugCompileSeparatesCache()
+	{
+		Workspace workspace("debug-compile");
+		workspace.WriteDefaultTree();
+		const auto release = workspace.Recipe();
+		const auto primed = Prime(workspace, release);
+
+		auto debug = release;
+		SetDebugCompile(true);
+		ApplyDebugCompile(debug);
+		SetDebugCompile(false);
+		const auto debugCold = LoadOrCompileShader(debug, workspace.Options());
+		Check(
+			debugCold.succeeded && debugCold.recordPath != primed.cold.recordPath && debugCold.bytecode != primed.cold.bytecode,
+			"debug compiles must not share a record with optimized ones");
+	}
+
 	void TestCompilerIdentityReset()
 	{
 		Workspace workspace("identity-reset");
@@ -558,6 +575,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 
 	constexpr TestCase tests[]{
 		{ "hit-and-invalidation", &TestHitAndInvalidation },
+		{ "debug-compile-separates-cache", &TestDebugCompileSeparatesCache },
 		{ "compiler-identity-reset", &TestCompilerIdentityReset },
 		{ "corrupt-record", &TestCorruptRecord },
 		{ "concurrent-writers", &TestConcurrentWriters },

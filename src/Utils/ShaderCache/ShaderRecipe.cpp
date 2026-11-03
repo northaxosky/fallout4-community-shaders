@@ -4,6 +4,7 @@
 #include "Utils/ShaderCache/ByteCodec.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <d3dcompiler.h>
 #include <mutex>
@@ -18,6 +19,8 @@ namespace cs::shader_cache
 {
 	namespace
 	{
+		std::atomic<bool> g_debugCompile{ false };
+
 		constexpr std::string_view kRecipeSchema = "FO4CS.shader-recipe";
 		constexpr std::uint32_t kRecipeSchemaVersion = 1;
 		constexpr std::string_view kDependencySchema = "FO4CS.shader-recipe.dependency";
@@ -127,6 +130,21 @@ namespace cs::shader_cache
 		writer.U64(a_identity.moduleLength);
 		writer.Digest(a_identity.moduleDigest);
 		return bytes;
+	}
+
+	void SetDebugCompile(bool a_enabled) noexcept
+	{
+		g_debugCompile.store(a_enabled, std::memory_order_relaxed);
+	}
+
+	void ApplyDebugCompile(ShaderRecipe& a_recipe)
+	{
+		if (!g_debugCompile.load(std::memory_order_relaxed))
+			return;
+		constexpr std::uint32_t optimizationMask = D3DCOMPILE_OPTIMIZATION_LEVEL0 | D3DCOMPILE_OPTIMIZATION_LEVEL2 | D3DCOMPILE_OPTIMIZATION_LEVEL3;
+		a_recipe.flags1 = (a_recipe.flags1 & ~optimizationMask) | D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+		a_recipe.defines.emplace_back("D3DCOMPILE_SKIP_OPTIMIZATION", "");
+		a_recipe.defines.emplace_back("D3DCOMPILE_DEBUG", "");
 	}
 
 	sha256::Sha256Result ComputeLogicalDigest(

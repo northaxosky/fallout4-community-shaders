@@ -18,6 +18,7 @@ namespace cs::engine
 		recipe.entryPoint = a_request.entryPoint;
 		recipe.profile = a_request.profile;
 		recipe.stage = a_request.stage;
+		shader_cache::ApplyDebugCompile(recipe);
 		return recipe;
 	}
 }
