@@ -52,17 +52,12 @@ namespace cs::render::temporal
 	ProviderResult LatencyRouter::SetLatencyMarker(
 		LatencyMarker a_marker, std::uint32_t a_frame)
 	{
-		ProviderResult result{ .code = ProviderResultCode::kUnavailable };
-		for (const auto& entry : _backends) {
-			if (!entry.provider->IsAvailable()) {
-				continue;
-			}
-			auto delivered = entry.provider->SetLatencyMarker(a_marker, a_frame);
-			if (result.code != ProviderResultCode::kFailure) {
-				result = std::move(delivered);
-			}
+		// Markers reach only the selected backend; an unselected Reflex can hang Proton.
+		const auto selected = _selected.load(std::memory_order_acquire);
+		if (selected == kNoBackend) {
+			return { .code = ProviderResultCode::kUnavailable };
 		}
-		return result;
+		return _backends[selected].provider->SetLatencyMarker(a_marker, a_frame);
 	}
 
 	LatencyDiagnostics LatencyRouter::GetLatencyDiagnostics() const noexcept
