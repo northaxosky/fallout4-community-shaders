@@ -142,7 +142,6 @@ namespace cs::features
 		[[nodiscard]] render::temporal::LatencyDiagnostics
 		GetLatencyDiagnostics() const noexcept;
 		[[nodiscard]] bool IsLatencyAvailable() const noexcept;
-		[[nodiscard]] bool AreMarkersAvailable() const noexcept;
 		bool ConfigureDLSSG(
 			bool a_enabled,
 			const render::temporal::FrameGenerationConfiguration&
