@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - Shader ownership: a feature whose shader target is disabled (`enable_shaders` or `[shader_ownership]`) now fails shader-injection validation instead of running without effect; Screen Space GI, Subsurface Scattering and Screen Space Shadows are now validated too.
 - Settings: out-of-range values in the config file are clamped to the allowed range instead of failing the whole feature.
@@ -22,9 +22,8 @@
 - Terrain Blending: terrain away from object edges is shaded once instead of twice, lowering its GPU cost.
 - Shader compilation: changing a debug view or clearing the shader cache recompiles the affected variants in the background instead of on first draw.
 - Menu: each feature's debug views, diagnostics and profiling now share one collapsed Debug section; Upscaling and Frame Generation drop their Status and Advanced sections, and Screen Space GI's presets and resolution are dropdowns.
-
-## 0.5.0
-
+- Upscaling: the texture mip bias now applies only to the upscaled world view, not to shadows, reflections or menus; the engine's samplers are no longer modified.
+- Deferred composite: lower GPU cost with Skylighting (one shared sky probe fetch) and Screen Space GI (skipped in fog passes that discard it).
 - Subsurface Scattering: new feature ported from Skyrim CS; blurs skin with separable or Burley scattering instead of the vanilla blur; turns the vanilla character light off unless enabled in its settings.
 - Sky Sync: new feature ported from Skyrim CS; sun and moon lights, shadows and godrays follow the bodies in the sky, with an optional alternate sun path and moonlight at night.
 - Terrain Blending: new feature ported from Skyrim CS; blends terrain into objects that sink into it by depth, removing the hard seam; no per-mesh opt-out yet.
