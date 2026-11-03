@@ -50,6 +50,7 @@ namespace cs::features
 			_adapterVendorId = a_binding.adapterVendorId;
 		}
 		_swapChain = a_binding.swapChain;
+		_frameGenerationPresentation = a_binding.frameGenerationPresentation;
 		_taggedSwapChain = nullptr;
 		_taggedEnabled = false;
 	}
@@ -76,6 +77,7 @@ namespace cs::features
 		_device = nullptr;
 		_adapterVendorId = 0;
 		_swapChain = nullptr;
+		_frameGenerationPresentation = false;
 		_taggedSwapChain = nullptr;
 		_taggedEnabled = false;
 		_presentationQuarantined = false;
@@ -126,6 +128,14 @@ namespace cs::features
 		return ProviderResult::Ok();
 	}
 
+	void AntiLag2Latency::Pause() noexcept
+	{
+		std::scoped_lock lock(_mutex);
+		if (_initialized && !_presentationQuarantined && _enabled) {
+			(void)AMD::AntiLag2DX12::Update(_context.get(), false, 0);
+		}
+	}
+
 	ProviderResult AntiLag2Latency::Sleep(std::uint32_t a_frame)
 	{
 		std::scoped_lock lock(_mutex);
@@ -135,6 +145,7 @@ namespace cs::features
 		if (_lastSleepFrame == a_frame) {
 			return ProviderResult::Ok();
 		}
+		// Each new frame's Update also resumes after Pause.
 		_lastSleepFrame = a_frame;
 		++_updateCalls;
 		const HRESULT result = AMD::AntiLag2DX12::Update(_context.get(), _enabled, _enabled ? _maxFps : 0);
@@ -204,7 +215,8 @@ namespace cs::features
 
 	void AntiLag2Latency::MarkEndOfFrameRenderingLocked() noexcept
 	{
-		if (_enabled && SUCCEEDED(AMD::AntiLag2DX12::MarkEndOfFrameRendering(_context.get()))) {
+		// Only the FSR FG swap chain consumes this.
+		if (_enabled && _frameGenerationPresentation && SUCCEEDED(AMD::AntiLag2DX12::MarkEndOfFrameRendering(_context.get()))) {
 			++_markersDelivered;
 		}
 	}
@@ -215,20 +227,21 @@ namespace cs::features
 			return;
 		}
 		const bool wasTagged = _taggedSwapChain == _swapChain && _taggedEnabled;
-		if (!_enabled && !wasTagged) {
+		const bool tag = _enabled && _frameGenerationPresentation;
+		if (!tag && !wasTagged) {
 			return;
 		}
 		// AMD's guide writes this every frame; doing so also covers a rebuilt swap chain at the same address.
-		const FrameTypeTaggingData data{ .context = _context.get(), .enabled = _enabled };
+		const FrameTypeTaggingData data{ .context = _context.get(), .enabled = tag };
 		const HRESULT result = _swapChain->SetPrivateData(kFrameTypeTaggingGuid, sizeof(data), &data);
 		if (FAILED(result)) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Anti-Lag 2 frame-type tagging failed: {:#010x}", static_cast<std::uint32_t>(result));
 			return;
 		}
-		if (_enabled && !wasTagged) {
+		if (tag && !wasTagged) {
 			L->info("Anti-Lag 2 frame-type tagging enabled on the presentation swap chain");
 		}
 		_taggedSwapChain = _swapChain;
-		_taggedEnabled = _enabled;
+		_taggedEnabled = tag;
 	}
 }

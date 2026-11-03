@@ -1299,7 +1299,8 @@ namespace cs::features
 		if (_presentationBound && _captureDevice12 && _callbacks.bindPresentation) {
 			_callbacks.bindPresentation({ .device = _captureDevice12.get(),
 				.adapterVendorId = _adapterVendorId,
-				.swapChain = a_swapChain });
+				.swapChain = a_swapChain,
+				.frameGenerationPresentation = _provider && _providerPresentationActive });
 		}
 	}
 
