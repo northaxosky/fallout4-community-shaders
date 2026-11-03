@@ -1209,7 +1209,6 @@ namespace cs::render
 							features::RenderDoc::GetSingleton()
 								->OnGameFramePresented();
 						} });
-			// Boot presents plain; saved FG starts through the live transition.
 			_impl->activePresentation = nullptr;
 		} catch (const std::exception& e) {
 			if (FAILED(_impl->swapChain.Rollback())) {
@@ -1367,6 +1366,7 @@ namespace cs::render
 		}
 
 		bool admitted = false;
+		bool frameGenerationAdmitted = false;
 		temporal::UpscalingSettings admittedSettings;
 		{
 			std::scoped_lock lock(_impl->mutex);
@@ -1387,6 +1387,8 @@ namespace cs::render
 						!_impl->frameGenerationQuarantined,
 					std::memory_order_release);
 				admittedSettings = _impl->effectiveRenderSettings;
+				frameGenerationAdmitted =
+					effective.frameGeneration != temporal::FrameGenerationMethod::kOff;
 			}
 		}
 		if (!admitted) {
@@ -1401,7 +1403,7 @@ namespace cs::render
 			_impl->renderer.ApplyConfiguration(
 				admittedSettings, _impl->rendererEligible);
 			// Boot presents plain; saved FG starts as a live transition.
-			if (request.frameGenerationEnabled) {
+			if (request.frameGenerationEnabled && frameGenerationAdmitted) {
 				SubmitLiveConfiguration();
 			}
 		}
