@@ -114,10 +114,10 @@ namespace cs::render
 		float pad0[3], CloudsCurve, CloudsDesaturation;
 		float CloudsEdgeIntensity, CloudsEdgeMoonMultiplier;
 		std::uint32_t EnableProceduralSun;
-		float ProceduralSunDiskRadiusSq, ProceduralSunDiskEdgeScale, ProceduralSunGlowIntensity;
-		float ProceduralSunCoronaFalloff, ProceduralSunCoronaScale;
+		float ProceduralSunDiskCos, ProceduralSunDiskRadiance, ProceduralSunEdgeSoftness;
+		float ProceduralSunHaloCos, ProceduralSunHaloIntensity;
 		std::uint32_t UseProceduralGradientWeights;
-		float ProceduralGradientWeightCurve, LightSpriteCurve, pad1[3];
+		float ProceduralGradientWeightCurve, LightSpriteCurve, ProceduralSunHaloFalloff, ProceduralSunRadianceLimit, pad1;
 		float ParticleIntensity, ParticleLightingInfluence, ParticleAmbientInfluence, ParticlePointLightingInfluence;
 		std::uint32_t EnableVolumetricRays;
 		float VolumetricRaysIntensity, VolumetricRaysDensity, VolumetricRaysSkyColorAmount;
@@ -182,6 +182,7 @@ namespace cs::render
 		std::uint32_t volumetricFarGridPixelSize, volumetricFarGridSizeZ;
 		float volumetricLocalLightScatteringIntensity, volumetricFogNoiseScale, volumetricFogNoiseThreshold, pad3;
 		float volumetricFogNoiseVelocity[3], pad0;
+		DirectX::XMFLOAT4 originalFogColorOverride;
 	};
 	struct TruePBRSettings
 	{
@@ -202,6 +203,17 @@ namespace cs::render
 	{
 		std::uint32_t Enable;
 		float MotionStretch, MotionTransparency, pad0;
+		DirectX::XMFLOAT4 TextureBounds;
+		float TextureRadiusScale[2], pad1[2];
+	};
+	// Shared SharedData.hlsli still declares this block; it is always zero-filled.
+	struct ProceduralSunSettings
+	{
+		std::uint32_t enabled;
+		float sunDiskCos, diskIntensity, edgeSoftness;
+		std::uint32_t haloEnabled;
+		float sunHaloCos, haloIntensity, haloFalloff;
+		float cloudOcclusionStrength, sunQuadModelRadius, pad0[2];
 	};
 
 	struct alignas(16) SharedFeatureDataCB
@@ -227,6 +239,7 @@ namespace cs::render
 		SkinData skinData{};
 		HorizonFixSettings horizonFixSettings{};
 		RainRefractionSettings rainRefractionSettings{};
+		ProceduralSunSettings proceduralSunSettings{};
 	};
 #define CS_FEATURE_LAYOUT(member, offset, size)                     \
 	static_assert(offsetof(SharedFeatureDataCB, member) == offset); \
@@ -247,11 +260,12 @@ namespace cs::render
 	CS_FEATURE_LAYOUT(linearLightingSettings, 752, 80);
 	CS_FEATURE_LAYOUT(enbSettings, 832, 512);
 	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1344, 16);
-	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1360, 240);
-	CS_FEATURE_LAYOUT(truePBRSettings, 1600, 16);
-	CS_FEATURE_LAYOUT(skinData, 1616, 112);
-	CS_FEATURE_LAYOUT(horizonFixSettings, 1728, 16);
-	CS_FEATURE_LAYOUT(rainRefractionSettings, 1744, 16);
+	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1360, 256);
+	CS_FEATURE_LAYOUT(truePBRSettings, 1616, 16);
+	CS_FEATURE_LAYOUT(skinData, 1632, 112);
+	CS_FEATURE_LAYOUT(horizonFixSettings, 1744, 16);
+	CS_FEATURE_LAYOUT(rainRefractionSettings, 1760, 48);
+	CS_FEATURE_LAYOUT(proceduralSunSettings, 1808, 48);
 #undef CS_FEATURE_LAYOUT
-	static_assert(sizeof(SharedFeatureDataCB) == 1760);
+	static_assert(sizeof(SharedFeatureDataCB) == 1856);
 }

@@ -52,4 +52,9 @@ namespace NvPerf::Host
 	{
 		return std::filesystem::path("Data") / "F4SE" / "Plugins" / "FO4CommunityShaders";
 	}
+
+	const char* BuildHint()
+	{
+		return "configure with xmake f --nvperf_sdk=<sdk>";
+	}
 }

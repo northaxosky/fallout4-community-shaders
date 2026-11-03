@@ -92,9 +92,9 @@ namespace
 			F(diffuseCurve), F(diffuseWhiteReflectance), F(pad));
 		const auto enb = FIELDS(ENBSettings, F(Enable), F(ColorPow), F(LightSpriteIntensity), F(FireIntensity), F(FireCurve), F(pad0),
 			F(CloudsCurve), F(CloudsDesaturation), F(CloudsEdgeIntensity), F(CloudsEdgeMoonMultiplier),
-			F(EnableProceduralSun), F(ProceduralSunDiskRadiusSq), F(ProceduralSunDiskEdgeScale), F(ProceduralSunGlowIntensity),
-			F(ProceduralSunCoronaFalloff), F(ProceduralSunCoronaScale), F(UseProceduralGradientWeights), F(ProceduralGradientWeightCurve),
-			F(LightSpriteCurve), F(pad1), F(ParticleIntensity), F(ParticleLightingInfluence), F(ParticleAmbientInfluence), F(ParticlePointLightingInfluence),
+			F(EnableProceduralSun), F(ProceduralSunDiskCos), F(ProceduralSunDiskRadiance), F(ProceduralSunEdgeSoftness),
+			F(ProceduralSunHaloCos), F(ProceduralSunHaloIntensity), F(UseProceduralGradientWeights), F(ProceduralGradientWeightCurve),
+			F(LightSpriteCurve), F(ProceduralSunHaloFalloff), F(ProceduralSunRadianceLimit), F(pad1), F(ParticleIntensity), F(ParticleLightingInfluence), F(ParticleAmbientInfluence), F(ParticlePointLightingInfluence),
 			F(EnableVolumetricRays), F(VolumetricRaysIntensity), F(VolumetricRaysDensity), F(VolumetricRaysSkyColorAmount), F(VolumetricRaysDesaturation), F(VolumetricRaysColorFilter),
 			F(EnableCloudsScattering), F(SkyScatteringIntensity), F(SkyScatteringShadowAmount), F(SkyScatteringAmount), F(SkyScatteringColor),
 			F(SkyScatteringDustDarkening), F(SkyScatteringDustTint), F(SkyScatteringDustVolume), F(SkyScatteringSunDirection), F(SkyScatteringSunVisibility),
@@ -121,11 +121,13 @@ namespace
 			F(volumetricDirectionalScatteringIntensity), F(volumetricShadowBias), F(volumetricDepthDistributionScale), F(volumetricSkyLightingIntensity),
 			F(volumetricFogScatteringDistribution), F(volumetricHistoryWeight), F(volumetricHistoryMissSampleCount), F(volumetricSampleJitterMultiplier),
 			F(volumetricUpsampleJitterMultiplier), F(volumetricNearGridDistance), F(volumetricFarGridPixelSize), F(volumetricFarGridSizeZ),
-			F(volumetricLocalLightScatteringIntensity), F(volumetricFogNoiseScale), F(volumetricFogNoiseThreshold), F(pad3), F(volumetricFogNoiseVelocity), F(pad0));
+			F(volumetricLocalLightScatteringIntensity), F(volumetricFogNoiseScale), F(volumetricFogNoiseThreshold), F(pad3), F(volumetricFogNoiseVelocity), F(pad0), F(originalFogColorOverride));
 		const auto pbr = FIELDS(TruePBRSettings, F(VertexAOStrength), F(EnableMicroShadows), F(MicroShadowStrength), F(pad));
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
-		const auto rain = FIELDS(RainRefractionSettings, F(Enable), F(MotionStretch), F(MotionTransparency), F(pad0));
+		const auto rain = FIELDS(RainRefractionSettings, F(Enable), F(MotionStretch), F(MotionTransparency), F(pad0), F(TextureBounds), F(TextureRadiusScale), F(pad1));
+		const auto sun = FIELDS(ProceduralSunSettings, F(enabled), F(sunDiskCos), F(diskIntensity), F(edgeSoftness), F(haloEnabled),
+			F(sunHaloCos), F(haloIntensity), F(haloFalloff), F(cloudOcclusionStrength), F(sunQuadModelRadius), F(pad0));
 #undef FIELDS
 #undef F
 		struct Block
@@ -145,7 +147,7 @@ namespace
 			{ 6, "enbSettings", enb }, { 6, "terrainBlendingSettings", blending },
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
-			{ 6, "rainRefractionSettings", rain }
+			{ 6, "rainRefractionSettings", rain }, { 6, "proceduralSunSettings", sun }
 		};
 		D3D11_SHADER_DESC shader{};
 		a_reflection->GetDesc(&shader);
@@ -256,7 +258,7 @@ namespace
 			ABI(SharedFeatureDataCB, enbSettings), ABI(SharedFeatureDataCB, terrainBlendingSettings),
 			ABI(SharedFeatureDataCB, exponentialHeightFogSettings), ABI(SharedFeatureDataCB, truePBRSettings),
 			ABI(SharedFeatureDataCB, skinData), ABI(SharedFeatureDataCB, horizonFixSettings),
-			ABI(SharedFeatureDataCB, rainRefractionSettings)
+			ABI(SharedFeatureDataCB, rainRefractionSettings), ABI(SharedFeatureDataCB, proceduralSunSettings)
 		};
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, DebugOwner), ABI(FO4SharedDataCB, DebugMode),

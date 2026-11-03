@@ -97,9 +97,11 @@ namespace cs::render::profiling
 			state.profiler.Initialize(state.device, state.context);
 			state.initialized = true;
 		}
-		if (state.queriesWanted && state.initialized)
+		if (state.queriesWanted && state.initialized) {
+			// queriesWanted is the consumer gate; keep the shared watch window open.
+			state.profiler.KeepActive();
 			state.profiler.BeginFrame();
-		else if (state.initialized) {
+		} else if (state.initialized) {
 			state.profiler.Release();
 			state.initialized = false;
 		}
