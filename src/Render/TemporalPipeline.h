@@ -263,6 +263,7 @@ namespace cs::render
 			ID3D11Device** a_device,
 			IDXGISwapChain** a_swapChain);
 		bool InstallLatencyHooks() noexcept;
+		[[nodiscard]] bool OnMainLoopThread() const noexcept;
 		[[nodiscard]] bool LatencyActive() const noexcept;
 		void EmitLatencyMarkers(
 			std::initializer_list<temporal::LatencyMarker> a_markers,
