@@ -525,7 +525,7 @@ namespace
 		if (!descriptor)
 			return error;
 		using cs::render::forward_draw::ForwardDrawCB;
-		const ABIField descriptorFields[]{ ABI(ForwardDrawCB, ExtraShaderDescriptor), ABI(ForwardDrawCB, PerShaderPad) };
+		const ABIField descriptorFields[]{ ABI(ForwardDrawCB, ExtraShaderDescriptor), ABI(ForwardDrawCB, EffectRadius), ABI(ForwardDrawCB, PerShaderPad) };
 		if (const auto mismatch = CheckConstantBuffer(descriptor.Get(), { "PerShader", cs::render::kForwardDrawSlot, sizeof(ForwardDrawCB), descriptorFields }); !mismatch.empty())
 			return mismatch;
 

@@ -33,8 +33,10 @@ namespace cs::render::forward_draw
 	struct alignas(16) ForwardDrawCB
 	{
 		std::uint32_t ExtraShaderDescriptor = 0;
-		std::uint32_t PerShaderPad[3]{};
+		float EffectRadius = 0.0f;
+		std::uint32_t PerShaderPad[2]{};
 	};
+	static_assert(sizeof(ForwardDrawCB) == 16);
 
 	inline constexpr std::array kTargets{ engine::ShaderInjectionTarget::kEffect, engine::ShaderInjectionTarget::kBsWater };
 
@@ -51,6 +53,7 @@ namespace cs::render::forward_draw
 	{
 		RE::BSRenderPass* pass = nullptr;
 		bool inWorld = false;
+		float effectRadius = 0.0f;
 	};
 
 	using Observer = void (*)(const Draw&);

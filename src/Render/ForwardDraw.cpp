@@ -9,6 +9,7 @@
 #include "Render/SubstrateSlots.h"
 #include "Utils/CSBuffer.h"
 
+#include "RE/B/BSGeometry.h"
 #include "RE/B/BSRenderPass.h"
 #include "RE/B/BSShaderAccumulator.h"
 #include "RE/B/BSShaderManager.h"
@@ -48,7 +49,8 @@ namespace cs::render::forward_draw
 		void SetupGeometry(RE::BSShader*, RE::BSRenderPass* a_pass) noexcept
 		{
 			auto* accumulator = RE::BSShaderManager::GetCurrentAccumulator();
-			t_draw = { a_pass, IsWorldAccumulator(accumulator) };
+			const auto* geometry = a_pass ? a_pass->geometry : nullptr;
+			t_draw = { a_pass, IsWorldAccumulator(accumulator), geometry ? geometry->worldBound.fRadius : 0.0f };
 			t_active = true;
 			for (const auto& subscription : g_subscriptions)
 				RunRenderCallback(subscription.owner, subscription.label, [&] { subscription.observer(t_draw); });
@@ -84,8 +86,11 @@ namespace cs::render::forward_draw
 		ID3D11Buffer* bound = nullptr;
 		RunRenderCallback(nullptr, "forward draw descriptor", [&] {
 			ForwardDrawCB next;
-			if (t_active && t_draw.inWorld)
-				next.ExtraShaderDescriptor |= kInWorld;
+			if (t_active) {
+				if (t_draw.inWorld)
+					next.ExtraShaderDescriptor |= kInWorld;
+				next.EffectRadius = t_draw.effectRadius;
+			}
 			bound = g_buffer.Update(next);
 		});
 		engine::BindInjectionConstantBuffers(a_context, kForwardDrawSlot, 1, &bound);

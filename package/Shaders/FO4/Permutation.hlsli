@@ -13,10 +13,8 @@ namespace Permutation
 	cbuffer PerShader : register(b8)
 	{
 		uint ExtraShaderDescriptor;
-		uint3 PerShaderPad;
+		float EffectRadius;
+		uint2 PerShaderPad;
 	};
-
-	// FO4: no effect radius carrier.
-	static const float EffectRadius = 0.0;
 }
 #endif
