@@ -12,17 +12,20 @@ struct ID3D11DeviceContext;
 
 namespace cs::render::profiling
 {
-	// Records the engine-owned device; query allocation waits for an enabled telemetry frame.
+	// Records the engine-owned device; query allocation waits for a KeepActive consumer.
 	void InitializeD3D11(
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context) noexcept;
 
 	// Marks the engine's completed deferred-composite frame. Generated D3D12
 	// presentation frames are intentionally outside this boundary.
-	void MarkEngineFrame(bool a_telemetryEnabled) noexcept;
+	void MarkEngineFrame() noexcept;
 
 	Profiler& GetProfiler() noexcept;
-	// Overlay consumer; GPU queries run while it or telemetry is enabled.
+	// Any thread. The single GPU-query gate: every consumer that reads timings calls this each
+	// frame it does; queries are allocated while a request is live and released once idle.
+	void KeepActive(std::uint32_t a_frames = 2) noexcept;
+	// Overlay consumer; gates per-shader draw timings only, not GPU queries.
 	void SetEnabled(bool a_enabled) noexcept;
 	bool BeginPass(std::string_view a_name);
 	// CS passes begun inside an engine pass pause it instead of being refused.

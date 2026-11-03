@@ -584,10 +584,12 @@ namespace cs::features
 		};
 		for (std::size_t i = 0; i < grid.size(); ++i)
 			_probeCounters.grid[i].store(grid[i], std::memory_order_relaxed);
+		float probeGpuMs = 0.0f;
 		for (const auto& result : cs::render::profiling::GetProfiler().GetResults()) {
 			if (result.valid && result.name == kProbeUpdatePass)
-				_probeCounters.gpuMs.store(result.gpuTimeMs, std::memory_order_relaxed);
+				probeGpuMs = result.gpuTimeMs;
 		}
+		_probeCounters.gpuMs.store(probeGpuMs, std::memory_order_relaxed);
 		CaptureLog->log(
 			a_level,
 			"summary enabled={} state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "

@@ -442,8 +442,11 @@ namespace cs::features
 	{
 		_vramUsed = a_used;
 		_vramBudget = a_budget;
-		render::profiling::SetEnabled(settings.ShowInOverlay || _testing);
-		if (!settings.ShowInOverlay && !_testing) {
+		const bool consuming = settings.ShowInOverlay || _testing;
+		render::profiling::SetEnabled(consuming);
+		if (consuming)
+			render::profiling::KeepActive();
+		if (!consuming) {
 			QueryPerformanceCounter(&_lastFrame);
 			_overlayFrequency = {};
 			_graphGate = {};

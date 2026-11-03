@@ -576,7 +576,9 @@ namespace cs::telemetry
 			return;
 		g_installed = true;
 		if (!cs::engine::RegisterPostDeferredComposite([] {
-				cs::render::profiling::MarkEngineFrame(pump::Enabled());
+				if (pump::Enabled())
+					cs::render::profiling::KeepActive();
+				cs::render::profiling::MarkEngineFrame();
 				pump::Tick();
 			})) {
 			g_compositeSamplingAvailable.store(false, std::memory_order_relaxed);

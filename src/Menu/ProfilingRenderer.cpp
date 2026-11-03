@@ -207,6 +207,7 @@ namespace cs
 
 	void ProfilingRenderer::RenderGraph()
 	{
+		render::profiling::KeepActive();
 		auto& profiler = render::profiling::GetProfiler();
 		const auto& results = profiler.GetResults();
 		bool cpuMode = (timingMode == TimingMode::CPU);
@@ -258,6 +259,7 @@ namespace cs
 
 	void ProfilingRenderer::RenderStatistics(bool showTable, bool showModeToggle)
 	{
+		render::profiling::KeepActive();
 		auto& profiler = render::profiling::GetProfiler();
 
 		bool cpuMode = (timingMode == TimingMode::CPU);
@@ -404,6 +406,7 @@ namespace cs
 
 	void ProfilingRenderer::RenderFeatureTimers(const std::string& featurePrefix)
 	{
+		render::profiling::KeepActive();
 		auto& profiler = render::profiling::GetProfiler();
 		const auto& results = profiler.GetResults();
 
@@ -529,6 +532,7 @@ namespace cs
 
 	bool ProfilingRenderer::HasFeatureTimers(const std::string& featurePrefix)
 	{
+		render::profiling::KeepActive();
 		const auto prefix = GetFeatureTimerPrefix(featurePrefix);
 		const auto& results = render::profiling::GetProfiler().GetResults();
 

@@ -24,6 +24,8 @@ namespace cs::features::remote_control
 		// The render thread writes the profiler; read it at the frame boundary.
 		Json Timings(const std::string& a_filter)
 		{
+			// A tool-driven window outlasts the overlay's short one; polls then see live passes.
+			render::profiling::KeepActive(3600);
 			auto& profiler = render::profiling::GetProfiler();
 			auto passes = Json::array();
 			for (const auto& pass : profiler.GetStatistics()) {
@@ -57,7 +59,7 @@ namespace cs::features::remote_control
 				{ "shaders", std::move(shaders) },
 			};
 			if (result["passes"].empty())
-				result["hint"] = "GPU timing runs only while telemetry or the Performance Overlay is enabled";
+				result["hint"] = "GPU timing wakes on this request; poll again for passes";
 			return result;
 		}
 

@@ -39,7 +39,6 @@ namespace cs::render::profiling
 			Profiler profiler;
 			bool initialized{};
 			bool enabled{};
-			bool queriesWanted{};
 			std::string activePass;
 			bool activeYields{};
 			std::string pausedPass;
@@ -73,7 +72,7 @@ namespace cs::render::profiling
 		annotation::SetProfilerCallbacks(BeginPass, EndPass);
 	}
 
-	void MarkEngineFrame(bool a_telemetryEnabled) noexcept
+	void MarkEngineFrame() noexcept
 	{
 #ifdef TRACY_SUPPORT
 		FrameMark;
@@ -91,15 +90,13 @@ namespace cs::render::profiling
 		state.activeYields = false;
 		state.pausedPass.clear();
 		state.profiler.EndFrame();
-		state.queriesWanted = a_telemetryEnabled || state.enabled;
-		if (state.queriesWanted && state.device && !state.initialized) {
+		const bool wanted = state.profiler.IsActive();
+		if (wanted && state.device && !state.initialized) {
 			// Allocate timestamp queries only on the render thread while a consumer needs them.
 			state.profiler.Initialize(state.device, state.context);
 			state.initialized = true;
 		}
-		if (state.queriesWanted && state.initialized) {
-			// queriesWanted is the consumer gate; keep the shared watch window open.
-			state.profiler.KeepActive();
+		if (wanted && state.initialized) {
 			state.profiler.BeginFrame();
 		} else if (state.initialized) {
 			state.profiler.Release();
@@ -124,6 +121,11 @@ namespace cs::render::profiling
 		return State().profiler;
 	}
 
+	void KeepActive(std::uint32_t a_frames) noexcept
+	{
+		State().profiler.KeepActive(a_frames);
+	}
+
 	void SetEnabled(bool a_enabled) noexcept
 	{
 		auto& state = State();
@@ -139,7 +141,7 @@ namespace cs::render::profiling
 	{
 		auto& state = State();
 		// FO4: annotation scopes can nest, but the shared profiler requires disjoint passes.
-		if (!state.queriesWanted || !state.initialized)
+		if (!state.initialized || !state.profiler.IsActive())
 			return false;
 		if (!state.activePass.empty()) {
 			if (!state.activeYields)
