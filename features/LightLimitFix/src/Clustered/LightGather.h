@@ -15,6 +15,8 @@
 namespace cs::features::light_limit_fix
 {
 	inline constexpr std::uint32_t kMaxLights = 1024;
+	// ClusterCullingCS stages every light in one thread group (16 x 16 x 4) of shared memory.
+	static_assert(kMaxLights <= 16 * 16 * 4);
 
 	// Sidecar record; flags lack kInitialised when the light is not authored.
 	using SidecarSnapshot = LightData (*)(RE::BSLight*, bool a_renderFade);

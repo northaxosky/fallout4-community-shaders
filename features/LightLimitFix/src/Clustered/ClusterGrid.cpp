@@ -98,7 +98,7 @@ namespace cs::features::light_limit_fix
 			context->CSSetConstantBuffers(0, 1, &constants);
 			context->CSSetUnorderedAccessViews(0, 1, &clusters, nullptr);
 			context->CSSetShader(_buildShader.get(), nullptr, 0);
-			context->Dispatch(clusterSize[0], clusterSize[1], clusterSize[2]);
+			context->Dispatch((clusterSize[0] * clusterSize[1] * clusterSize[2] + 63) / 64, 1, 1);
 			ID3D11UnorderedAccessView* none = nullptr;
 			context->CSSetUnorderedAccessViews(0, 1, &none, nullptr);
 		}
