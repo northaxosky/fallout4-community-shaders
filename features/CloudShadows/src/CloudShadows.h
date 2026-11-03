@@ -76,6 +76,7 @@ namespace cs::features
 
 		// Per cloud draw of the sky shader.
 		void BindSkyDraw(ID3D11DeviceContext* a_context);
+		void BindCubeDepth(ID3D11DeviceContext* a_context);
 		bool CaptureCloudDraw(ID3D11DeviceContext* a_context, bool a_skirt);
 		void UnbindExtraTarget(ID3D11DeviceContext* a_context);
 

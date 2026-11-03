@@ -286,11 +286,6 @@ namespace cs::features
 		if (!a_context || !cs::engine::ActiveShaderInjectionVariantHasDefine(cs::engine::ShaderInjectionTarget::kBsSky, "CLOUDS"))
 			return;
 		const bool inCube = cs::engine::GetSkyReflectionCubeCapture().has_value();
-		// The depth reject reads t17, so every cube cloud draw needs face depth.
-		if (inCube) {
-			if (auto* depth = cs::engine::GetDepthStencilDepthSRV(RE::BSGraphics::DepthStencilTargetID::kCubemapReflections))
-				cs::engine::OverrideInjectionFrameShaderResource(a_context, cloud_shadows_shader::kCloudDepthSlot, depth);
-		}
 		const bool capturing = IsHealthy() && IsEnabled() && _injectionsOperational.load(std::memory_order_acquire);
 		const auto* pass = cs::engine::GetCurrentSkyPass();
 		const bool skirt = capturing && inCube && pass && IsHorizonFill(pass->geometry);
@@ -298,9 +293,32 @@ namespace cs::features
 			_counters.horizonFillSkipped.fetch_add(1, std::memory_order_relaxed);
 		// The layers view shows the skirt; occlusion never takes it.
 		const bool showSkirt = skirt && _overlayMode.load(std::memory_order_acquire) == kModeLayers;
-		if (capturing && (!skirt || showSkirt) && CaptureCloudDraw(a_context, skirt))
+		if (!capturing || (skirt && !showSkirt) || !CaptureCloudDraw(a_context, skirt))
+			UnbindExtraTarget(a_context);
+		// The depth reject reads t17, so every cube cloud draw needs face depth.
+		if (inCube)
+			BindCubeDepth(a_context);
+	}
+
+	void CloudShadows::BindCubeDepth(ID3D11DeviceContext* a_context)
+	{
+		auto* depth = cs::engine::GetDepthStencilDepthSRV(RE::BSGraphics::DepthStencilTargetID::kCubemapReflections);
+		if (!depth)
 			return;
-		UnbindExtraTarget(a_context);
+		// D3D11 binds a null SRV while its resource is still the depth target, so detach it first.
+		ID3D11RenderTargetView* targets[kTargetSlots]{};
+		ID3D11DepthStencilView* view = nullptr;
+		a_context->OMGetRenderTargets(kTargetSlots, targets, &view);
+		if (view) {
+			cs::engine::CaptureShaderInjectionRenderTargets(a_context);
+			a_context->OMSetRenderTargets(kTargetSlots, targets, nullptr);
+			view->Release();
+		}
+		for (auto* target : targets) {
+			if (target)
+				target->Release();
+		}
+		cs::engine::OverrideInjectionFrameShaderResource(a_context, cloud_shadows_shader::kCloudDepthSlot, depth);
 	}
 
 	bool CloudShadows::CaptureCloudDraw(ID3D11DeviceContext* a_context, bool a_skirt)
