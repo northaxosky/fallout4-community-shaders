@@ -270,7 +270,7 @@ namespace cs::features
 		if (!cs::engine::RegisterSkyReflectionCubeConsumer(*this, "DynamicCubemaps", [this] { return IsEnabled() &&
 			                                                                                         _resourcesReady.load(std::memory_order_acquire) &&
 			                                                                                         _injectionsOperational.load(std::memory_order_acquire); }, [this] { return _engineCubeLod.load(std::memory_order_acquire); })) {
-			L->warn("Sky reflection cube unavailable; reflections capture the sky from the scene.");
+			L->warn("Sky reflection cube unavailable; reflections fall back to the sky-less environment capture.");
 		}
 
 		// FO4 draws the sky inside DrawWorld::Forward after the composite, so capture and publication follow it.
@@ -359,7 +359,6 @@ namespace cs::features
 			_updateCS = cs::util::RequireComputeShader("DynamicCubemaps/Update.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } });
 			_updateReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/UpdateReflections.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" } });
 			_updateFakeReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/UpdateFakeReflections.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "FAKEREFLECTIONS", "" } });
-			_updateSkyReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/UpdateSkyReflections.CS", kUpdatePath, { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" }, { "REFLECTIONS", "" }, { "FAKEREFLECTIONS", "" } });
 			_inferCS = cs::util::RequireComputeShader("DynamicCubemaps/Infer.CS", kInferPath);
 			_inferReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/InferReflections.CS", kInferPath, { { "REFLECTIONS", "" } });
 			_inferFakeReflectionsCS = cs::util::RequireComputeShader("DynamicCubemaps/InferFakeReflections.CS", kInferPath, { { "FAKEREFLECTIONS", "" } });
@@ -723,20 +722,16 @@ namespace cs::features
 	{
 		if (!a_reflections)
 			return _updateCS.get();
-		if (_fakeReflections.load(std::memory_order_relaxed))
-			return _updateFakeReflectionsCS.get();
-		// Without a valid sky cube, scene sky persists via the fake variant.
-		return _engineReflectionCube.load(std::memory_order_relaxed) ?
-		           _updateReflectionsCS.get() :
-		           _updateSkyReflectionsCS.get();
+		return _fakeReflections.load(std::memory_order_relaxed) ?
+		           _updateFakeReflectionsCS.get() :
+		           _updateReflectionsCS.get();
 	}
 
 	ID3D11ComputeShader* DynamicCubemaps::InferShader(bool a_reflections) const
 	{
 		if (!a_reflections)
 			return _inferCS.get();
-		return _fakeReflections.load(std::memory_order_relaxed) ||
-		               !_engineReflectionCube.load(std::memory_order_relaxed) ?
+		return _fakeReflections.load(std::memory_order_relaxed) ?
 		           _inferFakeReflectionsCS.get() :
 		           _inferReflectionsCS.get();
 	}
@@ -750,9 +745,9 @@ namespace cs::features
 	{
 		const bool engineCube = cs::engine::GetSkyReflectionCubeSRV() != nullptr;
 		const bool interior = cs::engine::IsInterior();
-		// FO4 exterior water always renders its REFLECTIONS technique, standing in for Skyrim's reflections prepass.
+		// FO4: a fresh host cube stands in for Skyrim's reflections prepass.
 		const bool active = engineCube || !interior;
-		const bool fake = active && cs::engine::IsSkyHidden();
+		const bool fake = active && (!engineCube || cs::engine::IsSkyHidden());
 		_engineReflectionCube.store(engineCube, std::memory_order_relaxed);
 		_activeReflections.store(active, std::memory_order_release);
 		_fakeReflections.store(fake, std::memory_order_release);
@@ -1206,10 +1201,9 @@ namespace cs::features
 					_captureSourceFormat.load(std::memory_order_relaxed)))
 			.Field(
 				"reflection_mode",
-				!active                                               ? "base_only" :
-				fake                                                  ? "fake" :
-				_engineReflectionCube.load(std::memory_order_relaxed) ? "active" :
-																		"scene_sky")
+				!active ? "base_only" :
+				fake    ? "fake" :
+						  "active")
 			.Field(
 				"engine_reflection_cube",
 				_engineReflectionCube.load(std::memory_order_relaxed))

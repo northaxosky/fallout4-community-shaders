@@ -52,7 +52,7 @@ namespace
 
 			{ "FO4/DynamicCubemaps/PrepareCaptureCS.hlsl", "cs_5_0", {}, { Toggle("REFLECTIONS") } },
 			{ "DynamicCubemaps/DetectCaptureLightingCS.hlsl", "cs_5_0", { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } } },
-			{ "DynamicCubemaps/UpdateCubemapCS.hlsl", "cs_5_0", { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, { Toggle("REFLECTIONS"), Toggle("FAKEREFLECTIONS") } },
+			{ "DynamicCubemaps/UpdateCubemapCS.hlsl", "cs_5_0", { { "DYNAMIC_CUBEMAPS_PREPARED_CAPTURE", "1" } }, { { {}, { { "REFLECTIONS", "" } }, { { "FAKEREFLECTIONS", "" } } } } },
 			{ "DynamicCubemaps/InferCubemapCS.hlsl", "cs_5_0", {}, { { {}, { { "REFLECTIONS", "" } }, { { "FAKEREFLECTIONS", "" } } } } },
 			{ "DynamicCubemaps/SpecularIrradianceCS.hlsl" },
 			{ "DynamicCubemaps/BC6HEncodeCS.hlsl" },
