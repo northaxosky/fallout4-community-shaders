@@ -68,6 +68,16 @@ namespace cs::features
 		       slReflexSetOptions && slReflexSleep && slPCLSetMarker;
 	}
 
+	bool Streamline::AreMarkersAvailable() const noexcept
+	{
+		if (!_reflexLowLatencyAvailable.load(std::memory_order_relaxed))
+			return false;
+			
+		std::scoped_lock lock(_latencyMutex);
+		const auto options = ResolveLatencyOptions();
+		return options.mode != LatencyMode::kOff && options.useMarkers;
+	}
+
 	LatencyOptions Streamline::ResolveLatencyOptions() const noexcept
 	{
 		auto options = _latencyRequested;
@@ -165,6 +175,8 @@ namespace cs::features
 		if (!IsLatencyAvailable()) {
 			return { .code = ProviderResultCode::kUnavailable };
 		}
+		if (!AreMarkersAvailable())
+			return ProviderResult::Ok();
 		if (!EnsureFrameToken(a_frame)) {
 			++_latencyMarkerFailures;
 			return Failure(sl::Result::eErrorInvalidState, "PCL marker has no frame token.");
