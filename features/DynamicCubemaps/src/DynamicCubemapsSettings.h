@@ -34,6 +34,6 @@ namespace cs::features::dynamic_cubemaps
 			settings::Field{ "enabled_ssr", "Enable all screen-space reflections, including water.", &Settings::enabledSSR },
 			settings::Field{ "material_reflections", "Blend from authored material cubemaps to dynamic reflections on environment-mapped surfaces.", &Settings::materialReflections, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "engine_cube_lod", "Draw LOD land, objects and trees into the engine reflection cube that far water blends toward.", &Settings::engineCubeLod },
-			settings::ChoiceField{ "engine_cube_size", "Engine reflection cube face size in texels; FO4 object LOD needs 1024 or more to stay stable.", &Settings::engineCubeSize, kEngineCubeSizes, settings::ApplyTiming::kNextLaunch } }
+			settings::ChoiceField{ "engine_cube_size", "Engine reflection cube render size in texels, filtered to 256 for reflections; FO4 object LOD needs 1024 or more to stay stable.", &Settings::engineCubeSize, kEngineCubeSizes, settings::ApplyTiming::kNextLaunch } }
 	};
 }

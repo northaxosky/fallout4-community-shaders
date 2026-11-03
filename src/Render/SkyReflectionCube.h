@@ -29,10 +29,10 @@ namespace cs::engine
 		std::function<bool()> a_wantsCube,
 		std::function<bool()> a_wantsLod = {});
 
-	// Render thread. Null unless all six faces are fresh.
+	// Render thread. Null unless all six faces are fresh; at most 256² a face.
 	[[nodiscard]] ID3D11ShaderResourceView* GetSkyReflectionCubeSRV() noexcept;
 
-	// Render thread. The engine cube texture, to mirror its shape.
+	// Render thread. The engine cube render target, at the configured size.
 	[[nodiscard]] ID3D11Texture2D* GetSkyReflectionCubeTexture() noexcept;
 
 	struct SkyReflectionCubeCapture

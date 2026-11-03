@@ -9,6 +9,7 @@
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/RuntimeCallback.h"
+#include "Utils/CSBuffer.h"
 #include "World/Sky.h"
 #include "World/Weather.h"
 
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -59,6 +61,8 @@ namespace cs::engine
 
 		// Upstream uses 256; FO4 object LOD is sub-texel there.
 		std::atomic<std::uint32_t> g_cubeSize{ 256 };
+		// Upstream's engine cube size; larger renders are box-filtered to it.
+		constexpr std::uint32_t kPublishedSize = 256;
 
 		// The only cube creation, inside BSShaderRenderTargets::Create.
 		constexpr CallSiteAnchor kCubeTargetCreate{
@@ -248,6 +252,87 @@ namespace cs::engine
 			auto& cube = rendererData->cubeMapRenderTargets[platformID];
 			return cube.srView ? &cube : nullptr;
 		}
+
+		// The engine cube box-filtered to kPublishedSize, the size consumers read.
+		class PublishedCube
+		{
+		public:
+			void Update(ID3D11Texture2D* a_engine, std::uint32_t a_faces)
+			{
+				auto* context = GetImmediateContext();
+				if (!a_engine || !context || !a_faces || !Ensure(a_engine))
+					return;
+				if (!_level)
+					return;
+				const auto chainMips = _level + 1;
+				for (std::uint32_t face = 0; face < 6; ++face) {
+					if (a_faces & (1u << face))
+						context->CopySubresourceRegion(_chain->resource.get(), D3D11CalcSubresource(0, face, chainMips), 0, 0, 0, a_engine, D3D11CalcSubresource(0, face, 1), nullptr);
+				}
+				context->GenerateMips(_chain->srv.get());
+				for (std::uint32_t face = 0; face < 6; ++face) {
+					if (a_faces & (1u << face))
+						context->CopySubresourceRegion(_published->resource.get(), D3D11CalcSubresource(0, face, 1), 0, 0, 0, _chain->resource.get(), D3D11CalcSubresource(_level, face, chainMips), nullptr);
+				}
+			}
+
+			// Null when the engine cube is already the published size.
+			[[nodiscard]] ID3D11ShaderResourceView* SRV() const noexcept { return _level ? _published->srv.get() : nullptr; }
+
+		private:
+			bool Ensure(ID3D11Texture2D* a_engine)
+			{
+				if (_engine == a_engine)
+					return true;
+				D3D11_TEXTURE2D_DESC engine{};
+				a_engine->GetDesc(&engine);
+				if (engine.Width != engine.Height || !std::has_single_bit(engine.Width))
+					return false;
+				_level = engine.Width > kPublishedSize ? static_cast<std::uint32_t>(std::countr_zero(engine.Width / kPublishedSize)) : 0;
+				_chain.reset();
+				_published.reset();
+				_engine = a_engine;
+				if (!_level)
+					return true;
+
+				// Each 2x2 mip step averages, so level n is a 2^n box filter.
+				D3D11_TEXTURE2D_DESC desc{};
+				desc.Width = engine.Width;
+				desc.Height = engine.Height;
+				desc.MipLevels = _level + 1;
+				desc.ArraySize = 6;
+				desc.Format = engine.Format;
+				desc.SampleDesc.Count = 1;
+				desc.Usage = D3D11_USAGE_DEFAULT;
+				desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+				desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS | D3D11_RESOURCE_MISC_TEXTURECUBE;
+				_chain = std::make_unique<cs::buffer::Texture2D>(desc);
+				D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+				srvDesc.Format = engine.Format;
+				srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+				srvDesc.TextureCube.MipLevels = desc.MipLevels;
+				_chain->CreateSRV(srvDesc);
+
+				desc.Width = kPublishedSize;
+				desc.Height = kPublishedSize;
+				desc.MipLevels = 1;
+				desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+				desc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+				_published = std::make_unique<cs::buffer::Texture2D>(desc);
+				srvDesc.TextureCube.MipLevels = 1;
+				_published->CreateSRV(srvDesc);
+
+				_chain->SetName("SkyReflectionCube/FilterChain.Texture", "SkyReflectionCube/FilterChain.SRV");
+				_published->SetName("SkyReflectionCube/Published.Texture", "SkyReflectionCube/Published.SRV");
+				return true;
+			}
+
+			const ID3D11Texture2D* _engine = nullptr;
+			std::uint32_t _level = 0;
+			std::unique_ptr<cs::buffer::Texture2D> _chain;
+			std::unique_ptr<cs::buffer::Texture2D> _published;
+		};
+		PublishedCube g_published;
 
 		// Mirrors Renderer::SetClearColor and RestorePreviousClearColor.
 		class ScopedClearColor
@@ -561,8 +646,8 @@ namespace cs::engine
 			g_counters.faces.fetch_add(1, std::memory_order_relaxed);
 		}
 
-		// One polar face (sky only) and at most one side face per frame.
-		void RenderFaces(
+		// One polar face (sky only) and at most one side face per frame; returns the faces drawn.
+		[[nodiscard]] std::uint32_t RenderFaces(
 			CubeCamera& a_camera,
 			RE::BSMultiBoundNode& a_skyRoot,
 			RE::BSGraphics::RenderTargetManager& a_manager,
@@ -575,10 +660,15 @@ namespace cs::engine
 			const ScopedCubeModeExit cubeMode(a_manager);
 			const bool lod = AnyConsumerWantsLod();
 			QueueLodRefresh(a_eye, lod);
-			ClickFace(a_camera, a_skyRoot, kPolarFirstFace + g_polarNext, false);
+			const auto polar = kPolarFirstFace + g_polarNext;
+			ClickFace(a_camera, a_skyRoot, polar, false);
 			g_polarNext ^= 1;
-			if (const auto side = NextSideFace())
+			std::uint32_t faces = 1u << polar;
+			if (const auto side = NextSideFace()) {
 				ClickFace(a_camera, a_skyRoot, *side, lod);
+				faces |= 1u << *side;
+			}
+			return faces;
 		}
 
 		void Render()
@@ -658,7 +748,8 @@ namespace cs::engine
 				unscaled.emplace();
 			UnbindAuxiliaryTargets(*manager, context->shadowState);
 			SetupCamera(**g_camera, eye, worldCamera->viewFrustum.far);
-			RenderFaces(**g_camera, *sky->root, *manager, context->shadowState, clear, eye);
+			const auto faces = RenderFaces(**g_camera, *sky->root, *manager, context->shadowState, clear, eye);
+			g_published.Update(reinterpret_cast<ID3D11Texture2D*>(GetEngineCube()->texture), faces);
 
 			g_counters.renders.fetch_add(1, std::memory_order_relaxed);
 			g_lastRenderFrame.store(state->frameCount, std::memory_order_relaxed);
@@ -755,7 +846,11 @@ namespace cs::engine
 		if (!state || !IsCurrentlyValid(state->frameCount))
 			return nullptr;
 		const auto* cube = GetEngineCube();
-		return cube ? reinterpret_cast<ID3D11ShaderResourceView*>(cube->srView) : nullptr;
+		if (!cube)
+			return nullptr;
+		if (auto* published = g_published.SRV())
+			return published;
+		return reinterpret_cast<ID3D11ShaderResourceView*>(cube->srView);
 	}
 
 	SkyReflectionCubeStatus GetSkyReflectionCubeStatus() noexcept

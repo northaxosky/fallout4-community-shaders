@@ -153,7 +153,7 @@ namespace cs::features
 				.kind = FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{
 				.id = "engine_cube",
-				.label = "Engine reflection cube (raw)",
+				.label = "Engine reflection cube",
 				.kind = FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{
 				.id = "capture_input",
