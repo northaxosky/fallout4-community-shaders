@@ -6,12 +6,6 @@ namespace cs::render
 {
 	using namespace renderer_detail;
 
-	namespace
-	{
-		// Not in CommonLibF4 yet; OG, NG/AE per bethesda-re render-targets facts.
-		constexpr REL::VariantID kWindowSizeChanged{ 212827, 2276824 };
-	}
-
 	void TemporalRenderer::InstallTemporalHooks()
 	{
 		using namespace upscaling_anchors;
@@ -55,7 +49,7 @@ namespace cs::render
 		stl::detour_thunk<LensFlare_RenderLensFlare>(RE::ID::BSImagespaceShaderLensFlare::RenderLensFlare);
 		stl::detour_thunk<BSImageSpace_Init_FXAA>(RE::ID::ImageSpaceManager::InitEffects);
 		// The create callback runs before WindowSizeChanged repopulates RT0.
-		stl::detour_thunk<Renderer_WindowSizeChanged>(kWindowSizeChanged);
+		stl::detour_thunk<Renderer_WindowSizeChanged>(RE::ID::BSGraphics::Renderer::WindowSizeChanged);
 		// ResetWindow can run without the render-target create callback.
 		stl::detour_thunk<Renderer_ResetWindow>(RE::ID::BSGraphics::Renderer::ResetWindow);
 		// Resource setup follows creation of the engine render targets.
