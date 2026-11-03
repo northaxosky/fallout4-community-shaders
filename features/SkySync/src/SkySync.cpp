@@ -337,8 +337,10 @@ namespace cs::features
 		_active = false;
 		_currentDim = 1.0f;
 
-		if (!IsEnabled())
+		if (!IsEnabled()) {
+			ResetSkyRotation(a_sky);
 			return std::exchange(_immediateTransitionReady, false);
+		}
 
 		if (!a_sky)
 			return false;
@@ -563,8 +565,26 @@ namespace cs::features
 			return;
 
 		_currentSkyRotation = rotation;
-		const float cosine = std::cos(-rotation);
-		const float sine = std::sin(-rotation);
+		_skyRotationApplied = true;
+		WriteSkyRotation(a_sky, rotation);
+	}
+
+	void SkySync::ResetSkyRotation(const RE::Sky* a_sky)
+	{
+		// Clear the cache so re-enabling reapplies the cell's north rotation
+		_currentSkyRotation = kNoSkyRotation;
+		_currentCell = nullptr;
+		if (!_skyRotationApplied || !a_sky || !a_sky->root)
+			return;
+
+		WriteSkyRotation(*a_sky, 0.0f);
+		_skyRotationApplied = false;
+	}
+
+	void SkySync::WriteSkyRotation(const RE::Sky& a_sky, float a_rotation)
+	{
+		const float cosine = std::cos(-a_rotation);
+		const float sine = std::sin(-a_rotation);
 		// FO4: rotations are stored transposed (vectors map as local * rotation)
 		a_sky.root->local.rotate = RE::NiMatrix3{
 			cosine, -sine, 0.0f, 0.0f,

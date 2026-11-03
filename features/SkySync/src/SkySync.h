@@ -131,6 +131,7 @@ namespace cs::features
 		bool _active = false;                           // the last Update steered the light
 		static constexpr float kNoSkyRotation = FLT_MAX;
 		float _currentSkyRotation = kNoSkyRotation;
+		bool _skyRotationApplied = false;  // survives the game-load cache reset until the root is restored
 		float _lastGameHour = -1.0f;
 		bool _immediateTransitionReady = false;
 
@@ -184,6 +185,8 @@ namespace cs::features
 		RE::NiPoint3 GetSunDirectionAtHour(const engine::climate::Timing& a_timing, float a_hour) const;
 		float GetSunAngle() const;
 		void SetSkyRotation(const RE::Sky& a_sky, RE::TESObjectCELL* a_cell);
+		void ResetSkyRotation(const RE::Sky* a_sky);
+		static void WriteSkyRotation(const RE::Sky& a_sky, float a_rotation);
 		// Whether the editor ID is in the disabled list.
 		bool IsWorldspaceListed(const RE::TESWorldSpace* a_worldspace) const;
 		// Recomputes the cached flag; the Locked form needs _worldspaceMutex held.

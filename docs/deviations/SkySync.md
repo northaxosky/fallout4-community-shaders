@@ -10,7 +10,3 @@
 | N/A | Default disabled worldspaces: Blackreach, Alftand, Sovngarde, Soul Cairn, Boneyard, Apocrypha | Empty list | No FO4 worldspace keeps one light around the clock |
 | N/A | `LinearLighting` sunlight color path | Omitted | Upstream never assigns its colors; FO4 sunlight is already linear |
 | Pending | Celestial direction and moon-light caster queries, moon night weights | Not exposed | Their consumers (Effects11 grading, shared lighting moon colors) are not ported |
-
-## Upstream bugs
-
-- `SkySync::Update`: disabling the feature leaves the sky root rotated by the last cell's north rotation.
