@@ -100,7 +100,7 @@ namespace cs::features
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
 		std::optional<cs::engine::PrepassExtraTargetId> _profileTarget;
 		std::optional<ConsumerCB> _consumerData;
-		winrt::com_ptr<ID3D11ComputeShader> _prepare, _extract, _horizontal, _vertical, _burley;
+		winrt::com_ptr<ID3D11ComputeShader> _prepare, _extract, _extractBurley, _horizontal, _vertical, _burley;
 		std::optional<NativeSnapshot> _native;
 		std::atomic_bool _resourcesReady{ false }, _failed{ false };
 		std::atomic_bool _unsupported{ false }, _produced{ false };

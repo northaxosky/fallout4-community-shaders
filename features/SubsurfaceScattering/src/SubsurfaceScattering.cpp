@@ -108,10 +108,11 @@ namespace cs::features
 		constexpr auto separable = L"Data\\Shaders\\SubsurfaceScattering\\SeparableSSSCS.hlsl";
 		_prepare = cs::util::CompileComputeShader("SubsurfaceScattering/Prepare.CS", L"Data\\Shaders\\FO4\\SubsurfaceScattering\\PrepareCS.hlsl");
 		_extract = cs::util::CompileComputeShader("SubsurfaceScattering/DiffuseExtraction.CS", extract);
+		_extractBurley = cs::util::CompileComputeShader("SubsurfaceScattering/DiffuseExtractionBurley.CS", extract, { { "BURLEY", "" } });
 		_horizontal = cs::util::CompileComputeShader("SubsurfaceScattering/HorizontalBlur.CS", separable, { { "HORIZONTAL", "" } });
 		_vertical = cs::util::CompileComputeShader("SubsurfaceScattering/VerticalBlur.CS", separable);
 		_burley = cs::util::CompileComputeShader("SubsurfaceScattering/Burley.CS", separable, { { "BURLEY", "" } });
-		const bool ready = static_cast<bool>(_prepare) && static_cast<bool>(_extract) && static_cast<bool>(_horizontal) && static_cast<bool>(_vertical) && static_cast<bool>(_burley);
+		const bool ready = static_cast<bool>(_prepare) && static_cast<bool>(_extract) && static_cast<bool>(_extractBurley) && static_cast<bool>(_horizontal) && static_cast<bool>(_vertical) && static_cast<bool>(_burley);
 		return ready;
 	}
 
@@ -273,7 +274,7 @@ namespace cs::features
 		auto* context = cs::engine::GetImmediateContext();
 		auto* manager = cs::engine::GetRenderTargetManager();
 		if (!CanRun() || !context || !manager || !_consumer ||
-			!_prepare || !_extract || !_horizontal || !_vertical || !_burley)
+			!_prepare || !_extract || !_extractBurley || !_horizontal || !_vertical || !_burley)
 			return;
 		// Upstream dispatches only on frames that drew skin.
 		if (!SkinDrawnThisFrame()) {
@@ -318,9 +319,10 @@ namespace cs::features
 			};
 			pass.Run(_prepare.get(), { normals, material, albedo, rawDepth, profile },
 				{ t.mask->uav.get(), t.normal->uav.get(), t.albedo->uav.get() }, width, height, 8, "SubsurfaceScattering::Prepare");
-			pass.Run(_extract.get(), { color, nullptr, nullptr, t.albedo->srv.get() },
+			const bool separable = _settings.ssMode == sss::kSeparable;
+			pass.Run(separable ? _extract.get() : _extractBurley.get(), { color, nullptr, separable ? nullptr : t.mask->srv.get(), t.albedo->srv.get() },
 				{ t.diffuseNoAlbedo->uav.get() }, width, height, 8, "SubsurfaceScattering::DiffuseExtraction");
-			if (_settings.ssMode == sss::kSeparable) {
+			if (separable) {
 				scatter(_horizontal.get(), t.diffuseNoAlbedo->srv.get(), t.horizontal->uav.get(), "SubsurfaceScattering::HorizontalBlur");
 				scatter(_vertical.get(), t.horizontal->srv.get(), colorUAV, "SubsurfaceScattering::VerticalBlur");
 			} else {

@@ -75,7 +75,7 @@ namespace
 			{ "ScreenSpaceGI/upsample.cs.hlsl", "cs_5_0", {}, kScreenSpaceGIAxes },
 
 			{ "FO4/SubsurfaceScattering/PrepareCS.hlsl" },
-			{ "SubsurfaceScattering/DiffuseExtractionCS.hlsl" },
+			{ "SubsurfaceScattering/DiffuseExtractionCS.hlsl", "cs_5_0", {}, { Toggle("BURLEY") } },
 			{ "SubsurfaceScattering/SeparableSSSCS.hlsl", "cs_5_0", {}, kSubsurfaceScatteringAxes },
 
 			// The shader's sample count is a scaled runtime value; compile its bounds.
