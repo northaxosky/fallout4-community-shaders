@@ -20,6 +20,14 @@
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
 
+// SHADOW_ONLY multiplies the lit sun; light-wide terms belong to the main pass.
+#ifdef SHADOW_ONLY
+#	define FO4DirectionalScreenSpaceShadow SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
+#	define GetMultFromViewPosition SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
+#	define GetParallaxShadow SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
+#	define GetCausticsMultFromViewPosition SHADOW_ONLY_multiplies_the_lit_sun_so_light_wide_terms_belong_to_the_main_pass
+#endif
+
 #if defined(OG)
 // OG separates sampling scale from clip reconstruction because cb2[0].zw is unused.
 #	define FO4_LIGHT_UV4 float4(input.position.xy* DynamicResolutionParam.xy* VPOSOffset_row0.xy, input.position.xy* VPOSOffset_row0.xy)
@@ -5314,32 +5322,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 			float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
-#	if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
-#	endif
-#	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
-			result *= WorldShadow::GetMultFromViewPosition(posView);
-#	endif
-#	if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
-			result *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
-#	endif
-#	ifdef WATER_EFFECTS
-			float shadowAlpha = result.z;
-#	endif
-#	if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			result *= WaterEffects::GetCausticsMultFromViewPosition(
-				posView,
-				ViewToWorld_row0,
-				ViewToWorld_row1,
-				ViewToWorld_row2,
-				PosAdjust);
-#	endif
-
-#	ifdef WATER_EFFECTS
-			output.diffuse = float4(result.xyz, shadowAlpha);
-#	else
-	output.diffuse = result.zzzz;
-#	endif
+			output.diffuse = result.zzzz;
 			output.specular = float4(result.xyz, 1.0);
 			return output;
 		}
@@ -5604,58 +5587,11 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	ifndef AMBIENT
 			float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
-#		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-			result *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
-#		endif
-#		if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
-			result *= WorldShadow::GetMultFromViewPosition(posView);
-#		endif
-#		if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
-			result *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
-#		endif
-#		ifdef WATER_EFFECTS
-			float shadowAlpha = result.z;
-#		endif
-#		if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-			result *= WaterEffects::GetCausticsMultFromViewPosition(
-				posView,
-				ViewToWorld_row0,
-				ViewToWorld_row1,
-				ViewToWorld_row2,
-				PosAdjust);
-#		endif
-
-#		ifdef WATER_EFFECTS
-			output.diffuse = float4(result.xyz, shadowAlpha);
-#		else
-		output.diffuse = result.zzzz;
-#		endif
+			output.diffuse = result.zzzz;
 			output.specular = float4(result.xyz, 1.0);
 #	else
 	float shadowBlend = fadeFactor * (shadow - 1.0);
-#		ifdef WATER_EFFECTS
-	float3 splitShadow = (shadowBlend + 1.0).xxx;
-#		else
 	float splitShadow = shadowBlend + 1.0;
-#		endif
-
-#		if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
-	splitShadow *= FO4DirectionalScreenSpaceShadow(input.position.xyz, depth);
-#		endif
-#		if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
-	splitShadow *= WorldShadow::GetMultFromViewPosition(posView);
-#		endif
-#		if defined(DIRECTIONAL) && defined(EXTENDED_MATERIALS)
-	splitShadow *= ExtendedMaterials::GetParallaxShadow(input.position.xy);
-#		endif
-#		if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
-	splitShadow *= WaterEffects::GetCausticsMultFromViewPosition(
-		posView,
-		ViewToWorld_row0,
-		ViewToWorld_row1,
-		ViewToWorld_row2,
-		PosAdjust);
-#		endif
 
 	float3 ambientSpecular;
 	[branch] if (isMaterial1)
@@ -5676,13 +5612,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		ambientSpecular = FO4Ambient::Specular((fresnel * pow(ambientReflected, 2.2)) * material.y);
 	}
 
-#		ifdef WATER_EFFECTS
-	output.specular = float4(splitShadow, 1.0) + float4(ambientSpecular, 0.0);
-	output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow, shadowBlend);
-#		else
 	output.specular = float4(splitShadow.xxx, 1.0) + float4(ambientSpecular, 0.0);
 	output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow.xxx, shadowBlend);
-#		endif
 #	endif
 			return output;
 		}

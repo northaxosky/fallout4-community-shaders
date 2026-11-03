@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Sun lighting: fixed a darker square around the player in third person; cloud, terrain and contact shadows were applied twice inside the focused shadow pass.
+
 ## 0.5.0
 
 - Shader ownership: a feature whose shader target is disabled (`enable_shaders` or `[shader_ownership]`) now fails shader-injection validation instead of running without effect; Screen Space GI, Subsurface Scattering and Screen Space Shadows are now validated too.
