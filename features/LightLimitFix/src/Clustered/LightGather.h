@@ -15,7 +15,7 @@
 namespace cs::features::light_limit_fix
 {
 	inline constexpr std::uint32_t kMaxLights = 1024;
-	// ClusterCullingCS stages every light in one thread group (16 x 16 x 4) of shared memory.
+	// ClusterCullingCS stages every light in one 16 x 16 x 4 thread group.
 	static_assert(kMaxLights <= 16 * 16 * 4);
 
 	// Sidecar record; flags lack kInitialised when the light is not authored.

@@ -24,7 +24,7 @@ namespace cs::features::remote_control
 		// The render thread writes the profiler; read it at the frame boundary.
 		Json Timings(const std::string& a_filter)
 		{
-			// A tool-driven window outlasts the overlay's short one; polls then see live passes.
+			// A tool window outlasts the overlay's, so later polls see live passes.
 			render::profiling::KeepActive(3600);
 			auto& profiler = render::profiling::GetProfiler();
 			auto passes = Json::array();

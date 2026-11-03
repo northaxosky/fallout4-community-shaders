@@ -407,7 +407,7 @@ namespace cs::features
 	{
 		if (_frameMs <= 0.0f)
 			return;
-		// Older frames fade by elapsed time, not frame count; the sums' ratio stays frames / time.
+		// Decay by elapsed time, not frame count; the sums' ratio stays frames / time.
 		const double timeConstantMs = std::max(settings.UpdateInterval, Settings::kMinSmoothingSeconds) * 1000.0;
 		const double decay = std::exp(-_frameMs / timeConstantMs);
 		_smoothTimeSumMs = _smoothTimeSumMs * decay + _frameMs;

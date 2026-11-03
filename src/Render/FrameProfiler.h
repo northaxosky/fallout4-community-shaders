@@ -12,7 +12,7 @@ struct ID3D11DeviceContext;
 
 namespace cs::render::profiling
 {
-	// Records the engine-owned device; query allocation waits for a KeepActive consumer.
+	// Records the engine device; queries allocate once a consumer calls KeepActive.
 	void InitializeD3D11(
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context) noexcept;
@@ -22,8 +22,7 @@ namespace cs::render::profiling
 	void MarkEngineFrame() noexcept;
 
 	Profiler& GetProfiler() noexcept;
-	// Any thread. The single GPU-query gate: every consumer that reads timings calls this each
-	// frame it does; queries are allocated while a request is live and released once idle.
+	// Any thread; the one GPU-query gate. Call each frame timings are read.
 	void KeepActive(std::uint32_t a_frames = 2) noexcept;
 	// Overlay consumer; gates per-shader draw timings only, not GPU queries.
 	void SetEnabled(bool a_enabled) noexcept;
