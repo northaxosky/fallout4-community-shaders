@@ -109,10 +109,6 @@ namespace FO4EffectLighting
 		float3 viewPosition = FO4Forward::ViewPosition(screenPosition);
 		float3 worldPosition = FrameBuffer::ViewToWorld(viewPosition);
 
-		float3 dirColor;
-		float3 ambientColor;
-		ShadowSampling::ExtractLighting(color, dirColor, ambientColor);
-
 		static const uint sampleCount = 8;
 		static const float rcpSampleCount = 1.0 / float(sampleCount);
 
@@ -143,9 +139,10 @@ namespace FO4EffectLighting
 			shadow *= rcpSampleCount;
 		}
 
-		dirColor *= shadow;
-
-		return dirColor + ambientColor;
+		// FO4: no shadowVariance output or EXP_HEIGHT_FOG attenuation; neither exists.
+		float3 dirLight = ShadowSampling::GetDirectionalLighting();
+		float3 sceneLight = ShadowSampling::GetSceneLightingColor();
+		return color * (1.0 - saturate(dirLight * (1.0 - shadow) / max(sceneLight, EPSILON_DIVISION)));
 	}
 #	endif
 }
