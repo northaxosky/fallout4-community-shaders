@@ -142,7 +142,7 @@ namespace cs::shader_cache
 		if (!g_debugCompile.load(std::memory_order_relaxed))
 			return;
 		constexpr std::uint32_t optimizationMask = D3DCOMPILE_OPTIMIZATION_LEVEL0 | D3DCOMPILE_OPTIMIZATION_LEVEL2 | D3DCOMPILE_OPTIMIZATION_LEVEL3;
-		a_recipe.flags1 = (a_recipe.flags1 & ~optimizationMask) | D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+		a_recipe.flags1 = (a_recipe.flags1 & ~optimizationMask) | D3DCOMPILE_DEBUG;
 		a_recipe.defines.emplace_back("D3DCOMPILE_SKIP_OPTIMIZATION", "");
 		a_recipe.defines.emplace_back("D3DCOMPILE_DEBUG", "");
 	}

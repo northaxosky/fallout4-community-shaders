@@ -33,7 +33,7 @@ namespace cs::shader_cache
 
 	// RenderDoc sets this at Load, before any compile; recipes built afterward keep debug info.
 	void SetDebugCompile(bool a_enabled) noexcept;
-	// Swaps the optimized flags for debug ones. Flags and defines are digested, so caches stay apart.
+	// Swaps the optimization level for debug info. Flags and defines are digested, so caches stay apart.
 	void ApplyDebugCompile(ShaderRecipe& a_recipe);
 
 	const char* DescribeStage(ShaderCacheStage a_stage) noexcept;
