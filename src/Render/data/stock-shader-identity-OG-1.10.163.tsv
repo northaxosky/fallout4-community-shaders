@@ -1,4 +1,4 @@
-# export_sha256=a903ad985daedd088e1e65acc8b56cc4fd459229f0548218cc275b542440f484 runtime=OG-1.10.163 routes=3932 exact=3699 canonical=0 unproven=233 rows=1543 rows_exact=1543 rows_canonical=0 rows_unproven=0 rows_unnamed=0 excluded_unhooked=138 excluded_inherited=2251 compiler_sha256=0bea1620dd82f5e6be1650fbe84ce819ba9f32f4148308cf1e68c4d825d74937
+# export_sha256=a903ad985daedd088e1e65acc8b56cc4fd459229f0548218cc275b542440f484 runtime=OG-1.10.163 routes=3932 exact=3699 canonical=0 unproven=233 rows=1576 rows_exact=1576 rows_canonical=0 rows_unproven=0 rows_unnamed=0 excluded_unhooked=138 excluded_inherited=2251 compiler_sha256=0bea1620dd82f5e6be1650fbe84ce819ba9f32f4148308cf1e68c4d825d74937
 bsdf_composite	pixel	0x00000008	0	900f62348ec133fd6384624e68fffb28b3939117	3499	"DFComposite"	""	""	0
 bsdf_composite	pixel	0x00000020	0	d521d61a4552e9904eca6c80a8d01028c5b930e4	3450	"DFComposite"	""	""	0
 bsdf_composite	pixel	0x00000021	0	a174392600dcb48e9197776f8c127382b02566ec	3455	"DFComposite"	""	""	0
@@ -1542,3 +1542,36 @@ df_tiled_lighting	compute	0x00000010	0	831537d43ed8c03e1ac44b1bc61b908737fb77a6	
 df_tiled_lighting	compute	0x00000011	0	66541194e24f3dabad0cc4f87ac42a65ef8b2a5d	3595	"DFTiledLighting"	""	""	0
 df_tiled_lighting	compute	0x00000012	0	caf797f4a4b3fef5459555ea773b640fa1ec348b	3596	"DFTiledLighting"	""	""	0
 face_customization	vertex	0x00000000	0	003ae9db059957a26ac0db8a1730bbf3d8c4c55d	3576	"FaceCustomization"	""	""	0
+imagespace	compute	0x00000000	0	c395941d72990c77d6a44460a8b133f7a32c5c2e	3712	"ISHDRDownSample4CS"	"BSImagespaceShaderHDRDownSample4CS"	"ISHDR"	1	"DOWNSAMPLE"	"4"
+imagespace	compute	0x00000000	0	aa395320711c5661f114add5fdc31425b54d035f	3713	"ISHDRDownSample64RGB2LumCS"	"BSImagespaceShaderHDRDownSample64RGB2LumCS"	"ISHDRCS"	3	"DOWNSAMPLE"	"64"	"LUM"	""	"RGB2LUM"	""
+imagespace	compute	0x00000000	0	18e22809c1bd9d67cb15dcfe6cc760b11cfe2696	3714	"ISHDRDownSample4LumCS"	"BSImagespaceShaderHDRDownSample4LumCS"	"ISHDRCS"	2	"DOWNSAMPLE"	"4"	"LUM"	""
+imagespace	compute	0x00000000	0	6f8117da31ac2fdfe46ccf34397158a489ad12e1	3715	"ISHDRDownSample16LumCS"	"BSImagespaceShaderHDRDownSample16LumCS"	"ISHDRCS"	2	"DOWNSAMPLE"	"16"	"LUM"	""
+imagespace	compute	0x00000000	0	233a92006a21f01704d15168a88de79c29b0e71a	3716	"ISHDRDownSample2LightAdaptCS"	"BSImagespaceShaderHDRDownSample2LightAdaptCS"	"ISHDRCS"	3	"DOWNSAMPLE"	"2"	"DOWNADAPT"	""	"LUM"	""
+imagespace	pixel	0x00000000	0	825c4cc3883966a7ca17aa213f8c0867085bc339	3643	"ISGammaLUT"	"BSImagespaceShaderGammaCorrectLUT"	"ISGamma"	1	"LUT"	""
+imagespace	pixel	0x00000000	0	4926eb7ff256cf41e68f7f874711e26542df0251	3693	"ISHDRTonemapBlendCinematic"	"BSImagespaceShaderHDRTonemapBlendCinematic"	"ISHDR"	1	"BLEND"	"4"
+imagespace	pixel	0x00000000	0	78776d34cd7152ffa4071818b10bdbbda9bc4ce5	3695	"ISHDRTonemapBlendCinematicFade"	"BSImagespaceShaderHDRTonemapBlendCinematicFade"	"ISHDR"	2	"BLEND"	"4"	"FADE"	""
+imagespace	pixel	0x00000000	0	71eb58652f2242af7de60e38a29c7f59d11c160e	3697	"ISHDRDownSample16"	"BSImagespaceShaderHDRDownSample16"	"ISHDR"	1	"DOWNSAMPLE"	"16"
+imagespace	pixel	0x00000000	0	23d5035904d229f8a3da38b4cb77277f4dfcee14	3699	"ISHDRDownSample4"	"BSImagespaceShaderHDRDownSample4"	"ISHDR"	1	"DOWNSAMPLE"	"4"
+imagespace	pixel	0x00000000	0	4ccb4c4a290715f3ea98fb5c59a3c3ec72aa3c27	3701	"ISHDRDownSample16Lum"	"BSImagespaceShaderHDRDownSample16Lum"	"ISHDR"	2	"DOWNSAMPLE"	"16"	"LUM"	""
+imagespace	pixel	0x00000000	0	a89d0db22a8517d4c17334fc0244816d639502ff	3703	"ISHDRDownSample4RGB2Lum"	"BSImagespaceShaderHDRDownSample4RGB2Lum"	"ISHDR"	3	"DOWNSAMPLE"	"4"	"LUM"	""	"RGB2LUM"	""
+imagespace	pixel	0x00000000	0	13bf57c157dcffff595dd70236a868aa4559ce4b	3705	"ISHDRDownSample4LightAdapt"	"BSImagespaceShaderHDRDownSample4LightAdapt"	"ISHDR"	2	"DOWNSAMPLE"	"4"	"DOWNADAPT"	""
+imagespace	pixel	0x00000000	0	23d5035904d229f8a3da38b4cb77277f4dfcee14	3707	"ISHDRDownSample4LumClamp"	"BSImagespaceShaderHDRDownSample4LumClamp"	"ISHDR"	2	"DOWNSAMPLE"	"4"	"LUMCLAMP"	""
+imagespace	pixel	0x00000000	0	f57bafba8dcbddd665e0072b82d3f817ae89bb8c	3709	"ISHDRDownSample16LightAdapt"	"BSImagespaceShaderHDRDownSample16LightAdapt"	"ISHDR"	3	"DOWNSAMPLE"	"16"	"DOWNADAPT"	""	"LUM"	""
+imagespace	pixel	0x00000000	0	4ccb4c4a290715f3ea98fb5c59a3c3ec72aa3c27	3711	"ISHDRDownSample16LumClamp"	"BSImagespaceShaderHDRDownSample16LumClamp"	"ISHDR"	3	"DOWNSAMPLE"	"16"	"LUMCLAMP"	""	"LUM"	""
+imagespace	pixel	0x00000000	0	d1677e5367e7bc004722a372f107314c29c24434	3867	"ISGamma"	"BSImagespaceShaderGammaCorrect"	"ISGamma"	0
+imagespace	pixel	0x00000000	0	971cc7e6b43d250a2f40bb72e71c1b7a08ba846c	3869	"ISGammaLinearize"	"BSImagespaceShaderGammaLinearize"	"ISGamma"	1	"LINEARIZE"	""
+imagespace	pixel	0x00000000	0	6baeb1a053aa080027a81fe5988943cf9159806b	3871	"ISGamma"	"BSImagespaceShaderGammaCorrectResize"	"ISGammaResize"	1	"RESIZE"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3642	"ISGammaLUT"	"BSImagespaceShaderGammaCorrectLUT"	"ISGamma"	1	"LUT"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3692	"ISHDRTonemapBlendCinematic"	"BSImagespaceShaderHDRTonemapBlendCinematic"	"ISHDR"	1	"BLEND"	"4"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3694	"ISHDRTonemapBlendCinematicFade"	"BSImagespaceShaderHDRTonemapBlendCinematicFade"	"ISHDR"	2	"BLEND"	"4"	"FADE"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3696	"ISHDRDownSample16"	"BSImagespaceShaderHDRDownSample16"	"ISHDR"	1	"DOWNSAMPLE"	"16"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3698	"ISHDRDownSample4"	"BSImagespaceShaderHDRDownSample4"	"ISHDR"	1	"DOWNSAMPLE"	"4"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3700	"ISHDRDownSample16Lum"	"BSImagespaceShaderHDRDownSample16Lum"	"ISHDR"	2	"DOWNSAMPLE"	"16"	"LUM"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3702	"ISHDRDownSample4RGB2Lum"	"BSImagespaceShaderHDRDownSample4RGB2Lum"	"ISHDR"	3	"DOWNSAMPLE"	"4"	"LUM"	""	"RGB2LUM"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3704	"ISHDRDownSample4LightAdapt"	"BSImagespaceShaderHDRDownSample4LightAdapt"	"ISHDR"	2	"DOWNSAMPLE"	"4"	"DOWNADAPT"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3706	"ISHDRDownSample4LumClamp"	"BSImagespaceShaderHDRDownSample4LumClamp"	"ISHDR"	2	"DOWNSAMPLE"	"4"	"LUMCLAMP"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3708	"ISHDRDownSample16LightAdapt"	"BSImagespaceShaderHDRDownSample16LightAdapt"	"ISHDR"	3	"DOWNSAMPLE"	"16"	"DOWNADAPT"	""	"LUM"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3710	"ISHDRDownSample16LumClamp"	"BSImagespaceShaderHDRDownSample16LumClamp"	"ISHDR"	3	"DOWNSAMPLE"	"16"	"LUMCLAMP"	""	"LUM"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3866	"ISGamma"	"BSImagespaceShaderGammaCorrect"	"ISGamma"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3868	"ISGammaLinearize"	"BSImagespaceShaderGammaLinearize"	"ISGamma"	1	"LINEARIZE"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3870	"ISGamma"	"BSImagespaceShaderGammaCorrectResize"	"ISGammaResize"	1	"RESIZE"	""

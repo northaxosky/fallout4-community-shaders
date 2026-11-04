@@ -803,6 +803,10 @@ namespace cs::engine
 		// One source reconstructs every stock passthrough VS route.
 		if (IsPassthroughVertex(a_descriptor))
 			return "ISFullscreenPassthroughVS";
+		// Imagespace sources are named after the engine's source group.
+		if (a_descriptor.target == ShaderInjectionTarget::kImageSpace &&
+			!a_descriptor.nativeSourceGroup.empty())
+			return a_descriptor.nativeSourceGroup;
 		return a_descriptor.nativeName;
 	}
 
