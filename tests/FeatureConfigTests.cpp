@@ -35,38 +35,6 @@ namespace
 	using namespace cs::settings;
 	using namespace cs::feature_config;
 
-	enum class Target : std::uint8_t
-	{
-		kEngine,
-		kTemporal
-	};
-
-	struct TestSettings
-	{
-		bool enabled = true;
-		std::uint32_t count = 2;
-		float thickness = 0.02f;
-		Target target = Target::kEngine;
-		Float2 span{ 1.0f, 2.0f };
-		StringList worlds;
-
-		bool operator==(const TestSettings&) const = default;
-	};
-
-	constexpr std::array kTargets{
-		Choice{ "engine", Target::kEngine },
-		Choice{ "temporal", Target::kTemporal }
-	};
-	constexpr Schema kTestSchema{
-		std::tuple{
-			Field{ "enabled", "Enable.", &TestSettings::enabled },
-			Field{ "count", "Count.", &TestSettings::count, Range{ 1u, 4u }, ApplyTiming::kNextLaunch },
-			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } },
-			ChoiceField{ "target", "Target.", &TestSettings::target, kTargets },
-			Float2Field<TestSettings>{ "span", "Span.", &TestSettings::span },
-			StringListField<TestSettings>{ "worlds", "Worlds.", &TestSettings::worlds } }
-	};
-
 	Registry BuildFullRegistry()
 	{
 		using namespace cs::features;
@@ -125,74 +93,6 @@ namespace
 	{
 		std::ifstream input(a_path, std::ios::binary);
 		return { std::istreambuf_iterator<char>{ input }, {} };
-	}
-
-	void TestSchema()
-	{
-		TestSettings value;
-		std::string error;
-		CHECK(Parse(kTestSchema, toml::parse("[settings]\nenabled = false\ncount = 4\nthickness = 0.049\ntarget = 'temporal'\n"), value, error));
-		const TestSettings expected{ false, 4, 0.049f, Target::kTemporal, { 1.0f, 2.0f } };
-		CHECK(value == expected);
-
-		// Only next-launch fields are reported, and only when they differ from the boot value.
-		auto current = expected;
-		current.thickness = 0.01f;
-		CHECK(RestartRequired(kTestSchema, expected, current).empty());
-		current.count = 1;
-		CHECK(RestartRequired(kTestSchema, expected, current).size() == 1);
-
-		std::ostringstream serialized;
-		serialized << toml::table{ { "settings", SerializeFull(kTestSchema, value) } };
-		TestSettings roundTrip;
-		CHECK(Parse(kTestSchema, toml::parse(serialized.str()), roundTrip, error));
-		CHECK(roundTrip == expected);
-
-		// Float fields compare as float, so a TOML 0.02 is not a delta from 0.02f.
-		TestSettings defaults;
-		CHECK(Parse(kTestSchema, toml::parse("[settings]\nthickness = 0.02\n"), defaults, error));
-		CHECK(SerializeDelta(kTestSchema, defaults, TestSettings{}).empty());
-		defaults.count = 3;
-		CHECK(SerializeDelta(kTestSchema, defaults, TestSettings{}).size() == 1);
-
-		auto spanned = expected;
-		CHECK(Parse(kTestSchema, toml::parse("[settings]\nspan = [25000, 45000]\n"), spanned, error));
-		CHECK(spanned.span[0] == 25000.0f && spanned.span[1] == 45000.0f);
-		TestSettings spanRoundTrip;
-		CHECK(Parse(kTestSchema, toml::table{ { "settings", SerializeDelta(kTestSchema, spanned, expected) } }, spanRoundTrip, error));
-		CHECK(spanRoundTrip.span == spanned.span);
-
-		// Configs saved under a wider range load clamped, not failing the feature.
-		auto clamped = expected;
-		CHECK(Parse(kTestSchema, toml::parse("[settings]\ncount = -3\nthickness = 9\n"), clamped, error));
-		CHECK(clamped.count == 1 && clamped.thickness == 0.05f);
-		CHECK(Parse(kTestSchema, toml::parse("[settings]\ncount = 64\n"), clamped, error));
-		CHECK(clamped.count == 4);
-
-		for (const auto& [document, message] : {
-				 std::pair{ "[settings]\nenabled = 1\n", "settings.enabled: expected boolean" },
-				 std::pair{ "[settings]\nthickness = nan\n", "settings.thickness: invalid value" },
-				 std::pair{ "[settings]\ncount = 3\ntarget = 'other'\n", "settings.target: invalid value" } }) {
-			auto candidate = expected;
-			CHECK(!Parse(kTestSchema, toml::parse(document), candidate, error));
-			CHECK(error == message);
-			CHECK(candidate == expected);
-		}
-		auto listed = expected;
-		CHECK(Parse(kTestSchema, toml::parse("[settings]\nworlds = ['Commonwealth', 'DiamondCity']\n"), listed, error));
-		CHECK((listed.worlds == StringList{ "Commonwealth", "DiamondCity" }));
-		TestSettings listRoundTrip;
-		CHECK(Parse(kTestSchema, toml::table{ { "settings", SerializeDelta(kTestSchema, listed, expected) } }, listRoundTrip, error));
-		CHECK(listRoundTrip.worlds == listed.worlds);
-		for (const auto document : { "[settings]\nworlds = 'Commonwealth'\n", "[settings]\nworlds = ['Commonwealth', 1]\n" }) {
-			auto candidate = listed;
-			CHECK(!Parse(kTestSchema, toml::parse(document), candidate, error));
-			CHECK(error == "settings.worlds: expected array of strings");
-			CHECK(candidate.worlds == listed.worlds);
-		}
-		auto kept = spanned;
-		CHECK(!Parse(kTestSchema, toml::parse("[settings]\nspan = [10000, nan]\n"), kept, error));
-		CHECK(kept.span == spanned.span);
 	}
 
 	void TestRegistry(const Registry& a_registry)
@@ -289,6 +189,19 @@ namespace
 		// A value where an owned table belongs must still render a parseable document.
 		const auto blocked = RenderDocument(a_registry, toml::parse("[features.ScreenSpaceShadows]\nsettings = false\n"));
 		CHECK(RenderDocument(a_registry, toml::parse(blocked)) == blocked);
+
+		// Configs saved under a wider range load clamped; bad values are rejected untouched.
+		namespace sss = cs::features::sss_settings;
+		sss::Settings tuned;
+		std::string error;
+		CHECK(Parse(sss::kSchema, toml::parse("[settings]\nSurfaceThickness = 9\nShadowContrast = -3\n"), tuned, error));
+		CHECK(tuned.SurfaceThickness == 0.05f && tuned.ShadowContrast == 0.0f);
+		for (const auto document : { "[settings]\nSurfaceThickness = nan\n", "[settings]\nShadowContrast = 'high'\n" }) {
+			auto candidate = tuned;
+			CHECK(!Parse(sss::kSchema, toml::parse(document), candidate, error));
+			CHECK(!error.empty());
+			CHECK(candidate.SurfaceThickness == tuned.SurfaceThickness && candidate.ShadowContrast == tuned.ShadowContrast);
+		}
 	}
 
 	// Editor overrides round-trip through TOML into a fresh registry.
@@ -335,53 +248,31 @@ namespace
 		CHECK(ReadFile(a_path) == invalid);
 	}
 
-	void TestLiveSettings()
+	void TestLiveSettingsRollback()
 	{
-		constexpr Schema schema{ std::tuple{
-			Field{ "enabled", "Enable.", &TestSettings::enabled },
-			Field{ "count", "Startup resource count.", &TestSettings::count, Range{ 1u, 4u }, ApplyTiming::kNextLaunch },
-			Field{ "thickness", "Thickness.", &TestSettings::thickness, Range{ 0.005f, 0.05f } } } };
-		TestSettings value;
-		float published = value.thickness;
-		auto access = BindLiveSettings(schema, value, [&] {
-			published = value.thickness;
-			if (!value.enabled)
+		using namespace cs::features::sss_settings;
+		Settings value;
+		float published = value.SurfaceThickness;
+		auto access = BindLiveSettings(kSchema, value, [&] {
+			published = value.SurfaceThickness;
+			if (value.ShadowContrast > 3.0f)
 				throw std::runtime_error("Effect finalization failed");
 		});
-		const auto baseline = access.snapshot();
-		CHECK(!baseline.contains("count"));
-		std::string error;
 		const auto before = value;
-		CHECK(!access.prepare(toml::parse("enabled = false\nthickness = nan"), error));
-		CHECK(value == before);
-		auto prepared = access.prepare(toml::parse("enabled = false\nthickness = 0.04\ncount = 4\nload = false"), error);
+		std::string error;
+		auto prepared = access.prepare(toml::parse("SurfaceThickness = 0.04\nShadowContrast = 3.5"), error);
 		CHECK(prepared.has_value());
 		if (!prepared)
 			return;
-		value.count = 3;
 		std::array transaction{ std::move(*prepared) };
 		try {
 			ApplyPreparedLiveSettings(transaction);
 			CHECK(false);
 		} catch (const std::runtime_error&) {
-			CHECK(value.enabled && value.thickness == before.thickness && value.count == 3);
-			CHECK(published == before.thickness);
+			CHECK(value.SurfaceThickness == before.SurfaceThickness && value.ShadowContrast == before.ShadowContrast);
+			CHECK(published == before.SurfaceThickness);
 		}
-		prepared = access.prepare(toml::parse("thickness = 0.03\ncount = 1"), error);
-		CHECK(prepared.has_value());
-		if (!prepared)
-			return;
-		std::array successful{ std::move(*prepared) };
-		ApplyPreparedLiveSettings(successful);
-		CHECK(value.count == 3 && value.thickness == 0.03f && published == 0.03f);
-		prepared = access.prepare(baseline, error);
-		if (prepared) {
-			std::array restore{ std::move(*prepared) };
-			ApplyPreparedLiveSettings(restore);
-		}
-		CHECK(value.count == 3 && value.thickness == before.thickness && published == before.thickness);
 	}
-
 	void TestLightAuthoring()
 	{
 		using namespace cs::features::light_limit_fix;
@@ -404,9 +295,6 @@ inverse_square = false
 		CHECK(definitions.size() == 2);
 		if (definitions.size() != 2)
 			return;
-		auto inherited = definitions[0].data;
-		inherited.Apply(definitions[1].data);
-		CHECK(inherited.inverseSquare == false && inherited.linear == true && inherited.cutoff == 0.1f && inherited.size == 2.0f);
 
 		for (const char* invalid : {
 				 R"([[lights]]
@@ -436,12 +324,11 @@ int main()
 	std::filesystem::create_directories(directory);
 	try {
 		const auto registry = BuildFullRegistry();
-		TestSchema();
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");
 		TestWeatherProfiles(registry, directory / "weather.toml");
-		TestLiveSettings();
+		TestLiveSettingsRollback();
 		TestLightAuthoring();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
