@@ -571,7 +571,7 @@ float3 atmosphere(float3 eyeToPosition, out float alpha)
 	float blend = lerp(heightRange.x, heightRange.y, fade);
 	float density = (0.75 < distance) ? min((fade - 0.75) * 4.0 * (1.0 - FogColor1.w) + FogColor1.w, 1.0) : FogColor1.w;
 	float scale = (distance < 0.015) ? fade * 66.666672 : 1.0;
-	density = min(pow(fade, FogColor0.w), density);
+	density = min(WATER_POW(fade, FogColor0.w), density);
 
 	alpha = 1.0 - blend;
 	alpha = blend * FogColor2.w + alpha;
@@ -640,7 +640,7 @@ float4 main(PS_INPUT input) : SV_Target0
 
 	float3 viewDirection = normalize(-input.eyeToPosition);
 	float3 reflected = reflect(-viewDirection, viewNormal);
-	float sunGlare = pow(max(dot(-viewDirection, WATER_PER_GEOMETRY(2).xyz), 0.0), WATER_PER_GEOMETRY(3).w) * WATER_PER_GEOMETRY(2).w;
+	float sunGlare = WATER_POW(max(dot(-viewDirection, WATER_PER_GEOMETRY(2).xyz), 0.0), WATER_PER_GEOMETRY(3).w) * WATER_PER_GEOMETRY(2).w;
 
 	float3 lightColor = WATER_PER_GEOMETRY(2).w * WATER_PER_GEOMETRY(3).xyz;
 #		ifdef FO4_WATER_SUN_SHADOW
@@ -690,7 +690,7 @@ float4 main(PS_INPUT input) : SV_Target0
 		float3 halfVector = normalize(normalize(delta) - eyeDirection);
 		float falloff = saturate(length(delta) / perTechnique[i + 6].w);
 		float attenuation = 1.0 - falloff * falloff;
-		specular = (perTechnique[i + 14].xyz * pow(saturate(dot(halfVector, normal)), perMaterial[13].w)) * attenuation + specular;
+		specular = (perTechnique[i + 14].xyz * WATER_POW(saturate(dot(halfVector, normal)), perMaterial[13].w)) * attenuation + specular;
 	}
 
 	return float4(specular * fresnel, 1.0);
@@ -971,7 +971,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float fogAlpha;
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	float3 viewDirection = normalize(-input.eyeToPosition);
-	float sunGlare = pow(max(dot(-viewDirection, WATER_PER_GEOMETRY(2).xyz), 0.0), WATER_PER_GEOMETRY(3).w) * WATER_PER_GEOMETRY(2).w;
+	float sunGlare = WATER_POW(max(dot(-viewDirection, WATER_PER_GEOMETRY(2).xyz), 0.0), WATER_PER_GEOMETRY(3).w) * WATER_PER_GEOMETRY(2).w;
 	fog = lerp(fog, WATER_PER_GEOMETRY(3).xyz, sunGlare);
 #		ifndef INTERIOR
 	float3 lightColor = WATER_PER_GEOMETRY(2).w * WATER_PER_GEOMETRY(3).xyz;
