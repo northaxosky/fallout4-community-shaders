@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Light Limit Fix: clustered light culling for effects and water is cheaper.
+- Subsurface Scattering: Burley mode skips non-skin pixels in its prepass, lowering its GPU cost.
+- Effects: smoke, fire and other effects keep their own color under view-ray shadows.
+- Sky Sync: turning it off restores the default sky rotation, including after loading a save.
+- Water: water forms with a zero specular, glare or fog power no longer produce black or white NaN pixels while a CS water feature is on.
+- Upscaling: DLSS motion dilation costs less GPU time.
+- Performance Overlay: FPS is smoothed every frame, Avg and 1% low use a 5-second window, Update Interval is now FPS Smoothing, and a Present row shows time blocked in Present.
+- Profiling: the Profiling page, feature Debug timings and the remote inspect tool show timings without the overlay open.
+- RenderDoc: shaders compile with debug info while RenderDoc is loaded.
 - Shader cache: with `background_compilation`, shaders compile when first drawn instead of all at startup, so play starts without queuing variants no scene uses.
 - Frame Generation: saved frame generation no longer freezes at startup on GPUs without DLSS Frame Generation (e.g. RTX 30-series); it now starts right after the first frame.
 - Sun lighting: fixed a darker square around the player in third person; cloud, terrain and contact shadows were applied twice inside the focused shadow pass.
