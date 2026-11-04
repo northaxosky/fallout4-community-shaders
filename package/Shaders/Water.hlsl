@@ -233,6 +233,13 @@ TextureCube<float3> CubeMapTex : register(t32);
 #		include "Skylighting/Skylighting.hlsli"
 #	endif
 
+// pow(0, 0) is NaN at zero power; potentially include in Shader Fixes feature.
+#	if defined(WATER_EFFECTS) || defined(UNIFIED_WATER)
+#		define WATER_POW(x, power) ((power) > 0.0 ? pow(x, power) : 1.0)
+#	else
+#		define WATER_POW(x, power) pow(x, power)
+#	endif
+
 cbuffer PerGeometry : register(b0)
 {
 	float4 perGeometry[8];
@@ -639,8 +646,8 @@ float4 main(PS_INPUT input) : SV_Target0
 #		ifdef FO4_WATER_SUN_SHADOW
 	lightColor *= FO4_WATER_SUN_SHADOW(FrameBuffer::ViewToWorld(input.eyeToPosition), input.screenPosition.xy);
 #		endif
-	float3 specular = pow(saturate(dot(reflected, WATER_PER_GEOMETRY(2).xyz)), perMaterial[8].x) * lightColor;
-	float3 ambient = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
+	float3 specular = WATER_POW(saturate(dot(reflected, WATER_PER_GEOMETRY(2).xyz)), perMaterial[8].x) * lightColor;
+	float3 ambient = WATER_POW(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
 	ambient = ambient * perMaterial[10].z;
 	float3 lighting = specular * perMaterial[1].w + ambient;
 
@@ -971,7 +978,7 @@ float4 main(PS_INPUT input) : SV_Target0
 #			ifdef FO4_WATER_SUN_SHADOW
 	lightColor *= FO4_WATER_SUN_SHADOW(FrameBuffer::ViewToWorld(input.eyeToPosition), input.screenPosition.xy);
 #			endif
-	float3 ambient = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
+	float3 ambient = WATER_POW(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
 	ambient = ambient * perMaterial[10].z;
 
 	float3 viewNormal;
@@ -979,7 +986,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	viewNormal.y = dot(WorldToView[1], float4(normal, 1.0));
 	viewNormal.z = dot(WorldToView[2], float4(normal, 1.0));
 	float3 reflected = reflect(-viewDirection, viewNormal);
-	float3 specular = pow(saturate(dot(reflected, WATER_PER_GEOMETRY(2).xyz)), perMaterial[8].x) * lightColor;
+	float3 specular = WATER_POW(saturate(dot(reflected, WATER_PER_GEOMETRY(2).xyz)), perMaterial[8].x) * lightColor;
 	float3 lighting = specular * perMaterial[1].w + ambient;
 #		endif
 
