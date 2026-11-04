@@ -50,10 +50,6 @@ namespace cs
 
 	void Menu::DrawChangelog(dmui::Client& a_client)
 	{
-		const ui::Section section{ "changelog", "Changelog" };
-		if (!section)
-			return;
-
 		const auto& history = Changelog();
 		if (!history.error.empty()) {
 			dmui::ui::TextWrapped("Changelog unavailable. See FO4CommunityShaders.log.");
@@ -64,7 +60,7 @@ namespace cs
 			const auto& release = history.releases[index];
 			const auto id = "changelog-" + release.version;
 			const ui::Section entry{ id.c_str(), release.version.c_str(),
-				ui::Collapsible{ .count = release.highlights.size() + release.items.size(), .expandedByDefault = index == 0, .framed = false } };
+				ui::Collapsible{ .count = release.highlights.size() + release.items.size(), .expandedByDefault = index == 0 } };
 			if (!entry)
 				continue;
 			if (!release.highlights.empty()) {
@@ -87,7 +83,8 @@ namespace cs
 			return;
 
 		const auto title = "What's new in " + release->version;
-		if (!CheckHostResult(a_client, a_client.DrawSectionHeader(title.c_str()), "draw what's new section"))
+		const ui::Section section{ "whats-new", title.c_str() };
+		if (!section)
 			return;
 		DrawBulletList(a_client, release->highlights);
 		if (dmui::ui::Button("View full changelog"))

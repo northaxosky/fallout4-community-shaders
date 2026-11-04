@@ -96,6 +96,8 @@ namespace cs
 
 		void SetDebugViewSelection(const Feature& a_feature, std::string_view a_view);
 		void DrawFeatureOverview(dmui::Client& a_client);
+		void DrawLinks(dmui::Client& a_client);
+		void DrawFaq(dmui::Client& a_client);
 		void DrawBulletList(dmui::Client& a_client, const std::vector<std::string>& a_items);
 		void DrawShaderSettings(dmui::Client& a_client);
 		void DrawDebugTexture(dmui::Client& a_client, const Feature& a_feature);
