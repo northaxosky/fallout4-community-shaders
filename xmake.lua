@@ -17,10 +17,10 @@ for _, directory in ipairs(os.dirs(path.join(os.scriptdir(), "features", "*", "s
 end
 table.sort(features)
 
--- Tests enumerate contributions via each feature's ShaderDefines.h.
-local generated_defines = path.join("build", ".gens", "FeatureShaderDefines")
+-- Test-only build machinery: tests enumerate contributions via each ShaderDefines.h.
+local generated_defines = path.join("build", ".gens", "TestFeatureShaderDefines")
 
-target("FeatureShaderDefines", function()
+target("TestFeatureShaderDefines", function()
     set_kind("phony")
     set_default(false)
     set_policy("build.fence", true)
@@ -430,7 +430,7 @@ local function stock_shader_identity_target(name, compiler, tests)
         set_default(false)
         set_group("shaders")
         set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/" .. name)
-        add_deps("ShaderStage", "FeatureShaderDefines")
+        add_deps("ShaderStage", "TestFeatureShaderDefines")
         use_shader_test_cache()
         add_files(
             "tests/StockShaderIdentityTests.cpp",
