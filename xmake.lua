@@ -333,8 +333,7 @@ target(plugin_name, function()
 
     add_deps("ShaderStage")
     add_installfiles("package/(**)|Shaders/**", { prefixdir = "." })
-    add_installfiles("build/ShaderStage/(Shaders/**)|SharedDataProbe.hlsl",
-        { prefixdir = "." })
+    add_installfiles("build/ShaderStage/(Shaders/**)", { prefixdir = "." })
     add_installfiles("features/Upscaling/(Shaders/Upscaling/Streamline/**)",
         { prefixdir = "." })
     add_installfiles("LICENSE", "EXCEPTIONS.md", { prefixdir = "." })
@@ -443,7 +442,7 @@ local function stock_shader_identity_target(name, compiler, tests)
             "src/Utils/ShaderCompile.cpp"
         )
         add_files(shader_cache_sources)
-        add_defines("NOMINMAX")
+        add_defines("NOMINMAX", 'FO4CS_TEST_SHADER_DIR="' .. (path.join(os.projectdir(), "tests", "shaders"):gsub("\\", "/")) .. '"')
         add_includedirs(generated_defines, "features/ScreenSpaceGI/src", "features/SubsurfaceScattering/src")
         add_packages("spdlog", "vcpkg::directxmath", "vcpkg::tomlplusplus")
         add_syslinks("bcrypt", "d3dcompiler", "version")

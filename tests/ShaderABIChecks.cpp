@@ -8,8 +8,8 @@
 #include "Render/SharedDataLayout.h"
 #include "Render/SubstrateSlots.h"
 #include "ScreenSpaceGIConstants.h"
+#include "ShaderTestCache.h"
 #include "SubsurfaceScatteringConstants.h"
-#include "Utils/ShaderCompile.h"
 #include "Utils/ShaderSamplerBindings.h"
 
 #include <algorithm>
@@ -25,6 +25,13 @@
 
 namespace
 {
+	// A test-only shader; it compiles against the staged tree but is never staged.
+	const std::filesystem::path& ProbeShader()
+	{
+		static const auto path = std::filesystem::path(FO4CS_TEST_SHADER_DIR) / "SharedDataProbe.hlsl";
+		return path;
+	}
+
 	struct ABIField
 	{
 		const char* name;
@@ -277,8 +284,8 @@ namespace
 			{ "FeatureData", 6, sizeof(SharedFeatureDataCB), feature }, { "FO4SharedData", 7, sizeof(FO4SharedDataCB), fo4 }
 		};
 		std::string error;
-		auto blob = cs::util::CompileShaderToBlob((a_root / "SharedDataProbe.hlsl").c_str(),
-			{ { "FO4CS_SUBSTRATE", "1" } }, "ps_5_0", "main", &error, a_root);
+		auto blob = cs::shader_test::CompileToBlob(ProbeShader(),
+			{ { "FO4CS_SUBSTRATE", "1" } }, "ps_5_0", &error, a_root);
 		if (!blob)
 			return error;
 		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
@@ -289,8 +296,8 @@ namespace
 				return mismatch;
 		}
 		for (const char* slot : { "b4", "b7" }) {
-			if (cs::util::CompileShaderToBlob((a_root / "SharedDataProbe.hlsl").c_str(),
-					{ { "FO4CS_SUBSTRATE", "1" }, { "ABI_SLOT_COLLISION", slot } }, "ps_5_0", "main", &error, a_root))
+			if (cs::shader_test::CompileToBlob(ProbeShader(),
+					{ { "FO4CS_SUBSTRATE", "1" }, { "ABI_SLOT_COLLISION", slot } }, "ps_5_0", &error, a_root))
 				return std::string("ABI collision accepted at ") + slot;
 			if (error.find("slot collision") == std::string::npos && error.find("overlap") == std::string::npos && error.find("cbuffer bank") == std::string::npos)
 				return "ABI collision failed for an unrelated reason: " + error;
@@ -311,9 +318,9 @@ namespace
 			ABI(Constants, MaxAccumFrames), ABI(Constants, BlurRadius), ABI(Constants, DistanceNormalisation), ABI(Constants, pad)
 		};
 		std::string error;
-		auto blob = cs::util::CompileShaderToBlob((a_root / "ScreenSpaceGI/gi.cs.hlsl").c_str(),
+		auto blob = cs::shader_test::CompileToBlob(a_root / "ScreenSpaceGI/gi.cs.hlsl",
 			{ { "GI", "1" }, { "GI_SPECULAR", "1" }, { "TEMPORAL_DENOISER", "1" }, { "HALF_RES", "1" } },
-			"cs_5_0", "main", &error, a_root);
+			"cs_5_0", &error, a_root);
 		if (!blob)
 			return error;
 		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
@@ -346,8 +353,8 @@ namespace
 			ABI(Constants, MeanFreePathBase), ABI(Constants, MeanFreePathHuman)
 		};
 		std::string error;
-		auto blob = cs::util::CompileShaderToBlob((a_root / "SubsurfaceScattering/SeparableSSSCS.hlsl").c_str(),
-			{ { "BURLEY", "1" } }, "cs_5_0", "main", &error, a_root);
+		auto blob = cs::shader_test::CompileToBlob(a_root / "SubsurfaceScattering/SeparableSSSCS.hlsl",
+			{ { "BURLEY", "1" } }, "cs_5_0", &error, a_root);
 		if (!blob)
 			return error;
 		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
@@ -370,8 +377,8 @@ namespace
 	std::string VerifySkylightingABI(const std::filesystem::path& a_root)
 	{
 		std::string error;
-		auto blob = cs::util::CompileShaderToBlob((a_root / "Skylighting/UpdateProbesCS.hlsl").c_str(),
-			{ { "FO4CS_SUBSTRATE", "1" }, { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } }, "cs_5_0", "main", &error, a_root);
+		auto blob = cs::shader_test::CompileToBlob(a_root / "Skylighting/UpdateProbesCS.hlsl",
+			{ { "FO4CS_SUBSTRATE", "1" }, { "SKYLIGHTING_SUN_CASCADES", cs::engine::kSunCascadesDefine } }, "cs_5_0", &error, a_root);
 		if (!blob)
 			return error;
 		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
@@ -384,10 +391,10 @@ namespace
 			return "DirectionalShadowLights: ABI structure stride mismatch";
 		return {};
 	}
-	Microsoft::WRL::ComPtr<ID3D11ShaderReflection> Reflect(const std::filesystem::path& a_root, const char* a_path, const std::vector<std::pair<const char*, const char*>>& a_defines, const char* a_profile, std::string& a_error, Microsoft::WRL::ComPtr<ID3DBlob>* a_blob = nullptr)
+	Microsoft::WRL::ComPtr<ID3D11ShaderReflection> Reflect(const std::filesystem::path& a_root, const std::filesystem::path& a_path, const std::vector<std::pair<const char*, const char*>>& a_defines, const char* a_profile, std::string& a_error, Microsoft::WRL::ComPtr<ID3DBlob>* a_blob = nullptr)
 	{
 		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
-		if (auto blob = cs::util::CompileShaderToBlob((a_root / a_path).c_str(), a_defines, a_profile, "main", &a_error, a_root);
+		if (auto blob = cs::shader_test::CompileToBlob(a_root / a_path, a_defines, a_profile, &a_error, a_root);
 			blob && SUCCEEDED(D3DReflect(blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(reflection.GetAddressOf())))) {
 			if (a_blob)
 				*a_blob = std::move(blob);
@@ -395,7 +402,7 @@ namespace
 		}
 		if (a_error.empty())
 			a_error = "reflection failed";
-		a_error = std::string(a_path) + ": " + a_error;
+		a_error = a_path.generic_string() + ": " + a_error;
 		return {};
 	}
 	// Namespace-scoped resources reflect with their qualified name.
@@ -468,7 +475,7 @@ namespace
 				return "BlurShadowCS: ABI slot mismatch";
 		}
 		Microsoft::WRL::ComPtr<ID3DBlob> consumerBlob;
-		const auto consumer = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "VOLUMETRIC_SHADOWS", "1" } }, "ps_5_0", error, &consumerBlob);
+		const auto consumer = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "VOLUMETRIC_SHADOWS", "1" } }, "ps_5_0", error, &consumerBlob);
 		if (!consumer)
 			return error;
 		if (BindPoint(consumer.Get(), "VolumetricShadows::SharedShadowMap") != slots::kSharedShadowMapSlot ||
@@ -499,19 +506,19 @@ namespace
 			return error;
 		if (const auto mismatch = CheckStructuredBuffer(tiled.Get(), { "LightLimitFixLights", 8, sizeof(LightData), fields }); !mismatch.empty())
 			return mismatch;
-		const auto raster = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX", "1" } }, "ps_5_0", error);
+		const auto raster = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX", "1" } }, "ps_5_0", error);
 		if (!raster)
 			return error;
 		const ABIField drawFields[]{ { "LightLimitFixLight", 0, sizeof(LightData) } };
 		if (const auto mismatch = CheckConstantBuffer(raster.Get(), { "LightLimitFixDraw", 11, sizeof(LightData), drawFields, "LightLimitFixLight", fields }); !mismatch.empty())
 			return mismatch;
-		const auto forward = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX_FORWARD", "1" } }, "ps_5_0", error);
+		const auto forward = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX_FORWARD", "1" } }, "ps_5_0", error);
 		if (!forward)
 			return error;
 		if (const auto mismatch = CheckStructuredBuffer(forward.Get(), { "Cones", 34, sizeof(cs::features::light_limit_fix::ConeData) }); !mismatch.empty())
 			return mismatch;
 		using cs::features::light_limit_fix::StrictLightDataCB;
-		const auto strict = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX_STRICT", "1" } }, "ps_5_0", error);
+		const auto strict = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "LIGHT_LIMIT_FIX_STRICT", "1" } }, "ps_5_0", error);
 		if (!strict)
 			return error;
 		const ABIField strictFields[]{ { "NumStrictLights", offsetof(StrictLightDataCB, numStrictLights), sizeof(StrictLightDataCB::numStrictLights) },
@@ -523,7 +530,7 @@ namespace
 		if (const auto mismatch = CheckConstantBuffer(strict.Get(), { "StrictLightData", 3, sizeof(StrictLightDataCB), strictFields, "StrictLights", fields }); !mismatch.empty())
 			return mismatch;
 
-		const auto descriptor = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "FORWARD_DRAW_DESCRIPTOR", "1" } }, "ps_5_0", error);
+		const auto descriptor = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "FORWARD_DRAW_DESCRIPTOR", "1" } }, "ps_5_0", error);
 		if (!descriptor)
 			return error;
 		using cs::render::forward_draw::ForwardDrawCB;
@@ -567,7 +574,7 @@ namespace
 		sky->GetDesc(&desc);
 		if (BindPoint(sky.Get(), "TexDepthSampler") != slots::kCloudDepthSlot || desc.OutputParameters != 4)
 			return "Sky: ABI depth slot or output count mismatch";
-		const auto consumer = Reflect(a_root, "SharedDataProbe.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
+		const auto consumer = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
 		if (!consumer)
 			return error;
 		if (BindPoint(consumer.Get(), "CloudShadows::CloudShadowsTexture") != slots::kCloudShadowsSlot)

@@ -1,7 +1,3 @@
-local shader_files = {
-    "tests/shaders/SharedDataProbe.hlsl"
-}
-
 local root = os.projectdir()
 
 -- Native FO4 entry points share engine names, not Skyrim's shader ABI.
@@ -91,9 +87,6 @@ local function stage_shaders()
         for _, source in ipairs(os.files(path.join(source_root, "**"))) do
             register(source, path.relative(source, source_root))
         end
-    end
-    for _, source in ipairs(shader_files) do
-        register(path.join(root, source), path.filename(source))
     end
     for _, entry in ipairs(shared.shaders) do
         local source = path.join(shared_root, entry)

@@ -8,11 +8,15 @@
 #include "Utils/ShaderCache/RevalidationContext.h"
 #include "Utils/ShaderCache/ShaderCache.h"
 #include "Utils/ShaderCache/SourceCompile.h"
+#include "Utils/ShaderCompile.h"
 
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Test compiles use the runtime shader cache when this names a directory.
 namespace cs::shader_test
@@ -48,6 +52,32 @@ namespace cs::shader_test
 		return shader_cache::LoadOrCompileShader(a_recipe, { .cacheRoot = *root, .revalidation = &revalidation });
 	}
 
+	// cs::util::CompileShaderToBlob semantics, served from the shared test cache.
+	inline Microsoft::WRL::ComPtr<ID3DBlob> CompileToBlob(
+		const std::filesystem::path& a_file,
+		const std::vector<std::pair<const char*, const char*>>& a_defines,
+		const char* a_profile,
+		std::string* a_outError,
+		const std::filesystem::path& a_shaderRoot)
+	{
+		const auto recipe = util::BuildUtilityShaderRecipe(
+			a_file, a_defines, a_profile, "main", a_shaderRoot, util::kUtilityCompileFlags1);
+		if (!recipe)
+			return util::CompileShaderToBlob(a_file.c_str(), a_defines, a_profile, "main", a_outError, a_shaderRoot);
+		const auto outcome = Compile(*recipe);
+		if (a_outError)
+			*a_outError = outcome.error;
+		if (!outcome.succeeded)
+			return {};
+		Microsoft::WRL::ComPtr<ID3DBlob> blob;
+		if (FAILED(D3DCreateBlob(outcome.bytecode.size(), blob.GetAddressOf()))) {
+			if (a_outError)
+				*a_outError = "Could not allocate shader bytecode blob";
+			return {};
+		}
+		std::memcpy(blob->GetBufferPointer(), outcome.bytecode.data(), outcome.bytecode.size());
+		return blob;
+	}
 	inline void ReportCache()
 	{
 		if (!CacheRoot())

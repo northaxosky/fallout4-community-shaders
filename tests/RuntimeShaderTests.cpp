@@ -177,17 +177,8 @@ namespace
 	{
 		std::string error;
 		const auto path = a_root / a_job.shader->file;
-		const auto recipe = cs::shader_test::CacheRoot() ?
-		                        cs::util::BuildUtilityShaderRecipe(path, a_job.defines, a_job.shader->profile, "main", a_root, cs::util::kUtilityCompileFlags1) :
-		                        std::nullopt;
-		if (recipe) {
-			const auto outcome = cs::shader_test::Compile(*recipe);
-			if (outcome.succeeded)
-				return {};
-			error = outcome.error;
-		} else if (cs::util::CompileShaderToBlob(path.c_str(), a_job.defines, a_job.shader->profile, "main", &error, a_root)) {
+		if (cs::shader_test::CompileToBlob(path, a_job.defines, a_job.shader->profile, &error, a_root))
 			return {};
-		}
 		return error.substr(0, error.find('\n'));
 	}
 }
