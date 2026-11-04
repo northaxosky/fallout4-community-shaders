@@ -185,9 +185,12 @@ namespace cs::d3d11
 			InvokeOwner("FeatureManager shader-injection validation", [&] {
 				FeatureManager::Get().ValidateShaderInjectionsAll();
 			});
-			InvokeOwner("Shader variant prewarm", [] {
-				engine::PrewarmAllShaderInjectionVariants();
-			});
+			// Background mode compiles on first draw, not at startup.
+			if (engine::ShaderCompileBlocksPlay()) {
+				InvokeOwner("Shader variant prewarm", [] {
+					engine::PrewarmAllShaderInjectionVariants();
+				});
+			}
 			InvokeOwner("Debug-view selection", [] {
 				Menu::Get().ApplyDebugViewSelections();
 			});

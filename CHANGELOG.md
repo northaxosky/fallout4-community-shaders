@@ -14,7 +14,7 @@
 - Performance Overlay: FPS is smoothed every frame, Avg and 1% low use a 5-second window, Update Interval is now FPS Smoothing, and a Present row shows time blocked in Present.
 - Profiling: the Profiling page, feature Debug timings and the remote inspect tool show timings without the overlay open.
 - RenderDoc: shaders compile with debug info while RenderDoc is loaded.
-- Shader cache: with `background_compilation`, shaders compile when first drawn instead of all at startup, so play starts without queuing variants no scene uses.
+- Shader cache: with `background_compilation`, shaders compile when first drawn instead of at startup.
 - Frame Generation: saved frame generation no longer freezes at startup on GPUs without DLSS Frame Generation (e.g. RTX 30-series); it now starts right after the first frame.
 - Latency Reduction: no longer exits at loading screens with Anti-Lag 2.
 - Sun lighting: fixed a darker square around the player in third person; cloud, terrain and contact shadows were applied twice inside the focused shadow pass.
