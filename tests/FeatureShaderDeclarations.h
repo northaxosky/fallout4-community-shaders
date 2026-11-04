@@ -5,16 +5,16 @@
 
 #include <algorithm>
 
-namespace cs::engine
+namespace cs::shader_test
 {
-	inline const std::vector<ShaderReplacementRegistration>& GetFeatureShaderContributions()
+	inline const std::vector<engine::ShaderReplacementRegistration>& GetFeatureShaderContributions()
 	{
 		static const auto contributions = [] {
-			auto registry = GetShaderContributionRegistry();
-			std::ranges::sort(registry, {}, &ShaderContribution::name);
-			std::vector<ShaderReplacementRegistration> result;
+			auto registry = engine::GetShaderContributionRegistry();
+			std::ranges::sort(registry, {}, &engine::ShaderContribution::name);
+			std::vector<engine::ShaderReplacementRegistration> result;
 			for (const auto& [name, provider] : registry)
-				result.append_range(DescribeFeatureShaderBindings(name, *provider));
+				result.append_range(engine::DescribeFeatureShaderBindings(name, *provider));
 			return result;
 		}();
 		return contributions;

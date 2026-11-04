@@ -5,6 +5,7 @@
 #include <Windows.h>
 #include <d3d11.h>
 
+#include "Check.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Utils/ShaderCache/CacheRecord.h"
 #include "Utils/ShaderCache/CacheStorage.h"
@@ -32,32 +33,13 @@ namespace
 {
 	using namespace cs::shader_cache;
 
-	int failures = 0;
-	const char* currentTest = "";
-
-	void Fail(std::string_view a_message)
-	{
-		std::printf(
-			"FAIL [%s]: %.*s\n",
-			currentTest,
-			static_cast<int>(a_message.size()),
-			a_message.data());
-		++failures;
-	}
-
-	void Check(bool a_condition, std::string_view a_message)
-	{
-		if (!a_condition)
-			Fail(a_message);
-	}
-
 	void CheckDisposition(
 		const ShaderCacheOutcome& a_outcome,
 		CacheDisposition a_expected,
 		std::string_view a_message)
 	{
 		if (a_outcome.disposition != a_expected) {
-			Fail(
+			FAIL(
 				std::string(a_message) + ": expected " + DescribeDisposition(a_expected) + ", got " + DescribeDisposition(a_outcome.disposition));
 		}
 	}
@@ -162,7 +144,7 @@ float4 Wrapped() { return SharedValue(); }
 			&error,
 			a_recipe.includeRoots.front());
 		if (!blob) {
-			Fail("direct compilation failed: " + error);
+			FAIL("direct compilation failed: " + error);
 			return {};
 		}
 		const auto* begin =
@@ -180,14 +162,14 @@ float4 Wrapped() { return SharedValue(); }
 	{
 		PrimedCache primed;
 		primed.cold = LoadOrCompileShader(a_recipe, a_workspace.Options());
-		Check(
+		CHECK_MSG(
 			primed.cold.succeeded && primed.cold.origin == CompileOrigin::kFreshCompile && primed.cold.recordWritten,
 			"cold compile must succeed and publish");
 		const auto warm = LoadOrCompileShader(a_recipe, a_workspace.Options());
 		CheckDisposition(warm, CacheDisposition::kHit, "second compile must hit");
-		Check(warm.bytecode == primed.cold.bytecode, "cache hit must preserve bytecode");
+		CHECK_MSG(warm.bytecode == primed.cold.bytecode, "cache hit must preserve bytecode");
 		primed.record = ReadAll(primed.cold.recordPath);
-		Check(!primed.record.empty(), "published record must be readable");
+		CHECK_MSG(!primed.record.empty(), "published record must be readable");
 		return primed;
 	}
 
@@ -198,7 +180,7 @@ float4 Wrapped() { return SharedValue(); }
 		workspace.Write("Sub/Shared.hlsli", "#error Includes must resolve from the shader root\n");
 		auto recipe = workspace.Recipe();
 		const auto primed = Prime(workspace, recipe);
-		Check(
+		CHECK_MSG(
 			primed.cold.bytecode == CompileDirect(recipe),
 			"cache output must match direct compilation");
 
@@ -206,7 +188,7 @@ float4 Wrapped() { return SharedValue(); }
 		tinted.defines.emplace_back("TINT", "1");
 		const auto tintedCold =
 			LoadOrCompileShader(tinted, workspace.Options());
-		Check(
+		CHECK_MSG(
 			tintedCold.succeeded && tintedCold.recordPath != primed.cold.recordPath && tintedCold.bytecode != primed.cold.bytecode,
 			"defines must address and compile distinct variants");
 
@@ -219,7 +201,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			rootStale,
 			CacheDisposition::kStale,
 			"root edits must invalidate the record");
-		Check(
+		CHECK_MSG(
 			rootStale.succeeded && rootStale.bytecode != primed.cold.bytecode,
 			"root edits must return recompiled bytecode");
 
@@ -234,13 +216,13 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			includeStale,
 			CacheDisposition::kStale,
 			"transitive include edits must invalidate the record");
-		Check(
+		CHECK_MSG(
 			includeStale.succeeded && includeStale.bytecode != rootStale.bytecode,
 			"transitive include edits must return recompiled bytecode");
 
 		const auto forced = LoadOrCompileShader(
 			recipe, workspace.Options(), CacheMode::kRecompile);
-		Check(
+		CHECK_MSG(
 			forced.succeeded && forced.disposition == CacheDisposition::kBypassed && forced.recordWritten && forced.bytecode == includeStale.bytecode,
 			"recompile mode must bypass and republish the cache");
 
@@ -248,7 +230,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		auto broken = recipe;
 		broken.defines.emplace_back("BROKEN", "1");
 		const auto failed = LoadOrCompileShader(broken, workspace.Options());
-		Check(
+		CHECK_MSG(
 			!failed.succeeded && !failed.recordWritten && !std::filesystem::exists(failed.recordPath),
 			"failed compilation must publish no cache artifact");
 	}
@@ -265,7 +247,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		ApplyDebugCompile(debug);
 		SetDebugCompile(false);
 		const auto debugCold = LoadOrCompileShader(debug, workspace.Options());
-		Check(
+		CHECK_MSG(
 			debugCold.succeeded && debugCold.recordPath != primed.cold.recordPath && debugCold.bytecode != primed.cold.bytecode,
 			"debug compiles must not share a record with optimized ones");
 	}
@@ -282,7 +264,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 
 		const auto initialized =
 			SynchronizeCacheIdentity(root, oldIdentity, kRecordSchemaVersion);
-		Check(
+		CHECK_MSG(
 			initialized.firstRun && !initialized.reset && initialized.error.empty(),
 			"first identity must initialize without a reset");
 
@@ -291,7 +273,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		WriteAll(record, { 1, 2, 3, 4 });
 		const auto changed =
 			SynchronizeCacheIdentity(root, newIdentity, kRecordSchemaVersion);
-		Check(
+		CHECK_MSG(
 			changed.reset && changed.error.empty() && !std::filesystem::exists(record),
 			"compiler replacement must discard incompatible records");
 	}
@@ -313,7 +295,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			repaired,
 			CacheDisposition::kRejected,
 			"corrupt records must fall through");
-		Check(
+		CHECK_MSG(
 			repaired.succeeded && repaired.recordWritten && repaired.bytecode == primed.cold.bytecode,
 			"corrupt records must recompile and republish");
 		CheckDisposition(
@@ -330,7 +312,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 
 		ShaderCacheRecord record;
 		if (ParseShaderCacheRecord(primed.record, record) != RecordStatus::kOk) {
-			Fail("pristine record must parse");
+			FAIL("pristine record must parse");
 			return;
 		}
 
@@ -340,7 +322,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		for (int index = 0; index < writers; ++index) {
 			auto variant = record;
 			variant.payload.back() = static_cast<std::uint8_t>(index);
-			Check(
+			CHECK_MSG(
 				SerializeShaderCacheRecord(variant, encoded[index]),
 				"writer record must serialize");
 		}
@@ -375,7 +357,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		reader.join();
 
 		const auto finalBytes = ReadAll(primed.cold.recordPath);
-		Check(
+		CHECK_MSG(
 			acceptedForeign.load() == 0 && std::ranges::find(encoded, finalBytes) != encoded.end(),
 			"concurrent writers must never yield an accepted partial record");
 	}
@@ -484,7 +466,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		using namespace cs::engine;
 		VariantFixture fixture("variant-coalesce", 2);
 		if (!fixture.device) {
-			Fail("could not create WARP device");
+			FAIL("could not create WARP device");
 			return;
 		}
 
@@ -501,15 +483,15 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 			}
 		}
 		fixture.gate.WaitEntered();
-		Check(
+		CHECK_MSG(
 			std::ranges::all_of(handles, [&](const auto& handle) { return handle == handles.front(); }) && fixture.attempts.load() == 1,
 			"concurrent requests must coalesce to one handle and one compile");
-		Check(
+		CHECK_MSG(
 			handles.front()->GetState() == ShaderVariantCompilationState::kPending && !handles.front()->Acquire(),
 			"pending compilation must neither block nor return a shader");
 
 		fixture.gate.Release();
-		Check(
+		CHECK_MSG(
 			WaitForState(handles.front(), ShaderVariantCompilationState::kReady) && !!handles.front()->Acquire() && handles.front()->GetSamplerUse().declared == 0x6000,
 			"completed compilation must publish its shader and sampler usage");
 	}
@@ -519,7 +501,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		using namespace cs::engine;
 		VariantFixture fixture("variant-demand");
 		if (!fixture.device) {
-			Fail("could not create WARP device");
+			FAIL("could not create WARP device");
 			return;
 		}
 
@@ -533,12 +515,12 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		fixture.cache->Demand(inflight);
 		fixture.cache->Demand(third);
 		fixture.gate.Release();
-		Check(
+		CHECK_MSG(
 			WaitForState(first, ShaderVariantCompilationState::kReady) && WaitForState(second, ShaderVariantCompilationState::kReady) && WaitForState(third, ShaderVariantCompilationState::kReady),
 			"every queued compilation must still complete after promotion");
 		std::scoped_lock lock(fixture.orderMutex);
-		Check(
-			fixture.order == std::vector<std::string>{ "A", "D", "B", "C" },
+		CHECK_MSG(
+			fixture.order == (std::vector<std::string>{ "A", "D", "B", "C" }),
 			"a demanded compilation must run ahead of earlier queued ones");
 	}
 
@@ -547,7 +529,7 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 		using namespace cs::engine;
 		VariantFixture fixture("variant-shutdown");
 		if (!fixture.device) {
-			Fail("could not create WARP device");
+			FAIL("could not create WARP device");
 			return;
 		}
 
@@ -557,12 +539,12 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 
 		std::thread stopping([&] { fixture.cache->Stop(); });
 		// Stop fails queued work before it joins, so the worker is provably still blocked here.
-		Check(
+		CHECK_MSG(
 			WaitForState(queued, ShaderVariantCompilationState::kFailed) && !fixture.finished.load(),
 			"shutdown must fail queued work while the in-flight compile is still running");
 		fixture.gate.Release();
 		stopping.join();
-		Check(
+		CHECK_MSG(
 			fixture.finished.load() && inflight->GetState() == ShaderVariantCompilationState::kFailed && !inflight->Acquire(),
 			"shutdown must wait for the in-flight worker and drop its result");
 	}
@@ -588,16 +570,15 @@ float4 main() : SV_Target { return Wrapped() * 0.5; }
 int main()
 {
 	for (const auto& test : tests) {
-		currentTest = test.name;
-		const int before = failures;
+		const int before = cs::tests::failures;
 		test.run();
 		std::printf(
 			"%-36s %s\n",
 			test.name,
-			failures == before ? "ok" : "FAILED");
+			cs::tests::failures == before ? "ok" : "FAILED");
 	}
 	std::printf(
-		failures == 0 ? "ShaderCache passed\n" : "%d shader cache assertion(s) failed\n",
-		failures);
-	return failures == 0 ? 0 : 1;
+		cs::tests::failures == 0 ? "ShaderCache passed\n" : "%d shader cache assertion(s) failed\n",
+		cs::tests::failures);
+	return cs::tests::failures == 0 ? 0 : 1;
 }

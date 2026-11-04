@@ -1,4 +1,5 @@
 #include "CSSha1.h"
+#include "Check.h"
 #include "FeatureShaderDeclarations.h"
 #include "Log.h"
 #include "ParallelFor.h"
@@ -39,6 +40,7 @@ namespace
 		bool contributed = false;
 	};
 
+	// Throws so a failing row or precondition reports through its caller.
 	void Require(bool a_condition, const std::string& a_message)
 	{
 		if (!a_condition)
@@ -101,11 +103,11 @@ namespace
 		Require(std::filesystem::is_directory(a_shaderRoot), "Shader root is not a directory: " + a_shaderRoot.string());
 		for (auto& row : a_rows) {
 			row.owned = IsShaderSourceAvailable(a_shaderRoot, ResolveShaderSourceName(row.source.Family()));
-			row.contributed = row.owned && std::ranges::any_of(GetFeatureShaderContributions(), [&](const auto& contribution) {
+			row.contributed = row.owned && std::ranges::any_of(cs::shader_test::GetFeatureShaderContributions(), [&](const auto& contribution) {
 				return contribution.targetId == row.source.target;
 			});
 		}
-		for (const auto& contribution : GetFeatureShaderContributions()) {
+		for (const auto& contribution : cs::shader_test::GetFeatureShaderContributions()) {
 			// Inherited targets keep their AE identity and are covered by the AE table.
 			if (a_inheritsTargets && std::ranges::none_of(a_rows, [&](const Row& row) { return row.source.target == contribution.targetId; }))
 				continue;
@@ -138,7 +140,7 @@ namespace
 
 	Contributions AllContributions(bool a_featuresOn)
 	{
-		return a_featuresOn ? Contributions(cs::engine::GetFeatureShaderContributions()) : Contributions{};
+		return a_featuresOn ? Contributions(cs::shader_test::GetFeatureShaderContributions()) : Contributions{};
 	}
 
 	auto CompileStage(const cs::engine::ShaderFamilyDescriptor& a_descriptor, const std::filesystem::path& a_shaderRoot,
@@ -197,7 +199,7 @@ namespace
 		const auto compiled = CompileStage(family, a_shaderRoot, AllContributions(a_featuresOn), a_runtime);
 		if (a_featuresOn) {
 			if (family.stage != cs::engine::ShaderStage::kCompute &&
-				std::ranges::any_of(cs::engine::GetFeatureShaderContributions(), [&](const auto& contribution) {
+				std::ranges::any_of(cs::shader_test::GetFeatureShaderContributions(), [&](const auto& contribution) {
 					return contribution.targetId == family.target && contribution.requiresGraphicsPair;
 				})) {
 				const bool isVertex = family.stage == cs::engine::ShaderStage::kVertex;
@@ -262,7 +264,7 @@ namespace
 	std::string CompileIsolated(const Row& a_row, const std::filesystem::path& a_shaderRoot, cs::engine::GameRuntime a_runtime)
 	{
 		const auto family = a_row.source.Family();
-		for (const auto& contribution : cs::engine::GetFeatureShaderContributions()) {
+		for (const auto& contribution : cs::shader_test::GetFeatureShaderContributions()) {
 			if (contribution.targetId != family.target ||
 				(contribution.stages & cs::engine::ShaderStageBit(family.stage)) == 0)
 				continue;
@@ -291,13 +293,17 @@ int main(int a_argc, char** a_argv)
 		const std::filesystem::path shaderRoot(a_argv[1]);
 		if (featuresOn) {
 			const auto abiError = VerifyShaderABI(shaderRoot);
-			Require(abiError.empty(), "Shader ABI: " + abiError);
+			CHECK_MSG(abiError.empty(), "Shader ABI: " + abiError);
+			if (!abiError.empty())
+				return 1;
 		}
 		ResolveOwnership(rows, table.inheritsTargets, shaderRoot);
 		const auto total = featuresOn ?
 		                       static_cast<std::size_t>(std::ranges::count(rows, true, &Row::contributed)) :
 		                       rows.size();
-		Require(total != 0, "No contributor targets in the identity corpus");
+		CHECK_MSG(total != 0, "No contributor targets in the identity corpus");
+		if (total == 0)
+			return 1;
 		const auto start = std::chrono::steady_clock::now();
 		ParallelFor(rows.size(), [&](std::size_t index) {
 			if (!rows[index].owned || (featuresOn && !rows[index].contributed))
@@ -351,7 +357,7 @@ int main(int a_argc, char** a_argv)
 			isolated ? "Isolated feature shader corpus" : featuresOn ? "Feature-on shader corpus" :
 																	   "Stock shader identity",
 			total - failed - unowned, failed, unowned, total, seconds, ParallelThreadCount());
-		return failed == 0 ? 0 : 1;
+		return failed == 0 && cs::tests::failures == 0 ? 0 : 1;
 	} catch (const std::exception& error) {
 		std::fprintf(stderr, "Stock shader identity: %s\n", error.what());
 		return 1;
