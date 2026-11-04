@@ -10,6 +10,7 @@
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/RuntimeCallback.h"
+#include "Render/ShaderCompileGate.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
@@ -994,6 +995,9 @@ namespace cs::engine
 
 		bool QueueNativeVariant(const NativeVariantKey& a_key)
 		{
+			// Background mode compiles on first draw, not at shader load.
+			if (!ShaderCompileBlocksPlay())
+				return false;
 			if (!IsValidTarget(a_key.target))
 				return false;
 			const auto plan =
