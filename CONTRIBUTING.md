@@ -94,6 +94,12 @@ CI runs `scripts\format.ps1 -Check` on C++ and HLSL. Run
 using only the `# Changelog` title, `## MAJOR.MINOR.PATCH` headings, single-line
 `- ` bullets, and blank lines. Builds embed the file directly in the DLL.
 
+Each major release (`0.x.0`) may start with a `### Highlights` subsection of 3-5
+hand-written bullets on new features and major changes, followed by `### Changes`
+with the regular bullets. The Home page shows the newest release's highlights;
+patch releases have no highlights. Other `###`
+headings and empty subsections are rejected.
+
 ## Install or deploy
 
 ```powershell

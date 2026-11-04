@@ -1,112 +1,28 @@
 #include "Log.h"
+#include "Menu/ChangelogParser.h"
 #include "Menu/ChangelogResource.h"
 #include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Utils/ModuleResource.h"
 
+#include <algorithm>
 #include <string>
-#include <string_view>
-#include <utility>
 #include <vector>
 
 namespace
 {
-	struct ChangelogRelease
-	{
-		std::string version;
-		std::vector<std::string> items;
-	};
-
-	struct ChangelogHistory
-	{
-		std::vector<ChangelogRelease> releases;
-		std::string error;
-	};
-
-	[[nodiscard]] ChangelogHistory ParseChangelogHistory(std::string_view a_text)
-	{
-		ChangelogHistory result;
-		std::size_t position{ 0 };
-		std::size_t lineNumber{ 0 };
-		bool sawTitle{ false };
-
-		const auto fail = [&](std::string a_reason) {
-			result.releases.clear();
-			result.error = "line " + std::to_string(lineNumber) + ": " + std::move(a_reason);
-		};
-
-		while (position < a_text.size()) {
-			const auto end = a_text.find('\n', position);
-			auto line = a_text.substr(
-				position,
-				end == std::string_view::npos ? a_text.size() - position : end - position);
-			position = end == std::string_view::npos ? a_text.size() : end + 1;
-			++lineNumber;
-			if (line.ends_with('\r'))
-				line.remove_suffix(1);
-
-			if (!sawTitle) {
-				if (line != "# Changelog") {
-					fail("expected '# Changelog'");
-					return result;
-				}
-				sawTitle = true;
-				continue;
-			}
-			if (line.empty())
-				continue;
-			if (line.starts_with("## ")) {
-				if (line.size() == 3) {
-					fail("empty release heading");
-					return result;
-				}
-				if (!result.releases.empty() && result.releases.back().items.empty()) {
-					fail("release has no items");
-					return result;
-				}
-				result.releases.push_back({ std::string{ line.substr(3) }, {} });
-				continue;
-			}
-			if (line.starts_with("- ")) {
-				if (result.releases.empty()) {
-					fail("bullet appears before a release");
-					return result;
-				}
-				if (line.size() == 2) {
-					fail("empty bullet");
-					return result;
-				}
-				result.releases.back().items.emplace_back(line.substr(2));
-				continue;
-			}
-
-			fail("unsupported content");
-			return result;
-		}
-
-		if (!sawTitle) {
-			lineNumber = 1;
-			fail("expected '# Changelog'");
-		} else if (result.releases.empty()) {
-			fail("no releases");
-		} else if (result.releases.back().items.empty()) {
-			fail("release has no items");
-		}
-		return result;
-	}
-
-	[[nodiscard]] ChangelogHistory LoadChangelog()
+	[[nodiscard]] cs::ChangelogHistory LoadChangelog()
 	{
 		const auto text = cs::LoadRcData(IDR_CHANGELOG);
 		if (!text) {
-			ChangelogHistory result;
+			cs::ChangelogHistory result;
 			result.error = text.error();
 			return result;
 		}
-		return ParseChangelogHistory(*text);
+		return cs::ParseChangelogHistory(*text);
 	}
 
-	[[nodiscard]] const ChangelogHistory& Changelog()
+	[[nodiscard]] const cs::ChangelogHistory& Changelog()
 	{
 		static const auto history = [] {
 			auto result = LoadChangelog();
@@ -120,6 +36,18 @@ namespace
 
 namespace cs
 {
+	void Menu::DrawBulletList(dmui::Client& a_client, const std::vector<std::string>& a_items)
+	{
+		dmui::ui::PushTextWrapPos(0.0f);
+		for (const auto& item : a_items) {
+			CheckHostResult(
+				a_client,
+				a_client.DrawBulletText(item.c_str()),
+				"draw changelog bullet");
+		}
+		dmui::ui::PopTextWrapPos();
+	}
+
 	void Menu::DrawChangelog(dmui::Client& a_client)
 	{
 		const ui::Section section{ "changelog", "Changelog" };
@@ -136,17 +64,33 @@ namespace cs
 			const auto& release = history.releases[index];
 			const auto id = "changelog-" + release.version;
 			const ui::Section entry{ id.c_str(), release.version.c_str(),
-				ui::Collapsible{ .count = release.items.size(), .expandedByDefault = index == 0, .framed = false } };
-			if (entry) {
-				dmui::ui::PushTextWrapPos(0.0f);
-				for (const auto& item : release.items) {
-					CheckHostResult(
-						a_client,
-						a_client.DrawBulletText(item.c_str()),
-						"draw changelog bullet");
-				}
-				dmui::ui::PopTextWrapPos();
+				ui::Collapsible{ .count = release.highlights.size() + release.items.size(), .expandedByDefault = index == 0, .framed = false } };
+			if (!entry)
+				continue;
+			if (!release.highlights.empty()) {
+				static_cast<void>(dmui::DrawStyledText(
+					a_client, "Highlights", { .fontRole = DMUI_FONT_ROLE_SUBHEADING }));
+				DrawBulletList(a_client, release.highlights);
+				static_cast<void>(dmui::DrawStyledText(
+					a_client, "Changes", { .fontRole = DMUI_FONT_ROLE_SUBHEADING }));
 			}
+			DrawBulletList(a_client, release.items);
 		}
+	}
+
+	void Menu::DrawWhatsNew(dmui::Client& a_client)
+	{
+		const auto& history = Changelog();
+		const auto release = std::ranges::find_if(
+			history.releases, [](const auto& a_release) { return !a_release.highlights.empty(); });
+		if (release == history.releases.end())
+			return;
+
+		const auto title = "What's new in " + release->version;
+		if (!CheckHostResult(a_client, a_client.DrawSectionHeader(title.c_str()), "draw what's new section"))
+			return;
+		DrawBulletList(a_client, release->highlights);
+		if (dmui::ui::Button("View full changelog"))
+			static_cast<void>(host::HostClient::Get().SelectPage("changelog"));
 	}
 }

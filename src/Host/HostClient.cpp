@@ -1002,6 +1002,15 @@ namespace cs::host
 			LogFailure("reset performance overlay layout");
 	}
 
+	bool HostClient::SelectPage(std::string_view a_id) noexcept
+	{
+		for (const auto& page : _pages) {
+			if (page->descriptor.id == a_id)
+				return _client.SelectPage(page->handle);
+		}
+		return false;
+	}
+
 	void HostClient::LogFailure(std::string_view a_operation) const noexcept
 	{
 		L->warn(

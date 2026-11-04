@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct ID3D11Device;
@@ -46,6 +47,7 @@ namespace cs::host
 			std::uint32_t a_durationMilliseconds,
 			std::string a_title = {}) noexcept;
 		void ResetOverlay() noexcept;
+		[[nodiscard]] bool SelectPage(std::string_view a_id) noexcept;
 
 	private:
 		HostClient();

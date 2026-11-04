@@ -456,6 +456,7 @@ namespace cs
 			"choose which features to load in Advanced, then restart. "
 			"Use Enabled on each loaded feature's page to toggle its effect live.");
 
+		DrawWhatsNew(a_client);
 		DrawFeatureOverview(a_client);
 
 		if (!CheckHostResult(

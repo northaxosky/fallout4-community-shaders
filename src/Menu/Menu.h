@@ -10,6 +10,7 @@
 #include <string>
 #include <toml++/toml.hpp>
 #include <unordered_map>
+#include <vector>
 
 namespace cs
 {
@@ -30,6 +31,7 @@ namespace cs
 		void DrawAdvanced(dmui::Client& a_client);
 		void DrawPresets(dmui::Client& a_client);
 		void DrawChangelog(dmui::Client& a_client);
+		void DrawWhatsNew(dmui::Client& a_client);
 		void ObserveHostFrame(dmui::Client& a_client);
 		void OnHostDeviceReady() noexcept;
 
@@ -94,6 +96,7 @@ namespace cs
 
 		void SetDebugViewSelection(const Feature& a_feature, std::string_view a_view);
 		void DrawFeatureOverview(dmui::Client& a_client);
+		void DrawBulletList(dmui::Client& a_client, const std::vector<std::string>& a_items);
 		void DrawShaderSettings(dmui::Client& a_client);
 		void DrawDebugTexture(dmui::Client& a_client, const Feature& a_feature);
 		void StartDialog(
