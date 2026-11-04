@@ -40,29 +40,16 @@ namespace cs::engine
 		bool g_hooked = false;
 		std::uint64_t g_bindEpoch = UINT64_MAX;
 
-		bool EnsureTexture(Entry& a_entry, ID3D11DeviceContext* a_context, const RE::BSGraphics::State& a_graphics)
+		bool EnsureTexture(Entry& a_entry, const RE::BSGraphics::State& a_graphics)
 		{
 			auto& texture = a_entry.texture;
 			if (texture && texture->desc.Width == a_graphics.screenWidth && texture->desc.Height == a_graphics.screenHeight)
 				return true;
 			const auto& name = a_entry.target.name;
 			try {
-				D3D11_TEXTURE2D_DESC desc{};
-				desc.Width = a_graphics.screenWidth;
-				desc.Height = a_graphics.screenHeight;
-				desc.MipLevels = 1;
-				desc.ArraySize = 1;
-				desc.Format = a_entry.target.format;
-				desc.SampleDesc.Count = 1;
-				desc.Usage = D3D11_USAGE_DEFAULT;
-				desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-				auto created = std::make_unique<cs::buffer::Texture2D>(desc);
-				created->CreateSRV({ .Format = desc.Format, .ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D, .Texture2D = { .MostDetailedMip = 0, .MipLevels = 1 } });
-				winrt::com_ptr<ID3D11Device> device;
-				a_context->GetDevice(device.put());
-				DX::ThrowIfFailed(device->CreateRenderTargetView(created->resource.get(), nullptr, created->rtv.put()));
-				created->SetName(name + ".Texture", name + ".SRV", "", name + ".RTV");
-				texture = std::move(created);
+				texture = cs::buffer::CreateRenderSizeTexture(
+					a_graphics.screenWidth, a_graphics.screenHeight, a_entry.target.format,
+					D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, name);
 				return true;
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Prepass target {} unavailable: {}", name, e.what());
@@ -91,7 +78,7 @@ namespace cs::engine
 			for (auto& entry : g_entries) {
 				bool active = false;
 				cs::render::RunRenderCallback(entry.owner, "PrepassExtraTarget", [&] { active = entry.target.active(); });
-				if (!active || !EnsureTexture(entry, context, *graphics))
+				if (!active || !EnsureTexture(entry, *graphics))
 					continue;
 				context->ClearRenderTargetView(entry.texture->rtv.get(), entry.target.clear.data());
 				entry.ready = true;

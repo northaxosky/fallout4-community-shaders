@@ -26,6 +26,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
 #include "World/Water.h"
 
@@ -257,36 +258,10 @@ namespace cs::features
 		const auto extent = cs::render::GetActiveExtent(graphics->screenWidth, graphics->screenHeight);
 		if (!extent.width || !extent.height)
 			return;
-		if (!_debugTexture || _debugTexture->desc.Width != graphics->screenWidth ||
-			_debugTexture->desc.Height != graphics->screenHeight) {
-			try {
-				D3D11_TEXTURE2D_DESC desc{};
-				desc.Width = graphics->screenWidth;
-				desc.Height = graphics->screenHeight;
-				desc.MipLevels = 1;
-				desc.ArraySize = 1;
-				desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-				desc.SampleDesc.Count = 1;
-				desc.Usage = D3D11_USAGE_DEFAULT;
-				desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-				auto texture = std::make_unique<cs::buffer::Texture2D>(desc);
-				winrt::com_ptr<ID3D11Device> device;
-				a_context->GetDevice(device.put());
-				DX::ThrowIfFailed(device->CreateShaderResourceView(
-					texture->resource.get(), nullptr, texture->srv.put()));
-				DX::ThrowIfFailed(device->CreateRenderTargetView(
-					texture->resource.get(), nullptr, texture->rtv.put()));
-				texture->SetName("WaterEffects/Debug.Texture", "WaterEffects/Debug.SRV", "", "WaterEffects/Debug.RTV");
-				_debugTexture = std::move(texture);
-			} catch (const std::exception& e) {
-				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Water debug target unavailable: {}", e.what());
-				return;
-			} catch (...) {
-				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Water debug target unavailable.");
-				return;
-			}
-		}
-		auto* target = _debugTexture->rtv.get();
+		auto* debugTarget = cs::render::AcquireFullscreenDebugTarget();
+		if (!debugTarget)
+			return;
+		auto* target = debugTarget->rtv.get();
 		const cs::render::FullscreenPass::Scope pass(_debugPass, a_context, target, extent.width, extent.height);
 		if (!pass.IsActive())
 			return;
@@ -361,11 +336,12 @@ namespace cs::features
 
 	FullscreenDebugData WaterEffects::GetFullscreenDebugData() const noexcept
 	{
-		if (!CanBind() || !_debugFrameReady)
+		auto* texture = cs::render::GetFullscreenDebugTargetSRV();
+		if (!CanBind() || !_debugFrameReady || !texture)
 			return {};
 		return { .owner = FullscreenDebugOwner::WaterEffects,
 			.mode = static_cast<std::uint32_t>(_debugVisualization.load(std::memory_order_acquire)),
-			.texture = _debugTexture->srv.get() };
+			.texture = texture };
 	}
 
 	void WaterEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const

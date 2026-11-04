@@ -9,6 +9,11 @@
 
 struct ID3D11Device;
 
+namespace cs::buffer
+{
+	class Texture2D;
+}
+
 namespace cs::engine
 {
 	enum class ShaderStage : std::uint8_t;
@@ -28,6 +33,11 @@ namespace cs::render
 	[[nodiscard]] ID3D11SamplerState* GetPointClampSampler() noexcept;
 	// Debug producers invalidate the cached packet when replacing or updating its texture.
 	void InvalidateFullscreenDebugData() noexcept;
+	// Render thread; freed when no full-screen debug view is selected.
+	[[nodiscard]] buffer::Texture2D* AcquireFullscreenDebugTarget(
+		DXGI_FORMAT a_format = DXGI_FORMAT_R16G16B16A16_FLOAT) noexcept;
+	// SRV for FullscreenDebugData::texture; null when unallocated.
+	[[nodiscard]] ID3D11ShaderResourceView* GetFullscreenDebugTargetSRV() noexcept;
 
 	// startup thread only
 	void EnsureSharedDataUpdateInstalled();

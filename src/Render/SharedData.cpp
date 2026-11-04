@@ -66,6 +66,7 @@ namespace cs::render
 			std::uint32_t debugSelectionFrame = UINT32_MAX;
 			Feature* debugFeature = nullptr;
 			winrt::com_ptr<ID3D11ShaderResourceView> debugTexture;
+			std::unique_ptr<buffer::Texture2D> debugTarget;
 			winrt::com_ptr<ID3D11SamplerState> linearClamp;
 			winrt::com_ptr<ID3D11SamplerState> pointClamp;
 		};
@@ -342,6 +343,11 @@ namespace cs::render
 				state.debugFeature = nullptr;
 				a_refresh = true;
 			}
+			if (state.debugTarget && !FeatureManager::Get().GetFullscreenDebugFeature()) {
+				state.debugTexture = nullptr;
+				state.debugTarget.reset();
+				state.debugFrame = UINT32_MAX;
+			}
 			if (state.debugFrame == graphics->frameCount && !a_refresh)
 				return;
 			auto debug = state.debugFeature ? state.debugFeature->GetFullscreenDebugData() : FullscreenDebugData{};
@@ -526,6 +532,38 @@ namespace cs::render
 	void InvalidateFullscreenDebugData() noexcept
 	{
 		GetSubstrateState().debugFrame = UINT32_MAX;
+	}
+
+	buffer::Texture2D* AcquireFullscreenDebugTarget(DXGI_FORMAT a_format) noexcept
+	{
+		auto& state = GetSubstrateState();
+		const auto* graphics = engine::GetGraphicsState();
+		// Refuse without a selection: only the render thread releases the target.
+		if (!graphics || !FeatureManager::Get().GetFullscreenDebugFeature())
+			return nullptr;
+		if (state.debugTarget && state.debugTarget->desc.Width == graphics->screenWidth &&
+			state.debugTarget->desc.Height == graphics->screenHeight &&
+			state.debugTarget->desc.Format == a_format)
+			return state.debugTarget.get();
+		try {
+			auto target = buffer::CreateRenderSizeTexture(
+				graphics->screenWidth, graphics->screenHeight, a_format,
+				D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
+				"FullscreenDebug/Target");
+			state.debugTexture = nullptr;
+			state.debugTarget = std::move(target);
+			state.debugFrame = UINT32_MAX;
+		} catch (const std::exception& e) {
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Fullscreen debug target unavailable: {}", e.what());
+			return nullptr;
+		}
+		return state.debugTarget.get();
+	}
+
+	ID3D11ShaderResourceView* GetFullscreenDebugTargetSRV() noexcept
+	{
+		const auto& target = GetSubstrateState().debugTarget;
+		return target ? target->srv.get() : nullptr;
 	}
 
 	void BindSharedData(

@@ -169,7 +169,6 @@ namespace cs::features
 		std::atomic_bool _probesReady{ false };
 
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _debugCompute;
-		std::unique_ptr<cs::buffer::Texture2D> _debugTexture;
 		bool _debugFrameReady = false;
 
 		std::atomic<std::uint8_t> _queuedReset{ 0 };

@@ -4,12 +4,10 @@
 #include "FeatureCategories.h"
 #include "Render/FullscreenPass.h"
 #include "ShaderDefines.h"
-#include "Utils/CSBuffer.h"
 
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <string>
 
@@ -92,7 +90,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11SamplerState> _causticsSampler;
 		cs::render::FullscreenPass _debugPass;
 		std::array<winrt::com_ptr<ID3D11PixelShader>, 2> _debugPS;
-		std::unique_ptr<cs::buffer::Texture2D> _debugTexture;
 		bool _debugFrameReady = false;
 
 		mutable std::mutex _validationMutex;

@@ -329,11 +329,12 @@ namespace cs::features
 
 	FullscreenDebugData Skylighting::GetFullscreenDebugData() const noexcept
 	{
-		if (!_debugFrameReady || !_debugTexture)
+		auto* texture = cs::render::GetFullscreenDebugTargetSRV();
+		if (!_debugFrameReady || !texture)
 			return {};
 		return { .owner = FullscreenDebugOwner::Skylighting,
 			.mode = static_cast<std::uint32_t>(_debugVisualization.load(std::memory_order_acquire)),
-			.texture = _debugTexture->srv.get() };
+			.texture = texture };
 	}
 
 	void Skylighting::RenderDebug(ID3D11DeviceContext* a_context)
@@ -351,41 +352,14 @@ namespace cs::features
 		const auto extent = cs::render::GetActiveExtent(graphics->screenWidth, graphics->screenHeight);
 		if (!extent.width || !extent.height)
 			return;
-		if (!_debugTexture || _debugTexture->desc.Width != graphics->screenWidth || _debugTexture->desc.Height != graphics->screenHeight) {
-			try {
-				D3D11_TEXTURE2D_DESC desc{};
-				desc.Width = graphics->screenWidth;
-				desc.Height = graphics->screenHeight;
-				desc.MipLevels = 1;
-				desc.ArraySize = 1;
-				desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-				desc.SampleDesc.Count = 1;
-				desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-				auto texture = std::make_unique<cs::buffer::Texture2D>(desc);
-				D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
-				srv.Format = desc.Format;
-				srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-				srv.Texture2D.MipLevels = 1;
-				texture->CreateSRV(srv);
-				D3D11_UNORDERED_ACCESS_VIEW_DESC uav{};
-				uav.Format = desc.Format;
-				uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-				texture->CreateUAV(uav);
-				texture->SetName("Skylighting/Debug.Texture", "Skylighting/Debug.SRV", "Skylighting/Debug.UAV");
-				_debugTexture = std::move(texture);
-			} catch (const std::exception& e) {
-				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Skylighting debug target unavailable: {}", e.what());
-				return;
-			} catch (...) {
-				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "Skylighting debug target unavailable.");
-				return;
-			}
-		}
+		auto* target = cs::render::AcquireFullscreenDebugTarget();
+		if (!target)
+			return;
 		cs::engine::ComputeOMScope scope(a_context, 2, 0, 1, 0);
 		cs::render::ScopedComputeSharedDataBinding substrate(a_context);
 		cs::render::annotation::ScopedEvent event("Skylighting::Debug", false);
 		ID3D11ShaderResourceView* srvs[]{ normals, _texProbeArray->srv.get() };
-		ID3D11UnorderedAccessView* uavs[]{ _debugTexture->uav.get() };
+		ID3D11UnorderedAccessView* uavs[]{ target->uav.get() };
 		a_context->CSSetShaderResources(0, 2, srvs);
 		a_context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 		a_context->CSSetShader(shader, nullptr, 0);

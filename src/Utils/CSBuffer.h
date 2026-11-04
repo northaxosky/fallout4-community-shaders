@@ -237,6 +237,24 @@ namespace cs::buffer
 			DX::ThrowIfFailed(device->CreateUnorderedAccessView(resource.get(), &a_desc, uav.put()));
 		}
 
+		void CreateSRV()
+		{
+			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
+			DX::ThrowIfFailed(device->CreateShaderResourceView(resource.get(), nullptr, srv.put()));
+		}
+
+		void CreateUAV()
+		{
+			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
+			DX::ThrowIfFailed(device->CreateUnorderedAccessView(resource.get(), nullptr, uav.put()));
+		}
+
+		void CreateRTV()
+		{
+			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
+			DX::ThrowIfFailed(device->CreateRenderTargetView(resource.get(), nullptr, rtv.put()));
+		}
+
 		void Reset()
 		{
 			rtv = nullptr;
@@ -265,4 +283,29 @@ namespace cs::buffer
 		winrt::com_ptr<ID3D11RenderTargetView> rtv;
 		winrt::com_ptr<ID3D12Resource> resource12;
 	};
+
+	// Single-mip texture with default views for each requested bind flag, named for captures.
+	inline std::unique_ptr<Texture2D> CreateRenderSizeTexture(
+		UINT a_width, UINT a_height, DXGI_FORMAT a_format, UINT a_bindFlags, std::string_view a_name)
+	{
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = a_width;
+		desc.Height = a_height;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = a_format;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = a_bindFlags;
+		auto texture = std::make_unique<Texture2D>(desc);
+		const std::string name(a_name);
+		if (a_bindFlags & D3D11_BIND_SHADER_RESOURCE)
+			texture->CreateSRV();
+		if (a_bindFlags & D3D11_BIND_UNORDERED_ACCESS)
+			texture->CreateUAV();
+		if (a_bindFlags & D3D11_BIND_RENDER_TARGET)
+			texture->CreateRTV();
+		texture->SetName(name + ".Texture", name + ".SRV", name + ".UAV", name + ".RTV");
+		return texture;
+	}
 }
