@@ -2,7 +2,6 @@
 
 #include "ENB/ENBSeriesAPI.h"
 #include "Log.h"
-#include "Utils/PluginVersion.h"
 
 namespace cs::env
 {
@@ -26,14 +25,14 @@ namespace cs::env
 		// doodlum's standalone Upscaling is 1.1.x; jarari's Upscaling Custom is 1.7+.
 		bool IsLegacyUpscaling(const std::filesystem::path& a_dll)
 		{
-			constexpr auto kFirstCompatible = REL::Version{ 1, 2 }.pack();
-			const auto version = util::ReadPluginVersion(a_dll);
-			if (!version) {
-				L->warn("Could not read the F4SE plugin version of {}; not blocking", a_dll.string());
-				return false;
-			}
-			const bool blocked = *version < kFirstCompatible;
-			L->info("{} reports F4SE plugin version {:08X}; {}", a_dll.filename().string(), *version, blocked ? "blocked" : "not blocked");
+			// Maps the DLL without running DllMain or resolving its imports.
+			const auto module = ::LoadLibraryExW(a_dll.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
+			const auto* data = module ? reinterpret_cast<const F4SE::PluginVersionData*>(::GetProcAddress(module, "F4SEPlugin_Version")) : nullptr;
+			const auto version = data && data->dataVersion == F4SE::PluginVersionData::kVersion ? data->pluginVersion : 0;
+			if (module)
+				::FreeLibrary(module);
+			const bool blocked = version && version < REL::Version{ 1, 2 }.pack();
+			L->info("{} reports F4SE plugin version {:08X}; {}", a_dll.filename().string(), version, blocked ? "blocked" : "not blocked");
 			return blocked;
 		}
 
