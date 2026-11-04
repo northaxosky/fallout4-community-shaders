@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Compatibility: Community Shaders now disables itself and shows a message when doodlum's standalone Upscaling is installed; it crashes alongside CS, which includes it. jarari's Upscaling Custom is unaffected.
 - Menu: Home shows what's new in the latest major release; menu pages group their settings into panels, and each changelog release has its own panel.
 - Unified Water: the main menu is ready several seconds sooner on startup; Regenerate Caches now rebuilds on the next launch.
 - Upscaling/Frame Generation: no longer crash at startup and keep working when the game window is resized, e.g. with HighFPSPhysicsFix BorderlessUpscale.
