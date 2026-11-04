@@ -7,7 +7,7 @@ import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "tests/data"
+DATA = ROOT / "src/Render/data"
 # Rows proven under an OG-era proof compiler; the export's inherited-row rule names this prefix.
 VARIANT_RECEIPTS = "harness/shaders/runtime-variants/"
 
