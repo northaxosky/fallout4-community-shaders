@@ -148,8 +148,7 @@ namespace cs::render
 			if (engine::TryGetSunLightColor(sunColor))
 				data.DirLightColor = { sunColor.x, sunColor.y, sunColor.z, 1.0f };
 			const auto glare = engine::GetSunGlare();
-			a_fo4.SunGlareColor = { glare.color.x, glare.color.y, glare.color.z, glare.exponent };
-			a_fo4.SunGlareIntensity = glare.intensity;
+			a_fo4.SunGlareColor = { glare.color.x, glare.color.y, glare.color.z, glare.intensity };
 			if (engine::TryGetDirectionalAmbientRows(a_fo4.DirectionalAmbient))
 				PackLinearAmbient(a_fo4.DirectionalAmbient, data);
 			data.HideSky = engine::IsSkyHidden() ? 1u : 0u;
@@ -191,7 +190,6 @@ namespace cs::render
 				.DebugMode = state.fo4.DebugMode,
 				.DeltaTime = state.fo4.DeltaTime,
 				.DebugParams = state.fo4.DebugParams,
-				.SunGlareIntensity = state.fo4.SunGlareIntensity,
 				.SunDiscDirection = state.fo4.SunDiscDirection,
 				.SunGlareColor = state.fo4.SunGlareColor
 			};

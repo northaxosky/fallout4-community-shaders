@@ -6,27 +6,33 @@
 
 namespace FO4Forward
 {
-	// First-person pixels use scene depth; the world camera cannot project them.
-	float3 ViewPosition(float3 screenPosition)
+	float2 ScreenUV(float3 screenPosition)
 	{
-		float2 uv = screenPosition.xy * SharedData::BufferDim.zw;
-		uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(uv);
-		float depth = FO4Depth::ProjectionDepth(screenPosition.z);
-		if (FO4Depth::IsFirstPerson(screenPosition.z))
-			depth = SharedData::GetDepth(uv);
+		return FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(
+			screenPosition.xy * SharedData::BufferDim.zw);
+	}
+
+	float3 Unproject(float2 uv, float depth)
+	{
 		float4 view = mul(FrameBuffer::CameraProjInverse,
 			float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), depth, 1.0));
 		return view.xyz / view.w;
 	}
 
-	// Unit camera-to-fragment direction; no depth read, any depth projects onto the ray.
+	// First-person pixels use scene depth; the world camera cannot project them.
+	float3 ViewPosition(float3 screenPosition)
+	{
+		float2 uv = ScreenUV(screenPosition);
+		float depth = FO4Depth::ProjectionDepth(screenPosition.z);
+		if (FO4Depth::IsFirstPerson(screenPosition.z))
+			depth = SharedData::GetDepth(uv);
+		return Unproject(uv, depth);
+	}
+
+	// Unit camera-to-fragment ray; no depth read, any depth lies on it.
 	float3 ViewDirection(float3 screenPosition)
 	{
-		float2 uv = screenPosition.xy * SharedData::BufferDim.zw;
-		uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(uv);
-		float4 view = mul(FrameBuffer::CameraProjInverse,
-			float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.5, 1.0));
-		return normalize(view.xyz / view.w);
+		return normalize(Unproject(ScreenUV(screenPosition), 0.5));
 	}
 
 	// Camera-relative world position, upstream's input.WorldPosition.

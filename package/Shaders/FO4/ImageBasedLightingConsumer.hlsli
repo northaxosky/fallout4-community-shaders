@@ -38,7 +38,8 @@ namespace FO4IBL
 		[branch] if (!SharedData::iblSettings.EnableIBL || SharedData::iblSettings.FogAmount == 0.0) return fogColor;
 		float3 tinted = ImageBasedLighting::GetFogIBLColor(fogColor);
 		float3 viewDirectionWS = FrameBuffer::ViewToWorld(FO4Forward::ViewDirection(screenPosition), false);
-		float sunFactor = pow(max(dot(viewDirectionWS, SharedData::DirLightDirection.xyz), 0.0), FO4SharedData::SunGlareColor.w) * FO4SharedData::SunGlareIntensity;
+		// FO4: DrawWorld_PreRender fixes the composite glare exponent at 8.
+		float sunFactor = pow(max(dot(viewDirectionWS, SharedData::DirLightDirection.xyz), 0.0), 8.0) * FO4SharedData::SunGlareColor.w;
 		return lerp(tinted, FO4SharedData::SunGlareColor.xyz, sunFactor);
 	}
 }

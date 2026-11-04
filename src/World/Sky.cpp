@@ -93,7 +93,7 @@ namespace cs::engine
 
 	SunGlare GetSunGlare() noexcept
 	{
-		// BSDFCompositeShader::SetupGeometry: the sun color without the HDR scale; exponent is a constant.
+		// BSDFCompositeShader::SetupGeometry: sun color without the HDR scale.
 		SunGlare glare{};
 		const auto* sky = RE::Sky::GetSingleton();
 		if (!sky || !sky->sun || !IsFullSky() || !TryGetLinearSunColor(1.0f, glare.color))
@@ -102,7 +102,6 @@ namespace cs::engine
 		const auto* property = GetSkyShaderProperty(sky->sun->sunBase.get());
 		if (!property)
 			return {};
-		glare.exponent = 8.0f;
 		glare.intensity = property->kBlendColor.a;
 		return glare;
 	}

@@ -20,11 +20,10 @@ namespace cs::engine
 	// Linear sun radiance as the deferred sun pass receives it.
 	bool TryGetSunLightColor(DirectX::XMFLOAT3& a_color) noexcept;
 
-	// The fog sun glare BSDFComposite blends toward: lerp(fog, color, pow(dot(view, sun), exponent) * intensity).
+	// Composite fog glare: lerp(fog, color, pow(dot(view, sun), 8) * intensity).
 	struct SunGlare
 	{
 		DirectX::XMFLOAT3 color{};
-		float exponent = 0.0f;
 		// The sun disc fade; zero outside Sky::Mode::kFull.
 		float intensity = 0.0f;
 	};
