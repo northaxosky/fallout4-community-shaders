@@ -90,12 +90,12 @@ CI runs `scripts\format.ps1 -Check` on C++ and HLSL. Run
 ## Changelog
 
 `CHANGELOG.md` is the only maintained release history. It feeds the in-game
-**General > Changelog** page and stable release notes. Keep versions newest first,
-using only the `# Changelog` title, `## MAJOR.MINOR.PATCH` headings, single-line
-`- ` bullets, blank lines, and, in a release that leads with 3-5 highlight bullets,
-`### Highlights` followed by `### Changes`. Other `###` headings and empty
-subsections are rejected. Home shows the newest release with highlights. Builds
-embed the file directly in the DLL.
+**General > Changelog** page and stable release notes. Keep versions newest first.
+The in-game parser reads only `## MAJOR.MINOR.PATCH` headings, single-line `- `
+bullets, and `### Highlights` / `### Changes` (bullets before either belong to
+Changes); everything else is ignored. A release that leads with 3-5 highlight
+bullets puts them under `### Highlights`; Home shows the newest such release.
+Builds embed the file directly in the DLL.
 
 ## Install or deploy
 

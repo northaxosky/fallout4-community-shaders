@@ -1,36 +1,62 @@
 #include "Log.h"
-#include "Menu/ChangelogParser.h"
 #include "Menu/ChangelogResource.h"
 #include "Menu/Menu.h"
 #include "Menu/Section.h"
 #include "Utils/ModuleResource.h"
 
 #include <algorithm>
+#include <ranges>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
 {
-	[[nodiscard]] cs::ChangelogHistory LoadChangelog()
+	struct ChangelogRelease
 	{
-		const auto text = cs::LoadRcData(IDR_CHANGELOG);
-		if (!text) {
-			cs::ChangelogHistory result;
-			result.error = text.error();
-			return result;
+		std::string version;
+		std::vector<std::string> highlights;
+		std::vector<std::string> items;
+	};
+
+	// Lenient: only '## ', '### Highlights|Changes' and '- ' lines matter.
+	[[nodiscard]] std::vector<ChangelogRelease> ParseChangelog(std::string_view a_text)
+	{
+		std::vector<ChangelogRelease> releases;
+		bool inHighlights = false;
+		for (const auto chunk : std::views::split(a_text, '\n')) {
+			std::string_view line{ chunk.begin(), chunk.end() };
+			if (line.ends_with('\r'))
+				line.remove_suffix(1);
+
+			if (line.starts_with("## ")) {
+				releases.push_back({ std::string{ line.substr(3) }, {}, {} });
+				inHighlights = false;
+			} else if (releases.empty()) {
+				continue;
+			} else if (line == "### Highlights") {
+				inHighlights = true;
+			} else if (line == "### Changes") {
+				inHighlights = false;
+			} else if (line.starts_with("- ")) {
+				auto& release = releases.back();
+				(inHighlights ? release.highlights : release.items).emplace_back(line.substr(2));
+			}
 		}
-		return cs::ParseChangelogHistory(*text);
+		return releases;
 	}
 
-	[[nodiscard]] const cs::ChangelogHistory& Changelog()
+	[[nodiscard]] const std::vector<ChangelogRelease>& Changelog()
 	{
-		static const auto history = [] {
-			auto result = LoadChangelog();
-			if (!result.error.empty())
-				cs::log::Get("cs.menu")->error("Changelog unavailable: {}", result.error);
-			return result;
+		static const auto releases = [] {
+			const auto text = cs::LoadRcData(IDR_CHANGELOG);
+			if (!text) {
+				cs::log::Get("cs.menu")->error("Changelog unavailable: {}", text.error());
+				return std::vector<ChangelogRelease>{};
+			}
+			return ParseChangelog(*text);
 		}();
-		return history;
+		return releases;
 	}
 }
 
@@ -50,14 +76,9 @@ namespace cs
 
 	void Menu::DrawChangelog(dmui::Client& a_client)
 	{
-		const auto& history = Changelog();
-		if (!history.error.empty()) {
-			dmui::ui::TextWrapped("Changelog unavailable. See FO4CommunityShaders.log.");
-			return;
-		}
-
-		for (std::size_t index = 0; index < history.releases.size(); ++index) {
-			const auto& release = history.releases[index];
+		const auto& releases = Changelog();
+		for (std::size_t index = 0; index < releases.size(); ++index) {
+			const auto& release = releases[index];
 			const auto id = "changelog-" + release.version;
 			const ui::Section entry{ id.c_str(), release.version.c_str(),
 				ui::Collapsible{ .count = release.highlights.size() + release.items.size(), .expandedByDefault = index == 0 } };
@@ -76,10 +97,10 @@ namespace cs
 
 	void Menu::DrawWhatsNew(dmui::Client& a_client)
 	{
-		const auto& history = Changelog();
+		const auto& releases = Changelog();
 		const auto release = std::ranges::find_if(
-			history.releases, [](const auto& a_release) { return !a_release.highlights.empty(); });
-		if (release == history.releases.end())
+			releases, [](const auto& a_release) { return !a_release.highlights.empty(); });
+		if (release == releases.end())
 			return;
 
 		const auto title = "What's new in " + release->version;
