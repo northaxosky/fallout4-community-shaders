@@ -1,64 +1,21 @@
 #include "CSSha1.h"
 
+#include "Utils/BCryptHash.h"
+
 #include <algorithm>
-#include <atomic>
-#include <mutex>
-
-#include <Windows.h>
-#include <bcrypt.h>
-
-#ifndef NT_SUCCESS
-#	define NT_SUCCESS(s) (((NTSTATUS)(s)) >= 0)
-#endif
 
 namespace cs::sha1
 {
-	namespace
-	{
-		std::once_flag g_initOnce;
-		BCRYPT_ALG_HANDLE g_alg = nullptr;
-		std::atomic<bool> g_ok{ false };
-
-		void DoInit()
-		{
-			BCRYPT_ALG_HANDLE h = nullptr;
-			if (NT_SUCCESS(BCryptOpenAlgorithmProvider(&h, BCRYPT_SHA1_ALGORITHM, nullptr, 0))) {
-				g_alg = h;
-				g_ok.store(true, std::memory_order_release);
-			}
-		}
-	}
-
 	void Sha1InitOnce()
 	{
-		std::call_once(g_initOnce, &DoInit);
+		bcrypt_hash::Initialize(bcrypt_hash::Algorithm::kSha1);
 	}
 
 	Sha1Result Sha1Compute(const void* data, std::size_t len) noexcept
 	{
 		Sha1Result out{};
-		if (!g_ok.load(std::memory_order_acquire) || !g_alg)
-			return out;
-
-		BCRYPT_HASH_HANDLE hash = nullptr;
-		alignas(8) unsigned char hashObj[512];
-		DWORD objLen = 0, cb = 0;
-		if (!NT_SUCCESS(BCryptGetProperty(g_alg, BCRYPT_OBJECT_LENGTH,
-				reinterpret_cast<PUCHAR>(&objLen), sizeof(objLen), &cb, 0)))
-			return out;
-		if (objLen > sizeof(hashObj))
-			return out;
-		if (!NT_SUCCESS(BCryptCreateHash(g_alg, &hash, hashObj, objLen, nullptr, 0, 0)))
-			return out;
-
-		if (len > static_cast<std::size_t>(ULONG_MAX)) {
-			BCryptDestroyHash(hash);
-			return out;
-		}
-		const auto* p = static_cast<const unsigned char*>(data);
-		if (NT_SUCCESS(BCryptHashData(hash, const_cast<PUCHAR>(p), static_cast<ULONG>(len), 0)))
-			BCryptFinishHash(hash, out.bytes.data(), static_cast<ULONG>(out.bytes.size()), 0);
-		BCryptDestroyHash(hash);
+		if (!bcrypt_hash::Compute(bcrypt_hash::Algorithm::kSha1, data, len, out.bytes))
+			out = {};
 		return out;
 	}
 
@@ -77,5 +34,4 @@ namespace cs::sha1
 		}
 		return s;
 	}
-
 }

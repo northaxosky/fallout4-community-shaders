@@ -403,6 +403,7 @@ end
 
 -- The runtime shader cache the shader test binaries compile through.
 local shader_cache_sources = {
+    "src/Utils/BCryptHash.cpp",
     "src/Utils/CSSha256.cpp",
     "src/Utils/ShaderCache/CacheRecord.cpp",
     "src/Utils/ShaderCache/CacheStorage.cpp",
