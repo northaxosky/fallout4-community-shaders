@@ -42,12 +42,13 @@ namespace cs::features
 		void BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept override;
 		void UnbindPresentation() noexcept override;
 		void QuarantinePresentation() noexcept override;
+		void Pause() noexcept override;
 
 	private:
 		void InitializeLocked() noexcept;
 		void ShutdownLocked() noexcept;
 		void MarkEndOfFrameRenderingLocked() noexcept;
-		// Lets the FidelityFX FG swap chain tag real vs interpolated frames.
+		// FG only: lets the FSR swap chain tag real vs interpolated frames.
 		void PublishFrameTypeTaggingLocked() noexcept;
 
 		// Sleep holds this across Update, which can block for the driver's delay; callers run on the game thread.
@@ -59,6 +60,7 @@ namespace cs::features
 		IDXGISwapChain* _swapChain = nullptr;
 		IDXGISwapChain* _taggedSwapChain = nullptr;
 		bool _taggedEnabled = false;
+		bool _frameGenerationPresentation = false;
 		bool _presentationQuarantined = false;
 		bool _initialized = false;
 		bool _initializationFailed = false;

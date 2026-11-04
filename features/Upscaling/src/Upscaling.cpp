@@ -369,9 +369,9 @@ namespace cs::features
 		const auto capabilities =
 			render::TemporalPipeline::Get()
 				.GetFidelityFXCapabilities();
+		const auto status = render::TemporalPipeline::Get().GetStatus();
 		const auto latency = render::temporal::FindDiagnostics(
-			render::TemporalPipeline::Get().GetStatus().latencyBackends,
-			render::temporal::LatencyBackend::kReflex);
+			status.latencyBackends, render::temporal::LatencyBackend::kReflex);
 		a_sink
 			.Field("reflex_available", latency.available)
 			.Field("reflex_low_latency_available", latency.lowLatencyAvailable)
@@ -384,7 +384,8 @@ namespace cs::features
 			.Field("reflex_marker_failures", latency.markerFailures)
 			.Field("reflex_report_frame", latency.reportFrame)
 			.Field("reflex_simulation_to_present_us", latency.simulationToPresentUs)
-			.Field("reflex_gpu_frame_time_us", latency.gpuFrameTimeUs);
+			.Field("reflex_gpu_frame_time_us", latency.gpuFrameTimeUs)
+			.Field("latency_pauses", status.latency.pauses);
 		a_sink
 			.Field("fsr4_capability",
 				static_cast<std::uint8_t>(

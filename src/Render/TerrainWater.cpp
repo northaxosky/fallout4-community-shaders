@@ -301,7 +301,77 @@ namespace cs::engine::water
 		}
 	}
 
-	bool ReadCellData(RE::TESWorldSpace* a_world, std::int32_t a_x, std::int32_t a_y,
+	namespace
+	{
+		constexpr std::uint32_t kGroup = 0x50555247u;
+		constexpr std::uint32_t kCell = 0x4C4C4543u;
+		constexpr std::uint32_t kWorld = 0x444C5257u;
+		constexpr std::uint32_t kExteriorCoords = 0x434C4358u;
+		constexpr std::uint32_t kPersistentCell = 0x400;
+
+		enum class GroupType : std::uint32_t
+		{
+			kTop = 0,
+			kWorldChildren = 1,
+			kExteriorBlock = 4,
+			kExteriorSubBlock = 5
+		};
+
+		std::uint64_t CellKey(std::int32_t a_x, std::int32_t a_y)
+		{
+			return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(a_x)) << 32) | static_cast<std::uint32_t>(a_y);
+		}
+	}
+
+	bool CellReader::Seek(RE::TESFile* a_file, RE::TESWorldSpace* a_world, std::int32_t a_x, std::int32_t a_y)
+	{
+		auto found = _cellOffsets.find(a_file);
+		if (found == _cellOffsets.end()) {
+			// FO4: FindCellInFile rewalks the file per cell; index its worldspaces once.
+			FileCells cells;
+			const auto& form = a_file->currentform;
+			bool inWorlds = false;
+			RE::TESFormID world = 0;
+			for (bool ok = a_file->SetOffset(0); ok && form.form;) {
+				if (form.form == kGroup) {
+					const auto type = static_cast<GroupType>(form.formID);
+					const auto label = form.flags;
+					if (type == GroupType::kTop) {
+						if (inWorlds)
+							break;
+						inWorlds = label == kWorld;
+						ok = inWorlds ? a_file->NextForm(true) : a_file->NextGroup();
+					} else if (type == GroupType::kWorldChildren) {
+						world = label;
+						RE::TESForm::AddCompileIndex(world, a_file);
+						ok = a_file->NextForm(true);
+					} else if (type == GroupType::kExteriorBlock || type == GroupType::kExteriorSubBlock) {
+						ok = a_file->NextForm(true);
+					} else {
+						ok = a_file->NextGroup();
+					}
+				} else if (form.form == kCell && inWorlds && world && !(form.flags & kPersistentCell)) {
+					const auto offset = a_file->fileoffset;
+					// Like the engine, a CELL without XCLC reads as (0, 0).
+					std::int32_t coords[3]{};
+					if (SeekChunk(a_file, kExteriorCoords))
+						(void)a_file->GetChunkData(coords, sizeof(coords));
+					cells[world].try_emplace(CellKey(coords[0], coords[1]), offset);
+					ok = a_file->NextForm(true);
+				} else {
+					ok = a_file->NextForm(true);
+				}
+			}
+			found = _cellOffsets.emplace(a_file, std::move(cells)).first;
+		}
+		const auto world = found->second.find(a_world->GetFormID());
+		if (world == found->second.end())
+			return false;
+		const auto cell = world->second.find(CellKey(a_x, a_y));
+		return cell != world->second.end() && a_file->SetOffset(cell->second);
+	}
+
+	bool CellReader::Read(RE::TESWorldSpace* a_world, std::int32_t a_x, std::int32_t a_y,
 		RE::TESFormID& a_form, float& a_water, float& a_land)
 	{
 		static std::mutex cursorMutex;
@@ -317,7 +387,7 @@ namespace cs::engine::water
 		RE::TESFile* file = nullptr;
 		for (; index >= 0; --index) {
 			file = (*files)[index]->GetThreadSafeFile(16 * 1024);
-			if (file && a_world->FindCellInFile(file, a_x, a_y))
+			if (file && Seek(file, a_world, a_x, a_y))
 				break;
 		}
 		if (index < 0)
@@ -335,7 +405,7 @@ namespace cs::engine::water
 		// Continue from that file to the original record, which has the LAND
 		for (; index >= 0; --index) {
 			file = (*files)[index]->GetThreadSafeFile(16 * 1024);
-			if (file && a_world->FindCellInFile(file, a_x, a_y) && RE::TESObjectCELL::FindLandDataInFile(file))
+			if (file && Seek(file, a_world, a_x, a_y) && RE::TESObjectCELL::FindLandDataInFile(file))
 				break;
 		}
 		if (index < 0)

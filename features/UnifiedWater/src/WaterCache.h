@@ -37,11 +37,11 @@ namespace cs::features::unified_water
 			bool active;
 		};
 		void LoadOrGenerateCaches(bool a_changed);
-		void RegenerateCaches();
 		InstructionResult GetInstructions(const RE::TESWorldSpace* a_world, std::uint32_t a_level, std::int32_t a_x, std::int32_t a_y) const;
 		Progress GetProgress() const noexcept;
 		bool IsReady() const noexcept { return _ready.load(std::memory_order_acquire); }
 		static bool LoadOrderChanged();
+		static void ScheduleRegeneration();
 
 	private:
 		using Header = CacheHeader;
@@ -61,6 +61,7 @@ namespace cs::features::unified_water
 		static std::shared_ptr<RuntimeCache> BuildRuntimeCache(const Header& a_header, std::vector<Instruction> a_instructions, const FormMap* a_forms = nullptr);
 		bool LoadCaches();
 		void ReadSnapshots();
+		void RegenerateCaches();
 		void GenerateCaches();
 
 		std::vector<Snapshot> _snapshots;

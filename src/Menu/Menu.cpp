@@ -456,12 +456,16 @@ namespace cs
 			"choose which features to load in Advanced, then restart. "
 			"Use Enabled on each loaded feature's page to toggle its effect live.");
 
+		DrawWhatsNew(a_client);
 		DrawFeatureOverview(a_client);
+		DrawLinks(a_client);
+		DrawFaq(a_client);
+	}
 
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Links"),
-				"draw links section"))
+	void Menu::DrawLinks(dmui::Client& a_client)
+	{
+		const ui::Section section{ "home-links", "Links" };
+		if (!section)
 			return;
 		// Host icon data is immutable, so one lookup per icon suffices.
 		static const char32_t githubGlyph =
@@ -480,16 +484,16 @@ namespace cs
 				.action = dmui::LinkAction::kOpenExternal },
 			dmui::Link{ .label = "Nexus Mods", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://www.nexusmods.com/fallout4/mods/109442" }, .glyph = nexusGlyph, .action = dmui::LinkAction::kOpenExternal }, dmui::Link{ .label = "Discord", .external = { .targetKind = DMUI_EXTERNAL_TARGET_URI, .target = "https://discord.com/invite/nkrQybAsyy" }, .glyph = discordGlyph, .action = dmui::LinkAction::kOpenExternal }
 		};
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawLinkRow("community-shaders-links", links),
-				"draw project links"))
-			return;
+		(void)CheckHostResult(
+			a_client,
+			a_client.DrawLinkRow("community-shaders-links", links),
+			"draw project links");
+	}
 
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("FAQ"),
-				"draw FAQ section"))
+	void Menu::DrawFaq(dmui::Client& a_client)
+	{
+		const ui::Section section{ "home-faq", "FAQ" };
+		if (!section)
 			return;
 		const std::array faq{
 			dmui::FaqEntry{
@@ -507,10 +511,8 @@ namespace cs
 
 	void Menu::DrawFeatureOverview(dmui::Client& a_client)
 	{
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Feature status"),
-				"draw feature status section"))
+		const ui::Section section{ "home-feature-status-section", "Feature status" };
+		if (!section)
 			return;
 		(void)CheckHostResult(a_client, ui::DrawTable(a_client, "home-feature-status", [&] {
 			for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
@@ -568,12 +570,7 @@ namespace cs
 	{
 		auto ownership =
 			feature_config::ParseShaderOwnership(feature_config::GetRoot());
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Shader Ownership"),
-				"draw shader ownership section"))
-			return;
-		{
+		if (const ui::Section section{ "section-shader-ownership", "Shader Ownership" }; section) {
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-ownership", [&] {
 					{
 						if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
@@ -601,12 +598,7 @@ namespace cs
 				return;
 		}
 
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Shader Cache"),
-				"draw shader cache section"))
-			return;
-		{
+		if (const ui::Section section{ "section-shader-cache", "Shader Cache" }; section) {
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-cache", [&] {
 					const auto cacheRoot = shader_cache::DefaultCacheRoot();
 					{
@@ -640,12 +632,7 @@ namespace cs
 
 	void Menu::DrawAdvanced(dmui::Client& a_client)
 	{
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Configuration"),
-				"draw configuration section"))
-			return;
-		{
+		if (const ui::Section section{ "section-configuration", "Configuration" }; section) {
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-configuration", [&] {
 					return ui::DrawRow(a_client, "open-configuration-folder", "Configuration file location", "", [&](auto&) {
 						if (dmui::ui::Button("Open")) {
@@ -658,12 +645,7 @@ namespace cs
 				return;
 		}
 
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Load on startup"),
-				"draw boot settings section"))
-			return;
-		{
+		if (const ui::Section section{ "section-load-on-startup", "Load on startup" }; section) {
 			dmui::ui::TextWrapped(
 				"Changes require a restart.");
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-startup-loading", [&] {
@@ -713,12 +695,7 @@ namespace cs
 
 		DrawShaderSettings(a_client);
 
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Logging"),
-				"draw logging section"))
-			return;
-		{
+		if (const ui::Section section{ "section-logging", "Logging" }; section) {
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-logging", [&] {
 					return ui::DrawRow(a_client, "global-log-level", "Global level", "", [&](auto&) {
 						const auto selected =
@@ -737,17 +714,15 @@ namespace cs
 				}),
 					"draw global logging table"))
 				return;
-		}
 
-		static std::string loggerSearch;
-		if (!a_client.DrawSearchInput(
-				"advanced-logger-search",
-				"Search logging channels...",
-				loggerSearch)) {
-			CheckHostResult(a_client, false, "draw logger search");
-			return;
-		}
-		{
+			static std::string loggerSearch;
+			if (!a_client.DrawSearchInput(
+					"advanced-logger-search",
+					"Search logging channels...",
+					loggerSearch)) {
+				CheckHostResult(a_client, false, "draw logger search");
+				return;
+			}
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-log-channels", [&] {
 					for (const auto& name : log::ListLoggers()) {
 						if (!dmui::ContainsFolded(name, loggerSearch))
@@ -778,12 +753,7 @@ namespace cs
 				return;
 		}
 
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Telemetry"),
-				"draw telemetry section"))
-			return;
-		{
+		if (const ui::Section section{ "section-telemetry", "Telemetry" }; section) {
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-telemetry", [&] {
 					{
 						if (!ui::DrawRow(a_client, "telemetry-enabled", "Emit telemetry", "", [&](auto&) {
@@ -806,12 +776,7 @@ namespace cs
 				return;
 		}
 
-		if (!CheckHostResult(
-				a_client,
-				a_client.DrawSectionHeader("Diagnostics"),
-				"draw diagnostics section"))
-			return;
-		{
+		if (const ui::Section section{ "section-diagnostics", "Diagnostics" }; section) {
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-diagnostics", [&] {
 					{
 						if (!ui::DrawRow(a_client, "frame-annotations", "Frame annotations",
@@ -857,6 +822,9 @@ namespace cs
 		if (presets.pendingComboIdentity.empty() && !list.empty())
 			presets.pendingComboIdentity = list.front().identity;
 
+		const ui::Section section{ "section-presets", "Presets" };
+		if (!section)
+			return;
 		(void)CheckHostResult(a_client, ui::DrawTable(a_client, "presets", [&] {
 			{
 				if (!ui::DrawRow(a_client, "active-preset", "Active preset", "", [&](auto&) {

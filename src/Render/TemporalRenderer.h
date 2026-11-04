@@ -176,6 +176,7 @@ namespace cs::render
 		void FinishPreUiScene(bool a_resolved, bool a_captureHudless);
 		void RecordFrameGenerationFailure() noexcept;
 		void InvalidateEngineDerivedResources();
+		void RefreshEngineResources();
 
 		void RestoreNativeFrameState();
 		void RestoreNativeFrameStateOnce();
@@ -409,6 +410,12 @@ namespace cs::render
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		struct Renderer_WindowSizeChanged
+		{
+			static void thunk(RE::BSGraphics::Renderer* a_this, std::uint32_t a_arg);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct Renderer_ResetWindow
 		{
 			static void thunk(RE::BSGraphics::Renderer* a_this, std::uint32_t a_arg);
@@ -416,6 +423,10 @@ namespace cs::render
 		};
 
 		std::atomic_bool _resourcesReady{ false };
+		// Set only on the render thread while WindowSizeChanged rebuilds targets.
+		bool _windowSizeChanging = false;
+		bool _windowRebuildDeferred = false;
+		bool _windowRebuildHandled = false;
 		std::atomic_bool _hooksInstalled{ false };
 		std::atomic_bool _quarantined{ false };
 		std::atomic_bool _quarantineCleanupPending{ false };

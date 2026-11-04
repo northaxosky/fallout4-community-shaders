@@ -48,6 +48,8 @@ namespace cs::render
 		// Lens-flare visibility read samples the main depth buffer.
 		stl::detour_thunk<LensFlare_RenderLensFlare>(RE::ID::BSImagespaceShaderLensFlare::RenderLensFlare);
 		stl::detour_thunk<BSImageSpace_Init_FXAA>(RE::ID::ImageSpaceManager::InitEffects);
+		// The create callback runs before WindowSizeChanged repopulates RT0.
+		stl::detour_thunk<Renderer_WindowSizeChanged>(RE::ID::BSGraphics::Renderer::WindowSizeChanged);
 		// ResetWindow can run without the render-target create callback.
 		stl::detour_thunk<Renderer_ResetWindow>(RE::ID::BSGraphics::Renderer::ResetWindow);
 		// Resource setup follows creation of the engine render targets.
@@ -74,12 +76,24 @@ namespace cs::render
 
 		auto* upscaling = GetSingleton();
 		GuardedThunkBody("Upscaling resource setup", [&] {
-			if (upscaling->_resourcesReady.load(std::memory_order_acquire)) {
-				upscaling->InvalidateEngineDerivedResources();
-			} else {
-				upscaling->SetupResources();
+			if (upscaling->_windowSizeChanging) {
+				upscaling->_windowRebuildDeferred = true;
+				L->info(
+					"Render-target create deferred until WindowSizeChanged returns (RT0 view {})",
+					cs::engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer) ? "present" : "null");
+				return;
 			}
+			upscaling->RefreshEngineResources();
 		});
+	}
+
+	void TemporalRenderer::RefreshEngineResources()
+	{
+		if (_resourcesReady.load(std::memory_order_acquire)) {
+			InvalidateEngineDerivedResources();
+		} else {
+			SetupResources();
+		}
 	}
 
 	bool TemporalRenderer::ImageSpaceEffectTemporalAA_IsActive::thunk(
@@ -547,12 +561,31 @@ namespace cs::render
 		});
 	}
 
+	void TemporalRenderer::Renderer_WindowSizeChanged::thunk(RE::BSGraphics::Renderer* a_this, std::uint32_t a_arg)
+	{
+		auto* upscaling = GetSingleton();
+		upscaling->_windowSizeChanging = true;
+		func(a_this, a_arg);
+		upscaling->_windowSizeChanging = false;
+
+		GuardedThunkBody("Upscaling window-size rebuild", [&] {
+			if (std::exchange(upscaling->_windowRebuildDeferred, false)) {
+				upscaling->RefreshEngineResources();
+				upscaling->_windowRebuildHandled = true;
+			}
+		});
+	}
+
 	void TemporalRenderer::Renderer_ResetWindow::thunk(RE::BSGraphics::Renderer* a_this, std::uint32_t a_arg)
 	{
 		func(a_this, a_arg);
 
 		GuardedThunkBody("Upscaling reset-window invalidation", [] {
-			GetSingleton()->InvalidateEngineDerivedResources();
+			auto* upscaling = GetSingleton();
+			// ResetWindow follows WindowSizeChanged, which already rebuilt.
+			if (!std::exchange(upscaling->_windowRebuildHandled, false)) {
+				upscaling->RefreshEngineResources();
+			}
 		});
 	}
 

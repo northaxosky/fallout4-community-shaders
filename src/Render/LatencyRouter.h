@@ -73,6 +73,7 @@ namespace cs::render::temporal
 		void BindPresentation(const PresentationBinding& a_binding) noexcept override;
 		void UnbindPresentation() noexcept override;
 		void QuarantinePresentation() noexcept override;
+		void Pause() noexcept override;
 
 		[[nodiscard]] LatencyBackend Selected() const noexcept;
 		[[nodiscard]] std::vector<LatencyBackendStatus> BackendStatus() const;
@@ -82,5 +83,7 @@ namespace cs::render::temporal
 
 		const std::vector<Entry> _backends;
 		std::atomic<std::size_t> _selected{ kNoBackend };
+		std::atomic_bool _paused{ false };
+		std::atomic_uint64_t _pauses{ 0 };
 	};
 }

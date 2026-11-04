@@ -250,6 +250,7 @@ namespace cs::render
 		temporal::WorldFrameClaim worldFrameClaim;
 		std::atomic_bool latencyHooksInstalled{ false };
 		std::atomic_bool latencyFailureReported{ false };
+		std::atomic<DWORD> mainLoopThread{ 0 };
 		std::atomic_uint64_t generatedFrames{ 0 };
 		std::atomic_bool generatedFrameCountAvailable{ false };
 		std::atomic_uint64_t providerPresentedFrames{ 0 };
@@ -838,6 +839,12 @@ namespace cs::render
 		}
 	}
 
+	bool TemporalPipeline::OnMainLoopThread() const noexcept
+	{
+		const auto thread = _impl->mainLoopThread.load(std::memory_order_acquire);
+		return thread == 0 || thread == ::GetCurrentThreadId();
+	}
+
 	bool TemporalPipeline::LatencyActive() const noexcept
 	{
 		return _impl->latencyHooksInstalled.load(std::memory_order_acquire) &&
@@ -888,6 +895,7 @@ namespace cs::render
 			PostFailure(temporal::FailureDomain::kEngine,
 				"Live temporal configuration failed.");
 		}
+		_impl->mainLoopThread.store(::GetCurrentThreadId(), std::memory_order_release);
 		std::uint64_t frame = 0;
 		temporal::UpscalingSettings renderSettings;
 		bool eligible = false;
@@ -959,6 +967,13 @@ namespace cs::render
 
 	void TemporalPipeline::BeginPresentAttempt(UINT a_flags) noexcept
 	{
+		if (!OnMainLoopThread()) {
+			// Loading screens present from the ServingThread, outside any paced frame.
+			if (LatencyActive()) {
+				_impl->latencyRouter.Pause();
+			}
+			return;
+		}
 		const bool testOnly = (a_flags & DXGI_PRESENT_TEST) != 0;
 		bool renderSubmitEnd = false;
 		std::uint64_t frame = 0;
@@ -982,6 +997,9 @@ namespace cs::render
 	void TemporalPipeline::EndPresentAttempt(UINT a_flags,
 		HRESULT a_result) noexcept
 	{
+		if (!OnMainLoopThread()) {
+			return;
+		}
 		const bool testOnly = (a_flags & DXGI_PRESENT_TEST) != 0;
 		const bool retryable = a_result == DXGI_ERROR_WAS_STILL_DRAWING;
 		std::uint64_t frame = 0;

@@ -385,6 +385,8 @@ namespace cs::render::temporal
 		std::uint64_t sleepCalls = 0;
 		std::uint64_t sleepFailures = 0;
 		std::uint64_t markerFailures = 0;
+		// Pauses for frames presented outside the main loop.
+		std::uint64_t pauses = 0;
 		std::uint64_t reportFrame = 0;
 		std::uint64_t simulationToPresentUs = 0;
 		std::uint32_t gpuFrameTimeUs = 0;
@@ -396,6 +398,8 @@ namespace cs::render::temporal
 		ID3D12Device* device = nullptr;
 		std::uint32_t adapterVendorId = 0;
 		IDXGISwapChain* swapChain = nullptr;
+		// A frame-generation provider currently owns presentation.
+		bool frameGenerationPresentation = false;
 	};
 
 	// Latency belongs to the device, not the presentation path.
@@ -410,6 +414,9 @@ namespace cs::render::temporal
 		virtual void UnbindPresentation() noexcept {}
 		// Stops driver calls without releasing anything.
 		virtual void QuarantinePresentation() noexcept {}
+
+		// Frames outside the main loop stop pacing; the next Sleep resumes.
+		virtual void Pause() noexcept {}
 
 		[[nodiscard]] virtual ProviderResult Configure(const LatencyOptions& a_options) = 0;
 		[[nodiscard]] virtual ProviderResult Sleep(std::uint32_t a_frame) = 0;

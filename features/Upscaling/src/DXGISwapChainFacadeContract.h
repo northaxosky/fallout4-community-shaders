@@ -1,5 +1,6 @@
 #pragma once
 
+#include <d3d11.h>
 #include <dxgi1_6.h>
 
 namespace cs::features::swap_chain_facade
@@ -18,6 +19,16 @@ namespace cs::features::swap_chain_facade
 		result.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 		result.Flags = 0;
 		return result;
+	}
+
+	// The game builds RTV/SRV/UAV on the back buffer without checking results.
+	[[nodiscard]] inline UINT BackBufferBindFlags(DXGI_USAGE a_usage) noexcept
+	{
+		UINT flags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		if (a_usage & DXGI_USAGE_UNORDERED_ACCESS) {
+			flags |= D3D11_BIND_UNORDERED_ACCESS;
+		}
+		return flags;
 	}
 
 	[[nodiscard]] inline DXGI_SWAP_CHAIN_DESC1 BuildDescription1(

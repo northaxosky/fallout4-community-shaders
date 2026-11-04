@@ -2,6 +2,8 @@
 
 #include "Log.h"
 
+#include <Windows.h>
+
 namespace cs::render::temporal
 {
 	namespace
@@ -15,6 +17,9 @@ namespace cs::render::temporal
 
 	ProviderResult LatencyRouter::Configure(const LatencyOptions& a_options)
 	{
+		if (_paused.exchange(false, std::memory_order_acq_rel)) {
+			L->info("Latency backend resumed on the main loop");
+		}
 		auto selected = kNoBackend;
 		ProviderResult result{ .code = ProviderResultCode::kUnavailable };
 		for (std::size_t i = 0; i < _backends.size(); ++i) {
@@ -60,13 +65,27 @@ namespace cs::render::temporal
 		return _backends[selected].provider->SetLatencyMarker(a_marker, a_frame);
 	}
 
+	void LatencyRouter::Pause() noexcept
+	{
+		const auto selected = _selected.load(std::memory_order_acquire);
+		if (selected == kNoBackend || _paused.exchange(true, std::memory_order_acq_rel)) {
+			return;
+		}
+		++_pauses;
+		L->info("{} paused: thread {} presented outside the main loop",
+			Name(_backends[selected].backend), ::GetCurrentThreadId());
+		_backends[selected].provider->Pause();
+	}
+
 	LatencyDiagnostics LatencyRouter::GetLatencyDiagnostics() const noexcept
 	{
 		const auto selected = _selected.load(std::memory_order_acquire);
-		if (selected != kNoBackend) {
-			return _backends[selected].provider->GetLatencyDiagnostics();
-		}
 		LatencyDiagnostics diagnostics;
+		if (selected != kNoBackend) {
+			diagnostics = _backends[selected].provider->GetLatencyDiagnostics();
+			diagnostics.pauses = _pauses.load(std::memory_order_relaxed);
+			return diagnostics;
+		}
 		for (const auto& entry : _backends) {
 			const auto reason = entry.provider->GetLatencyDiagnostics().unavailableReason;
 			if (reason != LatencyUnavailableReason::kNone) {

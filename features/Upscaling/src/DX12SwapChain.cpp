@@ -739,7 +739,8 @@ namespace cs::features
 		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
-		desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		desc.BindFlags =
+			swap_chain_facade::BackBufferBindFlags(_proxyDesc.BufferUsage);
 		auto proxy = SharedD3D11D3D12Texture::Create(
 			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationProxy");
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
@@ -1298,7 +1299,8 @@ namespace cs::features
 		if (_presentationBound && _captureDevice12 && _callbacks.bindPresentation) {
 			_callbacks.bindPresentation({ .device = _captureDevice12.get(),
 				.adapterVendorId = _adapterVendorId,
-				.swapChain = a_swapChain });
+				.swapChain = a_swapChain,
+				.frameGenerationPresentation = _provider && _providerPresentationActive });
 		}
 	}
 

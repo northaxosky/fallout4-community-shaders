@@ -229,6 +229,7 @@ namespace cs::features::unified_water
 	void WaterCache::ReadSnapshots()
 	{
 		// FO4: snapshot unsynchronized native cursors before terrain streaming.
+		engine::water::CellReader reader;
 		for (const auto world : GetValidWorldSpaces()) {
 			if (!world->editorID.c_str() || !*world->editorID.c_str())
 				continue;
@@ -251,7 +252,7 @@ namespace cs::features::unified_water
 				for (auto x = header.bounds.minX; x <= header.bounds.maxX; ++x) {
 					std::uint32_t formID = 0;
 					float water, land;
-					if (!engine::water::ReadCellData(world, x, y, formID, water, land))
+					if (!reader.Read(world, x, y, formID, water, land))
 						continue;
 					if (IsValidCellHeight(water) && IsValidCellHeight(land) && water > land) {
 						// Use default world water if no water form set
@@ -278,12 +279,21 @@ namespace cs::features::unified_water
 
 	void WaterCache::LoadOrGenerateCaches(bool a_changed)
 	{
-		ReadSnapshots();
 		if (!a_changed && LoadCaches())
 			return;
+		ReadSnapshots();
 		RegenerateCaches();
 		while (_running.load(std::memory_order_acquire))
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+
+	void WaterCache::ScheduleRegeneration()
+	{
+		// FO4: cell reads are startup-only, so a rebuild waits for the next launch.
+		std::error_code ec;
+		std::filesystem::remove(Path() / "UWLoadOrder.hash", ec);
+		if (ec)
+			L->warn("Could not schedule cache regeneration: {}", ec.message());
 	}
 
 	void WaterCache::RegenerateCaches()
@@ -292,7 +302,7 @@ namespace cs::features::unified_water
 			return;
 		if (_snapshots.empty()) {
 			_running.store(false);
-			L->error("No cell snapshots available; regeneration requires a startup rebuild");
+			L->error("No water worldspaces to cache");
 			return;
 		}
 		_total.store(static_cast<std::uint32_t>(_snapshots.size()));
@@ -336,6 +346,8 @@ namespace cs::features::unified_water
 					}
 				});
 			workers.clear();
+			_snapshots = {};
+			_forms = {};
 			if (!caches->empty()) {
 				_caches.store(caches, std::memory_order_release);
 				_ready.store(true, std::memory_order_release);

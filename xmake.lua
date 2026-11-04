@@ -381,6 +381,19 @@ target("RenderDocCaptureServiceTests", function()
     })
 end)
 
+target("ChangelogTests", function()
+    set_kind("binary")
+    set_default(false)
+    set_group("unit")
+    add_files(
+        "tests/ChangelogTests.cpp",
+        "src/Menu/ChangelogParser.cpp"
+    )
+    add_tests("Changelog", {
+        runargs = { path.join(os.projectdir(), "CHANGELOG.md") }
+    })
+end)
+
 target("FrameDispatcherTests", function()
     set_kind("binary")
     set_default(false)

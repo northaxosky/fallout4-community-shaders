@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Menu: Home shows what's new in the latest major release; menu pages group their settings into panels, and each changelog release has its own panel.
+- Unified Water: the main menu is ready several seconds sooner on startup; Regenerate Caches now rebuilds on the next launch.
+- Upscaling/Frame Generation: no longer crash at startup and keep working when the game window is resized, e.g. with HighFPSPhysicsFix BorderlessUpscale.
 - Light Limit Fix: clustered light culling for effects and water is cheaper.
 - Subsurface Scattering: Burley mode skips non-skin pixels in its prepass, lowering its GPU cost.
 - Effects: smoke, fire and other effects keep their own color under view-ray shadows.
@@ -13,9 +16,20 @@
 - RenderDoc: shaders compile with debug info while RenderDoc is loaded.
 - Shader cache: with `background_compilation`, shaders compile when first drawn instead of all at startup, so play starts without queuing variants no scene uses.
 - Frame Generation: saved frame generation no longer freezes at startup on GPUs without DLSS Frame Generation (e.g. RTX 30-series); it now starts right after the first frame.
+- Latency Reduction: no longer exits at loading screens with Anti-Lag 2.
 - Sun lighting: fixed a darker square around the player in third person; cloud, terrain and contact shadows were applied twice inside the focused shadow pass.
 
 ## 0.5.0
+
+### Highlights
+
+- Five new features ported from Skyrim Community Shaders: Subsurface Scattering, Sky Sync, Terrain Blending, Volumetric Shadows and Cloud Shadows.
+- Light Limit Fix replaces Inverse Square Lighting: effects and water now receive every nearby light.
+- Latency Reduction: NVIDIA Reflex, or experimental AMD Anti-Lag 2 on Radeon GPUs.
+- Shaders precompile at startup behind the main menu's loading spinner instead of stuttering in game.
+- New Profiling page with Skyrim CS's GPU/CPU pass graph.
+
+### Changes
 
 - Shader ownership: a feature whose shader target is disabled (`enable_shaders` or `[shader_ownership]`) now fails shader-injection validation instead of running without effect; Screen Space GI, Subsurface Scattering and Screen Space Shadows are now validated too.
 - Settings: out-of-range values in the config file are clamped to the allowed range instead of failing the whole feature.
