@@ -20,6 +20,16 @@ namespace cs::engine
 	// Linear sun radiance as the deferred sun pass receives it.
 	bool TryGetSunLightColor(DirectX::XMFLOAT3& a_color) noexcept;
 
+	// The fog sun glare BSDFComposite blends toward: lerp(fog, color, pow(dot(view, sun), exponent) * intensity).
+	struct SunGlare
+	{
+		DirectX::XMFLOAT3 color{};
+		float exponent = 0.0f;
+		// The sun disc fade; zero outside Sky::Mode::kFull.
+		float intensity = 0.0f;
+	};
+	[[nodiscard]] SunGlare GetSunGlare() noexcept;
+
 	// The geometry's sky shader property; null for any other.
 	RE::BSSkyShaderProperty* GetSkyShaderProperty(RE::BSGeometry* a_geometry);
 	const RE::BSSkyShaderProperty* GetSkyShaderProperty(const RE::BSGeometry* a_geometry);

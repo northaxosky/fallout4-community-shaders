@@ -277,7 +277,8 @@ namespace
 			ABI(FO4SharedDataCB, EnabledUnifiedWater), ABI(FO4SharedDataCB, EnabledScreenSpaceShadows),
 			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
 			ABI(FO4SharedDataCB, EnabledLODBlending), ABI(FO4SharedDataCB, EnabledLightLimitFix),
-			ABI(FO4SharedDataCB, pad0), ABI(FO4SharedDataCB, SunDiscDirection)
+			ABI(FO4SharedDataCB, SunGlareIntensity), ABI(FO4SharedDataCB, SunDiscDirection),
+			ABI(FO4SharedDataCB, SunGlareColor)
 		};
 		const ConstantBufferABI buffers[]{
 			{ "PerFrame", 4, sizeof(FrameDataCB), frame }, { "SharedData", 5, sizeof(SharedDataCB), shared },

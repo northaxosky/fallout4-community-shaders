@@ -64,22 +64,47 @@ namespace cs::engine
 		return true;
 	}
 
+	namespace
+	{
+		[[nodiscard]] bool TryGetLinearSunColor(float a_scale, DirectX::XMFLOAT3& a_color) noexcept
+		{
+			auto* sky = RE::Sky::GetSingleton();
+			if (!sky || !sky->sun || !sky->sun->light)
+				return false;
+
+			const auto* light = reinterpret_cast<const RE::NiLight*>(sky->sun->light.get());
+			const float scale = light->dimmer * a_scale;
+			const auto linear = [scale](float a_value) {
+				return std::pow(std::max(a_value, 0.0f), 2.2f) * scale;
+			};
+			a_color = { linear(light->diff.r), linear(light->diff.g), linear(light->diff.b) };
+			return std::isfinite(a_color.x) && std::isfinite(a_color.y) && std::isfinite(a_color.z);
+		}
+	}
+
 	bool TryGetSunLightColor(DirectX::XMFLOAT3& a_color) noexcept
 	{
-		auto* sky = RE::Sky::GetSingleton();
-		if (!sky || !sky->sun || !sky->sun->light)
-			return false;
-
 		// BSDFLightShader::SetupGeometry: pow(diffuse, 2.2) * dimmer * HDR sunlight scale.
-		const auto* light = reinterpret_cast<const RE::NiLight*>(sky->sun->light.get());
-		float scale = light->dimmer;
+		float scale = 1.0f;
 		if (const auto* imageSpace = RE::ImageSpaceManager::GetSingleton())
-			scale *= imageSpace->currentEOFData.baseData.hdrData.sunlightScale;
-		const auto linear = [scale](float a_value) {
-			return std::pow(std::max(a_value, 0.0f), 2.2f) * scale;
-		};
-		a_color = { linear(light->diff.r), linear(light->diff.g), linear(light->diff.b) };
-		return std::isfinite(a_color.x) && std::isfinite(a_color.y) && std::isfinite(a_color.z);
+			scale = imageSpace->currentEOFData.baseData.hdrData.sunlightScale;
+		return TryGetLinearSunColor(scale, a_color);
+	}
+
+	SunGlare GetSunGlare() noexcept
+	{
+		// BSDFCompositeShader::SetupGeometry: the sun color without the HDR scale; exponent is a constant.
+		SunGlare glare{};
+		const auto* sky = RE::Sky::GetSingleton();
+		if (!sky || !sky->sun || !IsFullSky() || !TryGetLinearSunColor(1.0f, glare.color))
+			return {};
+		// Sun::Update stores the same fade in the disc property's blend alpha.
+		const auto* property = GetSkyShaderProperty(sky->sun->sunBase.get());
+		if (!property)
+			return {};
+		glare.exponent = 8.0f;
+		glare.intensity = property->kBlendColor.a;
+		return glare;
 	}
 
 	bool IsSkyHidden() noexcept

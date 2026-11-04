@@ -54,7 +54,7 @@ PS_OUTPUT main(PS_INPUT input)
 #		else
 		baseColor.xyz * (input.TexCoord.z * DiffuseColor + FO4_IBL_FORWARD_AMBIENT(AmbientColor.xyz, input.HPosition.xyz));
 #		endif
-	float3 color = lerp(diffuseColor, FO4_FOG_VANILLA_COLOR(input.FogParam.xyz), input.FogParam.w);
+	float3 color = lerp(diffuseColor, FO4_FOG_FORWARD_COLOR(input.FogParam.xyz, input.HPosition.xyz), input.FogParam.w);
 	psout.Color.xyz = color * AmbientColor.w;
 	psout.Color.w = 1;
 #	endif

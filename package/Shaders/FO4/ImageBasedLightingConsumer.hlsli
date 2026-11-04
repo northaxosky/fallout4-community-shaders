@@ -31,6 +31,16 @@ namespace FO4IBL
 		[branch] if (!SharedData::iblSettings.EnableIBL) return fogColor;
 		return ImageBasedLighting::GetFogIBLColor(fogColor);
 	}
+
+	// FO4: forward fog lacks the composite's sun blend; apply it over the tint.
+	float3 ForwardFog(float3 fogColor, float3 screenPosition)
+	{
+		[branch] if (!SharedData::iblSettings.EnableIBL || SharedData::iblSettings.FogAmount == 0.0) return fogColor;
+		float3 tinted = ImageBasedLighting::GetFogIBLColor(fogColor);
+		float3 viewDirectionWS = FrameBuffer::ViewToWorld(FO4Forward::ViewDirection(screenPosition), false);
+		float sunFactor = pow(max(dot(viewDirectionWS, SharedData::DirLightDirection.xyz), 0.0), FO4SharedData::SunGlareColor.w) * FO4SharedData::SunGlareIntensity;
+		return lerp(tinted, FO4SharedData::SunGlareColor.xyz, sunFactor);
+	}
 }
 #	define FO4_IBL_FORWARD_AMBIENT(ambient, screenPosition) FO4IBL::ForwardDiffuse(ambient, screenPosition)
 #else

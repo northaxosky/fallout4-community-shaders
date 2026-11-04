@@ -19,6 +19,16 @@ namespace FO4Forward
 		return view.xyz / view.w;
 	}
 
+	// Unit camera-to-fragment direction; no depth read, any depth projects onto the ray.
+	float3 ViewDirection(float3 screenPosition)
+	{
+		float2 uv = screenPosition.xy * SharedData::BufferDim.zw;
+		uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(uv);
+		float4 view = mul(FrameBuffer::CameraProjInverse,
+			float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.5, 1.0));
+		return normalize(view.xyz / view.w);
+	}
+
 	// Camera-relative world position, upstream's input.WorldPosition.
 	float3 WorldPosition(float3 screenPosition)
 	{

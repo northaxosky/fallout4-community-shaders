@@ -803,7 +803,7 @@ PSOutput main(PSInput input)
 #		else
 	float3 blendedColor = lerp(
 		lightColor,
-		FO4_FOG_VANILLA_COLOR(input.FogParam.xyz),
+		FO4_FOG_FORWARD_COLOR(input.FogParam.xyz, input.Position.xyz),
 		input.FogParam.www);
 #		endif
 

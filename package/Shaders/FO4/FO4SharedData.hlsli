@@ -24,8 +24,9 @@ namespace FO4SharedData
 		uint EnabledVolumetricShadows;
 		uint EnabledLODBlending;
 		uint EnabledLightLimitFix;
-		uint pad0;
+		float SunGlareIntensity;
 		float4 SunDiscDirection;
+		float4 SunGlareColor;
 	};
 #if defined(FO4CS_SUBSTRATE) && (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(SKYLIGHTING_FULLSCREEN_DEBUG))
 	Texture2D<float4> DebugTexture : register(t61);
