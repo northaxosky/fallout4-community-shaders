@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <string_view>
 
@@ -14,6 +16,17 @@ namespace cs::tests
 			++failures;
 		}
 	}
+
+	inline void CheckHr(long a_result, std::string_view a_expression, int a_line)
+	{
+		if (a_result < 0) {
+			std::cerr << "CHECK_HR failed at line " << a_line << ": " << a_expression
+					  << " hr=0x" << std::hex << std::uppercase << static_cast<std::uint32_t>(a_result)
+					  << std::dec << '\n';
+			++failures;
+		}
+	}
 }
 
 #define CHECK(a_expression) ::cs::tests::Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
+#define CHECK_HR(a_expression) ::cs::tests::CheckHr(static_cast<long>(a_expression), #a_expression, __LINE__)

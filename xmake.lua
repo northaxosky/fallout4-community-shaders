@@ -367,50 +367,25 @@ target("FeatureConfigTests", function()
     add_packages("vcpkg::tomlplusplus")
 end)
 
-target("RenderDocCaptureServiceTests", function()
+target("AgilityBootstrapTests", function()
     set_kind("binary")
     set_default(false)
     set_group("unit")
     add_files(
-        "tests/RenderDocCaptureServiceTests.cpp",
-        "features/RenderDoc/src/CaptureService.cpp"
-    )
-    add_includedirs("features/RenderDoc/src", "extern/RenderDoc/include")
-    add_tests("RenderDocCaptureService", {
-        runargs = { path.join(os.projectdir(), "build/RenderDocCaptureServiceTests") }
-    })
-end)
-
-target("FrameDispatcherTests", function()
-    set_kind("binary")
-    set_default(false)
-    set_group("unit")
-    add_files(
-        "tests/FrameDispatcherTests.cpp",
-        "src/Render/FrameDispatcher.cpp"
-    )
-    add_tests("FrameDispatcher")
-end)
-
-target("FrameGenerationRetirementGpuTests", function()
-    set_kind("binary")
-    set_default(false)
-    set_group("unit")
-    add_files(
-        "tests/FrameGenerationRetirementGpuTests.cpp",
+        "tests/AgilityBootstrapTests.cpp",
         "features/Upscaling/src/AgilityBootstrap.cpp"
     )
     add_headerfiles("features/Upscaling/src/AgilityBootstrap.h")
-    add_includedirs(
-        generated_include,
-        "src",
-        "extern",
-        "features/Upscaling/src"
-    )
+    add_includedirs("features/Upscaling/src")
     add_packages("vcpkg::directx-headers")
-    add_syslinks("d3d11", "d3d12", "dxgi", "ole32", "version")
+    add_syslinks("d3d12", "dxgi", "ole32", "version")
+    add_tests("AgilityBootstrap", {
+        runargs = {
+            "--agility",
+            path.join(os.projectdir(), "features/Upscaling/Shaders/Upscaling/Streamline/D3D12")
+        }
+    })
 end)
-
 -- Each test binary carries its own d3dcompiler_47.dll (exe-dir lookup).
 local function stage_shader_compiler(target)
     local source = target:values("fo4cs.identity_compiler")
@@ -547,19 +522,6 @@ end)
 
 target("FeatureConfigTests", function()
     add_tests("FeatureConfig")
-end)
-
-target("FrameGenerationRetirementGpuTests", function()
-    add_tests("FrameGenerationRetirementGpu")
-    add_tests("AgilityBootstrapGpu", {
-        runargs = {
-            "--agility",
-            path.join(
-                os.projectdir(),
-                "features/Upscaling/Shaders/Upscaling/Streamline/D3D12"
-            )
-        }
-    })
 end)
 
 target("ShaderCacheTests", function()

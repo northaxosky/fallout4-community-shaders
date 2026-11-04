@@ -22,8 +22,6 @@ namespace cs::render
 		static constexpr std::chrono::milliseconds kDefaultTimeout{ 5000 };
 		static constexpr std::size_t kMaxQueued = 256;
 
-		[[nodiscard]] bool Post(std::function<void()> a_task);
-
 		// Frame thread only. Returns one message per posted task that threw.
 		[[nodiscard]] std::vector<std::string> Drain() noexcept;
 
@@ -77,6 +75,8 @@ namespace cs::render
 		}
 
 	private:
+		[[nodiscard]] bool Post(std::function<void()> a_task);
+
 		std::mutex _mutex;
 		std::deque<std::function<void()>> _queue;
 	};
