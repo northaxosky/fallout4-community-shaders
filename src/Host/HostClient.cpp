@@ -1002,13 +1002,16 @@ namespace cs::host
 			LogFailure("reset performance overlay layout");
 	}
 
-	bool HostClient::SelectPage(std::string_view a_id) noexcept
+	void HostClient::SelectPage(HostPageKind a_kind) noexcept
 	{
 		for (const auto& page : _pages) {
-			if (page->descriptor.id == a_id)
-				return _client.SelectPage(page->handle);
+			if (page->descriptor.kind != a_kind)
+				continue;
+			if (!_client.SelectPage(page->handle))
+				LogFailure("select page");
+			return;
 		}
-		return false;
+		L->warn("DearModdingUI select page failed: no matching page");
 	}
 
 	void HostClient::LogFailure(std::string_view a_operation) const noexcept

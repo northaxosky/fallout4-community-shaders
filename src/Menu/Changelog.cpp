@@ -88,6 +88,6 @@ namespace cs
 			return;
 		DrawBulletList(a_client, release->highlights);
 		if (dmui::ui::Button("View full changelog"))
-			static_cast<void>(host::HostClient::Get().SelectPage("changelog"));
+			host::HostClient::Get().SelectPage(host::HostPageKind::kChangelog);
 	}
 }

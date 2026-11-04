@@ -31,7 +31,6 @@ namespace cs
 		void DrawAdvanced(dmui::Client& a_client);
 		void DrawPresets(dmui::Client& a_client);
 		void DrawChangelog(dmui::Client& a_client);
-		void DrawWhatsNew(dmui::Client& a_client);
 		void ObserveHostFrame(dmui::Client& a_client);
 		void OnHostDeviceReady() noexcept;
 
@@ -95,6 +94,7 @@ namespace cs
 		};
 
 		void SetDebugViewSelection(const Feature& a_feature, std::string_view a_view);
+		void DrawWhatsNew(dmui::Client& a_client);
 		void DrawFeatureOverview(dmui::Client& a_client);
 		void DrawLinks(dmui::Client& a_client);
 		void DrawFaq(dmui::Client& a_client);

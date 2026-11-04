@@ -25,15 +25,22 @@ namespace cs
 			result.error = "line " + std::to_string(lineNumber) + ": " + std::move(a_reason);
 		};
 
-		// Leaving a subsection (or release) requires it to hold bullets.
+		// Leaving Highlights requires bullets.
+		const auto leaveSubsection = [&]() {
+			if (subsection == Subsection::kHighlights && result.releases.back().highlights.empty()) {
+				fail("empty Highlights subsection");
+				return false;
+			}
+			return true;
+		};
+
+		// A new '## ' heading or EOF ends the release, which needs items.
 		const auto finishRelease = [&]() {
 			if (result.releases.empty())
 				return true;
 			const auto& release = result.releases.back();
-			if (subsection == Subsection::kHighlights && release.highlights.empty()) {
-				fail("empty Highlights subsection");
+			if (!leaveSubsection())
 				return false;
-			}
 			if (release.items.empty()) {
 				fail("release has no items");
 				return false;
@@ -89,10 +96,8 @@ namespace cs
 						fail("Changes must be the last subsection of a release");
 						return result;
 					}
-					if (subsection == Subsection::kHighlights && release.highlights.empty()) {
-						fail("empty Highlights subsection");
+					if (!leaveSubsection())
 						return result;
-					}
 					subsection = Subsection::kChanges;
 				} else {
 					fail("unknown subsection heading");
