@@ -6,6 +6,7 @@
 #include "Menu/ProfilingRenderer.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
+#include "Render/FrameBoundary.h"
 #include "Render/FrameProfiler.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -187,8 +188,19 @@ namespace cs::features
 		render::profiling::SetEnabled(settings.ShowInOverlay);
 		QueryPerformanceFrequency(&_frequency);
 		QueryPerformanceCounter(&_lastFrame);
+		if (!render::RegisterPreSwap(*this, [this] { QueryPerformanceCounter(&_presentStart); }) ||
+			!render::RegisterPostSwap(*this, [this] { AccumulatePresentTime(); }))
+			L->warn("Present timing unavailable; frame boundary callbacks were not registered");
 		L->info("Loaded: ShowInOverlay={} FrameHistorySize={} toggle_hotkey={}",
 			settings.ShowInOverlay, settings.FrameHistorySize, settings.toggleHotkey);
+	}
+
+	void PerformanceOverlay::AccumulatePresentTime()
+	{
+		LARGE_INTEGER end;
+		QueryPerformanceCounter(&end);
+		const auto ms = static_cast<float>(static_cast<double>(end.QuadPart - _presentStart.QuadPart) * 1000.0 / static_cast<double>(_frequency.QuadPart));
+		_smoothPresentMs = _smoothPresentMs * 0.95f + ms * 0.05f;
 	}
 
 	void PerformanceOverlay::OnDataLoaded()
@@ -482,11 +494,15 @@ namespace cs::features
 		if (std::abs(other) < 1e-4f)
 			other = 0.0f;
 		const float csPasses = render::profiling::GetProfiler().GetTotalTimeMs();
-		const float remainingOther = std::max(0.0f, other - csPasses);
+		// Capped at the unattributed time it is carved from.
+		const float present = std::min(_smoothPresentMs, std::max(0.0f, other));
+		const float remainingOther = std::max(0.0f, other - present);
 		rows.push_back({ "CS Passes:", -3, -1, csPasses, Percentage(csPasses, _displayMs), 0.0f,
 			"GPU time spent in Community Shaders compute passes (profiled).", true, {}, {} });
+		rows.push_back({ "Present:", -4, -1, present, Percentage(present, _displayMs), 0.0f,
+			"CPU time spent waiting inside Main::Swap, which presents the frame. Capped at the frame time not attributed to shader types, so it can read lower than the measured wait.", true, {}, {} });
 		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, _displayMs), 0.0f,
-			"Frame time not attributed to any measured shader type or CS compute pass. This includes UI, post-processing, engine work, and any GPU activity not directly measured.", true, {}, {} });
+			"Frame time not attributed to any measured shader type or to Present. This includes UI, post-processing, engine work, and CS compute passes (whose GPU time is shown separately).", true, {}, {} });
 		rows.push_back({ "Total:", -1, static_cast<int>(calls), _displayMs, 100.0f,
 			CostPerCall(_displayMs, calls), "Total frame time.", true, {}, {} });
 		return rows;

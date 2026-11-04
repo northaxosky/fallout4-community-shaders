@@ -53,6 +53,7 @@ namespace cs::features
 		static float OverlayContentWidth() noexcept;
 		void UpdateGraphValues();
 		void ResetFrameStats();
+		void AccumulatePresentTime();
 		void AccumulateFrameStats();
 		void UpdateFrameStats();
 		std::vector<DrawCallRow> BuildRows() const;
@@ -67,6 +68,8 @@ namespace cs::features
 		float _averageMs{}, _refreshHz{};
 		// Both sums decay with wall time, so smoothing is frame-rate independent.
 		double _smoothTimeSumMs{}, _smoothFrameWeight{};
+		LARGE_INTEGER _presentStart{};
+		float _smoothPresentMs{};
 		std::deque<float> _windowFrameMs;
 		double _windowSumMs{};
 		float _windowAvgMs{}, _windowP99Ms{};
