@@ -547,16 +547,9 @@ namespace cs::render
 		func(a_this);
 
 		GuardedThunkBody("Upscaling FXAA disable", [] {
-			auto* imageSpaceManager = RE::ImageSpaceManager::GetSingleton();
-			if (!imageSpaceManager) {
-				return;
-			}
-			constexpr auto fxaa = static_cast<std::uint32_t>(
-				RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_SHADER_FXAA);
-			if (fxaa < imageSpaceManager->effectList.size()) {
-				if (auto* effect = imageSpaceManager->effectList[fxaa]) {
-					effect->isActive = false;
-				}
+			if (auto* effect = cs::engine::GetImageSpaceEffect(
+					RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_SHADER_FXAA)) {
+				effect->isActive = false;
 			}
 		});
 	}

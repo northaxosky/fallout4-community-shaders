@@ -118,9 +118,7 @@ namespace cs::engine
 		RE::ImageSpaceManager::ImageSpaceEffectEnum a_effect)
 	{
 		auto* manager = RE::ImageSpaceManager::GetSingleton();
-		using Index = decltype(manager->effectList)::size_type;
-		const auto index = static_cast<Index>(a_effect);
-		return manager && index < manager->effectList.size() ? manager->effectList[index] : nullptr;
+		return manager ? manager->GetEffect(a_effect) : nullptr;
 	}
 
 	// SAO_CS: saoToggleState gates the composite; isActive also gates SSLR Hi-Z.
