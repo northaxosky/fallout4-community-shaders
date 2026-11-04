@@ -10,6 +10,16 @@
 
 ## 0.5.0
 
+### Highlights
+
+- Five new features ported from Skyrim Community Shaders: Subsurface Scattering, Sky Sync, Terrain Blending, Volumetric Shadows and Cloud Shadows.
+- Light Limit Fix replaces Inverse Square Lighting: effects and water now receive every nearby light.
+- Latency Reduction: NVIDIA Reflex, or experimental AMD Anti-Lag 2 on Radeon GPUs.
+- Shaders precompile at startup behind the main menu's loading spinner instead of stuttering in game.
+- New Profiling page with Skyrim CS's GPU/CPU pass graph.
+
+### Changes
+
 - Shader ownership: a feature whose shader target is disabled (`enable_shaders` or `[shader_ownership]`) now fails shader-injection validation instead of running without effect; Screen Space GI, Subsurface Scattering and Screen Space Shadows are now validated too.
 - Settings: out-of-range values in the config file are clamped to the allowed range instead of failing the whole feature.
 - Light Limit Fix: replaces Inverse Square Lighting; the config section is now `[features.LightLimitFix]` and `derive_unauthored_lights` now defaults to off, so converting unauthored lights to inverse-square falloff needs opting in.
