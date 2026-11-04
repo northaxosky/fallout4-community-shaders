@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 
 namespace cs::engine::water
 {
@@ -47,6 +48,18 @@ namespace cs::engine::water
 	void UpdateVisibility(TerrainNode* a_node, RE::NiNode* a_parent, std::span<const TileCell> a_tiles, bool a_hideTiles);
 
 	// FO4: read engine-owned cursors at DataLoaded, before terrain streaming.
-	bool ReadCellData(RE::TESWorldSpace* a_world, std::int32_t a_x, std::int32_t a_y,
-		RE::TESFormID& a_form, float& a_water, float& a_land);
+	class CellReader
+	{
+	public:
+		bool Read(RE::TESWorldSpace* a_world, std::int32_t a_x, std::int32_t a_y,
+			RE::TESFormID& a_form, float& a_water, float& a_land);
+
+	private:
+		using WorldCells = std::unordered_map<std::uint64_t, std::uint32_t>;
+		using FileCells = std::unordered_map<RE::TESFormID, WorldCells>;
+
+		bool Seek(RE::TESFile* a_file, RE::TESWorldSpace* a_world, std::int32_t a_x, std::int32_t a_y);
+
+		std::unordered_map<const RE::TESFile*, FileCells> _cellOffsets;
+	};
 }

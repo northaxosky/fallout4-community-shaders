@@ -464,8 +464,8 @@ namespace cs::features
 
 	void UnifiedWater::DrawSettings()
 	{
-		if (dmui::ui::Button("Regenerate Caches"))
-			_cache.RegenerateCaches();
+		if (dmui::ui::Button("Regenerate Caches on Next Launch"))
+			_cache.ScheduleRegeneration();
 		dmui::ui::Text("%s", "Activation and shader ownership changes require a restart.");
 	}
 

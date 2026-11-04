@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Unified Water: the main menu is ready several seconds sooner on startup; Regenerate Caches now rebuilds on the next launch.
 - Upscaling/Frame Generation: no longer crash at startup and keep working when the game window is resized, e.g. with HighFPSPhysicsFix BorderlessUpscale.
 - Frame Generation: saved frame generation no longer freezes at startup on GPUs without DLSS Frame Generation (e.g. RTX 30-series); it now starts right after the first frame.
 - Latency Reduction: no longer exits at loading screens with Anti-Lag 2.
