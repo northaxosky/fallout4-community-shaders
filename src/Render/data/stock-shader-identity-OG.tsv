@@ -1,4 +1,4 @@
-# export_sha256=a903ad985daedd088e1e65acc8b56cc4fd459229f0548218cc275b542440f484 runtime=OG-1.10.163 routes=3932 exact=3699 canonical=0 unproven=233 rows=1576 rows_exact=1576 rows_canonical=0 rows_unproven=0 rows_unnamed=0 excluded_unhooked=138 excluded_inherited=2251 compiler_sha256=0bea1620dd82f5e6be1650fbe84ce819ba9f32f4148308cf1e68c4d825d74937
+# export_sha256=b4e9588ab0ed5bc79afdb2b31bf0c4947999fcef908d822c5cb62bbb1d058f86 runtime=OG-1.10.163 routes=3932 exact=3457 canonical=0 unproven=475 rows=1636 rows_exact=1636 rows_canonical=0 rows_unproven=0 rows_unnamed=1 excluded_unhooked=138 excluded_inherited=2158 compiler_sha256=0bea1620dd82f5e6be1650fbe84ce819ba9f32f4148308cf1e68c4d825d74937
 bsdf_composite	pixel	0x00000008	0	900f62348ec133fd6384624e68fffb28b3939117	3499	"DFComposite"	""	""	0
 bsdf_composite	pixel	0x00000020	0	d521d61a4552e9904eca6c80a8d01028c5b930e4	3450	"DFComposite"	""	""	0
 bsdf_composite	pixel	0x00000021	0	a174392600dcb48e9197776f8c127382b02566ec	3455	"DFComposite"	""	""	0
@@ -1562,6 +1562,22 @@ imagespace	pixel	0x00000000	0	d1677e5367e7bc004722a372f107314c29c24434	3867	"ISG
 imagespace	pixel	0x00000000	0	971cc7e6b43d250a2f40bb72e71c1b7a08ba846c	3869	"ISGammaLinearize"	"BSImagespaceShaderGammaLinearize"	"ISGamma"	1	"LINEARIZE"	""
 imagespace	pixel	0x00000000	0	6baeb1a053aa080027a81fe5988943cf9159806b	3871	"ISGamma"	"BSImagespaceShaderGammaCorrectResize"	"ISGammaResize"	1	"RESIZE"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3642	"ISGammaLUT"	"BSImagespaceShaderGammaCorrectLUT"	"ISGamma"	1	"LUT"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3646	"ISCopy"	"BSImagespaceShaderCopy"	"ISCopy"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3650	"ISCopyVisAlpha"	"BSImagespaceShaderCopyVisAlpha"	"ISCopy"	1	"VIS_ALPHA"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3652	"ISRefraction"	"BSImagespaceShaderRefraction"	"ISRefraction"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3654	"ISDoubleVision"	"BSImagespaceShaderDoubleVision"	"ISDoubleVision"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3658	"ISDepthOfField"	"BSImagespaceShaderDepthOfField"	"ISDepthOfField"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3662	"ISBokehBlurHoriz"	"BSImagespaceShaderBokehDepthOfFieldPass2"	"ISBokehBlur"	1	"HORIZONTAL_BLUR"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3664	"ISBokehBlurVert"	"BSImagespaceShaderBokehDepthOfFieldPass3"	"ISBokehBlur"	1	"VERTICAL_BLUR"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3670	"ISDistantBlur"	"BSImagespaceShaderDistantBlur"	"ISDepthOfField"	1	"DISTANT"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3676	"ISRadialBlur"	"BSImagespaceShaderRadialBlur"	"ISRadialBlur"	1	"NUM_STEPS"	"2"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3678	"ISRadialBlurMedium"	"BSImagespaceShaderRadialBlurMedium"	"ISRadialBlur"	1	"NUM_STEPS"	"6"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3680	"ISRadialBlurHigh"	"BSImagespaceShaderRadialBlurHigh"	"ISRadialBlur"	1	"NUM_STEPS"	"10"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3682	"ISCopyGreyScale"	"BSImagespaceShaderGreyScale"	"ISCopy"	1	"GREYSCALE"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3684	"ISCopyDownsampleDepth"	"BSImagespaceShaderDownsampleDepth"	"ISCopy"	1	"DOWNSAMPLE_DEPTH"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3686	"ISCopyStencil"	"BSImagespaceShaderCopyStencil"	"ISCopy"	1	"COPY_STENCIL"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3688	"ISCopyWaterMask"	"BSImagespaceShaderCopyWaterMask"	"ISCopy"	1	"COPY_STENCIL_AND_WATER_MAT_ID"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3690	"ISCopyShadowMapToArray"	"BSImagespaceShaderCopyShadowMapToArray"	"ISCopy"	1	"COPY_DEPTH"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3692	"ISHDRTonemapBlendCinematic"	"BSImagespaceShaderHDRTonemapBlendCinematic"	"ISHDR"	1	"BLEND"	"4"
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3694	"ISHDRTonemapBlendCinematicFade"	"BSImagespaceShaderHDRTonemapBlendCinematicFade"	"ISHDR"	2	"BLEND"	"4"	"FADE"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3696	"ISHDRDownSample16"	"BSImagespaceShaderHDRDownSample16"	"ISHDR"	1	"DOWNSAMPLE"	"16"
@@ -1572,6 +1588,50 @@ imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3704	"IS
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3706	"ISHDRDownSample4LumClamp"	"BSImagespaceShaderHDRDownSample4LumClamp"	"ISHDR"	2	"DOWNSAMPLE"	"4"	"LUMCLAMP"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3708	"ISHDRDownSample16LightAdapt"	"BSImagespaceShaderHDRDownSample16LightAdapt"	"ISHDR"	3	"DOWNSAMPLE"	"16"	"DOWNADAPT"	""	"LUM"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3710	"ISHDRDownSample16LumClamp"	"BSImagespaceShaderHDRDownSample16LumClamp"	"ISHDR"	3	"DOWNSAMPLE"	"16"	"LUMCLAMP"	""	"LUM"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3717	"ISBlur3"	"BSImagespaceShaderBlur3"	"ISBlur"	1	"TEXTAP"	"3"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3719	"ISBlur5"	"BSImagespaceShaderBlur5"	"ISBlur"	1	"TEXTAP"	"5"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3721	"ISBlur7"	"BSImagespaceShaderBlur7"	"ISBlur"	1	"TEXTAP"	"7"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3723	"ISBlur9"	"BSImagespaceShaderBlur9"	"ISBlur"	2	"TEXTAP"	"9"	"COLORRANGE"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3725	"ISBlur11"	"BSImagespaceShaderBlur11"	"ISBlur"	1	"TEXTAP"	"11"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3727	"ISBlur13"	"BSImagespaceShaderBlur13"	"ISBlur"	1	"TEXTAP"	"13"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3729	"ISBlur15"	"BSImagespaceShaderBlur15"	"ISBlur"	1	"TEXTAP"	"15"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3734	"ISNonHDRBlur3"	"BSImageSpaceShaderNonHDRBlur3"	"ISBlur"	1	"TEXTAP"	"3"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3736	"ISNonHDRBlur5"	"BSImageSpaceShaderNonHDRBlur5"	"ISBlur"	1	"TEXTAP"	"5"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3738	"ISNonHDRBlur7"	"BSImageSpaceShaderNonHDRBlur7"	"ISBlur"	1	"TEXTAP"	"7"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3740	"ISNonHDRBlur9"	"BSImageSpaceShaderNonHDRBlur9"	"ISBlur"	1	"TEXTAP"	"9"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3742	"ISNonHDRBlur11"	"BSImageSpaceShaderNonHDRBlur11"	"ISBlur"	1	"TEXTAP"	"11"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3744	"ISNonHDRBlur13"	"BSImageSpaceShaderNonHDRBlur13"	"ISBlur"	1	"TEXTAP"	"13"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3746	"ISNonHDRBlur15"	"BSImageSpaceShaderNonHDRBlur15"	"ISBlur"	1	"TEXTAP"	"15"
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3748	"ISBrightPassBlur3"	"BSImagespaceShaderBrightPassBlur3"	"ISBlur"	2	"TEXTAP"	"3"	"BRIGHTPASS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3750	"ISBrightPassBlur5"	"BSImagespaceShaderBrightPassBlur5"	"ISBlur"	2	"TEXTAP"	"5"	"BRIGHTPASS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3752	"ISBrightPassBlur7"	"BSImagespaceShaderBrightPassBlur7"	"ISBlur"	2	"TEXTAP"	"7"	"BRIGHTPASS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3754	"ISBrightPassBlur9"	"BSImagespaceShaderBrightPassBlur9"	"ISBlur"	2	"TEXTAP"	"9"	"BRIGHTPASS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3756	"ISBrightPassBlur11"	"BSImagespaceShaderBrightPassBlur11"	"ISBlur"	2	"TEXTAP"	"11"	"BRIGHTPASS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3758	"ISBrightPassBlur13"	"BSImagespaceShaderBrightPassBlur13"	"ISBlur"	2	"TEXTAP"	"13"	"BRIGHTPASS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3760	"ISBrightPassBlur15"	"BSImagespaceShaderBrightPassBlur15"	"ISBlur"	2	"TEXTAP"	"15"	"BRIGHTPASS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3765	"ISWaterDisplacementClearSimulation"	"BSISWaterDisplacementClearSimulation"	"ISWaterDisplacement"	1	"CLEAR_SIMULATION"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3767	"ISWaterDisplacementTexOffset"	"BSISWaterDisplacementTexOffset"	"ISWaterDisplacement"	1	"TEXCOORD_OFFSET"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3771	"ISWaterDisplacementRainRipple"	"BSISWaterDisplacementRainRipple"	"ISWaterDisplacement"	1	"RIPPLE_MAKER_RAIN"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3777	"ISWaterBlendHeightmaps"	"BSISWaterBlendHeightmaps"	"ISWaterDisplacement"	1	"BLEND_HEIGHTMAPS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3781	"ISWaterDisplacementNormals"	"BSISWaterDisplacementNormals"	"ISWaterDisplacement"	1	"NORMALS"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3791	"ISAlphaBlend"	"BSImagespaceShaderAlphaBlend"	"ISAlphaBlend"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3821	"ISVLSSpotLight"	"BSImagespaceShaderVLSSpotLight"	"ISVLS"	1	"VLS_LIGHT"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3823	"ISVLSApplication"	"BSImagespaceShaderVLSApplication"	"ISVLS"	1	"APPLICATION"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3825	"ISVLSComposite"	"BSImagespaceShaderVLSComposite"	"ISVLS"	1	"COMPOSITE"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3827	"ISVLSCoord"	"BSImagespaceShaderVLSSliceCoord"	"ISVLS_Coord"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3829	"ISVLSSliceInterp"	"BSImagespaceShaderVLSSliceInterp"	"ISVLS"	1	"SLICE_INTERP"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3831	"ISVLSSliceStencil"	"BSImagespaceShaderVLSSliceStencil"	"ISVLS_Stencil"	1	"SLICE_STENCIL"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3833	"ISVLSSliceScatterRay"	"BSImagespaceShaderVLSSliceScatterRay"	"ISVLS_SliceScatterRay"	1	"VLS_SLICE_SCATTER_RAY"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3835	"ISVLSSliceScatterInterp"	"BSImagespaceShaderVLSSliceScatterInterp"	"ISVLS_SliceScatterInterp"	1	"VLS_SLICE_SCATTER_INTERP"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3860	"ISTemporalAA"	"BSImagespaceShaderTemporalAA"	"ISTemporalAA"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3862	"ISTemporalAAPipboy"	"BSImagespaceShaderTemporalAAPipboy"	"ISTemporalAA"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3864	"ISTemporalAAPowerArmorPipboy"	"BSImagespaceShaderTemporalAAPowerArmorPipboy"	"ISTemporalAA"	1	"POWERARMOR_PIPBOY"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3866	"ISGamma"	"BSImagespaceShaderGammaCorrect"	"ISGamma"	0
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3868	"ISGammaLinearize"	"BSImagespaceShaderGammaLinearize"	"ISGamma"	1	"LINEARIZE"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3870	"ISGamma"	"BSImagespaceShaderGammaCorrectResize"	"ISGammaResize"	1	"RESIZE"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3874	"ISSSLRRaytracing"	"BSImagespaceShaderSSLRRaytracing"	"ISSSLRRaytracing"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3880	"ISSSLRPrepass"	"BSImagespaceShaderSSLRPrepass"	"ISSSLRPrepass"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3882	"ISDepthOfFieldFogged"	"BSImagespaceShaderDepthOfFieldFogged"	"ISDepthOfField"	1	"FOGGED"	""
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3884	"ISDepthOfFieldSplitScreen"	"BSImagespaceShaderDepthOfFieldSplitScreen"	"ISDepthOfField"	0
+imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3886	"ISDistantBlurFogged"	"BSImagespaceShaderDistantBlurFogged"	"ISDepthOfField"	2	"DISTANT"	""	"FOGGED"	""
+imagespace	vertex	0x00000000	0	65a3ca08add4b7c7654e14687f421c1265c94173	3921	""	""	""	0

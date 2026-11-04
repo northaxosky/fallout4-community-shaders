@@ -35,7 +35,7 @@ namespace cs::engine
 	{
 		std::map<std::string, std::string> header;
 		GameRuntime runtime = GameRuntime::kAE;
-		// The table lists only targets that differ from the AE table.
+		// The table overrides AE rows of its families; the rest come from AE.
 		bool inheritsTargets = false;
 		std::vector<StockShaderRow> rows;
 	};

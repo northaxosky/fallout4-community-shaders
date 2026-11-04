@@ -9,6 +9,7 @@
 #include <format>
 #include <iterator>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 namespace cs::engine
@@ -25,7 +26,16 @@ namespace cs::engine
 			return ParseStockShaderTable(*text);
 		}
 
-		// The OG table lists only targets that differ from AE; NG shares AE.
+		bool SameFamily(const StockShaderRow& a_left, const StockShaderRow& a_right)
+		{
+			const auto key = [](const StockShaderRow& a_row) {
+				return std::tie(a_row.targetName, a_row.stage, a_row.descriptor, a_row.nativeName,
+					a_row.nativeClassName, a_row.nativeSourceGroup, a_row.nativeMacros);
+			};
+			return key(a_left) == key(a_right);
+		}
+
+		// OG rows replace their AE families; NG's shaders match AE's.
 		std::vector<StockShaderRow> Build(GameRuntime a_runtime)
 		{
 			auto rows = LoadTable(IDR_STOCK_SHADERS_AE).rows;
@@ -34,7 +44,7 @@ namespace cs::engine
 			auto overrides = LoadTable(IDR_STOCK_SHADERS_OG).rows;
 			std::erase_if(rows, [&](const StockShaderRow& a_row) {
 				return std::ranges::any_of(overrides, [&](const StockShaderRow& a_override) {
-					return a_override.target == a_row.target;
+					return SameFamily(a_override, a_row);
 				});
 			});
 			rows.insert(

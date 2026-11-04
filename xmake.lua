@@ -240,8 +240,8 @@ target(plugin_name, function()
     local resources = {
         ["src/Menu/Changelog.rc"] = { "CHANGELOG.md" },
         ["src/Render/StockShaderTables.rc"] = {
-            "src/Render/data/stock-shader-identity.tsv",
-            "src/Render/data/stock-shader-identity-OG-1.10.163.tsv"
+            "src/Render/data/stock-shader-identity-AE.tsv",
+            "src/Render/data/stock-shader-identity-OG.tsv"
         }
     }
     for resource in pairs(resources) do
@@ -463,16 +463,16 @@ local function stock_shader_identity_target(name, compiler, tests)
 end
 
 stock_shader_identity_target("StockShaderIdentityTests", nil, {
-    StockShaderIdentity = { file = "stock-shader-identity.tsv" },
-    FeatureShaderCompile = { file = "stock-shader-identity.tsv", mode = "--features-on" },
-    FeatureShaderIsolated = { file = "stock-shader-identity.tsv", mode = "--features-isolated" },
+    StockShaderIdentityAE = { file = "stock-shader-identity-AE.tsv" },
+    FeatureShaderCompileAE = { file = "stock-shader-identity-AE.tsv", mode = "--features-on" },
+    FeatureShaderIsolatedAE = { file = "stock-shader-identity-AE.tsv", mode = "--features-isolated" },
     -- OG recipes compile at runtime with the system compiler, so feature coverage uses it too.
-    FeatureShaderCompileOG = { file = "stock-shader-identity-OG-1.10.163.tsv", mode = "--features-on" }
+    FeatureShaderCompileOG = { file = "stock-shader-identity-OG.tsv", mode = "--features-on" }
 })
 
 -- The compiler OG 1.10.163 shipped with; staged by scripts\fetch-sdks.ps1, never packaged.
 stock_shader_identity_target("StockShaderIdentityOGTests", "build/tools/d3dcompiler-6.3.9600.16384/d3dcompiler_47.dll", {
-    StockShaderIdentityOG = { file = "stock-shader-identity-OG-1.10.163.tsv" }
+    StockShaderIdentityOG = { file = "stock-shader-identity-OG.tsv" }
 })
 
 -- Compiles every runtime feature shader variant against the staged tree.
