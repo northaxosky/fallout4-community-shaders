@@ -1,5 +1,6 @@
 #include "Render/FullscreenPass.h"
 
+#include "Render/Annotation.h"
 #include "Utils/CSUtil.h"
 
 namespace cs::render
@@ -13,6 +14,7 @@ namespace cs::render
 		rasterizer.CullMode = D3D11_CULL_NONE;
 		rasterizer.DepthClipEnable = TRUE;
 		DX::ThrowIfFailed(a_device->CreateRasterizerState(&rasterizer, _rasterizer.put()));
+		annotation::SetName(_rasterizer.get(), "Render/FullscreenPass.Rasterizer");
 	}
 
 	FullscreenPass::Scope::Scope(

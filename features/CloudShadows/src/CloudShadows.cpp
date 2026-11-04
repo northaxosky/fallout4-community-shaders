@@ -418,6 +418,7 @@ namespace cs::features
 		target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
 		DX::ThrowIfFailed(a_device->CreateBlendState(&blendDesc, _overlayBlend.put()));
+		cs::render::annotation::SetName(_overlayBlend.get(), "CloudShadows/Overlay.Blend");
 
 		D3D11_BUFFER_DESC constants{};
 		constants.ByteWidth = sizeof(float) * 4;
@@ -425,6 +426,7 @@ namespace cs::features
 		constants.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 		constants.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 		DX::ThrowIfFailed(a_device->CreateBuffer(&constants, nullptr, _overlayConstants.put()));
+		cs::render::annotation::SetName(_overlayConstants.get(), "CloudShadows/Overlay.Constants");
 		_overlayReady.store(_overlayPass.Ready() && _overlayPS[0] && _overlayPS[1] && _overlayPS[2], std::memory_order_release);
 	}
 
@@ -482,6 +484,7 @@ namespace cs::features
 			return false;
 		}
 
+		cs::render::annotation::SetName(blend.get(), "CloudShadows/Layers.Blend");
 		cs::render::annotation::SetName(cube.get(), "CloudShadows/Layers");
 		cs::render::annotation::SetName(srv.get(), "CloudShadows/Layers.SRV");
 		for (std::uint32_t face = 0; face < kFaceCount; ++face)

@@ -54,8 +54,10 @@ namespace cs::d3d11
 			const D3D11_BUFFER_DESC desc{ 16, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0 };
 			winrt::com_ptr<ID3D11Buffer> probe;
 			winrt::com_ptr<ID3D11Device> resourceDevice;
-			if (SUCCEEDED(a_device->CreateBuffer(&desc, nullptr, probe.put())))
+			if (SUCCEEDED(a_device->CreateBuffer(&desc, nullptr, probe.put()))) {
+				render::annotation::SetName(probe.get(), "Render/DeviceIdentityProbe");
 				probe->GetDevice(resourceDevice.put());
+			}
 			winrt::com_ptr<ID3D11Device> contextDevice;
 			a_context->GetDevice(contextDevice.put());
 			L->info(

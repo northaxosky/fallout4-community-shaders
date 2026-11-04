@@ -58,17 +58,20 @@ namespace cs::engine
 			desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
 			desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
 			DX::ThrowIfFailed(device->CreateBuffer(&desc, nullptr, validation->result.put()));
+			cs::render::annotation::SetName(validation->result.get(), "Skylighting/OccluderBatch.Validate.Result");
 			const D3D11_UNORDERED_ACCESS_VIEW_DESC view{
 				.Format = DXGI_FORMAT_R32_TYPELESS,
 				.ViewDimension = D3D11_UAV_DIMENSION_BUFFER,
 				.Buffer = { .FirstElement = 0, .NumElements = kResultWords, .Flags = D3D11_BUFFER_UAV_FLAG_RAW }
 			};
 			DX::ThrowIfFailed(device->CreateUnorderedAccessView(validation->result.get(), &view, validation->resultView.put()));
+			cs::render::annotation::SetName(validation->resultView.get(), "Skylighting/OccluderBatch.Validate.Result.UAV");
 			desc.Usage = D3D11_USAGE_STAGING;
 			desc.BindFlags = 0;
 			desc.MiscFlags = 0;
 			desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 			DX::ThrowIfFailed(device->CreateBuffer(&desc, nullptr, validation->readback.put()));
+			cs::render::annotation::SetName(validation->readback.get(), "Skylighting/OccluderBatch.Validate.Readback");
 			return validation;
 		}
 
