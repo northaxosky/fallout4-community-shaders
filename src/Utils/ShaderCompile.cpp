@@ -85,14 +85,18 @@ namespace cs::util
 			*a_outError = outcome.error;
 		if (!outcome.succeeded)
 			return {};
+		return MakeBlob(outcome.bytecode, a_outError);
+	}
 
-		Microsoft::WRL::ComPtr<ID3DBlob> shaderBlob;
-		if (FAILED(D3DCreateBlob(outcome.bytecode.size(), shaderBlob.GetAddressOf()))) {
+	Microsoft::WRL::ComPtr<ID3DBlob> MakeBlob(std::span<const std::uint8_t> a_bytecode, std::string* a_outError)
+	{
+		Microsoft::WRL::ComPtr<ID3DBlob> blob;
+		if (FAILED(D3DCreateBlob(a_bytecode.size(), blob.GetAddressOf()))) {
 			if (a_outError)
 				*a_outError = "Could not allocate shader bytecode blob";
 			return {};
 		}
-		std::memcpy(shaderBlob->GetBufferPointer(), outcome.bytecode.data(), outcome.bytecode.size());
-		return shaderBlob;
+		std::memcpy(blob->GetBufferPointer(), a_bytecode.data(), a_bytecode.size());
+		return blob;
 	}
 }

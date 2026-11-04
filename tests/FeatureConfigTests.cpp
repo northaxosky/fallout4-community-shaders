@@ -190,7 +190,7 @@ namespace
 		const auto blocked = RenderDocument(a_registry, toml::parse("[features.ScreenSpaceShadows]\nsettings = false\n"));
 		CHECK(RenderDocument(a_registry, toml::parse(blocked)) == blocked);
 
-		// Configs saved under a wider range load clamped; bad values are rejected untouched.
+		// Wider-range saves load clamped; bad values are rejected untouched.
 		namespace sss = cs::features::sss_settings;
 		sss::Settings tuned;
 		std::string error;

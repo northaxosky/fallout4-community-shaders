@@ -69,14 +69,7 @@ namespace cs::shader_test
 			*a_outError = outcome.error;
 		if (!outcome.succeeded)
 			return {};
-		Microsoft::WRL::ComPtr<ID3DBlob> blob;
-		if (FAILED(D3DCreateBlob(outcome.bytecode.size(), blob.GetAddressOf()))) {
-			if (a_outError)
-				*a_outError = "Could not allocate shader bytecode blob";
-			return {};
-		}
-		std::memcpy(blob->GetBufferPointer(), outcome.bytecode.data(), outcome.bytecode.size());
-		return blob;
+		return util::MakeBlob(outcome.bytecode, a_outError);
 	}
 	inline void ReportCache()
 	{

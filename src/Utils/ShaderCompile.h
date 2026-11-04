@@ -6,6 +6,7 @@
 
 #include <d3dcommon.h>
 #include <d3dcompiler.h>
+#include <span>
 #include <wrl/client.h>
 
 #include <cstdint>
@@ -26,6 +27,8 @@ namespace cs::util
 		const char* a_program,
 		const std::filesystem::path& a_shaderRoot = kDefaultShaderRoot,
 		std::uint32_t a_flags1 = shader_cache::kCachedOptimizedFlags1);
+
+	Microsoft::WRL::ComPtr<ID3DBlob> MakeBlob(std::span<const std::uint8_t> a_bytecode, std::string* a_outError = nullptr);
 
 	Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderToBlob(
 		const wchar_t* a_filePath,

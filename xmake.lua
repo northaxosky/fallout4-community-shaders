@@ -17,7 +17,7 @@ for _, directory in ipairs(os.dirs(path.join(os.scriptdir(), "features", "*", "s
 end
 table.sort(features)
 
--- Test-only build machinery: tests enumerate contributions via each ShaderDefines.h.
+-- Tests enumerate contributions via each feature's ShaderDefines.h.
 local generated_defines = path.join("build", ".gens", "TestFeatureShaderDefines")
 
 target("TestFeatureShaderDefines", function()
