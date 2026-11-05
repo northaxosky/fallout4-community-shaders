@@ -7,7 +7,7 @@
 namespace cs::engine
 {
 	// Native names whose stock imagespace VS is the shared fullscreen passthrough.
-	inline constexpr std::array<std::string_view, 87> kImageSpacePassthroughVertexNames{
+	inline constexpr std::array<std::string_view, 93> kImageSpacePassthroughVertexNames{
 		"ISAO",
 		"ISAOGauss",
 		"ISAlphaBlend",
@@ -30,12 +30,16 @@ namespace cs::engine
 		"ISCopy",
 		"ISCopyDownsampleDepth",
 		"ISCopyGreyScale",
+		"ISCopyNormals",
 		"ISCopyShadowMapToArray",
 		"ISCopyStencil",
 		"ISCopyVisAlpha",
 		"ISCopyWaterMask",
 		"ISDepthOfField",
+		"ISDepthOfFieldFogged",
+		"ISDepthOfFieldSplitScreen",
 		"ISDistantBlur",
+		"ISDistantBlurFogged",
 		"ISDoubleVision",
 		"ISFXAA",
 		"ISFullScreenColor",
@@ -75,11 +79,13 @@ namespace cs::engine
 		"ISSAOMinify",
 		"ISSAORawAO",
 		"ISSAORawAOEditor",
+		"ISSSLRPrepass",
 		"ISSSLRRaytracing",
 		"ISSunbeams",
 		"ISTemporalAA",
 		"ISTemporalAAPipboy",
 		"ISTemporalAAPowerArmorPipboy",
+		"ISUpsampleDynamicResolution",
 		"ISVLSApplication",
 		"ISVLSComposite",
 		"ISVLSCoord",
@@ -102,8 +108,53 @@ namespace cs::engine
 	// The only passthrough route whose output signature widens with TEXCOORD1.
 	inline constexpr std::string_view kImageSpacePassthroughTexCoord1Name = "ISFXAA";
 
+	// OG passthrough routes whose VS also reads the base GeometryOffset constant.
+	inline constexpr std::array<std::string_view, 19> kImageSpacePassthroughGeometryOffsetNames{
+		"ISAO",
+		"ISAOGauss",
+		"ISFullScreenColor",
+		"ISLocalMap",
+		"ISLocalMapCompanion",
+		"ISModMenu",
+		"ISModMenuGlow",
+		"ISMotionBlur",
+		"ISPipboyScreen",
+		"ISSAOBlurH",
+		"ISSAOBlurV",
+		"ISSAOCameraZ",
+		"ISSAOMinify",
+		"ISSAORawAO",
+		"ISSAORawAOEditor",
+		"ISSunbeams",
+		"ISUpsampleDynamicResolution",
+		"ISVatsTarget",
+		"ISVatsTargetDebug",
+	};
+
+	static_assert(std::ranges::is_sorted(kImageSpacePassthroughGeometryOffsetNames));
+
+	// Position-only quads sharing the passthrough source; Markers also packs a TEXCOORD0.
+	inline constexpr std::array<std::string_view, 2> kImageSpaceXYQuadVertexNames{
+		"ISHUDGlassMarkers",
+		"LensFlareVis",
+	};
+
+	static_assert(std::ranges::is_sorted(kImageSpaceXYQuadVertexNames));
+
+	inline constexpr std::string_view kImageSpaceXYQuadPackedName = "ISHUDGlassMarkers";
+
 	[[nodiscard]] constexpr bool IsImageSpacePassthroughVertex(std::string_view a_nativeName) noexcept
 	{
 		return std::ranges::binary_search(kImageSpacePassthroughVertexNames, a_nativeName);
+	}
+
+	[[nodiscard]] constexpr bool IsImageSpacePassthroughGeometryOffsetVertex(std::string_view a_nativeName) noexcept
+	{
+		return std::ranges::binary_search(kImageSpacePassthroughGeometryOffsetNames, a_nativeName);
+	}
+
+	[[nodiscard]] constexpr bool IsImageSpaceXYQuadVertex(std::string_view a_nativeName) noexcept
+	{
+		return std::ranges::binary_search(kImageSpaceXYQuadVertexNames, a_nativeName);
 	}
 }
