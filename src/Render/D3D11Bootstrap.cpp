@@ -11,7 +11,6 @@
 #include "Menu/Menu.h"
 #include "Render/Annotation.h"
 #include "Render/FrameProfiler.h"
-#include "Render/ShaderCompileGate.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalPipeline.h"
@@ -185,12 +184,6 @@ namespace cs::d3d11
 			InvokeOwner("FeatureManager shader-injection validation", [&] {
 				FeatureManager::Get().ValidateShaderInjectionsAll();
 			});
-			// Background mode compiles on first draw, not at startup.
-			if (engine::ShaderCompileBlocksPlay()) {
-				InvokeOwner("Shader variant prewarm", [] {
-					engine::PrewarmAllShaderInjectionVariants();
-				});
-			}
 			InvokeOwner("Debug-view selection", [] {
 				Menu::Get().ApplyDebugViewSelections();
 			});
