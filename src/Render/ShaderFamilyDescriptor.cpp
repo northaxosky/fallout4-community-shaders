@@ -659,48 +659,6 @@ namespace cs::engine
 			return true;
 		}
 
-		// The mesh combiner loaders carry no macro list; the engine derives it from the technique bits.
-		void AddMeshCombinerDefines(
-			ShaderInjectionDefines& a_defines,
-			const ShaderFamilyDescriptor& a_descriptor)
-		{
-			const auto d = a_descriptor.descriptor;
-			const auto name = a_descriptor.nativeName;
-			if (name == "MeshCombinerCompute" || name == "VertexBufferCopyCS") {
-				DefineBit(a_defines, d, 1, "POSITION_AS32BITS");
-				DefineBit(a_defines, d, 2, "NORMAL_ATTRIBUTE");
-				DefineBit(a_defines, d, 4, "BINORMAL_ATTRIBUTE");
-				DefineBit(a_defines, d, 8, "COLOR_REMAP");
-				DefineBit(a_defines, d, 16, "COLOR_ATTRIBUTE");
-			} else if (name == "IndexBufferOffsetCS") {
-				DefineBit(a_defines, d, 1, "DST_NOT_ALIGNED");
-				DefineBit(a_defines, d, 2, "SRC_NOT_ALIGNED");
-				DefineBit(a_defines, d, 4, "EVEN_NUMBER_OF_INDICES");
-			} else if (name == "MergeInstancedVertexBufferCopyCS") {
-				if (d == 0)
-					Define(a_defines, "ADD_COLOR_ATTRIBUTE");
-			} else {
-				return;
-			}
-			Define(a_defines, "GROUP_DIM_X", "64");
-		}
-
-		void AddImageSpaceDefines(
-			ShaderInjectionDefines& a_defines,
-			const ShaderFamilyDescriptor& a_descriptor)
-		{
-			a_defines = a_descriptor.nativeMacros;
-			if (a_descriptor.stage == ShaderStage::kCompute && a_descriptor.nativeClassName.empty())
-				AddMeshCombinerDefines(a_defines, a_descriptor);
-			const auto engineClass = a_descriptor.nativeClassName;
-			// FO4: the class reports TEXTAP 13 but ships the 15-tap body.
-			if (engineClass == "BSImagespaceShaderBlur15_Y_270_CS")
-				Define(a_defines, "TEXTAP", "15");
-			// FO4: the class omits BRIGHTPASS but ships the bright-pass body.
-			else if (engineClass == "BSImagespaceShaderBrightPassBlur9_Y_270_CS")
-				Define(a_defines, "BRIGHTPASS", "");
-		}
-
 		bool AddFamilyDefines(
 			ShaderInjectionDefines& a_defines,
 			const ShaderFamilyDescriptor& a_descriptor)
@@ -745,7 +703,7 @@ namespace cs::engine
 					std::to_string(std::min(d, 3U)));
 				return true;
 			case ShaderInjectionTarget::kImageSpace:
-				AddImageSpaceDefines(a_defines, a_descriptor);
+				a_defines = a_descriptor.nativeMacros;
 				return true;
 			default:
 				return true;

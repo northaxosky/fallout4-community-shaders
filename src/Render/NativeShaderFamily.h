@@ -50,11 +50,6 @@ namespace cs::engine
 	{
 		if (a_name == "DFTiledLighting")
 			return ShaderInjectionTarget::kDfTiledLighting;
-		for (const auto name : { "MeshCombinerCompute", "VertexBufferCopyCS", "IndexBufferOffsetCS",
-				 "MergeInstancedVertexBufferCopyCS", "DismemberCS", "SkinnedDecalCS", "DFDecalsCS" }) {
-			if (a_name == name)
-				return ShaderInjectionTarget::kImageSpace;
-		}
 		return std::nullopt;
 	}
 }
