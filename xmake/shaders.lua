@@ -10,7 +10,10 @@ local engine_entry_points = {
     ["isdepthoffield.hlsl"] = true,
     ["isdoublevision.hlsl"] = true,
     ["isnoise.hlsl"] = true,
-    ["isradialblur.hlsl"] = true
+    ["isradialblur.hlsl"] = true,
+    ["isalphablend.hlsl"] = true,
+    ["isblur.hlsl"] = true,
+    ["iscopy.hlsl"] = true
 }
 
 local function excluded(relative)
