@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
-#include "Common/DummyVSTexCoord.hlsl"
+#define FO4CS_VS_GEOMETRY_OFFSET
+#include "FO4/ImageSpaceVS.hlsli"
 
 #ifdef PSHADER
 cbuffer ISSAOBlurConstants : register(b2)

@@ -1,7 +1,6 @@
 #include "Render/ShaderFamilyDescriptor.h"
 
 #include "Log.h"
-#include "Render/ImageSpacePassthroughVertex.h"
 #include "Render/PrepassTechnique.h"
 
 #include <algorithm>
@@ -711,41 +710,6 @@ namespace cs::engine
 			}
 		}
 
-		bool IsPassthroughVertex(const ShaderFamilyDescriptor& a_descriptor) noexcept
-		{
-			return a_descriptor.target == ShaderInjectionTarget::kImageSpace &&
-			       a_descriptor.stage == ShaderStage::kVertex &&
-			       IsImageSpacePassthroughVertex(a_descriptor.nativeName);
-		}
-
-		bool IsXYQuadVertex(const ShaderFamilyDescriptor& a_descriptor) noexcept
-		{
-			return a_descriptor.target == ShaderInjectionTarget::kImageSpace &&
-			       a_descriptor.stage == ShaderStage::kVertex &&
-			       IsImageSpaceXYQuadVertex(a_descriptor.nativeName);
-		}
-
-		// Per-route axes of the shared fullscreen VS; OG-only ones are gated by OG in the source.
-		void AddSharedVertexDefines(
-			ShaderInjectionDefines& a_defines,
-			const ShaderFamilyDescriptor& a_descriptor)
-		{
-			if (IsXYQuadVertex(a_descriptor)) {
-				Define(a_defines, "IMAGESPACE_XYQUAD");
-				if (a_descriptor.nativeName == kImageSpaceXYQuadPackedName) {
-					Define(a_defines, "IMAGESPACE_XYQUAD_PACKED");
-					Define(a_defines, "IMAGESPACE_XYQUAD_GEOMETRY_OFFSET");
-				}
-				return;
-			}
-			if (!IsPassthroughVertex(a_descriptor))
-				return;
-			if (a_descriptor.nativeName == kImageSpacePassthroughTexCoord1Name)
-				Define(a_defines, "IMAGESPACE_PASSTHROUGH_TEXCOORD1");
-			if (IsImageSpacePassthroughGeometryOffsetVertex(a_descriptor.nativeName))
-				Define(a_defines, "IMAGESPACE_PASSTHROUGH_GEOMETRY_OFFSET");
-		}
-
 		void AddStageSourceDefine(
 			ShaderInjectionDefines& a_defines,
 			const ShaderFamilyDescriptor& a_descriptor)
@@ -828,9 +792,6 @@ namespace cs::engine
 	std::string_view ResolveShaderSourceName(
 		const ShaderFamilyDescriptor& a_descriptor) noexcept
 	{
-		// One source reconstructs every stock passthrough and xyquad VS route.
-		if (IsPassthroughVertex(a_descriptor) || IsXYQuadVertex(a_descriptor))
-			return "ISFullscreenPassthroughVS";
 		// Imagespace sources are named after the engine's source group.
 		if (a_descriptor.target == ShaderInjectionTarget::kImageSpace &&
 			!a_descriptor.nativeSourceGroup.empty())
@@ -867,7 +828,6 @@ namespace cs::engine
 			return std::nullopt;
 		}
 		AddStageSourceDefine(result.defines, a_descriptor);
-		AddSharedVertexDefines(result.defines, a_descriptor);
 		return result;
 	}
 }

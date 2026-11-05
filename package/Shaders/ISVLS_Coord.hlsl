@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
-#include "Common/DummyVSTexCoord.hlsl"
+#include "FO4/ImageSpaceVS.hlsli"
 
 #ifdef PSHADER
 cbuffer ISVLSConstants : register(b2)
@@ -14,12 +14,13 @@ SamplerState DepthSampler : register(s1);
 
 typedef VS_OUTPUT PS_INPUT;
 
-#define FLT_MAX 3.402823466e+38
+#	define FLT_MAX 3.402823466e+38
 
 float4 GenerateCoordinate(float2 texCoord)
 {
 	float slice = saturate(texCoord.y -
-		0.5 / lightscreenpos_numslice_numsampperslice.z) * 4.0;
+						   0.5 / lightscreenpos_numslice_numsampperslice.z) *
+	              4.0;
 	uint side = (uint)min(floor(slice), 3.0);
 	float alongSide = frac(slice) * 2.0 - 1.0;
 	float4 oneHot = (float4)(side == uint4(0, 1, 2, 3));
@@ -33,19 +34,16 @@ float4 GenerateCoordinate(float2 texCoord)
 	rayDir = rayDir / distToExit;
 	bool4 isCorrect = abs(rayDir.xyxy) > 0.00001;
 	float4 boundaries = float4(-1.0, -1.0, 1.0, 1.0) -
-		lightscreenpos_numslice_numsampperslice.xyxy;
+	                    lightscreenpos_numslice_numsampperslice.xyxy;
 	float4 denominator = rayDir.xyxy + (isCorrect ? 0.0 : 1.0);
 	float4 distToBoundaries = boundaries / denominator;
 	bool4 beforeExit = isCorrect && distToBoundaries < (distToExit - 0.0001);
 	float4 intersections = (float4)beforeExit * distToBoundaries -
-		(float4)!beforeExit * FLT_MAX;
+	                       (float4)!beforeExit * FLT_MAX;
 	float firstIntersection = max(
 		max(max(max(intersections.x, 0.0), intersections.y), intersections.z),
 		intersections.w);
-	float2 entryPoint = lightOnScreen
-		? lightscreenpos_numslice_numsampperslice.xy
-		: rayDir * firstIntersection +
-			lightscreenpos_numslice_numsampperslice.xy;
+	float2 entryPoint = lightOnScreen ? lightscreenpos_numslice_numsampperslice.xy : rayDir * firstIntersection + lightscreenpos_numslice_numsampperslice.xy;
 	if (any(abs(entryPoint) > 1.0001)) {
 		discard;
 	}
@@ -53,7 +51,7 @@ float4 GenerateCoordinate(float2 texCoord)
 	float halfTexel = 0.5 / lightscreenpos_numslice_numsampperslice.w;
 	float position = texCoord.x - halfTexel;
 	float lastSampleScale = lightscreenpos_numslice_numsampperslice.w /
-		(lightscreenpos_numslice_numsampperslice.w - 1.0);
+	                        (lightscreenpos_numslice_numsampperslice.w - 1.0);
 	position = saturate(position * lastSampleScale);
 	float2 xy = lerp(entryPoint, exitPoint, position);
 	if (any(abs(xy) > 1.0001)) {
@@ -69,9 +67,10 @@ void main(
 {
 	outputCoordinate = GenerateCoordinate(input.TexCoord);
 	float depth = Depth.Sample(DepthSampler,
-		outputCoordinate.xy * float2(0.5, -0.5) + 0.5).x;
+						   outputCoordinate.xy * float2(0.5, -0.5) + 0.5)
+	                  .x;
 	float depthScale = islightonscreen_znear_zfar.z /
-		(islightonscreen_znear_zfar.z - islightonscreen_znear_zfar.y);
+	                   (islightonscreen_znear_zfar.z - islightonscreen_znear_zfar.y);
 	float cameraZ =
 		-depthScale * islightonscreen_znear_zfar.y / (depth - depthScale);
 	outputCameraZ = float4(cameraZ, 0, 0, 0);

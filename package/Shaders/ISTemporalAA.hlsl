@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
-#include "Common/DummyVSTexCoord.hlsl"
+#include "FO4/ImageSpaceVS.hlsli"
 
 #ifdef PSHADER
 cbuffer TemporalAAConstants : register(b2)

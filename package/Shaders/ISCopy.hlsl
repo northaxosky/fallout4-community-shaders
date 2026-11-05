@@ -2,17 +2,18 @@
 // Copyright (c) 2026 northaxosky
 
 #ifdef VSHADER
-#	ifdef SCALE_BIAS
+#	if defined(SCALE_BIAS) || defined(MASK)
+#		ifdef SCALE_BIAS
 cbuffer ISCopyScaleBiasConstants : register(b2)
 {
 	float4 ScaleBias : packoffset(c2);
 };
-#	elif defined(MASK)
+#		elif defined(MASK)
 cbuffer ISCopyTextureMaskConstants : register(b2)
 {
 	float4 RotationMatrix : packoffset(c0);
 };
-#	endif
+#		endif
 
 struct VS_INPUT
 {
@@ -30,17 +31,20 @@ VS_OUTPUT main(VS_INPUT input)
 {
 	VS_OUTPUT vsout;
 	vsout.Position = float4(input.Position.xyz, 1.0);
-#	ifdef SCALE_BIAS
+#		ifdef SCALE_BIAS
 	vsout.TexCoord = input.TexCoord * ScaleBias.xy + ScaleBias.zw;
-#	elif defined(MASK)
+#		elif defined(MASK)
 	vsout.TexCoord = mul(input.TexCoord - 0.5,
 						 float2x2(RotationMatrix.xy, RotationMatrix.zw)) +
 	                 0.5;
-#	else
+#		else
 	vsout.TexCoord = input.TexCoord;
-#	endif
+#		endif
 	return vsout;
 }
+#	else
+#		include "FO4/ImageSpaceVS.hlsli"
+#	endif
 #endif
 
 #ifdef PSHADER

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 northaxosky
 
 #ifdef VSHADER
+#	if defined(COC_GENERATION) || defined(COMPOSITE)
 cbuffer BokehVertexConstants : register(b2)
 {
 	float4 ResolutionParams;
@@ -19,9 +20,9 @@ struct VS_OUTPUT
 	float4 Position: SV_POSITION;
 	float2 TexCoord: TEXCOORD0;
 	float2 PixelCoord: TEXCOORD1;
-#	ifdef COMPOSITE
+#		ifdef COMPOSITE
 	float2 BlurredPixelCoord: TEXCOORD2;
-#	endif
+#		endif
 };
 
 VS_OUTPUT main(VS_INPUT input)
@@ -30,11 +31,14 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.Position = float4(input.Position.xyz, 1.0);
 	vsout.TexCoord = input.TexCoord;
 	vsout.PixelCoord = input.TexCoord * ScreenResolution.xy;
-#	ifdef COMPOSITE
+#		ifdef COMPOSITE
 	vsout.BlurredPixelCoord = input.TexCoord * ScreenResolution.xy - 0.5;
-#	endif
+#		endif
 	return vsout;
 }
+#	else
+#		include "FO4/ImageSpaceVS.hlsli"
+#	endif
 #endif
 
 #ifdef PSHADER

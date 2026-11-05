@@ -2,13 +2,14 @@
 // Copyright (c) 2026 northaxosky
 
 #ifdef VSHADER
+#	if defined(RIPPLE_MAKER_WADING) || defined(HEIGHTMAP_WADING) || defined(HEIGHTMAP_RAIN) || defined(HEIGHTMAP_SMOOTH)
 struct VS_INPUT
 {
 	float4 Position: POSITION0;
 	float2 TexCoord: TEXCOORD0;
 };
 
-#	ifdef RIPPLE_MAKER_WADING
+#		ifdef RIPPLE_MAKER_WADING
 cbuffer ISWaterDisplacementConstants : register(b2)
 {
 	float4 ResolutionParams;
@@ -34,7 +35,7 @@ VS_OUTPUT main(VS_INPUT input)
 	return vsout;
 }
 
-#	elif defined(HEIGHTMAP_WADING) || defined(HEIGHTMAP_RAIN) || defined(HEIGHTMAP_SMOOTH)
+#		elif defined(HEIGHTMAP_WADING) || defined(HEIGHTMAP_RAIN) || defined(HEIGHTMAP_SMOOTH)
 
 struct VS_OUTPUT
 {
@@ -60,6 +61,9 @@ VS_OUTPUT main(VS_INPUT input)
 	return vsout;
 }
 
+#		endif
+#	else
+#		include "FO4/ImageSpaceVS.hlsli"
 #	endif
 #endif
 

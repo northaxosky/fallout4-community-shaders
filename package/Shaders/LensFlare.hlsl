@@ -2,6 +2,24 @@
 // Copyright (c) 2026 northaxosky
 
 #ifdef VSHADER
+#	ifdef VISIBILITY
+struct VS_INPUT
+{
+	float4 Position: POSITION0;
+};
+
+struct VS_OUTPUT
+{
+	float4 Position: SV_POSITION;
+};
+
+VS_OUTPUT main(VS_INPUT input)
+{
+	VS_OUTPUT vsout;
+	vsout.Position = float4(input.Position.xy, 0.0, 1.0);
+	return vsout;
+}
+#	else
 struct VS_INPUT
 {
 	float4 Position: POSITION0;
@@ -33,6 +51,7 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.LightPos = ScreenSpaceLightPos_PositionScale.xyz;
 	return vsout;
 }
+#	endif
 #endif
 
 #ifdef PSHADER

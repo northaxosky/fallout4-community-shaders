@@ -16,13 +16,29 @@ struct VS_OUTPUT
 #	endif
 };
 
+#	if defined(MARKERS) && defined(OG)
+cbuffer PerGeometry : register(b2)
+{
+	float4 GeometryOffset;
+};
+#	endif
+
 VS_OUTPUT main(VS_INPUT input)
 {
 	VS_OUTPUT vsout;
+#	ifdef MARKERS
+#		ifdef OG
+	vsout.Position = float4(input.Position.xy + GeometryOffset.xy, 0.0, 1.0);
+#		else
+	vsout.Position = float4(input.Position.xy, 0.0, 1.0);
+#		endif
+	vsout.TexCoord = float3(input.Position.zw, 1.0);
+#	else
 	vsout.Position = float4(input.Position.xyz, 1.0);
-#	ifndef CLEAR
+#		ifndef CLEAR
 	vsout.TexCoord.xy = input.Position.xy * float2(0.5, -0.5) + 0.5;
 	vsout.TexCoord.z = input.Color.w;
+#		endif
 #	endif
 	return vsout;
 }

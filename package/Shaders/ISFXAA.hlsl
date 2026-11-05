@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
 
+#define FO4CS_VS_TEXCOORD1
+#include "FO4/ImageSpaceVS.hlsli"
+
 #ifdef PSHADER
 cbuffer FXAAConstants : register(b2)
 {
