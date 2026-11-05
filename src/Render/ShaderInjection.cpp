@@ -2331,8 +2331,6 @@ namespace cs::engine
 			for (auto* entry : a_owner->computeShaders) {
 				if (!entry || !entry->shader)
 					continue;
-				const bool prequeue =
-					a_streamIsGood && a_target == ShaderInjectionTarget::kDfTiledLighting && a_nativeName == "DFTiledLighting" && (entry->id == 0 || entry->id == 3);
 				RecordNativeComputeShader(
 					MakeNativeVariantKey({ .target = a_target,
 						.stage = ShaderStage::kCompute,
@@ -2340,7 +2338,7 @@ namespace cs::engine
 						.nativeName = a_nativeName }),
 					reinterpret_cast<ID3D11ComputeShader*>(
 						entry->shader),
-					prequeue);
+					a_streamIsGood);
 			}
 		} catch (...) {
 			CS_LOG_EVERY_MS(
