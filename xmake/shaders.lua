@@ -20,7 +20,10 @@ local engine_entry_points = {
     ["issaominify.hlsl"] = true,
     ["isrefraction.hlsl"] = true,
     ["isupsampledynamicresolution.hlsl"] = true,
-    ["iswaterdisplacement.hlsl"] = true
+    ["iswaterdisplacement.hlsl"] = true,
+    ["islocalmap.hlsl"] = true,
+    ["ismap.hlsl"] = true,
+    ["lensflare.hlsl"] = true
 }
 
 local function excluded(relative)
