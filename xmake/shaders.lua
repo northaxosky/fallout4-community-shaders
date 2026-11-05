@@ -6,7 +6,11 @@ local engine_entry_points = {
     ["distanttree.hlsl"] = true,
     ["sky.hlsl"] = true,
     ["water.hlsl"] = true,
-    ["ishdr.hlsl"] = true
+    ["ishdr.hlsl"] = true,
+    ["isdepthoffield.hlsl"] = true,
+    ["isdoublevision.hlsl"] = true,
+    ["isnoise.hlsl"] = true,
+    ["isradialblur.hlsl"] = true
 }
 
 local function excluded(relative)
