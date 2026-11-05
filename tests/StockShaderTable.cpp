@@ -80,7 +80,6 @@ namespace cs::engine
 				"Invalid identity table header");
 		}
 		table.runtime = ParseRuntime(table.header.at("runtime"));
-		table.inheritsTargets = std::stoull(table.header.at("excluded_inherited")) != 0;
 
 		std::set<std::tuple<ShaderInjectionTarget, ShaderStage, std::uint32_t, std::uint32_t>> keys;
 		while (std::getline(file, line)) {
@@ -111,9 +110,6 @@ namespace cs::engine
 			table.rows.push_back(std::move(row));
 		}
 		Require(file.eof() && !table.rows.empty() && table.rows.size() == std::stoull(table.header.at("rows")), "Identity row count mismatch");
-		Require(static_cast<std::size_t>(std::ranges::count_if(table.rows, [](const auto& row) { return row.nativeName.empty(); })) ==
-					std::stoull(table.header.at("rows_unnamed")),
-			"Unnamed identity row count mismatch");
 		return table;
 	}
 }

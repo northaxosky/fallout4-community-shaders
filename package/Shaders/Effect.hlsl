@@ -60,26 +60,29 @@ cbuffer CameraData : register(b0)
 };
 #	endif
 
+// FO4: OG fxc keeps this slot when unused; stock membrane PS omits it.
+#	if !defined(MEMBRANE)
 cbuffer PerMaterial : register(b1)
 {
 	float4 BaseColor;
 	float4 BaseColorScale;
-#	if defined(UI_MASK_RECTS)
+#		if defined(UI_MASK_RECTS)
 	float4 BaseColorScale_row1;
-#	else
-	float4 LightingInfluence;
-#	endif
-#	if defined(ENVMAP) || defined(PARTICLE_DISTORTION) || defined(WEATHER)
-#		if defined(ENVMAP) || defined(PARTICLE_DISTORTION)
-	float4 EnvmapScale_row0;
 #		else
-	float4 LightingInfluence_row1;
+	float4 LightingInfluence;
 #		endif
-#	endif
-#	if defined(WEATHER)
+#		if defined(ENVMAP) || defined(PARTICLE_DISTORTION) || defined(WEATHER)
+#			if defined(ENVMAP) || defined(PARTICLE_DISTORTION)
+	float4 EnvmapScale_row0;
+#			else
+	float4 LightingInfluence_row1;
+#			endif
+#		endif
+#		if defined(WEATHER)
 	float4 OcclusionMapSize;  // Weather depth-map size.
-#	endif
+#		endif
 };
+#	endif
 
 cbuffer PerGeometry : register(b2)
 {

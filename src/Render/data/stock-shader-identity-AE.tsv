@@ -1,4 +1,4 @@
-# export_sha256=ea957b788e62b9962cb56082f1d25aa8bbae407be9de583d8be95e596aeb86f2 runtime=AE-1.11.240 routes=3939 exact=3938 canonical=0 unproven=1 rows=3801 rows_exact=3800 rows_canonical=0 rows_unproven=1 rows_unnamed=9 excluded_unhooked=138 excluded_inherited=0 compiler_sha256=8d48f0096f75c46d9c2180ed0fb12c1cb8124b3f3cc6e1262538819cbb23404c
+# export_sha256=04d0d75ef4517c069200b38061ab8dda798555b5e44768115735893c71f9a4fa runtime=AE-1.11.240 rows=3801 compiler_sha256=8d48f0096f75c46d9c2180ed0fb12c1cb8124b3f3cc6e1262538819cbb23404c
 blood_splatter	pixel	0x00000000	0	700a1e3169f8d0c02ed360cabd1d0a2f2631e243	2	"BloodSplatter"	""	""	0
 blood_splatter	pixel	0x00000001	0	fabc7b50a63bc9f1ac022eb29c9018e98b1abf26	3	"BloodSplatter"	""	""	0
 blood_splatter	vertex	0x00000000	0	a83cf576f5b08683d917d05e6be9d7b4dfc3bc77	0	"BloodSplatter"	""	""	0
@@ -3222,9 +3222,9 @@ imagespace	pixel	0x00000000	0	3e67c77b2ee562029a32116eba2d2e8cd914ea5f	3900	"Rai
 imagespace	pixel	0x00000000	0	df4edff869a66b7c7773479519b54a56bce939c9	3902	"RainSplashDraw"	"BSImagespaceShaderRainSplashDraw"	"RainSplashDraw"	0
 imagespace	pixel	0x00000000	0	3431a18227b93dddc508e1b80312b72fcfdc7b9c	3904	"LensFlareVis"	"BSLensFlareVis"	"LensFlare"	1	"VISIBILITY"	""
 imagespace	pixel	0x00000000	0	f6abbdf9f7e7dd0cf34588a5109a4fdc4038853c	3906	"ISUpsampleDynamicResolution"	"BSImagespaceShaderUpsampleDynamicResolution"	"ISUpsampleDynamicResolution"	0
-imagespace	pixel	0x00000000	0	2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725	3930	""	""	""	0
-imagespace	pixel	0x00000000	0	2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725	3933	""	""	""	0
-imagespace	pixel	0x00000000	0	2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725	3936	""	""	""	0
+imagespace	pixel	0x00000000	0	2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725	3930	"ZPrePass"	""	"ZPrePass"	1	"ALPHA_TEST"	""
+imagespace	pixel	0x00000000	0	2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725	3933	"ZPrePass"	""	"ZPrePass"	2	"INSTANCED"	""	"ALPHA_TEST"	""
+imagespace	pixel	0x00000000	0	2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725	3936	"ZPrePass"	""	"ZPrePass"	2	"MERGE_INSTANCE"	""	"ALPHA_TEST"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3647	"ISGammaLUT"	"BSImagespaceShaderGammaCorrectLUT"	"ISGamma"	1	"LUT"	""
 imagespace	vertex	0x00000000	0	89b8678cd5673cfb7702b6f3271151646fddb0b0	3649	"ISFXAA"	"BSImagespaceShaderFXAA"	"ISFXAA"	0
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3651	"ISCopy"	"BSImagespaceShaderCopy"	"ISCopy"	0
@@ -3346,12 +3346,12 @@ imagespace	vertex	0x00000000	0	dfaafe2121001ff21c4e17244431d8e1d9beb936	3899	"Ra
 imagespace	vertex	0x00000000	0	a34595b1b333a2596c8514d52186933c90186f45	3901	"RainSplashDraw"	"BSImagespaceShaderRainSplashDraw"	"RainSplashDraw"	0
 imagespace	vertex	0x00000000	0	c400b7735461b8dbe3a4e40fed0434cc8e32f323	3903	"LensFlareVis"	"BSLensFlareVis"	"LensFlare"	1	"VISIBILITY"	""
 imagespace	vertex	0x00000000	0	89e56423886dc05ed3b2d1445a70f386c651ac38	3905	"ISUpsampleDynamicResolution"	"BSImagespaceShaderUpsampleDynamicResolution"	"ISUpsampleDynamicResolution"	0
-imagespace	vertex	0x00000000	0	65a3ca08add4b7c7654e14687f421c1265c94173	3928	""	""	""	0
-imagespace	vertex	0x00000000	0	2dfd8283725f177f867525afc71ddff2ca581e20	3929	""	""	""	0
-imagespace	vertex	0x00000000	0	ca0ecf95e2178af7a2fa3de113930bb0cd5ea8c4	3931	""	""	""	0
-imagespace	vertex	0x00000000	0	24ae3852f41c264b4147d6e178325834c66118c5	3932	""	""	""	0
-imagespace	vertex	0x00000000	0	c14dd8e49428ad18b0f5bce2b9ba96a1585b56c2	3934	""	""	""	0
-imagespace	vertex	0x00000000	0	53e7e2f0c051a4e9ba9af8ae785ff619c81ce99c	3935	""	""	""	0
+imagespace	vertex	0x00000000	0	65a3ca08add4b7c7654e14687f421c1265c94173	3928	"ZPrePass"	""	"ZPrePass"	0
+imagespace	vertex	0x00000000	0	2dfd8283725f177f867525afc71ddff2ca581e20	3929	"ZPrePass"	""	"ZPrePass"	1	"ALPHA_TEST"	""
+imagespace	vertex	0x00000000	0	ca0ecf95e2178af7a2fa3de113930bb0cd5ea8c4	3931	"ZPrePass"	""	"ZPrePass"	1	"INSTANCED"	""
+imagespace	vertex	0x00000000	0	24ae3852f41c264b4147d6e178325834c66118c5	3932	"ZPrePass"	""	"ZPrePass"	2	"INSTANCED"	""	"ALPHA_TEST"	""
+imagespace	vertex	0x00000000	0	c14dd8e49428ad18b0f5bce2b9ba96a1585b56c2	3934	"ZPrePass"	""	"ZPrePass"	1	"MERGE_INSTANCE"	""
+imagespace	vertex	0x00000000	0	53e7e2f0c051a4e9ba9af8ae785ff619c81ce99c	3935	"ZPrePass"	""	"ZPrePass"	2	"MERGE_INSTANCE"	""	"ALPHA_TEST"	""
 particle	pixel	0x00000000	0	346822cf0c361f7951de3d2e7f22b49fd608c6a1	14	"Particle"	""	""	0
 particle	pixel	0x00000001	0	017a02024fd3a2c7b60abd2eb15147226283e654	15	"Particle"	""	""	0
 particle	pixel	0x00000002	0	75afbb092fe9fc9eb1ede03c21232a46d6704f2e	16	"Particle"	""	""	0

@@ -78,7 +78,6 @@ namespace
 	{
 		std::vector<Row> rows;
 		cs::engine::GameRuntime runtime = cs::engine::GameRuntime::kAE;
-		bool inheritsTargets = false;
 	};
 
 	Table ReadRows(const std::filesystem::path& a_path)
@@ -91,13 +90,13 @@ namespace
 		Require(IsHex(compiler, 64), "Invalid compiler pin");
 		ReportCompiler(compiler);
 		std::printf("runtime %s\n", parsed.header.at("runtime").c_str());
-		Table table{ .runtime = parsed.runtime, .inheritsTargets = parsed.inheritsTargets };
+		Table table{ .runtime = parsed.runtime };
 		for (auto& source : parsed.rows)
 			table.rows.push_back({ .source = std::move(source) });
 		return table;
 	}
 
-	void ResolveOwnership(std::vector<Row>& a_rows, bool a_inheritsTargets, const std::filesystem::path& a_shaderRoot)
+	void ResolveOwnership(std::vector<Row>& a_rows, const std::filesystem::path& a_shaderRoot)
 	{
 		using namespace cs::engine;
 		Require(std::filesystem::is_directory(a_shaderRoot), "Shader root is not a directory: " + a_shaderRoot.string());
@@ -108,9 +107,6 @@ namespace
 			});
 		}
 		for (const auto& contribution : cs::shader_test::GetFeatureShaderContributions()) {
-			// Inherited targets keep their AE identity and are covered by the AE table.
-			if (a_inheritsTargets && std::ranges::none_of(a_rows, [&](const Row& row) { return row.source.target == contribution.targetId; }))
-				continue;
 			for (const auto stage : { ShaderStage::kVertex, ShaderStage::kPixel, ShaderStage::kCompute }) {
 				if ((contribution.stages & ShaderStageBit(stage)) == 0)
 					continue;
@@ -221,53 +217,6 @@ namespace
 		return StrippedIdentity(compiled.bytecode);
 	}
 
-	// Engine-internal shaders outside the table; stripped SHA-1 of the stock DXBC.
-	struct EngineShader
-	{
-		const char* file;
-		const char* profile;
-		cs::engine::ShaderStage stage;
-		const char* expected;
-		std::vector<std::pair<std::string, std::string>> defines = {};
-	};
-
-	// The Z-prepass rows carry no name or macros, so the table cannot select their source.
-	const std::vector<EngineShader> kEngineShaders{
-		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "65a3ca08add4b7c7654e14687f421c1265c94173" },
-		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "2dfd8283725f177f867525afc71ddff2ca581e20", { { "ALPHA_TEST", "" } } },
-		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "ca0ecf95e2178af7a2fa3de113930bb0cd5ea8c4", { { "INSTANCED", "" } } },
-		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "24ae3852f41c264b4147d6e178325834c66118c5", { { "INSTANCED", "" }, { "ALPHA_TEST", "" } } },
-		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "c14dd8e49428ad18b0f5bce2b9ba96a1585b56c2", { { "MERGE_INSTANCE", "" } } },
-		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "53e7e2f0c051a4e9ba9af8ae785ff619c81ce99c", { { "MERGE_INSTANCE", "" }, { "ALPHA_TEST", "" } } },
-		{ "ZPrePass.hlsl", "ps_5_0", cs::engine::ShaderStage::kPixel, "2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725", { { "ALPHA_TEST", "" } } }
-	};
-
-	std::size_t CheckEngineShaders(const std::filesystem::path& a_shaderRoot)
-	{
-		std::size_t failed = 0;
-		for (const auto& shader : kEngineShaders) {
-			std::string actual;
-			try {
-				cs::engine::ShaderVariantCompilationRequest variant;
-				variant.sourcePath = a_shaderRoot / shader.file;
-				variant.entryPoint = "main";
-				variant.profile = shader.profile;
-				variant.stage = shader.stage;
-				variant.defines = shader.defines;
-				const auto compiled = cs::shader_test::Compile(cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot));
-				Require(compiled.succeeded, "compile-error: " + FirstErrorLine(compiled.error));
-				actual = StrippedIdentity(compiled.bytecode);
-			} catch (const std::exception& error) {
-				actual = std::string("error: ") + error.what();
-			}
-			if (actual == shader.expected)
-				continue;
-			++failed;
-			std::printf("engine shader %s expected=%s actual=%s\n", shader.file, shader.expected, actual.c_str());
-		}
-		return failed;
-	}
-
 	// Features load alone, so each must compile without others' includes.
 	std::string CompileIsolated(const Row& a_row, const std::filesystem::path& a_shaderRoot, cs::engine::GameRuntime a_runtime)
 	{
@@ -305,7 +254,7 @@ int main(int a_argc, char** a_argv)
 			if (!abiError.empty())
 				return 1;
 		}
-		ResolveOwnership(rows, table.inheritsTargets, shaderRoot);
+		ResolveOwnership(rows, shaderRoot);
 		const auto total = featuresOn ?
 		                       static_cast<std::size_t>(std::ranges::count(rows, true, &Row::contributed)) :
 		                       rows.size();
@@ -356,8 +305,6 @@ int main(int a_argc, char** a_argv)
 		}
 		if (!featuresOn && failed > 50)
 			std::printf("... %zu additional failures omitted\n", failed - 50);
-		if (!featuresOn && table.runtime == cs::engine::GameRuntime::kAE)
-			failed += CheckEngineShaders(shaderRoot);
 		for (const auto& [target, result] : targetResults)
 			std::printf("  %s: %zu passed, %zu failed\n", target.c_str(), result.first, result.second);
 		cs::shader_test::ReportCache();
