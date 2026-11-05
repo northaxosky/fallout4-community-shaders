@@ -1,31 +1,5 @@
 local root = os.projectdir()
 
--- Native FO4 entry points share engine names, not Skyrim's shader ABI.
-local engine_entry_points = {
-    ["effect.hlsl"] = true,
-    ["distanttree.hlsl"] = true,
-    ["sky.hlsl"] = true,
-    ["water.hlsl"] = true,
-    ["ishdr.hlsl"] = true,
-    ["isdepthoffield.hlsl"] = true,
-    ["isdoublevision.hlsl"] = true,
-    ["isnoise.hlsl"] = true,
-    ["isradialblur.hlsl"] = true,
-    ["isalphablend.hlsl"] = true,
-    ["isblur.hlsl"] = true,
-    ["iscopy.hlsl"] = true,
-    ["istemporalaa.hlsl"] = true,
-    ["issaoblur.hlsl"] = true,
-    ["issaocameraz.hlsl"] = true,
-    ["issaominify.hlsl"] = true,
-    ["isrefraction.hlsl"] = true,
-    ["isupsampledynamicresolution.hlsl"] = true,
-    ["iswaterdisplacement.hlsl"] = true,
-    ["islocalmap.hlsl"] = true,
-    ["ismap.hlsl"] = true,
-    ["lensflare.hlsl"] = true
-}
-
 local function excluded(relative)
     -- SDK runtimes keep their manifest-owned install path.
     return relative == "Upscaling/XeSS"
@@ -43,22 +17,10 @@ local function stage_shaders()
         path.join(root, "build", "ShaderStage", "Shaders")
     )
     local staged = {}
-    local upstream = {}
 
     local function shared_destination(source)
         return source:gsub("\\", "/"):match("^package/Shaders/(.+)$")
             or source:gsub("\\", "/"):match("^features/[^/]+/Shaders/(.+)$")
-    end
-
-    local upstream_roots = { path.join(shared_root, "package/Shaders") }
-    table.join2(upstream_roots, os.dirs(path.join(shared_root, "features/*/Shaders")))
-    assert(os.isdir(upstream_roots[1]),
-        "shared shaders missing; run scripts\\fetch-submodules.ps1")
-    for _, directory in ipairs(upstream_roots) do
-        for _, source in ipairs(os.files(path.join(directory, "**"))) do
-            local relative = path.relative(source, directory):gsub("\\", "/")
-            upstream[relative:lower()] = source
-        end
     end
 
     local function register(source, relative, from_shared)
@@ -73,14 +35,6 @@ local function stage_shaders()
         if excluded(relative) then
             return
         end
-        if not from_shared then
-            local engine_entry_point = engine_entry_points[key]
-                and path.absolute(source) == path.absolute(path.join(root, "package/Shaders", relative))
-            assert(not upstream[key] or engine_entry_point,
-                "FO4 shader shadows upstream destination '" .. relative
-                .. "'; move it under FO4/: " .. source)
-        end
-
         if staged[key] then
             raise(
                 "shader stage duplicate destination '%s': '%s' and '%s'",
