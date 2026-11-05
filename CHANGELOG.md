@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
 - Compatibility: Community Shaders now disables itself and shows a message when doodlum's standalone Upscaling is installed; it crashes alongside CS, which includes it. jarari's Upscaling Custom is unaffected.
 - Menu: Home shows what's new in the latest major release; menu pages group their settings into panels, and each changelog release has its own panel.
@@ -19,6 +19,7 @@
 - Frame Generation: saved frame generation no longer freezes at startup on GPUs without DLSS Frame Generation (e.g. RTX 30-series); it now starts right after the first frame.
 - Latency Reduction: no longer exits at loading screens with Anti-Lag 2.
 - Sun lighting: fixed a darker square around the player in third person; cloud, terrain and contact shadows were applied twice inside the focused shadow pass.
+- Image Based Lighting: with Fog Mix above 0, glass and other effects no longer show as a grey patch against the fog when looking toward the sun.
 
 ## 0.5.0
 
