@@ -228,11 +228,18 @@ namespace
 		const char* profile;
 		cs::engine::ShaderStage stage;
 		const char* expected;
+		std::vector<std::pair<std::string, std::string>> defines = {};
 	};
 
-	constexpr EngineShader kEngineShaders[]{
-		// DoZPrePass alpha test; Upscaling biases it with SAMPLE_MATERIAL.
-		{ "FO4/ZPrePassAlpha.hlsl", "ps_5_0", cs::engine::ShaderStage::kPixel, "2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725" }
+	// The Z-prepass rows carry no name or macros, so the table cannot select their source.
+	const std::vector<EngineShader> kEngineShaders{
+		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "65a3ca08add4b7c7654e14687f421c1265c94173" },
+		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "2dfd8283725f177f867525afc71ddff2ca581e20", { { "ALPHA_TEST", "" } } },
+		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "ca0ecf95e2178af7a2fa3de113930bb0cd5ea8c4", { { "INSTANCED", "" } } },
+		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "24ae3852f41c264b4147d6e178325834c66118c5", { { "INSTANCED", "" }, { "ALPHA_TEST", "" } } },
+		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "c14dd8e49428ad18b0f5bce2b9ba96a1585b56c2", { { "MERGE_INSTANCE", "" } } },
+		{ "ZPrePass.hlsl", "vs_5_0", cs::engine::ShaderStage::kVertex, "53e7e2f0c051a4e9ba9af8ae785ff619c81ce99c", { { "MERGE_INSTANCE", "" }, { "ALPHA_TEST", "" } } },
+		{ "ZPrePass.hlsl", "ps_5_0", cs::engine::ShaderStage::kPixel, "2b9a9a0f9b019bca4ad0b4909bb25b38a2ebc725", { { "ALPHA_TEST", "" } } }
 	};
 
 	std::size_t CheckEngineShaders(const std::filesystem::path& a_shaderRoot)
@@ -246,6 +253,7 @@ namespace
 				variant.entryPoint = "main";
 				variant.profile = shader.profile;
 				variant.stage = shader.stage;
+				variant.defines = shader.defines;
 				const auto compiled = cs::shader_test::Compile(cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot));
 				Require(compiled.succeeded, "compile-error: " + FirstErrorLine(compiled.error));
 				actual = StrippedIdentity(compiled.bytecode);

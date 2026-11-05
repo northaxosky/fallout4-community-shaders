@@ -179,7 +179,7 @@ namespace cs::features
 		CreateReplayState(a_device, kColor, ColorBlendDesc());
 		CreateReplayState(a_device, kData, DataBlendDesc());
 		CreateReplayState(a_device, kOpaque, OpaqueBlendDesc());
-		g_replay.offsetDepthVS = cs::util::CompileVertexShader("TerrainBlending/OffsetDepth.VS", L"Data\\Shaders\\FO4\\ZPrePass.hlsl", { { "OFFSET_DEPTH", "" } });
+		g_replay.offsetDepthVS = cs::util::CompileVertexShader("TerrainBlending/OffsetDepth.VS", L"Data\\Shaders\\ZPrePass.hlsl", { { "OFFSET_DEPTH", "" } });
 		if (!g_replay.offsetDepthVS) {
 			FailLoad("Terrain Blending could not compile the offset Z-prepass vertex shader.");
 			return;

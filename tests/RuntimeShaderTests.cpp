@@ -93,7 +93,7 @@ namespace
 
 			{ "FO4/Upscaling/EncodeTexturesCS.hlsl", "cs_5_0", { { "DEPTH_OUTPUT", "1" } }, { { {}, { { "DLSS", "" } }, { { "FSR", "" } } } } },
 			{ "FO4/Upscaling/DepthRefractionUpscalePS.hlsl", "ps_5_0", {} },
-			{ "FO4/ZPrePassAlpha.hlsl", "ps_5_0", {} },
+			{ "ZPrePass.hlsl", "ps_5_0", { { "ALPHA_TEST", "" } } },
 			{ "FO4/Upscaling/UpscaleVS.hlsl", "vs_5_0" },
 			{ "Upscaling/SpatialFallbackPS.hlsl", "ps_5_0" },
 			{ "Upscaling/OverrideDepthCS.hlsl" },
@@ -101,7 +101,7 @@ namespace
 			{ "Upscaling/RCAS/RCAS.hlsl", "cs_5_1" },
 
 			{ "FO4/FullscreenVS.hlsl", "vs_5_0" },
-			{ "FO4/ZPrePass.hlsl", "vs_5_0", { { "OFFSET_DEPTH", "" } } },
+			{ "ZPrePass.hlsl", "vs_5_0", { { "OFFSET_DEPTH", "" } } },
 			{ "FO4/OccluderBatchVS.hlsl", "vs_5_0", {}, { Toggle("MERGE_INSTANCED") } },
 			{ "FO4/OccluderBatchCompareCS.hlsl" },
 
