@@ -13,7 +13,8 @@ local engine_entry_points = {
     ["isradialblur.hlsl"] = true,
     ["isalphablend.hlsl"] = true,
     ["isblur.hlsl"] = true,
-    ["iscopy.hlsl"] = true
+    ["iscopy.hlsl"] = true,
+    ["istemporalaa.hlsl"] = true
 }
 
 local function excluded(relative)
