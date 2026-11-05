@@ -8,7 +8,7 @@
 | Divergence | Effect lights scaled by 0.5 and `PointLight` pi under Linear Lighting | Effect lights keep FO4's native effect point lane (no 0.5, no pi), with the t34 spot cone term | Both factors are Skyrim calibrations |
 | Forced | Water clustered lights are 3x Skyrim's native water specular lane | 3x FO4's native water specular lane, fragment-to-light, replacing it in world draws | Native water lanes differ |
 | Forced | Spot lights not represented | Spot cones travel in an FO4 sidecar buffer at t34 beside the upstream light record | Skyrim has no spot lights |
-| Pending | Shadow-casting lights sample a persistent local shadow copy (`LocalShadowCopyCS`) | Shadow-casting lights light forward passes unshadowed; `localShadowIndex` stays 0 | Not ported; FO4 forward has no shadow-light path |
+| Pending | Shadow-casting lights sample a persistent local shadow copy (`LocalShadowCopyCS`) | Forward passes skip shadow-casting lights; `localShadowIndex` stays 0 | Not ported; FO4 forward has no shadow-light path |
 | Forced | Room index from the owning node's ancestors | Room is the owning fade node's direct parent | Engine association rule |
 | Pending | First-person effects lit from their own depth | Lit at background depth | Needs a view-space reconstruction |
 | N/A | Particle lights | | FO4 has no particle lights |

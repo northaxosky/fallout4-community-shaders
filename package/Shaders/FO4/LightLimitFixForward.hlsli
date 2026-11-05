@@ -59,7 +59,7 @@ namespace FO4LightLimitFix
 		return true;
 	}
 
-	// FO4: no local shadow sampler; shadow lights enter unshadowed.
+	// FO4: no local shadow copy, so every shadow caster is skipped.
 	bool IsClusterLightSkipped(LightLimitFix::Light light)
 	{
 		return LightLimitFix::IsLightIgnored(light) || (light.lightFlags & LightLimitFix::LightFlags::ShadowCaster) != 0;

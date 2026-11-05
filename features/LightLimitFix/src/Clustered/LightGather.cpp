@@ -9,6 +9,7 @@ namespace cs::features::light_limit_fix
 	namespace
 	{
 		constexpr auto kInitialised = static_cast<std::uint32_t>(LightFlags::kInitialised);
+		constexpr auto kShadowCaster = static_cast<std::uint32_t>(LightFlags::kShadowCaster);
 	}
 
 	LightGather::LightGather()
@@ -50,6 +51,8 @@ namespace cs::features::light_limit_fix
 				return;
 			}
 
+			if (a_shadowList)
+				light.lightFlags |= kShadowCaster;
 			if (_strict.Mark(*a_light, light))
 				++_stats.strictLights;
 
@@ -71,7 +74,6 @@ namespace cs::features::light_limit_fix
 		std::scoped_lock lock(a_scene.lightLock);
 		for (auto& light : a_scene.nonShadowLights)
 			add(light.get(), false);
-		// FO4: shadow lights enter unflagged; no forward shadow-mask path.
 		for (auto& light : a_scene.shadowLights)
 			add(light.get(), true);
 		_stats.lights = static_cast<std::uint32_t>(_lights.size());
