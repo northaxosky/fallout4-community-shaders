@@ -14,7 +14,13 @@ local engine_entry_points = {
     ["isalphablend.hlsl"] = true,
     ["isblur.hlsl"] = true,
     ["iscopy.hlsl"] = true,
-    ["istemporalaa.hlsl"] = true
+    ["istemporalaa.hlsl"] = true,
+    ["issaoblur.hlsl"] = true,
+    ["issaocameraz.hlsl"] = true,
+    ["issaominify.hlsl"] = true,
+    ["isrefraction.hlsl"] = true,
+    ["isupsampledynamicresolution.hlsl"] = true,
+    ["iswaterdisplacement.hlsl"] = true
 }
 
 local function excluded(relative)
