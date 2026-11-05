@@ -240,10 +240,6 @@
 #		if defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_GOBO_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
 #			define FO4_DEFERRED_HALFOMNI_GOBO_NATIVE_BRANCH 1
 #		endif
-#		if defined(FO4_DEFERRED_HALFOMNI_POISSON_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) || defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE) || (defined(OG) && (defined(FO4_DEFERRED_HALFOMNI_NATIVE_BRANCH) || defined(FO4_DEFERRED_HALFOMNI_GOBO_NATIVE_BRANCH)))
-// OG filtered half-omni preserves the live mask to match the native branch schedule.
-#			define FO4_DEFERRED_HALFOMNI_POISSON_LIVE_MASK 1
-#		endif
 #		if defined(POINTOMNI) && defined(SHADOW) && defined(FILTER_PCF9) && !defined(SPECULAR) && !defined(IGNOREROUGHNESS) && !defined(IGNORERIM) && !defined(GOBOPROJECTION)
 #			define FO4_DEFERRED_PCF9_OMNI_BASE 1
 #		endif
@@ -1358,20 +1354,12 @@ PS_OUTPUT main(PS_INPUT input)
 			shadowRef = saturate(radial / LightVector.w);
 			omniUV = omniUV * 0.5 + 0.5;
 			float selectedY = 1.0 - omniUV.y;
-#					ifdef FO4_DEFERRED_HALFOMNI_POISSON_LIVE_MASK
 			shadowCoord.xz = float2(omniUV.x, selectedY) * ShadowLightParam.zz;
-#					else
-			shadowCoord.x = omniUV.x * ShadowLightParam.z;
-#					endif
 #					ifdef FILTER_POISSON
 			float poissonScale = ShadowSampleParam_row0.z * 3.0;
 #					endif
 			shadowRef -= ShadowSampleParam_row0.x;
-#					ifdef FO4_DEFERRED_HALFOMNI_POISSON_LIVE_MASK
 			shadowCoord.z = 1.0 - shadowCoord.z;
-#					else
-			shadowCoord.z = 1.0 - selectedY * ShadowLightParam.z;
-#					endif
 			shadowCoord.w = 0.0;
 #				else
 	float radial = length(shadowProj);
@@ -1392,22 +1380,14 @@ PS_OUTPUT main(PS_INPUT input)
 	shadowRef = saturate(radial / LightVector.w);
 	shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
 	float selectedY = 1.0 - shadowCoord.y;
-#						ifdef FO4_DEFERRED_HALFOMNI_POISSON_LIVE_MASK
 	shadowCoord.xz = float2(shadowCoord.x, selectedY) * ShadowLightParam.zz;
-#						else
-	shadowCoord.x *= ShadowLightParam.z;
-#						endif
 #						ifdef FILTER_POISSON
 	float poissonScale = ShadowSampleParam_row0.z * 3.0;
 #						endif
 #						ifndef FO4_DEFERRED_RAW_BASE
 	shadowRef -= ShadowSampleParam_row0.x;
 #						endif
-#						ifdef FO4_DEFERRED_HALFOMNI_POISSON_LIVE_MASK
 	shadowCoord.z = 1.0 - shadowCoord.z;
-#						else
-	shadowCoord.z = 1.0 - selectedY * ShadowLightParam.z;
-#						endif
 	shadowCoord.w = 0.0;
 #					else
 	float2 omniUV = paraboloid.xy / paraboloid.zz;

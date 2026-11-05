@@ -1,4 +1,4 @@
-# export_sha256=f11414fa9d99e5dda074db1d5ba9581f96fbe1d3a1bb281b08346c3ab01b3928 runtime=AE-1.11.240 routes=3939 exact=3735 canonical=10 unproven=194 rows=3801 rows_exact=3597 rows_canonical=10 rows_unproven=194 rows_unnamed=9 excluded_unhooked=138 excluded_inherited=0 compiler_sha256=8d48f0096f75c46d9c2180ed0fb12c1cb8124b3f3cc6e1262538819cbb23404c
+# export_sha256=ea957b788e62b9962cb56082f1d25aa8bbae407be9de583d8be95e596aeb86f2 runtime=AE-1.11.240 routes=3939 exact=3938 canonical=0 unproven=1 rows=3801 rows_exact=3800 rows_canonical=0 rows_unproven=1 rows_unnamed=9 excluded_unhooked=138 excluded_inherited=0 compiler_sha256=8d48f0096f75c46d9c2180ed0fb12c1cb8124b3f3cc6e1262538819cbb23404c
 blood_splatter	pixel	0x00000000	0	700a1e3169f8d0c02ed360cabd1d0a2f2631e243	2	"BloodSplatter"	""	""	0
 blood_splatter	pixel	0x00000001	0	fabc7b50a63bc9f1ac022eb29c9018e98b1abf26	3	"BloodSplatter"	""	""	0
 blood_splatter	vertex	0x00000000	0	a83cf576f5b08683d917d05e6be9d7b4dfc3bc77	0	"BloodSplatter"	""	""	0
@@ -209,7 +209,7 @@ bsdf_composite	vertex	0x00204000	0	b311c1f25593cfac39b6ec55f4e694ce6d88d34e	3398
 bsdf_light	pixel	0x00000001	0	a9435eca0f0be238c3660cd8a7cac1340247bf8b	3072	"DFLight"	""	""	0
 bsdf_light	pixel	0x00000004	0	12d92cd37efa9722bd27657f54fcddf1879170cd	3305	"DFLight"	""	""	0
 bsdf_light	pixel	0x00000008	0	1a1c410f653ee5c5730b47e206126806ab92100c	3374	"DFLight"	""	""	0
-bsdf_light	pixel	0x00000010	0	b6871457b89257844623b5ff3fffbec4d33b5bde	3198	"DFLight"	""	""	0
+bsdf_light	pixel	0x00000010	0	1b2eca6d889c56a51f1900a61786256024bf0195	3198	"DFLight"	""	""	0
 bsdf_light	pixel	0x00000020	0	388c13087069397fcc3f4b2a8e3f96e59c003d34	3298	"DFLight"	""	""	0
 bsdf_light	pixel	0x00000040	0	27ca11039e1e098bf4c1d9ea384917897e4434f3	3353	"DFLight"	""	""	0
 bsdf_light	pixel	0x00000044	0	27ca11039e1e098bf4c1d9ea384917897e4434f3	3369	"DFLight"	""	""	0
@@ -267,21 +267,21 @@ bsdf_light	pixel	0x00024202	0	b21b8eb34c0ef5c307d268ee450e92eba7ea588f	3154	"DFL
 bsdf_light	pixel	0x00024281	0	987c4e79e0e7a466da1156a35ade792df6939072	3155	"DFLight"	""	""	0
 bsdf_light	pixel	0x00050202	0	964e9b82cde7aecea38bc999d1c925127da0bc01	3300	"DFLight"	""	""	0
 bsdf_light	pixel	0x00080008	0	343061244ac85f5bf6b304454332ec009d04e2f4	3325	"DFLight"	""	""	0
-bsdf_light	pixel	0x00080010	0	15a5b5ffc1380d41e76b1824977425e748290ad7	3326	"DFLight"	""	""	0
+bsdf_light	pixel	0x00080010	0	32528d53fb1239d33db643d03932dfa3d308dab2	3326	"DFLight"	""	""	0
 bsdf_light	pixel	0x00080020	0	89432623839a50dcb915ad3285917fcf5d99df75	3327	"DFLight"	""	""	0
 bsdf_light	pixel	0x00080202	0	3d1bcaf539fd34620773ae30fc7a3002f19fb426	3328	"DFLight"	""	""	0
 bsdf_light	pixel	0x00080208	0	50c9d4c3ef7dd9f41fc93b23891fcd9cfd9d9c9c	3329	"DFLight"	""	""	0
-bsdf_light	pixel	0x00080210	0	f333c4ec5bb4829337a5461215948cb7e76850bc	3330	"DFLight"	""	""	0
+bsdf_light	pixel	0x00080210	0	14d23504eb8160a638ea97d2edabeffa6b3e4b0a	3330	"DFLight"	""	""	0
 bsdf_light	pixel	0x00080220	0	bffd9e9e324654d21a6032350f7083af22bbdff8	3331	"DFLight"	""	""	0
 bsdf_light	pixel	0x00080282	0	3d1bcaf539fd34620773ae30fc7a3002f19fb426	3332	"DFLight"	""	""	0
 bsdf_light	pixel	0x00080820	0	dab3065cd56d9d8772dc78d3ffd7d4c048c81f3e	3333	"DFLight"	""	""	0
 bsdf_light	pixel	0x00081020	0	c0024122a3d253b5df2eafe1f736e907d16952aa	3334	"DFLight"	""	""	0
 bsdf_light	pixel	0x00081208	0	236ca6a0bd709759b4dd946935809a5f466ea375	3335	"DFLight"	""	""	0
-bsdf_light	pixel	0x00081210	0	4cfe24cff2ca910613a2f9a1a9c8566e9fd9c087	3336	"DFLight"	""	""	0
+bsdf_light	pixel	0x00081210	0	b8b4935974c95f686652a3621eebd02dad40035c	3336	"DFLight"	""	""	0
 bsdf_light	pixel	0x00081220	0	3e1d0db60d011efcfbafe8c6a2fb139a245c5ce3	3337	"DFLight"	""	""	0
 bsdf_light	pixel	0x00084202	0	7dbeaf79423a8e0c526f6d60ae01af0dc347d87b	3339	"DFLight"	""	""	0
 bsdf_light	pixel	0x00084208	0	086430f042849184b1088a2b73c2a6a29453d535	3340	"DFLight"	""	""	0
-bsdf_light	pixel	0x00084210	0	4b448c63ee6c9ab1b10b9578e10364ed1170c4d3	3341	"DFLight"	""	""	0
+bsdf_light	pixel	0x00084210	0	bf12ddedcfac07bbd39a22e0278337106757bc37	3341	"DFLight"	""	""	0
 bsdf_light	pixel	0x00084220	0	880720a9de4c3f9fb65b5f3984079d7cbb4d0b49	3342	"DFLight"	""	""	0
 bsdf_light	pixel	0x00085220	0	83f27df1981c24585903831bb3b943b8062e9959	3345	"DFLight"	""	""	0
 bsdf_light	pixel	0x0008c020	0	4521fc37900213f8a4befb7de7465dfa36d2efbd	3347	"DFLight"	""	""	0
@@ -296,22 +296,22 @@ bsdf_light	pixel	0x000b0202	0	cf3f9141478b244932e875909255d1ebde3373e5	3372	"DFL
 bsdf_light	pixel	0x000b0282	0	cf3f9141478b244932e875909255d1ebde3373e5	3373	"DFLight"	""	""	0
 bsdf_light	pixel	0x000d0202	0	0bff5e0ecdf732495be001a37160d8aa11a9660c	3375	"DFLight"	""	""	0
 bsdf_light	pixel	0x00100008	0	ffb33088fb5bb1dc211e1c52c5ee855930fd50a1	3074	"DFLight"	""	""	0
-bsdf_light	pixel	0x00100010	0	90ba7429679b37293ae643a7a6ab9c73d6a5cd71	3075	"DFLight"	""	""	0
+bsdf_light	pixel	0x00100010	0	c55f6f0d777e6f6a55d5a359eb4b370da2ff6a6a	3075	"DFLight"	""	""	0
 bsdf_light	pixel	0x00100020	0	d63b2b1807b386557d5244474dfd6fdfa51f2f10	3076	"DFLight"	""	""	0
 bsdf_light	pixel	0x00100202	0	6816c3885f7e99ee072ec107a52a49a35780731b	3077	"DFLight"	""	""	0
 bsdf_light	pixel	0x00100208	0	2fe442f15c3bebd51f17d6bdfdc2e2524376af7e	3078	"DFLight"	""	""	0
-bsdf_light	pixel	0x00100210	0	96b55802f62329882240cef389a0e1682be647ce	3079	"DFLight"	""	""	0
+bsdf_light	pixel	0x00100210	0	fa90ccc0141d32ec70dd823d032a437a41c7108f	3079	"DFLight"	""	""	0
 bsdf_light	pixel	0x00100220	0	d5351ff2cf2158fa8a3e53babf3779b7321d1ce4	3080	"DFLight"	""	""	0
 bsdf_light	pixel	0x00100282	0	6816c3885f7e99ee072ec107a52a49a35780731b	3081	"DFLight"	""	""	0
 bsdf_light	pixel	0x00100820	0	bbbb5ddde11db5d418dd21724ba1f3d152cf73df	3082	"DFLight"	""	""	0
 bsdf_light	pixel	0x00101008	0	8eb91cb7565e5dee63226ed0ba7f98579d2b4570	3083	"DFLight"	""	""	0
 bsdf_light	pixel	0x00101020	0	f6e4aed9485cea7e27ae29c5160eceeebbc2d141	3084	"DFLight"	""	""	0
 bsdf_light	pixel	0x00101208	0	9ab3d9cfeaf9f1cfffccd182aa26d3eb5f389461	3085	"DFLight"	""	""	0
-bsdf_light	pixel	0x00101210	0	a2010a44664270417373d1b1b3fab4e6f5af1925	3086	"DFLight"	""	""	0
+bsdf_light	pixel	0x00101210	0	ffbeb95eea97c2c7e4ff05bba255494cb702a85b	3086	"DFLight"	""	""	0
 bsdf_light	pixel	0x00101220	0	180372319d5ff04806dc727c83e77a1ca737b75e	3087	"DFLight"	""	""	0
 bsdf_light	pixel	0x00104008	0	2018f7d9fd227bb90520585e7c2f8d451f135738	3088	"DFLight"	""	""	0
 bsdf_light	pixel	0x00104208	0	f37b236a1e3f36b2f836b2e8a251ca7658923024	3089	"DFLight"	""	""	0
-bsdf_light	pixel	0x00104210	0	7119a889523a2e03815792a18f16c05d66fac4e7	3090	"DFLight"	""	""	0
+bsdf_light	pixel	0x00104210	0	cb87d220e14bdd5470a75aa9b1ddf4e92153cb75	3090	"DFLight"	""	""	0
 bsdf_light	pixel	0x00104220	0	1cb3b8adcaef66f61f408874c03bed9914ec7f67	3091	"DFLight"	""	""	0
 bsdf_light	pixel	0x00105220	0	6a62a10b141bc872998797d9e8079a8459f2e676	3092	"DFLight"	""	""	0
 bsdf_light	pixel	0x0010c008	0	2018f7d9fd227bb90520585e7c2f8d451f135738	3094	"DFLight"	""	""	0
@@ -3189,7 +3189,7 @@ imagespace	pixel	0x00000000	0	160429054405ab2cbc25e3f3be39f9b15f352141	3827	"ISA
 imagespace	pixel	0x00000000	0	84a7357cceabbba824e2c7668675d5fa9163e361	3829	"ISVLSSpotLight"	"BSImagespaceShaderVLSSpotLight"	"ISVLS"	1	"VLS_LIGHT"	""
 imagespace	pixel	0x00000000	0	fac7b2255893ca19603072425b5a18b69b7687c3	3831	"ISVLSApplication"	"BSImagespaceShaderVLSApplication"	"ISVLS"	1	"APPLICATION"	""
 imagespace	pixel	0x00000000	0	07fad71939a156686cb772e079f72e8f78784c06	3833	"ISVLSComposite"	"BSImagespaceShaderVLSComposite"	"ISVLS"	1	"COMPOSITE"	""
-imagespace	pixel	0x00000000	0	badf1bd1298e81dd9088e747bedad5ecc15785e7	3835	"ISVLSCoord"	"BSImagespaceShaderVLSSliceCoord"	"ISVLS_Coord"	0
+imagespace	pixel	0x00000000	0	597db6590c6769a0a6980c6a61125ffa96773fd7	3835	"ISVLSCoord"	"BSImagespaceShaderVLSSliceCoord"	"ISVLS_Coord"	0
 imagespace	pixel	0x00000000	0	100bed432577b799f59c369f13ae9db6403fb76e	3837	"ISVLSSliceInterp"	"BSImagespaceShaderVLSSliceInterp"	"ISVLS"	1	"SLICE_INTERP"	""
 imagespace	pixel	0x00000000	0	229b2d23d88386bf55dac67762723646fc808c67	3839	"ISVLSSliceStencil"	"BSImagespaceShaderVLSSliceStencil"	"ISVLS_Stencil"	1	"SLICE_STENCIL"	""
 imagespace	pixel	0x00000000	0	c3ef728666f6b81fc63dab233c81305deefaf8ef	3841	"ISVLSSliceScatterRay"	"BSImagespaceShaderVLSSliceScatterRay"	"ISVLS_SliceScatterRay"	1	"VLS_SLICE_SCATTER_RAY"	""
