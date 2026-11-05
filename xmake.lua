@@ -238,11 +238,7 @@ target(plugin_name, function()
         "extern/bethesda-devbench/include/DevBenchAPI.cpp"
     )
     local resources = {
-        ["src/Menu/Changelog.rc"] = { "CHANGELOG.md" },
-        ["src/Render/StockShaderTables.rc"] = {
-            "src/Render/data/stock-shader-identity-AE.tsv",
-            "src/Render/data/stock-shader-identity-OG.tsv"
-        }
+        ["src/Menu/Changelog.rc"] = { "CHANGELOG.md" }
     }
     for resource in pairs(resources) do
         add_files(resource, { includedirs = os.projectdir() })
@@ -438,7 +434,7 @@ local function stock_shader_identity_target(name, compiler, tests)
             "src/Render/ShaderFamilyDescriptor.cpp",
             "src/Render/ShaderInjectionCompileRequest.cpp",
             "src/Render/ShaderVariantRecipe.cpp",
-            "src/Render/StockShaderTable.cpp",
+            "tests/StockShaderTable.cpp",
             "tests/CSSha1.cpp",
             "src/Utils/ShaderCompile.cpp"
         )

@@ -1,4 +1,4 @@
-#include "Render/StockShaderTable.h"
+#include "StockShaderTable.h"
 
 #include <algorithm>
 #include <iomanip>

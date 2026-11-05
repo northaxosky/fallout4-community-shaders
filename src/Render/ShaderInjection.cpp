@@ -14,7 +14,6 @@
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
-#include "Render/StockShaderVariants.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/ShaderInclude.h"
@@ -1834,6 +1833,53 @@ namespace cs::engine
 
 	namespace
 	{
+		bool NativePixelForcesEarlyDepthStencil(
+			const RE::BSGraphics::PixelShader* a_nativePixel) noexcept
+		{
+			if (!a_nativePixel || !a_nativePixel->shader)
+				return false;
+			auto& service = GetService();
+			std::scoped_lock lock(service.nativeVariantMutex);
+			const auto metadata = service.nativeShaderMetadata.find(
+				reinterpret_cast<ID3D11DeviceChild*>(
+					a_nativePixel->shader));
+			return metadata != service.nativeShaderMetadata.end() && metadata->second.forceEarlyDepthStencil;
+		}
+
+		// Every technique the engine loaded for a shader; compute entries carry their object.
+		template <class TVisit>
+		void ForEachNativeTechnique(
+			const RE::BSShader& a_shader,
+			const NativeShaderFamilyContext& a_family,
+			TVisit&& a_visit)
+		{
+			const auto supportedStages = SupportedStages(a_family.target);
+			if ((supportedStages & ShaderStageBit(ShaderStage::kVertex)) != 0) {
+				for (auto* entry : a_shader.GetVertexShaders()) {
+					if (entry && entry->shader)
+						a_visit(MakeNativeVariantKey(a_family, ShaderStage::kVertex, entry->id), nullptr);
+				}
+			}
+			if ((supportedStages & ShaderStageBit(ShaderStage::kPixel)) != 0) {
+				for (auto* entry : a_shader.GetPixelShaders()) {
+					if (entry && entry->shader) {
+						a_visit(
+							MakeNativeVariantKey(a_family, ShaderStage::kPixel, entry->id, NativePixelForcesEarlyDepthStencil(entry)),
+							nullptr);
+					}
+				}
+			}
+			if ((supportedStages & ShaderStageBit(ShaderStage::kCompute)) != 0) {
+				for (auto* entry : a_shader.GetComputeShaders()) {
+					if (entry && entry->shader) {
+						a_visit(
+							MakeNativeVariantKey(a_family, ShaderStage::kCompute, entry->id),
+							reinterpret_cast<ID3D11ComputeShader*>(entry->shader));
+					}
+				}
+			}
+		}
+
 		std::size_t PrewarmVariants(std::span<const ShaderInjectionTarget> a_targets, bool a_all)
 		{
 			auto& service = GetService();
@@ -1842,26 +1888,43 @@ namespace cs::engine
 				return 0;
 			std::array<std::size_t, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> perTarget{};
 			std::size_t total = 0;
-			const auto rows = GetStockShaderVariants(plan->runtime);
-			for (const auto& row : rows) {
-				// Rows without a native name have no shader the engine could bind.
-				if (row.nativeName.empty() || !ShaderEnabled(row.target) ||
-					(!a_all && std::ranges::find(a_targets, row.target) == a_targets.end()) ||
-					(SupportedStages(row.target) & ShaderStageBit(row.stage)) == 0)
-					continue;
-				const auto* target = FindPublishedTarget(*plan, row.target);
+			const auto prewarm = [&](const NativeVariantKey& a_key) {
+				if (!ShaderEnabled(a_key.target) ||
+					(!a_all && std::ranges::find(a_targets, a_key.target) == a_targets.end()) ||
+					(SupportedStages(a_key.target) & ShaderStageBit(a_key.stage)) == 0)
+					return;
+				const auto* target = FindPublishedTarget(*plan, a_key.target);
 				if (!target || target->contributions.empty())
-					continue;
-				const auto variant = FindOrPrepareNativeVariant(
-					*plan, *target, MakeNativeVariantKey(row.Family()));
+					return;
+				const auto variant = FindOrPrepareNativeVariant(*plan, *target, a_key);
 				if (!variant)
-					continue;
+					return;
 				std::scoped_lock lock(variant->mutex);
 				if (variant->compilation) {
-					++perTarget[ToIndex(row.target)];
+					++perTarget[ToIndex(a_key.target)];
 					++total;
 				}
+			};
+			std::vector<std::pair<const RE::BSShader*, std::shared_ptr<const NativeShaderFamilyContext>>> families;
+			std::vector<NativeVariantKey> computeKeys;
+			{
+				std::scoped_lock lock(service.nativeVariantMutex);
+				for (const auto& [shader, family] : service.shaderFamilies) {
+					if (family)
+						families.emplace_back(shader, family);
+				}
+				for (const auto& owner : service.nativeComputeOwners)
+					computeKeys.push_back(owner.second);
 			}
+			for (const auto& [shader, family] : families) {
+				// Compute entries are covered by their recorded owners below.
+				ForEachNativeTechnique(*shader, *family, [&](const NativeVariantKey& a_key, ID3D11ComputeShader* a_compute) {
+					if (!a_compute)
+						prewarm(a_key);
+				});
+			}
+			for (const auto& key : computeKeys)
+				prewarm(key);
 			std::string breakdown;
 			for (const auto& metadata : kTargets) {
 				if (const auto count = perTarget[ToIndex(metadata.id)]) {
@@ -1954,19 +2017,6 @@ namespace cs::engine
 
 	namespace
 	{
-		bool NativePixelForcesEarlyDepthStencil(
-			const RE::BSGraphics::PixelShader* a_nativePixel) noexcept
-		{
-			if (!a_nativePixel || !a_nativePixel->shader)
-				return false;
-			auto& service = GetService();
-			std::scoped_lock lock(service.nativeVariantMutex);
-			const auto metadata = service.nativeShaderMetadata.find(
-				reinterpret_cast<ID3D11DeviceChild*>(
-					a_nativePixel->shader));
-			return metadata != service.nativeShaderMetadata.end() && metadata->second.forceEarlyDepthStencil;
-		}
-
 		void ObserveNativeShaderImpl(
 			RE::BSShader* a_shader,
 			bool a_streamIsGood) noexcept
@@ -1978,46 +2028,15 @@ namespace cs::engine
 				GetService().bindingEpoch.fetch_add(1, std::memory_order_release);
 				if (!family)
 					return;
-				const auto supportedStages =
-					SupportedStages(family->target);
-				if ((supportedStages & ShaderStageBit(ShaderStage::kVertex)) != 0) {
-					for (auto* entry : a_shader->GetVertexShaders()) {
-						if (!entry || !entry->shader)
-							continue;
-						std::ignore = QueueNativeVariant(
-							MakeNativeVariantKey(
-								*family,
-								ShaderStage::kVertex,
-								entry->id));
-					}
-				}
-				if ((supportedStages & ShaderStageBit(ShaderStage::kPixel)) != 0) {
-					for (auto* entry : a_shader->GetPixelShaders()) {
-						if (!entry || !entry->shader)
-							continue;
-						std::ignore = QueueNativeVariant(
-							MakeNativeVariantKey(
-								*family,
-								ShaderStage::kPixel,
-								entry->id,
-								NativePixelForcesEarlyDepthStencil(
-									entry)));
-					}
-				}
-				if ((supportedStages & ShaderStageBit(ShaderStage::kCompute)) != 0) {
-					for (auto* entry : a_shader->GetComputeShaders()) {
-						if (!entry || !entry->shader)
-							continue;
-						RecordNativeComputeShader(
-							MakeNativeVariantKey(
-								*family,
-								ShaderStage::kCompute,
-								entry->id),
-							reinterpret_cast<ID3D11ComputeShader*>(
-								entry->shader),
-							true);
-					}
-				}
+				ForEachNativeTechnique(
+					*a_shader,
+					*family,
+					[](const NativeVariantKey& a_key, ID3D11ComputeShader* a_compute) {
+						if (a_compute)
+							RecordNativeComputeShader(a_key, a_compute, true);
+						else
+							std::ignore = QueueNativeVariant(a_key);
+					});
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
 					L,

@@ -5,9 +5,9 @@
 #include "ParallelFor.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantRecipe.h"
-#include "Render/StockShaderTable.h"
 #include "ShaderABIChecks.h"
 #include "ShaderTestCache.h"
+#include "StockShaderTable.h"
 #include "Utils/CSSha256.h"
 
 #include <algorithm>
