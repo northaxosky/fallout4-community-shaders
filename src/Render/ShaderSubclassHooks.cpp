@@ -10,6 +10,7 @@
 #include "Render/FrameProfiler.h"
 #include "Render/NativeShaderFamily.h"
 #include "Render/PrepassTechnique.h"
+#include "Render/ShaderCompileGate.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SkyReflectionCube.h"
 #include "Telemetry/Telemetry.h"
@@ -180,6 +181,19 @@ namespace cs::engine
 						streamIsGood && *target == ShaderInjectionTarget::kDfTiledLighting);
 				}
 				return result;
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Every technique is loaded once Initialize returns, before the main menu can open.
+		struct ShaderManagerInitializeHook
+		{
+			static void thunk()
+			{
+				func();
+				if (ShaderCompileBlocksPlay())
+					PrewarmAllShaderInjectionVariants();
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -496,6 +510,9 @@ namespace cs::engine
 	void InstallShaderSubclassHooks()
 	{
 		std::call_once(g_installOnce, [] {
+			TryPatch("BSShaderManager technique load completion", [] {
+				stl::detour_thunk<ShaderManagerInitializeHook>(RE::ID::BSShaderManager::Initialize);
+			});
 			TryPatch("BSShader archive loader observer", [] {
 				stl::detour_thunk<ReloadFromStreamHook>(RE::ID::BSShader::Load);
 			});
