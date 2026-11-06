@@ -28,15 +28,15 @@ namespace cs::render
 			return true;
 		}
 
-		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
-		D3D11_TEXTURE2D_DESC frameBufferDesc{};
-		if (!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
-			!HasSDRUpscalingContract(frameBufferDesc)) {
-			L->error("RT0 is unavailable or incompatible with the SDR upscaling contract");
+		winrt::com_ptr<ID3D11Texture2D> sceneColor;
+		D3D11_TEXTURE2D_DESC sceneColorDesc{};
+		if (!TryGetSceneColorTexture(sceneColor, sceneColorDesc) ||
+			!HasSceneColorContract(sceneColorDesc)) {
+			L->error("kMain is unavailable or incompatible with the pre-tonemap scene color contract");
 			return false;
 		}
 
-		D3D11_TEXTURE2D_DESC colorDesc = frameBufferDesc;
+		D3D11_TEXTURE2D_DESC colorDesc = sceneColorDesc;
 		colorDesc.Usage = D3D11_USAGE_DEFAULT;
 		colorDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 		colorDesc.CPUAccessFlags = 0;
@@ -139,29 +139,29 @@ namespace cs::render
 			return true;
 		}
 
-		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
-		D3D11_TEXTURE2D_DESC frameBufferDesc{};
-		if (!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
-			!HasSDRUpscalingContract(frameBufferDesc) ||
+		winrt::com_ptr<ID3D11Texture2D> sceneColor;
+		D3D11_TEXTURE2D_DESC sceneColorDesc{};
+		if (!TryGetSceneColorTexture(sceneColor, sceneColorDesc) ||
+			!HasSceneColorContract(sceneColorDesc) ||
 			!MatchesTextureContract(
 				upscalingTexture,
-				frameBufferDesc,
-				DXGI_FORMAT_R8G8B8A8_UNORM) ||
+				sceneColorDesc,
+				sceneColorDesc.Format) ||
 			!MatchesTextureContract(
 				superResolutionDepthTexture,
-				frameBufferDesc,
+				sceneColorDesc,
 				DXGI_FORMAT_R32_FLOAT) ||
 			!MatchesTextureContract(
 				motionVectorCopyTexture,
-				frameBufferDesc,
+				sceneColorDesc,
 				DXGI_FORMAT_R16G16_FLOAT) ||
 			!MatchesTextureContract(
 				reactiveMaskTexture,
-				frameBufferDesc,
+				sceneColorDesc,
 				DXGI_FORMAT_R8_UNORM) ||
 			!MatchesTextureContract(
 				transparencyCompositionMaskTexture,
-				frameBufferDesc,
+				sceneColorDesc,
 				DXGI_FORMAT_R8_UNORM)) {
 			return false;
 		}
@@ -176,12 +176,12 @@ namespace cs::render
 			       publicationTexture->resource.get() != upscalingTexture->resource.get() &&
 			       MatchesTextureContract(
 					   sharpenerTexture,
-					   frameBufferDesc,
-					   DXGI_FORMAT_R8G8B8A8_UNORM) &&
+					   sceneColorDesc,
+					   sceneColorDesc.Format) &&
 			       MatchesTextureContract(
 					   publicationTexture,
-					   frameBufferDesc,
-					   DXGI_FORMAT_R8G8B8A8_UNORM);
+					   sceneColorDesc,
+					   sceneColorDesc.Format);
 		}
 		return sharpenerTexture &&
 		       publicationTexture &&
@@ -189,12 +189,12 @@ namespace cs::render
 		       publicationTexture->resource.get() != upscalingTexture->resource.get() &&
 		       MatchesTextureContract(
 				   sharpenerTexture,
-				   frameBufferDesc,
-				   DXGI_FORMAT_R8G8B8A8_UNORM) &&
+				   sceneColorDesc,
+				   sceneColorDesc.Format) &&
 		       MatchesTextureContract(
 				   publicationTexture,
-				   frameBufferDesc,
-				   DXGI_FORMAT_R8G8B8A8_UNORM);
+				   sceneColorDesc,
+				   sceneColorDesc.Format);
 	}
 
 	void TemporalRenderer::DestroyUpscalingTextureResources(UpscaleMethod a_upscalemethod)
@@ -221,13 +221,17 @@ namespace cs::render
 		destroy(publicationTexture);
 		refractionNormalsCopy.reset();
 		sceneDepthCopy.reset();
+		pipboyMaskCopy.reset();
+		vatsMaskFull.reset();
+		motionVectorSourceCopy.reset();
 	}
 
 	bool TemporalRenderer::EnsureShaderReadableCopy(
 		std::unique_ptr<cs::buffer::Texture2D>& a_copy,
 		ID3D11Texture2D* a_source,
 		DXGI_FORMAT a_viewFormat,
-		std::string_view a_name)
+		std::string_view a_name,
+		bool a_renderTarget)
 	{
 		D3D11_TEXTURE2D_DESC desc{};
 		a_source->GetDesc(&desc);
@@ -241,10 +245,13 @@ namespace cs::render
 		}
 
 		desc.Usage = D3D11_USAGE_DEFAULT;
-		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | (a_renderTarget ? D3D11_BIND_RENDER_TARGET : 0u);
 		desc.CPUAccessFlags = 0;
 		desc.MiscFlags = 0;
 		auto copy = std::make_unique<cs::buffer::Texture2D>(desc);
+		if (a_renderTarget) {
+			copy->CreateRTV();
+		}
 
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 		srvDesc.Format = a_viewFormat;
@@ -337,6 +344,15 @@ namespace cs::render
 		}
 
 		return depthRefractionUpscalePS.get();
+	}
+
+	ID3D11PixelShader* TemporalRenderer::GetChainInputsUpscalePS()
+	{
+		if (!chainInputsUpscalePS) {
+			L->debug("Compiling ChainInputsUpscalePS.hlsl");
+			chainInputsUpscalePS = cs::util::CompilePixelShader("Upscaling/ChainInputsUpscale.PS", kChainInputsUpscalePath);
+		}
+		return chainInputsUpscalePS.get();
 	}
 
 	ID3D11VertexShader* TemporalRenderer::GetUpscaleVS()
@@ -473,7 +489,6 @@ namespace cs::render
 		ResetDebugSnapshotResources();
 		_frameGenerationDebugSnapshot.request.Invalidate();
 		ResetFrameGenerationDebugSnapshotResources();
-		_imagespaceRatiosNeutralized = false;
 		// Restore native ratios/offsets and clear the latch so a later non-driving frame can't strand a sub-rect.
 		RestoreNativeFrameState();
 		_resourcesReady.store(false, std::memory_order_release);

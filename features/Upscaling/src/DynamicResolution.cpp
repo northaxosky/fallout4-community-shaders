@@ -18,7 +18,7 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.upscaling.dynres");
 
-		// Engine render targets that hold the world and HDR imagespace chain.
+		// Targets the deferred composite and SSLR passes draw at render scale.
 		using RE::BSGraphics::RenderTargetID;
 		constexpr RenderTargetID kProxiedTargets[] = {
 			RenderTargetID::kGBufferNormal,
@@ -34,17 +34,10 @@ namespace cs::features
 			RenderTargetID::kDiffuseLightTiled,
 			RenderTargetID::kDiffuseSpecularTiled,
 			RenderTargetID::kMain,
-			RenderTargetID::kGBufferMotionVectors,
-			RenderTargetID::kRefractionNormals,
-			RenderTargetID::kMenuBlur,
-			RenderTargetID::kMenuBlurSwap,
 			RenderTargetID::kGBufferAlbedoSpecular,
 			RenderTargetID::kSSRPrepass,
 			RenderTargetID::kSSRDepth,
-			RenderTargetID::kSSR,
-			RenderTargetID::kHDRDownsample0,
-			RenderTargetID::kHDRBlurSwap,
-			RenderTargetID::kMenuBackground
+			RenderTargetID::kSSR
 		};
 
 		// Pooled slots exist only between acquire and release; proxied per acquire.

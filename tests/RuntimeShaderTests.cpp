@@ -93,6 +93,7 @@ namespace
 
 			{ "FO4/Upscaling/EncodeTexturesCS.hlsl", "cs_5_0", { { "DEPTH_OUTPUT", "1" } }, { { {}, { { "DLSS", "" } }, { { "FSR", "" } } } } },
 			{ "FO4/Upscaling/DepthRefractionUpscalePS.hlsl", "ps_5_0", {} },
+			{ "FO4/Upscaling/ChainInputsUpscalePS.hlsl", "ps_5_0" },
 			{ "ZPrePass.hlsl", "ps_5_0", { { "ALPHA_TEST", "" } } },
 			{ "FO4/Upscaling/UpscaleVS.hlsl", "vs_5_0" },
 			{ "Upscaling/SpatialFallbackPS.hlsl", "ps_5_0" },

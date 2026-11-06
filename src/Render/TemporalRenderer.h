@@ -120,6 +120,8 @@ namespace cs::render
 
 		winrt::com_ptr<ID3D11PixelShader> depthRefractionUpscalePS;
 		ID3D11PixelShader* GetDepthRefractionUpscalePS();
+		winrt::com_ptr<ID3D11PixelShader> chainInputsUpscalePS;
+		ID3D11PixelShader* GetChainInputsUpscalePS();
 
 		winrt::com_ptr<ID3D11VertexShader> upscaleVS;
 		ID3D11VertexShader* GetUpscaleVS();
@@ -144,27 +146,34 @@ namespace cs::render
 		// FO4 creates neither the copyable refraction normals nor a full-size depth copy that upstream samples.
 		std::unique_ptr<cs::buffer::Texture2D> refractionNormalsCopy;
 		std::unique_ptr<cs::buffer::Texture2D> sceneDepthCopy;
+		std::unique_ptr<cs::buffer::Texture2D> pipboyMaskCopy;
+		std::unique_ptr<cs::buffer::Texture2D> vatsMaskFull;
+		std::unique_ptr<cs::buffer::Texture2D> motionVectorSourceCopy;
 		static bool EnsureShaderReadableCopy(
 			std::unique_ptr<cs::buffer::Texture2D>& a_copy,
 			ID3D11Texture2D* a_source,
 			DXGI_FORMAT a_viewFormat,
-			std::string_view a_name);
+			std::string_view a_name,
+			bool a_renderTarget = false);
 
 		features::RCAS rcas;
 
+		// Pre-tonemap seam: FG capture, super resolution, full-extent chain inputs.
+		void ResolveSceneBeforeImagespace();
+		// Pre-UI seam: reShade effects and the HUD-less capture.
+		void FinishPreUiSeam();
 		bool PerformUpscaling();
-		bool RecoverMissedResolveAtRenderUIReturn();
 		bool PreflightExternalResolve(UpscaleMethod a_method);
 		bool ApplySpatialFallback(
-			ID3D11Texture2D* a_frameBuffer,
-			const D3D11_TEXTURE2D_DESC& a_frameBufferDesc,
+			ID3D11Texture2D* a_sceneColor,
+			const D3D11_TEXTURE2D_DESC& a_sceneColorDesc,
 			std::uint32_t a_sourceWidth,
 			std::uint32_t a_sourceHeight);
-		bool ApplyPassthroughFallback(
-			ID3D11Texture2D* a_frameBuffer,
-			ID3D11DeviceContext* a_context);
 		void ScheduleNativeSuperResolutionFallback() noexcept;
-		void UpscaleDepth();
+		// Full-extent copies of what the imagespace chain reads at plain UV.
+		void UpscaleChainInputs();
+		void UpscaleDepth(ID3D11DeviceContext* a_context);
+		void UpscaleMotionAndMasks(ID3D11DeviceContext* a_context);
 		// kSkipped is transient: no provider work, no native fallback.
 		temporal::ProviderResultCode Upscale();
 		// Returns true once consecutive skips mean the provider is broken.
@@ -232,7 +241,6 @@ namespace cs::render
 			kNone,
 			kNotInitialized,
 			kNoDevice,
-			kNoRTV,
 			kNoTexture,
 			kUnsupportedFormat,
 			kTextureCreationFailed,
@@ -380,12 +388,6 @@ namespace cs::render
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		struct Vats_SetPixelConstant
-		{
-			static void thunk(void* a_param, int a_row, float a_x, float a_y, float a_z, float a_w);
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
 		struct LoadingMenu_UpdateTemporalData
 		{
 			static void thunk(RE::BSGraphics::State* a_state);
@@ -457,11 +459,7 @@ namespace cs::render
 		std::atomic_uint32_t _transientFailures{ 0 };
 		std::uint32_t _consecutiveSkips = 0;
 		std::atomic_uint32_t _missedResolveFrames{ 0 };
-		std::atomic_uint32_t _gammaOnlyRecoveryFrames{ 0 };
 		std::atomic_bool _renderUiFullEffectsPath{ false };
-		std::atomic_uint32_t _renderUiRecoverySourceWidth{ 0 };
-		std::atomic_uint32_t _renderUiRecoverySourceHeight{ 0 };
-		std::atomic_bool _renderUiRecoveryPassthrough{ false };
 		std::atomic_bool _spatialFallbackThisFrame{ false };
 		std::atomic_bool _srPublishedToFramebuffer{ false };
 		bool _superResolutionSubmissionUnsafe = false;
@@ -476,9 +474,11 @@ namespace cs::render
 		bool _upscaledThisFrame = false;
 		std::optional<std::uint32_t> _lastDispatchedFrame;
 		bool _imagespaceScope = false;
-		float _savedDynamicWidthRatio = 1.0f;
-		float _savedDynamicHeightRatio = 1.0f;
-		bool _imagespaceRatiosNeutralized = false;
+		temporal::PreUiHandoffPlan _preUiHandoff;
+		bool _sceneResolved = false;
+		cs::engine::ImageSpaceTriangleSwap _chainTriangle;
+		cs::engine::RenderTargetSwap _vatsMaskSwap;
+		bool _vatsMaskUpscaled = false;
 		bool _frameGenerationInputsCaptured = false;
 		bool _hudlessCapturePending = false;
 		winrt::com_ptr<ID3D11ComputeShader> _copyDepthForFrameGenerationCS;

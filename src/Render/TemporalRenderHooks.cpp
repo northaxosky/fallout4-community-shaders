@@ -27,7 +27,6 @@ namespace cs::render
 			CallHook{ &kDeferredCompositeSSLRBegin, &stl::write_thunk_call<DeferredCompositeSSLR_Begin> },
 			CallHook{ &kDeferredCompositeSSLRBlurHAcquire, &stl::write_thunk_call<DeferredCompositeSSLR_AcquireBlurH> },
 			CallHook{ &kDeferredCompositeSSLRBlurHRelease, &stl::write_thunk_call<DeferredCompositeSSLR_ReleaseBlurH> },
-			CallHook{ &kVatsSetPixelConstant, &stl::write_thunk_call<Vats_SetPixelConstant> },
 			CallHook{ &kLoadingMenuUpdateTemporalData, &stl::write_thunk_call<LoadingMenu_UpdateTemporalData> },
 			CallHook{ &kRenderPreUIDeferredPrePass, &stl::write_thunk_call<RenderPreUI_DeferredPrePass> },
 			CallHook{ &kRenderPreUIForward, &stl::write_thunk_call<RenderPreUI_Forward> },
@@ -138,12 +137,6 @@ namespace cs::render
 		auto* upscaling = GetSingleton();
 		upscaling->_spatialFallbackThisFrame.store(
 			false, std::memory_order_release);
-		upscaling->_renderUiRecoverySourceWidth.store(
-			0, std::memory_order_relaxed);
-		upscaling->_renderUiRecoverySourceHeight.store(
-			0, std::memory_order_relaxed);
-		upscaling->_renderUiRecoveryPassthrough.store(
-			false, std::memory_order_release);
 		if (upscaling->_nativeSuperResolutionFallbackPending.exchange(
 				false, std::memory_order_acq_rel)) {
 			render::TemporalPipeline::Get().FailSuperResolutionToNative(
@@ -190,56 +183,8 @@ namespace cs::render
 	{
 		func(a_this, a_enabled);
 
-		auto* upscaling = GetSingleton();
-		GuardedThunkBody("Upscaling resolve", [&] {
-			upscaling->LatchFrameGenerationDecision();
-			if (!upscaling->_imagespaceScope) {
-				return;
-			}
-			upscaling->_resolveSeamSeen.store(true, std::memory_order_release);
-			const auto handoff = temporal::PlanPreUiHandoff(
-				upscaling->_renderUiFullEffectsPath.load(
-					std::memory_order_acquire),
-				upscaling->ShouldUseFrameGenerationThisFrame(),
-				upscaling->IsDrivingFrameState());
-			if (handoff.captureFrameGenerationInputs) {
-				upscaling->CaptureFrameGenerationInputs();
-			}
-			if (!handoff.driveSuperResolution) {
-				upscaling->FinishPreUiScene(
-					true, handoff.ShouldCaptureHudlessColor(true));
-				return;
-			}
-
-			const auto upscaleMethod = upscaling->GetUpscaleMethod();
-			bool upscaled = true;
-			if (IsExternalUpscaler(upscaleMethod)) {
-				upscaled = upscaling->PerformUpscaling();
-			}
-			// Freeze previews after temporal inputs and RT0 publication settle.
-			upscaling->CaptureSelectedDebugSnapshot();
-
-			// Jitter must not leak into UI regardless of whether the resolve succeeded.
-			if (auto* state = cs::engine::GetGraphicsState()) {
-				state->offsetX = 0.0f;
-				state->offsetY = 0.0f;
-			}
-
-			if (upscaled) {
-				// Save the render scale, then neutralize ratios so UI and post-processing run full-extent.
-				if (auto* renderTargetManager = cs::engine::GetRenderTargetManager()) {
-					upscaling->_savedDynamicWidthRatio = renderTargetManager->GetDynamicWidthRatio();
-					upscaling->_savedDynamicHeightRatio = renderTargetManager->GetDynamicHeightRatio();
-				}
-				cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
-				upscaling->_imagespaceRatiosNeutralized = true;
-			}
-			// A false result means both the provider and explicit spatial recovery failed.
-
-			upscaling->FinishPreUiScene(
-				upscaled, handoff.ShouldCaptureHudlessColor(upscaled));
-
-			SetTemporalEnabled(upscaleMethod == UpscaleMethod::kTAA);
+		GuardedThunkBody("Upscaling pre-UI seam", [] {
+			GetSingleton()->FinishPreUiSeam();
 		});
 	}
 
@@ -250,37 +195,11 @@ namespace cs::render
 		std::uint32_t a_4,
 		std::uint32_t a_5)
 	{
-		auto* upscaling = GetSingleton();
-
-		if (!upscaling->IsDrivingFrameState() || !upscaling->dynamicResolution.ProxyPassAvailable()) {
-			func(a_this, a_first, a_last, a_4, a_5);
-			return;
-		}
-
-		auto* state = cs::engine::GetGraphicsState();
-		const float savedOffsetX = state ? state->offsetX : 0.0f;
-		const float savedOffsetY = state ? state->offsetY : 0.0f;
-
-		try {
-			// HDR effects render against the render-resolution proxies.
-			func(a_this, 0, 3, 1, 1);
-			upscaling->dynamicResolution.BeginProxyPass({ RE::BSGraphics::RenderTargetID::kRefractionNormals,
-				RE::BSGraphics::RenderTargetID::kMain,
-				RE::BSGraphics::RenderTargetID::kGBufferMotionVectors,
-				RE::BSGraphics::RenderTargetID::kMenuBackground });
-
-			// LDR effects render full-extent.
-			func(a_this, 4, 13, 1, 1);
-			upscaling->dynamicResolution.EndProxyPass({ RE::BSGraphics::RenderTargetID::kMain });
-		} catch (...) {
-			upscaling->dynamicResolution.EndProxyPass({ RE::BSGraphics::RenderTargetID::kMain });
-			upscaling->QuarantineAfterException("Upscaling imagespace effect split");
-		}
-
-		if (state) {
-			state->offsetX = savedOffsetX;
-			state->offsetY = savedOffsetY;
-		}
+		GuardedThunkBody("Upscaling pre-tonemap seam", [] {
+			GetSingleton()->ResolveSceneBeforeImagespace();
+		});
+		func(a_this, a_first, a_last, a_4, a_5);
+		GetSingleton()->_vatsMaskSwap.Restore();
 	}
 
 	void TemporalRenderer::DrawWorldRenderUI::thunk(void* a_this)
@@ -299,6 +218,8 @@ namespace cs::render
 		upscaling->_imagespaceScope = true;
 		const REX::TScopeExit clearScope{ [upscaling]() noexcept {
 			upscaling->_imagespaceScope = false;
+			upscaling->_chainTriangle.Restore();
+			upscaling->_vatsMaskSwap.Restore();
 		} };
 		const bool resolveRequired = upscaling->IsDrivingVendorUpscaler();
 
@@ -311,33 +232,17 @@ namespace cs::render
 			}
 			const bool resolveSeen =
 				upscaling->_resolveSeamSeen.load(std::memory_order_acquire);
-			if (resolveRequired && !resolveSeen) {
+			if (resolveRequired && fullEffectsPath && !resolveSeen) {
 				upscaling->_missedResolveFrames.fetch_add(
 					1, std::memory_order_relaxed);
-				if (!fullEffectsPath) {
-					upscaling->_gammaOnlyRecoveryFrames.fetch_add(
-						1, std::memory_order_relaxed);
-				}
-				const bool recovered =
-					upscaling->RecoverMissedResolveAtRenderUIReturn();
-				const char* failure = nullptr;
-				if (fullEffectsPath) {
-					failure = recovered ? "The full-effects Render_UI path unexpectedly skipped +0xC5; spatial fallback was published and temporal rendering is disabled until restart." : "The full-effects Render_UI path unexpectedly skipped +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
-				} else {
-					failure = recovered ? "The Gamma-only Render_UI path bypassed +0xC5; spatial fallback was published and temporal rendering is disabled until restart." : "The Gamma-only Render_UI path bypassed +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
-				}
+				upscaling->ScheduleNativeSuperResolutionFallback();
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
-					failure);
-				if (recovered) {
-					L->warn(
-						"spatial fallback published at Render_UI return after the {} path bypassed +0xC5.",
-						fullEffectsPath ? "full-effects" : "Gamma-only");
-				}
+					"The full-effects Render_UI path skipped the pre-tonemap seam; temporal rendering is disabled until restart.");
 			} else if (!fullEffectsPath && resolveSeen) {
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
-					"Render_UI effects-path gate selected Gamma-only processing but the +0xC5 seam executed.");
+					"Render_UI effects-path gate selected Gamma-only processing but the pre-tonemap seam executed.");
 			}
 		});
 
@@ -345,17 +250,16 @@ namespace cs::render
 			SetTemporalEnabled(false);
 		});
 
-		GuardedThunkBody("Upscaling Render_UI ratio restore", [&] {
-			if (!upscaling->_imagespaceRatiosNeutralized) {
+		// Main_UpdateDynamicResolution republishes the scale on the next world frame.
+		GuardedThunkBody("Upscaling Render_UI ratio release", [&] {
+			if (!upscaling->IsDrivingFrameState()) {
 				return;
 			}
-			upscaling->_imagespaceRatiosNeutralized = false;
-			const bool activated = upscaling->_savedDynamicWidthRatio != 1.0f ||
-			                       upscaling->_savedDynamicHeightRatio != 1.0f;
-			cs::engine::SetDynamicResolution(
-				upscaling->_savedDynamicWidthRatio,
-				upscaling->_savedDynamicHeightRatio,
-				activated);
+			if (auto* state = cs::engine::GetGraphicsState()) {
+				state->offsetX = 0.0f;
+				state->offsetY = 0.0f;
+			}
+			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
 		});
 	}
 
@@ -479,28 +383,6 @@ namespace cs::render
 				upscaling->dynamicResolution.ResetDepth();
 			});
 		}
-	}
-
-	void TemporalRenderer::Vats_SetPixelConstant::thunk(
-		void* a_param,
-		int a_row,
-		float a_x,
-		float a_y,
-		float a_z,
-		float a_w)
-	{
-		auto* upscaling = GetSingleton();
-		if (upscaling->IsDrivingFrameState() && upscaling->IsUpscalingActive()) {
-			func(
-				a_param,
-				a_row,
-				a_x * upscaling->_savedDynamicHeightRatio,
-				a_y * upscaling->_savedDynamicWidthRatio,
-				a_z,
-				a_w);
-			return;
-		}
-		func(a_param, a_row, a_x, a_y, a_z, a_w);
 	}
 
 	void TemporalRenderer::LoadingMenu_UpdateTemporalData::thunk(RE::BSGraphics::State* a_state)

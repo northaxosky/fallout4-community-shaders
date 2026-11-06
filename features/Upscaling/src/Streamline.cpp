@@ -790,7 +790,7 @@ namespace cs::features
 		dlssOptions.mode = *mode;
 		dlssOptions.outputWidth = a_request.outputWidth;
 		dlssOptions.outputHeight = a_request.outputHeight;
-		dlssOptions.colorBuffersHDR = sl::Boolean::eFalse;
+		dlssOptions.colorBuffersHDR = sl::Boolean::eTrue;
 		dlssOptions.useAutoExposure = sl::Boolean::eTrue;
 
 		std::optional<sl::DLSSPreset> customPreset;
@@ -883,7 +883,7 @@ namespace cs::features
 	{
 		const auto mode = ToFSRMode(a_request.qualityMode);
 		if (!slFSRSetOptions || !mode ||
-			!render::temporal::IsFo4PostTonemapSdr(a_request.color)) {
+			!render::temporal::IsFo4PreTonemapLinear(a_request.color)) {
 			return false;
 		}
 
@@ -898,7 +898,7 @@ namespace cs::features
 		options.frameTimeDeltaMilliseconds =
 			a_request.frameTimeMilliseconds;
 		options.viewSpaceToMetersFactor = 0.01428222656f;
-		options.colorSpace = sl::FSRColorSpace::eGamma22;
+		options.colorSpace = sl::FSRColorSpace::eLinear;
 		options.useAutoExposure = sl::Boolean::eTrue;
 		options.dynamicResolutionEnabled = sl::Boolean::eFalse;
 		sl::FSRAlgorithmOptions algorithmOptions{};
@@ -1007,7 +1007,7 @@ namespace cs::features
 			!a_request.renderHeight || !a_request.outputWidth ||
 			!a_request.outputHeight ||
 			colorInput->resource == privateOutput->resource ||
-			!render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
+			!render::temporal::IsFo4PreTonemapLinear(a_request.color) ||
 			!slSetTagForFrame || !slEvaluateFeature ||
 			!deviceRegistered ||
 			(fsr && !featureFSR)) {

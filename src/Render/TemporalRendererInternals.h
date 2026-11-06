@@ -33,37 +33,6 @@
 
 namespace cs::features
 {
-	[[nodiscard]] inline bool PrepareUpscalingPassthrough(
-		ID3D11DeviceContext* a_context,
-		ID3D11Texture2D* a_privateOutput,
-		ID3D11Texture2D* a_input) noexcept
-	{
-		if (!a_context || !a_privateOutput || !a_input ||
-			a_privateOutput == a_input) {
-			return false;
-		}
-
-		D3D11_TEXTURE2D_DESC outputDesc{};
-		D3D11_TEXTURE2D_DESC inputDesc{};
-		a_privateOutput->GetDesc(&outputDesc);
-		a_input->GetDesc(&inputDesc);
-		if (outputDesc.Width != inputDesc.Width ||
-			outputDesc.Height != inputDesc.Height ||
-			outputDesc.MipLevels != inputDesc.MipLevels ||
-			outputDesc.ArraySize != inputDesc.ArraySize ||
-			outputDesc.Format != inputDesc.Format ||
-			outputDesc.SampleDesc.Count != inputDesc.SampleDesc.Count ||
-			outputDesc.SampleDesc.Quality != inputDesc.SampleDesc.Quality) {
-			return false;
-		}
-
-		cs::render::annotation::ScopedEvent annotationScope(
-			"Upscaling::PreparePassthrough");
-		cs::engine::CopyResourcePreservingOM(
-			a_context, a_privateOutput, a_input);
-		return true;
-	}
-
 	[[nodiscard]] inline bool PublishUpscalingOutput(
 		ID3D11DeviceContext* a_context,
 		ID3D11Resource* a_frameBuffer,
@@ -90,16 +59,21 @@ namespace cs::render::renderer_detail
 
 	constexpr const wchar_t* kEncodeTexturesPath = L"Data\\Shaders\\FO4\\Upscaling\\EncodeTexturesCS.hlsl";
 	constexpr const wchar_t* kDepthRefractionUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\DepthRefractionUpscalePS.hlsl";
+	constexpr const wchar_t* kChainInputsUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\ChainInputsUpscalePS.hlsl";
 	constexpr const wchar_t* kUpscaleVSPath = L"Data\\Shaders\\FO4\\Upscaling\\UpscaleVS.hlsl";
 	constexpr const wchar_t* kSpatialFallbackPath =
 		L"Data\\Shaders\\Upscaling\\SpatialFallbackPS.hlsl";
 	constexpr const wchar_t* kCopyDepthForFrameGenerationPath =
 		L"Data\\Shaders\\FrameGeneration\\CopyDepthForFrameGenerationCS.hlsl";
 
-	// kMain supplies post-alpha color for first-person alpha conditioning.
+	// kMain is the pre-tonemap scene color and the post-alpha first-person source.
 	constexpr auto kSceneColorTarget = RE::BSGraphics::RenderTargetID::kMain;
 	constexpr auto kPreAlphaColorTarget = RE::BSGraphics::RenderTargetID::kMainCopy;
 	constexpr auto kMotionVectorTarget = RE::BSGraphics::RenderTargetID::kGBufferMotionVectors;
+	// Alpha carries the material class ISHDR reads to bypass Pip-Boy pixels.
+	constexpr auto kPipboyMaskTarget = RE::BSGraphics::RenderTargetID::kGBufferAmbient;
+	// ISVatsTarget reads the VATS coverage mask as its Mask texture.
+	constexpr auto kVatsMaskTarget = RE::BSGraphics::RenderTargetID::kMenuBackground;
 	constexpr auto kNormalsTarget = RE::BSGraphics::RenderTargetID::kGBufferNormal;
 	constexpr auto kRefractionNormalTarget = RE::BSGraphics::RenderTargetID::kRefractionNormals;
 
@@ -265,46 +239,43 @@ namespace cs::render::renderer_detail
 		       a_left.MiscFlags == a_right.MiscFlags;
 	}
 
-	enum class FrameBufferTextureFailure : std::uint8_t
-	{
-		kNone,
-		kNoRTV,
-		kNoTexture
-	};
-
-	inline bool HasSDRUpscalingContract(const D3D11_TEXTURE2D_DESC& a_desc) noexcept
+	inline bool HasSceneColorContract(const D3D11_TEXTURE2D_DESC& a_desc) noexcept
 	{
 		return a_desc.Width > 0 &&
 		       a_desc.Height > 0 &&
 		       a_desc.MipLevels == 1 &&
 		       a_desc.ArraySize == 1 &&
-		       a_desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM &&
+		       a_desc.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
 		       a_desc.SampleDesc.Count == 1 &&
 		       a_desc.SampleDesc.Quality == 0;
 	}
 
+	// The pre-tonemap scene color the imagespace chain consumes.
+	inline bool TryGetSceneColorTexture(
+		winrt::com_ptr<ID3D11Texture2D>& a_texture,
+		D3D11_TEXTURE2D_DESC& a_desc) noexcept
+	{
+		auto* texture = cs::engine::GetRenderTargetTexture(kSceneColorTarget);
+		if (!texture) {
+			return false;
+		}
+		a_texture.copy_from(texture);
+		a_texture->GetDesc(&a_desc);
+		return true;
+	}
+
 	inline bool TryGetFrameBufferTexture(
 		winrt::com_ptr<ID3D11Texture2D>& a_texture,
-		D3D11_TEXTURE2D_DESC& a_desc,
-		FrameBufferTextureFailure* a_failure = nullptr) noexcept
+		D3D11_TEXTURE2D_DESC& a_desc) noexcept
 	{
-		if (a_failure) {
-			*a_failure = FrameBufferTextureFailure::kNone;
-		}
 		auto* rtv = cs::engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
 		if (!rtv) {
-			if (a_failure) {
-				*a_failure = FrameBufferTextureFailure::kNoRTV;
-			}
 			return false;
 		}
 
 		winrt::com_ptr<ID3D11Resource> resource;
 		rtv->GetResource(resource.put());
 		if (!resource || FAILED(resource->QueryInterface(IID_PPV_ARGS(a_texture.put())))) {
-			if (a_failure) {
-				*a_failure = FrameBufferTextureFailure::kNoTexture;
-			}
 			return false;
 		}
 

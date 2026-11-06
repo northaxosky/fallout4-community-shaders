@@ -31,14 +31,14 @@ namespace cs::features::upscaling_anchors
 		};
 	}
 
-	// RenderEffectRange splits the effect chain into HDR and LDR passes.
+	// Super resolution runs here, before the chain reads linear kMain.
 	inline constexpr CallSiteAnchor kDrawWorldRenderUIRenderEffectRange{
 		.name = "DrawWorld::Render_UI -> ImageSpaceManager::RenderEffectRange",
 		.function = RE::ID::DrawWorld::Imagespace,
 		.offset = { 0x9F, 0x83, 0x83 },
 		.target = RE::ID::ImageSpaceManager::RenderEffectRange
 	};
-	// Upscale resolves after the effect chain.
+	// Pre-UI: the full-extent frame is final for the HUD-less capture.
 	inline constexpr CallSiteAnchor kDrawWorldRenderUIResolve{
 		.name = "DrawWorld::Render_UI -> SetUseDynamicResolutionViewportAsDefaultViewport",
 		.function = RE::ID::DrawWorld::Imagespace,
@@ -74,14 +74,6 @@ namespace cs::features::upscaling_anchors
 		.function = RE::ID::DrawWorld::DeferredComposite,
 		.offset = { 0x6BA, 0x6C3, 0x6C3 },
 		.target = RE::ID::BSGraphics::RenderTargetManager::ReleaseRenderTarget
-	};
-
-	// VATS outline thickness scales with the dynamic ratio.
-	inline constexpr CallSiteAnchor kVatsSetPixelConstant{
-		.name = "VATS UpdateParams -> ImageSpaceShaderParam::SetPixelConstant",
-		.function = RE::ID::ImageSpaceEffectVatsTarget::UpdateParams,
-		.offset = { 0xBB, 0x110, 0x110 },
-		.target = RE::ID::ImageSpaceShaderParam::SetPixelConstant
 	};
 
 	// LoadingMenu renders unscaled; neutralize its jitter.

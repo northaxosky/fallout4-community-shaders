@@ -249,11 +249,9 @@ namespace cs::render
 			}
 		}
 
-		// Build render-resolution proxies before the world and HDR imagespace chain use them.
+		// Build render-resolution proxies before the world composite passes use them.
 		dynamicResolution.UpdateRenderTargets(widthRatio, heightRatio);
 
-		_savedDynamicWidthRatio = widthRatio;
-		_savedDynamicHeightRatio = heightRatio;
 		cs::engine::SetDynamicResolution(
 			widthRatio,
 			heightRatio,
@@ -353,7 +351,6 @@ namespace cs::render
 			dynamicResolution.Release();
 		} catch (...) {
 		}
-		_imagespaceRatiosNeutralized = false;
 	}
 
 	void TemporalRenderer::ApplyConfiguration(const Settings& a_settings, bool a_eligible) noexcept

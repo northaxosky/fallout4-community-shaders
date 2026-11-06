@@ -379,6 +379,40 @@ namespace cs::engine
 		return slot ? &RE::BSGraphics::GetRendererData()->renderTargets[*slot] : nullptr;
 	}
 
+	// Points a logical target at another texture until restored.
+	class RenderTargetSwap
+	{
+	public:
+		void Apply(
+			RE::BSGraphics::RenderTargetID a_logicalID,
+			ID3D11Texture2D* a_texture,
+			ID3D11ShaderResourceView* a_srv,
+			ID3D11RenderTargetView* a_rtv) noexcept
+		{
+			auto* target = ResolveRenderTarget(a_logicalID);
+			if (_target || !target || !a_texture || !a_srv || !a_rtv) {
+				return;
+			}
+			_saved = *target;
+			_target = target;
+			target->texture = reinterpret_cast<decltype(target->texture)>(a_texture);
+			target->srView = reinterpret_cast<decltype(target->srView)>(a_srv);
+			target->rtView = reinterpret_cast<decltype(target->rtView)>(a_rtv);
+		}
+
+		void Restore() noexcept
+		{
+			if (_target) {
+				*_target = _saved;
+				_target = nullptr;
+			}
+		}
+
+	private:
+		RE::BSGraphics::RenderTarget* _target = nullptr;
+		RE::BSGraphics::RenderTarget _saved{};
+	};
+
 	[[nodiscard]] inline ID3D11ShaderResourceView* GetRenderTargetSRV(RE::BSGraphics::RenderTargetID a_renderTarget)
 	{
 		auto* target = ResolveRenderTarget(a_renderTarget);

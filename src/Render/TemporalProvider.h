@@ -113,6 +113,7 @@ namespace cs::render::temporal
 	enum class ColorStage : std::uint8_t
 	{
 		kUnknown,
+		kPreTonemap,
 		kPostTonemapLut
 	};
 
@@ -153,6 +154,19 @@ namespace cs::render::temporal
 		       a_color.transfer == TransferFunction::kGamma22 &&
 		       a_color.primaries == ColorPrimaries::kUnspecified &&
 		       a_color.stage == ColorStage::kPostTonemapLut &&
+		       a_color.alpha == AlphaMode::kIgnored &&
+		       a_color.exposure == ExposureMode::kAutomatic;
+	}
+
+	// FO4: kMain before the imagespace chain is linear scene radiance.
+	[[nodiscard]] inline bool
+	IsFo4PreTonemapLinear(const ColorContract& a_color) noexcept
+	{
+		return a_color.resourceFormat != DXGI_FORMAT_UNKNOWN &&
+		       a_color.range == ColorRange::kFull &&
+		       a_color.transfer == TransferFunction::kLinear &&
+		       a_color.primaries == ColorPrimaries::kUnspecified &&
+		       a_color.stage == ColorStage::kPreTonemap &&
 		       a_color.alpha == AlphaMode::kIgnored &&
 		       a_color.exposure == ExposureMode::kAutomatic;
 	}

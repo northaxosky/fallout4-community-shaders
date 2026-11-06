@@ -7,42 +7,6 @@
 
 namespace cs::render
 {
-	namespace
-	{
-		enum class RenderUIOutputExtent : std::uint8_t
-		{
-			kInvalid,
-			kCommitted,
-			kFull
-		};
-
-		RenderUIOutputExtent ClassifyRenderUIOutputExtent(
-			float a_topLeftX,
-			float a_topLeftY,
-			float a_width,
-			float a_height,
-			std::uint32_t a_committedWidth,
-			std::uint32_t a_committedHeight,
-			std::uint32_t a_fullWidth,
-			std::uint32_t a_fullHeight) noexcept
-		{
-			const auto isNear = [](float a_value, std::uint32_t a_expected) {
-				return std::isfinite(a_value) &&
-				       std::abs(a_value - static_cast<float>(a_expected)) <= 0.5f;
-			};
-			if (!isNear(a_topLeftX, 0) || !isNear(a_topLeftY, 0) ||
-				!a_committedWidth || !a_committedHeight ||
-				!a_fullWidth || !a_fullHeight)
-				return RenderUIOutputExtent::kInvalid;
-			if (isNear(a_width, a_fullWidth) && isNear(a_height, a_fullHeight))
-				return RenderUIOutputExtent::kFull;
-			if (isNear(a_width, a_committedWidth) &&
-				isNear(a_height, a_committedHeight))
-				return RenderUIOutputExtent::kCommitted;
-			return RenderUIOutputExtent::kInvalid;
-		}
-	}
-
 	using namespace renderer_detail;
 
 	bool TemporalRenderer::PreflightExternalResolve(UpscaleMethod a_method)
@@ -53,28 +17,28 @@ namespace cs::render
 
 		auto* state = cs::engine::GetGraphicsState();
 		auto* context = cs::engine::GetImmediateContext();
-		auto* frameBufferRTV =
-			cs::engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
+		auto* sceneColorRTV = cs::engine::GetRenderTargetRTV(kSceneColorTarget);
 		const auto [renderWidth, renderHeight] = GetRenderSize();
-		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
-		D3D11_TEXTURE2D_DESC frameBufferDesc{};
-		if (!state || !context || !frameBufferRTV ||
+		winrt::com_ptr<ID3D11Texture2D> sceneColor;
+		D3D11_TEXTURE2D_DESC sceneColorDesc{};
+		if (!state || !context || !sceneColorRTV ||
 			!HasRequiredResources(a_method) ||
-			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) || !renderWidth ||
-			!renderHeight || renderWidth > frameBufferDesc.Width ||
-			renderHeight > frameBufferDesc.Height || !upscalingTexture ||
+			!TryGetSceneColorTexture(sceneColor, sceneColorDesc) || !renderWidth ||
+			!renderHeight || renderWidth > sceneColorDesc.Width ||
+			renderHeight > sceneColorDesc.Height || !upscalingTexture ||
 			!upscalingTexture->srv || !publicationTexture ||
 			!publicationTexture->resource || !publicationTexture->rtv ||
 			!cs::render::GetLinearClampSampler() || !upscalingDataCB || !upscaleRasterizerState ||
-			!upscaleBlendState || !GetUpscaleVS() || !GetSpatialFallbackPS()) {
+			!upscaleBlendState || !GetUpscaleVS() || !GetSpatialFallbackPS() ||
+			!GetChainInputsUpscalePS()) {
 			return false;
 		}
 
 		winrt::com_ptr<ID3D11Resource> renderTargetResource;
-		frameBufferRTV->GetResource(renderTargetResource.put());
-		return renderTargetResource.get() == frameBuffer.get() &&
-		       frameBufferDesc.Width == state->screenWidth &&
-		       frameBufferDesc.Height == state->screenHeight;
+		sceneColorRTV->GetResource(renderTargetResource.put());
+		return renderTargetResource.get() == sceneColor.get() &&
+		       sceneColorDesc.Width == state->screenWidth &&
+		       sceneColorDesc.Height == state->screenHeight;
 	}
 
 	render::temporal::ProviderResultCode TemporalRenderer::Upscale()
@@ -234,11 +198,11 @@ namespace cs::render
 					upscaleMethod == UpscaleMethod::kDLSS &&
 					settings.sharpnessEnabledDLSS &&
 					settings.sharpnessDLSS > 0.0f,
-				.color = { .resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
+				.color = { .resourceFormat = upscalingTexture->desc.Format,
 					.range = render::temporal::ColorRange::kFull,
-					.transfer = render::temporal::TransferFunction::kGamma22,
+					.transfer = render::temporal::TransferFunction::kLinear,
 					.primaries = render::temporal::ColorPrimaries::kUnspecified,
-					.stage = render::temporal::ColorStage::kPostTonemapLut,
+					.stage = render::temporal::ColorStage::kPreTonemap,
 					.alpha = render::temporal::AlphaMode::kIgnored,
 					.exposure = render::temporal::ExposureMode::kAutomatic },
 				.camera = camera
@@ -323,19 +287,19 @@ namespace cs::render
 		};
 
 		auto* context = cs::engine::GetImmediateContext();
-		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
-		D3D11_TEXTURE2D_DESC frameBufferDesc{};
+		winrt::com_ptr<ID3D11Texture2D> sceneColor;
+		D3D11_TEXTURE2D_DESC sceneColorDesc{};
 		if (!context || !upscalingTexture ||
-			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
-			!HasSDRUpscalingContract(frameBufferDesc) ||
-			!MatchesTextureContract(upscalingTexture, frameBufferDesc,
-				DXGI_FORMAT_R8G8B8A8_UNORM)) {
+			!TryGetSceneColorTexture(sceneColor, sceneColorDesc) ||
+			!HasSceneColorContract(sceneColorDesc) ||
+			!MatchesTextureContract(upscalingTexture, sceneColorDesc,
+				sceneColorDesc.Format)) {
 			ScheduleNativeSuperResolutionFallback();
 			return finish(false);
 		}
 		const auto [renderWidth, renderHeight] = GetRenderSize();
-		if (!renderWidth || !renderHeight || renderWidth > frameBufferDesc.Width ||
-			renderHeight > frameBufferDesc.Height) {
+		if (!renderWidth || !renderHeight || renderWidth > sceneColorDesc.Width ||
+			renderHeight > sceneColorDesc.Height) {
 			ScheduleNativeSuperResolutionFallback();
 			return finish(false);
 		}
@@ -344,7 +308,7 @@ namespace cs::render
 			cs::render::annotation::ScopedEvent inputScope(
 				"Upscaling::CaptureInputColor");
 			cs::engine::CopyResourcePreservingOM(
-				context, upscalingTexture->resource.get(), frameBuffer.get());
+				context, upscalingTexture->resource.get(), sceneColor.get());
 		}
 
 		const bool captured = cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame()).has_value();
@@ -361,7 +325,7 @@ namespace cs::render
 			if (_superResolutionSubmissionUnsafe) {
 				return finish(false);
 			}
-			if (!ApplySpatialFallback(frameBuffer.get(), frameBufferDesc, renderWidth,
+			if (!ApplySpatialFallback(sceneColor.get(), sceneColorDesc, renderWidth,
 					renderHeight)) {
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
@@ -389,7 +353,7 @@ namespace cs::render
 				// Later world frame of a latency frame: structural, not a provider skip.
 				render::TemporalPipeline::Get().SkipWorldFrame();
 			}
-			UpscaleDepth();
+			UpscaleChainInputs();
 			return finish(true, false);
 		}
 
@@ -398,22 +362,22 @@ namespace cs::render
 		if (method == UpscaleMethod::kFSR3 ||
 			method == UpscaleMethod::kFSR4) {
 			published = PublishUpscalingOutput(
-				context, frameBuffer.get(),
+				context, sceneColor.get(),
 				sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
 				_upscaledThisFrame);
 		} else if (method == UpscaleMethod::kDLSS) {
 			auto* output = _providerPublicationOutputReady ? publicationTexture : sharpenerTexture;
 			published = PublishUpscalingOutput(
-				context, frameBuffer.get(),
+				context, sceneColor.get(),
 				output ? output->resource.get() : nullptr,
 				_upscaledThisFrame);
 		}
 		if (published) {
 			render::TemporalPipeline::Get().ConsumeSuperResolutionReset(true);
-			UpscaleDepth();
+			UpscaleChainInputs();
 			return finish(true, true);
 		}
-		if (!ApplySpatialFallback(frameBuffer.get(), frameBufferDesc, renderWidth,
+		if (!ApplySpatialFallback(sceneColor.get(), sceneColorDesc, renderWidth,
 				renderHeight)) {
 			render::TemporalPipeline::Get().PostFailure(
 				render::temporal::FailureDomain::kEngine,
@@ -428,95 +392,32 @@ namespace cs::render
 			"spatial fallback published after provider publication failure; "
 			"native TAA begins next frame.");
 		ScheduleNativeSuperResolutionFallback();
-		UpscaleDepth();
+		UpscaleChainInputs();
 		return finish(true, false);
 	}
 
-	bool TemporalRenderer::RecoverMissedResolveAtRenderUIReturn()
-	{
-		auto* context = cs::engine::GetImmediateContext();
-		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
-		D3D11_TEXTURE2D_DESC frameBufferDesc{};
-		if (!context || !upscalingTexture ||
-			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
-			!HasSDRUpscalingContract(frameBufferDesc) ||
-			!MatchesTextureContract(upscalingTexture, frameBufferDesc,
-				DXGI_FORMAT_R8G8B8A8_UNORM)) {
-			ScheduleNativeSuperResolutionFallback();
-			return false;
-		}
-		UINT viewportCount = 1;
-		D3D11_VIEWPORT sourceViewport{};
-		context->RSGetViewports(&viewportCount, &sourceViewport);
-		const auto [renderWidth, renderHeight] = GetRenderSize();
-		const auto outputExtent =
-			viewportCount == 1 ? ClassifyRenderUIOutputExtent(
-									 sourceViewport.TopLeftX, sourceViewport.TopLeftY,
-									 sourceViewport.Width, sourceViewport.Height, renderWidth,
-									 renderHeight, frameBufferDesc.Width, frameBufferDesc.Height) :
-								 RenderUIOutputExtent::kInvalid;
-		if (outputExtent == RenderUIOutputExtent::kInvalid) {
-			_renderUiRecoverySourceWidth.store(0, std::memory_order_relaxed);
-			_renderUiRecoverySourceHeight.store(0, std::memory_order_relaxed);
-			_renderUiRecoveryPassthrough.store(false, std::memory_order_release);
-			ScheduleNativeSuperResolutionFallback();
-			return false;
-		}
-
-		const bool passthrough =
-			outputExtent == RenderUIOutputExtent::kFull;
-		const auto sourceWidth = passthrough ? frameBufferDesc.Width : renderWidth;
-		const auto sourceHeight = passthrough ? frameBufferDesc.Height : renderHeight;
-		_renderUiRecoverySourceWidth.store(sourceWidth, std::memory_order_relaxed);
-		_renderUiRecoverySourceHeight.store(sourceHeight, std::memory_order_relaxed);
-		_renderUiRecoveryPassthrough.store(passthrough, std::memory_order_release);
-
-		{
-			cs::render::annotation::ScopedEvent inputScope(
-				"Upscaling::CaptureMissedResolveInputColor");
-			cs::engine::CopyResourcePreservingOM(
-				context, upscalingTexture->resource.get(), frameBuffer.get());
-		}
-
-		const bool published =
-			passthrough ? ApplyPassthroughFallback(frameBuffer.get(), context) : ApplySpatialFallback(frameBuffer.get(), frameBufferDesc, sourceWidth, sourceHeight);
-		if (!published) {
-			ScheduleNativeSuperResolutionFallback();
-			return false;
-		}
-
-		_upscaledThisFrame = false;
-		_srPublishedToFramebuffer.store(false, std::memory_order_release);
-		_spatialFallbacks.fetch_add(1, std::memory_order_relaxed);
-		_spatialFallbackThisFrame.store(true, std::memory_order_release);
-		ScheduleNativeSuperResolutionFallback();
-		UpscaleDepth();
-		return true;
-	}
-
 	bool TemporalRenderer::ApplySpatialFallback(
-		ID3D11Texture2D* a_frameBuffer,
-		const D3D11_TEXTURE2D_DESC& a_frameBufferDesc, std::uint32_t a_sourceWidth,
+		ID3D11Texture2D* a_sceneColor,
+		const D3D11_TEXTURE2D_DESC& a_sceneColorDesc, std::uint32_t a_sourceWidth,
 		std::uint32_t a_sourceHeight)
 	{
 		auto* context = cs::engine::GetImmediateContext();
-		auto* frameBufferRTV =
-			cs::engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
+		auto* sceneColorRTV = cs::engine::GetRenderTargetRTV(kSceneColorTarget);
 		auto* vertexShader = GetUpscaleVS();
 		auto* pixelShader = GetSpatialFallbackPS();
-		if (!context || !a_frameBuffer || !frameBufferRTV || !upscalingTexture ||
+		if (!context || !a_sceneColor || !sceneColorRTV || !upscalingTexture ||
 			!upscalingTexture->srv || !publicationTexture ||
 			!publicationTexture->resource || !publicationTexture->rtv ||
 			!cs::render::GetLinearClampSampler() || !upscalingDataCB || !upscaleRasterizerState ||
 			!upscaleBlendState || !vertexShader || !pixelShader || !a_sourceWidth ||
-			!a_sourceHeight || a_sourceWidth > a_frameBufferDesc.Width ||
-			a_sourceHeight > a_frameBufferDesc.Height) {
+			!a_sourceHeight || a_sourceWidth > a_sceneColorDesc.Width ||
+			a_sourceHeight > a_sceneColorDesc.Height) {
 			return false;
 		}
 
 		winrt::com_ptr<ID3D11Resource> renderTargetResource;
-		frameBufferRTV->GetResource(renderTargetResource.put());
-		if (renderTargetResource.get() != a_frameBuffer) {
+		sceneColorRTV->GetResource(renderTargetResource.put());
+		if (renderTargetResource.get() != a_sceneColor) {
 			return false;
 		}
 
@@ -533,8 +434,8 @@ namespace cs::render
 			const D3D11_VIEWPORT viewport{
 				.TopLeftX = 0.0f,
 				.TopLeftY = 0.0f,
-				.Width = static_cast<float>(a_frameBufferDesc.Width),
-				.Height = static_cast<float>(a_frameBufferDesc.Height),
+				.Width = static_cast<float>(a_sceneColorDesc.Width),
+				.Height = static_cast<float>(a_sceneColorDesc.Height),
 				.MinDepth = 0.0f,
 				.MaxDepth = 1.0f
 			};
@@ -567,31 +468,11 @@ namespace cs::render
 			context->PSSetShader(nullptr, nullptr, 0);
 			context->VSSetShader(nullptr, nullptr, 0);
 		}
-		return PublishUpscalingOutput(context, a_frameBuffer,
+		return PublishUpscalingOutput(context, a_sceneColor,
 			publicationTexture->resource.get(), true);
 	}
 
-	bool TemporalRenderer::ApplyPassthroughFallback(
-		ID3D11Texture2D* a_frameBuffer, ID3D11DeviceContext* a_context)
-	{
-		if (!a_frameBuffer || !a_context || !upscalingTexture ||
-			!upscalingTexture->resource || !publicationTexture ||
-			!publicationTexture->resource) {
-			return false;
-		}
-
-		cs::render::annotation::ScopedEvent passthroughScope(
-			"Upscaling::FullExtentPassthrough", false);
-		if (!PrepareUpscalingPassthrough(a_context,
-				publicationTexture->resource.get(),
-				upscalingTexture->resource.get())) {
-			return false;
-		}
-		return PublishUpscalingOutput(a_context, a_frameBuffer,
-			publicationTexture->resource.get(), true);
-	}
-
-	void TemporalRenderer::UpscaleDepth()
+	void TemporalRenderer::UpscaleChainInputs()
 	{
 		if ((!_upscaledThisFrame &&
 				!_spatialFallbackThisFrame.load(std::memory_order_acquire)) ||
@@ -601,17 +482,49 @@ namespace cs::render
 
 		auto* context = cs::engine::GetImmediateContext();
 		auto* state = cs::engine::GetGraphicsState();
-		if (!context || !state || !cs::render::GetLinearClampSampler() || !jitterCB ||
-			!upscaleRasterizerState || !upscaleBlendState ||
-			!upscaleDepthStencilState) {
+		auto* fullscreenVS = GetUpscaleVS();
+		if (!context || !state || !fullscreenVS || !cs::render::GetLinearClampSampler() ||
+			!jitterCB || !upscalingDataCB || !upscaleRasterizerState ||
+			!upscaleBlendState || !upscaleDepthStencilState) {
 			return;
 		}
 
-		float2 screenSize{ (float)state->screenWidth, (float)state->screenHeight };
+		const float2 screenSize{ (float)state->screenWidth, (float)state->screenHeight };
 		if (screenSize.x <= 0.0f || screenSize.y <= 0.0f) {
 			return;
 		}
 
+		cs::render::annotation::ScopedEvent annotationScope("Upscaling::UpscaleChainInputs");
+
+		// Restore the engine's exact OM bindings after the passes.
+		cs::engine::OMScope omScope(context);
+		context->IASetInputLayout(nullptr);
+		context->IASetVertexBuffers(0, 0, nullptr, nullptr, nullptr);
+		context->IASetIndexBuffer(nullptr, DXGI_FORMAT_UNKNOWN, 0);
+		context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		context->VSSetShader(fullscreenVS, nullptr, 0);
+
+		const D3D11_VIEWPORT viewport{
+			.TopLeftX = 0.0f,
+			.TopLeftY = 0.0f,
+			.Width = screenSize.x,
+			.Height = screenSize.y,
+			.MinDepth = 0.0f,
+			.MaxDepth = 1.0f
+		};
+		context->RSSetViewports(1, &viewport);
+		context->RSSetState(upscaleRasterizerState.get());
+		context->OMSetBlendState(upscaleBlendState.get(), nullptr, 0xffffffff);
+
+		UpscaleDepth(context);
+		UpscaleMotionAndMasks(context);
+
+		context->PSSetShader(nullptr, nullptr, 0);
+		context->VSSetShader(nullptr, nullptr, 0);
+	}
+
+	void TemporalRenderer::UpscaleDepth(ID3D11DeviceContext* a_context)
+	{
 		auto* depthTexture =
 			cs::engine::GetDepthStencilTexture(RE::BSGraphics::DepthStencilTargetID::kMain);
 		auto* depthDSV =
@@ -622,8 +535,9 @@ namespace cs::render
 			cs::engine::GetRenderTargetTexture(kRefractionNormalTarget);
 		auto* refractionNormalsRTV =
 			cs::engine::GetRenderTargetRTV(kRefractionNormalTarget);
+		auto* depthUpscalePS = GetDepthRefractionUpscalePS();
 		if (!depthTexture || !depthDSV || !depthSRV || !refractionNormalsTexture ||
-			!refractionNormalsRTV) {
+			!refractionNormalsRTV || !depthUpscalePS) {
 			return;
 		}
 
@@ -637,69 +551,162 @@ namespace cs::render
 				refractionNormalsDesc.Format, "Upscaling/RefractionNormalsCopy")) {
 			return;
 		}
-
-		auto* fullscreenVS = GetUpscaleVS();
-		auto* depthUpscalePS = GetDepthRefractionUpscalePS();
-		if (!fullscreenVS || !depthUpscalePS) {
-			return;
-		}
 		cs::render::annotation::ScopedEvent annotationScope("Upscaling::UpscaleDepth");
 
-		// Restore the engine's exact OM bindings after the depth pass.
-		cs::engine::OMScope omScope(context);
-		context->IASetInputLayout(nullptr);
-		context->IASetVertexBuffers(0, 0, nullptr, nullptr, nullptr);
-		context->IASetIndexBuffer(nullptr, DXGI_FORMAT_UNKNOWN, 0);
-		context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-		context->VSSetShader(fullscreenVS, nullptr, 0);
-
-		D3D11_VIEWPORT viewport = {};
-		viewport.TopLeftX = 0.0f;
-		viewport.TopLeftY = 0.0f;
-		viewport.Width = screenSize.x;
-		viewport.Height = screenSize.y;
-		viewport.MinDepth = 0.0f;
-		viewport.MaxDepth = 1.0f;
-		context->RSSetViewports(1, &viewport);
-
-		context->RSSetState(upscaleRasterizerState.get());
-		context->OMSetBlendState(upscaleBlendState.get(), nullptr, 0xffffffff);
-
 		ID3D11SamplerState* samplers[] = { cs::render::GetLinearClampSampler() };
-		context->PSSetSamplers(0, ARRAYSIZE(samplers), samplers);
+		a_context->PSSetSamplers(0, ARRAYSIZE(samplers), samplers);
 
 		JitterCB jitterData{};
 		jitterData.jitter = jitter;
-
 		jitterCB->Update(jitterData);
 		auto bufferArray = jitterCB->CB();
-		context->PSSetConstantBuffers(0, 1, &bufferArray);
+		a_context->PSSetConstantBuffers(0, 1, &bufferArray);
 
-		{
-			context->CopyResource(sceneDepthCopy->resource.get(), depthTexture);
+		a_context->CopyResource(sceneDepthCopy->resource.get(), depthTexture);
+		a_context->OMSetDepthStencilState(upscaleDepthStencilState.get(), 0x00);
+		a_context->CopyResource(refractionNormalsCopy->resource.get(), refractionNormalsTexture);
 
-			context->OMSetDepthStencilState(upscaleDepthStencilState.get(), 0x00);
+		ID3D11ShaderResourceView* srvs[] = { refractionNormalsCopy->srv.get(),
+			sceneDepthCopy->srv.get() };
+		a_context->PSSetShaderResources(0, ARRAYSIZE(srvs), srvs);
 
-			context->CopyResource(refractionNormalsCopy->resource.get(), refractionNormalsTexture);
+		// Fallout 4's SAO derives camera-Z without a second output.
+		ID3D11RenderTargetView* rtvs[] = { refractionNormalsRTV };
+		a_context->OMSetRenderTargets(ARRAYSIZE(rtvs), rtvs, depthDSV);
 
-			ID3D11ShaderResourceView* srvs[] = { refractionNormalsCopy->srv.get(),
-				sceneDepthCopy->srv.get() };
-			context->PSSetShaderResources(0, ARRAYSIZE(srvs), srvs);
-
-			// Fallout 4's SAO derives camera-Z without a second output.
-			ID3D11RenderTargetView* rtvs[] = { refractionNormalsRTV };
-			context->OMSetRenderTargets(ARRAYSIZE(rtvs), rtvs, depthDSV);
-
-			context->PSSetShader(depthUpscalePS, nullptr, 0);
-			context->Draw(3, 0);
-		}
+		a_context->PSSetShader(depthUpscalePS, nullptr, 0);
+		a_context->Draw(3, 0);
 
 		ID3D11ShaderResourceView* nullPSResources[2] = { nullptr, nullptr };
-		context->PSSetShaderResources(0, ARRAYSIZE(nullPSResources), nullPSResources);
+		a_context->PSSetShaderResources(0, ARRAYSIZE(nullPSResources), nullPSResources);
+	}
 
-		context->PSSetShader(nullptr, nullptr, 0);
-		context->VSSetShader(nullptr, nullptr, 0);
+	void TemporalRenderer::UpscaleMotionAndMasks(ID3D11DeviceContext* a_context)
+	{
+		auto* motionTexture = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
+		auto* motionRTV = cs::engine::GetRenderTargetRTV(kMotionVectorTarget);
+		auto* maskTexture = cs::engine::GetRenderTargetTexture(kPipboyMaskTarget);
+		auto* maskRTV = cs::engine::GetRenderTargetRTV(kPipboyMaskTarget);
+		auto* chainInputsPS = GetChainInputsUpscalePS();
+		if (!motionTexture || !motionRTV || !maskTexture || !maskRTV || !chainInputsPS) {
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC motionDesc{};
+		D3D11_TEXTURE2D_DESC maskDesc{};
+		motionTexture->GetDesc(&motionDesc);
+		maskTexture->GetDesc(&maskDesc);
+		if (!EnsureShaderReadableCopy(motionVectorSourceCopy, motionTexture, motionDesc.Format,
+				"Upscaling/MotionVectorSourceCopy") ||
+			!EnsureShaderReadableCopy(pipboyMaskCopy, maskTexture, maskDesc.Format,
+				"Upscaling/PipboyMaskCopy")) {
+			return;
+		}
+		cs::render::annotation::ScopedEvent annotationScope("Upscaling::UpscaleMotionAndMasks");
+
+		// Logical 15 doubles as the menu background; VATS gets its own copy.
+		auto* vatsEffect = cs::engine::GetImageSpaceEffect(
+			RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_VATS_TARGET);
+		auto* vatsSource = cs::engine::GetRenderTargetTexture(kVatsMaskTarget);
+		auto* vatsSourceSRV = cs::engine::GetRenderTargetSRV(kVatsMaskTarget);
+		const bool vats = vatsEffect && vatsEffect->IsActive() && vatsSource && vatsSourceSRV &&
+		                  EnsureShaderReadableCopy(vatsMaskFull, vatsSource, DXGI_FORMAT_R8G8B8A8_UNORM,
+							  "Upscaling/VatsMaskFull", true);
+
+		const auto [renderWidth, renderHeight] = GetRenderSize();
+		upscalingDataCB->Update(UpscalingDataCB{
+			.trueSamplingDim = { static_cast<float>(renderWidth), static_cast<float>(renderHeight) },
+			.pad0 = { 0.0f, 0.0f } });
+		auto constants = upscalingDataCB->CB();
+		a_context->PSSetConstantBuffers(0, 1, &constants);
+
+		a_context->CopyResource(motionVectorSourceCopy->resource.get(), motionTexture);
+		a_context->CopyResource(pipboyMaskCopy->resource.get(), maskTexture);
+		ID3D11ShaderResourceView* srvs[] = { motionVectorSourceCopy->srv.get(),
+			pipboyMaskCopy->srv.get(), vats ? vatsSourceSRV : pipboyMaskCopy->srv.get() };
+		a_context->PSSetShaderResources(0, ARRAYSIZE(srvs), srvs);
+
+		ID3D11RenderTargetView* rtvs[] = { motionRTV, maskRTV, vats ? vatsMaskFull->rtv.get() : nullptr };
+		a_context->OMSetRenderTargets(ARRAYSIZE(rtvs), rtvs, nullptr);
+		a_context->PSSetShader(chainInputsPS, nullptr, 0);
+		a_context->Draw(3, 0);
+
+		ID3D11ShaderResourceView* nullPSResources[3] = { nullptr, nullptr, nullptr };
+		a_context->PSSetShaderResources(0, ARRAYSIZE(nullPSResources), nullPSResources);
+		_vatsMaskUpscaled = vats;
+	}
+
+	void TemporalRenderer::ResolveSceneBeforeImagespace()
+	{
+		_resolveSeamSeen.store(true, std::memory_order_release);
+		LatchFrameGenerationDecision();
+		_sceneResolved = false;
+		_vatsMaskUpscaled = false;
+		_preUiHandoff = {};
+		if (!_imagespaceScope) {
+			return;
+		}
+		_preUiHandoff = temporal::PlanPreUiHandoff(
+			_renderUiFullEffectsPath.load(std::memory_order_acquire),
+			ShouldUseFrameGenerationThisFrame(),
+			IsDrivingFrameState());
+		if (_preUiHandoff.captureFrameGenerationInputs) {
+			CaptureFrameGenerationInputs();
+		}
+		if (!_preUiHandoff.driveSuperResolution) {
+			_sceneResolved = true;
+			return;
+		}
+
+		const auto upscaleMethod = GetUpscaleMethod();
+		const bool external = IsExternalUpscaler(upscaleMethod);
+		bool upscaled = true;
+		if (external) {
+			upscaled = PerformUpscaling();
+		} else {
+			_srPublishedToFramebuffer.store(false, std::memory_order_release);
+		}
+		// Freeze previews after temporal inputs settle.
+		CaptureSelectedDebugSnapshot();
+
+		if (external && upscaled) {
+			// The chain, UI and native TAA now run full-extent without jitter.
+			if (auto* state = cs::engine::GetGraphicsState()) {
+				state->offsetX = 0.0f;
+				state->offsetY = 0.0f;
+			}
+			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
+			// The engine bakes the render ratio into its dynamic triangle UVs.
+			_chainTriangle.Apply();
+			// Only the chain's VATS effect reads logical 15.
+			if (_vatsMaskUpscaled) {
+				_vatsMaskSwap.Apply(kVatsMaskTarget, vatsMaskFull->resource.get(),
+					vatsMaskFull->srv.get(), vatsMaskFull->rtv.get());
+			}
+		}
+		// False means the provider and spatial recovery both failed.
+		_sceneResolved = upscaled;
+	}
+
+	void TemporalRenderer::FinishPreUiSeam()
+	{
+		if (!_imagespaceScope) {
+			return;
+		}
+		if (!_preUiHandoff.driveSuperResolution) {
+			FinishPreUiScene(
+				true, _preUiHandoff.ShouldCaptureHudlessColor(true));
+			return;
+		}
+
+		// Jitter must not leak into UI regardless of whether the resolve succeeded.
+		if (auto* state = cs::engine::GetGraphicsState()) {
+			state->offsetX = 0.0f;
+			state->offsetY = 0.0f;
+		}
+		FinishPreUiScene(
+			_sceneResolved, _preUiHandoff.ShouldCaptureHudlessColor(_sceneResolved));
+		SetTemporalEnabled(GetUpscaleMethod() == UpscaleMethod::kTAA);
 	}
 
 }  // namespace cs::render

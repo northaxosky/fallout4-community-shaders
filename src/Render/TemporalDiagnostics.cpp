@@ -387,12 +387,10 @@ namespace cs::render
 			return "not_initialized";
 		case ProviderOutputDebugFailure::kNoDevice:
 			return "no_device";
-		case ProviderOutputDebugFailure::kNoRTV:
-			return "no_rt0_rtv";
 		case ProviderOutputDebugFailure::kNoTexture:
-			return "no_rt0_texture";
+			return "no_scene_color_texture";
 		case ProviderOutputDebugFailure::kUnsupportedFormat:
-			return "unsupported_rt0_format";
+			return "unsupported_scene_color_format";
 		case ProviderOutputDebugFailure::kTextureCreationFailed:
 			return "preview_texture_creation_failed";
 		case ProviderOutputDebugFailure::kSRVCreationFailed:
@@ -407,12 +405,10 @@ namespace cs::render
 		switch (a_failure) {
 		case ProviderOutputDebugFailure::kNoDevice:
 			return "RT0 provider output preview is unavailable: no D3D11 device.";
-		case ProviderOutputDebugFailure::kNoRTV:
-			return "RT0 provider output preview is unavailable: RT0 has no RTV.";
 		case ProviderOutputDebugFailure::kNoTexture:
-			return "RT0 provider output preview is unavailable: the RT0 RTV has no texture.";
+			return "RT0 provider output preview is unavailable: the scene color target (kMain) has no texture.";
 		case ProviderOutputDebugFailure::kUnsupportedFormat:
-			return "RT0 provider output preview is unavailable: RT0 has no safe SRV format.";
+			return "RT0 provider output preview is unavailable: the scene color target (kMain) has no safe SRV format.";
 		case ProviderOutputDebugFailure::kTextureCreationFailed:
 			return "RT0 provider output preview is unavailable: preview texture creation failed.";
 		case ProviderOutputDebugFailure::kSRVCreationFailed:
@@ -449,17 +445,11 @@ namespace cs::render
 				spdlog::level::warn,
 				"RT0 provider output preview allocation failed: no D3D11 device");
 			break;
-		case ProviderOutputDebugFailure::kNoRTV:
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::warn,
-				"RT0 provider output preview allocation failed: RT0 has no RTV");
-			break;
 		case ProviderOutputDebugFailure::kNoTexture:
 			CS_LOG_ONCE(
 				L,
 				spdlog::level::warn,
-				"RT0 provider output preview allocation failed: the RT0 RTV has no texture resource");
+				"RT0 provider output preview allocation failed: the scene color target (kMain) has no texture");
 			break;
 		case ProviderOutputDebugFailure::kUnsupportedFormat:
 			CS_LOG_ONCE(
@@ -546,12 +536,8 @@ namespace cs::render
 			SetProviderOutputDebugFailure(ProviderOutputDebugFailure::kNoDevice);
 			return;
 		}
-		FrameBufferTextureFailure textureFailure =
-			FrameBufferTextureFailure::kNone;
-		if (!TryGetFrameBufferTexture(
-				frameBuffer, frameBufferDesc, &textureFailure)) {
-			SetProviderOutputDebugFailure(
-				textureFailure == FrameBufferTextureFailure::kNoRTV ? ProviderOutputDebugFailure::kNoRTV : ProviderOutputDebugFailure::kNoTexture);
+		if (!TryGetSceneColorTexture(frameBuffer, frameBufferDesc)) {
+			SetProviderOutputDebugFailure(ProviderOutputDebugFailure::kNoTexture);
 			return;
 		}
 
@@ -696,10 +682,10 @@ namespace cs::render
 			.Field("active_height", static_cast<std::int64_t>(activeExtent.height))
 			.Field(
 				"input_color_format",
-				static_cast<std::int64_t>(DXGI_FORMAT_R8G8B8A8_UNORM))
-			.Field("input_transfer", std::string_view{ "gamma_2_2" })
-			.Field("input_color_stage", std::string_view{ "post_tonemap_lut" })
-			.Field("input_lut_baked", true)
+				static_cast<std::int64_t>(DXGI_FORMAT_R11G11B10_FLOAT))
+			.Field("input_transfer", std::string_view{ "linear" })
+			.Field("input_color_stage", std::string_view{ "pre_tonemap" })
+			.Field("input_lut_baked", false)
 			.Field("dynamic_width_ratio", static_cast<double>(activeExtent.widthRatio))
 			.Field("dynamic_height_ratio", static_cast<double>(activeExtent.heightRatio))
 			.Field("scale_published", _resolutionScalePublished)
@@ -709,11 +695,7 @@ namespace cs::render
 			.Field("spatial_fallback_preflight_ready", _spatialFallbackPreflightReady.load(std::memory_order_acquire))
 			.Field("spatial_fallback_this_frame", _spatialFallbackThisFrame.load(std::memory_order_acquire))
 			.Field("missed_resolve_frames", static_cast<std::int64_t>(_missedResolveFrames.load(std::memory_order_relaxed)))
-			.Field("gamma_only_recovery_frames", static_cast<std::int64_t>(_gammaOnlyRecoveryFrames.load(std::memory_order_relaxed)))
 			.Field("render_ui_full_effects_path", _renderUiFullEffectsPath.load(std::memory_order_acquire))
-			.Field("render_ui_recovery_source_width", static_cast<std::int64_t>(_renderUiRecoverySourceWidth.load(std::memory_order_relaxed)))
-			.Field("render_ui_recovery_source_height", static_cast<std::int64_t>(_renderUiRecoverySourceHeight.load(std::memory_order_relaxed)))
-			.Field("render_ui_recovery_passthrough", _renderUiRecoveryPassthrough.load(std::memory_order_acquire))
 			.Field("resolve_seam_seen", _resolveSeamSeen.load(std::memory_order_acquire))
 			.Field("native_fallback_pending", _nativeSuperResolutionFallbackPending.load(std::memory_order_acquire))
 			.Field("sr_published_to_framebuffer", _srPublishedToFramebuffer.load(std::memory_order_acquire))

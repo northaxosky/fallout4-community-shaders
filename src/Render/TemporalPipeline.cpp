@@ -1636,7 +1636,6 @@ namespace cs::render
 			a_request.jitterY = frozen->jitterY;
 			a_request.frameTimeMilliseconds =
 				frozen->frameTimeMilliseconds;
-			a_request.color = frozen->color;
 			a_request.camera = frozen->camera;
 			return true;
 		}
