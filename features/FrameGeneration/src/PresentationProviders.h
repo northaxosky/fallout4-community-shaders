@@ -72,6 +72,7 @@ namespace cs::features
 		bool _ready = false;
 		bool _presentationActive = false;
 		render::temporal::FrameGenerationConfiguration _configuration;
+		render::temporal::ColorContract _color = render::temporal::kFo4PostTonemapSdrContract;
 	};
 
 }  // namespace cs::features

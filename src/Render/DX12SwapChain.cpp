@@ -181,6 +181,9 @@ namespace cs::render
 			for (const auto& resource : _hudlessBuffers) {
 				retainShared(resource);
 			}
+			for (const auto& resource : _uiBuffers) {
+				retainShared(resource);
+			}
 			for (const auto& resource : _depthBuffers) {
 				retainShared(resource);
 			}
@@ -338,6 +341,9 @@ namespace cs::render
 		}
 		for (auto& hudless : _hudlessBuffers) {
 			hudless.reset();
+		}
+		for (auto& ui : _uiBuffers) {
+			ui.reset();
 		}
 		_proxyBuffer.reset();
 		_hdrOutput.reset();
@@ -766,14 +772,16 @@ namespace cs::render
 		resources.proxy = SharedD3D11D3D12Texture::Create(
 			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationProxy");
 		if (_provider) {
-			resources.hudless = {
-				SharedD3D11D3D12Texture::Create(
-					_device11.get(), _device12.get(), desc,
-					"Upscaling/HUDLess[0]"),
-				SharedD3D11D3D12Texture::Create(
-					_device11.get(), _device12.get(), desc,
-					"Upscaling/HUDLess[1]")
-			};
+			auto hudlessDesc = desc;
+			if (_hdrContainer) {
+				// The presenter encodes the HUD-less frame to PQ; the interface keeps fp16 alpha.
+				hudlessDesc.Format = _innerDesc.Format;
+				hudlessDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_RENDER_TARGET;
+				auto uiDesc = desc;
+				uiDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+				resources.ui = CreateSlotBuffers(uiDesc, "Upscaling/UI");
+			}
+			resources.hudless = CreateSlotBuffers(hudlessDesc, "Upscaling/HUDLess");
 		}
 		if (_hdrContainer) {
 			resources.hdrScene = SharedD3D11D3D12Texture::Create(
@@ -784,11 +792,23 @@ namespace cs::render
 				_device11.get(), _device12.get(), desc, "Present/HdrOutput");
 		}
 		if (!resources.proxy || (_provider && (!resources.hudless[0] || !resources.hudless[1])) ||
+			(_provider && _hdrContainer && (!resources.ui[0] || !resources.ui[1])) ||
 			(_hdrContainer && (!resources.hdrOutput || !resources.hdrScene))) {
 			return E_OUTOFMEMORY;
 		}
 		a_resources = std::move(resources);
 		return S_OK;
+	}
+
+	std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> DX12SwapChain::CreateSlotBuffers(
+		const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name) const
+	{
+		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> buffers;
+		for (UINT slot = 0; slot < buffers.size(); ++slot) {
+			buffers[slot] = SharedD3D11D3D12Texture::Create(
+				_device11.get(), _device12.get(), a_desc, std::format("{}[{}]", a_name, slot));
+		}
+		return buffers;
 	}
 
 	HRESULT DX12SwapChain::RecreateDisplayResources(UINT a_width, UINT a_height)
@@ -800,6 +820,7 @@ namespace cs::render
 		}
 		_proxyBuffer = std::move(resources.proxy);
 		_hudlessBuffers = std::move(resources.hudless);
+		_uiBuffers = std::move(resources.ui);
 		_hdrOutput = std::move(resources.hdrOutput);
 		_hdrScene = std::move(resources.hdrScene);
 		if (_streamline) {
@@ -825,15 +846,21 @@ namespace cs::render
 		                 D3D11_BIND_RENDER_TARGET;
 
 		if (_provider && (!_hudlessBuffers[0] || !_hudlessBuffers[1])) {
-			desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-			for (UINT slot = 0; slot < _hudlessBuffers.size(); ++slot) {
-				_hudlessBuffers[slot] =
-					SharedD3D11D3D12Texture::Create(
-						_device11.get(), _device12.get(), desc,
-						std::format("Upscaling/HUDLess[{}]", slot));
-			}
+			desc.Format = _hdrContainer ? _innerDesc.Format : DXGI_FORMAT_R8G8B8A8_UNORM;
+			_hudlessBuffers = CreateSlotBuffers(desc, "Upscaling/HUDLess");
 			if (!_hudlessBuffers[0] || !_hudlessBuffers[1]) {
 				_hudlessBuffers = {};
+				_frameGenerationDisabled = true;
+				return E_OUTOFMEMORY;
+			}
+		}
+		if (_provider && _hdrContainer && (!_uiBuffers[0] || !_uiBuffers[1])) {
+			auto uiDesc = desc;
+			uiDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			uiDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			_uiBuffers = CreateSlotBuffers(uiDesc, "Upscaling/UI");
+			if (!_uiBuffers[0] || !_uiBuffers[1]) {
+				_uiBuffers = {};
 				_frameGenerationDisabled = true;
 				return E_OUTOFMEMORY;
 			}
@@ -964,6 +991,7 @@ namespace cs::render
 	{
 		return IsReady() && !_frameGenerationDisabled && _provider &&
 		       _provider->IsReady() && _hudlessBuffers[0] && _hudlessBuffers[1] &&
+		       (!_hdrContainer || (_uiBuffers[0] && _uiBuffers[1])) &&
 		       _depthBuffers[0] && _depthBuffers[1] && _motionBuffers[0] &&
 		       _motionBuffers[1];
 	}
@@ -1064,6 +1092,9 @@ namespace cs::render
 		}
 		for (auto& hudless : _hudlessBuffers) {
 			hudless.reset();
+		}
+		for (auto& ui : _uiBuffers) {
+			ui.reset();
 		}
 		for (auto& backBuffer : _backBuffers) {
 			backBuffer = nullptr;
@@ -1240,6 +1271,11 @@ namespace cs::render
 	UINT DX12SwapChain::GetHeight() const noexcept { return _innerDesc.Height; }
 
 	UINT DX12SwapChain::GetFrameSlot() const noexcept { return _frameSlot; }
+
+	SharedD3D11D3D12Texture* DX12SwapChain::GetUiTexture() const noexcept
+	{
+		return _frameSlot < _uiBuffers.size() ? _uiBuffers[_frameSlot].get() : nullptr;
+	}
 
 	SharedD3D11D3D12Texture* DX12SwapChain::GetHudlessTexture() const noexcept
 	{
@@ -1858,6 +1894,9 @@ namespace cs::render
 				}
 			}
 			const auto hdrSettings = _hdrContainer && _callbacks.queryHdrOutput ? _callbacks.queryHdrOutput() : hdr::OutputSettings{};
+			bool requested = frameGenerationRequested &&
+			                 _frameGenerationInputsReady && !_frameGenerationDisabled &&
+			                 request.enabled;
 			if (PrepareReShade()) {
 				// A separated frame's proxy holds only the interface, composed after the effects.
 				const auto* color = hdrSettings.interfaceSeparated && _hdrScene ? _hdrScene.get() : _proxyBuffer.get();
@@ -1866,8 +1905,12 @@ namespace cs::render
 			}
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const auto* copySource = _proxyBuffer.get();
+			// Frame generation blends in PQ so real and generated frames match.
+			bool hdrFrameGeneration = false;
 			if (_hdrContainer) {
-				copySource = ComposeHdr(hdrSettings) ? _hdrOutput.get() : nullptr;
+				hdrFrameGeneration = requested && ComposeHdrFrameGenerationInputs(hdrSettings);
+				requested = requested && hdrFrameGeneration;
+				copySource = hdrFrameGeneration || ComposeHdr(hdrSettings) ? _hdrOutput.get() : nullptr;
 			}
 			if (copySource && copySource->resource12->GetDesc().Format != _innerDesc.Format) {
 				CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
@@ -1912,9 +1955,6 @@ namespace cs::render
 					barriersAfter.data());
 			}
 
-			bool requested = frameGenerationRequested &&
-			                 _frameGenerationInputsReady && !_frameGenerationDisabled &&
-			                 request.enabled;
 			if (_provider && requested) {
 				const auto validation =
 					_provider->ValidateConfiguration(
@@ -1961,13 +2001,21 @@ namespace cs::render
 					.state = D3D12_RESOURCE_STATE_COMMON
 				};
 				request.finalColor = render::temporal::D3D12GpuView{
-					.resource = _proxyBuffer->resource12.get(),
+					.resource = (hdrFrameGeneration ? _hdrOutput : _proxyBuffer)->resource12.get(),
 					.state = D3D12_RESOURCE_STATE_COMMON
 				};
 				request.outputWidth = _innerDesc.Width;
 				request.outputHeight = _innerDesc.Height;
 				request.enabled = requested;
 				request.uiMode = render::temporal::UiCompositionMode::kHudlessAndFinal;
+				if (hdrFrameGeneration) {
+					request.uiColorAndAlpha = render::temporal::D3D12GpuView{
+						.resource = _uiBuffers[_frameSlot]->resource12.get(),
+						.state = D3D12_RESOURCE_STATE_COMMON
+					};
+					request.uiMode = render::temporal::UiCompositionMode::kHudlessAndPremultipliedLayer;
+					request.color = render::temporal::kHdr10PostTonemapContract;
+				}
 				pipeline.RecordFrameGenerationFrameTimeInput(
 					request.frameTimeMilliseconds);
 				const auto preparation = [&] {
@@ -2223,6 +2271,37 @@ namespace cs::render
 		_hdrCompose.Dispatch(*_context11, *scene->srv11, separated ? _proxyBuffer->srv11.get() : nullptr,
 			*_hdrOutput->uav11, _innerDesc.Width, _innerDesc.Height, settings);
 		return true;
+	}
+
+	bool DX12SwapChain::ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& settings) noexcept
+	{
+		// Without a separate interface there is no clean HUD-less frame; skip this frame only.
+		if (!settings.interfaceSeparated || !_hdrScene)
+			return false;
+		const auto* hudless = _hudlessBuffers[_frameSlot].get();
+		const auto* ui = _uiBuffers[_frameSlot].get();
+		if (!_hdrCompose.IsReady() || !_hdrOutput || !hudless || !ui || !_proxyBuffer ||
+			!hudless->srv11 || !hudless->uav11 || !ui->srv11 || !ui->uav11 ||
+			!_hdrScene->srv11 || !_hdrOutput->uav11) {
+			CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "HDR frame-generation inputs are unavailable; the frame is not generated.");
+			return false;
+		}
+		ApplyHdrColorSpace(settings);
+		const bool written = render::temporal::WriteFrameGenerationInput(
+			[this] { return AcquireFrameGenerationInputWrite(); },
+			[&] {
+				cs::render::annotation::ScopedEvent annotationScope("FrameGeneration::EncodeHdrInputs");
+				_hdrCompose.Dispatch(*_context11, *_hdrScene->srv11, nullptr, *hudless->uav11,
+					_innerDesc.Width, _innerDesc.Height, settings);
+				_context11->CopyResource(ui->texture11.get(), _proxyBuffer->texture11.get());
+				_hdrCompose.EncodeInterface(*_context11, *ui->uav11, _innerDesc.Width, _innerDesc.Height, settings);
+				_hdrCompose.CompositeInterface(*_context11, *hudless->srv11, *ui->srv11, *_hdrOutput->uav11,
+					_innerDesc.Width, _innerDesc.Height);
+			});
+		if (!written) {
+			DisableFrameGeneration("frame-generation HDR inputs were still in provider use");
+		}
+		return written;
 	}
 
 	bool DX12SwapChain::PrepareReShade() noexcept
@@ -2612,6 +2691,7 @@ namespace cs::render
 		if (sizeChanged &&
 			(!pending.proxy ||
 				(_provider && (!pending.hudless[0] || !pending.hudless[1])) ||
+				(_provider && _hdrContainer && (!pending.ui[0] || !pending.ui[1])) ||
 				(_hdrContainer && (!pending.hdrOutput || !pending.hdrScene)) ||
 				targetWidth != resizedDesc.Width ||
 				targetHeight != resizedDesc.Height)) {
@@ -2636,6 +2716,7 @@ namespace cs::render
 			ReleaseReShade();
 			_proxyBuffer = std::move(pending.proxy);
 			_hudlessBuffers = std::move(pending.hudless);
+			_uiBuffers = std::move(pending.ui);
 			_hdrOutput = std::move(pending.hdrOutput);
 			_hdrScene = std::move(pending.hdrScene);
 		}

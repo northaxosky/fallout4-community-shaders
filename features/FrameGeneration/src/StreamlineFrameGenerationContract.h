@@ -58,6 +58,7 @@ namespace cs::features::streamline_fg
 		std::uint32_t a_outputWidth,
 		std::uint32_t a_outputHeight,
 		std::uint32_t a_backBufferCount,
+		const render::temporal::ColorContract& a_color,
 		bool a_retainResources) noexcept
 	{
 		sl::DLSSGOptions options{};
@@ -77,11 +78,17 @@ namespace cs::features::streamline_fg
 		options.colorWidth = a_outputWidth;
 		options.colorHeight = a_outputHeight;
 		options.numBackBuffers = a_backBufferCount;
-		options.colorBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+		options.colorBufferFormat = a_color.resourceFormat;
 		options.mvecBufferFormat = DXGI_FORMAT_R16G16_FLOAT;
 		options.depthBufferFormat = DXGI_FORMAT_R32_FLOAT;
-		options.hudLessBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-		options.enableUserInterfaceRecomposition = sl::Boolean::eFalse;
+		options.hudLessBufferFormat = a_color.resourceFormat;
+		// HDR10 frames carry a premultiplied fp16 interface layer for DLSS-G to recompose.
+		if (render::temporal::IsHdr10PostTonemap(a_color)) {
+			options.uiBufferFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			options.enableUserInterfaceRecomposition = sl::Boolean::eTrue;
+		} else {
+			options.enableUserInterfaceRecomposition = sl::Boolean::eFalse;
+		}
 		if (a_retainResources) {
 			options.flags |= sl::DLSSGFlags::eRetainResourcesWhenOff;
 		}

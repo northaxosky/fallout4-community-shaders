@@ -5,6 +5,7 @@
 #include <winrt/base.h>
 
 #include <cstdint>
+#include <span>
 
 namespace cs::render::hdr
 {
@@ -46,7 +47,7 @@ namespace cs::render::hdr
 	class Compose
 	{
 	public:
-		// Compiles the shared HDROutputCS on the device; false if it cannot.
+		// Compiles the compose shaders on the device; false if any cannot.
 		[[nodiscard]] bool Initialize(ID3D11Device& a_device);
 		void Reset() noexcept;
 		[[nodiscard]] bool IsReady() const noexcept { return _shader && _constants; }
@@ -57,8 +58,24 @@ namespace cs::render::hdr
 			ID3D11ShaderResourceView* a_interface, ID3D11UnorderedAccessView& a_output,
 			UINT a_width, UINT a_height, const OutputSettings& a_settings);
 
+		// Frame generation blends in PQ, so the premultiplied interface is encoded in place.
+		void EncodeInterface(ID3D11DeviceContext& a_context, ID3D11UnorderedAccessView& a_interface,
+			UINT a_width, UINT a_height, const OutputSettings& a_settings);
+
+		// Blends the encoded interface over the encoded HUD-less frame in PQ.
+		void CompositeInterface(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_hudless,
+			ID3D11ShaderResourceView& a_interface, ID3D11UnorderedAccessView& a_output,
+			UINT a_width, UINT a_height);
+
 	private:
+		[[nodiscard]] bool UpdateConstants(ID3D11DeviceContext& a_context, const OutputSettings& a_settings, bool a_skipInterface);
+		void Run(ID3D11DeviceContext& a_context, ID3D11ComputeShader& a_shader,
+			std::span<ID3D11ShaderResourceView* const> a_inputs, ID3D11UnorderedAccessView& a_output,
+			UINT a_width, UINT a_height);
+
 		winrt::com_ptr<ID3D11ComputeShader> _shader;
+		winrt::com_ptr<ID3D11ComputeShader> _encodeInterface;
+		winrt::com_ptr<ID3D11ComputeShader> _compositeInterface;
 		winrt::com_ptr<ID3D11Buffer> _constants;
 	};
 }

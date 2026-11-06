@@ -106,36 +106,30 @@ namespace cs::features
 		std::uint32_t a_width, std::uint32_t a_height, DXGI_FORMAT a_format,
 		std::uint32_t a_bufferCount)
 	{
-		if (a_format != DXGI_FORMAT_R8G8B8A8_UNORM) {
+		const auto color = render::temporal::PresentContractForFormat(a_format);
+		if (!color) {
 			return Failure(
 				std::string(Name()) +
-				" requires the supported SDR swap-chain format.");
+				" does not support the swap-chain format.");
 		}
+		if (_method != Method::kDLSSG && render::temporal::IsHdr10PostTonemap(*color)) {
+			return Failure("FSR frame generation does not support HDR output yet.");
+		}
+		_color = *color;
 		_width = a_width;
 		_height = a_height;
 		_bufferCount = a_bufferCount;
 		if (_method == Method::kDLSSG) {
 			_ready = _runtime.ConfigureDLSSG(
 				false, _configuration, a_width, a_height,
-				a_width, a_height, a_bufferCount, true);
+				a_width, a_height, a_bufferCount, _color, true);
 		} else {
 			render::temporal::FrameGenerationRequest request;
 			request.renderWidth = a_width;
 			request.renderHeight = a_height;
 			request.outputWidth = a_width;
 			request.outputHeight = a_height;
-			request.color = {
-				.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-				.viewFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-				.range = render::temporal::ColorRange::kFull,
-				.transfer = render::temporal::TransferFunction::kGamma22,
-				.primaries =
-					render::temporal::ColorPrimaries::kUnspecified,
-				.stage = render::temporal::ColorStage::kPostTonemapLut,
-				.alpha = render::temporal::AlphaMode::kIgnored,
-				.exposure =
-					render::temporal::ExposureMode::kAutomatic
-			};
+			request.color = _color;
 			const auto algorithm = _method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3;
 			_ready =
 				_runtime.ValidateFSRGAlgorithm(algorithm).Succeeded() &&
@@ -153,10 +147,11 @@ namespace cs::features
 				std::string(Name()) + " presentation is not ready.");
 		}
 		const bool configured = _method == Method::kDLSSG ? (_configuration = a_request.configuration,
+																_color = a_request.color,
 																_runtime.ConfigureDLSSG(a_request.enabled,
 																	_configuration, a_request.renderWidth,
 																	a_request.renderHeight, a_request.outputWidth,
-																	a_request.outputHeight, _bufferCount, true)) :
+																	a_request.outputHeight, _bufferCount, _color, true)) :
 		                                                    _runtime.ConfigureFSRG(a_request.enabled, a_request,
 																_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3);
 		if (!configured) {
@@ -185,7 +180,7 @@ namespace cs::features
 		if (_method == Method::kDLSSG) {
 			_configuration = a_request.configuration;
 			disabled = _runtime.ConfigureDLSSG(false, _configuration,
-				_width, _height, _width, _height, _bufferCount, true);
+				_width, _height, _width, _height, _bufferCount, _color, true);
 		} else {
 			auto request = a_request;
 			request.enabled = false;
@@ -220,7 +215,7 @@ namespace cs::features
 		}
 		if (_method == Method::kDLSSG) {
 			return _runtime.ConfigureDLSSG(a_enabled, _configuration,
-					   _width, _height, _width, _height, _bufferCount, true) ?
+					   _width, _height, _width, _height, _bufferCount, _color, true) ?
 			           ProviderResult::Ok() :
 			           Failure("DLSS-G enablement change failed.");
 		}
@@ -230,17 +225,7 @@ namespace cs::features
 		request.renderHeight = _height;
 		request.outputWidth = _width;
 		request.outputHeight = _height;
-		request.color = {
-			.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-			.viewFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-			.range = render::temporal::ColorRange::kFull,
-			.transfer = render::temporal::TransferFunction::kGamma22,
-			.primaries =
-				render::temporal::ColorPrimaries::kUnspecified,
-			.stage = render::temporal::ColorStage::kPostTonemapLut,
-			.alpha = render::temporal::AlphaMode::kIgnored,
-			.exposure = render::temporal::ExposureMode::kAutomatic
-		};
+		request.color = _color;
 		return _runtime.ConfigureFSRG(a_enabled, request,
 				   _method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3) ?
 		           ProviderResult::Ok() :
@@ -261,7 +246,7 @@ namespace cs::features
 				return ProviderResult::Ok();
 			}
 			if (!_runtime.ConfigureDLSSG(false, _configuration,
-					_width, _height, _width, _height, _bufferCount, true)) {
+					_width, _height, _width, _height, _bufferCount, _color, true)) {
 				return Failure("DLSS-G could not be disabled.");
 			}
 		} else {
@@ -270,18 +255,7 @@ namespace cs::features
 			request.renderHeight = _height;
 			request.outputWidth = _width;
 			request.outputHeight = _height;
-			request.color = {
-				.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-				.viewFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-				.range = render::temporal::ColorRange::kFull,
-				.transfer = render::temporal::TransferFunction::kGamma22,
-				.primaries =
-					render::temporal::ColorPrimaries::kUnspecified,
-				.stage = render::temporal::ColorStage::kPostTonemapLut,
-				.alpha = render::temporal::AlphaMode::kIgnored,
-				.exposure =
-					render::temporal::ExposureMode::kAutomatic
-			};
+			request.color = _color;
 			if (!_runtime.ConfigureFSRG(false, request,
 					_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3)) {
 				return Failure(std::string(Name()) +

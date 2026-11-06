@@ -181,6 +181,8 @@ namespace cs::render
 
 		void CaptureFrameGenerationInputs();
 		void CaptureHUDLessColor();
+		[[nodiscard]] bool CopyHUDLessColor(
+			const TemporalPipeline::FrameGenerationCaptureResources& capture);
 		void RenderReShadeEffects();
 		void FinishPreUiScene(bool a_resolved, bool a_captureHudless);
 		void RecordFrameGenerationFailure() noexcept;

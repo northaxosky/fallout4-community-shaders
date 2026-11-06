@@ -1151,6 +1151,7 @@ namespace cs::features
 		std::uint32_t a_outputWidth,
 		std::uint32_t a_outputHeight,
 		std::uint32_t a_backBufferCount,
+		const render::temporal::ColorContract& a_color,
 		bool a_retainResources)
 	{
 		if (!featureDLSSG || !slDLSSGSetOptions ||
@@ -1170,7 +1171,7 @@ namespace cs::features
 		const auto options = streamline_fg::BuildOptions(
 			a_enabled, a_configuration, a_renderWidth, a_renderHeight,
 			a_outputWidth, a_outputHeight, a_backBufferCount,
-			a_retainResources);
+			a_color, a_retainResources);
 		if (SL_FAILED(result, slDLSSGSetOptions(viewport, options))) {
 			L->error(
 				"Could not configure DLSS-G: {}",
@@ -1301,16 +1302,25 @@ namespace cs::features
 		const sl::Extent outputExtent{
 			0, 0, a_request.outputWidth, a_request.outputHeight
 		};
+		sl::Resource ui(
+			sl::ResourceType::eTex2d,
+			a_request.uiColorAndAlpha.resource,
+			nullptr,
+			nullptr,
+			a_request.uiColorAndAlpha.state);
+		const bool tagUi = a_request.uiMode == render::temporal::UiCompositionMode::kHudlessAndPremultipliedLayer &&
+		                   a_request.uiColorAndAlpha.resource;
 		const sl::ResourceTag tags[]{
 			{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
 			{ &motion, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
-			{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &outputExtent }
+			{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &outputExtent },
+			{ &ui, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, &outputExtent }
 		};
 		if (SL_FAILED(result, slSetTagForFrame(
 								  *frameToken,
 								  viewport,
 								  tags,
-								  _countof(tags),
+								  tagUi ? _countof(tags) : _countof(tags) - 1,
 								  reinterpret_cast<sl::CommandBuffer*>(
 									  a_request.recording.commandList)))) {
 			L->error(
@@ -1359,7 +1369,8 @@ namespace cs::features
 		const sl::ResourceTag tags[]{
 			{ nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
 			{ nullptr, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
-			{ nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr }
+			{ nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+			{ nullptr, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, nullptr }
 		};
 		const auto result = slSetTagForFrame(
 			*frameToken,

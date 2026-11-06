@@ -25,6 +25,7 @@ function main(target)
             "features/Dynamic Cubemaps/Shaders/DynamicCubemaps",
             "features/Extended Materials/Shaders/ExtendedMaterials",
             "features/HDR Display/Shaders/HDRDisplay/HDROutputCS.hlsl",
+            "features/HDR Display/Shaders/HDRDisplay/UIBrightnessCS.hlsl",
             "features/IBL/Shaders/IBL/DiffuseIBLCS.hlsl",
             "features/IBL/Shaders/IBL/IBL.hlsli",
             "features/Skylighting/Shaders/Skylighting/Skylighting.hlsli",

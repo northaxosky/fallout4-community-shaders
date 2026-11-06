@@ -151,6 +151,7 @@ namespace cs::features
 			std::uint32_t a_outputWidth,
 			std::uint32_t a_outputHeight,
 			std::uint32_t a_backBufferCount,
+			const render::temporal::ColorContract& a_color,
 			bool a_retainResources);
 		bool TagDLSSGFrame(
 			const render::temporal::FrameGenerationRequest& a_request);

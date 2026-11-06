@@ -1191,22 +1191,7 @@ namespace cs::render
 							}
 							if (result.color.resourceFormat ==
 								DXGI_FORMAT_UNKNOWN) {
-								result.color = {
-									.resourceFormat =
-										DXGI_FORMAT_R8G8B8A8_UNORM,
-									.viewFormat =
-										DXGI_FORMAT_R8G8B8A8_UNORM,
-									.range = temporal::ColorRange::kFull,
-									.transfer =
-										temporal::TransferFunction::kGamma22,
-									.primaries =
-										temporal::ColorPrimaries::kUnspecified,
-									.stage =
-										temporal::ColorStage::kPostTonemapLut,
-									.alpha = temporal::AlphaMode::kIgnored,
-									.exposure =
-										temporal::ExposureMode::kAutomatic
-								};
+								result.color = temporal::kFo4PostTonemapSdrContract;
 							}
 							return result;
 						},
@@ -1378,11 +1363,12 @@ namespace cs::render
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kOff)] = temporalProxyPath;
 		session.hdrDisplay = request.hdrDisplay;
-		// Frame generation does not carry the HDR container yet.
-		const bool fgDisplayEligible = temporalProxyPath && !request.hdrDisplay;
+		// Only DLSS-G carries the HDR10 container so far.
+		const bool fgDisplayEligible = temporalProxyPath;
+		const bool fsrDisplayEligible = fgDisplayEligible && !request.hdrDisplay;
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kFSR3)] =
-			request.frameGenerationEligible && fgDisplayEligible &&
+			request.frameGenerationEligible && fsrDisplayEligible &&
 			_impl->FrameGenerationProvider(
 					 temporal::FrameGenerationMethod::kFSR3)
 				->IsAvailable();
@@ -1393,7 +1379,7 @@ namespace cs::render
 			_impl->streamlinePresentation.IsAvailable();
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kFSR4)] =
-			request.frameGenerationEligible && fgDisplayEligible &&
+			request.frameGenerationEligible && fsrDisplayEligible &&
 			_impl->streamlineFsr4Presentation.IsAvailable();
 		if (a_adapter) {
 			DXGI_ADAPTER_DESC desc{};
@@ -1935,6 +1921,7 @@ namespace cs::render
 			.inputsCaptured = _impl->inputsCaptured.load(std::memory_order_relaxed),
 			.hudlessPending =
 				_impl->hudlessCapturePending.load(std::memory_order_relaxed),
+			.inputColor = IsHdrContainerActive() ? temporal::kHdr10PostTonemapContract : temporal::kFo4PostTonemapSdrContract,
 			.alphaConditioned =
 				_impl->alphaConditioned.load(std::memory_order_relaxed),
 			.conditionedCaptures =
@@ -1984,6 +1971,7 @@ namespace cs::render
 			.motion = captureTexture(_impl->swapChain.GetMotionTexture()),
 			.depth = captureTexture(_impl->swapChain.GetDepthTexture()),
 			.hudlessColor = captureTexture(_impl->swapChain.GetHudlessTexture()),
+			.hdrContainer = _impl->swapChain.IsHdrContainer(),
 			.width = _impl->swapChain.GetWidth(),
 			.height = _impl->swapChain.GetHeight(),
 			.frameSlot = _impl->swapChain.GetFrameSlot() };

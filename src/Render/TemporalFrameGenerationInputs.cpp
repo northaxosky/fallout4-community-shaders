@@ -262,15 +262,7 @@ namespace cs::render
 				.frameTimeMilliseconds =
 					(timer ? timer->realTimeDelta : 0.0f) * 1000.0f,
 				.resetHistory = resetHistory,
-				.color = {
-					.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-					.viewFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-					.range = temporal::ColorRange::kFull,
-					.transfer = temporal::TransferFunction::kGamma22,
-					.primaries = temporal::ColorPrimaries::kUnspecified,
-					.stage = temporal::ColorStage::kPostTonemapLut,
-					.alpha = temporal::AlphaMode::kIgnored,
-					.exposure = temporal::ExposureMode::kAutomatic },
+				.color = temporal::kFo4PostTonemapSdrContract,
 				.camera = temporal::BuildFrameGenerationCamera(frameBuffer, capture.width, capture.height) });
 
 		auto* context = cs::engine::GetImmediateContext();
@@ -369,25 +361,16 @@ namespace cs::render
 		_hudlessCapturePending = true;
 	}
 
-	void TemporalRenderer::CaptureHUDLessColor()
+	bool TemporalRenderer::CopyHUDLessColor(
+		const render::TemporalPipeline::FrameGenerationCaptureResources& capture)
 	{
-		const auto capture =
-			render::TemporalPipeline::Get()
-				.GetFrameGenerationCaptureResources();
-		if (!_hudlessCapturePending || !_frameGenerationInputsCaptured ||
-			!capture.ready) {
-			return;
-		}
-		_hudlessCapturePending = false;
-		render::TemporalPipeline::Get().SetHudlessCapturePending(false);
-
 		auto* context = cs::engine::GetImmediateContext();
 		auto* frameBufferRTV =
 			cs::engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
 		const auto& hudless = capture.hudlessColor;
 		if (!context || !frameBufferRTV || !hudless.resource) {
 			render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
-			return;
+			return false;
 		}
 
 		winrt::com_ptr<ID3D11Resource> frameBufferResource;
@@ -396,7 +379,7 @@ namespace cs::render
 		if (!frameBufferResource ||
 			FAILED(frameBufferResource->QueryInterface(IID_PPV_ARGS(frameBuffer.put())))) {
 			render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
-			return;
+			return false;
 		}
 
 		D3D11_TEXTURE2D_DESC sourceDesc{};
@@ -408,7 +391,7 @@ namespace cs::render
 			targetDesc.Format != DXGI_FORMAT_R8G8B8A8_UNORM) {
 			render::TemporalPipeline::Get().FailFrameGenerationFrame(
 				"pre-UI RT0 is incompatible with SDR HUDLessColor");
-			return;
+			return false;
 		}
 		if (!temporal::WriteFrameGenerationInput(
 				[]() {
@@ -425,9 +408,28 @@ namespace cs::render
 				})) {
 			render::TemporalPipeline::Get().FailFrameGenerationFrame(
 				"frame-generation HUD-less input was still in provider use");
-			return;
+			return false;
 		}
 		CaptureFrameGenerationHudlessDebugSnapshot();
+		return true;
+	}
+
+	void TemporalRenderer::CaptureHUDLessColor()
+	{
+		const auto capture =
+			render::TemporalPipeline::Get()
+				.GetFrameGenerationCaptureResources();
+		if (!_hudlessCapturePending || !_frameGenerationInputsCaptured ||
+			!capture.ready) {
+			return;
+		}
+		_hudlessCapturePending = false;
+		render::TemporalPipeline::Get().SetHudlessCapturePending(false);
+
+		// The HDR container's scene is fp16 gamma; the presenter encodes its own HUD-less.
+		if (!capture.hdrContainer && !CopyHUDLessColor(capture)) {
+			return;
+		}
 		render::TemporalPipeline::Get().SetFrameGenerationInputsReady(true);
 		const auto [renderWidth, renderHeight] = GetRenderSize();
 		const bool transactionReady =

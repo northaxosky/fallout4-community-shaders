@@ -111,6 +111,7 @@ namespace cs::render
 		bool active = false;
 		bool inputsCaptured = false;
 		bool hudlessPending = false;
+		temporal::ColorContract inputColor = temporal::kFo4PostTonemapSdrContract;
 		bool alphaConditioned = false;
 		std::uint64_t conditionedCaptures = 0;
 		std::uint64_t rawCaptures = 0;
@@ -150,6 +151,8 @@ namespace cs::render
 			Texture motion;
 			Texture depth;
 			Texture hudlessColor;
+			// The HDR container presents PQ, so the presenter writes the HUD-less input.
+			bool hdrContainer = false;
 			std::uint32_t width = 0;
 			std::uint32_t height = 0;
 			std::uint32_t frameSlot = 0;

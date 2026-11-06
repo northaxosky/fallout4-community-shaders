@@ -99,6 +99,7 @@ namespace cs::render
 		[[nodiscard]] UINT GetFrameSlot() const noexcept;
 
 		[[nodiscard]] SharedD3D11D3D12Texture* GetHudlessTexture() const noexcept;
+		[[nodiscard]] SharedD3D11D3D12Texture* GetUiTexture() const noexcept;
 		[[nodiscard]] SharedD3D11D3D12Texture* GetProxyTexture() const noexcept;
 		// Empty unless the HDR container is active.
 		[[nodiscard]] hdr::SceneTarget GetHdrSceneTarget() const noexcept;
@@ -190,12 +191,18 @@ namespace cs::render
 		{
 			std::unique_ptr<SharedD3D11D3D12Texture> proxy;
 			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
+			// HDR container only: the encoded interface layer frame generation recomposes.
+			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> ui;
 			// HDR container only: the composed signal the present copies in place of the proxy.
 			std::unique_ptr<SharedD3D11D3D12Texture> hdrOutput;
 			// HDR container only: the scene, while the proxy collects just the interface.
 			std::unique_ptr<SharedD3D11D3D12Texture> hdrScene;
 		};
 		HRESULT CreateDisplayResources(UINT a_width, UINT a_height, DisplayResources& a_resources);
+		[[nodiscard]] std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> CreateSlotBuffers(
+			const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name) const;
+		// Writes this slot's HUD-less and interface inputs and the PQ composite; false skips the frame.
+		[[nodiscard]] bool ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& a_settings) noexcept;
 		// False when the container has nothing to present this frame.
 		[[nodiscard]] bool ComposeHdr(const hdr::OutputSettings& a_settings) noexcept;
 		[[nodiscard]] std::optional<features::ScRgbProxy> ScRgbFor(
@@ -267,6 +274,7 @@ namespace cs::render
 		bool _hdrContainer = false;
 		bool _hdrDegraded = false;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _hudlessBuffers;
+		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _uiBuffers;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _depthBuffers;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _motionBuffers;
 		winrt::com_ptr<DXGISwapChainProxy> _proxy;

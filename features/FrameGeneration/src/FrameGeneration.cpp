@@ -26,6 +26,11 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.framegeneration");
 
+		std::string_view TransferName(render::temporal::TransferFunction a_transfer) noexcept
+		{
+			return a_transfer == render::temporal::TransferFunction::kPQ ? "pq" : "gamma_2_2";
+		}
+
 		std::string_view MethodName(std::uint32_t a_method) noexcept
 		{
 			return render::temporal::presentation::Name(
@@ -256,8 +261,8 @@ namespace cs::features
 			.Field("inputs_captured", diagnostics.inputsCaptured)
 			.Field("hudless_pending", diagnostics.hudlessPending)
 			.Field("input_color_format",
-				static_cast<std::int64_t>(DXGI_FORMAT_R8G8B8A8_UNORM))
-			.Field("input_transfer", std::string_view{ "gamma_2_2" })
+				static_cast<std::int64_t>(diagnostics.inputColor.resourceFormat))
+			.Field("input_transfer", TransferName(diagnostics.inputColor.transfer))
 			.Field("input_color_stage", std::string_view{ "post_tonemap_lut" })
 			.Field("input_lut_baked", true)
 			.Field("last_alpha_conditioned", diagnostics.alphaConditioned)

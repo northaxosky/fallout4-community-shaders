@@ -59,6 +59,8 @@ namespace
 			{ "FO4/CubemapPreviewCS.hlsl", "cs_5_0", {}, { Toggle("SINGLE_CHANNEL") } },
 
 			{ "HDRDisplay/HDROutputCS.hlsl" },
+			{ "HDRDisplay/UIBrightnessCS.hlsl" },
+			{ "HDRDisplay/InterfaceCompositePQCS.hlsl" },
 
 			{ "IBL/DiffuseIBLCS.hlsl" },
 

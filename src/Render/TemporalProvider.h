@@ -102,12 +102,14 @@ namespace cs::render::temporal
 		kUnknown,
 		kLinear,
 		kGamma22,
-		kSRGB
+		kSRGB,
+		kPQ
 	};
 
 	enum class ColorPrimaries : std::uint8_t
 	{
-		kUnspecified
+		kUnspecified,
+		kBT2020
 	};
 
 	enum class ColorStage : std::uint8_t
@@ -156,6 +158,55 @@ namespace cs::render::temporal
 		       a_color.stage == ColorStage::kPostTonemapLut &&
 		       a_color.alpha == AlphaMode::kIgnored &&
 		       a_color.exposure == ExposureMode::kAutomatic;
+	}
+
+	// The HDR10 present container: PQ/BT.2020 packed in R10G10B10A2.
+	[[nodiscard]] inline bool
+	IsHdr10PostTonemap(const ColorContract& a_color) noexcept
+	{
+		return a_color.resourceFormat == DXGI_FORMAT_R10G10B10A2_UNORM &&
+		       a_color.range == ColorRange::kFull &&
+		       a_color.transfer == TransferFunction::kPQ &&
+		       a_color.primaries == ColorPrimaries::kBT2020 &&
+		       a_color.stage == ColorStage::kPostTonemapLut &&
+		       a_color.alpha == AlphaMode::kIgnored &&
+		       a_color.exposure == ExposureMode::kAutomatic;
+	}
+
+	inline constexpr ColorContract kFo4PostTonemapSdrContract{
+		.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
+		.viewFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
+		.range = ColorRange::kFull,
+		.transfer = TransferFunction::kGamma22,
+		.primaries = ColorPrimaries::kUnspecified,
+		.stage = ColorStage::kPostTonemapLut,
+		.alpha = AlphaMode::kIgnored,
+		.exposure = ExposureMode::kAutomatic
+	};
+
+	inline constexpr ColorContract kHdr10PostTonemapContract{
+		.resourceFormat = DXGI_FORMAT_R10G10B10A2_UNORM,
+		.viewFormat = DXGI_FORMAT_R10G10B10A2_UNORM,
+		.range = ColorRange::kFull,
+		.transfer = TransferFunction::kPQ,
+		.primaries = ColorPrimaries::kBT2020,
+		.stage = ColorStage::kPostTonemapLut,
+		.alpha = AlphaMode::kIgnored,
+		.exposure = ExposureMode::kAutomatic
+	};
+
+	// The contract of a present container, by its swap-chain format.
+	[[nodiscard]] inline std::optional<ColorContract>
+	PresentContractForFormat(DXGI_FORMAT a_format) noexcept
+	{
+		switch (a_format) {
+		case DXGI_FORMAT_R8G8B8A8_UNORM:
+			return kFo4PostTonemapSdrContract;
+		case DXGI_FORMAT_R10G10B10A2_UNORM:
+			return kHdr10PostTonemapContract;
+		default:
+			return std::nullopt;
+		}
 	}
 
 	// FO4: kMain before the imagespace chain is linear scene radiance.
