@@ -260,6 +260,10 @@ PSOutput main(PSInput input)
 #		if defined(PREMULTIPLY_ALPHA)
 	output.Color.xyz *= output.Color.w;
 #		endif
+#		if defined(HDR_OUTPUT)
+	// fp16 RT0 lacks the UNORM clamp that zeroes NaN from degenerate fades.
+	output.Color = saturate(output.Color);
+#		endif
 #	else
 #		if defined(WEATHER)
 	float2 weatherPixel = input.WeatherCoord.xy + 1.0;

@@ -3,10 +3,10 @@
 
 namespace cs::features::hdr_display_shader
 {
-	// The tonemap, gamma and temporal AA passes branch on HDR at run time.
+	// Imagespace branches on HDR at run time; UI effects clamp for fp16 RT0.
 	inline const engine::ShaderDefineDeclaration kShaderDefines{
 		"HDR_OUTPUT",
-		{ engine::ShaderInjectionTarget::kImageSpace }
+		{ engine::ShaderInjectionTarget::kImageSpace, engine::ShaderInjectionTarget::kEffect }
 	};
 
 	inline const engine::RegisterShaderContribution kRegisterShaderContribution{ "HDRDisplay", kShaderDefines };
