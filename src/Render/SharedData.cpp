@@ -266,6 +266,7 @@ namespace cs::render
 				const auto delta = GetRealTimeDelta();
 				const auto nextTimer = state.timer + delta;
 				data.shared = BuildSharedData(nextTimer, *camera, data.fo4);
+				FeatureManager::Get().WriteSharedFrameDataAll(data.shared);
 				const auto* manager = engine::GetRenderTargetManager();
 				// OG deferred, water and tiled-lighting shaders carry no dynamic-resolution constants.
 				const bool fullScale = REX::FModule::IsRuntimeOG();

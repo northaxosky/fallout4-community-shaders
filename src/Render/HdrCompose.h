@@ -1,0 +1,51 @@
+#pragma once
+
+#include <d3d11.h>
+#include <dxgi1_6.h>
+#include <winrt/base.h>
+
+#include <cstdint>
+
+namespace cs::render::hdr
+{
+	// The signal the present chain carries; PQ is the only one so far.
+	enum class Encoding : std::uint8_t
+	{
+		kPQ
+	};
+
+	// Display state the HDR Display feature publishes for the presenter.
+	struct OutputSettings
+	{
+		Encoding encoding = Encoding::kPQ;
+		bool enabled = false;
+		float paperWhite = 203.0f;
+		float peakNits = 1000.0f;
+		float uiBrightness = 1.0f;
+	};
+
+	// The container stays HDR-capable when disabled; only the color space changes.
+	[[nodiscard]] constexpr DXGI_COLOR_SPACE_TYPE ColorSpace(const OutputSettings& a_settings) noexcept
+	{
+		return a_settings.enabled ? DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+	}
+
+	// Encodes the gamma 2.2 scene, where 1.0 is paper white, for the container.
+	class Compose
+	{
+	public:
+		// The shader is the shared HDROutputCS; its device owns the constants.
+		[[nodiscard]] bool Initialize(ID3D11ComputeShader* a_shader);
+		void Reset() noexcept;
+		[[nodiscard]] bool IsReady() const noexcept { return _shader && _constants; }
+
+		// The interface is not composited yet; the scene fills the output.
+		void Dispatch(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_scene,
+			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height,
+			const OutputSettings& a_settings);
+
+	private:
+		winrt::com_ptr<ID3D11ComputeShader> _shader;
+		winrt::com_ptr<ID3D11Buffer> _constants;
+	};
+}

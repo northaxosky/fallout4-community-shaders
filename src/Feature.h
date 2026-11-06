@@ -26,6 +26,7 @@ namespace cs::render
 {
 	struct SharedFeatureDataCB;
 	struct FO4SharedDataCB;
+	struct SharedDataCB;
 }
 
 namespace cs
@@ -89,6 +90,8 @@ namespace cs
 		virtual void OnLoadingMenuClosed() {}
 		virtual void Prepass() {}
 		virtual void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) {}
+		// Fills the b5 frame block the host built; the b6 and b8 writers cannot reach it.
+		virtual void WriteSharedFrameData(render::SharedDataCB&) {}
 		virtual void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept {}
 		// Fires after IsEnabled() flips; resources stay alive while disabled.
 		virtual void OnEnabledChanged(bool) noexcept {}
@@ -339,6 +342,7 @@ namespace cs
 		void ValidateShaderInjectionsAll();
 
 		void WriteSharedDataAll(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4);
+		void WriteSharedFrameDataAll(render::SharedDataCB& a_shared);
 
 		auto GetAll() const noexcept
 		{

@@ -3,6 +3,7 @@
 #include "DynamicCubemapsSettings.h"
 #include "ExtendedMaterialsSettings.h"
 #include "FrameGenerationSettings.h"
+#include "HDRDisplaySettings.h"
 #include "ImageBasedLightingSettings.h"
 #include "LODBlendingSettings.h"
 #include "LightLimitFixSettings.h"
@@ -60,6 +61,7 @@ namespace
 			std::pair{ "MotionVectorFixes", SchemaView{} },
 			std::pair{ "Upscaling", MakeSchemaView(cs::render::temporal::kSchema) },
 			std::pair{ "FrameGeneration", MakeSchemaView(frame_generation::kSchema) },
+			std::pair{ "HDRDisplay", MakeSchemaView(hdr_display::kSchema) },
 			std::pair{ "PerformanceOverlay", MakeSchemaView(performance_overlay::kSchema) },
 			std::pair{ "RenderDoc", MakeSchemaView(renderdoc_settings::kSchema) },
 			std::pair{ "RemoteControl", SchemaView{} },
@@ -68,7 +70,7 @@ namespace
 		CHECK(features.size() == kAllFeatureKeys.size());
 		// Mirrors Feature::SupportsEnableToggle and DefaultEnabled.
 		const auto enabledDefault = [](std::string_view a_key) -> std::optional<bool> {
-			for (const auto optOut : { "LightLimitFix", "Upscaling", "FrameGeneration", "PerformanceOverlay", "RenderDoc", "CSEditor" }) {
+			for (const auto optOut : { "LightLimitFix", "Upscaling", "FrameGeneration", "HDRDisplay", "PerformanceOverlay", "RenderDoc", "CSEditor" }) {
 				if (a_key == optOut)
 					return std::nullopt;
 			}

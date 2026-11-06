@@ -11,6 +11,7 @@
 #include "AntiLag2Latency.h"
 #include "Feature.h"
 #include "FrameGeneration.h"
+#include "HDRDisplay.h"
 #include "Log.h"
 #include "PresentationProviders.h"
 #include "Render/Annotation.h"
@@ -449,10 +450,13 @@ namespace cs::render
 		auto* upscaling = features::Upscaling::GetSingleton();
 		auto* frameGeneration = features::FrameGeneration::GetSingleton();
 
+		auto* hdrDisplay = features::HDRDisplay::GetSingleton();
+
 		temporal::RequestedTopology requested;
 		requested.upscalingEligible = upscaling && upscaling->GetState().IsActive();
 		requested.frameGenerationEligible =
 			frameGeneration && frameGeneration->GetState().IsActive();
+		requested.hdrDisplay = hdrDisplay->GetState().IsActive();
 		if (upscaling) {
 			_impl->requestedRenderSettings = upscaling->settings;
 			requested.superResolution =
@@ -505,11 +509,12 @@ namespace cs::render
 			InstallLatencyHooks();
 			_impl->renderer.InstallTemporalHooks();
 		}
-		L->info("Temporal request frozen: SR={} eligible={}, FG={} eligible={}",
+		L->info("Temporal request frozen: SR={} eligible={}, FG={} eligible={}, HDR={}",
 			static_cast<unsigned>(requested.superResolution),
 			requested.upscalingEligible,
 			static_cast<unsigned>(requested.frameGeneration),
-			requested.frameGenerationEligible);
+			requested.frameGenerationEligible,
+			requested.hdrDisplay);
 	}
 
 	void TemporalPipeline::SubmitLiveConfiguration()
@@ -1071,7 +1076,8 @@ namespace cs::render
 			std::scoped_lock lock(_impl->mutex);
 			request = *_impl->topology.StartupRequest();
 		}
-		if (!request.upscalingEligible && !request.frameGenerationEligible) {
+		if (!request.upscalingEligible && !request.frameGenerationEligible &&
+			!request.hdrDisplay) {
 			return std::nullopt;
 		}
 		if (!a_context.createDevice || !a_context.swapChainDesc ||
@@ -1082,13 +1088,18 @@ namespace cs::render
 				"creation request.");
 			return std::nullopt;
 		}
+		if (request.hdrDisplay) {
+			features::HDRDisplay::GetSingleton()->SeedFromDisplay(
+				a_context.swapChainDesc->OutputWindow);
+		}
 		// The D3D12 proxy presents black in exclusive fullscreen.
 		if (!a_context.swapChainDesc->Windowed) {
 			_impl->creationState.store(TemporalCreationState::kNative,
 				std::memory_order_release);
 			PostFailure(temporal::FailureDomain::kTransport,
-				"Upscaling and frame generation require windowed or borderless "
-				"presentation; exclusive fullscreen keeps native presentation.");
+				"Upscaling, frame generation and HDR output require windowed or "
+				"borderless presentation; exclusive fullscreen keeps native "
+				"presentation.");
 			return std::nullopt;
 		}
 		const double refreshRate =
@@ -1226,7 +1237,12 @@ namespace cs::render
 						[] {
 							features::RenderDoc::GetSingleton()
 								->OnGameFramePresented();
-						} });
+						},
+					.queryHdrOutput =
+						request.hdrDisplay ?
+							std::function<hdr::OutputSettings()>{
+								[] { return features::HDRDisplay::GetSingleton()->GetOutputSettings(); } } :
+							std::function<hdr::OutputSettings()>{} });
 			_impl->activePresentation = nullptr;
 		} catch (const std::exception& e) {
 			if (FAILED(_impl->swapChain.Rollback())) {
@@ -1356,7 +1372,9 @@ namespace cs::render
 		session.rejectionReason = srAdmission.detail;
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kOff)] = temporalProxyPath;
-		const bool fgDisplayEligible = temporalProxyPath;
+		session.hdrDisplay = request.hdrDisplay;
+		// Frame generation does not carry the HDR container yet.
+		const bool fgDisplayEligible = temporalProxyPath && !request.hdrDisplay;
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kFSR3)] =
 			request.frameGenerationEligible && fgDisplayEligible &&
@@ -1843,6 +1861,16 @@ namespace cs::render
 	{
 		return _impl->creationState.load(std::memory_order_acquire) ==
 		       TemporalCreationState::kProxy;
+	}
+
+	bool TemporalPipeline::IsHdrContainerActive() const noexcept
+	{
+		return IsFrameGenerationProxyActive() && _impl->swapChain.IsHdrContainer();
+	}
+
+	bool TemporalPipeline::InitializeHdrCompose(ID3D11ComputeShader* a_shader)
+	{
+		return _impl->swapChain.InitializeHdrCompose(a_shader);
 	}
 
 	bool TemporalPipeline::IsFrameGenerationEnabledForFrame(

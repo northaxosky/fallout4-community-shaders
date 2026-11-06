@@ -487,6 +487,14 @@ namespace cs
 		}
 	}
 
+	void FeatureManager::WriteSharedFrameDataAll(render::SharedDataCB& a_shared)
+	{
+		for (auto* feature : GetAll()) {
+			if (feature->IsEnabled())
+				feature->WriteSharedFrameData(a_shared);
+		}
+	}
+
 	void FeatureManager::ActivateAll()
 	{
 		_loadedFeatures.clear();

@@ -573,7 +573,6 @@ namespace cs::render::temporal
 		a_publishedInnerDescription = a_innerDescription;
 		a_proxyDescription.BufferDesc.Width = a_innerDescription.Width;
 		a_proxyDescription.BufferDesc.Height = a_innerDescription.Height;
-		a_proxyDescription.BufferDesc.Format = a_innerDescription.Format;
 		ResetPresentationProtocol(a_allocatorFenceValues, a_inputReuseGate,
 			a_frameSlot, a_presentPrepared,
 			a_preparedFrameGeneration,

@@ -49,6 +49,8 @@ namespace cs::render::temporal
 	{
 		bool upscalingEligible = false;
 		bool frameGenerationEligible = false;
+		// HDR Display is loaded; the presenter becomes the HDR container.
+		bool hdrDisplay = false;
 		bool superResolutionEnabled = true;
 		bool frameGenerationEnabled = true;
 		SuperResolutionMethod superResolution = SuperResolutionMethod::kDLSS;
@@ -68,6 +70,7 @@ namespace cs::render::temporal
 		bool bridgePresent = false;
 		bool proxyInstalled = false;
 		bool latencyHooksInstalled = false;
+		bool hdrDisplay = false;
 		std::array<bool, static_cast<std::size_t>(SuperResolutionMethod::kCount)> admittedSr{};
 		std::array<bool, static_cast<std::size_t>(FrameGenerationMethod::kCount)>
 			admittedFg{};

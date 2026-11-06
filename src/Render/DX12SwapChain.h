@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include <d3d11_4.h>
@@ -15,6 +16,7 @@
 #include "ReShade/ReShadeRuntime.h"
 #include "Render/DXGISwapChainProxy.h"
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/HdrCompose.h"
 #include "Render/TemporalProvider.h"
 #include "Utils/CSBuffer.h"
 
@@ -57,6 +59,8 @@ namespace cs::render
 		std::function<void()> quarantinePresentation;
 		// The D3D11 device has no swap chain of its own, so game frames end here.
 		std::function<void()> gameFramePresented;
+		// Set when HDR Display is loaded; the inner chain then becomes the HDR container.
+		std::function<hdr::OutputSettings()> queryHdrOutput;
 	};
 
 	class DX12SwapChain : public IDXGISwapChainProxyOwner
@@ -79,6 +83,9 @@ namespace cs::render
 		[[nodiscard]] bool IsReady() const noexcept;
 		[[nodiscard]] bool IsBridgeReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationReady() const noexcept;
+		[[nodiscard]] bool IsHdrContainer() const noexcept;
+		// False without an HDR container; the shader is the shared HDROutputCS.
+		[[nodiscard]] bool InitializeHdrCompose(ID3D11ComputeShader* a_shader);
 		[[nodiscard]] render::temporal::IFrameGenerationProvider*
 		GetPresentationProvider() const noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -176,10 +183,17 @@ namespace cs::render
 			render::temporal::IFrameGenerationProvider* a_provider,
 			bool a_allowStreamlineFallback = false);
 		HRESULT CreateInteropFence();
-		HRESULT CreateDisplayResources(
-			UINT a_width, UINT a_height,
-			std::unique_ptr<SharedD3D11D3D12Texture>& a_proxy,
-			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2>& a_hudless);
+		struct DisplayResources
+		{
+			std::unique_ptr<SharedD3D11D3D12Texture> proxy;
+			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
+			// HDR container only: the composed signal the present copies in place of the proxy.
+			std::unique_ptr<SharedD3D11D3D12Texture> hdrOutput;
+		};
+		HRESULT CreateDisplayResources(UINT a_width, UINT a_height, DisplayResources& a_resources);
+		// False when the container has nothing to present this frame.
+		[[nodiscard]] bool ComposeHdr() noexcept;
+		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept;
 		HRESULT RecreateDisplayResources(UINT a_width, UINT a_height);
 		HRESULT RecreateFrameGenerationResources(UINT a_width, UINT a_height);
 		HRESULT RestoreFrameGenerationProvider(UINT a_width, UINT a_height);
@@ -239,6 +253,10 @@ namespace cs::render
 		winrt::com_ptr<ID3D11Fence> _inputRetirementFence11;
 		winrt::com_ptr<IDXGISwapChain4> _swapChain;
 		std::unique_ptr<SharedD3D11D3D12Texture> _proxyBuffer;
+		std::unique_ptr<SharedD3D11D3D12Texture> _hdrOutput;
+		hdr::Compose _hdrCompose;
+		std::optional<DXGI_COLOR_SPACE_TYPE> _appliedColorSpace;
+		bool _hdrContainer = false;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _hudlessBuffers;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _depthBuffers;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _motionBuffers;

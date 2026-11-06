@@ -148,6 +148,12 @@ namespace cs::render::temporal::presentation
 			a_status.session.admittedFg[index]) {
 			return {};
 		}
+		if (a_status.session.hdrDisplay) {
+			return {
+				.kind = AvailabilityKind::kUnavailable,
+				.reason = "Unavailable while HDR Display is loaded."
+			};
+		}
 		if (a_method == FrameGenerationMethod::kDLSSG) {
 			if (!a_status.session.latencyHooksInstalled) {
 				return {

@@ -49,6 +49,7 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 - [Remote Control](RemoteControl.md)
 - [Upscaling](Upscaling.md)
 - [FrameGeneration](FrameGeneration.md)
+- [HDR Display](HDRDisplay.md)
 - [MotionVectorFixes](MotionVectorFixes.md)
 - [Screen Space GI](ScreenSpaceGI.md)
 - [Screen Space Shadows](ScreenSpaceShadows.md)
@@ -64,3 +65,5 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 ## Upstream bugs
 
 - `Common/FrameBuffer.hlsli` clamp helpers bound X to a texel-edge clamp but Y to the raw ratio, which may read past the bottom edge of reduced-resolution allocations; needs investigation.
+- HDR Display: the `hdrPeakNits` struct default is 800 while restore-defaults uses 1000.
+- HDR Display: `bUse64bitsHDRRenderTarget` is set at `kDataLoaded`, after the renderer has created its targets.

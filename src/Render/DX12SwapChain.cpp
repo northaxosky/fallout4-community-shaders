@@ -17,6 +17,7 @@
 #include <REX/TScopeExit.h>
 
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Render/Annotation.h"
 #include "Render/RendererContext.h"
 #include "Render/TemporalPipeline.h"
@@ -175,6 +176,7 @@ namespace cs::render
 				retain(a_shared->resource12.get());
 			};
 			retainShared(_proxyBuffer);
+			retainShared(_hdrOutput);
 			for (const auto& resource : _hudlessBuffers) {
 				retainShared(resource);
 			}
@@ -205,6 +207,7 @@ namespace cs::render
 		}
 		_streamline = a_streamline;
 		_callbacks = std::move(a_callbacks);
+		_hdrContainer = static_cast<bool>(_callbacks.queryHdrOutput);
 		_creationDesc = a_desc;
 		_proxyDesc = a_desc;
 
@@ -261,8 +264,9 @@ namespace cs::render
 		_presentationBound = true;
 		NotifyPresentationBinding(_swapChain.get());
 		ClearSharedBuffers();
-		L->info("Published D3D11-facing plain D3D12 proxy at {}x{} R8G8B8A8_UNORM",
-			_innerDesc.Width, _innerDesc.Height);
+		L->info("Published D3D11-facing plain D3D12 proxy at {}x{} {}",
+			_innerDesc.Width, _innerDesc.Height,
+			_hdrContainer ? "R10G10B10A2_UNORM (HDR container)" : "R8G8B8A8_UNORM");
 		return S_OK;
 	}
 
@@ -286,6 +290,9 @@ namespace cs::render
 		_callbacks.quarantinePresentation = std::move(quarantinePresentation);
 		_published = false;
 		ReleaseReShade();
+		_hdrCompose.Reset();
+		_appliedColorSpace.reset();
+		_hdrContainer = false;
 		if (_quarantined) {
 			return DXGI_ERROR_DEVICE_REMOVED;
 		}
@@ -324,6 +331,7 @@ namespace cs::render
 			hudless.reset();
 		}
 		_proxyBuffer.reset();
+		_hdrOutput.reset();
 		for (auto& backBuffer : _backBuffers) {
 			backBuffer = nullptr;
 		}
@@ -616,7 +624,7 @@ namespace cs::render
 			_innerDesc.Height =
 				static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1));
 		}
-		_innerDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		_innerDesc.Format = _hdrContainer ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
 		_innerDesc.SampleDesc.Count = 1;
 		_innerDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 		_innerDesc.BufferCount = 2;
@@ -681,6 +689,10 @@ namespace cs::render
 		if (SUCCEEDED(result) && _swapChain) {
 			_frameIndex = _swapChain->GetCurrentBackBufferIndex();
 			_proxyDesc = swap_chain_facade::BuildDescription(a_desc, _innerDesc);
+			_appliedColorSpace.reset();
+			if (_hdrContainer && _callbacks.queryHdrOutput) {
+				ApplyHdrColorSpace(_callbacks.queryHdrOutput());
+			}
 		}
 		return result;
 	}
@@ -727,9 +739,7 @@ namespace cs::render
 	}
 
 	HRESULT DX12SwapChain::CreateDisplayResources(
-		UINT a_width, UINT a_height,
-		std::unique_ptr<SharedD3D11D3D12Texture>& a_proxy,
-		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2>& a_hudless)
+		UINT a_width, UINT a_height, DisplayResources& a_resources)
 	{
 		D3D11_TEXTURE2D_DESC desc{};
 		desc.Width = a_width;
@@ -741,11 +751,11 @@ namespace cs::render
 		desc.Usage = D3D11_USAGE_DEFAULT;
 		desc.BindFlags =
 			swap_chain_facade::BackBufferBindFlags(_proxyDesc.BufferUsage);
-		auto proxy = SharedD3D11D3D12Texture::Create(
+		DisplayResources resources;
+		resources.proxy = SharedD3D11D3D12Texture::Create(
 			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationProxy");
-		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
 		if (_provider) {
-			hudless = {
+			resources.hudless = {
 				SharedD3D11D3D12Texture::Create(
 					_device11.get(), _device12.get(), desc,
 					"Upscaling/HUDLess[0]"),
@@ -754,25 +764,30 @@ namespace cs::render
 					"Upscaling/HUDLess[1]")
 			};
 		}
-		if (!proxy || (_provider && (!hudless[0] || !hudless[1]))) {
+		if (_hdrContainer) {
+			desc.Format = _innerDesc.Format;
+			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			resources.hdrOutput = SharedD3D11D3D12Texture::Create(
+				_device11.get(), _device12.get(), desc, "Present/HdrOutput");
+		}
+		if (!resources.proxy || (_provider && (!resources.hudless[0] || !resources.hudless[1])) ||
+			(_hdrContainer && !resources.hdrOutput)) {
 			return E_OUTOFMEMORY;
 		}
-		a_proxy = std::move(proxy);
-		a_hudless = std::move(hudless);
+		a_resources = std::move(resources);
 		return S_OK;
 	}
 
 	HRESULT DX12SwapChain::RecreateDisplayResources(UINT a_width, UINT a_height)
 	{
-		std::unique_ptr<SharedD3D11D3D12Texture> proxy;
-		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
-		const HRESULT result =
-			CreateDisplayResources(a_width, a_height, proxy, hudless);
+		DisplayResources resources;
+		const HRESULT result = CreateDisplayResources(a_width, a_height, resources);
 		if (FAILED(result)) {
 			return result;
 		}
-		_proxyBuffer = std::move(proxy);
-		_hudlessBuffers = std::move(hudless);
+		_proxyBuffer = std::move(resources.proxy);
+		_hudlessBuffers = std::move(resources.hudless);
+		_hdrOutput = std::move(resources.hdrOutput);
 		if (_streamline) {
 			_streamline->NotifyDLSSGDisplayChange(
 				a_width, a_height);
@@ -837,7 +852,7 @@ namespace cs::render
 		++_inputResourceGeneration;
 		const auto providerResult =
 			_provider ? _provider->CreateDisplayResources(a_width, a_height,
-							DXGI_FORMAT_R8G8B8A8_UNORM,
+							_innerDesc.Format,
 							_innerDesc.BufferCount) :
 						render::temporal::ProviderResult{};
 		if (!providerResult.Succeeded()) {
@@ -860,7 +875,7 @@ namespace cs::render
 		const render::temporal::ProviderDisplayDescription description{
 			.width = a_width,
 			.height = a_height,
-			.format = DXGI_FORMAT_R8G8B8A8_UNORM,
+			.format = _innerDesc.Format,
 			.bufferCount = _innerDesc.BufferCount
 		};
 		const auto result = render::temporal::RestoreProviderAfterResize(
@@ -912,7 +927,7 @@ namespace cs::render
 	bool DX12SwapChain::IsReady() const noexcept
 	{
 		return !_quarantined && _published && _swapChain && _proxyBuffer &&
-		       _context11 && _queue && _retirementQueue &&
+		       (!_hdrContainer || _hdrOutput) && _context11 && _queue && _retirementQueue &&
 		       _fence11 && _fence12 && _inputRetirementFence11 &&
 		       _inputRetirementFence12 && _presentingCompletionFence &&
 		       _fenceEvent &&
@@ -1831,6 +1846,10 @@ namespace cs::render
 			if (PrepareReShade()) {
 				_reshade.Present(*_context11, *_proxyBuffer->texture11);
 			}
+			const auto* copySource = _proxyBuffer.get();
+			if (_hdrContainer && !ComposeHdr()) {
+				copySource = nullptr;
+			}
 			cs::render::annotation::SetMarker("FG_D3D11ProductionComplete");
 			const UINT64 d3d11Ready = _nextFenceValue++;
 			DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Ready));
@@ -1840,14 +1859,14 @@ namespace cs::render
 				submission->allocator.get(), nullptr));
 
 			auto* commandList = submission->commandList.get();
-			{
+			if (copySource) {
 				auto timing =
 					render::TemporalPipeline::Get().MeasureFrameGenerationCpuPhase(
 						render::FrameGenerationCpuPhase::kCopyRecord);
 				cs::render::annotation::ScopedEvent copyScope(commandList,
 					"FG_CopyRealFrame");
 				const std::array barriersBefore{
-					Transition(_proxyBuffer->resource12.get(),
+					Transition(copySource->resource12.get(),
 						D3D12_RESOURCE_STATE_COMMON,
 						D3D12_RESOURCE_STATE_COPY_SOURCE),
 					Transition(_backBuffers[_frameIndex].get(),
@@ -1857,9 +1876,9 @@ namespace cs::render
 				commandList->ResourceBarrier(static_cast<UINT>(barriersBefore.size()),
 					barriersBefore.data());
 				commandList->CopyResource(_backBuffers[_frameIndex].get(),
-					_proxyBuffer->resource12.get());
+					copySource->resource12.get());
 				const std::array barriersAfter{
-					Transition(_proxyBuffer->resource12.get(),
+					Transition(copySource->resource12.get(),
 						D3D12_RESOURCE_STATE_COPY_SOURCE,
 						D3D12_RESOURCE_STATE_COMMON),
 					Transition(_backBuffers[_frameIndex].get(),
@@ -2127,6 +2146,49 @@ namespace cs::render
 			render::TemporalPipeline::Get().RequestFrameGenerationReset();
 		}
 		return presentResult;
+	}
+
+	bool DX12SwapChain::IsHdrContainer() const noexcept
+	{
+		return _hdrContainer && IsReady();
+	}
+
+	bool DX12SwapChain::InitializeHdrCompose(ID3D11ComputeShader* a_shader)
+	{
+		return _hdrContainer && _hdrCompose.Initialize(a_shader);
+	}
+
+	void DX12SwapChain::ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept
+	{
+		const auto colorSpace = hdr::ColorSpace(a_settings);
+		if (!_swapChain || _appliedColorSpace == colorSpace) {
+			return;
+		}
+		// Applied once per change; a failure is not retried every frame.
+		_appliedColorSpace = colorSpace;
+		const HRESULT result = _swapChain->SetColorSpace1(colorSpace);
+		if (FAILED(result)) {
+			L->error("HDR container color space {} was rejected: {:#010x}",
+				static_cast<int>(colorSpace), static_cast<std::uint32_t>(result));
+			return;
+		}
+		// Static metadata misbehaves on some monitors, so none is sent.
+		_swapChain->SetHDRMetaData(DXGI_HDR_METADATA_TYPE_NONE, 0, nullptr);
+		L->info("HDR container color space set to {}",
+			a_settings.enabled ? "G2084 (HDR10)" : "G22 (SDR)");
+	}
+
+	bool DX12SwapChain::ComposeHdr() noexcept
+	{
+		const auto settings = _callbacks.queryHdrOutput ? _callbacks.queryHdrOutput() : hdr::OutputSettings{};
+		ApplyHdrColorSpace(settings);
+		if (!_hdrCompose.IsReady() || !_hdrOutput || !_proxyBuffer->srv11 || !_hdrOutput->uav11) {
+			CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "HDR compose is unavailable; the frame is not presented.");
+			return false;
+		}
+		_hdrCompose.Dispatch(*_context11, *_proxyBuffer->srv11, *_hdrOutput->uav11,
+			_innerDesc.Width, _innerDesc.Height, settings);
+		return true;
 	}
 
 	bool DX12SwapChain::PrepareReShade() noexcept
@@ -2417,11 +2479,10 @@ namespace cs::render
 
 		const UINT oldWidth = _innerDesc.Width;
 		const UINT oldHeight = _innerDesc.Height;
-		std::unique_ptr<SharedD3D11D3D12Texture> pendingProxy;
-		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> pendingHudless;
+		DisplayResources pending;
 		if (targetWidth != oldWidth || targetHeight != oldHeight) {
 			const HRESULT resourceResult = CreateDisplayResources(
-				targetWidth, targetHeight, pendingProxy, pendingHudless);
+				targetWidth, targetHeight, pending);
 			if (FAILED(resourceResult)) {
 				return resourceResult;
 			}
@@ -2469,7 +2530,7 @@ namespace cs::render
 		}
 
 		const HRESULT resizeResult = _swapChain->ResizeBuffers(
-			effectiveCount, targetWidth, targetHeight, DXGI_FORMAT_R8G8B8A8_UNORM,
+			effectiveCount, targetWidth, targetHeight, _innerDesc.Format,
 			swap_chain_facade::PreservePrivateResizeFlags(a_flags, _innerDesc));
 		if (FAILED(resizeResult)) {
 			const HRESULT refreshResult = RefreshBackBuffers();
@@ -2479,7 +2540,7 @@ namespace cs::render
 			const render::temporal::ProviderDisplayDescription oldDescription{
 				.width = oldWidth,
 				.height = oldHeight,
-				.format = DXGI_FORMAT_R8G8B8A8_UNORM,
+				.format = _innerDesc.Format,
 				.bufferCount = _innerDesc.BufferCount
 			};
 			if (_provider) {
@@ -2506,12 +2567,13 @@ namespace cs::render
 		const bool sizeChanged =
 			resizedDesc.Width != oldWidth || resizedDesc.Height != oldHeight;
 		if (sizeChanged &&
-			(!pendingProxy ||
-				(_provider && (!pendingHudless[0] || !pendingHudless[1])) ||
+			(!pending.proxy ||
+				(_provider && (!pending.hudless[0] || !pending.hudless[1])) ||
+				(_hdrContainer && !pending.hdrOutput) ||
 				targetWidth != resizedDesc.Width ||
 				targetHeight != resizedDesc.Height)) {
 			const HRESULT resourceResult = CreateDisplayResources(
-				resizedDesc.Width, resizedDesc.Height, pendingProxy, pendingHudless);
+				resizedDesc.Width, resizedDesc.Height, pending);
 			if (FAILED(resourceResult)) {
 				_published = false;
 				DisableFrameGeneration("resized display resources were unavailable");
@@ -2529,9 +2591,11 @@ namespace cs::render
 		if (sizeChanged) {
 			// ReShade's copy and runtime are sized at creation.
 			ReleaseReShade();
-			_proxyBuffer = std::move(pendingProxy);
-			_hudlessBuffers = std::move(pendingHudless);
+			_proxyBuffer = std::move(pending.proxy);
+			_hudlessBuffers = std::move(pending.hudless);
+			_hdrOutput = std::move(pending.hdrOutput);
 		}
+		_appliedColorSpace.reset();
 		render::temporal::CommitResizeBridgeState(
 			resizedDesc, _proxyDesc, _innerDesc, _allocatorFenceValues,
 			_inputReuseGate, _frameSlot, _presentPrepared, _preparedFrameGeneration,

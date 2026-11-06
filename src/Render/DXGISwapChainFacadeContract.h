@@ -12,7 +12,8 @@ namespace cs::render::swap_chain_facade
 		auto result = a_requested;
 		result.BufferDesc.Width = a_inner.Width;
 		result.BufferDesc.Height = a_inner.Height;
-		result.BufferDesc.Format = a_inner.Format;
+		// The inner format may be an HDR container the game must never see.
+		result.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		result.SampleDesc = { 1, 0 };
 		result.BufferCount = a_inner.BufferCount;
 		result.Windowed = TRUE;
