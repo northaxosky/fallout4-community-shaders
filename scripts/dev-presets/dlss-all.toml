@@ -1,71 +1,13 @@
-# Every feature; deploy-dev.ps1 forces the dev tools on.
+# Settings only; deploy-dev.ps1 loads every feature without a load key and pins the dev tools.
 
 [logging]
 telemetry = true
 
-[features.ScreenSpaceGI]
-load = true
-
-[features.SubsurfaceScattering]
-load = true
-
-[features.Skylighting]
-load = true
-
-[features.LightLimitFix]
-load = true
-
-[features.DynamicCubemaps]
-load = true
-
 [features.ImageBasedLighting]
-load = true
 enabled = true
-
-[features.WaterEffects]
-load = true
-
-[features.UnifiedWater]
-load = true
-
-[features.ScreenSpaceShadows]
-load = true
-
-[features.TerrainShadows]
-load = true
-
-[features.VolumetricShadows]
-load = true
-
-[features.CloudShadows]
-load = true
-
-[features.LODBlending]
-load = true
-
-[features.TerrainVariation]
-load = true
-
-[features.TerrainBlending]
-load = true
-
-[features.ExtendedMaterials]
-load = true
-
-[features.MotionVectorFixes]
-load = true
-
-[features.Upscaling]
-load = true
 
 [features.Upscaling.settings]
 upscale_method = 3
 
-[features.FrameGeneration]
-load = true
-
 [features.FrameGeneration.settings]
 frame_generation_method = 2
-
-[features.PerformanceOverlay]
-load = true

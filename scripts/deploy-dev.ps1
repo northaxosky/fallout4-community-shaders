@@ -6,6 +6,7 @@
 	Clears the deploy environment variables, refuses to run while the game is open, builds releasedbg,
 	installs into build/isolated-install, mirrors that into the mod folder (keeping its ShaderCache,
 	Presets and plugin TOML), then overwrites the plugin TOML and verifies the DLL and PDB hashes.
+	Every feature the TOML leaves without a load key is loaded; RenderDoc loads only with -RenderDoc.
 	Use -WhatIf to list the steps without building or copying.
 
 .PARAMETER Mod
@@ -54,20 +55,28 @@ if ($PSCmdlet.ShouldProcess($modPath, "build, install and deploy with $Toml")) {
 	robocopy $install $modPath /MIR /NJH /NJS /NP /NDL /XF FO4CommunityShaders.toml meta.ini /XD ShaderCache Presets | Out-Null
 	if ($LASTEXITCODE -ge 8) { throw "robocopy failed (exit $LASTEXITCODE)." }
 	New-Item -ItemType Directory -Force (Join-Path $modPath $plugin) | Out-Null
-	# Pin dev tool loading so every deployed build can be inspected.
 	$settings = Get-Content -LiteralPath $Toml -Raw
-	$tools = [ordered]@{ RemoteControl = $true; CSEditor = $true; RenderDoc = $RenderDoc.IsPresent }
-	foreach ($tool in $tools.Keys) {
-		$load = "load = $($tools[$tool].ToString().ToLower())"
-		$section = "(?ms)^\[features\.$tool\][ \t]*\r?\n(?:(?!^\[).)*?^[ \t]*#?[ \t]*load[ \t]*=[ \t]*\w+[^\r\n]*"
-		if ($settings -match "(?m)^\[features\.$tool\][ \t]*\r?$") {
+	# A feature without a load key stays unloaded, so derive the list from the sources.
+	$features = Get-ChildItem (Join-Path $root 'features\*\src\*.h') |
+		Select-String -Pattern 'GetName\(\) const override \{ return "(\w+)"; \}' |
+		ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object -Unique
+	if (-not $features) { throw 'No feature names found under features\.' }
+	# Pin dev tool loading so every deployed build can be inspected.
+	$tools = @{ RemoteControl = $true; CSEditor = $true; RenderDoc = $RenderDoc.IsPresent }
+	foreach ($feature in $features) {
+		$pinned = $tools.ContainsKey($feature)
+		$load = "load = $(($pinned ? $tools[$feature] : $true).ToString().ToLower())"
+		$section = "(?ms)^\[features\.$feature\][ \t]*\r?\n(?:(?!^\[).)*?^[ \t]*#?[ \t]*load[ \t]*=[ \t]*\w+[^\r\n]*"
+		$explicit = "(?ms)^\[features\.$feature\][ \t]*\r?\n(?:(?!^\[).)*?^[ \t]*load[ \t]*="
+		if ($settings -match "(?m)^\[features\.$feature\][ \t]*\r?$") {
+			if (-not $pinned -and $settings -match $explicit) { continue }
 			if ($settings -match $section) {
 				$settings = [regex]::Replace($settings, $section, { param($m) $m.Value -replace '[ \t]*#?[ \t]*load[ \t]*=[ \t]*\w+[^\r\n]*$', $load }, 1)
 			} else {
-				$settings = $settings -replace "(?m)^\[features\.$tool\][ \t]*\r?$", "[features.$tool]`n$load"
+				$settings = $settings -replace "(?m)^\[features\.$feature\][ \t]*\r?$", "[features.$feature]`n$load"
 			}
 		} else {
-			$settings = $settings.TrimEnd() + "`n`n[features.$tool]`n$load`n"
+			$settings = $settings.TrimEnd() + "`n`n[features.$feature]`n$load`n"
 		}
 	}
 	Set-Content -LiteralPath (Join-Path $modPath "$plugin\FO4CommunityShaders.toml") -Value $settings -NoNewline
