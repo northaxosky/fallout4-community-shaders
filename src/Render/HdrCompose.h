@@ -34,8 +34,8 @@ namespace cs::render::hdr
 	class Compose
 	{
 	public:
-		// The shader is the shared HDROutputCS; its device owns the constants.
-		[[nodiscard]] bool Initialize(ID3D11ComputeShader* a_shader);
+		// Compiles the shared HDROutputCS on the device; false if it cannot.
+		[[nodiscard]] bool Initialize(ID3D11Device& a_device);
 		void Reset() noexcept;
 		[[nodiscard]] bool IsReady() const noexcept { return _shader && _constants; }
 

@@ -331,6 +331,8 @@ namespace cs
 			const toml::node* a_enabled,
 			std::string_view a_phase,
 			std::string& a_error);
+		// Keeps the feature loaded but marks part of it unavailable.
+		void ReportDegraded(Feature& a_feature, std::string a_detail);
 		bool SaveAllSettings(std::string& a_error);
 		bool LoadAllSettings(std::string& a_error);
 		bool ResetAllSettings(std::string& a_error);

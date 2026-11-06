@@ -487,6 +487,12 @@ namespace cs
 		}
 	}
 
+	void FeatureManager::ReportDegraded(Feature& a_feature, std::string a_detail)
+	{
+		L->warn("Feature {} degraded: {}", a_feature.GetName(), a_detail);
+		a_feature.SetRuntimeState(FeatureRuntimeState::kDegraded, std::move(a_detail));
+	}
+
 	void FeatureManager::WriteSharedFrameDataAll(render::SharedDataCB& a_shared)
 	{
 		for (auto* feature : GetAll()) {

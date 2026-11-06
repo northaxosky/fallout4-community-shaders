@@ -211,8 +211,6 @@ namespace cs::render
 		[[nodiscard]] bool IsFrameGenerationProxyActive() const noexcept;
 		// True while the presenter carries the HDR container (never in exclusive fullscreen).
 		[[nodiscard]] bool IsHdrContainerActive() const noexcept;
-		// Hands the shared HDROutputCS to the container; false when there is none.
-		bool InitializeHdrCompose(ID3D11ComputeShader* a_shader);
 		[[nodiscard]] bool
 		IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
 		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;

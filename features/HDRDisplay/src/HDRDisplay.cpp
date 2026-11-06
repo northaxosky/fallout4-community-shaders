@@ -11,7 +11,6 @@
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalPipeline.h"
 #include "Settings/SettingsPersistence.h"
-#include "Utils/CSUtil.h"
 #include "World/Sky.h"
 
 namespace cs::features
@@ -59,18 +58,6 @@ namespace cs::features
 		_settings.enableHDR = _windowsHdrOn.load(std::memory_order_acquire);
 		_settings.autoDetected = autoDetected;
 		SaveSettings();
-	}
-
-	void HDRDisplay::OnD3D11Ready(IDXGIAdapter*, ID3D11Device*)
-	{
-		const auto shader = util::CompileComputeShader("HDRDisplay/HDROutputCS", L"Data\\Shaders\\HDRDisplay\\HDROutputCS.hlsl");
-		if (!shader) {
-			FailLoad("HDR Display could not compile its output shader");
-			return;
-		}
-		// No container in exclusive fullscreen; the feature then idles.
-		if (!render::TemporalPipeline::Get().InitializeHdrCompose(shader.get()))
-			L->warn("HDR output is inactive: the presenter has no HDR container");
 	}
 
 	void HDRDisplay::SeedFromDisplay(HWND a_window)
@@ -124,7 +111,7 @@ namespace cs::features
 
 		if (const ui::Section section{ "hdr-display-output", "Output" }; section) {
 			if (!render::TemporalPipeline::Get().IsHdrContainerActive())
-				dmui::ui::TextDisabled("HDR output needs borderless windowed mode.");
+				dmui::ui::TextDisabled("HDR output is inactive; it needs borderless windowed mode.");
 			else if (_displayKnown.load(std::memory_order_acquire))
 				dmui::ui::TextDisabled(_windowsHdrOn.load(std::memory_order_acquire)       ? "Windows HDR is on." :
 									   _displaySupportsHdr.load(std::memory_order_acquire) ? "Windows HDR is off for this display." :

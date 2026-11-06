@@ -1275,6 +1275,11 @@ namespace cs::render
 			return std::nullopt;
 		}
 
+		if (_impl->swapChain.IsHdrDegraded()) {
+			FeatureManager::Get().ReportDegraded(
+				*features::HDRDisplay::GetSingleton(),
+				"HDR output shader failed to compile; presenting SDR");
+		}
 		*a_context.device = device;
 		*a_context.immediateContext = immediateContext;
 		*a_context.swapChain = _impl->swapChain.AcquireProxy();
@@ -1866,11 +1871,6 @@ namespace cs::render
 	bool TemporalPipeline::IsHdrContainerActive() const noexcept
 	{
 		return IsFrameGenerationProxyActive() && _impl->swapChain.IsHdrContainer();
-	}
-
-	bool TemporalPipeline::InitializeHdrCompose(ID3D11ComputeShader* a_shader)
-	{
-		return _impl->swapChain.InitializeHdrCompose(a_shader);
 	}
 
 	bool TemporalPipeline::IsFrameGenerationEnabledForFrame(

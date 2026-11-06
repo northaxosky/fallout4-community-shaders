@@ -208,6 +208,7 @@ namespace cs::render
 		_streamline = a_streamline;
 		_callbacks = std::move(a_callbacks);
 		_hdrContainer = static_cast<bool>(_callbacks.queryHdrOutput);
+		_hdrDegraded = false;
 		_creationDesc = a_desc;
 		_proxyDesc = a_desc;
 
@@ -231,6 +232,12 @@ namespace cs::render
 				}
 				result = FAILED(disableFsrG.hresult) ? disableFsrG.hresult : E_FAIL;
 			}
+		}
+		// Chosen before the format: an R10 chain nothing can fill would present nothing.
+		if (SUCCEEDED(result) && _hdrContainer && !_hdrCompose.Initialize(*_device11)) {
+			L->error("HDR compose is unavailable; presenting SDR");
+			_hdrContainer = false;
+			_hdrDegraded = true;
 		}
 		winrt::com_ptr<IDXGIAdapter> actualAdapter;
 		if (SUCCEEDED(result)) {
@@ -293,6 +300,7 @@ namespace cs::render
 		_hdrCompose.Reset();
 		_appliedColorSpace.reset();
 		_hdrContainer = false;
+		_hdrDegraded = false;
 		if (_quarantined) {
 			return DXGI_ERROR_DEVICE_REMOVED;
 		}
@@ -2151,11 +2159,6 @@ namespace cs::render
 	bool DX12SwapChain::IsHdrContainer() const noexcept
 	{
 		return _hdrContainer && IsReady();
-	}
-
-	bool DX12SwapChain::InitializeHdrCompose(ID3D11ComputeShader* a_shader)
-	{
-		return _hdrContainer && _hdrCompose.Initialize(a_shader);
 	}
 
 	void DX12SwapChain::ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept

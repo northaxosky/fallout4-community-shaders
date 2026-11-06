@@ -1,14 +1,18 @@
 #include "Render/HdrCompose.h"
 
+#include "Log.h"
 #include "Render/Annotation.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderStage.h"
 #include "Render/SharedData.h"
+#include "Utils/ShaderCompile.h"
 
 namespace cs::render::hdr
 {
 	namespace
 	{
+		auto* L = cs::log::Get("cs.render.hdrcompose");
+
 		// HDROutputCS PerFrame; the unused tail serves the UI and AutoHDR paths.
 		struct alignas(16) PerFrame
 		{
@@ -19,22 +23,29 @@ namespace cs::render::hdr
 		static_assert(sizeof(PerFrame) == 48);
 	}
 
-	bool Compose::Initialize(ID3D11ComputeShader* a_shader)
+	bool Compose::Initialize(ID3D11Device& a_device)
 	{
 		Reset();
-		if (!a_shader)
+		// Compiled directly: the shader cache and engine device are not up at chain creation.
+		std::string error;
+		const auto blob = util::CompileShaderToBlob(L"Data\\Shaders\\HDRDisplay\\HDROutputCS.hlsl", {}, "cs_5_0", "main", &error);
+		if (!blob) {
+			L->error("HDROutputCS failed to compile: {}", error);
 			return false;
-		winrt::com_ptr<ID3D11Device> device;
-		a_shader->GetDevice(device.put());
+		}
 		D3D11_BUFFER_DESC desc{};
 		desc.ByteWidth = sizeof(PerFrame);
 		desc.Usage = D3D11_USAGE_DYNAMIC;
 		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 		desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-		if (!device || FAILED(device->CreateBuffer(&desc, nullptr, _constants.put())))
+		const HRESULT shader = a_device.CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, _shader.put());
+		if (FAILED(shader) || FAILED(a_device.CreateBuffer(&desc, nullptr, _constants.put()))) {
+			L->error("HDR compose resources were rejected by the device: {:#010x}", static_cast<std::uint32_t>(shader));
+			Reset();
 			return false;
+		}
+		annotation::SetName(_shader.get(), "Render/HdrCompose.CS");
 		annotation::SetName(_constants.get(), "Render/HdrCompose.Constants");
-		_shader.copy_from(a_shader);
 		return true;
 	}
 

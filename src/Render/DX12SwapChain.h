@@ -84,8 +84,8 @@ namespace cs::render
 		[[nodiscard]] bool IsBridgeReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationReady() const noexcept;
 		[[nodiscard]] bool IsHdrContainer() const noexcept;
-		// False without an HDR container; the shader is the shared HDROutputCS.
-		[[nodiscard]] bool InitializeHdrCompose(ID3D11ComputeShader* a_shader);
+		// True when HDR was requested but the chain stayed SDR because compose could not be built.
+		[[nodiscard]] bool IsHdrDegraded() const noexcept { return _hdrDegraded; }
 		[[nodiscard]] render::temporal::IFrameGenerationProvider*
 		GetPresentationProvider() const noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -257,6 +257,7 @@ namespace cs::render
 		hdr::Compose _hdrCompose;
 		std::optional<DXGI_COLOR_SPACE_TYPE> _appliedColorSpace;
 		bool _hdrContainer = false;
+		bool _hdrDegraded = false;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _hudlessBuffers;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _depthBuffers;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _motionBuffers;
