@@ -45,7 +45,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Grass Lighting | Mixed | Brightness/facing, complex-atlas decode, LOD brightness | Ext: exact specular/transmission/AO, PBR grass. N/A: forward activation | NS | M | S/M | Med |
 | Grass Optimizations | Mixed | Culling policy, HiZ, complex detection (no standalone payoff) | Ext: instance/bucket renderer + indirect submission, mesh LOD | NS | H | L | Med |
 | Hair Specular | Mixed | Color controls, opaque Marschner, depth self-shadow, single tangent shift* | Ext: Kajiya-Kay frame/dual shift, blended hair | NS | H | M | Med |
-| [HDR Display](deviations/HDRDisplay.md) | Port | HDR10 output container and settings (done); native tonemap unclamp, UI brightness, SR/FG HDR transport pending | AutoHDR requires Effects11 | Pt | H | L | Med |
+| [HDR Display](deviations/HDRDisplay.md) | Port | HDR10 output container and settings (done); native tonemap unclamp, UI brightness, FG HDR transport pending | AutoHDR requires Effects11 | Pt | H | L | Med |
 | HorizonFix | N/A | — | Integration with a Skyrim-only companion DLL | — | L | — | High |
 | [IBL](deviations/IBL.md) | Port | Environment SH, sky SH*, ambient/fog/effect consumers, occlusion integration, specular IBL | N/A: static IBL, world-map toggle, ENB | Pt | H | L | Med |
 | Interior Sun | Port (provisional) | Native sun gating*, portal culling, double-sided/distance, gameplay sun | N/A: plain interior directional light | NS | H | L | Low |

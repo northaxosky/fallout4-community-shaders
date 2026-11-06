@@ -104,12 +104,6 @@ namespace cs::render::temporal::presentation
 			a_status.session.admittedSr[index]) {
 			return {};
 		}
-		if (a_status.session.hdrDisplay) {
-			return {
-				.kind = AvailabilityKind::kUnavailable,
-				.reason = "Unavailable while HDR Display is loaded."
-			};
-		}
 		if (a_method == SuperResolutionMethod::kFSR4) {
 			const auto& capability = a_fidelityFx.fsr4SuperResolution;
 			if (capability.availability == CapabilityAvailability::kUnknown) {

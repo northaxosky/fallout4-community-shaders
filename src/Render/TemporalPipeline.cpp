@@ -1367,14 +1367,6 @@ namespace cs::render
 					.Succeeded();
 		}
 
-		// The vendor upscalers do not carry the HDR scene yet; native TAA does.
-		if (request.hdrDisplay) {
-			for (const auto method : { temporal::SuperResolutionMethod::kFSR3, temporal::SuperResolutionMethod::kDLSS,
-					 temporal::SuperResolutionMethod::kFSR4 }) {
-				srAdmission.methods[static_cast<std::size_t>(method)] = false;
-			}
-		}
-
 		temporal::SessionTopology session;
 		session.valid = true;
 		session.proxyInstalled = temporalProxyPath;

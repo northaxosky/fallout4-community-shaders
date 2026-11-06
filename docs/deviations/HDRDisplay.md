@@ -8,7 +8,6 @@
 | Forced | No LUT stage | The gamma LUT grades values above 1 by radial scaling: the color is divided by its largest channel above 1, graded, and scaled back | FO4 grades through 3D LUTs after the tonemap and clamps there |
 | Divergence | The pause freeze-frame stays 8-bit | The menu background and freeze-frame stores are fp16 | They copy from the scene target |
 | Divergence | ReShade has no HDR handling | The hosted runtime runs on the scene before the UI, as scRGB on an fp16 copy | Effects get the HDR scene |
-| Divergence | Vendor upscalers take the HDR scene | DLSS and FSR are not admitted while the feature is loaded; native TAA is | Not ported yet |
 | Pending | HDR frame generation | Frame generation is not admitted while the feature is loaded | Not ported yet |
 | Pending | Sun scaling, Bink video white, AutoHDR, SDR crop preview, HDR screenshots | Omitted | Their consumers are not ported |
 | Divergence | HDR is detected on the swap chain's containing output | Detected on the monitor of the game window | The proxy chain exposes no containing output |
