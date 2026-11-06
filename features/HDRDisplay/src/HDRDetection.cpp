@@ -147,7 +147,12 @@ namespace cs::features::hdr_display
 				.hdrEnabled = legacy.advancedColorEnabled != 0 && OutputIsPQ(monitor).value_or(false)
 			};
 		}
-		L->warn("HDR detection failed: advanced color info is unavailable");
-		return std::nullopt;
+		// Some drivers expose no advanced color info; DXGI still reports a PQ output.
+		const auto pq = OutputIsPQ(monitor);
+		if (!pq) {
+			L->warn("HDR detection failed: advanced color info is unavailable");
+			return std::nullopt;
+		}
+		return DisplayCapability{ .hdrSupported = *pq, .hdrEnabled = *pq };
 	}
 }
