@@ -53,6 +53,164 @@ float2 HiZCellCount(float2 targetSize, float level)
 {
 	return float2(uint2(targetSize) >> (uint)max(level - 1.0, 0.0));
 }
+
+// FO4: the host engine reflection cube, upstream's SkyReflectionTex at t4.
+TextureCube<float4> SkyReflectionTex : register(t32);
+
+namespace WaterReflections
+{
+	static const int iterations = 64.0;
+	static const int binaryIterations = ceil(log2(iterations));
+
+	static const float rayLength = 1.0;
+	static const float skyDepth = 1.0 - 1e-6;
+#		ifdef UNIFIED_WATER
+	static const float maxValidDepth = skyDepth;
+#		else
+	static const float maxValidDepth = 0.9999;
+#		endif
+	// FO4: Skyrim's fReflectionRayThickness default; FO4 has no such setting.
+	static const float rayThickness = 0.001;
+
+	float2 ConvertRaySample(float2 raySample)
+	{
+		return FrameBuffer::GetDynamicResolutionAdjustedScreenPosition(raySample);
+	}
+
+	// FO4: canonical t17 is the single-projection depth upstream marches.
+	float SampleDepth(float2 sampleUV)
+	{
+		return SharedData::DepthTexture.SampleLevel(SSRDepthSampler, ConvertRaySample(sampleUV), 0).x;
+	}
+
+	float4 GetReflectionColor(
+		float3 projReflectionDirection,
+		float3 projPosition,
+		float3 reflectionDirection)
+	{
+		float3 prevRaySample;
+		float3 raySample = projPosition;
+
+		for (int i = 0; i < iterations; i++) {
+			prevRaySample = raySample;
+			raySample = projPosition + (float(i) / float(iterations)) * projReflectionDirection;
+
+			float2 sampleUV = raySample.xy;
+
+			if (FrameBuffer::IsOutsideFrame(sampleUV))
+				return 0.0;
+
+			float iterationDepth = SampleDepth(sampleUV);
+			if (iterationDepth > maxValidDepth && iterationDepth <= skyDepth)
+				continue;
+
+			if (saturate((raySample.z - iterationDepth) / rayThickness) > 0.0) {
+				float3 binaryMinRaySample = prevRaySample;
+				float3 binaryMaxRaySample = raySample;
+				float3 binaryRaySample = raySample;
+				float depthThicknessFactor;
+
+				for (int k = 0; k < binaryIterations; k++) {
+					binaryRaySample = lerp(binaryMinRaySample, binaryMaxRaySample, 0.5);
+
+					sampleUV = binaryRaySample.xy;
+					iterationDepth = SampleDepth(sampleUV);
+					if (iterationDepth > maxValidDepth && iterationDepth <= skyDepth) {
+						if (iterationDepth < binaryRaySample.z)
+							binaryMaxRaySample = binaryRaySample;
+						else
+							binaryMinRaySample = binaryRaySample;
+						depthThicknessFactor = 0.0;
+						continue;
+					}
+
+					// Compute expected depth vs actual depth
+					depthThicknessFactor = 1.0 - saturate(abs(binaryRaySample.z - iterationDepth) / rayThickness);
+
+					if (iterationDepth < binaryRaySample.z)
+						binaryMaxRaySample = binaryRaySample;
+					else
+						binaryMinRaySample = binaryRaySample;
+				}
+
+				// Fade based on ray length
+				float ssrMarchingRadiusFadeFactor = 1.0 - saturate(length(binaryRaySample - projPosition) / rayLength);
+
+				float2 uvResultScreenCenterOffset = binaryRaySample.xy - 0.5;
+
+				float2 centerDistance = abs(uvResultScreenCenterOffset.xy * 2.0);
+
+				// Fade out around screen edges
+				float centerDistanceFadeFactorX = smoothstep(0.0, 0.1, saturate(1.0 - centerDistance.x));
+				float centerDistanceFadeFactorY = smoothstep(0.0, 0.5, saturate(1.0 - centerDistance.y));
+
+				float fadeFactor = depthThicknessFactor * ssrMarchingRadiusFadeFactor * centerDistanceFadeFactorX * centerDistanceFadeFactorY;
+
+				if (fadeFactor > 0.0) {
+					if (iterationDepth > skyDepth) {
+						if (SharedData::InInterior || SharedData::HideSky)
+							return 0.0;
+						// FO4: without a host engine cube a sky hit is a miss.
+						uint cubeWidth, cubeHeight;
+						SkyReflectionTex.GetDimensions(cubeWidth, cubeHeight);
+						if (cubeWidth == 0)
+							return 0.0;
+						float3 reflectionDirectionWS = FrameBuffer::ViewToWorld(reflectionDirection, false);
+						return float4(SkyReflectionTex.SampleLevel(SceneColorSampler, reflectionDirectionWS, 0).xyz, fadeFactor);
+					}
+
+					// FO4: the SSLR proxy pass holds scene color at unit UVs.
+					float3 color = SceneColor.SampleLevel(SceneColorSampler, binaryRaySample.xy, 0).xyz;
+					// FO4: no alpha-only target feeds upstream's reprojected alpha.
+					return float4(color, fadeFactor);
+				}
+
+				return 0.0;
+			}
+		}
+
+		return 0.0;
+	}
+
+	// FO4: the water ray pass marks the pixel and supplies its surface depth.
+	float4 Trace(float2 uv, float depth)
+	{
+		// FO4: upstream's DefaultNormal, world up in view space.
+		float3 viewNormal = FrameBuffer::WorldToView(float3(0.0, 0.0, 1.0), false);
+
+		[branch] if (depth > maxValidDepth)
+		{
+			return 0.0;
+		}
+
+		float4 positionVS = float4(float2(uv.x, 1.0 - uv.y) * 2.0 - 1.0, depth, 1.0);
+		positionVS = mul(FrameBuffer::CameraProjInverse, positionVS);
+		positionVS.xyz = positionVS.xyz / positionVS.w;
+
+		float3 viewPosition = positionVS.xyz;
+		float3 viewDirection = normalize(viewPosition);
+
+		float3 reflectionDirection = reflect(viewDirection, viewNormal);
+		float viewAttenuation = saturate(dot(viewDirection, reflectionDirection));
+		[branch] if (viewAttenuation < 0)
+		{
+			return 0.0;
+		}
+
+		float4 clipReflectionDirection = mul(FrameBuffer::CameraProj, float4(reflectionDirection, 0.0));
+		float3 ndcPosition = float3(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), depth);
+		float3 projReflectionDirection = clipReflectionDirection.xyz - ndcPosition * clipReflectionDirection.w;
+		projReflectionDirection.xy *= float2(0.5, -0.5);
+		float directionLengthSquared = dot(projReflectionDirection, projReflectionDirection);
+		if (directionLengthSquared <= 0.0)
+			return 0.0;
+		projReflectionDirection *= rsqrt(directionLengthSquared) * rayLength;
+
+		float3 projPosition = float3(uv, depth);
+
+		return GetReflectionColor(projReflectionDirection, projPosition, reflectionDirection);
+	}
+}
 #	endif
 
 float4 main(PS_INPUT input) : SV_Target0
@@ -66,6 +224,12 @@ float4 main(PS_INPUT input) : SV_Target0
 	float4 color = 0.0;
 	float surfaceDepth =
 		SSRDepth.SampleLevel(SSRDepthSampler, input.TexCoord, 0).x;
+#	ifdef DYNAMIC_CUBEMAPS
+	[branch] if (surfaceDepth < 0.0)
+	{
+		return WaterReflections::Trace(input.TexCoord, -surfaceDepth);
+	}
+#	endif
 	// The branch preserves stock confidence scheduling.
 	[branch] if (TargetSizeNearFar.z < surfaceDepth)
 	{

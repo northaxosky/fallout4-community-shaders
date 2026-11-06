@@ -92,6 +92,8 @@ namespace cs::features
 		static constexpr std::uint32_t kPreviewHeight = 256;
 		static constexpr std::uint32_t kDynamicCubemapPSSlot = 30;
 		static constexpr std::uint32_t kDynamicCubemapPSSlotCount = 3;
+		// Water's CubeMapTex and the SSLR water march's SkyReflectionTex.
+		static constexpr std::uint32_t kEngineCubePSSlot = kDynamicCubemapPSSlot + 2;
 		static constexpr std::uint32_t kCompositionPSSlot = 39;
 		static constexpr std::uint32_t kCompositionPSSlotCount = 2;
 
@@ -171,6 +173,7 @@ namespace cs::features
 		void PublishSettings() noexcept;
 		void PostDeferred();
 		void BindComposition(ID3D11DeviceContext* a_context);
+		void BindImageSpace(ID3D11DeviceContext* a_context);
 		void ResolveReflectionMode();
 		void UpdateCubemap();
 		void UpdateCubemapCapture(bool a_reflections);

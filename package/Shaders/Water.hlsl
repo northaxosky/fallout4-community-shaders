@@ -530,9 +530,13 @@ float3 surfaceColor(
 #			else
 	float2 clamped = min(screenUv, perGeometry[1].xy);
 #			endif
-#			if defined(DYNAMIC_CUBEMAPS) && !defined(LOD)
+#			if defined(DYNAMIC_CUBEMAPS)
 	[branch] if (FO4SharedData::EnabledDynamicCubemaps != 0)
 	{
+#				if defined(LOD)
+		// Upstream: LOD water takes no screen-space reflection.
+		return color;
+#				else
 		float pointingDirection = dot(eyeDirection, reflectionDirection) * 0.5 + 0.5;
 		float pointingAlignment = dot(reflect(eyeDirection, float3(0, 0, 1)), reflectionDirection) * 0.5 + 0.5;
 		float ssrAmount = sqrt(min(pointingAlignment, pointingDirection));
@@ -543,6 +547,7 @@ float3 surfaceColor(
 		float4 ssrReflectionColor = lerp(ssrReflectionColorBlurred, ssrReflectionColorRaw, ssrAmount * 0.7);
 		float ssrFraction = saturate(ssrReflectionColor.w * distanceFactor * ssrAmount);
 		return lerp(color, max(0, ssrReflectionColor.xyz), ssrFraction);
+#				endif
 	}
 #			endif
 	float4 reflection = lerp(texture9.SampleLevel(sampler9, clamped, 0.0), texture10.SampleLevel(sampler10, clamped, 0.0), WATER_PER_GEOMETRY(7).x);
@@ -823,6 +828,18 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	covered = covered && stencilCovered(corner);
 #			endif
 	clip(covered ? -1.0 : 1.0);
+#		endif
+
+#		ifdef DYNAMIC_CUBEMAPS
+	// FO4: marks water for upstream's flat-normal march with negated NDC depth.
+	[branch] if (FO4SharedData::EnabledDynamicCubemaps != 0)
+	{
+		float4 surfaceClip = toClip(input.eyeToPosition);
+		PS_OUTPUT_SSLR marked;
+		marked.ray = 0.0;
+		marked.depth = -surfaceClip.z / surfaceClip.w;
+		return marked;
+	}
 #		endif
 
 #		ifdef BSWATER_RAY_LOD

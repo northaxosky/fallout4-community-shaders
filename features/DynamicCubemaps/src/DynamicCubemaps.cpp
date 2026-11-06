@@ -258,7 +258,10 @@ namespace cs::features
 	void DynamicCubemaps::Load()
 	{
 		PublishSettings();
-		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+				if (registration.targetId == cs::engine::ShaderInjectionTarget::kImageSpace)
+					registration.bind = [this](ID3D11DeviceContext* a_context) { BindImageSpace(a_context); };
+			})) {
 			FailLoad(
 				"DynamicCubemaps could not register its water, composite, "
 				"deferred lighting, or SSLR shader contributions");
@@ -316,6 +319,16 @@ namespace cs::features
 		}
 		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel,
 			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
+	}
+
+	// Upstream VanillaBinding: SSLR sky hits sample the engine cube.
+	void DynamicCubemaps::BindImageSpace(ID3D11DeviceContext* a_context)
+	{
+		if (!a_context) {
+			return;
+		}
+		ID3D11ShaderResourceView* cube = Operational() ? cs::engine::GetSkyReflectionCubeSRV() : nullptr;
+		cs::engine::BindInjectionShaderResources(a_context, kEngineCubePSSlot, 1, &cube);
 	}
 
 	ID3D11ShaderResourceView* DynamicCubemaps::GetEnvironmentSRV() const noexcept
