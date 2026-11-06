@@ -14,6 +14,7 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/HookRegistry.h"
+#include "Render/InterfaceLayer.h"
 #include "Render/RenderHooks.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalPipeline.h"
@@ -121,7 +122,7 @@ namespace cs::features
 			.paperWhite = static_cast<float>(_settings.paperWhite),
 			.peakNits = static_cast<float>(_settings.peakNits),
 			.uiBrightness = _settings.uiBrightness,
-			.interfaceSeparated = _interfaceSeparated.exchange(false, std::memory_order_acq_rel)
+			.interfaceSeparated = render::InterfaceLayer::Get().ConsumeSeparated()
 		};
 	}
 
@@ -131,6 +132,10 @@ namespace cs::features
 		if (!engine::EnsureDetourInstalled<RenderTargetManager_CreateRenderTarget>(
 				renderTargetsInstalled, RE::ID::BSGraphics::RenderTargetManager::CreateRenderTarget, "RenderTargetManager::CreateRenderTarget")) {
 			FailLoad("HDR Display could not hook render target creation.");
+			return;
+		}
+		if (!render::InterfaceLayer::Get().Install()) {
+			FailLoad("HDR Display could not hook the engine blend binds.");
 			return;
 		}
 		if (!engine::RegisterFeatureShaderBindings(*this)) {
@@ -147,53 +152,18 @@ namespace cs::features
 
 	void HDRDisplay::OnPreImagespace()
 	{
-		auto* context = engine::GetImmediateContext();
-		// A swap that survived its frame would leave the engine drawing into the scene texture.
-		if (_sceneSwap.IsActive()) {
-			L->error("The scene redirect outlived its frame; restoring it.");
-			if (context)
-				RestoreFrameTarget(*context);
-			else
-				_sceneSwap.Restore();
-		}
 		// The host shell blurs the back buffer, so it must hold the whole frame.
-		if (!IsHdrActive() || !context || host::HostClient::IsShellOpen())
-			return;
-		const auto scene = render::TemporalPipeline::Get().GetHdrSceneTarget();
-		auto* frameTarget = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
-		if (!scene || !frameTarget)
-			return;
-		_sceneSwap.Apply(RE::BSGraphics::RenderTargetID::kFrameBuffer, scene.texture, scene.srv, scene.rtv);
-		if (_sceneSwap.IsActive())
-			engine::ReplaceBoundRenderTargetView(*context, frameTarget, scene.rtv);
-	}
-
-	void HDRDisplay::RestoreFrameTarget(ID3D11DeviceContext& a_context)
-	{
-		auto* sceneTarget = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
-		_sceneSwap.Restore();
-		engine::ReplaceBoundRenderTargetView(
-			a_context, sceneTarget, engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer));
+		render::InterfaceLayer::Get().BeginScene(IsHdrActive() && !host::HostClient::IsShellOpen());
 	}
 
 	void HDRDisplay::SeparateInterface()
 	{
-		if (!_sceneSwap.IsActive())
+		auto& layer = render::InterfaceLayer::Get();
+		if (!layer.IsSceneActive())
 			return;
-		auto* context = engine::GetImmediateContext();
-		if (!context) {
-			_sceneSwap.Restore();
-			return;
-		}
-		RenderReShade(*context);
-		RestoreFrameTarget(*context);
-		auto* proxyTarget = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
-		if (!proxyTarget)
-			return;
-		// The interface composites over the scene with alpha, so it starts transparent.
-		constexpr float kClear[4]{};
-		context->ClearRenderTargetView(proxyTarget, kClear);
-		_interfaceSeparated.store(true, std::memory_order_release);
+		if (auto* context = engine::GetImmediateContext())
+			RenderReShade(*context);
+		layer.EndScene();
 	}
 
 	void HDRDisplay::RenderReShade(ID3D11DeviceContext& a_context)

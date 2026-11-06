@@ -33,11 +33,20 @@ namespace cs::engine
 	};
 	using ContextCallSiteAnchor = SiteAnchor<ContextVtableCall>;
 
+	// The call itself, call [r10+disp32], with the vtable pointer already loaded.
+	struct ContextIndirectCall
+	{
+		std::uint16_t offset = 0;
+	};
+	using ContextIndirectCallSiteAnchor = SiteAnchor<ContextIndirectCall>;
+
 	// Returns the call-site address once it is proven to call the anchor's target.
 	[[nodiscard]] std::expected<std::uintptr_t, std::string> ResolveCallSite(
 		const CallSiteAnchor& a_anchor) noexcept;
 	[[nodiscard]] std::expected<std::uintptr_t, std::string> ResolveCallSite(
 		const ContextCallSiteAnchor& a_anchor) noexcept;
+	[[nodiscard]] std::expected<std::uintptr_t, std::string> ResolveCallSite(
+		const ContextIndirectCallSiteAnchor& a_anchor) noexcept;
 
 	// Verifies the write and restores the original bytes on mismatch.
 	[[nodiscard]] std::expected<void, std::string> WriteVerifiedPatch(
@@ -61,6 +70,10 @@ namespace cs::engine
 
 	// Replaces a resolved context call with a call to a same-signature thunk.
 	[[nodiscard]] std::expected<void, std::string> RedirectContextCall(
+		std::uintptr_t a_site,
+		std::uintptr_t a_thunk) noexcept;
+	// Same for a site resolved from a ContextIndirectCallSiteAnchor.
+	[[nodiscard]] std::expected<void, std::string> RedirectContextIndirectCall(
 		std::uintptr_t a_site,
 		std::uintptr_t a_thunk) noexcept;
 }

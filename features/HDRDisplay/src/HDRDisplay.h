@@ -54,12 +54,11 @@ namespace cs::features
 		std::string_view GetRegistrationFailureMessage() const override { return "HDR Display could not register its imagespace shader define."; }
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(hdr_display::kSchema, _settings); }
 
-		// Start of Render_UI: the frame target becomes the scene texture.
+		// Start of Render_UI: the interface layer redirects the frame target to the scene texture.
 		void OnPreImagespace();
-		// The scene is final: effects run on it, then the frame target returns to the proxy,
-		// which is cleared to collect the interface. Idempotent; pause frames reach it afterwards.
+		// The scene is final: effects run on it, then the interface layer takes over the proxy.
+		// Idempotent; pause frames reach it afterwards.
 		void SeparateInterface();
-		void RestoreFrameTarget(ID3D11DeviceContext& a_context);
 		// ReShade runs on the HDR scene as scRGB, before the interface.
 		void RenderReShade(ID3D11DeviceContext& a_context);
 
@@ -67,8 +66,5 @@ namespace cs::features
 		std::atomic_bool _displayKnown{ false };
 		std::atomic_bool _displaySupportsHdr{ false };
 		std::atomic_bool _windowsHdrOn{ false };
-
-		engine::RenderTargetSwap _sceneSwap;
-		std::atomic_bool _interfaceSeparated{ false };
 	};
 }

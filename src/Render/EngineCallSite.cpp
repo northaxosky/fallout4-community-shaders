@@ -52,6 +52,31 @@ namespace cs::engine
 			       a_bytes[3] == 0xFF && a_bytes[4] == 0x50 && a_bytes[5] == a_vtableOffset;
 		}
 
+		constexpr std::size_t kIndirectCallLength = 7;
+
+		// call qword ptr [r10+disp32]: 41 FF 92 <disp32>.
+		[[nodiscard]] constexpr bool IsR10IndirectCall(
+			std::span<const std::uint8_t, kIndirectCallLength> a_bytes,
+			std::uint16_t a_vtableOffset) noexcept
+		{
+			return a_bytes[0] == 0x41 && a_bytes[1] == 0xFF && a_bytes[2] == 0x92 &&
+			       a_bytes[3] == (a_vtableOffset & 0xFF) && a_bytes[4] == (a_vtableOffset >> 8) &&
+			       a_bytes[5] == 0 && a_bytes[6] == 0;
+		}
+
+		template <std::size_t SiteLength>
+		std::expected<void, std::string> RedirectCall(std::uintptr_t a_site, std::uintptr_t a_thunk) noexcept
+		{
+			try {
+				const REL::ASM::CALL5 call(a_site, REL::GetTrampoline().allocate_branch5(a_thunk));
+				if (const auto patched = WriteBranchPatch<SiteLength>(a_site, call); !patched)
+					return std::unexpected(std::format("context call redirect: {}", patched.error()));
+			} catch (const std::exception& e) {
+				return std::unexpected(std::format("context call redirect at {:#x}: {}", a_site, e.what()));
+			}
+			return {};
+		}
+
 		std::string RuntimeLabel()
 		{
 			return std::format(
@@ -137,6 +162,22 @@ namespace cs::engine
 		return site;
 	}
 
+	std::expected<std::uintptr_t, std::string> ResolveCallSite(
+		const ContextIndirectCallSiteAnchor& a_anchor) noexcept
+	{
+		const auto read = ReadSite<kIndirectCallLength>(a_anchor);
+		if (!read)
+			return std::unexpected(read.error());
+		const auto& [site, bytes] = *read;
+		if (!IsR10IndirectCall(bytes, a_anchor.target.offset)) {
+			return std::unexpected(std::format(
+				"{}: {} has no call [r10+{:#x}] at {:#x} (bytes {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X})",
+				a_anchor.name, RuntimeLabel(), a_anchor.target.offset, site,
+				bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6]));
+		}
+		return site;
+	}
+
 	std::expected<void, std::string> WriteVerifiedPatch(
 		std::uintptr_t a_site,
 		std::span<const std::uint8_t> a_patch) noexcept
@@ -169,13 +210,13 @@ namespace cs::engine
 		std::uintptr_t a_site,
 		std::uintptr_t a_thunk) noexcept
 	{
-		try {
-			const REL::ASM::CALL5 call(a_site, REL::GetTrampoline().allocate_branch5(a_thunk));
-			if (const auto patched = WriteBranchPatch<6>(a_site, call); !patched)
-				return std::unexpected(std::format("context call redirect: {}", patched.error()));
-		} catch (const std::exception& e) {
-			return std::unexpected(std::format("context call redirect at {:#x}: {}", a_site, e.what()));
-		}
-		return {};
+		return RedirectCall<6>(a_site, a_thunk);
+	}
+
+	std::expected<void, std::string> RedirectContextIndirectCall(
+		std::uintptr_t a_site,
+		std::uintptr_t a_thunk) noexcept
+	{
+		return RedirectCall<kIndirectCallLength>(a_site, a_thunk);
 	}
 }
