@@ -88,12 +88,48 @@ float FilmicSlope(float x, float toeNumerator)
 	return (numeratorSlope * denominator - numerator * denominatorSlope) / (denominator * denominator);
 }
 
-// FO4: the curve is exactly vanilla up to its white point, then continues linearly with the slope there.
+// Where FilmicCurve's slope peaks, f''(x) = 0. With P the quadratic numerator of f', f'' is
+// (P'Dn - 2P Dn') / Dn^3, so the point is the root of a cubic with only negative terms but the
+// constant. It lies in (0, 2), so a fixed bisection plus one Newton step settles it; a toe
+// numerator under 0.02 has no root and the slope peaks at 0.
+float FilmicInflection(float toeNumerator)
+{
+	const float A = 0.15;
+	const float B = 0.50;
+	const float C = 0.10;
+	const float D = 0.20;
+	const float F = 0.30;
+	float E = toeNumerator;
+	float c3 = -2.0 * A * A * B * (1.0 - C);
+	float c2 = -6.0 * A * A * D * (F - E);
+	float c1 = 6.0 * A * B * D * (E - C * F);
+	float c0 = 2.0 * A * D * D * F * (F - E) - 2.0 * B * B * D * (C * F - E);
+	if (c0 <= 0.0)
+		return 0.0;
+	float lo = 0.0;
+	float hi = 2.0;
+	[unroll] for (int i = 0; i < 12; ++i)
+	{
+		float mid = 0.5 * (lo + hi);
+		float g = ((c3 * mid + c2) * mid + c1) * mid + c0;
+		lo = g > 0.0 ? mid : lo;
+		hi = g > 0.0 ? hi : mid;
+	}
+	float x = 0.5 * (lo + hi);
+	float g = ((c3 * x + c2) * x + c1) * x + c0;
+	float dg = (3.0 * c3 * x + 2.0 * c2) * x + c1;
+	return max(x - g / dg, 0.0);
+}
+
+// FO4: vanilla Hable up to its inflection point, then the tangent there, as upstream's
+// Hejl and Reinhard paths branch before the shoulder.
 float3 FilmicContinued(float3 x, float toeNumerator, float whiteScale)
 {
 	float3 vanilla = FilmicCurve(x, toeNumerator) * whiteScale;
-	float slope = FilmicSlope(LinearWhitePoint, toeNumerator) * whiteScale;
-	return x > LinearWhitePoint ? 1.0 + slope * (x - LinearWhitePoint) : vanilla;
+	float branch = FilmicInflection(toeNumerator);
+	float branchValue = FilmicCurve(float3(branch, 0, 0), toeNumerator).x * whiteScale;
+	float slope = FilmicSlope(branch, toeNumerator) * whiteScale;
+	return x > branch ? branchValue + slope * (x - branch) : vanilla;
 }
 
 // Upstream's display mapping; the scene is linear with 1.0 at paper white.

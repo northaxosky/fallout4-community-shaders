@@ -3,7 +3,7 @@
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
 | Divergence | Redirects the game's swap chain and UI targets, then composites into the back buffer | The presenter owns an R10 HDR10 swap chain behind the D3D12 proxy; the game keeps an R8 back buffer, backed by an fp16 proxy | Presentation is host-owned, and the game must never see the container format |
-| Forced | The Reinhard and Hejl curves continue linearly past a branch point | Hable is exactly vanilla up to its white point, then continues linearly with the slope there | FO4's tonemap is Hable with a white point, so the branch sits at paper white |
+| Forced | The Reinhard and Hejl curves continue linearly past a branch point before the shoulder | Hable continues linearly past its inflection point, solved at run time from the toe numerator; it is vanilla below that point | FO4's tonemap is Hable, not Reinhard or Hejl |
 | Divergence | The UI draws into its own target; the compose scales it by the interface brightness | The UI draws in place onto the scene, so the scene is scaled by 1 / interface brightness after the imagespace chain and the compose lifts the white | The engine blends the UI over the scene in gamma space |
 | Forced | No LUT stage | The gamma LUT grades values above 1 by one of two methods: radial scaling into the LUT, or carrying the SDR grade's change onto the highlights | FO4 grades through 3D LUTs after the tonemap and clamps there |
 | Divergence | The pause freeze-frame stays 8-bit | The menu background and freeze-frame stores are fp16 | They copy from the scene target |
