@@ -100,6 +100,8 @@ namespace cs::render
 
 		[[nodiscard]] SharedD3D11D3D12Texture* GetHudlessTexture() const noexcept;
 		[[nodiscard]] SharedD3D11D3D12Texture* GetProxyTexture() const noexcept;
+		// Empty unless the HDR container is active.
+		[[nodiscard]] hdr::SceneTarget GetHdrSceneTarget() const noexcept;
 		[[nodiscard]] SharedD3D11D3D12Texture* GetDepthTexture() const noexcept;
 		[[nodiscard]] SharedD3D11D3D12Texture* GetMotionTexture() const noexcept;
 		[[nodiscard]] ID3D12GraphicsCommandList* GetCommandList() const noexcept;
@@ -125,7 +127,7 @@ namespace cs::render
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		// Creates the ReShade runtime on first use; false if absent or unusable.
 		[[nodiscard]] bool ReShadeEffectsEnabled() noexcept;
-		// A non-zero a_hdrWhiteNits hands ReShade the HDR proxy as scRGB with that white.
+		// A non-zero a_hdrWhiteNits hands ReShade the HDR color as scRGB with that white.
 		void RenderReShadeEffects(ID3D11DeviceContext& a_context,
 			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits = 0.0f) noexcept;
 
@@ -190,11 +192,14 @@ namespace cs::render
 			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
 			// HDR container only: the composed signal the present copies in place of the proxy.
 			std::unique_ptr<SharedD3D11D3D12Texture> hdrOutput;
+			// HDR container only: the scene, while the proxy collects just the interface.
+			std::unique_ptr<SharedD3D11D3D12Texture> hdrScene;
 		};
 		HRESULT CreateDisplayResources(UINT a_width, UINT a_height, DisplayResources& a_resources);
 		// False when the container has nothing to present this frame.
 		[[nodiscard]] bool ComposeHdr(const hdr::OutputSettings& a_settings) noexcept;
-		[[nodiscard]] std::optional<features::ScRgbProxy> ScRgbFor(float a_whiteNits, bool a_enabled) const noexcept;
+		[[nodiscard]] std::optional<features::ScRgbProxy> ScRgbFor(
+			const SharedD3D11D3D12Texture* a_color, float a_whiteNits, bool a_enabled) const noexcept;
 		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept;
 		HRESULT RecreateDisplayResources(UINT a_width, UINT a_height);
 		HRESULT RecreateFrameGenerationResources(UINT a_width, UINT a_height);
@@ -256,6 +261,7 @@ namespace cs::render
 		winrt::com_ptr<IDXGISwapChain4> _swapChain;
 		std::unique_ptr<SharedD3D11D3D12Texture> _proxyBuffer;
 		std::unique_ptr<SharedD3D11D3D12Texture> _hdrOutput;
+		std::unique_ptr<SharedD3D11D3D12Texture> _hdrScene;
 		hdr::Compose _hdrCompose;
 		std::optional<DXGI_COLOR_SPACE_TYPE> _appliedColorSpace;
 		bool _hdrContainer = false;

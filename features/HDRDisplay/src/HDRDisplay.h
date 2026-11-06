@@ -3,7 +3,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "HDRDisplaySettings.h"
-#include "Render/FullscreenPass.h"
+#include "Render/Engine.h"
 #include "Render/HdrCompose.h"
 #include "ShaderDefines.h"
 
@@ -12,11 +12,10 @@
 
 #include <atomic>
 
-#include <winrt/base.h>
-
 namespace cs::features
 {
-	// Presents through an HDR10 container; the scene is HDR from the tonemap on.
+	// Presents through an HDR10 container; the scene is HDR from the tonemap on. The engine
+	// renders the scene into a separate texture, so the interface lands alone in the proxy.
 	class HDRDisplay : public ShaderFeature<hdr_display_shader::kShaderDefines>
 	{
 	public:
@@ -35,12 +34,11 @@ namespace cs::features
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
-		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void WriteSharedFrameData(render::SharedDataCB& a_shared) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 
-		// Presenter state for this present; the interface scale applies only after a seeded frame.
+		// Presenter state for this present; the frame is separated once the scene was redirected.
 		[[nodiscard]] render::hdr::OutputSettings ConsumeOutputSettings() noexcept;
 
 		// First run only: HDR starts on when Windows HDR is on for the game's monitor.
@@ -56,11 +54,13 @@ namespace cs::features
 		std::string_view GetRegistrationFailureMessage() const override { return "HDR Display could not register its imagespace shader define."; }
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(hdr_display::kSchema, _settings); }
 
-		// After the imagespace chain, before the UI.
-		void OnPostImagespace();
-		// Scales the scene in linear space so the UI, drawn in place, sits at paper white.
-		void SeedInterfaceBrightness(ID3D11DeviceContext& a_context);
-		// ReShade runs on the HDR scene as scRGB, before the UI.
+		// Start of Render_UI: the frame target becomes the scene texture.
+		void OnPreImagespace();
+		// The scene is final: effects run on it, then the frame target returns to the proxy,
+		// which is cleared to collect the interface. Idempotent; pause frames reach it afterwards.
+		void SeparateInterface();
+		void RestoreFrameTarget(ID3D11DeviceContext& a_context);
+		// ReShade runs on the HDR scene as scRGB, before the interface.
 		void RenderReShade(ID3D11DeviceContext& a_context);
 
 		Settings _settings;
@@ -68,10 +68,7 @@ namespace cs::features
 		std::atomic_bool _displaySupportsHdr{ false };
 		std::atomic_bool _windowsHdrOn{ false };
 
-		render::FullscreenPass _seedPass;
-		winrt::com_ptr<ID3D11PixelShader> _seedPS;
-		winrt::com_ptr<ID3D11BlendState> _seedBlend;
-		winrt::com_ptr<ID3D11Buffer> _seedConstants;
-		std::atomic<float> _seededInterface{ 1.0f };
+		engine::RenderTargetSwap _sceneSwap;
+		std::atomic_bool _interfaceSeparated{ false };
 	};
 }

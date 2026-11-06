@@ -331,12 +331,6 @@ namespace cs::render
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		struct DrawWorldRenderUI_Resolve
-		{
-			static void thunk(RE::BSGraphics::RenderTargetManager* a_this, bool a_enabled);
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
 		struct DrawWorldRenderUI_RenderEffectRange
 		{
 			static void thunk(

@@ -2,6 +2,7 @@
 
 #include "Render/FrameGenerationCpuTiming.h"
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/HdrCompose.h"
 #include "Render/LatencyRouter.h"
 #include "Render/SwapChainHook.h"
 #include "Render/TemporalPipelineState.h"
@@ -211,6 +212,8 @@ namespace cs::render
 		[[nodiscard]] bool IsFrameGenerationProxyActive() const noexcept;
 		// True while the presenter carries the HDR container (never in exclusive fullscreen).
 		[[nodiscard]] bool IsHdrContainerActive() const noexcept;
+		// The fp16 scene texture the HDR container renders into while the interface is separate.
+		[[nodiscard]] hdr::SceneTarget GetHdrSceneTarget() const noexcept;
 		[[nodiscard]] bool
 		IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
 		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;
@@ -225,7 +228,7 @@ namespace cs::render
 		GetFrameGenerationCaptureResources() const noexcept;
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		[[nodiscard]] bool ReShadeEffectsEnabled() noexcept;
-		// A non-zero a_hdrWhiteNits hands ReShade the HDR proxy as scRGB with that white.
+		// A non-zero a_hdrWhiteNits hands ReShade the HDR color as scRGB with that white.
 		void RenderReShadeEffects(ID3D11DeviceContext& a_context,
 			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits = 0.0f) noexcept;
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;

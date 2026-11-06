@@ -408,10 +408,45 @@ namespace cs::engine
 			}
 		}
 
+		[[nodiscard]] bool IsActive() const noexcept { return _target != nullptr; }
+
 	private:
 		RE::BSGraphics::RenderTarget* _target = nullptr;
 		RE::BSGraphics::RenderTarget _saved{};
 	};
+
+	// The engine skips rebinding a target it thinks is current; fix the OM after a swap.
+	inline void ReplaceBoundRenderTargetView(
+		ID3D11DeviceContext& a_context,
+		ID3D11RenderTargetView* a_from,
+		ID3D11RenderTargetView* a_to) noexcept
+	{
+		if (!a_from || !a_to || a_from == a_to) {
+			return;
+		}
+		std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> bound{};
+		ID3D11DepthStencilView* depth = nullptr;
+		a_context.OMGetRenderTargets(static_cast<UINT>(bound.size()), bound.data(), &depth);
+		auto rebind = bound;
+		bool replaced = false;
+		for (std::size_t i = 0; i < bound.size(); ++i) {
+			if (bound[i] == a_from) {
+				rebind[i] = a_to;
+				replaced = true;
+			}
+		}
+		if (replaced) {
+			a_context.OMSetRenderTargets(static_cast<UINT>(rebind.size()), rebind.data(), depth);
+		}
+		for (auto* view : bound) {
+			if (view) {
+				view->Release();
+			}
+		}
+		if (depth) {
+			depth->Release();
+		}
+	}
 
 	[[nodiscard]] inline ID3D11ShaderResourceView* GetRenderTargetSRV(RE::BSGraphics::RenderTargetID a_renderTarget)
 	{

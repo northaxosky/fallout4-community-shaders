@@ -119,8 +119,8 @@ namespace cs::features
 			.enabled = _settings.enableHDR,
 			.paperWhite = static_cast<float>(_settings.paperWhite),
 			.peakNits = static_cast<float>(_settings.peakNits),
-			// Only a frame seeded in OnPostImagespace carries the interface scale.
-			.uiBrightness = _seededInterface.exchange(1.0f, std::memory_order_acq_rel)
+			.uiBrightness = _settings.uiBrightness,
+			.interfaceSeparated = _interfaceSeparated.exchange(false, std::memory_order_acq_rel)
 		};
 	}
 
@@ -136,53 +136,62 @@ namespace cs::features
 			FailLoad("HDR Display could not register its imagespace shader define.");
 			return;
 		}
-		if (!engine::RegisterPostImagespace(*this, [this] { OnPostImagespace(); })) {
-			FailLoad("HDR Display needs the post-imagespace hook.");
+		if (!engine::RegisterPreImagespace(*this, [this] { OnPreImagespace(); }) ||
+			!engine::RegisterPreInterface(*this, [this] { SeparateInterface(); }, engine::HookPriority::OutermostPost) || !engine::RegisterPostImagespace(*this, [this] { SeparateInterface(); })) {
+			FailLoad("HDR Display needs the imagespace hooks.");
 			return;
 		}
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
-	void HDRDisplay::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
+	void HDRDisplay::OnPreImagespace()
 	{
-		try {
-			_seedPass.Create(a_device);
-			D3D11_BLEND_DESC blendDesc{};
-			auto& target = blendDesc.RenderTarget[0];
-			target.BlendEnable = TRUE;
-			// dst * src.rgb; alpha is kept.
-			target.SrcBlend = D3D11_BLEND_ZERO;
-			target.DestBlend = D3D11_BLEND_SRC_COLOR;
-			target.BlendOp = D3D11_BLEND_OP_ADD;
-			target.SrcBlendAlpha = D3D11_BLEND_ZERO;
-			target.DestBlendAlpha = D3D11_BLEND_ONE;
-			target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
-			target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-			DX::ThrowIfFailed(a_device->CreateBlendState(&blendDesc, _seedBlend.put()));
-			D3D11_BUFFER_DESC constants{};
-			constants.ByteWidth = 16;
-			constants.Usage = D3D11_USAGE_DYNAMIC;
-			constants.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-			constants.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-			DX::ThrowIfFailed(a_device->CreateBuffer(&constants, nullptr, _seedConstants.put()));
-			render::annotation::SetName(_seedConstants.get(), "HDRDisplay/Seed.Constants");
-			_seedPS = util::CompilePixelShader("HDRDisplay/SeedScalePS", L"Data\\Shaders\\FO4\\HDRDisplay\\SeedScalePS.hlsl");
-		} catch (const std::exception& e) {
-			L->error("The interface seed pass could not be built: {}", e.what());
+		auto* context = engine::GetImmediateContext();
+		// A swap that survived its frame would leave the engine drawing into the scene texture.
+		if (_sceneSwap.IsActive()) {
+			L->error("The scene redirect outlived its frame; restoring it.");
+			if (context)
+				RestoreFrameTarget(*context);
+			else
+				_sceneSwap.Restore();
 		}
-		if (!_seedPS || !_seedPass.Ready() || !_seedBlend || !_seedConstants)
-			FailLoad("HDR Display could not build its interface seed pass");
+		if (!IsHdrActive() || !context)
+			return;
+		const auto scene = render::TemporalPipeline::Get().GetHdrSceneTarget();
+		auto* frameTarget = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
+		if (!scene || !frameTarget)
+			return;
+		_sceneSwap.Apply(RE::BSGraphics::RenderTargetID::kFrameBuffer, scene.texture, scene.srv, scene.rtv);
+		if (_sceneSwap.IsActive())
+			engine::ReplaceBoundRenderTargetView(*context, frameTarget, scene.rtv);
 	}
 
-	void HDRDisplay::OnPostImagespace()
+	void HDRDisplay::RestoreFrameTarget(ID3D11DeviceContext& a_context)
 	{
-		if (!IsHdrActive())
+		auto* sceneTarget = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
+		_sceneSwap.Restore();
+		engine::ReplaceBoundRenderTargetView(
+			a_context, sceneTarget, engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer));
+	}
+
+	void HDRDisplay::SeparateInterface()
+	{
+		if (!_sceneSwap.IsActive())
 			return;
 		auto* context = engine::GetImmediateContext();
-		if (!context)
+		if (!context) {
+			_sceneSwap.Restore();
 			return;
+		}
 		RenderReShade(*context);
-		SeedInterfaceBrightness(*context);
+		RestoreFrameTarget(*context);
+		auto* proxyTarget = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
+		if (!proxyTarget)
+			return;
+		// The interface composites over the scene with alpha, so it starts transparent.
+		constexpr float kClear[4]{};
+		context->ClearRenderTargetView(proxyTarget, kClear);
+		_interfaceSeparated.store(true, std::memory_order_release);
 	}
 
 	void HDRDisplay::RenderReShade(ID3D11DeviceContext& a_context)
@@ -197,41 +206,9 @@ namespace cs::features
 			return;
 		winrt::com_ptr<ID3D11Resource> resource;
 		target->GetResource(resource.put());
-		// Before the UI and the interface seed, the scene's white is paper white.
+		// Before the interface, the scene's white is paper white.
 		pipeline.RenderReShadeEffects(a_context, *resource, render::UpdateOutputCanonicalDepth(&a_context, *camera),
 			static_cast<float>(_settings.paperWhite));
-	}
-
-	void HDRDisplay::SeedInterfaceBrightness(ID3D11DeviceContext& a_context)
-	{
-		const float interfaceBrightness = _settings.uiBrightness;
-		if (interfaceBrightness == 1.0f || !_seedPS)
-			return;
-		auto* target = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
-		if (!target)
-			return;
-		winrt::com_ptr<ID3D11Resource> resource;
-		target->GetResource(resource.put());
-		const auto texture = resource.try_as<ID3D11Texture2D>();
-		D3D11_MAPPED_SUBRESOURCE mapped{};
-		if (!texture || FAILED(a_context.Map(_seedConstants.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-			return;
-		// RT0 is gamma 2.2, so a linear 1 / ui scale is a power of the same factor.
-		const float scale = std::pow(1.0f / interfaceBrightness, 1.0f / 2.2f);
-		*static_cast<float*>(mapped.pData) = scale;
-		a_context.Unmap(_seedConstants.get(), 0);
-		D3D11_TEXTURE2D_DESC desc{};
-		texture->GetDesc(&desc);
-		const render::FullscreenPass::Scope pass(_seedPass, &a_context, target, desc.Width, desc.Height);
-		if (!pass.IsActive())
-			return;
-		render::annotation::ScopedEvent annotationScope("HDRDisplay/SeedInterface");
-		constexpr float kBlendFactor[4]{};
-		a_context.OMSetBlendState(_seedBlend.get(), kBlendFactor, 0xFFFFFFFFu);
-		ID3D11Buffer* constants = _seedConstants.get();
-		a_context.PSSetConstantBuffers(0, 1, &constants);
-		pass.Draw(_seedPS.get());
-		_seededInterface.store(interfaceBrightness, std::memory_order_release);
 	}
 
 	void HDRDisplay::WriteSharedFrameData(render::SharedDataCB& a_shared)

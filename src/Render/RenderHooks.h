@@ -80,7 +80,13 @@ namespace cs::engine
 	CS_DECLARE_RENDER_HOOK(RegisterPreShadowLightRender, ShadowLightKind a_kind, );
 	CS_DECLARE_RENDER_HOOK(RegisterPostShadowLightRender, ShadowLightKind a_kind, );
 
-	// After the ImageSpace effects and resolve, before the UI.
+	// Start of Render_UI, before the ImageSpace chain.
+	CS_DECLARE_RENDER_HOOK(RegisterPreImagespace);
+
+	// Scene is final, before the post-AA interface draws; not on pause frames.
+	CS_DECLARE_RENDER_HOOK(RegisterPreInterface);
+
+	// After Render_UI returns, which includes the post-AA interface draws.
 	CS_DECLARE_RENDER_HOOK(RegisterPostImagespace);
 
 	// After all sky and cloud draws in the main color target, before water and alpha.

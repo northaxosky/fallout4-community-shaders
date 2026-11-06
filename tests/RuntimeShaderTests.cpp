@@ -59,7 +59,6 @@ namespace
 			{ "FO4/CubemapPreviewCS.hlsl", "cs_5_0", {}, { Toggle("SINGLE_CHANNEL") } },
 
 			{ "HDRDisplay/HDROutputCS.hlsl" },
-			{ "FO4/HDRDisplay/SeedScalePS.hlsl", "ps_5_0" },
 
 			{ "IBL/DiffuseIBLCS.hlsl" },
 

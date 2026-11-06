@@ -38,13 +38,6 @@ namespace cs::features::upscaling_anchors
 		.offset = { 0x9F, 0x83, 0x83 },
 		.target = RE::ID::ImageSpaceManager::RenderEffectRange
 	};
-	// Pre-UI: the full-extent frame is final for the HUD-less capture.
-	inline constexpr CallSiteAnchor kDrawWorldRenderUIResolve{
-		.name = "DrawWorld::Render_UI -> SetUseDynamicResolutionViewportAsDefaultViewport",
-		.function = RE::ID::DrawWorld::Imagespace,
-		.offset = { 0xE1, 0xC5, 0xC5 },
-		.target = RE::ID::BSGraphics::RenderTargetManager::SetUseDynamicResolutionViewportAsDefaultViewport
-	};
 
 	// BSDFComposite samples dynamic-resolution G-buffers.
 	inline constexpr CallSiteAnchor kDeferredCompositeRenderPass{

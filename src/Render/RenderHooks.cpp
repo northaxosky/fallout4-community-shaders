@@ -50,6 +50,7 @@ namespace cs::engine
 		bool EnsureSecondCompositeInstalled();
 		bool EnsurePrecipitationOcclusionInstalled();
 		bool EnsureImagespaceInstalled();
+		bool EnsurePreInterfaceInstalled();
 		bool EnsureSunShadowRenderInstalled();
 		bool EnsureWaterUpdateInstalled();
 		bool EnsureCommandBufferRouteInstalled();
@@ -73,6 +74,8 @@ namespace cs::engine
 		HookPoint g_postDeferredComposite{ "PostDeferredComposite", {}, EnsureDeferredCompositeInstalled };
 		HookPoint g_preSecondDeferredComposite{ "PreSecondDeferredComposite", {}, EnsureSecondCompositeInstalled };
 		HookPoint g_postForwardSky{ "PostForwardSky", {}, EnsureForwardSkyInstalled };
+		HookPoint g_preImagespace{ "PreImagespace", {}, EnsureImagespaceInstalled };
+		HookPoint g_preInterface{ "PreInterface", {}, EnsurePreInterfaceInstalled };
 		HookPoint g_postImagespace{ "PostImagespace", {}, EnsureImagespaceInstalled };
 		HookPoint g_prePrecipitationOcclusion{ "PrePrecipitationOcclusion", {}, EnsurePrecipitationOcclusionInstalled };
 		HookPoint g_postPrecipitationOcclusion{ "PostPrecipitationOcclusion", {}, EnsurePrecipitationOcclusionInstalled };
@@ -127,6 +130,7 @@ namespace cs::engine
 		bool g_secondCompositeInstalled = false;
 		bool g_precipitationOcclusionInstalled = false;
 		bool g_imagespaceInstalled = false;
+		bool g_preInterfaceInstalled = false;
 		bool g_sunShadowRenderInstalled = false;
 		bool g_frustumShadowRenderInstalled = false;
 		bool g_parabolicShadowRenderInstalled = false;
@@ -391,8 +395,20 @@ namespace cs::engine
 			static void thunk(void* a_this)
 			{
 				MarkRegistrationClosed();
+				Dispatch(g_preImagespace, "Imagespace pre");
 				func(a_this);
 				Dispatch(g_postImagespace, "Imagespace post");
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Render_UI marks the scene final here, before the post-AA interface draws.
+		struct PreInterface_Hook
+		{
+			static void thunk(RE::BSGraphics::RenderTargetManager* a_this, bool a_enabled)
+			{
+				func(a_this, a_enabled);
+				Dispatch(g_preInterface, "Pre interface");
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -628,6 +644,28 @@ namespace cs::engine
 		{
 			return EnsureDetourInstalled<Imagespace_Hook>(
 				g_imagespaceInstalled, RE::ID::DrawWorld::Imagespace, "DrawWorld::Imagespace");
+		}
+
+		bool EnsurePreInterfaceInstalled()
+		{
+			if (g_preInterfaceInstalled) {
+				return true;
+			}
+			const CallSiteAnchor anchor{
+				"DrawWorld::Render_UI -> SetUseDynamicResolutionViewportAsDefaultViewport",
+				RE::ID::DrawWorld::Imagespace,
+				{ 0xE1, 0xC5, 0xC5 },
+				RE::ID::BSGraphics::RenderTargetManager::SetUseDynamicResolutionViewportAsDefaultViewport
+			};
+			const auto site = ResolveCallSite(anchor);
+			if (!site) {
+				L->error("Pre-interface hook unavailable: {}", site.error());
+				return false;
+			}
+			stl::write_thunk_call<PreInterface_Hook>(*site);
+			g_preInterfaceInstalled = true;
+			L->info("Hook installed on DrawWorld::Render_UI resolve call (pre-interface boundary)");
+			return true;
 		}
 
 		bool EnsurePrecipitationOcclusionInstalled()
@@ -1022,6 +1060,8 @@ namespace cs::engine
 	CS_DEFINE_RENDER_HOOK(RegisterPostShadowLightRender, g_postShadowLightRender[static_cast<std::size_t>(a_kind)], ShadowLightKind a_kind, )
 	CS_DEFINE_RENDER_HOOK(RegisterPostResetState, g_postResetState)
 	CS_DEFINE_RENDER_HOOK(RegisterPostForwardSky, g_postForwardSky)
+	CS_DEFINE_RENDER_HOOK(RegisterPreImagespace, g_preImagespace)
+	CS_DEFINE_RENDER_HOOK(RegisterPreInterface, g_preInterface)
 	CS_DEFINE_RENDER_HOOK(RegisterPostImagespace, g_postImagespace)
 	CS_DEFINE_RENDER_HOOK(RegisterPostSunShadowRender, g_postSunShadowRender)
 	CS_DEFINE_RENDER_HOOK(RegisterPrePrecipitationOcclusion, g_prePrecipitationOcclusion)

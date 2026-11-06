@@ -1873,6 +1873,11 @@ namespace cs::render
 		return IsFrameGenerationProxyActive() && _impl->swapChain.IsHdrContainer();
 	}
 
+	hdr::SceneTarget TemporalPipeline::GetHdrSceneTarget() const noexcept
+	{
+		return IsHdrContainerActive() ? _impl->swapChain.GetHdrSceneTarget() : hdr::SceneTarget{};
+	}
+
 	bool TemporalPipeline::IsFrameGenerationEnabledForFrame(
 		bool a_inExcludedMenu) const noexcept
 	{

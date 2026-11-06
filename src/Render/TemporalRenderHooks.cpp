@@ -1,4 +1,5 @@
 #include "RE/D/DrawWorld.h"
+#include "Render/RenderHooks.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalRendererInternals.h"
 
@@ -21,7 +22,6 @@ namespace cs::render
 			CallHook{ &kDrawWorldBeginSetDynamicViewport, &stl::write_thunk_call<DrawWorldBegin_SetDynamicViewport> },
 			CallHook{ &kDrawWorldBeginUpdateTemporalData, &stl::write_thunk_call<Main_UpdateJitter> },
 			CallHook{ &firstPersonAlpha, &stl::write_thunk_call<DrawWorld_FirstPersonAlpha> },
-			CallHook{ &kDrawWorldRenderUIResolve, &stl::write_thunk_call<DrawWorldRenderUI_Resolve> },
 			CallHook{ &kDrawWorldRenderUIRenderEffectRange, &stl::write_thunk_call<DrawWorldRenderUI_RenderEffectRange> },
 			CallHook{ &kDeferredCompositeRenderPass, &stl::write_thunk_call<DeferredComposite_RenderPass> },
 			CallHook{ &kDeferredCompositeSSLRBegin, &stl::write_thunk_call<DeferredCompositeSSLR_Begin> },
@@ -39,6 +39,17 @@ namespace cs::render
 				return;
 			}
 			hook.site = *site;
+		}
+		// The seam runs after the engine call, ahead of every other pre-interface callback.
+		if (!cs::engine::RegisterPreInterface(
+				[] {
+					GuardedThunkBody("Upscaling pre-UI seam", [] {
+						GetSingleton()->FinishPreUiSeam();
+					});
+				},
+				cs::engine::HookPriority::OutermostPre)) {
+			RejectInitialization("The pre-interface hook could not be registered.");
+			return;
 		}
 
 		for (const auto& hook : callHooks) {
@@ -174,17 +185,6 @@ namespace cs::render
 
 		GuardedThunkBody("Upscaling first-person alpha post-stage", [upscaling] {
 			upscaling->FinishFirstPersonAlphaInputs();
-		});
-	}
-
-	void TemporalRenderer::DrawWorldRenderUI_Resolve::thunk(
-		RE::BSGraphics::RenderTargetManager* a_this,
-		bool a_enabled)
-	{
-		func(a_this, a_enabled);
-
-		GuardedThunkBody("Upscaling pre-UI seam", [] {
-			GetSingleton()->FinishPreUiSeam();
 		});
 	}
 

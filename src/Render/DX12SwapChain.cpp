@@ -177,6 +177,7 @@ namespace cs::render
 			};
 			retainShared(_proxyBuffer);
 			retainShared(_hdrOutput);
+			retainShared(_hdrScene);
 			for (const auto& resource : _hudlessBuffers) {
 				retainShared(resource);
 			}
@@ -340,6 +341,7 @@ namespace cs::render
 		}
 		_proxyBuffer.reset();
 		_hdrOutput.reset();
+		_hdrScene.reset();
 		for (auto& backBuffer : _backBuffers) {
 			backBuffer = nullptr;
 		}
@@ -774,13 +776,15 @@ namespace cs::render
 			};
 		}
 		if (_hdrContainer) {
+			resources.hdrScene = SharedD3D11D3D12Texture::Create(
+				_device11.get(), _device12.get(), desc, "HDRDisplay/Scene");
 			desc.Format = _innerDesc.Format;
 			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 			resources.hdrOutput = SharedD3D11D3D12Texture::Create(
 				_device11.get(), _device12.get(), desc, "Present/HdrOutput");
 		}
 		if (!resources.proxy || (_provider && (!resources.hudless[0] || !resources.hudless[1])) ||
-			(_hdrContainer && !resources.hdrOutput)) {
+			(_hdrContainer && (!resources.hdrOutput || !resources.hdrScene))) {
 			return E_OUTOFMEMORY;
 		}
 		a_resources = std::move(resources);
@@ -797,6 +801,7 @@ namespace cs::render
 		_proxyBuffer = std::move(resources.proxy);
 		_hudlessBuffers = std::move(resources.hudless);
 		_hdrOutput = std::move(resources.hdrOutput);
+		_hdrScene = std::move(resources.hdrScene);
 		if (_streamline) {
 			_streamline->NotifyDLSSGDisplayChange(
 				a_width, a_height);
@@ -936,7 +941,7 @@ namespace cs::render
 	bool DX12SwapChain::IsReady() const noexcept
 	{
 		return !_quarantined && _published && _swapChain && _proxyBuffer &&
-		       (!_hdrContainer || _hdrOutput) && _context11 && _queue && _retirementQueue &&
+		       (!_hdrContainer || (_hdrOutput && _hdrScene)) && _context11 && _queue && _retirementQueue &&
 		       _fence11 && _fence12 && _inputRetirementFence11 &&
 		       _inputRetirementFence12 && _presentingCompletionFence &&
 		       _fenceEvent &&
@@ -1854,9 +1859,10 @@ namespace cs::render
 			}
 			const auto hdrSettings = _hdrContainer && _callbacks.queryHdrOutput ? _callbacks.queryHdrOutput() : hdr::OutputSettings{};
 			if (PrepareReShade()) {
-				// Present-time effects see the interface too, which sits at the lifted white.
-				const auto scRgb = ScRgbFor(hdrSettings.paperWhite * hdrSettings.uiBrightness, hdrSettings.enabled);
-				_reshade.Present(*_context11, *_proxyBuffer->texture11, scRgb ? &*scRgb : nullptr);
+				// A separated frame's proxy holds only the interface, composed after the effects.
+				const auto* color = hdrSettings.interfaceSeparated && _hdrScene ? _hdrScene.get() : _proxyBuffer.get();
+				const auto scRgb = ScRgbFor(color, hdrSettings.paperWhite, hdrSettings.enabled);
+				_reshade.Present(*_context11, *color->texture11, scRgb ? &*scRgb : nullptr);
 			}
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const auto* copySource = _proxyBuffer.get();
@@ -2190,22 +2196,32 @@ namespace cs::render
 			a_settings.enabled ? "G2084 (HDR10)" : "G22 (SDR)");
 	}
 
-	std::optional<features::ScRgbProxy> DX12SwapChain::ScRgbFor(float a_whiteNits, bool a_enabled) const noexcept
+	std::optional<features::ScRgbProxy> DX12SwapChain::ScRgbFor(
+		const SharedD3D11D3D12Texture* a_color, float a_whiteNits, bool a_enabled) const noexcept
 	{
-		if (!_hdrContainer || !a_enabled || !_proxyBuffer)
+		if (!_hdrContainer || !a_enabled || !a_color)
 			return std::nullopt;
-		return features::ScRgbProxy{ .srv = _proxyBuffer->srv11.get(), .rtv = _proxyBuffer->rtv11.get(), .whiteNits = a_whiteNits };
+		return features::ScRgbProxy{ .srv = a_color->srv11.get(), .rtv = a_color->rtv11.get(), .whiteNits = a_whiteNits };
+	}
+
+	hdr::SceneTarget DX12SwapChain::GetHdrSceneTarget() const noexcept
+	{
+		if (!_hdrContainer || !_hdrScene)
+			return {};
+		return { _hdrScene->texture11.get(), _hdrScene->srv11.get(), _hdrScene->rtv11.get() };
 	}
 
 	bool DX12SwapChain::ComposeHdr(const hdr::OutputSettings& settings) noexcept
 	{
 		ApplyHdrColorSpace(settings);
-		if (!_hdrCompose.IsReady() || !_hdrOutput || !_proxyBuffer->srv11 || !_hdrOutput->uav11) {
+		const bool separated = settings.interfaceSeparated && _hdrScene;
+		const auto* scene = separated ? _hdrScene.get() : _proxyBuffer.get();
+		if (!_hdrCompose.IsReady() || !_hdrOutput || !scene->srv11 || !_proxyBuffer->srv11 || !_hdrOutput->uav11) {
 			CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "HDR compose is unavailable; the frame is not presented.");
 			return false;
 		}
-		_hdrCompose.Dispatch(*_context11, *_proxyBuffer->srv11, *_hdrOutput->uav11,
-			_innerDesc.Width, _innerDesc.Height, settings);
+		_hdrCompose.Dispatch(*_context11, *scene->srv11, separated ? _proxyBuffer->srv11.get() : nullptr,
+			*_hdrOutput->uav11, _innerDesc.Width, _innerDesc.Height, settings);
 		return true;
 	}
 
@@ -2241,9 +2257,14 @@ namespace cs::render
 	void DX12SwapChain::RenderReShadeEffects(ID3D11DeviceContext& a_context,
 		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits) noexcept
 	{
-		// Only the proxy buffer is what the game later presents.
-		if (PrepareReShade() && &a_color == static_cast<ID3D11Resource*>(_proxyBuffer->texture11.get())) {
-			const auto scRgb = ScRgbFor(a_hdrWhiteNits, a_hdrWhiteNits > 0.0f);
+		// Only the proxy buffer, or the scene standing in for it, is what the game later presents.
+		const SharedD3D11D3D12Texture* color = nullptr;
+		if (&a_color == static_cast<ID3D11Resource*>(_proxyBuffer->texture11.get()))
+			color = _proxyBuffer.get();
+		else if (_hdrScene && &a_color == static_cast<ID3D11Resource*>(_hdrScene->texture11.get()))
+			color = _hdrScene.get();
+		if (color && PrepareReShade()) {
+			const auto scRgb = ScRgbFor(color, a_hdrWhiteNits, a_hdrWhiteNits > 0.0f);
 			_reshade.RenderEffects(a_context, a_color, a_depth, scRgb ? &*scRgb : nullptr);
 		}
 	}
@@ -2259,6 +2280,9 @@ namespace cs::render
 			"FrameGeneration::ClearSharedBuffers");
 		if (_proxyBuffer && _proxyBuffer->rtv11) {
 			_context11->ClearRenderTargetView(_proxyBuffer->rtv11.get(), clear);
+		}
+		if (_hdrScene && _hdrScene->rtv11) {
+			_context11->ClearRenderTargetView(_hdrScene->rtv11.get(), clear);
 		}
 		if (a_clearFrameGenerationInputs) {
 			for (auto& hudless : _hudlessBuffers) {
@@ -2588,7 +2612,7 @@ namespace cs::render
 		if (sizeChanged &&
 			(!pending.proxy ||
 				(_provider && (!pending.hudless[0] || !pending.hudless[1])) ||
-				(_hdrContainer && !pending.hdrOutput) ||
+				(_hdrContainer && (!pending.hdrOutput || !pending.hdrScene)) ||
 				targetWidth != resizedDesc.Width ||
 				targetHeight != resizedDesc.Height)) {
 			const HRESULT resourceResult = CreateDisplayResources(
@@ -2613,6 +2637,7 @@ namespace cs::render
 			_proxyBuffer = std::move(pending.proxy);
 			_hudlessBuffers = std::move(pending.hudless);
 			_hdrOutput = std::move(pending.hdrOutput);
+			_hdrScene = std::move(pending.hdrScene);
 		}
 		_appliedColorSpace.reset();
 		render::temporal::CommitResizeBridgeState(

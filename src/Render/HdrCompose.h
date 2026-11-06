@@ -22,6 +22,18 @@ namespace cs::render::hdr
 		float paperWhite = 203.0f;
 		float peakNits = 1000.0f;
 		float uiBrightness = 1.0f;
+		// This frame's scene is in the presenter's scene texture; the proxy holds only the interface.
+		bool interfaceSeparated = false;
+	};
+
+	// The presenter's fp16 scene texture, which the engine renders into while the interface is separate.
+	struct SceneTarget
+	{
+		ID3D11Texture2D* texture = nullptr;
+		ID3D11ShaderResourceView* srv = nullptr;
+		ID3D11RenderTargetView* rtv = nullptr;
+
+		[[nodiscard]] explicit operator bool() const noexcept { return texture && srv && rtv; }
 	};
 
 	// The container stays HDR-capable when disabled; only the color space changes.
@@ -39,10 +51,11 @@ namespace cs::render::hdr
 		void Reset() noexcept;
 		[[nodiscard]] bool IsReady() const noexcept { return _shader && _constants; }
 
-		// The interface is not composited yet; the scene fills the output.
+		// With a_interface it is composited over the scene at uiBrightness; without,
+		// a_scene already holds the whole frame.
 		void Dispatch(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_scene,
-			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height,
-			const OutputSettings& a_settings);
+			ID3D11ShaderResourceView* a_interface, ID3D11UnorderedAccessView& a_output,
+			UINT a_width, UINT a_height, const OutputSettings& a_settings);
 
 	private:
 		winrt::com_ptr<ID3D11ComputeShader> _shader;

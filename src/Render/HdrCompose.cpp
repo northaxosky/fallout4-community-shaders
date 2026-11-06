@@ -56,27 +56,27 @@ namespace cs::render::hdr
 	}
 
 	void Compose::Dispatch(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_scene,
-		ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const OutputSettings& a_settings)
+		ID3D11ShaderResourceView* a_interface, ID3D11UnorderedAccessView& a_output,
+		UINT a_width, UINT a_height, const OutputSettings& a_settings)
 	{
 		D3D11_MAPPED_SUBRESOURCE mapped{};
 		if (FAILED(a_context.Map(_constants.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
 			return;
 		*static_cast<PerFrame*>(mapped.pData) = {
 			.enableHDR = a_settings.enabled ? 1.0f : 0.0f,
-			// RT0 white is the interface; a seeded frame lifts it by the interface brightness.
-			.paperWhite = a_settings.paperWhite * a_settings.uiBrightness,
+			.paperWhite = a_settings.paperWhite,
 			.peakNits = a_settings.peakNits,
-			.skipUIComposite = 1.0f,
+			.skipUIComposite = a_interface ? 0.0f : 1.0f,
 			.uiBrightness = a_settings.uiBrightness
 		};
 		a_context.Unmap(_constants.get(), 0);
 
 		annotation::ScopedEvent annotationScope("Render::HdrCompose", false);
-		// The scene is the proxy, which may still be bound as the engine's target.
+		// The inputs may still be bound as the engine's targets.
 		engine::ComputeOMScope scope(&a_context);
 		auto* constants = _constants.get();
 		auto* output = &a_output;
-		ID3D11ShaderResourceView* inputs[]{ &a_scene, &a_scene };
+		ID3D11ShaderResourceView* inputs[]{ &a_scene, a_interface ? a_interface : &a_scene };
 		a_context.CSSetConstantBuffers(0, 1, &constants);
 		a_context.CSSetShaderResources(0, 2, inputs);
 		a_context.CSSetUnorderedAccessViews(0, 1, &output, nullptr);
