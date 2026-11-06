@@ -5,6 +5,7 @@
 #include <DearModdingUI/Client.h>
 
 #include "HDRDetection.h"
+#include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
@@ -155,7 +156,8 @@ namespace cs::features
 			else
 				_sceneSwap.Restore();
 		}
-		if (!IsHdrActive() || !context)
+		// The host shell blurs the back buffer, so it must hold the whole frame.
+		if (!IsHdrActive() || !context || host::HostClient::IsShellOpen())
 			return;
 		const auto scene = render::TemporalPipeline::Get().GetHdrSceneTarget();
 		auto* frameTarget = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);

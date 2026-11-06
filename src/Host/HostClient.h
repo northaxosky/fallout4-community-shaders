@@ -49,6 +49,9 @@ namespace cs::host
 		void ResetOverlay() noexcept;
 		void SelectPage(HostPageKind a_kind) noexcept;
 
+		// True while the host shell is open; its backdrop blurs the back buffer.
+		[[nodiscard]] static bool IsShellOpen() noexcept;
+
 	private:
 		HostClient();
 

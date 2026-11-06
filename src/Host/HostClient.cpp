@@ -1014,6 +1014,14 @@ namespace cs::host
 		L->warn("DearModdingUI select page failed: no matching page");
 	}
 
+	bool HostClient::IsShellOpen() noexcept
+	{
+		// DearModdingUI registers its shell under this menu name.
+		static const RE::BSFixedString kShellMenu{ "DearModdingUI_Menu" };
+		const auto* ui = RE::UI::GetSingleton();
+		return ui && ui->GetMenuOpen(kShellMenu);
+	}
+
 	void HostClient::LogFailure(std::string_view a_operation) const noexcept
 	{
 		L->warn(
