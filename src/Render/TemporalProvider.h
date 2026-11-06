@@ -616,6 +616,8 @@ namespace cs::render::temporal
 		float jitterX = 0.0f;
 		float jitterY = 0.0f;
 		float frameTimeMilliseconds = 0.0f;
+		// Display peak for HDR contracts; zero otherwise.
+		float peakLuminanceNits = 0.0f;
 		bool enabled = false;
 		bool resetHistory = false;
 		UiCompositionMode uiMode = UiCompositionMode::kFinalColorOnly;
@@ -664,6 +666,11 @@ namespace cs::render::temporal
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
 		[[nodiscard]] virtual ProviderResult
 		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) = 0;
+		// True when the provider composites the interface itself, so the back buffer is scene only.
+		[[nodiscard]] virtual bool PresentsSceneOnlyBackBuffer() const noexcept
+		{
+			return false;
+		}
 		[[nodiscard]] virtual ProviderResult ValidateConfiguration(
 			const FrameGenerationConfiguration&) const
 		{

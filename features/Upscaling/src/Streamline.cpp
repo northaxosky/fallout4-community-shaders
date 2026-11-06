@@ -1195,7 +1195,8 @@ namespace cs::features
 	{
 		if (!featureFSRG || !slFSRGSetOptions ||
 			!a_request.outputWidth || !a_request.outputHeight ||
-			!render::temporal::IsFo4PostTonemapSdr(a_request.color)) {
+			!(render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
+				render::temporal::IsHdr10PostTonemap(a_request.color))) {
 			return false;
 		}
 		if (a_enabled &&
@@ -1209,12 +1210,21 @@ namespace cs::features
 		options.displayHeight = a_request.outputHeight;
 		options.maxRenderWidth = a_request.outputWidth;
 		options.maxRenderHeight = a_request.outputHeight;
-		options.backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-		options.colorSpace = sl::FSRColorSpace::eGamma22;
+		options.backBufferFormat = a_request.color.resourceFormat;
 		options.frameTimeDeltaMilliseconds =
 			a_request.frameTimeMilliseconds;
 		options.viewSpaceToMetersFactor = 0.01428222656f;
 		options.onlyPresentGenerated = sl::Boolean::eFalse;
+		if (render::temporal::IsHdr10PostTonemap(a_request.color)) {
+			// FFX recomposes the premultiplied PQ interface over each frame.
+			options.colorSpace = sl::FSRColorSpace::ePQ;
+			options.uiPremultipliedAlpha = sl::Boolean::eTrue;
+			options.uiDoubleBuffering = sl::Boolean::eTrue;
+			options.minLuminance = 0.0f;
+			options.maxLuminance = a_request.peakLuminanceNits;
+		} else {
+			options.colorSpace = sl::FSRColorSpace::eGamma22;
+		}
 		sl::FSRGAlgorithmOptions algorithmOptions{};
 		streamline_fidelityfx::SelectAlgorithm(
 			options, algorithmOptions, a_algorithm);

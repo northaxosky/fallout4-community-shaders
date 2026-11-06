@@ -112,9 +112,6 @@ namespace cs::features
 				std::string(Name()) +
 				" does not support the swap-chain format.");
 		}
-		if (_method != Method::kDLSSG && render::temporal::IsHdr10PostTonemap(*color)) {
-			return Failure("FSR frame generation does not support HDR output yet.");
-		}
 		_color = *color;
 		_width = a_width;
 		_height = a_height;
@@ -130,6 +127,7 @@ namespace cs::features
 			request.outputWidth = a_width;
 			request.outputHeight = a_height;
 			request.color = _color;
+			request.peakLuminanceNits = _peakLuminanceNits;
 			const auto algorithm = _method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3;
 			_ready =
 				_runtime.ValidateFSRGAlgorithm(algorithm).Succeeded() &&
@@ -146,6 +144,7 @@ namespace cs::features
 			return Failure(
 				std::string(Name()) + " presentation is not ready.");
 		}
+		_peakLuminanceNits = a_request.peakLuminanceNits;
 		const bool configured = _method == Method::kDLSSG ? (_configuration = a_request.configuration,
 																_color = a_request.color,
 																_runtime.ConfigureDLSSG(a_request.enabled,
@@ -226,6 +225,7 @@ namespace cs::features
 		request.outputWidth = _width;
 		request.outputHeight = _height;
 		request.color = _color;
+		request.peakLuminanceNits = _peakLuminanceNits;
 		return _runtime.ConfigureFSRG(a_enabled, request,
 				   _method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3) ?
 		           ProviderResult::Ok() :
@@ -256,6 +256,7 @@ namespace cs::features
 			request.outputWidth = _width;
 			request.outputHeight = _height;
 			request.color = _color;
+			request.peakLuminanceNits = _peakLuminanceNits;
 			if (!_runtime.ConfigureFSRG(false, request,
 					_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3)) {
 				return Failure(std::string(Name()) +
@@ -290,6 +291,11 @@ namespace cs::features
 		       _method == Method::kFSR4  ? _runtime.ValidateFSRGAlgorithm(
 											   sl::FSRGAlgorithm::eFSR4) :
 		                                   ProviderResult::Ok();
+	}
+
+	bool StreamlinePresentation::PresentsSceneOnlyBackBuffer() const noexcept
+	{
+		return _method != Method::kDLSSG;
 	}
 
 	render::temporal::FrameGenerationCapabilities

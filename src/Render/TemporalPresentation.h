@@ -148,12 +148,6 @@ namespace cs::render::temporal::presentation
 			a_status.session.admittedFg[index]) {
 			return {};
 		}
-		if (a_status.session.hdrDisplay && a_method != FrameGenerationMethod::kDLSSG) {
-			return {
-				.kind = AvailabilityKind::kUnavailable,
-				.reason = "FSR frame generation does not support HDR output yet."
-			};
-		}
 		if (a_method == FrameGenerationMethod::kDLSSG) {
 			if (!a_status.session.latencyHooksInstalled) {
 				return {

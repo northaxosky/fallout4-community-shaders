@@ -45,6 +45,7 @@ namespace cs::features
 		ValidateConfiguration(
 			const render::temporal::FrameGenerationConfiguration&
 				a_configuration) const override;
+		[[nodiscard]] bool PresentsSceneOnlyBackBuffer() const noexcept override;
 		[[nodiscard]] render::temporal::FrameGenerationCapabilities
 		GetCapabilities() const noexcept override;
 		[[nodiscard]] std::optional<std::uint32_t>
@@ -73,6 +74,7 @@ namespace cs::features
 		bool _presentationActive = false;
 		render::temporal::FrameGenerationConfiguration _configuration;
 		render::temporal::ColorContract _color = render::temporal::kFo4PostTonemapSdrContract;
+		float _peakLuminanceNits = 0.0f;
 	};
 
 }  // namespace cs::features

@@ -1363,12 +1363,10 @@ namespace cs::render
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kOff)] = temporalProxyPath;
 		session.hdrDisplay = request.hdrDisplay;
-		// Only DLSS-G carries the HDR10 container so far.
 		const bool fgDisplayEligible = temporalProxyPath;
-		const bool fsrDisplayEligible = fgDisplayEligible && !request.hdrDisplay;
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kFSR3)] =
-			request.frameGenerationEligible && fsrDisplayEligible &&
+			request.frameGenerationEligible && fgDisplayEligible &&
 			_impl->FrameGenerationProvider(
 					 temporal::FrameGenerationMethod::kFSR3)
 				->IsAvailable();
@@ -1379,7 +1377,7 @@ namespace cs::render
 			_impl->streamlinePresentation.IsAvailable();
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kFSR4)] =
-			request.frameGenerationEligible && fsrDisplayEligible &&
+			request.frameGenerationEligible && fgDisplayEligible &&
 			_impl->streamlineFsr4Presentation.IsAvailable();
 		if (a_adapter) {
 			DXGI_ADAPTER_DESC desc{};

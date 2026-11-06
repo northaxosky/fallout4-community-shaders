@@ -1906,11 +1906,14 @@ namespace cs::render
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const auto* copySource = _proxyBuffer.get();
 			// Frame generation blends in PQ so real and generated frames match.
-			bool hdrFrameGeneration = false;
+			const SharedD3D11D3D12Texture* hdrFrameGenerationBackBuffer = nullptr;
 			if (_hdrContainer) {
-				hdrFrameGeneration = requested && ComposeHdrFrameGenerationInputs(hdrSettings);
-				requested = requested && hdrFrameGeneration;
-				copySource = hdrFrameGeneration || ComposeHdr(hdrSettings) ? _hdrOutput.get() : nullptr;
+				if (requested) {
+					hdrFrameGenerationBackBuffer = ComposeHdrFrameGenerationInputs(hdrSettings);
+					requested = hdrFrameGenerationBackBuffer != nullptr;
+				}
+				copySource = hdrFrameGenerationBackBuffer ? hdrFrameGenerationBackBuffer : ComposeHdr(hdrSettings) ? _hdrOutput.get() :
+				                                                                                                     nullptr;
 			}
 			if (copySource && copySource->resource12->GetDesc().Format != _innerDesc.Format) {
 				CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
@@ -2001,14 +2004,15 @@ namespace cs::render
 					.state = D3D12_RESOURCE_STATE_COMMON
 				};
 				request.finalColor = render::temporal::D3D12GpuView{
-					.resource = (hdrFrameGeneration ? _hdrOutput : _proxyBuffer)->resource12.get(),
+					.resource = (hdrFrameGenerationBackBuffer ? hdrFrameGenerationBackBuffer : _proxyBuffer.get())->resource12.get(),
 					.state = D3D12_RESOURCE_STATE_COMMON
 				};
 				request.outputWidth = _innerDesc.Width;
 				request.outputHeight = _innerDesc.Height;
 				request.enabled = requested;
 				request.uiMode = render::temporal::UiCompositionMode::kHudlessAndFinal;
-				if (hdrFrameGeneration) {
+				if (hdrFrameGenerationBackBuffer) {
+					request.peakLuminanceNits = hdrSettings.peakNits;
 					request.uiColorAndAlpha = render::temporal::D3D12GpuView{
 						.resource = _uiBuffers[_frameSlot]->resource12.get(),
 						.state = D3D12_RESOURCE_STATE_COMMON
@@ -2273,18 +2277,20 @@ namespace cs::render
 		return true;
 	}
 
-	bool DX12SwapChain::ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& settings) noexcept
+	const SharedD3D11D3D12Texture* DX12SwapChain::ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& settings) noexcept
 	{
 		// Without a separate interface there is no clean HUD-less frame; skip this frame only.
 		if (!settings.interfaceSeparated || !_hdrScene)
-			return false;
+			return nullptr;
 		const auto* hudless = _hudlessBuffers[_frameSlot].get();
 		const auto* ui = _uiBuffers[_frameSlot].get();
+		// The provider composites the interface itself over a scene-only back buffer.
+		const bool sceneOnly = _provider && _provider->PresentsSceneOnlyBackBuffer();
 		if (!_hdrCompose.IsReady() || !_hdrOutput || !hudless || !ui || !_proxyBuffer ||
 			!hudless->srv11 || !hudless->uav11 || !ui->srv11 || !ui->uav11 ||
 			!_hdrScene->srv11 || !_hdrOutput->uav11) {
 			CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "HDR frame-generation inputs are unavailable; the frame is not generated.");
-			return false;
+			return nullptr;
 		}
 		ApplyHdrColorSpace(settings);
 		const bool written = render::temporal::WriteFrameGenerationInput(
@@ -2295,13 +2301,16 @@ namespace cs::render
 					_innerDesc.Width, _innerDesc.Height, settings);
 				_context11->CopyResource(ui->texture11.get(), _proxyBuffer->texture11.get());
 				_hdrCompose.EncodeInterface(*_context11, *ui->uav11, _innerDesc.Width, _innerDesc.Height, settings);
-				_hdrCompose.CompositeInterface(*_context11, *hudless->srv11, *ui->srv11, *_hdrOutput->uav11,
-					_innerDesc.Width, _innerDesc.Height);
+				if (!sceneOnly) {
+					_hdrCompose.CompositeInterface(*_context11, *hudless->srv11, *ui->srv11, *_hdrOutput->uav11,
+						_innerDesc.Width, _innerDesc.Height);
+				}
 			});
 		if (!written) {
 			DisableFrameGeneration("frame-generation HDR inputs were still in provider use");
+			return nullptr;
 		}
-		return written;
+		return sceneOnly ? hudless : _hdrOutput.get();
 	}
 
 	bool DX12SwapChain::PrepareReShade() noexcept
