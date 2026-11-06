@@ -1854,8 +1854,13 @@ namespace cs::render
 			if (PrepareReShade()) {
 				_reshade.Present(*_context11, *_proxyBuffer->texture11);
 			}
+			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const auto* copySource = _proxyBuffer.get();
-			if (_hdrContainer && !ComposeHdr()) {
+			if (_hdrContainer) {
+				copySource = ComposeHdr() ? _hdrOutput.get() : nullptr;
+			}
+			if (copySource && copySource->resource12->GetDesc().Format != _innerDesc.Format) {
+				CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
 				copySource = nullptr;
 			}
 			cs::render::annotation::SetMarker("FG_D3D11ProductionComplete");
