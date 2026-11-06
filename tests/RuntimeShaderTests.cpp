@@ -58,6 +58,8 @@ namespace
 			{ "DynamicCubemaps/BC6HEncodeCS.hlsl" },
 			{ "FO4/CubemapPreviewCS.hlsl", "cs_5_0", {}, { Toggle("SINGLE_CHANNEL") } },
 
+			{ "HDRDisplay/HDROutputCS.hlsl" },
+
 			{ "IBL/DiffuseIBLCS.hlsl" },
 
 			{ "LightLimitFix/ClusterBuildingCS.hlsl" },
