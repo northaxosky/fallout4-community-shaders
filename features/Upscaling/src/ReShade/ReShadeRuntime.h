@@ -5,7 +5,7 @@
 #include <d3d11.h>
 #include <dxgi1_6.h>
 
-#include "DXGISwapChainProxy.h"
+#include "Render/DXGISwapChainProxy.h"
 
 namespace cs::features
 {
@@ -22,7 +22,7 @@ namespace cs::features
 		[[nodiscard]] static bool IsInstalled() noexcept;
 
 		// Creates the runtime once per Destroy; a failed attempt is not retried.
-		bool Ensure(IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
+		bool Ensure(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
 			ID3D11Device& a_device, UINT a_width, UINT a_height) noexcept;
 		// Leaks the runtime on purpose: ReShade must not run after quarantine.
 		void Abandon() noexcept;

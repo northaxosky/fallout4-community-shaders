@@ -1,6 +1,6 @@
-#include "DXGISwapChainProxy.h"
+#include "Render/DXGISwapChainProxy.h"
 
-namespace cs::features
+namespace cs::render
 {
 	DXGISwapChainProxy::DXGISwapChainProxy(
 		IDXGISwapChainProxyOwner& a_owner,

@@ -9,12 +9,12 @@
 #include <utility>
 
 #include "AntiLag2Latency.h"
-#include "DX12SwapChain.h"
 #include "Feature.h"
 #include "FrameGeneration.h"
 #include "Log.h"
 #include "PresentationProviders.h"
 #include "Render/Annotation.h"
+#include "Render/DX12SwapChain.h"
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameBoundary.h"
@@ -304,7 +304,7 @@ namespace cs::render
 			features::StreamlinePresentation::Method::kFSR4
 		};
 		temporal::IFrameGenerationProvider* activePresentation = nullptr;
-		features::DX12SwapChain swapChain;
+		DX12SwapChain swapChain;
 
 		temporal::ISuperResolutionProvider*
 		SuperResolutionProvider(temporal::SuperResolutionMethod a_method) noexcept
@@ -1123,7 +1123,7 @@ namespace cs::render
 			proxyResult = _impl->swapChain.Initialize(
 				a_context.adapter, device, immediateContext, *a_context.swapChainDesc,
 				&_impl->streamline,
-				features::TemporalPresentationCallbacks{
+				TemporalPresentationCallbacks{
 					.clearCapture =
 						[] {
 							TemporalPipeline::Get()
@@ -2137,7 +2137,7 @@ namespace cs::render
 	FrameGenerationDebugTexture TemporalPipeline::GetFrameGenerationDebugTexture(
 		FrameGenerationDebugResource a_resource) const noexcept
 	{
-		const features::SharedD3D11D3D12Texture* resource = nullptr;
+		const SharedD3D11D3D12Texture* resource = nullptr;
 		switch (a_resource) {
 		case FrameGenerationDebugResource::kHudless:
 			resource = _impl->swapChain.GetHudlessTexture();

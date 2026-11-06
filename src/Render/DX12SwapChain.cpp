@@ -1,5 +1,5 @@
 #include "DX12SwapChain.h"
-#include "DXGISwapChainFacadeContract.h"
+#include "Render/DXGISwapChainFacadeContract.h"
 
 #include "AgilityBootstrap.h"
 
@@ -23,11 +23,11 @@
 #include "Render/TemporalRenderer.h"
 #include "Streamline.h"
 
-namespace cs::features
+namespace cs::render
 {
 	namespace
 	{
-		auto* L = cs::log::Get("cs.feature.upscaling.dx12swapchain");
+		auto* L = cs::log::Get("cs.render.dx12swapchain");
 
 		D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* a_resource,
 			D3D12_RESOURCE_STATES a_before,
@@ -190,7 +190,7 @@ namespace cs::features
 	HRESULT DX12SwapChain::Initialize(
 		IDXGIAdapter* a_adapter, ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context, const DXGI_SWAP_CHAIN_DESC& a_desc,
-		Streamline* a_streamline,
+		features::Streamline* a_streamline,
 		TemporalPresentationCallbacks a_callbacks)
 	{
 		if (_published || _quarantined || !a_device || !a_context ||
@@ -435,10 +435,10 @@ namespace cs::features
 			DX::ThrowIfFailed(dxgiDevice->GetAdapter(actualAdapter.put()));
 		}
 		_adapter = actualAdapter;
-		AgilityBootstrapDiagnostics agilityDiagnostics;
+		features::AgilityBootstrapDiagnostics agilityDiagnostics;
 		DX::ThrowIfFailed(CreatePrivateD3D12Device(
 			actualAdapter.get(),
-			std::filesystem::path(Streamline::PluginDir) / L"D3D12",
+			std::filesystem::path(features::Streamline::PluginDir) / L"D3D12",
 			_deviceFactory, _device12.put(), &agilityDiagnostics));
 		if (agilityDiagnostics.UsedSdkFactory()) {
 			const auto& version = agilityDiagnostics.loadedVersion;
@@ -446,7 +446,7 @@ namespace cs::features
 				"Created the private D3D12 device through SDK factory {} "
 				"at {}; the factory selected {} core {} version "
 				"{}.{}.{}.{}",
-				kPrivateD3D12SdkVersion,
+				features::kPrivateD3D12SdkVersion,
 				agilityDiagnostics.sdkDirectory.string(),
 				agilityDiagnostics.LoadedPackagedCore() ? "packaged" : "system/other",
 				agilityDiagnostics.loadedD3D12Core.string(),
@@ -454,7 +454,7 @@ namespace cs::features
 				version.revision);
 		} else {
 			const auto level = agilityDiagnostics.status ==
-			                           AgilityBootstrapStatus::kRuntimeMissing ?
+			                           features::AgilityBootstrapStatus::kRuntimeMissing ?
 			                       spdlog::level::info :
 			                       spdlog::level::warn;
 			L->log(
@@ -462,8 +462,8 @@ namespace cs::features
 				"Agility SDK factory {} was not activated "
 				"(status={}, activation={:#010x}); using the system "
 				"D3D12 runtime",
-				kPrivateD3D12SdkVersion,
-				AgilityBootstrapStatusName(
+				features::kPrivateD3D12SdkVersion,
+				features::AgilityBootstrapStatusName(
 					agilityDiagnostics.status),
 				static_cast<std::uint32_t>(
 					agilityDiagnostics.activationResult));
@@ -2131,7 +2131,7 @@ namespace cs::features
 
 	bool DX12SwapChain::PrepareReShade() noexcept
 	{
-		return ReShadeRuntime::IsInstalled() && IsReady() && _outwardDevice11 &&
+		return features::ReShadeRuntime::IsInstalled() && IsReady() && _outwardDevice11 &&
 		       _reshade.Ensure(*this, *_swapChain, *_outwardDevice11,
 				   _innerDesc.Width, _innerDesc.Height);
 	}
@@ -2602,4 +2602,4 @@ namespace cs::features
 	{
 		return _swapChain ? _swapChain->GetLastPresentCount(a_count) : E_FAIL;
 	}
-}  // namespace cs::features
+}  // namespace cs::render

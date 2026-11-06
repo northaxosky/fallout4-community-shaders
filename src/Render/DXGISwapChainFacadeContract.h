@@ -3,7 +3,7 @@
 #include <d3d11.h>
 #include <dxgi1_6.h>
 
-namespace cs::features::swap_chain_facade
+namespace cs::render::swap_chain_facade
 {
 	[[nodiscard]] inline DXGI_SWAP_CHAIN_DESC BuildDescription(
 		const DXGI_SWAP_CHAIN_DESC& a_requested,

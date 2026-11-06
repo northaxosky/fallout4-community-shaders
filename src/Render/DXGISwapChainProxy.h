@@ -5,7 +5,7 @@
 #include <dxgi1_6.h>
 #include <winrt/base.h>
 
-namespace cs::features
+namespace cs::render
 {
 	class IDXGISwapChainProxyOwner
 	{

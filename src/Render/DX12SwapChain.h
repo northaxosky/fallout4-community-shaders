@@ -11,9 +11,9 @@
 #include <dxgi1_6.h>
 #include <winrt/base.h>
 
-#include "DXGISwapChainProxy.h"
 #include "RCAS/RCAS.h"
 #include "ReShade/ReShadeRuntime.h"
+#include "Render/DXGISwapChainProxy.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/TemporalProvider.h"
 #include "Utils/CSBuffer.h"
@@ -21,7 +21,10 @@
 namespace cs::features
 {
 	class Streamline;
+}
 
+namespace cs::render
+{
 	struct SharedD3D11D3D12Texture
 	{
 		winrt::com_ptr<ID3D11Texture2D> texture11;
@@ -65,7 +68,7 @@ namespace cs::features
 		HRESULT Initialize(IDXGIAdapter* a_adapter, ID3D11Device* a_device,
 			ID3D11DeviceContext* a_context,
 			const DXGI_SWAP_CHAIN_DESC& a_desc,
-			Streamline* a_streamline,
+			features::Streamline* a_streamline,
 			TemporalPresentationCallbacks a_callbacks);
 		[[nodiscard]] HRESULT Rollback() noexcept;
 		[[nodiscard]] HRESULT Drain() noexcept;
@@ -240,10 +243,10 @@ namespace cs::features
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _depthBuffers;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _motionBuffers;
 		winrt::com_ptr<DXGISwapChainProxy> _proxy;
-		Streamline* _streamline = nullptr;
+		features::Streamline* _streamline = nullptr;
 		render::temporal::IFrameGenerationProvider* _provider = nullptr;
-		RCAS _rcas;
-		ReShadeRuntime _reshade;
+		features::RCAS _rcas;
+		features::ReShadeRuntime _reshade;
 		TemporalPresentationCallbacks _callbacks;
 		DXGI_SWAP_CHAIN_DESC _creationDesc{};
 		DXGI_SWAP_CHAIN_DESC _proxyDesc{};
@@ -275,4 +278,4 @@ namespace cs::features
 		render::temporal::AtomicPresentInputRetirementDiagnostics
 			_retirementDiagnostics;
 	};
-}  // namespace cs::features
+}  // namespace cs::render

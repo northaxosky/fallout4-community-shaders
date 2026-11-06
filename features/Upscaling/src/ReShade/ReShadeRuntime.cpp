@@ -47,10 +47,10 @@ namespace cs::features
 		}
 
 		// Presents the typeless copy to ReShade as swap chain buffer 0.
-		class BackBufferOwner final : public IDXGISwapChainProxyOwner
+		class BackBufferOwner final : public render::IDXGISwapChainProxyOwner
 		{
 		public:
-			BackBufferOwner(IDXGISwapChainProxyOwner& a_host, ID3D11Texture2D& a_buffer) noexcept :
+			BackBufferOwner(render::IDXGISwapChainProxyOwner& a_host, ID3D11Texture2D& a_buffer) noexcept :
 				_host(a_host)
 			{
 				_buffer.copy_from(&a_buffer);
@@ -128,7 +128,7 @@ namespace cs::features
 			}
 
 		private:
-			IDXGISwapChainProxyOwner& _host;
+			render::IDXGISwapChainProxyOwner& _host;
 			winrt::com_ptr<ID3D11Texture2D> _buffer;
 		};
 	}
@@ -136,7 +136,7 @@ namespace cs::features
 	struct ReShadeRuntime::Impl
 	{
 		std::unique_ptr<BackBufferOwner> owner;
-		winrt::com_ptr<DXGISwapChainProxy> proxy;
+		winrt::com_ptr<render::DXGISwapChainProxy> proxy;
 		winrt::com_ptr<ID3D11Texture2D> color;
 		winrt::com_ptr<ID3D11RenderTargetView> rtv;
 		winrt::com_ptr<ID3D11RenderTargetView> rtvSrgb;
@@ -160,7 +160,7 @@ namespace cs::features
 			}
 		}
 
-		void Create(IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
+		void Create(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
 			ID3D11Device& a_device, UINT a_width, UINT a_height)
 		{
 			winrt::com_ptr<ID3D11Device> device;
@@ -197,7 +197,7 @@ namespace cs::features
 				contextState.put()));
 
 			owner = std::make_unique<BackBufferOwner>(a_host, *color);
-			proxy.attach(new DXGISwapChainProxy(*owner, a_inner));
+			proxy.attach(new render::DXGISwapChainProxy(*owner, a_inner));
 
 			// Events need an add-on identity; without it, rebind every frame.
 			addonRegistered = ::reshade::register_addon(cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnReloadedEffects)));
@@ -246,7 +246,7 @@ namespace cs::features
 		return installed;
 	}
 
-	bool ReShadeRuntime::Ensure(IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
+	bool ReShadeRuntime::Ensure(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
 		ID3D11Device& a_device, UINT a_width, UINT a_height) noexcept
 	{
 		if (_attempted) {
