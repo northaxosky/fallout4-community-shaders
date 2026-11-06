@@ -28,15 +28,15 @@ namespace cs::features::hdr_display
 			{
 				struct
 				{
-					UINT32 advancedColorSupported : 1;
-					UINT32 advancedColorActive : 1;
-					UINT32 reserved1 : 1;
-					UINT32 advancedColorLimitedByPolicy : 1;
-					UINT32 highDynamicRangeSupported : 1;
-					UINT32 highDynamicRangeUserEnabled : 1;
-					UINT32 wideColorSupported : 1;
-					UINT32 wideColorUserEnabled : 1;
-					UINT32 reserved : 24;
+					UINT32 advancedColorSupported: 1;
+					UINT32 advancedColorActive: 1;
+					UINT32 reserved1: 1;
+					UINT32 advancedColorLimitedByPolicy: 1;
+					UINT32 highDynamicRangeSupported: 1;
+					UINT32 highDynamicRangeUserEnabled: 1;
+					UINT32 wideColorSupported: 1;
+					UINT32 wideColorUserEnabled: 1;
+					UINT32 reserved: 24;
 				};
 				UINT32 value;
 			};
