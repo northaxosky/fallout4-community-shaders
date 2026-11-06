@@ -48,6 +48,16 @@ static const float ExposureBias = 2.0;
 // Material class 4 in PipboyMask alpha marks Pip-Boy pixels.
 static const float PipboyClass = 4.0;
 
+#		ifdef HDR_OUTPUT
+#			include "FO4/HDRDisplay.hlsli"
+// FO4: DisplayMapping's unused Hejl helper expects the Skyrim tonemap factor.
+float3 GetTonemapFactorHejlBurgessDawson(float3 value, bool isHDR = false)
+{
+	return value;
+}
+#			include "Common/DisplayMapping.hlsli"
+#		endif
+
 float3 FilmicCurve(float3 x, float toeNumerator)
 {
 	float shoulderStrength = 0.15;
@@ -61,6 +71,53 @@ float3 FilmicCurve(float3 x, float toeNumerator)
 				   toeStrength * toeDenominator) -
 	       toeNumerator / toeDenominator;
 }
+
+#		ifdef HDR_OUTPUT
+// Slope of FilmicCurve at x.
+float FilmicSlope(float x, float toeNumerator)
+{
+	float shoulderStrength = 0.15;
+	float linearStrength = 0.50;
+	float linearAngle = 0.10;
+	float toeStrength = 0.20;
+	float toeDenominator = 0.30;
+	float numerator = x * (shoulderStrength * x + linearAngle * linearStrength) + toeStrength * toeNumerator;
+	float denominator = x * (shoulderStrength * x + linearStrength) + toeStrength * toeDenominator;
+	float numeratorSlope = 2.0 * shoulderStrength * x + linearAngle * linearStrength;
+	float denominatorSlope = 2.0 * shoulderStrength * x + linearStrength;
+	return (numeratorSlope * denominator - numerator * denominatorSlope) / (denominator * denominator);
+}
+
+// FO4: the curve is exactly vanilla up to its white point, then continues linearly with the slope there.
+float3 FilmicContinued(float3 x, float toeNumerator, float whiteScale)
+{
+	float3 vanilla = FilmicCurve(x, toeNumerator) * whiteScale;
+	float slope = FilmicSlope(LinearWhitePoint, toeNumerator) * whiteScale;
+	return x > LinearWhitePoint ? 1.0 + slope * (x - LinearWhitePoint) : vanilla;
+}
+
+// Upstream's display mapping; the scene is linear with 1.0 at paper white.
+float3 DisplayMap(float3 color)
+{
+	float4 hdrData = SharedData::HDRData;
+	float paperWhite = max(hdrData.y, 1e-6);
+	float peakRatio = max(hdrData.z / paperWhite, 1.0);
+
+	// reduce highlights
+	float lumaIn = Color::RGBToLuminance(color);
+	float lumaOut = lumaIn > 1.0 ? pow(lumaIn, 0.85) : lumaIn;
+	color *= lumaIn > 0.0 ? lumaOut / lumaIn : 0.0;
+
+	// force stronger hue shift
+	if (max(color.x, max(color.y, color.z)) > 1.0)
+		color = Color::Correct::Hue(color, DisplayMapping::RangeCompress(color, 1.0, 6.0), 0.25);
+
+	// map to display peak
+	color = Color::BT709ToBT2020(color);
+	color = exp2(DisplayMapping::RangeCompress(log2(max(0, color)), log2(0.4 * peakRatio), log2(peakRatio), log2(100.0)));
+	return Color::BT2020ToBT709(color);
+}
+#		endif
 
 float4 main(PS_INPUT input) : SV_Target0
 {
@@ -84,6 +141,11 @@ float4 main(PS_INPUT input) : SV_Target0
 	float whiteScale =
 		1.0 / FilmicCurve(float3(LinearWhitePoint, 0, 0), Param.w).x;
 	float3 toned = curve * whiteScale;
+#		ifdef HDR_OUTPUT
+	const bool hdr = FO4HDR::IsActive();
+	if (hdr)
+		toned = FilmicContinued(ExposureBias * exposed, Param.w, whiteScale);
+#		endif
 
 	float luminance = dot(toned, float3(0.2125, 0.7154, 0.0721));
 	float4 saturated = lerp(luminance, float4(toned, 0.0), Cinematic.x);
@@ -91,6 +153,10 @@ float4 main(PS_INPUT input) : SV_Target0
 	float4 graded = lerp(adaptedLuminance, Cinematic.w * tinted, Cinematic.z);
 #		ifdef FADE
 	graded = lerp(graded, Fade, Fade.w);
+#		endif
+#		ifdef HDR_OUTPUT
+	if (hdr)
+		graded.xyz = DisplayMap(graded.xyz);
 #		endif
 	return graded;
 }

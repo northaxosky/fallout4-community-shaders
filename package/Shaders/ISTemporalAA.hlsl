@@ -2,6 +2,11 @@
 // Copyright (c) 2026 northaxosky
 #include "FO4/ImageSpaceVS.hlsli"
 
+#ifdef HDR_OUTPUT
+#	include "Common/DisplayMapping.hlsli"
+#	include "FO4/HDRDisplay.hlsli"
+#endif
+
 #ifdef PSHADER
 cbuffer TemporalAAConstants : register(b2)
 {
@@ -34,6 +39,43 @@ struct PS_OUTPUT
 	float4 Color: SV_Target1;
 };
 
+#	ifdef HDR_OUTPUT
+// Working space is PQ/BT.2020, so the 0..1 brackets hold for HDR scenes.
+static bool UseHDR = false;
+
+float3 ToWorking(float3 gammaColor)
+{
+	return DisplayMapping::LinearToPQ(Color::BT709ToBT2020(TransferFunctions::SignedGamma22ToLinear(gammaColor)), 10000.0);
+}
+
+float3 FromWorking(float3 pqColor)
+{
+	return TransferFunctions::LinearToSignedGamma22(Color::BT2020ToBT709(DisplayMapping::PQtoLinear(pqColor, 10000.0)));
+}
+
+// History luma is stored as game gamma so the 8-bit target keeps highlight precision.
+float EncodeHistoryLuma(float pqLuma)
+{
+	return TransferFunctions::LinearToSignedGamma22(DisplayMapping::PQtoLinear(pqLuma.xxx, 10000.0).x);
+}
+
+float DecodeHistoryLuma(float gammaLuma)
+{
+	return DisplayMapping::LinearToPQ(TransferFunctions::SignedGamma22ToLinear(gammaLuma).xxx, 10000.0).x;
+}
+
+float3 SampleSource(float2 uv)
+{
+	float3 color = source.Sample(sourceSampler, uv).rgb;
+	return UseHDR ? ToWorking(color) : color;
+}
+#	else
+float3 SampleSource(float2 uv)
+{
+	return source.Sample(sourceSampler, uv).rgb;
+}
+#	endif
+
 float4 Tap(float3 color)
 {
 	return float4(color, dot(color.gbr, float3(0.5, 0.25, 0.25)));
@@ -60,6 +102,9 @@ void UpdateBracket(float3 rbl, float historyLuma, inout float3 lower, inout floa
 PS_OUTPUT main(PS_INPUT input)
 {
 	PS_OUTPUT output;
+#	ifdef HDR_OUTPUT
+	UseHDR = FO4HDR::IsActive();
+#	endif
 	float2 uv = input.TexCoord;
 	float2 step = SampleWeights4567.xy;
 
@@ -106,15 +151,15 @@ PS_OUTPUT main(PS_INPUT input)
 	float2 previousUV = uv * PreviousInverseSize_PreviousMaxUV.zw + motionScaled * InverseSize_MaxUV.zw;
 	float4 history = accumulationBuffer.Sample(accumulationBufferSampler, previousUV);
 
-	float4 cNW = Tap(source.Sample(sourceSampler, uvNW).rgb);
-	float4 cSE = Tap(source.Sample(sourceSampler, uvSE).rgb);
-	float4 cNE = Tap(source.Sample(sourceSampler, uvNE).rgb);
-	float4 cE = Tap(source.Sample(sourceSampler, uvE).rgb);
-	float4 cN = Tap(source.Sample(sourceSampler, uvN).rgb);
-	float4 cSW = Tap(source.Sample(sourceSampler, uvSW).rgb);
-	float4 cW = Tap(source.Sample(sourceSampler, uvW).rgb);
-	float4 cS = Tap(source.Sample(sourceSampler, uvS).rgb);
-	float3 cC = source.Sample(sourceSampler, uv).rgb;
+	float4 cNW = Tap(SampleSource(uvNW));
+	float4 cSE = Tap(SampleSource(uvSE));
+	float4 cNE = Tap(SampleSource(uvNE));
+	float4 cE = Tap(SampleSource(uvE));
+	float4 cN = Tap(SampleSource(uvN));
+	float4 cSW = Tap(SampleSource(uvSW));
+	float4 cW = Tap(SampleSource(uvW));
+	float4 cS = Tap(SampleSource(uvS));
+	float3 cC = SampleSource(uv);
 	float lNW = cNW.w;
 	float lSE = cSE.w;
 	float lNE = cNE.w;
@@ -125,6 +170,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float lS = cS.w;
 	float lC = Luma(cC);
 	float histL = history.x;
+#	ifdef HDR_OUTPUT
+	if (UseHDR)
+		histL = DecodeHistoryLuma(history.x);
+#	endif
 
 	float3 up = float3(1.001, 1.001, 1.001);
 	float3 lo = float3(-0.001, -0.001, -0.001);
@@ -172,6 +221,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float lumaBlend = feedback * lumaDelta + lC;
 	output.History = float4(saturate((abs(lumaDelta * feedback) < 0.01) ? lC : lumaBlend),
 		0.0, speedFraction, 0.0);
+#		ifdef HDR_OUTPUT
+	if (UseHDR)
+		output.History.x = EncodeHistoryLuma(output.History.x);
+#		endif
 #	else
 	float similar = 4.0 - ceil(0.2 - abs(lC - lSE)) - ceil(0.2 - abs(lC - lNW)) - ceil(0.2 - abs(lC - lNE)) - ceil(0.2 - abs(lC - lE)) - ceil(0.2 - abs(lC - lN)) - ceil(0.2 - abs(lC - lSW)) - ceil(0.2 - abs(lC - lW)) - ceil(0.2 - abs(lC - lS));
 	float stability = saturate(similar) * 0.25 + history.y * 0.95;
@@ -186,6 +239,11 @@ PS_OUTPUT main(PS_INPUT input)
 	float range = bounds.z - bounds.y;
 	float along = bounds.x - bounds.y;
 	float speedChange = abs(speedFraction - previousSpeedFraction);
+#		ifdef HDR_OUTPUT
+	// Upstream decays by the PQ luma change; the 20 and 100 were tuned for gamma luma.
+	if (UseHDR)
+		speedChange = abs(historyLuma - lC) * 0.05;
+#		endif
 	float steadyA = max(1.0 - speedChange * 20.0, 0.0);
 	float steadyB = max(1.0 - speedChange * 100.0, 0.0);
 	float ramp = saturate(flagged * 0.2 + min(history.w, flagged));
@@ -197,6 +255,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float lumaBlend = feedback * lumaDelta + lC;
 	output.History = float4(saturate((abs(lumaDelta * feedback) < 0.01) ? lC : lumaBlend),
 		stabilityOut, speedFraction, ramp);
+#		ifdef HDR_OUTPUT
+	if (UseHDR)
+		output.History.x = EncodeHistoryLuma(output.History.x);
+#		endif
 	float3 lowerColor = unsettled ? lowerUsed.xyz : lowerRaw.xyz;
 	float3 upperColor = unsettled ? upperUsed.xyz : upperRaw.xyz;
 #	endif
@@ -206,6 +268,13 @@ PS_OUTPUT main(PS_INPUT input)
 	bracket = offscreen ? cC : bracket;
 	float3 blended = trust * (cC - filtered) + filtered;
 	blended = saturate(feedback * (bracket - blended) + blended);
+#	ifdef HDR_OUTPUT
+	// Upstream skips the detail recovery in HDR; the neighborhood delta blows up there.
+	if (UseHDR) {
+		output.Color = float4(FromWorking(blended), 1.0);
+		return output;
+	}
+#	endif
 	blended = saturate((blended - filtered) * LowFrequency_HighFrequency_Sharpen_Overlay.z + blended);
 	output.Color = float4(saturate(LowFrequency_HighFrequency_Sharpen_Overlay.w * (filtered - blended) + blended), 1.0);
 	return output;

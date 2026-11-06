@@ -1241,7 +1241,7 @@ namespace cs::render
 					.queryHdrOutput =
 						request.hdrDisplay ?
 							std::function<hdr::OutputSettings()>{
-								[] { return features::HDRDisplay::GetSingleton()->GetOutputSettings(); } } :
+								[] { return features::HDRDisplay::GetSingleton()->ConsumeOutputSettings(); } } :
 							std::function<hdr::OutputSettings()>{} });
 			_impl->activePresentation = nullptr;
 		} catch (const std::exception& e) {
@@ -1365,6 +1365,14 @@ namespace cs::render
 					.ValidateFSRAlgorithm(
 						sl::FSRAlgorithm::eFSR4)
 					.Succeeded();
+		}
+
+		// The vendor upscalers do not carry the HDR scene yet; native TAA does.
+		if (request.hdrDisplay) {
+			for (const auto method : { temporal::SuperResolutionMethod::kFSR3, temporal::SuperResolutionMethod::kDLSS,
+					 temporal::SuperResolutionMethod::kFSR4 }) {
+				srAdmission.methods[static_cast<std::size_t>(method)] = false;
+			}
 		}
 
 		temporal::SessionTopology session;
@@ -1995,9 +2003,12 @@ namespace cs::render
 	}
 
 	void TemporalPipeline::RenderReShadeEffects(ID3D11DeviceContext& a_context,
-		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth) noexcept
+		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits) noexcept
 	{
-		_impl->swapChain.RenderReShadeEffects(a_context, a_color, a_depth);
+		// An active HDR scene is owned by HDR Display, which converts it for ReShade.
+		if (a_hdrWhiteNits <= 0.0f && features::HDRDisplay::GetSingleton()->IsHdrActive())
+			return;
+		_impl->swapChain.RenderReShadeEffects(a_context, a_color, a_depth, a_hdrWhiteNits);
 	}
 
 	void TemporalPipeline::SetFrameGenerationInputsReady(bool a_ready) noexcept

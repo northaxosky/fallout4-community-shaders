@@ -754,7 +754,8 @@ namespace cs::render
 		desc.Height = a_height;
 		desc.MipLevels = 1;
 		desc.ArraySize = 1;
-		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		// The game still sees R8; an HDR scene needs the headroom of fp16.
+		desc.Format = _hdrContainer ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
 		desc.BindFlags =
@@ -1851,13 +1852,16 @@ namespace cs::render
 					return acquireResult;
 				}
 			}
+			const auto hdrSettings = _hdrContainer && _callbacks.queryHdrOutput ? _callbacks.queryHdrOutput() : hdr::OutputSettings{};
 			if (PrepareReShade()) {
-				_reshade.Present(*_context11, *_proxyBuffer->texture11);
+				// Present-time effects see the interface too, which sits at the lifted white.
+				const auto scRgb = ScRgbFor(hdrSettings.paperWhite * hdrSettings.uiBrightness, hdrSettings.enabled);
+				_reshade.Present(*_context11, *_proxyBuffer->texture11, scRgb ? &*scRgb : nullptr);
 			}
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const auto* copySource = _proxyBuffer.get();
 			if (_hdrContainer) {
-				copySource = ComposeHdr() ? _hdrOutput.get() : nullptr;
+				copySource = ComposeHdr(hdrSettings) ? _hdrOutput.get() : nullptr;
 			}
 			if (copySource && copySource->resource12->GetDesc().Format != _innerDesc.Format) {
 				CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
@@ -2186,9 +2190,15 @@ namespace cs::render
 			a_settings.enabled ? "G2084 (HDR10)" : "G22 (SDR)");
 	}
 
-	bool DX12SwapChain::ComposeHdr() noexcept
+	std::optional<features::ScRgbProxy> DX12SwapChain::ScRgbFor(float a_whiteNits, bool a_enabled) const noexcept
 	{
-		const auto settings = _callbacks.queryHdrOutput ? _callbacks.queryHdrOutput() : hdr::OutputSettings{};
+		if (!_hdrContainer || !a_enabled || !_proxyBuffer)
+			return std::nullopt;
+		return features::ScRgbProxy{ .srv = _proxyBuffer->srv11.get(), .rtv = _proxyBuffer->rtv11.get(), .whiteNits = a_whiteNits };
+	}
+
+	bool DX12SwapChain::ComposeHdr(const hdr::OutputSettings& settings) noexcept
+	{
 		ApplyHdrColorSpace(settings);
 		if (!_hdrCompose.IsReady() || !_hdrOutput || !_proxyBuffer->srv11 || !_hdrOutput->uav11) {
 			CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "HDR compose is unavailable; the frame is not presented.");
@@ -2203,7 +2213,7 @@ namespace cs::render
 	{
 		return features::ReShadeRuntime::IsInstalled() && IsReady() && _outwardDevice11 &&
 		       _reshade.Ensure(*this, *_swapChain, *_outwardDevice11,
-				   _innerDesc.Width, _innerDesc.Height);
+				   _innerDesc.Width, _innerDesc.Height, _hdrContainer);
 	}
 
 	void DX12SwapChain::ReleaseReShade() noexcept
@@ -2229,11 +2239,12 @@ namespace cs::render
 	}
 
 	void DX12SwapChain::RenderReShadeEffects(ID3D11DeviceContext& a_context,
-		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth) noexcept
+		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits) noexcept
 	{
 		// Only the proxy buffer is what the game later presents.
 		if (PrepareReShade() && &a_color == static_cast<ID3D11Resource*>(_proxyBuffer->texture11.get())) {
-			_reshade.RenderEffects(a_context, a_color, a_depth);
+			const auto scRgb = ScRgbFor(a_hdrWhiteNits, a_hdrWhiteNits > 0.0f);
+			_reshade.RenderEffects(a_context, a_color, a_depth, scRgb ? &*scRgb : nullptr);
 		}
 	}
 

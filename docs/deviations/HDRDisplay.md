@@ -2,10 +2,15 @@
 
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
-| Divergence | Redirects the game's swap chain and UI targets, then composites into the back buffer | The presenter owns an R10 HDR10 swap chain behind the D3D12 proxy; a compose pass encodes the proxy at present while the game keeps an R8 back buffer | Presentation is host-owned, and the game must never see the container format |
-| Pending | Unclamped scene, HDR tonemap, display mapping, TAA in PQ, sun scaling, separate UI target | SDR content: the proxy's white maps to paper white; `uiBrightness` is stored but unused | Not ported yet |
+| Divergence | Redirects the game's swap chain and UI targets, then composites into the back buffer | The presenter owns an R10 HDR10 swap chain behind the D3D12 proxy; the game keeps an R8 back buffer, backed by an fp16 proxy | Presentation is host-owned, and the game must never see the container format |
+| Forced | The Reinhard and Hejl curves continue linearly past a branch point | Hable is exactly vanilla up to its white point, then continues linearly with the slope there | FO4's tonemap is Hable with a white point, so the branch sits at paper white |
+| Divergence | The UI draws into its own target; the compose scales it by the interface brightness | The UI draws in place onto the scene, so the scene is scaled by 1 / interface brightness after the imagespace chain and the compose lifts the white | The engine blends the UI over the scene in gamma space |
+| Forced | No LUT stage | The gamma LUT grades values above 1 by one of two methods: radial scaling into the LUT, or carrying the SDR grade's change onto the highlights | FO4 grades through 3D LUTs after the tonemap and clamps there |
+| Divergence | The pause freeze-frame stays 8-bit | The menu background and freeze-frame stores are fp16 | They copy from the scene target |
+| Divergence | ReShade has no HDR handling | The hosted runtime runs on the scene before the UI, as scRGB on an fp16 copy | Effects get the HDR scene |
+| Divergence | Vendor upscalers take the HDR scene | DLSS and FSR are not admitted while the feature is loaded; native TAA is | Not ported yet |
 | Pending | HDR frame generation | Frame generation is not admitted while the feature is loaded | Not ported yet |
-| Pending | AutoHDR, SDR crop preview, HDR screenshots | Omitted | Their consumers are not ported |
+| Pending | Sun scaling, Bink video white, AutoHDR, SDR crop preview, HDR screenshots | Omitted | Their consumers are not ported |
 | Divergence | HDR is detected on the swap chain's containing output | Detected on the monitor of the game window | The proxy chain exposes no containing output |
 | Divergence | Exclusive fullscreen only warns | Native presentation stays and HDR is inactive | The D3D12 proxy presents black in exclusive fullscreen |
 | Divergence | No conflict detection | Isotope or RenoDX installed deactivates the feature with a menu reason; the rest of CS runs | Both own HDR output |

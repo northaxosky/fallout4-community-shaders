@@ -225,8 +225,9 @@ namespace cs::render
 		GetFrameGenerationCaptureResources() const noexcept;
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		[[nodiscard]] bool ReShadeEffectsEnabled() noexcept;
+		// A non-zero a_hdrWhiteNits hands ReShade the HDR proxy as scRGB with that white.
 		void RenderReShadeEffects(ID3D11DeviceContext& a_context,
-			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth) noexcept;
+			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits = 0.0f) noexcept;
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void FailFrameGenerationFrame(const char* a_reason) noexcept;
 		void ResetFrameGenerationCaptureDiagnostics() noexcept;

@@ -59,6 +59,7 @@ namespace
 			{ "FO4/CubemapPreviewCS.hlsl", "cs_5_0", {}, { Toggle("SINGLE_CHANNEL") } },
 
 			{ "HDRDisplay/HDROutputCS.hlsl" },
+			{ "FO4/HDRDisplay/SeedScalePS.hlsl", "ps_5_0" },
 
 			{ "IBL/DiffuseIBLCS.hlsl" },
 
@@ -99,6 +100,7 @@ namespace
 			{ "ZPrePass.hlsl", "ps_5_0", { { "ALPHA_TEST", "" } } },
 			{ "FO4/Upscaling/UpscaleVS.hlsl", "vs_5_0" },
 			{ "Upscaling/SpatialFallbackPS.hlsl", "ps_5_0" },
+			{ "FO4/Upscaling/ScRGBConvertPS.hlsl", "ps_5_0", {}, { Toggle("TO_SCRGB", "1") } },
 			{ "Upscaling/OverrideDepthCS.hlsl" },
 			{ "Upscaling/OverrideLinearDepthCS.hlsl" },
 			{ "Upscaling/RCAS/RCAS.hlsl", "cs_5_1" },

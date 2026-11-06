@@ -63,7 +63,8 @@ namespace cs::render::hdr
 			return;
 		*static_cast<PerFrame*>(mapped.pData) = {
 			.enableHDR = a_settings.enabled ? 1.0f : 0.0f,
-			.paperWhite = a_settings.paperWhite,
+			// RT0 white is the interface; a seeded frame lifts it by the interface brightness.
+			.paperWhite = a_settings.paperWhite * a_settings.uiBrightness,
 			.peakNits = a_settings.peakNits,
 			.skipUIComposite = 1.0f,
 			.uiBrightness = a_settings.uiBrightness

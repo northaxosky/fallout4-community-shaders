@@ -125,8 +125,9 @@ namespace cs::render
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		// Creates the ReShade runtime on first use; false if absent or unusable.
 		[[nodiscard]] bool ReShadeEffectsEnabled() noexcept;
+		// A non-zero a_hdrWhiteNits hands ReShade the HDR proxy as scRGB with that white.
 		void RenderReShadeEffects(ID3D11DeviceContext& a_context,
-			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth) noexcept;
+			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits = 0.0f) noexcept;
 
 		HRESULT Present(UINT a_syncInterval, UINT a_flags) noexcept override;
 		HRESULT
@@ -192,7 +193,8 @@ namespace cs::render
 		};
 		HRESULT CreateDisplayResources(UINT a_width, UINT a_height, DisplayResources& a_resources);
 		// False when the container has nothing to present this frame.
-		[[nodiscard]] bool ComposeHdr() noexcept;
+		[[nodiscard]] bool ComposeHdr(const hdr::OutputSettings& a_settings) noexcept;
+		[[nodiscard]] std::optional<features::ScRgbProxy> ScRgbFor(float a_whiteNits, bool a_enabled) const noexcept;
 		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept;
 		HRESULT RecreateDisplayResources(UINT a_width, UINT a_height);
 		HRESULT RecreateFrameGenerationResources(UINT a_width, UINT a_height);

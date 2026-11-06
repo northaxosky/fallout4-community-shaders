@@ -7,8 +7,10 @@
 
 #include "Log.h"
 #include "Render/Annotation.h"
+#include "Render/FullscreenPass.h"
 #include "Render/RendererContext.h"
 #include "Render/ScopedContextState.h"
+#include "Utils/CSUtil.h"
 #include "Utils/ModuleInfo.h"
 
 // Last: this header must not see imgui.h.
@@ -50,8 +52,8 @@ namespace cs::features
 		class BackBufferOwner final : public render::IDXGISwapChainProxyOwner
 		{
 		public:
-			BackBufferOwner(render::IDXGISwapChainProxyOwner& a_host, ID3D11Texture2D& a_buffer) noexcept :
-				_host(a_host)
+			BackBufferOwner(render::IDXGISwapChainProxyOwner& a_host, ID3D11Texture2D& a_buffer, bool a_hdr) noexcept :
+				_host(a_host), _hdr(a_hdr)
 			{
 				_buffer.copy_from(&a_buffer);
 			}
@@ -82,7 +84,10 @@ namespace cs::features
 			}
 			HRESULT GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept override
 			{
-				return _host.GetDesc(a_desc);
+				const HRESULT result = _host.GetDesc(a_desc);
+				if (SUCCEEDED(result) && _hdr)
+					a_desc->BufferDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+				return result;
 			}
 			HRESULT ResizeBuffers(UINT, UINT, UINT, DXGI_FORMAT, UINT) noexcept override
 			{
@@ -94,7 +99,10 @@ namespace cs::features
 			}
 			HRESULT GetDesc1(DXGI_SWAP_CHAIN_DESC1* a_desc) noexcept override
 			{
-				return _host.GetDesc1(a_desc);
+				const HRESULT result = _host.GetDesc1(a_desc);
+				if (SUCCEEDED(result) && _hdr)
+					a_desc->Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+				return result;
 			}
 			HRESULT GetFullscreenDesc(DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_desc) noexcept override
 			{
@@ -130,6 +138,7 @@ namespace cs::features
 		private:
 			render::IDXGISwapChainProxyOwner& _host;
 			winrt::com_ptr<ID3D11Texture2D> _buffer;
+			bool _hdr;
 		};
 	}
 
@@ -144,6 +153,15 @@ namespace cs::features
 		effect_runtime* runtime = nullptr;
 		ID3D11ShaderResourceView* boundDepth = nullptr;
 		bool addonRegistered = false;
+
+		// HDR container only: the copy is fp16 and converts to and from scRGB.
+		bool hdrContainer = false;
+		bool scRgb = false;
+		winrt::com_ptr<ID3D11ShaderResourceView> colorSrv;
+		render::FullscreenPass convertPass;
+		winrt::com_ptr<ID3D11PixelShader> toScRgb;
+		winrt::com_ptr<ID3D11PixelShader> fromScRgb;
+		winrt::com_ptr<ID3D11Buffer> convertConstants;
 
 		~Impl()
 		{
@@ -161,8 +179,9 @@ namespace cs::features
 		}
 
 		void Create(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
-			ID3D11Device& a_device, UINT a_width, UINT a_height)
+			ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer)
 		{
+			hdrContainer = a_hdrContainer;
 			winrt::com_ptr<ID3D11Device> device;
 			DX::ThrowIfFailed(a_device.QueryInterface(IID_PPV_ARGS(device.put())));
 			winrt::com_ptr<ID3D11Device1> device1;
@@ -174,17 +193,35 @@ namespace cs::features
 			desc.Height = a_height;
 			desc.MipLevels = 1;
 			desc.ArraySize = 1;
-			desc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+			desc.Format = a_hdrContainer ? DXGI_FORMAT_R16G16B16A16_TYPELESS : DXGI_FORMAT_R8G8B8A8_TYPELESS;
 			desc.SampleDesc.Count = 1;
 			desc.Usage = D3D11_USAGE_DEFAULT;
 			desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 			DX::ThrowIfFailed(device->CreateTexture2D(&desc, nullptr, color.put()));
 			D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};
 			rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-			rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			rtvDesc.Format = a_hdrContainer ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
 			DX::ThrowIfFailed(device->CreateRenderTargetView(color.get(), &rtvDesc, rtv.put()));
-			rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+			// fp16 has no sRGB variant; both views write the same values.
+			rtvDesc.Format = a_hdrContainer ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 			DX::ThrowIfFailed(device->CreateRenderTargetView(color.get(), &rtvDesc, rtvSrgb.put()));
+			if (a_hdrContainer) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+				srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+				srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+				srvDesc.Texture2D.MipLevels = 1;
+				DX::ThrowIfFailed(device->CreateShaderResourceView(color.get(), &srvDesc, colorSrv.put()));
+				convertPass.Create(device.get());
+				toScRgb = cs::util::RequireShaderAs<ID3D11PixelShader>("Upscaling/ReShade.ToScRGB", L"Data\\Shaders\\FO4\\Upscaling\\ScRGBConvertPS.hlsl", { { "TO_SCRGB", "1" } });
+				fromScRgb = cs::util::RequireShaderAs<ID3D11PixelShader>("Upscaling/ReShade.FromScRGB", L"Data\\Shaders\\FO4\\Upscaling\\ScRGBConvertPS.hlsl");
+				D3D11_BUFFER_DESC constants{};
+				constants.ByteWidth = 16;
+				constants.Usage = D3D11_USAGE_DYNAMIC;
+				constants.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+				constants.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+				DX::ThrowIfFailed(device->CreateBuffer(&constants, nullptr, convertConstants.put()));
+				cs::render::annotation::SetName(convertConstants.get(), "Upscaling/ReShade.ScRGB.Constants");
+			}
 			cs::render::annotation::SetName(color.get(), "Upscaling/ReShade.Color");
 			cs::render::annotation::SetName(rtv.get(), "Upscaling/ReShade.Color.RTV");
 			cs::render::annotation::SetName(rtvSrgb.get(), "Upscaling/ReShade.Color.RTV_sRGB");
@@ -196,7 +233,7 @@ namespace cs::features
 				0, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), &selected,
 				contextState.put()));
 
-			owner = std::make_unique<BackBufferOwner>(a_host, *color);
+			owner = std::make_unique<BackBufferOwner>(a_host, *color, a_hdrContainer);
 			proxy.attach(new render::DXGISwapChainProxy(*owner, a_inner));
 
 			// Events need an add-on identity; without it, rebind every frame.
@@ -213,6 +250,34 @@ namespace cs::features
 				DX::ThrowIfFailed(E_FAIL);
 			}
 			g_runtime.store(runtime, std::memory_order_release);
+		}
+
+		// Draws a converted copy of a_source into a_target.
+		void Convert(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView* a_source, ID3D11RenderTargetView* a_target,
+			ID3D11PixelShader* a_shader, float a_whiteNits, UINT a_width, UINT a_height)
+		{
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			if (FAILED(a_context.Map(convertConstants.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+				return;
+			*static_cast<float*>(mapped.pData) = a_whiteNits / 80.0f;
+			a_context.Unmap(convertConstants.get(), 0);
+			const render::FullscreenPass::Scope pass(convertPass, &a_context, a_target, a_width, a_height);
+			if (!pass.IsActive())
+				return;
+			ID3D11Buffer* constants = convertConstants.get();
+			a_context.PSSetConstantBuffers(0, 1, &constants);
+			a_context.PSSetShaderResources(0, 1, &a_source);
+			pass.Draw(a_shader);
+		}
+
+		// ReShade picks its effect color space from this override.
+		void SetScRgb(bool a_scRgb)
+		{
+			if (scRgb == a_scRgb)
+				return;
+			scRgb = a_scRgb;
+			runtime->set_color_space(a_scRgb ? ::reshade::api::color_space::extended_srgb_linear : ::reshade::api::color_space::srgb_nonlinear);
+			L->info("ReShade color space set to {}", a_scRgb ? "scRGB" : "sRGB");
 		}
 
 		// Reloading effects drops the DEPTH binding and resets bufready_depth uniforms.
@@ -247,7 +312,7 @@ namespace cs::features
 	}
 
 	bool ReShadeRuntime::Ensure(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
-		ID3D11Device& a_device, UINT a_width, UINT a_height) noexcept
+		ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer) noexcept
 	{
 		if (_attempted) {
 			return _impl != nullptr;
@@ -255,8 +320,8 @@ namespace cs::features
 		_attempted = true;
 		try {
 			_impl = std::make_unique<Impl>();
-			_impl->Create(a_host, a_inner, a_device, a_width, a_height);
-			L->info("ReShade effect runtime created at {}x{}", a_width, a_height);
+			_impl->Create(a_host, a_inner, a_device, a_width, a_height, a_hdrContainer);
+			L->info("ReShade effect runtime created at {}x{}{}", a_width, a_height, a_hdrContainer ? " (fp16 HDR container)" : "");
 		} catch (const std::exception& e) {
 			L->warn("ReShade effect runtime unavailable: {}", e.what());
 			_impl.reset();
@@ -292,22 +357,35 @@ namespace cs::features
 
 	template <class F>
 	void ReShadeRuntime::WithColorCopy(ID3D11DeviceContext& a_context, ID3D11Resource& a_color,
-		const char* a_event, F&& a_body) noexcept
+		const ScRgbProxy* a_scRgb, const char* a_event, F&& a_body) noexcept
 	{
 		if (!_impl || !_impl->runtime) {
 			return;
 		}
 		auto& impl = *_impl;
 		cs::render::annotation::ScopedEvent annotationScope(a_event);
-		cs::engine::CopyResourcePreservingOM(&a_context, impl.color.get(), &a_color);
+		const bool convert = a_scRgb && impl.hdrContainer && a_scRgb->srv && a_scRgb->rtv;
+		if (impl.hdrContainer)
+			impl.SetScRgb(convert);
+		D3D11_TEXTURE2D_DESC desc{};
+		static_cast<ID3D11Texture2D&>(a_color).GetDesc(&desc);
+		if (convert) {
+			impl.Convert(a_context, a_scRgb->srv, impl.rtv.get(), impl.toScRgb.get(), a_scRgb->whiteNits, desc.Width, desc.Height);
+		} else {
+			cs::engine::CopyResourcePreservingOM(&a_context, impl.color.get(), &a_color);
+		}
 		a_body(impl);
-		cs::engine::CopyResourcePreservingOM(&a_context, &a_color, impl.color.get());
+		if (convert) {
+			impl.Convert(a_context, impl.colorSrv.get(), a_scRgb->rtv, impl.fromScRgb.get(), a_scRgb->whiteNits, desc.Width, desc.Height);
+		} else {
+			cs::engine::CopyResourcePreservingOM(&a_context, &a_color, impl.color.get());
+		}
 	}
 
 	void ReShadeRuntime::RenderEffects(ID3D11DeviceContext& a_context, ID3D11Resource& a_color,
-		ID3D11ShaderResourceView* a_depth) noexcept
+		ID3D11ShaderResourceView* a_depth, const ScRgbProxy* a_scRgb) noexcept
 	{
-		WithColorCopy(a_context, a_color, "Upscaling::ReShade/Effects", [&](Impl& a_impl) {
+		WithColorCopy(a_context, a_color, a_scRgb, "Upscaling::ReShade/Effects", [&](Impl& a_impl) {
 			cs::render::ScopedContextState state(&a_context, a_impl.contextState.get());
 			if (!state.IsActive()) {
 				return;
@@ -319,9 +397,9 @@ namespace cs::features
 		});
 	}
 
-	void ReShadeRuntime::Present(ID3D11DeviceContext& a_context, ID3D11Resource& a_color) noexcept
+	void ReShadeRuntime::Present(ID3D11DeviceContext& a_context, ID3D11Resource& a_color, const ScRgbProxy* a_scRgb) noexcept
 	{
-		WithColorCopy(a_context, a_color, "Upscaling::ReShade/Present", [](Impl& a_impl) {
+		WithColorCopy(a_context, a_color, a_scRgb, "Upscaling::ReShade/Present", [](Impl& a_impl) {
 			::reshade::update_and_present_effect_runtime(a_impl.runtime);
 		});
 	}
