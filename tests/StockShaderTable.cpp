@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <tuple>
 
-namespace cs::engine
+namespace cs::shader_test
 {
 	namespace
 	{
@@ -22,38 +22,38 @@ namespace cs::engine
 			return a_text.size() == a_length && a_text.find_first_not_of("0123456789abcdef") == a_text.npos;
 		}
 
-		GameRuntime ParseRuntime(std::string_view a_build)
+		engine::GameRuntime ParseRuntime(std::string_view a_build)
 		{
-			for (const auto [prefix, runtime] : { std::pair{ "OG-", GameRuntime::kOG }, std::pair{ "NG-", GameRuntime::kNG },
-					 std::pair{ "AE-", GameRuntime::kAE } }) {
+			for (const auto [prefix, runtime] : { std::pair{ "OG-", engine::GameRuntime::kOG }, std::pair{ "NG-", engine::GameRuntime::kNG },
+					 std::pair{ "AE-", engine::GameRuntime::kAE } }) {
 				if (a_build.starts_with(prefix))
 					return runtime;
 			}
 			throw std::runtime_error("Unknown identity table runtime: " + std::string(a_build));
 		}
 
-		ShaderStage ParseStage(const std::string& a_stage)
+		engine::ShaderStage ParseStage(const std::string& a_stage)
 		{
 			if (a_stage == "vertex")
-				return ShaderStage::kVertex;
+				return engine::ShaderStage::kVertex;
 			if (a_stage == "pixel")
-				return ShaderStage::kPixel;
+				return engine::ShaderStage::kPixel;
 			if (a_stage == "compute")
-				return ShaderStage::kCompute;
+				return engine::ShaderStage::kCompute;
 			throw std::runtime_error("Unknown stage: " + a_stage);
 		}
 
-		ShaderInjectionTarget ParseTarget(const std::string& a_target)
+		engine::ShaderInjectionTarget ParseTarget(const std::string& a_target)
 		{
-			for (const auto& target : GetShaderInjectionTargets()) {
+			for (const auto& target : engine::GetShaderInjectionTargets()) {
 				if (target.name == a_target)
 					return target.id;
 			}
-			return ShaderInjectionTarget::kCount;
+			return engine::ShaderInjectionTarget::kCount;
 		}
 	}
 
-	ShaderFamilyDescriptor StockShaderRow::Family() const
+	engine::ShaderFamilyDescriptor StockShaderRow::Family() const
 	{
 		return {
 			.target = target,
@@ -81,7 +81,7 @@ namespace cs::engine
 		}
 		table.runtime = ParseRuntime(table.header.at("runtime"));
 
-		std::set<std::tuple<ShaderInjectionTarget, ShaderStage, std::uint32_t, std::uint32_t>> keys;
+		std::set<std::tuple<engine::ShaderInjectionTarget, engine::ShaderStage, std::uint32_t, std::uint32_t>> keys;
 		while (std::getline(file, line)) {
 			// Stray carriage returns from a CRLF checkout.
 			if (line.ends_with('\r'))

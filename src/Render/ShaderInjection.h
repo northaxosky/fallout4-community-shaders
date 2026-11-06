@@ -272,7 +272,7 @@ namespace cs::engine
 		std::string& a_error);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
-	// Queues every stock variant of contributed targets ahead of observed binds.
+	// Re-queues every loaded engine technique of contributed targets.
 	std::size_t PrewarmAllShaderInjectionVariants();
 	// Limited to a_targets, e.g. after invalidation; empty queues nothing.
 	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets);

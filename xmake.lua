@@ -449,7 +449,7 @@ local function stock_shader_identity_target(name, compiler, tests)
             add_tests(test, {
                 runargs = {
                     path.join(os.projectdir(), "build/ShaderStage/Shaders"),
-                    path.join(os.projectdir(), "src/Render/data", spec.file),
+                    path.join(os.projectdir(), "tests/data", spec.file),
                     spec.mode
                 },
                 run_timeout = 600000

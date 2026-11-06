@@ -22,7 +22,7 @@ struct VS_OUTPUT
 #			include "Common/FrameBuffer.hlsli"
 #		endif
 
-// FO4: OG names the base VS constant GeometryOffset; AE/NG call it ResolutionParams.
+// FO4: OG calls the base VS constant GeometryOffset; AE/NG ResolutionParams.
 #		if defined(OG) && defined(FO4CS_VS_TEXCOORD1)
 cbuffer FXAAVertexConstants : register(b2)
 {

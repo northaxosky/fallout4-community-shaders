@@ -34,7 +34,7 @@ namespace
 {
 	struct Row
 	{
-		cs::engine::StockShaderRow source;
+		cs::shader_test::StockShaderRow source;
 		std::string actual;
 		bool owned = false;
 		bool contributed = false;
@@ -85,7 +85,7 @@ namespace
 		std::ifstream file(a_path, std::ios::binary);
 		std::ostringstream text;
 		text << file.rdbuf();
-		auto parsed = cs::engine::ParseStockShaderTable(text.str());
+		auto parsed = cs::shader_test::ParseStockShaderTable(text.str());
 		const auto& compiler = parsed.header.at("compiler_sha256");
 		Require(IsHex(compiler, 64), "Invalid compiler pin");
 		ReportCompiler(compiler);

@@ -77,7 +77,7 @@ Shader suites reuse compiled blobs from `.shader-test-cache` (override with
 Add regression tests for critical behavior and real failure modes, not implementation
 details. Validate rendering and hook changes in game before claiming they work.
 
-The stock shader identity tables in `src\Render\data\` are generated; don't edit them by hand.
+The stock shader identity tables in `tests\data\` are generated; don't edit them by hand.
 
 ## Format
 

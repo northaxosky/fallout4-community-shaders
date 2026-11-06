@@ -1846,7 +1846,7 @@ namespace cs::engine
 			return metadata != service.nativeShaderMetadata.end() && metadata->second.forceEarlyDepthStencil;
 		}
 
-		// Every technique the engine loaded for a shader; compute entries carry their object.
+		// Each loaded technique of a shader; compute entries carry their object.
 		template <class TVisit>
 		void ForEachNativeTechnique(
 			const RE::BSShader& a_shader,

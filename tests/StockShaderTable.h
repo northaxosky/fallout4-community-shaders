@@ -9,15 +9,15 @@
 #include <string_view>
 #include <vector>
 
-namespace cs::engine
+namespace cs::shader_test
 {
 	// One stock shader variant of the identity corpus; owns its descriptor strings.
 	struct StockShaderRow
 	{
 		// Table spelling; targets we do not inject resolve to kCount.
 		std::string targetName;
-		ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
-		ShaderStage stage = ShaderStage::kPixel;
+		engine::ShaderInjectionTarget target = engine::ShaderInjectionTarget::kCount;
+		engine::ShaderStage stage = engine::ShaderStage::kPixel;
 		std::uint32_t descriptor = 0;
 		bool forceEarlyDepthStencil = false;
 		std::string expected;
@@ -25,16 +25,16 @@ namespace cs::engine
 		std::string nativeName;
 		std::string nativeClassName;
 		std::string nativeSourceGroup;
-		ShaderInjectionDefines nativeMacros;
+		engine::ShaderInjectionDefines nativeMacros;
 
 		// Views this row's strings; valid while the row is unmoved.
-		[[nodiscard]] ShaderFamilyDescriptor Family() const;
+		[[nodiscard]] engine::ShaderFamilyDescriptor Family() const;
 	};
 
 	struct StockShaderTable
 	{
 		std::map<std::string, std::string> header;
-		GameRuntime runtime = GameRuntime::kAE;
+		engine::GameRuntime runtime = engine::GameRuntime::kAE;
 		std::vector<StockShaderRow> rows;
 	};
 

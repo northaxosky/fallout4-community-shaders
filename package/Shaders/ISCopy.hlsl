@@ -33,12 +33,10 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.Position = float4(input.Position.xyz, 1.0);
 #		ifdef SCALE_BIAS
 	vsout.TexCoord = input.TexCoord * ScaleBias.xy + ScaleBias.zw;
-#		elif defined(MASK)
+#		else
 	vsout.TexCoord = mul(input.TexCoord - 0.5,
 						 float2x2(RotationMatrix.xy, RotationMatrix.zw)) +
 	                 0.5;
-#		else
-	vsout.TexCoord = input.TexCoord;
 #		endif
 	return vsout;
 }
