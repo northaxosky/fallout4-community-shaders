@@ -101,8 +101,7 @@ namespace cs::render
 		DirectX::XMFLOAT4 DirectionalAmbient[3]{};
 		std::uint32_t EnabledVolumetricShadows = 0, EnabledLODBlending = 0;
 		std::uint32_t EnabledLightLimitFix = 0;
-		// HDR Display: how the gamma LUT treats values above 1 (0 radial, 1 grade transfer).
-		std::uint32_t HDRLutMethod = 0;
+		std::uint32_t pad0 = 0;
 		// Unit direction to the drawn sun disc; the light's if unavailable.
 		DirectX::XMFLOAT4 SunDiscDirection{};
 		// BSDFComposite's fog sun glare color; w is its weight, zero when off.
@@ -126,7 +125,7 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, EnabledVolumetricShadows) == 112);
 	static_assert(offsetof(FO4SharedDataCB, EnabledLODBlending) == 116);
 	static_assert(offsetof(FO4SharedDataCB, EnabledLightLimitFix) == 120);
-	static_assert(offsetof(FO4SharedDataCB, HDRLutMethod) == 124);
+	static_assert(offsetof(FO4SharedDataCB, pad0) == 124);
 	static_assert(offsetof(FO4SharedDataCB, SunDiscDirection) == 128);
 	static_assert(offsetof(FO4SharedDataCB, SunGlareColor) == 144);
 

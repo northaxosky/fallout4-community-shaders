@@ -60,16 +60,8 @@ float4 main(PS_INPUT input) : SV_Target0
 		float3 hdrEncoded = sign(image.rgb) * pow(abs(image.rgb), GammaExponent);
 #		ifdef LUT
 		float3 positive = max(hdrEncoded, 0.0);
-		float3 graded;
-		if (FO4HDR::LutMethod() == 0) {
-			float radius = max(1.0, max(positive.x, max(positive.y, positive.z)));
-			graded = SampleLUTs(positive / radius) * radius;
-		} else {
-			// Vanilla grades the SDR range; its change scales the highlights.
-			float3 sdrIn = saturate(positive);
-			graded = positive * (SampleLUTs(sdrIn) / max(sdrIn, 1e-4));
-		}
-		return float4(graded, image.a);
+		float radius = max(1.0, max(positive.x, max(positive.y, positive.z)));
+		return float4(SampleLUTs(positive / radius) * radius, image.a);
 #		else
 		return float4(hdrEncoded, image.a);
 #		endif

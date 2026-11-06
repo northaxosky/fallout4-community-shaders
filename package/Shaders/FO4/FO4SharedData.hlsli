@@ -24,7 +24,7 @@ namespace FO4SharedData
 		uint EnabledVolumetricShadows;
 		uint EnabledLODBlending;
 		uint EnabledLightLimitFix;
-		uint HDRLutMethod;
+		uint pad0;
 		float4 SunDiscDirection;
 		float4 SunGlareColor;
 	};

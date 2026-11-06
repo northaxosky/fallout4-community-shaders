@@ -174,11 +174,6 @@ namespace cs::features
 			FailLoad("HDR Display could not build its interface seed pass");
 	}
 
-	void HDRDisplay::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
-	{
-		a_fo4.HDRLutMethod = static_cast<std::uint32_t>(_settings.lutMethod);
-	}
-
 	void HDRDisplay::OnPostImagespace()
 	{
 		if (!IsHdrActive())
@@ -272,11 +267,6 @@ namespace cs::features
 			field(&Settings::paperWhite, { .format = "%d nits", .flags = clamped });
 			field(&Settings::peakNits, { .format = "%d nits", .flags = clamped });
 			field(&Settings::uiBrightness, { .format = "%.2f", .flags = clamped });
-			static const std::array lutMethods{
-				dmui::ChoiceOption<hdr_display::LutMethod>{ hdr_display::LutMethod::kRadial, "Radial", "radial" },
-				dmui::ChoiceOption<hdr_display::LutMethod>{ hdr_display::LutMethod::kGradeTransfer, "Grade transfer", "grade-transfer" }
-			};
-			field.Choice(&Settings::lutMethod, lutMethods, { .label = "Color grade above white (dev A/B)" });
 		}
 	}
 
