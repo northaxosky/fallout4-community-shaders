@@ -899,6 +899,7 @@ namespace cs::features
 			a_request.frameTimeMilliseconds;
 		options.viewSpaceToMetersFactor = 0.01428222656f;
 		options.colorSpace = sl::FSRColorSpace::eLinear;
+		options.colorBuffersHDR = sl::Boolean::eTrue;
 		options.useAutoExposure = sl::Boolean::eTrue;
 		options.dynamicResolutionEnabled = sl::Boolean::eFalse;
 		sl::FSRAlgorithmOptions algorithmOptions{};
