@@ -71,16 +71,6 @@ namespace cs::features
 			static void thunk(Node* a_node, RE::NiNode* a_parent);
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
-		struct SetWorldSpace
-		{
-			static void thunk(RE::TES* a_tes, RE::TESWorldSpace* a_world, bool a_exterior);
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-		struct ReleaseWorld
-		{
-			static void thunk(RE::TESWorldSpace* a_world);
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
 		struct UpdateWaterSystem
 		{
 			static void thunk(engine::water::WaterSystem* a_system, RE::BSCullingProcess* a_process);
@@ -107,9 +97,8 @@ namespace cs::features
 		bool _applying = false;
 		std::atomic_bool _ready{ false };
 		std::atomic_bool _hooks{ false };
-		std::atomic_bool _exterior{ false };
+		std::atomic_bool _tilesHidden{ true };
 		std::atomic_bool _lodWaterAttached{ true };
-		std::atomic_bool _refreshTiles{ false };
 		std::atomic_uint64_t _tilesBuilt{ 0 };
 		std::atomic_uint64_t _chunksAttached{ 0 };
 		std::atomic_uint64_t _chunksDetached{ 0 };

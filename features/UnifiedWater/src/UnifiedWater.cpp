@@ -70,15 +70,12 @@ namespace cs::features
 		stl::detour_thunk<Detach>(RE::ID::BGSTerrainChunk::Detach);
 		stl::detour_thunk<AttachWater>(RE::ID::BGSTerrainChunk::AttachWater);
 		stl::detour_thunk<Visibility>(RE::ID::BGSTerrainNode::UpdateWaterVisibility);
-		stl::detour_thunk<SetWorldSpace>(RE::ID::TES::SetWorldSpace);
-		stl::detour_thunk<ReleaseWorld>(RE::ID::TESWorldSpace::ReleaseLowResMaxHeightData);
 		stl::detour_thunk<UpdateWaterSystem>(RE::ID::TESWaterSystem::UpdateWaterSystem);
 		if (!engine::water::InstallWaterMaterialIdentity())
 			throw std::runtime_error("Unified Water AddWater material call site did not match.");
 		if (!engine::water::InstallTileWaterOverride())
 			throw std::runtime_error("Unified Water AddLODWater call site did not match.");
 		if (!Attach::func.address() || !Detach::func.address() || !AttachWater::func.address() || !Visibility::func.address() ||
-			!SetWorldSpace::func.address() || !ReleaseWorld::func.address() ||
 			!UpdateWaterSystem::func.address()) {
 			throw std::runtime_error("Unified Water native hook installation failed.");
 		}
@@ -395,22 +392,6 @@ namespace cs::features
 		self._visibilityUpdates.fetch_add(1);
 	}
 
-	void UnifiedWater::SetWorldSpace::thunk(RE::TES* a_tes, RE::TESWorldSpace* a_world, bool a_exterior)
-	{
-		func(a_tes, a_world, a_exterior);
-		auto& self = *GetSingleton();
-		self._exterior.store(a_world && a_exterior, std::memory_order_release);
-		self._refreshTiles.store(true, std::memory_order_release);
-	}
-
-	void UnifiedWater::ReleaseWorld::thunk(RE::TESWorldSpace* a_world)
-	{
-		func(a_world);
-		auto& self = *GetSingleton();
-		self._exterior.store(false, std::memory_order_release);
-		self._refreshTiles.store(true, std::memory_order_release);
-	}
-
 	void UnifiedWater::ApplyEnabledState()
 	{
 		const std::scoped_lock lock(_mutex);
@@ -438,7 +419,10 @@ namespace cs::features
 		// FO4: runs every frame, so live toggles apply with a static camera.
 		auto& self = *GetSingleton();
 		self.ApplyEnabledState();
-		if (self._refreshTiles.exchange(false, std::memory_order_acq_rel))
+		const auto* tes = RE::TES::GetSingleton();
+		// Interiors with an exterior LOD view (XILW) stream worldspace chunks too.
+		const bool hidden = !tes || tes->interiorCell;
+		if (self._tilesHidden.exchange(hidden, std::memory_order_acq_rel) != hidden)
 			self.RefreshTileVisibility();
 		func(a_system, a_process);
 	}
@@ -446,7 +430,7 @@ namespace cs::features
 	bool UnifiedWater::TilesHidden() const
 	{
 		// FO4: the Pip-Boy map has no Skyrim exterior-LOD MapMenu rendering path.
-		return !_exterior.load(std::memory_order_acquire);
+		return _tilesHidden.load(std::memory_order_acquire);
 	}
 
 	void UnifiedWater::RefreshTileVisibility()
@@ -509,7 +493,6 @@ namespace cs::features
 			.Field("shapes_live_lod32", _shapesLive[3].load())
 			.Field("squares_merged", _squaresMerged.load())
 			.Field("tile_water_overrides", engine::water::TileWaterOverrides())
-			.Field("exterior", _exterior.load())
 			.Field("tiles_hidden", TilesHidden())
 			.Field("lod_water_attached", _lodWaterAttached.load());
 	}
