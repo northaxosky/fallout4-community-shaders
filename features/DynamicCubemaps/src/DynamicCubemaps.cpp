@@ -24,6 +24,7 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
+#include "Render/RenderTargetFormats.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderStage.h"
@@ -270,6 +271,12 @@ namespace cs::features
 
 		// FO4 vanilla never renders the reflections cube; the host does.
 		cs::engine::SetSkyReflectionCubeSize(static_cast<std::uint32_t>(_bootSettings.engineCubeSize));
+		// Upstream's SSR targets are R16G16B16A16_FLOAT; FO4's are 8-bit sRGB.
+		using RE::BSGraphics::RenderTargetID;
+		for (const auto target : { RenderTargetID::kSSR, RenderTargetID::kSSRBlurred0, RenderTargetID::kSSRBlurred1 }) {
+			if (!cs::engine::RequestRenderTargetFormat(target, DXGI_FORMAT_R16G16B16A16_FLOAT))
+				L->warn("SSR target {} stays 8-bit; reflections clip at 1.0.", static_cast<int>(target));
+		}
 		if (!cs::engine::RegisterSkyReflectionCubeConsumer(*this, "DynamicCubemaps", [this] { return IsEnabled() &&
 			                                                                                         _resourcesReady.load(std::memory_order_acquire) &&
 			                                                                                         _injectionsOperational.load(std::memory_order_acquire); }, [this] { return _engineCubeLod.load(std::memory_order_acquire); })) {
