@@ -505,6 +505,7 @@ float3 surfaceColor(
 			dynamicCubemap = ColorManagement::SceneColor::LerpInLinear(specularIrradiance, specularIrradianceReflections, skylightingSpecular);
 		}
 
+		// FO4: eyeVector.w is per-vertex; callers pass the pixel's distance.
 		float reflectionAmount = saturate(cameraDistance / 1024.0);
 
 		if (SharedData::HideSky || SharedData::InInterior)
@@ -654,7 +655,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 eyeDirection = normalize(input.eyeVector.xyz);
 	float3 reflectionDirection = reflect(eyeDirection, normal);
 	float slope = reflectionDirection.z;
-	float3 color = lerp(perMaterial[2].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, eyeDirection, normal, reflectionDirection, input.eyeVector.w, 0.0, skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection)), perMaterial[2].w) + lighting;
+	float3 color = lerp(perMaterial[2].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, eyeDirection, normal, reflectionDirection, length(input.eyeVector.xyz), 0.0, skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection)), perMaterial[2].w) + lighting;
 	float fogAlpha;
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	fog = lerp(fog, WATER_PER_GEOMETRY(3).xyz, sunGlare);
@@ -731,7 +732,7 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 reflectionDirection = reflect(eyeDirection, normal);
 	float slope = reflectionDirection.z;
 	float grazing = 1.0 - saturate(dot(-eyeDirection, -normal));
-	float3 water = lerp(perMaterial[0].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, eyeDirection, normal, reflectionDirection, input.eyeVector.w, WaterDistanceBlendFactor(fade), skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection)), 0.5);
+	float3 water = lerp(perMaterial[0].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy, eyeDirection, normal, reflectionDirection, length(input.eyeVector.xyz), WaterDistanceBlendFactor(fade), skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection)), 0.5);
 #		ifdef LIGHT_LIMIT_FIX
 	[branch] if (FO4LightLimitFix::UseClusteredLights())
 		water += 0.5 * FO4LightLimitFix::GetWaterSpecularLighting(input.eyeToPosition, FrameBuffer::ViewToWorld(input.eyeToPosition), normal, perMaterial[13].w);
@@ -956,7 +957,7 @@ float4 main(PS_INPUT input) : SV_Target0
 		eyeDirection,
 		normal,
 		reflectionDirection,
-		input.eyeVector.w,
+		length(input.eyeVector.xyz),
 		WaterDistanceBlendFactor(fade),
 		skylightingSpecularVisibility(input.eyeVector.xyz, normal, eyeDirection));
 	float3 tinted = lerp(perMaterial[2].xyz, water, perMaterial[2].w);
