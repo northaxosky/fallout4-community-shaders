@@ -460,10 +460,12 @@ namespace cs
 				feature->ComposeEnabledLiveSettings();
 
 				const bool deactivatedForEnb = cs::env::IsENBLoaded();
-				const bool desiredActive = activation.valid && activation.load && !deactivatedForEnb;
+				const auto modConflict = cs::env::FeatureConflict(key);
+				const bool desiredActive = activation.valid && activation.load && !deactivatedForEnb && !modConflict;
 				feature->SetState({ .desiredActive = desiredActive,
 					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-					.detail = deactivatedForEnb ? "ENB is loaded; this feature is inactive." : std::string{} });
+					.detail = deactivatedForEnb ? "ENB is loaded; this feature is inactive." : modConflict ? std::string(*modConflict) :
+				                                                                                             std::string{} });
 			} catch (const std::exception& e) {
 				failConfiguration(feature, e.what());
 			} catch (...) {

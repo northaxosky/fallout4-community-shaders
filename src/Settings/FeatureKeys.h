@@ -6,6 +6,8 @@
 
 namespace cs::feature_config
 {
+	inline constexpr std::string_view kHDRDisplay = "HDRDisplay";
+
 	inline constexpr std::array<std::string_view, 24> kAllFeatureKeys{
 		"ScreenSpaceGI",
 		"SubsurfaceScattering",

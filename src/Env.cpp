@@ -2,6 +2,7 @@
 
 #include "ENB/ENBSeriesAPI.h"
 #include "Log.h"
+#include "Settings/FeatureKeys.h"
 
 namespace cs::env
 {
@@ -12,6 +13,14 @@ namespace cs::env
 		bool g_enbLoaded = false;
 		bool g_conflictsDetected = false;
 		std::vector<std::string> g_conflicts;
+		// Feature config key to the reason it is deactivated.
+		std::vector<std::pair<std::string_view, std::string>> g_featureConflicts;
+
+		enum class PluginRoot
+		{
+			kF4SEPlugins,
+			kGameDirectory
+		};
 
 		struct PluginRule
 		{
@@ -20,6 +29,9 @@ namespace cs::env
 			std::string_view reason;
 			// Optional extra gate on the DLL at the path; null means any copy conflicts.
 			bool (*match)(const std::filesystem::path&) = nullptr;
+			// Empty blocks all of CS; a feature key deactivates only that feature.
+			std::string_view feature = {};
+			PluginRoot root = PluginRoot::kF4SEPlugins;
 		};
 
 		// doodlum's standalone Upscaling is 1.1.x; jarari's Upscaling Custom is 1.7+.
@@ -43,15 +55,23 @@ namespace cs::env
 		};
 		constexpr std::array<PluginRule, 0> kRequiredPlugins{};
 
-		std::filesystem::path PluginPath(std::string_view a_file)
+		// Both rewrite the tonemap and swap chain that HDR Display owns.
+		constexpr std::array kFeatureConflicts{
+			PluginRule{ "Isotope", "FO4Isotope.dll", "Isotope owns HDR output; remove it to use HDR Display", nullptr, feature_config::kHDRDisplay },
+			PluginRule{ "Isotope", "00FO4Isotope.dll", "Isotope owns HDR output; remove it to use HDR Display", nullptr, feature_config::kHDRDisplay },
+			PluginRule{ "RenoDX", "renodx-fallout4.addon64", "RenoDX owns HDR output; remove it to use HDR Display", nullptr, feature_config::kHDRDisplay, PluginRoot::kGameDirectory },
+		};
+
+		std::filesystem::path PluginPath(const PluginRule& a_rule)
 		{
-			return std::filesystem::path("Data/F4SE/Plugins") / a_file;
+			const auto root = a_rule.root == PluginRoot::kGameDirectory ? std::filesystem::path(".") : std::filesystem::path("Data/F4SE/Plugins");
+			return root / a_rule.file;
 		}
 
-		bool PluginExists(std::string_view a_file)
+		bool PluginExists(const PluginRule& a_rule)
 		{
 			std::error_code ec;
-			return std::filesystem::exists(PluginPath(a_file), ec);
+			return std::filesystem::exists(PluginPath(a_rule), ec);
 		}
 	}
 
@@ -75,15 +95,30 @@ namespace cs::env
 			return;
 		g_conflictsDetected = true;
 		for (const auto& rule : kIncompatiblePlugins) {
-			if (PluginExists(rule.file) && (!rule.match || rule.match(PluginPath(rule.file))))
+			if (PluginExists(rule) && (!rule.match || rule.match(PluginPath(rule))))
 				g_conflicts.push_back(std::format("Incompatible plugin {} detected: {}", rule.name, rule.reason));
 		}
 		for (const auto& rule : kRequiredPlugins) {
-			if (!PluginExists(rule.file))
+			if (!PluginExists(rule))
 				g_conflicts.push_back(std::format("Required plugin {} not found: {}", rule.name, rule.reason));
 		}
 		for (const auto& conflict : g_conflicts)
 			L->error("{}", conflict);
+		for (const auto& rule : kFeatureConflicts) {
+			if (PluginExists(rule) && (!rule.match || rule.match(PluginPath(rule)))) {
+				g_featureConflicts.emplace_back(rule.feature, std::format("{} ({}) is installed: {}.", rule.name, rule.file, rule.reason));
+				L->warn("Feature {} deactivated: {}", rule.feature, g_featureConflicts.back().second);
+			}
+		}
+	}
+
+	std::optional<std::string_view> FeatureConflict(std::string_view a_featureKey) noexcept
+	{
+		for (const auto& [key, reason] : g_featureConflicts) {
+			if (key == a_featureKey)
+				return reason;
+		}
+		return std::nullopt;
 	}
 
 	bool IsBlocked() noexcept

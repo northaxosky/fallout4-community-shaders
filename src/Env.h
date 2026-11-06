@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string_view>
+
 namespace cs::env
 {
 	// One-shot detection. Call from F4SEPlugin_Load after the logger is attached.
@@ -10,6 +13,9 @@ namespace cs::env
 
 	// One-shot scan of Data/F4SE/Plugins; same call contract as DetectENB.
 	void DetectPluginConflicts();
+
+	// Why a feature is deactivated by an installed third-party mod; empty when it is not.
+	std::optional<std::string_view> FeatureConflict(std::string_view a_featureKey) noexcept;
 
 	// True when DetectPluginConflicts found anything; CS must then stay inert.
 	bool IsBlocked() noexcept;
