@@ -213,7 +213,7 @@ namespace cs::render
 		[[nodiscard]] temporal::EffectiveConfiguration
 		GetEffectiveConfiguration() const;
 		[[nodiscard]] bool IsFrameGenerationProxyActive() const noexcept;
-		// True while the presenter carries the HDR container; never exclusive fullscreen.
+		// True while the presenter carries the HDR container; never in fullscreen.
 		[[nodiscard]] bool IsHdrContainerActive() const noexcept;
 		// The fp16 scene texture rendered into while the interface is separate.
 		[[nodiscard]] hdr::SceneTarget GetHdrSceneTarget() const noexcept;

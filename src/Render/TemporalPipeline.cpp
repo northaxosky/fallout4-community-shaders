@@ -1991,7 +1991,7 @@ namespace cs::render
 		// At this seam the scene's white is paper white; SDR is not scRGB.
 		const auto* hdrDisplay = features::HDRDisplay::GetSingleton();
 		_impl->swapChain.RenderReShadeEffects(a_context, a_color, a_depth,
-			hdrDisplay->IsHdrActive() ? hdrDisplay->GetPaperWhite() : 0.0f);
+			hdrDisplay->IsHdrActive() ? hdrDisplay->GetOutputSettings().paperWhite : 0.0f);
 	}
 
 	void TemporalPipeline::SetFrameGenerationInputsReady(bool a_ready) noexcept

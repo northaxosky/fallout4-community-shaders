@@ -690,7 +690,7 @@ namespace cs::render::temporal
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
 		[[nodiscard]] virtual ProviderResult
 		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) = 0;
-		// True when the provider composites the interface; the back buffer is scene only.
+		// The provider composites the interface itself; the back buffer is scene only.
 		[[nodiscard]] virtual bool PresentsSceneOnlyBackBuffer() const noexcept
 		{
 			return false;

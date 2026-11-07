@@ -10,7 +10,6 @@
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
-#include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/HookRegistry.h"

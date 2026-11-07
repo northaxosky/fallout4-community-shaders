@@ -23,7 +23,7 @@ namespace cs::render
 		// Scene start; a_wanted false only restores a swap that outlived its frame.
 		void BeginScene(bool a_wanted);
 		[[nodiscard]] bool IsSceneActive() const noexcept { return _sceneSwap.IsActive(); }
-		// The scene is final: the target returns to the proxy, cleared for the interface.
+		// Scene final: the target returns to the proxy, cleared for the interface.
 		void EndScene();
 
 		// True from EndScene until the presenter consumes the frame.

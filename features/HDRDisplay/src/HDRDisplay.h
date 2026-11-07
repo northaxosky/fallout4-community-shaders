@@ -45,8 +45,6 @@ namespace cs::features
 		// True while the frame renders HDR: enabled, with a container to present it.
 		[[nodiscard]] bool IsHdrActive() const noexcept;
 
-		[[nodiscard]] float GetPaperWhite() const noexcept { return static_cast<float>(_settings.paperWhite); }
-
 	private:
 		HDRDisplay() = default;
 
