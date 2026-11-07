@@ -211,6 +211,8 @@ namespace cs::render
 		HRESULT RecreateDisplayResources(UINT a_width, UINT a_height);
 		HRESULT RecreateFrameGenerationResources(UINT a_width, UINT a_height);
 		HRESULT RestoreFrameGenerationProvider(UINT a_width, UINT a_height);
+		// What the display resources hold; the provider is configured with it.
+		[[nodiscard]] render::temporal::ColorContract PresentContract() const;
 		HRESULT RefreshBackBuffers();
 		struct SubmissionRecord
 		{

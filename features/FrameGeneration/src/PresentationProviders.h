@@ -31,7 +31,7 @@ namespace cs::features
 		SetPresentationActive(bool a_active) override;
 		[[nodiscard]] render::temporal::ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
-			DXGI_FORMAT a_format,
+			const render::temporal::ColorContract& a_color,
 			std::uint32_t a_bufferCount) override;
 		[[nodiscard]] render::temporal::ProviderResult PrepareFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;

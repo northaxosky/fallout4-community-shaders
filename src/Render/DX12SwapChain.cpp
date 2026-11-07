@@ -893,7 +893,7 @@ namespace cs::render
 		++_inputResourceGeneration;
 		const auto providerResult =
 			_provider ? _provider->CreateDisplayResources(a_width, a_height,
-							_innerDesc.Format,
+							PresentContract(),
 							_innerDesc.BufferCount) :
 						render::temporal::ProviderResult{};
 		if (!providerResult.Succeeded()) {
@@ -906,6 +906,14 @@ namespace cs::render
 		return S_OK;
 	}
 
+	render::temporal::ColorContract DX12SwapChain::PresentContract() const
+	{
+		if (!_hdrContainer)
+			return render::temporal::kFo4PostTonemapSdrContract;
+		const bool hdr = _callbacks.queryHdrOutput && _callbacks.queryHdrOutput().enabled;
+		return render::temporal::ContainerContract(hdr);
+	}
+
 	HRESULT DX12SwapChain::RestoreFrameGenerationProvider(UINT a_width,
 		UINT a_height)
 	{
@@ -916,7 +924,7 @@ namespace cs::render
 		const render::temporal::ProviderDisplayDescription description{
 			.width = a_width,
 			.height = a_height,
-			.format = _innerDesc.Format,
+			.color = PresentContract(),
 			.bufferCount = _innerDesc.BufferCount
 		};
 		const auto result = render::temporal::RestoreProviderAfterResize(
@@ -2671,7 +2679,7 @@ namespace cs::render
 			const render::temporal::ProviderDisplayDescription oldDescription{
 				.width = oldWidth,
 				.height = oldHeight,
-				.format = _innerDesc.Format,
+				.color = PresentContract(),
 				.bufferCount = _innerDesc.BufferCount
 			};
 			if (_provider) {

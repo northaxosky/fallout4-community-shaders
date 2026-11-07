@@ -233,20 +233,6 @@ namespace cs::render::temporal
 		return a_hdr ? kHdr10PostTonemapContract : kGamma22ContainerPostTonemapContract;
 	}
 
-	// The contract of a present container, by its swap-chain format.
-	[[nodiscard]] inline std::optional<ColorContract>
-	PresentContractForFormat(DXGI_FORMAT a_format) noexcept
-	{
-		switch (a_format) {
-		case DXGI_FORMAT_R8G8B8A8_UNORM:
-			return kFo4PostTonemapSdrContract;
-		case DXGI_FORMAT_R10G10B10A2_UNORM:
-			return kHdr10PostTonemapContract;
-		default:
-			return std::nullopt;
-		}
-	}
-
 	// FO4: kMain before the imagespace chain is linear scene radiance.
 	[[nodiscard]] inline bool
 	IsFo4PreTonemapLinear(const ColorContract& a_color) noexcept
@@ -696,7 +682,7 @@ namespace cs::render::temporal
 		}
 		[[nodiscard]] virtual ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
-			DXGI_FORMAT a_format, std::uint32_t a_bufferCount) = 0;
+			const ColorContract& a_color, std::uint32_t a_bufferCount) = 0;
 		[[nodiscard]] virtual ProviderResult
 		PrepareFrame(const FrameGenerationRequest& a_request) = 0;
 		[[nodiscard]] virtual ProviderResult

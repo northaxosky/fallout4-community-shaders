@@ -103,16 +103,10 @@ namespace cs::features
 	}
 
 	ProviderResult StreamlinePresentation::CreateDisplayResources(
-		std::uint32_t a_width, std::uint32_t a_height, DXGI_FORMAT a_format,
-		std::uint32_t a_bufferCount)
+		std::uint32_t a_width, std::uint32_t a_height,
+		const render::temporal::ColorContract& a_color, std::uint32_t a_bufferCount)
 	{
-		const auto color = render::temporal::PresentContractForFormat(a_format);
-		if (!color) {
-			return Failure(
-				std::string(Name()) +
-				" does not support the swap-chain format.");
-		}
-		_color = *color;
+		_color = a_color;
 		_width = a_width;
 		_height = a_height;
 		_bufferCount = a_bufferCount;
@@ -145,8 +139,8 @@ namespace cs::features
 				std::string(Name()) + " presentation is not ready.");
 		}
 		_peakLuminanceNits = a_request.peakLuminanceNits;
+		_color = a_request.color;
 		const bool configured = _method == Method::kDLSSG ? (_configuration = a_request.configuration,
-																_color = a_request.color,
 																_runtime.ConfigureDLSSG(a_request.enabled,
 																	_configuration, a_request.renderWidth,
 																	a_request.renderHeight, a_request.outputWidth,

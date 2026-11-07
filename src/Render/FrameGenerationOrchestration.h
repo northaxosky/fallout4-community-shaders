@@ -39,7 +39,7 @@ namespace cs::render::temporal
 	{
 		std::uint32_t width = 0;
 		std::uint32_t height = 0;
-		DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+		ColorContract color;
 		std::uint32_t bufferCount = 0;
 	};
 
@@ -243,7 +243,7 @@ namespace cs::render::temporal
 	{
 		const auto& description = SUCCEEDED(a_resizeResult) && a_newDescription ? *a_newDescription : a_oldDescription;
 		return a_provider.CreateDisplayResources(
-			description.width, description.height, description.format,
+			description.width, description.height, description.color,
 			description.bufferCount);
 	}
 
