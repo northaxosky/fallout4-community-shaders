@@ -68,6 +68,11 @@ namespace cs::engine
 		StoreGlobal(RE::ID::Sun::DiscAlpha, a_disc);
 	}
 
+	void HideSunGlare(const RE::Sun& a_sun)
+	{
+		a_sun.sunGlareNode->SetAppCulled(true);
+	}
+
 	void SetSunLightDirection(const RE::Sky& a_sky, const RE::NiPoint3& a_towardsBody)
 	{
 		const auto& sun = *a_sky.sun;

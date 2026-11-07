@@ -626,6 +626,8 @@ namespace cs::features
 		// Replace vanilla's mirrored night arc, which a lowered horizon would reveal
 		engine::SetSunPosition(a_sky, a_sunDir, GetSunDistance(a_sky));
 		FadeSunAtHorizon(a_sky, a_sunHeight);
+		// FO4: the glare never billboards, so a sun below eye level floods the view.
+		engine::HideSunGlare(*a_sky.sun);
 
 		a_dirs[static_cast<int>(Caster::kSun)] = a_sunDir;
 	}

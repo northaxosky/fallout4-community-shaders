@@ -6,6 +6,7 @@
 | Forced | Sun arc peak 400 and sideways offset 25 | `fSunXExtreme` and `fSunYExtreme`; alternate-path horizon distance keeps the 0.7 ratio | `Sun::Update` reads them |
 | Forced | Moon phase from the texture name; moons move on their own tracks | Phase from the day count, shared by both moons; both moons follow the sun's arc, so Masser and Secunda coincide in a climate that enables both | `Moon::Update` has no per-moon motion |
 | Forced | Interior cells need one sunlight-shadows flag | Interior cells need both sun-shadow cell bits; a sky mode of none is skipped | Main sun-shadow eligibility |
+| Forced | The engine draws the sun glare | Hidden | FO4 never billboards it, so a sun below eye level turns it into a flat quad that floods the view |
 | N/A | EVLaS, DVLaSS and Moon and Stars conflict checks | Omitted | Skyrim-only mods |
 | N/A | Default disabled worldspaces: Blackreach, Alftand, Sovngarde, Soul Cairn, Boneyard, Apocrypha | Empty list | No FO4 worldspace keeps one light around the clock |
 | N/A | `LinearLighting` sunlight color path | Omitted | Upstream never assigns its colors; FO4 sunlight is already linear |

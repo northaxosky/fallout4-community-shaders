@@ -12,6 +12,9 @@ namespace cs::engine
 	// Sets disc and glare alpha, and the composite's disc alpha.
 	void SetSunAlpha(const RE::Sun& a_sun, float a_disc, float a_glare);
 
+	// Culls the glare until the next Sun::Update unculls it.
+	void HideSunGlare(const RE::Sun& a_sun);
+
 	// Points the sun and cloud lights away from a sky-local body direction.
 	void SetSunLightDirection(const RE::Sky& a_sky, const RE::NiPoint3& a_towardsBody);
 }
