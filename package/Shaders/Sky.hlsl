@@ -111,6 +111,21 @@ VS_OUTPUT main(VS_INPUT input)
 #endif
 
 #ifdef BSSKY_PIXEL_SHADER
+#	include "FO4/FO4ShaderData.hlsli"
+#	ifdef FO4CS_SUBSTRATE
+#		include "Common/Random.hlsli"
+#	endif
+
+float2 DitherTexel(float2 position)
+{
+#	ifdef FO4CS_SUBSTRATE
+	// FO4: whole-texel jitter lets temporal upscalers resolve the tile.
+	return position + Random::TemporalTileOffset(SharedData::FrameCount, 8.0);
+#	else
+	return position;
+#	endif
+}
+
 cbuffer PerFrame : register(b12)
 {
 	row_major float4x4 WorldToView;
@@ -214,7 +229,7 @@ PS_OUTPUT main(PS_INPUT_SKY input)
 		color *= PParams[0].y;
 	}
 
-	float occlusion = texture2.Sample(sampler2, input.screenPosition.xy * 0.125).x;
+	float occlusion = texture2.Sample(sampler2, DitherTexel(input.screenPosition.xy) * 0.125).x;
 	occlusion = occlusion * 0.0078125 - 0.001953125;
 	output.color = float4(color + occlusion, 1.0);
 	output.motion = motionVector(input.currentPosition, input.previousPosition);
@@ -429,7 +444,7 @@ PS_OUTPUT main(PS_INPUT_SUN_GLARE input)
 		color *= PParams[0].y;
 	}
 
-	float occlusion = texture2.Sample(sampler2, input.screenPosition.xy * 0.125).x;
+	float occlusion = texture2.Sample(sampler2, DitherTexel(input.screenPosition.xy) * 0.125).x;
 	occlusion = occlusion * 0.0078125 - 0.001953125;
 	output.color = float4(color + occlusion, 1.0);
 	output.motion = motionVector(input.currentPosition, input.previousPosition);

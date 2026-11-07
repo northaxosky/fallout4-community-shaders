@@ -4,11 +4,11 @@
 
 namespace cs::features::upscaling
 {
-	// Owned pixel shaders that sample materials with SharedData::MipBias.
+	// Owned pixel shaders that read SharedData (mip bias, temporal dither).
 	inline const engine::ShaderDefineDeclaration kMipBiasShaderDefines{
 		engine::shader_injection_defines::kSubstrate,
 		{ engine::ShaderInjectionTarget::kDeferredPrepass, engine::ShaderInjectionTarget::kDistantTree,
-			engine::ShaderInjectionTarget::kBsWater }
+			engine::ShaderInjectionTarget::kBsWater, engine::ShaderInjectionTarget::kBsSky }
 	};
 
 	// Imagespace fullscreen VS draws read the exact render scale from b4.
