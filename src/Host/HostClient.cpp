@@ -1016,10 +1016,8 @@ namespace cs::host
 
 	bool HostClient::IsShellOpen() noexcept
 	{
-		// DearModdingUI registers its shell under this menu name.
-		static const RE::BSFixedString kShellMenu{ "DearModdingUI_Menu" };
-		const auto* ui = RE::UI::GetSingleton();
-		return ui && ui->GetMenuOpen(kShellMenu);
+		// The host's own shell state; its game menu can disagree.
+		return Get()._client.IsMenuVisible().value_or(false);
 	}
 
 	void HostClient::LogFailure(std::string_view a_operation) const noexcept
