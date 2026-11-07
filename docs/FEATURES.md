@@ -109,15 +109,17 @@ are FO4-only rule-4 port features.
 
 Ordered by user value over effort, respecting dependencies.
 
-1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE.
-2. **Finish ported features:** Light Limit Fix local shadow copy (M); DC provider adapters (S/M); Water Effects caustics proof (S).
-3. **Cheap new features:** LOD Blending (S); Unified Water optical blend and terrain tiles (M); Terrain Variation (M).
-4. **Parallax:** Extended Materials object/terrain POM + TruePBR surface POM, reading `_s` alpha (M).
-5. **Mid-size, few dependencies:** Subsurface Scattering (M); Volumetric
-   Shadows producer + DFLight (M); Hair Specular opaque slices (M); Grass Collision (M, actor-bounds RE).
-6. **RE-gated:** Interior Sun.
-7. **Providers:** provider adapters in DC/SSGI.
-8. **Remaining ports:** Skin detail/default response; Sky Sync; Grass Lighting basics; CS Editor; Screenshot (then Remote Control screenshot capture); HDR Display (L).
+1. **Effects11** (L): highest user value; FO4 users rely on ENB's enbeffect. Starts with tonemap-attachment RE;
+   unblocks HDR Display AutoHDR.
+2. **Pending slices of ported features:** Light Limit Fix local shadow copy (M); Cloud Shadows self-shadowing;
+   Water Effects secondary-view caustics; CS Editor template/imagespace/godray/light editors and shell.
+3. **Mid-size, few dependencies:** Hair Specular opaque slices (M); Grass Collision (M, actor-bounds RE); Skin
+   detail/default response (M); Grass Lighting basics (S/M).
+4. **Sky:** Procedural Sun (S/M) with HDR Display sun scaling.
+5. **RE-gated:** Interior Sun.
+6. **Specular providers:** Dynamic Cubemaps deferred-surface reflections and SSGI specular adapters, after the
+   Vanilla PBR and SSGI specular ports.
+7. **Remaining ports:** Screenshot (then Remote Control screenshot capture, HDR crop preview).
 
 ## Extension slices
 
