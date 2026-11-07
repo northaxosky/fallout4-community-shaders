@@ -1226,7 +1226,7 @@ namespace cs::render
 					.queryHdrOutput =
 						request.hdrDisplay ?
 							std::function<hdr::OutputSettings()>{
-								[] { return features::HDRDisplay::GetSingleton()->ConsumeOutputSettings(); } } :
+								[] { return features::HDRDisplay::GetSingleton()->GetOutputSettings(); } } :
 							std::function<hdr::OutputSettings()>{} });
 			_impl->activePresentation = nullptr;
 		} catch (const std::exception& e) {

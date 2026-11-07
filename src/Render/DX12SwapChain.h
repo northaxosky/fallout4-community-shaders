@@ -201,10 +201,10 @@ namespace cs::render
 		HRESULT CreateDisplayResources(UINT a_width, UINT a_height, DisplayResources& a_resources);
 		[[nodiscard]] std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> CreateSlotBuffers(
 			const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name) const;
-		// Writes this slot's inputs and returns the PQ back buffer; null skips the frame.
-		[[nodiscard]] const SharedD3D11D3D12Texture* ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& a_settings) noexcept;
+		// Writes this slot's inputs, returns the encoded back buffer; null skips.
+		[[nodiscard]] const SharedD3D11D3D12Texture* ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& a_settings, bool a_separated) noexcept;
 		// False when the container has nothing to present this frame.
-		[[nodiscard]] bool ComposeHdr(const hdr::OutputSettings& a_settings) noexcept;
+		[[nodiscard]] bool ComposeHdr(const hdr::OutputSettings& a_settings, bool a_separated) noexcept;
 		[[nodiscard]] std::optional<features::ScRgbProxy> ScRgbFor(
 			const SharedD3D11D3D12Texture* a_color, float a_whiteNits, bool a_enabled) const noexcept;
 		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept;

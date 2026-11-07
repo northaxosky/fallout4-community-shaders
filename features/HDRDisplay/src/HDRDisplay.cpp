@@ -115,14 +115,13 @@ namespace cs::features
 		return _settings.enableHDR && render::TemporalPipeline::Get().IsHdrContainerActive();
 	}
 
-	render::hdr::OutputSettings HDRDisplay::ConsumeOutputSettings() noexcept
+	render::hdr::OutputSettings HDRDisplay::GetOutputSettings() const noexcept
 	{
 		return {
 			.enabled = _settings.enableHDR,
 			.paperWhite = static_cast<float>(_settings.paperWhite),
 			.peakNits = static_cast<float>(_settings.peakNits),
-			.uiBrightness = _settings.uiBrightness,
-			.interfaceSeparated = render::InterfaceLayer::Get().ConsumeSeparated()
+			.uiBrightness = _settings.uiBrightness
 		};
 	}
 

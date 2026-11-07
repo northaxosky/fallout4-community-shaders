@@ -19,6 +19,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Annotation.h"
+#include "Render/InterfaceLayer.h"
 #include "Render/RendererContext.h"
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalRenderer.h"
@@ -1902,12 +1903,14 @@ namespace cs::render
 				}
 			}
 			const auto hdrSettings = _hdrContainer && _callbacks.queryHdrOutput ? _callbacks.queryHdrOutput() : hdr::OutputSettings{};
+			// Consumed once per present; the scene texture holds this frame's scene.
+			const bool separated = _hdrContainer && InterfaceLayer::Get().ConsumeSeparated() && _hdrScene;
 			bool requested = frameGenerationRequested &&
 			                 _frameGenerationInputsReady && !_frameGenerationDisabled &&
 			                 request.enabled;
 			if (PrepareReShade()) {
 				// A separated frame's proxy holds only the interface, composed after the effects.
-				const auto* color = hdrSettings.interfaceSeparated && _hdrScene ? _hdrScene.get() : _proxyBuffer.get();
+				const auto* color = separated ? _hdrScene.get() : _proxyBuffer.get();
 				const auto scRgb = ScRgbFor(color, hdrSettings.paperWhite, hdrSettings.enabled);
 				_reshade.Present(*_context11, *color->texture11, scRgb ? &*scRgb : nullptr);
 			}
@@ -1917,11 +1920,11 @@ namespace cs::render
 			const SharedD3D11D3D12Texture* hdrFrameGenerationBackBuffer = nullptr;
 			if (_hdrContainer) {
 				if (requested) {
-					hdrFrameGenerationBackBuffer = ComposeHdrFrameGenerationInputs(hdrSettings);
+					hdrFrameGenerationBackBuffer = ComposeHdrFrameGenerationInputs(hdrSettings, separated);
 					requested = hdrFrameGenerationBackBuffer != nullptr;
 				}
-				copySource = hdrFrameGenerationBackBuffer ? hdrFrameGenerationBackBuffer : ComposeHdr(hdrSettings) ? _hdrOutput.get() :
-				                                                                                                     nullptr;
+				copySource = hdrFrameGenerationBackBuffer ? hdrFrameGenerationBackBuffer : ComposeHdr(hdrSettings, separated) ? _hdrOutput.get() :
+				                                                                                                                nullptr;
 			}
 			if (copySource && copySource->resource12->GetDesc().Format != _innerDesc.Format) {
 				CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
@@ -2271,10 +2274,9 @@ namespace cs::render
 		return { _hdrScene->texture11.get(), _hdrScene->srv11.get(), _hdrScene->rtv11.get() };
 	}
 
-	bool DX12SwapChain::ComposeHdr(const hdr::OutputSettings& settings) noexcept
+	bool DX12SwapChain::ComposeHdr(const hdr::OutputSettings& settings, bool separated) noexcept
 	{
 		ApplyHdrColorSpace(settings);
-		const bool separated = settings.interfaceSeparated && _hdrScene;
 		const auto* scene = separated ? _hdrScene.get() : _proxyBuffer.get();
 		if (!_hdrCompose.IsReady() || !_hdrOutput || !scene->srv11 || !_proxyBuffer->srv11 || !_hdrOutput->uav11) {
 			CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "HDR compose is unavailable; the frame is not presented.");
@@ -2285,10 +2287,10 @@ namespace cs::render
 		return true;
 	}
 
-	const SharedD3D11D3D12Texture* DX12SwapChain::ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& settings) noexcept
+	const SharedD3D11D3D12Texture* DX12SwapChain::ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& settings, bool separated) noexcept
 	{
 		// No separate interface means no clean HUD-less frame; skip this frame only.
-		if (!settings.interfaceSeparated || !_hdrScene)
+		if (!separated)
 			return nullptr;
 		const auto* hudless = _hudlessBuffers[_frameSlot].get();
 		const auto* ui = _uiBuffers[_frameSlot].get();

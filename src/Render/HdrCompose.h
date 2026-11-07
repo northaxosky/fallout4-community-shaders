@@ -15,8 +15,6 @@ namespace cs::render::hdr
 		float paperWhite = 203.0f;
 		float peakNits = 1000.0f;
 		float uiBrightness = 1.0f;
-		// The scene is in the presenter's scene texture; the proxy holds the interface.
-		bool interfaceSeparated = false;
 	};
 
 	// The presenter's fp16 scene texture, drawn into while the interface is split.

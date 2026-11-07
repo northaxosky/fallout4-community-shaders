@@ -37,8 +37,7 @@ namespace cs::features
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 
-		// Presenter state for this present; separated once the scene was redirected.
-		[[nodiscard]] render::hdr::OutputSettings ConsumeOutputSettings() noexcept;
+		[[nodiscard]] render::hdr::OutputSettings GetOutputSettings() const noexcept;
 
 		// First run only: HDR starts on when Windows HDR is on for the game's monitor.
 		void SeedFromDisplay(HWND a_window);
