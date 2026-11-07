@@ -1,7 +1,6 @@
 #include "Render/CanonicalDepth.h"
 #include "Render/FrameBuffer.h"
 #include "Render/FrameGenerationOrchestration.h"
-#include "Render/InterfaceLayer.h"
 #include "Render/TemporalRendererInternals.h"
 
 namespace cs::render
@@ -450,8 +449,7 @@ namespace cs::render
 	void TemporalRenderer::RenderReShadeEffects()
 	{
 		auto& pipeline = render::TemporalPipeline::Get();
-		// A split scene is rendered by HDR Display at the interface seam.
-		if (InterfaceLayer::Get().IsSceneActive() || !pipeline.ReShadeEffectsEnabled()) {
+		if (!pipeline.ReShadeEffectsEnabled()) {
 			return;
 		}
 		auto* context = cs::engine::GetImmediateContext();

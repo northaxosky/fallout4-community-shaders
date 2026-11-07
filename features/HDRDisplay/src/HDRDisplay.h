@@ -47,6 +47,8 @@ namespace cs::features
 		// True while the frame renders HDR content: enabled, with a container to present it.
 		[[nodiscard]] bool IsHdrActive() const noexcept;
 
+		[[nodiscard]] float GetPaperWhite() const noexcept { return static_cast<float>(_settings.paperWhite); }
+
 	private:
 		HDRDisplay() = default;
 
@@ -59,8 +61,6 @@ namespace cs::features
 		// The scene is final: effects run on it, then the interface layer takes over the proxy.
 		// Idempotent; pause frames reach it afterwards.
 		void SeparateInterface();
-		// ReShade runs on the HDR scene as scRGB, before the interface.
-		void RenderReShade(ID3D11DeviceContext& a_context);
 
 		Settings _settings;
 		std::atomic_bool _displayKnown{ false };

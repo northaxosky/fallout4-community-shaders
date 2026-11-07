@@ -162,26 +162,7 @@ namespace cs::features
 		auto& layer = render::InterfaceLayer::Get();
 		if (!layer.IsSceneActive())
 			return;
-		if (auto* context = engine::GetImmediateContext())
-			RenderReShade(*context);
 		layer.EndScene();
-	}
-
-	void HDRDisplay::RenderReShade(ID3D11DeviceContext& a_context)
-	{
-		auto& pipeline = render::TemporalPipeline::Get();
-		if (!pipeline.ReShadeEffectsEnabled())
-			return;
-		const auto* graphics = engine::GetGraphicsState();
-		const auto camera = graphics ? engine::GetCapturedWorldCameraRecord(graphics->frameCount) : std::nullopt;
-		auto* target = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
-		if (!camera || !target)
-			return;
-		winrt::com_ptr<ID3D11Resource> resource;
-		target->GetResource(resource.put());
-		// Before the interface, the scene's white is paper white; SDR is not scRGB.
-		pipeline.RenderReShadeEffects(a_context, *resource, render::UpdateOutputCanonicalDepth(&a_context, *camera),
-			IsHdrActive() ? static_cast<float>(_settings.paperWhite) : 0.0f);
 	}
 
 	void HDRDisplay::WriteSharedFrameData(render::SharedDataCB& a_shared)

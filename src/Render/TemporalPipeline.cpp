@@ -1986,12 +1986,12 @@ namespace cs::render
 	}
 
 	void TemporalPipeline::RenderReShadeEffects(ID3D11DeviceContext& a_context,
-		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits) noexcept
+		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth) noexcept
 	{
-		// An active HDR scene is owned by HDR Display, which converts it for ReShade.
-		if (a_hdrWhiteNits <= 0.0f && features::HDRDisplay::GetSingleton()->IsHdrActive())
-			return;
-		_impl->swapChain.RenderReShadeEffects(a_context, a_color, a_depth, a_hdrWhiteNits);
+		// At this seam the scene's white is paper white; SDR is not scRGB.
+		const auto* hdrDisplay = features::HDRDisplay::GetSingleton();
+		_impl->swapChain.RenderReShadeEffects(a_context, a_color, a_depth,
+			hdrDisplay->IsHdrActive() ? hdrDisplay->GetPaperWhite() : 0.0f);
 	}
 
 	void TemporalPipeline::SetFrameGenerationInputsReady(bool a_ready) noexcept
