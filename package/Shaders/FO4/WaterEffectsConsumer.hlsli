@@ -15,7 +15,7 @@ namespace WaterEffects
 	float3 GetCausticsMultFromViewPosition(
 		float3 viewPosition,
 		float4 viewToWorldRow0, float4 viewToWorldRow1, float4 viewToWorldRow2,
-		float4 cameraPosAdjust)
+		float4 cameraPosAdjust, float2 pixelPos)
 	{
 		[branch] if (FO4SharedData::EnabledWaterEffects == 0) return 1.0.xxx;
 		uint2 dimensions;
@@ -25,7 +25,7 @@ namespace WaterEffects
 			return 1.0.xxx;
 		// FO4: b4 supplies camera-relative coordinates, not the native draw anchor.
 		float3 position = FrameBuffer::ViewToWorld(viewPosition);
-		return ComputeCaustics(SharedData::GetWaterData(position), position);
+		return ComputeCaustics(SharedData::GetWaterData(position), position, pixelPos);
 	}
 
 	bool TryGetDebugColorFromViewPosition(

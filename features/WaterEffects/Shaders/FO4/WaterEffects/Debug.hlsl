@@ -14,11 +14,15 @@ float4 main(float4 screenPosition : SV_Position) : SV_Target
 	float4 water = SharedData::GetWaterData(position.xyz);
 	float distance = water.w - position.z;
 	float3 color = 0.0;
+#ifndef WATER_SUBMERSION_DEBUG
+	// Quad reads need uniform control flow, so sample outside the branch.
+	float3 caustics = WaterEffects::ComputeCaustics(water, position.xyz, screenPosition.xy);
+#endif
 	if (distance > 0.0 && depth < 1.0) {
 #ifdef WATER_SUBMERSION_DEBUG
 		color = saturate(distance / 1024.0).xxx;
 #else
-		color = saturate(WaterEffects::ComputeCaustics(water, position.xyz) * 0.25);
+		color = saturate(caustics * 0.25);
 #endif
 	}
 	return float4(color, 1);

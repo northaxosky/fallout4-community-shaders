@@ -2385,7 +2385,8 @@ float2 goboUV = float2(omniUV.x,
 			ViewToWorld_row0,
 			ViewToWorld_row1,
 			ViewToWorld_row2,
-			PosAdjust);
+			PosAdjust,
+			input.position.xy);
 #	endif
 
 		float3 albedoPremult = albedoSample.xyz * albedoSample.w;
@@ -3181,7 +3182,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				ViewToWorld_row0,
 				ViewToWorld_row1,
 				ViewToWorld_row2,
-				PosAdjust);
+				PosAdjust,
+				input.position.xy);
 #	endif
 
 			float NdotL_raw = dot(normalView, LightVector.xyz);
@@ -4181,7 +4183,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				ViewToWorld_row0,
 				ViewToWorld_row1,
 				ViewToWorld_row2,
-				PosAdjust);
+				PosAdjust,
+				input.position.xy);
 #	endif
 
 #	ifdef FO4_DS3_REASSOC_ORDER
@@ -6249,7 +6252,8 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				ViewToWorld_row0,
 				ViewToWorld_row1,
 				ViewToWorld_row2,
-				PosAdjust);
+				PosAdjust,
+				input.position.xy);
 			finalDiffuse *= causticsMult;
 			FO4_SOFT_LOBE_SCALE(softDiffuse, causticsMult);
 			brdfSpecular *= causticsMult;
