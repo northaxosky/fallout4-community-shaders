@@ -338,6 +338,7 @@ namespace cs::features
 		cs::render::annotation::SetMarker("CloudShadows/CloudDraw");
 		// The face composite restarts at the first cloud draw of each face render.
 		if (std::exchange(_clearedSerial, capture->serial) != capture->serial) {
+			cs::render::annotation::ScopedEvent timing("CloudShadows/ClearLayer");
 			ClearFace(a_context, capture->face);
 			_counters.facesCleared.fetch_add(1, std::memory_order_relaxed);
 		}
@@ -347,6 +348,7 @@ namespace cs::features
 		if (layers) {
 			if (std::exchange(_layerClearedSerial, capture->serial) != capture->serial) {
 				constexpr float kClear[4]{};
+				cs::render::annotation::ScopedEvent timing("CloudShadows/ClearLayers");
 				a_context->ClearRenderTargetView(_layerFaceRTV[capture->face].get(), kClear);
 			}
 			_counters.layerDraws.fetch_add(1, std::memory_order_relaxed);

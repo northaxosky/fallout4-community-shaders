@@ -1,6 +1,7 @@
 #include "Render/InterfaceLayer.h"
 
 #include "Log.h"
+#include "Render/Annotation.h"
 #include "Render/EngineCallSite.h"
 #include "Render/RendererContext.h"
 #include "Render/TemporalPipeline.h"
@@ -144,7 +145,10 @@ namespace cs::render
 			return;
 		// The interface composites over the scene with alpha, so it starts transparent.
 		constexpr float kClear[4]{};
-		context->ClearRenderTargetView(proxyTarget, kClear);
+		{
+			annotation::ScopedEvent timing("Render::InterfaceLayer::ClearUI");
+			context->ClearRenderTargetView(proxyTarget, kClear);
+		}
 		// The scene's last blend bind would carry into the first interface draw.
 		InvalidateEngineBlendState();
 		_blendTouched = true;
