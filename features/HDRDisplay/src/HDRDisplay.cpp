@@ -38,7 +38,7 @@ namespace cs::features
 
 		// The pause freeze-frame stores copy from RT0, so they follow its format.
 		constexpr auto kMenuBackground = RE::BSGraphics::RenderTargetID::kMenuBackground;
-		constexpr auto kFreezeFrameStore = static_cast<RE::BSGraphics::RenderTargetID>(54);
+		constexpr auto kPauseFreezeFrame = RE::BSGraphics::RenderTargetID::kPauseFreezeFrame;
 		constexpr auto kHdrSceneFormat = static_cast<RE::BSGraphics::Format>(DXGI_FORMAT_R16G16B16A16_FLOAT);
 
 		struct RenderTargetManager_CreateRenderTarget
@@ -46,7 +46,7 @@ namespace cs::features
 			static void thunk(RE::BSGraphics::RenderTargetManager* a_manager, RE::BSGraphics::RenderTargetID a_id,
 				const RE::BSGraphics::RenderTargetProperties* a_properties, RE::BSGraphics::RenderTargetCreationMode a_mode)
 			{
-				if (a_properties && (a_id == kMenuBackground || a_id == kFreezeFrameStore) &&
+				if (a_properties && (a_id == kMenuBackground || a_id == kPauseFreezeFrame) &&
 					render::TemporalPipeline::Get().IsHdrContainerActive()) {
 					auto promoted = *a_properties;
 					promoted.format = kHdrSceneFormat;
