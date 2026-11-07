@@ -41,7 +41,7 @@ namespace cs::features::remote_control
 			return { { "metric", NvPerf::FormatMetric(a_metric) }, { "label", NvPerf::MetricLabel(a_metric) } };
 		}
 
-		// Per-frame values keyed by metric label; incomplete values are null.
+		// Per-frame values keyed by metric label, perSample per sample; incomplete values are null.
 		Json CaptureResultJson(const NvPerf::CaptureResult& a_result, bool a_detail)
 		{
 			auto metrics = Json::array();
@@ -53,16 +53,27 @@ namespace cs::features::remote_control
 			auto unsupported = Json::array();
 			for (const auto& metric : a_result.unsupportedMetrics)
 				unsupported.push_back(MetricJson(metric));
+			const auto number = [](double a_value) { return std::isnan(a_value) ? Json(nullptr) : Json(a_value); };
 			const auto values = [&](const std::vector<double>& a_values) {
 				auto out = Json::object();
 				for (std::size_t m = 0; m < labels.size() && m < a_values.size(); ++m)
-					out[labels[m]] = std::isnan(a_values[m]) ? Json(nullptr) : Json(a_values[m]);
+					out[labels[m]] = number(a_values[m]);
+				return out;
+			};
+			const auto perSample = [&](const std::vector<std::vector<double>>& a_series) {
+				auto out = Json::object();
+				for (std::size_t m = 0; m < labels.size() && m < a_series.size(); ++m) {
+					auto column = Json::array();
+					for (const double value : a_series[m])
+						column.push_back(number(value));
+					out[labels[m]] = std::move(column);
+				}
 				return out;
 			};
 			auto summary = Json::array();
 			for (const auto& entry : a_result.summary)
 				summary.push_back({ { "range", entry.name }, { "perFrame", entry.occurrencesPerFrame }, { "incomplete", entry.incomplete },
-					{ "values", values(entry.values) } });
+					{ "values", values(entry.values) }, { "perSample", perSample(entry.perSample) } });
 			Json out{ { "captureId", a_result.id }, { "success", a_result.success }, { "error", a_result.error }, { "chip", a_result.chipName },
 				{ "startFrame", a_result.startFrame }, { "endFrame", a_result.endFrame }, { "samples", a_result.samples },
 				{ "passesPerSample", a_result.passesPerSample }, { "droppedRanges", a_result.droppedRanges },
@@ -165,7 +176,7 @@ namespace cs::features::remote_control
 
 	const Tool kNvPerfTool{
 		"communityshaders.nvperf",
-		R"({"description":"NVIDIA Nsight Perf GPU hardware counters per render pass (D3D11; builds with the nvperf_sdk option, NVIDIA GPUs only). Ranges are the perf events Community Shaders emits (engine passes need Frame Annotations enabled at startup). Action-dispatched. status -> {built,available,gpuSupported,device,chip,deviceError,library,capture:{state,captureId,sample,samples,pass,passes,error}}. metrics -> {defaults:[{metric,label}],kinds}. capture: optional metrics (array of name[:counter|ratio|throughput|active|elapsed|percycle] strings, default the defaults), ranges (array of names, trailing * = prefix; default every outermost range), samples (1-64, default 1), delayFrames (default 0), nestingLevels (1-8, default 1; each level multiplies the passes) -> {queued,captureId}; runs over the next frames, one profiler pass per frame. cancel: stop the running capture. result: optional captureId (default latest), detail (boolean: include every range of every sample) -> {pending,capture} while running, else {captureId,success,error,chip,startFrame,endFrame,samples,passesPerSample,metrics:[{metric,label}],unsupportedMetrics,summary:[{range,perFrame,incomplete,values:{label:value}}],csvPath}. Summary values are per frame: counters summed (gpu__time_duration in ns), rates weighted by range time. Event communityshaders.nvperf.completed {captureId,success,error} fires when a capture ends.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["status","metrics","capture","cancel","result"]},"metrics":{"type":"array","items":{"type":"string"}},"ranges":{"type":"array","items":{"type":"string"}},"samples":{"type":"number"},"delayFrames":{"type":"number"},"nestingLevels":{"type":"number"},"captureId":{"type":"number"},"detail":{"type":"boolean"}},"required":["action"]}})",
+		R"({"description":"NVIDIA Nsight Perf GPU hardware counters per render pass (D3D11; builds with the nvperf_sdk option, NVIDIA GPUs only). Ranges are the perf events Community Shaders emits (engine passes need Frame Annotations enabled at startup). Action-dispatched. status -> {built,available,gpuSupported,device,chip,deviceError,library,capture:{state,captureId,sample,samples,pass,passes,error}}. metrics -> {defaults:[{metric,label}],kinds}. capture: optional metrics (array of name[:counter|ratio|throughput|active|elapsed|percycle] strings, default the defaults), ranges (array of names, trailing * = prefix; default every outermost range), samples (1-64, default 1), delayFrames (default 0), nestingLevels (1-8, default 1; each level multiplies the passes) -> {queued,captureId}; runs over the next frames, one profiler pass per frame. cancel: stop the running capture. result: optional captureId (default latest), detail (boolean: include every range of every sample) -> {pending,capture} while running, else {captureId,success,error,chip,startFrame,endFrame,samples,passesPerSample,metrics:[{metric,label}],unsupportedMetrics,summary:[{range,perFrame,incomplete,values:{label:value},perSample:{label:[one value per sample]}}],csvPath}. Summary values are per frame: counters summed (gpu__time_duration in ns), rates weighted by range time. perSample: the same per sample (counters 0 in a sample without the range, rates null). Event communityshaders.nvperf.completed {captureId,success,error} fires when a capture ends.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["status","metrics","capture","cancel","result"]},"metrics":{"type":"array","items":{"type":"string"}},"ranges":{"type":"array","items":{"type":"string"}},"samples":{"type":"number"},"delayFrames":{"type":"number"},"nestingLevels":{"type":"number"},"captureId":{"type":"number"},"detail":{"type":"boolean"}},"required":["action"]}})",
 		&Handle
 	};
 }
