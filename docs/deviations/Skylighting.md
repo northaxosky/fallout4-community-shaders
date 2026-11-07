@@ -18,3 +18,7 @@
 | Forced | `SKYLIGHTING_SHADOW_VIS` on rim/soft/back lighting | Soft-wrap, rim and back lobes use the shadow-visibility volume instead of the cascade shadow; direct lobe and specular keep the cascade shadow. Only sun lobes of directional families are affected | |
 | Forced | Dynamic Cubemaps specular lerps env and reflections cubes by `skylightingSpecular`, weighted by DALC at the reflection vector | Composite probe sites lerp the two cubes by probe specular visibility; native probe specular weight (`ambient + sun + local diffuse`) replaces the DALC weight | The DALC term cannot be separated from the native sum, and no reflectance channel exists |
 | Pending | b6 zeroed while the map menu is open | Unresolved whether the FO4 local map needs it | |
+
+## Upstream bugs
+
+- `Water.hlsl` samples probes with `SampleNoBias` at the water plane, reading them as partly occluded and darkening open-water reflections.

@@ -455,7 +455,8 @@ float skylightingSpecularVisibility(float3 positionMS, float3 normal, float3 eye
 #	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
 	[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 	// FO4: callers pass eyeVector.xyz, the camera-relative position OG lacks.
-	sh2 skylightingSH = Skylighting::SampleNoBias(positionMS);
+	// FO4: bias up; probes at the water plane read as occluded.
+	sh2 skylightingSH = Skylighting::Sample(positionMS, float3(0.0, 0.0, 1.0));
 	sh2 specularLobe = SphericalHarmonics::FauxSpecularLobe(normal, -eyeDirection, 0.0);
 	return Skylighting::EvaluateSpecular(skylightingSH, specularLobe, Skylighting::GetFadeOutFactor(positionMS));
 #	else
@@ -490,21 +491,6 @@ float3 surfaceColor(
 			color = CubeMapTex.SampleLevel(sampler3, reflectionDirection, 0).xyz;
 #			endif
 
-		float3 dynamicCubemap;
-		if (SharedData::InInterior) {
-			dynamicCubemap = DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
-		} else {
-			float3 specularIrradiance = 0.0;
-			if (skylightingSpecular < 1.0)
-				specularIrradiance = DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
-
-			float3 specularIrradianceReflections = 0.0;
-			if (skylightingSpecular > 0.0)
-				specularIrradianceReflections = DynamicCubemaps::EnvReflectionsTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
-
-			dynamicCubemap = ColorManagement::SceneColor::LerpInLinear(specularIrradiance, specularIrradianceReflections, skylightingSpecular);
-		}
-
 		// FO4: eyeVector.w is per-vertex; callers pass the pixel's distance.
 		float reflectionAmount = saturate(cameraDistance / 1024.0);
 
@@ -515,12 +501,30 @@ float3 surfaceColor(
 		reflectionAmount = 0.0;
 #			endif
 
-		float3 debugColor;
-		if (DynamicCubemaps::TryGetDebugEnvironment(reflectionDirection, sampler3, debugColor)) {
-			dynamicCubemap = debugColor;
-			reflectionAmount = 0.0;
+		float3 dynamicCubemap;
+		if (SharedData::InInterior) {
+			dynamicCubemap = DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
+		} else {
+			float3 specularIrradiance = 0.0;
+			if (skylightingSpecular < 1.0)
+				specularIrradiance = DynamicCubemaps::EnvTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
+
+			float3 specularIrradianceReflections = 0.0;
+			if (skylightingSpecular > 0.0) {
+				specularIrradianceReflections = DynamicCubemaps::EnvReflectionsTexture.SampleLevel(sampler3, reflectionDirection, 0).xyz;
+				// FO4: only the unfloored sky-visible lobe fades to the engine cube.
+				float minVisibility = SharedData::skylightingSettings.MinSpecularVisibility;
+				float skyVisibility = minVisibility < 1.0 ? saturate((skylightingSpecular - minVisibility) / (1.0 - minVisibility)) : 1.0;
+				specularIrradianceReflections = lerp(specularIrradianceReflections, color, reflectionAmount * skyVisibility);
+			}
+
+			dynamicCubemap = ColorManagement::SceneColor::LerpInLinear(specularIrradiance, specularIrradianceReflections, skylightingSpecular);
 		}
-		color = lerp(dynamicCubemap, color, reflectionAmount);
+
+		float3 debugColor;
+		if (DynamicCubemaps::TryGetDebugEnvironment(reflectionDirection, sampler3, debugColor))
+			dynamicCubemap = debugColor;
+		color = dynamicCubemap;
 	}
 #		endif
 #		if defined(REFLECTIONS) && defined(SSLR)
