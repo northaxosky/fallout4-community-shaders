@@ -58,11 +58,11 @@ namespace cs::render::hdr
 			ID3D11ShaderResourceView* a_interface, ID3D11UnorderedAccessView& a_output,
 			UINT a_width, UINT a_height, const OutputSettings& a_settings);
 
-		// Frame generation blends in PQ, so the premultiplied interface is encoded in place.
+		// Frame generation blends in the output encoding, so the interface is encoded in place.
 		void EncodeInterface(ID3D11DeviceContext& a_context, ID3D11UnorderedAccessView& a_interface,
 			UINT a_width, UINT a_height, const OutputSettings& a_settings);
 
-		// Blends the encoded interface over the encoded HUD-less frame in PQ.
+		// Blends the encoded interface over the encoded HUD-less frame.
 		void CompositeInterface(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_hudless,
 			ID3D11ShaderResourceView& a_interface, ID3D11UnorderedAccessView& a_output,
 			UINT a_width, UINT a_height);

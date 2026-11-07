@@ -54,7 +54,7 @@ namespace cs::render::hdr
 		desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 		_shader = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\HDROutputCS.hlsl", "HDROutputCS");
 		_encodeInterface = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\UIBrightnessCS.hlsl", "UIBrightnessCS");
-		_compositeInterface = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\InterfaceCompositePQCS.hlsl", "InterfaceCompositePQCS");
+		_compositeInterface = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\InterfaceCompositeCS.hlsl", "InterfaceCompositeCS");
 		if (!_shader || !_encodeInterface || !_compositeInterface || FAILED(a_device.CreateBuffer(&desc, nullptr, _constants.put()))) {
 			Reset();
 			return false;

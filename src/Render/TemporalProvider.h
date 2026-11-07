@@ -173,6 +173,26 @@ namespace cs::render::temporal
 		       a_color.exposure == ExposureMode::kAutomatic;
 	}
 
+	// The R10 present container with HDR output off: gamma 2.2 in R10G10B10A2.
+	[[nodiscard]] inline bool
+	IsGamma22ContainerPostTonemap(const ColorContract& a_color) noexcept
+	{
+		return a_color.resourceFormat == DXGI_FORMAT_R10G10B10A2_UNORM &&
+		       a_color.range == ColorRange::kFull &&
+		       a_color.transfer == TransferFunction::kGamma22 &&
+		       a_color.primaries == ColorPrimaries::kUnspecified &&
+		       a_color.stage == ColorStage::kPostTonemapLut &&
+		       a_color.alpha == AlphaMode::kIgnored &&
+		       a_color.exposure == ExposureMode::kAutomatic;
+	}
+
+	// Either encoding of the R10 present container.
+	[[nodiscard]] inline bool
+	IsContainerPostTonemap(const ColorContract& a_color) noexcept
+	{
+		return IsHdr10PostTonemap(a_color) || IsGamma22ContainerPostTonemap(a_color);
+	}
+
 	inline constexpr ColorContract kFo4PostTonemapSdrContract{
 		.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
 		.viewFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
@@ -194,6 +214,24 @@ namespace cs::render::temporal
 		.alpha = AlphaMode::kIgnored,
 		.exposure = ExposureMode::kAutomatic
 	};
+
+	inline constexpr ColorContract kGamma22ContainerPostTonemapContract{
+		.resourceFormat = DXGI_FORMAT_R10G10B10A2_UNORM,
+		.viewFormat = DXGI_FORMAT_R10G10B10A2_UNORM,
+		.range = ColorRange::kFull,
+		.transfer = TransferFunction::kGamma22,
+		.primaries = ColorPrimaries::kUnspecified,
+		.stage = ColorStage::kPostTonemapLut,
+		.alpha = AlphaMode::kIgnored,
+		.exposure = ExposureMode::kAutomatic
+	};
+
+	// The R10 container's contract for the output encoding.
+	[[nodiscard]] constexpr const ColorContract&
+	ContainerContract(bool a_hdr) noexcept
+	{
+		return a_hdr ? kHdr10PostTonemapContract : kGamma22ContainerPostTonemapContract;
+	}
 
 	// The contract of a present container, by its swap-chain format.
 	[[nodiscard]] inline std::optional<ColorContract>

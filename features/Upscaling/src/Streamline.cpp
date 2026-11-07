@@ -1196,7 +1196,7 @@ namespace cs::features
 		if (!featureFSRG || !slFSRGSetOptions ||
 			!a_request.outputWidth || !a_request.outputHeight ||
 			!(render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
-				render::temporal::IsHdr10PostTonemap(a_request.color))) {
+				render::temporal::IsContainerPostTonemap(a_request.color))) {
 			return false;
 		}
 		if (a_enabled &&
@@ -1215,13 +1215,17 @@ namespace cs::features
 			a_request.frameTimeMilliseconds;
 		options.viewSpaceToMetersFactor = 0.01428222656f;
 		options.onlyPresentGenerated = sl::Boolean::eFalse;
-		if (render::temporal::IsHdr10PostTonemap(a_request.color)) {
-			// FFX recomposes the premultiplied PQ interface over each frame.
-			options.colorSpace = sl::FSRColorSpace::ePQ;
+		if (render::temporal::IsContainerPostTonemap(a_request.color)) {
+			// FFX recomposes the premultiplied interface over each frame.
 			options.uiPremultipliedAlpha = sl::Boolean::eTrue;
 			options.uiDoubleBuffering = sl::Boolean::eTrue;
-			options.minLuminance = 0.0f;
-			options.maxLuminance = a_request.peakLuminanceNits;
+			if (render::temporal::IsHdr10PostTonemap(a_request.color)) {
+				options.colorSpace = sl::FSRColorSpace::ePQ;
+				options.minLuminance = 0.0f;
+				options.maxLuminance = a_request.peakLuminanceNits;
+			} else {
+				options.colorSpace = sl::FSRColorSpace::eGamma22;
+			}
 		} else {
 			options.colorSpace = sl::FSRColorSpace::eGamma22;
 		}

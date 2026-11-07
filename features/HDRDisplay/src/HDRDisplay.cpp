@@ -153,7 +153,8 @@ namespace cs::features
 	void HDRDisplay::OnPreImagespace()
 	{
 		// The host shell blurs the back buffer, so it must hold the whole frame.
-		render::InterfaceLayer::Get().BeginScene(IsHdrActive() && !host::HostClient::IsShellOpen());
+		render::InterfaceLayer::Get().BeginScene(
+			render::TemporalPipeline::Get().IsHdrContainerActive() && !host::HostClient::IsShellOpen());
 	}
 
 	void HDRDisplay::SeparateInterface()
@@ -178,9 +179,9 @@ namespace cs::features
 			return;
 		winrt::com_ptr<ID3D11Resource> resource;
 		target->GetResource(resource.put());
-		// Before the interface, the scene's white is paper white.
+		// Before the interface, the scene's white is paper white; SDR is not scRGB.
 		pipeline.RenderReShadeEffects(a_context, *resource, render::UpdateOutputCanonicalDepth(&a_context, *camera),
-			static_cast<float>(_settings.paperWhite));
+			IsHdrActive() ? static_cast<float>(_settings.paperWhite) : 0.0f);
 	}
 
 	void HDRDisplay::WriteSharedFrameData(render::SharedDataCB& a_shared)

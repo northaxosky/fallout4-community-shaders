@@ -1919,7 +1919,7 @@ namespace cs::render
 			.inputsCaptured = _impl->inputsCaptured.load(std::memory_order_relaxed),
 			.hudlessPending =
 				_impl->hudlessCapturePending.load(std::memory_order_relaxed),
-			.inputColor = IsHdrContainerActive() ? temporal::kHdr10PostTonemapContract : temporal::kFo4PostTonemapSdrContract,
+			.inputColor = IsHdrContainerActive() ? temporal::ContainerContract(features::HDRDisplay::GetSingleton()->IsHdrActive()) : temporal::kFo4PostTonemapSdrContract,
 			.alphaConditioned =
 				_impl->alphaConditioned.load(std::memory_order_relaxed),
 			.conditionedCaptures =

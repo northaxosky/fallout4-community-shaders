@@ -60,7 +60,7 @@ namespace
 
 			{ "HDRDisplay/HDROutputCS.hlsl" },
 			{ "HDRDisplay/UIBrightnessCS.hlsl" },
-			{ "HDRDisplay/InterfaceCompositePQCS.hlsl" },
+			{ "HDRDisplay/InterfaceCompositeCS.hlsl" },
 
 			{ "IBL/DiffuseIBLCS.hlsl" },
 

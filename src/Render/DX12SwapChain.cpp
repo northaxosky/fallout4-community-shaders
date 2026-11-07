@@ -774,7 +774,7 @@ namespace cs::render
 		if (_provider) {
 			auto hudlessDesc = desc;
 			if (_hdrContainer) {
-				// The presenter encodes the HUD-less frame to PQ; the interface keeps fp16 alpha.
+				// The presenter encodes the HUD-less frame to the output encoding; the interface keeps fp16 alpha.
 				hudlessDesc.Format = _innerDesc.Format;
 				hudlessDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_RENDER_TARGET;
 				auto uiDesc = desc;
@@ -1905,7 +1905,7 @@ namespace cs::render
 			}
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const auto* copySource = _proxyBuffer.get();
-			// Frame generation blends in PQ so real and generated frames match.
+			// Frame generation blends in the output encoding so real and generated frames match.
 			const SharedD3D11D3D12Texture* hdrFrameGenerationBackBuffer = nullptr;
 			if (_hdrContainer) {
 				if (requested) {
@@ -2018,7 +2018,7 @@ namespace cs::render
 						.state = D3D12_RESOURCE_STATE_COMMON
 					};
 					request.uiMode = render::temporal::UiCompositionMode::kHudlessAndPremultipliedLayer;
-					request.color = render::temporal::kHdr10PostTonemapContract;
+					request.color = render::temporal::ContainerContract(hdrSettings.enabled);
 				}
 				pipeline.RecordFrameGenerationFrameTimeInput(
 					request.frameTimeMilliseconds);
