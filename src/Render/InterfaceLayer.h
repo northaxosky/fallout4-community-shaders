@@ -11,20 +11,19 @@
 
 namespace cs::render
 {
-	// Splits a frame into a scene and an interface layer. The engine renders the scene into the
-	// presenter's scene texture; the proxy is then cleared and collects the interface alone.
+	// Splits a frame into a scene texture and an interface layer in the proxy.
 	class InterfaceLayer
 	{
 	public:
 		[[nodiscard]] static InterfaceLayer& Get() noexcept;
 
-		// Redirects the engine's draw-time blend binds; false when the engine call site is unproven.
+		// Redirects the engine's draw-time blend binds; false if the site is unproven.
 		[[nodiscard]] bool Install();
 
-		// Start of the scene; a_wanted false only restores a swap that outlived its frame.
+		// Scene start; a_wanted false only restores a swap that outlived its frame.
 		void BeginScene(bool a_wanted);
 		[[nodiscard]] bool IsSceneActive() const noexcept { return _sceneSwap.IsActive(); }
-		// The scene is final: the frame target returns to the proxy, cleared for the interface.
+		// The scene is final: the target returns to the proxy, cleared for the interface.
 		void EndScene();
 
 		// True from EndScene until the presenter consumes the frame.

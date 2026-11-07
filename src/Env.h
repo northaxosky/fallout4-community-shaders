@@ -14,7 +14,7 @@ namespace cs::env
 	// One-shot scan of Data/F4SE/Plugins; same call contract as DetectENB.
 	void DetectPluginConflicts();
 
-	// Why a feature is deactivated by an installed third-party mod; empty when it is not.
+	// Why an installed third-party mod deactivates a feature; empty if none.
 	std::optional<std::string_view> FeatureConflict(std::string_view a_featureKey) noexcept;
 
 	// True when DetectPluginConflicts found anything; CS must then stay inert.

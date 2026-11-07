@@ -88,10 +88,7 @@ float FilmicSlope(float x, float toeNumerator)
 	return (numeratorSlope * denominator - numerator * denominatorSlope) / (denominator * denominator);
 }
 
-// Where FilmicCurve's slope peaks, f''(x) = 0. With P the quadratic numerator of f', f'' is
-// (P'Dn - 2P Dn') / Dn^3, so the point is the root of a cubic with only negative terms but the
-// constant. It lies in (0, 2), so a fixed bisection plus one Newton step settles it; a toe
-// numerator under 0.02 has no root and the slope peaks at 0.
+// f''=0 root in (0,2); bisection + one Newton step. No root under toe 0.02.
 float FilmicInflection(float toeNumerator)
 {
 	const float A = 0.15;
@@ -121,8 +118,7 @@ float FilmicInflection(float toeNumerator)
 	return max(x - g / dg, 0.0);
 }
 
-// FO4: vanilla Hable up to its inflection point, then the tangent there, as upstream's
-// Hejl and Reinhard paths branch before the shoulder.
+// FO4: Hable up to its inflection, then its tangent; upstream branches earlier.
 float3 FilmicContinued(float3 x, float toeNumerator, float whiteScale)
 {
 	float3 vanilla = FilmicCurve(x, toeNumerator) * whiteScale;

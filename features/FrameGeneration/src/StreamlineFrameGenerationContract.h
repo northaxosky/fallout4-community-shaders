@@ -82,7 +82,7 @@ namespace cs::features::streamline_fg
 		options.mvecBufferFormat = DXGI_FORMAT_R16G16_FLOAT;
 		options.depthBufferFormat = DXGI_FORMAT_R32_FLOAT;
 		options.hudLessBufferFormat = a_color.resourceFormat;
-		// Container frames carry a premultiplied fp16 interface layer for DLSS-G to recompose.
+		// Container frames carry a premultiplied fp16 UI layer for DLSS-G to recompose.
 		if (render::temporal::IsContainerPostTonemap(a_color)) {
 			options.uiBufferFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 			options.enableUserInterfaceRecomposition = sl::Boolean::eTrue;

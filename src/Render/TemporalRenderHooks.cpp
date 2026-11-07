@@ -40,7 +40,7 @@ namespace cs::render
 			}
 			hook.site = *site;
 		}
-		// The seam runs after the engine call, ahead of every other pre-interface callback.
+		// The seam runs after the engine call, ahead of other pre-interface callbacks.
 		if (!cs::engine::RegisterPreInterface(
 				[] {
 					GuardedThunkBody("Upscaling pre-UI seam", [] {

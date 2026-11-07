@@ -8,7 +8,7 @@
 
 namespace FO4HDR
 {
-	// HDRData.x gates HDR; w above 0.9 marks the main menu and loading screens, which stay SDR.
+	// HDRData.x gates HDR; w > 0.9 marks main menu and loading screens, kept SDR.
 	bool IsActive()
 	{
 		float4 data = SharedData::HDRData;

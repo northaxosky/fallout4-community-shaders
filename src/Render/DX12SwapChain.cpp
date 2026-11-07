@@ -774,7 +774,7 @@ namespace cs::render
 		if (_provider) {
 			auto hudlessDesc = desc;
 			if (_hdrContainer) {
-				// The presenter encodes the HUD-less frame to the output encoding; the interface keeps fp16 alpha.
+				// The presenter encodes the HUD-less frame itself; the UI keeps fp16 alpha.
 				hudlessDesc.Format = _innerDesc.Format;
 				hudlessDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_RENDER_TARGET;
 				auto uiDesc = desc;
@@ -1913,7 +1913,7 @@ namespace cs::render
 			}
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const auto* copySource = _proxyBuffer.get();
-			// Frame generation blends in the output encoding so real and generated frames match.
+			// Frame generation blends in the output encoding so real and generated match.
 			const SharedD3D11D3D12Texture* hdrFrameGenerationBackBuffer = nullptr;
 			if (_hdrContainer) {
 				if (requested) {
@@ -2287,7 +2287,7 @@ namespace cs::render
 
 	const SharedD3D11D3D12Texture* DX12SwapChain::ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& settings) noexcept
 	{
-		// Without a separate interface there is no clean HUD-less frame; skip this frame only.
+		// No separate interface means no clean HUD-less frame; skip this frame only.
 		if (!settings.interfaceSeparated || !_hdrScene)
 			return nullptr;
 		const auto* hudless = _hudlessBuffers[_frameSlot].get();
@@ -2353,7 +2353,7 @@ namespace cs::render
 	void DX12SwapChain::RenderReShadeEffects(ID3D11DeviceContext& a_context,
 		ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits) noexcept
 	{
-		// Only the proxy buffer, or the scene standing in for it, is what the game later presents.
+		// Only the proxy, or the scene standing in for it, is what the game presents.
 		const SharedD3D11D3D12Texture* color = nullptr;
 		if (&a_color == static_cast<ID3D11Resource*>(_proxyBuffer->texture11.get()))
 			color = _proxyBuffer.get();

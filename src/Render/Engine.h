@@ -415,7 +415,7 @@ namespace cs::engine
 		RE::BSGraphics::RenderTarget _saved{};
 	};
 
-	// The engine skips rebinding a target it thinks is current; fix the OM after a swap.
+	// The engine skips rebinding a target it thinks is current; fix OM after a swap.
 	inline void ReplaceBoundRenderTargetView(
 		ID3D11DeviceContext& a_context,
 		ID3D11RenderTargetView* a_from,

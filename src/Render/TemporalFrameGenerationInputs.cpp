@@ -426,7 +426,7 @@ namespace cs::render
 		_hudlessCapturePending = false;
 		render::TemporalPipeline::Get().SetHudlessCapturePending(false);
 
-		// The HDR container's scene is fp16 gamma; the presenter encodes its own HUD-less.
+		// The HDR scene is fp16 gamma; the presenter encodes its own HUD-less.
 		if (!capture.hdrContainer && !CopyHUDLessColor(capture)) {
 			return;
 		}

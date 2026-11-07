@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
-// Blends the premultiplied interface over the HUD-less frame in the output encoding.
+// Blends the premultiplied interface over the HUD-less frame, output-encoded.
 Texture2D<float4> Hudless : register(t0);
 Texture2D<float4> Interface : register(t1);
 RWTexture2D<float4> Output : register(u0);

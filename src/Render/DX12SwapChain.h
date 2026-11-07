@@ -84,7 +84,7 @@ namespace cs::render
 		[[nodiscard]] bool IsBridgeReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationReady() const noexcept;
 		[[nodiscard]] bool IsHdrContainer() const noexcept;
-		// True when HDR was requested but the chain stayed SDR because compose could not be built.
+		// HDR was requested but the chain stayed SDR: compose could not be built.
 		[[nodiscard]] bool IsHdrDegraded() const noexcept { return _hdrDegraded; }
 		[[nodiscard]] render::temporal::IFrameGenerationProvider*
 		GetPresentationProvider() const noexcept;
@@ -193,7 +193,7 @@ namespace cs::render
 			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
 			// HDR container only: the encoded interface layer frame generation recomposes.
 			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> ui;
-			// HDR container only: the composed signal the present copies in place of the proxy.
+			// HDR container only: the composed signal presented in place of the proxy.
 			std::unique_ptr<SharedD3D11D3D12Texture> hdrOutput;
 			// HDR container only: the scene, while the proxy collects just the interface.
 			std::unique_ptr<SharedD3D11D3D12Texture> hdrScene;
@@ -201,7 +201,7 @@ namespace cs::render
 		HRESULT CreateDisplayResources(UINT a_width, UINT a_height, DisplayResources& a_resources);
 		[[nodiscard]] std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> CreateSlotBuffers(
 			const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name) const;
-		// Writes this slot's HUD-less and interface inputs and returns the PQ back buffer; null skips the frame.
+		// Writes this slot's inputs and returns the PQ back buffer; null skips the frame.
 		[[nodiscard]] const SharedD3D11D3D12Texture* ComposeHdrFrameGenerationInputs(const hdr::OutputSettings& a_settings) noexcept;
 		// False when the container has nothing to present this frame.
 		[[nodiscard]] bool ComposeHdr(const hdr::OutputSettings& a_settings) noexcept;

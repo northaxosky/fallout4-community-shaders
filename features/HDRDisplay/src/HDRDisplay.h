@@ -14,8 +14,7 @@
 
 namespace cs::features
 {
-	// Presents through an HDR10 container; the scene is HDR from the tonemap on. The engine
-	// renders the scene into a separate texture, so the interface lands alone in the proxy.
+	// Presents through an HDR10 container; the interface lands alone in the proxy.
 	class HDRDisplay : public ShaderFeature<hdr_display_shader::kShaderDefines>
 	{
 	public:
@@ -38,13 +37,13 @@ namespace cs::features
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 
-		// Presenter state for this present; the frame is separated once the scene was redirected.
+		// Presenter state for this present; separated once the scene was redirected.
 		[[nodiscard]] render::hdr::OutputSettings ConsumeOutputSettings() noexcept;
 
 		// First run only: HDR starts on when Windows HDR is on for the game's monitor.
 		void SeedFromDisplay(HWND a_window);
 
-		// True while the frame renders HDR content: enabled, with a container to present it.
+		// True while the frame renders HDR: enabled, with a container to present it.
 		[[nodiscard]] bool IsHdrActive() const noexcept;
 
 		[[nodiscard]] float GetPaperWhite() const noexcept { return static_cast<float>(_settings.paperWhite); }
@@ -56,10 +55,9 @@ namespace cs::features
 		std::string_view GetRegistrationFailureMessage() const override { return "HDR Display could not register its imagespace shader define."; }
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(hdr_display::kSchema, _settings); }
 
-		// Start of Render_UI: the interface layer redirects the frame target to the scene texture.
+		// Start of Render_UI: the interface layer redirects the target to the scene.
 		void OnPreImagespace();
-		// The scene is final: effects run on it, then the interface layer takes over the proxy.
-		// Idempotent; pause frames reach it afterwards.
+		// The scene is final; the interface takes the proxy. Idempotent for pauses.
 		void SeparateInterface();
 
 		Settings _settings;

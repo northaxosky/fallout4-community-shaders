@@ -53,7 +53,7 @@ float3 FromWorking(float3 pqColor)
 	return TransferFunctions::LinearToSignedGamma22(Color::BT2020ToBT709(DisplayMapping::PQtoLinear(pqColor, 10000.0)));
 }
 
-// History luma is stored as game gamma so the 8-bit target keeps highlight precision.
+// History luma is stored as game gamma so the 8-bit target keeps highlights.
 float EncodeHistoryLuma(float pqLuma)
 {
 	return TransferFunctions::LinearToSignedGamma22(DisplayMapping::PQtoLinear(pqLuma.xxx, 10000.0).x);
@@ -240,7 +240,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float along = bounds.x - bounds.y;
 	float speedChange = abs(speedFraction - previousSpeedFraction);
 #		ifdef HDR_OUTPUT
-	// Upstream decays by the PQ luma change; the 20 and 100 were tuned for gamma luma.
+	// Upstream decays by PQ luma change; 20 and 100 were tuned for gamma luma.
 	if (UseHDR)
 		speedChange = abs(historyLuma - lC) * 0.05;
 #		endif
@@ -269,7 +269,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 blended = trust * (cC - filtered) + filtered;
 	blended = saturate(feedback * (bracket - blended) + blended);
 #	ifdef HDR_OUTPUT
-	// Upstream skips the detail recovery in HDR; the neighborhood delta blows up there.
+	// Upstream skips detail recovery in HDR; the neighborhood delta blows up there.
 	if (UseHDR) {
 		output.Color = float4(FromWorking(blended), 1.0);
 		return output;

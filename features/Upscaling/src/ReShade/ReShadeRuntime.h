@@ -9,7 +9,7 @@
 
 namespace cs::features
 {
-	// The HDR proxy holds gamma 2.2 with 1.0 at whiteNits; ReShade sees scRGB, 1.0 = 80 nits.
+	// HDR proxy: gamma 2.2, 1.0 at whiteNits; ReShade sees scRGB, 1.0 = 80 nits.
 	struct ScRgbProxy
 	{
 		ID3D11ShaderResourceView* srv = nullptr;

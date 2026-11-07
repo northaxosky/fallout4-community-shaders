@@ -26,7 +26,7 @@ namespace cs::render::hdr
 
 		winrt::com_ptr<ID3D11ComputeShader> CompileCompute(ID3D11Device& a_device, const wchar_t* a_path, const char* a_name)
 		{
-			// Compiled directly: the shader cache and engine device are not up at chain creation.
+			// Compiled directly: the shader cache and device are not up at chain creation.
 			std::string error;
 			const auto blob = util::CompileShaderToBlob(a_path, {}, "cs_5_0", "main", &error);
 			if (!blob) {

@@ -14,7 +14,7 @@ namespace cs::render
 	{
 		auto* L = cs::log::Get("cs.render.interfacelayer");
 
-		// SetDirtyStates' ID3D11DeviceContext::OMSetBlendState, on its blend-dirty branch.
+		// SetDirtyStates' OMSetBlendState call, on its blend-dirty branch.
 		constexpr engine::ContextIndirectCallSiteAnchor kBlendBind{
 			.name = "SetDirtyStates -> ID3D11DeviceContext::OMSetBlendState",
 			.function = RE::ID::BSGraphics::SetDirtyStates,
@@ -32,8 +32,7 @@ namespace cs::render
 
 		constexpr UINT8 kRgbMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
 
-		// The engine's states assume an opaque target; on a layer, alpha must accumulate coverage.
-		// Returns false for a destination-dependent blend the layer cannot represent.
+		// Layer alpha accumulates coverage; false for destination-dependent blends.
 		bool TranslateTarget(D3D11_RENDER_TARGET_BLEND_DESC& a_target, bool& a_changed)
 		{
 			if (!a_target.BlendEnable || a_target.BlendOp != D3D11_BLEND_OP_ADD)
@@ -98,7 +97,7 @@ namespace cs::render
 	void InterfaceLayer::BeginScene(bool a_wanted)
 	{
 		auto* context = engine::GetImmediateContext();
-		// A swap that survived its frame would leave the engine drawing into the scene texture.
+		// A swap that outlived its frame would leave the engine drawing to the scene.
 		if (_sceneSwap.IsActive()) {
 			L->error("The scene redirect outlived its frame; restoring it.");
 			if (context)
@@ -106,7 +105,7 @@ namespace cs::render
 			else
 				_sceneSwap.Restore();
 		}
-		// Translated states may still be bound from the last interface; the scene wants its own.
+		// Stale translated states from the last interface; the scene wants its own.
 		if (_blendTouched) {
 			InvalidateEngineBlendState();
 			_blendTouched = false;
@@ -146,7 +145,7 @@ namespace cs::render
 		// The interface composites over the scene with alpha, so it starts transparent.
 		constexpr float kClear[4]{};
 		context->ClearRenderTargetView(proxyTarget, kClear);
-		// The scene's last blend bind would otherwise carry into the first interface draw.
+		// The scene's last blend bind would carry into the first interface draw.
 		InvalidateEngineBlendState();
 		_blendTouched = true;
 		_proxyTarget.store(proxyTarget, std::memory_order_release);

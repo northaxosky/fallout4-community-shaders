@@ -15,11 +15,11 @@ namespace cs::render::hdr
 		float paperWhite = 203.0f;
 		float peakNits = 1000.0f;
 		float uiBrightness = 1.0f;
-		// This frame's scene is in the presenter's scene texture; the proxy holds only the interface.
+		// The scene is in the presenter's scene texture; the proxy holds the interface.
 		bool interfaceSeparated = false;
 	};
 
-	// The presenter's fp16 scene texture, which the engine renders into while the interface is separate.
+	// The presenter's fp16 scene texture, drawn into while the interface is split.
 	struct SceneTarget
 	{
 		ID3D11Texture2D* texture = nullptr;
@@ -44,13 +44,12 @@ namespace cs::render::hdr
 		void Reset() noexcept;
 		[[nodiscard]] bool IsReady() const noexcept { return _shader && _constants; }
 
-		// With a_interface it is composited over the scene at uiBrightness; without,
-		// a_scene already holds the whole frame.
+		// With a_interface it is composited at uiBrightness; else a_scene is the frame.
 		void Dispatch(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_scene,
 			ID3D11ShaderResourceView* a_interface, ID3D11UnorderedAccessView& a_output,
 			UINT a_width, UINT a_height, const OutputSettings& a_settings);
 
-		// Frame generation blends in the output encoding, so the interface is encoded in place.
+		// Frame generation blends in the output encoding; the UI is encoded in place.
 		void EncodeInterface(ID3D11DeviceContext& a_context, ID3D11UnorderedAccessView& a_interface,
 			UINT a_width, UINT a_height, const OutputSettings& a_settings);
 
