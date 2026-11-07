@@ -139,7 +139,7 @@ namespace cs::features
 			return;
 		}
 		if (!engine::RegisterFeatureShaderBindings(*this)) {
-			FailLoad("HDR Display could not register its imagespace shader define.");
+			FailLoad(std::string(GetRegistrationFailureMessage()));
 			return;
 		}
 		if (!engine::RegisterPreImagespace(*this, [this] { OnPreImagespace(); }) ||

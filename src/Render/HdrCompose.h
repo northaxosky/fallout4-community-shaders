@@ -4,21 +4,13 @@
 #include <dxgi1_6.h>
 #include <winrt/base.h>
 
-#include <cstdint>
 #include <span>
 
 namespace cs::render::hdr
 {
-	// The signal the present chain carries; PQ is the only one so far.
-	enum class Encoding : std::uint8_t
-	{
-		kPQ
-	};
-
 	// Display state the HDR Display feature publishes for the presenter.
 	struct OutputSettings
 	{
-		Encoding encoding = Encoding::kPQ;
 		bool enabled = false;
 		float paperWhite = 203.0f;
 		float peakNits = 1000.0f;
