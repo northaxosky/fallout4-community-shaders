@@ -75,7 +75,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Motion Vector Fixes** | Motion-data corrections for temporal rendering. |
 | **Upscaling** | TAA, FSR 3/4, and DLSS. |
 | **Frame Generation** | FSR 3/4, DLSS, and supported Multi Frame Generation modes. |
-| **HDR Display** | HDR10 output with configurable paper white and peak brightness; requires borderless windowed mode, and is disabled while Isotope or RenoDX is installed. The game is still rendered in SDR. |
+| **HDR Display** | HDR10 output with configurable paper white and peak brightness; needs borderless windowed mode and is inactive while Isotope or RenoDX is installed. |
 | **Performance Overlay** | FPS, frame-time, and latency graphs, plus per-feature GPU timings. |
 | **CS Editor** | Weather picker, weather lock, time controls, and per-weather feature overrides. |
 | **RenderDoc** | In-game frame capture for debugging. |
