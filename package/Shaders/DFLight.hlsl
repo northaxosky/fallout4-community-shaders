@@ -2356,7 +2356,7 @@ float2 goboUV = float2(omniUV.x,
 		bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 #	endif
 
-		FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
+		FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView, albedoSample, matSample);
 		float slice = SplitDistances_row0.y;
 
 		float shadow = ComputeCascadeShadow(posView, slice);
@@ -3028,7 +3028,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float3 ambientSpecular = 0.0;
 #	endif
 
-		FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
+		FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView, albedoSample, matSample);
 #	ifdef FO4_DS2_TIGHT_AMBIENT_IGNORE
 		bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 #	endif
@@ -4154,7 +4154,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 ambientSpecular = 0.0;
 #	endif
 
-			FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
+			FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView, albedoSample, matSample);
 #	ifdef FO4_DS3_HOISTED_VIEW_LOG
 			float NdotV_view = saturate(dot(normalView, viewDirNeg));
 			float ambientFresLog = log2(1.0 - NdotV_view);
@@ -5856,7 +5856,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 ambientSpecular = 0.0;
 #	endif
 
-			FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView);
+			FO4_SOFT_SHADOW_BEGIN(softShadow, posView, normalView, albedoSample, matSample);
 
 #	ifdef FO4_UNSHADOWED_AMBIENT_ROUGHNESS
 			float NdotV_raw = dot(normalView, viewDirNeg);

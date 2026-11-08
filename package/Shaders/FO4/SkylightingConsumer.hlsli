@@ -118,9 +118,22 @@ namespace Skylighting
 	static float3 AmbientScale = 1.0;
 
 #	ifdef SKYLIGHTING_SHADOW_VIS
+	static bool SoftSunOptIn = false;
+
+	// FO4: backLightPower (MRT0.a) and subsurface rolloff (MRT3.z) stand in for upstream's flags.
+	void SetSoftSunOptIn(float4 albedoSample, float4 matSample)
+	{
+		SoftSunOptIn = albedoSample.w > 0.0 || matSample.z > 0.0;
+	}
+
+	bool SoftSunVisibilityApplies()
+	{
+		return FO4SharedData::EnabledSkylighting != 0 && SoftSunOptIn;
+	}
+
 	void SampleShadowVisibility(float3 viewPosition, float3 normalView)
 	{
-		[branch] if (FO4SharedData::EnabledSkylighting == 0) return;
+		[branch] if (!SoftSunVisibilityApplies()) return;
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
 		// Height clamped so visibility stays valid above the volume, unlike the diffuse fade.

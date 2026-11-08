@@ -21,17 +21,18 @@
 // Soft, rim and back lobes take probe visibility (SHADOW_VIS), else the VSM.
 #if defined(SKYLIGHTING_SHADOW_VIS)
 #	define FO4_SOFT_SUN_SHADOW_ACTIVE
-// FO4: Skylighting toggles live, so disabled lobes take the unloaded source.
-#	define FO4_SKYLIGHTING_DISABLED [branch] if (FO4SharedData::EnabledSkylighting == 0)
-#	define FO4_SOFT_SHADOW_BEGIN(softShadow, viewPosition, normalView)    \
-		FO4_SKYLIGHTING_SOFT_SHADOW(softShadow, viewPosition, normalView); \
+// FO4: Skylighting toggles live; disabled or non-opted lobes take the unloaded source.
+#	define FO4_SKYLIGHTING_DISABLED [branch] if (!Skylighting::SoftSunVisibilityApplies())
+#	define FO4_SOFT_SHADOW_BEGIN(softShadow, viewPosition, normalView, albedoSample, matSample) \
+		Skylighting::SetSoftSunOptIn(albedoSample, matSample);                                   \
+		FO4_SKYLIGHTING_SOFT_SHADOW(softShadow, viewPosition, normalView);                       \
 		FO4_SKYLIGHTING_DISABLED { FO4_UNLOADED_SOFT_SHADOW_BEGIN(softShadow, viewPosition); }
 #	define FO4_SOFT_SHADOW_NATIVE(softShadow, shadow) \
 		FO4_SKYLIGHTING_DISABLED { FO4_UNLOADED_SOFT_SHADOW_NATIVE(softShadow, shadow); }
 #elif defined(FO4_UNLOADED_SOFT_SHADOW)
 #	define FO4_SOFT_SUN_SHADOW_ACTIVE
-#	define FO4_SOFT_SHADOW_BEGIN(softShadow, viewPosition, normalView) \
-		float softShadow;                                               \
+#	define FO4_SOFT_SHADOW_BEGIN(softShadow, viewPosition, normalView, albedoSample, matSample) \
+		float softShadow;                                                                        \
 		FO4_UNLOADED_SOFT_SHADOW_BEGIN(softShadow, viewPosition)
 #	define FO4_SOFT_SHADOW_NATIVE(softShadow, shadow) FO4_UNLOADED_SOFT_SHADOW_NATIVE(softShadow, shadow)
 #endif
@@ -66,7 +67,7 @@ namespace FO4SoftSunShadow
 #	define FO4_SOFT_SUN_LOBES(output, shadow, softShadow, sunColor, rim, backfaceWrap, albedoPremult, forwardBlend, albedo) \
 		output.diffuse.xyz += FO4SoftSunShadow::LobeDelta(sunColor, rim, backfaceWrap, albedoPremult, forwardBlend, albedo, FO4_SOFT_SUN_CAUSTICS_TINT, shadow, softShadow) / 3.0
 #else
-#	define FO4_SOFT_SHADOW_BEGIN(softShadow, viewPosition, normalView)
+#	define FO4_SOFT_SHADOW_BEGIN(softShadow, viewPosition, normalView, albedoSample, matSample)
 #	define FO4_SHADOW_LIGHT_MUL(shadow, softShadow, factor) shadow *= (factor)
 #	define FO4_SOFT_SUN_LOBES(output, shadow, softShadow, sunColor, rim, backfaceWrap, albedoPremult, forwardBlend, albedo)
 #endif
