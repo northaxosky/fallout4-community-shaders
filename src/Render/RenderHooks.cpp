@@ -93,6 +93,13 @@ namespace cs::engine
 		};
 		auto g_preShadowLightRender = makeShadowPoints("PreShadowLightRender");
 		auto g_postShadowLightRender = makeShadowPoints("PostShadowLightRender");
+		struct LocalShadowLightEntry
+		{
+			HookPriority priority;
+			LocalShadowLightCallback cb;
+			Feature* owner;
+		};
+		std::vector<LocalShadowLightEntry> g_postLocalShadowLightRender;
 		HookPoint g_postResetState{ "PostResetState", {}, EnsureResetStateInstalled };
 		struct PrepassHold
 		{
@@ -446,6 +453,15 @@ namespace cs::engine
 			static inline REL::Relocation<void(RE::BSShadowDirectionalLight*, std::uint32_t)> func;
 		};
 
+		void DispatchLocalShadowLight(RE::BSShadowLight& a_light, ShadowLightKind a_kind) noexcept
+		{
+			if (g_postLocalShadowLightRender.empty())
+				return;
+			const ScopedPassBoundary boundary;
+			for (const auto& entry : g_postLocalShadowLightRender)
+				render::RunRenderCallback(entry.owner, "Local shadow light post (light)", [&] { entry.cb(a_light, a_kind); });
+		}
+
 		// Local lights have no stock-caller boundary to preserve.
 		template <ShadowLightKind Kind, class Light>
 		struct LocalShadowRender_Hook
@@ -454,6 +470,7 @@ namespace cs::engine
 			{
 				Dispatch(g_preShadowLightRender[static_cast<std::size_t>(Kind)], "Local shadow light pre");
 				func(a_this, a_mask);
+				DispatchLocalShadowLight(*a_this, Kind);
 				Dispatch(g_postShadowLightRender[static_cast<std::size_t>(Kind)], "Local shadow light post");
 			}
 			static inline REL::Relocation<void(Light*, std::uint32_t)> func;
@@ -1083,6 +1100,29 @@ namespace cs::engine
 	CS_DEFINE_RENDER_HOOK(RegisterPostPrecipitationOcclusion, g_postPrecipitationOcclusion)
 
 #undef CS_DEFINE_RENDER_HOOK
+
+	static bool RegisterPostLocalShadowLight(
+		LocalShadowLightCallback a_callback,
+		HookPriority a_priority,
+		Feature* a_owner)
+	{
+		if (!RegistrationAllowed("PostLocalShadowLightRender") ||
+			!EnsureShadowLightRenderInstalled(ShadowLightKind::kFrustum) ||
+			!EnsureShadowLightRenderInstalled(ShadowLightKind::kParabolic))
+			return false;
+		InsertByPriority(g_postLocalShadowLightRender, LocalShadowLightEntry{ a_priority, std::move(a_callback), a_owner });
+		return true;
+	}
+
+	bool RegisterPostLocalShadowLightRender(LocalShadowLightCallback callback, HookPriority priority)
+	{
+		return RegisterPostLocalShadowLight(std::move(callback), priority, nullptr);
+	}
+
+	bool RegisterPostLocalShadowLightRender(Feature& a_owner, LocalShadowLightCallback callback, HookPriority priority)
+	{
+		return RegisterPostLocalShadowLight(std::move(callback), priority, &a_owner);
+	}
 
 	static bool RegisterPrepassHold(
 		PrepassBucketPredicate a_predicate,

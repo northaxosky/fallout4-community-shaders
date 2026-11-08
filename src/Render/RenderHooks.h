@@ -17,6 +17,7 @@ namespace RE
 	class BSBatchRenderer;
 	class BSGeometry;
 	class BSRenderPass;
+	class BSShadowLight;
 }
 
 namespace cs::engine
@@ -82,6 +83,16 @@ namespace cs::engine
 	// Bracket every Render of that light kind, whatever its mask.
 	CS_DECLARE_RENDER_HOOK(RegisterPreShadowLightRender, ShadowLightKind a_kind, );
 	CS_DECLARE_RENDER_HOOK(RegisterPostShadowLightRender, ShadowLightKind a_kind, );
+
+	using LocalShadowLightCallback = std::function<void(RE::BSShadowLight&, ShadowLightKind)>;
+	// After each spot or parabolic Render returns, with that light's map still bound.
+	bool RegisterPostLocalShadowLightRender(
+		LocalShadowLightCallback callback,
+		HookPriority priority = HookPriority::Default);
+	bool RegisterPostLocalShadowLightRender(
+		Feature& a_owner,
+		LocalShadowLightCallback callback,
+		HookPriority priority = HookPriority::Default);
 
 	// Start of Render_UI, before the ImageSpace chain.
 	CS_DECLARE_RENDER_HOOK(RegisterPreImagespace);
