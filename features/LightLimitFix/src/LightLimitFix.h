@@ -4,6 +4,8 @@
 #include "LightLimitFixSettings.h"
 #include "ShaderDefines.h"
 
+#include <atomic>
+
 namespace cs::features
 {
 	class LightLimitFix : public ShaderFeature<light_limit_fix::kShaderDefines>
@@ -36,6 +38,7 @@ namespace cs::features
 		void RestoreDefaultSettings() override;
 		// Applies at the next launch: the boot value gates light creation.
 		bool DeriveUnauthoredLights() const noexcept { return _bootSettings.deriveUnauthoredLights; }
+		light_limit_fix::LocalShadowConfig GetLocalShadowConfig() const noexcept;
 		void DrawFailLoadMessage() override { DrawSettings(); }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -43,8 +46,12 @@ namespace cs::features
 	private:
 		bool PrepareInjectionVariants(std::string& a_error) override;
 		LightLimitFix() = default;
+		void PublishSettings() noexcept;
 
 		light_limit_fix::Settings _settings;
 		light_limit_fix::Settings _bootSettings;
+		std::atomic_bool _enableLocalShadows{ false };
+		std::atomic<std::uint32_t> _localShadowSlots{ 16 }, _localShadowResolution{ 0 }, _localShadowSamples{ 8 };
+		std::atomic<float> _localShadowFilterScale{ 1.0f };
 	};
 }

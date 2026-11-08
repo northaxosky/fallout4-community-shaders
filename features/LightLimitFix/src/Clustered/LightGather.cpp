@@ -27,7 +27,7 @@ namespace cs::features::light_limit_fix
 	}
 
 	void LightGather::Gather(RE::ShadowSceneNode& a_scene, const DirectX::XMFLOAT4& a_posAdjust,
-		SidecarSnapshot a_snapshot)
+		SidecarSnapshot a_snapshot, LocalShadowResolver a_localShadow)
 	{
 		Clear();
 		const auto add = [&](RE::BSLight* a_light, bool a_shadowList) {
@@ -51,8 +51,11 @@ namespace cs::features::light_limit_fix
 				return;
 			}
 
-			if (a_shadowList)
+			if (a_shadowList) {
 				light.lightFlags |= kShadowCaster;
+				if (a_localShadow && a_light->IsShadowLight())
+					a_localShadow(static_cast<RE::BSShadowLight&>(*a_light), light);
+			}
 			if (_strict.Mark(*a_light, light))
 				++_stats.strictLights;
 

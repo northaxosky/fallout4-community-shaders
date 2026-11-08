@@ -66,6 +66,7 @@ namespace
 
 			{ "LightLimitFix/ClusterBuildingCS.hlsl" },
 			{ "LightLimitFix/ClusterCullingCS.hlsl" },
+			{ "FO4/LightLimitFix/LocalShadowCopyCS.hlsl" },
 
 			{ "FrameGeneration/CopyDepthForFrameGenerationCS.hlsl" },
 

@@ -71,6 +71,28 @@ namespace cs::features::light_limit_fix
 	static_assert(offsetof(StrictLightDataCB, worldEyePosition) == 16);
 	static_assert(offsetof(StrictLightDataCB, strictLights) == 32);
 
+	// Mirrors LightLimitFix::LocalShadowData in LightLimitFix.hlsli.
+	struct alignas(16) LocalShadowData
+	{
+		DirectX::XMFLOAT4X4 shadowProj;
+		// x: type, y: radius (<= 0 means no data), z: depth bias, w: fade-in.
+		DirectX::XMFLOAT4 params;
+		// x: spot falloff exponent, y: skinned receiver offset, z: FO4 shadow fade distance squared.
+		DirectX::XMFLOAT4 params2;
+		DirectX::XMFLOAT4 origin;
+	};
+	static_assert(sizeof(LocalShadowData) == 112);
+	static_assert(offsetof(LocalShadowData, params) == 64);
+	static_assert(offsetof(LocalShadowData, params2) == 80);
+	static_assert(offsetof(LocalShadowData, origin) == 96);
+
+	enum class LocalShadowType : std::uint32_t
+	{
+		kSpot,
+		kHemisphere,
+		kOmni
+	};
+
 	// FO4: spot cone beside each gathered light; exponent 0 means no cone.
 	struct alignas(16) ConeData
 	{

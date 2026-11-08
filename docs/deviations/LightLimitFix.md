@@ -8,13 +8,16 @@
 | Divergence | Effect lights scaled by 0.5 and `PointLight` pi under Linear Lighting | Effect lights keep FO4's native effect point lane (no 0.5, no pi), with the t34 spot cone term | Both factors are Skyrim calibrations |
 | Forced | Water clustered lights are 3x Skyrim's native water specular lane | 3x FO4's native water specular lane, fragment-to-light, replacing it in world draws | Native water lanes differ |
 | Forced | Spot lights not represented | Spot cones travel in an FO4 sidecar buffer at t34 beside the upstream light record | Skyrim has no spot lights |
-| Pending | Shadow-casting lights sample a persistent local shadow copy (`LocalShadowCopyCS`) | Forward passes skip shadow-casting lights; `localShadowIndex` stays 0 | Not ported; FO4 forward has no shadow-light path |
+| Forced | Persistent local shadow cache copied from the engine's shadow atlas | Each light's map is resampled into its cache slice right after the engine renders it; a light is shadowed once its map was cached in an earlier frame | FO4 reuses one shadow depth array for every light inside a frame, and its maps are corner viewports of that array |
+| Forced | Local shadow matrix is the engine light transform | Spot clip matrix is rescaled to span its cache slice; hemisphere and omni matrices are used as published | The engine bakes the map's viewport scale and offset into the spot matrix |
+| Divergence | Local shadow fades only by its fade-in | Also fades to zero toward the local shadow distance, like FO4's deferred shadow term | Native shadow-casting lights vanish at that distance |
+| Ext | Effect lights skip shadow casters | Effects sample local shadows like upstream particle and lighting lights; a shadowed spot drops the native cone, as the shadow carries the falloff | Upstream gives these casters no forward shadow path |
 | Forced | Room index from the owning node's ancestors | Room is the owning fade node's direct parent | Engine association rule |
 | Pending | First-person effects lit from their own depth | Lit at background depth | Needs a view-space reconstruction |
 | N/A | Particle lights | | FO4 has no particle lights |
 | Pending | Effects11 point-light color override | Not applied | Effects11 not ported |
 | N/A | ACEScg and color-mode cache key | | FO4 has no color management |
-| N/A | Local shadow cache and scheduler | | FO4 has no shadow-caster cap |
+| N/A | Local shadow scheduler | | FO4 has no shadow-caster cap |
 | N/A | Surface clustered shading | | Opaque lighting is native tiled |
 | N/A | Light Limit and Strict Lights Count visualizations | | They visualize surface clustered shading, which FO4 does not use; opaque keeps native tiled lighting |
 | N/A | Shadow Mask visualization | | No FO4 shadow mask |

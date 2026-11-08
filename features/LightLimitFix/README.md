@@ -53,6 +53,13 @@ Missing or wrong-type forms are logged and ignored. Changes require restart.
 | `cutoff` | `1.0` | Clamped to 0.01-1; exactly 1 selects 0.05 for nonshadow lights or 0.022 for shadow lights |
 | `size` | sqrt(2) | Source size in meters; values >= 50 select sqrt(2), then clamp to 0.01-50 |
 
+`[features.LightLimitFix.settings] enable_local_shadows` (default `false`, applies live) lets
+shadow-casting lights light effects and water with their own shadow. Each light's map is copied into
+a cache slice after the engine renders it; a light is shadowed one frame after its first copy.
+`local_shadow_slots` (4-64, default 16) caps cached lights, `local_shadow_resolution` is `"engine"`,
+`"512"`, `"1024"` or `"2048"`, `local_shadow_samples` is `"1"`, `"4"` or `"8"`, and
+`local_shadow_filter_scale` is 0.25-2. Shadow casters beyond the slot cap stay skipped.
+
 Intensity is the native animated dimmer times 4, times the derived scale.
 Spot cones, cookies, shadow tests, hemisphere/box masks and native gameplay
 exclusions remain independent.

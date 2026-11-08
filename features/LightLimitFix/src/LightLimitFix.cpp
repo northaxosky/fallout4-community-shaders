@@ -4,6 +4,7 @@
 #include "Clustered/LightGather.h"
 #include "Clustered/StrictLights.h"
 #include "Deferred/DeferredLights.h"
+#include "LocalShadow/LocalShadows.h"
 #include "RE/B/BSDFTiledLighting.h"
 #include "Sidecar/InverseSquareMath.h"
 #include "Sidecar/LightSidecar.h"
@@ -27,6 +28,7 @@
 #include "Render/RuntimeCallback.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/SharedDataLayout.h"
+#include "Settings/LiveSettings.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
@@ -41,6 +43,7 @@ namespace cs::features
 		constexpr std::uint32_t kTiledSlot = 8;
 		constexpr std::uint32_t kStrictSlot = 3;
 		constexpr std::uint32_t kForwardSlot = 34;
+		constexpr std::uint32_t kLocalShadowSlot = 102;
 		constexpr auto kDirectory = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Lights";
 		// FO4: only the clustered view has a source.
 		constexpr std::array<FeatureDebugView, 1> kDebugViews{ { { "clustered_lights", "Clustered Lights Count", FeatureDebugViewKind::kFullscreen } } };
@@ -55,6 +58,7 @@ namespace cs::features
 			DeferredLights deferred;
 			LightGather gather;
 			ClusterGrid grid;
+			LocalShadows localShadows;
 			buffer::CachedConstantBuffer<StrictLightDataCB> strict;
 			std::atomic<bool> gridBuilt{ false };
 			std::atomic<std::uint32_t> debugView{ 0 };
@@ -78,6 +82,10 @@ namespace cs::features
 		{
 			return LightLimitFix::GetSingleton()->IsInjectionOperational() && g_state.dataLoaded.load() &&
 			       LightLimitFix::GetSingleton()->IsActive();
+		}
+		void ResolveLocalShadow(RE::BSShadowLight& a_light, LightData& a_data)
+		{
+			g_state.localShadows.Resolve(a_light, a_data);
 		}
 		bool IsInverseSquare(const LightData& a_data)
 		{
@@ -203,6 +211,7 @@ namespace cs::features
 			static void thunk(void* a_scene, RE::BSLight** a_light)
 			{
 				if (*a_light) {
+					g_state.localShadows.Release(**a_light);
 					if (const auto* light = (*a_light)->GetSourceLight()) {
 						std::scoped_lock lock(g_state.mutex);
 						if (g_state.sidecar.Remove(*light))
@@ -402,7 +411,25 @@ namespace cs::features
 			return false;
 		_settings = candidate;
 		_bootSettings = candidate;
+		_liveSettings = settings::BindLiveSettings(light_limit_fix::kSchema, _settings, [this] { PublishSettings(); });
+		PublishSettings();
 		return true;
+	}
+	void LightLimitFix::PublishSettings() noexcept
+	{
+		_enableLocalShadows.store(_settings.enableLocalShadows, std::memory_order_release);
+		_localShadowSlots.store(_settings.localShadowSlots, std::memory_order_release);
+		_localShadowResolution.store(_settings.localShadowResolution, std::memory_order_release);
+		_localShadowSamples.store(_settings.localShadowSamples, std::memory_order_release);
+		_localShadowFilterScale.store(_settings.localShadowFilterScale, std::memory_order_release);
+	}
+	light_limit_fix::LocalShadowConfig LightLimitFix::GetLocalShadowConfig() const noexcept
+	{
+		return { .enabled = _enableLocalShadows.load(std::memory_order_acquire),
+			.slots = _localShadowSlots.load(std::memory_order_acquire),
+			.resolution = _localShadowResolution.load(std::memory_order_acquire),
+			.samples = _localShadowSamples.load(std::memory_order_acquire),
+			.filterScale = _localShadowFilterScale.load(std::memory_order_acquire) };
 	}
 	bool LightLimitFix::SaveSettings()
 	{
@@ -415,6 +442,7 @@ namespace cs::features
 	void LightLimitFix::RestoreDefaultSettings()
 	{
 		_settings = {};
+		PublishSettings();
 		SaveSettings();
 	}
 	void LightLimitFix::Load()
@@ -442,6 +470,10 @@ namespace cs::features
 							ready ? g_state.grid.IndexListView() : nullptr, ready ? g_state.grid.GridView() : nullptr
 						};
 						engine::BindInjectionShaderResources(context, kForwardSlot, std::size(views), views);
+						ID3D11ShaderResourceView* shadows[]{
+							ready ? g_state.localShadows.DataView() : nullptr, ready ? g_state.localShadows.CacheView() : nullptr
+						};
+						engine::BindInjectionShaderResources(context, kLocalShadowSlot, std::size(shadows), shadows);
 						auto* strict = ready ? g_state.strict.CB() : nullptr;
 						engine::BindInjectionConstantBuffers(context, kStrictSlot, 1, &strict);
 					};
@@ -466,6 +498,17 @@ namespace cs::features
 				}
 			})) {
 			FailLoad("Unable to register the LLF consumers");
+			return;
+		}
+		if (!engine::RegisterPostLocalShadowLightRender(*this, [](RE::BSShadowLight& a_light, engine::ShadowLightKind a_kind) {
+				if (Enabled())
+					g_state.localShadows.OnRendered(a_light, a_kind);
+			}) ||
+			!engine::RegisterPostDeferredLightsImpl(*this, [] {
+				if (Enabled())
+					g_state.localShadows.Upload();
+			})) {
+			FailLoad("Unable to register the LLF local shadow copy");
 			return;
 		}
 		_registrationsReady.store(true, std::memory_order_release);
@@ -512,6 +555,7 @@ namespace cs::features
 		_injectionsOperational.store(false, std::memory_order_release);
 		std::scoped_lock lock(g_state.mutex);
 		g_state.gridBuilt = false;
+		g_state.localShadows.Clear();
 		g_state.sidecar.RestoreNativeRadii();
 		g_state.deferred.Clear();
 	}
@@ -538,25 +582,35 @@ namespace cs::features
 			const auto size = ClusterGrid::ActiveDimensions();
 			std::ranges::copy(size, std::begin(a_feature.lightLimitFixSettings.ClusterSize));
 		}
+		if (g_state.localShadows.Ready()) {
+			a_feature.lightLimitFixSettings.EnableLocalShadows = 1u;
+			a_feature.lightLimitFixSettings.LocalShadowSamples = g_state.localShadows.Samples();
+			a_feature.lightLimitFixSettings.LocalShadowFilterRadius = g_state.localShadows.FilterRadius();
+			a_feature.lightLimitFixSettings.LocalShadowTexelSize = g_state.localShadows.TexelSize();
+		}
 	}
 	void LightLimitFix::OnD3D11Ready(IDXGIAdapter*, ID3D11Device*)
 	{
 		g_state.deferred.Create();
 		g_state.grid.Create();
 		g_state.strict.Create("LLF StrictLightData");
+		g_state.localShadows.Create();
 		g_state.resources = true;
 	}
 	void LightLimitFix::Prepass()
 	{
 		g_state.gridBuilt = false;
-		if (!Enabled() || !g_state.resources.load())
+		if (!Enabled() || !g_state.resources.load()) {
+			g_state.localShadows.Clear();
 			return;
+		}
 		const auto* graphics = engine::GetGraphicsState();
 		auto* scene = engine::GetWorldShadowSceneNode();
 		const auto camera = graphics ? engine::GetCapturedWorldCameraRecord(graphics->frameCount) : std::nullopt;
 		if (!scene || !camera)
 			return;
-		g_state.gather.Gather(*scene, camera->PosAdjust, &Snapshot);
+		g_state.localShadows.Begin(GetLocalShadowConfig(), camera->PosAdjust);
+		g_state.gather.Gather(*scene, camera->PosAdjust, &Snapshot, &ResolveLocalShadow);
 		if (!g_state.grid.Build(g_state.gather, *camera)) {
 			++g_state.clusterSkips;
 			return;
@@ -596,6 +650,27 @@ namespace cs::features
 				kDirectory);
 			field(&Settings::deriveUnauthoredLights, { .help = help });
 		}
+		bool changed = false;
+		if (const ui::Section section{ "llf-local-shadows", "Local Shadows" }; section) {
+			changed |= field(&Settings::enableLocalShadows, { .label = "Enable Local Shadows" });
+			changed |= field(&Settings::localShadowSlots, { .label = "Shadow Cache Slots" });
+			static constexpr std::array kResolutions{
+				dmui::ChoiceOption<std::uint32_t>{ 0u, "engine", "Engine", true },
+				dmui::ChoiceOption<std::uint32_t>{ 512u, "512", "512", true },
+				dmui::ChoiceOption<std::uint32_t>{ 1024u, "1024", "1024", true },
+				dmui::ChoiceOption<std::uint32_t>{ 2048u, "2048", "2048", true }
+			};
+			changed |= field.Choice(&Settings::localShadowResolution, kResolutions, { .label = "Shadow Cache Resolution" });
+			static constexpr std::array kSamples{
+				dmui::ChoiceOption<std::uint32_t>{ 1u, "1", "1", true },
+				dmui::ChoiceOption<std::uint32_t>{ 4u, "4", "4", true },
+				dmui::ChoiceOption<std::uint32_t>{ 8u, "8", "8", true }
+			};
+			changed |= field.Choice(&Settings::localShadowSamples, kSamples, { .label = "Shadow Filter Samples" });
+			changed |= field(&Settings::localShadowFilterScale, { .label = "Shadow Filter Scale" });
+		}
+		if (changed)
+			PublishSettings();
 	}
 	void LightLimitFix::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
@@ -619,6 +694,12 @@ namespace cs::features
 			.Field("cluster_cone_lights", g_state.clusterConeLights.load())
 			.Field("cluster_strict_lights", g_state.clusterStrictLights.load())
 			.Field("cluster_dropped_lights", g_state.clusterDropped.load())
+			.Field("local_shadow_slots", g_state.localShadows.stats.slots.load())
+			.Field("local_shadow_cached", g_state.localShadows.stats.cached.load())
+			.Field("local_shadow_resolution", g_state.localShadows.stats.resolution.load())
+			.Field("local_shadow_copies", g_state.localShadows.stats.copies.load())
+			.Field("local_shadow_copy_total", g_state.localShadows.stats.copyTotal.load())
+			.Field("local_shadow_rejected", g_state.localShadows.stats.rejected.load())
 			.Field("cluster_dim_x", g_state.clusterX.load())
 			.Field("cluster_dim_y", g_state.clusterY.load())
 			.Field("cluster_dim_z", g_state.clusterZ.load())
