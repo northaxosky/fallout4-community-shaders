@@ -256,18 +256,6 @@ namespace cs::render::frame_annotations
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// The engine calls this Render_UI; it is the whole effect chain.
-		struct Imagespace_Hook
-		{
-			static void thunk()
-			{
-				const Scope scope(Gate::kAlways, "Imagespace");
-				func();
-			}
-
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
 		// Stock callers pass the cameras plus four floats; the floats are opaque.
 		struct DoZPrePass_Hook
 		{
@@ -328,6 +316,8 @@ namespace cs::render::frame_annotations
 			BracketPass(&RegisterPreDeferredLightsImpl, &RegisterPostDeferredLightsImpl, "Deferred Lights");
 			BracketPass(&RegisterPrePrecipitationOcclusion, &RegisterPostPrecipitationOcclusion, "Precipitation Occlusion");
 			BracketPass(&RegisterPreWaterUpdate, &RegisterPostWaterUpdate, "Water Effects");
+			// Render_UI is the whole effect chain.
+			BracketPass(&RegisterPreImagespace, &RegisterPostImagespace, "Imagespace");
 			// Replays run in RenderBatches, outside RenderPassImpl ranges.
 			BracketPass(&RegisterPreCommandBufferReplay, &RegisterPostCommandBufferReplay, [] { return std::format("BSBatchRenderer::CommandBuffer [{}:{:X}]", ShaderLabel(t_bound.shader), t_bound.pixelShaderId); }, Gate::kLive);
 			BracketPass(&PreShadow<ShadowLightKind::kDirectional>, &PostShadow<ShadowLightKind::kDirectional>, "Directional Light Shadowmaps");
@@ -358,7 +348,6 @@ namespace cs::render::frame_annotations
 			Detour<ClickCubeMap_Hook>(RE::ID::BSCubeMapCamera::ClickCubeMap, "BSCubeMapCamera::ClickCubeMap");
 			Detour<DoZPrePass_Hook>(RE::ID::BSGraphics::Renderer::DoZPrePass, "BSGraphics::Renderer::DoZPrePass");
 			Detour<Forward_Hook>(RE::ID::DrawWorld::Forward, "DrawWorld::Forward");
-			Detour<Imagespace_Hook>(RE::ID::DrawWorld::Imagespace, "DrawWorld::Imagespace");
 
 			Vfunc<0x29, FinishAccumulating_Hook<FinishPhase::kAll>>(RE::VTABLE::BSShaderAccumulator);
 			Vfunc<0x2E, FinishAccumulating_Hook<FinishPhase::kPreResolveDepth>>(RE::VTABLE::BSShaderAccumulator);

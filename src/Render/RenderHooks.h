@@ -35,6 +35,9 @@ namespace cs::engine
 		InnermostPost = -1000,
 		InnermostPre = 1000,
 		OutermostPost = 1000,
+		// Encloses even the outermost brackets.
+		EnclosingPre = -2000,
+		EnclosingPost = 2000,
 	};
 
 	// True on the startup thread before the first render hook fires.

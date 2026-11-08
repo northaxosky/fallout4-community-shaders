@@ -162,6 +162,9 @@ namespace cs::render
 		void ResolveSceneBeforeImagespace();
 		// Pre-UI seam: reShade effects and the HUD-less capture.
 		void FinishPreUiSeam();
+		// Render_UI entry and exit, via the imagespace hook points.
+		void BeginRenderUI();
+		void EndRenderUI();
 		bool PerformUpscaling();
 		bool PreflightExternalResolve(UpscaleMethod a_method);
 		bool ApplySpatialFallback(
@@ -344,12 +347,6 @@ namespace cs::render
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		struct DrawWorldRenderUI
-		{
-			static void thunk(void* a_this);
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
 		struct DeferredComposite_RenderPass
 		{
 			static void thunk(void* a_pass, std::uint32_t a_2, bool a_3);
@@ -470,6 +467,7 @@ namespace cs::render
 		bool _upscaledThisFrame = false;
 		std::optional<std::uint32_t> _lastDispatchedFrame;
 		bool _imagespaceScope = false;
+		bool _renderUiResolveRequired = false;
 		temporal::PreUiHandoffPlan _preUiHandoff;
 		bool _sceneResolved = false;
 		cs::engine::ImageSpaceTriangleSwap _chainTriangle;

@@ -52,6 +52,17 @@ namespace cs::render
 			return;
 		}
 
+		// The imagespace points wrap every Render_UI call, normal and pause-only.
+		if (!cs::engine::RegisterPostImagespace(
+				[] { GetSingleton()->EndRenderUI(); },
+				cs::engine::HookPriority::EnclosingPost) ||
+			!cs::engine::RegisterPreImagespace(
+				[] { GetSingleton()->BeginRenderUI(); },
+				cs::engine::HookPriority::EnclosingPre)) {
+			RejectInitialization("The Render_UI hooks could not be registered.");
+			return;
+		}
+
 		for (const auto& hook : callHooks) {
 			hook.install(hook.site);
 		}
@@ -64,8 +75,6 @@ namespace cs::render
 		stl::detour_thunk<Renderer_ResetWindow>(RE::ID::BSGraphics::Renderer::ResetWindow);
 		// Resource setup follows creation of the engine render targets.
 		stl::detour_thunk<BSShaderRenderTargets_Create>(RE::ID::BSShaderRenderTargets::Create);
-		// Own both the normal and pause-only Render_UI paths.
-		stl::detour_thunk<DrawWorldRenderUI>(RE::ID::DrawWorld::Imagespace);
 		// Pip-Boy and companion map render inside Render_UI before the resolve.
 		stl::detour_thunk<Interface3D_RenderPrepassesAndMenus>(RE::ID::Interface3D::RenderPrepassesAndMenus);
 		stl::detour_thunk<CompanionLocalMap_SetRenderFunc>(RE::ID::DrawWorld::SetCompanionLocalMapRenderFunc);
@@ -202,9 +211,8 @@ namespace cs::render
 		GetSingleton()->_vatsMaskSwap.Restore();
 	}
 
-	void TemporalRenderer::DrawWorldRenderUI::thunk(void* a_this)
+	void TemporalRenderer::BeginRenderUI()
 	{
-		auto* upscaling = GetSingleton();
 		GuardedThunkBody("Upscaling scene history reset", [] {
 			if (IsHistoryResetFrame()) {
 				TemporalPipeline::Get().RequestSuperResolutionReset();
@@ -212,18 +220,16 @@ namespace cs::render
 			}
 		});
 		const bool fullEffectsPath = RE::DrawWorld::GetEndOfFrameImagespaceEffectsEnabled();
-		upscaling->_renderUiFullEffectsPath.store(
-			fullEffectsPath, std::memory_order_release);
-		upscaling->_resolveSeamSeen.store(false, std::memory_order_release);
-		upscaling->_imagespaceScope = true;
-		const REX::TScopeExit clearScope{ [upscaling]() noexcept {
-			upscaling->_imagespaceScope = false;
-			upscaling->_chainTriangle.Restore();
-			upscaling->_vatsMaskSwap.Restore();
-		} };
-		const bool resolveRequired = upscaling->IsDrivingVendorUpscaler();
+		_renderUiFullEffectsPath.store(fullEffectsPath, std::memory_order_release);
+		_resolveSeamSeen.store(false, std::memory_order_release);
+		_imagespaceScope = true;
+		_renderUiResolveRequired = IsDrivingVendorUpscaler();
+	}
 
-		func(a_this);
+	void TemporalRenderer::EndRenderUI()
+	{
+		const bool resolveRequired = _renderUiResolveRequired;
+		const bool fullEffectsPath = _renderUiFullEffectsPath.load(std::memory_order_acquire);
 
 		GuardedThunkBody("Upscaling Render_UI completion", [&] {
 			if (!cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame())) {
@@ -231,11 +237,11 @@ namespace cs::render
 				return;
 			}
 			const bool resolveSeen =
-				upscaling->_resolveSeamSeen.load(std::memory_order_acquire);
+				_resolveSeamSeen.load(std::memory_order_acquire);
 			if (resolveRequired && fullEffectsPath && !resolveSeen) {
-				upscaling->_missedResolveFrames.fetch_add(
+				_missedResolveFrames.fetch_add(
 					1, std::memory_order_relaxed);
-				upscaling->ScheduleNativeSuperResolutionFallback();
+				ScheduleNativeSuperResolutionFallback();
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
 					"The full-effects Render_UI path skipped the pre-tonemap seam; temporal rendering is disabled until restart.");
@@ -252,7 +258,7 @@ namespace cs::render
 
 		// Main_UpdateDynamicResolution republishes the scale on the next world frame.
 		GuardedThunkBody("Upscaling Render_UI ratio release", [&] {
-			if (!upscaling->IsDrivingFrameState()) {
+			if (!IsDrivingFrameState()) {
 				return;
 			}
 			if (auto* state = cs::engine::GetGraphicsState()) {
@@ -261,6 +267,10 @@ namespace cs::render
 			}
 			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
 		});
+
+		_imagespaceScope = false;
+		_chainTriangle.Restore();
+		_vatsMaskSwap.Restore();
 	}
 
 	void TemporalRenderer::Interface3D_RenderPrepassesAndMenus::thunk(RE::Interface3D::Renderer* a_this)
