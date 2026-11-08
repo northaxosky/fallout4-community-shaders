@@ -24,6 +24,6 @@ namespace cs::features::screenshot_file
 	// CS_YYYY-MM-DD_HH-MM-SS_mmm.png under a game-relative or absolute folder.
 	[[nodiscard]] std::filesystem::path BuildPath(const std::string& a_folder);
 
-	// Worker thread: encodes and writes the file; returns the failure, or empty on success.
+	// Encoder thread: writes the file; returns the failure, or empty on success.
 	[[nodiscard]] std::string Save(Job& a_job);
 }

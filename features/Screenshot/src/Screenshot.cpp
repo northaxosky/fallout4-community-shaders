@@ -7,6 +7,7 @@
 #include "Log.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
+#include "RE/M/Main.h"
 #include "RE/M/MenuControls.h"
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
@@ -20,7 +21,6 @@
 
 #include <array>
 #include <cstring>
-#include <thread>
 
 namespace cs::features
 {
@@ -28,7 +28,7 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.screenshot");
 
-		// Reads a finished staging copy without stalling; DXGI_ERROR_WAS_STILL_DRAWING while in flight.
+		// Non-blocking read; DXGI_ERROR_WAS_STILL_DRAWING while the copy is in flight.
 		HRESULT ReadStaging(ID3D11DeviceContext& a_context, ID3D11Texture2D& a_staging,
 			DXGI_FORMAT a_format, UINT a_width, UINT a_height, DirectX::ScratchImage& a_image)
 		{
@@ -44,7 +44,7 @@ namespace cs::features
 			const auto* destination = a_image.GetImage(0, 0, 0);
 			if (!destination)
 				return unmap(E_FAIL);
-			// A short or narrow driver mapping must not be read past; uncopied bytes stay black.
+			// Never read past a short driver mapping; uncopied bytes stay black.
 			const size_t rowBytes = std::min<size_t>(destination->rowPitch, mapped.RowPitch);
 			const size_t mappedRows = mapped.DepthPitch != 0 ? mapped.DepthPitch / mapped.RowPitch : destination->height;
 			const size_t rows = std::min<size_t>(destination->height, mappedRows);
@@ -54,15 +54,6 @@ namespace cs::features
 					static_cast<const uint8_t*>(mapped.pData) + row * mapped.RowPitch, rowBytes);
 			}
 			return unmap(S_OK);
-		}
-
-		winrt::com_ptr<ID3D11Texture2D> FrameBufferTexture()
-		{
-			auto* view = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
-			winrt::com_ptr<ID3D11Resource> resource;
-			if (view)
-				view->GetResource(resource.put());
-			return resource ? resource.try_as<ID3D11Texture2D>() : nullptr;
 		}
 
 		struct QueueCheck
@@ -86,19 +77,18 @@ namespace cs::features
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Both sites resolve before either is patched, so the pair installs whole or not at all.
+		// Resolves both before patching either, so the pair installs whole.
 		bool InstallSites()
 		{
-			const std::array queueSite{ engine::screenshot::kSwapQueuedCheck };
-			const std::array takeSite{ engine::screenshot::kSwapTakeScreenShot };
-			for (const auto& anchor : { queueSite[0], takeSite[0] }) {
-				if (const auto site = engine::ResolveCallSite(anchor); !site) {
-					L->error("Screenshot hooks unavailable: {}", site.error());
-					return false;
-				}
+			const auto queue = engine::ResolveCallSite(engine::screenshot::kSwapQueuedCheck);
+			const auto take = engine::ResolveCallSite(engine::screenshot::kSwapTakeScreenShot);
+			if (!queue || !take) {
+				L->error("Screenshot hooks unavailable: {}", (queue ? take : queue).error());
+				return false;
 			}
-			return engine::InstallCallSites<QueueCheck>(queueSite).has_value() &&
-			       engine::InstallCallSites<TakeScreenShot>(takeSite).has_value();
+			stl::write_thunk_call<QueueCheck>(*queue);
+			stl::write_thunk_call<TakeScreenShot>(*take);
+			return true;
 		}
 	}
 
@@ -154,7 +144,7 @@ namespace cs::features
 
 	void Screenshot::AddCaptureObserver(CaptureObserver a_observer)
 	{
-		_observers.push_back(std::move(a_observer));
+		_observers.Add(std::move(a_observer));
 	}
 
 	void Screenshot::OnPreInterface()
@@ -162,7 +152,7 @@ namespace cs::features
 		if (!_queuedThisFrame || !_settings.captureWithoutInterface || render::InterfaceLayer::Get().IsSceneActive())
 			return;
 		// Not split: the frame buffer holds the scene alone right now.
-		const auto frame = FrameBufferTexture();
+		auto* frame = engine::GetRenderTargetTexture(RE::BSGraphics::RenderTargetID::kFrameBuffer);
 		auto* context = engine::GetImmediateContext();
 		if (!frame || !context)
 			return;
@@ -178,7 +168,7 @@ namespace cs::features
 				return;
 			}
 		}
-		engine::CopyResourcePreservingOM(context, _scene->resource.get(), frame.get());
+		engine::CopyResourcePreservingOM(context, _scene->resource.get(), frame);
 		_sceneKept = true;
 	}
 
@@ -186,18 +176,19 @@ namespace cs::features
 	{
 		auto* hdrDisplay = HDRDisplay::GetSingleton();
 		const bool wantHdr = hdrDisplay->IsHdrActive();
-		if (const auto* frame = hdrDisplay->ComposeCapture(wantHdr, a_interface)) {
-			a_hdr = wantHdr;
-			return frame->resource.get();
+		// SDR with the interface is already in the engine's copy target.
+		if (wantHdr || !a_interface) {
+			if (const auto* frame = hdrDisplay->ComposeCapture(wantHdr, a_interface)) {
+				a_hdr = wantHdr;
+				return frame->resource.get();
+			}
 		}
 		a_hdr = false;
 		if (!a_interface && _sceneKept)
 			return _scene->resource.get();
 		if (!a_interface)
 			L->warn("No interface-free frame was available; saving the full frame.");
-		// The engine's copy has just filled it with the displayed frame.
-		const auto* target = engine::ResolveRenderTarget(engine::screenshot::kTarget);
-		return target ? reinterpret_cast<ID3D11Texture2D*>(target->texture) : nullptr;
+		return engine::GetRenderTargetTexture(RE::BSGraphics::RenderTargetID::kScreenshot);
 	}
 
 	bool Screenshot::OnTakeScreenShot()
@@ -256,6 +247,9 @@ namespace cs::features
 	{
 		PollReadbacks();
 		DrainCompletions();
+		// Joins after the queue drains, so queued shots still save.
+		if (const auto* main = RE::Main::GetSingleton(); main && main->quitGame)
+			StopEncoder();
 	}
 
 	void Screenshot::PollReadbacks()
@@ -276,31 +270,68 @@ namespace cs::features
 		});
 	}
 
-	// Encoding and disk I/O stay off the render thread; each shot owns its thread.
+	// Encoding and disk I/O stay off the render thread.
 	void Screenshot::Save(const Readback& a_readback, DirectX::ScratchImage&& a_image)
 	{
-		screenshot_file::Job job{
-			.image = std::move(a_image),
-			.path = a_readback.path,
-			.hdr = a_readback.hdr,
-			.hdrPngBitDepth = a_readback.settings.hdrPngBitDepth,
-			.fixDiscordHdr = a_readback.settings.fixDiscordHdr,
-			.copyToClipboard = a_readback.settings.copyToClipboard
+		EncodeJob work{
+			.id = a_readback.id,
+			.job = {
+				.image = std::move(a_image),
+				.path = a_readback.path,
+				.hdr = a_readback.hdr,
+				.hdrPngBitDepth = a_readback.settings.hdrPngBitDepth,
+				.fixDiscordHdr = a_readback.settings.fixDiscordHdr,
+				.copyToClipboard = a_readback.settings.copyToClipboard }
 		};
+		const auto fail = [&](std::string a_error) {
+			Complete({ .id = work.id, .path = work.job.path, .error = std::move(a_error) });
+		};
+		if (_encoderStopped)
+			return fail("The encoder has stopped for shutdown");
 		try {
-			std::thread([this, id = a_readback.id, job = std::move(job)]() mutable {
-				// WIC needs COM on the encoding thread.
-				const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
-				CaptureCompletion done{ .id = id, .path = job.path, .error = screenshot_file::Save(job) };
-				std::error_code ec;
-				if (done.error.empty())
-					done.bytes = std::filesystem::file_size(done.path, ec);
-				Complete(std::move(done));
-				if (com)
-					CoUninitialize();
-			}).detach();
+			if (!_encoder.joinable())
+				_encoder = std::jthread([this](std::stop_token a_stop) { RunEncoder(a_stop); });
 		} catch (const std::exception& error) {
-			Complete({ .id = a_readback.id, .path = a_readback.path, .error = std::string("Could not start the encoder: ") + error.what() });
+			return fail(std::string("Could not start the encoder: ") + error.what());
+		}
+		{
+			const std::scoped_lock lock{ _encodeMutex };
+			_encodeQueue.push_back(std::move(work));
+		}
+		_encodeWake.notify_one();
+	}
+
+	void Screenshot::RunEncoder(std::stop_token a_stop)
+	{
+		// WIC needs COM on the encoding thread.
+		const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+		for (;;) {
+			EncodeJob work;
+			{
+				std::unique_lock lock{ _encodeMutex };
+				_encodeWake.wait(lock, a_stop, [this] { return !_encodeQueue.empty(); });
+				// Empty here means stop was requested and the queue is drained.
+				if (_encodeQueue.empty())
+					break;
+				work = std::move(_encodeQueue.front());
+				_encodeQueue.pop_front();
+			}
+			CaptureCompletion done{ .id = work.id, .path = work.job.path, .error = screenshot_file::Save(work.job) };
+			std::error_code ec;
+			if (done.error.empty())
+				done.bytes = std::filesystem::file_size(done.path, ec);
+			Complete(std::move(done));
+		}
+		if (com)
+			CoUninitialize();
+	}
+
+	void Screenshot::StopEncoder()
+	{
+		_encoderStopped = true;
+		if (_encoder.joinable()) {
+			_encoder.request_stop();
+			_encoder.join();
 		}
 	}
 
@@ -327,8 +358,7 @@ namespace cs::features
 				host::HostClient::Get().PostNotification(DMUI_STATUS_SEVERITY_ERROR,
 					completion.error + "; see the log.", 5000, "Screenshot failed");
 			}
-			for (const auto& observer : _observers)
-				observer(completion);
+			_observers.Notify(completion);
 		}
 	}
 

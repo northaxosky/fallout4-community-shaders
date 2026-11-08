@@ -96,12 +96,12 @@ namespace cs::features::screenshot_file
 			return !ec;
 		}
 
-		// Discord misreads cICP, while the iCCP profile still describes the HDR color space.
+		// Discord misreads cICP; the iCCP profile still describes the color space.
 		bool StripPngCicpChunk(const std::filesystem::path& a_path)
 		{
 			constexpr size_t kSignatureSize = 8;
 			constexpr size_t kTypeOffset = 4;
-			constexpr size_t kChunkOverhead = 12;  // length + type + CRC
+			constexpr size_t kChunkOverhead = 12;
 
 			std::error_code ec;
 			const auto fileSize = std::filesystem::file_size(a_path, ec);

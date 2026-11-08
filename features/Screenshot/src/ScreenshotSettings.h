@@ -38,13 +38,9 @@ namespace cs::features::screenshot_settings
 		bool applyCropToScreenshot = true;
 		CropAspect cropAspect = CropAspect::kFullFrame;
 		bool captureWithoutInterface = false;
-		// HDR PNG quantization; used when HDR output is on.
 		std::uint32_t hdrPngBitDepth = 11;
-		// Strip cICP from HDR PNGs so Discord falls back to the embedded ICC profile.
 		bool fixDiscordHdr = true;
-		// After save, put the file path on the clipboard (CF_HDROP).
 		bool copyToClipboard = true;
-		// Skip the game's own file for the same screenshot.
 		bool disableVanillaScreenshot = true;
 	};
 
@@ -92,14 +88,14 @@ namespace cs::features::screenshot_settings
 		std::uint32_t height = 0;
 	};
 
-	// Largest centered region of the aspect; even edges keep chroma-subsampled viewers aligned.
+	// Largest centered region of the aspect; even edges keep chroma aligned.
 	[[nodiscard]] constexpr PixelRegion CropRegion(CropAspect a_aspect, std::uint32_t a_width, std::uint32_t a_height) noexcept
 	{
 		const auto [ratioWidth, ratioHeight] = Ratio(a_aspect);
 		PixelRegion region{ 0, 0, a_width, a_height };
 		if (ratioWidth == 0 || a_width == 0 || a_height == 0)
 			return region;
-		// Compare as cross products: the frame is wider than the ratio when w * rh > h * rw.
+		// Cross products: the frame is wider than the ratio when w * rh > h * rw.
 		if (static_cast<std::uint64_t>(a_width) * ratioHeight > static_cast<std::uint64_t>(a_height) * ratioWidth)
 			region.width = static_cast<std::uint32_t>(static_cast<std::uint64_t>(a_height) * ratioWidth / ratioHeight);
 		else
