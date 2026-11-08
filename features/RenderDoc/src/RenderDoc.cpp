@@ -455,31 +455,20 @@ namespace cs::features
 
 	void RenderDoc::AddCaptureObserver(CaptureObserver a_observer)
 	{
-		std::scoped_lock lock(_captureMutex);
-		_observers.push_back(std::move(a_observer));
+		_observers.Add(std::move(a_observer));
 	}
 
 	void RenderDoc::Complete(CaptureCompletion a_completion)
 	{
-		std::vector<CaptureObserver> observers;
 		{
 			std::scoped_lock lock(_captureMutex);
-			observers = _observers;
 			_annotationForce.reset();
 		}
 		if (a_completion.error.empty())
 			L->info("Capture {} finished: {} files", a_completion.id, a_completion.captures.size());
 		else
 			L->warn("Capture {} failed: {}", a_completion.id, a_completion.error);
-		for (const auto& observer : observers) {
-			try {
-				observer(a_completion);
-			} catch (const std::exception& error) {
-				L->error("Capture observer threw: {}", error.what());
-			} catch (...) {
-				L->error("Capture observer threw");
-			}
-		}
+		_observers.Notify(a_completion);
 	}
 
 	void RenderDoc::OnGameFramePresented()

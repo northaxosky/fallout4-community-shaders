@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Capture/CaptureContract.h"
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/FrameAnnotations.h"
@@ -30,18 +31,13 @@ namespace cs::features
 	{
 	public:
 		using CaptureTarget = renderdoc_settings::CaptureTarget;
-		using RequestId = std::uint64_t;
+		using RequestId = capture::RequestId;
+		using CaptureRefusal = capture::Refusal;
 
 		struct CaptureRequest
 		{
 			CaptureTarget target = CaptureTarget::kEngineD3D11;
 			std::uint32_t frames = 1;
-		};
-
-		struct CaptureRefusal
-		{
-			std::string message;
-			std::string hint;
 		};
 
 		struct CaptureCompletion
@@ -53,7 +49,8 @@ namespace cs::features
 			std::string error;
 		};
 
-		using CaptureObserver = std::function<void(const CaptureCompletion&)>;
+		using Observers = capture::ObserverList<CaptureCompletion>;
+		using CaptureObserver = Observers::Observer;
 
 		static RenderDoc* GetSingleton();
 
@@ -171,7 +168,7 @@ namespace cs::features
 		// Captures show every annotation event from request to completion.
 		std::optional<render::frame_annotations::ScopedForce> _annotationForce;
 		std::optional<AwaitedFiles> _awaited;
-		std::vector<CaptureObserver> _observers;
+		Observers _observers;
 		RequestId _lastRequestId{};
 
 		std::array<char, 1024> _commentsBuf{};

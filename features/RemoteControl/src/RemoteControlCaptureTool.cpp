@@ -1,6 +1,7 @@
 #include "RemoteControl.h"
 #include "RemoteControlTools.h"
 
+#include "Capture/CaptureContract.h"
 #include "RenderDoc.h"
 #include "Screenshot.h"
 
@@ -30,6 +31,23 @@ namespace cs::features::remote_control
 			return std::ranges::find(kDevices, a_target, &Device::target)->name;
 		}
 
+		Json Refused(const capture::Refusal& a_refusal)
+		{
+			return Error(a_refusal.message, { { "hint", a_refusal.hint } });
+		}
+
+		// The reply to a queued request; a_extra adds the kind's own fields.
+		Json Queued(capture::RequestId a_id, std::string_view a_kind, std::uint64_t a_frame, Json a_extra = Json::object())
+		{
+			a_extra.update({ { "queued", true }, { "requestId", a_id }, { "kind", a_kind }, { "enqueued_at_frame", a_frame } });
+			return a_extra;
+		}
+
+		void EmitCompleted(const Json& a_payload)
+		{
+			RemoteControl::GetSingleton()->EmitEvent("communityshaders.capture.completed", a_payload);
+		}
+
 		Json RequestRenderDoc(const Device& a_device, std::uint32_t a_frames)
 		{
 			auto* renderDoc = RenderDoc::GetSingleton();
@@ -40,15 +58,8 @@ namespace cs::features::remote_control
 			const auto frame = render::profiling::FrameSequence();
 			const auto request = renderDoc->RequestCapture({ a_device.target, a_frames });
 			if (!request)
-				return Error(request.error().message, { { "hint", request.error().hint } });
-			return {
-				{ "queued", true },
-				{ "requestId", *request },
-				{ "kind", "renderdoc" },
-				{ "device", a_device.name },
-				{ "frames", a_frames },
-				{ "enqueued_at_frame", frame }
-			};
+				return Refused(request.error());
+			return Queued(*request, "renderdoc", frame, { { "device", a_device.name }, { "frames", a_frames } });
 		}
 
 		Json RequestScreenshot()
@@ -56,13 +67,8 @@ namespace cs::features::remote_control
 			const auto frame = render::profiling::FrameSequence();
 			const auto request = Screenshot::GetSingleton()->RequestCapture();
 			if (!request)
-				return Error(request.error().message, { { "hint", request.error().hint } });
-			return {
-				{ "queued", true },
-				{ "requestId", *request },
-				{ "kind", "screenshot" },
-				{ "enqueued_at_frame", frame }
-			};
+				return Refused(request.error());
+			return Queued(*request, "screenshot", frame);
 		}
 
 		Json Handle(const Json& a_args)
@@ -70,7 +76,7 @@ namespace cs::features::remote_control
 			const auto kind = a_args.value("kind", std::string{});
 			if (kind.empty())
 				return Error("missing required parameter 'kind'");
-			// The request sets the engine's queued flag, so it is made at the frame boundary.
+			// The request sets the engine queued flag, so it runs at the frame boundary.
 			if (kind == "screenshot")
 				return OnFrame([] { return RequestScreenshot(); });
 			if (kind != "renderdoc")
@@ -102,7 +108,7 @@ namespace cs::features::remote_control
 			} else {
 				payload["error"] = a_done.error;
 			}
-			RemoteControl::GetSingleton()->EmitEvent("communityshaders.capture.completed", payload);
+			EmitCompleted(payload);
 		});
 		Screenshot::GetSingleton()->AddCaptureObserver([](const Screenshot::CaptureCompletion& a_done) {
 			Json payload{ { "requestId", a_done.id }, { "kind", "screenshot" } };
@@ -114,7 +120,7 @@ namespace cs::features::remote_control
 			}
 			// Screenshots saved by the hotkey carry no request and are not events.
 			if (a_done.id != 0)
-				RemoteControl::GetSingleton()->EmitEvent("communityshaders.capture.completed", payload);
+				EmitCompleted(payload);
 		});
 	}
 
