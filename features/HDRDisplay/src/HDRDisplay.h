@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "HDRCapture.h"
 #include "HDRDisplaySettings.h"
 #include "Render/Engine.h"
 #include "Render/HdrCompose.h"
@@ -45,6 +46,9 @@ namespace cs::features
 		// True while the frame renders HDR: enabled, with a container to present it.
 		[[nodiscard]] bool IsHdrActive() const noexcept;
 
+		// The split frame encoded for a file (PQ when a_hdr, else gamma 2.2); null when not split.
+		[[nodiscard]] const buffer::Texture2D* ComposeCapture(bool a_hdr, bool a_interface);
+
 	private:
 		HDRDisplay() = default;
 
@@ -58,6 +62,7 @@ namespace cs::features
 		void SeparateInterface();
 
 		Settings _settings;
+		hdr_display::CaptureComposer _capture;
 		std::atomic_bool _displayKnown{ false };
 		std::atomic_bool _displaySupportsHdr{ false };
 		std::atomic_bool _windowsHdrOn{ false };

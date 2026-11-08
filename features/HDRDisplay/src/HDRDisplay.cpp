@@ -15,6 +15,7 @@
 #include "Render/HookRegistry.h"
 #include "Render/InterfaceLayer.h"
 #include "Render/RenderHooks.h"
+#include "Render/ScreenshotSites.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalPipeline.h"
 #include "Settings/SettingsPersistence.h"
@@ -56,6 +57,34 @@ namespace cs::features
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		// The frame buffer holds only the interface while split; the copy reads the composed frame.
+		struct ScreenshotCopy
+		{
+			static void thunk(std::int32_t a_source, std::int32_t a_destination)
+			{
+				engine::RenderTargetSwap composed;
+				if (const auto* frame = HDRDisplay::GetSingleton()->ComposeCapture(false, true)) {
+					composed.Apply(RE::BSGraphics::RenderTargetID::kFrameBuffer,
+						frame->resource.get(), frame->srv.get(), frame->rtv.get());
+				}
+				func(a_source, a_destination);
+				composed.Restore();
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		void InstallScreenshotCopy()
+		{
+			static bool installed = false;
+			if (installed)
+				return;
+			const std::array sites{ engine::screenshot::kSwapCopy, engine::screenshot::kCameraPathCopy };
+			if (const auto result = engine::InstallCallSites<ScreenshotCopy>(sites); !result)
+				L->error("Engine screenshots stay unsplit: {}", result.error());
+			else
+				installed = true;
+		}
 	}
 
 	HDRDisplay* HDRDisplay::GetSingleton()
@@ -114,6 +143,13 @@ namespace cs::features
 		return _settings.enableHDR && render::TemporalPipeline::Get().IsHdrContainerActive();
 	}
 
+	const buffer::Texture2D* HDRDisplay::ComposeCapture(bool a_hdr, bool a_interface)
+	{
+		auto settings = GetOutputSettings();
+		settings.enabled = a_hdr;
+		return _capture.Compose(settings, a_interface);
+	}
+
 	render::hdr::OutputSettings HDRDisplay::GetOutputSettings() const noexcept
 	{
 		return {
@@ -136,6 +172,7 @@ namespace cs::features
 			FailLoad("HDR Display could not hook the engine blend binds.");
 			return;
 		}
+		InstallScreenshotCopy();
 		if (!engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad(std::string(GetRegistrationFailureMessage()));
 			return;
