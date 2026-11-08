@@ -217,6 +217,9 @@ namespace cs::render
 		[[nodiscard]] bool IsHdrContainerActive() const noexcept;
 		// The fp16 scene texture rendered into while the interface is separate.
 		[[nodiscard]] hdr::SceneTarget GetHdrSceneTarget() const noexcept;
+		// Runs the presenter's HDR compose into a_output; false unless the container is active.
+		[[nodiscard]] bool ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
+			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept;
 		[[nodiscard]] bool
 		IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
 		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;

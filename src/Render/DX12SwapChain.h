@@ -103,6 +103,9 @@ namespace cs::render
 		[[nodiscard]] SharedD3D11D3D12Texture* GetProxyTexture() const noexcept;
 		// Empty unless the HDR container is active.
 		[[nodiscard]] hdr::SceneTarget GetHdrSceneTarget() const noexcept;
+		// Encodes with the presenter's compose; false unless the HDR container is active.
+		[[nodiscard]] bool ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
+			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept;
 		[[nodiscard]] SharedD3D11D3D12Texture* GetDepthTexture() const noexcept;
 		[[nodiscard]] SharedD3D11D3D12Texture* GetMotionTexture() const noexcept;
 		[[nodiscard]] ID3D12GraphicsCommandList* GetCommandList() const noexcept;

@@ -1862,6 +1862,13 @@ namespace cs::render
 		return IsHdrContainerActive() ? _impl->swapChain.GetHdrSceneTarget() : hdr::SceneTarget{};
 	}
 
+	bool TemporalPipeline::ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
+		ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept
+	{
+		return IsHdrContainerActive() &&
+		       _impl->swapChain.ComposeToTarget(a_scene, a_interface, a_output, a_width, a_height, a_settings);
+	}
+
 	bool TemporalPipeline::IsFrameGenerationEnabledForFrame(
 		bool a_inExcludedMenu) const noexcept
 	{

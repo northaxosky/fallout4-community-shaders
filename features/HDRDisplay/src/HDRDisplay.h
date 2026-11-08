@@ -46,7 +46,7 @@ namespace cs::features
 		// True while the frame renders HDR: enabled, with a container to present it.
 		[[nodiscard]] bool IsHdrActive() const noexcept;
 
-		// The split frame encoded for a file (PQ when a_hdr, else gamma 2.2); null when not split.
+		// The split frame as PQ (a_hdr) or gamma 2.2; null when not split.
 		[[nodiscard]] const buffer::Texture2D* ComposeCapture(bool a_hdr, bool a_interface);
 
 	private:

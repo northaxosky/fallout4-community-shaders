@@ -7,21 +7,18 @@
 
 namespace cs::features::hdr_display
 {
-	// Encodes the split scene and interface into a texture a screenshot can read.
+	// Encodes the split scene and interface for a screenshot to read.
 	class CaptureComposer
 	{
 	public:
-		// R10 PQ for HDR output, R8 gamma 2.2 otherwise; null while the frame is not split.
+		// R10 PQ or R8 gamma 2.2; null unless the frame is split.
 		[[nodiscard]] const buffer::Texture2D* Compose(
 			const render::hdr::OutputSettings& a_settings, bool a_interface);
 
 	private:
-		[[nodiscard]] bool EnsureReady();
 		[[nodiscard]] std::unique_ptr<buffer::Texture2D>& Target(
 			bool a_hdr, UINT a_width, UINT a_height);
 
-		render::hdr::Compose _compose;
-		bool _failed = false;
 		std::unique_ptr<buffer::Texture2D> _sdr;
 		std::unique_ptr<buffer::Texture2D> _hdr;
 	};

@@ -58,7 +58,7 @@ namespace cs::features
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// The frame buffer holds only the interface while split; the copy reads the composed frame.
+		// Split, the frame buffer holds only the interface; compose it for the copy.
 		struct ScreenshotCopy
 		{
 			static void thunk(std::int32_t a_source, std::int32_t a_destination)

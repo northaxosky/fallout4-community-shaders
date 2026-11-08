@@ -2274,6 +2274,15 @@ namespace cs::render
 		return { _hdrScene->texture11.get(), _hdrScene->srv11.get(), _hdrScene->rtv11.get() };
 	}
 
+	bool DX12SwapChain::ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
+		ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept
+	{
+		if (!_hdrContainer || !_hdrCompose.IsReady() || !_context11)
+			return false;
+		_hdrCompose.Dispatch(*_context11, a_scene, a_interface, a_output, a_width, a_height, a_settings);
+		return true;
+	}
+
 	bool DX12SwapChain::ComposeHdr(const hdr::OutputSettings& settings, bool separated) noexcept
 	{
 		ApplyHdrColorSpace(settings);

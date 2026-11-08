@@ -16,18 +16,6 @@ namespace cs::features::hdr_display
 		constexpr UINT kBind = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_RENDER_TARGET;
 	}
 
-	bool CaptureComposer::EnsureReady()
-	{
-		if (_compose.IsReady())
-			return true;
-		auto* device = engine::GetDevice();
-		// A failed compile is not retried on every capture.
-		if (_failed || !device)
-			return false;
-		_failed = !_compose.Initialize(*device);
-		return !_failed;
-	}
-
 	std::unique_ptr<buffer::Texture2D>& CaptureComposer::Target(bool a_hdr, UINT a_width, UINT a_height)
 	{
 		auto& target = a_hdr ? _hdr : _sdr;
@@ -41,23 +29,22 @@ namespace cs::features::hdr_display
 	const buffer::Texture2D* CaptureComposer::Compose(const render::hdr::OutputSettings& a_settings, bool a_interface)
 	{
 		// While the frame is split the frame buffer holds only the interface.
-		if (!render::InterfaceLayer::Get().IsDrawingInterface() || !EnsureReady())
+		if (!render::InterfaceLayer::Get().IsDrawingInterface())
 			return nullptr;
 		const auto scene = render::TemporalPipeline::Get().GetHdrSceneTarget();
 		auto* interfaceSrv = engine::GetRenderTargetSRV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
-		auto* context = engine::GetImmediateContext();
-		if (!scene || !context || (a_interface && !interfaceSrv))
+		if (!scene || (a_interface && !interfaceSrv))
 			return nullptr;
 		D3D11_TEXTURE2D_DESC sceneDesc{};
 		scene.texture->GetDesc(&sceneDesc);
 		try {
 			auto& target = Target(a_settings.enabled, sceneDesc.Width, sceneDesc.Height);
-			_compose.Dispatch(*context, *scene.srv, a_interface ? interfaceSrv : nullptr, *target->uav,
-				sceneDesc.Width, sceneDesc.Height, a_settings);
+			if (!render::TemporalPipeline::Get().ComposeToTarget(*scene.srv, a_interface ? interfaceSrv : nullptr,
+					*target->uav, sceneDesc.Width, sceneDesc.Height, a_settings))
+				return nullptr;
 			return target.get();
 		} catch (const std::exception& error) {
 			L->error("Capture target creation failed: {}", error.what());
-			_failed = true;
 			return nullptr;
 		}
 	}
