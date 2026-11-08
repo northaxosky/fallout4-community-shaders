@@ -152,18 +152,11 @@ namespace cs::engine::water
 			CallSiteAnchor{ "AddLODWater alternate AddWater", RE::ID::TESWaterSystem::AddLODWater,
 				{ 0x106, 0, 0 }, RE::ID::TESWaterSystem::AddWater }
 		};
-		std::vector<std::uintptr_t> sites;
-		for (std::size_t i = 0; i < (REX::FModule::IsRuntimeOG() ? 2u : 1u); ++i) {
-			const auto site = ResolveCallSite(anchors[i]);
-			if (!site) {
-				cs::log::Get("cs.render.terrainwater")->error("{}", site.error());
-				return false;
-			}
-			sites.push_back(*site);
-		}
-		for (const auto site : sites)
-			stl::write_thunk_call<LODWaterAddWater>(site);
-		return true;
+		const auto installed = InstallCallSites<LODWaterAddWater>(
+			std::span{ anchors }.first(REX::FModule::IsRuntimeOG() ? 2u : 1u));
+		if (!installed)
+			cs::log::Get("cs.render.terrainwater")->error("{}", installed.error());
+		return installed.has_value();
 	}
 
 	std::uint64_t TileWaterOverrides() noexcept

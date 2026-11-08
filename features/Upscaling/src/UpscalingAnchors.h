@@ -34,7 +34,7 @@ namespace cs::features::upscaling_anchors
 	// Super resolution runs here, before the chain reads linear kMain.
 	inline constexpr CallSiteAnchor kDrawWorldRenderUIRenderEffectRange{
 		.name = "DrawWorld::Render_UI -> ImageSpaceManager::RenderEffectRange",
-		.function = RE::ID::DrawWorld::Imagespace,
+		.function = RE::ID::DrawWorld::Render_UI,
 		.offset = { 0x9F, 0x83, 0x83 },
 		.target = RE::ID::ImageSpaceManager::RenderEffectRange
 	};

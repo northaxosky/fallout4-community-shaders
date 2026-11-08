@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace cs::engine
 {
@@ -47,6 +48,23 @@ namespace cs::engine
 		const ContextCallSiteAnchor& a_anchor) noexcept;
 	[[nodiscard]] std::expected<std::uintptr_t, std::string> ResolveCallSite(
 		const ContextIndirectCallSiteAnchor& a_anchor) noexcept;
+
+	// Resolve all sites first so the group installs whole or not at all.
+	template <class Hook>
+	[[nodiscard]] std::expected<void, std::string> InstallCallSites(
+		std::span<const CallSiteAnchor> a_anchors)
+	{
+		std::vector<std::uintptr_t> sites;
+		for (const auto& anchor : a_anchors) {
+			auto site = ResolveCallSite(anchor);
+			if (!site)
+				return std::unexpected(std::move(site.error()));
+			sites.push_back(*site);
+		}
+		for (const auto site : sites)
+			stl::write_thunk_call<Hook>(site);
+		return {};
+	}
 
 	// Verifies the write and restores the original bytes on mismatch.
 	[[nodiscard]] std::expected<void, std::string> WriteVerifiedPatch(

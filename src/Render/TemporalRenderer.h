@@ -162,7 +162,6 @@ namespace cs::render
 		void ResolveSceneBeforeImagespace();
 		// Pre-UI seam: reShade effects and the HUD-less capture.
 		void FinishPreUiSeam();
-		// Render_UI entry and exit, via the imagespace hook points.
 		void BeginRenderUI();
 		void EndRenderUI();
 		bool PerformUpscaling();

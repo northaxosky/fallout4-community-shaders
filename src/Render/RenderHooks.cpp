@@ -392,11 +392,11 @@ namespace cs::engine
 
 		struct Imagespace_Hook
 		{
-			static void thunk(void* a_this)
+			static void thunk()
 			{
 				MarkRegistrationClosed();
 				Dispatch(g_preImagespace, "Imagespace pre");
-				func(a_this);
+				func();
 				Dispatch(g_postImagespace, "Imagespace post");
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -640,10 +640,25 @@ namespace cs::engine
 			return true;
 		}
 
+		// Call-site wraps keep Render_UI's entry free for other mods' detours.
 		bool EnsureImagespaceInstalled()
 		{
-			return EnsureDetourInstalled<Imagespace_Hook>(
-				g_imagespaceInstalled, RE::ID::DrawWorld::Imagespace, "DrawWorld::Imagespace");
+			if (g_imagespaceInstalled) {
+				return true;
+			}
+			constexpr auto kCallee = RE::ID::DrawWorld::Render_UICallee;
+			const std::array anchors{
+				CallSiteAnchor{ "Main::DrawWorld_And_UI -> Render_UI", RE::ID::Main::DrawWorld_And_UI, { 0x163, 0x182, 0x182 }, kCallee },
+				CallSiteAnchor{ "Main::DrawGamePause -> Render_UI", RE::ID::Main::DrawGamePause, { 0x103, 0xEA, 0xEA }, kCallee },
+				CallSiteAnchor{ "Main::DrawGamePause -> Render_UI (second)", RE::ID::Main::DrawGamePause, { 0x1A7, 0x18E, 0x18E }, kCallee }
+			};
+			if (const auto installed = InstallCallSites<Imagespace_Hook>(anchors); !installed) {
+				L->error("Imagespace hook unavailable: {}", installed.error());
+				return false;
+			}
+			g_imagespaceInstalled = true;
+			L->info("Hook installed on {} Render_UI call sites (imagespace boundary)", anchors.size());
+			return true;
 		}
 
 		bool EnsurePreInterfaceInstalled()
@@ -653,7 +668,7 @@ namespace cs::engine
 			}
 			const CallSiteAnchor anchor{
 				"DrawWorld::Render_UI -> SetUseDynamicResolutionViewportAsDefaultViewport",
-				RE::ID::DrawWorld::Imagespace,
+				RE::ID::DrawWorld::Render_UI,
 				{ 0xE1, 0xC5, 0xC5 },
 				RE::ID::BSGraphics::RenderTargetManager::SetUseDynamicResolutionViewportAsDefaultViewport
 			};
