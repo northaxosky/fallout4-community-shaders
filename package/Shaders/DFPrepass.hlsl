@@ -1524,7 +1524,8 @@ struct PS_OUTPUT
 	// 1 - vertexAO as upstream's Masks2; SSGI composite and Skylighting read it.
 #			if GRASS && VC
 	output.specTint.w = 1.0 - grassVertexAO;
-#			elif VC && !LANDSCAPE && !HAIR && !EYE && !SKIN_TINT
+#			elif VC && !LANDSCAPE && !HAIR && !EYE && !SKIN_TINT && !GRADIENT_REMAP
+	// FO4: gradient remap reads COLOR0.x as a row index, not baked AO.
 	// Albedo is already linear here, so unlike upstream the max needs no ColorToLinear.
 	output.specTint.w = 1.0 - max(max(input.vertexColor.x, input.vertexColor.y), input.vertexColor.z);
 #			else
