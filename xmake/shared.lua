@@ -76,7 +76,8 @@ function main(target)
         },
         includedirs = {
             "src",
-            "src/Features/ScreenSpaceShadows"
+            "src/Features/ScreenSpaceShadows",
+            "extern/sk_hdr_png/include"
         }
     }
     local root = path.join(os.projectdir(), shared.root)

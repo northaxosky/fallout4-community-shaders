@@ -12,6 +12,7 @@
 #include "RenderDocSettings.h"
 #include "ScreenSpaceGISettings.h"
 #include "ScreenSpaceShadowsSettings.h"
+#include "ScreenshotSettings.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
 #include "Settings/LiveSettings.h"
@@ -64,13 +65,14 @@ namespace
 			std::pair{ "HDRDisplay", MakeSchemaView(hdr_display::kSchema) },
 			std::pair{ "PerformanceOverlay", MakeSchemaView(performance_overlay::kSchema) },
 			std::pair{ "RenderDoc", MakeSchemaView(renderdoc_settings::kSchema) },
+			std::pair{ "Screenshot", MakeSchemaView(screenshot_settings::kSchema) },
 			std::pair{ "RemoteControl", SchemaView{} },
 			std::pair{ "CSEditor", SchemaView{} }
 		};
 		CHECK(features.size() == kAllFeatureKeys.size());
 		// Mirrors Feature::SupportsEnableToggle and DefaultEnabled.
 		const auto enabledDefault = [](std::string_view a_key) -> std::optional<bool> {
-			for (const auto optOut : { "LightLimitFix", "Upscaling", "FrameGeneration", "HDRDisplay", "PerformanceOverlay", "RenderDoc", "CSEditor" }) {
+			for (const auto optOut : { "LightLimitFix", "Upscaling", "FrameGeneration", "HDRDisplay", "PerformanceOverlay", "RenderDoc", "Screenshot", "CSEditor" }) {
 				if (a_key == optOut)
 					return std::nullopt;
 			}

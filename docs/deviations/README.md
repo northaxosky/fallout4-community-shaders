@@ -47,6 +47,7 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 - [Image Based Lighting](IBL.md)
 - [RenderDoc](RenderDoc.md)
 - [Remote Control](RemoteControl.md)
+- [Screenshot](Screenshot.md)
 - [Upscaling](Upscaling.md)
 - [FrameGeneration](FrameGeneration.md)
 - [HDR Display](HDRDisplay.md)

@@ -55,10 +55,10 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Port | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
 | Procedural Sun | Port | Analytic sun disc and corona in the Sky shader's sun pass; yields to an Effects11 preset's own procedural sun | — | NS | M | S/M | Med |
 | Rain Refraction | Port | Rain-drop refraction texture and consumer; reads Light Limit Fix's clustered lights | — | NS | M | M | Low |
-| [Remote Control](deviations/RemoteControl.md) | Port | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc capture and NvPerf tools and events; screenshot capture pending | — | Pt | H | M | High |
+| [Remote Control](deviations/RemoteControl.md) | Port | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc and screenshot capture and NvPerf tools and events | — | Pt | H | M | High |
 | [Screen Space GI](deviations/ScreenSpaceGI.md) | Port | AO, GI, temporal, specular GI, vertex AO (relocated), provider wiring | — | Pt | H | M | High |
 | [Screen-Space Shadows](deviations/ScreenSpaceShadows.md) | Port | Bend raymarch, direct/back visibility, tree/alpha/secondary receivers, preview/telemetry | — | Pt | H | M | High |
-| Screenshot | Port | SDR/crop/async/clipboard, temporal source, HDR PNG (needs HDR Display) | — | NS | M | M | High |
+| [Screenshot](deviations/Screenshot.md) | Port | SDR PNG, aspect crops, async save, clipboard, scene-only capture, HDR PNG through HDR Display; HDR AVIF pending | N/A: crop editor and preview, SDR BMP | Pt | M | S | High |
 | Skin | Mixed | Detail normal/color, default dual-lobe*, transmittance*, sweat inputs* | Ext: RFAOS/wet textures, wet-skin film | NS | H | M | Med |
 | [Sky Sync](deviations/SkySync.md) | Port | Alternate sun path, moon casting*, dawn/dusk + godray dimming, celestial transitions | N/A: Skyrim compat checks | Pt | M | M | Med |
 | [Subsurface Scattering](deviations/SubsurfaceScattering.md) | Mixed | Separable and Burley on native class-5 skin, per-draw Human/Base profile, character light | — | Pt | H | M | Med |
@@ -119,7 +119,7 @@ Ordered by user value over effort, respecting dependencies.
 5. **RE-gated:** Interior Sun.
 6. **Specular providers:** Dynamic Cubemaps deferred-surface reflections and SSGI specular adapters, after the
    Vanilla PBR and SSGI specular ports.
-7. **Remaining ports:** Screenshot (then Remote Control screenshot capture, HDR crop preview).
+7. **Remaining ports:** Screenshot HDR AVIF output.
 
 ## Extension slices
 
