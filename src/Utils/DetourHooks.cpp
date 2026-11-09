@@ -3,7 +3,7 @@
 #include "Log.h"
 #include "Utils/HookOwner.h"
 
-#include <detours.h>
+#include <detours/detours.h>
 
 #include <cstdint>
 #include <format>

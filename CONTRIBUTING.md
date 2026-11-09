@@ -8,6 +8,8 @@ validation as well as a successful build.
 - Windows x64
 - Visual Studio 2026 with the Desktop development with C++ workload
 - [xmake](https://xmake.io)
+- [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set, checked out at or after the
+  baseline pinned in `xmake.lua` (`git pull`, then `bootstrap-vcpkg.bat`)
 - [Git](https://git-scm.com/) and [Git LFS](https://git-lfs.com/)
 - PowerShell 7 (`pwsh`)
 

@@ -98,16 +98,21 @@ end)
 
 add_repositories("fo4cs-repository xmake")
 
-add_requires("vcpkg::detours 4.0.1")
-add_requires("vcpkg::directx-headers 1.619.1")
+-- vcpkg 2026.10.16; xmake's default baseline moves with each xmake release
+add_requireconfs("vcpkg::*", {
+    configs = { baseline = "9eec002df1cd109f8f104cd966a763daf9751489" }
+})
+
+add_requires("vcpkg::detours")
+add_requires("vcpkg::directx-headers")
 add_requires("vcpkg::directxmath")
-add_requires("vcpkg::directxtex 2025-10-27")
-add_requires("vcpkg::directxtk 2025-10-27")
-add_requires("vcpkg::magic-enum 0.9.7")
-add_requires("vcpkg::tomlplusplus 3.4.0")
+add_requires("vcpkg::directxtex")
+add_requires("vcpkg::directxtk")
+add_requires("vcpkg::magic-enum")
+add_requires("vcpkg::tomlplusplus")
 
 if has_config("tracy") then
-    add_requires("vcpkg::tracy 0.13.1", {
+    add_requires("vcpkg::tracy", {
         configs = { features = { "on-demand" } }
     })
 end
