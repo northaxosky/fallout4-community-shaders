@@ -419,8 +419,8 @@ namespace cs::features
 	{
 		_enableLocalShadows.store(_settings.enableLocalShadows, std::memory_order_release);
 		_localShadowSlots.store(_settings.localShadowSlots, std::memory_order_release);
-		_localShadowResolution.store(_settings.localShadowResolution, std::memory_order_release);
-		_localShadowSamples.store(_settings.localShadowSamples, std::memory_order_release);
+		_localShadowResolution.store(static_cast<std::uint32_t>(_settings.localShadowResolution), std::memory_order_release);
+		_localShadowSamples.store(static_cast<std::uint32_t>(_settings.localShadowSamples), std::memory_order_release);
 		_localShadowFilterScale.store(_settings.localShadowFilterScale, std::memory_order_release);
 	}
 	light_limit_fix::LocalShadowConfig LightLimitFix::GetLocalShadowConfig() const noexcept
@@ -654,18 +654,8 @@ namespace cs::features
 		if (const ui::Section section{ "llf-local-shadows", "Local Shadows" }; section) {
 			changed |= field(&Settings::enableLocalShadows, { .label = "Enable Local Shadows" });
 			changed |= field(&Settings::localShadowSlots, { .label = "Shadow Cache Slots" });
-			static constexpr std::array kResolutions{
-				dmui::ChoiceOption<std::uint32_t>{ 512u, "512", "512", true },
-				dmui::ChoiceOption<std::uint32_t>{ 1024u, "1024", "1024", true },
-				dmui::ChoiceOption<std::uint32_t>{ 2048u, "2048", "2048", true }
-			};
-			changed |= field.Choice(&Settings::localShadowResolution, kResolutions, { .label = "Shadow Cache Resolution" });
-			static constexpr std::array kSamples{
-				dmui::ChoiceOption<std::uint32_t>{ 1u, "1", "1", true },
-				dmui::ChoiceOption<std::uint32_t>{ 4u, "4", "4", true },
-				dmui::ChoiceOption<std::uint32_t>{ 8u, "8", "8", true }
-			};
-			changed |= field.Choice(&Settings::localShadowSamples, kSamples, { .label = "Shadow Filter Samples" });
+			changed |= field.Choice(&Settings::localShadowResolution, { .label = "Shadow Cache Resolution" });
+			changed |= field.Choice(&Settings::localShadowSamples, { .label = "Shadow Filter Samples" });
 			changed |= field(&Settings::localShadowFilterScale, { .label = "Shadow Filter Scale" });
 		}
 		if (changed)

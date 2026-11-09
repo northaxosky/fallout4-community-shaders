@@ -1,8 +1,5 @@
-// Resamples a freshly rendered FO4 local shadow map into the Light Limit Fix cache layout.
-// FO4 renders each map into the bottom-left MapSize square of a SourceSize slice; omni lights
-// use slice 0 for the front and slice 1 for the back hemisphere. The cache holds one light per
-// slice: the map fills it, with an omni light's hemispheres stacked front above back. Depth is
-// min-reduced over each cache texel's source footprint so occluders never shrink.
+// Resamples an FO4 map (bottom-left square of its slice) into the cache layout.
+// Omni hemispheres stack front above back; depth is min-reduced per cache texel.
 
 Texture2DArray<float> SourceShadowMaps : register(t0);
 RWTexture2DArray<float> CacheShadowMaps : register(u0);
@@ -47,7 +44,7 @@ uint2 GetFootprint(float lo, float hi)
 
 	const float mapSize = MapSize;
 	const float sourceSize = SourceSize;
-	// The front map grows up from the corner row; the back map grows down from the bottom.
+	// Front rows grow up from the corner row, back rows down from the bottom.
 	const float2 rows = back ? sourceSize - mapV.yx * mapSize : sourceSize - mapSize + mapV * mapSize;
 	const uint2 columnRange = GetFootprint(uvMin.x * mapSize, uvMax.x * mapSize);
 	const uint2 rowRange = GetFootprint(rows.x, rows.y);

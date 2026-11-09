@@ -77,7 +77,7 @@ namespace cs::features::light_limit_fix
 		DirectX::XMFLOAT4X4 shadowProj;
 		// x: type, y: radius (<= 0 means no data), z: depth bias, w: fade-in.
 		DirectX::XMFLOAT4 params;
-		// x: spot falloff exponent, y: skinned receiver offset, z: FO4 shadow fade distance squared.
+		// x: spot falloff exponent, y: skinned offset, z: FO4 fade distance squared.
 		DirectX::XMFLOAT4 params2;
 		DirectX::XMFLOAT4 origin;
 	};

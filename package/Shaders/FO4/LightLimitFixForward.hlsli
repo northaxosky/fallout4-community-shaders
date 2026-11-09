@@ -54,7 +54,7 @@ namespace FO4LightLimitFix
 	}
 
 	// FO4: native effect point-light lane, without upstream's pi and 0.5.
-	float3 GetEffectLightColor(uint lightIndex, LightLimitFix::Light light, float3 viewPosition, float3 worldPosition)
+	float3 GetEffectLightColor(uint lightIndex, LightLimitFix::Light light, float3 viewPosition, float3 worldPosition, float2 screenPosition)
 	{
 		float3 lightPosition = light.positionWS.xyz;
 		float3 lightDirection = lightPosition - worldPosition;
@@ -62,8 +62,8 @@ namespace FO4LightLimitFix
 		float x = saturate(distance * light.invRadius);
 		float attenuation = GetAttenuation(light, distance, pow(1.0 - x * x, 2.2));
 		float3 color = GetLinearColor(light.color, light.lightFlags) * light.fade * attenuation;
-		// FO4: the local shadow carries the spot falloff, so the cone is not applied twice.
-		[branch] if (HasLocalShadow(light)) return color * GetLocalShadow(light, viewPosition, worldPosition, lightDirection / max(distance, 1e-5), 0.0);
+		// FO4: the local shadow carries the spot falloff; skip the cone.
+		[branch] if (HasLocalShadow(light)) return color * GetLocalShadow(light, viewPosition, worldPosition, lightDirection / max(distance, 1e-5), Random::InterleavedGradientNoise(screenPosition, SharedData::FrameCount));
 		return color * GetConeAttenuation(lightIndex, lightPosition, worldPosition);
 	}
 
@@ -79,13 +79,13 @@ namespace FO4LightLimitFix
 		return true;
 	}
 
-	// FO4: a shadow caster lights forward passes only through its cached local shadow.
+	// FO4: shadow casters light forward passes only through a local shadow.
 	bool IsClusterLightSkipped(LightLimitFix::Light light)
 	{
 		return LightLimitFix::IsLightIgnored(light) || ((light.lightFlags & LightLimitFix::LightFlags::ShadowCaster) != 0 && !HasLocalShadow(light));
 	}
 
-	float3 GetEffectLighting(float3 viewPosition, float3 worldPosition, out uint lightCount)
+	float3 GetEffectLighting(float3 viewPosition, float3 worldPosition, float2 screenPosition, out uint lightCount)
 	{
 		float3 result = 0.0;
 		uint lightOffset;
@@ -96,7 +96,7 @@ namespace FO4LightLimitFix
 			LightLimitFix::Light light = LightLimitFix::lights[clusteredLightIndex];
 			if (IsClusterLightSkipped(light))
 				continue;
-			result += GetEffectLightColor(clusteredLightIndex, light, viewPosition, worldPosition);
+			result += GetEffectLightColor(clusteredLightIndex, light, viewPosition, worldPosition, screenPosition);
 		}
 		return result;
 	}

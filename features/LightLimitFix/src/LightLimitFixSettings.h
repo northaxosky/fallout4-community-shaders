@@ -12,37 +12,50 @@ namespace cs::features::light_limit_fix
 	inline constexpr float kMinLocalShadowFilterScale = 0.25f;
 	inline constexpr float kMaxLocalShadowFilterScale = 2.0f;
 
+	enum class LocalShadowResolution : std::uint32_t
+	{
+		k512 = 512,
+		k1024 = 1024,
+		k2048 = 2048
+	};
+
+	enum class LocalShadowSamples : std::uint32_t
+	{
+		k1 = 1,
+		k4 = 4,
+		k8 = 8
+	};
+
 	struct Settings
 	{
 		bool deriveUnauthoredLights = false;
 		bool enableLocalShadows = false;
 		std::uint32_t localShadowSlots = 16;
-		// 0 follows the engine shadow map resolution.
-		std::uint32_t localShadowResolution = 1024;
-		std::uint32_t localShadowSamples = 8;
+		LocalShadowResolution localShadowResolution = LocalShadowResolution::k1024;
+		LocalShadowSamples localShadowSamples = LocalShadowSamples::k8;
 		float localShadowFilterScale = 1.0f;
 	};
 
 	// Live local shadow settings as the render thread reads them.
 	struct LocalShadowConfig
 	{
-		bool enabled = false;
-		std::uint32_t slots = 16;
-		std::uint32_t resolution = 0;
-		std::uint32_t samples = 8;
-		float filterScale = 1.0f;
+		bool enabled;
+		std::uint32_t slots;
+		std::uint32_t resolution;
+		std::uint32_t samples;
+		float filterScale;
 	};
 
 	inline constexpr std::array kLocalShadowResolutions{
-		settings::Choice<std::uint32_t>{ "512", 512 },
-		settings::Choice<std::uint32_t>{ "1024", 1024 },
-		settings::Choice<std::uint32_t>{ "2048", 2048 }
+		settings::Choice{ "512", LocalShadowResolution::k512 },
+		settings::Choice{ "1024", LocalShadowResolution::k1024 },
+		settings::Choice{ "2048", LocalShadowResolution::k2048 }
 	};
 
 	inline constexpr std::array kLocalShadowSampleCounts{
-		settings::Choice<std::uint32_t>{ "1", 1 },
-		settings::Choice<std::uint32_t>{ "4", 4 },
-		settings::Choice<std::uint32_t>{ "8", 8 }
+		settings::Choice{ "1", LocalShadowSamples::k1 },
+		settings::Choice{ "4", LocalShadowSamples::k4 },
+		settings::Choice{ "8", LocalShadowSamples::k8 }
 	};
 
 	inline constexpr settings::Schema kSchema{

@@ -773,7 +773,7 @@ PSOutput main(PSInput input)
 	[branch] if (FO4LightLimitFix::UseClusteredLights())
 	{
 		float3 viewPosition = FO4Forward::ViewPosition(input.Position.xyz);
-		propertyColor += FO4LightLimitFix::GetEffectLighting(viewPosition, FrameBuffer::ViewToWorld(viewPosition), lightCount);
+		propertyColor += FO4LightLimitFix::GetEffectLighting(viewPosition, FrameBuffer::ViewToWorld(viewPosition), input.Position.xy, lightCount);
 	}
 #				endif
 #			endif

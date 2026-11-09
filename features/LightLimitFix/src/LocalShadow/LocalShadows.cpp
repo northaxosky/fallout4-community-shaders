@@ -7,6 +7,7 @@
 #include "Utils/CSUtil.h"
 
 #include <RE/B/BSShaderManager.h>
+#include <RE/N/NiCamera.h>
 
 #include <algorithm>
 #include <cmath>
@@ -195,25 +196,16 @@ namespace cs::features::light_limit_fix
 		_samples.store(a_config.samples, std::memory_order_release);
 		_filterRadius.store(kFilterRadiusTexels / static_cast<float>(_layout.engineSize) * scale, std::memory_order_release);
 		for (auto& slot : _slots) {
-			if (slot.owner && _frame - slot.lastSeen > kEvictFrames)
+			if (slot.owner && _frame - slot.lastCopy > kEvictFrames)
 				slot = {};
 		}
 		stats.copies = 0;
 	}
 
-	std::uint32_t LocalShadows::FindOrAssign(const RE::BSLight& a_light)
+	std::uint32_t LocalShadows::Find(const RE::BSLight* a_owner) const
 	{
-		constexpr auto kNone = ~0u;
-		auto free = kNone;
-		for (std::uint32_t i = 0; i < _slots.size(); ++i) {
-			if (_slots[i].owner == &a_light)
-				return i;
-			if (!_slots[i].owner && free == kNone)
-				free = i;
-		}
-		if (free != kNone)
-			_slots[free].owner = &a_light;
-		return free;
+		const auto found = std::ranges::find(_slots, a_owner, &Slot::owner);
+		return static_cast<std::uint32_t>(found - _slots.begin());
 	}
 
 	float LocalShadows::FadeIn(const Slot& a_slot) const noexcept
@@ -226,13 +218,10 @@ namespace cs::features::light_limit_fix
 		std::scoped_lock lock(_mutex);
 		if (!_ready.load(std::memory_order_acquire))
 			return;
-		const auto index = FindOrAssign(a_light);
+		const auto index = Find(&a_light);
 		if (index >= _slots.size())
 			return;
-		auto& slot = _slots[index];
-		slot.lastSeen = _frame;
-		if (!slot.copied)
-			return;
+		const auto& slot = _slots[index];
 		a_data.lightFlags |= static_cast<std::uint32_t>(LightFlags::kLocalShadow);
 		a_data.localShadowIndex = index;
 		// Spots fade in whole; other types fade in their shadow.
@@ -342,22 +331,32 @@ namespace cs::features::light_limit_fix
 		std::scoped_lock lock(_mutex);
 		if (!_ready.load(std::memory_order_acquire))
 			return;
-		// Focus wrappers and lights past the slot cap hold no slot.
-		const RE::BSLight& light = a_light;
-		const auto found = std::ranges::find(_slots, &light, &Slot::owner);
-		if (found == _slots.end())
+		// FO4: focus wrappers render orthographic frustums and are not local lights.
+		const auto* entries = a_light.shadowMapData;
+		if (a_kind == engine::ShadowLightKind::kFrustum && entries && a_light.shadowMapCount &&
+			entries[0].camera && entries[0].camera->viewFrustum.ortho)
 			return;
-		auto& slot = *found;
-		const auto job = Capture(slot, a_light, a_kind);
-		if (!job || !Copy(*job, static_cast<std::uint32_t>(found - _slots.begin()))) {
+		// A slot is taken only once the light's map provably exists.
+		auto index = Find(&a_light);
+		const bool known = index < _slots.size();
+		if (!known)
+			index = Find(nullptr);
+		if (index >= _slots.size()) {
 			++stats.rejected;
 			return;
 		}
-		if (!slot.copied) {
-			slot.copied = true;
+		Slot slot = known ? _slots[index] : Slot{};
+		const auto job = Capture(slot, a_light, a_kind);
+		if (!job || !Copy(*job, index)) {
+			++stats.rejected;
+			return;
+		}
+		if (!known) {
+			slot.owner = &a_light;
 			slot.readyFrame = _frame;
 		}
-		slot.lastSeen = _frame;
+		slot.lastCopy = _frame;
+		_slots[index] = slot;
 		++stats.copies;
 		++stats.copyTotal;
 	}
@@ -372,7 +371,7 @@ namespace cs::features::light_limit_fix
 		const double eyeX = _eye.x, eyeY = _eye.y, eyeZ = _eye.z;
 		for (std::size_t i = 0; i < _slots.size(); ++i) {
 			const auto& slot = _slots[i];
-			if (!slot.owner || !slot.copied)
+			if (!slot.owner)
 				continue;
 			auto& out = _upload[i];
 			out.shadowProj = slot.projection;
