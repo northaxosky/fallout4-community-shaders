@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace cs::engine
 {
@@ -181,7 +184,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// FO4: the utility depth technique selects a raster bias that Skyrim's leaves off.
+		// FO4: the utility depth technique selects a raster bias Skyrim leaves off.
 		struct UtilityShader_SetupTechnique
 		{
 			static bool thunk(RE::BSUtilityShader* a_shader, std::uint32_t a_currentPass)
@@ -200,6 +203,18 @@ namespace cs::engine
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		// Reports an install by the original address the hook captured.
+		template <class Hook>
+		[[nodiscard]] HookInstall ReportInstall(std::string a_name, std::string_view a_original)
+		{
+			HookInstall install{ .name = std::move(a_name) };
+			install.installed = Hook::func.address() != 0;
+			install.detail = std::format("{} {:#x}", a_original, Hook::func.address());
+			if (!install.installed)
+				L->error("Hook {} unavailable: the {} did not resolve", install.name, a_original);
+			return install;
+		}
 	}
 
 	// The stock technique for the occlusion mode, from the same inputs.
@@ -230,23 +245,14 @@ namespace cs::engine
 
 	HookInstall InstallOccluderPassHook()
 	{
-		HookInstall install{ .name = "BSLightingShaderProperty vslot 44 (GetRenderPasses_ShadowMapOrMask)" };
 		stl::write_vfunc<44, LightingShaderProperty_OcclusionPasses>(RE::VTABLE::BSLightingShaderProperty[0]);
-		install.installed = LightingShaderProperty_OcclusionPasses::func.address() != 0;
-		install.detail = std::format("stock builder {:#x}", LightingShaderProperty_OcclusionPasses::func.address());
-		if (!install.installed)
-			L->error("Hook {} unavailable: the stock builder did not resolve", install.name);
-		return install;
+		return ReportInstall<LightingShaderProperty_OcclusionPasses>(
+			"BSLightingShaderProperty vslot 44 (GetRenderPasses_ShadowMapOrMask)", "stock builder");
 	}
 
 	HookInstall InstallOccluderDepthBiasHook()
 	{
-		HookInstall install{ .name = "BSUtilityShader::SetupTechnique" };
 		stl::detour_thunk<UtilityShader_SetupTechnique>(RE::ID::BSUtilityShader::SetupTechnique);
-		install.installed = UtilityShader_SetupTechnique::func.address() != 0;
-		install.detail = std::format("stock setup {:#x}", UtilityShader_SetupTechnique::func.address());
-		if (!install.installed)
-			L->error("Hook {} unavailable: the detour did not attach", install.name);
-		return install;
+		return ReportInstall<UtilityShader_SetupTechnique>("BSUtilityShader::SetupTechnique", "stock setup");
 	}
 }

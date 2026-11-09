@@ -21,7 +21,7 @@
 // Soft, rim and back lobes take probe visibility (SHADOW_VIS), else the VSM.
 #if defined(SKYLIGHTING_SHADOW_VIS)
 #	define FO4_SOFT_SUN_SHADOW_ACTIVE
-// FO4: Skylighting toggles live; disabled or non-opted lobes take the unloaded source.
+// FO4: disabled or non-opted pixels fall back to the unloaded source.
 #	define FO4_SKYLIGHTING_DISABLED [branch] if (!Skylighting::SoftSunVisibilityApplies())
 #	define FO4_SOFT_SHADOW_BEGIN(softShadow, viewPosition, normalView, albedoSample, matSample) \
 		Skylighting::SetSoftSunOptIn(albedoSample, matSample);                                   \

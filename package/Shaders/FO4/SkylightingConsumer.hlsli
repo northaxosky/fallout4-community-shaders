@@ -120,7 +120,7 @@ namespace Skylighting
 #	ifdef SKYLIGHTING_SHADOW_VIS
 	static bool SoftSunOptIn = false;
 
-	// FO4: backLightPower (MRT0.a) and subsurface rolloff (MRT3.z) stand in for upstream's flags.
+	// FO4: back-light power (MRT0.a) or rolloff (MRT3.z) stands in for the flags.
 	void SetSoftSunOptIn(float4 albedoSample, float4 matSample)
 	{
 		SoftSunOptIn = albedoSample.w > 0.0 || matSample.z > 0.0;
