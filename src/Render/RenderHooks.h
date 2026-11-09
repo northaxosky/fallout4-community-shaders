@@ -45,9 +45,10 @@ namespace cs::engine
 	[[nodiscard]] bool RenderHookRegistrationAllowed(const char* a_where);
 
 	// Register only during Load or OnPostPostLoad.
-#define CS_DECLARE_RENDER_HOOK(name, ...)                                                              \
-	bool name(__VA_ARGS__ RenderHookCallback callback, HookPriority priority = HookPriority::Default); \
-	bool name(Feature& a_owner, __VA_ARGS__ RenderHookCallback callback, HookPriority priority = HookPriority::Default)
+#define CS_DECLARE_HOOK(Callback, name, ...)                                                 \
+	bool name(__VA_ARGS__ Callback callback, HookPriority priority = HookPriority::Default); \
+	bool name(Feature& a_owner, __VA_ARGS__ Callback callback, HookPriority priority = HookPriority::Default)
+#define CS_DECLARE_RENDER_HOOK(name, ...) CS_DECLARE_HOOK(RenderHookCallback, name, __VA_ARGS__)
 
 	CS_DECLARE_RENDER_HOOK(RegisterPostDeferredPrePass);
 	CS_DECLARE_RENDER_HOOK(RegisterPreDeferredPrePass);
@@ -85,14 +86,8 @@ namespace cs::engine
 	CS_DECLARE_RENDER_HOOK(RegisterPostShadowLightRender, ShadowLightKind a_kind, );
 
 	using LocalShadowLightCallback = std::function<void(RE::BSShadowLight&, ShadowLightKind)>;
-	// After each spot or parabolic Render returns, with that light's map still bound.
-	bool RegisterPostLocalShadowLightRender(
-		LocalShadowLightCallback callback,
-		HookPriority priority = HookPriority::Default);
-	bool RegisterPostLocalShadowLightRender(
-		Feature& a_owner,
-		LocalShadowLightCallback callback,
-		HookPriority priority = HookPriority::Default);
+	// After a spot or parabolic Render; that light's map is still bound.
+	CS_DECLARE_HOOK(LocalShadowLightCallback, RegisterPostLocalShadowLightRender);
 
 	// Start of Render_UI, before the ImageSpace chain.
 	CS_DECLARE_RENDER_HOOK(RegisterPreImagespace);
@@ -110,6 +105,7 @@ namespace cs::engine
 	CS_DECLARE_RENDER_HOOK(RegisterPostResetState);
 
 #undef CS_DECLARE_RENDER_HOOK
+#undef CS_DECLARE_HOOK
 
 	// One world batch-4 bucket: every pass in it shares the technique.
 	struct HeldPrepassBucket
