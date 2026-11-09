@@ -26,7 +26,6 @@ namespace cs::engine
 		constexpr std::uint8_t kGeometryType15 = 15;
 		constexpr std::uint8_t kTreeAnimPassType = 11;
 		constexpr std::uint8_t kVatsPassType = 21;
-		constexpr auto kNoDepthBias = static_cast<RE::BSGraphics::RasterStateDepthBiasMode>(0);
 
 		[[nodiscard]] std::optional<OccluderReject> RejectOccluder(
 			const RE::BSLightingShaderProperty& a_property,
@@ -193,8 +192,8 @@ namespace cs::engine
 				if (result && GetActiveCaptureOnWalkThread()) {
 					if (auto* context = GetActiveContext()) {
 						auto& state = context->shadowState;
-						if (state.rasterStateDepthBiasMode.get() != kNoDepthBias) {
-							state.rasterStateDepthBiasMode = kNoDepthBias;
+						if (state.rasterStateDepthBiasMode.get() != RE::BSGraphics::RasterStateDepthBiasMode::kNone) {
+							state.rasterStateDepthBiasMode = RE::BSGraphics::RasterStateDepthBiasMode::kNone;
 							state.stateUpdateFlags |= static_cast<std::uint32_t>(RE::BSGraphics::ShaderFlags::DIRTY_RASTERIZER_STATE);
 						}
 					}

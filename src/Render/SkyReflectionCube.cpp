@@ -164,8 +164,6 @@ namespace cs::engine
 		const void* g_lodWorldSpace = nullptr;
 		WeatherSnapshot g_lodWeather;
 		std::optional<std::uint32_t> g_lastFrame;
-		// ClickCubeMap selects front culling (2) and exits with back (1).
-		constexpr auto kCubeCullMode = static_cast<RE::BSGraphics::RasterStateCullMode>(2);
 		std::optional<SkyReflectionCubeCapture> g_capture;
 		std::uint64_t g_captureSerial = 0;
 
@@ -822,9 +820,9 @@ namespace cs::engine
 			return;
 		// Mirrored face views need the selector ClickCubeMap writes inline.
 		auto& state = context->shadowState;
-		if (state.rasterStateCullMode.get() == kCubeCullMode)
+		if (state.rasterStateCullMode.get() == RE::BSGraphics::RasterStateCullMode::kFront)
 			return;
-		state.rasterStateCullMode = kCubeCullMode;
+		state.rasterStateCullMode = RE::BSGraphics::RasterStateCullMode::kFront;
 		state.stateUpdateFlags |= static_cast<std::uint32_t>(RE::BSGraphics::ShaderFlags::DIRTY_RASTERIZER_STATE);
 	}
 
