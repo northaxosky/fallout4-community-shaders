@@ -16,6 +16,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 namespace cs::ui
 {
@@ -212,5 +213,17 @@ namespace cs::ui
 		std::span<const dmui::ChoiceOption<typename Field::ValueType>> a_options, const FieldOptions& a_dropdown = {})
 	{
 		return EditChoice(SpecFor(a_field, a_dropdown), a_settings.*a_field.member, Settings{}.*a_field.member, a_options);
+	}
+
+	// A choice field's own choices as a dropdown field row.
+	template <class Field, class Settings>
+		requires requires(const Field& a_field) { a_field.member; a_field.help; a_field.choices; }
+	EditResult EditChoice(const Field& a_field, Settings& a_settings, const FieldOptions& a_dropdown = {})
+	{
+		using Value = typename Field::ValueType;
+		std::vector<dmui::ChoiceOption<Value>> options;
+		for (const auto& choice : a_field.choices)
+			options.push_back({ choice.value, std::string(choice.text), std::string(choice.text), true });
+		return EditChoice(a_field, a_settings, std::span<const dmui::ChoiceOption<Value>>{ options }, a_dropdown);
 	}
 }

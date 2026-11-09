@@ -68,6 +68,13 @@ namespace cs::settings
 			return _edit.Apply(ui::EditChoice(_schema.Find(a_member), _settings, a_choices, a_options));
 		}
 
+		// Offers the schema field's own choices.
+		template <class T>
+		bool Choice(T Settings::* a_member, const ui::FieldOptions& a_options = {}) const
+		{
+			return _edit.Apply(ui::EditChoice(_schema.Find(a_member), _settings, a_options));
+		}
+
 	private:
 		SettingsEdit& _edit;
 		const Schema& _schema;
