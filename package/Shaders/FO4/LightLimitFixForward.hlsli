@@ -45,7 +45,7 @@ namespace FO4LightLimitFix
 	// FO4: DFLight fades its shadow term to zero toward the local shadow distance.
 	float GetLocalShadow(LightLimitFix::Light light, float3 viewPosition, float3 worldPosition, float3 towardLight, float noise)
 	{
-		float shadow = LightLimitFix::GetLocalShadow(LinearSampler, light.localShadowIndex, worldPosition, FrameBuffer::CameraPosAdjust.xyz, towardLight, false, noise);
+		float shadow = LightLimitFix::GetLocalShadowWithLightFade(LinearSampler, light.localShadowIndex, worldPosition, FrameBuffer::CameraPosAdjust.xyz, towardLight, false, noise);
 		float distanceFade = saturate(dot(viewPosition, viewPosition) / LightLimitFix::LocalShadows[light.localShadowIndex].Params2.z);
 		distanceFade *= distanceFade;
 		distanceFade *= distanceFade;
