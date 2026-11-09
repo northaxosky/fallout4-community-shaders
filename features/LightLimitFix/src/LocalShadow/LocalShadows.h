@@ -27,7 +27,7 @@ namespace cs::features::light_limit_fix
 		void Create();
 		// Prepass: applies settings, frees stale slots and rebases to the eye.
 		void Begin(const LocalShadowConfig& a_config, const DirectX::XMFLOAT4& a_eye);
-		// Gather: flags a light whose map is cached; assigns no slot.
+		// Gather: requests the light's copy and flags it once cached; assigns no slot.
 		void Resolve(RE::BSShadowLight& a_light, LightData& a_data);
 		// Right after the light's Render, while its map is still bound.
 		void OnRendered(RE::BSShadowLight& a_light, engine::ShadowLightKind a_kind);
@@ -95,6 +95,7 @@ namespace cs::features::light_limit_fix
 		std::unique_ptr<buffer::StructuredBuffer> _data;
 		std::vector<Slot> _slots;
 		std::vector<LocalShadowData> _upload;
+		std::vector<const RE::BSLight*> _wanted;
 		Layout _layout;
 		// Last layout requested; a failed allocation is not retried.
 		Layout _requested;

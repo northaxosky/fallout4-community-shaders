@@ -79,6 +79,7 @@ namespace cs::features::light_limit_fix
 		_data.reset();
 		_slots.clear();
 		_upload.clear();
+		_wanted.clear();
 		_layout = {};
 		_requested = {};
 		stats.slots = 0;
@@ -183,6 +184,7 @@ namespace cs::features::light_limit_fix
 		std::scoped_lock lock(_mutex);
 		_frame = engine::GetFrameCount();
 		_eye = a_eye;
+		_wanted.clear();
 		if (!a_config.enabled) {
 			ReleaseResources();
 			return;
@@ -218,6 +220,7 @@ namespace cs::features::light_limit_fix
 		std::scoped_lock lock(_mutex);
 		if (!_ready.load(std::memory_order_acquire))
 			return;
+		_wanted.push_back(&a_light);
 		const auto index = Find(&a_light);
 		if (index >= _slots.size())
 			return;
@@ -329,12 +332,8 @@ namespace cs::features::light_limit_fix
 	void LocalShadows::OnRendered(RE::BSShadowLight& a_light, engine::ShadowLightKind a_kind)
 	{
 		std::scoped_lock lock(_mutex);
-		if (!_ready.load(std::memory_order_acquire))
-			return;
-		// FO4: focus wrappers render orthographic frustums and are not local lights.
-		const auto* entries = a_light.shadowMapData;
-		if (a_kind == engine::ShadowLightKind::kFrustum && entries && a_light.shadowMapCount &&
-			entries[0].camera && entries[0].camera->viewFrustum.ortho)
+		// Only lights this frame's gather kept; focus wrappers never reach it.
+		if (!_ready.load(std::memory_order_acquire) || !std::ranges::contains(_wanted, &a_light))
 			return;
 		// A slot is taken only once the light's map provably exists.
 		auto index = Find(&a_light);
