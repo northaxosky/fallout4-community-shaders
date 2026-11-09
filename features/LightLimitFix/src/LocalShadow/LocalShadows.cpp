@@ -106,9 +106,7 @@ namespace cs::features::light_limit_fix
 		}
 
 		const std::uint32_t engineSize = properties.width;
-		const std::uint32_t cacheSize = a_config.resolution == 0 || a_config.resolution >= engineSize ?
-		                                    engineSize :
-		                                    std::max(a_config.resolution, kMinCacheSize);
+		const std::uint32_t cacheSize = std::clamp(a_config.resolution, std::min(kMinCacheSize, engineSize), engineSize);
 		DXGI_FORMAT format = DXGI_FORMAT_R32_FLOAT;
 		UINT support = 0;
 		if (properties.use16BitsDepth && SUCCEEDED(device->CheckFormatSupport(DXGI_FORMAT_R16_UNORM, &support)) &&

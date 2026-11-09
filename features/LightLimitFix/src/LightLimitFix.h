@@ -51,7 +51,7 @@ namespace cs::features
 		light_limit_fix::Settings _settings;
 		light_limit_fix::Settings _bootSettings;
 		std::atomic_bool _enableLocalShadows{ false };
-		std::atomic<std::uint32_t> _localShadowSlots{ 16 }, _localShadowResolution{ 0 }, _localShadowSamples{ 8 };
+		std::atomic<std::uint32_t> _localShadowSlots{ 16 }, _localShadowResolution{ 1024 }, _localShadowSamples{ 8 };
 		std::atomic<float> _localShadowFilterScale{ 1.0f };
 	};
 }

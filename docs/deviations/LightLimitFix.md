@@ -10,6 +10,7 @@
 | Forced | Spot lights not represented | Spot cones travel in an FO4 sidecar buffer at t34 beside the upstream light record | Skyrim has no spot lights |
 | Forced | Persistent local shadow cache copied from the engine's shadow atlas | Each light's map is resampled into its cache slice right after the engine renders it; a light is shadowed once its map was cached in an earlier frame | FO4 reuses one shadow depth array for every light inside a frame, and its maps are corner viewports of that array |
 | Forced | Local shadow matrix is the engine light transform | Spot clip matrix is rescaled to span its cache slice; hemisphere and omni matrices are used as published | The engine bakes the map's viewport scale and offset into the spot matrix |
+| Divergence | Local shadow cache resolution defaults to the engine shadow map size | Defaults to 1024; no engine option | FO4 maps are distance-scaled corners of one 4096 slice, so engine size would cost 512 MB and 0.13 ms per copy |
 | Divergence | Local shadow fades only by its fade-in | Also fades to zero toward the local shadow distance, like FO4's deferred shadow term | Native shadow-casting lights vanish at that distance |
 | Ext | Effect lights skip shadow casters | Effects sample local shadows like upstream particle and lighting lights; a shadowed spot drops the native cone, as the shadow carries the falloff | Upstream gives these casters no forward shadow path |
 | Forced | Room index from the owning node's ancestors | Room is the owning fade node's direct parent | Engine association rule |

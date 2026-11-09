@@ -56,8 +56,8 @@ Missing or wrong-type forms are logged and ignored. Changes require restart.
 `[features.LightLimitFix.settings] enable_local_shadows` (default `false`, applies live) lets
 shadow-casting lights light effects and water with their own shadow. Each light's map is copied into
 a cache slice after the engine renders it; a light is shadowed one frame after its first copy.
-`local_shadow_slots` (4-64, default 16) caps cached lights, `local_shadow_resolution` is `"engine"`,
-`"512"`, `"1024"` or `"2048"`, `local_shadow_samples` is `"1"`, `"4"` or `"8"`, and
+`local_shadow_slots` (4-64, default 16) caps cached lights, `local_shadow_resolution` is `"512"`,
+`"1024"` (default) or `"2048"`, `local_shadow_samples` is `"1"`, `"4"` or `"8"`, and
 `local_shadow_filter_scale` is 0.25-2. Shadow casters beyond the slot cap stay skipped.
 
 Intensity is the native animated dimmer times 4, times the derived scale.

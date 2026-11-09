@@ -655,7 +655,6 @@ namespace cs::features
 			changed |= field(&Settings::enableLocalShadows, { .label = "Enable Local Shadows" });
 			changed |= field(&Settings::localShadowSlots, { .label = "Shadow Cache Slots" });
 			static constexpr std::array kResolutions{
-				dmui::ChoiceOption<std::uint32_t>{ 0u, "engine", "Engine", true },
 				dmui::ChoiceOption<std::uint32_t>{ 512u, "512", "512", true },
 				dmui::ChoiceOption<std::uint32_t>{ 1024u, "1024", "1024", true },
 				dmui::ChoiceOption<std::uint32_t>{ 2048u, "2048", "2048", true }
