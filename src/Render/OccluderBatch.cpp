@@ -490,14 +490,11 @@ namespace cs::engine
 					return nullptr;
 			}
 
-			// The stock occlusion map's bias, clip and winding.
+			// Probes are volume points, so the map keeps true depth; no raster bias.
 			D3D11_RASTERIZER_DESC raster{};
 			raster.FillMode = D3D11_FILL_SOLID;
 			raster.CullMode = D3D11_CULL_BACK;
 			raster.FrontCounterClockwise = TRUE;
-			raster.DepthBias = 12;
-			raster.SlopeScaledDepthBias = 6.0f;
-			raster.DepthBiasClamp = -100.0f;
 			raster.DepthClipEnable = TRUE;
 			DX::ThrowIfFailed(device->CreateRasterizerState(&raster, resources->cullBack.put()));
 			raster.CullMode = D3D11_CULL_NONE;

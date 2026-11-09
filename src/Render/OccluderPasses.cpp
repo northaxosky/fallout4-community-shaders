@@ -2,6 +2,7 @@
 
 #include "Log.h"
 #include "Render/OccluderBatch.h"
+#include "Render/RendererContext.h"
 #include "Telemetry/Telemetry.h"
 
 #include <cstdint>
@@ -22,6 +23,7 @@ namespace cs::engine
 		constexpr std::uint8_t kGeometryType15 = 15;
 		constexpr std::uint8_t kTreeAnimPassType = 11;
 		constexpr std::uint8_t kVatsPassType = 21;
+		constexpr auto kNoDepthBias = static_cast<RE::BSGraphics::RasterStateDepthBiasMode>(0);
 
 		[[nodiscard]] std::optional<OccluderReject> RejectOccluder(
 			const RE::BSLightingShaderProperty& a_property,
@@ -178,6 +180,26 @@ namespace cs::engine
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		// FO4: the utility depth technique selects a raster bias that Skyrim's leaves off.
+		struct UtilityShader_SetupTechnique
+		{
+			static bool thunk(RE::BSUtilityShader* a_shader, std::uint32_t a_currentPass)
+			{
+				const bool result = func(a_shader, a_currentPass);
+				if (result && GetActiveCaptureOnWalkThread()) {
+					if (auto* context = GetActiveContext()) {
+						auto& state = context->shadowState;
+						if (state.rasterStateDepthBiasMode.get() != kNoDepthBias) {
+							state.rasterStateDepthBiasMode = kNoDepthBias;
+							state.stateUpdateFlags |= static_cast<std::uint32_t>(RE::BSGraphics::ShaderFlags::DIRTY_RASTERIZER_STATE);
+						}
+					}
+				}
+				return result;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
 	}
 
 	// The stock technique for the occlusion mode, from the same inputs.
@@ -214,6 +236,17 @@ namespace cs::engine
 		install.detail = std::format("stock builder {:#x}", LightingShaderProperty_OcclusionPasses::func.address());
 		if (!install.installed)
 			L->error("Hook {} unavailable: the stock builder did not resolve", install.name);
+		return install;
+	}
+
+	HookInstall InstallOccluderDepthBiasHook()
+	{
+		HookInstall install{ .name = "BSUtilityShader::SetupTechnique" };
+		stl::detour_thunk<UtilityShader_SetupTechnique>(RE::ID::BSUtilityShader::SetupTechnique);
+		install.installed = UtilityShader_SetupTechnique::func.address() != 0;
+		install.detail = std::format("stock setup {:#x}", UtilityShader_SetupTechnique::func.address());
+		if (!install.installed)
+			L->error("Hook {} unavailable: the detour did not attach", install.name);
 		return install;
 	}
 }

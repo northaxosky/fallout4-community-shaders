@@ -295,6 +295,7 @@ namespace cs::engine
 		std::vector<HookInstall> installs;
 		installs.push_back(InstallCallSiteHook(kProjectionSetViewFrustum, &stl::write_thunk_call<SetViewFrustum_Hook>));
 		installs.push_back(InstallOccluderPassHook());
+		installs.push_back(InstallOccluderDepthBiasHook());
 		installs.push_back(InstallOccluderGatherHook());
 		return installs;
 	}
