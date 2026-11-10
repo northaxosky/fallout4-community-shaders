@@ -28,14 +28,14 @@ namespace cs::compat
 			Rule{ "Frame Generation", { Source::kF4SEPlugin, "AAAFrameGeneration" }, kDeviceCreation,
 				"Turned off HDR Display, Upscaling, Frame Generation and RenderDoc to avoid conflicting with the standalone Frame Generation mod. Remove that mod to use them." },
 			// It patches stock shader bytecode, so no CS shader replacement can coexist.
-			Rule{ "Cloud Shadows (1001Bits)", { Source::kF4SEPlugin, "FO4CloudShadows" }, {},
+			Rule{ "Cloud Shadows (Asciim0v)", { Source::kF4SEPlugin, "FO4CloudShadows" }, {},
 				"Turned off all features because the standalone Cloud Shadows mod is not supported. Remove it to use them." },
 			Rule{ "Isotope", { Source::kF4SEPlugin, "FO4Isotope" }, kDeviceCreation,
 				"Turned off HDR Display, Upscaling, Frame Generation and RenderDoc to avoid conflicting with Isotope. Remove Isotope to use them." },
 			Rule{ "RenoDX", { Source::kGameFile, "renodx-fallout4.addon64" }, kHdrDisplay,
 				"Turned off HDR Display to avoid conflicting with RenoDX's HDR. Remove RenoDX to use it." },
 			Rule{ "ENB", { Source::kENB }, {},
-				"Turned off all features because ENB is not supported. Remove it to use them." },
+				"ENB detected. All features are off and your execution has been scheduled. Remove ENB to use them." },
 		};
 	}
 

@@ -120,7 +120,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 
 ## Compatibility notes
 
-- ENB and standalone Cloud Shadows (1001Bits) are unsupported.
+- ENB and standalone Cloud Shadows (Asciim0v) are unsupported.
 - Conflicting mods turn off the CS features they overlap; Home > Compatibility lists them.
 - Native HDR mods (RenoDX, Special K HDR) are unsupported with Upscaling or Frame Generation and untested otherwise.
 - Linux/Proton needs a Windows 10 `d3dcompiler_47.dll` in the prefix's `system32` or next to `Fallout4.exe`; Proton's built-in compiler cannot build the shaders.
