@@ -35,9 +35,9 @@
 		}
 		@{
 			Name        = 'AgilitySDK'
-			Version     = '1.616.1'
-			Url         = 'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/1.616.1/microsoft.direct3d.d3d12.1.616.1.nupkg'
-			Sha256      = '3d8f4af714947c8b64b5656f48deb08661d6a5f743d97c63766065bd633ad52e'
+			Version     = '1.620.2'
+			Url         = 'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/1.620.2/microsoft.direct3d.d3d12.1.620.2.nupkg'
+			Sha256      = '70489669c2bbeaf318b62d72b0ac3e753d521387bfc848c9763791c4e920bfcc'
 			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline/D3D12'
 			Files       = @(
 				'build/native/bin/x64/D3D12Core.dll'

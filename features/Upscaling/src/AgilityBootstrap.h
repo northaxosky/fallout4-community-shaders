@@ -10,7 +10,7 @@
 
 namespace cs::features
 {
-	inline constexpr UINT kPrivateD3D12SdkVersion = 616;
+	inline constexpr UINT kPrivateD3D12SdkVersion = 620;
 
 	enum class AgilityBootstrapStatus : std::uint8_t
 	{
