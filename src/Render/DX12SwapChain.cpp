@@ -699,9 +699,6 @@ namespace cs::render
 		}
 		if (SUCCEEDED(result) && swapChain) {
 			_swapChain = std::move(swapChain);
-			if (!a_desc.Windowed) {
-				result = _swapChain->SetFullscreenState(TRUE, nullptr);
-			}
 		}
 		if (SUCCEEDED(result) && _swapChain) {
 			_frameIndex = _swapChain->GetCurrentBackBufferIndex();
@@ -1135,7 +1132,6 @@ namespace cs::render
 		auto creationDesc = _creationDesc;
 		creationDesc.BufferDesc.Width = _innerDesc.Width;
 		creationDesc.BufferDesc.Height = _innerDesc.Height;
-		creationDesc.Windowed = _proxyDesc.Windowed;
 		const auto outwardDesc = _proxyDesc;
 		_provider = a_provider;
 		_providerPresentationActive = false;
@@ -1198,7 +1194,6 @@ namespace cs::render
 		NotifyPresentationBinding(_swapChain.get());
 		_creationDesc.BufferDesc.Width = _innerDesc.Width;
 		_creationDesc.BufferDesc.Height = _innerDesc.Height;
-		_creationDesc.Windowed = _proxyDesc.Windowed;
 		ClearSharedBuffers();
 		return {
 			.code = render::temporal::ProviderResultCode::kSuccess
@@ -2433,18 +2428,14 @@ namespace cs::render
 	}
 
 	HRESULT DX12SwapChain::SetFullscreenState(BOOL a_fullscreen,
-		IDXGIOutput* a_target) noexcept
+		IDXGIOutput*) noexcept
 	{
 		if (!_swapChain) {
 			return DXGI_ERROR_INVALID_CALL;
 		}
-		const HRESULT result =
-			_swapChain->SetFullscreenState(a_fullscreen, a_target);
-		if (SUCCEEDED(result)) {
-			_proxyDesc.Windowed = !a_fullscreen;
-			_creationDesc.Windowed = !a_fullscreen;
-		}
-		return result;
+		// Exclusive is unsupported; Renderer::Begin retries until it reads it back.
+		_proxyDesc.Windowed = !a_fullscreen;
+		return S_OK;
 	}
 
 	HRESULT DX12SwapChain::GetFullscreenState(BOOL* a_fullscreen,
@@ -2456,20 +2447,14 @@ namespace cs::render
 			}
 			return E_POINTER;
 		}
-		if (!_swapChain) {
-			*a_fullscreen = !_proxyDesc.Windowed;
-			if (a_target) {
+		*a_fullscreen = !_proxyDesc.Windowed;
+		if (a_target) {
+			*a_target = nullptr;
+			if (*a_fullscreen && FAILED(GetContainingOutput(a_target))) {
 				*a_target = nullptr;
 			}
-			return S_OK;
 		}
-		const HRESULT result =
-			_swapChain->GetFullscreenState(a_fullscreen, a_target);
-		if (SUCCEEDED(result)) {
-			_proxyDesc.Windowed = !*a_fullscreen;
-			_creationDesc.Windowed = !*a_fullscreen;
-		}
-		return result;
+		return S_OK;
 	}
 
 	HRESULT DX12SwapChain::GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept
