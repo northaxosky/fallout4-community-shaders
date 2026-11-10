@@ -539,7 +539,15 @@ namespace cs::host
 
 				if (!a_feature.IsActive()) {
 					return ui::DrawRow(_client, "inactive-feature", "Availability", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool {
-			if (a_feature.IsInstalled()) {
+			if (!state.detail.empty()) {
+				if (!dmui::DrawStyledText(
+						_client,
+						state.detail,
+						{ .tone = dmui::TextTone::kStatusWarning })) {
+					LogFailure("draw feature availability detail");
+					return false;
+				}
+			} else if (a_feature.IsInstalled()) {
 				if (loadAtBoot) {
 					if (!dmui::DrawStyledText(
 							_client,

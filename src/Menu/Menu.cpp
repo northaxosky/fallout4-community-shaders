@@ -1,6 +1,7 @@
 #include "Menu/Menu.h"
 
 #include "BuildIdentity.h"
+#include "Compat/Compat.h"
 #include "Feature.h"
 #include "Host/HostClient.h"
 #include "Log.h"
@@ -457,6 +458,7 @@ namespace cs
 			"Use Enabled on each loaded feature's page to toggle its effect live.");
 
 		DrawWhatsNew(a_client);
+		DrawCompatibility(a_client);
 		DrawFeatureOverview(a_client);
 		DrawLinks(a_client);
 		DrawFaq(a_client);
@@ -507,6 +509,31 @@ namespace cs
 			a_client,
 			a_client.DrawFaq("community-shaders-faq", faq),
 			"draw FAQ");
+	}
+
+	void Menu::DrawCompatibility(dmui::Client& a_client)
+	{
+		const auto findings = compat::Findings();
+		if (findings.empty())
+			return;
+		const ui::Section section{ "home-compatibility", "Compatibility" };
+		if (!section)
+			return;
+		(void)CheckHostResult(a_client, ui::DrawTable(a_client, "home-compatibility-table", [&] {
+			for (const auto& [index, finding] : std::views::enumerate(findings)) {
+				const auto id = std::format("compat-{}", index);
+				const auto label = std::string(finding.rule.mod);
+				if (!ui::DrawRow(a_client, id.c_str(), label.c_str(), finding.source.c_str(), [&](auto&) {
+						return CheckHostResult(
+							a_client,
+							dmui::DrawStyledText(a_client, finding.rule.reason, { .wrapped = true }),
+							"draw compatibility detail");
+					}))
+					return false;
+			}
+			return true;
+		}),
+			"draw compatibility table");
 	}
 
 	void Menu::DrawFeatureOverview(dmui::Client& a_client)

@@ -95,6 +95,7 @@ namespace cs
 
 		void SetDebugViewSelection(const Feature& a_feature, std::string_view a_view);
 		void DrawWhatsNew(dmui::Client& a_client);
+		void DrawCompatibility(dmui::Client& a_client);
 		void DrawFeatureOverview(dmui::Client& a_client);
 		void DrawLinks(dmui::Client& a_client);
 		void DrawFaq(dmui::Client& a_client);
