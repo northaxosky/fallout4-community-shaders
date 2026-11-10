@@ -13,7 +13,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 [![Version](https://img.shields.io/github/v/release/northaxosky/fallout4-community-shaders?include_prereleases&sort=semver&display_name=tag&style=for-the-badge&label=version)](https://github.com/northaxosky/fallout4-community-shaders/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 
-[![Fallout 4](https://img.shields.io/badge/Fallout%204-1.11.240-3a7d44?style=for-the-badge)](https://www.nexusmods.com/fallout4)
+[![Fallout 4](https://img.shields.io/badge/Fallout%204-OG%20%7C%20NG%20%7C%20AE-3a7d44?style=for-the-badge)](https://www.nexusmods.com/fallout4)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](xmake.lua)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
@@ -30,7 +30,7 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 
 | | |
 |---|---|
-| **Game** | Fallout 4 runtime **1.11.240**. OG **1.10.163** and NG **1.10.984** are supported but untested. |
+| **Game** | Fallout 4 **1.11.240** (AE), **1.10.984** (NG) or **1.10.163** (OG). |
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
