@@ -75,7 +75,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Motion Vector Fixes** | Motion-data corrections for temporal rendering. |
 | **Upscaling** | TAA, FSR 3/4, and DLSS. |
 | **Frame Generation** | FSR 3/4, DLSS, and supported Multi Frame Generation modes. |
-| **HDR Display** | HDR10 output with configurable paper white and peak brightness; needs borderless windowed mode and is inactive while Isotope or RenoDX is installed. |
+| **HDR Display** | HDR10 output with configurable paper white and peak brightness; needs borderless windowed mode. |
 | **Performance Overlay** | FPS, frame-time, and latency graphs, plus per-feature GPU timings. |
 | **CS Editor** | Weather picker, weather lock, time controls, and per-weather feature overrides. |
 | **RenderDoc** | In-game frame capture for debugging. |
@@ -121,7 +121,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 ## Compatibility notes
 
 - ENB is unsupported.
-- The standalone Motion Vector Fixes (`MotionVectorFixes.dll`), Dynamic Cubemaps F4 (`DynamicCubemapF4.dll`) and doodlum's Upscaling (`Upscaling.dll`, plugin version below 1.2) plugins are incompatible; CS includes all three, so remove them. While any is in `Data\F4SE\Plugins`, CS disables all hooks and features and shows a message at launch. jarari's Upscaling Custom is unaffected.
+- Conflicting mods turn off the CS features they overlap; Home > Compatibility lists them.
 - Native HDR mods (RenoDX, Special K HDR) are unsupported with Upscaling or Frame Generation and untested otherwise.
 - Linux/Proton needs a Windows 10 `d3dcompiler_47.dll` in the prefix's `system32` or next to `Fallout4.exe`; Proton's built-in compiler cannot build the shaders.
 - Upscaling requires a DX12-capable GPU. DLSS requires compatible NVIDIA RTX hardware.

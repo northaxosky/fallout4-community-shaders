@@ -13,4 +13,3 @@
 | Pending | Sun scaling, Bink video white, AutoHDR | Omitted | Their consumers are not ported |
 | Divergence | HDR is detected on the swap chain's containing output | Detected on the monitor of the game window | The proxy chain exposes no containing output |
 | Divergence | Exclusive fullscreen only warns | Native presentation stays and HDR is inactive | The D3D12 proxy presents black in exclusive fullscreen |
-| Divergence | No conflict detection | Isotope or RenoDX installed deactivates the feature with a menu reason; the rest of CS runs | Both own HDR output |
