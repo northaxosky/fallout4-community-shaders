@@ -1,6 +1,6 @@
 #include "Feature.h"
 
-#include "Env.h"
+#include "Compat/Compat.h"
 #include "Log.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -459,13 +459,11 @@ namespace cs
 				feature->_enabled.store(enabled, std::memory_order_release);
 				feature->ComposeEnabledLiveSettings();
 
-				const bool deactivatedForEnb = cs::env::IsENBLoaded();
-				const auto modConflict = cs::env::FeatureConflict(key);
-				const bool desiredActive = activation.valid && activation.load && !deactivatedForEnb && !modConflict;
+				const auto* deactivation = compat::Find(key);
+				const bool desiredActive = activation.valid && activation.load && !deactivation;
 				feature->SetState({ .desiredActive = desiredActive,
 					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-					.detail = deactivatedForEnb ? "ENB is loaded; this feature is inactive." : modConflict ? std::string(*modConflict) :
-				                                                                                             std::string{} });
+					.detail = deactivation ? std::string(deactivation->rule.reason) : std::string{} });
 			} catch (const std::exception& e) {
 				failConfiguration(feature, e.what());
 			} catch (...) {
@@ -511,7 +509,7 @@ namespace cs
 				continue;
 			}
 			if (state.runtimeState == FeatureRuntimeState::kInactive) {
-				L->info("Feature {} inactive per TOML configuration; skipping", feature->GetName());
+				L->info("Feature {} inactive; skipping{}", feature->GetName(), state.detail.empty() ? "" : ": " + state.detail);
 				continue;
 			}
 			const bool wasActive = state.runtimeState == FeatureRuntimeState::kActive;

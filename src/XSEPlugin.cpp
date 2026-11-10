@@ -1,5 +1,5 @@
 #include "BuildIdentity.h"
-#include "Env.h"
+#include "Compat/Compat.h"
 #include "Feature.h"
 #include "Host/HostClient.h"
 #include "Log.h"
@@ -48,12 +48,6 @@ extern "C" DLLEXPORT constinit auto F4SEPlugin_Version = []() noexcept {
 
 	return data;
 }();
-
-static void OnBlockedMessage(F4SE::MessagingInterface::Message* a_msg)
-{
-	if (a_msg->type == F4SE::MessagingInterface::kGameDataReady)
-		cs::env::ShowBlockingErrors();
-}
 
 static void OnMessage(F4SE::MessagingInterface::Message* a_msg)
 {
@@ -108,18 +102,11 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 		REX::FModule::IsRuntimeOG() ? cs::engine::GameRuntime::kOG :
 		REX::FModule::IsRuntimeNG() ? cs::engine::GameRuntime::kNG :
 									  cs::engine::GameRuntime::kAE);
-	cs::env::DetectENB();
-	cs::env::DetectPluginConflicts();
+	cs::compat::Detect();
 
 	L->info("FO4CommunityShaders v{}.{}.{} loaded (build {}, commit {})",
 		Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2],
 		CS_BUILD_DESCRIBE, CS_BUILD_GIT_SHA);
-
-	if (cs::env::IsBlocked()) {
-		// Returning true keeps F4SE from reporting a failed plugin.
-		F4SE::GetMessagingInterface()->RegisterListener(OnBlockedMessage);
-		return true;
-	}
 
 	cs::engine::InstallShaderSubclassHooks();
 	cs::engine::InstallShaderCompileLoadGate();
