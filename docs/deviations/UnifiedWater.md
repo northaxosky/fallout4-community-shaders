@@ -9,7 +9,7 @@
 | Forced | Per-child `SetAppCulled` for loaded cells | Segmented siblings keep native masking; tiles are culled per cell and while no exterior is loaded | FO4 masks loaded cells by segment and dereferences segment data unchecked; it ignores the root cull bit for registered LOD water |
 | Forced | Interior hide relies on cull bits | Tiles are unregistered and re-registered through `BGSTerrainChunk::AttachWater` | Interiors without Has-Water never run the water update that refreshes cull bits |
 | Forced | One shape per square | Squares of one form and height in a LOD8, LOD16 or LOD32 chunk share one shape with the same quads | Every FO4 tile is its own water draw in every water pass; LOD4 stays per cell for loaded-cell hiding |
-| Forced | Cache workers read plugin records | Records are read sequentially at DataLoaded, only when regenerating; one walk per plugin indexes its CELL offsets; the settings button schedules regeneration for the next launch | FO4 file cursors are unsynchronized; `FindCellInFile` rewalks groups per cell |
+| Forced | Cache workers read plugin records | Records are read sequentially at DataLoaded, only when regenerating; one walk per plugin indexes its CELL offsets | FO4 file cursors are unsynchronized; `FindCellInFile` rewalks groups per cell |
 | Forced | Sky-cell cleanup and map-menu exception | Exterior state cleared in `ReleaseLowResMaxHeightData` | The Pip-Boy map renders no exterior LOD |
 | Forced | Material identity folds noise texture names into the CRC | Done at FO4's `TESWaterForm::UpdateWaterMaterial` over three noise textures | FO4 material fill path differs |
 | Forced | Cubemap reflection flag on tiles | Tiles keep native reflection flags | FO4 water has no cubemap technique |

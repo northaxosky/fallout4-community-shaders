@@ -9,4 +9,3 @@
 | Divergence | Landscape texture eligibility: `landscape/<file>` with no subfolder | `landscape/<folder>/...` for `rocks`, `dlc06rocks`, `ground`, `trees`, `dirtcliffs`, excluding `rockriverstones*`; roads, piers, `stonewall*`, grass, plants, glowingseaash, rrtracks, sinkhole excluded | FO4 stores every terrain texture one folder deep; excluded sets tile poorly |
 | Forced | Variation on instanced terrain | Not applied | The engine never binds it |
 | Pending | Stochastic RMAOS for `TRUE_PBR` landscape and meshes | No TruePBR consumer yet | |
-| Pending | Residual seams in admitted textures | Mild cases remain (`rockslab02`, `driedgrass01`, some mud/silt specs, `dirtclifferoded`) | |

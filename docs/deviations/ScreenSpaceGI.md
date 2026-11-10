@@ -9,7 +9,7 @@
 | Forced | Skyrim SSAO generation toggle | Native SAO_CS active/applied bits are controlled per frame | Native DrawModel and the console rewrite them |
 | Forced | `Masks2.x` vertex AO | `1 - vertexAO` in emissive logical 31.a, shared with Skylighting; blended hair, landscape, skin tint and eye permutations write 0, so vertex AO is 1 there | No separate vertex-AO channel exists |
 | Forced | History persists across render-size changes | History resets when the working size changes | FO4 dynamic resolution keeps targets at allocation size |
-| Divergence | Fog gray is the shaded main color | Unblended 2D fog (no `COMPOSITE_SCENE_BLEND`) skips `ComposeDiffuse`; its desaturation luminance is the native diffuse | Output is fog color and alpha, so SSGI only shifted the gray term for about 0.17 ms |
+| Divergence | Fog gray is the shaded main color | Unblended 2D fog (no `COMPOSITE_SCENE_BLEND`) skips `ComposeDiffuse`; its desaturation luminance is the native diffuse | Output is fog color and alpha, so composing only shifted its gray term |
 | Divergence | AOPower default 1, range 0-6 | Default 4, range 0-12 | Calibrated for interiors dominated by placed lights |
 | Pending | Specular consumers beyond native cube SH/HQ | Other specular provider families need adapters | |
 
