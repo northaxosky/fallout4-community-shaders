@@ -71,21 +71,25 @@ namespace cs::util
 		return name;
 	}
 
+	std::optional<std::string> ForeignModuleName(std::uintptr_t a_address)
+	{
+		static const auto game = GetModuleHandleW(nullptr);
+		static const auto self = ModuleFromAddress(reinterpret_cast<const void*>(&ForeignModuleName));
+		const auto module = ModuleFromAddress(reinterpret_cast<const void*>(a_address));
+		if (!module || module == game || module == self)
+			return std::nullopt;
+		return ModuleFileName(module);
+	}
+
 	// Trampolines often sit in allocated memory outside any module.
 	std::optional<std::string> ForeignOwner(std::uintptr_t a_address)
 	{
-		static const auto game = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-		static const auto self = reinterpret_cast<std::uintptr_t>(ModuleFromAddress(reinterpret_cast<const void*>(&ForeignOwner)));
-
 		auto destination = JumpDestination(a_address);
 		if (!destination)
 			return std::nullopt;
 		for (int hop = 0; hop < kMaxForeignHops; ++hop) {
-			const auto module = reinterpret_cast<std::uintptr_t>(ModuleFromAddress(reinterpret_cast<const void*>(*destination)));
-			if (module == game || module == self)
-				return std::nullopt;
-			if (module != 0)
-				return ModuleFileName(reinterpret_cast<HMODULE>(module));
+			if (ModuleFromAddress(reinterpret_cast<const void*>(*destination)))
+				return ForeignModuleName(*destination);
 			const auto next = JumpDestination(*destination);
 			if (!next)
 				break;

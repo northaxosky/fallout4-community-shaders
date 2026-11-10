@@ -1416,9 +1416,11 @@ namespace cs::render
 					effective.frameGeneration != temporal::FrameGenerationMethod::kOff;
 			}
 		}
-		if (!admitted) {
+		// A wrapping plugin retried creation; the first device keeps the session.
+		if (!admitted && (request.upscalingEligible || request.frameGenerationEligible || request.hdrDisplay)) {
 			PostFailure(temporal::FailureDomain::kConfiguration,
-				"The temporal session topology was published more than once.");
+				"The D3D11 device was created again; Upscaling, Frame Generation and HDR Display stay bound to "
+				"the first device. Disable them while another plugin owns device creation.");
 		}
 		if (admitted && !temporalProxyPath) {
 			_impl->creationState.store(TemporalCreationState::kNative,

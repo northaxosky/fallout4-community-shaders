@@ -35,8 +35,7 @@ namespace cs::render
 		ReplacementCreateDeviceCallback replacementCreateCallback;
 		// Exactly one trigger bootstraps D3D11; decided once at install time.
 		std::atomic<bool> bootstrapFromEngineSite{ false };
-		// Temporal post-create admits once; a wrapper's retry leaves it stale.
-		std::atomic<std::uint32_t> createdThroughThunk{ 0 };
+		std::atomic<bool> createdThroughThunk{ false };
 
 		// IAT wrappers above CS may retry; only this site sees the final device.
 		constexpr engine::CallSiteAnchor kEngineCreateDeviceCall{
@@ -128,14 +127,11 @@ namespace cs::render
 
 			const HRESULT result = replacementResult ? *replacementResult : next(a_adapter, a_driverType, a_software, a_flags, kNativeFeatureLevels, static_cast<UINT>(std::size(kNativeFeatureLevels)), a_sdkVersion, hasDesc ? &swapChainDesc : nullptr, a_swapChain, a_device, a_featureLevel, a_immediateContext);
 
-			if (SUCCEEDED(result) && createdThroughThunk.fetch_add(1, std::memory_order_acq_rel) > 0) {
-				L->warn(
-					"D3D11 device created again through the import hook by {}; Upscaling, Frame Generation and "
-					"HDR Display stay bound to the first device. Disable them while that plugin owns creation.",
-					cs::util::ModuleFileName(cs::util::ModuleFromAddress(_ReturnAddress())));
-			}
-
 			if (SUCCEEDED(result)) {
+				if (createdThroughThunk.exchange(true, std::memory_order_acq_rel)) {
+					const auto caller = cs::util::ForeignModuleName(reinterpret_cast<std::uintptr_t>(_ReturnAddress()));
+					L->warn("D3D11 device created again through the import hook{}", caller ? " by " + *caller : std::string{});
+				}
 				// Callbacks run before the bootstrap so an interface upgrade is visible to it.
 				for (auto& callback : postCreateCallbacks) {
 					RunGuarded("post-create", [&] { callback(a_adapter, a_device, a_swapChain); });
