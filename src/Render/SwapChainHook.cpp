@@ -3,13 +3,17 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <intrin.h>
 #include <mutex>
+#include <span>
 #include <utility>
 #include <vector>
 
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/D3D11Bootstrap.h"
+#include "Render/EngineCallSite.h"
+#include "Utils/HookOwner.h"
 
 namespace cs::render
 {
@@ -29,6 +33,18 @@ namespace cs::render
 		std::vector<PreCreateDeviceCallback> preCreateCallbacks;
 		std::vector<PostCreateDeviceCallback> postCreateCallbacks;
 		ReplacementCreateDeviceCallback replacementCreateCallback;
+		// Exactly one trigger bootstraps D3D11; decided once at install time.
+		std::atomic<bool> bootstrapFromEngineSite{ false };
+		// Temporal post-create admits once; a wrapper's retry leaves it stale.
+		std::atomic<std::uint32_t> createdThroughThunk{ 0 };
+
+		// IAT wrappers above CS may retry; only this site sees the final device.
+		constexpr engine::CallSiteAnchor kEngineCreateDeviceCall{
+			.name = "BSGraphics::CreateD3DAndSwapChain -> D3D11CreateDeviceAndSwapChain",
+			.function = RE::ID::BSGraphics::CreateD3DAndSwapChain,
+			.offset = { 0x419, 0x411, 0x410 },
+			.target = RE::ID::BSGraphics::D3D11CreateDeviceAndSwapChainImportStub
+		};
 
 		// FO4: no static d3d11 import; bind by name like upstream's import would.
 		template <class Fn>
@@ -112,6 +128,13 @@ namespace cs::render
 
 			const HRESULT result = replacementResult ? *replacementResult : next(a_adapter, a_driverType, a_software, a_flags, kNativeFeatureLevels, static_cast<UINT>(std::size(kNativeFeatureLevels)), a_sdkVersion, hasDesc ? &swapChainDesc : nullptr, a_swapChain, a_device, a_featureLevel, a_immediateContext);
 
+			if (SUCCEEDED(result) && createdThroughThunk.fetch_add(1, std::memory_order_acq_rel) > 0) {
+				L->warn(
+					"D3D11 device created again through the import hook by {}; Upscaling, Frame Generation and "
+					"HDR Display stay bound to the first device. Disable them while that plugin owns creation.",
+					cs::util::ModuleFileName(cs::util::ModuleFromAddress(_ReturnAddress())));
+			}
+
 			if (SUCCEEDED(result)) {
 				// Callbacks run before the bootstrap so an interface upgrade is visible to it.
 				for (auto& callback : postCreateCallbacks) {
@@ -119,15 +142,57 @@ namespace cs::render
 				}
 			}
 
-			cs::d3d11::RunBootstrapPostCreate(
-				result,
-				a_adapter,
-				hasDesc ? &swapChainDesc : nullptr,
-				a_swapChain,
-				a_device,
-				a_immediateContext);
+			if (!bootstrapFromEngineSite.load(std::memory_order_acquire)) {
+				cs::d3d11::RunBootstrapPostCreate(
+					result,
+					a_adapter,
+					hasDesc ? &swapChainDesc : nullptr,
+					a_swapChain,
+					a_device,
+					a_immediateContext);
+			}
 
 			return result;
+		}
+
+		struct EngineCreateDeviceAndSwapChain
+		{
+			static HRESULT WINAPI thunk(
+				IDXGIAdapter* a_adapter,
+				D3D_DRIVER_TYPE a_driverType,
+				HMODULE a_software,
+				UINT a_flags,
+				const D3D_FEATURE_LEVEL* a_featureLevels,
+				UINT a_featureLevelCount,
+				UINT a_sdkVersion,
+				const DXGI_SWAP_CHAIN_DESC* a_swapChainDesc,
+				IDXGISwapChain** a_swapChain,
+				ID3D11Device** a_device,
+				D3D_FEATURE_LEVEL* a_featureLevel,
+				ID3D11DeviceContext** a_immediateContext)
+			{
+				const HRESULT result = func(
+					a_adapter, a_driverType, a_software, a_flags, a_featureLevels, a_featureLevelCount,
+					a_sdkVersion, a_swapChainDesc, a_swapChain, a_device, a_featureLevel, a_immediateContext);
+				CS_LOG_ONCE(L, spdlog::level::info, "SwapChainHook engine call site bootstrapping D3D11");
+				cs::d3d11::RunBootstrapPostCreate(
+					result, a_adapter, a_swapChainDesc, a_swapChain, a_device, a_immediateContext);
+				return result;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		void InstallEngineBootstrapSite()
+		{
+			if (const auto installed = engine::InstallCallSites<EngineCreateDeviceAndSwapChain>(
+					std::span(&kEngineCreateDeviceCall, 1));
+				!installed) {
+				L->error("SwapChainHook engine call site unavailable, bootstrapping from the IAT thunk: {}",
+					installed.error());
+				return;
+			}
+			bootstrapFromEngineSite.store(true, std::memory_order_release);
+			L->info("SwapChainHook engine call site installed at '{}'", kEngineCreateDeviceCall.name);
 		}
 	}
 
@@ -208,6 +273,7 @@ namespace cs::render
 		nextCreateDevice.store(ResolveD3D11Export<CreateDevice>("D3D11CreateDevice"),
 			std::memory_order_release);
 		installState.store(SwapChainHookState::kInstalled, std::memory_order_release);
+		InstallEngineBootstrapSite();
 		L->info("SwapChainHook IAT hook installed (next={:#x})", previous);
 		return true;
 	}
