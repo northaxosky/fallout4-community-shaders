@@ -107,7 +107,7 @@ body:
     attributes:
       label: Checks
       options:
-        - label: I am running Fallout 4 1.11.240 with the required F4SE and Address Library.
+        - label: I am running Fallout 4 1.11.240, 1.10.984 or 1.10.163 with the matching F4SE and Address Library.
           required: true
         - label: ENB is not installed.
           required: true
