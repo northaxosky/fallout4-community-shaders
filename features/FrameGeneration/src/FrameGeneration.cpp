@@ -26,6 +26,20 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.framegeneration");
 
+		const char* AvailabilityName(
+			render::temporal::CapabilityAvailability a_availability) noexcept
+		{
+			switch (a_availability) {
+			case render::temporal::CapabilityAvailability::kUnsupported:
+				return "unsupported";
+			case render::temporal::CapabilityAvailability::kSupported:
+				return "supported";
+			case render::temporal::CapabilityAvailability::kUnknown:
+				break;
+			}
+			return "unknown";
+		}
+
 		std::string_view TransferName(render::temporal::TransferFunction a_transfer) noexcept
 		{
 			return a_transfer == render::temporal::TransferFunction::kPQ ? "pq" : "gamma_2_2";
@@ -719,9 +733,8 @@ namespace cs::features
 					diagnostics.generatedFrames));
 		}
 		dmui::ui::TextDisabled(
-			"DLSS capability: %u | current: %s | max generation: %ux | dynamic: %s | status: %u",
-			static_cast<unsigned>(
-				dlssCapabilities.availability),
+			"DLSS-G: %s | current: %s | max generation: %ux | dynamic: %s | status: %u",
+			AvailabilityName(dlssCapabilities.availability),
 			dlssCapabilities.IsCurrent() ? "yes" : "no",
 			dlssCapabilities.maxGeneratedFrames ? dlssCapabilities.maxGeneratedFrames + 1 : 0,
 			dlssCapabilities.dynamicModeSupported ? "yes" : "no",
