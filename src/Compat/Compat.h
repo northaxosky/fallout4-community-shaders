@@ -4,6 +4,8 @@
 #include <string>
 #include <string_view>
 
+#include "REL/Version.h"
+
 namespace cs::compat
 {
 	enum class Source
@@ -27,6 +29,8 @@ namespace cs::compat
 		std::span<const std::string_view> features;
 		// Shown to users as is.
 		std::string_view reason;
+		// When set and true for the plugin's version, the detected mod runs in a mode the rule does not apply to.
+		bool (*exempt)(const REL::Version& a_version) = nullptr;
 	};
 
 	struct Finding
