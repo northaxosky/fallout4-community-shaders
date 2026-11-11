@@ -68,3 +68,13 @@ namespace cs::features
 		std::atomic_bool _windowsHdrOn{ false };
 	};
 }
+
+// HDR output state for a plugin that renders the scene this presenter encodes.
+// Plain C layout: other plugins mirror it and call CS_GetHdrOutputState by name.
+struct CS_HdrOutputState
+{
+	std::uint32_t size;       // sizeof(CS_HdrOutputState), set by the caller
+	std::uint32_t hdrActive;  // 1 while the frame renders HDR: setting on and container presenting
+	float paperWhiteNits;
+	float peakNits;
+};

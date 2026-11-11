@@ -245,3 +245,16 @@ namespace cs::features
 		static AutoRegister _autoRegister;
 	}
 }
+
+// Valid once device creation returns; callable every frame from the render thread.
+extern "C" DLLEXPORT bool CS_GetHdrOutputState(CS_HdrOutputState* a_state) noexcept
+{
+	if (!a_state || a_state->size < sizeof(CS_HdrOutputState))
+		return false;
+	const auto* hdr = cs::features::HDRDisplay::GetSingleton();
+	const auto settings = hdr->GetOutputSettings();
+	a_state->hdrActive = hdr->IsHdrActive() ? 1u : 0u;
+	a_state->paperWhiteNits = settings.paperWhite;
+	a_state->peakNits = settings.peakNits;
+	return true;
+}
