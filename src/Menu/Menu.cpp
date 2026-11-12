@@ -46,7 +46,7 @@ namespace
 		const auto saved = cs::feature_config::UpdateTopLevelSection(
 			"shader_ownership", toml::table{ { "enable_shaders", a_config.enableShaders }, { "targets", std::move(targets) } });
 		if (saved)
-			cs::engine::ApplyShaderOwnershipConfig(a_config);
+			cs::FeatureManager::Get().ApplyShaderOwnership(a_config);
 		else
 			L->warn("Failed to save shader ownership: {}", saved.error);
 	}

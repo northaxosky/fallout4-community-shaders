@@ -537,6 +537,15 @@ namespace cs::host
 				return true; });
 				}
 
+				if (state.runtimeState == FeatureRuntimeState::kActive && !state.detail.empty() &&
+					!ui::DrawRow(_client, "feature-note", "Status", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool {
+						if (!dmui::DrawStyledText(_client, state.detail, { .wrapped = true })) {
+							LogFailure("draw feature note");
+							return false;
+						}
+						return true; }))
+					return false;
+
 				if (!a_feature.IsActive()) {
 					return ui::DrawRow(_client, "inactive-feature", "Availability", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool {
 			if (!state.detail.empty()) {

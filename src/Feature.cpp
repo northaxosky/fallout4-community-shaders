@@ -612,6 +612,7 @@ namespace cs
 	bool ShaderInjectionFeature::ValidateShaderInjections(std::string& a_error)
 	{
 		_injectionsOperational.store(false, std::memory_order_release);
+		_injectionsValidated.store(false, std::memory_order_release);
 		const bool valid = [&] {
 			if (!_registrationsReady.load(std::memory_order_acquire)) {
 				a_error = GetRegistrationFailureMessage();
@@ -625,8 +626,18 @@ namespace cs
 			std::scoped_lock lock(_injectionErrorMutex);
 			_injectionError = valid ? std::string{} : a_error;
 		}
-		_injectionsOperational.store(valid, std::memory_order_release);
+		// Operational is derived from ownership by RefreshShaderOwnership.
+		_injectionsValidated.store(valid, std::memory_order_release);
 		return valid;
+	}
+
+	std::vector<engine::ShaderInjectionTarget> ShaderInjectionFeature::RefreshShaderOwnership()
+	{
+		auto unowned = engine::GetUnownedShaderTargets(GetName());
+		_injectionsOperational.store(
+			_injectionsValidated.load(std::memory_order_acquire) && unowned.empty(),
+			std::memory_order_release);
+		return unowned;
 	}
 
 	std::string ShaderInjectionFeature::GetInjectionValidationError() const
@@ -676,5 +687,54 @@ namespace cs
 				reason);
 			feature->SetRuntimeState(FeatureRuntimeState::kFailed, std::move(reason));
 		}
+		RefreshShaderOwnership();
+	}
+
+	void FeatureManager::ApplyShaderOwnership(const feature_config::ShaderOwnershipConfig& a_config)
+	{
+		engine::ApplyShaderOwnershipConfig(a_config);
+		RefreshShaderOwnership();
+	}
+
+	void FeatureManager::RefreshShaderOwnership()
+	{
+		const bool enabled = engine::IsShaderInjectionEnabled();
+		const auto join = [](const std::vector<std::string_view>& a_names) {
+			std::string joined;
+			for (const auto name : a_names)
+				joined += std::format("{}{}", joined.empty() ? "" : ", ", name);
+			return joined;
+		};
+		std::vector<std::string_view> targets;
+		std::vector<std::string_view> suspended;
+		for (auto* feature : _loadedFeatures) {
+			if (!feature)
+				continue;
+			std::vector<std::string_view> names;
+			for (const auto target : feature->RefreshShaderOwnership()) {
+				const auto* metadata = engine::GetShaderInjectionTarget(target);
+				names.push_back(metadata ? metadata->name : "unknown");
+				if (!std::ranges::contains(targets, names.back()))
+					targets.push_back(names.back());
+			}
+			std::string note;
+			if (!names.empty()) {
+				suspended.push_back(feature->GetName());
+				note = enabled ?
+				           std::format("Suspended: custom shaders are off for {}", join(names)) :
+				           "Suspended: custom shaders are off";
+			}
+			feature->SetActiveNote(std::move(note));
+		}
+
+		std::string summary;
+		if (!enabled)
+			summary = "Custom shaders are off; shader features are suspended";
+		else if (!suspended.empty())
+			summary = std::format("Custom shaders are off for {}; suspended features: {}", join(targets), join(suspended));
+		if (summary == _ownershipSummary)
+			return;
+		_ownershipSummary = summary;
+		L->info("{}", summary.empty() ? "Custom shaders are on; shader features are active" : summary);
 	}
 }

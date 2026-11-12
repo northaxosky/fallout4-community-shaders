@@ -1510,26 +1510,29 @@ namespace cs::engine
 		return true;
 	}
 
-	bool SetBaselineShaderOwnership(
-		ShaderInjectionTarget a_target,
-		bool a_enabled)
+	namespace
 	{
-		if (!IsValidTarget(a_target)) {
-			L->error(
-				"Shader ownership rejected: unknown target.");
-			return false;
+		bool SetBaselineShaderOwnership(
+			ShaderInjectionTarget a_target,
+			bool a_enabled)
+		{
+			if (!IsValidTarget(a_target)) {
+				L->error(
+					"Shader ownership rejected: unknown target.");
+				return false;
+			}
+
+			auto& service = GetService();
+			service.baselineOwnership[ToIndex(a_target)].store(a_enabled, std::memory_order_relaxed);
+			return true;
 		}
 
-		auto& service = GetService();
-		service.baselineOwnership[ToIndex(a_target)].store(a_enabled, std::memory_order_relaxed);
-		return true;
-	}
-
-	bool SetShaderInjectionEnabled(bool a_enabled)
-	{
-		auto& service = GetService();
-		service.enabled.store(a_enabled, std::memory_order_relaxed);
-		return true;
+		bool SetShaderInjectionEnabled(bool a_enabled)
+		{
+			auto& service = GetService();
+			service.enabled.store(a_enabled, std::memory_order_relaxed);
+			return true;
+		}
 	}
 
 	bool SetShaderInjectionRuntime(GameRuntime a_runtime)
@@ -1592,6 +1595,24 @@ namespace cs::engine
 			SetBaselineShaderOwnership(target.id, a_config.targets[target.id]);
 	}
 
+	bool IsShaderInjectionEnabled() noexcept
+	{
+		return GetService().enabled.load(std::memory_order_relaxed);
+	}
+
+	std::vector<ShaderInjectionTarget> GetUnownedShaderTargets(std::string_view a_contributor)
+	{
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		std::vector<ShaderInjectionTarget> unowned;
+		for (const auto& registration : service.registrations) {
+			if (registration.contributor == a_contributor && !ShaderEnabled(registration.targetId) &&
+				!std::ranges::contains(unowned, registration.targetId))
+				unowned.push_back(registration.targetId);
+		}
+		return unowned;
+	}
+
 	bool ValidateShaderInjectionRoutes(
 		std::string_view a_contributor,
 		std::string& a_error)
@@ -1620,10 +1641,6 @@ namespace cs::engine
 				GetShaderInjectionTarget(registration.targetId);
 			if (!metadata) {
 				a_error = "contributor '" + std::string(a_contributor) + "' registered an unknown shader-injection target";
-				return false;
-			}
-			if (!ShaderEnabled(registration.targetId)) {
-				a_error = "'" + std::string(metadata->name) + "' is not enabled (enable_shaders or [shader_ownership]) but contributor '" + std::string(a_contributor) + "' registered for it";
 				return false;
 			}
 			if ((registration.stages & metadata->supportedStages) == 0) {
