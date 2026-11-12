@@ -343,6 +343,10 @@ namespace cs
 			a_error = "non-standard exception";
 			return false;
 		}
+		if (const auto ownership = feature_config::ParseShaderOwnership(reloaded.root); ownership.valid)
+			ApplyShaderOwnership(ownership.config);
+		else
+			L->warn("Invalid [shader_ownership] configuration left unchanged: {}", ownership.error);
 		return true;
 	}
 
