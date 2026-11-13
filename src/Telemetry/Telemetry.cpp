@@ -379,7 +379,9 @@ namespace cs::telemetry
 		static void CollectFeature(const Feature& a_feature, Sink& a_sink)
 		{
 			if (a_feature.SupportsEnableToggle())
-				a_sink.Field("enabled", a_feature.IsEnabled());
+				a_sink.Field("enabled", a_feature.IsSwitchedOn());
+			if (a_feature.FollowsShaderOwnership())
+				a_sink.Field("suspended", a_feature.IsSuspended());
 			if (a_feature.ProducesTelemetry())
 				a_feature.CollectTelemetry(a_sink);
 		}

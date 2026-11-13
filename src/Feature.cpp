@@ -640,7 +640,6 @@ namespace cs
 			_injectionError = valid ? std::string{} : a_error;
 		}
 		_injectionsOperational.Set(InjectionGate::kValidated, valid);
-		RefreshShaderOwnership();
 		return valid;
 	}
 

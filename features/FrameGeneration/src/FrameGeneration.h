@@ -22,7 +22,6 @@ namespace cs::features
 		std::string_view GetName() const override { return "FrameGeneration"; }
 		std::string_view GetDisplayName() const override { return "Frame Generation"; }
 		bool SupportsEnableToggle() const override { return false; }
-		bool FollowsShaderOwnership() const override { return false; }
 		std::string GetCategory() const override { return FeatureCategories::kDisplay; }
 		std::string GetFeatureSummary() const override
 		{

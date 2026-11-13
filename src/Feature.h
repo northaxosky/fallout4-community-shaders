@@ -76,7 +76,7 @@ namespace cs
 		bool IsLoaded() const noexcept override { return _loaded; }
 		Feature* GetRuntimeOwner() const noexcept override { return const_cast<Feature*>(this); }
 
-		// Framework-owned live switch; opt-outs always report enabled.
+		// Framework-owned live switch; opt-outs are always switched on.
 		virtual bool SupportsEnableToggle() const { return true; }
 		virtual bool DefaultEnabled() const { return true; }
 		// Effective state: the switch, unless shader ownership suspends the feature.
@@ -89,6 +89,7 @@ namespace cs
 		{
 			return !SupportsEnableToggle() || _enabled.load(std::memory_order_acquire);
 		}
+		bool IsSuspended() const noexcept { return _suspended.load(std::memory_order_acquire); }
 		// Host-frame thread; readers are on the render path.
 		void SetEnabled(bool a_enabled) noexcept;
 
@@ -275,7 +276,7 @@ namespace cs
 			else
 				_bits.fetch_and(static_cast<std::uint8_t>(~a_bit), std::memory_order_acq_rel);
 		}
-		std::atomic<std::uint8_t> _bits{ kOwned };
+		std::atomic<std::uint8_t> _bits{ 0 };
 	};
 
 	// Owns the registration/operational flags and the common injection validation.
