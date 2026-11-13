@@ -24,6 +24,7 @@ namespace cs::features::remote_control
 			&kShaderCacheTool,
 			&kSettingsTool,
 			&kCaptureTool,
+			&kPerfTool,
 			&kNvPerfTool
 		};
 

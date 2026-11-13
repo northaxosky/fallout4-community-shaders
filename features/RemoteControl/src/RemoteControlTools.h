@@ -37,6 +37,7 @@ namespace cs::features::remote_control
 	extern const Tool kShaderCacheTool;
 	extern const Tool kSettingsTool;
 	extern const Tool kCaptureTool;
+	extern const Tool kPerfTool;
 	extern const Tool kNvPerfTool;
 
 	[[nodiscard]] std::span<const Tool* const> GetTools() noexcept;
