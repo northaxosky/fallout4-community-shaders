@@ -3,7 +3,10 @@
 #include "DynamicCubemaps.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
+#include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/FrameBindings.h"
+#include "Render/ShaderFamilyDescriptor.h"
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
 #include "Settings/SettingsPersistence.h"
@@ -19,6 +22,7 @@ namespace cs::features
 			FeatureDebugView{ "live", "Live sample (conditioned)", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "authored", "Authored sample", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "environment", "Final environment (iblColor)", FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{ "live-lod", "Live LOD (red: raised to the authored blur)", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "live-light", "Live reflection light (ambient only)", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "live-occlusion", "Live specular occlusion (SSGI, without native AO)", FeatureDebugViewKind::kFullscreen }
 		};
@@ -43,11 +47,47 @@ namespace cs::features
 
 	void VanillaPBR::Load()
 	{
-		if (!engine::RegisterFeatureShaderBindings(*this)) {
+		if (!engine::RegisterFeatureShaderBindings(*this, [this](engine::ShaderReplacementRegistration& registration) {
+				if (registration.targetId == engine::ShaderInjectionTarget::kBsdfComposite)
+					registration.bind = [this](ID3D11DeviceContext* a_context) {
+						if (_blurMatchActive && engine::ActiveCompositeHasLiveEnvironment())
+							_blurMatch.CaptureAuthored(a_context);
+					};
+			})) {
 			FailLoad("Vanilla PBR shader contribution registration failed.");
 			return;
 		}
 		_registrationsReady.store(true, std::memory_order_release);
+	}
+
+	void VanillaPBR::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
+	{
+		if (_registrationsReady.load(std::memory_order_acquire))
+			_blurMatchCreated.store(_blurMatch.Create(a_device, *Log()), std::memory_order_release);
+	}
+
+	void VanillaPBR::OnEnabledChanged(bool a_enabled) noexcept
+	{
+		if (!a_enabled)
+			_releaseBlurMatch.store(true, std::memory_order_release);
+	}
+
+	void VanillaPBR::Prepass()
+	{
+		auto* context = engine::GetImmediateContext();
+		if (!context)
+			return;
+		if (_releaseBlurMatch.exchange(false, std::memory_order_acq_rel))
+			_blurMatch.Release();
+		// Unbound first: the table is rewritten as a compute output.
+		ID3D11ShaderResourceView* table = nullptr;
+		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, vanilla_pbr::kLiveLODPSSlot, 1, &table);
+		_blurMatchActive = IsEnabled() && _liveEnvironmentEnabled.load() && _liveEnvironmentReady.load() &&
+		                   _blurMatchCreated.load(std::memory_order_acquire);
+		if (!_blurMatchActive)
+			return;
+		table = _blurMatch.Update(context, DynamicCubemaps::GetSingleton()->GetSharpReflectionsSRV());
+		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, vanilla_pbr::kLiveLODPSSlot, 1, &table);
 	}
 
 	bool VanillaPBR::ValidateInjectionPrerequisites(std::string& a_error)
@@ -119,6 +159,7 @@ namespace cs::features
 		_debugMode = a_view == "live"           ? 1u :
 		             a_view == "authored"       ? 2u :
 		             a_view == "environment"    ? 3u :
+		             a_view == "live-lod"       ? 4u :
 		             a_view == "live-light"     ? 5u :
 		             a_view == "live-occlusion" ? 6u :
 		                                          0u;
@@ -132,6 +173,9 @@ namespace cs::features
 		a_sink.Field("direct_enabled", _directEnabled.load())
 			.Field("live_environment_enabled", _liveEnvironmentEnabled.load())
 			.Field("live_environment_ready", _liveEnvironmentReady.load())
+			.Field("blur_match_authored_slots", _blurMatch.AuthoredSlots())
+			.Field("blur_match_profiled_slots", _blurMatch.ProfiledSlots())
+			.Field("blur_match_live_ready", _blurMatch.LiveReady())
 			.Field("injection_operational", IsInjectionOperational());
 	}
 	namespace

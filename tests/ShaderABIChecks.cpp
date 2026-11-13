@@ -2,6 +2,8 @@
 
 #include "../features/CloudShadows/src/ShaderDefines.h"
 #include "../features/LightLimitFix/src/LightData.h"
+#include "../features/VanillaPBR/src/BlurMatchConstants.h"
+#include "../features/VanillaPBR/src/ShaderDefines.h"
 #include "../features/VolumetricShadows/src/ShaderDefines.h"
 #include "Render/DirectionalShadowLightData.h"
 #include "Render/ForwardDraw.h"
@@ -588,6 +590,32 @@ namespace
 			return "consumer: ABI slot mismatch";
 		return {};
 	}
+	std::string VerifyVanillaPBRABI(const std::filesystem::path& a_root)
+	{
+		namespace vpbr = cs::features::vanilla_pbr;
+		std::string error;
+		// The host binds the LOD table and profiles the authored cubes.
+		const auto composite = Reflect(a_root, "DFComposite.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY", "1" }, { "VANILLA_PBR", "1" }, { "DYNAMIC_CUBEMAPS", "1" } }, "ps_5_0", error);
+		if (!composite)
+			return error;
+		if (BindPoint(composite.Get(), "VanillaPBR::LiveLODTexture") != vpbr::kLiveLODPSSlot ||
+			BindPoint(composite.Get(), "g_tIblProbeCube") != vpbr::kAuthoredCubePSSlot)
+			return "DFComposite: ABI slot mismatch";
+		const auto detail = Reflect(a_root, "FO4/VanillaPBR/BlurDetailCS.hlsl", vpbr::kBlurMatchShaderDefines, "cs_5_0", error);
+		if (!detail)
+			return error;
+		const ABIField jobs[]{ ABI(vpbr::BlurDetailCB, Jobs) };
+		if (const auto mismatch = CheckConstantBuffer(detail.Get(), { "DetailCB", 0, sizeof(vpbr::BlurDetailCB), jobs }); !mismatch.empty())
+			return "BlurDetailCS: " + mismatch;
+		const auto match = Reflect(a_root, "FO4/VanillaPBR/BlurMatchCS.hlsl", vpbr::kBlurMatchShaderDefines, "cs_5_0", error);
+		if (!match)
+			return error;
+		const ABIField fields[]{ ABI(vpbr::BlurMatchCB, LiveTarget), ABI(vpbr::BlurMatchCB, LiveMips), ABI(vpbr::BlurMatchCB, AuthoredMips),
+			ABI(vpbr::BlurMatchCB, SlotCount), ABI(vpbr::BlurMatchCB, SlotReady), ABI(vpbr::BlurMatchCB, MatchPad) };
+		if (const auto mismatch = CheckConstantBuffer(match.Get(), { "MatchCB", 0, sizeof(vpbr::BlurMatchCB), fields }); !mismatch.empty())
+			return "BlurMatchCS: " + mismatch;
+		return {};
+	}
 #undef ABI
 }
 
@@ -609,5 +637,7 @@ std::string VerifyShaderABI(const std::filesystem::path& a_root)
 		return "Volumetric Shadows ABI: " + error;
 	if (auto error = VerifyCloudShadowsABI(a_root); !error.empty())
 		return "Cloud Shadows ABI: " + error;
+	if (auto error = VerifyVanillaPBRABI(a_root); !error.empty())
+		return "Vanilla PBR ABI: " + error;
 	return {};
 }

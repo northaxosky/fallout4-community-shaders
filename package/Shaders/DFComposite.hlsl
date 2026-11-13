@@ -41,6 +41,7 @@ namespace VanillaPBR
 {
 #	ifdef VANILLA_PBR_FULLSCREEN_DEBUG
 	static float3 EnvironmentDebug = 0.0;
+	static float3 LiveLODDebug = 0.0;
 #	endif
 
 	static bool LiveEnvironmentUsed = false;
@@ -80,6 +81,26 @@ namespace VanillaPBR
 			screenReflection * nativeLight * nativeAO, screenWeight);
 	}
 
+	// FO4: live LOD per authored slot (row) and mip, matched to its baked blur.
+	Texture2D<float> LiveLODTexture : register(t42);
+
+	// No sharper than the authored cube: its matched blur floors the live LOD.
+	float LiveLOD(float lod, float slice, uint probeWidth, uint probeLevels, uint liveWidth, uint liveLevels)
+	{
+		float resolutionLOD = lod + log2(float(liveWidth) / float(probeWidth));
+		float mip = clamp(lod, 0.0, float(probeLevels - 1));
+		int2 texel = int2(mip, slice);
+		int next = min(texel.x + 1, int(probeLevels) - 1);
+		// Unprofiled slots and an unbound table read zero: resolution only.
+		float matched = lerp(LiveLODTexture.Load(int3(texel, 0)), LiveLODTexture.Load(int3(next, texel.y, 0)), frac(mip));
+		float lastMip = float(liveLevels - 1);
+		float chosen = clamp(max(resolutionLOD, matched), 0.0, lastMip);
+#	ifdef VANILLA_PBR_FULLSCREEN_DEBUG
+		LiveLODDebug = float3(chosen, resolutionLOD, resolutionLOD) / max(lastMip, 1.0);
+#	endif
+		return chosen;
+	}
+
 	// FO4: authored cube sets how the material reflects; the live cube, what.
 	bool TryLiveEnvironment(TextureCubeArray<float4> probe, SamplerState probeSampler, float3 direction,
 		float lod, float slice, out float3 color)
@@ -87,24 +108,36 @@ namespace VanillaPBR
 		color = 0.0;
 		uint liveWidth, liveHeight, liveLevels;
 		DynamicCubemaps::SharpReflectionsTexture.GetDimensions(0, liveWidth, liveHeight, liveLevels);
-		// The last mip holds one texel per face, not one average.
-		float lastMip = float(liveLevels) - 1.0;
-		float liveLuminance = 0.0;
-		[unroll] for (uint axis = 0; axis < 6; ++axis)
+		uint tableWidth, tableHeight;
+		LiveLODTexture.GetDimensions(tableWidth, tableHeight);
+		// Rows end in the authored average RGB, then the live luminance.
+		int3 averages = int3(int(tableWidth) - 4, int(slice), 0);
+		float liveLuminance = LiveLODTexture.Load(averages + int3(3, 0, 0));
+		// An unbound or unready table reads zero: average per pixel instead.
+		[branch] if (!(liveLuminance > 1e-4))
 		{
-			float3 face = 0.0;
-			face[axis >> 1] = (axis & 1) ? -1.0 : 1.0;
-			liveLuminance += Color::RGBToLuminance(DynamicCubemaps::SharpReflectionsTexture.SampleLevel(probeSampler, face, lastMip));
+			// The last mip holds one texel per face, not one average.
+			float lastMip = float(liveLevels) - 1.0;
+			liveLuminance = 0.0;
+			[unroll] for (uint axis = 0; axis < 6; ++axis)
+			{
+				float3 face = 0.0;
+				face[axis >> 1] = (axis & 1) ? -1.0 : 1.0;
+				liveLuminance += Color::RGBToLuminance(DynamicCubemaps::SharpReflectionsTexture.SampleLevel(probeSampler, face, lastMip));
+			}
+			liveLuminance /= 6.0;
 		}
-		liveLuminance /= 6.0;
 		if (!(liveLuminance > 1e-4))
 			return false;
 		uint probeWidth, probeHeight, probeElements, probeLevels;
 		probe.GetDimensions(0, probeWidth, probeHeight, probeElements, probeLevels);
 		// FO4: native sites pass the antipodal ray; the live cube stores true ones.
 		float3 live = DynamicCubemaps::SharpReflectionsTexture.SampleLevel(
-			probeSampler, -direction, lod + log2(float(liveWidth) / float(probeWidth)));
-		float3 probeAverage = NativeProbeAverage(probe, probeSampler, slice);
+			probeSampler, -direction, LiveLOD(lod, slice, probeWidth, probeLevels, liveWidth, liveLevels));
+		float3 probeAverage = float3(LiveLODTexture.Load(averages), LiveLODTexture.Load(averages + int3(1, 0, 0)),
+			LiveLODTexture.Load(averages + int3(2, 0, 0)));
+		[branch] if (!any(probeAverage > 0.0))
+			probeAverage = NativeProbeAverage(probe, probeSampler, slice);
 		float probeLuminance = Color::RGBToLuminance(probeAverage);
 		float3 hue = AuthoredHue(probeAverage);
 		// Native weighting multiplies by local light; keep only the live pattern.
@@ -131,6 +164,7 @@ namespace VanillaPBR
 		const uint mode = FO4SharedData::DebugMode;
 		EnvironmentDebug = mode == 1 ? live :
 		                   mode == 2 ? AuthoredEnvironment(probe, probeSampler, direction, lod, slice, rain) :
+		                   mode == 4 ? (useLive ? LiveLODDebug : 0.0) :
 		                   mode == 5 ? (useLive ? LiveAmbient : 0.0) :
 		                   mode == 6 ? (useLive ? SpecularAOLagarde(LiveNdotV, LiveScreenVisibility, LiveRoughness).xxx : 0.0) :
 		                               result;

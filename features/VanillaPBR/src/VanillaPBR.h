@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BlurMatch.h"
 #include "Feature.h"
 #include "ShaderDefines.h"
 #include "VanillaPBRSettings.h"
@@ -16,6 +17,9 @@ namespace cs::features
 		std::string GetFeatureSummary() const override { return "GGX direct specular and live environment reflections for vanilla materials."; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
+		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
+		void Prepass() override;
+		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) override;
 		void DrawSettings() override;
 		bool SaveSettings() override;
@@ -32,5 +36,11 @@ namespace cs::features
 		vanilla_pbr::Settings _settings;
 		std::atomic_uint32_t _debugMode{ 0 };
 		std::atomic_bool _directEnabled{ false }, _liveEnvironmentEnabled{ false }, _liveEnvironmentReady{ false };
+		vanilla_pbr::BlurMatch _blurMatch;
+		std::atomic_bool _blurMatchCreated{ false };
+		// Set off the render thread; Prepass releases the adopted cubes.
+		std::atomic_bool _releaseBlurMatch{ false };
+		// Render thread: composite draws capture the authored cubes only while live.
+		bool _blurMatchActive = false;
 	};
 }
