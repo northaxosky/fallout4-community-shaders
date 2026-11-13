@@ -277,13 +277,13 @@ namespace
 			ABI(FO4SharedDataCB, VanillaPBRSplitScreen), ABI(FO4SharedDataCB, VanillaPBRSplitPosition),
 			ABI(FO4SharedDataCB, VanillaPBREnableEyeSpecialHandling), ABI(FO4SharedDataCB, pad2),
 			ABI(FO4SharedDataCB, pad3), ABI(FO4SharedDataCB, pad4),
-			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, DynamicMaterialReflections),
-			ABI(FO4SharedDataCB, EnabledWaterEffects), ABI(FO4SharedDataCB, EnabledTerrainVariation),
-			ABI(FO4SharedDataCB, EnabledSkylighting), ABI(FO4SharedDataCB, EnabledScreenSpaceGI),
-			ABI(FO4SharedDataCB, EnabledUnifiedWater), ABI(FO4SharedDataCB, EnabledScreenSpaceShadows),
-			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
-			ABI(FO4SharedDataCB, EnabledLODBlending), ABI(FO4SharedDataCB, EnabledLightLimitFix),
-			ABI(FO4SharedDataCB, pad0), ABI(FO4SharedDataCB, SunDiscDirection),
+			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, EnabledWaterEffects),
+			ABI(FO4SharedDataCB, EnabledTerrainVariation), ABI(FO4SharedDataCB, EnabledSkylighting),
+			ABI(FO4SharedDataCB, EnabledScreenSpaceGI), ABI(FO4SharedDataCB, EnabledUnifiedWater),
+			ABI(FO4SharedDataCB, EnabledScreenSpaceShadows), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
+			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledLODBlending),
+			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, pad0),
+			ABI(FO4SharedDataCB, pad1), ABI(FO4SharedDataCB, SunDiscDirection),
 			ABI(FO4SharedDataCB, SunGlareColor)
 		};
 		const ConstantBufferABI buffers[]{

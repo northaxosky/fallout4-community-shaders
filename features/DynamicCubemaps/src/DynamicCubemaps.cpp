@@ -247,7 +247,6 @@ namespace cs::features
 	void DynamicCubemaps::PublishSettings() noexcept
 	{
 		_enabledSSR.store(_settings.enabledSSR, std::memory_order_release);
-		_materialReflections.store(_settings.materialReflections, std::memory_order_release);
 		_engineCubeLod.store(_settings.engineCubeLod, std::memory_order_release);
 	}
 
@@ -317,7 +316,7 @@ namespace cs::features
 			return;
 		}
 		std::array<ID3D11ShaderResourceView*, kCompositionPSSlotCount> resources{
-			GetEnvironmentSRV(), GetReflectionsSRV()
+			GetEnvironmentSRV(), GetReflectionsSRV(), GetSharpReflectionsSRV()
 		};
 		if (Operational() &&
 			_debugVisualization.load(std::memory_order_acquire) ==
@@ -348,6 +347,11 @@ namespace cs::features
 		return PublishedSRV(_activeReflections.load(std::memory_order_acquire));
 	}
 
+	ID3D11ShaderResourceView* DynamicCubemaps::GetSharpReflectionsSRV() const noexcept
+	{
+		return PublishedSRV(_activeReflections.load(std::memory_order_acquire) && !cs::engine::IsInterior(), true);
+	}
+
 	bool DynamicCubemaps::Operational() const noexcept
 	{
 		return _resourcesReady.load(std::memory_order_acquire) &&
@@ -355,12 +359,14 @@ namespace cs::features
 		       IsEnabled();
 	}
 
-	ID3D11ShaderResourceView* DynamicCubemaps::PublishedSRV(bool a_reflections) const noexcept
+	ID3D11ShaderResourceView* DynamicCubemaps::PublishedSRV(bool a_reflections, bool a_sharp) const noexcept
 	{
 		if (!Operational() ||
 			!_cubemapValid[a_reflections ? 1 : 0].load(std::memory_order_acquire)) {
 			return nullptr;
 		}
+		if (a_sharp)
+			return (a_reflections ? _reflectionsSharp : _environmentSharp).srv.get();
 		return (a_reflections ? _reflections : _environment).srv.get();
 	}
 
@@ -489,6 +495,8 @@ namespace cs::features
 		createCube(_filtered, DXGI_FORMAT_R11G11B10_FLOAT, true, true, "DynamicCubemaps/Filtered");
 		createCube(_environment, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Environment");
 		createCube(_reflections, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Reflections");
+		createCube(_environmentSharp, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Environment.Sharp");
+		createCube(_reflectionsSharp, DXGI_FORMAT_R11G11B10_FLOAT, true, false, "DynamicCubemaps/Reflections.Sharp");
 		createCube(_preparedPosition, DXGI_FORMAT_R32G32B32A32_FLOAT, false, false, "DynamicCubemaps/PreparedPosition", 1);
 		createCube(_preparedColor, DXGI_FORMAT_R32G32B32A32_FLOAT, false, false, "DynamicCubemaps/PreparedColor", 1);
 		createCube(_preparedUV, DXGI_FORMAT_R32G32_FLOAT, false, false, "DynamicCubemaps/PreparedUV", 1);
@@ -769,7 +777,11 @@ namespace cs::features
 		const bool active = engineCube || !interior;
 		const bool fake = active && (!engineCube || cs::engine::IsSkyHidden());
 		_engineReflectionCube.store(engineCube, std::memory_order_relaxed);
-		_activeReflections.store(active, std::memory_order_release);
+		const bool previousActive = _activeReflections.exchange(active, std::memory_order_acq_rel);
+		if (active && !previousActive) {
+			_cubemapValid[1].store(false, std::memory_order_release);
+			_resetCapture[1] = true;
+		}
 		_fakeReflections.store(fake, std::memory_order_release);
 	}
 
@@ -1142,6 +1154,9 @@ namespace cs::features
 		context->CopyResource(
 			published.texture.get(),
 			_filtered.texture.get());
+		context->CopyResource(
+			(a_reflections ? _reflectionsSharp : _environmentSharp).texture.get(),
+			_inferred.texture.get());
 		_cubemapValid[a_reflections ? 1 : 0].store(
 			true, std::memory_order_release);
 	}
@@ -1266,7 +1281,6 @@ namespace cs::features
 			a_fo4.EnabledDynamicCubemaps = 1u;
 			a_fo4.EnabledSSR =
 				_enabledSSR.load(std::memory_order_acquire) ? 1u : 0u;
-			a_fo4.DynamicMaterialReflections = _materialReflections.load(std::memory_order_acquire);
 		}
 	}
 
@@ -1288,8 +1302,6 @@ namespace cs::features
 			};
 			changed |= field.Choice(&Settings::engineCubeSize, kSizes, { .label = "Engine Cube Size" });
 		}
-		if (const ui::Section section{ "dynamic-cubemaps-material", "Material Reflections" }; section)
-			changed |= field(&Settings::materialReflections, { .label = "Material Reflections" });
 		if (changed)
 			PublishSettings();
 	}

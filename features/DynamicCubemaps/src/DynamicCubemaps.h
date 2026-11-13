@@ -79,6 +79,7 @@ namespace cs::features
 		ID3D11ShaderResourceView* GetEnvironmentSRV() const noexcept;
 		// The environment cube stands in while reflections are inactive.
 		ID3D11ShaderResourceView* GetReflectionsSRV() const noexcept;
+		ID3D11ShaderResourceView* GetSharpReflectionsSRV() const noexcept;
 
 	private:
 		std::string_view GetRegistrationFailureMessage() const override;
@@ -95,7 +96,7 @@ namespace cs::features
 		// Water's CubeMapTex and the SSLR water march's SkyReflectionTex.
 		static constexpr std::uint32_t kEngineCubePSSlot = kDynamicCubemapPSSlot + 2;
 		static constexpr std::uint32_t kCompositionPSSlot = 39;
-		static constexpr std::uint32_t kCompositionPSSlotCount = 2;
+		static constexpr std::uint32_t kCompositionPSSlotCount = 3;
 
 		struct CubeTexture
 		{
@@ -192,11 +193,10 @@ namespace cs::features
 		ID3D11ComputeShader* UpdateShader(bool a_reflections) const;
 		ID3D11ComputeShader* InferShader(bool a_reflections) const;
 		bool Operational() const noexcept;
-		ID3D11ShaderResourceView* PublishedSRV(bool a_reflections) const noexcept;
+		ID3D11ShaderResourceView* PublishedSRV(bool a_reflections, bool a_sharp = false) const noexcept;
 
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _enabledSSR{ true };
-		std::atomic<float> _materialReflections{ 0.25f };
 		std::atomic_bool _engineCubeLod{ true };
 		std::atomic_bool _queuedReset{ false };
 		std::atomic_bool _activeReflections{ false };
@@ -223,6 +223,8 @@ namespace cs::features
 		CubeTexture _filtered;
 		CubeTexture _environment;
 		CubeTexture _reflections;
+		CubeTexture _environmentSharp;
+		CubeTexture _reflectionsSharp;
 		CubeTexture _preparedPosition;
 		CubeTexture _preparedColor;
 		CubeTexture _preparedUV;
