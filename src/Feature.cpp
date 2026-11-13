@@ -706,6 +706,11 @@ namespace cs
 		RefreshShaderOwnership();
 	}
 
+	feature_config::ShaderOwnershipConfig FeatureManager::GetShaderOwnership() const
+	{
+		return engine::GetShaderOwnershipConfig();
+	}
+
 	void FeatureManager::RefreshShaderOwnership()
 	{
 		const bool enabled = engine::IsShaderInjectionEnabled();

@@ -265,6 +265,8 @@ namespace cs::engine
 	// Call only via FeatureManager::ApplyShaderOwnership.
 	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config);
 	bool IsShaderInjectionEnabled() noexcept;
+	// The ownership last applied, not the saved configuration.
+	feature_config::ShaderOwnershipConfig GetShaderOwnershipConfig() noexcept;
 	std::vector<ShaderInjectionTarget> GetUnownedShaderTargets(std::string_view a_contributor);
 	bool ValidateShaderInjectionRoutes(
 		std::string_view a_contributor,

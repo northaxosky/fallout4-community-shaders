@@ -66,12 +66,16 @@ namespace cs::feature_config
 		{
 			return enabled[static_cast<std::size_t>(a_target)];
 		}
+
+		bool operator==(const ShaderOwnershipTargets&) const = default;
 	};
 
 	struct ShaderOwnershipConfig
 	{
 		bool enableShaders{ false };
 		ShaderOwnershipTargets targets;
+
+		bool operator==(const ShaderOwnershipConfig&) const = default;
 	};
 
 	struct ShaderOwnershipParseResult
