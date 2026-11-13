@@ -31,7 +31,7 @@ namespace cs::features::remote_control
 				{ "name", std::string(a_feature.GetDisplayName()) },
 				{ "shortName", std::string(a_feature.GetName()) },
 				{ "loaded", a_feature.IsLoaded() },
-				{ "enabled", a_feature.IsEnabled() },
+				{ "enabled", a_feature.IsSwitchedOn() },
 				{ "toggleable", a_feature.SupportsEnableToggle() },
 				{ "version", Plugin::VERSION.string(".") },
 				{ "category", a_feature.GetCategory() },
@@ -148,7 +148,7 @@ namespace cs::features::remote_control
 			if (settings::liveComparisonActive)
 				return Error("an A/B comparison is active", { { "hint", "stop it in the Performance Overlay first" } });
 
-			const bool enabled = a_enabled.is_boolean() ? a_enabled.get<bool>() : !feature->IsEnabled();
+			const bool enabled = a_enabled.is_boolean() ? a_enabled.get<bool>() : !feature->IsSwitchedOn();
 			feature->SetEnabled(enabled);
 			auto* self = RemoteControl::GetSingleton();
 			// Its own disable would otherwise be muted.

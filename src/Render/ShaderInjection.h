@@ -262,10 +262,9 @@ namespace cs::engine
 	// The provider's declaration must be in the contribution registry under a_name.
 	bool ValidateShaderContributionName(std::string_view a_name, const ShaderDefineProvider& a_provider);
 	bool SetShaderInjectionRuntime(GameRuntime a_runtime);
-	// Only FeatureManager::ApplyShaderOwnership may call this; it refreshes feature flags.
+	// Call only via FeatureManager::ApplyShaderOwnership.
 	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config);
 	bool IsShaderInjectionEnabled() noexcept;
-	// Targets the contributor registered for that are not currently owned.
 	std::vector<ShaderInjectionTarget> GetUnownedShaderTargets(std::string_view a_contributor);
 	bool ValidateShaderInjectionRoutes(
 		std::string_view a_contributor,

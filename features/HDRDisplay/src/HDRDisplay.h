@@ -26,6 +26,7 @@ namespace cs::features
 		std::string_view GetName() const override { return "HDRDisplay"; }
 		std::string_view GetDisplayName() const override { return "HDR Display"; }
 		bool SupportsEnableToggle() const override { return false; }
+		bool FollowsShaderOwnership() const override { return false; }
 		std::string GetCategory() const override { return FeatureCategories::kDisplay; }
 		std::string GetFeatureSummary() const override
 		{

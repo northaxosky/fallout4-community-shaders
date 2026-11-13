@@ -62,7 +62,7 @@ namespace cs::host
 			if (!a_feature.SupportsEnableToggle())
 				return;
 			settings::SettingsEdit edit{ a_feature };
-			bool enabled = a_feature.IsEnabled();
+			bool enabled = a_feature.IsSwitchedOn();
 			if (edit.Apply(ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled())))
 				a_feature.SetEnabled(enabled);
 		}

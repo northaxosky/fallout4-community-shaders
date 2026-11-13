@@ -75,13 +75,23 @@ namespace cs
 
 	void Feature::SetEnabled(bool a_enabled) noexcept
 	{
-		if (_enabled.exchange(a_enabled, std::memory_order_acq_rel) != a_enabled && SupportsEnableToggle())
-			OnEnabledChanged(a_enabled);
+		const bool before = IsEnabled();
+		_enabled.store(a_enabled, std::memory_order_release);
+		if (IsEnabled() != before)
+			OnEnabledChanged(!before);
+	}
+
+	void Feature::SetSuspended(bool a_suspended) noexcept
+	{
+		const bool before = IsEnabled();
+		_suspended.store(a_suspended, std::memory_order_release);
+		if (IsEnabled() != before)
+			OnEnabledChanged(!before);
 	}
 
 	bool Feature::SaveEnabled()
 	{
-		return !SupportsEnableToggle() || settings::SaveEnabled(GetConfigKey(), IsEnabled(), *Log());
+		return !SupportsEnableToggle() || settings::SaveEnabled(GetConfigKey(), IsSwitchedOn(), *Log());
 	}
 
 	bool Feature::Persist()
@@ -615,8 +625,7 @@ namespace cs
 
 	bool ShaderInjectionFeature::ValidateShaderInjections(std::string& a_error)
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
-		_injectionsValidated.store(false, std::memory_order_release);
+		_injectionsOperational.Set(InjectionGate::kValidated, false);
 		const bool valid = [&] {
 			if (!_registrationsReady.load(std::memory_order_acquire)) {
 				a_error = GetRegistrationFailureMessage();
@@ -630,17 +639,15 @@ namespace cs
 			std::scoped_lock lock(_injectionErrorMutex);
 			_injectionError = valid ? std::string{} : a_error;
 		}
-		// Operational is derived from ownership by RefreshShaderOwnership.
-		_injectionsValidated.store(valid, std::memory_order_release);
+		_injectionsOperational.Set(InjectionGate::kValidated, valid);
+		RefreshShaderOwnership();
 		return valid;
 	}
 
 	std::vector<engine::ShaderInjectionTarget> ShaderInjectionFeature::RefreshShaderOwnership()
 	{
 		auto unowned = engine::GetUnownedShaderTargets(GetName());
-		_injectionsOperational.store(
-			_injectionsValidated.load(std::memory_order_acquire) && unowned.empty(),
-			std::memory_order_release);
+		_injectionsOperational.Set(InjectionGate::kOwned, unowned.empty());
 		return unowned;
 	}
 
@@ -714,8 +721,12 @@ namespace cs
 		for (auto* feature : _loadedFeatures) {
 			if (!feature)
 				continue;
+			const auto unowned = feature->RefreshShaderOwnership();
+			// Unhealthy features keep their state; only healthy ones suspend.
+			if (!feature->IsHealthy() || !feature->FollowsShaderOwnership())
+				continue;
 			std::vector<std::string_view> names;
-			for (const auto target : feature->RefreshShaderOwnership()) {
+			for (const auto target : unowned) {
 				const auto* metadata = engine::GetShaderInjectionTarget(target);
 				names.push_back(metadata ? metadata->name : "unknown");
 				if (!std::ranges::contains(targets, names.back()))
@@ -728,6 +739,7 @@ namespace cs
 				           std::format("Suspended: custom shaders are off for {}", join(names)) :
 				           "Suspended: custom shaders are off";
 			}
+			feature->SetSuspended(!names.empty());
 			feature->SetActiveNote(std::move(note));
 		}
 
