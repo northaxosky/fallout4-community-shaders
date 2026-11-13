@@ -12,6 +12,9 @@
 #	include "DFTiledLighting/TileCullCS.hlsli"
 #else
 
+#	if defined(VANILLA_PBR)
+#		include "FO4/VanillaPBR.hlsli"
+#	endif
 #	ifdef LIGHT_LIMIT_FIX
 #		include "FO4/LightLimitFixConsumer.hlsli"
 StructuredBuffer<LightLimitFix::Light> LightLimitFixLights : register(t8);
@@ -363,6 +366,13 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 
 					[branch] if ((light.Flags & 16u) != 0)
 					{
+						// clang-format off
+#	if defined(VANILLA_PBR)
+						[branch] if (VanillaPBR::UseGGX(float2(pixel))) {
+						specular = light.Color * VanillaPBR::Evaluate(normalView, viewDirection, lightDirection,
+													 material.x, material.y, false, 0.0, material.w);
+						} else {
+#	endif
 						float3 halfway =
 							lightDirection -
 							positionView * positionViewInverseLength;
@@ -430,6 +440,10 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 							light.Color *
 							specularMagnitude *
 							normalDotLightSaturated.z;
+#	if defined(VANILLA_PBR)
+						}
+#	endif
+						// clang-format on
 					}
 					else
 					{

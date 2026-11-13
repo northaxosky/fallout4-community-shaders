@@ -20,7 +20,7 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 | Forced | Single perspective depth | One R32_FLOAT canonical world-projection depth at t17 | Native depth combines first-person and world projections |
 | Forced | Ambient SH projects sRGB-decoded DALC axis colors | Axis colors decode with power 2.2; vanilla ambient replays from b7 DALC rows | Native lighting evaluates DALC with power 2.2 |
 | Forced | Linear Lighting is optional | Shaders always compile with `ENABLE_LL`; b6 publishes identity diffuse decode and no pi on sun radiance | FO4 deferred HDR and sun inputs are already linear |
-| Divergence | b7 LLF block; zero `cubemapCreatorSettings` semantics | One FO4-only 144-byte b7 holds debug-view state, `DeltaTime`, per-feature enable flags, DALC rows and the sun disc direction; b6 `cubemapCreatorSettings` stays zero | Single-substrate ABI |
+| Divergence | b7 LLF block; zero `cubemapCreatorSettings` semantics | One FO4-only 208-byte b7 holds debug-view state, `DeltaTime`, per-feature enable flags, DALC rows, the sun disc direction and Vanilla PBR settings; b6 `cubemapCreatorSettings` stays zero | Single-substrate ABI |
 | Forced | `Util::IsInterior()`: interior cell, or `kNoSky`/`kFixedDimensions` worldspace | `engine::IsInterior()`: interior cell, `kNoSky`, or `Sky::mode != kFull`; shared by Skylighting, Dynamic Cubemaps | FO4 sets `kFixedDimensions` on open-sky worldspaces such as Diamond City |
 | Pending | FrameParams (except y), celestial/HDR/map/shadow fields | Zero or absent; FrameParams.y is 1 | No FO4 source is consumed yet; y selects the clustered grid's screen UV |
 | Divergence | Water refraction samples the offset texel | Shore blend falls back to the mask-accepted sample above the water plane | Stock reads the unmasked texel, fringing first-person hands and weapons into water |
@@ -35,6 +35,7 @@ Classification rules live in [FEATURES](../FEATURES.md#classification).
 
 - [Frame Annotations](FrameAnnotations.md)
 - [Light Limit Fix](LightLimitFix.md)
+- [Vanilla PBR](VanillaPBR.md)
 - [WaterEffects](WaterEffects.md)
 - [Unified Water](UnifiedWater.md)
 - [Performance Overlay](PerformanceOverlay.md)

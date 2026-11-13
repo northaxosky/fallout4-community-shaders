@@ -27,6 +27,18 @@ namespace FO4SharedData
 		uint pad0;
 		float4 SunDiscDirection;
 		float4 SunGlareColor;
+		uint VanillaPBREnable;
+		uint VanillaPBREnableGGX;
+		float VanillaPBRRoughnessMultiplier;
+		float VanillaPBRSpecularRoughnessBlend;
+		float VanillaPBRBaseF0Multiplier;
+		float VanillaPBRMinF0;
+		uint VanillaPBRSplitScreen;
+		float VanillaPBRSplitPosition;
+		uint VanillaPBREnableEyeSpecialHandling;
+		uint pad2;
+		uint pad3;
+		uint pad4;
 	};
 #if defined(FO4CS_SUBSTRATE) && (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(SKYLIGHTING_FULLSCREEN_DEBUG))
 	Texture2D<float4> DebugTexture : register(t61);

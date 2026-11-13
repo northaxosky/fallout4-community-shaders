@@ -106,8 +106,15 @@ namespace cs::render
 		DirectX::XMFLOAT4 SunDiscDirection{};
 		// BSDFComposite's fog sun glare color; w is its weight, zero when off.
 		DirectX::XMFLOAT4 SunGlareColor{};
+		std::uint32_t VanillaPBREnable = 0, VanillaPBREnableGGX = 0;
+		float VanillaPBRRoughnessMultiplier = 1.0f, VanillaPBRSpecularRoughnessBlend = 0.0f;
+		float VanillaPBRBaseF0Multiplier = 0.2f, VanillaPBRMinF0 = 0.02f;
+		std::uint32_t VanillaPBRSplitScreen = 0;
+		float VanillaPBRSplitPosition = 0.5f;
+		std::uint32_t VanillaPBREnableEyeSpecialHandling = 0;
+		std::uint32_t pad2 = 0, pad3 = 0, pad4 = 0;
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 160);
+	static_assert(sizeof(FO4SharedDataCB) == 208);
 	static_assert(offsetof(FO4SharedDataCB, DebugOwner) == 0);
 	static_assert(offsetof(FO4SharedDataCB, DebugMode) == 4);
 	static_assert(offsetof(FO4SharedDataCB, EnabledSSR) == 8);
@@ -128,6 +135,18 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, pad0) == 124);
 	static_assert(offsetof(FO4SharedDataCB, SunDiscDirection) == 128);
 	static_assert(offsetof(FO4SharedDataCB, SunGlareColor) == 144);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBREnable) == 160);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBREnableGGX) == 164);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRRoughnessMultiplier) == 168);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSpecularRoughnessBlend) == 172);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRBaseF0Multiplier) == 176);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRMinF0) == 180);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitScreen) == 184);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitPosition) == 188);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBREnableEyeSpecialHandling) == 192);
+	static_assert(offsetof(FO4SharedDataCB, pad2) == 196);
+	static_assert(offsetof(FO4SharedDataCB, pad3) == 200);
+	static_assert(offsetof(FO4SharedDataCB, pad4) == 204);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

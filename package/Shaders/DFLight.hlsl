@@ -15,6 +15,9 @@
 #include "FO4/SoftSunShadow.hlsli"
 
 #include "FO4/LightLimitFixRaster.hlsli"
+#if defined(VANILLA_PBR)
+#	include "FO4/VanillaPBR.hlsli"
+#endif
 
 #if defined(DIRECTIONAL) && defined(WATER_EFFECTS) && !defined(SHADOW_ONLY)
 // FO4: directional RGB accumulators carry upstream's chromatic multiplier.
@@ -661,6 +664,13 @@ PS_OUTPUT main(PS_INPUT input)
 		visibilityGeom = visibilityGeom * (tangentSin / tangentDenom) + visA;
 		brdfShadowMix = NdotL_pos * visibilityGeom;
 
+		// clang-format off
+#		if defined(VANILLA_PBR)
+		[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+		brdfSpecular = LightColor_row0.xyz * VanillaPBR::Evaluate(normalView, viewDirNeg, LightVector.xyz,
+												 matSample.x, matSample.y, true, WorldWetnessAndRainTransition.y, matSample.w);
+		} else {
+#		endif
 		float3 halfVec = LightVector.xyz - posView * posViewLen;
 		halfVec *= rsqrt(dot(halfVec, halfVec));
 
@@ -698,6 +708,10 @@ PS_OUTPUT main(PS_INPUT input)
 		specMag *= FO4_DIRECTIONAL_SPECULAR_SCALE;
 
 		brdfSpecular = NdotL_clamped * (specMag * LightColor_row0.xyz);
+#		if defined(VANILLA_PBR)
+		}
+#		endif
+		// clang-format on
 		brdfModulator = depthScale;
 	}
 
@@ -941,6 +955,13 @@ PS_OUTPUT main(PS_INPUT input)
 		visibilityGeom = visibilityGeom * (tangentSin / tangentDenom) + visA;
 		brdfShadowMix = NdotL_sat * visibilityGeom;
 
+		// clang-format off
+#		if defined(VANILLA_PBR)
+		[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+		brdfSpecular = FO4LocalLightColor(LightColor_row0.xyz) * VanillaPBR::Evaluate(normalView, viewDirNeg, lightDir,
+																	 matSample.x, matSample.y, false, 0.0, matSample.w);
+		} else {
+#		endif
 		float3 halfVec = lightDir + viewDirNeg;
 		halfVec *= rsqrt(dot(halfVec, halfVec));
 
@@ -980,6 +1001,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 		brdfSpecular =
 			NdotL_clamped * (specMag * FO4LocalLightColor(LightColor_row0.xyz));
+#		if defined(VANILLA_PBR)
+		}
+#		endif
+		// clang-format on
 	}
 
 	float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -1662,6 +1687,13 @@ attenuation = attenuation * shadowFactor;
 #			endif
 
 #			ifdef SPECULAR
+			// clang-format off
+#				if defined(VANILLA_PBR)
+			[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+			brdfSpecular = FO4LocalLightColor(LightColor_row0.xyz) * VanillaPBR::Evaluate(normalView, viewDirNeg, lightDir,
+																		 matSample.x, matSample.y, false, 0.0, matSample.w);
+			} else {
+#				endif
 #				if !defined(FO4_DEFERRED_SPOT_SPEC_BASE) && !defined(FO4_DEFERRED_SPOT_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_PCF1_OMNI_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_PCF1_POINTSPOT_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_PCF1_POINTSPOT_SPEC_BASE) && !defined(FO4_DEFERRED_PCF1_OMNI_SPEC_BASE) && !defined(FO4_DEFERRED_RAW_POINTSPOT_SPEC_BASE) && !defined(FO4_DEFERRED_RAW_OMNI_SPEC_BASE) && !defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_BASE) && !defined(FO4_DEFERRED_PCF9_OMNI_SPEC_BASE) && !defined(FO4_DEFERRED_PCF9_OMNI_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_BASE) && !defined(FO4_DEFERRED_HALFOMNI_PCF1_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_BASE) && !defined(FO4_DEFERRED_HALFOMNI_PCF9_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_PCF9_POINTSPOT_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_POISSON_OMNI_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_GOBO_BASE) && !defined(FO4_DEFERRED_POISSON_POINTSPOT_SPEC_BASE) && !defined(FO4_DEFERRED_POISSON_OMNI_SPEC_BASE) && !defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_BASE) && !defined(FO4_DEFERRED_HALFOMNI_POISSON_SPEC_GOBO_BASE)
 			float specExp = exp2(matSample.x * 10.0 + 1.0);
 #				endif
@@ -1740,6 +1772,10 @@ attenuation = attenuation * shadowFactor;
 #				else
 	brdfSpecular = NdotL_clamped * (specMag * FO4LocalLightColor(LightColor_row0.xyz));
 #				endif
+#				if defined(VANILLA_PBR)
+			}
+#				endif
+// clang-format on
 #			endif
 		}
 
@@ -2472,6 +2508,13 @@ float2 goboUV = float2(omniUV.x,
 			visibilityGeom = visibilityGeom * tangentRatio + visA;
 			brdfShadowMix = NdotL_pos * visibilityGeom;
 
+			// clang-format off
+#	if defined(VANILLA_PBR)
+			[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+			brdfSpecular = LightColor_row0.xyz * VanillaPBR::Evaluate(normalView, viewDirNeg, LightVector.xyz,
+													 matSample.x, matSample.y, true, WorldWetnessAndRainTransition.y, matSample.w);
+			} else {
+#	endif
 			float3 halfVec = LightVector.xyz - posView * posViewLen;
 			halfVec *= rsqrt(dot(halfVec, halfVec));
 
@@ -2514,6 +2557,10 @@ float2 goboUV = float2(omniUV.x,
 			specMag *= FO4_DIRECTIONAL_SPECULAR_SCALE;
 
 			brdfSpecular = (specMag * LightColor_row0.xyz) * NdotL_clamped;
+#	if defined(VANILLA_PBR)
+			}
+#	endif
+			// clang-format on
 			brdfModulator = depthScale;
 		}
 
@@ -3313,6 +3360,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		brdfShadowMix = NdotL_pos * visibilityGeom;
 #	endif
 
+				// clang-format off
+#	if defined(VANILLA_PBR)
+				[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+				brdfSpecular = LightColor_row0.xyz * VanillaPBR::Evaluate(normalView, viewDirNeg, LightVector.xyz,
+														 matSample.x, matSample.y, true, WorldWetnessAndRainTransition.y, matSample.w);
+				} else {
+#	endif
 				float3 halfVec = LightVector.xyz - posView * posViewLen;
 				halfVec *= rsqrt(dot(halfVec, halfVec));
 
@@ -3384,6 +3438,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	else
 		brdfSpecular = NdotL_clamped * (specMag * LightColor_row0.xyz);
 #	endif
+#	if defined(VANILLA_PBR)
+				}
+#	endif
+				// clang-format on
 				brdfModulator = depthScale;
 			}
 
@@ -4325,6 +4383,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		brdfShadowMix = NdotL_pos * visibilityGeom;
 #	endif
 
+				// clang-format off
+#	if defined(VANILLA_PBR)
+				[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+				brdfSpecular = LightColor_row0.xyz * VanillaPBR::Evaluate(normalView, viewDirNeg, LightVector.xyz,
+														 matSample.x, matSample.y, true, WorldWetnessAndRainTransition.y, matSample.w);
+				} else {
+#	endif
 				float3 halfVec = LightVector.xyz - posView * posViewLen;
 				halfVec *= rsqrt(dot(halfVec, halfVec));
 
@@ -4396,6 +4461,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	else
 		brdfSpecular = NdotL_clamped * (specMag * LightColor_row0.xyz);
 #	endif
+#	if defined(VANILLA_PBR)
+				}
+#	endif
+				// clang-format on
 				brdfModulator = depthScale;
 			}
 
@@ -4819,6 +4888,13 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		brdfShadowMix = NdotL_sat * visibilityGeom;
 #	endif
 #	ifdef SPECULAR
+				// clang-format off
+#		if defined(VANILLA_PBR)
+				[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+				brdfSpecular = FO4LocalLightColor(LightColor_row0.xyz) * VanillaPBR::Evaluate(normalView, viewDirNeg, lightDir,
+																			 matSample.x, matSample.y, false, 0.0, matSample.w);
+				} else {
+#		endif
 				float3 halfVec = lightDir - posView * posViewLenInv;
 				halfVec *= rsqrt(dot(halfVec, halfVec));
 #		ifdef IGNOREROUGHNESS
@@ -4867,6 +4943,10 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 				specMag *= matSample.y;
 				specMag *= 3.1415927;
 				brdfSpecular = (specMag * FO4LocalLightColor(LightColor_row0.xyz)) * NdotL_clamped;
+#		if defined(VANILLA_PBR)
+				}
+#		endif
+// clang-format on
 #	endif
 			}
 
@@ -6088,6 +6168,18 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float specExp = specExpBase;
 #		endif
 
+				// clang-format off
+#		if defined(VANILLA_PBR)
+				[branch] if (VanillaPBR::UseGGX(input.position.xy)) {
+#			if defined(DIRECTIONAL)
+				brdfSpecular = FO4LocalLightColor(LightColor_row0.xyz) * VanillaPBR::Evaluate(normalView, viewDirNeg, lightDir,
+														 matSample.x, matSample.y, true, WorldWetnessAndRainTransition.y, matSample.w);
+#			else
+			brdfSpecular = FO4LocalLightColor(LightColor_row0.xyz) * VanillaPBR::Evaluate(normalView, viewDirNeg, lightDir,
+																		 matSample.x, matSample.y, false, 0.0, matSample.w);
+#			endif
+				} else {
+#		endif
 				float3 halfVec = lightDir - posView * posViewLen;
 				halfVec *= rsqrt(dot(halfVec, halfVec));
 
@@ -6166,6 +6258,10 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				specMag *= FO4_SPECULAR_SCALE;
 
 				brdfSpecular = (specMag * FO4LocalLightColor(LightColor_row0.xyz)) * NdotL_clamped;
+#		if defined(VANILLA_PBR)
+				}
+#		endif
+// clang-format on
 #	endif
 
 #	if defined(DIRECTIONAL) && defined(AMBIENT) && !defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)

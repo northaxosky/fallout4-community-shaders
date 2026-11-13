@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Vanilla PBR: new feature. GGX direct specular for vanilla materials.
+
 ## 0.5.1
 
 - Compatibility: Community Shaders now disables itself and shows a message when doodlum's standalone Upscaling is installed; it crashes alongside CS, which includes it. jarari's Upscaling Custom is unaffected.

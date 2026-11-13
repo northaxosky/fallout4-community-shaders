@@ -21,6 +21,7 @@
 #include "SkylightingSettings.h"
 #include "SubsurfaceScatteringSettings.h"
 #include "TerrainVariationSettings.h"
+#include "VanillaPBRSettings.h"
 #include "World/WeatherVariableRegistry.h"
 
 #include "Check.h"
@@ -46,6 +47,7 @@ namespace
 			std::pair{ "SubsurfaceScattering", MakeSchemaView(subsurface_scattering::kSchema) },
 			std::pair{ "Skylighting", MakeSchemaView(skylighting::kSchema) },
 			std::pair{ "LightLimitFix", MakeSchemaView(light_limit_fix::kSchema) },
+			std::pair{ "VanillaPBR", MakeSchemaView(vanilla_pbr::kSchema) },
 			std::pair{ "DynamicCubemaps", MakeSchemaView(dynamic_cubemaps::kSchema) },
 			std::pair{ "ImageBasedLighting", MakeSchemaView(image_based_lighting::kSchema) },
 			std::pair{ "WaterEffects", SchemaView{} },
