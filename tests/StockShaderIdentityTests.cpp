@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
@@ -140,7 +141,7 @@ namespace
 	}
 
 	auto CompileStage(const cs::engine::ShaderFamilyDescriptor& a_descriptor, const std::filesystem::path& a_shaderRoot,
-		Contributions a_contributions, cs::engine::GameRuntime a_runtime)
+		Contributions a_contributions, cs::engine::GameRuntime a_runtime, const cs::engine::ShaderDefineOptions& a_options = {})
 	{
 		const auto family = cs::engine::BuildShaderFamilyCompilationDescriptor(a_descriptor);
 		Require(family.has_value(), "unresolved");
@@ -155,10 +156,23 @@ namespace
 		variant.profile = request->profile;
 		variant.stage = a_descriptor.stage;
 		variant.defines.assign(request->defines.begin(), request->defines.end());
+		for (const auto& [name, value] : a_options)
+			variant.defines.emplace_back(std::string(name), std::string(value));
 		const auto recipe = cs::engine::BuildShaderVariantRecipe(variant, a_shaderRoot);
 		auto compiled = cs::shader_test::Compile(recipe);
 		Require(compiled.succeeded, "compile-error: " + FirstErrorLine(compiled.error));
 		return compiled;
+	}
+
+	bool ContributesTo(const cs::engine::ShaderReplacementRegistration& a_contribution, const cs::engine::ShaderFamilyDescriptor& a_family)
+	{
+		return a_contribution.targetId == a_family.target && (a_contribution.stages & cs::engine::ShaderStageBit(a_family.stage)) != 0;
+	}
+
+	cs::engine::ShaderDefineOptions FullscreenDebugOptions(const cs::engine::ShaderReplacementRegistration& a_contribution, cs::engine::ShaderInjectionTarget a_target)
+	{
+		const auto* declaration = dynamic_cast<const cs::engine::ShaderDefineDeclaration*>(a_contribution.feature);
+		return declaration ? declaration->GetShaderDefineOptions(a_target, true) : cs::engine::ShaderDefineOptions{};
 	}
 
 	auto ReflectSignature(const auto& a_bytecode, bool a_input)
@@ -189,11 +203,88 @@ namespace
 		return cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(stripped->GetBufferPointer(), stripped->GetBufferSize()));
 	}
 
-	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn, cs::engine::GameRuntime a_runtime)
+	bool HasFullscreenDebug(const cs::engine::ShaderFamilyDescriptor& a_family)
+	{
+		return std::ranges::any_of(cs::shader_test::GetFeatureShaderContributions(), [&](const auto& contribution) {
+			return ContributesTo(contribution, a_family) && !FullscreenDebugOptions(contribution, a_family.target).empty();
+		});
+	}
+
+	// Pairwise define coverage per target and stage bounds debug-view cost.
+	std::vector<bool> SelectDebugRows(const std::vector<Row>& a_rows)
+	{
+		using Key = std::pair<cs::engine::ShaderInjectionTarget, cs::engine::ShaderStage>;
+		std::map<Key, std::vector<std::size_t>> groups;
+		std::vector<cs::engine::ShaderInjectionDefines> defines(a_rows.size());
+		for (std::size_t index = 0; index < a_rows.size(); ++index) {
+			const auto& row = a_rows[index];
+			const auto family = row.source.Family();
+			if (!row.contributed || !HasFullscreenDebug(family))
+				continue;
+			const auto descriptor = cs::engine::BuildShaderFamilyCompilationDescriptor(family);
+			if (!descriptor)
+				continue;
+			defines[index] = descriptor->defines;
+			groups[{ family.target, family.stage }].push_back(index);
+		}
+		std::vector<bool> selected(a_rows.size());
+		for (const auto& [key, members] : groups) {
+			std::set<std::string> names;
+			for (const auto index : members)
+				for (const auto& [name, value] : defines[index])
+					names.insert(name);
+			std::vector<std::vector<std::string>> states;
+			for (const auto index : members) {
+				auto& state = states.emplace_back();
+				for (const auto& name : names) {
+					const auto found = defines[index].find(name);
+					state.push_back(name + "=" + (found == defines[index].end() ? std::string("<undefined>") : found->second));
+				}
+			}
+			std::set<std::pair<std::string, std::string>> uncovered;
+			for (const auto& state : states)
+				for (std::size_t first = 0; first < state.size(); ++first)
+					for (std::size_t second = first; second < state.size(); ++second)
+						uncovered.emplace(state[first], state[second]);
+			if (uncovered.empty())
+				selected[members.front()] = true;
+			while (!uncovered.empty()) {
+				std::size_t best = 0;
+				std::size_t bestCount = 0;
+				for (std::size_t member = 0; member < members.size(); ++member) {
+					std::size_t count = 0;
+					const auto& state = states[member];
+					for (std::size_t first = 0; first < state.size(); ++first)
+						for (std::size_t second = first; second < state.size(); ++second)
+							count += uncovered.contains({ state[first], state[second] });
+					if (count > bestCount) {
+						best = member;
+						bestCount = count;
+					}
+				}
+				selected[members[best]] = true;
+				const auto& state = states[best];
+				for (std::size_t first = 0; first < state.size(); ++first)
+					for (std::size_t second = first; second < state.size(); ++second)
+						uncovered.erase({ state[first], state[second] });
+			}
+		}
+		return selected;
+	}
+
+	std::string Compile(const Row& a_row, const std::filesystem::path& a_shaderRoot, bool a_featuresOn, bool a_debugViews,
+		cs::engine::GameRuntime a_runtime)
 	{
 		const auto family = a_row.source.Family();
 		const auto compiled = CompileStage(family, a_shaderRoot, AllContributions(a_featuresOn), a_runtime);
 		if (a_featuresOn) {
+			// One fullscreen debug view is selected at a time, beside every other feature.
+			for (const auto& contribution : cs::shader_test::GetFeatureShaderContributions()) {
+				if (!a_debugViews || !ContributesTo(contribution, family))
+					continue;
+				if (const auto options = FullscreenDebugOptions(contribution, family.target); !options.empty())
+					CompileStage(family, a_shaderRoot, AllContributions(true), a_runtime, options);
+			}
 			if (family.stage != cs::engine::ShaderStage::kCompute &&
 				std::ranges::any_of(cs::shader_test::GetFeatureShaderContributions(), [&](const auto& contribution) {
 					return contribution.targetId == family.target && contribution.requiresGraphicsPair;
@@ -222,11 +313,12 @@ namespace
 	{
 		const auto family = a_row.source.Family();
 		for (const auto& contribution : cs::shader_test::GetFeatureShaderContributions()) {
-			if (contribution.targetId != family.target ||
-				(contribution.stages & cs::engine::ShaderStageBit(family.stage)) == 0)
+			if (!ContributesTo(contribution, family))
 				continue;
 			try {
 				CompileStage(family, a_shaderRoot, Contributions(&contribution, 1), a_runtime);
+				if (const auto options = FullscreenDebugOptions(contribution, family.target); !options.empty())
+					CompileStage(family, a_shaderRoot, Contributions(&contribution, 1), a_runtime, options);
 			} catch (const std::exception& error) {
 				return contribution.contributor + ": " + FirstErrorLine(error.what());
 			}
@@ -261,13 +353,14 @@ int main(int a_argc, char** a_argv)
 		CHECK_MSG(total != 0, "No contributor targets in the identity corpus");
 		if (total == 0)
 			return 1;
+		const auto debugRows = featuresOn && !isolated ? SelectDebugRows(rows) : std::vector<bool>(rows.size());
 		const auto start = std::chrono::steady_clock::now();
 		ParallelFor(rows.size(), [&](std::size_t index) {
 			if (!rows[index].owned || (featuresOn && !rows[index].contributed))
 				return;
 			try {
 				rows[index].actual = isolated ? CompileIsolated(rows[index], shaderRoot, table.runtime) :
-				                                Compile(rows[index], shaderRoot, featuresOn, table.runtime);
+				                                Compile(rows[index], shaderRoot, featuresOn, debugRows[index], table.runtime);
 			} catch (const std::exception& error) {
 				rows[index].actual = "error: " + FirstErrorLine(error.what());
 			}
