@@ -113,6 +113,30 @@ namespace cs::features
 			settings.ShowInOverlay, settings.FrameHistorySize, settings.toggleHotkey);
 	}
 
+	std::expected<void, std::string> PerformanceOverlay::StartCostMeasurement()
+	{
+		// The comparison advances only from the host frame tick.
+		const auto state = host::HostClient::Get().Client().QueryState();
+		if (!state || state->state != DMUI_HOST_STATE_READY)
+			return std::unexpected("the DearModdingUI host is not ready, and the comparison advances only from its frame tick");
+		try {
+			_comparison.StartCostRun();
+		} catch (const std::exception& error) {
+			return std::unexpected(error.what());
+		}
+		return {};
+	}
+
+	std::expected<void, std::string> PerformanceOverlay::StopComparison()
+	{
+		try {
+			_comparison.SetInterval(0);
+		} catch (const std::exception& error) {
+			return std::unexpected(error.what());
+		}
+		return {};
+	}
+
 	void PerformanceOverlay::AccumulatePresentTime()
 	{
 		LARGE_INTEGER end;
@@ -262,9 +286,11 @@ namespace cs::features
 	{
 		_vramUsed = a_used;
 		_vramBudget = a_budget;
-		const bool consuming = settings.ShowInOverlay || _comparison.Testing();
-		render::profiling::SetEnabled(consuming);
-		if (consuming)
+		// A cost run needs frame time only, so draw profiling stays off for it.
+		const bool drawTimings = settings.ShowInOverlay || _comparison.WantsDrawTimings();
+		const bool consuming = drawTimings || _comparison.Testing();
+		render::profiling::SetEnabled(drawTimings);
+		if (drawTimings)
 			render::profiling::KeepActive();
 		if (!consuming) {
 			QueryPerformanceCounter(&_lastFrame);
@@ -277,13 +303,13 @@ namespace cs::features
 		UpdateGraphValues();
 		try {
 			if (_comparison.Testing())
-				_comparison.Update(Util::GetNowSecs(), BuildRows());
+				_comparison.Update(Util::GetNowSecs(), BuildRows(_frameMs));
 		} catch (const std::exception& error) {
 			_comparison.Abort(error.what());
 		}
 	}
 
-	std::vector<DrawCallRow> PerformanceOverlay::BuildRows() const
+	std::vector<DrawCallRow> PerformanceOverlay::BuildRows(float a_totalMs) const
 	{
 		std::vector<DrawCallRow> rows;
 		float measured{}, calls{};
@@ -299,21 +325,21 @@ namespace cs::features
 				ShaderTooltip(timing.type),
 				true, {}, {} });
 		}
-		float other = _displayMs - measured;
+		float other = a_totalMs - measured;
 		if (std::abs(other) < 1e-4f)
 			other = 0.0f;
 		const float csPasses = render::profiling::GetProfiler().GetTotalTimeMs();
 		// Capped at the unattributed time it is carved from.
 		const float present = std::min(_smoothPresentMs, std::max(0.0f, other));
 		const float remainingOther = std::max(0.0f, other - present);
-		rows.push_back({ "CS Passes:", -3, -1, csPasses, Percentage(csPasses, _displayMs), 0.0f,
+		rows.push_back({ "CS Passes:", -3, -1, csPasses, Percentage(csPasses, a_totalMs), 0.0f,
 			"GPU time spent in Community Shaders compute passes (profiled).", true, {}, {} });
-		rows.push_back({ "Present:", -4, -1, present, Percentage(present, _displayMs), 0.0f,
+		rows.push_back({ "Present:", -4, -1, present, Percentage(present, a_totalMs), 0.0f,
 			"CPU time spent waiting inside Main::Swap, which presents the frame. Capped at the frame time not attributed to shader types, so it can read lower than the measured wait.", true, {}, {} });
-		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, _displayMs), 0.0f,
+		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, a_totalMs), 0.0f,
 			"Frame time not attributed to any measured shader type or to Present. This includes UI, post-processing, engine work, and CS compute passes (whose GPU time is shown separately).", true, {}, {} });
-		rows.push_back({ "Total:", -1, static_cast<int>(calls), _displayMs, 100.0f,
-			CostPerCall(_displayMs, calls), "Total frame time.", true, {}, {} });
+		rows.push_back({ "Total:", -1, static_cast<int>(calls), a_totalMs, 100.0f,
+			CostPerCall(a_totalMs, calls), "Total frame time.", true, {}, {} });
 		return rows;
 	}
 
@@ -417,7 +443,7 @@ namespace cs::features
 				}
 			}
 			if (settings.ShowDrawCalls)
-				DrawDrawCalls(BuildRows());
+				DrawDrawCalls(BuildRows(_displayMs));
 			if (settings.ShowCSPasses)
 				ProfilingRenderer::RenderStatistics(false, false);
 		}
@@ -501,10 +527,25 @@ namespace cs::features
 			.Field("engine_frame_sequence", static_cast<std::int64_t>(render::profiling::FrameSequence()))
 			.Field("ab_testing", _comparison.Testing())
 			.Field("ab_restore_pending", _comparison.RestorePending())
+			.Field("ab_cost_run", _comparison.CostRun())
 			.Field("post_fg_calculated", _frameGeneration)
 			.Field("vram_available", _vramBudget > 0)
 			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsed / (1024 * 1024)))
 			.Field("vram_budget_mb", static_cast<std::int64_t>(_vramBudget / (1024 * 1024)));
+		if (const auto& summary = _comparison.LastSummary()) {
+			a_sink.Field("ab_mean_a_ms", static_cast<double>(summary->meanA))
+				.Field("ab_mean_b_ms", static_cast<double>(summary->meanB))
+				.Field("ab_median_a_ms", static_cast<double>(summary->medianA))
+				.Field("ab_median_b_ms", static_cast<double>(summary->medianB))
+				.Field("ab_delta_ms", static_cast<double>(summary->delta))
+				.Field("ab_fps_a", static_cast<double>(summary->fpsA))
+				.Field("ab_fps_b", static_cast<double>(summary->fpsB))
+				.Field("ab_frames", summary->frames)
+				.Field("ab_excluded_frames", summary->excluded)
+				.Field("ab_windows", summary->windows)
+				.Field("ab_duration_s", static_cast<double>(summary->duration))
+				.Field("ab_validity", performance_overlay::ABComparison::ValidityName(summary->validity));
+		}
 	}
 
 	namespace

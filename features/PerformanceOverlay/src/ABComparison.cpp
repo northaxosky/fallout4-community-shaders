@@ -9,6 +9,7 @@
 #include "Shared/PerfUtils.h"
 
 #include <algorithm>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 
@@ -17,6 +18,12 @@ namespace cs::features::performance_overlay
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.performanceoverlay");
+
+		// A switch can reattach terrain chunks or recreate shaders; both gates must pass.
+		constexpr double kSettleSeconds = 0.25;
+		constexpr int kSettleFrames = 10;
+		constexpr int kCostWindowSeconds = 3;
+		constexpr int kCostWindows = 20;
 
 		nlohmann::json SnapshotJson(const std::map<Feature*, toml::table>& a_snapshot)
 		{
@@ -37,13 +44,64 @@ namespace cs::features::performance_overlay
 			}
 			return result;
 		}
+
+		nlohmann::json OwnershipJson(const feature_config::ShaderOwnershipConfig& a_ownership)
+		{
+			auto targets = nlohmann::json::object();
+			for (const auto& target : engine::GetShaderInjectionTargets())
+				targets[std::string(target.name)] = a_ownership.targets[target.id];
+			return { { "enable_shaders", a_ownership.enableShaders }, { "targets", std::move(targets) } };
+		}
+	}
+
+	ABComparison::Progress ABComparison::GetProgress() const noexcept
+	{
+		return { _testing, _restorePending, CostRun(), std::min(_windowsDone + 1, _windowLimit), _windowLimit, _variantB,
+			_testing ? std::max(0.0, _testInterval - (Util::GetNowSecs() - _lastSwitch)) : 0.0 };
+	}
+
+	std::optional<ABComparison::Summary> ABComparison::Summarize() const
+	{
+		if (!_aggregator.HasResults())
+			return std::nullopt;
+		Summary summary;
+		summary.frames = _aggregator.GetTotalFrameCount();
+		summary.duration = _aggregator.GetTotalTestDuration();
+		bool hasSamplesA = false;
+		bool hasSamplesB = false;
+		for (const auto& interval : _aggregator.GetIntervals()) {
+			++summary.windows;
+			summary.excluded += interval.excludedFrames;
+			hasSamplesA = hasSamplesA || (interval.variant == ABVariant::A && !interval.frameRows.empty());
+			hasSamplesB = hasSamplesB || (interval.variant == ABVariant::B && !interval.frameRows.empty());
+		}
+		for (const auto& row : _aggregator.GetAggregatedResults()) {
+			if (row.shaderType != -1)
+				continue;
+			summary.meanA = row.meanA;
+			summary.meanB = row.meanB;
+			summary.medianA = row.medianA;
+			summary.medianB = row.medianB;
+			summary.delta = row.delta;
+		}
+		summary.fpsA = Util::CalcFPS(summary.meanA);
+		summary.fpsB = Util::CalcFPS(summary.meanB);
+		const bool hasBothVariants = hasSamplesA && hasSamplesB;
+		summary.validPercent = summary.frames + summary.excluded > 0 ? 100.0f * static_cast<float>(summary.frames) / static_cast<float>(summary.frames + summary.excluded) : 0.0f;
+		summary.validity = hasBothVariants && summary.frames >= kMinimumSamplesForValidity && summary.duration >= kMinimumTestDuration &&
+		                           summary.validPercent >= kMinimumValidFramesPercent ?
+		                       Validity::kValid :
+		                   hasBothVariants && summary.frames >= kMinimumSamplesForMarginal && summary.duration >= kMinimumDurationForMarginal ? Validity::kMarginal :
+		                                                                                                                                        Validity::kInsufficient;
+		return summary;
 	}
 
 	void ABComparison::CaptureBaseline()
 	{
 		_baseline = Capture();
-		_test.clear();
+		_a = _b = {};
 		_aggregator.Clear();
+		_lastSummary.reset();
 		_testError.clear();
 	}
 
@@ -54,7 +112,7 @@ namespace cs::features::performance_overlay
 		try {
 			SetInterval(0);
 		} catch (const std::exception& error) {
-			_testError += std::format("; TEST restoration failed: {}", error.what());
+			_testError += std::format("; {} restoration failed: {}", _labelB, error.what());
 			L->error("{}", _testError);
 			_testing = false;
 			_restorePending = true;
@@ -65,9 +123,10 @@ namespace cs::features::performance_overlay
 		Menu::ShowToast(_testError, 8.0, DMUI_STATUS_SEVERITY_ERROR, std::string(_owner.GetDisplayName()));
 	}
 
-	ABComparison::Snapshot ABComparison::Capture()
+	ABComparison::State ABComparison::Capture()
 	{
-		Snapshot snapshot;
+		State state;
+		state.ownership = FeatureManager::Get().GetShaderOwnership();
 		for (auto* feature : FeatureManager::Get().GetAll()) {
 			const auto& access = feature->GetLiveSettingsAccess();
 			if (!feature->IsHealthy() || !access.snapshot)
@@ -75,19 +134,22 @@ namespace cs::features::performance_overlay
 			auto values = access.snapshot();
 			for (const auto key : access.notComparable)
 				values.erase(key);
-			snapshot.emplace(feature, std::move(values));
+			state.live.emplace(feature, std::move(values));
 		}
-		return snapshot;
+		return state;
 	}
 
-	void ABComparison::Apply(const Snapshot& a_snapshot, bool a_restoring)
+	void ABComparison::Apply(const State& a_state, bool a_restoring)
 	{
+		auto& manager = FeatureManager::Get();
+		if (a_state.ownership != manager.GetShaderOwnership())
+			manager.ApplyShaderOwnership(a_state.ownership);
 		std::vector<cs::settings::PreparedLiveSettings> prepared;
-		for (const auto& [feature, values] : a_snapshot) {
+		for (const auto& [feature, values] : a_state.live) {
 			if (!a_restoring && !feature->IsHealthy())
 				throw std::runtime_error(std::format("{} is no longer healthy", feature->GetName()));
 			std::string error;
-			auto value = FeatureManager::Get().PrepareLiveSettings(*feature, values, "ABComparison::Finalize", error);
+			auto value = manager.PrepareLiveSettings(*feature, values, "ABComparison::Finalize", error);
 			if (!value)
 				throw std::runtime_error(std::format("{}: {}", feature->GetName(), error));
 			if (a_restoring && !feature->IsHealthy())
@@ -97,12 +159,42 @@ namespace cs::features::performance_overlay
 		cs::settings::ApplyPreparedLiveSettings(prepared);
 	}
 
+	void ABComparison::Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit)
+	{
+		_a = std::move(a_a);
+		_b = std::move(a_b);
+		_labelA = std::move(a_labelA);
+		_labelB = std::move(a_labelB);
+		_aggregator.Clear();
+		_lastSummary.reset();
+		auto describe = [](const State& a_state) {
+			auto json = SnapshotJson(a_state.live);
+			json["ShaderOwnership"] = OwnershipJson(a_state.ownership);
+			return json;
+		};
+		_aggregator.SetSettingsA(describe(_a));
+		_aggregator.SetSettingsB(describe(_b));
+		_variantB = true;
+		_windowsDone = 0;
+		_windowLimit = a_windowLimit;
+		_framesSinceSwitch = 0;
+		_aggregator.OnABSwitch(ABVariant::B);
+		_lastSwitch = Util::GetNowSecs();
+		_testInterval = a_interval;
+		_testError.clear();
+		_testing = true;
+		cs::settings::liveComparisonActive = true;
+	}
+
 	void ABComparison::SetInterval(int a_interval)
 	{
 		if (!a_interval) {
 			if (_testing || _restorePending) {
-				Apply(_test, true);
+				Apply(_b, true);
 				_aggregator.OnTestEnd();
+				_lastSummary = Summarize();
+				if (CostRun())
+					LogCostSummary();
 			}
 			_testing = false;
 			_restorePending = false;
@@ -111,83 +203,137 @@ namespace cs::features::performance_overlay
 			return;
 		}
 		if (_restorePending)
-			throw std::runtime_error("Restore TEST before starting another comparison");
-		if (!_testing) {
-			if (_baseline.empty())
-				throw std::runtime_error("No healthy live-effect settings are available for A/B testing");
-			auto test = Capture();
-			if (test.size() != _baseline.size())
-				throw std::runtime_error("Loaded features changed; capture a new USER baseline");
-			for (const auto& [feature, values] : test) {
-				(void)values;
-				if (!_baseline.contains(feature))
-					throw std::runtime_error("Loaded features changed; capture a new USER baseline");
-			}
-			if (test == _baseline)
-				throw std::runtime_error("USER and TEST live settings are identical");
-			_test = std::move(test);
-			_aggregator.Clear();
-			_aggregator.SetSettingsA(SnapshotJson(_baseline));
-			_aggregator.SetSettingsB(SnapshotJson(_test));
-			_variantB = true;
-			_aggregator.OnABSwitch(ABVariant::B);
-			_lastSwitch = Util::GetNowSecs();
-			_testing = true;
-			cs::settings::liveComparisonActive = true;
+			throw std::runtime_error(std::format("Restore {} before starting another comparison", _labelB));
+		if (_testing) {
+			if (CostRun())
+				throw std::runtime_error("A cost measurement is running; stop it first");
+			_testInterval = a_interval;
+			_testError.clear();
+			return;
 		}
-		_testInterval = a_interval;
-		_testError.clear();
+		if (_baseline.live.empty())
+			throw std::runtime_error("No healthy live-effect settings are available for A/B testing");
+		auto test = Capture();
+		if (test.live.size() != _baseline.live.size())
+			throw std::runtime_error("Loaded features changed; capture a new USER baseline");
+		for (const auto& [feature, values] : test.live) {
+			(void)values;
+			if (!_baseline.live.contains(feature))
+				throw std::runtime_error("Loaded features changed; capture a new USER baseline");
+		}
+		if (test == _baseline)
+			throw std::runtime_error("USER and TEST live settings are identical");
+		Begin(_baseline, std::move(test), "USER", "TEST", a_interval, 0);
+	}
+
+	void ABComparison::StartCostRun()
+	{
+		if (_testing || _restorePending)
+			throw std::runtime_error("A comparison is already running");
+		auto on = Capture();
+		if (!on.ownership.enableShaders)
+			throw std::runtime_error("Custom shaders are already off; turn them on to measure their cost");
+		auto off = on;
+		off.ownership.enableShaders = false;
+		Begin(std::move(off), std::move(on), "CS off", "CS on", kCostWindowSeconds, kCostWindows);
 	}
 
 	void ABComparison::Update(double a_now, const std::vector<DrawCallRow>& a_rows)
 	{
 		if (!_testing)
 			return;
-		for (const auto& [feature, values] : _test) {
+		for (const auto& [feature, values] : _b.live) {
 			(void)values;
 			if (!feature->IsHealthy())
 				throw std::runtime_error(std::format("{} was quarantined", feature->GetName()));
 		}
-		_aggregator.OnFrame(a_rows);
+		++_framesSinceSwitch;
+		if (_framesSinceSwitch >= kSettleFrames && a_now - _lastSwitch >= kSettleSeconds)
+			_aggregator.OnFrame(a_rows);
 		if (a_now - _lastSwitch > static_cast<double>(_testInterval)) {
-			Apply(_variantB ? _baseline : _test);
+			++_windowsDone;
+			if (CostRun() && _windowsDone >= _windowLimit) {
+				SetInterval(0);
+				return;
+			}
+			Apply(_variantB ? _a : _b);
 			_variantB = !_variantB;
 			_aggregator.OnABSwitch(_variantB ? ABVariant::B : ABVariant::A);
 			_lastSwitch = a_now;
+			_framesSinceSwitch = 0;
+		}
+	}
+
+	void ABComparison::LogCostSummary() const
+	{
+		if (!_lastSummary)
+			return;
+		const auto& summary = *_lastSummary;
+		L->info("CS cost: on {:.2f} ms ({:.1f} FPS), off {:.2f} ms ({:.1f} FPS), cost {:+.2f} ms, {} windows, {}",
+			summary.meanB, summary.fpsB, summary.meanA, summary.fpsA, summary.delta, summary.windows, ValidityName(summary.validity));
+	}
+
+	std::string ABComparison::CostHelp() const
+	{
+		std::string unaffected;
+		for (auto* feature : FeatureManager::Get().GetAll()) {
+			if (feature->IsActive() && !feature->FollowsShaderOwnership())
+				unaffected += std::format("{}{}", unaffected.empty() ? "" : ", ", feature->GetDisplayName());
+		}
+		return std::format(
+			"Alternates custom shaders on and off in {} second windows for {} cycles. Off still includes CS hooks and per-draw lookups, "
+			"Unified Water's distant-water patch{}, so it reads lower than removing the plugin.",
+			kCostWindowSeconds, kCostWindows / 2,
+			unaffected.empty() ? "" : std::format(", and features that do not follow shader ownership ({})", unaffected));
+	}
+
+	void ABComparison::Attempt(const std::function<void()>& a_action)
+	{
+		try {
+			a_action();
+		} catch (const std::exception& error) {
+			_testError = error.what();
+			Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR, std::string(_owner.GetDisplayName()));
 		}
 	}
 
 	void ABComparison::DrawControls()
 	{
 		dmui::ui::TextWrapped("Capture USER before editing TEST. Set the interval to 0 to restore TEST.");
-		if (_restorePending && dmui::ui::Button("Retry TEST Restoration"))
-			Abort("Retrying TEST restoration");
+		if (const auto retry = std::format("Retry {} Restoration", _labelB); _restorePending && dmui::ui::Button(retry.c_str()))
+			Abort(std::format("Retrying {} restoration", _labelB));
 		dmui::ui::BeginDisabled(_testing || _restorePending);
 		if (dmui::ui::Button("Capture USER Baseline"))
 			CaptureBaseline();
 		dmui::ui::EndDisabled();
+		dmui::ui::BeginDisabled(CostRun() && _testing);
 		int interval = _testInterval;
-		if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed) {
-			try {
-				SetInterval(interval);
-			} catch (const std::exception& error) {
-				_testError = error.what();
-				Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR, std::string(_owner.GetDisplayName()));
-			}
-		}
+		if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed)
+			Attempt([&] { SetInterval(interval); });
+		dmui::ui::EndDisabled();
+		dmui::ui::BeginDisabled(_testing || _restorePending);
+		if (dmui::ui::Button("Measure CS cost"))
+			Attempt([&] { StartCostRun(); });
+		dmui::ui::EndDisabled();
+		if (_testing && CostRun() && dmui::ui::Button("Stop CS Cost Measurement"))
+			Attempt([&] { SetInterval(0); });
+		dmui::ui::TextWrapped("%s", CostHelp().c_str());
 		DrawResults();
 	}
 
 	void ABComparison::DrawResults()
 	{
-		if (_testing)
-			dmui::ui::Text("Variant %s: %.1f seconds left",
-				_variantB ? "B (TEST)" : "A (USER)",
-				std::max(0.0, _testInterval - (Util::GetNowSecs() - _lastSwitch)));
+		if (_testing) {
+			const auto progress = GetProgress();
+			dmui::ui::Text("Variant %s (%s): %.1f seconds left",
+				_variantB ? "B" : "A", (_variantB ? _labelB : _labelA).c_str(), progress.windowSecondsLeft);
+			if (progress.costRun)
+				dmui::ui::Text("Window %d of %d", progress.window, progress.windows);
+		}
 		std::vector<std::string> changes;
-		for (const auto& [feature, values] : _test) {
-			const auto baseline = _baseline.find(feature);
-			if (baseline == _baseline.end())
+		for (const auto& [feature, values] : _b.live) {
+			const auto baseline = _a.live.find(feature);
+			if (baseline == _a.live.end())
 				continue;
 			for (const auto& [key, value] : values) {
 				const auto* original = baseline->second.get(key);
@@ -202,34 +348,32 @@ namespace cs::features::performance_overlay
 				changes.push_back(text.str());
 			}
 		}
+		const auto& ownershipA = _a.ownership;
+		const auto& ownershipB = _b.ownership;
+		if (ownershipA.enableShaders != ownershipB.enableShaders)
+			changes.push_back(std::format("ShaderOwnership.enable_shaders: {} -> {}", ownershipA.enableShaders, ownershipB.enableShaders));
+		for (const auto& target : engine::GetShaderInjectionTargets()) {
+			if (ownershipA.targets[target.id] != ownershipB.targets[target.id])
+				changes.push_back(std::format("ShaderOwnership.targets.{}: {} -> {}", target.name, ownershipA.targets[target.id], ownershipB.targets[target.id]));
+		}
 		if (!changes.empty()) {
-			if (const ui::Section section{ "overlay-ab-changes", "Changes from USER", ui::Collapsible{ .count = changes.size(), .framed = false } }; section) {
+			const auto title = std::format("Changes from {}", _labelA);
+			if (const ui::Section section{ "overlay-ab-changes", title.c_str(), ui::Collapsible{ .count = changes.size(), .framed = false } }; section) {
 				for (const auto& change : changes)
 					dmui::ui::TextUnformatted(change.c_str());
 			}
 		}
 		if (!_testError.empty())
 			dmui::ui::Text("A/B error: %s", _testError.c_str());
-		if (!_aggregator.HasResults())
+		const auto summary = Summarize();
+		if (!summary)
 			return;
-		const int frames = _aggregator.GetTotalFrameCount();
-		const float duration = _aggregator.GetTotalTestDuration();
-		int excluded{};
-		bool hasSamplesA = false;
-		bool hasSamplesB = false;
-		for (const auto& interval : _aggregator.GetIntervals()) {
-			excluded += interval.excludedFrames;
-			hasSamplesA = hasSamplesA || (interval.variant == ABVariant::A && !interval.frameRows.empty());
-			hasSamplesB = hasSamplesB || (interval.variant == ABVariant::B && !interval.frameRows.empty());
+		if (CostRun() && summary->meanA > 0.0f && summary->meanB > 0.0f) {
+			dmui::ui::Text("CS cost: %+.2f ms per frame (%.2f ms / %.1f FPS on, %.2f ms / %.1f FPS off)",
+				summary->delta, summary->meanB, summary->fpsB, summary->meanA, summary->fpsA);
 		}
-		const bool hasBothVariants = hasSamplesA && hasSamplesB;
-		const float validPercent = frames + excluded > 0 ? 100.0f * static_cast<float>(frames) / static_cast<float>(frames + excluded) : 0.0f;
-		const char* validity = hasBothVariants && frames >= kMinimumSamplesForValidity && duration >= kMinimumTestDuration &&
-		                               validPercent >= kMinimumValidFramesPercent ?
-		                           "Valid" :
-		                       hasBothVariants && frames >= kMinimumSamplesForMarginal && duration >= kMinimumDurationForMarginal ? "Marginal" :
-		                                                                                                                            "Insufficient";
-		dmui::ui::Text("%s: %d frames, %.1f seconds, %d excluded, %.1f%% valid", validity, frames, duration, excluded, validPercent);
+		dmui::ui::Text("%s: %d frames, %.1f seconds, %d excluded, %.1f%% valid", ValidityName(summary->validity).data(),
+			summary->frames, summary->duration, summary->excluded, summary->validPercent);
 		if (!dmui::ui::BeginTable("ABResults", 7, dmui::ui::TableFlags::kSortable))
 			return;
 		const char* labels[]{ "Shader Type", "A Avg", "B Avg", "Delta", "A Median", "B Median", "Median Delta" };
@@ -275,7 +419,7 @@ namespace cs::features::performance_overlay
 					DrawMilliseconds(values[i], tone);
 				}
 				if (row.shaderType == -1 && row.frameCountA > 0 && row.frameCountB > 0)
-					ui::Tooltip("A (USER): %.2f FPS; B (TEST): %.2f FPS", Util::CalcFPS(row.meanA), Util::CalcFPS(row.meanB));
+					ui::Tooltip("A (%s): %.2f FPS; B (%s): %.2f FPS", _labelA.c_str(), Util::CalcFPS(row.meanA), _labelB.c_str(), Util::CalcFPS(row.meanB));
 			}
 		}
 		dmui::ui::EndTable();

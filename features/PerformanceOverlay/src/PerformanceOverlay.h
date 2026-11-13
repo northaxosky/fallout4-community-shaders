@@ -9,6 +9,7 @@
 #include <Features/PerformanceOverlay/CircularBuffer.h>
 #include <Profiler.h>
 #include <deque>
+#include <expected>
 
 namespace cs::features
 {
@@ -32,6 +33,10 @@ namespace cs::features
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		void TickHostFrame(std::uint64_t a_vramUsedBytes, std::uint64_t a_vramBudgetBytes);
+		// Shared by the settings page and Remote Control.
+		std::expected<void, std::string> StartCostMeasurement();
+		std::expected<void, std::string> StopComparison();
+		const performance_overlay::ABComparison& Comparison() const noexcept { return _comparison; }
 		DMUI_ManagedOverlayOptions ManagedOverlayOptions() const noexcept;
 		const std::string& SuggestedToggleHotkey() const noexcept { return settings.toggleHotkey; }
 		using Settings = performance_overlay::Settings;
@@ -48,7 +53,8 @@ namespace cs::features
 		void AccumulatePresentTime();
 		void AccumulateFrameStats();
 		void UpdateFrameStats();
-		std::vector<DrawCallRow> BuildRows() const;
+		// The total is raw for comparisons and smoothed for the on-screen rows.
+		std::vector<DrawCallRow> BuildRows(float a_totalMs) const;
 
 		CircularBuffer<float> _history{ 600 }, _postHistory{ 600 };
 		LARGE_INTEGER _frequency{}, _lastFrame{}, _overlayFrequency{}, _lastUpdate{};
