@@ -722,8 +722,11 @@ namespace cs
 			if (!feature)
 				continue;
 			const auto unowned = feature->RefreshShaderOwnership();
-			// Unhealthy features keep their state; only healthy ones suspend.
-			if (!feature->IsHealthy() || !feature->FollowsShaderOwnership())
+			if (!feature->FollowsShaderOwnership())
+				continue;
+			// Degraded features suspend and resume too; only active ones are reported.
+			feature->SetSuspended(!unowned.empty());
+			if (!feature->IsActive())
 				continue;
 			std::vector<std::string_view> names;
 			for (const auto target : unowned) {
@@ -739,7 +742,6 @@ namespace cs
 				           std::format("Suspended: custom shaders are off for {}", join(names)) :
 				           "Suspended: custom shaders are off";
 			}
-			feature->SetSuspended(!names.empty());
 			feature->SetActiveNote(std::move(note));
 		}
 
