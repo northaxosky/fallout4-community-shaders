@@ -599,34 +599,32 @@ namespace cs
 		auto ownership =
 			feature_config::ParseShaderOwnership(feature_config::GetRoot());
 		if (const ui::Section section{ "section-shader-ownership", "Shader Ownership" }; section) {
-			// A comparison restores the ownership it started from, so edits would be lost.
-			dmui::ui::BeginDisabled(cs::settings::liveComparisonActive);
-			const bool drawn = CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-ownership", [&] {
-				{
-					if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
-							if (dmui::ui::Checkbox("##enable-shaders", &ownership.config.enableShaders))
-								SaveShaderOwnership(ownership.config);
-							return true;
-						}))
-						return false;
-				}
+			// A comparison restores the ownership it started from.
+			const dmui::DisabledScope disabled{ cs::settings::liveComparisonActive };
+			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-ownership", [&] {
+					{
+						if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
+								if (dmui::ui::Checkbox("##enable-shaders", &ownership.config.enableShaders))
+									SaveShaderOwnership(ownership.config);
+								return true;
+							}))
+							return false;
+					}
 
-				for (const auto& target : engine::GetShaderInjectionTargets()) {
-					if (!ui::DrawRow(a_client, target.name.data(), target.label.data(), "", [&](auto&) {
-							if (dmui::ui::Checkbox("##enabled", &ownership.config.targets[target.id]))
-								SaveShaderOwnership(ownership.config);
-							return true;
-						}))
-						return false;
-				}
-				if (!ownership.valid) {
-					return ui::DrawRow(a_client, "shader-ownership-error", "Configuration error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, ownership.error, { .tone = dmui::TextTone::kStatusError }); });
-				}
-				return true;
-			}),
-				"draw shader ownership table");
-			dmui::ui::EndDisabled();
-			if (!drawn)
+					for (const auto& target : engine::GetShaderInjectionTargets()) {
+						if (!ui::DrawRow(a_client, target.name.data(), target.label.data(), "", [&](auto&) {
+								if (dmui::ui::Checkbox("##enabled", &ownership.config.targets[target.id]))
+									SaveShaderOwnership(ownership.config);
+								return true;
+							}))
+							return false;
+					}
+					if (!ownership.valid) {
+						return ui::DrawRow(a_client, "shader-ownership-error", "Configuration error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, ownership.error, { .tone = dmui::TextTone::kStatusError }); });
+					}
+					return true;
+				}),
+					"draw shader ownership table"))
 				return;
 		}
 

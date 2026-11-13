@@ -14,8 +14,7 @@
 
 namespace cs::features::performance_overlay
 {
-	// Alternates two states (live settings plus shader ownership) in timed windows
-	// and aggregates raw frame rows per variant. Stopping always restores B.
+	// Alternates two states in timed windows; stopping always restores B.
 	class ABComparison
 	{
 	public:
@@ -26,9 +25,11 @@ namespace cs::features::performance_overlay
 			kInsufficient
 		};
 
-		// Total frame time over the run; delta is B minus A.
+		// Total frame time over the run; delta is B minus A. The means, delta
+		// and FPS are set only when both variants have samples.
 		struct Summary
 		{
+			bool comparable{};
 			float meanA{}, meanB{}, medianA{}, medianB{}, delta{};
 			float fpsA{}, fpsB{};
 			int frames{}, excluded{}, windows{};
@@ -54,10 +55,13 @@ namespace cs::features::performance_overlay
 			_owner(a_owner) {}
 
 		bool Testing() const noexcept { return _testing; }
-		bool CostRun() const noexcept { return _windowLimit > 0; }
+		// A cost run is in progress.
+		bool CostRunning() const noexcept { return _testing && _costRun; }
+		// The current or last run was a cost run, so its summary is a cost.
+		bool LastRunWasCost() const noexcept { return _costRun; }
 		bool RestorePending() const noexcept { return _restorePending; }
-		// Draw timings feed the per-type rows, which a cost run does not read.
-		bool WantsDrawTimings() const noexcept { return _testing && !CostRun(); }
+		// Per-type rows need draw profiling; a cost run reads only the Total row.
+		bool WantsDrawTimings() const noexcept { return _testing && !_costRun; }
 		Progress GetProgress() const noexcept;
 		const std::string& Error() const noexcept { return _testError; }
 		// Live aggregation; LastSummary is the one frozen when the run stopped.
@@ -69,7 +73,11 @@ namespace cs::features::performance_overlay
 		void SetInterval(int);
 		// Custom shaders on (B) against off (A); throws when they are already off.
 		void StartCostRun();
+		// Stops the run, records the reason and shows it as a toast.
 		void Abort(std::string_view a_reason) noexcept;
+		// Records an error from a user action and shows it as a toast.
+		void Fail(std::string a_message);
+		std::string CostHelp() const;
 		// Throws when a compared feature stops being healthy or a state cannot apply.
 		void Update(double a_now, const std::vector<DrawCallRow>& a_rows);
 		void DrawControls();
@@ -89,14 +97,13 @@ namespace cs::features::performance_overlay
 		void Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit);
 		void Attempt(const std::function<void()>& a_action);
 		void LogCostSummary() const;
-		std::string CostHelp() const;
 
 		const Feature& _owner;
 		State _baseline, _a, _b;
 		std::string _labelA = "USER", _labelB = "TEST";
 		ABTestAggregator _aggregator;
 		std::optional<Summary> _lastSummary;
-		bool _testing{}, _variantB = true, _restorePending{};
+		bool _testing{}, _variantB = true, _restorePending{}, _costRun{};
 		int _testInterval{}, _windowsDone{}, _windowLimit{}, _framesSinceSwitch{};
 		double _lastSwitch{};
 		std::string _testError;

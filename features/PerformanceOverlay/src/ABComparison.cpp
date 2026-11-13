@@ -19,7 +19,7 @@ namespace cs::features::performance_overlay
 	{
 		auto* L = cs::log::Get("cs.feature.performanceoverlay");
 
-		// A switch can reattach terrain chunks or recreate shaders; both gates must pass.
+		// A switch recreates resources; sample only after both gates pass.
 		constexpr double kSettleSeconds = 0.25;
 		constexpr int kSettleFrames = 10;
 		constexpr int kCostWindowSeconds = 3;
@@ -56,7 +56,7 @@ namespace cs::features::performance_overlay
 
 	ABComparison::Progress ABComparison::GetProgress() const noexcept
 	{
-		return { _testing, _restorePending, CostRun(), std::min(_windowsDone + 1, _windowLimit), _windowLimit, _variantB,
+		return { _testing, _restorePending, CostRunning(), std::min(_windowsDone + 1, _windowLimit), _windowLimit, _variantB,
 			_testing ? std::max(0.0, _testInterval - (Util::GetNowSecs() - _lastSwitch)) : 0.0 };
 	}
 
@@ -75,18 +75,19 @@ namespace cs::features::performance_overlay
 			hasSamplesA = hasSamplesA || (interval.variant == ABVariant::A && !interval.frameRows.empty());
 			hasSamplesB = hasSamplesB || (interval.variant == ABVariant::B && !interval.frameRows.empty());
 		}
+		const bool hasBothVariants = hasSamplesA && hasSamplesB;
+		summary.comparable = hasBothVariants;
 		for (const auto& row : _aggregator.GetAggregatedResults()) {
-			if (row.shaderType != -1)
+			if (row.shaderType != -1 || !hasBothVariants)
 				continue;
 			summary.meanA = row.meanA;
 			summary.meanB = row.meanB;
 			summary.medianA = row.medianA;
 			summary.medianB = row.medianB;
 			summary.delta = row.delta;
+			summary.fpsA = Util::CalcFPS(row.meanA);
+			summary.fpsB = Util::CalcFPS(row.meanB);
 		}
-		summary.fpsA = Util::CalcFPS(summary.meanA);
-		summary.fpsB = Util::CalcFPS(summary.meanB);
-		const bool hasBothVariants = hasSamplesA && hasSamplesB;
 		summary.validPercent = summary.frames + summary.excluded > 0 ? 100.0f * static_cast<float>(summary.frames) / static_cast<float>(summary.frames + summary.excluded) : 0.0f;
 		summary.validity = hasBothVariants && summary.frames >= kMinimumSamplesForValidity && summary.duration >= kMinimumTestDuration &&
 		                           summary.validPercent >= kMinimumValidFramesPercent ?
@@ -111,16 +112,16 @@ namespace cs::features::performance_overlay
 		L->error("A/B test stopped: {}", _testError);
 		try {
 			SetInterval(0);
-		} catch (const std::exception& error) {
-			_testError += std::format("; {} restoration failed: {}", _labelB, error.what());
-			L->error("{}", _testError);
-			_testing = false;
-			_restorePending = true;
-			cs::settings::liveComparisonActive = true;
-			_testInterval = 0;
-			_aggregator.OnTestEnd();
+		} catch (const std::exception&) {
+			// The stop path already recorded the failed restoration.
 		}
 		Menu::ShowToast(_testError, 8.0, DMUI_STATUS_SEVERITY_ERROR, std::string(_owner.GetDisplayName()));
+	}
+
+	void ABComparison::Fail(std::string a_message)
+	{
+		_testError = std::move(a_message);
+		Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR, std::string(_owner.GetDisplayName()));
 	}
 
 	ABComparison::State ABComparison::Capture()
@@ -177,6 +178,7 @@ namespace cs::features::performance_overlay
 		_variantB = true;
 		_windowsDone = 0;
 		_windowLimit = a_windowLimit;
+		_costRun = a_windowLimit > 0;
 		_framesSinceSwitch = 0;
 		_aggregator.OnABSwitch(ABVariant::B);
 		_lastSwitch = Util::GetNowSecs();
@@ -190,10 +192,22 @@ namespace cs::features::performance_overlay
 	{
 		if (!a_interval) {
 			if (_testing || _restorePending) {
-				Apply(_b, true);
+				try {
+					Apply(_b, true);
+				} catch (const std::exception& error) {
+					// Leave the run so shaders stop toggling; a retry restores.
+					const auto message = std::format("{} restoration failed: {}", _labelB, error.what());
+					_testError += (_testError.empty() ? "" : "; ") + message;
+					L->error("{}", _testError);
+					_testing = false;
+					_restorePending = true;
+					_testInterval = 0;
+					_aggregator.OnTestEnd();
+					throw std::runtime_error(message);
+				}
 				_aggregator.OnTestEnd();
 				_lastSummary = Summarize();
-				if (CostRun())
+				if (_costRun)
 					LogCostSummary();
 			}
 			_testing = false;
@@ -205,7 +219,7 @@ namespace cs::features::performance_overlay
 		if (_restorePending)
 			throw std::runtime_error(std::format("Restore {} before starting another comparison", _labelB));
 		if (_testing) {
-			if (CostRun())
+			if (_costRun)
 				throw std::runtime_error("A cost measurement is running; stop it first");
 			_testInterval = a_interval;
 			_testError.clear();
@@ -248,11 +262,17 @@ namespace cs::features::performance_overlay
 				throw std::runtime_error(std::format("{} was quarantined", feature->GetName()));
 		}
 		++_framesSinceSwitch;
-		if (_framesSinceSwitch >= kSettleFrames && a_now - _lastSwitch >= kSettleSeconds)
-			_aggregator.OnFrame(a_rows);
+		if (_framesSinceSwitch >= kSettleFrames && a_now - _lastSwitch >= kSettleSeconds) {
+			// Per-type rows freeze without draw profiling, so a cost run keeps only Total.
+			if (!_costRun) {
+				_aggregator.OnFrame(a_rows);
+			} else if (const auto total = std::ranges::find(a_rows, -1, &DrawCallRow::shaderType); total != a_rows.end()) {
+				_aggregator.OnFrame({ *total });
+			}
+		}
 		if (a_now - _lastSwitch > static_cast<double>(_testInterval)) {
 			++_windowsDone;
-			if (CostRun() && _windowsDone >= _windowLimit) {
+			if (_costRun && _windowsDone >= _windowLimit) {
 				SetInterval(0);
 				return;
 			}
@@ -269,6 +289,10 @@ namespace cs::features::performance_overlay
 		if (!_lastSummary)
 			return;
 		const auto& summary = *_lastSummary;
+		if (!summary.comparable) {
+			L->info("CS cost: not measured, {} windows, {}", summary.windows, ValidityName(summary.validity));
+			return;
+		}
 		L->info("CS cost: on {:.2f} ms ({:.1f} FPS), off {:.2f} ms ({:.1f} FPS), cost {:+.2f} ms, {} windows, {}",
 			summary.meanB, summary.fpsB, summary.meanA, summary.fpsA, summary.delta, summary.windows, ValidityName(summary.validity));
 	}
@@ -276,14 +300,19 @@ namespace cs::features::performance_overlay
 	std::string ABComparison::CostHelp() const
 	{
 		std::string unaffected;
+		bool unifiedWater = false;
 		for (auto* feature : FeatureManager::Get().GetAll()) {
-			if (feature->IsActive() && !feature->FollowsShaderOwnership())
+			if (!feature->IsActive())
+				continue;
+			unifiedWater = unifiedWater || feature->GetName() == "UnifiedWater";
+			if (!feature->FollowsShaderOwnership())
 				unaffected += std::format("{}{}", unaffected.empty() ? "" : ", ", feature->GetDisplayName());
 		}
 		return std::format(
-			"Alternates custom shaders on and off in {} second windows for {} cycles. Off still includes CS hooks and per-draw lookups, "
-			"Unified Water's distant-water patch{}, so it reads lower than removing the plugin.",
+			"Alternates custom shaders on and off in {} second windows for {} cycles. Off still includes CS hooks and per-draw lookups{}{}, "
+			"so it reads lower than removing the plugin.",
 			kCostWindowSeconds, kCostWindows / 2,
+			unifiedWater ? ", Unified Water's distant-water patch" : "",
 			unaffected.empty() ? "" : std::format(", and features that do not follow shader ownership ({})", unaffected));
 	}
 
@@ -292,8 +321,7 @@ namespace cs::features::performance_overlay
 		try {
 			a_action();
 		} catch (const std::exception& error) {
-			_testError = error.what();
-			Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR, std::string(_owner.GetDisplayName()));
+			Fail(error.what());
 		}
 	}
 
@@ -301,24 +329,16 @@ namespace cs::features::performance_overlay
 	{
 		dmui::ui::TextWrapped("Capture USER before editing TEST. Set the interval to 0 to restore TEST.");
 		if (const auto retry = std::format("Retry {} Restoration", _labelB); _restorePending && dmui::ui::Button(retry.c_str()))
-			Abort(std::format("Retrying {} restoration", _labelB));
-		dmui::ui::BeginDisabled(_testing || _restorePending);
-		if (dmui::ui::Button("Capture USER Baseline"))
-			CaptureBaseline();
-		dmui::ui::EndDisabled();
-		dmui::ui::BeginDisabled(CostRun() && _testing);
+			Attempt([&] { SetInterval(0); });
+		{
+			const dmui::DisabledScope disabled{ _testing || _restorePending };
+			if (dmui::ui::Button("Capture USER Baseline"))
+				CaptureBaseline();
+		}
+		const dmui::DisabledScope disabled{ CostRunning() };
 		int interval = _testInterval;
 		if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed)
 			Attempt([&] { SetInterval(interval); });
-		dmui::ui::EndDisabled();
-		dmui::ui::BeginDisabled(_testing || _restorePending);
-		if (dmui::ui::Button("Measure CS cost"))
-			Attempt([&] { StartCostRun(); });
-		dmui::ui::EndDisabled();
-		if (_testing && CostRun() && dmui::ui::Button("Stop CS Cost Measurement"))
-			Attempt([&] { SetInterval(0); });
-		dmui::ui::TextWrapped("%s", CostHelp().c_str());
-		DrawResults();
 	}
 
 	void ABComparison::DrawResults()
@@ -368,12 +388,14 @@ namespace cs::features::performance_overlay
 		const auto summary = Summarize();
 		if (!summary)
 			return;
-		if (CostRun() && summary->meanA > 0.0f && summary->meanB > 0.0f) {
+		if (_costRun && summary->comparable) {
 			dmui::ui::Text("CS cost: %+.2f ms per frame (%.2f ms / %.1f FPS on, %.2f ms / %.1f FPS off)",
 				summary->delta, summary->meanB, summary->fpsB, summary->meanA, summary->fpsA);
 		}
 		dmui::ui::Text("%s: %d frames, %.1f seconds, %d excluded, %.1f%% valid", ValidityName(summary->validity).data(),
 			summary->frames, summary->duration, summary->excluded, summary->validPercent);
+		if (_costRun)
+			return;
 		if (!dmui::ui::BeginTable("ABResults", 7, dmui::ui::TableFlags::kSortable))
 			return;
 		const char* labels[]{ "Shader Type", "A Avg", "B Avg", "Delta", "A Median", "B Median", "Median Delta" };

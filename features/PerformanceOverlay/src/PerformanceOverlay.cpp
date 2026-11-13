@@ -115,7 +115,6 @@ namespace cs::features
 
 	std::expected<void, std::string> PerformanceOverlay::StartCostMeasurement()
 	{
-		// The comparison advances only from the host frame tick.
 		const auto state = host::HostClient::Get().Client().QueryState();
 		if (!state || state->state != DMUI_HOST_STATE_READY)
 			return std::unexpected("the DearModdingUI host is not ready, and the comparison advances only from its frame tick");
@@ -482,7 +481,25 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "overlay-ab-test", "A/B Testing" }; section) {
 			_comparison.DrawControls();
+			DrawCostControls();
+			_comparison.DrawResults();
 		}
+	}
+
+	void PerformanceOverlay::DrawCostControls()
+	{
+		{
+			const dmui::DisabledScope disabled{ _comparison.Testing() || _comparison.RestorePending() };
+			if (dmui::ui::Button("Measure CS cost")) {
+				if (auto started = StartCostMeasurement(); !started)
+					_comparison.Fail(std::move(started.error()));
+			}
+		}
+		if (_comparison.CostRunning() && dmui::ui::Button("Stop CS Cost Measurement")) {
+			if (auto stopped = StopComparison(); !stopped)
+				_comparison.Fail(std::move(stopped.error()));
+		}
+		dmui::ui::TextWrapped("%s", _comparison.CostHelp().c_str());
 	}
 
 	DMUI_ManagedOverlayOptions PerformanceOverlay::ManagedOverlayOptions() const noexcept
@@ -527,24 +544,26 @@ namespace cs::features
 			.Field("engine_frame_sequence", static_cast<std::int64_t>(render::profiling::FrameSequence()))
 			.Field("ab_testing", _comparison.Testing())
 			.Field("ab_restore_pending", _comparison.RestorePending())
-			.Field("ab_cost_run", _comparison.CostRun())
+			.Field("ab_cost_running", _comparison.CostRunning())
 			.Field("post_fg_calculated", _frameGeneration)
 			.Field("vram_available", _vramBudget > 0)
 			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsed / (1024 * 1024)))
 			.Field("vram_budget_mb", static_cast<std::int64_t>(_vramBudget / (1024 * 1024)));
 		if (const auto& summary = _comparison.LastSummary()) {
-			a_sink.Field("ab_mean_a_ms", static_cast<double>(summary->meanA))
-				.Field("ab_mean_b_ms", static_cast<double>(summary->meanB))
-				.Field("ab_median_a_ms", static_cast<double>(summary->medianA))
-				.Field("ab_median_b_ms", static_cast<double>(summary->medianB))
-				.Field("ab_delta_ms", static_cast<double>(summary->delta))
-				.Field("ab_fps_a", static_cast<double>(summary->fpsA))
-				.Field("ab_fps_b", static_cast<double>(summary->fpsB))
-				.Field("ab_frames", summary->frames)
+			a_sink.Field("ab_frames", summary->frames)
 				.Field("ab_excluded_frames", summary->excluded)
 				.Field("ab_windows", summary->windows)
 				.Field("ab_duration_s", static_cast<double>(summary->duration))
 				.Field("ab_validity", performance_overlay::ABComparison::ValidityName(summary->validity));
+			if (summary->comparable) {
+				a_sink.Field("ab_mean_a_ms", static_cast<double>(summary->meanA))
+					.Field("ab_mean_b_ms", static_cast<double>(summary->meanB))
+					.Field("ab_median_a_ms", static_cast<double>(summary->medianA))
+					.Field("ab_median_b_ms", static_cast<double>(summary->medianB))
+					.Field("ab_delta_ms", static_cast<double>(summary->delta))
+					.Field("ab_fps_a", static_cast<double>(summary->fpsA))
+					.Field("ab_fps_b", static_cast<double>(summary->fpsB));
+			}
 		}
 	}
 
