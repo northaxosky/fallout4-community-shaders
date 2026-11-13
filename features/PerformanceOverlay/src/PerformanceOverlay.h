@@ -1,15 +1,14 @@
 #pragma once
 
+#include "ABComparison.h"
 #include "Feature.h"
 #include "PerformanceOverlaySettings.h"
 #include "Utils/GraphSampleGate.h"
 #include <DearModdingUI/API.h>
 #include <DearModdingUI/UI.h>
-#include <Features/PerformanceOverlay/ABTesting/ABTestAggregator.h>
 #include <Features/PerformanceOverlay/CircularBuffer.h>
 #include <Profiler.h>
 #include <deque>
-#include <map>
 
 namespace cs::features
 {
@@ -28,7 +27,7 @@ namespace cs::features
 		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override;
 		void DrawSettings() override;
 		void DrawOverlay() override;
-		bool IsOverlayActive() const override { return settings.ShowInOverlay || _testing || _restorePending; }
+		bool IsOverlayActive() const override { return settings.ShowInOverlay || _comparison.Testing() || _comparison.RestorePending(); }
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
@@ -39,15 +38,8 @@ namespace cs::features
 		Settings settings;
 
 	private:
-		using Snapshot = std::map<Feature*, toml::table>;
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(performance_overlay::kSchema, settings); }
-		static Snapshot CaptureSettings();
-		static void ApplySettings(const Snapshot&, bool a_restoring = false);
-		void SetTestInterval(int);
-		void AbortTest(std::string_view a_reason) noexcept;
-		void UpdateTest(double);
-		void DrawTestResults();
 		void DrawDrawCalls(const std::vector<DrawCallRow>&);
 		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4 DMUI_ThemeColors::*);
 		static float OverlayContentWidth() noexcept;
@@ -60,7 +52,6 @@ namespace cs::features
 
 		CircularBuffer<float> _history{ 600 }, _postHistory{ 600 };
 		LARGE_INTEGER _frequency{}, _lastFrame{}, _overlayFrequency{}, _lastUpdate{};
-		double _lastSwitch{};
 		float _frameMs{}, _fps{}, _displayMs{}, _displayFps{};
 		float _postDisplayMs{}, _postDisplayFps{}, _updateTimer{};
 		float _graphMin{}, _graphMax = 50.0f;
@@ -75,12 +66,8 @@ namespace cs::features
 		float _windowAvgMs{}, _windowP99Ms{};
 		bool _frameGeneration{};
 		std::uint64_t _vramUsed{}, _vramBudget{};
-		Snapshot _baseline, _test;
-		ABTestAggregator _aggregator;
-		bool _testing{}, _variantB = true, _restorePending{};
-		int _testInterval{};
+		performance_overlay::ABComparison _comparison{ *this };
 		Util::GraphSampleGate _graphGate;
 		std::uint64_t _hostTick{};
-		std::string _testError;
 	};
 }
