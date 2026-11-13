@@ -13,7 +13,7 @@ namespace cs::features
 		std::string_view GetName() const override { return "VanillaPBR"; }
 		std::string_view GetDisplayName() const override { return "Vanilla PBR"; }
 		std::string GetCategory() const override { return FeatureCategories::kMaterials; }
-		std::string GetFeatureSummary() const override { return "GGX direct specular for vanilla materials."; }
+		std::string GetFeatureSummary() const override { return "GGX direct specular and live environment reflections for vanilla materials."; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) override;
@@ -21,12 +21,16 @@ namespace cs::features
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(vanilla_pbr::kSchema, _settings); }
 		void RestoreDefaultSettings() override;
+		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
+		void SetDebugView(std::string_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(telemetry::Sink&) const override;
 
 	private:
 		bool ValidateInjectionPrerequisites(std::string&) override;
 		vanilla_pbr::Settings _settings;
-		std::atomic_bool _directEnabled{ false };
+		std::atomic_uint32_t _debugMode{ 0 };
+		std::atomic_bool _directEnabled{ false }, _liveEnvironmentEnabled{ false }, _liveEnvironmentReady{ false };
 	};
 }

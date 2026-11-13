@@ -2,6 +2,7 @@
 #define FO4_VANILLA_PBR_HLSLI
 
 #include "Common/BRDF.hlsli"
+#include "Common/Color.hlsli"
 #include "Common/Shading.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
 
@@ -12,6 +13,7 @@ namespace VanillaPBR
 		return FO4SharedData::VanillaPBREnable != 0 &&
 		       FO4SharedData::VanillaPBREnableGGX != 0 &&
 		       (FO4SharedData::VanillaPBRSplitScreen == 0 ||
+				   FO4SharedData::VanillaPBRSplitMode == 1 ||
 				   pixelPosition.x >= FO4SharedData::VanillaPBRSplitPosition * SharedData::BufferDim.x * FrameBuffer::DynamicResolutionParams1.x);
 	}
 
@@ -29,6 +31,17 @@ namespace VanillaPBR
 	bool UseEyeSpecialHandling(float materialClass)
 	{
 		return IsEye(materialClass) && FO4SharedData::VanillaPBREnableEyeSpecialHandling != 0;
+	}
+
+	// One gate for the live cube; false keeps the pixel stock.
+	bool UseLiveEnvironment(float2 pixelPosition, float materialClass, bool hasEnvmap)
+	{
+		return hasEnvmap && !UseEyeSpecialHandling(materialClass) &&
+		       FO4SharedData::VanillaPBREnable != 0 &&
+		       FO4SharedData::VanillaPBRLiveEnvironment != 0 &&
+		       (FO4SharedData::VanillaPBRSplitScreen == 0 ||
+				   FO4SharedData::VanillaPBRSplitMode == 0 ||
+				   pixelPosition.x >= FO4SharedData::VanillaPBRSplitPosition * SharedData::BufferDim.x * FrameBuffer::DynamicResolutionParams1.x);
 	}
 
 	float Exponent(float gloss, bool directional, float wetness)
@@ -55,6 +68,28 @@ namespace VanillaPBR
 	float F0(float intensity)
 	{
 		return saturate(max(FO4SharedData::VanillaPBRMinF0, intensity * FO4SharedData::VanillaPBRBaseF0Multiplier));
+	}
+
+	// Authored envmap average: last mip at the six face centers.
+	float3 NativeProbeAverage(TextureCubeArray<float4> probe, SamplerState probeSampler, float slice)
+	{
+		float3 sum = probe.SampleLevel(probeSampler, float4(1.0, 0.0, 0.0, slice), 15.0).xyz +
+		             probe.SampleLevel(probeSampler, float4(-1.0, 0.0, 0.0, slice), 15.0).xyz +
+		             probe.SampleLevel(probeSampler, float4(0.0, 1.0, 0.0, slice), 15.0).xyz +
+		             probe.SampleLevel(probeSampler, float4(0.0, -1.0, 0.0, slice), 15.0).xyz +
+		             probe.SampleLevel(probeSampler, float4(0.0, 0.0, 1.0, slice), 15.0).xyz +
+		             probe.SampleLevel(probeSampler, float4(0.0, 0.0, -1.0, slice), 15.0).xyz;
+		return sum / 6.0;
+	}
+
+	// FO4: warm saturated envmaps author metal tint; neutral and blue add none.
+	float3 AuthoredHue(float3 probeAverage)
+	{
+		float luminance = max(Color::RGBToLuminance(probeAverage), 1e-4);
+		float peak = max(probeAverage.r, max(probeAverage.g, probeAverage.b));
+		float saturation = (peak - min(probeAverage.r, min(probeAverage.g, probeAverage.b))) / max(peak, 1e-4);
+		float tint = probeAverage.r >= probeAverage.b ? saturate((saturation - 0.4) / 0.3) : 0.0;
+		return lerp(1.0, probeAverage / luminance, tint);
 	}
 
 	float3 Evaluate(float3 N, float3 V, float3 L, float gloss, float intensity,
@@ -84,5 +119,12 @@ namespace VanillaPBR
 		// FO4: native specular accumulation is not divided by three.
 		return specular * (NdotL * Math::PI);
 	}
+
+#ifdef VANILLA_PBR_FULLSCREEN_DEBUG
+	bool IsDebugViewActive()
+	{
+		return FO4SharedData::DebugOwner == FullscreenDebugOwner::VanillaPBR && FO4SharedData::DebugMode != 0;
+	}
+#endif
 }
 #endif

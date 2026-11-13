@@ -2,7 +2,7 @@
 
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
-| Forced | Authored 1x1 sentinel envmaps, Creator export and the Reflectance target select dynamic-reflection materials | Selection uses all surface water; native envmap materials keep their authored cube | Native cube-array registration rejects widths below 128 and the G-buffer has no reflectance/F0 channel |
+| Forced | Authored 1x1 sentinel envmaps, Creator export and the Reflectance target select dynamic-reflection materials | Selection uses all surface water; native envmap materials keep their authored cube, and the live cube reaches materials only through [Vanilla PBR](VanillaPBR.md) | Native cube-array registration rejects widths below 128 and the G-buffer has no reflectance/F0 channel |
 | Forced | Capture before the deferred composite | Capture runs after the Forward cloud group | FO4 draws the sky after the composite |
 | Forced | Capture the main color target | Geometry rebuilt as `3 * albedo * (diffuse A + diffuse B) + emissive`; sky from scene color | FO4 has no diffuse-only target |
 | Forced | Sky depth reconstructs a finite far-plane position | Sky depth 1.0 is placed on the far-plane direction | FO4's world projection has an infinite far plane |

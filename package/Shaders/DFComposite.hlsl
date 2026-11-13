@@ -8,6 +8,9 @@
 #endif
 #include "Common/DeferredContracts.hlsli"
 #include "FO4/SkylightingConsumer.hlsli"
+#if defined(VANILLA_PBR) || defined(VANILLA_PBR_FULLSCREEN_DEBUG)
+#	include "FO4/VanillaPBR.hlsli"
+#endif
 // FO4: IBL tints native fog colors before the final blend.
 #include "FO4/FogConsumer.hlsli"
 #ifdef SUBSURFACE_SCATTERING
@@ -18,6 +21,140 @@
 
 #ifdef DYNAMIC_CUBEMAPS
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
+#endif
+
+float3 AuthoredEnvironment(TextureCubeArray<float4> probe, SamplerState probeSampler, float3 direction, float lod,
+	float slice, float rain)
+{
+	float3 color = probe.SampleLevel(probeSampler, float4(direction, slice), lod).xyz;
+	float luminance = dot(color, float3(0.299, 0.587, 0.114));
+	return lerp(color, luminance.xxx, rain * 0.9);
+}
+
+#if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+#	include "FO4/AmbientConsumer.hlsli"
+#	ifdef SSGI
+#		include "FO4/ScreenSpaceGIConsumer.hlsli"
+#	endif
+
+namespace VanillaPBR
+{
+#	ifdef VANILLA_PBR_FULLSCREEN_DEBUG
+	static float3 EnvironmentDebug = 0.0;
+#	endif
+
+	static bool LiveEnvironmentUsed = false;
+	static float3 LiveAmbient = 0.0;
+	static float LiveNdotV = 1.0;
+	static float LiveRoughness = 1.0;
+	static float LiveScreenVisibility = 1.0;
+
+	// FO4: the lighting producers' ambient addend, without sun or local lights.
+	void PrepareLiveReflection(float2 pixelPosition, float3 viewPosition, float3 normalView, float gloss,
+		float materialClass)
+	{
+		FO4_AMBIENT_SKYLIGHTING_SET(pixelPosition, viewPosition, normalView);
+		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
+		LiveAmbient = FO4Ambient::Diffuse(FO4SharedData::GetAmbientLinear(normalWS), normalView);
+		LiveNdotV = saturate(dot(normalView, normalize(-viewPosition)));
+		LiveRoughness = Roughness(gloss, false, 0.0, materialClass);
+#	ifdef SSGI
+		LiveScreenVisibility = ScreenSpaceGI::Visibility(pixelPosition);
+#	endif
+	}
+
+	// Replaces nativeLight * nativeAO: sunlight reflects as the direct highlight.
+	float3 LiveReflectionWeight(float3 nativeLight, float nativeAO, bool screenSpaceOccluded = false)
+	{
+		// Native AO and SSGI visibility occlude the reflection once, as specular.
+		float ao = screenSpaceOccluded ? nativeAO : nativeAO * LiveScreenVisibility;
+		// Never brighter than native, should the shared ambient miss a producer.
+		return min(LiveAmbient, nativeLight) * SpecularAOLagarde(LiveNdotV, ao, LiveRoughness);
+	}
+
+	// FO4: screen-space reflections keep the native weighting.
+	float3 LiveReflection(float3 environment, float3 screenReflection, float screenWeight, float3 nativeLight,
+		float nativeAO)
+	{
+		return lerp(environment * LiveReflectionWeight(nativeLight, nativeAO),
+			screenReflection * nativeLight * nativeAO, screenWeight);
+	}
+
+	// FO4: authored cube sets how the material reflects; the live cube, what.
+	bool TryLiveEnvironment(TextureCubeArray<float4> probe, SamplerState probeSampler, float3 direction,
+		float lod, float slice, out float3 color)
+	{
+		color = 0.0;
+		uint liveWidth, liveHeight, liveLevels;
+		DynamicCubemaps::SharpReflectionsTexture.GetDimensions(0, liveWidth, liveHeight, liveLevels);
+		// The last mip holds one texel per face, not one average.
+		float lastMip = float(liveLevels) - 1.0;
+		float liveLuminance = 0.0;
+		[unroll] for (uint axis = 0; axis < 6; ++axis)
+		{
+			float3 face = 0.0;
+			face[axis >> 1] = (axis & 1) ? -1.0 : 1.0;
+			liveLuminance += Color::RGBToLuminance(DynamicCubemaps::SharpReflectionsTexture.SampleLevel(probeSampler, face, lastMip));
+		}
+		liveLuminance /= 6.0;
+		if (!(liveLuminance > 1e-4))
+			return false;
+		uint probeWidth, probeHeight, probeElements, probeLevels;
+		probe.GetDimensions(0, probeWidth, probeHeight, probeElements, probeLevels);
+		// FO4: native sites pass the antipodal ray; the live cube stores true ones.
+		float3 live = DynamicCubemaps::SharpReflectionsTexture.SampleLevel(
+			probeSampler, -direction, lod + log2(float(liveWidth) / float(probeWidth)));
+		float3 probeAverage = NativeProbeAverage(probe, probeSampler, slice);
+		float probeLuminance = Color::RGBToLuminance(probeAverage);
+		float3 hue = AuthoredHue(probeAverage);
+		// Native weighting multiplies by local light; keep only the live pattern.
+		color = live / liveLuminance * probeLuminance * hue;
+		return true;
+	}
+
+	float3 EnvironmentSample(float2 pixelPosition, float materialClass, TextureCubeArray<float4> probe,
+		SamplerState probeSampler, float3 direction, float lod, float slice, float rain, float3 viewPosition,
+		float3 normalView, float gloss)
+	{
+		float3 live = 0.0;
+		bool useLive = false;
+		[branch] if (UseLiveEnvironment(pixelPosition, materialClass, slice >= 0.0))
+			useLive = TryLiveEnvironment(probe, probeSampler, direction, lod, slice, live);
+		LiveEnvironmentUsed = useLive;
+		[branch] if (useLive)
+			PrepareLiveReflection(pixelPosition, viewPosition, normalView, gloss, materialClass);
+		float3 result = live;
+		// FO4: live samples skip rain greying; the live cube shows the weather.
+		[branch] if (!useLive)
+			result = AuthoredEnvironment(probe, probeSampler, direction, lod, slice, rain);
+#	ifdef VANILLA_PBR_FULLSCREEN_DEBUG
+		const uint mode = FO4SharedData::DebugMode;
+		EnvironmentDebug = mode == 1 ? live :
+		                   mode == 2 ? AuthoredEnvironment(probe, probeSampler, direction, lod, slice, rain) :
+		                   mode == 5 ? (useLive ? LiveAmbient : 0.0) :
+		                   mode == 6 ? (useLive ? SpecularAOLagarde(LiveNdotV, LiveScreenVisibility, LiveRoughness).xxx : 0.0) :
+		                               result;
+#	endif
+		return result;
+	}
+}
+#	define SAMPLE_MATERIAL_ENVIRONMENT(pixelPosition, materialClass, probe, probeSampler, direction, lod, slice, rain, viewPosition, normalView, gloss) \
+		VanillaPBR::EnvironmentSample(pixelPosition, materialClass, probe, probeSampler, direction, lod, slice, rain, viewPosition, normalView, gloss)
+#else
+#	define SAMPLE_MATERIAL_ENVIRONMENT(pixelPosition, materialClass, probe, probeSampler, direction, lod, slice, rain, viewPosition, normalView, gloss) \
+		AuthoredEnvironment(probe, probeSampler, direction, lod, slice, rain)
+#endif
+
+// Environment views replace the output; pixels without an envmap stay black.
+#if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS) && defined(VANILLA_PBR_FULLSCREEN_DEBUG)
+#	define VANILLA_PBR_IF_ENVIRONMENT_DEBUG(color, statement)        \
+		[branch] if (VanillaPBR::IsDebugViewActive())                 \
+		{                                                             \
+			float4 color = float4(VanillaPBR::EnvironmentDebug, 1.0); \
+			statement;                                                \
+		}
+#else
+#	define VANILLA_PBR_IF_ENVIRONMENT_DEBUG(color, statement)
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
@@ -264,13 +401,12 @@ PS_OUTPUT main(PS_INPUT input)
 		float mipLevel = (1.0 - shadingData.x) * 6.0;
 		mipLevel = pos.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(matSliceFloat * 255.0 - 1.0);
-		float3 cubeSample = g_tIBLProbeCube.SampleLevel(g_sIBLProbeCube, float4(reflWorld, arraySlice), mipLevel).xyz;
-		float luma = dot(cubeSample, float3(0.299, 0.587, 0.114));
-		float desatW = WorldWetnessAndRainTransition.y * 0.9;
-		iblColor = lerp(cubeSample, luma.xxx, desatW);
+		iblColor = SAMPLE_MATERIAL_ENVIRONMENT(input.position.xy, shadingData.z, g_tIBLProbeCube, g_sIBLProbeCube,
+			reflWorld, mipLevel, arraySlice, WorldWetnessAndRainTransition.y, pos.xyz, normalView, shadingData.x);
 	} else {
 		iblColor = float3(0, 0, 0);
 	}
+	VANILLA_PBR_IF_ENVIRONMENT_DEBUG(environmentDebug, output.color = environmentDebug; return output);
 #	if defined(OG)
 	// OG samples the lit scene and SSAO without the cb2[5].xy clamp.
 	float2 uvClamped = uv;
@@ -344,6 +480,13 @@ PS_OUTPUT main(PS_INPUT input)
 	const float aoFactor = 1.0;
 #	endif
 	output.color.xyz = modulated * aoFactor;
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+	[branch] if (VanillaPBR::LiveEnvironmentUsed)
+	{
+		float3 reflection = VanillaPBR::LiveReflection(iblColor, litRaw.xyz * SSLRParams0.x, litAlpha, ambientPairSum, aoFactor);
+		output.color.xyz = ambientAccum * aoFactor + glossFactor * glossSquaredScaled * reflection;
+	}
+#	endif
 	output.color.w = 1.0;
 	return output;
 }
@@ -600,11 +743,11 @@ PS_OUTPUT main(PS_INPUT input)
 		float mipLevel = (1.0 - shadingData.x) * 6.0;
 		mipLevel = positionView.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(material.y * 255.0 - 1.0);
-		float3 cubeSample = g_tIblProbeCube.SampleLevel(g_sIblProbeCube, float4(reflectionWorld, arraySlice), mipLevel).xyz;
-		float luminance = dot(cubeSample, float3(0.299, 0.587, 0.114));
-		iblColor = lerp(
-			cubeSample, luminance.xxx, WorldWetnessAndRainTransition.y * 0.9);
+		iblColor = SAMPLE_MATERIAL_ENVIRONMENT(input.position.xy, shadingData.z, g_tIblProbeCube, g_sIblProbeCube,
+			reflectionWorld, mipLevel, arraySlice, WorldWetnessAndRainTransition.y, positionView, normalView,
+			shadingData.x);
 	}
+	VANILLA_PBR_IF_ENVIRONMENT_DEBUG(environmentDebug, output.color = environmentDebug; return output);
 
 	float materialId = shadingData.z * 255.0;
 #	if defined(OG)
@@ -721,6 +864,13 @@ PS_OUTPUT main(PS_INPUT input)
 		const float ao = 1.0;
 #	endif
 		float3 aoColor = modulated * ao;
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+		[branch] if (VanillaPBR::LiveEnvironmentUsed)
+		{
+			float3 reflection = VanillaPBR::LiveReflection(iblColor, litScene.xyz * SSLRParams0.x, litAlpha, ambientPair, ao);
+			aoColor = ambientAccum * ao + glossFactor * glossSquaredScaled * reflection;
+		}
+#	endif
 
 		float fogPlaneDistance =
 			dot(ViewToWorld_row2, float4(positionView, 1.0)) + PosAdjust.z;
@@ -962,6 +1112,20 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 	color *= outputMask;
 #		endif
 #	endif
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+	[branch] if (VanillaPBR::LiveEnvironmentUsed)
+	{
+#		if !OUTPUTMASK
+		const float liveMask = 1.0;
+#		elif defined(OG) && !FOGSTACK
+		float liveMask = outputMaskTexture.Sample(outputMaskSampler, coordinate).x;
+#		else
+		float liveMask = outputMask;
+#		endif
+		color = centerColor * liveMask +
+		        environment * glossFactor * gloss * VanillaPBR::LiveReflectionWeight(directLighting, liveMask);
+	}
+#	endif
 	return color;
 }
 
@@ -1061,10 +1225,11 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float mipLevel = (1.0 - surface.x) * 6.0;
 		mipLevel = viewPosition.z * 0.001953125 + mipLevel;
 		float arraySlice = floor(material.x * 255.0 - 1.0);
-		environment = environmentTexture.SampleLevel(environmentSampler, float4(environmentCoordinate, arraySlice), mipLevel).xyz;
-		float luminance = dot(environment, float3(0.299, 0.587, 0.114));
-		environment = lerp(environment, luminance.xxx, WorldWetnessAndRainTransition.y * 0.9);
+		environment = SAMPLE_MATERIAL_ENVIRONMENT(position.xy, surface.z, environmentTexture, environmentSampler,
+			environmentCoordinate, mipLevel, arraySlice, WorldWetnessAndRainTransition.y, viewPosition, normal,
+			surface.x);
 	}
+	VANILLA_PBR_IF_ENVIRONMENT_DEBUG(environmentDebug, return environmentDebug);
 
 #	if FOGSTACK
 	bool3 materialMatches = abs(surface.z * 255.0 - float3(5.0, 2.0, 3.0)) < 0.25;
@@ -1331,10 +1496,10 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		lod = pos.z * 0.001953125 + lod;
 		float idx = floor(prm.x * 255.0 - 1.0);
 
-		cube = TexCube.SampleLevel(SampCube, float4(rw, idx), lod).xyz;
-		float lum = dot(cube, float3(0.299, 0.587, 0.114));
-		cube = lerp(cube, lum.xxx, WorldWetnessAndRainTransition.y * 0.9);
+		cube = SAMPLE_MATERIAL_ENVIRONMENT(svpos.xy, surf.z, TexCube, SampCube, rw, lod, idx,
+			WorldWetnessAndRainTransition.y, pos.xyz, nn.xyz, surf.x);
 	}
+	VANILLA_PBR_IF_ENVIRONMENT_DEBUG(environmentDebug, return environmentDebug);
 
 	float4 result;
 
@@ -1358,13 +1523,25 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		float s = min(1.0 / rsqrt(saturate(surf.x - 0.3)), 1.0);
 		k = k * s;
 		float g2 = (prm.y * prm.y) * 50.0;
-		col = ((cube * k) * g2) * b3 + col;
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+		// FO4: the live reflection joins after the mask, with its own weight.
+		float3 liveReflection = VanillaPBR::LiveEnvironmentUsed ? cube * k * g2 : 0.0;
+		[branch] if (!VanillaPBR::LiveEnvironmentUsed)
+#	endif
+			col = ((cube * k) * g2) * b3 + col;
 
 #	if OUTPUTMASK
 #		if !defined(OG)
 		float mask = TexMask.Sample(SampMask, min(uv, SunColor_row3.xy)).x;
 #		endif
 		col = col * mask;
+#	endif
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+#		if OUTPUTMASK
+		col += liveReflection * VanillaPBR::LiveReflectionWeight(b3, mask);
+#		else
+		col += liveReflection * VanillaPBR::LiveReflectionWeight(b3, 1.0);
+#		endif
 #	endif
 
 		pos.w = 1.0;
@@ -1809,6 +1986,11 @@ PS_OUTPUT main(PS_INPUT input)
 		output.color = skylightingDebugColor;
 		return output;
 	}
+#	endif
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS) && defined(VANILLA_PBR_FULLSCREEN_DEBUG) && !COMPOSITE_SCENE_BLEND
+	// Blended fog follows the environment roots, which already wrote the view.
+	[branch] if (VanillaPBR::IsDebugViewActive())
+		discard;
 #	endif
 
 #	if COMPOSITE_MATERIAL_5
@@ -2413,10 +2595,10 @@ float4 main(PSInput input) : SV_Target0
 			6.0,
 			worldPosition.z * 0.001953125);
 		float probeSlice = floor(material.x * 255.0 - 1.0);
-		probeColor = probeTexture.SampleLevel(probeSampler, float4(probeDirection, probeSlice), probeLod).xyz;
-		float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
-		probeColor = lerp(probeColor, probeLuma.xxx, WorldWetnessAndRainTransition.y * 0.9);
+		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(input.position.xy, typeData.z, probeTexture, probeSampler,
+			probeDirection, probeLod, probeSlice, WorldWetnessAndRainTransition.y, worldPosition, normal, typeData.x);
 	}
+	VANILLA_PBR_IF_ENVIRONMENT_DEBUG(environmentDebug, return environmentDebug);
 #	else
 	float2 material;
 	float3 probeColor = 0.0;
@@ -2531,10 +2713,10 @@ float4 main(PSInput input) : SV_Target0
 			6.0,
 			worldPosition.z * 0.001953125);
 		float probeSlice = floor(material.x * 255.0 - 1.0);
-		probeColor = probeTexture.SampleLevel(probeSampler, float4(probeDirection, probeSlice), probeLod).xyz;
-		float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
-		probeColor = lerp(probeColor, probeLuma.xxx, WorldWetnessAndRainTransition.y * 0.9);
+		probeColor = SAMPLE_MATERIAL_ENVIRONMENT(input.position.xy, typeData.z, probeTexture, probeSampler,
+			probeDirection, probeLod, probeSlice, WorldWetnessAndRainTransition.y, worldPosition, normal, typeData.x);
 	}
+	VANILLA_PBR_IF_ENVIRONMENT_DEBUG(environmentDebug, return environmentDebug);
 #	endif
 		float3 reflectionColor = probeColor;
 #	ifdef SSGI
@@ -2547,7 +2729,12 @@ float4 main(PSInput input) : SV_Target0
 			typeData.x,
 			ambientTexture.Sample(ambientSampler, uv).w);
 #	endif
-		color = mad(reflectionColor * gloss * specularScale, diffuse, color);
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+		// FO4: the live reflection joins after native AO, with its own weight.
+		float3 liveReflection = VanillaPBR::LiveEnvironmentUsed ? reflectionColor * gloss * specularScale : 0.0;
+		[branch] if (!VanillaPBR::LiveEnvironmentUsed)
+#	endif
+			color = mad(reflectionColor * gloss * specularScale, diffuse, color);
 
 #	if COMPOSITE_MODULATION
 #		if !defined(OG)
@@ -2559,6 +2746,19 @@ float4 main(PSInput input) : SV_Target0
 		float modulation = modulationTexture.Sample(modulationSampler, uv).x;
 #		endif
 		color *= modulation;
+#	endif
+#	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
+#		if COMPOSITE_MODULATION
+		const float liveAO = modulation;
+#		else
+		const float liveAO = 1.0;
+#		endif
+#		ifdef SSGI
+		// ComposeSpecular already applied SSGI's specular occlusion.
+		color += liveReflection * VanillaPBR::LiveReflectionWeight(diffuse, liveAO, true);
+#		else
+		color += liveReflection * VanillaPBR::LiveReflectionWeight(diffuse, liveAO);
+#		endif
 #	endif
 
 #	if COMPOSITE_FOG_STACK

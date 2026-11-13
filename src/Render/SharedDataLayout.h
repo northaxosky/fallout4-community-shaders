@@ -110,7 +110,8 @@ namespace cs::render
 		std::uint32_t VanillaPBRSplitScreen = 0;
 		float VanillaPBRSplitPosition = 0.5f;
 		std::uint32_t VanillaPBREnableEyeSpecialHandling = 0;
-		std::uint32_t pad2 = 0, pad3 = 0, pad4 = 0;
+		std::uint32_t VanillaPBRSplitMode = 0, VanillaPBRLiveEnvironment = 0;
+		std::uint32_t pad2 = 0;
 	};
 	static_assert(sizeof(FO4SharedDataCB) == 208);
 	static_assert(offsetof(FO4SharedDataCB, DebugOwner) == 0);
@@ -142,9 +143,9 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitScreen) == 184);
 	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitPosition) == 188);
 	static_assert(offsetof(FO4SharedDataCB, VanillaPBREnableEyeSpecialHandling) == 192);
-	static_assert(offsetof(FO4SharedDataCB, pad2) == 196);
-	static_assert(offsetof(FO4SharedDataCB, pad3) == 200);
-	static_assert(offsetof(FO4SharedDataCB, pad4) == 204);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitMode) == 196);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRLiveEnvironment) == 200);
+	static_assert(offsetof(FO4SharedDataCB, pad2) == 204);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

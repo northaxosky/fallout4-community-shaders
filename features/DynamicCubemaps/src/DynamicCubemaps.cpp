@@ -349,6 +349,8 @@ namespace cs::features
 
 	ID3D11ShaderResourceView* DynamicCubemaps::GetSharpReflectionsSRV() const noexcept
 	{
+		if (_debugVisualization.load(std::memory_order_acquire) == DebugVisualization::kEngineCube)
+			return nullptr;
 		return PublishedSRV(_activeReflections.load(std::memory_order_acquire) && !cs::engine::IsInterior(), true);
 	}
 

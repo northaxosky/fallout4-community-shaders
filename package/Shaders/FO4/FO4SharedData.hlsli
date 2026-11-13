@@ -36,9 +36,9 @@ namespace FO4SharedData
 		uint VanillaPBRSplitScreen;
 		float VanillaPBRSplitPosition;
 		uint VanillaPBREnableEyeSpecialHandling;
+		uint VanillaPBRSplitMode;
+		uint VanillaPBRLiveEnvironment;
 		uint pad2;
-		uint pad3;
-		uint pad4;
 	};
 #if defined(FO4CS_SUBSTRATE) && (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG) || defined(SKYLIGHTING_FULLSCREEN_DEBUG))
 	Texture2D<float4> DebugTexture : register(t61);

@@ -79,6 +79,7 @@ namespace cs::features
 		ID3D11ShaderResourceView* GetEnvironmentSRV() const noexcept;
 		// The environment cube stands in while reflections are inactive.
 		ID3D11ShaderResourceView* GetReflectionsSRV() const noexcept;
+		// Null under the engine-cube view, so live envmaps fall back to stock.
 		ID3D11ShaderResourceView* GetSharpReflectionsSRV() const noexcept;
 
 	private:
