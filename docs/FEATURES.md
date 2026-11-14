@@ -23,10 +23,8 @@ Stock-shader reconstruction and missing reverse engineering are port work, not e
 `*` marks a port slice that is conditional on a named RE question. N/A means the problem is absent or FO4
 already does it natively.
 
-Calibration: Dynamic Cubemaps' dry-material reflections reuse FO4's native envmap selection (composite
-`ENVMAP`, G-buffer probe slice/strength, native gain) and swap only the sampled cube: a small adapter, so a port.
-Upstream's 1×1 sentinel cubes cannot register in FO4 (t8 rejects cubes under 128 px), so authored
-reflectance selection is an extension.
+Calibration: upstream's 1×1 sentinel cubes cannot register in FO4 (t8 rejects cubes under 128 px), so
+authored reflectance selection is an extension.
 
 ## Map
 
@@ -36,7 +34,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 |---|---|---|---|---|---|---|---|
 | [CS Editor](deviations/CSEditor.md) | Port | Weather picker, lock, time controls, weather panels and per-weather feature overrides; template/imagespace/godray editors, light editor and shell pending | N/A: Skyrim VL noise fields | Pt | H | L | High |
 | [Cloud Shadows](deviations/CloudShadows.md) | Mixed | Layer-cube producer, DFLight directional receivers, Water sun specular; cloud self-shadowing pending | Ext: Effect/particle sun term. N/A: legacy VL consumer, BSParticleShader (never drawn) | Pt | H | L | High |
-| [Dynamic Cubemaps](deviations/DynamicCubemaps.md) | Mixed | Capture/filter/inference, water, native envmap materials, Skylighting/IBL-specular providers, Creator tool | Ext: authored sentinel/reflectance selection, FO4 material workflow | Pt | H | S/M | High |
+| [Dynamic Cubemaps](deviations/DynamicCubemaps.md) | Mixed | Capture/filter/inference, water, Vanilla PBR environment source, Skylighting/IBL-specular providers, Creator tool | Ext: authored sentinel/reflectance selection, FO4 material workflow | Pt | H | S/M | High |
 | Effects11 | Port | `.fx` host and effect chain, color correction, editor, weather/light controls, volumetric rays, water shore fade/sun specular | N/A: ENB preset/binary compatibility | NS | H | L | Med |
 | Exponential Height Fog | Port | Analytic height fog; volumetric fog (froxel in-scatter with transmittance from sun cascades, Terrain/Cloud Shadows, Skylighting, local lights); waits for upstream Physical Sky | — | NS | H | L | Med |
 | [Extended Materials](deviations/ExtendedMaterials.md) | Mixed | Object POM + contact refinement, warping fix, terrain POM/height blend (height from `_s` alpha) | Ext: complex envmask material; sun parallax soft shadows (done). N/A: point-light parallax shadows | Pt | H | M | Med |
@@ -69,6 +67,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | TruePBR | Mixed | Surface POM (EM marcher under `TRUE_PBR`+`HasDisplacement`; same slice as Extended Materials POM) | Ext: PBR material loader + RMAOS lighting, coat/fuzz/SSS/hair, landscape/grass PBR, glints | NS | H | M | Med |
 | [Unified Water](deviations/UnifiedWater.md) | Port | Optical distance blend, distant terrain tile generation/lifetime, cache UI, material identity fix | FO4-specific requirement: preserve vanilla placed-water distance rendering. N/A: Skyrim world flowmap | Pt | M | S/M | Med |
 | [Upscaling](deviations/Upscaling.md) | Port | SR/native AA, DR/RCAS/reflection/depth consumers, canonical SDK depth, masks, underwater chain, FG/UI/Reflex | — | Pt | H | L | High |
+| [Vanilla PBR](deviations/VanillaPBR.md) | Extension | — | FO4-original gloss/intensity mappings, deferred direct GGX, and the Dynamic Cubemaps live cube inside the native envmap formula, based on upstream PR #2332 | Pt | H | M | High |
 | Volumetric Lighting | Extension | — | Ext: native GFSDK godray controls and output-relative resolution (`feat/volumetric-lighting`), night-time (moon) godrays. N/A: Skyrim froxel VL patches (FO4 has no froxel renderer; volumetrics come from Exponential Height Fog) | NS | M | M | Med |
 | [Water Effects](deviations/WaterEffects.md) | Port | Exterior/secondary caustics, interior heights*, debug, water parallax (height from water-normal alpha) | N/A: FLOWMAP parallax (no FO4 flowmap path) | Pt | H | M | High |
 | Wetness Effects | — | removed; not ported | — | NS | — | — | — |

@@ -1,3 +1,4 @@
+#include "../features/VanillaPBR/src/BlurMatchConstants.h"
 #include "ParallelFor.h"
 #include "Render/DirectionalShadowLightData.h"
 #include "ShaderTestCache.h"
@@ -91,6 +92,9 @@ namespace
 
 			{ "TerrainShadows/ShadowUpdate.cs.hlsl" },
 			{ "TerrainShadows/ShadowStatistics.cs.hlsl" },
+
+			{ "FO4/VanillaPBR/BlurDetailCS.hlsl", "cs_5_0", cs::features::vanilla_pbr::kBlurMatchShaderDefines },
+			{ "FO4/VanillaPBR/BlurMatchCS.hlsl", "cs_5_0", cs::features::vanilla_pbr::kBlurMatchShaderDefines },
 
 			{ "VolumetricShadows/DownsampleShadowCS.hlsl", "cs_5_0", {}, { { { { "DOWNSAMPLE_SHADOW_MIP0", "1" } }, { { "DOWNSAMPLE_SHADOW_MIP1", "1" } } } } },
 			{ "FO4/VolumetricShadows/ShadowPreviewCS.hlsl" },

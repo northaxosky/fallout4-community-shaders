@@ -17,7 +17,8 @@ namespace FullscreenDebugOwner
 		WaterEffects = 4,
 		Skylighting = 5,
 		DynamicCubemaps = 6,
-		LightLimitFix = 7;
+		LightLimitFix = 7,
+		VanillaPBR = 8;
 }
 
 namespace DynamicCubemapsDebugMode

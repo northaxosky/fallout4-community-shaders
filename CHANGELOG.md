@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Dynamic Cubemaps: `material_reflections` is removed; Vanilla PBR's Live Environment replaces it.
+- Vanilla PBR: new feature. GGX direct specular for vanilla materials; envmapped surfaces reflect the live world through vanilla's envmap formula, keeping authored strength, blur and metal tint, lit by ambient light only.
+
 ## 0.5.1
 
 - Compatibility: Community Shaders now disables itself and shows a message when doodlum's standalone Upscaling is installed; it crashes alongside CS, which includes it. jarari's Upscaling Custom is unaffected.
