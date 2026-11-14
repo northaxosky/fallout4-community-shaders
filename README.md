@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logos/logo_cs.png" alt="Fallout 4 Community Shaders logo" width="160">
+  <img src="logos/logo_cs_mini.png" alt="Fallout 4 Community Shaders logo" width="240">
 </p>
 
 <div align="center">
