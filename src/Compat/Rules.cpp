@@ -10,6 +10,16 @@ namespace cs::compat
 	{
 		namespace fk = cs::feature_config;
 
+		// Isotope's hosted presentation (1.4.0) leaves device creation and presentation to CS.
+		bool IsotopeHostedPresentation(const REL::Version& a_version)
+		{
+			if (a_version < REL::Version{ 1, 4, 0 })
+				return false;
+			std::error_code ec;
+			const auto ini = std::filesystem::absolute("Data/F4SE/Plugins/FO4Isotope.ini", ec);
+			return !ec && ::GetPrivateProfileIntW(L"General", L"HostedPresentation", 0, ini.c_str()) == 1;
+		}
+
 		constexpr std::array<std::string_view, 1> kMotionVectorFixes{ fk::kMotionVectorFixes };
 		// Image Based Lighting needs Dynamic Cubemaps.
 		constexpr std::array<std::string_view, 2> kDynamicCubemaps{ fk::kDynamicCubemaps, fk::kImageBasedLighting };
@@ -31,7 +41,8 @@ namespace cs::compat
 			Rule{ "Cloud Shadows (Asciim0v)", { Source::kF4SEPlugin, "FO4CloudShadows" }, {},
 				"Turned off all features because the standalone Cloud Shadows mod is not supported. Remove it to use them." },
 			Rule{ "Isotope", { Source::kF4SEPlugin, "FO4Isotope" }, kDeviceCreation,
-				"Turned off HDR Display, Upscaling, Frame Generation and RenderDoc to avoid conflicting with Isotope. Remove Isotope to use them." },
+				"Turned off HDR Display, Upscaling, Frame Generation and RenderDoc to avoid conflicting with Isotope. Remove Isotope, or turn on its Hosted Presentation setting, to use them.",
+				&IsotopeHostedPresentation },
 			Rule{ "RenoDX", { Source::kGameFile, "renodx-fallout4.addon64" }, kHdrDisplay,
 				"Turned off HDR Display to avoid conflicting with RenoDX's HDR. Remove RenoDX to use it." },
 			Rule{ "ENB", { Source::kENB }, {},
