@@ -592,13 +592,9 @@ struct PS_OUTPUT
 	float2 motionVec: SV_Target5;
 #		endif
 #	endif
-#	if defined(EXTENDED_MATERIALS)
-	// FO4: upstream shades parallax shadows forward; DFLight reads them from here.
-	float4 parallaxShadow: SV_Target6;
-#	endif
-#	if defined(SUBSURFACE_SCATTERING)
-	// FO4: upstream's lighting mask carries the Human profile; SSS reads it here.
-	float4 sssProfile: SV_Target7;
+#	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
+	// FO4: shared target; R parallax shadow, G Human skin flag, B reserved for AO.
+	float4 aux: SV_Target6;
 #	endif
 };
 
@@ -1696,25 +1692,22 @@ struct PS_OUTPUT
 		output.motionVec = (currNDC - prevNDC) * float2(-0.5, 0.5);
 #		endif
 #	endif
-#	if defined(EXTENDED_MATERIALS)
-	// Every draw writes, so surfaces drawn over parallax never keep its shadow.
-#		if BLEND
-		output.parallaxShadow = float4(parallaxShadow, 0, 0, output.albedo.w);
+#	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
+	// Every draw writes all channels, so nothing keeps another surface's value.
+#		if defined(EXTENDED_MATERIALS)
+		const float auxParallaxShadow = parallaxShadow;
 #		else
-		output.parallaxShadow = float4(parallaxShadow, 0, 0, 1);
+		const float auxParallaxShadow = 1.0;
 #		endif
-#	endif
-#	if defined(SUBSURFACE_SCATTERING)
-	// Every draw writes, so surfaces drawn over skin never keep its profile.
-#		if LANDSCAPE
-		const float sssProfile = 0.0;
+#		if defined(SUBSURFACE_SCATTERING) && !LANDSCAPE
+		const float auxHumanSkin = (PrepassFeatureLane.x & PrepassLaneFlag::HumanSkin) != 0 ? 1.0 : 0.0;
 #		else
-		const float sssProfile = (PrepassFeatureLane.x & PrepassLaneFlag::HumanSkin) != 0 ? 1.0 : 0.0;
+		const float auxHumanSkin = 0.0;
 #		endif
 #		if BLEND
-		output.sssProfile = float4(sssProfile, 0, 0, output.albedo.w);
+		output.aux = float4(auxParallaxShadow, auxHumanSkin, 1, output.albedo.w);
 #		else
-		output.sssProfile = float4(sssProfile, 0, 0, 1);
+		output.aux = float4(auxParallaxShadow, auxHumanSkin, 1, 1);
 #		endif
 #	endif
 #	if defined(FO4_TERRAIN_BLENDING)
@@ -1728,11 +1721,8 @@ struct PS_OUTPUT
 #		if PREPASS_MOTION_VECTOR
 			output.motionVec.w = terrainBlendFactor;
 #		endif
-#		if defined(EXTENDED_MATERIALS)
-			output.parallaxShadow.w = terrainBlendFactor;
-#		endif
-#		if defined(SUBSURFACE_SCATTERING)
-			output.sssProfile.w = terrainBlendFactor;
+#		if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
+			output.aux.w = terrainBlendFactor;
 #		endif
 		}
 #	endif

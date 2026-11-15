@@ -35,15 +35,6 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.extendedmaterials");
 
-		constexpr std::uint32_t kParallaxShadowRTVSlot = 6;
-		constexpr std::uint32_t kParallaxShadowPSSlot = 66;
-		// Parallax shadow is continuous shading, so terrain blends it like colour.
-		constexpr std::array<cs::engine::PrepassExtraWrite, cs::engine::kTerrainWritePhases> kTerrainWrites{
-			cs::engine::PrepassExtraWrite{ .blend = true, .mask = 0x1 },
-			cs::engine::PrepassExtraWrite{},
-			cs::engine::PrepassExtraWrite{ .mask = 0x1 }
-		};
-
 		// Height lives in the _s alpha, so only formats that store alpha can carry it.
 		[[nodiscard]] bool HasAlphaChannel(DXGI_FORMAT a_format) noexcept
 		{
@@ -109,7 +100,7 @@ namespace cs::features
 			FailLoad("Extended Materials shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassExtraTarget(*this, { .name = "ExtendedMaterials/ParallaxShadow", .rtvSlot = kParallaxShadowRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .clear = { 1, 1, 1, 1 }, .publishSlot = kParallaxShadowPSSlot, .active = [this] { return ShadowsActive(); }, .terrain = kTerrainWrites })) {
+		if (!cs::engine::RegisterPrepassAuxChannel(*this, cs::engine::PrepassAuxChannel::kParallaxShadow, [this] { return ShadowsActive(); })) {
 			FailLoad("Extended Materials parallax shadows need the prepass target.");
 			return;
 		}

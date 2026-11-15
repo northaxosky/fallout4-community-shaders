@@ -77,8 +77,8 @@ namespace cs::features
 			FailLoad("Subsurface Scattering shader contribution registration failed.");
 			return;
 		}
-		_profileTarget = cs::engine::RegisterPrepassExtraTarget(*this, { .name = "SubsurfaceScattering/Profile", .rtvSlot = kProfileRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .active = [this] { return CanRun(); } });
-		if (!_profileTarget || !cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassDrawFlag::kHumanSkin, &sss::IsHumanSkinDraw)) {
+		if (!cs::engine::RegisterPrepassAuxChannel(*this, cs::engine::PrepassAuxChannel::kHumanSkin, [this] { return CanRun(); }) ||
+			!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassDrawFlag::kHumanSkin, &sss::IsHumanSkinDraw)) {
 			FailLoad("Subsurface Scattering skin profile registration failed.");
 			return;
 		}
@@ -289,7 +289,7 @@ namespace cs::features
 		// FO4: GBufferAmbient carries the material class in its alpha.
 		auto* material = cs::engine::GetRenderTargetSRV(RT::kGBufferAmbient);
 		auto* albedo = cs::engine::GetRenderTargetSRV(RT::kGBufferAlbedoSpecular);
-		auto* profile = _profileTarget ? cs::engine::GetPrepassExtraTargetSRV(*_profileTarget) : nullptr;
+		auto* profile = cs::engine::GetPrepassAuxSRV(cs::engine::PrepassAuxChannel::kHumanSkin);
 		auto* color = cs::engine::GetRenderTargetSRV(RT::kMainCopy);
 		auto* colorUAV = cs::engine::GetRenderTargetUAV(RT::kMainCopy);
 		auto* colorTexture = cs::engine::GetRenderTargetTexture(RT::kMainCopy);

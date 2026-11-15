@@ -46,6 +46,22 @@ namespace cs::engine
 		bool g_hooked = false;
 		std::uint64_t g_bindEpoch = UINT64_MAX;
 
+		// FO4: the engine's six G-buffer targets come first.
+		constexpr std::uint32_t kAuxRTVSlot = 6;
+		constexpr std::uint32_t kAuxPublishSlot = 66;
+		constexpr std::uint8_t kRedMask = D3D11_COLOR_WRITE_ENABLE_RED;
+		constexpr std::uint8_t kGreenMask = D3D11_COLOR_WRITE_ENABLE_GREEN;
+
+		struct AuxClaim
+		{
+			Feature* owner = nullptr;
+			std::function<bool()> active;
+			bool activeThisFrame = false;
+		};
+
+		std::array<AuxClaim, static_cast<std::size_t>(PrepassAuxChannel::kCount)> g_auxClaims;
+		std::optional<PrepassExtraTargetId> g_auxTarget;
+
 		// Render thread only.
 		PrepassExtraWritePhase g_phase = PrepassExtraWritePhase::kNative;
 		render::DerivedBlendStateCache g_blend;
@@ -153,13 +169,31 @@ namespace cs::engine
 		// Native states map to themselves; a terrain phase overrides each target's write.
 		std::optional<D3D11_BLEND_DESC> DeriveBlend(D3D11_BLEND_DESC a_desc, PrepassExtraWritePhase a_phase)
 		{
-			if (a_phase == PrepassExtraWritePhase::kNative)
-				return std::nullopt;
-			if (!a_desc.IndependentBlendEnable) {
+			const auto expand = [&a_desc] {
+				if (a_desc.IndependentBlendEnable)
+					return;
 				for (std::size_t slot = 1; slot < kMaxRenderTargets; ++slot)
 					a_desc.RenderTarget[slot] = a_desc.RenderTarget[0];
 				a_desc.IndependentBlendEnable = TRUE;
+			};
+			if (a_phase == PrepassExtraWritePhase::kNative) {
+				bool changed = false;
+				const auto source = a_desc;
+				for (const auto& entry : g_entries) {
+					const auto coupled = entry.target.nativeRCoupled;
+					const auto& base = source.IndependentBlendEnable ? source.RenderTarget[entry.target.rtvSlot] : source.RenderTarget[0];
+					const auto mask = static_cast<std::uint8_t>(base.RenderTargetWriteMask);
+					const auto wanted = static_cast<std::uint8_t>((mask & kRedMask) ? mask | coupled : mask & ~coupled);
+					if (!coupled || wanted == mask)
+						continue;
+					expand();
+					a_desc.RenderTarget[entry.target.rtvSlot] = base;
+					a_desc.RenderTarget[entry.target.rtvSlot].RenderTargetWriteMask = wanted;
+					changed = true;
+				}
+				return changed ? std::optional{ a_desc } : std::nullopt;
 			}
+			expand();
 			const auto phase = static_cast<std::size_t>(a_phase) - 1;
 			for (const auto& entry : g_entries) {
 				const auto write = entry.target.terrain[phase];
@@ -239,23 +273,75 @@ namespace cs::engine
 		}
 	}
 
-	std::optional<PrepassExtraTargetId> RegisterPrepassExtraTarget(Feature& a_owner, PrepassExtraTarget a_target)
+	namespace
 	{
-		if (a_target.rtvSlot >= kMaxRenderTargets || !a_target.active ||
-			std::ranges::any_of(g_entries, [&](const Entry& a_entry) { return a_entry.target.rtvSlot == a_target.rtvSlot; })) {
-			L->error("Prepass target {} has an invalid or taken render target slot {}.", a_target.name, a_target.rtvSlot);
-			return std::nullopt;
-		}
-		if (!g_hooked) {
-			if (!RegisterPreDeferredPrePass(&BeginPrepass, kBeginPriority) ||
-				!RegisterPostDeferredPrePass(&PublishTargets) ||
-				!RegisterShaderInjectionFinalizer(ShaderInjectionTarget::kDeferredPrepass, &FinalizeTargets)) {
+		std::optional<PrepassExtraTargetId> AddEntry(Feature* a_owner, PrepassExtraTarget a_target)
+		{
+			if (a_target.rtvSlot >= kMaxRenderTargets || !a_target.active ||
+				std::ranges::any_of(g_entries, [&](const Entry& a_entry) { return a_entry.target.rtvSlot == a_target.rtvSlot; })) {
+				L->error("Prepass target {} has an invalid or taken render target slot {}.", a_target.name, a_target.rtvSlot);
 				return std::nullopt;
 			}
-			g_hooked = true;
+			if (!g_hooked) {
+				if (!RegisterPreDeferredPrePass(&BeginPrepass, kBeginPriority) ||
+					!RegisterPostDeferredPrePass(&PublishTargets) ||
+					!RegisterShaderInjectionFinalizer(ShaderInjectionTarget::kDeferredPrepass, &FinalizeTargets)) {
+					return std::nullopt;
+				}
+				g_hooked = true;
+			}
+			g_entries.push_back({ .owner = a_owner, .target = std::move(a_target) });
+			return g_entries.size() - 1;
 		}
-		g_entries.push_back({ .owner = &a_owner, .target = std::move(a_target) });
-		return g_entries.size() - 1;
+
+		// Each owner's callback runs on its own, so one failing claim leaves the others.
+		bool EvaluateAuxClaims()
+		{
+			bool any = false;
+			for (auto& claim : g_auxClaims) {
+				claim.activeThisFrame = false;
+				if (claim.active)
+					cs::render::RunRenderCallback(claim.owner, "PrepassAuxChannel", [&] { claim.activeThisFrame = claim.active(); });
+				any |= claim.activeThisFrame;
+			}
+			return any;
+		}
+	}
+
+	std::optional<PrepassExtraTargetId> RegisterPrepassExtraTarget(Feature& a_owner, PrepassExtraTarget a_target)
+	{
+		return AddEntry(&a_owner, std::move(a_target));
+	}
+
+	bool RegisterPrepassAuxChannel(Feature& a_owner, PrepassAuxChannel a_channel, std::function<bool()> a_active)
+	{
+		auto& claim = g_auxClaims[static_cast<std::size_t>(a_channel)];
+		if (claim.active || !a_active) {
+			L->error("Prepass auxiliary channel {} is invalid or already claimed.", static_cast<int>(a_channel));
+			return false;
+		}
+		if (!g_auxTarget) {
+			g_auxTarget = AddEntry(nullptr, { .name = "PrepassExtraTargets/Aux",
+												.rtvSlot = kAuxRTVSlot,
+												.format = DXGI_FORMAT_R8G8B8A8_UNORM,
+												.clear = { 1, 0, 1, 0 },
+												.publishSlot = kAuxPublishSlot,
+												.active = &EvaluateAuxClaims,
+												// Terrain blends the shadow like colour and owns no skin.
+												.terrain = { PrepassExtraWrite{ .blend = true, .mask = kRedMask }, PrepassExtraWrite{}, PrepassExtraWrite{ .mask = kRedMask } },
+												.nativeRCoupled = kRedMask | kGreenMask });
+			if (!g_auxTarget)
+				return false;
+		}
+		claim = { &a_owner, std::move(a_active) };
+		return true;
+	}
+
+	ID3D11ShaderResourceView* GetPrepassAuxSRV(PrepassAuxChannel a_channel) noexcept
+	{
+		if (!g_auxTarget || !g_auxClaims[static_cast<std::size_t>(a_channel)].activeThisFrame)
+			return nullptr;
+		return GetPrepassExtraTargetSRV(*g_auxTarget);
 	}
 
 	ScopedPrepassExtraWritePhase::ScopedPrepassExtraWritePhase(PrepassExtraWritePhase a_phase) noexcept :

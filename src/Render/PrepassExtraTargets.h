@@ -52,6 +52,17 @@ namespace cs::engine
 		std::function<bool()> active;              // evaluated once per prepass start
 		// Indexed by terrain phase (color, data, opaque).
 		std::array<PrepassExtraWrite, kTerrainWritePhases> terrain{};
+		// Channels written only where the native mask writes R, as separate R8 targets were.
+		std::uint8_t nativeRCoupled = 0;
+	};
+
+	// Channels of the renderer's shared auxiliary target (slot 6, t66); each has one owner.
+	enum class PrepassAuxChannel : std::uint8_t
+	{
+		kParallaxShadow,  // R, neutral 1
+		kHumanSkin,       // G, neutral 0
+		kMaterialAO,      // B, written as 1 until a material source claims it
+		kCount
 	};
 
 	using PrepassExtraTargetId = std::size_t;
@@ -76,4 +87,9 @@ namespace cs::engine
 	void WritePrepassExtraTargetTelemetry(telemetry::Sink& a_sink);
 	// The target's SRV for a compute consumer; null unless written this frame.
 	[[nodiscard]] ID3D11ShaderResourceView* GetPrepassExtraTargetSRV(PrepassExtraTargetId a_id) noexcept;
+
+	// Load/OnPostPostLoad only. The auxiliary target is allocated and cleared on frames any claim is active.
+	[[nodiscard]] bool RegisterPrepassAuxChannel(Feature& a_owner, PrepassAuxChannel a_channel, std::function<bool()> a_active);
+	// The auxiliary target's SRV; null unless that channel's owner was active this frame.
+	[[nodiscard]] ID3D11ShaderResourceView* GetPrepassAuxSRV(PrepassAuxChannel a_channel) noexcept;
 }
