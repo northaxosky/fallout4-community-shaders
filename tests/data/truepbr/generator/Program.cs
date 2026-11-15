@@ -118,6 +118,11 @@ Invalid("missing_rmaos", s => s.Textures[4] = "");
 Invalid("interlayer_without_displacement", s => s.FeatureFlags = Flag("twoLayer") | Flag("interlayerParallax"));
 Invalid("coat_normal_without_features1", s => s.FeatureFlags = Flag("twoLayer") | Flag("coatNormal"));
 
+// Common-field rules the reference validator does not check; the expected text is ours.
+Unreferenced("uv_offset_nan", s => s.Common.UvOffset = [float.NaN, 0f], "UV Offset must be finite.");
+Unreferenced("alpha_nan", s => s.Common.Alpha = float.NaN, "Alpha must be finite.");
+Unreferenced("emittance_color_negative", s => s.Common.EmissiveColor = [1f, -0.5f, 1f], "Emissive Color must be finite and at least 0.");
+
 // Structural and override failures the reference reader or validator does not name.
 Raw("duplicate_cspb", (s, p1) => Concat(p1, Block("CSPB", s.Write), Block("CSPB", s.Write)));
 Raw("missing_cspb", (s, p1) => Concat(p1, Block("CSTS", new TruePbrThinSurfaceOverride().Write)));
@@ -268,6 +273,16 @@ void Invalid(string name, Action<TruePbrSection> edit)
     var bytes = Concat(head, Block("CSPB", section.Write));
     var file = Emit(@"invalid\" + name, bytes);
     rows.Add($"{file}\t{head.Length}\treject\t0\t{(cut >= 0 ? text[..cut] : text)}");
+}
+
+void Unreferenced(string name, Action<TruePbrSection> edit, string error)
+{
+    var head = Part1(null);
+    var section = NewSection(head);
+    Textures(section, Rock + "color.dds", Rock + "n.dds", rmaos: Rock + "rmaos.dds");
+    edit(section);
+    var file = Emit(@"invalid\" + name, Concat(head, Block("CSPB", section.Write)));
+    rows.Add($"{file}	{head.Length}	reject	0	{error}");
 }
 
 void Raw(string name, Func<TruePbrSection, byte[], byte[]> build, bool reference = true)

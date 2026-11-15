@@ -27,6 +27,11 @@ namespace cs::features::true_pbr
 			a_errors.push_back(std::format("{} must be finite, at least {}{} (is {}).", a_label, a_parameter.min, upper, a_value));
 		}
 
+		bool AllFinite(const std::array<float, 2>& a_values)
+		{
+			return std::isfinite(a_values[0]) && std::isfinite(a_values[1]);
+		}
+
 		std::string ComponentLabel(const ParameterComponent& a_at)
 		{
 			if (a_at.parameter->count == 1)
@@ -87,6 +92,16 @@ namespace cs::features::true_pbr
 
 		if (!std::isfinite(a_material.emittanceMult) || a_material.emittanceMult < 0)
 			errors.emplace_back("Emissive Scale must be finite and at least 0.");
+		if (!std::ranges::all_of(a_material.emittanceColor, [](float a_value) { return std::isfinite(a_value) && a_value >= 0; }))
+			errors.emplace_back("Emissive Color must be finite and at least 0.");
+		if (!AllFinite(a_material.uvOffset))
+			errors.emplace_back("UV Offset must be finite.");
+		if (!AllFinite(a_material.uvScale))
+			errors.emplace_back("UV Scale must be finite.");
+		if (!std::isfinite(a_material.alpha))
+			errors.emplace_back("Alpha must be finite.");
+		if (!std::isfinite(a_material.refractionPower))
+			errors.emplace_back("Refraction Power must be finite.");
 		return result;
 	}
 }
