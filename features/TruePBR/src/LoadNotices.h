@@ -9,7 +9,6 @@
 
 namespace cs::features::true_pbr
 {
-	// Rejected material files: how many, and the latest reason.
 	class LoadNotices
 	{
 	public:

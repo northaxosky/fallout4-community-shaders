@@ -23,7 +23,7 @@ namespace cs::features::true_pbr
 	{
 		auto* L = cs::log::Get("cs.feature.truepbr");
 
-		// The resource being created on this thread; LoadBinary has no name of its own.
+		// LoadBinary has no name of its own; Create is its only caller.
 		thread_local const char* t_resourceName = nullptr;
 
 		struct LoadContext
@@ -50,7 +50,7 @@ namespace cs::features::true_pbr
 				"TruePBR material '{}' rendered as its vanilla part: {}", a_name, a_reason);
 		}
 
-		// Version 100: Part 1 is a vanilla v2 body the original reads; Part 2 follows in the stream.
+		// Part 2 follows Part 1 in the same stream, at the cursor.
 		void HandleVersion100(LoadContext& a_context)
 		{
 			a_context.RunOriginal();

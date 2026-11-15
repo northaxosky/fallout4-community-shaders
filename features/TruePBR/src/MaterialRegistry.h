@@ -16,13 +16,13 @@
 
 namespace cs::features::true_pbr
 {
-	// 16-bit id of one material file; 0 is not PBR. Never reused in a session.
+	// 0 is not PBR; ids are never reused in a session.
 	using RecordId = std::uint16_t;
 
-	// Lowercase, backslashed name from the first `materials\` component; nullopt without one.
+	// Anchors on the first materials\ component; nullopt without one.
 	[[nodiscard]] std::optional<std::string> CanonicalName(std::string_view a_path);
 
-	// Immutable once published and never freed: baked draw data may hold the id.
+	// Baked draw data may hold the id, so records are never freed.
 	struct MaterialRecord
 	{
 		RecordId id;
@@ -34,7 +34,7 @@ namespace cs::features::true_pbr
 	{
 		kPublished,
 		kReused,
-		kChangedOnDisk  // decoded differently from the published record, which stays
+		kChangedOnDisk  // differs from the kept record
 	};
 
 	struct Ingested
@@ -56,8 +56,7 @@ namespace cs::features::true_pbr
 
 		MaterialRegistry();
 
-		// Validates a decoded material, then publishes it under a_canonicalName or compares it
-		// with the record already there. Thread-safe; validation takes no lock.
+		// Validation runs outside the lock.
 		[[nodiscard]] std::expected<Ingested, Rejection> Ingest(std::string_view a_canonicalName, PbrMaterial a_material);
 
 		[[nodiscard]] const MaterialRecord* Find(std::string_view a_canonicalName) const;

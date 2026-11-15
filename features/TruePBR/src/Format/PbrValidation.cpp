@@ -68,7 +68,7 @@ namespace cs::features::true_pbr
 			const auto at = ParameterAt(index);
 			const auto label = ComponentLabel(at);
 			CheckRange(errors, label, *at.parameter, a_material.parameters[index]);
-			// An override replaces the parameter, so its value is checked against the same range.
+			// An override replaces the parameter, so it gets the same range.
 			if (a_material.thinSurface && index >= overrideFirst && index < overrideFirst + 4)
 				CheckRange(errors, "Thin Surface Override " + label, *at.parameter, resolved[index]);
 		}

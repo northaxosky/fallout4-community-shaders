@@ -11,7 +11,7 @@ namespace cs::features::true_pbr
 	{
 		constexpr std::size_t kMaxPathBytes = 1024;
 
-		// Reads fields in declaration order; the first failure sticks and later reads return zeros.
+		// A sticky failure keeps the field list straight-line.
 		class FieldReader
 		{
 		public:
@@ -33,7 +33,7 @@ namespace cs::features::true_pbr
 				return values;
 			}
 
-			// BGSM string: u32 length including the terminating null.
+			// The u32 length counts the terminating null.
 			std::string Text()
 			{
 				std::string text;

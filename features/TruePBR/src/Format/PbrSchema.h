@@ -6,7 +6,7 @@
 #include <limits>
 #include <string_view>
 
-// Mirrors TruePbrSchema.cs of the Material Editor library (the reference writer).
+// Mirrors TruePbrSchema.cs of the Material Editor reference writer.
 namespace cs::features::true_pbr
 {
 	inline constexpr std::uint32_t kCspbLayout = 1;
@@ -57,7 +57,6 @@ namespace cs::features::true_pbr
 	inline constexpr std::size_t kParameterCount = CountParameterComponents();
 	static_assert(kParameterCount == 25);
 
-	// Index of a parameter's first component in the 25-float array.
 	consteval std::size_t ParameterIndex(std::string_view a_name)
 	{
 		std::size_t index = 0;
@@ -125,7 +124,6 @@ namespace cs::features::true_pbr
 
 	inline constexpr std::uint32_t kKnownFeatureMask = (1u << kFeatures.size()) - 1;
 
-	// Slot order of the CSPB texture list and of PbrMaterial::textures.
 	enum class PbrTexture : std::uint8_t
 	{
 		kBaseColor,

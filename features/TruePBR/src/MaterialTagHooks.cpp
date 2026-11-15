@@ -38,7 +38,7 @@ namespace cs::features::true_pbr
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Setup registers a unique material, so property->material is the one that renders.
+		// Setup registers a unique material, so it is the one that renders.
 		struct BSShaderData_SetupDataLightingShader
 		{
 			static void thunk(RE::BSShaderData* a_data, RE::BSLightingShaderProperty* a_property)

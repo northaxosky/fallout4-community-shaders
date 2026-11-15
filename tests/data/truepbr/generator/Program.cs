@@ -1,4 +1,5 @@
-// Regenerate: dotnet run --project tests\data\truepbr\generator -- tests\data\truepbr
+// dotnet run --project <this dir> -p:MaterialEditorRoot=<path> -- <out dir>
+// Needs Material Editor branch feat/truepbr-v100 at 827d61e or later.
 using System.Text;
 using MaterialLib;
 
@@ -8,7 +9,6 @@ var failures = 0;
 
 const string Rock = @"pbr\rock\rock_";
 
-// Valid files: every field of the reference reader's view lands in expected.tsv.
 Valid("minimal", s => Textures(s, Rock + "color.dds", Rock + "n.dds", rmaos: Rock + "rmaos.dds"));
 
 Valid("nondefault", s =>
@@ -36,7 +36,7 @@ Valid("nondefault", s =>
         0.3f, 0.2f, 0.1f, 0.7f, 2.5f, 20f, 0.1f, 3f, 0.4f, 0.3f, 0.2f, 2f,
     ];
     values.CopyTo(s.Parameters, 0);
-}, part1: b => b.EmitEnabled = false); // Part 1 omits the emittance color; CSPB still emits.
+}, part1: b => b.EmitEnabled = false); // Part 1 omits the color; CSPB still emits it.
 
 Valid("coat_all_slots", s =>
 {
@@ -81,7 +81,7 @@ Valid("foliage_csts", s =>
     };
 });
 
-// Block order and unknown tags: CSPB comes last, after a zero-size unknown block.
+// CSPB comes last, after a zero-size unknown block.
 Valid("unknown_blocks", s => Textures(s, Rock + "color.dds", Rock + "n.dds", rmaos: Rock + "rmaos.dds"),
     blocks: s => [
         new MaterialBlock("XXXX", [1, 2, 3, 4, 5]),
@@ -118,12 +118,12 @@ Invalid("missing_rmaos", s => s.Textures[4] = "");
 Invalid("interlayer_without_displacement", s => s.FeatureFlags = Flag("twoLayer") | Flag("interlayerParallax"));
 Invalid("coat_normal_without_features1", s => s.FeatureFlags = Flag("twoLayer") | Flag("coatNormal"));
 
-// Common-field rules the reference validator does not check; the expected text is ours.
+// The reference validator misses these; the expected text is ours.
 Unreferenced("uv_offset_nan", s => s.Common.UvOffset = [float.NaN, 0f], "UV Offset must be finite.");
 Unreferenced("alpha_nan", s => s.Common.Alpha = float.NaN, "Alpha must be finite.");
 Unreferenced("emittance_color_negative", s => s.Common.EmissiveColor = [1f, -0.5f, 1f], "Emissive Color must be finite and at least 0.");
 
-// Structural and override failures the reference reader or validator does not name.
+// Failures the reference reader and validator do not name.
 Raw("duplicate_cspb", (s, p1) => Concat(p1, Block("CSPB", s.Write), Block("CSPB", s.Write)));
 Raw("missing_cspb", (s, p1) => Concat(p1, Block("CSTS", new TruePbrThinSurfaceOverride().Write)));
 Raw("trailing_bytes", (s, p1) => Concat(p1, new MaterialBlock("CSPB", [.. Payload(s.Write), 0]).ToBytes()));
@@ -294,7 +294,6 @@ void Raw(string name, Func<TruePbrSection, byte[], byte[]> build, bool reference
     rows.Add($"{file}\t{head.Length}\treject\t0\t-");
 }
 
-// The reference reader's view of the written file, as stable text cells.
 string Row(string file, int part2, byte[] bytes, int warnings)
 {
     var path = Path.GetTempFileName();

@@ -11,7 +11,7 @@ namespace cs::features::true_pbr
 {
 	using PbrParameters = std::array<float, kParameterCount>;
 
-	// Upstream PBRThinSurface; replaces the same four parameters.
+	// Upstream PBRThinSurface; replaces four parameters.
 	struct ThinSurfaceOverride
 	{
 		float subsurfaceBalance = 0.0f;
@@ -41,14 +41,13 @@ namespace cs::features::true_pbr
 		return values;
 	}
 
-	// The decoded `CSPB` block and its optional overrides. Engine-free.
 	struct PbrMaterial
 	{
 		std::uint32_t tileFlags = 0;
 		std::array<float, 2> uvOffset{};
 		std::array<float, 2> uvScale{};
 		float alpha = 1.0f;
-		std::uint8_t alphaBlend = 0;  // FO4 blend triple
+		std::uint8_t alphaBlend = 0;
 		std::uint32_t blendSource = 0;
 		std::uint32_t blendDestination = 0;
 		std::uint8_t alphaTestRef = 0;
