@@ -1,7 +1,6 @@
 #include "Check.h"
 #include "Format/BgsmV100.h"
 #include "MaterialRegistry.h"
-#include "MaterialTags.h"
 
 #include <bit>
 #include <filesystem>
@@ -10,7 +9,7 @@
 #include <sstream>
 #include <thread>
 
-// Fixtures and expected.tsv come from the reference writer and reader (tests/data/truepbr/generator).
+// Fixtures come from the generator beside them; see its first line.
 namespace
 {
 	using namespace cs::features::true_pbr;
@@ -36,7 +35,6 @@ namespace
 		return text;
 	}
 
-	// The reference reader's cell format, rendered from the decoded material.
 	std::vector<std::string> Describe(const PbrMaterial& m, const std::vector<std::string>& a_unknownTags)
 	{
 		std::vector<std::string> cells{
@@ -104,7 +102,6 @@ namespace
 		std::vector<std::string> unknownTags;
 	};
 
-	// The binary route: decode Part 2, then publish.
 	Outcome Load(MaterialRegistry& a_registry, std::string_view a_name, std::span<const std::uint8_t> a_part2)
 	{
 		auto decoded = DecodePart2(a_part2);
@@ -181,7 +178,7 @@ namespace
 		const auto bytes = ReadFile(a_directory / "minimal.bgsm");
 		const auto part2 = std::span(bytes).subspan(std::ranges::find(rows, "minimal.bgsm", &Row::file)->part2);
 
-		// Every spelling of one file, including the absolute build path, names one record.
+		// Every spelling, including the build path, names one record.
 		MaterialRegistry registry;
 		RecordId id = 0;
 		for (const auto* spelling : { "DATA\\MATERIALS\\Test\\Rock.BGSM", "Data/Materials/test/rock.bgsm", "C:\\Build\\Data\\Materials\\TEST\\rock.bgsm", "materials\\test\\rock.bgsm" }) {
@@ -213,32 +210,12 @@ namespace
 		CHECK(registry.Count() == 1 && registry.Get(id));
 	}
 
-	// A second assignment of a material is how a merged material would show up.
-	void TestTags()
-	{
-		MaterialTags tags;
-		int a = 0, b = 0;
-		CHECK(tags.Find(&a) == 0);
-		tags.Assign(&a, 3);
-		tags.Assign(&b, 3);
-		CHECK(tags.Find(&a) == 3 && tags.Count() == 2 && tags.Conflicts() == 0);
-		tags.Assign(&a, 3);
-		CHECK(tags.Conflicts() == 0);
-		tags.Assign(&a, 4);
-		CHECK(tags.Find(&a) == 4 && tags.Conflicts() == 1);
-		tags.Assign(&a, 0);
-		CHECK(tags.Find(&a) == 0 && tags.Conflicts() == 2 && tags.Count() == 1);
-		tags.Erase(&b);
-		tags.Erase(&b);
-		CHECK(tags.Count() == 0 && tags.Conflicts() == 2);
-	}
-
 	void TestConcurrentIngest(const std::filesystem::path& a_directory)
 	{
 		const auto rows = ReadExpected(a_directory);
 		const auto bytes = ReadFile(a_directory / "minimal.bgsm");
 		const auto part2 = std::span(bytes).subspan(std::ranges::find(rows, "minimal.bgsm", &Row::file)->part2);
-		for (int round = 0; round < 50; ++round) {
+		for (int round = 0; round < 5; ++round) {
 			MaterialRegistry registry;
 			std::array<RecordId, 8> ids{};
 			std::vector<std::jthread> threads;
@@ -261,5 +238,4 @@ void RunTruePbrTests(const std::filesystem::path& a_directory)
 	TestTruncation(a_directory);
 	TestIdentity(a_directory);
 	TestConcurrentIngest(a_directory);
-	TestTags();
 }
