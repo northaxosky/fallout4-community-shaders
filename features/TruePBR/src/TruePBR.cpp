@@ -35,21 +35,21 @@ namespace cs::features
 
 	void TruePBR::Load()
 	{
+		if (!engine::RegisterFeatureShaderBindings(*this) || !true_pbr::RegisterPrepassClassifier(*this)) {
+			FailLoad("True PBR prepass registration failed.");
+			return;
+		}
 		// Tag hooks first and the parse last, so a partial install tags nothing.
 		if (!true_pbr::InstallMaterialTagHooks() || !true_pbr::InstallMaterialLoadHooks()) {
 			FailLoad("True PBR material hooks failed to install.");
 			return;
 		}
 		Log()->info("Installed hooks");
-		// Emission above 1 needs a float G-buffer target; the first requester wins.
+		// Last, since a format request cannot be undone and needs the shader clamp.
 		const bool floatEmissive = engine::RequestRenderTargetFormat(RE::BSGraphics::RenderTargetID::kGBufferEmissive, DXGI_FORMAT_R16G16B16A16_FLOAT);
 		_floatEmissiveRequested.store(floatEmissive, std::memory_order_relaxed);
 		if (!floatEmissive)
 			Log()->warn("The emissive target stays 8-bit; PBR emission clips at 1.");
-		if (!engine::RegisterFeatureShaderBindings(*this) || !true_pbr::RegisterPrepassClassifier(*this)) {
-			FailLoad("True PBR prepass registration failed.");
-			return;
-		}
 		_registrationsReady.store(true, std::memory_order_release);
 	}
 
