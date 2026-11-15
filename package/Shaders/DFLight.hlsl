@@ -13,6 +13,7 @@
 #endif
 #include "FO4/AmbientConsumer.hlsli"
 #include "FO4/SoftSunShadow.hlsli"
+#include "FO4/TruePBRConsumer.hlsli"
 
 #include "FO4/LightLimitFixRaster.hlsli"
 #if defined(VANILLA_PBR)
@@ -543,10 +544,12 @@ PS_OUTPUT main(PS_INPUT input)
 	float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 	float3 normalView = DecodeOctahedralNormal(normalEnc);
+	FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 
 #		ifdef AMBIENT_IBL_IN_LIGHT
 	FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 	float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
+	FO4_TRUE_PBR_AMBIENT(pbr, albedoSample.xyz, normalView, normalize(-posView), ambientDiffuse);
 	float3 ambientSpecular = 0.0;
 #		endif
 
@@ -731,8 +734,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float forwardBlend = saturate((brdfModulator + NdotL_raw) / (brdfModulator + 1.0));
 	forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
 	finalDiffuse += (forwardBlend * LightColor_row0.xyz) * albedoSample.xyz;
+	FO4_TRUE_PBR_DIRECT(pbr, normalView, viewDirNeg, LightVector.xyz, LightColor_row0.xyz, true, finalDiffuse, brdfSpecular);
 
 	float specMix = (1.0 - schlickFres * 0.5);
+	FO4_TRUE_PBR_OVERRIDE(pbr, specMix, 1.0);
 	output.specular.xyz = shadowPcf * specMix * brdfSpecular;
 #		ifdef AMBIENT_IBL_IN_LIGHT
 	output.specular.xyz += ambientSpecular;
@@ -895,6 +900,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 	float3 normalView = DecodeOctahedralNormal(normalEnc);
+	FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 
 	float roughness01 = 1.0 - matSample.x;
 
@@ -1014,6 +1020,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float3 diffuseAccum = FO4LocalLightColor(LightColor_row0.xyz) * ambientTerm;
 	diffuseAccum += FO4LocalLightColor(LightColor_row0.xyz) * brdfShadowMix;
+	FO4_TRUE_PBR_DIRECT(pbr, normalView, normalize(-posView), lightDir, FO4LocalLightColor(LightColor_row0.xyz), true, diffuseAccum, brdfSpecular);
 
 	float4 posViewHomog = float4(posView, 1.0);
 	float3 lsDir;
@@ -1296,6 +1303,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 	float3 normalView = DecodeOctahedralNormal(normalEnc);
+	FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 
 	float roughness01 = 1.0 - matSample.x;
 #		endif
@@ -1810,6 +1818,9 @@ diffuseAccum = FO4LocalLightColor(LightColor_row0.xyz) * ambientTerm + diffuseAc
 
 	float3 diffuseAccum = FO4LocalLightColor(LightColor_row0.xyz);
 	float3 brdfSpecular = float3(0, 0, 0);
+#		endif
+#		ifndef ATTENUATION_ONLY
+		FO4_TRUE_PBR_DIRECT(pbr, normalView, normalize(-posView), lightDir, FO4LocalLightColor(LightColor_row0.xyz), FO4_TRUE_PBR_SPECULAR, diffuseAccum, brdfSpecular);
 #		endif
 
 #		ifdef FO4_DEFERRED_HALFOMNI_GOBO_NATIVE_BRANCH
@@ -2377,6 +2388,7 @@ float2 goboUV = float2(omniUV.x,
 		float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 		float3 normalView = DecodeOctahedralNormal(normalEnc);
+		FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 
 		float roughness01 = 1.0 - matSample.x;
 		float posViewLenSq = dot(-posView, -posView);
@@ -2386,6 +2398,7 @@ float2 goboUV = float2(omniUV.x,
 #	ifdef AMBIENT
 		FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 		float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
+		FO4_TRUE_PBR_AMBIENT(pbr, albedoSample.xyz, normalView, normalize(-posView), ambientDiffuse);
 		float3 ambientSpecular = 0.0;
 		float NdotV_view = saturate(dot(normalView, viewDirNeg));
 		float ambientFresLog = log2(1.0 - NdotV_view);
@@ -2591,12 +2604,14 @@ float2 goboUV = float2(omniUV.x,
 		forwardBlend *= transmissionContactShadow;
 #	endif
 		finalDiffuse += (forwardBlend * LightColor_row0.xyz) * albedoSample.xyz;
+		FO4_TRUE_PBR_DIRECT(pbr, normalView, viewDirNeg, LightVector.xyz, LightColor_row0.xyz, true, finalDiffuse, brdfSpecular);
 
 #	ifdef WATER_EFFECTS
 		finalDiffuse *= causticsMult;
 		brdfSpecular *= causticsMult;
 #	endif
 		float specMix = mad(schlickFres, -0.5, 1.0);
+		FO4_TRUE_PBR_OVERRIDE(pbr, specMix, 1.0);
 #	ifdef AMBIENT
 		float3 scaledSpecular = brdfSpecular * specMix;
 		output.specular = float4(0.0, 0.0, 0.0, 1.0);
@@ -3061,6 +3076,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 		float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 		float3 normalView = DecodeOctahedralNormal(normalEnc);
+		FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 
 #	ifndef IGNOREROUGHNESS
 		float roughness01 = 1.0 - matSample.x;
@@ -3072,6 +3088,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	ifdef AMBIENT
 		FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 		float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
+		FO4_TRUE_PBR_AMBIENT(pbr, albedoSample.xyz, normalView, normalize(-posView), ambientDiffuse);
 		float3 ambientSpecular = 0.0;
 #	endif
 
@@ -3494,6 +3511,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			forwardBlend *= transmissionContactShadow;
 #	endif
 			finalDiffuse += (forwardBlend * LightColor_row0.xyz) * albedoSample.xyz;
+			FO4_TRUE_PBR_DIRECT(pbr, normalView, viewDirNeg, LightVector.xyz, LightColor_row0.xyz, true, finalDiffuse, brdfSpecular);
 
 #	ifdef WATER_EFFECTS
 			finalDiffuse *= causticsMult;
@@ -3504,6 +3522,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	else
 	float specMix = 1.0 - schlickFres * 0.5;
 #	endif
+			FO4_TRUE_PBR_OVERRIDE(pbr, specMix, 1.0);
 #	ifdef AMBIENT
 #		if defined(FO4_DS2_TIGHT_AMBIENT_IGNORE) || defined(FO4_DS2_TARGET_ORDER)
 			float3 scaledSpecular = brdfSpecular * specMix;
@@ -4198,6 +4217,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 			float3 normalView = DecodeOctahedralNormal(normalEnc);
+			FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 
 #	ifndef IGNOREROUGHNESS
 			float roughness01 = 1.0 - matSample.x;
@@ -4209,6 +4229,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	ifdef AMBIENT
 			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 			float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
+			FO4_TRUE_PBR_AMBIENT(pbr, albedoSample.xyz, normalView, normalize(-posView), ambientDiffuse);
 			float3 ambientSpecular = 0.0;
 #	endif
 
@@ -4517,6 +4538,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			forwardBlend *= transmissionContactShadow;
 #	endif
 			finalDiffuse += (forwardBlend * LightColor_row0.xyz) * albedoSample.xyz;
+			FO4_TRUE_PBR_DIRECT(pbr, normalView, viewDirNeg, LightVector.xyz, LightColor_row0.xyz, true, finalDiffuse, brdfSpecular);
 
 #	ifdef WATER_EFFECTS
 			finalDiffuse *= causticsMult;
@@ -4527,6 +4549,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	else
 	float specMix = 1.0 - schlickFres * 0.5;
 #	endif
+			FO4_TRUE_PBR_OVERRIDE(pbr, specMix, 1.0);
 
 #	ifdef FO4_DS3_TIGHT_NONAMBIENT
 			output.specular.xyz = (brdfSpecular * specMix) * shadow;
@@ -4787,6 +4810,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 			float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 			float3 normalView = DecodeOctahedralNormal(normalEnc);
+			FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 #	ifndef IGNOREROUGHNESS
 			float roughness01 = 1.0 - matSample.x;
 #	endif
@@ -4973,6 +4997,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	endif
 			float3 diffuseAccum = FO4LocalLightColor(LightColor_row0.xyz) * brdfShadowMix;
 			diffuseAccum += FO4LocalLightColor(LightColor_row0.xyz) * ambientTerm;
+			FO4_TRUE_PBR_DIRECT(pbr, normalView, normalize(-posView), lightDir, FO4LocalLightColor(LightColor_row0.xyz), FO4_TRUE_PBR_SPECULAR, diffuseAccum, brdfSpecular);
 
 			float4 posViewHomog = float4(posView, 1.0);
 			float4 lsDir;
@@ -5920,6 +5945,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
 
 			float3 normalView = DecodeOctahedralNormal(normalEnc);
+			FO4_TRUE_PBR_DECODE(pbr, input.position.xy, matSample);
 
 #	ifdef FO4_UNSHADOWED_AMBIENT_ROUGHNESS
 			float roughness01 = 1.0 - matSample.x;
@@ -5933,6 +5959,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	ifdef AMBIENT
 			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, posView, normalView);
 			float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
+			FO4_TRUE_PBR_AMBIENT(pbr, albedoSample.xyz, normalView, normalize(-posView), ambientDiffuse);
 			float3 ambientSpecular = 0.0;
 #	endif
 
@@ -6330,6 +6357,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += (forwardBlend * FO4LocalLightColor(LightColor_row0.xyz)) * albedoSample.xyz;
 #	endif
 
+			FO4_TRUE_PBR_DIRECT(pbr, normalView, normalize(-posView), lightDir, FO4LocalLightColor(LightColor_row0.xyz), FO4_TRUE_PBR_SPECULAR, finalDiffuse, brdfSpecular);
 #	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
 			float worldShadowMult = WorldShadow::GetMultFromViewPosition(posView);
 			finalDiffuse *= worldShadowMult;
@@ -6359,11 +6387,13 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #		ifdef FO4_UNSHADOWED_USES_GLOSS_FRESNEL
 #			if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
 			float specularFresnelScale = mad(schlickFres, -0.5, 1.0);
+			FO4_TRUE_PBR_OVERRIDE(pbr, specularFresnelScale, 1.0);
 			output.specular = float4(0.0, 0.0, 0.0, 1.0);
 			output.specular += float4(
 				mad(brdfSpecular, specularFresnelScale, ambientSpecular), 0.0);
 #			else
 		float specularFresnelScale = mad(schlickFres, -0.5, 1.0);
+		FO4_TRUE_PBR_OVERRIDE(pbr, specularFresnelScale, 1.0);
 		output.specular.xyz = brdfSpecular * specularFresnelScale;
 #			endif
 #		else
@@ -6504,9 +6534,11 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 				encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
 				-(1.0 - encodedLengthSquared * 0.5));
 			float3 viewDirection = normalize(-positionView);
+			FO4_TRUE_PBR_DECODE(pbr, input.position.xy, float4(material.x, material.y, 0.0, material.z));
 
 			FO4_AMBIENT_SKYLIGHTING_SET(input.position.xy, positionView, normalView);
 			float3 ambientDiffuse = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
+			FO4_TRUE_PBR_AMBIENT(pbr, FO4GBufferViews::Albedo.Load(int3(int2(input.position.xy), 0)).xyz, normalView, viewDirection, ambientDiffuse);
 			float ndotv = dot(normalView, viewDirection);
 			float3 reflectionDirection = 2.0 * ndotv * normalView - viewDirection;
 			float oneMinusNdotV = 1.0 - saturate(ndotv);

@@ -11,6 +11,7 @@
 #include "PrepassClassifier.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/GBufferViews.h"
 #include "Render/RenderTargetFormats.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedDataLayout.h"
@@ -120,7 +121,11 @@ namespace cs::features
 	void TruePBR::Load()
 	{
 		const bool registered = engine::RegisterFeatureShaderBindings(*this, [this](engine::ShaderReplacementRegistration& a_registration) {
-			a_registration.bind = [this](ID3D11DeviceContext* a_context) { BindRecordTable(a_context); };
+			// The prepass reads the record table; the lighting stages read the G-buffer.
+			if (a_registration.targetId == engine::ShaderInjectionTarget::kDeferredPrepass)
+				a_registration.bind = [this](ID3D11DeviceContext* a_context) { BindRecordTable(a_context); };
+			else
+				a_registration.bind = [](ID3D11DeviceContext* a_context) { engine::BindGBufferViews(a_context); };
 		});
 		if (!registered || !true_pbr::RegisterPrepassClassifier(*this) || !RegisterMaterialTargets()) {
 			FailLoad("True PBR prepass registration failed.");

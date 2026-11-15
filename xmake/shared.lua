@@ -17,6 +17,7 @@ function main(target)
             "package/Shaders/Common/GBuffer.hlsli",
             "package/Shaders/Common/LightingCommon.hlsli",
             "package/Shaders/Common/LightingEval.hlsli",
+            "package/Shaders/Common/PBR.hlsli",
             "package/Shaders/Common/PBRMath.hlsli",
             "package/Shaders/Common/Random.hlsli",
             "package/Shaders/Common/Shading.hlsli",
