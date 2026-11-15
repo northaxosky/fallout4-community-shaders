@@ -23,6 +23,14 @@
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
 #endif
 
+#ifdef FO4_TRUE_PBR
+#	include "FO4/TruePBR/Composite.hlsli"
+// A TruePBR pixel resolves its own ambient occlusion and environment radiance.
+#	define FO4_TRUE_PBR_RESOLVE(materialClass, result, litColor, ssao, pixelPosition, probeSampler) [branch] if (FO4TruePBR::IsPixel(materialClass)) result = FO4TruePBR::Resolve(pixelPosition, litColor, ssao, probeSampler)
+#else
+#	define FO4_TRUE_PBR_RESOLVE(materialClass, result, litColor, ssao, pixelPosition, probeSampler)
+#endif
+
 float3 AuthoredEnvironment(TextureCubeArray<float4> probe, SamplerState probeSampler, float3 direction, float lod,
 	float slice, float rain)
 {
@@ -521,6 +529,7 @@ PS_OUTPUT main(PS_INPUT input)
 		output.color.xyz = ambientAccum * aoFactor + glossFactor * glossSquaredScaled * reflection;
 	}
 #	endif
+	FO4_TRUE_PBR_RESOLVE(shadingData.z, output.color.xyz, modulated, aoFactor, input.position.xy, g_sIBLProbeCube);
 	output.color.w = 1.0;
 	return output;
 }
@@ -905,6 +914,7 @@ PS_OUTPUT main(PS_INPUT input)
 			aoColor = ambientAccum * ao + glossFactor * glossSquaredScaled * reflection;
 		}
 #	endif
+		FO4_TRUE_PBR_RESOLVE(shadingData.z, aoColor, modulated, ao, input.position.xy, g_sIblProbeCube);
 
 		float fogPlaneDistance =
 			dot(ViewToWorld_row2, float4(positionView, 1.0)) + PosAdjust.z;
@@ -1120,7 +1130,7 @@ float3 sampleDirectLighting(float2 coordinate)
 }
 
 float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFactor,
-	float gloss, float3 environment, float3 centerColor
+	float gloss, float3 environment, float3 centerColor, float materialClass, float2 pixelPosition
 #	if defined(OG) && OUTPUTMASK && FOGSTACK
 	// OG passes the output mask sampled before exclusion.
 	,
@@ -1131,6 +1141,8 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 	float3 color = environment * glossFactor;
 	color *= gloss;
 	color = color * directLighting + centerColor;
+	const float3 unoccluded = color;
+	float occlusion = 1.0;
 #	if OUTPUTMASK
 #		if !defined(OG)
 	float outputMask =
@@ -1138,14 +1150,18 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 							 outputMaskSampler, min(coordinate, screenSetup[5].xy))
 			.x;
 	color *= outputMask;
+	occlusion = outputMask;
 #		elif !FOGSTACK
 	// OG samples the output mask without the cb2[5].xy clamp.
-	color *= outputMaskTexture.Sample(outputMaskSampler, coordinate).x;
+	occlusion = outputMaskTexture.Sample(outputMaskSampler, coordinate).x;
+	color *= occlusion;
 #		else
 	// OG applies the pre-exclusion mask before adding wet reflections.
 	color *= outputMask;
+	occlusion = outputMask;
 #		endif
 #	endif
+	FO4_TRUE_PBR_RESOLVE(materialClass, color, unoccluded, occlusion, pixelPosition, environmentSampler);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 	[branch] if (VanillaPBR::LiveEnvironmentUsed)
 	{
@@ -1314,7 +1330,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	}
 
 #	if !FOGSTACK
-	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor),
+	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor, surface.z, position.xy),
 		1.0);
 #	else
 #		if OUTPUTMASK && defined(OG)
@@ -1328,7 +1344,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float roughFactor = min(1.0 / rsqrt(saturate(surface.x - 0.3)), 1.0);
 		glossFactor *= roughFactor;
 		float gloss = material.y * material.y * 50.0;
-		float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
+		float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor, surface.z, position.xy
 #		if OUTPUTMASK && defined(OG)
 			// OG passes the output mask sampled before exclusion.
 			,
@@ -1564,12 +1580,16 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 #	endif
 			col = ((cube * k) * g2) * b3 + col;
 
+		const float3 unoccluded = col;
+		float occlusion = 1.0;
 #	if OUTPUTMASK
 #		if !defined(OG)
 		float mask = TexMask.Sample(SampMask, min(uv, SunColor_row3.xy)).x;
 #		endif
 		col = col * mask;
+		occlusion = mask;
 #	endif
+		FO4_TRUE_PBR_RESOLVE(surf.z, col, unoccluded, occlusion, svpos.xy, SampCube);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 #		if OUTPUTMASK
 		col += liveReflection * VanillaPBR::LiveReflectionWeight(b3, mask);
@@ -2779,7 +2799,9 @@ float4 main(PSInput input) : SV_Target0
 		// OG samples modulation without the cb2[5].xy clamp.
 		float modulation = modulationTexture.Sample(modulationSampler, uv).x;
 #		endif
+		const float3 unoccluded = color;
 		color *= modulation;
+		FO4_TRUE_PBR_RESOLVE(typeData.z, color, unoccluded, modulation, input.position.xy, probeSampler);
 #	endif
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 #		if COMPOSITE_MODULATION

@@ -26,6 +26,20 @@ namespace FO4Ambient
 	}
 
 #ifdef FO4CS_SUBSTRATE
+	// Splits the replayed ambient diffuse out of a lit color so occlusion can weigh it apart.
+	float3 SplitOcclusion(float3 color, float3 ambient, float3 ambientVisibility, float3 directVisibility)
+	{
+		float maxScale = 1.0;
+		if (ambient.x > 0.0)
+			maxScale = min(maxScale, color.x / ambient.x);
+		if (ambient.y > 0.0)
+			maxScale = min(maxScale, color.y / ambient.y);
+		if (ambient.z > 0.0)
+			maxScale = min(maxScale, color.z / ambient.z);
+		ambient *= maxScale;
+		return max(0.0, color - ambient) * directVisibility + ambient * ambientVisibility;
+	}
+
 	float3 DiffuseAlbedo(float2 screenPosition, float3 normalView, float3 normalWS, float3 albedo, float vertexAO)
 	{
 		float3 ambient = FO4_AMBIENT_VANILLA_DIFFUSE(FO4SharedData::GetAmbientLinear(normalWS), normalView) * albedo;

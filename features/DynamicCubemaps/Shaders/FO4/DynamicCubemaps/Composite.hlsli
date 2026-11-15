@@ -74,11 +74,36 @@ namespace DynamicCubemaps
 		else
 #endif
 		{
-			result.environment = ColorManagement::SceneToLinear(envSample);
-			result.sky = ColorManagement::SceneToLinear(skySample);
+			// Upstream DeferredCompositeCS.hlsl:248-276: the fallback without IBL normalizes by the DALC.
+			const float3 ambientSpecular = Color::RGBToLuminance(FO4SharedData::GetAmbientLinear(direction)) * Color::ReflectionNormalisationScale;
+			// FO4: upstream's INTERIOR permutation is the runtime interior flag.
+			[branch] if (SharedData::InInterior)
+			{
+				float envLum = Color::RGBToLuminance(EnvTexture.SampleLevel(probeSampler, direction, 15));
+				result.environment = ColorManagement::SceneToLinear(envSample / max(envLum, 0.001) * ambientSpecular);
+			}
+			else
+			{
 #ifdef SKYLIGHTING
-			result.sky *= FO4_SPECULAR_LOBE(skylighting);
+				const float skylightingSpecular = FO4_SPECULAR_LOBE(skylighting);
+				float3 reflections = 0.0;
+				[branch] if (skylightingSpecular > 0.0)
+				{
+					float lum = Color::RGBToLuminance(EnvReflectionsTexture.SampleLevel(probeSampler, direction, 15));
+					reflections = ColorManagement::SceneToLinear(fullSample / max(lum, 0.001) * ambientSpecular);
+				}
+				float3 env = 0.0;
+				[branch] if (skylightingSpecular < 1.0)
+				{
+					float lum = Color::RGBToLuminance(EnvTexture.SampleLevel(probeSampler, direction, 15));
+					env = ColorManagement::SceneToLinear(envSample / max(lum, 0.001) * ambientSpecular * skylightingSpecular);
+				}
+				result.environment = lerp(env, reflections, skylightingSpecular);
+#else
+				float lum = Color::RGBToLuminance(EnvReflectionsTexture.SampleLevel(probeSampler, direction, 15));
+				result.environment = ColorManagement::SceneToLinear(fullSample / max(lum, 0.001) * ambientSpecular);
 #endif
+			}
 		}
 		if (SharedData::InInterior) {
 			result.sky = 0.0;
