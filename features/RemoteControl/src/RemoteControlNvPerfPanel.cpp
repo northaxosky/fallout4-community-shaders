@@ -5,6 +5,7 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Section.h"
+#include "Menu/SettingWidgets.h"
 #include "Utils/PathUtf8.h"
 
 #include <DearModdingUI/Client.h>
@@ -54,9 +55,7 @@ namespace cs::features::remote_control
 
 		void Draw(std::string_view a_text, dmui::TextTone a_tone)
 		{
-			auto& client = host::HostClient::Get().Client();
-			if (!dmui::DrawStyledText(client, a_text, { .tone = a_tone, .wrapped = true }))
-				L->warn("DearModdingUI draw failed: {}", DMUI_ResultToString(client.LastResult()));
+			ui::DrawStatusText(L, a_text, a_tone);
 		}
 
 		void RequestCapture(const std::vector<NvPerf::MetricRequest>& a_defaults)

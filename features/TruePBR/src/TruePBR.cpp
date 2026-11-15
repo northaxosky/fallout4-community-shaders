@@ -1,11 +1,11 @@
 #include "TruePBR.h"
 
-#include "Host/HostClient.h"
 #include "LoadNotices.h"
 #include "MaterialLoadHooks.h"
 #include "MaterialRegistry.h"
 #include "MaterialTagHooks.h"
 #include "MaterialTags.h"
+#include "Menu/SettingWidgets.h"
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
@@ -57,15 +57,10 @@ namespace cs::features
 	void TruePBR::DrawSettings()
 	{
 		using namespace true_pbr;
-		auto& client = host::HostClient::Get().Client();
-		const auto draw = [&](const std::string& a_text, dmui::TextTone a_tone) {
-			if (!dmui::DrawStyledText(client, a_text, { .tone = a_tone, .wrapped = true }))
-				Log()->warn("DearModdingUI draw failed: {}", DMUI_ResultToString(client.LastResult()));
-		};
 		const auto records = Records().Count();
-		draw(std::format("{} PBR material files loaded this session.", records), dmui::TextTone::kInherit);
+		ui::DrawStatusText(Log(), std::format("{} PBR material files loaded this session.", records), dmui::TextTone::kInherit);
 		if (!IsEnabled() && records != 0)
-			draw("True PBR is switched off, but loaded PBR materials keep their PBR textures and render through vanilla shading until restart.", dmui::TextTone::kStatusWarning);
+			ui::DrawStatusText(Log(), "True PBR is switched off, but loaded PBR materials keep their PBR textures and render through vanilla shading until restart.", dmui::TextTone::kStatusWarning);
 	}
 
 	namespace
