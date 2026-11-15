@@ -358,6 +358,7 @@ target("FeatureConfigTests", function()
         "features/LightLimitFix/src/Authoring/LightAuthoring.cpp",
         "features/TruePBR/src/Format/BgsmV100.cpp",
         "features/TruePBR/src/Format/PbrValidation.cpp",
+        "features/TruePBR/src/MaterialRegistry.cpp",
         "src/Settings/FeatureConfig.cpp"
     )
     add_headerfiles(
@@ -367,7 +368,8 @@ target("FeatureConfigTests", function()
         "features/TruePBR/src/Format/BgsmV100.h",
         "features/TruePBR/src/Format/PbrMaterial.h",
         "features/TruePBR/src/Format/PbrSchema.h",
-        "features/TruePBR/src/Format/PbrValidation.h"
+        "features/TruePBR/src/Format/PbrValidation.h",
+        "features/TruePBR/src/MaterialRegistry.h"
     )
     add_defines('FO4CS_TRUEPBR_TEST_DATA="' .. (path.join(os.projectdir(), "tests", "data", "truepbr"):gsub("\\", "/")) .. '"')
     for _, feature in ipairs(features) do

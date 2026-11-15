@@ -1,12 +1,13 @@
 #include "Check.h"
 #include "Format/BgsmV100.h"
-#include "Format/PbrValidation.h"
+#include "MaterialRegistry.h"
 
 #include <bit>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 // Fixtures and expected.tsv come from the reference writer and reader (tests/data/truepbr/generator).
 namespace
@@ -96,57 +97,55 @@ namespace
 		return rows;
 	}
 
-	struct Verdict
+	struct Outcome
 	{
-		std::optional<PbrMaterial> material;  // set when decoded and valid
-		std::vector<std::string> errors;
-		std::vector<std::string> warnings;
+		std::expected<Ingested, Rejection> result;
 		std::vector<std::string> unknownTags;
 	};
 
-	Verdict Check(std::span<const std::uint8_t> a_part2)
+	// The binary route: decode Part 2, then publish.
+	Outcome Load(MaterialRegistry& a_registry, std::string_view a_name, std::span<const std::uint8_t> a_part2)
 	{
-		Verdict verdict;
 		auto decoded = DecodePart2(a_part2);
-		if (!decoded) {
-			verdict.errors.push_back(decoded.error());
-			return verdict;
-		}
-		auto validation = Validate(decoded->material);
-		verdict.errors = std::move(validation.errors);
-		verdict.warnings = std::move(validation.warnings);
-		verdict.unknownTags = std::move(decoded->unknownTags);
-		if (verdict.errors.empty())
-			verdict.material = std::move(decoded->material);
-		return verdict;
+		if (!decoded)
+			return { std::unexpected(Rejection{ { decoded.error() } }), {} };
+		return { a_registry.Ingest(a_name, std::move(decoded->material)), std::move(decoded->unknownTags) };
+	}
+
+	std::string Stem(const std::string& a_file)
+	{
+		return "materials\\test\\" + a_file;
 	}
 
 	void TestFixtures(const std::filesystem::path& a_directory)
 	{
 		const auto rows = ReadExpected(a_directory);
 		CHECK(rows.size() > 30);
+		MaterialRegistry registry;
 		for (const auto& row : rows) {
 			const auto bytes = ReadFile(a_directory / row.file);
 			CHECK_MSG(bytes.size() > row.part2, row.file);
 			if (bytes.size() <= row.part2)
 				continue;
-			const auto verdict = Check(std::span(bytes).subspan(row.part2));
+			const auto part2 = std::span(bytes).subspan(row.part2);
+			auto loaded = Load(registry, Stem(row.file), part2);
 			if (!row.ok) {
-				CHECK_MSG(!verdict.material, row.file + " should be rejected");
-				if (verdict.material || row.error == "-")
+				CHECK_MSG(!loaded.result, row.file + " should be rejected");
+				if (loaded.result || row.error == "-")
 					continue;
-				CHECK_MSG(verdict.errors.size() == 1, row.file + " should break exactly one rule");
-				if (verdict.errors.size() == 1) {
-					const auto cut = verdict.errors[0].find(" (is ");
-					CHECK_MSG(verdict.errors[0].substr(0, cut) == row.error, row.file + ": " + verdict.errors[0]);
+				const auto& errors = loaded.result.error().errors;
+				CHECK_MSG(errors.size() == 1, row.file + " should break exactly one rule");
+				if (errors.size() == 1) {
+					const auto cut = errors[0].find(" (is ");
+					CHECK_MSG(errors[0].substr(0, cut) == row.error, row.file + ": " + errors[0]);
 				}
 				continue;
 			}
-			CHECK_MSG(verdict.material, row.file + " should be accepted");
-			if (!verdict.material)
+			CHECK_MSG(loaded.result, row.file + " should be accepted");
+			if (!loaded.result)
 				continue;
-			CHECK_MSG(verdict.warnings.size() == row.warnings, row.file + " warnings");
-			const auto actual = Describe(*verdict.material, verdict.unknownTags);
+			CHECK_MSG(loaded.result->warnings.size() == row.warnings, row.file + " warnings");
+			const auto actual = Describe(loaded.result->record->material, loaded.unknownTags);
 			CHECK_MSG(actual == row.cells, row.file + " differs from the reference reader");
 			if (actual != row.cells)
 				for (std::size_t i = 0; i < std::min(actual.size(), row.cells.size()); ++i)
@@ -167,8 +166,69 @@ namespace
 			const auto bytes = ReadFile(a_directory / row->file);
 			const auto part2 = std::span(bytes).subspan(row->part2);
 			for (std::size_t length = 0; length < part2.size(); ++length) {
-					CHECK_MSG(!Check(part2.first(length)).material, std::format("{} cut to {}", name, length));
+				MaterialRegistry registry;
+				CHECK_MSG(!Load(registry, "materials\\x.bgsm", part2.first(length)).result, std::format("{} cut to {}", name, length));
+				CHECK(registry.Count() == 0);
 			}
+		}
+	}
+
+	void TestIdentity(const std::filesystem::path& a_directory)
+	{
+		const auto rows = ReadExpected(a_directory);
+		const auto bytes = ReadFile(a_directory / "minimal.bgsm");
+		const auto part2 = std::span(bytes).subspan(std::ranges::find(rows, "minimal.bgsm", &Row::file)->part2);
+
+		// Every spelling of one file, including the absolute build path, names one record.
+		MaterialRegistry registry;
+		RecordId id = 0;
+		for (const auto* spelling : { "DATA\\MATERIALS\\Test\\Rock.BGSM", "Data/Materials/test/rock.bgsm", "C:\\Build\\Data\\Materials\\TEST\\rock.bgsm", "materials\\test\\rock.bgsm" }) {
+			const auto name = CanonicalName(spelling);
+			CHECK(name && *name == "materials\\test\\rock.bgsm");
+			const auto loaded = Load(registry, *name, part2);
+			CHECK(loaded.result);
+			if (!loaded.result)
+				continue;
+			if (id == 0)
+				id = loaded.result->record->id;
+			CHECK(loaded.result->record->id == id);
+		}
+		CHECK(registry.Count() == 1);
+		CHECK(registry.Find("MATERIALS\\TEST\\ROCK.BGSM") == registry.Get(id));
+		CHECK(!CanonicalName("textures\\rock.dds"));
+
+		// An edited file keeps the published record and its id.
+		const auto edited = ReadFile(a_directory / "nondefault.bgsm");
+		const auto editedPart2 = std::span(edited).subspan(std::ranges::find(rows, "nondefault.bgsm", &Row::file)->part2);
+		const auto changed = Load(registry, "materials\\test\\rock.bgsm", editedPart2);
+		CHECK(changed.result && changed.result->outcome == IngestOutcome::kChangedOnDisk);
+		CHECK(changed.result && changed.result->record->id == id);
+		CHECK(registry.Get(id)->material.uvScale[0] == 1.0f);
+
+		// A rejected edit of a published file leaves it alone.
+		const auto broken = ReadFile(a_directory / "invalid" / "missing_rmaos.bgsm");
+		CHECK(!Load(registry, "materials\\test\\rock.bgsm", std::span(broken).subspan(rows.front().part2)).result);
+		CHECK(registry.Count() == 1 && registry.Get(id));
+	}
+
+	void TestConcurrentIngest(const std::filesystem::path& a_directory)
+	{
+		const auto rows = ReadExpected(a_directory);
+		const auto bytes = ReadFile(a_directory / "minimal.bgsm");
+		const auto part2 = std::span(bytes).subspan(std::ranges::find(rows, "minimal.bgsm", &Row::file)->part2);
+		for (int round = 0; round < 50; ++round) {
+			MaterialRegistry registry;
+			std::array<RecordId, 8> ids{};
+			std::vector<std::jthread> threads;
+			for (std::size_t i = 0; i < ids.size(); ++i)
+				threads.emplace_back([&, i] {
+					const auto name = CanonicalName(i % 2 ? "Data\\Materials\\a.bgsm" : "C:\\Build\\Data\\MATERIALS\\a.bgsm");
+					if (const auto loaded = Load(registry, *name, part2); loaded.result)
+						ids[i] = loaded.result->record->id;
+				});
+			threads.clear();
+			CHECK(registry.Count() == 1);
+			CHECK(std::ranges::all_of(ids, [&](RecordId a_id) { return a_id == ids[0] && a_id != 0; }));
 		}
 	}
 }
@@ -177,4 +237,6 @@ void RunTruePbrTests(const std::filesystem::path& a_directory)
 {
 	TestFixtures(a_directory);
 	TestTruncation(a_directory);
+	TestIdentity(a_directory);
+	TestConcurrentIngest(a_directory);
 }
