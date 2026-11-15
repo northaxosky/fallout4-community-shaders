@@ -36,6 +36,11 @@ namespace cs
 		class SettingsEdit;
 	}
 
+	namespace feature_config
+	{
+		struct ShaderOwnershipConfig;
+	}
+
 	namespace weather
 	{
 		class Profiles;
@@ -71,13 +76,20 @@ namespace cs
 		bool IsLoaded() const noexcept override { return _loaded; }
 		Feature* GetRuntimeOwner() const noexcept override { return const_cast<Feature*>(this); }
 
-		// Framework-owned live switch; opt-outs always report enabled.
+		// Framework-owned live switch; opt-outs are always switched on.
 		virtual bool SupportsEnableToggle() const { return true; }
 		virtual bool DefaultEnabled() const { return true; }
+		// Effective state: the switch, unless shader ownership suspends the feature.
 		bool IsEnabled() const noexcept
+		{
+			return IsSwitchedOn() && !_suspended.load(std::memory_order_acquire);
+		}
+		// The user's switch alone, for UI and persistence.
+		bool IsSwitchedOn() const noexcept
 		{
 			return !SupportsEnableToggle() || _enabled.load(std::memory_order_acquire);
 		}
+		bool IsSuspended() const noexcept { return _suspended.load(std::memory_order_acquire); }
 		// Host-frame thread; readers are on the render path.
 		void SetEnabled(bool a_enabled) noexcept;
 
@@ -148,7 +160,7 @@ namespace cs
 		{
 			const auto binding = GetSettingsBinding();
 			return (binding && binding.modified()) ||
-			       (SupportsEnableToggle() && IsEnabled() != DefaultEnabled());
+			       (SupportsEnableToggle() && IsSwitchedOn() != DefaultEnabled());
 		}
 
 		// Overlays render even while settings are closed.
@@ -162,6 +174,10 @@ namespace cs
 
 		// Fires once after shader injections freeze, before the first frame.
 		virtual bool ValidateShaderInjections(std::string&) { return true; }
+		// Re-derives ownership-dependent state; returns the targets now unowned.
+		virtual std::vector<engine::ShaderInjectionTarget> RefreshShaderOwnership() { return {}; }
+		// True suspends the whole feature while a registered target is unowned.
+		virtual bool FollowsShaderOwnership() const { return false; }
 
 		virtual std::string GetFeatureSummary() const { return {}; }
 
@@ -203,6 +219,15 @@ namespace cs
 			state.ApplyActivationResult(a_result);
 			SetState(std::move(state));
 		}
+		// Flips the effective state like SetEnabled, firing OnEnabledChanged.
+		void SetSuspended(bool a_suspended) noexcept;
+		// Active features carry no detail, so it can hold a neutral note.
+		void SetActiveNote(std::string a_note)
+		{
+			std::scoped_lock lock(_stateMutex);
+			if (_runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kActive)
+				_stateDetail = std::move(a_note);
+		}
 		bool BeginRuntimeQuarantine() noexcept
 		{
 			auto expected = FeatureRuntimeState::kActive;
@@ -225,19 +250,46 @@ namespace cs
 		bool _loadFailed = false;
 		bool _loaded = false;
 		std::atomic_bool _enabled{ true };
+		std::atomic_bool _suspended{ false };
 		bool _settingsSavePending = false;
 		bool _settingsEditCompleted = false;
 		std::string _loadFailureReason;
+	};
+
+	// Operational = validated and owned; only ShaderInjectionFeature writes it.
+	class InjectionGate
+	{
+	public:
+		bool load(std::memory_order a_order = std::memory_order_acquire) const noexcept
+		{
+			return _bits.load(a_order) == (kValidated | kOwned);
+		}
+
+	private:
+		friend class ShaderInjectionFeature;
+		static constexpr std::uint8_t kValidated = 1;
+		static constexpr std::uint8_t kOwned = 2;
+		void Set(std::uint8_t a_bit, bool a_on) noexcept
+		{
+			if (a_on)
+				_bits.fetch_or(a_bit, std::memory_order_acq_rel);
+			else
+				_bits.fetch_and(static_cast<std::uint8_t>(~a_bit), std::memory_order_acq_rel);
+		}
+		std::atomic<std::uint8_t> _bits{ 0 };
 	};
 
 	// Owns the registration/operational flags and the common injection validation.
 	class ShaderInjectionFeature : public Feature
 	{
 	public:
-		// Registered, prerequisites, routes, variants; operational if all pass.
+		// Registered, prerequisites, routes, variants; validated if all pass.
 		bool ValidateShaderInjections(std::string& a_error) final;
 		bool IsInjectionOperational() const noexcept { return _injectionsOperational.load(std::memory_order_acquire); }
 		std::string GetInjectionValidationError() const;
+		std::vector<engine::ShaderInjectionTarget> RefreshShaderOwnership() final;
+		// Presentation features override this to false; only their injections stop.
+		bool FollowsShaderOwnership() const override { return true; }
 
 	protected:
 		virtual std::string_view GetRegistrationFailureMessage() const { return "the shader contribution did not register"; }
@@ -248,7 +300,10 @@ namespace cs
 		static bool RequireSharedData(std::string& a_error, std::string_view a_consequence = {});
 
 		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
+		// Permanently drops the feature's injections, e.g. after a quarantine.
+		void RevokeInjections() noexcept { _injectionsOperational.Set(InjectionGate::kValidated, false); }
+
+		InjectionGate _injectionsOperational;
 
 	private:
 		mutable std::mutex _injectionErrorMutex;
@@ -343,6 +398,9 @@ namespace cs
 		// Runs after the injection freeze so features can reject a partial delivery path.
 		void ValidateShaderInjectionsAll();
 
+		// Sole route for ownership changes; refreshes every feature.
+		void ApplyShaderOwnership(const feature_config::ShaderOwnershipConfig& a_config);
+
 		void WriteSharedDataAll(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4);
 		void WriteSharedFrameDataAll(render::SharedDataCB& a_shared);
 
@@ -361,10 +419,12 @@ namespace cs
 
 	private:
 		FeatureManager() = default;
+		void RefreshShaderOwnership();
 		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _loadedFeatures;
 		std::atomic<Feature*> _fullscreenDebugFeature{ nullptr };
 		bool _d3d11ReadyDone = false;
+		std::string _ownershipSummary;
 	};
 }
 

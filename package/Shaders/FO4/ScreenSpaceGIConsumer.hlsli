@@ -16,6 +16,13 @@ namespace ScreenSpaceGI
 	Texture2D<float4> NormalTexture : register(t29);
 	Texture2D<float4> SpecularTexture : register(t38);
 
+	// FO4: the unoccluded fraction alone, without the vertex AO division.
+	float Visibility(float2 screenPosition)
+	{
+		[branch] if (!Enabled) return 1.0;
+		return 1 - OcclusionTexture.Load(int3(int2(screenPosition), 0));
+	}
+
 	// Upstream d330bf12d DeferredCompositeCS.hlsl:46-56,123-180.
 	float3 ComposeDiffuse(float2 screenPosition, float3x3 viewToWorld,
 		float3 albedo, float3 diffuseColor, float vertexAOStore)

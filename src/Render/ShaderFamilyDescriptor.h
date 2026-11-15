@@ -41,6 +41,22 @@ namespace cs::engine
 		       ActiveShaderInjectionVariantHasAnyDefine(target, kDirectionalSunShadowedFamilies);
 	}
 
+	// BSDFComposite families that sample authored envmaps; never decals.
+	inline constexpr std::array<std::string_view, 5> kCompositeEnvironmentFamilies{
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY", "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY", "BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY",
+		"BSDFCOMPOSITE_PS_CUBE_IBL"
+	};
+
+	// Active composite reflects Vanilla PBR's live cube at its envmap sites.
+	[[nodiscard]] inline bool ActiveCompositeHasLiveEnvironment() noexcept
+	{
+		constexpr auto target = ShaderInjectionTarget::kBsdfComposite;
+		return ActiveShaderInjectionVariantHasAnyDefine(target, kCompositeEnvironmentFamilies) &&
+		       ActiveShaderInjectionVariantHasDefine(target, "VANILLA_PBR") &&
+		       ActiveShaderInjectionVariantHasDefine(target, "DYNAMIC_CUBEMAPS");
+	}
+
 	// Source file that reconstructs a native shader; usually its own name.
 	[[nodiscard]] std::string_view ResolveShaderSourceName(
 		const ShaderFamilyDescriptor& a_descriptor) noexcept;

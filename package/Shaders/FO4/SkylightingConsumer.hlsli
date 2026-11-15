@@ -18,7 +18,7 @@
 namespace Skylighting
 {
 #ifdef IBL
-	// FO4: both scalars of one probe sample at a composite probe site.
+	// FO4: both scalars of one probe sample for a composite reflection.
 	struct SpecularVisibility
 	{
 		float specular;
@@ -93,24 +93,24 @@ namespace Skylighting
 		return view.xyz / view.w;
 	}
 
-	// FO4: composite probe sites share upstream's lobe; positions are view space.
-	SpecularVisibility GetSpecularVisibility(float3 viewPosition, float3 normalView, float glossiness)
+	// FO4: composite reflections share upstream's lobe; positions are view space.
+	SpecularVisibility GetSpecularVisibilityRoughness(float3 viewPosition, float3 normalView, float roughness)
 	{
 		// FO4: the interior branch samples EnvTexture and never reads visibility.
 		[branch] if (SharedData::InInterior || FO4SharedData::EnabledSkylighting == 0) return FO4_SPECULAR_UNOCCLUDED;
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
-		float3 V = -normalize(positionMS);
+		float3 V = normalize(FrameBuffer::ViewToWorld(-viewPosition, false));
 		float3 R = reflect(-V, normalWS);
 		sh2 skylightingSH = SampleProbes(ClampToArrayHeight(positionMS), R);
 		float fadeOut = GetHorizontalFadeOutFactor(positionMS);
 #	ifdef IBL
 		SpecularVisibility result;
-		result.specular = EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, 1.0 - glossiness), fadeOut);
+		result.specular = EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, roughness), fadeOut);
 		result.visibility = EvaluateVisibility(skylightingSH, fadeOut);
 		return result;
 #	else
-		return EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, 1.0 - glossiness), fadeOut);
+		return EvaluateSpecular(skylightingSH, SphericalHarmonics::FauxSpecularLobe(normalWS, V, roughness), fadeOut);
 #	endif
 	}
 
@@ -165,11 +165,11 @@ namespace Skylighting
 #	define FO4_AMBIENT_SKYLIGHTING_SET(pixelPosition, viewPosition, normalView) \
 		Skylighting::AmbientScale = Skylighting::GetAmbientScale(pixelPosition, viewPosition, normalView)
 #	define FO4_AMBIENT_SKYLIGHTING(ambient) ((ambient) * Skylighting::AmbientScale)
-#	define FO4_SKYLIGHTING_SPECULAR(viewPosition, normalView, glossiness) Skylighting::GetSpecularVisibility(viewPosition, normalView, glossiness)
+#	define FO4_SKYLIGHTING_SPECULAR_ROUGHNESS(viewPosition, normalView, roughness) Skylighting::GetSpecularVisibilityRoughness(viewPosition, normalView, roughness)
 #else
 #	define FO4_AMBIENT_SKYLIGHTING_SET(pixelPosition, viewPosition, normalView)
 #	define FO4_AMBIENT_SKYLIGHTING(ambient) (ambient)
-#	define FO4_SKYLIGHTING_SPECULAR(viewPosition, normalView, glossiness) FO4_SPECULAR_UNOCCLUDED
+#	define FO4_SKYLIGHTING_SPECULAR_ROUGHNESS(viewPosition, normalView, roughness) FO4_SPECULAR_UNOCCLUDED
 #endif
 
 // Sun lobes use probe visibility where upstream's SHADOW_VIS does.

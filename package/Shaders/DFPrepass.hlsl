@@ -1658,6 +1658,10 @@ struct PS_OUTPUT
 		output.auxA.w = 1.0;
 #		endif
 #	endif
+#	if defined(VANILLA_PBR) && EYE && !BLEND && !PIPBOY_SCREEN && !SKIN_TINT && !HAIR && !FACE
+		// FO4: eyes share the default class; a spare class lets Vanilla PBR find them.
+		output.auxA.w = 254.0 / 255.0;
+#	endif
 
 #	if PREPASS_MOTION_VECTOR
 #		if TESSELLATE_DISP_HEIGHT

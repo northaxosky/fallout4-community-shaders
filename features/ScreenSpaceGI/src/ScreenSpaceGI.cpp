@@ -507,7 +507,7 @@ namespace cs::features
 		};
 		if (const ui::Section section{ "ssgi-toggles", "Toggles" }; section) {
 			ui::EditSetting({ "ssgi-show-advanced", { .label = "Show Advanced Options" } }, showAdvanced, false);
-			dmui::ui::BeginDisabled(!IsEnabled());
+			dmui::ui::BeginDisabled(!IsSwitchedOn());
 			compile(field(&Settings::enableGI, { .label = "Indirect Lighting (IL)" }));
 			dmui::ui::EndDisabled();
 			field(&Settings::enableVanillaSSAO, { .label = "Vanilla SSAO" });
@@ -515,7 +515,7 @@ namespace cs::features
 				compile(field(&Settings::enableExperimentalSpecularGI, { .label = "(Experimental) HQ Specular IL" }));
 		}
 		if (const ui::Section section{ "ssgi-quality", "Quality/Performance" }; section) {
-			dmui::ui::BeginDisabled(!IsEnabled());
+			dmui::ui::BeginDisabled(!IsSwitchedOn());
 			struct Preset
 			{
 				const char* label;
@@ -563,7 +563,7 @@ namespace cs::features
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual", "Visual" }; section) {
-			dmui::ui::BeginDisabled(!IsEnabled());
+			dmui::ui::BeginDisabled(!IsSwitchedOn());
 			field(&Settings::aoPower, { .label = "AO Power", .format = "%.2f" });
 			dmui::ui::BeginDisabled(!_settings.enableGI);
 			field(&Settings::giStrength, { .label = "IL Source Brightness", .format = "%.2f" });
@@ -586,14 +586,14 @@ namespace cs::features
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual-il", "Visual - IL" }; section) {
-			dmui::ui::BeginDisabled(!IsEnabled() || !_settings.enableGI);
+			dmui::ui::BeginDisabled(!IsSwitchedOn() || !_settings.enableGI);
 			if (showAdvanced)
 				field(&Settings::giDistanceCompensation, { .label = "IL Distance Compensation", .format = "%.1f" });
 			field(&Settings::giSaturation, { .label = "IL Saturation", .format = "%.1f%%", .scale = 100.0f });
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-denoising", "Denoising" }; section) {
-			dmui::ui::BeginDisabled(!IsEnabled());
+			dmui::ui::BeginDisabled(!IsSwitchedOn());
 			compile(field(&Settings::enableTemporalDenoiser, { .label = "Temporal Denoiser" }));
 			field(&Settings::enableBlur, { .label = "Blur" });
 			if (showAdvanced) {

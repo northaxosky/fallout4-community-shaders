@@ -261,12 +261,11 @@ namespace cs::engine
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
 	// The provider's declaration must be in the contribution registry under a_name.
 	bool ValidateShaderContributionName(std::string_view a_name, const ShaderDefineProvider& a_provider);
-	bool SetBaselineShaderOwnership(
-		ShaderInjectionTarget a_target,
-		bool a_enabled);
-	bool SetShaderInjectionEnabled(bool a_enabled);
 	bool SetShaderInjectionRuntime(GameRuntime a_runtime);
+	// Call only via FeatureManager::ApplyShaderOwnership.
 	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config);
+	bool IsShaderInjectionEnabled() noexcept;
+	std::vector<ShaderInjectionTarget> GetUnownedShaderTargets(std::string_view a_contributor);
 	bool ValidateShaderInjectionRoutes(
 		std::string_view a_contributor,
 		std::string& a_error);

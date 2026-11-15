@@ -91,43 +91,61 @@ namespace cs::render
 		float DeltaTime = 0.0f;
 		DirectX::XMFLOAT4 DebugParams{};
 		std::uint32_t EnabledDynamicCubemaps = 0;
-		float DynamicMaterialReflections = 0.0f;
 		std::uint32_t EnabledWaterEffects = 0;
 		std::uint32_t EnabledTerrainVariation = 0;
 		std::uint32_t EnabledSkylighting = 0, EnabledScreenSpaceGI = 0;
 		std::uint32_t EnabledUnifiedWater = 0;
-		std::uint32_t EnabledScreenSpaceShadows = 0;
+		std::uint32_t EnabledScreenSpaceShadows = 0, EnabledVolumetricShadows = 0;
 		// Engine DALC rows, so vanilla ambient replays exactly beside the linear SH.
 		DirectX::XMFLOAT4 DirectionalAmbient[3]{};
-		std::uint32_t EnabledVolumetricShadows = 0, EnabledLODBlending = 0;
-		std::uint32_t EnabledLightLimitFix = 0;
-		std::uint32_t pad0 = 0;
+		std::uint32_t EnabledLODBlending = 0, EnabledLightLimitFix = 0;
+		std::uint32_t pad0 = 0, pad1 = 0;
 		// Unit direction to the drawn sun disc; the light's if unavailable.
 		DirectX::XMFLOAT4 SunDiscDirection{};
 		// BSDFComposite's fog sun glare color; w is its weight, zero when off.
 		DirectX::XMFLOAT4 SunGlareColor{};
+		std::uint32_t VanillaPBREnable = 0, VanillaPBREnableGGX = 0;
+		float VanillaPBRRoughnessMultiplier = 1.0f, VanillaPBRSpecularRoughnessBlend = 0.0f;
+		float VanillaPBRBaseF0Multiplier = 0.2f, VanillaPBRMinF0 = 0.02f;
+		std::uint32_t VanillaPBRSplitScreen = 0;
+		float VanillaPBRSplitPosition = 0.5f;
+		std::uint32_t VanillaPBREnableEyeSpecialHandling = 0;
+		std::uint32_t VanillaPBRSplitMode = 0, VanillaPBRLiveEnvironment = 0;
+		std::uint32_t pad2 = 0;
 	};
-	static_assert(sizeof(FO4SharedDataCB) == 160);
+	static_assert(sizeof(FO4SharedDataCB) == 208);
 	static_assert(offsetof(FO4SharedDataCB, DebugOwner) == 0);
 	static_assert(offsetof(FO4SharedDataCB, DebugMode) == 4);
 	static_assert(offsetof(FO4SharedDataCB, EnabledSSR) == 8);
 	static_assert(offsetof(FO4SharedDataCB, DeltaTime) == 12);
 	static_assert(offsetof(FO4SharedDataCB, DebugParams) == 16);
 	static_assert(offsetof(FO4SharedDataCB, EnabledDynamicCubemaps) == 32);
-	static_assert(offsetof(FO4SharedDataCB, DynamicMaterialReflections) == 36);
-	static_assert(offsetof(FO4SharedDataCB, EnabledWaterEffects) == 40);
-	static_assert(offsetof(FO4SharedDataCB, EnabledTerrainVariation) == 44);
-	static_assert(offsetof(FO4SharedDataCB, EnabledSkylighting) == 48);
-	static_assert(offsetof(FO4SharedDataCB, EnabledScreenSpaceGI) == 52);
-	static_assert(offsetof(FO4SharedDataCB, EnabledUnifiedWater) == 56);
-	static_assert(offsetof(FO4SharedDataCB, EnabledScreenSpaceShadows) == 60);
+	static_assert(offsetof(FO4SharedDataCB, EnabledWaterEffects) == 36);
+	static_assert(offsetof(FO4SharedDataCB, EnabledTerrainVariation) == 40);
+	static_assert(offsetof(FO4SharedDataCB, EnabledSkylighting) == 44);
+	static_assert(offsetof(FO4SharedDataCB, EnabledScreenSpaceGI) == 48);
+	static_assert(offsetof(FO4SharedDataCB, EnabledUnifiedWater) == 52);
+	static_assert(offsetof(FO4SharedDataCB, EnabledScreenSpaceShadows) == 56);
+	static_assert(offsetof(FO4SharedDataCB, EnabledVolumetricShadows) == 60);
 	static_assert(offsetof(FO4SharedDataCB, DirectionalAmbient) == 64);
-	static_assert(offsetof(FO4SharedDataCB, EnabledVolumetricShadows) == 112);
-	static_assert(offsetof(FO4SharedDataCB, EnabledLODBlending) == 116);
-	static_assert(offsetof(FO4SharedDataCB, EnabledLightLimitFix) == 120);
-	static_assert(offsetof(FO4SharedDataCB, pad0) == 124);
+	static_assert(offsetof(FO4SharedDataCB, EnabledLODBlending) == 112);
+	static_assert(offsetof(FO4SharedDataCB, EnabledLightLimitFix) == 116);
+	static_assert(offsetof(FO4SharedDataCB, pad0) == 120);
+	static_assert(offsetof(FO4SharedDataCB, pad1) == 124);
 	static_assert(offsetof(FO4SharedDataCB, SunDiscDirection) == 128);
 	static_assert(offsetof(FO4SharedDataCB, SunGlareColor) == 144);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBREnable) == 160);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBREnableGGX) == 164);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRRoughnessMultiplier) == 168);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSpecularRoughnessBlend) == 172);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRBaseF0Multiplier) == 176);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRMinF0) == 180);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitScreen) == 184);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitPosition) == 188);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBREnableEyeSpecialHandling) == 192);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRSplitMode) == 196);
+	static_assert(offsetof(FO4SharedDataCB, VanillaPBRLiveEnvironment) == 200);
+	static_assert(offsetof(FO4SharedDataCB, pad2) == 204);
 
 	[[nodiscard]] inline FrameDataCB PackFrameData(
 		const engine::WorldCameraRecord& a_camera, DirectX::XMFLOAT2 a_ratio,

@@ -552,7 +552,7 @@ namespace cs::features
 	}
 	void LightLimitFix::OnRuntimeQuarantined(std::string_view, std::string_view) noexcept
 	{
-		_injectionsOperational.store(false, std::memory_order_release);
+		RevokeInjections();
 		std::scoped_lock lock(g_state.mutex);
 		g_state.gridBuilt = false;
 		g_state.localShadows.Clear();

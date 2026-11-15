@@ -10,6 +10,8 @@ validation as well as a successful build.
 - [xmake](https://xmake.io)
 - [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set, checked out at or after the
   baseline pinned in `xmake.lua` (`git pull`, then `bootstrap-vcpkg.bat`)
+- Deep checkout paths: set `XMAKE_PKG_LOCALDIR` to a short directory so vcpkg packages install
+  outside `build\` and stay under the Windows path limit
 - [Git](https://git-scm.com/) and [Git LFS](https://git-lfs.com/)
 - PowerShell 7 (`pwsh`)
 

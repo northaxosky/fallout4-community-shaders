@@ -1,6 +1,6 @@
 <div align="center">
 
-# FO4 Community Shaders
+# Fallout 4 Community Shaders
 
 **Modern rendering features for Fallout 4, built as an open
 [F4SE](https://f4se.silverlock.org/) plugin.**

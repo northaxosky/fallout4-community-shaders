@@ -56,7 +56,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "RenderDoc"; }
 		std::string_view GetDisplayName() const override { return "RenderDoc"; }
-		std::string GetFeatureSummary() const override { return "In-game RenderDoc capture support."; }
+		std::string GetFeatureSummary() const override { return "In-game RenderDoc capture support; adds CPU cost while loaded."; }
 		bool SupportsEnableToggle() const override { return false; }
 		std::string GetCategory() const override { return FeatureCategories::kUtility; }
 

@@ -177,7 +177,9 @@ namespace cs::features
 		auto* probes = GetBindableProbeArraySRV();
 		if (!a_context || !probes)
 			return;
-		const bool lighting = a_consumer == Consumer::kLight || a_consumer == Consumer::kTiled;
+		// The ambient scale reads albedo and vertex AO, also for live reflections.
+		const bool lighting = a_consumer == Consumer::kLight || a_consumer == Consumer::kTiled ||
+		                      (a_consumer == Consumer::kComposite && cs::engine::ActiveCompositeHasLiveEnvironment());
 		// Only the raster sun reads shadow visibility; tiled has no directional lobes.
 		const bool shadowVisibility = a_consumer == Consumer::kLight;
 		const std::array<ID3D11ShaderResourceView*, 4> views{

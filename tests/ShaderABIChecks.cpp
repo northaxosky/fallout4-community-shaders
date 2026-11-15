@@ -2,6 +2,8 @@
 
 #include "../features/CloudShadows/src/ShaderDefines.h"
 #include "../features/LightLimitFix/src/LightData.h"
+#include "../features/VanillaPBR/src/BlurMatchConstants.h"
+#include "../features/VanillaPBR/src/ShaderDefines.h"
 #include "../features/VolumetricShadows/src/ShaderDefines.h"
 #include "Render/DirectionalShadowLightData.h"
 #include "Render/ForwardDraw.h"
@@ -271,13 +273,19 @@ namespace
 			ABI(FO4SharedDataCB, DebugOwner), ABI(FO4SharedDataCB, DebugMode),
 			ABI(FO4SharedDataCB, EnabledSSR),
 			ABI(FO4SharedDataCB, DeltaTime), ABI(FO4SharedDataCB, DebugParams),
-			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, DynamicMaterialReflections),
-			ABI(FO4SharedDataCB, EnabledWaterEffects), ABI(FO4SharedDataCB, EnabledTerrainVariation),
-			ABI(FO4SharedDataCB, EnabledSkylighting), ABI(FO4SharedDataCB, EnabledScreenSpaceGI),
-			ABI(FO4SharedDataCB, EnabledUnifiedWater), ABI(FO4SharedDataCB, EnabledScreenSpaceShadows),
-			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
-			ABI(FO4SharedDataCB, EnabledLODBlending), ABI(FO4SharedDataCB, EnabledLightLimitFix),
-			ABI(FO4SharedDataCB, pad0), ABI(FO4SharedDataCB, SunDiscDirection),
+			ABI(FO4SharedDataCB, VanillaPBREnable), ABI(FO4SharedDataCB, VanillaPBREnableGGX),
+			ABI(FO4SharedDataCB, VanillaPBRRoughnessMultiplier), ABI(FO4SharedDataCB, VanillaPBRSpecularRoughnessBlend),
+			ABI(FO4SharedDataCB, VanillaPBRBaseF0Multiplier), ABI(FO4SharedDataCB, VanillaPBRMinF0),
+			ABI(FO4SharedDataCB, VanillaPBRSplitScreen), ABI(FO4SharedDataCB, VanillaPBRSplitPosition),
+			ABI(FO4SharedDataCB, VanillaPBREnableEyeSpecialHandling), ABI(FO4SharedDataCB, VanillaPBRSplitMode),
+			ABI(FO4SharedDataCB, VanillaPBRLiveEnvironment), ABI(FO4SharedDataCB, pad2),
+			ABI(FO4SharedDataCB, EnabledDynamicCubemaps), ABI(FO4SharedDataCB, EnabledWaterEffects),
+			ABI(FO4SharedDataCB, EnabledTerrainVariation), ABI(FO4SharedDataCB, EnabledSkylighting),
+			ABI(FO4SharedDataCB, EnabledScreenSpaceGI), ABI(FO4SharedDataCB, EnabledUnifiedWater),
+			ABI(FO4SharedDataCB, EnabledScreenSpaceShadows), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
+			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledLODBlending),
+			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, pad0),
+			ABI(FO4SharedDataCB, pad1), ABI(FO4SharedDataCB, SunDiscDirection),
 			ABI(FO4SharedDataCB, SunGlareColor)
 		};
 		const ConstantBufferABI buffers[]{
@@ -582,6 +590,32 @@ namespace
 			return "consumer: ABI slot mismatch";
 		return {};
 	}
+	std::string VerifyVanillaPBRABI(const std::filesystem::path& a_root)
+	{
+		namespace vpbr = cs::features::vanilla_pbr;
+		std::string error;
+		// The host binds the LOD table and profiles the authored cubes.
+		const auto composite = Reflect(a_root, "DFComposite.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY", "1" }, { "VANILLA_PBR", "1" }, { "DYNAMIC_CUBEMAPS", "1" } }, "ps_5_0", error);
+		if (!composite)
+			return error;
+		if (BindPoint(composite.Get(), "VanillaPBR::LiveLODTexture") != vpbr::kLiveLODPSSlot ||
+			BindPoint(composite.Get(), "g_tIblProbeCube") != vpbr::kAuthoredCubePSSlot)
+			return "DFComposite: ABI slot mismatch";
+		const auto detail = Reflect(a_root, "FO4/VanillaPBR/BlurDetailCS.hlsl", vpbr::kBlurMatchShaderDefines, "cs_5_0", error);
+		if (!detail)
+			return error;
+		const ABIField jobs[]{ ABI(vpbr::BlurDetailCB, Jobs) };
+		if (const auto mismatch = CheckConstantBuffer(detail.Get(), { "DetailCB", 0, sizeof(vpbr::BlurDetailCB), jobs }); !mismatch.empty())
+			return "BlurDetailCS: " + mismatch;
+		const auto match = Reflect(a_root, "FO4/VanillaPBR/BlurMatchCS.hlsl", vpbr::kBlurMatchShaderDefines, "cs_5_0", error);
+		if (!match)
+			return error;
+		const ABIField fields[]{ ABI(vpbr::BlurMatchCB, LiveTarget), ABI(vpbr::BlurMatchCB, LiveMips), ABI(vpbr::BlurMatchCB, AuthoredMips),
+			ABI(vpbr::BlurMatchCB, SlotCount), ABI(vpbr::BlurMatchCB, SlotReady), ABI(vpbr::BlurMatchCB, MatchPad) };
+		if (const auto mismatch = CheckConstantBuffer(match.Get(), { "MatchCB", 0, sizeof(vpbr::BlurMatchCB), fields }); !mismatch.empty())
+			return "BlurMatchCS: " + mismatch;
+		return {};
+	}
 #undef ABI
 }
 
@@ -603,5 +637,7 @@ std::string VerifyShaderABI(const std::filesystem::path& a_root)
 		return "Volumetric Shadows ABI: " + error;
 	if (auto error = VerifyCloudShadowsABI(a_root); !error.empty())
 		return "Cloud Shadows ABI: " + error;
+	if (auto error = VerifyVanillaPBRABI(a_root); !error.empty())
+		return "Vanilla PBR ABI: " + error;
 	return {};
 }
