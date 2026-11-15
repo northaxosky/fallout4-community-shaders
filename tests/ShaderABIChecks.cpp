@@ -285,7 +285,7 @@ namespace
 			ABI(FO4SharedDataCB, EnabledScreenSpaceGI), ABI(FO4SharedDataCB, EnabledUnifiedWater),
 			ABI(FO4SharedDataCB, EnabledScreenSpaceShadows), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
 			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledLODBlending),
-			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, pad0),
+			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, EnabledTruePBR),
 			ABI(FO4SharedDataCB, pad1), ABI(FO4SharedDataCB, SunDiscDirection),
 			ABI(FO4SharedDataCB, SunGlareColor)
 		};

@@ -21,6 +21,7 @@
 #include "SkylightingSettings.h"
 #include "SubsurfaceScatteringSettings.h"
 #include "TerrainVariationSettings.h"
+#include "TruePBRSettings.h"
 #include "VanillaPBRSettings.h"
 #include "World/WeatherVariableRegistry.h"
 
@@ -63,7 +64,7 @@ namespace
 			std::pair{ "TerrainVariation", MakeSchemaView(terrain_variation::kSchema) },
 			std::pair{ "TerrainBlending", SchemaView{} },
 			std::pair{ "ExtendedMaterials", MakeSchemaView(extended_materials::kSchema) },
-			std::pair{ "TruePBR", SchemaView{} },
+			std::pair{ "TruePBR", MakeSchemaView(true_pbr::kSchema) },
 			std::pair{ "MotionVectorFixes", SchemaView{} },
 			std::pair{ "Upscaling", MakeSchemaView(cs::render::temporal::kSchema) },
 			std::pair{ "FrameGeneration", MakeSchemaView(frame_generation::kSchema) },

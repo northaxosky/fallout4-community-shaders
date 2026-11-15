@@ -2,7 +2,9 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "RecordTable.h"
 #include "ShaderDefines.h"
+#include "TruePBRSettings.h"
 
 namespace cs::features
 {
@@ -14,8 +16,14 @@ namespace cs::features
 		std::string_view GetDisplayName() const override { return "True PBR"; }
 		std::string GetCategory() const override { return FeatureCategories::kMaterials; }
 		std::string GetFeatureSummary() const override { return "Physically based materials authored with metal-roughness textures."; }
+		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;
+		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
+		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) override;
 		void DrawSettings() override;
+		bool SaveSettings() override;
+		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(true_pbr::kSchema, _settings); }
+		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(telemetry::Sink&) const override;
 		bool HasDebugUI() const override { return true; }
@@ -27,6 +35,13 @@ namespace cs::features
 
 	private:
 		bool ValidateInjectionPrerequisites(std::string&) override;
+		void BindRecordTable(ID3D11DeviceContext*);
+		// Latched once per frame so every pass of a frame agrees.
+		bool EnabledThisFrame() noexcept;
+		true_pbr::Settings _settings;
+		true_pbr::RecordTable _records;
+		std::uint32_t _latchedFrame = UINT32_MAX;
+		bool _latchedEnabled = false;
 		std::atomic_uint32_t _debugMode{ 0 };
 		std::atomic_bool _floatEmissiveRequested{ false };
 		// The DXGI format of the created emissive target; 0 until it exists.

@@ -5,11 +5,16 @@
 #include "MaterialRegistry.h"
 #include "MaterialTagHooks.h"
 #include "MaterialTags.h"
+#include "Menu/Section.h"
 #include "Menu/SettingWidgets.h"
+#include "Menu/SettingsEdit.h"
 #include "PrepassClassifier.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/RenderTargetFormats.h"
+#include "Render/ShaderInjection.h"
+#include "Render/SharedDataLayout.h"
+#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
@@ -33,9 +38,63 @@ namespace cs::features
 		};
 	}
 
+	bool TruePBR::Configure(const toml::table& a_config, std::string& a_error)
+	{
+		auto candidate = _settings;
+		if (!settings::Parse(true_pbr::kSchema, a_config, candidate, a_error))
+			return false;
+		_settings = candidate;
+		_liveSettings = settings::BindLiveSettings(true_pbr::kSchema, _settings);
+		return true;
+	}
+
+	bool TruePBR::SaveSettings()
+	{
+		return settings::SaveDelta(true_pbr::kSchema, GetConfigKey(), _settings, *Log());
+	}
+
+	void TruePBR::RestoreDefaultSettings()
+	{
+		_settings = {};
+		SaveSettings();
+	}
+
+	void TruePBR::OnD3D11Ready(IDXGIAdapter*, ID3D11Device*)
+	{
+		_records.Create();
+	}
+
+	bool TruePBR::EnabledThisFrame() noexcept
+	{
+		const auto* graphics = engine::GetGraphicsState();
+		const auto frame = graphics ? graphics->frameCount : 0u;
+		if (frame != _latchedFrame) {
+			_latchedFrame = frame;
+			_latchedEnabled = IsInjectionOperational() && _records.SRV();
+		}
+		return _latchedEnabled;
+	}
+
+	void TruePBR::WriteSharedData(render::SharedFeatureDataCB& a_shared, render::FO4SharedDataCB& a_fo4)
+	{
+		a_shared.truePBRSettings.VertexAOStrength = _settings.VertexAOStrength;
+		a_shared.truePBRSettings.EnableMicroShadows = _settings.EnableMicroShadows ? 1u : 0u;
+		a_shared.truePBRSettings.MicroShadowStrength = _settings.MicroShadowStrength;
+		a_fo4.EnabledTruePBR = EnabledThisFrame() ? 1u : 0u;
+	}
+
+	void TruePBR::BindRecordTable(ID3D11DeviceContext* a_context)
+	{
+		if (auto* table = _records.SRV())
+			engine::BindInjectionShaderResources(a_context, true_pbr::kRecordTableSlot, 1, &table);
+	}
+
 	void TruePBR::Load()
 	{
-		if (!engine::RegisterFeatureShaderBindings(*this) || !true_pbr::RegisterPrepassClassifier(*this)) {
+		const bool registered = engine::RegisterFeatureShaderBindings(*this, [this](engine::ShaderReplacementRegistration& a_registration) {
+			a_registration.bind = [this](ID3D11DeviceContext* a_context) { BindRecordTable(a_context); };
+		});
+		if (!registered || !true_pbr::RegisterPrepassClassifier(*this)) {
 			FailLoad("True PBR prepass registration failed.");
 			return;
 		}
@@ -60,6 +119,7 @@ namespace cs::features
 
 	void TruePBR::Prepass()
 	{
+		_records.Upload(engine::GetImmediateContext());
 		if (_emissiveFormat.load(std::memory_order_relaxed) != 0)
 			return;
 		if (auto* texture = engine::GetRenderTargetTexture(RE::BSGraphics::RenderTargetID::kGBufferEmissive)) {
@@ -117,6 +177,14 @@ namespace cs::features
 		ui::DrawStatusText(Log(), std::format("{} PBR material files loaded this session.", records), dmui::TextTone::kInherit);
 		if (!IsEnabled() && records != 0)
 			ui::DrawStatusText(Log(), "True PBR is switched off, but loaded PBR materials keep their PBR textures and render through vanilla shading until restart.", dmui::TextTone::kStatusWarning);
+		settings::SettingsEdit edit{ *this };
+		const auto field = edit.Bind(kSchema, _settings);
+		if (const ui::Section section{ "true-pbr-global", "Global Settings" }; section) {
+			field(&Settings::VertexAOStrength);
+			field(&Settings::EnableMicroShadows);
+			if (_settings.EnableMicroShadows)
+				field(&Settings::MicroShadowStrength);
+		}
 	}
 
 	namespace

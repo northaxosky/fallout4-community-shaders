@@ -23,7 +23,7 @@ namespace FO4SharedData
 		float4 DirectionalAmbient[3];
 		uint EnabledLODBlending;
 		uint EnabledLightLimitFix;
-		uint pad0;
+		uint EnabledTruePBR;
 		uint pad1;
 		float4 SunDiscDirection;
 		float4 SunGlareColor;
