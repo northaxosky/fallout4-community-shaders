@@ -354,13 +354,22 @@ target("FeatureConfigTests", function()
     set_group("unit")
     add_files(
         "tests/FeatureConfigTests.cpp",
+        "tests/TruePbrTests.cpp",
         "features/LightLimitFix/src/Authoring/LightAuthoring.cpp",
+        "features/TruePBR/src/Format/BgsmV100.cpp",
+        "features/TruePBR/src/Format/PbrValidation.cpp",
         "src/Settings/FeatureConfig.cpp"
     )
     add_headerfiles(
         "src/Settings/FeatureConfig.h",
-        "src/Settings/FeatureKeys.h"
+        "src/Settings/FeatureKeys.h",
+        "src/Utils/ByteCodec.h",
+        "features/TruePBR/src/Format/BgsmV100.h",
+        "features/TruePBR/src/Format/PbrMaterial.h",
+        "features/TruePBR/src/Format/PbrSchema.h",
+        "features/TruePBR/src/Format/PbrValidation.h"
     )
+    add_defines('FO4CS_TRUEPBR_TEST_DATA="' .. (path.join(os.projectdir(), "tests", "data", "truepbr"):gsub("\\", "/")) .. '"')
     for _, feature in ipairs(features) do
         add_includedirs("features/" .. feature .. "/src")
     end

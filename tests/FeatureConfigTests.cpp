@@ -33,6 +33,8 @@
 #include <set>
 #include <sstream>
 
+void RunTruePbrTests(const std::filesystem::path& a_directory);
+
 namespace
 {
 
@@ -338,6 +340,7 @@ int main()
 		TestWeatherProfiles(registry, directory / "weather.toml");
 		TestLiveSettingsRollback();
 		TestLightAuthoring();
+		RunTruePbrTests(std::filesystem::path(FO4CS_TRUEPBR_TEST_DATA));
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
 		++cs::tests::failures;
