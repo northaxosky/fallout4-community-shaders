@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <unordered_set>
@@ -26,6 +27,23 @@
 		if (csLogOnceSet.insert(csLogOnceKey).second) {                    \
 			(logger)->log((level), __VA_ARGS__);                           \
 		}                                                                  \
+	} while (0)
+
+// CS_LOG_ONCE_BY_KEY_GLOBAL is the same, but one set per expansion site is shared by every thread.
+#define CS_LOG_ONCE_BY_KEY_GLOBAL(logger, level, key, ...)             \
+	do {                                                               \
+		const auto csLogOnceKey = (key);                               \
+		using CsLogOnceKey = std::decay_t<decltype(csLogOnceKey)>;     \
+		static std::mutex csLogOnceMutex;                              \
+		static std::unordered_set<CsLogOnceKey> csLogOnceSet;          \
+		bool csLogOnceFirst;                                           \
+		{                                                              \
+			std::scoped_lock csLogOnceLock(csLogOnceMutex);            \
+			csLogOnceFirst = csLogOnceSet.insert(csLogOnceKey).second; \
+		}                                                              \
+		if (csLogOnceFirst) {                                          \
+			(logger)->log((level), __VA_ARGS__);                       \
+		}                                                              \
 	} while (0)
 
 // CS_LOG_EVERY_N logs on first hit and every N hits after; suppress 4127 because constant n makes the guard constant.

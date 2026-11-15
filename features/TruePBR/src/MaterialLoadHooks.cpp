@@ -1,8 +1,9 @@
 #include "MaterialLoadHooks.h"
 
 #include "Format/BgsmV100.h"
-#include "Log.h"
 #include "LoadNotices.h"
+#include "Log.h"
+#include "LogThrottle.h"
 #include "MaterialRegistry.h"
 #include "Render/HookRegistry.h"
 #include "ShaderDataSwap.h"
@@ -44,10 +45,9 @@ namespace cs::features::true_pbr
 
 		void Reject(const std::string& a_name, const std::string& a_reason)
 		{
-			if (Notices().Reject(a_name, a_reason))
-				L->warn("TruePBR material '{}' rendered as its vanilla part: {}", a_name, a_reason);
-			else
-				L->debug("TruePBR material '{}' rejected again: {}", a_name, a_reason);
+			Notices().Reject(a_name, a_reason);
+			CS_LOG_ONCE_BY_KEY_GLOBAL(L, spdlog::level::warn, a_name,
+				"TruePBR material '{}' rendered as its vanilla part: {}", a_name, a_reason);
 		}
 
 		// Version 100: Part 1 is a vanilla v2 body the original reads; Part 2 follows in the stream.
@@ -57,8 +57,8 @@ namespace cs::features::true_pbr
 
 			const std::string rawName = a_context.resourceName;
 			if (a_context.family != RE::BSShaderManager::ShaderEnum::kLighting) {
-				if (Notices().Once(rawName + "#family"))
-					L->warn("TruePBR material '{}' is not a lighting material and is left as its vanilla part.", rawName);
+				CS_LOG_ONCE_BY_KEY_GLOBAL(L, spdlog::level::warn, rawName,
+					"TruePBR material '{}' is not a lighting material and is left as its vanilla part.", rawName);
 				return;
 			}
 
@@ -104,8 +104,9 @@ namespace cs::features::true_pbr
 				for (const auto& warning : ingested->warnings)
 					L->warn("TruePBR material '{}': {}", *name, warning);
 				L->debug("TruePBR material '{}' is record {}.", *name, record.id);
-			} else if (ingested->outcome == IngestOutcome::kChangedOnDisk && Notices().Once(*name + "#changed")) {
-				L->warn("TruePBR material '{}' changed on disk; restart to apply.", *name);
+			} else if (ingested->outcome == IngestOutcome::kChangedOnDisk) {
+				CS_LOG_ONCE_BY_KEY_GLOBAL(L, spdlog::level::warn, *name,
+					"TruePBR material '{}' changed on disk; restart to apply.", *name);
 			}
 			ShaderDataSwap(data, record);
 		}
