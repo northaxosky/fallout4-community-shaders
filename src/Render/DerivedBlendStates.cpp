@@ -25,7 +25,11 @@ namespace cs::render
 			L->error("Could not create the derived blend state for {}.", static_cast<const void*>(a_source));
 			return entry;
 		}
-		_derivedStates.insert(entry.derived.get());
+		// D3D11 returns the same object for an identical descriptor.
+		if (entry.derived.get() == a_source)
+			entry.derived = nullptr;
+		else
+			_derivedStates.insert(entry.derived.get());
 		return entry;
 	}
 
