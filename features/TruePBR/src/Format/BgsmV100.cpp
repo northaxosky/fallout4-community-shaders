@@ -36,14 +36,10 @@ namespace cs::features::true_pbr
 			// BGSM string: u32 length including the terminating null.
 			std::string Text()
 			{
-				const auto length = U32();
-				if (!_ok || length > kMaxPathBytes || length > _reader.Remaining())
+				std::string text;
+				if (!_ok || !_reader.Text(text, kMaxPathBytes))
 					return Fail<std::string>();
-				if (length == 0)
-					return {};
-				const auto bytes = _reader.View(length);
-				std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-				if (text.back() == '\0')
+				if (!text.empty() && text.back() == '\0')
 					text.pop_back();
 				if (text.find('\0') != std::string::npos)
 					return Fail<std::string>();

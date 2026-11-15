@@ -1,9 +1,24 @@
 #include "ShaderDataSwap.h"
 
 #include "RE/B/BSShaderData.h"
+#include "RE/B/BSShaderProperty.h"
+
+#include <array>
 
 namespace cs::features::true_pbr
 {
+	namespace
+	{
+		using Slot = RE::BSShaderProperty::TextureTypeEnum;
+
+		// Indexed by PbrTexture; greyscale, envmap and index 9 are never written.
+		constexpr std::array<Slot, 7> kEngineSlots{
+			Slot::kBase, Slot::kNormal, Slot::kGlow, Slot::kDisplacement,
+			Slot::kSmoothSpec, Slot::kMultilayer, Slot::kWrinkles
+		};
+		static_assert(kEngineSlots.size() == kTextureSlots.size());
+	}
+
 	void ShaderDataSwap(RE::BSShaderData& a_data, const MaterialRecord& a_record)
 	{
 		const auto& m = a_record.material;
@@ -35,7 +50,7 @@ namespace cs::features::true_pbr
 		for (auto& name : names)
 			name = "";
 		for (std::size_t slot = 0; slot < kTextureSlots.size(); ++slot)
-			names[kTextureSlots[slot].engineIndex] = m.textures[slot].c_str();
+			names[static_cast<std::size_t>(kEngineSlots[slot])] = m.textures[slot].c_str();
 
 		// Glow is bound only for the glowmap class, so it follows the emissive texture.
 		a_data.glowmap = !m.Texture(PbrTexture::kEmissive).empty();

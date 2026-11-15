@@ -143,17 +143,15 @@ namespace cs::features::true_pbr
 		std::string_view label;
 		bool required;
 		std::uint32_t requiredByFeature;  // feature mask, or 0
-		std::uint8_t engineIndex;         // BSShaderData::textureNames index
 	};
 
-	// Reserved engine slots 3 (greyscale), 4 (envmap) and 9 stay empty.
 	inline constexpr std::array kTextureSlots{
-		PbrTextureSlot{ "baseColor", "Base Color", true, 0, 0 },
-		PbrTextureSlot{ "normal", "Normal", true, 0, 1 },
-		PbrTextureSlot{ "emissive", "Emissive", false, 0, 2 },
-		PbrTextureSlot{ "displacement", "Displacement", false, feature::kInterlayerParallax, 8 },
-		PbrTextureSlot{ "rmaos", "RMAOS", true, 0, 7 },
-		PbrTextureSlot{ "features0", "Features 0", false, 0, 6 },
-		PbrTextureSlot{ "features1", "Features 1", false, feature::kCoatNormal, 5 }
+		PbrTextureSlot{ "baseColor", "Base Color", true, 0 },
+		PbrTextureSlot{ "normal", "Normal", true, 0 },
+		PbrTextureSlot{ "emissive", "Emissive", false, 0 },
+		PbrTextureSlot{ "displacement", "Displacement", false, feature::kInterlayerParallax },
+		PbrTextureSlot{ "rmaos", "RMAOS", true, 0 },
+		PbrTextureSlot{ "features0", "Features 0", false, 0 },
+		PbrTextureSlot{ "features1", "Features 1", false, feature::kCoatNormal }
 	};
 }

@@ -1,5 +1,7 @@
 #include "Format/PbrValidation.h"
 
+#include "Utils/StringCompare.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -13,10 +15,8 @@ namespace cs::features::true_pbr
 
 		bool UnderPbr(std::string_view a_path)
 		{
-			if (a_path.size() <= kPbrPrefix.size() || (a_path[kPbrPrefix.size()] != '\\' && a_path[kPbrPrefix.size()] != '/'))
-				return false;
-			return std::ranges::equal(a_path.substr(0, kPbrPrefix.size()), kPbrPrefix,
-				[](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; });
+			return a_path.size() > kPbrPrefix.size() && (a_path[kPbrPrefix.size()] == '\\' || a_path[kPbrPrefix.size()] == '/') &&
+			       util::EqualsIgnoreCase(a_path.substr(0, kPbrPrefix.size()), kPbrPrefix);
 		}
 
 		void CheckRange(std::vector<std::string>& a_errors, std::string_view a_label, const PbrParameter& a_parameter, float a_value)
