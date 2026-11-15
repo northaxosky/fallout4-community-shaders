@@ -597,6 +597,13 @@ namespace cs::features
 		}
 	}
 
+	std::string RenderDoc::GetStartupNotice() const
+	{
+		if (!_api)
+			return {};
+		return "RenderDoc is loaded and severely impacts performance. Disable startup loading and restart to unload it.";
+	}
+
 	void RenderDoc::DrawOverlay()
 	{
 		ApplyPendingComments();
