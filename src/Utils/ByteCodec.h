@@ -1,8 +1,6 @@
 #pragma once
 
-#include "Utils/CSSha256.h"
-
-#include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -10,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cs::shader_cache
+namespace cs::bytes
 {
 	// explicit little-endian encoding; never persist struct layout
 	class ByteWriter
@@ -37,17 +35,17 @@ namespace cs::shader_cache
 				_bytes->push_back(static_cast<std::uint8_t>((a_value >> shift) & 0xFFu));
 		}
 
+		void F32(float a_value)
+		{
+			U32(std::bit_cast<std::uint32_t>(a_value));
+		}
+
 		void Bytes(const void* a_data, std::size_t a_length)
 		{
 			if (a_length == 0)
 				return;
 			const auto* first = static_cast<const std::uint8_t*>(a_data);
 			_bytes->insert(_bytes->end(), first, first + a_length);
-		}
-
-		void Digest(const sha256::Sha256Result& a_digest)
-		{
-			Bytes(a_digest.bytes.data(), a_digest.bytes.size());
 		}
 
 		void Text(std::string_view a_text)
@@ -108,12 +106,12 @@ namespace cs::shader_cache
 			return true;
 		}
 
-		bool Digest(sha256::Sha256Result& a_digest) noexcept
+		bool F32(float& a_value) noexcept
 		{
-			const auto view = View(a_digest.bytes.size());
-			if (view.empty())
+			std::uint32_t bits = 0;
+			if (!U32(bits))
 				return false;
-			std::copy(view.begin(), view.end(), a_digest.bytes.begin());
+			a_value = std::bit_cast<float>(bits);
 			return true;
 		}
 

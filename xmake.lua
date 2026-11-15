@@ -508,7 +508,8 @@ target("ShaderCacheTests", function()
     add_headerfiles(
         "src/Utils/CSSha256.h",
         "src/Utils/ShaderCompile.h",
-        "src/Utils/ShaderCache/ByteCodec.h",
+        "src/Utils/ByteCodec.h",
+        "src/Utils/ShaderCache/DigestCodec.h",
         "src/Utils/ShaderCache/CacheRecord.h",
         "src/Utils/ShaderCache/CacheStorage.h",
         "src/Utils/ShaderCache/CompilerIdentity.h",

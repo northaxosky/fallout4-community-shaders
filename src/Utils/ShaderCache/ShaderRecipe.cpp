@@ -1,7 +1,7 @@
 #include "Utils/ShaderCache/ShaderRecipe.h"
 
 #include "Utils/PathUtf8.h"
-#include "Utils/ShaderCache/ByteCodec.h"
+#include "Utils/ShaderCache/DigestCodec.h"
 
 #include <algorithm>
 #include <atomic>
@@ -128,7 +128,7 @@ namespace cs::shader_cache
 		writer.U32(a_recipe.flags2);
 		writer.Text(EncodeLocator(a_identity.modulePath));
 		writer.U64(a_identity.moduleLength);
-		writer.Digest(a_identity.moduleDigest);
+		WriteDigest(writer, a_identity.moduleDigest);
 		return bytes;
 	}
 
@@ -160,7 +160,7 @@ namespace cs::shader_cache
 		std::vector<std::uint8_t> bytes(a_recipeBytes.begin(), a_recipeBytes.end());
 		ByteWriter writer(bytes);
 		writer.Text(kDependencySchema);
-		writer.Digest(a_dependencyDigest);
+		WriteDigest(writer, a_dependencyDigest);
 		return sha256::Sha256Compute(bytes.data(), bytes.size());
 	}
 }
