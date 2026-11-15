@@ -13,4 +13,4 @@
 | N/A | Point-light parallax soft shadows | Not applied | Each light needs its own tangent-space march, which G-buffer lighting cannot repeat |
 | N/A | `bLandSpecular` INI enable | Not applied | FO4 landscape always binds a separate `_s` map |
 | Pending | Complex Material (`EnableComplexMaterial`) | Published as 0 | FO4's envmap loader has no separate mask |
-| Pending | TruePBR surface POM | Not applied | Needs the TruePBR material loader |
+| Pending | TruePBR surface POM | Not applied | Needs TruePBR shading |
