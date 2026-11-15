@@ -21,6 +21,10 @@ namespace cs::features
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(true_pbr::kSchema, _settings); }
 		void RestoreDefaultSettings() override;
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(telemetry::Sink&) const override;
+		bool HasDebugUI() const override { return true; }
+		void DrawDebug() override;
 
 	private:
 		true_pbr::Settings _settings;
