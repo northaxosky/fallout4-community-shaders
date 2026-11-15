@@ -73,7 +73,7 @@ namespace TruePBRPrepass
 		return a_dryGloss > 0.0 ? clamp(1.0 - (1.0 - a_dryRoughness) * a_gloss / a_dryGloss, PBR::Constants::MinRoughness, PBR::Constants::MaxRoughness) : a_dryRoughness;
 	}
 
-	// Lighting.hlsl:2948-2965; FO4: native wetness is the wet signal.
+	// Lighting.hlsl:2948-2965; FO4: world wetness is upstream's wetness amount.
 	float3 WetDarkening(float3 a_baseColor, float a_metallic, float a_wetness)
 	{
 		const float porosity = 1.0 - saturate(sqrt(a_metallic));

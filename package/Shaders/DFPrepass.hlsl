@@ -1763,8 +1763,7 @@ struct PS_OUTPUT
 			// Wetness: relative gloss, and upstream's porosity darkening.
 			const float dryGloss = svScrolls.x ? anchor.x * anchor.x : anchor.x;
 			surface.roughness = TruePBRPrepass::WetRoughness(surface.roughness, sval.x, dryGloss);
-			const float wetDarkening = WetnessControl_Spec.w == -1.0 ? 0.0 : saturate(WorldWetnessAndRainTransition.x) * saturate(WetnessControl_Spec.w);
-			surface.baseColor = TruePBRPrepass::WetDarkening(surface.baseColor, surface.metallic, wetDarkening);
+			surface.baseColor = TruePBRPrepass::WetDarkening(surface.baseColor, surface.metallic, saturate(WorldWetnessAndRainTransition.x));
 
 			output.albedo = float4(surface.baseColor, 0.0);
 			output.material = 0.0;
