@@ -13,9 +13,11 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/GBufferViews.h"
+#include "Render/RenderHooks.h"
 #include "Render/RenderTargetFormats.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -35,9 +37,10 @@ namespace cs::features
 
 	namespace
 	{
-		// SV_Target7 and t67 in the prepass and lighting shaders.
+		// SV_Target7 of the prepass shader.
 		constexpr std::uint32_t kF0TargetSlot = 7;
-		constexpr std::uint32_t kF0PublishSlot = 67;
+		// RGB only: the F0 target has no alpha; the emissive alpha is kept.
+		constexpr std::uint8_t kRgbMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
 
 		constexpr std::array kDebugViews{
 			FeatureDebugView{ "classified", "Classified draws", FeatureDebugViewKind::kFullscreen },
@@ -87,7 +90,7 @@ namespace cs::features
 			target.DestBlend = target.DestBlendAlpha = D3D11_BLEND_ONE;
 			target.BlendOp = target.BlendOpAlpha = D3D11_BLEND_OP_MIN;
 			// The alpha carries the vertex occlusion.
-			target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
+			target.RenderTargetWriteMask = kRgbMask;
 			DX::ThrowIfFailed(a_device->CreateBlendState(&blend, _clampBlend.put()));
 			render::annotation::SetName(_clampBlend.get(), "TruePBR/EmissiveClamp.Blend");
 			_clampShader = util::CompilePixelShader(L"Data\\Shaders\\FO4\\TruePBR\\EmissiveClampPS.hlsl");
@@ -98,14 +101,10 @@ namespace cs::features
 			Log()->warn("The emissive clamp pass is unavailable; fallback prepass draws can exceed 1.");
 	}
 
-	// Runs only when a prepass draw kept its native shader: the injection is not operational, or a
-	// replacement was not ready or failed this frame. Owned draws clamp in the shader.
 	void TruePBR::ClampFallbackEmission()
 	{
 		const auto outcome = engine::GetShaderInjectionOutcomeSnapshot(engine::ShaderInjectionTarget::kDeferredPrepass);
-		const bool fellBack = outcome.passthroughs != _lastPassthroughs || !IsInjectionOperational();
-		_lastPassthroughs = outcome.passthroughs;
-		if (!fellBack || !_floatEmissiveRequested.load(std::memory_order_relaxed) || !_clampShader || !_clampPass.Ready())
+		if (outcome.nativeDraws == 0 || !_floatEmissiveRequested.load(std::memory_order_relaxed) || !_clampShader || !_clampPass.Ready())
 			return;
 		auto* context = engine::GetImmediateContext();
 		auto* target = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kGBufferEmissive);
@@ -132,7 +131,7 @@ namespace cs::features
 		const auto frame = graphics ? graphics->frameCount : 0u;
 		if (frame != _latchedFrame) {
 			_latchedFrame = frame;
-			// Last frame's views: a lit pixel is only tagged once both targets exist.
+			// Last frame's views: tagging needs both targets to exist.
 			_latchedEnabled = IsInjectionOperational() && _records.SRV() && _f0Target &&
 			                  engine::GetPrepassExtraTargetSRV(*_f0Target) &&
 			                  engine::GetPrepassAuxSRV(engine::PrepassAuxChannel::kMaterialAO);
@@ -151,30 +150,29 @@ namespace cs::features
 	void TruePBR::BindRecordTable(ID3D11DeviceContext* a_context)
 	{
 		if (auto* table = _records.SRV())
-			engine::BindInjectionShaderResources(a_context, true_pbr::kRecordTableSlot, 1, &table);
+			engine::BindInjectionShaderResources(a_context, render::kTruePBRRecordTableSlot, 1, &table);
 	}
 
 	bool TruePBR::RegisterMaterialTargets()
 	{
 		const auto active = [this] { return IsEnabled() && IsInjectionOperational(); };
-		constexpr std::uint8_t color = 0x7;  // RGB; the target has no alpha
 		_f0Target = engine::RegisterPrepassExtraTarget(*this, { .name = "TruePBR/F0",
 																  .rtvSlot = kF0TargetSlot,
 																  .format = DXGI_FORMAT_R11G11B10_FLOAT,
 																  .clear = { 0.04f, 0.04f, 0.04f, 0.0f },
-																  .publishSlot = kF0PublishSlot,
+																  .publishSlot = render::kTruePBRF0Slot,
 																  .publishStages = engine::ShaderStageBit(engine::ShaderStage::kPixel) | engine::ShaderStageBit(engine::ShaderStage::kCompute),
 																  .active = active,
 																  // Terrain fades neutral F0 into a PBR object like color.
-																  .terrain = { engine::PrepassExtraWrite{ .blend = true, .mask = color }, engine::PrepassExtraWrite{}, engine::PrepassExtraWrite{ .mask = color } },
-																  .materialMask = color });
+																  .terrain = { engine::PrepassExtraWrite{ .blend = true, .mask = kRgbMask }, engine::PrepassExtraWrite{}, engine::PrepassExtraWrite{ .mask = kRgbMask } },
+																  .materialMask = kRgbMask });
 		return _f0Target && engine::RegisterPrepassAuxChannel(*this, engine::PrepassAuxChannel::kMaterialAO, active);
 	}
 
 	void TruePBR::Load()
 	{
 		const bool registered = engine::RegisterFeatureShaderBindings(*this, [this](engine::ShaderReplacementRegistration& a_registration) {
-			// The prepass reads the record table; the lighting stages read the G-buffer.
+			// The prepass binds the record table, lighting the G-buffer.
 			if (a_registration.targetId == engine::ShaderInjectionTarget::kDeferredPrepass)
 				a_registration.bind = [this](ID3D11DeviceContext* a_context) { BindRecordTable(a_context); };
 			else
@@ -190,7 +188,11 @@ namespace cs::features
 			return;
 		}
 		Log()->info("Installed hooks");
-		// Last: the request cannot be undone and needs the shader clamp.
+		if (!engine::RegisterPostDeferredPrePass(*this, [this] { ClampFallbackEmission(); })) {
+			FailLoad("True PBR emissive clamp registration failed.");
+			return;
+		}
+		// Last: the request cannot be undone.
 		const bool floatEmissive = engine::RequestRenderTargetFormat(RE::BSGraphics::RenderTargetID::kGBufferEmissive, DXGI_FORMAT_R16G16B16A16_FLOAT);
 		_floatEmissiveRequested.store(floatEmissive, std::memory_order_relaxed);
 		if (!floatEmissive)
@@ -206,7 +208,6 @@ namespace cs::features
 	void TruePBR::Prepass()
 	{
 		_records.Upload(engine::GetImmediateContext());
-		ClampFallbackEmission();
 		if (_emissiveFormat.load(std::memory_order_relaxed) != 0)
 			return;
 		if (auto* texture = engine::GetRenderTargetTexture(RE::BSGraphics::RenderTargetID::kGBufferEmissive)) {

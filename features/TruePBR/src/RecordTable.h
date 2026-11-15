@@ -15,9 +15,6 @@ namespace cs::buffer
 
 namespace cs::features::true_pbr
 {
-	// Pixel slot of the record table.
-	inline constexpr std::uint32_t kRecordTableSlot = 68;
-
 	// GPU mirror of the registry, indexed by record id. Render thread only.
 	class RecordTable
 	{

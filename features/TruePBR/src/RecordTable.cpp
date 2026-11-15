@@ -41,7 +41,7 @@ namespace cs::features::true_pbr
 			return;
 		std::vector<TruePBRRecord::Row> rows;
 		rows.reserve(count - _uploaded);
-		// Ids are 1-based, so the first new row is the one after the uploaded count.
+		// Ids are 1-based, so the next row follows the uploaded count.
 		for (auto id = _uploaded + 1; id <= count; ++id) {
 			const auto* record = Records().Get(static_cast<RecordId>(id));
 			rows.push_back(record ? MakeRecordRow(*record) : TruePBRRecord::Row{});

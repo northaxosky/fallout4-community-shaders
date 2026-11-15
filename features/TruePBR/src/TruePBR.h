@@ -52,11 +52,10 @@ namespace cs::features
 		std::atomic_bool _floatEmissiveRequested{ false };
 		// The DXGI format of the created emissive target; 0 until it exists.
 		std::atomic_uint32_t _emissiveFormat{ 0 };
-		// Native prepass draws write the float emissive target unclamped; a MIN pass restores the 8-bit range.
+		// A MIN pass clamps what native draws write to the float target.
 		render::FullscreenPass _clampPass;
 		winrt::com_ptr<ID3D11PixelShader> _clampShader;
 		winrt::com_ptr<ID3D11BlendState> _clampBlend;
-		std::uint64_t _lastPassthroughs = UINT64_MAX;
 		std::atomic_uint64_t _clampFrames{ 0 };
 	};
 }

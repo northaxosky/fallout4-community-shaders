@@ -53,6 +53,8 @@ namespace cs::engine
 		ShaderInjectionDrawMetrics g_completedDrawMetrics;
 		// Sampled once per frame; counters are skipped unless telemetry is on.
 		std::atomic<bool> g_collectMetrics{ false };
+		// Per target, draws that kept the native pixel shader this frame.
+		std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> g_frameNativeDraws{};
 
 		template <class Counter>
 		void Tally(Counter& a_counter, std::uint64_t a_amount = 1) noexcept
@@ -279,6 +281,8 @@ namespace cs::engine
 			t_drawMetrics.frameBindings = GetFrameBindingMetrics();
 			g_completedDrawMetrics = t_drawMetrics;
 		}
+		for (auto& count : g_frameNativeDraws)
+			count.store(0, std::memory_order_relaxed);
 		const bool collect = telemetry::pump::Enabled();
 		g_collectMetrics.store(collect, std::memory_order_relaxed);
 		t_drawMetrics = { .frame = a_frame };
@@ -2258,6 +2262,8 @@ namespace cs::engine
 		if (!entry.family || !ShaderEnabled(entry.target)) {
 			if (miss)
 				Tally(t_drawMetrics.bindResolveMisses);
+			if (entry.family && native.pixel)
+				g_frameNativeDraws[ToIndex(entry.target)].fetch_add(1, std::memory_order_relaxed);
 			t_bound = nullptr;
 			return native;
 		}
@@ -2271,6 +2277,8 @@ namespace cs::engine
 		auto& runtime = service.runtime[ToIndex(entry.target)];
 		Tally(runtime.matches, entry.matches);
 		Tally(runtime.substitutions, (entry.replaced.vertex != native.vertex) + (entry.replaced.pixel != native.pixel));
+		if (native.pixel && entry.replaced.pixel == native.pixel)
+			g_frameNativeDraws[ToIndex(entry.target)].fetch_add(1, std::memory_order_relaxed);
 		return entry.replaced;
 	}
 
@@ -2563,8 +2571,7 @@ namespace cs::engine
 		snapshot.matches = runtime.matches.load(std::memory_order_relaxed);
 		snapshot.substitutions =
 			runtime.substitutions.load(std::memory_order_relaxed);
-		snapshot.passthroughs = runtime.passthroughNotReady.load(std::memory_order_relaxed) +
-		                        runtime.passthroughCompileFail.load(std::memory_order_relaxed);
+		snapshot.nativeDraws = g_frameNativeDraws[ToIndex(a_target)].load(std::memory_order_relaxed);
 		return snapshot;
 	}
 

@@ -8,6 +8,7 @@
 #include "Render/RenderHooks.h"
 #include "Render/RuntimeCallback.h"
 #include "Render/ShaderInjection.h"
+#include "Render/SubstrateSlots.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 
@@ -48,12 +49,11 @@ namespace cs::engine
 
 		// FO4: the engine's six G-buffer targets come first.
 		constexpr std::uint32_t kAuxRTVSlot = 6;
-		constexpr std::uint32_t kAuxPublishSlot = 66;
 		constexpr std::uint8_t kRedMask = D3D11_COLOR_WRITE_ENABLE_RED;
 		constexpr std::uint8_t kGreenMask = D3D11_COLOR_WRITE_ENABLE_GREEN;
 		constexpr std::uint8_t kBlueMask = D3D11_COLOR_WRITE_ENABLE_BLUE;
 		constexpr std::uint8_t kColorMask = kRedMask | kGreenMask | kBlueMask;
-		// RT3 holds roughness and class; the material channels follow its writes.
+		// RT3 holds roughness and class; material channels follow it.
 		constexpr std::size_t kMaterialHolderSlot = 3;
 
 		struct AuxClaim
@@ -75,7 +75,7 @@ namespace cs::engine
 		std::atomic<std::uint64_t> g_unscopedSkips{ 0 };
 		std::atomic<std::uint64_t> g_nullBlendDraws{ 0 };
 
-		// Calls a_fn for each stage in a_stages that frame bindings track.
+		// Frame bindings track only the pixel and compute stages.
 		template <class Fn>
 		void ForPublishStages(ShaderStageMask a_stages, Fn&& a_fn)
 		{
@@ -233,7 +233,7 @@ namespace cs::engine
 					auto mask = static_cast<std::uint8_t>(base.RenderTargetWriteMask);
 					mask = static_cast<std::uint8_t>((mask & kRedMask) ? mask | coupled : mask & ~coupled);
 					if (material) {
-						// A channel pair shares one equation, so a conflicting coupled write wins.
+						// A channel pair shares one equation; a coupled write wins.
 						const bool follows = WritesMaterial(holder) && (!(mask & coupled) || SameEquation(base, holder));
 						if (follows) {
 							wanted = holder;
@@ -384,7 +384,7 @@ namespace cs::engine
 												.rtvSlot = kAuxRTVSlot,
 												.format = DXGI_FORMAT_R8G8B8A8_UNORM,
 												.clear = { 1, 0, 1, 0 },
-												.publishSlot = kAuxPublishSlot,
+												.publishSlot = render::kPrepassAuxSlot,
 												.publishStages = ShaderStageBit(ShaderStage::kPixel) | ShaderStageBit(ShaderStage::kCompute),
 												.active = &EvaluateAuxClaims,
 												// Terrain blends shadow and material AO like color; no skin.
