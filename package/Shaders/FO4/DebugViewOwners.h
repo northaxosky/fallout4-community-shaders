@@ -41,6 +41,10 @@ namespace TruePBRDebugMode
 	static const uint
 #endif
 		Classified = 1,
-		Record = 2;
+		Record = 2,
+		BaseColor = 3,
+		Roughness = 4,
+		MetallicF0 = 5,
+		AmbientOcclusion = 6;
 }
 #endif

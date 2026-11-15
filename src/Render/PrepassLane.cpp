@@ -4,6 +4,7 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/PrepassTechnique.h"
+#include "Render/RenderHooks.h"
 #include "Render/ShaderHookSupport.h"
 #include "Telemetry/Telemetry.h"
 
@@ -15,6 +16,7 @@
 
 #include "RE/B/BSDFPrePassShader.h"
 #include "RE/B/BSGeometry.h"
+#include "RE/B/BSLightingShaderProperty.h"
 #include "RE/B/BSRenderPass.h"
 #include "RE/B/BSShaderProperty.h"
 #include "RE/N/NiRTTI.h"
@@ -56,6 +58,7 @@ namespace cs::engine
 		std::array<std::array<ClassifierCounts, kPrepassBakePaths>, kPrepassFlagSlots> g_classifierCounts;
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
 		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
+		std::atomic_bool g_inWorldPrepass{ false };
 
 		// Stock never reads the cb2 pad before material flags.
 		constexpr std::size_t kPrepassMaterialFlagsSlot = 0x60 - 0x58;
@@ -151,6 +154,10 @@ namespace cs::engine
 			}
 			if (Runs(g_recordClassifier, a_path))
 				request.payload.recordId = g_recordClassifier.classify(draw);
+			if (request.payload.recordId != 0) {
+				if (const auto* property = draw.LightingProperty())
+					request.payload.emissiveScaleBits = std::bit_cast<std::uint32_t>(property->emitColorScale);
+			}
 			return request;
 		}
 
@@ -291,9 +298,17 @@ namespace cs::engine
 		return true;
 	}
 
+	bool PrepassDrawContext::InWorldPrepass() const noexcept
+	{
+		return path == PrepassBakePath::kCommandBuffer || g_inWorldPrepass.load(std::memory_order_relaxed);
+	}
+
 	bool RegisterPrepassRecordClassifier(Feature& a_owner, PrepassRecordClassifier a_classifier)
 	{
-		if (!InstallLaneHooks() || !a_classifier || g_recordClassifier.classify)
+		static const bool tracked =
+			RegisterPreDeferredPrePass([] { g_inWorldPrepass.store(true, std::memory_order_relaxed); }) &&
+			RegisterPostDeferredPrePass([] { g_inWorldPrepass.store(false, std::memory_order_relaxed); });
+		if (!tracked || !InstallLaneHooks() || !a_classifier || g_recordClassifier.classify)
 			return false;
 		g_recordClassifier = { a_classifier, &a_owner };
 		g_prepassLaneActive = true;

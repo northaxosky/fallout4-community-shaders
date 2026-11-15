@@ -11,6 +11,8 @@ namespace cs::features::true_pbr
 	{
 		std::uint16_t ClassifyRecord(engine::PrepassDrawContext& a_draw) noexcept
 		{
+			if (!a_draw.InWorldPrepass())
+				return RecordId{ 0 };
 			const auto* property = a_draw.LightingProperty();
 			return property && property->material ? Tags().Find(property->material) : RecordId{ 0 };
 		}

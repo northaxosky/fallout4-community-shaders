@@ -5,9 +5,21 @@
 
 namespace TruePBRDebug
 {
-	bool IsActive()
+	bool IsOwner()
 	{
-		return FO4SharedData::DebugOwner == FullscreenDebugOwner::TruePBR && FO4SharedData::DebugMode != 0;
+		return FO4SharedData::DebugOwner == FullscreenDebugOwner::TruePBR;
+	}
+
+	// Views of the draw's record, shown on any tagged draw.
+	bool IsRecordView()
+	{
+		return IsOwner() && (FO4SharedData::DebugMode == TruePBRDebugMode::Classified || FO4SharedData::DebugMode == TruePBRDebugMode::Record);
+	}
+
+	// Views of decoded material channels, shown on PBR pixels.
+	bool IsMaterialView()
+	{
+		return IsOwner() && FO4SharedData::DebugMode >= TruePBRDebugMode::BaseColor && FO4SharedData::DebugMode <= TruePBRDebugMode::AmbientOcclusion;
 	}
 
 	// Golden-ratio hue steps keep consecutive ids visibly apart.
@@ -22,6 +34,16 @@ namespace TruePBRDebug
 	{
 		a_albedo = 0.0;
 		a_emissive = FO4SharedData::DebugMode == TruePBRDebugMode::Record ? RecordColor(a_record) : float3(1.0, 0.0, 1.0);
+	}
+
+	void ApplyMaterial(float3 a_baseColor, float a_roughness, float3 a_f0, float a_ao, inout float3 a_albedo, inout float3 a_emissive)
+	{
+		a_albedo = 0.0;
+		const uint mode = FO4SharedData::DebugMode;
+		a_emissive = mode == TruePBRDebugMode::BaseColor  ? a_baseColor :
+		             mode == TruePBRDebugMode::Roughness  ? float3(a_roughness, a_roughness, a_roughness) :
+		             mode == TruePBRDebugMode::MetallicF0 ? a_f0 :
+		                                                    float3(a_ao, a_ao, a_ao);
 	}
 }
 #endif

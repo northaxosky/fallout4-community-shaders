@@ -38,7 +38,11 @@ namespace cs::features
 
 		constexpr std::array kDebugViews{
 			FeatureDebugView{ "classified", "Classified draws", FeatureDebugViewKind::kFullscreen },
-			FeatureDebugView{ "record", "Material record (color per id)", FeatureDebugViewKind::kFullscreen }
+			FeatureDebugView{ "record", "Material record (color per id)", FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{ "base_color", "Base color (after metal)", FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{ "roughness", "Roughness", FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{ "metallic_f0", "F0 (metals carry their color)", FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{ "ambient_occlusion", "Material ambient occlusion", FeatureDebugViewKind::kFullscreen }
 		};
 	}
 
@@ -157,9 +161,13 @@ namespace cs::features
 
 	void TruePBR::SetDebugView(std::string_view a_view) noexcept
 	{
-		_debugMode = a_view == "classified" ? TruePBRDebugMode::Classified :
-		             a_view == "record"     ? TruePBRDebugMode::Record :
-		                                      0u;
+		_debugMode = a_view == "classified"        ? TruePBRDebugMode::Classified :
+		             a_view == "record"            ? TruePBRDebugMode::Record :
+		             a_view == "base_color"        ? TruePBRDebugMode::BaseColor :
+		             a_view == "roughness"         ? TruePBRDebugMode::Roughness :
+		             a_view == "metallic_f0"       ? TruePBRDebugMode::MetallicF0 :
+		             a_view == "ambient_occlusion" ? TruePBRDebugMode::AmbientOcclusion :
+		                                             0u;
 	}
 
 	FullscreenDebugData TruePBR::GetFullscreenDebugData() const noexcept
