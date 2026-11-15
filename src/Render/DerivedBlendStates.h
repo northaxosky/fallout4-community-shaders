@@ -13,20 +13,19 @@
 
 namespace cs::render
 {
-	// Blend states derived from an engine state by a policy, built once per (state, policy).
+	// Derived blend states, built once per (source state, policy).
 	class DerivedBlendStateCache
 	{
 	public:
 		struct Census
 		{
-			std::string description;  // the source descriptor
+			std::string description;
 			std::uint32_t policy = 0;
 			bool derived = false;
 			std::uint64_t uses = 0;
 		};
 
-		// The state to bind for a_source under a_policy; a_source itself when a_derive
-		// (descriptor -> optional descriptor) returns nothing.
+		// Returns a_source itself when a_derive yields no descriptor.
 		template <class Derive>
 		[[nodiscard]] ID3D11BlendState* Resolve(ID3D11BlendState* a_source, std::uint32_t a_policy, Derive&& a_derive)
 		{
@@ -42,7 +41,6 @@ namespace cs::render
 			return derived ? derived : a_source;
 		}
 
-		// True for a state this cache created.
 		[[nodiscard]] bool IsDerived(ID3D11BlendState* a_state) const;
 		[[nodiscard]] std::vector<Census> TakeCensus() const;
 
@@ -65,7 +63,7 @@ namespace cs::render
 		struct Entry
 		{
 			winrt::com_ptr<ID3D11BlendState> source;   // Pins the cache key.
-			winrt::com_ptr<ID3D11BlendState> derived;  // Null when the source already satisfies the policy.
+			winrt::com_ptr<ID3D11BlendState> derived;  // Null when the source needs no change.
 			std::string description;
 			std::uint64_t uses = 0;
 		};
@@ -77,6 +75,5 @@ namespace cs::render
 		std::unordered_set<const ID3D11BlendState*> _derivedStates;
 	};
 
-	// One line naming a descriptor's independence, A2C and each used target.
 	[[nodiscard]] std::string DescribeBlendState(const D3D11_BLEND_DESC& a_desc);
 }

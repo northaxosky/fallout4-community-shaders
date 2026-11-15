@@ -268,7 +268,7 @@ cbuffer PerCall_CB2 : register(b2)
 #	if LANDSCAPE
 	float4 WetnessControl_Reflect;  // Landscape material gate.
 #	else
-	// The host locates this lane as the register before WetnessControl_Spec; keep the two adjacent (PrepassLane.cpp).
+	// The host finds this lane by its slot before WetnessControl_Spec.
 	uint4 PrepassFeatureLane;
 #	endif
 #	if LANDSCAPE
@@ -596,7 +596,7 @@ struct PS_OUTPUT
 #		endif
 #	endif
 #	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
-	// FO4: shared target; R parallax shadow, G Human skin flag, B reserved for AO.
+	// FO4: shared target; R parallax shadow, G human skin, B reserved for AO.
 	float4 aux: SV_Target6;
 #	endif
 };
@@ -995,7 +995,7 @@ struct PS_OUTPUT
 		if (FO4SharedData::EnabledLODBlending != 0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		elif !LANDSCAPE && !GRASS
-		// FO4: object LOD has no technique define; the host bakes the BTO flag into the lane, which stock never reads.
+		// FO4: object LOD has no technique define, so the lane carries it.
 		if ((PrepassFeatureLane.x & PrepassLaneFlag::ObjectLOD) != 0 && FO4SharedData::EnabledLODBlending != 0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
 #		endif
@@ -1494,7 +1494,7 @@ struct PS_OUTPUT
 		output.specTint.xyz += pipboySample * PipboyParams.w;
 #	endif
 #	if defined(FO4_TRUE_PBR)
-		// FO4: the target is float under True PBR; vanilla emission keeps its 8-bit range.
+		// FO4: float target; keep vanilla emission within its 8-bit range.
 		output.specTint.xyz = saturate(output.specTint.xyz);
 #	endif
 

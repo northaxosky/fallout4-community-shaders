@@ -3,7 +3,7 @@
 
 namespace cs::features::true_pbr
 {
-	// No debug define: the debug views are a uniform branch, so toggling them recompiles nothing.
+	// No debug define: views are a uniform branch, so no recompile.
 	inline const engine::ShaderDefineDeclaration kShaderDefines{
 		"FO4_TRUE_PBR",
 		{ engine::ShaderInjectionTarget::kDeferredPrepass }

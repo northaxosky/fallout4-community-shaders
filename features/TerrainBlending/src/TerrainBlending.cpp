@@ -77,7 +77,7 @@ namespace cs::features
 			};
 		}
 
-		// Targets past the engine's six are written by the renderer's per-phase finalizer.
+		// The renderer's finalizer writes targets past the engine's six.
 		constexpr std::size_t kEngineTargets = 6;
 
 		D3D11_BLEND_DESC MaskedBlendDesc()

@@ -26,14 +26,12 @@ namespace cs::telemetry
 
 namespace cs::engine
 {
-	// The engine path that baked a prepass draw's per-draw constants.
 	enum class PrepassBakePath
 	{
 		kCommandBuffer,  // once, when the pass is created
 		kImmediate       // every frame, from BSDFPrePassShader::SetupGeometry
 	};
 
-	// One classifier owns each flag bit of PrepassFeatureLane.x.
 	enum class PrepassDrawFlag : std::uint32_t
 	{
 		kObjectLOD = PrepassLaneFlag::ObjectLOD,
@@ -42,7 +40,6 @@ namespace cs::engine
 		kHumanSkin = PrepassLaneFlag::HumanSkin
 	};
 
-	// The 16 bytes written over PrepassFeatureLane.
 	struct PrepassLanePayload
 	{
 		std::uint32_t flags = 0;
@@ -51,7 +48,7 @@ namespace cs::engine
 	};
 	static_assert(sizeof(PrepassLanePayload) == 16);
 
-	// Per-draw facts shared by every classifier; each is computed at most once.
+	// Computes each shared draw fact at most once.
 	class PrepassDrawContext
 	{
 	public:
@@ -65,7 +62,6 @@ namespace cs::engine
 			return *_inObjectLOD;
 		}
 
-		// The pass's lighting shader property; null for other shader properties.
 		[[nodiscard]] RE::BSLightingShaderProperty* LightingProperty() noexcept;
 
 		RE::BSRenderPass* pass;
@@ -83,7 +79,7 @@ namespace cs::engine
 	struct PrepassLaneStats
 	{
 		std::uint64_t baked = 0;        // draws whose lane was written
-		std::uint64_t unavailable = 0;  // non-landscape draws whose pixel shader has no lane
+		std::uint64_t unavailable = 0;  // landscape excluded
 	};
 
 	struct PrepassClassifierStats
@@ -92,10 +88,8 @@ namespace cs::engine
 		std::uint64_t flagged = 0;
 	};
 
-	// Load/OnPostPostLoad only; false if patching failed or the flag is taken.
-	// Immediate draws skip a disabled owner; baked records always classify.
+	// Baked records ignore enablement; immediate draws skip disabled owners.
 	[[nodiscard]] bool RegisterPrepassDrawClassifier(Feature& a_owner, PrepassDrawFlag a_flag, PrepassDrawClassifier a_classifier);
-	// The single owner of PrepassFeatureLane.y; same rules as the flag classifiers.
 	[[nodiscard]] bool RegisterPrepassRecordClassifier(Feature& a_owner, PrepassRecordClassifier a_classifier);
 	[[nodiscard]] PrepassLaneStats GetPrepassLaneStats() noexcept;
 	[[nodiscard]] PrepassClassifierStats GetPrepassClassifierStats(PrepassDrawFlag a_flag, PrepassBakePath a_path) noexcept;

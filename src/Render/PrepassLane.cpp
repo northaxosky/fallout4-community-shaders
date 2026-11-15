@@ -57,12 +57,11 @@ namespace cs::engine
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
 		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
 
-		// Stock never reads the cb2 pad declared directly before material flags (constantTable byte 0x60), so it carries the lane.
+		// Stock never reads the cb2 pad before material flags.
 		constexpr std::size_t kPrepassMaterialFlagsSlot = 0x60 - 0x58;
 		constexpr std::uint64_t kLaneDiagnosticLimit = 16;
-		// Landscape draws lay that register out as WetnessControl_Reflect, which stock reads.
+		// Landscape reuses the slot as WetnessControl_Reflect, which stock reads.
 		constexpr std::uint32_t kPrepassLandscapeBit = prepass_technique::kLandscape;
-		// Context::GetConstantBuffer level of the per-geometry cb2.
 		constexpr std::uint32_t kPerGeometryConstantLevel = 2;
 		constexpr std::size_t kLaneDwords = sizeof(PrepassLanePayload) / sizeof(float);
 
@@ -71,7 +70,7 @@ namespace cs::engine
 			PrepassBakePath path;
 			std::uint32_t descriptor;
 			PrepassLanePayload payload;
-			std::int32_t offset;  // dword offset in the pixel cb2 constants; -1 when unresolved
+			std::int32_t offset;  // -1 when unresolved
 		};
 
 		thread_local PrepassLaneRequest* t_prepassLane = nullptr;
@@ -85,7 +84,7 @@ namespace cs::engine
 		{
 			if (!a_pixel)
 				return -1;
-			// Table bytes are dword offsets; 0xFF marks a constant the variant does not have.
+			// 0xFF marks a constant this variant lacks.
 			const auto flags = static_cast<std::uint8_t>(a_pixel->constantTable[kPrepassMaterialFlagsSlot]);
 			return flags != 0xFF && flags >= 4 ? flags - 4 : -1;
 		}
@@ -100,7 +99,6 @@ namespace cs::engine
 				L->warn("Prepass lane unavailable: descriptor=0x{:08X} offset={}", a_descriptor, a_offset);
 		}
 
-		// Both bake paths and the OG flush write the lane through this one copy.
 		void WriteLanePayload(float* a_destination, const PrepassLanePayload& a_payload) noexcept
 		{
 			std::memcpy(a_destination, &a_payload, sizeof(a_payload));
@@ -124,7 +122,7 @@ namespace cs::engine
 			return a_registration.classify && (a_path == PrepassBakePath::kCommandBuffer || a_registration.owner->IsEnabled());
 		}
 
-		// Constants are not cleared between draws, so unused components are written 0.
+		// Constants persist between draws, so unused components are zeroed.
 		[[nodiscard]] PrepassLaneRequest MakePrepassLaneRequest(
 			RE::BSShader* a_shader,
 			RE::BSRenderPass* a_pass,
@@ -152,11 +150,11 @@ namespace cs::engine
 					request.payload.flags |= 1u << slot;
 			}
 			if (Runs(g_recordClassifier, a_path))
-				request.payload.recordId = g_recordClassifier.classify(draw) & PrepassLaneRecord::IdMask;
+				request.payload.recordId = g_recordClassifier.classify(draw);
 			return request;
 		}
 
-		// Immediate draws fill cb2 inside SetupGeometry: write the lane at the map on NG/AE, at the pre-unmap flush on OG (each inlines the other).
+		// Each runtime inlines the other's write point: NG/AE map, OG flush.
 		struct PrepassSetupGeometryHook
 		{
 			static constexpr std::size_t size = 0x07;
@@ -204,7 +202,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// OG unmaps both level-2 groups here after SetupGeometry fills them; that is its only caller inside the lane scope.
+		// OG-only: its unmap runs after SetupGeometry fills cb2.
 		struct ConstantGroupFlushHook
 		{
 			static void thunk(
@@ -219,7 +217,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// cb2 is baked once into an immutable record, so the lane rides the constants BuildCommandBuffer copies; the scope excludes utility shaders.
+		// The record is immutable once baked, so write before the copy.
 		struct PrepassCreateCommandBufferHook
 		{
 			static std::byte* thunk(
@@ -259,10 +257,10 @@ namespace cs::engine
 		{
 			static const bool installed =
 				TryPatch(
-					"BSDFPrePassShader SetupGeometry lane",
+					L, "BSDFPrePassShader SetupGeometry lane",
 					[] { stl::write_vfunc<RE::BSDFPrePassShader, PrepassSetupGeometryHook>(); }) &&
 				TryPatch(
-					"immediate pixel constants lane",
+					L, "immediate pixel constants lane",
 					[] {
 						if (REX::FModule::IsRuntimeOG())
 							stl::detour_thunk<ConstantGroupFlushHook>(RE::ID::BSGraphics::Renderer::FlushConstantGroup);
@@ -270,10 +268,10 @@ namespace cs::engine
 							stl::detour_thunk<PixelConstantMapHook>(RE::ID::BSGraphics::Renderer::GetShaderConstantGroupPS);
 					}) &&
 				TryPatch(
-					"BSDFPrePassShader command-buffer creator lane",
+					L, "BSDFPrePassShader command-buffer creator lane",
 					[] { stl::detour_thunk<PrepassCreateCommandBufferHook>(RE::ID::BSDFPrePassShader::CreateCommandBuffer); }) &&
 				TryPatch(
-					"command-buffer builder lane",
+					L, "command-buffer builder lane",
 					[] { stl::detour_thunk<BuildCommandBufferHook>(RE::ID::BSShader::BuildCommandBuffer); });
 			return installed;
 		}

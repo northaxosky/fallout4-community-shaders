@@ -618,7 +618,6 @@ namespace
 		return {};
 	}
 
-	// The host writes PrepassLanePayload over the cb2 register stock lays out as WetnessControl_Reflect.
 	std::string VerifyPrepassLaneABI(const std::filesystem::path& a_root)
 	{
 		std::string error;

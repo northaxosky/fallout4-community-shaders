@@ -45,7 +45,7 @@ namespace cs::features
 			return;
 		}
 		Log()->info("Installed hooks");
-		// Last, since a format request cannot be undone and needs the shader clamp.
+		// Last: the request cannot be undone and needs the shader clamp.
 		const bool floatEmissive = engine::RequestRenderTargetFormat(RE::BSGraphics::RenderTargetID::kGBufferEmissive, DXGI_FORMAT_R16G16B16A16_FLOAT);
 		_floatEmissiveRequested.store(floatEmissive, std::memory_order_relaxed);
 		if (!floatEmissive)

@@ -7,7 +7,7 @@
 
 namespace cs::engine
 {
-	// Restores the previous value so nested engine calls on one thread unwind correctly.
+	// Restores the previous value so nested engine calls unwind.
 	template <class T>
 	class ThreadLocalPointerScope
 	{
@@ -31,17 +31,16 @@ namespace cs::engine
 
 	// Runs an engine patch, logging the outcome instead of throwing.
 	template <class Install>
-	bool TryPatch(std::string_view a_label, Install&& a_install)
+	bool TryPatch(spdlog::logger* a_log, std::string_view a_label, Install&& a_install)
 	{
-		auto* log = cs::log::Get("cs.render.shadersubclass");
 		try {
 			a_install();
-			log->info("Patched {}", a_label);
+			a_log->info("Patched {}", a_label);
 			return true;
 		} catch (const std::exception& e) {
-			log->error("Failed to patch {}: {}", a_label, e.what());
+			a_log->error("Failed to patch {}: {}", a_label, e.what());
 		} catch (...) {
-			log->error("Failed to patch {}.", a_label);
+			a_log->error("Failed to patch {}.", a_label);
 		}
 		return false;
 	}

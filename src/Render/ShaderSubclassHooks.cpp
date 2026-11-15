@@ -202,20 +202,20 @@ namespace cs::engine
 	void InstallShaderSubclassHooks()
 	{
 		std::call_once(g_installOnce, [] {
-			TryPatch("BSShader archive loader observer", [] {
+			TryPatch(L, "BSShader archive loader observer", [] {
 				stl::detour_thunk<ReloadFromStreamHook>(RE::ID::BSShader::Load);
 			});
-			TryPatch("native graphics shader-set boundary", [] {
+			TryPatch(L, "native graphics shader-set boundary", [] {
 				stl::detour_thunk<SetShadersHook>(RE::ID::BSGraphics::Renderer::SetShaders);
 			});
-			TryPatch("native compute shader-run boundary", [] {
+			TryPatch(L, "native compute shader-run boundary", [] {
 				stl::detour_thunk<RunComputeShaderHook>(RE::ID::BSGraphics::Renderer::RunComputeShader);
 			});
-			TryPatch("standalone compute shader observers", [] {
+			TryPatch(L, "standalone compute shader observers", [] {
 				stl::detour_thunk<ReloadStandaloneComputeHook>(RE::ID::BSComputeShader::LoadTechniquesFromStream);
 			});
-			TryPatch("BSSkyShader SetupGeometry pass", [] { stl::write_vfunc<RE::BSSkyShader, SkySetupGeometryHook>(); });
-			TryPatch("BSShader native technique binder", [] {
+			TryPatch(L, "BSSkyShader SetupGeometry pass", [] { stl::write_vfunc<RE::BSSkyShader, SkySetupGeometryHook>(); });
+			TryPatch(L, "BSShader native technique binder", [] {
 				stl::detour_thunk<BeginTechniqueHook>(RE::ID::BSShader::BeginTechnique);
 			});
 		});

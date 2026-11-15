@@ -166,7 +166,6 @@ namespace cs::engine
 			});
 		}
 
-		// Native states map to themselves; a terrain phase overrides each target's write.
 		std::optional<D3D11_BLEND_DESC> DeriveBlend(D3D11_BLEND_DESC a_desc, PrepassExtraWritePhase a_phase)
 		{
 			const auto expand = [&a_desc] {
@@ -211,7 +210,6 @@ namespace cs::engine
 			return a_desc;
 		}
 
-		// The bound state follows the draw, so the derivation reads it per draw and the draw scope restores it.
 		void BindBlend(ID3D11DeviceContext* a_context)
 		{
 			ID3D11BlendState* raw = nullptr;
@@ -242,7 +240,7 @@ namespace cs::engine
 			g_derivedBinds.fetch_add(1, std::memory_order_relaxed);
 		}
 
-		// After every contribution bind of a prepass draw, so no feature's state can overwrite it.
+		// Runs last so no contribution can overwrite the target writes.
 		void FinalizeTargets(ID3D11DeviceContext* a_context)
 		{
 			if (ReadyRenderTargetCount() == 0)
@@ -294,7 +292,7 @@ namespace cs::engine
 			return g_entries.size() - 1;
 		}
 
-		// Each owner's callback runs on its own, so one failing claim leaves the others.
+		// Each claim runs alone so one failing owner spares the others.
 		bool EvaluateAuxClaims()
 		{
 			bool any = false;
@@ -327,7 +325,7 @@ namespace cs::engine
 												.clear = { 1, 0, 1, 0 },
 												.publishSlot = kAuxPublishSlot,
 												.active = &EvaluateAuxClaims,
-												// Terrain blends the shadow like colour and owns no skin.
+												// Terrain blends shadow like color; no skin.
 												.terrain = { PrepassExtraWrite{ .blend = true, .mask = kRedMask }, PrepassExtraWrite{}, PrepassExtraWrite{ .mask = kRedMask } },
 												.nativeRCoupled = kRedMask | kGreenMask });
 			if (!g_auxTarget)
