@@ -135,6 +135,7 @@
 #	endif
 
 #	include "FO4/FO4ShaderData.hlsli"
+#	include "FO4/PrepassLane.h"
 
 // FO4: Skyrim mesh exclusions as prepass variants; host rejects object LOD.
 #	if defined(TERRAIN_VARIATION) && TEXTURE && !LANDSCAPE && !(LOD_LANDSCAPE || SKIN_TINT || HAIR || EYE || TREE_ANIM || DISMEMBERMENT_MEATCUFF)
@@ -264,8 +265,8 @@ cbuffer PerCall_CB2 : register(b2)
 #	if LANDSCAPE
 	float4 WetnessControl_Reflect;  // Landscape material gate.
 #	else
-	// The host locates this lane as the register before WetnessControl_Spec; keep the two adjacent (ShaderSubclassHooks.cpp).
-	float4 PrepassFeatureLane;
+	// The host locates this lane as the register before WetnessControl_Spec; keep the two adjacent (PrepassLane.cpp).
+	uint4 PrepassFeatureLane;
 #	endif
 #	if LANDSCAPE
 	float4 WetnessControl_Spec;   // Landscape flags.
@@ -689,8 +690,8 @@ struct PS_OUTPUT
 #	endif
 #	if defined(TERRAIN_VARIATION_MESH)
 		// Lattice cell comes from the geometric UV, before the parallax block below rewrites uv.
-		// FO4: the host flags eligible meshes in PrepassFeatureLane.y.
-		const bool applyMeshTV = PrepassFeatureLane.y != 0.0 && FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableMeshSupport;
+		// FO4: the host flags eligible meshes in the lane.
+		const bool applyMeshTV = (PrepassFeatureLane.x & PrepassLaneFlag::TerrainVariation) != 0 && FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableMeshSupport;
 		StochasticOffsets meshOffset = (StochasticOffsets)0;
 		[branch] if (applyMeshTV)
 		{
@@ -750,7 +751,7 @@ struct PS_OUTPUT
 			&& SharedData::extendedMaterialSettings.EnableTerrainParallax
 #		else
 			// FO4: only the marcher below reads this; upstream runs it on all EMAT draws.
-			&& SharedData::extendedMaterialSettings.EnableParallax && PrepassFeatureLane.z != 0.0
+			&& SharedData::extendedMaterialSettings.EnableParallax && (PrepassFeatureLane.x & PrepassLaneFlag::ExtendedMaterials) != 0
 #		endif
 		) {
 			float3 ndx = ddx(vertexNormal);
@@ -779,8 +780,8 @@ struct PS_OUTPUT
 #	endif
 
 #	if defined(EMAT_OBJECT)
-		// FO4: PrepassFeatureLane.z marks non-LOD meshes whose _s format stores alpha.
-		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && PrepassFeatureLane.z != 0.0)
+		// FO4: the lane flags non-LOD meshes whose _s format stores alpha.
+		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && (PrepassFeatureLane.x & PrepassLaneFlag::ExtendedMaterials) != 0)
 		{
 			displacementParams.HeightScale *= HeightScaleOf(g_tMaterial, g_sMaterial);
 			[branch] if (displacementParams.HeightScale > 0.0)
@@ -995,8 +996,8 @@ struct PS_OUTPUT
 		if (FO4SharedData::EnabledLODBlending != 0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		elif !LANDSCAPE && !GRASS
-		// FO4: object LOD has no technique define; the host bakes the BTO flag into PrepassFeatureLane, which stock never reads.
-		if (PrepassFeatureLane.x != 0.0 && FO4SharedData::EnabledLODBlending != 0)
+		// FO4: object LOD has no technique define; the host bakes the BTO flag into the lane, which stock never reads.
+		if ((PrepassFeatureLane.x & PrepassLaneFlag::ObjectLOD) != 0 && FO4SharedData::EnabledLODBlending != 0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
 #		endif
 #	endif
@@ -1708,7 +1709,7 @@ struct PS_OUTPUT
 #		if LANDSCAPE
 		const float sssProfile = 0.0;
 #		else
-		const float sssProfile = PrepassFeatureLane.w != 0.0 ? 1.0 : 0.0;
+		const float sssProfile = (PrepassFeatureLane.x & PrepassLaneFlag::HumanSkin) != 0 ? 1.0 : 0.0;
 #		endif
 #		if BLEND
 		output.sssProfile = float4(sssProfile, 0, 0, output.albedo.w);

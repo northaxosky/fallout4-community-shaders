@@ -17,9 +17,9 @@
 #include "Render/ObjectLOD.h"
 #include "Render/OverlayShape.h"
 #include "Render/PrepassExtraTargets.h"
+#include "Render/PrepassLane.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -64,7 +64,7 @@ namespace cs::features
 			auto* pass = a_draw.pass;
 			if (a_draw.InObjectLOD() || cs::engine::IsOverlayShape(pass))
 				return false;
-			const auto* property = netimmerse_cast<RE::BSLightingShaderProperty*>(pass->GetShaderProperty());
+			const auto* property = a_draw.LightingProperty();
 			const auto* material = property ? static_cast<const RE::BSLightingShaderMaterialBase*>(property->material) : nullptr;
 			return material && HasAlphaChannel(cs::engine::GetTextureFormat(material->smoothnessSpecMaskTexture.get()));
 		}
@@ -107,7 +107,7 @@ namespace cs::features
 			FailLoad("Extended Materials parallax shadows need the prepass target.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kZ, &IsParallaxEligible)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassDrawFlag::kExtendedMaterials, &IsParallaxEligible)) {
 			FailLoad("Extended Materials prepass draw classifier installation failed.");
 			return;
 		}
@@ -119,7 +119,7 @@ namespace cs::features
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed));
-		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kZ, "eligible");
+		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassDrawFlag::kExtendedMaterials, "eligible");
 	}
 
 	std::string_view ExtendedMaterials::GetRegistrationFailureMessage() const
