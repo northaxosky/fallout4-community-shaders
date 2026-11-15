@@ -127,6 +127,7 @@ namespace
 			CHECK_MSG(bytes.size() > row.part2, row.file);
 			if (bytes.size() <= row.part2)
 				continue;
+			CHECK_MSG(ReadBgsmVersion(bytes) == kBgsmVersion, row.file + " version");
 			const auto part2 = std::span(bytes).subspan(row.part2);
 			auto loaded = Load(registry, Stem(row.file), part2);
 			if (!row.ok) {

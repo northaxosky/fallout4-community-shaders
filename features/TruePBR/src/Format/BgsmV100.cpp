@@ -138,6 +138,16 @@ namespace cs::features::true_pbr
 
 	}
 
+	std::optional<std::uint32_t> ReadBgsmVersion(std::span<const std::uint8_t> a_file)
+	{
+		bytes::ByteReader in(a_file);
+		const auto magic = in.View(4);
+		std::uint32_t version = 0;
+		if (magic.size() != 4 || std::string_view(reinterpret_cast<const char*>(magic.data()), 4) != "BGSM" || !in.U32(version))
+			return std::nullopt;
+		return version;
+	}
+
 	std::expected<DecodedPart2, std::string> DecodePart2(std::span<const std::uint8_t> a_part2)
 	{
 		DecodedPart2 decoded;

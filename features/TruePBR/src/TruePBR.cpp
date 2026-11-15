@@ -1,5 +1,6 @@
 #include "TruePBR.h"
 
+#include "MaterialLoadHooks.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/SharedFeatureData.h"
@@ -27,6 +28,15 @@ namespace cs::features
 		a_shared.truePBRSettings.VertexAOStrength = _settings.VertexAOStrength;
 		a_shared.truePBRSettings.EnableMicroShadows = _settings.EnableMicroShadows;
 		a_shared.truePBRSettings.MicroShadowStrength = _settings.MicroShadowStrength;
+	}
+
+	void TruePBR::Load()
+	{
+		if (!true_pbr::InstallMaterialLoadHooks()) {
+			FailLoad("True PBR material hooks failed to install.");
+			return;
+		}
+		Log()->info("Installed hooks");
 	}
 
 	bool TruePBR::SaveSettings()

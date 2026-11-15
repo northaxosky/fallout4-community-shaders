@@ -15,6 +15,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kMaterials; }
 		std::string GetFeatureSummary() const override { return "Physically based materials authored with metal-roughness textures."; }
 		bool Configure(const toml::table&, std::string&) override;
+		void Load() override;
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) override;
 		void DrawSettings() override;
 		bool SaveSettings() override;

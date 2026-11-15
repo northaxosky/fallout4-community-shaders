@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -12,6 +13,11 @@
 // Layout: notes/truepbr/bgsm-v100-schema.md. Engine-free; callers pass Part 2.
 namespace cs::features::true_pbr
 {
+	inline constexpr std::uint32_t kBgsmVersion = 100;
+
+	// The version of a BGSM header; nullopt without the magic.
+	[[nodiscard]] std::optional<std::uint32_t> ReadBgsmVersion(std::span<const std::uint8_t> a_file);
+
 	struct DecodedPart2
 	{
 		PbrMaterial material;
