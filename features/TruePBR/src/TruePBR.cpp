@@ -6,10 +6,6 @@
 #include "MaterialRegistry.h"
 #include "MaterialTagHooks.h"
 #include "MaterialTags.h"
-#include "Menu/Section.h"
-#include "Menu/SettingsEdit.h"
-#include "Render/SharedFeatureData.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
@@ -22,22 +18,6 @@ namespace cs::features
 	{
 		static TruePBR instance;
 		return &instance;
-	}
-
-	bool TruePBR::Configure(const toml::table& a_config, std::string& a_error)
-	{
-		auto candidate = _settings;
-		if (!settings::Parse(true_pbr::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		return true;
-	}
-
-	void TruePBR::WriteSharedData(render::SharedFeatureDataCB& a_shared, render::FO4SharedDataCB&)
-	{
-		a_shared.truePBRSettings.VertexAOStrength = _settings.VertexAOStrength;
-		a_shared.truePBRSettings.EnableMicroShadows = _settings.EnableMicroShadows;
-		a_shared.truePBRSettings.MicroShadowStrength = _settings.MicroShadowStrength;
 	}
 
 	void TruePBR::Load()
@@ -59,17 +39,6 @@ namespace cs::features
 			.Field("live_tags", Tags().Count())
 			.Field("retag_conflicts", Tags().Conflicts())
 			.Field("foreign_material_path", Tags().ForeignPaths());
-	}
-
-	bool TruePBR::SaveSettings()
-	{
-		return settings::SaveDelta(true_pbr::kSchema, GetConfigKey(), _settings, *Log());
-	}
-
-	void TruePBR::RestoreDefaultSettings()
-	{
-		_settings = {};
-		SaveSettings();
 	}
 
 	void TruePBR::DrawDebug()
@@ -97,14 +66,6 @@ namespace cs::features
 		draw(std::format("{} PBR material files loaded this session.", records), dmui::TextTone::kInherit);
 		if (!IsEnabled() && records != 0)
 			draw("True PBR is switched off, but loaded PBR materials keep their PBR textures and render through vanilla shading until restart.", dmui::TextTone::kStatusWarning);
-		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(kSchema, _settings);
-		if (const ui::Section section{ "true-pbr-global", "Global Settings" }; section) {
-			field(&Settings::VertexAOStrength);
-			field(&Settings::EnableMicroShadows, { .help = "Occludes direct light with the material's ambient occlusion map, adding contact shadowing to surface detail such as seams, rivets and fabric weave." });
-			if (_settings.EnableMicroShadows)
-				field(&Settings::MicroShadowStrength, { .help = "How strongly ambient occlusion darkens direct light." });
-		}
 	}
 
 	namespace
