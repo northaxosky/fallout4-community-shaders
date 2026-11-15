@@ -34,6 +34,7 @@ namespace cs::features
 
 		// PS slot of the probe array for forward consumers; compute binds t50 too.
 		static constexpr std::uint32_t kProbeArraySlot = 50;
+		static constexpr std::uint32_t kShadowVisibilitySlot = 53;
 
 		static Skylighting* GetSingleton();
 
@@ -135,7 +136,7 @@ namespace cs::features
 			kTiled
 		};
 		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
-		// Probes at kProbeArraySlot, then albedo, MRT4 (vertex AO), shadow visibility.
+		// Probes, the G-buffer views for lighting consumers, and shadow visibility for raster sun lobes.
 		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t

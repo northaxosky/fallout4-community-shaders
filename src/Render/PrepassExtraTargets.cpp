@@ -71,6 +71,16 @@ namespace cs::engine
 		std::atomic<std::uint64_t> g_unscopedSkips{ 0 };
 		std::atomic<std::uint64_t> g_nullBlendDraws{ 0 };
 
+		// Calls a_fn for each stage in a_stages that frame bindings track.
+		template <class Fn>
+		void ForPublishStages(ShaderStageMask a_stages, Fn&& a_fn)
+		{
+			for (const auto stage : { ShaderStage::kPixel, ShaderStage::kCompute }) {
+				if (a_stages & ShaderStageBit(stage))
+					a_fn(stage);
+			}
+		}
+
 		constexpr std::array<const char*, 4> kPhaseNames{ "native", "terrain-color", "terrain-data", "terrain-opaque" };
 
 		bool EnsureTexture(Entry& a_entry, const RE::BSGraphics::State& a_graphics)
@@ -102,8 +112,11 @@ namespace cs::engine
 			// The prepass renders into the target, so no stage may still sample it.
 			ID3D11ShaderResourceView* none = nullptr;
 			for (const auto& entry : g_entries) {
-				if (entry.target.publishSlot)
-					BindFrameShaderResources(context, ShaderStage::kPixel, *entry.target.publishSlot, 1, &none);
+				if (entry.target.publishSlot) {
+					ForPublishStages(entry.target.publishStages, [&](ShaderStage a_stage) {
+						BindFrameShaderResources(context, a_stage, *entry.target.publishSlot, 1, &none);
+					});
+				}
 			}
 			const auto* graphics = GetGraphicsState();
 			if (!graphics)
@@ -266,7 +279,9 @@ namespace cs::engine
 				if (!entry.ready || !entry.target.publishSlot)
 					continue;
 				auto* srv = entry.texture->srv.get();
-				BindFrameShaderResources(context, ShaderStage::kPixel, *entry.target.publishSlot, 1, &srv);
+				ForPublishStages(entry.target.publishStages, [&](ShaderStage a_stage) {
+					BindFrameShaderResources(context, a_stage, *entry.target.publishSlot, 1, &srv);
+				});
 			}
 		}
 	}
@@ -324,6 +339,7 @@ namespace cs::engine
 												.format = DXGI_FORMAT_R8G8B8A8_UNORM,
 												.clear = { 1, 0, 1, 0 },
 												.publishSlot = kAuxPublishSlot,
+												.publishStages = ShaderStageBit(ShaderStage::kPixel) | ShaderStageBit(ShaderStage::kCompute),
 												.active = &EvaluateAuxClaims,
 												// Terrain blends shadow like color; no skin.
 												.terrain = { PrepassExtraWrite{ .blend = true, .mask = kRedMask }, PrepassExtraWrite{}, PrepassExtraWrite{ .mask = kRedMask } },

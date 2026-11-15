@@ -2,6 +2,7 @@
 #define FO4_SKYLIGHTING_CONSUMER
 
 #include "FO4/FO4ShaderData.hlsli"
+#include "FO4/GBufferViews.hlsli"
 #include "FO4/SunShadowFamilies.hlsli"
 
 #ifdef SKYLIGHTING
@@ -40,10 +41,6 @@ namespace Skylighting
 #endif
 
 #ifdef SKYLIGHTING
-	Texture2D<float4> AlbedoTexture : register(t51);
-	// FO4: MRT4 alpha stores 1 - vertexAO, upstream's Masks2.x.
-	Texture2D<float4> VertexAOTexture : register(t52);
-
 	// FO4: shadow visibility of the last SampleShadowVisibility; lobes share it.
 	static float ShadowVisibility = 1.0;
 
@@ -82,7 +79,8 @@ namespace Skylighting
 	{
 		[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 		int3 texel = int3(int2(pixelPosition), 0);
-		return GetAmbientScale(viewPosition, normalView, AlbedoTexture.Load(texel).xyz, 1.0 - VertexAOTexture.Load(texel).w);
+		// FO4: MRT4 alpha stores 1 - vertexAO, upstream's Masks2.x.
+		return GetAmbientScale(viewPosition, normalView, FO4GBufferViews::Albedo.Load(texel).xyz, 1.0 - FO4GBufferViews::Emissive.Load(texel).w);
 	}
 
 	float3 GetViewPosition(float2 pixelPosition)
