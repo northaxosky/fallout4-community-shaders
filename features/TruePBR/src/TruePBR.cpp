@@ -9,6 +9,7 @@
 #include "Menu/SettingWidgets.h"
 #include "Menu/SettingsEdit.h"
 #include "PrepassClassifier.h"
+#include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/GBufferViews.h"
@@ -17,6 +18,7 @@
 #include "Render/SharedDataLayout.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/CSUtil.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -68,9 +70,60 @@ namespace cs::features
 		SaveSettings();
 	}
 
-	void TruePBR::OnD3D11Ready(IDXGIAdapter*, ID3D11Device*)
+	void TruePBR::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
 		_records.Create();
+		BuildEmissiveClamp(a_device);
+	}
+
+	void TruePBR::BuildEmissiveClamp(ID3D11Device* a_device)
+	{
+		try {
+			_clampPass.Create(a_device);
+			D3D11_BLEND_DESC blend{};
+			auto& target = blend.RenderTarget[0];
+			target.BlendEnable = TRUE;
+			target.SrcBlend = target.SrcBlendAlpha = D3D11_BLEND_ONE;
+			target.DestBlend = target.DestBlendAlpha = D3D11_BLEND_ONE;
+			target.BlendOp = target.BlendOpAlpha = D3D11_BLEND_OP_MIN;
+			// The alpha carries the vertex occlusion.
+			target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
+			DX::ThrowIfFailed(a_device->CreateBlendState(&blend, _clampBlend.put()));
+			render::annotation::SetName(_clampBlend.get(), "TruePBR/EmissiveClamp.Blend");
+			_clampShader = util::CompilePixelShader(L"Data\\Shaders\\FO4\\TruePBR\\EmissiveClampPS.hlsl");
+		} catch (const std::exception& e) {
+			Log()->warn("The emissive clamp pass is unavailable: {}", e.what());
+		}
+		if (!_clampShader)
+			Log()->warn("The emissive clamp pass is unavailable; fallback prepass draws can exceed 1.");
+	}
+
+	// Runs only when a prepass draw kept its native shader: the injection is not operational, or a
+	// replacement was not ready or failed this frame. Owned draws clamp in the shader.
+	void TruePBR::ClampFallbackEmission()
+	{
+		const auto outcome = engine::GetShaderInjectionOutcomeSnapshot(engine::ShaderInjectionTarget::kDeferredPrepass);
+		const bool fellBack = outcome.passthroughs != _lastPassthroughs || !IsInjectionOperational();
+		_lastPassthroughs = outcome.passthroughs;
+		if (!fellBack || !_floatEmissiveRequested.load(std::memory_order_relaxed) || !_clampShader || !_clampPass.Ready())
+			return;
+		auto* context = engine::GetImmediateContext();
+		auto* target = engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kGBufferEmissive);
+		auto* texture = engine::GetRenderTargetTexture(RE::BSGraphics::RenderTargetID::kGBufferEmissive);
+		auto* material = engine::GetRenderTargetSRV(RE::BSGraphics::RenderTargetID::kGBufferAmbient);
+		if (!context || !target || !texture || !material)
+			return;
+		D3D11_TEXTURE2D_DESC desc{};
+		texture->GetDesc(&desc);
+		const render::FullscreenPass::Scope pass(_clampPass, context, target, desc.Width, desc.Height);
+		if (!pass.IsActive())
+			return;
+		render::annotation::ScopedEvent timing("TruePBR/EmissiveClamp");
+		constexpr float kBlendFactor[4]{};
+		context->OMSetBlendState(_clampBlend.get(), kBlendFactor, 0xFFFFFFFFu);
+		context->PSSetShaderResources(0, 1, &material);
+		pass.Draw(_clampShader.get());
+		_clampFrames.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	bool TruePBR::EnabledThisFrame() noexcept
@@ -153,6 +206,7 @@ namespace cs::features
 	void TruePBR::Prepass()
 	{
 		_records.Upload(engine::GetImmediateContext());
+		ClampFallbackEmission();
 		if (_emissiveFormat.load(std::memory_order_relaxed) != 0)
 			return;
 		if (auto* texture = engine::GetRenderTargetTexture(RE::BSGraphics::RenderTargetID::kGBufferEmissive)) {
@@ -191,6 +245,7 @@ namespace cs::features
 			.Field("foreign_material_path", Tags().ForeignPaths())
 			.Field("float_emissive_requested", _floatEmissiveRequested.load(std::memory_order_relaxed))
 			.Field("float_emissive", _emissiveFormat.load(std::memory_order_relaxed) == DXGI_FORMAT_R16G16B16A16_FLOAT)
+			.Field("emissive_clamp_frames", _clampFrames.load(std::memory_order_relaxed))
 			.Field("emissive_format", _emissiveFormat.load(std::memory_order_relaxed));
 	}
 

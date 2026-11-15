@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "RecordTable.h"
+#include "Render/FullscreenPass.h"
 #include "Render/PrepassExtraTargets.h"
 #include "ShaderDefines.h"
 #include "TruePBRSettings.h"
@@ -38,6 +39,8 @@ namespace cs::features
 		bool ValidateInjectionPrerequisites(std::string&) override;
 		void BindRecordTable(ID3D11DeviceContext*);
 		bool RegisterMaterialTargets();
+		void BuildEmissiveClamp(ID3D11Device*);
+		void ClampFallbackEmission();
 		// Latched once per frame so every pass of a frame agrees.
 		bool EnabledThisFrame() noexcept;
 		true_pbr::Settings _settings;
@@ -49,5 +52,11 @@ namespace cs::features
 		std::atomic_bool _floatEmissiveRequested{ false };
 		// The DXGI format of the created emissive target; 0 until it exists.
 		std::atomic_uint32_t _emissiveFormat{ 0 };
+		// Native prepass draws write the float emissive target unclamped; a MIN pass restores the 8-bit range.
+		render::FullscreenPass _clampPass;
+		winrt::com_ptr<ID3D11PixelShader> _clampShader;
+		winrt::com_ptr<ID3D11BlendState> _clampBlend;
+		std::uint64_t _lastPassthroughs = UINT64_MAX;
+		std::atomic_uint64_t _clampFrames{ 0 };
 	};
 }

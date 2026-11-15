@@ -2563,6 +2563,8 @@ namespace cs::engine
 		snapshot.matches = runtime.matches.load(std::memory_order_relaxed);
 		snapshot.substitutions =
 			runtime.substitutions.load(std::memory_order_relaxed);
+		snapshot.passthroughs = runtime.passthroughNotReady.load(std::memory_order_relaxed) +
+		                        runtime.passthroughCompileFail.load(std::memory_order_relaxed);
 		return snapshot;
 	}
 

@@ -204,6 +204,8 @@ namespace cs::engine
 	{
 		std::uint64_t matches = 0;
 		std::uint64_t substitutions = 0;
+		// Draws that kept the native shader because a replacement was not ready or failed.
+		std::uint64_t passthroughs = 0;
 	};
 
 	struct ComputeDispatchBridgeStatus
