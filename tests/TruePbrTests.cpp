@@ -1,6 +1,7 @@
 #include "Check.h"
 #include "Format/BgsmV100.h"
 #include "MaterialRegistry.h"
+#include "MaterialTags.h"
 
 #include <bit>
 #include <filesystem>
@@ -212,6 +213,26 @@ namespace
 		CHECK(registry.Count() == 1 && registry.Get(id));
 	}
 
+	// A second assignment of a material is how a merged material would show up.
+	void TestTags()
+	{
+		MaterialTags tags;
+		int a = 0, b = 0;
+		CHECK(tags.Find(&a) == 0);
+		tags.Assign(&a, 3);
+		tags.Assign(&b, 3);
+		CHECK(tags.Find(&a) == 3 && tags.Count() == 2 && tags.Conflicts() == 0);
+		tags.Assign(&a, 3);
+		CHECK(tags.Conflicts() == 0);
+		tags.Assign(&a, 4);
+		CHECK(tags.Find(&a) == 4 && tags.Conflicts() == 1);
+		tags.Assign(&a, 0);
+		CHECK(tags.Find(&a) == 0 && tags.Conflicts() == 2 && tags.Count() == 1);
+		tags.Erase(&b);
+		tags.Erase(&b);
+		CHECK(tags.Count() == 0 && tags.Conflicts() == 2);
+	}
+
 	void TestConcurrentIngest(const std::filesystem::path& a_directory)
 	{
 		const auto rows = ReadExpected(a_directory);
@@ -240,4 +261,5 @@ void RunTruePbrTests(const std::filesystem::path& a_directory)
 	TestTruncation(a_directory);
 	TestIdentity(a_directory);
 	TestConcurrentIngest(a_directory);
+	TestTags();
 }

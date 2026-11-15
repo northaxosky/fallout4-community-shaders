@@ -1,6 +1,7 @@
 #include "TruePBR.h"
 
 #include "MaterialLoadHooks.h"
+#include "MaterialTagHooks.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/SharedFeatureData.h"
@@ -32,7 +33,8 @@ namespace cs::features
 
 	void TruePBR::Load()
 	{
-		if (!true_pbr::InstallMaterialLoadHooks()) {
+		// Tag hooks first and the parse last, so a partial install tags nothing.
+		if (!true_pbr::InstallMaterialTagHooks() || !true_pbr::InstallMaterialLoadHooks()) {
 			FailLoad("True PBR material hooks failed to install.");
 			return;
 		}
