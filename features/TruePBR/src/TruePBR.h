@@ -20,6 +20,7 @@ namespace cs::features
 		void CollectTelemetry(telemetry::Sink&) const override;
 		bool HasDebugUI() const override { return true; }
 		void DrawDebug() override;
+		void Prepass() override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
@@ -27,5 +28,8 @@ namespace cs::features
 	private:
 		bool ValidateInjectionPrerequisites(std::string&) override;
 		std::atomic_uint32_t _debugMode{ 0 };
+		std::atomic_bool _floatEmissiveRequested{ false };
+		// The DXGI format of the created emissive target; 0 until it exists.
+		std::atomic_uint32_t _emissiveFormat{ 0 };
 	};
 }

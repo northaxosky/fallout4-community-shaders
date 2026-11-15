@@ -1493,6 +1493,10 @@ struct PS_OUTPUT
 #	if PIPBOY_SCREEN
 		output.specTint.xyz += pipboySample * PipboyParams.w;
 #	endif
+#	if defined(FO4_TRUE_PBR)
+		// FO4: the target is float under True PBR; vanilla emission keeps its 8-bit range.
+		output.specTint.xyz = saturate(output.specTint.xyz);
+#	endif
 
 #	if BLEND
 		float blendAlpha = (AlphaScale_row0.y == 1.0) ? albedoSample.a : 1.0;

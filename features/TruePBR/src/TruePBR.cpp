@@ -7,7 +7,9 @@
 #include "MaterialTags.h"
 #include "Menu/SettingWidgets.h"
 #include "PrepassClassifier.h"
+#include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/RenderTargetFormats.h"
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
@@ -39,6 +41,11 @@ namespace cs::features
 			return;
 		}
 		Log()->info("Installed hooks");
+		// Emission above 1 needs a float G-buffer target; the first requester wins.
+		const bool floatEmissive = engine::RequestRenderTargetFormat(RE::BSGraphics::RenderTargetID::kGBufferEmissive, DXGI_FORMAT_R16G16B16A16_FLOAT);
+		_floatEmissiveRequested.store(floatEmissive, std::memory_order_relaxed);
+		if (!floatEmissive)
+			Log()->warn("The emissive target stays 8-bit; PBR emission clips at 1.");
 		if (!engine::RegisterFeatureShaderBindings(*this) || !true_pbr::RegisterPrepassClassifier(*this)) {
 			FailLoad("True PBR prepass registration failed.");
 			return;
@@ -49,6 +56,17 @@ namespace cs::features
 	bool TruePBR::ValidateInjectionPrerequisites(std::string& a_error)
 	{
 		return RequireSharedData(a_error, "the debug views read b7");
+	}
+
+	void TruePBR::Prepass()
+	{
+		if (_emissiveFormat.load(std::memory_order_relaxed) != 0)
+			return;
+		if (auto* texture = engine::GetRenderTargetTexture(RE::BSGraphics::RenderTargetID::kGBufferEmissive)) {
+			D3D11_TEXTURE2D_DESC desc{};
+			texture->GetDesc(&desc);
+			_emissiveFormat.store(desc.Format, std::memory_order_relaxed);
+		}
 	}
 
 	std::span<const FeatureDebugView> TruePBR::GetDebugViews() const noexcept { return kDebugViews; }
@@ -73,7 +91,10 @@ namespace cs::features
 			.Field("rejected", Notices().RejectedCount())
 			.Field("live_tags", Tags().Count())
 			.Field("retag_conflicts", Tags().Conflicts())
-			.Field("foreign_material_path", Tags().ForeignPaths());
+			.Field("foreign_material_path", Tags().ForeignPaths())
+			.Field("float_emissive_requested", _floatEmissiveRequested.load(std::memory_order_relaxed))
+			.Field("float_emissive", _emissiveFormat.load(std::memory_order_relaxed) == DXGI_FORMAT_R16G16B16A16_FLOAT)
+			.Field("emissive_format", _emissiveFormat.load(std::memory_order_relaxed));
 	}
 
 	void TruePBR::DrawDebug()
