@@ -2,10 +2,11 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "ShaderDefines.h"
 
 namespace cs::features
 {
-	class TruePBR : public Feature
+	class TruePBR : public ShaderFeature<true_pbr::kShaderDefines>
 	{
 	public:
 		static TruePBR* GetSingleton();
@@ -19,5 +20,12 @@ namespace cs::features
 		void CollectTelemetry(telemetry::Sink&) const override;
 		bool HasDebugUI() const override { return true; }
 		void DrawDebug() override;
+		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
+		void SetDebugView(std::string_view) noexcept override;
+		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
+
+	private:
+		bool ValidateInjectionPrerequisites(std::string&) override;
+		std::atomic_uint32_t _debugMode{ 0 };
 	};
 }

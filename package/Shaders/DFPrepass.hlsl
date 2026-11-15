@@ -136,6 +136,9 @@
 
 #	include "FO4/FO4ShaderData.hlsli"
 #	include "FO4/PrepassLane.h"
+#	if defined(FO4_TRUE_PBR)
+#		include "FO4/TruePBR/Debug.hlsli"
+#	endif
 
 // FO4: Skyrim mesh exclusions as prepass variants; host rejects object LOD.
 #	if defined(TERRAIN_VARIATION) && TEXTURE && !LANDSCAPE && !(LOD_LANDSCAPE || SKIN_TINT || HAIR || EYE || TREE_ANIM || DISMEMBERMENT_MEATCUFF)
@@ -1691,6 +1694,11 @@ struct PS_OUTPUT
 #		else
 		output.motionVec = (currNDC - prevNDC) * float2(-0.5, 0.5);
 #		endif
+#	endif
+#	if defined(FO4_TRUE_PBR) && !LANDSCAPE
+		// FO4: landscape draws carry no lane.
+		[branch] if (TruePBRDebug::IsActive() && PrepassFeatureLane.y != 0)
+			TruePBRDebug::Apply(PrepassFeatureLane.y, output.albedo.xyz, output.specTint.xyz);
 #	endif
 #	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
 	// Every draw writes all channels, so nothing keeps another surface's value.

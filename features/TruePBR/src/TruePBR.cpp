@@ -6,10 +6,13 @@
 #include "MaterialTagHooks.h"
 #include "MaterialTags.h"
 #include "Menu/SettingWidgets.h"
+#include "PrepassClassifier.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
 
+#include <array>
 #include <format>
 
 namespace cs::features
@@ -20,6 +23,14 @@ namespace cs::features
 		return &instance;
 	}
 
+	namespace
+	{
+		constexpr std::array kDebugViews{
+			FeatureDebugView{ "classified", "Classified draws", FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{ "record", "Material record (color per id)", FeatureDebugViewKind::kFullscreen }
+		};
+	}
+
 	void TruePBR::Load()
 	{
 		// Tag hooks first and the parse last, so a partial install tags nothing.
@@ -28,6 +39,30 @@ namespace cs::features
 			return;
 		}
 		Log()->info("Installed hooks");
+		if (!engine::RegisterFeatureShaderBindings(*this) || !true_pbr::RegisterPrepassClassifier(*this)) {
+			FailLoad("True PBR prepass registration failed.");
+			return;
+		}
+		_registrationsReady.store(true, std::memory_order_release);
+	}
+
+	bool TruePBR::ValidateInjectionPrerequisites(std::string& a_error)
+	{
+		return RequireSharedData(a_error, "the debug views read b7");
+	}
+
+	std::span<const FeatureDebugView> TruePBR::GetDebugViews() const noexcept { return kDebugViews; }
+
+	void TruePBR::SetDebugView(std::string_view a_view) noexcept
+	{
+		_debugMode = a_view == "classified" ? TruePBRDebugMode::Classified :
+		             a_view == "record"     ? TruePBRDebugMode::Record :
+		                                      0u;
+	}
+
+	FullscreenDebugData TruePBR::GetFullscreenDebugData() const noexcept
+	{
+		return { .owner = FullscreenDebugOwner::TruePBR, .mode = _debugMode.load() };
 	}
 
 	void TruePBR::CollectTelemetry(telemetry::Sink& a_sink) const
@@ -50,7 +85,7 @@ namespace cs::features
 			dmui::ui::Text("Last rejection: %s", last.c_str());
 		for (const auto& [id, live] : Tags().LiveByRecord()) {
 			if (const auto* record = Records().Get(id))
-				dmui::ui::Text("%zu  %s", live, record->name.c_str());
+				dmui::ui::Text("id %u  live %zu  %s", static_cast<unsigned>(id), live, record->name.c_str());
 		}
 	}
 
