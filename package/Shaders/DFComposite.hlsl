@@ -23,15 +23,9 @@
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
 #endif
 
+#include "FO4/TruePBRConsumer.hlsli"
 #ifdef FO4_TRUE_PBR
 #	include "FO4/TruePBR/Composite.hlsli"
-// A TruePBR pixel resolves its own ambient occlusion and environment radiance.
-#	define FO4_TRUE_PBR_RESOLVE(materialClass, result, litColor, ssao, pixelPosition, probeSampler) [branch] if (FO4TruePBR::IsPixel(materialClass)) result = FO4TruePBR::Resolve(pixelPosition, litColor, ssao, probeSampler)
-// The native and Vanilla PBR reflections are off on a TruePBR pixel, also under a blended draw.
-#	define FO4_TRUE_PBR_NO_NATIVE_REFLECTION(materialClass, reflectionScale) [branch] if (FO4TruePBR::IsPixel(materialClass)) reflectionScale = 0.0
-#else
-#	define FO4_TRUE_PBR_RESOLVE(materialClass, result, litColor, ssao, pixelPosition, probeSampler)
-#	define FO4_TRUE_PBR_NO_NATIVE_REFLECTION(materialClass, reflectionScale)
 #endif
 
 float3 AuthoredEnvironment(TextureCubeArray<float4> probe, SamplerState probeSampler, float3 direction, float lod,
@@ -1167,7 +1161,6 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 	occlusion = outputMask;
 #		endif
 #	endif
-	FO4_TRUE_PBR_RESOLVE(materialClass, color, unoccluded, occlusion, pixelPosition, environmentSampler);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 	[branch] if (VanillaPBR::LiveEnvironmentUsed)
 	{
@@ -1182,6 +1175,7 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 		        environment * glossFactor * gloss * VanillaPBR::LiveReflectionWeight(directLighting, liveMask);
 	}
 #	endif
+	FO4_TRUE_PBR_RESOLVE(materialClass, color, unoccluded, occlusion, pixelPosition, environmentSampler);
 	return color;
 }
 
@@ -2799,6 +2793,8 @@ float4 main(PSInput input) : SV_Target0
 #	endif
 			color = mad(reflectionColor * gloss * specularScale, diffuse, color);
 
+		const float3 unoccluded = color;
+		float occlusion = 1.0;
 #	if COMPOSITE_MODULATION
 #		if !defined(OG)
 		float2 modulationUV = min(uv, screenData[5].xy);
@@ -2808,10 +2804,10 @@ float4 main(PSInput input) : SV_Target0
 		// OG samples modulation without the cb2[5].xy clamp.
 		float modulation = modulationTexture.Sample(modulationSampler, uv).x;
 #		endif
-		const float3 unoccluded = color;
 		color *= modulation;
-		FO4_TRUE_PBR_RESOLVE(typeData.z, color, unoccluded, modulation, input.position.xy, probeSampler);
+		occlusion = modulation;
 #	endif
+		FO4_TRUE_PBR_RESOLVE(typeData.z, color, unoccluded, occlusion, input.position.xy, probeSampler);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 #		if COMPOSITE_MODULATION
 		const float liveAO = modulation;

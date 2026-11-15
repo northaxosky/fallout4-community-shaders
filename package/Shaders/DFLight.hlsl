@@ -2587,6 +2587,8 @@ float2 goboUV = float2(omniUV.x,
 
 		float fresEdge = saturate(dot(viewDirNeg, -LightVector.xyz));
 		float ambientTerm = ambientFres * fresEdge * NdotL_clamped * roughness01;
+		// FO4: a TruePBR pixel has no native rim term.
+		FO4_TRUE_PBR_OVERRIDE(pbr, ambientTerm, 0.0);
 
 		float3 finalDiffuse = LightColor_row0.xyz * brdfShadowMix;
 		finalDiffuse += LightColor_row0.xyz * ambientTerm;
@@ -3479,6 +3481,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #		else
 	float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 #		endif
+	// FO4: a TruePBR pixel has no native rim term.
+	FO4_TRUE_PBR_OVERRIDE(pbr, ambientTerm, 0.0);
 
 #		ifdef FO4_DS2_REASSOC_ORDER
 	float3 finalDiffuse = LightColor_row0.xyz * brdfShadowMix;
@@ -4507,6 +4511,8 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #		else
 		float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 #		endif
+			// FO4: a TruePBR pixel has no native rim term.
+			FO4_TRUE_PBR_OVERRIDE(pbr, ambientTerm, 0.0);
 
 #		ifdef FO4_DS3_LATE_DIFFUSE
 			float3 finalDiffuse = LightColor_row0.xyz * brdfShadowMix;
@@ -6302,6 +6308,8 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #	endif
 
 			float3 finalDiffuse = FO4LocalLightColor(LightColor_row0.xyz) * brdfShadowMix;
+			// FO4: early, so the contact shadow scales the PBR lobes.
+			FO4_TRUE_PBR_DIRECT(pbr, normalView, normalize(-posView), lightDir, FO4LocalLightColor(LightColor_row0.xyz), FO4_TRUE_PBR_SPECULAR, finalDiffuse, brdfSpecular);
 			FO4_SOFT_LOBES_DECLARE(softDiffuse);
 
 #	if !defined(IGNOREROUGHNESS) && !defined(IGNORERIM)
@@ -6319,6 +6327,8 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 #		else
 		float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 #		endif
+			// FO4: a TruePBR pixel has no native rim term.
+			FO4_TRUE_PBR_OVERRIDE(pbr, ambientTerm, 0.0);
 
 			FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += FO4LocalLightColor(LightColor_row0.xyz) * ambientTerm;
 #	endif
@@ -6357,7 +6367,6 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			FO4_SOFT_LOBE(finalDiffuse, softDiffuse) += (forwardBlend * FO4LocalLightColor(LightColor_row0.xyz)) * albedoSample.xyz;
 #	endif
 
-			FO4_TRUE_PBR_DIRECT(pbr, normalView, normalize(-posView), lightDir, FO4LocalLightColor(LightColor_row0.xyz), FO4_TRUE_PBR_SPECULAR, finalDiffuse, brdfSpecular);
 #	if defined(DIRECTIONAL) && defined(FO4_WORLD_SHADOW)
 			float worldShadowMult = WorldShadow::GetMultFromViewPosition(posView);
 			finalDiffuse *= worldShadowMult;
