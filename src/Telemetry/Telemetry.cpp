@@ -9,6 +9,7 @@
 #include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
 #include "Render/FrameProfiler.h"
+#include "Render/PrepassExtraTargets.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SkyReflectionCube.h"
@@ -391,6 +392,7 @@ namespace cs::telemetry
 		inline constexpr std::string_view kFrameBufferComponent = "frame_buffer";
 		inline constexpr std::string_view kShaderInjectionComponent = "shader_injection";
 		inline constexpr std::string_view kSkyReflectionCubeComponent = "sky_reflection_cube";
+		inline constexpr std::string_view kPrepassExtraTargetsComponent = "prepass_extra_targets";
 
 		void EmitComponent(
 			spdlog::logger* a_logger,
@@ -452,6 +454,7 @@ namespace cs::telemetry
 			EmitComponent(logger, frame, kFrameBufferComponent, CollectFrameBuffer);
 			EmitComponent(logger, frame, kShaderInjectionComponent, CollectShaderInjection);
 			EmitComponent(logger, frame, kSkyReflectionCubeComponent, CollectSkyReflectionCube);
+			EmitComponent(logger, frame, kPrepassExtraTargetsComponent, cs::engine::WritePrepassExtraTargetTelemetry);
 			for (const auto* feature : FeatureManager::Get().GetAll()) {
 				try {
 					if (!feature->ProducesTelemetry() && !feature->SupportsEnableToggle())
@@ -506,6 +509,10 @@ namespace cs::telemetry
 				Sink skyReflectionCube;
 				CollectSkyReflectionCube(skyReflectionCube);
 				root.insert_or_assign(kSkyReflectionCubeComponent, skyReflectionCube.AsTable());
+
+				Sink prepassExtraTargets;
+				cs::engine::WritePrepassExtraTargetTelemetry(prepassExtraTargets);
+				root.insert_or_assign(kPrepassExtraTargetsComponent, prepassExtraTargets.AsTable());
 
 				toml::table features;
 				for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {

@@ -84,8 +84,8 @@ namespace cs::engine
 	void BindInjectionShaderResources(ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*) noexcept;
 	void BindInjectionSamplers(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*) noexcept;
 	void BindInjectionConstantBuffers(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*) noexcept;
-	// The active draw scope restores the blend state when its draw returns.
-	void CaptureShaderInjectionBlendState(ID3D11DeviceContext*) noexcept;
+	// The active draw scope restores the blend state when its draw returns; false outside a scope.
+	bool CaptureShaderInjectionBlendState(ID3D11DeviceContext*) noexcept;
 	// The active draw scope restores the render targets and depth view.
 	void CaptureShaderInjectionRenderTargets(ID3D11DeviceContext*) noexcept;
 	// Overrides a frame-bound PS slot for one draw; the draw scope restores it.
@@ -259,6 +259,8 @@ namespace cs::engine
 		std::string* a_error = nullptr);
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
+	// Runs after every contribution bind of the target's draw dispatch, on every draw path.
+	[[nodiscard]] bool RegisterShaderInjectionFinalizer(ShaderInjectionTarget a_target, ShaderInjectionBindCallback a_finalize);
 	// The provider's declaration must be in the contribution registry under a_name.
 	bool ValidateShaderContributionName(std::string_view a_name, const ShaderDefineProvider& a_provider);
 	bool SetShaderInjectionRuntime(GameRuntime a_runtime);

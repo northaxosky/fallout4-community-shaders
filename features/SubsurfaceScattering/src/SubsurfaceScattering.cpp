@@ -73,7 +73,7 @@ namespace cs::features
 
 	void SubsurfaceScattering::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings(*this, cs::engine::AttachPrepassExtraTargets)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
 			FailLoad("Subsurface Scattering shader contribution registration failed.");
 			return;
 		}

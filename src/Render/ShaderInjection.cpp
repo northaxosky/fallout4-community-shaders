@@ -238,9 +238,10 @@ namespace cs::engine
 		RecordShaderInjectionD3DBinds();
 	}
 
-	void CaptureShaderInjectionBlendState(ID3D11DeviceContext* a_context) noexcept
+	bool CaptureShaderInjectionBlendState(ID3D11DeviceContext* a_context) noexcept
 	{
 		CaptureBindings(a_context, ShaderResourceType::kBlendState, 0, 1);
+		return t_bindings != nullptr;
 	}
 
 	void CaptureShaderInjectionRenderTargets(ID3D11DeviceContext* a_context) noexcept
@@ -1236,6 +1237,9 @@ namespace cs::engine
 			}
 		}
 
+		// Written only while registrations are collected, before any draw.
+		std::array<std::vector<ShaderInjectionBindCallback>, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> g_finalizers;
+
 		void ExecuteComputeDispatch(
 			ID3D11DeviceContext* a_context,
 			UINT a_threadGroupCountX,
@@ -1487,6 +1491,20 @@ namespace cs::engine
 		if (!admissible(a_registration))
 			return false;
 		service.registrations.push_back(std::move(a_registration));
+		return true;
+	}
+
+	bool RegisterShaderInjectionFinalizer(ShaderInjectionTarget a_target, ShaderInjectionBindCallback a_finalize)
+	{
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		if (service.lifecycle != Lifecycle::kCollecting) {
+			LogLateMutation("Finalizer registration");
+			return false;
+		}
+		if (!IsValidTarget(a_target) || !a_finalize)
+			return false;
+		g_finalizers[ToIndex(a_target)].push_back(std::move(a_finalize));
 		return true;
 	}
 
@@ -2015,6 +2033,8 @@ namespace cs::engine
 			if (render::forward_draw::Covers(a_target.id))
 				render::forward_draw::BindDescriptor(a_context);
 			DispatchPublishedTarget(a_target, ShaderStage::kPixel, a_context);
+			for (const auto& finalize : g_finalizers[ToIndex(a_target.id)])
+				render::RunRenderCallback(nullptr, kTargets[ToIndex(a_target.id)].name, [&] { finalize(a_context); });
 			t_samplerMask = previousMask;
 		}
 	}

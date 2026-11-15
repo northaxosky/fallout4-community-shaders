@@ -7,6 +7,7 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
 #include "Render/FrameProfiler.h"
+#include "Render/PrepassExtraTargets.h"
 #include "Render/PrepassTechnique.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
@@ -76,29 +77,36 @@ namespace cs::features
 			};
 		}
 
-		// Colour lerps by PS alpha; data channels belong to the data draw.
-		D3D11_BLEND_DESC ColorBlendDesc()
+		// Targets past the engine's six are written by the renderer's per-phase finalizer.
+		constexpr std::size_t kEngineTargets = 6;
+
+		D3D11_BLEND_DESC MaskedBlendDesc()
 		{
 			D3D11_BLEND_DESC desc{};
 			desc.IndependentBlendEnable = TRUE;
+			for (auto& target : desc.RenderTarget)
+				SetBlendTarget(target, false, 0x0);
+			return desc;
+		}
+
+		// Colour lerps by PS alpha; data channels belong to the data draw.
+		D3D11_BLEND_DESC ColorBlendDesc()
+		{
+			auto desc = MaskedBlendDesc();
 			SetBlendTarget(desc.RenderTarget[0], true, 0x7);
 			SetBlendTarget(desc.RenderTarget[1], true, 0x3);
 			SetBlendTarget(desc.RenderTarget[2], false, 0x0);
 			SetBlendTarget(desc.RenderTarget[3], true, 0x7);
 			SetBlendTarget(desc.RenderTarget[4], true, 0x7);
 			SetBlendTarget(desc.RenderTarget[5], true, 0x3);
-			// Parallax shadow is continuous shading, so it blends like colour.
-			SetBlendTarget(desc.RenderTarget[6], true, 0x1);
-			SetBlendTarget(desc.RenderTarget[7], false, 0x0);
 			return desc;
 		}
 
 		// RT4 .w is vertex AO, which terrain owns outright where it wins.
 		D3D11_BLEND_DESC DataBlendDesc()
 		{
-			D3D11_BLEND_DESC desc{};
-			desc.IndependentBlendEnable = TRUE;
-			constexpr std::array<UINT8, 8> masks{ 0x8, 0x0, 0xF, 0x8, 0x8, 0x0, 0x0, 0x0 };
+			auto desc = MaskedBlendDesc();
+			constexpr std::array<UINT8, kEngineTargets> masks{ 0x8, 0x0, 0xF, 0x8, 0x8, 0x0 };
 			for (std::size_t slot = 0; slot < masks.size(); ++slot)
 				SetBlendTarget(desc.RenderTarget[slot], false, masks[slot]);
 			return desc;
@@ -107,11 +115,10 @@ namespace cs::features
 		// Fully-in terrain writes what the colour and data draws would together.
 		D3D11_BLEND_DESC OpaqueBlendDesc()
 		{
-			D3D11_BLEND_DESC desc{};
-			desc.IndependentBlendEnable = TRUE;
+			auto desc = MaskedBlendDesc();
 			const auto color = ColorBlendDesc();
 			const auto data = DataBlendDesc();
-			for (std::size_t slot = 0; slot < std::size(desc.RenderTarget); ++slot)
+			for (std::size_t slot = 0; slot < kEngineTargets; ++slot)
 				SetBlendTarget(desc.RenderTarget[slot], false, color.RenderTarget[slot].RenderTargetWriteMask | data.RenderTarget[slot].RenderTargetWriteMask);
 			return desc;
 		}
@@ -131,6 +138,21 @@ namespace cs::features
 			DX::ThrowIfFailed(a_device->CreateBuffer(&bufferDesc, &data, g_replay.passBuffer[a_pass].put()));
 			cs::render::annotation::SetName(g_replay.blend[a_pass].get(), kBlendNames[a_pass]);
 			cs::render::annotation::SetName(g_replay.passBuffer[a_pass].get(), kBufferNames[a_pass]);
+		}
+
+		cs::engine::PrepassExtraWritePhase ExtraWritePhase(ReplayPass a_pass) noexcept
+		{
+			using enum cs::engine::PrepassExtraWritePhase;
+			switch (a_pass) {
+			case kColor:
+				return kTerrainColor;
+			case kData:
+				return kTerrainData;
+			case kOpaque:
+				return kTerrainOpaque;
+			default:
+				return kNative;
+			}
 		}
 
 		bool Hold(std::uint32_t a_technique) noexcept
@@ -276,6 +298,7 @@ namespace cs::features
 	void TerrainBlending::DrawHeld(std::span<const cs::engine::HeldPrepassBucket> a_buckets, std::uint32_t a_pass)
 	{
 		g_replay.replaying = static_cast<ReplayPass>(a_pass);
+		const cs::engine::ScopedPrepassExtraWritePhase phase{ ExtraWritePhase(g_replay.replaying) };
 		const REX::TScopeExit restore{ []() noexcept { g_replay.replaying = kStock; } };
 		for (const auto& bucket : a_buckets)
 			cs::engine::ReplayHeldPrepassBucket(bucket);
