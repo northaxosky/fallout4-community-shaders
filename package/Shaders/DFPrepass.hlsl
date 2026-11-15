@@ -111,6 +111,11 @@
 #		define FO4_PREPASS_VERTEX_AO 1
 #	endif
 
+// FO4: one shared target; R parallax shadow, G human skin, B material AO.
+#	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING) || defined(FO4_TRUE_PBR)
+#		define FO4_PREPASS_AUX
+#	endif
+
 // FO4: loaded landscape replays after objects with alpha-blended writes.
 #	if defined(TERRAIN_BLENDING) && LANDSCAPE && !BLEND && !INSTANCED
 #		define FO4_TERRAIN_BLENDING
@@ -595,9 +600,12 @@ struct PS_OUTPUT
 	float2 motionVec: SV_Target5;
 #		endif
 #	endif
-#	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
-	// FO4: shared target; R parallax shadow, G human skin, B reserved for AO.
+#	if defined(FO4_PREPASS_AUX)
 	float4 aux: SV_Target6;
+#	endif
+#	if defined(FO4_TRUE_PBR)
+	// F0 of the lit surface; alpha is only the blend factor.
+	float4 f0: SV_Target7;
 #	endif
 };
 
@@ -1704,7 +1712,7 @@ struct PS_OUTPUT
 		[branch] if (TruePBRDebug::IsActive() && PrepassFeatureLane.y != 0)
 			TruePBRDebug::Apply(PrepassFeatureLane.y, output.albedo.xyz, output.specTint.xyz);
 #	endif
-#	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
+#	if defined(FO4_PREPASS_AUX)
 	// Every draw writes all channels, so nothing keeps another surface's value.
 #		if defined(EXTENDED_MATERIALS)
 		const float auxParallaxShadow = parallaxShadow;
@@ -1717,10 +1725,14 @@ struct PS_OUTPUT
 		const float auxHumanSkin = 0.0;
 #		endif
 #		if BLEND
-		output.aux = float4(auxParallaxShadow, auxHumanSkin, 1, output.albedo.w);
+		const float auxCoverage = output.albedo.w;
 #		else
-		output.aux = float4(auxParallaxShadow, auxHumanSkin, 1, 1);
+		const float auxCoverage = 1.0;
 #		endif
+		output.aux = float4(auxParallaxShadow, auxHumanSkin, 1, auxCoverage);
+#	endif
+#	if defined(FO4_TRUE_PBR)
+		output.f0 = float4(0.04, 0.04, 0.04, auxCoverage);
 #	endif
 #	if defined(FO4_TERRAIN_BLENDING)
 		// The colour draw reads every blended target's alpha as the lerp factor.
@@ -1733,8 +1745,11 @@ struct PS_OUTPUT
 #		if PREPASS_MOTION_VECTOR
 			output.motionVec.w = terrainBlendFactor;
 #		endif
-#		if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING)
+#		if defined(FO4_PREPASS_AUX)
 			output.aux.w = terrainBlendFactor;
+#		endif
+#		if defined(FO4_TRUE_PBR)
+			output.f0.w = terrainBlendFactor;
 #		endif
 		}
 #	endif

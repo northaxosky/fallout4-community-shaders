@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "RecordTable.h"
+#include "Render/PrepassExtraTargets.h"
 #include "ShaderDefines.h"
 #include "TruePBRSettings.h"
 
@@ -36,9 +37,11 @@ namespace cs::features
 	private:
 		bool ValidateInjectionPrerequisites(std::string&) override;
 		void BindRecordTable(ID3D11DeviceContext*);
+		bool RegisterMaterialTargets();
 		// Latched once per frame so every pass of a frame agrees.
 		bool EnabledThisFrame() noexcept;
 		true_pbr::Settings _settings;
+		std::optional<engine::PrepassExtraTargetId> _f0Target;
 		true_pbr::RecordTable _records;
 		std::uint32_t _latchedFrame = UINT32_MAX;
 		bool _latchedEnabled = false;

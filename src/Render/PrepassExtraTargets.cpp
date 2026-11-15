@@ -51,6 +51,10 @@ namespace cs::engine
 		constexpr std::uint32_t kAuxPublishSlot = 66;
 		constexpr std::uint8_t kRedMask = D3D11_COLOR_WRITE_ENABLE_RED;
 		constexpr std::uint8_t kGreenMask = D3D11_COLOR_WRITE_ENABLE_GREEN;
+		constexpr std::uint8_t kBlueMask = D3D11_COLOR_WRITE_ENABLE_BLUE;
+		constexpr std::uint8_t kColorMask = kRedMask | kGreenMask | kBlueMask;
+		// RT3 holds roughness and class; the material channels follow its writes.
+		constexpr std::size_t kMaterialHolderSlot = 3;
 
 		struct AuxClaim
 		{
@@ -179,6 +183,30 @@ namespace cs::engine
 			});
 		}
 
+		using TargetBlend = D3D11_RENDER_TARGET_BLEND_DESC;
+
+		bool SameBlend(const TargetBlend& a_left, const TargetBlend& a_right) noexcept
+		{
+			return a_left.BlendEnable == a_right.BlendEnable && a_left.SrcBlend == a_right.SrcBlend &&
+			       a_left.DestBlend == a_right.DestBlend && a_left.BlendOp == a_right.BlendOp &&
+			       a_left.SrcBlendAlpha == a_right.SrcBlendAlpha && a_left.DestBlendAlpha == a_right.DestBlendAlpha &&
+			       a_left.BlendOpAlpha == a_right.BlendOpAlpha && a_left.RenderTargetWriteMask == a_right.RenderTargetWriteMask;
+		}
+
+		bool SameEquation(TargetBlend a_left, const TargetBlend& a_right) noexcept
+		{
+			a_left.RenderTargetWriteMask = a_right.RenderTargetWriteMask;
+			return SameBlend(a_left, a_right);
+		}
+
+		// Replace, or the source-alpha lerp the engine uses for coverage.
+		bool WritesMaterial(const TargetBlend& a_holder) noexcept
+		{
+			const bool color = (a_holder.RenderTargetWriteMask & kColorMask) == kColorMask;
+			const bool coverage = a_holder.SrcBlend == D3D11_BLEND_SRC_ALPHA && a_holder.DestBlend == D3D11_BLEND_INV_SRC_ALPHA && a_holder.BlendOp == D3D11_BLEND_OP_ADD;
+			return color && (!a_holder.BlendEnable || coverage);
+		}
+
 		std::optional<D3D11_BLEND_DESC> DeriveBlend(D3D11_BLEND_DESC a_desc, PrepassExtraWritePhase a_phase)
 		{
 			const auto expand = [&a_desc] {
@@ -191,16 +219,34 @@ namespace cs::engine
 			if (a_phase == PrepassExtraWritePhase::kNative) {
 				bool changed = false;
 				const auto source = a_desc;
+				const auto effective = [&source](std::size_t a_slot) -> const TargetBlend& {
+					return source.IndependentBlendEnable ? source.RenderTarget[a_slot] : source.RenderTarget[0];
+				};
+				const auto& holder = effective(kMaterialHolderSlot);
 				for (const auto& entry : g_entries) {
 					const auto coupled = entry.target.nativeRCoupled;
-					const auto& base = source.IndependentBlendEnable ? source.RenderTarget[entry.target.rtvSlot] : source.RenderTarget[0];
-					const auto mask = static_cast<std::uint8_t>(base.RenderTargetWriteMask);
-					const auto wanted = static_cast<std::uint8_t>((mask & kRedMask) ? mask | coupled : mask & ~coupled);
-					if (!coupled || wanted == mask)
+					const auto material = entry.target.materialMask;
+					if (!coupled && !material)
+						continue;
+					const auto& base = effective(entry.target.rtvSlot);
+					auto wanted = base;
+					auto mask = static_cast<std::uint8_t>(base.RenderTargetWriteMask);
+					mask = static_cast<std::uint8_t>((mask & kRedMask) ? mask | coupled : mask & ~coupled);
+					if (material) {
+						// A channel pair shares one equation, so a conflicting coupled write wins.
+						const bool follows = WritesMaterial(holder) && (!(mask & coupled) || SameEquation(base, holder));
+						if (follows) {
+							wanted = holder;
+							mask |= material;
+						} else {
+							mask &= static_cast<std::uint8_t>(~material);
+						}
+					}
+					wanted.RenderTargetWriteMask = mask;
+					if (SameBlend(wanted, base))
 						continue;
 					expand();
-					a_desc.RenderTarget[entry.target.rtvSlot] = base;
-					a_desc.RenderTarget[entry.target.rtvSlot].RenderTargetWriteMask = wanted;
+					a_desc.RenderTarget[entry.target.rtvSlot] = wanted;
 					changed = true;
 				}
 				return changed ? std::optional{ a_desc } : std::nullopt;
@@ -341,9 +387,10 @@ namespace cs::engine
 												.publishSlot = kAuxPublishSlot,
 												.publishStages = ShaderStageBit(ShaderStage::kPixel) | ShaderStageBit(ShaderStage::kCompute),
 												.active = &EvaluateAuxClaims,
-												// Terrain blends shadow like color; no skin.
-												.terrain = { PrepassExtraWrite{ .blend = true, .mask = kRedMask }, PrepassExtraWrite{}, PrepassExtraWrite{ .mask = kRedMask } },
-												.nativeRCoupled = kRedMask | kGreenMask });
+												// Terrain blends shadow and material AO like color; no skin.
+												.terrain = { PrepassExtraWrite{ .blend = true, .mask = kRedMask | kBlueMask }, PrepassExtraWrite{}, PrepassExtraWrite{ .mask = kRedMask | kBlueMask } },
+												.nativeRCoupled = kRedMask | kGreenMask,
+												.materialMask = kBlueMask });
 			if (!g_auxTarget)
 				return false;
 		}

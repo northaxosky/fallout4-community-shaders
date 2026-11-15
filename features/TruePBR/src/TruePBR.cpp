@@ -32,6 +32,10 @@ namespace cs::features
 
 	namespace
 	{
+		// SV_Target7 and t67 in the prepass and lighting shaders.
+		constexpr std::uint32_t kF0TargetSlot = 7;
+		constexpr std::uint32_t kF0PublishSlot = 67;
+
 		constexpr std::array kDebugViews{
 			FeatureDebugView{ "classified", "Classified draws", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "record", "Material record (color per id)", FeatureDebugViewKind::kFullscreen }
@@ -70,7 +74,10 @@ namespace cs::features
 		const auto frame = graphics ? graphics->frameCount : 0u;
 		if (frame != _latchedFrame) {
 			_latchedFrame = frame;
-			_latchedEnabled = IsInjectionOperational() && _records.SRV();
+			// Last frame's views: a lit pixel is only tagged once both targets exist.
+			_latchedEnabled = IsInjectionOperational() && _records.SRV() && _f0Target &&
+			                  engine::GetPrepassExtraTargetSRV(*_f0Target) &&
+			                  engine::GetPrepassAuxSRV(engine::PrepassAuxChannel::kMaterialAO);
 		}
 		return _latchedEnabled;
 	}
@@ -89,12 +96,29 @@ namespace cs::features
 			engine::BindInjectionShaderResources(a_context, true_pbr::kRecordTableSlot, 1, &table);
 	}
 
+	bool TruePBR::RegisterMaterialTargets()
+	{
+		const auto active = [this] { return IsEnabled() && IsInjectionOperational(); };
+		constexpr std::uint8_t color = 0x7;  // RGB; the target has no alpha
+		_f0Target = engine::RegisterPrepassExtraTarget(*this, { .name = "TruePBR/F0",
+																  .rtvSlot = kF0TargetSlot,
+																  .format = DXGI_FORMAT_R11G11B10_FLOAT,
+																  .clear = { 0.04f, 0.04f, 0.04f, 0.0f },
+																  .publishSlot = kF0PublishSlot,
+																  .publishStages = engine::ShaderStageBit(engine::ShaderStage::kPixel) | engine::ShaderStageBit(engine::ShaderStage::kCompute),
+																  .active = active,
+																  // Terrain fades neutral F0 into a PBR object like color.
+																  .terrain = { engine::PrepassExtraWrite{ .blend = true, .mask = color }, engine::PrepassExtraWrite{}, engine::PrepassExtraWrite{ .mask = color } },
+																  .materialMask = color });
+		return _f0Target && engine::RegisterPrepassAuxChannel(*this, engine::PrepassAuxChannel::kMaterialAO, active);
+	}
+
 	void TruePBR::Load()
 	{
 		const bool registered = engine::RegisterFeatureShaderBindings(*this, [this](engine::ShaderReplacementRegistration& a_registration) {
 			a_registration.bind = [this](ID3D11DeviceContext* a_context) { BindRecordTable(a_context); };
 		});
-		if (!registered || !true_pbr::RegisterPrepassClassifier(*this)) {
+		if (!registered || !true_pbr::RegisterPrepassClassifier(*this) || !RegisterMaterialTargets()) {
 			FailLoad("True PBR prepass registration failed.");
 			return;
 		}
