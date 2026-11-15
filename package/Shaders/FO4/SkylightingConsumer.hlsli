@@ -19,16 +19,6 @@
 
 namespace Skylighting
 {
-#ifdef FO4CS_SUBSTRATE
-	float3 GetViewPosition(float2 pixelPosition)
-	{
-		float2 uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(pixelPosition * SharedData::BufferDim.zw);
-		float4 view = mul(FrameBuffer::CameraProjInverse,
-			float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), SharedData::GetDepth(uv), 1.0));
-		return view.xyz / view.w;
-	}
-#endif
-
 #ifdef IBL
 	// FO4: both scalars of one probe sample for a composite reflection.
 	struct SpecularVisibility
@@ -91,7 +81,7 @@ namespace Skylighting
 		[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 		int3 texel = int3(int2(pixelPosition), 0);
 		float3 albedo = FO4GBufferViews::Albedo.Load(texel).xyz;
-		// FO4: upstream passes the exported indirect albedo, not the base color.
+		// FO4: upstream passes the exported indirect albedo.
 		FO4_TRUE_PBR_EXPORTED_ALBEDO(albedo, pixelPosition, normalView, viewPosition);
 		// FO4: MRT4 alpha stores 1 - vertexAO, upstream's Masks2.x.
 		return GetAmbientScale(viewPosition, normalView, albedo, 1.0 - FO4GBufferViews::Emissive.Load(texel).w);

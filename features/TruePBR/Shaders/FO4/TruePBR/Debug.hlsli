@@ -10,13 +10,12 @@ namespace TruePBRDebug
 		return FO4SharedData::DebugOwner == FullscreenDebugOwner::TruePBR;
 	}
 
-	// Views of the draw's record, shown on any tagged draw.
+	// Shown on any tagged draw, not only on PBR pixels.
 	bool IsRecordView()
 	{
 		return IsOwner() && (FO4SharedData::DebugMode == TruePBRDebugMode::Classified || FO4SharedData::DebugMode == TruePBRDebugMode::Record);
 	}
 
-	// Views of decoded material channels, shown on PBR pixels.
 	bool IsMaterialView()
 	{
 		return IsOwner() && FO4SharedData::DebugMode >= TruePBRDebugMode::BaseColor && FO4SharedData::DebugMode <= TruePBRDebugMode::AmbientOcclusion;

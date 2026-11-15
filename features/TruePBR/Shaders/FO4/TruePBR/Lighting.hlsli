@@ -3,12 +3,10 @@
 
 #include "FO4/GBufferViews.hlsli"
 #include "FO4/TruePBR/Adapter.hlsli"
+#include "FO4/TruePBR/Record.h"
 
 namespace FO4TruePBR
 {
-	// The prepass class tag of a TruePBR pixel.
-	static const float ClassTag = 128.0 / 255.0;
-
 	struct Surface
 	{
 		bool active;
@@ -19,7 +17,7 @@ namespace FO4TruePBR
 
 	bool IsPixel(float a_class)
 	{
-		return FO4SharedData::EnabledTruePBR != 0 && abs(a_class * 255.0 - 128.0) < 0.25;
+		return FO4SharedData::EnabledTruePBR != 0 && TruePBRRecord::IsClassTag(a_class);
 	}
 
 	// a_material is MRT3: R is 1 - roughness, W the class tag.
@@ -37,8 +35,7 @@ namespace FO4TruePBR
 		return surface;
 	}
 
-	// Upstream's direct lobes on view-space vectors; every dot product is frame independent.
-	// FO4: x pi, once, so the normalized lobes meet the light units legacy Lambert already uses.
+	// FO4: x pi matches the light units legacy Lambert uses.
 	void Direct(Surface a_surface, float3 a_normal, float3 a_viewDirection, float3 a_lightDirection, float3 a_lightColor, bool a_specular, out float3 a_diffuse, out float3 a_specularOut)
 	{
 		DirectContext context = (DirectContext)0;
@@ -63,19 +60,35 @@ namespace FO4TruePBR
 		a_specularOut = a_specular ? lighting.specular * Math::PI : 0.0;
 	}
 
-	// Upstream's indirect diffuse weight divided by the base color (MRT0 is the post-metal base),
-	// so it scales the ambient irradiance before the composite multiplies the base back in.
-	float3 IndirectDiffuseThroughput(Surface a_surface, float3 a_baseColor, float3 a_normal, float3 a_viewDirection)
+	IndirectLobeWeights IndirectLobes(Surface a_surface, float3 a_baseColor, float3 a_normal, float3 a_viewDirection)
 	{
-		const float3 specularAlbedo = PBR::SpecularDirectionalAlbedo(a_surface.f0, a_surface.roughness, saturate(dot(a_normal, a_viewDirection)));
-		return (1.0 - specularAlbedo) * MultiBounceAO(a_baseColor, a_surface.ao);
+		IndirectContext context = (IndirectContext)0;
+		context.worldNormal = a_normal;
+		context.vertexNormal = a_normal;
+		context.viewDir = a_viewDirection;
+
+		MaterialProperties material = (MaterialProperties)0;
+		material.BaseColor = a_baseColor;
+		material.Roughness = a_surface.roughness;
+		material.F0 = a_surface.f0;
+		material.AO = a_surface.ao;
+
+		IndirectLobeWeights weights;
+		PBR::GetIndirectLobeWeights(weights, context, material);
+		return weights;
 	}
 
-	// Upstream's exported indirect albedo: the base color times the indirect diffuse weight.
+	// FO4: the composite multiplies the base color back in.
+	float3 IndirectDiffuseThroughput(Surface a_surface, float3 a_baseColor, float3 a_normal, float3 a_viewDirection)
+	{
+		return IndirectLobes(a_surface, a_baseColor, a_normal, a_viewDirection).diffuse / max(a_baseColor, 1e-6);
+	}
+
+	// Skylighting and SSGI take upstream's indirect diffuse weight.
 	float3 ExportedAlbedo(float2 a_pixelPosition, float3 a_normal, float3 a_viewDirection, float3 a_baseColor)
 	{
 		const Surface surface = Decode(a_pixelPosition, FO4GBufferViews::Material.Load(int3(int2(a_pixelPosition), 0)));
-		return surface.active ? a_baseColor * IndirectDiffuseThroughput(surface, a_baseColor, a_normal, a_viewDirection) : a_baseColor;
+		return surface.active ? IndirectLobes(surface, a_baseColor, a_normal, a_viewDirection).diffuse : a_baseColor;
 	}
 }
 

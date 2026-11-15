@@ -2,7 +2,9 @@
 #define FO4_TRUE_PBR_COMPOSITE_HLSLI
 
 #include "FO4/AmbientConsumer.hlsli"
+#include "FO4/GBuffer.hlsli"
 #include "FO4/TruePBR/Lighting.hlsli"
+#include "FO4/ViewPosition.hlsli"
 #ifdef SSGI
 #	include "FO4/ScreenSpaceGIConsumer.hlsli"
 #endif
@@ -12,37 +14,28 @@
 
 namespace FO4TruePBR
 {
-	float3 DecodeNormal(float2 a_encoded)
-	{
-		const float2 encoded = a_encoded * 4.0 - 2.0;
-		const float lengthSquared = dot(encoded, encoded);
-		return float3(encoded * sqrt(1.0 - lengthSquared * 0.25), -(1.0 - lengthSquared * 0.5));
-	}
-
-	// Replaces the native whole-color SSAO of a TruePBR pixel. Material AO is in the lobe weights;
-	// SSAO occludes the ambient diffuse and the environment radiance, not direct light or emission.
-	// a_color is the lit color: direct, ambient diffuse, specular and emission.
+	// Whole-color SSAO would also darken direct light and emission.
 	float3 Resolve(float2 a_pixelPosition, float3 a_color, float a_ssao, SamplerState a_sampler)
 	{
 		const int3 texel = int3(int2(a_pixelPosition), 0);
 		const Surface surface = Decode(a_pixelPosition, FO4GBufferViews::Material.Load(texel));
-		const float3 normalView = DecodeNormal(FO4GBufferViews::Normal.Load(texel).xy);
-		const float3 viewPosition = Skylighting::GetViewPosition(a_pixelPosition);
+		const float3 normalView = FO4GBuffer::DecodeViewNormal(FO4GBufferViews::Normal.Load(texel).xy);
+		const float3 viewPosition = FO4GBuffer::GetViewPosition(a_pixelPosition);
 		const float3 viewDirection = normalize(-viewPosition);
 		const float3 base = FO4GBufferViews::Albedo.Load(texel).xyz;
 		const float vertexAOStore = FO4GBufferViews::Emissive.Load(texel).w;
 		const float NdotV = saturate(dot(normalView, viewDirection));
-		const float3 specularAlbedo = PBR::SpecularDirectionalAlbedo(surface.f0, surface.roughness, NdotV);
+		const IndirectLobeWeights lobes = IndirectLobes(surface, base, normalView, viewDirection);
 		const float alpha = surface.roughness * surface.roughness;
 
 #ifdef SSGI
-		// SSGI's own visibility already occludes the diffuse and the environment.
+		// SSGI's own visibility already occludes diffuse and environment.
 		const float ssao = ScreenSpaceGI::Enabled ? 1.0 : a_ssao;
 #else
 		const float ssao = a_ssao;
 #endif
 
-		const float3 diffuseAlbedo = base * IndirectDiffuseThroughput(surface, base, normalView, viewDirection);
+		const float3 diffuseAlbedo = lobes.diffuse;
 		const float3 normalWorld = normalize(FrameBuffer::ViewToWorld(normalView, false));
 		const float3 ambient = FO4Ambient::DiffuseAlbedo(a_pixelPosition, normalView, normalWorld, diffuseAlbedo, 1.0 - vertexAOStore);
 		float3 color = FO4Ambient::SplitOcclusion(a_color, ambient, MultiBounceAO(diffuseAlbedo, ssao), 1.0);
@@ -58,7 +51,7 @@ namespace FO4TruePBR
 #	else
 		radiance *= SpecularOcclusion(NdotV, alpha, ssao);
 #	endif
-		color += specularAlbedo * SpecularOcclusion(NdotV, alpha, surface.ao) * radiance;
+		color += lobes.specular * radiance;
 #endif
 		return color;
 	}

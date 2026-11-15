@@ -143,8 +143,7 @@
 #	include "FO4/PrepassLane.h"
 #	if defined(FO4_TRUE_PBR)
 #		include "FO4/TruePBR/Debug.hlsli"
-// FO4: variants that can shade a record's material; landscape, blends and
-// character, tinted or animated surfaces keep the sanitized vanilla path.
+// FO4: variants that can shade a record; the rest keep the vanilla path.
 #		if TEXTURE && !BLEND && !LANDSCAPE && !INSTANCED && !TESSELLATE_DISP_HEIGHT && !(HAIR || EYE || FACE || SKIN_TINT || GRADIENT_REMAP || LOD_LANDSCAPE || TREE_ANIM || GRASS || PIPBOY_SCREEN || MENU_SCREEN || DISMEMBERMENT_MEATCUFF || BONE_TINTING)
 #			define FO4_TRUE_PBR_BRANCH
 #			include "FO4/TruePBR/Prepass.hlsli"
@@ -649,7 +648,7 @@ struct PS_OUTPUT
 	PS_OUTPUT output;
 #	endif
 #	if defined(FO4_TRUE_PBR_BRANCH)
-		// The lane's record id indexes the table; the flag, not the id, says the row is valid.
+		// The flag, not the id, says the row is valid.
 		TruePBRRecord::Row pbrRow = (TruePBRRecord::Row)0;
 		[branch] if (FO4SharedData::EnabledTruePBR != 0 && (PrepassFeatureLane.y & 0xFFFF) != 0)
 			pbrRow = TruePBRPrepass::Records[PrepassFeatureLane.y & 0xFFFF];
@@ -1128,7 +1127,7 @@ struct PS_OUTPUT
 #	endif
 
 #	if defined(FO4_TRUE_PBR_BRANCH)
-		// Before the native vertex color multiply; the PBR decode applies its own.
+		// Before the native vertex color multiply; the PBR decode has its own.
 		const float3 pbrBaseSample = albedoSample.xyz;
 #	endif
 #	if VC
@@ -1761,7 +1760,7 @@ struct PS_OUTPUT
 				1.0;
 #		endif
 			TruePBRPrepass::Surface surface = TruePBRPrepass::Decode(pbrBaseSample, materialSample, pbrRow, encodedVertexColor);
-			// Native wetness: gloss relative to dry, and the upstream porosity darkening.
+			// Wetness: relative gloss, and upstream's porosity darkening.
 			const float dryGloss = svScrolls.x ? anchor.x * anchor.x : anchor.x;
 			surface.roughness = TruePBRPrepass::WetRoughness(surface.roughness, sval.x, dryGloss);
 			const float wetDarkening = WetnessControl_Spec.w == -1.0 ? 0.0 : saturate(WorldWetnessAndRainTransition.x) * saturate(WetnessControl_Spec.w);
@@ -1769,7 +1768,7 @@ struct PS_OUTPUT
 
 			output.albedo = float4(surface.baseColor, 0.0);
 			output.material = 0.0;
-			output.auxA = float4(1.0 - surface.roughness, 0.0, 0.0, TruePBRPrepass::ClassTag);
+			output.auxA = float4(1.0 - surface.roughness, 0.0, 0.0, TruePBRRecord::ClassTag / 255.0);
 			float3 emission = 0.0;
 #		if GLOWMAP
 			[branch] if ((pbrRow.flags & TruePBRRecord::HasEmissive) != 0)

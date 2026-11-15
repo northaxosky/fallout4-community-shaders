@@ -12,8 +12,6 @@ namespace TruePBRPrepass
 {
 	StructuredBuffer<TruePBRRecord::Row> Records : register(t68);
 
-	static const float ClassTag = 128.0 / 255.0;
-
 	struct Surface
 	{
 		float3 baseColor;  // after metal, as upstream material.BaseColor
@@ -23,13 +21,13 @@ namespace TruePBRPrepass
 		float ao;
 	};
 
-	// FO4: the vertex shader outputs pow(color, 2.2); this inverts it per pixel.
+	// FO4: the vertex shader outputs pow(color, 2.2); invert it here.
 	float3 EncodedVertexColor(float3 a_vertexColor)
 	{
 		return pow(a_vertexColor, 1.0 / 2.2);
 	}
 
-	// Upstream's vertex color weight; base color and emission differ only in epsilon.
+	// Base color and emission differ only in epsilon.
 	float3 VertexColorWeight(float3 a_encoded, float a_epsilon)
 	{
 		float3 color = ColorManagement::PBRVertexColorToLinear(a_encoded);
@@ -38,7 +36,7 @@ namespace TruePBRPrepass
 		return Color::LinearSRGBToWorking(color);
 	}
 
-	// Lighting.hlsl:1533,2043-2082; FO4: the sRGB view already decodes the base color.
+	// Lighting.hlsl:1533,2043-2082; FO4: the sRGB view decodes the base color.
 	Surface Decode(float3 a_baseSample, float4 a_rmaosSample, TruePBRRecord::Row a_row, float3 a_encodedVertexColor)
 	{
 		const float4 rmaos = a_rmaosSample * float4(a_row.roughnessScale, 1, 1, a_row.specularLevel);
@@ -52,8 +50,7 @@ namespace TruePBRPrepass
 		return surface;
 	}
 
-	// FO4 translation of Lighting.hlsl:2823-2843: the engine constant is pow(color * scale, 2.2),
-	// so the authored color and scale are recovered from it and the lane's live scale.
+	// Lighting.hlsl:2823-2843; FO4: inverts pow(color * scale, 2.2).
 	float3 Emission(float3 a_glow, float3 a_engineConstant, float a_scale, float3 a_encodedVertexColor)
 	{
 		if (a_scale <= 0.0)
@@ -70,13 +67,13 @@ namespace TruePBRPrepass
 		return 1.0 - lerp(1, vertexAO, SharedData::truePBRSettings.VertexAOStrength);
 	}
 
-	// Spec 5.2: the native wet gloss response, relative to dry, keeps the authored roughness at g = 0.
+	// Wet gloss relative to dry, so g = 0 keeps the authored roughness.
 	float WetRoughness(float a_dryRoughness, float a_gloss, float a_dryGloss)
 	{
 		return a_dryGloss > 0.0 ? clamp(1.0 - (1.0 - a_dryRoughness) * a_gloss / a_dryGloss, PBR::Constants::MinRoughness, PBR::Constants::MaxRoughness) : a_dryRoughness;
 	}
 
-	// Lighting.hlsl:2948-2965 with the native wetness as the wet-albedo signal.
+	// Lighting.hlsl:2948-2965; FO4: native wetness is the wet signal.
 	float3 WetDarkening(float3 a_baseColor, float a_metallic, float a_wetness)
 	{
 		const float porosity = 1.0 - saturate(sqrt(a_metallic));

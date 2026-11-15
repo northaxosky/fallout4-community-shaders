@@ -7,6 +7,7 @@
 #include "FO4/AmbientConsumer.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
 #include "FO4/ScreenSpaceGI/Contracts.hlsli"
+#include "FO4/ViewPosition.hlsli"
 
 namespace ScreenSpaceGI
 {
@@ -40,8 +41,8 @@ namespace ScreenSpaceGI
 		float2 ssgiIlCoCg = BounceChromaTexture.Load(texel);
 		float3 ssgiIl = max(0, Color::YCoCgToRGB(float3(ssgiIlY, ssgiIlCoCg)));
 		// FO4: native HDR/albedo are linear; convert once at the upstream colour boundary.
-		// FO4: upstream's exported albedo is the indirect diffuse weight on a TruePBR pixel.
-		FO4_TRUE_PBR_EXPORTED_ALBEDO(albedo, screenPosition, normalVS, Skylighting::GetViewPosition(screenPosition));
+		// FO4: upstream exports the indirect diffuse weight on PBR pixels.
+		FO4_TRUE_PBR_EXPORTED_ALBEDO(albedo, screenPosition, normalVS, FO4GBuffer::GetViewPosition(screenPosition));
 		float3 linAlbedo = albedo;
 		float3 multiBounceSSGIAo = MultiBounceAO(linAlbedo, ssgiAo);
 		// FO4: native diffuse folds in powered DALC without an upstream Masks.z channel.

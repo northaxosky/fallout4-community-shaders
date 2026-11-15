@@ -4,6 +4,7 @@
 #include "FO4/FO4ShaderData.hlsli"
 #include "FO4/ImageBasedLightingConsumer.hlsli"
 #include "FO4/SkylightingConsumer.hlsli"
+#include "FO4/ViewPosition.hlsli"
 
 // Single replacement point for the vanilla diffuse ambient.
 #ifdef IBL
@@ -26,7 +27,7 @@ namespace FO4Ambient
 	}
 
 #ifdef FO4CS_SUBSTRATE
-	// Splits the replayed ambient diffuse out of a lit color so occlusion can weigh it apart.
+	// Lets occlusion weigh the replayed ambient apart from direct light.
 	float3 SplitOcclusion(float3 color, float3 ambient, float3 ambientVisibility, float3 directVisibility)
 	{
 		float maxScale = 1.0;
@@ -48,7 +49,7 @@ namespace FO4Ambient
 		float skylightingDiffuse = 1.0;
 		[branch] if (FO4SharedData::EnabledSkylighting != 0)
 		{
-			float3 positionMS = FrameBuffer::ViewToWorld(Skylighting::GetViewPosition(screenPosition));
+			float3 positionMS = FrameBuffer::ViewToWorld(FO4GBuffer::GetViewPosition(screenPosition));
 			sh2 skylightingSH = Skylighting::SampleProbes(positionMS, normalWS);
 			// FO4: lighting scaled the ambient addend; scale the separated term too.
 			ambient *= Skylighting::GetAmbientScale(skylightingSH, positionMS, normalWS, albedo, vertexAO);
