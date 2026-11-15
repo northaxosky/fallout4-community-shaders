@@ -171,7 +171,8 @@ namespace cs::render
 				// Upstream: legacy point-light colors are a white Lambert response.
 				.pointLightMult = std::numbers::pi_v<float>,
 				.ambientMult = 1.0f,
-				.glowmapMult = 1.0f,
+				// Upstream's default; TruePBR glow is the only reader.
+				.glowmapMult = 0.66f,
 				.effectLightingMult = 1.0f,
 				.membraneEffectMult = 1.0f,
 				.bloodEffectMult = 1.0f,
