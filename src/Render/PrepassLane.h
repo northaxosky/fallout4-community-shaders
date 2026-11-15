@@ -44,7 +44,7 @@ namespace cs::engine
 	{
 		std::uint32_t flags = 0;
 		std::uint32_t recordId = 0;
-		// Float bits of the draw's live emissive multiplier; set with a record id.
+		// Float bits of the live emissive multiplier; set with a record id.
 		std::uint32_t emissiveScaleBits = 0;
 		std::uint32_t reserved = 0;
 	};
@@ -66,8 +66,7 @@ namespace cs::engine
 
 		[[nodiscard]] RE::BSLightingShaderProperty* LightingProperty() noexcept;
 
-		// False for immediate draws outside the world prepass (Interface3D has no extra
-		// targets). A baked record's phase is unknown, so it counts as world.
+		// Interface3D has no extra targets; baked draws count as world.
 		[[nodiscard]] bool InWorldPrepass() const noexcept;
 
 		RE::BSRenderPass* pass;

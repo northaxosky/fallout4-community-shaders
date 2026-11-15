@@ -455,7 +455,7 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 					}
 				}
 
-				// FO4: light flags 8 and 16 follow the raster attenuation-only and specular choices.
+				// FO4: flag 16 mirrors the raster specular choice.
 				FO4_TRUE_PBR_DIRECT(pbr, normalView, viewDirection, lightDirection, light.Color, (light.Flags & 16u) != 0, diffuse, specular);
 				FO4_TRUE_PBR_OVERRIDE(pbr, ignoreRim, true);
 				[branch] if (!ignoreRim)

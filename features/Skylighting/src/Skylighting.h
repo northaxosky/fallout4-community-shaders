@@ -136,7 +136,7 @@ namespace cs::features
 			kTiled
 		};
 		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
-		// Probes, the G-buffer views for lighting consumers, and shadow visibility for raster sun lobes.
+		// Probes, then the G-buffer views, then shadow visibility.
 		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t

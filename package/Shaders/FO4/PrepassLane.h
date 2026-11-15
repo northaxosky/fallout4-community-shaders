@@ -5,8 +5,7 @@
 #	include <cstdint>
 #endif
 
-// Per-draw lane in the prepass cb2 pad: .x flags, .y record id, .z the live emissive
-// multiplier as float bits (record draws), .w zero.
+// cb2 pad lane: .x flags, .y record id, .z emissive scale bits, .w zero.
 namespace PrepassLaneFlag
 {
 #ifdef __cplusplus

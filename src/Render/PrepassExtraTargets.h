@@ -53,8 +53,7 @@ namespace cs::engine
 		std::array<PrepassExtraWrite, kTerrainWritePhases> terrain{};
 		// Mirrors separate R8 targets, which wrote only where R was written.
 		std::uint8_t nativeRCoupled = 0;
-		// Channels written where roughness and class are (RT3): a full color write under
-		// replace or the source-alpha lerp. Masked under any other state.
+		// Channels that follow RT3's full color write, masked otherwise.
 		std::uint8_t materialMask = 0;
 	};
 

@@ -74,7 +74,7 @@ namespace DynamicCubemaps
 		else
 #endif
 		{
-			// Upstream DeferredCompositeCS.hlsl:248-276: the fallback without IBL normalizes by the DALC.
+			// DeferredCompositeCS.hlsl:248-276; FO4 scales by the DALC.
 			const float3 ambientSpecular = Color::RGBToLuminance(FO4SharedData::GetAmbientLinear(direction)) * Color::ReflectionNormalisationScale;
 			// FO4: upstream's INTERIOR permutation is the runtime interior flag.
 			[branch] if (SharedData::InInterior)
