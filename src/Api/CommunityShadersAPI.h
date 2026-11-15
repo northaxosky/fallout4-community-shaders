@@ -20,8 +20,8 @@ enum CS_HdrSceneEncoding
 // Append-only: fields past the caller's size are not written.
 struct CS_HdrOutputState
 {
-	uint32_t size;           // sizeof the caller's struct, set by the caller
-	uint32_t hdrActive;      // 1 while the frame renders HDR
+	uint32_t size;       // sizeof the caller's struct, set by the caller
+	uint32_t hdrActive;  // 1 while the frame renders HDR
 	float paperWhiteNits;
 	float peakNits;
 	uint32_t sceneEncoding;  // CS_HdrSceneEncoding
