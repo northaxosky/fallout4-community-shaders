@@ -22,13 +22,13 @@ namespace cs::features::true_pbr
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Reached by every lighting subclass; effect and water materials share the base copy.
-		struct BSShaderMaterial_CopyMembers
+		// Every lighting subclass override calls this base (OG, NG and AE).
+		struct BSLightingShaderMaterialBase_CopyMembers
 		{
-			static void thunk(RE::BSShaderMaterial* a_dest, const RE::BSShaderMaterial* a_source)
+			static void thunk(RE::BSLightingShaderMaterialBase* a_dest, const RE::BSShaderMaterial* a_source)
 			{
 				func(a_dest, a_source);
-				if (Tags().Count() == 0 || a_dest->GetType() != RE::BSShaderMaterial::Type::kLighting)
+				if (Tags().Count() == 0)
 					return;
 				if (const auto id = Tags().Find(a_source))
 					Tags().Assign(a_dest, id);
@@ -64,7 +64,7 @@ namespace cs::features::true_pbr
 		static bool copy = false;
 		static bool setup = false;
 		return engine::EnsureDetourInstalled<BSLightingShaderMaterialBase_Dtor>(dtor, RE::ID::BSLightingShaderMaterialBase::Dtor, "BSLightingShaderMaterialBase::~BSLightingShaderMaterialBase") &&
-		       engine::EnsureDetourInstalled<BSShaderMaterial_CopyMembers>(copy, RE::ID::BSShaderMaterial::CopyMembers, "BSShaderMaterial::CopyMembers") &&
+		       engine::EnsureDetourInstalled<BSLightingShaderMaterialBase_CopyMembers>(copy, RE::ID::BSLightingShaderMaterialBase::CopyMembers, "BSLightingShaderMaterialBase::CopyMembers") &&
 		       engine::EnsureDetourInstalled<BSShaderData_SetupDataLightingShader>(setup, RE::ID::BSShaderData::SetupDataLightingShader, "BSShaderData::SetupDataLightingShader");
 	}
 }
