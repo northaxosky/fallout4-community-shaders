@@ -27,8 +27,11 @@
 #	include "FO4/TruePBR/Composite.hlsli"
 // A TruePBR pixel resolves its own ambient occlusion and environment radiance.
 #	define FO4_TRUE_PBR_RESOLVE(materialClass, result, litColor, ssao, pixelPosition, probeSampler) [branch] if (FO4TruePBR::IsPixel(materialClass)) result = FO4TruePBR::Resolve(pixelPosition, litColor, ssao, probeSampler)
+// The native and Vanilla PBR reflections are off on a TruePBR pixel, also under a blended draw.
+#	define FO4_TRUE_PBR_NO_NATIVE_REFLECTION(materialClass, reflectionScale) [branch] if (FO4TruePBR::IsPixel(materialClass)) reflectionScale = 0.0
 #else
 #	define FO4_TRUE_PBR_RESOLVE(materialClass, result, litColor, ssao, pixelPosition, probeSampler)
+#	define FO4_TRUE_PBR_NO_NATIVE_REFLECTION(materialClass, reflectionScale)
 #endif
 
 float3 AuthoredEnvironment(TextureCubeArray<float4> probe, SamplerState probeSampler, float3 direction, float lod,
@@ -412,6 +415,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float matSliceFloat = matRaw.y;
 	float matGlossOrSpec = matRaw.z;
 	float glossSquaredScaled = matGlossOrSpec * matGlossOrSpec * 50.0;
+	FO4_TRUE_PBR_NO_NATIVE_REFLECTION(shadingData.z, glossSquaredScaled);
 	bool hasIBL = (matSliceFloat > 0.5 / 255.0);
 	float3 iblColor = float3(0, 0, 0);
 	if (hasIBL) {
@@ -884,6 +888,7 @@ PS_OUTPUT main(PS_INPUT input)
 			shadingData.y * 3.0 *
 			min(1.0, 1.0 / rsqrt(saturate(shadingData.x - 0.3)));
 		float glossSquaredScaled = material.z * material.z * 50.0;
+		FO4_TRUE_PBR_NO_NATIVE_REFLECTION(shadingData.z, glossSquaredScaled);
 #	if !defined(OG)
 		float2 litSceneUv = min(uv, SunColor_row3.xy);
 		float4 litScene = g_tLitScene.Sample(g_sLitScene, litSceneUv);
@@ -1138,6 +1143,7 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 #	endif
 )
 {
+	FO4_TRUE_PBR_NO_NATIVE_REFLECTION(materialClass, gloss);
 	float3 color = environment * glossFactor;
 	color *= gloss;
 	color = color * directLighting + centerColor;
@@ -1573,6 +1579,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		float s = min(1.0 / rsqrt(saturate(surf.x - 0.3)), 1.0);
 		k = k * s;
 		float g2 = (prm.y * prm.y) * 50.0;
+		FO4_TRUE_PBR_NO_NATIVE_REFLECTION(surf.z, g2);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 		// FO4: the live reflection joins after the mask, with its own weight.
 		float3 liveReflection = VanillaPBR::LiveEnvironmentUsed ? cube * k * g2 : 0.0;
@@ -2724,6 +2731,7 @@ float4 main(PSInput input) : SV_Target0
 			1.0 / rsqrt(saturate(typeData.x - 0.3)));
 		gloss *= roughFactor;
 		float specularScale = material.y * material.y * 50.0;
+		FO4_TRUE_PBR_NO_NATIVE_REFLECTION(typeData.z, specularScale);
 #	else
 	float gloss = typeData.y * 3.0;
 	float roughFactor = min(
@@ -2732,6 +2740,7 @@ float4 main(PSInput input) : SV_Target0
 	gloss *= roughFactor;
 	material = materialTexture.SampleLevel(materialSampler, uv, 0.0).yz;
 	float specularScale = material.y * material.y * 50.0;
+	FO4_TRUE_PBR_NO_NATIVE_REFLECTION(typeData.z, specularScale);
 	if (material.x > (0.5 / 255.0)) {
 		float2 encodedNormal =
 			normalTexture.SampleLevel(normalSampler, uv, 0.0).xy * 4.0 - 2.0;
