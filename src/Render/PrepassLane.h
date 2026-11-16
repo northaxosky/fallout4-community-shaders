@@ -3,6 +3,7 @@
 #include "../../package/Shaders/FO4/PrepassLane.h"
 #include "Render/ObjectLOD.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -12,6 +13,7 @@ namespace RE
 {
 	class BSLightingShaderProperty;
 	class BSRenderPass;
+	class NiTexture;
 }
 
 namespace cs
@@ -46,7 +48,8 @@ namespace cs::engine
 		std::uint32_t recordId = 0;
 		// Float bits of the live emissive multiplier; set with a record id.
 		std::uint32_t emissiveScaleBits = 0;
-		std::uint32_t reserved = 0;
+		// PrepassLaneTexture bits of the record textures bound for this draw.
+		std::uint32_t texturesBound = 0;
 	};
 	static_assert(sizeof(PrepassLanePayload) == 16);
 
@@ -77,14 +80,39 @@ namespace cs::engine
 		std::optional<RE::BSLightingShaderProperty*> _lightingProperty;
 	};
 
+	enum class PrepassRecordTexture : std::size_t
+	{
+		kDisplacement,
+		kFeatures0,
+		kFeatures1,
+		kCount
+	};
+
+	// Record textures keep a draw immediate; null entries are not bound.
+	struct PrepassRecord
+	{
+		std::uint16_t id = 0;  // 0 is none
+		std::array<RE::NiTexture*, static_cast<std::size_t>(PrepassRecordTexture::kCount)> textures{};
+
+		[[nodiscard]] bool HasTextures() const noexcept
+		{
+			for (const auto* texture : textures) {
+				if (texture)
+					return true;
+			}
+			return false;
+		}
+	};
+
 	using PrepassDrawClassifier = bool (*)(PrepassDrawContext& a_draw) noexcept;
-	// Returns the draw's material record id; 0 is none.
-	using PrepassRecordClassifier = std::uint16_t (*)(PrepassDrawContext& a_draw) noexcept;
+	using PrepassRecordClassifier = PrepassRecord (*)(PrepassDrawContext& a_draw) noexcept;
 
 	struct PrepassLaneStats
 	{
-		std::uint64_t baked = 0;        // draws whose lane was written
-		std::uint64_t unavailable = 0;  // landscape excluded
+		std::uint64_t baked = 0;          // draws whose lane was written
+		std::uint64_t unavailable = 0;    // landscape excluded
+		std::uint64_t textured = 0;       // immediate draws that bound a record texture
+		std::uint64_t keptImmediate = 0;  // bakes skipped for record textures
 	};
 
 	struct PrepassClassifierStats

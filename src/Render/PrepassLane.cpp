@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "Log.h"
 #include "PCH.h"
+#include "Render/Engine.h"
 #include "Render/PrepassTechnique.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderHookSupport.h"
@@ -16,10 +17,12 @@
 
 #include "RE/B/BSDFPrePassShader.h"
 #include "RE/B/BSGeometry.h"
+#include "RE/B/BSLightingShaderMaterialBase.h"
 #include "RE/B/BSLightingShaderProperty.h"
 #include "RE/B/BSRenderPass.h"
 #include "RE/B/BSShaderProperty.h"
 #include "RE/N/NiRTTI.h"
+#include "RE/N/NiTexture.h"
 
 namespace cs::engine
 {
@@ -58,6 +61,8 @@ namespace cs::engine
 		std::array<std::array<ClassifierCounts, kPrepassBakePaths>, kPrepassFlagSlots> g_classifierCounts;
 		std::atomic<std::uint64_t> g_laneBaked{ 0 };
 		std::atomic<std::uint64_t> g_laneUnavailable{ 0 };
+		std::atomic<std::uint64_t> g_laneTextured{ 0 };
+		std::atomic<std::uint64_t> g_laneKeptImmediate{ 0 };
 		std::atomic_bool g_inWorldPrepass{ false };
 
 		// Stock never reads the cb2 pad before material flags.
@@ -68,12 +73,21 @@ namespace cs::engine
 		constexpr std::uint32_t kPerGeometryConstantLevel = 2;
 		constexpr std::size_t kLaneDwords = sizeof(PrepassLanePayload) / sizeof(float);
 
+		constexpr std::size_t kRecordTextureCount = static_cast<std::size_t>(PrepassRecordTexture::kCount);
+		constexpr std::array<std::uint32_t, kRecordTextureCount> kRecordTextureSlots{
+			PrepassLaneTexture::DisplacementSlot, PrepassLaneTexture::Features0Slot, PrepassLaneTexture::Features1Slot
+		};
+
 		struct PrepassLaneRequest
 		{
 			PrepassBakePath path;
 			std::uint32_t descriptor;
 			PrepassLanePayload payload;
 			std::int32_t offset;  // -1 when unresolved
+			// Baked draws cannot carry plugin textures, so they stay immediate.
+			bool keepImmediate = false;
+			RE::BSGraphics::TextureAddressMode addressMode = RE::BSGraphics::TextureAddressMode::kWrap_S_Wrap_T;
+			std::array<const RE::BSGraphics::Texture*, kRecordTextureCount> textures{};
 		};
 
 		thread_local PrepassLaneRequest* t_prepassLane = nullptr;
@@ -125,6 +139,38 @@ namespace cs::engine
 			return a_registration.classify && (a_path == PrepassBakePath::kCommandBuffer || a_registration.owner->IsEnabled());
 		}
 
+		// Decided with the slot writes, so the lane never claims an unbound slot.
+		void ResolveRecordTextures(const PrepassRecord& a_record, PrepassDrawContext& a_draw, PrepassLaneRequest& a_request) noexcept
+		{
+			if (!a_record.HasTextures())
+				return;
+			if (a_request.path == PrepassBakePath::kCommandBuffer) {
+				a_request.keepImmediate = true;
+				return;
+			}
+			for (std::size_t index = 0; index < kRecordTextureCount; ++index) {
+				const auto* texture = a_record.textures[index];
+				const auto* renderer = texture ? texture->rendererTexture : nullptr;
+				if (!renderer || IsEngineDefaultTexture(texture))
+					continue;
+				a_request.textures[index] = renderer;
+				a_request.payload.texturesBound |= 1u << index;
+			}
+			if (const auto* property = a_draw.LightingProperty(); property && property->material)
+				a_request.addressMode = static_cast<const RE::BSLightingShaderMaterialBase*>(property->material)->textureClampMode;
+		}
+
+		void BindRecordTextures(const PrepassLaneRequest& a_request) noexcept
+		{
+			if (a_request.payload.texturesBound == 0)
+				return;
+			for (std::size_t index = 0; index < kRecordTextureCount; ++index) {
+				if (const auto* texture = a_request.textures[index])
+					SetPixelShaderTexture(kRecordTextureSlots[index], *texture, a_request.addressMode, RE::BSGraphics::TextureFilterMode::kAniso);
+			}
+			g_laneTextured.fetch_add(1, std::memory_order_relaxed);
+		}
+
 		// Constants persist between draws, so unused components are zeroed.
 		[[nodiscard]] PrepassLaneRequest MakePrepassLaneRequest(
 			RE::BSShader* a_shader,
@@ -152,8 +198,12 @@ namespace cs::engine
 				if (flagged)
 					request.payload.flags |= 1u << slot;
 			}
-			if (Runs(g_recordClassifier, a_path))
-				request.payload.recordId = g_recordClassifier.classify(draw);
+			if (Runs(g_recordClassifier, a_path)) {
+				const auto record = g_recordClassifier.classify(draw);
+				request.payload.recordId = record.id;
+				if (record.id != 0)
+					ResolveRecordTextures(record, draw, request);
+			}
 			if (request.payload.recordId != 0) {
 				if (const auto* property = draw.LightingProperty())
 					request.payload.emissiveScaleBits = std::bit_cast<std::uint32_t>(property->emitColorScale);
@@ -175,8 +225,11 @@ namespace cs::engine
 					return;
 				}
 				auto request = MakePrepassLaneRequest(a_self, a_pass, PrepassBakePath::kImmediate);
-				const ThreadLocalPointerScope scope(t_prepassLane, &request);
-				func(a_self, a_pass);
+				{
+					const ThreadLocalPointerScope scope(t_prepassLane, &request);
+					func(a_self, a_pass);
+				}
+				BindRecordTextures(request);
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -234,6 +287,11 @@ namespace cs::engine
 				if (!g_prepassLaneActive || !a_pass || (a_pass->passEnum & kPrepassLandscapeBit) != 0)
 					return func(a_self, a_pass);
 				auto request = MakePrepassLaneRequest(a_self, a_pass, PrepassBakePath::kCommandBuffer);
+				if (request.keepImmediate) {
+					// The engine's own exclusion result: no buffer, the draw stays immediate.
+					g_laneKeptImmediate.fetch_add(1, std::memory_order_relaxed);
+					return nullptr;
+				}
 				const ThreadLocalPointerScope scope(t_prepassLane, &request);
 				return func(a_self, a_pass);
 			}
@@ -317,7 +375,10 @@ namespace cs::engine
 
 	PrepassLaneStats GetPrepassLaneStats() noexcept
 	{
-		return { g_laneBaked.load(std::memory_order_relaxed), g_laneUnavailable.load(std::memory_order_relaxed) };
+		return {
+			g_laneBaked.load(std::memory_order_relaxed), g_laneUnavailable.load(std::memory_order_relaxed),
+			g_laneTextured.load(std::memory_order_relaxed), g_laneKeptImmediate.load(std::memory_order_relaxed)
+		};
 	}
 
 	PrepassClassifierStats GetPrepassClassifierStats(PrepassDrawFlag a_flag, PrepassBakePath a_path) noexcept

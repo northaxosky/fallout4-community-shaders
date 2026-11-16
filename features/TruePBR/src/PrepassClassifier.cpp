@@ -9,12 +9,12 @@ namespace cs::features::true_pbr
 {
 	namespace
 	{
-		std::uint16_t ClassifyRecord(engine::PrepassDrawContext& a_draw) noexcept
+		engine::PrepassRecord ClassifyRecord(engine::PrepassDrawContext& a_draw) noexcept
 		{
 			if (!a_draw.InWorldPrepass())
-				return RecordId{ 0 };
+				return {};
 			const auto* property = a_draw.LightingProperty();
-			return property && property->material ? Tags().Find(property->material) : RecordId{ 0 };
+			return property && property->material ? engine::PrepassRecord{ .id = Tags().Find(property->material) } : engine::PrepassRecord{};
 		}
 	}
 
