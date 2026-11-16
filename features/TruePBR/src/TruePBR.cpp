@@ -13,6 +13,7 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/GBufferViews.h"
+#include "Render/PrepassLane.h"
 #include "Render/RenderHooks.h"
 #include "Render/RenderTargetFormats.h"
 #include "Render/ShaderInjection.h"
@@ -238,9 +239,13 @@ namespace cs::features
 	void TruePBR::CollectTelemetry(telemetry::Sink& a_sink) const
 	{
 		using namespace true_pbr;
+		const auto lanes = engine::GetPrepassLaneStats();
 		a_sink
 			.Field("records", Records().Count())
 			.Field("rejected", Notices().RejectedCount())
+			.Field("texture_warnings", Notices().WarningCount())
+			.Field("textured_draws", lanes.textured)
+			.Field("bakes_kept_immediate", lanes.keptImmediate)
 			.Field("live_tags", Tags().Count())
 			.Field("retag_conflicts", Tags().Conflicts())
 			.Field("foreign_material_path", Tags().ForeignPaths())
@@ -254,7 +259,7 @@ namespace cs::features
 	{
 		using namespace true_pbr;
 		dmui::ui::Text("Records: %zu  Live tagged materials: %zu", Records().Count(), Tags().Count());
-		dmui::ui::Text("Rejected files: %zu", Notices().RejectedCount());
+		dmui::ui::Text("Rejected files: %zu  Texture warnings: %zu", Notices().RejectedCount(), Notices().WarningCount());
 		if (const auto last = Notices().LastRejection(); !last.empty())
 			dmui::ui::Text("Last rejection: %s", last.c_str());
 		for (const auto& [id, live] : Tags().LiveByRecord()) {

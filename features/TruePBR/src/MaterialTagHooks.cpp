@@ -2,6 +2,7 @@
 
 #include "MaterialRegistry.h"
 #include "MaterialTags.h"
+#include "RecordTextures.h"
 #include "Render/HookRegistry.h"
 
 #include "RE/B/BSLightingShaderMaterialBase.h"
@@ -28,12 +29,8 @@ namespace cs::features::true_pbr
 			static void thunk(RE::BSLightingShaderMaterialBase* a_dest, const RE::BSShaderMaterial* a_source)
 			{
 				func(a_dest, a_source);
-				if (Tags().Count() == 0)
-					return;
-				if (const auto id = Tags().Find(a_source))
-					Tags().Assign(a_dest, id);
-				else
-					Tags().Erase(a_dest);
+				if (Tags().Count() != 0)
+					Tags().Inherit(a_dest, a_source);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -51,8 +48,10 @@ namespace cs::features::true_pbr
 				const auto* record = named ? Records().Find(path) : nullptr;
 				if (named && !record)
 					Tags().NoteForeignPath();
-				if (record || Tags().Count() != 0)
-					Tags().Assign(a_property->material, record ? record->id : RecordId{ 0 });
+				if (!record && Tags().Count() == 0)
+					return;
+				// Loaded before Assign so no tag or registry lock is held across it.
+				Tags().Assign(a_property->material, record ? record->id : RecordId{ 0 }, record ? RequestRecordTextures(*record) : RecordTextureSet{});
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};

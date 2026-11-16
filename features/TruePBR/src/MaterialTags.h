@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MaterialRegistry.h"
+#include "RecordTextures.h"
 
 #include <atomic>
 #include <cstddef>
@@ -17,9 +18,14 @@ namespace cs::features::true_pbr
 	public:
 		// 0 when untagged. Lock-free while nothing is tagged.
 		[[nodiscard]] RecordId Find(const void* a_material) const;
+		// The textures stay valid while the material lives.
+		[[nodiscard]] engine::PrepassRecord Lookup(const void* a_material) const;
 
 		// A different tag already there means a shared material; counted.
-		void Assign(const void* a_material, RecordId a_id);
+		void Assign(const void* a_material, RecordId a_id, RecordTextureSet a_textures = {});
+
+		// Gives a_dest a_source's tag; false when a_source has none (a_dest is untagged).
+		bool Inherit(const void* a_dest, const void* a_source);
 
 		void Erase(const void* a_material);
 
@@ -32,8 +38,17 @@ namespace cs::features::true_pbr
 		[[nodiscard]] std::vector<std::pair<RecordId, std::size_t>> LiveByRecord() const;
 
 	private:
+		struct Entry
+		{
+			RecordId id = 0;
+			RecordTextureSet textures;
+		};
+
+		// Under the unique lock; the displaced entry is released after unlocking.
+		[[nodiscard]] Entry Replace(const void* a_material, RecordId a_id, RecordTextureSet&& a_textures, bool a_countConflict);
+
 		mutable std::shared_mutex _lock;
-		std::unordered_map<const void*, RecordId> _tags;
+		std::unordered_map<const void*, Entry> _tags;
 		std::atomic<std::size_t> _count{ 0 };
 		std::atomic<std::uint64_t> _conflicts{ 0 };
 		std::atomic<std::uint64_t> _foreign{ 0 };
