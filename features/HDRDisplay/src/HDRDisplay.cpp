@@ -262,6 +262,7 @@ extern "C" DLLEXPORT bool CS_GetHdrOutputState(CS_HdrOutputState* a_state) noexc
 		.paperWhiteNits = settings.paperWhite,
 		.peakNits = settings.peakNits,
 		.sceneEncoding = CS_HdrSceneEncoding_LinearPaperWhite,
+		.lutOutputEncoding = CS_HdrLutOutputEncoding_SignedGamma22PaperWhite,
 	};
 	std::memcpy(a_state, &state, std::min<std::size_t>(state.size, sizeof(state)));
 	return true;
