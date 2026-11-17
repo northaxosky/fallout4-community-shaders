@@ -471,6 +471,9 @@ float HeightScaleOf(Texture2D<float4> a_texture, SamplerState a_sampler)
 #		undef LANDSCAPE
 #		include "ExtendedMaterials/ExtendedMaterials.hlsli"
 #		define LANDSCAPE 0
+#		if defined(FO4_TRUE_PBR_BRANCH)
+#			include "FO4/TruePBR/Parallax.hlsli"
+#		endif
 #	elif defined(EMAT_LANDSCAPE)
 // FO4: four layers, height in each _s alpha; layers 5-6 weigh zero.
 struct EMLandscapeInput
@@ -653,6 +656,15 @@ struct PS_OUTPUT
 		[branch] if (FO4SharedData::EnabledTruePBR != 0 && (PrepassFeatureLane.y & 0xFFFF) != 0)
 			pbrRow = TruePBRPrepass::Records[PrepassFeatureLane.y & 0xFFFF];
 		const bool pbrPixel = (pbrRow.flags & TruePBRRecord::Valid) != 0;
+#		if defined(EMAT_OBJECT)
+		// FO4: the host binds t4 only for draws that have a displacement texture.
+		const bool pbrParallax = pbrPixel && (PrepassFeatureLane.w & PrepassLaneTexture::Displacement) != 0 && (pbrRow.flags & TruePBRRecord::InterlayerParallax) == 0;
+#		endif
+#	endif
+#	if defined(EMAT_OBJECT) && defined(FO4_TRUE_PBR_BRANCH)
+#		define FO4_PBR_PARALLAX pbrParallax
+#	else
+#		define FO4_PBR_PARALLAX false
 #	endif
 #	if defined(EXTENDED_MATERIALS)
 		float parallaxShadow = 1.0;
@@ -775,7 +787,7 @@ struct PS_OUTPUT
 			&& SharedData::extendedMaterialSettings.EnableTerrainParallax
 #		else
 			// FO4: only the marcher below reads this; upstream runs it on all EMAT draws.
-			&& SharedData::extendedMaterialSettings.EnableParallax && (PrepassFeatureLane.x & PrepassLaneFlag::ExtendedMaterials) != 0
+			&& SharedData::extendedMaterialSettings.EnableParallax && ((PrepassFeatureLane.x & PrepassLaneFlag::ExtendedMaterials) != 0 || FO4_PBR_PARALLAX)
 #		endif
 		) {
 			float3 ndx = ddx(vertexNormal);
@@ -803,6 +815,10 @@ struct PS_OUTPUT
 		}
 #	endif
 
+#	if defined(EMAT_OBJECT) && defined(FO4_TRUE_PBR_BRANCH)
+		const float2 geometricUv = uv;
+		float2 pbrUvDelta = 0.0;
+#	endif
 #	if defined(EMAT_OBJECT)
 		// FO4: the lane flags non-LOD meshes whose _s format stores alpha.
 		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && (PrepassFeatureLane.x & PrepassLaneFlag::ExtendedMaterials) != 0 && !FO4_PBR_PIXEL)
@@ -827,6 +843,15 @@ struct PS_OUTPUT
 				}
 			}
 		}
+#		if defined(FO4_TRUE_PBR_BRANCH)
+		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && pbrParallax)
+		{
+			const TruePBRParallax::Result pbrMarch = TruePBRParallax::March(uv, viewPosition.z, viewDirection, tbnTr, screenNoise, pbrRow.displacementScale, displacementParams);
+			uv = pbrMarch.uv;
+			parallaxShadow = pbrMarch.shadow;
+			pbrUvDelta = uv - geometricUv;
+		}
+#		endif
 #	endif
 
 #	if LANDSCAPE
@@ -1208,6 +1233,17 @@ struct PS_OUTPUT
 #		if EYE && COMBINED
 		clip(albedoSample.a - eyeParams.x);
 #		else
+#			if defined(EMAT_OBJECT) && defined(FO4_TRUE_PBR_BRANCH)
+		// Upstream tests alpha at the geometric uv; the vertex alpha multiply stays.
+		[branch] if (any(pbrUvDelta != 0.0))
+		{
+			albedoSample.a = SAMPLE_MATERIAL(g_tAlbedo, g_sAlbedo, geometricUv).a
+#				if VC
+		                     * input.vertexColor.a
+#				endif
+				;
+		}
+#			endif
 		clip(albedoSample.a - EmissiveColor_row0.w);
 #		endif
 #	endif
@@ -1782,10 +1818,14 @@ struct PS_OUTPUT
 			output.specTint.w = 0.0;
 #			endif
 #		endif
-			output.aux.xyz = float3(1.0, 0.0, surface.ao);
+			output.aux.xyz = float3(auxParallaxShadow, 0.0, surface.ao);
 			output.f0.xyz = surface.f0;
 			[branch] if (TruePBRDebug::IsMaterialView())
 				TruePBRDebug::ApplyMaterial(surface.baseColor, surface.roughness, surface.f0, surface.ao, output.albedo.xyz, output.specTint.xyz);
+#		if defined(EMAT_OBJECT)
+			[branch] if (TruePBRDebug::IsParallaxView())
+				TruePBRDebug::ApplyParallax(pbrUvDelta, auxParallaxShadow, output.albedo.xyz, output.specTint.xyz);
+#		endif
 		}
 #	endif
 #	if defined(FO4_TRUE_PBR) && !LANDSCAPE

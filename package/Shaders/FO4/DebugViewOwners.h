@@ -45,6 +45,7 @@ namespace TruePBRDebugMode
 		BaseColor = 3,
 		Roughness = 4,
 		MetallicF0 = 5,
-		AmbientOcclusion = 6;
+		AmbientOcclusion = 6,
+		ParallaxOffset = 7;
 }
 #endif

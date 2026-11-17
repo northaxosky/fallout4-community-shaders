@@ -25,6 +25,7 @@
 
 #include <DearModdingUI/Client.h>
 
+#include <algorithm>
 #include <array>
 #include <format>
 
@@ -49,7 +50,8 @@ namespace cs::features
 			FeatureDebugView{ "base_color", "Base color (after metal)", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "roughness", "Roughness", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "metallic_f0", "F0 (metals carry their color)", FeatureDebugViewKind::kFullscreen },
-			FeatureDebugView{ "ambient_occlusion", "Material ambient occlusion", FeatureDebugViewKind::kFullscreen }
+			FeatureDebugView{ "ambient_occlusion", "Material ambient occlusion", FeatureDebugViewKind::kFullscreen },
+			FeatureDebugView{ "parallax_offset", "Parallax offset (uv x10 in RG, shadow in B)", FeatureDebugViewKind::kFullscreen }
 		};
 	}
 
@@ -228,6 +230,7 @@ namespace cs::features
 		             a_view == "roughness"         ? TruePBRDebugMode::Roughness :
 		             a_view == "metallic_f0"       ? TruePBRDebugMode::MetallicF0 :
 		             a_view == "ambient_occlusion" ? TruePBRDebugMode::AmbientOcclusion :
+		             a_view == "parallax_offset"   ? TruePBRDebugMode::ParallaxOffset :
 		                                             0u;
 	}
 
@@ -275,6 +278,11 @@ namespace cs::features
 		ui::DrawStatusText(Log(), std::format("{} PBR material files loaded this session.", records), dmui::TextTone::kInherit);
 		if (!IsEnabled() && records != 0)
 			ui::DrawStatusText(Log(), "True PBR is switched off, but loaded PBR materials keep their PBR textures and render through vanilla shading until restart.", dmui::TextTone::kStatusWarning);
+		bool parallax = false;
+		for (const auto* feature : FeatureManager::Get().GetAll())
+			parallax = parallax || (feature->GetName() == "ExtendedMaterials" && feature->IsEnabled());
+		if (!parallax)
+			ui::DrawStatusText(Log(), "PBR parallax needs Extended Materials, which is not active; PBR surfaces render flat.", dmui::TextTone::kStatusWarning);
 		settings::SettingsEdit edit{ *this };
 		const auto field = edit.Bind(kSchema, _settings);
 		if (const ui::Section section{ "true-pbr-global", "Global Settings" }; section) {

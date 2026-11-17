@@ -21,6 +21,11 @@ namespace TruePBRDebug
 		return IsOwner() && FO4SharedData::DebugMode >= TruePBRDebugMode::BaseColor && FO4SharedData::DebugMode <= TruePBRDebugMode::AmbientOcclusion;
 	}
 
+	bool IsParallaxView()
+	{
+		return IsOwner() && FO4SharedData::DebugMode == TruePBRDebugMode::ParallaxOffset;
+	}
+
 	// Golden-ratio hue steps keep consecutive ids visibly apart.
 	float3 RecordColor(uint a_record)
 	{
@@ -33,6 +38,13 @@ namespace TruePBRDebug
 	{
 		a_albedo = 0.0;
 		a_emissive = FO4SharedData::DebugMode == TruePBRDebugMode::Record ? RecordColor(a_record) : float3(1.0, 0.0, 1.0);
+	}
+
+	// Uv offset times ten in red and green, the parallax shadow in blue.
+	void ApplyParallax(float2 a_uvDelta, float a_shadow, inout float3 a_albedo, inout float3 a_emissive)
+	{
+		a_albedo = 0.0;
+		a_emissive = float3(abs(a_uvDelta) * 10.0, a_shadow);
 	}
 
 	void ApplyMaterial(float3 a_baseColor, float a_roughness, float3 a_f0, float a_ao, inout float3 a_albedo, inout float3 a_emissive)
