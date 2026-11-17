@@ -281,8 +281,10 @@ namespace cs::features::performance_overlay
 			throw std::runtime_error("A comparison is already running");
 		if (a_options.windowSeconds < 1 || a_options.cycles < 1)
 			throw std::runtime_error("A run needs at least one cycle of one-second windows");
-		if (a_options.settleSeconds >= a_options.windowSeconds)
-			throw std::runtime_error("settleSeconds must be shorter than the window");
+		if (a_options.settleSeconds < kMinSettleSeconds || a_options.settleSeconds >= a_options.windowSeconds) {
+			throw std::runtime_error(std::format("settleSeconds must be from {} up to but not including windowSeconds ({})",
+				kMinSettleSeconds, a_options.windowSeconds));
+		}
 		auto current = Capture();
 		auto variant = current;
 		for (const auto& [feature, overrides] : a_variant.settings) {
@@ -294,6 +296,8 @@ namespace cs::features::performance_overlay
 					throw std::runtime_error(std::format("{}.{} is not a comparable live setting", feature->GetName(), key.str()));
 				live->second.insert_or_assign(key, node);
 			}
+			if (std::string error; !FeatureManager::Get().PrepareLiveSettings(*feature, live->second, "ABComparison::StartRun", error))
+				throw std::runtime_error(std::format("{}: {}", feature->GetName(), error));
 		}
 		if (a_variant.ownership)
 			variant.ownership = *a_variant.ownership;
@@ -322,7 +326,7 @@ namespace cs::features::performance_overlay
 		}
 		++_framesSinceSwitch;
 		if (_framesSinceSwitch >= kSettleFrames && a_now - _lastSwitch >= _settleSeconds) {
-			// Per-type rows freeze without draw profiling, so a scripted run keeps only Total.
+			// Per-type rows freeze without draw profiling; scripted runs keep Total.
 			if (!_scripted) {
 				_aggregator.OnFrame(a_rows);
 			} else if (const auto total = std::ranges::find(a_rows, -1, &DrawCallRow::shaderType); total != a_rows.end()) {
@@ -414,7 +418,7 @@ namespace cs::features::performance_overlay
 			if (dmui::ui::Button("Measure CS cost"))
 				Attempt([&] { StartCostRun(RunOptions{}); });
 		}
-		if (ScriptedRunning() && dmui::ui::Button("Stop CS Cost Measurement"))
+		if (ScriptedRunning() && dmui::ui::Button("Stop Scripted Comparison"))
 			Attempt([&] { SetInterval(0); });
 		dmui::ui::TextWrapped("%s", CostHelp().c_str());
 	}

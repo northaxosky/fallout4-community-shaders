@@ -85,8 +85,9 @@ namespace cs::feature_config
 		std::string error;
 	};
 
-	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root);
-	// Invalid or missing values use the default; a_error names an invalid one.
+	ShaderOwnershipConfig DefaultShaderOwnership();
+	// Invalid or missing values use a_base; error names an invalid one.
+	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root, const ShaderOwnershipConfig& a_base = DefaultShaderOwnership());
 
 	struct WriteResult
 	{

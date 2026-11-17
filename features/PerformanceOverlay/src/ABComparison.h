@@ -63,11 +63,12 @@ namespace cs::features::performance_overlay
 		};
 
 		// windowSeconds includes the settle period.
+		static constexpr double kMinSettleSeconds = 0.25;
 		struct RunOptions
 		{
 			int windowSeconds = 3;
 			int cycles = 10;
-			double settleSeconds = 0.25;
+			double settleSeconds = kMinSettleSeconds;
 		};
 
 		explicit ABComparison(const Feature& a_owner) :
@@ -88,8 +89,7 @@ namespace cs::features::performance_overlay
 		void CaptureBaseline();
 		// Zero restores B and ends the run; throws if restoration fails.
 		void SetInterval(int);
-		// Current state (B) against it with the variant applied (A); throws when
-		// the variant is invalid, changes nothing, or a comparison is active.
+		// Current state (B) vs current plus the variant (A); throws if invalid.
 		void StartRun(const Variant&, const RunOptions&, std::string a_labelA, std::string a_labelB);
 		// Custom shaders on (B) against off (A); throws when they are already off.
 		void StartCostRun(const RunOptions&);

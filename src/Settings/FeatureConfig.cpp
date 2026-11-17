@@ -481,12 +481,18 @@ namespace cs::feature_config
 		return UpdateOwnedSettingsAt(kConfigPath, path, a_value, a_mode);
 	}
 
-	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root)
+	ShaderOwnershipConfig DefaultShaderOwnership()
 	{
-		ShaderOwnershipParseResult result;
-		result.config.enableShaders = settings::core::ShaderOwnership{}.enableShaders;
+		ShaderOwnershipConfig config;
+		config.enableShaders = settings::core::ShaderOwnership{}.enableShaders;
 		for (const auto& target : engine::GetShaderInjectionTargets())
-			result.config.targets[target.id] = settings::core::ShaderTarget{}.enabled;
+			config.targets[target.id] = settings::core::ShaderTarget{}.enabled;
+		return config;
+	}
+
+	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root, const ShaderOwnershipConfig& a_base)
+	{
+		ShaderOwnershipParseResult result{ .config = a_base };
 		const auto* ownershipNode = a_root.get("shader_ownership");
 		if (!ownershipNode)
 			return result;
@@ -499,7 +505,7 @@ namespace cs::feature_config
 		const auto* ownership = ownershipNode->as_table();
 		if (!ownership)
 			return fail("shader_ownership must be a table");
-		settings::core::ShaderOwnership parsed;
+		settings::core::ShaderOwnership parsed{ .enableShaders = a_base.enableShaders };
 		if (std::string error; !settings::ParseTable(settings::core::kShaderOwnership, *ownership, parsed, error))
 			return fail("shader_ownership." + error);
 		result.config.enableShaders = parsed.enableShaders;
@@ -513,7 +519,7 @@ namespace cs::feature_config
 			const auto* target = engine::FindShaderInjectionTarget(key.str());
 			if (!target)
 				return fail("shader_ownership.targets contains unknown target '" + std::string(key.str()) + "'");
-			settings::core::ShaderTarget value;
+			settings::core::ShaderTarget value{ .enabled = a_base.targets[target->id] };
 			if (std::string error; !settings::ParseTable(settings::core::ShaderTargetSchema(target->name), *targets, value, error))
 				return fail("shader_ownership.targets." + error);
 			result.config.targets[target->id] = value.enabled;
