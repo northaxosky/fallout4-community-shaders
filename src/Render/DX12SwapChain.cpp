@@ -1956,6 +1956,9 @@ namespace cs::render
 				copySource = nullptr;
 			}
 			cs::render::annotation::SetMarker("FG_D3D11ProductionComplete");
+			// D3D11 time across the round trip; minus D3D12::Present is the handoff.
+			cs::render::annotation::SpannedEvent handoff;
+			handoff.Begin("Render::PresentHandoff");
 			const UINT64 d3d11Ready = _nextFenceValue++;
 			DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Ready));
 			DX::ThrowIfFailed(_queue->Wait(_fence12.get(), d3d11Ready));
@@ -2114,6 +2117,7 @@ namespace cs::render
 			_gpuTimer.Commit(submission->timing);
 			_allocatorFenceValues[_frameSlot] = d3d12Done;
 			const HRESULT producerWait = _context11->Wait(_fence11.get(), d3d12Done);
+			handoff.End();
 			DX::ThrowIfFailed(producerWait);
 			_presentSubmissionMayBeInFlight = false;
 			_preparedFrameGeneration =
