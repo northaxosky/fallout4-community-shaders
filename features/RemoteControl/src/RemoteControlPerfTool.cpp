@@ -2,6 +2,8 @@
 
 #include "PerformanceOverlay.h"
 #include "Render/ShaderInjection.h"
+#include "Settings/FeatureConfig.h"
+#include "Settings/SettingsJson.h"
 
 #include <format>
 
@@ -89,9 +91,8 @@ namespace cs::features::remote_control
 			options.cycles = *cycles;
 			if (a_args.contains("settleSeconds")) {
 				const auto& settle = a_args["settleSeconds"];
-				if (!settle.is_number() || settle.get<double>() < 0.25 || settle.get<double>() >= options.windowSeconds) {
-					return std::unexpected(Error(std::format("'settleSeconds' must be a number from 0.25 up to but not including windowSeconds ({})", options.windowSeconds)));
-				}
+				if (!settle.is_number())
+					return std::unexpected(Error("'settleSeconds' must be a number"));
 				options.settleSeconds = settle.get<double>();
 			}
 			return options;
@@ -101,27 +102,13 @@ namespace cs::features::remote_control
 		{
 			if (!a_ownership.is_object())
 				return std::unexpected(Error("'ownership' must be an object"));
-			auto ownership = engine::GetShaderOwnershipConfig();
-			for (const auto& [key, value] : a_ownership.items()) {
-				if (key == "enable_shaders" && value.is_boolean()) {
-					ownership.enableShaders = value.get<bool>();
-				} else if (key == "targets" && value.is_object()) {
-					auto valid = Json::array();
-					for (const auto& target : engine::GetShaderInjectionTargets())
-						valid.push_back(std::string(target.name));
-					for (const auto& [name, enabled] : value.items()) {
-						const auto target = std::ranges::find(engine::GetShaderInjectionTargets(), name, &engine::ShaderInjectionTargetMetadata::name);
-						if (target == engine::GetShaderInjectionTargets().end())
-							return std::unexpected(Error("unknown ownership target", { { "target", name }, { "validTargets", valid } }));
-						if (!enabled.is_boolean())
-							return std::unexpected(Error("ownership target values must be booleans", { { "target", name } }));
-						ownership.targets[target->id] = enabled.get<bool>();
-					}
-				} else {
-					return std::unexpected(Error("'ownership' takes enable_shaders (boolean) and targets (object of booleans)", { { "member", key } }));
-				}
-			}
-			return ownership;
+			auto values = settings::JsonToToml(a_ownership);
+			if (!values)
+				return std::unexpected(Error("'ownership' is not valid settings", { { "detail", std::move(values.error()) } }));
+			auto parsed = feature_config::ParseShaderOwnership(toml::table{ { "shader_ownership", std::move(*values) } }, engine::GetShaderOwnershipConfig());
+			if (!parsed.valid)
+				return std::unexpected(Error(std::move(parsed.error)));
+			return parsed.config;
 		}
 
 		std::expected<Comparison::Variant, Json> ParseVariant(const Json& a_args)
@@ -198,7 +185,7 @@ namespace cs::features::remote_control
 
 	const Tool kPerfTool{
 		"communityshaders.perf",
-		R"({"description":"Compare the frame time of the current state against a variant of it by alternating them in interleaved fixed-length windows in one session. Action-dispatched. start: begins a run from the current live state. The variant is given by 'settings' (live setting overrides per feature shortName, validated as communityshaders.feature set; a toggleable feature's framework 'enabled' switch is a setting too) and/or 'ownership' (shader ownership: enable_shaders and targets by name, both optional, unknown targets refused with the valid list). With neither, the variant is custom shaders OFF (stock shaders bound), which must currently be on. windowSeconds (integer 1-60, default 3) is the full window and includes the settle period; settleSeconds (number >= 0.25 and < windowSeconds, default 0.25) drops samples after each switch, so settings that take longer to settle need a larger value; cycles (integer 1-100, default 10) is the number of current/variant pairs. Out-of-range values are refused. The run advances only from the DearModdingUI frame tick, so it needs the DearModdingUI host ready, and it is refused when the Performance Overlay is not loaded or any A/B comparison is active. It restores the current state when it ends or is stopped; while it runs, live settings, presets and the shader ownership controls are locked. Replies with the status. status: {running,scripted,restorePending} plus {window,windows,variant:'current'|'variant',windowSecondsLeft} while running, and any error. summary: {comparable,frames,excludedFrames,durationSeconds,windows,validity:'Valid'|'Marginal'|'Insufficient'} plus {currentMs,variantMs,deltaMs,currentMedianMs,variantMedianMs,currentFps,variantFps} only when comparable (both were sampled) and {deltaStdErrMs,pairs} when at least two current/variant window pairs completed, with final=false while running. deltaMs is mean frame time of the current state minus the variant (positive means the current state is slower, so for the default run it is the cost of custom shaders); deltaStdErrMs is its standard error over the window pairs. For the default run the variant still includes CS hooks, per-draw lookups and every feature that does not follow shader ownership, so it reads lower than removing the plugin. stop: ends a running scripted run early, restores the current state, and returns its summary. The run also stops by itself and logs one summary line.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["start","status","summary","stop"]},"settings":{"type":"object","description":"{shortName:{key:value}} live overrides for the variant","additionalProperties":{"type":"object"}},"ownership":{"type":"object","properties":{"enable_shaders":{"type":"boolean"},"targets":{"type":"object","additionalProperties":{"type":"boolean"}}}},"windowSeconds":{"type":"integer","minimum":1,"maximum":60},"cycles":{"type":"integer","minimum":1,"maximum":100},"settleSeconds":{"type":"number","minimum":0.25}},"required":["action"]}})",
+		R"({"description":"Compare the frame time of the current state against a variant of it by alternating them in interleaved fixed-length windows in one session. Action-dispatched. start: begins a run from the current live state. The variant is given by 'settings' (live setting overrides per feature shortName, validated as communityshaders.feature set; a toggleable feature's framework 'enabled' switch is a setting too) and/or 'ownership' (shader ownership: enable_shaders and targets by name, both optional; omitted members keep their current values, unknown targets are refused). With neither, the variant is custom shaders OFF (stock shaders bound), which must currently be on. windowSeconds (integer 1-60, default 3) is the full window and includes the settle period; settleSeconds (number >= 0.25 and < windowSeconds, default 0.25) drops samples after each switch; cycles (integer 1-100, default 10) is the number of current/variant pairs. The run advances only from the DearModdingUI frame tick, so it needs the DearModdingUI host ready, and it is refused when the Performance Overlay is not loaded or any A/B comparison is active. It restores the current state when it ends or is stopped; while it runs, live settings, presets and the shader ownership controls are locked. Replies with the status. status: {running,scripted,restorePending} plus {window,windows,variant:'current'|'variant',windowSecondsLeft} while running, and any error. summary: {comparable,frames,excludedFrames,durationSeconds,windows,validity:'Valid'|'Marginal'|'Insufficient'} plus {currentMs,variantMs,deltaMs,currentMedianMs,variantMedianMs,currentFps,variantFps} only when comparable (both were sampled) and {deltaStdErrMs,pairs} when at least two current/variant window pairs completed, with final=false while running. deltaMs is mean frame time of the current state minus the variant (positive: current is slower); deltaStdErrMs is its standard error over the window pairs. For the default run the variant still includes CS hooks, per-draw lookups and every feature that does not follow shader ownership, so it reads lower than removing the plugin. stop: ends a running scripted run early, restores the current state, and returns its summary. The run also stops by itself and logs one summary line.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["start","status","summary","stop"]},"settings":{"type":"object","description":"{shortName:{key:value}} live overrides for the variant","additionalProperties":{"type":"object"}},"ownership":{"type":"object","properties":{"enable_shaders":{"type":"boolean"},"targets":{"type":"object","additionalProperties":{"type":"boolean"}}}},"windowSeconds":{"type":"integer","minimum":1,"maximum":60},"cycles":{"type":"integer","minimum":1,"maximum":100},"settleSeconds":{"type":"number","minimum":0.25}},"required":["action"]}})",
 		&Handle
 	};
 }
