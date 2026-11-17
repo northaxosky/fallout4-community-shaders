@@ -30,6 +30,7 @@ namespace cs::host
 	namespace
 	{
 		constexpr std::uint32_t kBindingPollFrames = 120;
+		constexpr std::uint32_t kStartupNoticeMilliseconds = 10000;
 
 		constexpr dmui::ClientOptions kClientOptions{
 			.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT
@@ -702,10 +703,11 @@ namespace cs::host
 		try {
 			const auto state = _client.QueryState();
 			if (state && state->state == DMUI_HOST_STATE_READY &&
-				!_readyLogged.exchange(true)) {
+				!_readySeen.exchange(true)) {
 				L->info(
 					"DearModdingUI forwarding backend is ready; hosted pages, overlays, and "
 					"hotkeys are active");
+				PostStartupNotices();
 			} else if (state && state->state == DMUI_HOST_STATE_UNAVAILABLE &&
 					   !_unavailableLogged.exchange(true)) {
 				L->warn(
@@ -749,6 +751,18 @@ namespace cs::host
 			SyncShaderCompileOverlay();
 		} catch (...) {
 			L->error("DearModdingUI frame observer failed");
+		}
+	}
+
+	void HostClient::PostStartupNotices() noexcept
+	{
+		auto& features = FeatureManager::Get();
+		for (auto* feature : features.GetAll()) {
+			features.RunRuntimeCallback(*feature, "DearModdingUI::StartupNotice", [&] {
+				if (auto notice = feature->GetStartupNotice(); !notice.empty())
+					PostNotification(DMUI_STATUS_SEVERITY_WARNING, std::move(notice),
+						kStartupNoticeMilliseconds, std::string(feature->GetDisplayName()));
+			});
 		}
 	}
 

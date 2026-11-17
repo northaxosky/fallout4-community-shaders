@@ -65,6 +65,7 @@ namespace cs::features
 		void DrawSettings() override;
 		void DrawOverlay() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
+		std::string GetStartupNotice() const override;
 		std::vector<std::string_view> GetRestartSettings() const override;
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }

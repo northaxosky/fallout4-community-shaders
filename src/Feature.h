@@ -169,6 +169,9 @@ namespace cs
 		// True while DrawOverlay needs frames.
 		virtual bool IsOverlayActive() const { return false; }
 
+		// Warning toast posted once when the host UI is ready; empty posts none.
+		virtual std::string GetStartupNotice() const { return {}; }
+
 		// Fires after D3D11 device creation.
 		virtual void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) {}
 
