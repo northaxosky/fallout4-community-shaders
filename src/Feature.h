@@ -403,8 +403,6 @@ namespace cs
 
 		// Sole route for ownership changes; refreshes every feature.
 		void ApplyShaderOwnership(const feature_config::ShaderOwnershipConfig& a_config);
-		// The applied ownership; a live comparison can differ from the saved one.
-		feature_config::ShaderOwnershipConfig GetShaderOwnership() const;
 
 		void WriteSharedDataAll(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4);
 		void WriteSharedFrameDataAll(render::SharedDataCB& a_shared);

@@ -5,6 +5,7 @@
 #include <Features/PerformanceOverlay/ABTesting/ABTestAggregator.h>
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <map>
 #include <optional>
@@ -25,8 +26,7 @@ namespace cs::features::performance_overlay
 			kInsufficient
 		};
 
-		// Total frame time over the run; delta is B minus A. The means, delta
-		// and FPS are set only when both variants have samples.
+		// Total frame time; delta is B minus A, set only when comparable.
 		struct Summary
 		{
 			bool comparable{};
@@ -55,7 +55,6 @@ namespace cs::features::performance_overlay
 			_owner(a_owner) {}
 
 		bool Testing() const noexcept { return _testing; }
-		// A cost run is in progress.
 		bool CostRunning() const noexcept { return _testing && _costRun; }
 		// The current or last run was a cost run, so its summary is a cost.
 		bool LastRunWasCost() const noexcept { return _costRun; }
@@ -67,20 +66,20 @@ namespace cs::features::performance_overlay
 		// Live aggregation; LastSummary is the one frozen when the run stopped.
 		std::optional<Summary> Summarize() const;
 		const std::optional<Summary>& LastSummary() const noexcept { return _lastSummary; }
-		// Rebases USER on the current live state and drops the last run.
 		void CaptureBaseline();
 		// Zero restores B and ends the run; throws if restoration fails.
 		void SetInterval(int);
 		// Custom shaders on (B) against off (A); throws when they are already off.
 		void StartCostRun();
-		// Stops the run, records the reason and shows it as a toast.
 		void Abort(std::string_view a_reason) noexcept;
-		// Records an error from a user action and shows it as a toast.
 		void Fail(std::string a_message);
+		// Runs the action, returning a thrown error's message.
+		static std::expected<void, std::string> Try(const std::function<void()>& a_action);
 		std::string CostHelp() const;
 		// Throws when a compared feature stops being healthy or a state cannot apply.
 		void Update(double a_now, const std::vector<DrawCallRow>& a_rows);
 		void DrawControls();
+		void DrawCostControls();
 		void DrawResults();
 
 	private:

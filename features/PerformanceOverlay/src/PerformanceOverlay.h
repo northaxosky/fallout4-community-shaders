@@ -33,7 +33,6 @@ namespace cs::features
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		void TickHostFrame(std::uint64_t a_vramUsedBytes, std::uint64_t a_vramBudgetBytes);
-		// Shared by the settings page and Remote Control.
 		std::expected<void, std::string> StartCostMeasurement();
 		std::expected<void, std::string> StopComparison();
 		const performance_overlay::ABComparison& Comparison() const noexcept { return _comparison; }
@@ -46,7 +45,6 @@ namespace cs::features
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(performance_overlay::kSchema, settings); }
 		void DrawDrawCalls(const std::vector<DrawCallRow>&);
-		void DrawCostControls();
 		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4 DMUI_ThemeColors::*);
 		static float OverlayContentWidth() noexcept;
 		void UpdateGraphValues();

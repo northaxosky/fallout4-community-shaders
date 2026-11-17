@@ -5,6 +5,7 @@
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "OverlayTable.h"
+#include "Render/ShaderInjection.h"
 #include "Settings/LiveSettings.h"
 #include "Shared/PerfUtils.h"
 
@@ -128,7 +129,7 @@ namespace cs::features::performance_overlay
 	ABComparison::State ABComparison::Capture()
 	{
 		State state;
-		state.ownership = FeatureManager::Get().GetShaderOwnership();
+		state.ownership = engine::GetShaderOwnershipConfig();
 		for (auto* feature : FeatureManager::Get().GetAll()) {
 			const auto& access = feature->GetLiveSettingsAccess();
 			if (!feature->IsHealthy() || !access.snapshot)
@@ -144,7 +145,7 @@ namespace cs::features::performance_overlay
 	void ABComparison::Apply(const State& a_state, bool a_restoring)
 	{
 		auto& manager = FeatureManager::Get();
-		if (a_state.ownership != manager.GetShaderOwnership())
+		if (a_state.ownership != engine::GetShaderOwnershipConfig())
 			manager.ApplyShaderOwnership(a_state.ownership);
 		std::vector<cs::settings::PreparedLiveSettings> prepared;
 		for (const auto& [feature, values] : a_state.live) {
@@ -301,29 +302,33 @@ namespace cs::features::performance_overlay
 	std::string ABComparison::CostHelp() const
 	{
 		std::string unaffected;
-		bool unifiedWater = false;
 		for (auto* feature : FeatureManager::Get().GetAll()) {
 			if (!feature->IsActive())
 				continue;
-			unifiedWater = unifiedWater || feature->GetName() == "UnifiedWater";
 			if (!feature->FollowsShaderOwnership())
 				unaffected += std::format("{}{}", unaffected.empty() ? "" : ", ", feature->GetDisplayName());
 		}
 		return std::format(
-			"Alternates custom shaders on and off in {} second windows for {} cycles. Off still includes CS hooks and per-draw lookups{}{}, "
+			"Alternates custom shaders on and off in {} second windows for {} cycles. Off still includes CS hooks and per-draw lookups{}, "
 			"so it reads lower than removing the plugin.",
 			kCostWindowSeconds, kCostWindows / 2,
-			unifiedWater ? ", Unified Water's distant-water patch" : "",
 			unaffected.empty() ? "" : std::format(", and features that do not follow shader ownership ({})", unaffected));
 	}
 
-	void ABComparison::Attempt(const std::function<void()>& a_action)
+	std::expected<void, std::string> ABComparison::Try(const std::function<void()>& a_action)
 	{
 		try {
 			a_action();
 		} catch (const std::exception& error) {
-			Fail(error.what());
+			return std::unexpected(error.what());
 		}
+		return {};
+	}
+
+	void ABComparison::Attempt(const std::function<void()>& a_action)
+	{
+		if (auto result = Try(a_action); !result)
+			Fail(std::move(result.error()));
 	}
 
 	void ABComparison::DrawControls()
@@ -340,6 +345,18 @@ namespace cs::features::performance_overlay
 		int interval = _testInterval;
 		if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed)
 			Attempt([&] { SetInterval(interval); });
+	}
+
+	void ABComparison::DrawCostControls()
+	{
+		{
+			const dmui::DisabledScope disabled{ _testing || _restorePending };
+			if (dmui::ui::Button("Measure CS cost"))
+				Attempt([&] { StartCostRun(); });
+		}
+		if (CostRunning() && dmui::ui::Button("Stop CS Cost Measurement"))
+			Attempt([&] { SetInterval(0); });
+		dmui::ui::TextWrapped("%s", CostHelp().c_str());
 	}
 
 	void ABComparison::DrawResults()

@@ -8,7 +8,7 @@ namespace cs::features::remote_control
 	{
 		using Comparison = performance_overlay::ABComparison;
 
-		// B is custom shaders on, A is off; cost is on minus off, set only when both were sampled.
+		// B is shaders on, A off; cost fields need both sampled.
 		Json SummaryJson(const Comparison::Summary& a_summary)
 		{
 			Json json{
