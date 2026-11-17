@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct ID3D11Device;
 struct ID3D11DeviceContext;
@@ -56,6 +57,18 @@ namespace cs::render::profiling
 		float calls{};
 		float milliseconds{};
 	};
+
+	struct ExternalGpuPass
+	{
+		std::string name;
+		float lastMs{};
+		float avgMs{};
+		float p95Ms{};
+	};
+
+	// GPU passes timed outside the D3D11 profiler; frame thread only.
+	void RecordExternalGpuPass(std::string_view a_name, float a_ms);
+	std::vector<ExternalGpuPass> GetExternalGpuPasses();
 
 	void SetShaderFamily(int a_type, std::string_view a_name);
 	void RecordDraw();
