@@ -113,12 +113,17 @@ namespace cs::features
 			settings.ShowInOverlay, settings.FrameHistorySize, settings.toggleHotkey);
 	}
 
-	std::expected<void, std::string> PerformanceOverlay::StartCostMeasurement()
+	std::expected<void, std::string> PerformanceOverlay::StartComparison(const performance_overlay::ABComparison::Variant& a_variant, const performance_overlay::ABComparison::RunOptions& a_options)
 	{
 		const auto state = host::HostClient::Get().Client().QueryState();
 		if (!state || state->state != DMUI_HOST_STATE_READY)
 			return std::unexpected("the DearModdingUI host is not ready, and the comparison advances only from its frame tick");
-		return performance_overlay::ABComparison::Try([&] { _comparison.StartCostRun(); });
+		return performance_overlay::ABComparison::Try([&] {
+			if (a_variant.Empty())
+				_comparison.StartCostRun(a_options);
+			else
+				_comparison.StartRun(a_variant, a_options, "variant", "current");
+		});
 	}
 
 	std::expected<void, std::string> PerformanceOverlay::StopComparison()
@@ -518,7 +523,7 @@ namespace cs::features
 			.Field("engine_frame_sequence", static_cast<std::int64_t>(render::profiling::FrameSequence()))
 			.Field("ab_testing", _comparison.Testing())
 			.Field("ab_restore_pending", _comparison.RestorePending())
-			.Field("ab_cost_running", _comparison.CostRunning())
+			.Field("ab_scripted_running", _comparison.ScriptedRunning())
 			.Field("post_fg_calculated", _frameGeneration)
 			.Field("vram_available", _vramBudget > 0)
 			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsed / (1024 * 1024)))

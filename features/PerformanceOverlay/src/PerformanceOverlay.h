@@ -33,7 +33,8 @@ namespace cs::features
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		void TickHostFrame(std::uint64_t a_vramUsedBytes, std::uint64_t a_vramBudgetBytes);
-		std::expected<void, std::string> StartCostMeasurement();
+		// An empty variant runs the custom-shaders cost comparison.
+		std::expected<void, std::string> StartComparison(const performance_overlay::ABComparison::Variant&, const performance_overlay::ABComparison::RunOptions&);
 		std::expected<void, std::string> StopComparison();
 		const performance_overlay::ABComparison& Comparison() const noexcept { return _comparison; }
 		DMUI_ManagedOverlayOptions ManagedOverlayOptions() const noexcept;

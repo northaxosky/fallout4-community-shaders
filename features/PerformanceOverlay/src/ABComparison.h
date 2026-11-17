@@ -31,6 +31,9 @@ namespace cs::features::performance_overlay
 		{
 			bool comparable{};
 			float meanA{}, meanB{}, medianA{}, medianB{}, delta{};
+			// Standard error of delta over paired B/A windows; set from two pairs.
+			std::optional<float> deltaStdErr;
+			int pairs{};
 			float fpsA{}, fpsB{};
 			int frames{}, excluded{}, windows{};
 			float duration{}, validPercent{};
@@ -39,7 +42,7 @@ namespace cs::features::performance_overlay
 
 		struct Progress
 		{
-			bool running{}, restorePending{}, costRun{};
+			bool running{}, restorePending{}, scripted{};
 			int window{}, windows{};
 			bool variantB{};
 			double windowSecondsLeft{};
@@ -51,16 +54,32 @@ namespace cs::features::performance_overlay
 			                                                                                      "Insufficient";
 		}
 
+		// Differences from the current live state; A is the current state plus these.
+		struct Variant
+		{
+			std::map<Feature*, toml::table> settings;
+			std::optional<feature_config::ShaderOwnershipConfig> ownership;
+			bool Empty() const noexcept { return settings.empty() && !ownership; }
+		};
+
+		// windowSeconds includes the settle period.
+		struct RunOptions
+		{
+			int windowSeconds = 3;
+			int cycles = 10;
+			double settleSeconds = 0.25;
+		};
+
 		explicit ABComparison(const Feature& a_owner) :
 			_owner(a_owner) {}
 
 		bool Testing() const noexcept { return _testing; }
-		bool CostRunning() const noexcept { return _testing && _costRun; }
-		// The current or last run was a cost run, so its summary is a cost.
-		bool LastRunWasCost() const noexcept { return _costRun; }
+		bool ScriptedRunning() const noexcept { return _testing && _scripted; }
+		// The current or last run was scripted (fixed length), not manual USER/TEST.
+		bool LastRunWasScripted() const noexcept { return _scripted; }
 		bool RestorePending() const noexcept { return _restorePending; }
-		// Per-type rows need draw profiling; a cost run reads only the Total row.
-		bool WantsDrawTimings() const noexcept { return _testing && !_costRun; }
+		// Per-type rows need draw profiling; a scripted run reads only the Total row.
+		bool WantsDrawTimings() const noexcept { return _testing && !_scripted; }
 		Progress GetProgress() const noexcept;
 		const std::string& Error() const noexcept { return _testError; }
 		// Live aggregation; LastSummary is the one frozen when the run stopped.
@@ -69,8 +88,11 @@ namespace cs::features::performance_overlay
 		void CaptureBaseline();
 		// Zero restores B and ends the run; throws if restoration fails.
 		void SetInterval(int);
+		// Current state (B) against it with the variant applied (A); throws when
+		// the variant is invalid, changes nothing, or a comparison is active.
+		void StartRun(const Variant&, const RunOptions&, std::string a_labelA, std::string a_labelB);
 		// Custom shaders on (B) against off (A); throws when they are already off.
-		void StartCostRun();
+		void StartCostRun(const RunOptions&);
 		void Abort(std::string_view a_reason) noexcept;
 		void Fail(std::string a_message);
 		// Runs the action, returning a thrown error's message.
@@ -93,18 +115,18 @@ namespace cs::features::performance_overlay
 		static State Capture();
 		static void Apply(const State&, bool a_restoring = false);
 		// A zero window limit runs until stopped.
-		void Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit);
+		void Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds);
 		void Attempt(const std::function<void()>& a_action);
-		void LogCostSummary() const;
+		void LogSummary() const;
 
 		const Feature& _owner;
 		State _baseline, _a, _b;
 		std::string _labelA = "USER", _labelB = "TEST";
 		ABTestAggregator _aggregator;
 		std::optional<Summary> _lastSummary;
-		bool _testing{}, _variantB = true, _restorePending{}, _costRun{};
+		bool _testing{}, _variantB = true, _restorePending{}, _scripted{};
 		int _testInterval{}, _windowsDone{}, _windowLimit{}, _framesSinceSwitch{};
-		double _lastSwitch{};
+		double _lastSwitch{}, _settleSeconds{ RunOptions{}.settleSeconds };
 		std::string _testError;
 	};
 }

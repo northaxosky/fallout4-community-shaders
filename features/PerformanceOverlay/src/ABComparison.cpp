@@ -10,7 +10,9 @@
 #include "Shared/PerfUtils.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 
@@ -21,10 +23,21 @@ namespace cs::features::performance_overlay
 		auto* L = cs::log::Get("cs.feature.performanceoverlay");
 
 		// A switch recreates resources; sample only after both gates pass.
-		constexpr double kSettleSeconds = 0.25;
 		constexpr int kSettleFrames = 10;
-		constexpr int kCostWindowSeconds = 3;
-		constexpr int kCostWindows = 20;
+
+		// Mean Total frame time of one window; none when it sampled nothing.
+		std::optional<double> WindowMean(const ABInterval& a_interval)
+		{
+			double sum = 0.0;
+			int count = 0;
+			for (const auto& frame : a_interval.frameRows) {
+				if (const auto total = std::ranges::find(frame, -1, &DrawCallRow::shaderType); total != frame.end()) {
+					sum += total->frameTime;
+					++count;
+				}
+			}
+			return count ? std::optional{ sum / count } : std::nullopt;
+		}
 
 		nlohmann::json SnapshotJson(const std::map<Feature*, toml::table>& a_snapshot)
 		{
@@ -57,7 +70,7 @@ namespace cs::features::performance_overlay
 
 	ABComparison::Progress ABComparison::GetProgress() const noexcept
 	{
-		return { _testing, _restorePending, CostRunning(), std::min(_windowsDone + 1, _windowLimit), _windowLimit, _variantB,
+		return { _testing, _restorePending, ScriptedRunning(), std::min(_windowsDone + 1, _windowLimit), _windowLimit, _variantB,
 			_testing ? std::max(0.0, _testInterval - (Util::GetNowSecs() - _lastSwitch)) : 0.0 };
 	}
 
@@ -70,13 +83,32 @@ namespace cs::features::performance_overlay
 		summary.duration = _aggregator.GetTotalTestDuration();
 		bool hasSamplesA = false;
 		bool hasSamplesB = false;
+		std::vector<double> deltas;
+		std::optional<double> pendingB;
 		for (const auto& interval : _aggregator.GetIntervals()) {
+			const auto mean = WindowMean(interval);
+			if (interval.variant == ABVariant::B) {
+				pendingB = mean;
+			} else {
+				if (pendingB && mean)
+					deltas.push_back(*pendingB - *mean);
+				pendingB.reset();
+			}
 			++summary.windows;
 			summary.excluded += interval.excludedFrames;
 			hasSamplesA = hasSamplesA || (interval.variant == ABVariant::A && !interval.frameRows.empty());
 			hasSamplesB = hasSamplesB || (interval.variant == ABVariant::B && !interval.frameRows.empty());
 		}
 		const bool hasBothVariants = hasSamplesA && hasSamplesB;
+		summary.pairs = static_cast<int>(deltas.size());
+		if (deltas.size() >= 2) {
+			const auto n = static_cast<double>(deltas.size());
+			const double average = std::accumulate(deltas.begin(), deltas.end(), 0.0) / n;
+			double squares = 0.0;
+			for (const auto delta : deltas)
+				squares += (delta - average) * (delta - average);
+			summary.deltaStdErr = static_cast<float>(std::sqrt(squares / (n - 1.0) / n));
+		}
 		summary.comparable = hasBothVariants;
 		for (const auto& row : _aggregator.GetAggregatedResults()) {
 			if (row.shaderType != -1 || !hasBothVariants)
@@ -104,7 +136,7 @@ namespace cs::features::performance_overlay
 		_a = _b = {};
 		_aggregator.Clear();
 		_lastSummary.reset();
-		_costRun = false;
+		_scripted = false;
 		_testError.clear();
 	}
 
@@ -162,7 +194,7 @@ namespace cs::features::performance_overlay
 		cs::settings::ApplyPreparedLiveSettings(prepared);
 	}
 
-	void ABComparison::Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit)
+	void ABComparison::Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds)
 	{
 		_a = std::move(a_a);
 		_b = std::move(a_b);
@@ -180,7 +212,8 @@ namespace cs::features::performance_overlay
 		_variantB = true;
 		_windowsDone = 0;
 		_windowLimit = a_windowLimit;
-		_costRun = a_windowLimit > 0;
+		_scripted = a_windowLimit > 0;
+		_settleSeconds = a_settleSeconds;
 		_framesSinceSwitch = 0;
 		_aggregator.OnABSwitch(ABVariant::B);
 		_lastSwitch = Util::GetNowSecs();
@@ -209,8 +242,8 @@ namespace cs::features::performance_overlay
 				}
 				_aggregator.OnTestEnd();
 				_lastSummary = Summarize();
-				if (_costRun)
-					LogCostSummary();
+				if (_scripted)
+					LogSummary();
 			}
 			_testing = false;
 			_restorePending = false;
@@ -221,8 +254,8 @@ namespace cs::features::performance_overlay
 		if (_restorePending)
 			throw std::runtime_error(std::format("Restore {} before starting another comparison", _labelB));
 		if (_testing) {
-			if (_costRun)
-				throw std::runtime_error("A cost measurement is running; stop it first");
+			if (_scripted)
+				throw std::runtime_error("A scripted comparison is running; stop it first");
 			_testInterval = a_interval;
 			_testError.clear();
 			return;
@@ -239,19 +272,43 @@ namespace cs::features::performance_overlay
 		}
 		if (test == _baseline)
 			throw std::runtime_error("USER and TEST live settings are identical");
-		Begin(_baseline, std::move(test), "USER", "TEST", a_interval, 0);
+		Begin(_baseline, std::move(test), "USER", "TEST", a_interval, 0, RunOptions{}.settleSeconds);
 	}
 
-	void ABComparison::StartCostRun()
+	void ABComparison::StartRun(const Variant& a_variant, const RunOptions& a_options, std::string a_labelA, std::string a_labelB)
 	{
 		if (_testing || _restorePending)
 			throw std::runtime_error("A comparison is already running");
-		auto on = Capture();
-		if (!on.ownership.enableShaders)
+		if (a_options.windowSeconds < 1 || a_options.cycles < 1)
+			throw std::runtime_error("A run needs at least one cycle of one-second windows");
+		if (a_options.settleSeconds >= a_options.windowSeconds)
+			throw std::runtime_error("settleSeconds must be shorter than the window");
+		auto current = Capture();
+		auto variant = current;
+		for (const auto& [feature, overrides] : a_variant.settings) {
+			const auto live = variant.live.find(feature);
+			if (live == variant.live.end())
+				throw std::runtime_error(std::format("{} has no live settings to compare (not loaded or not healthy)", feature->GetName()));
+			for (const auto& [key, node] : overrides) {
+				if (!live->second.contains(key))
+					throw std::runtime_error(std::format("{}.{} is not a comparable live setting", feature->GetName(), key.str()));
+				live->second.insert_or_assign(key, node);
+			}
+		}
+		if (a_variant.ownership)
+			variant.ownership = *a_variant.ownership;
+		if (variant == current)
+			throw std::runtime_error("The variant changes nothing from the current state");
+		Begin(std::move(variant), std::move(current), std::move(a_labelA), std::move(a_labelB), a_options.windowSeconds, a_options.cycles * 2, a_options.settleSeconds);
+	}
+
+	void ABComparison::StartCostRun(const RunOptions& a_options)
+	{
+		if (!engine::GetShaderOwnershipConfig().enableShaders)
 			throw std::runtime_error("Custom shaders are already off; turn them on to measure their cost");
-		auto off = on;
-		off.ownership.enableShaders = false;
-		Begin(std::move(off), std::move(on), "CS off", "CS on", kCostWindowSeconds, kCostWindows);
+		auto ownership = engine::GetShaderOwnershipConfig();
+		ownership.enableShaders = false;
+		StartRun({ .ownership = ownership }, a_options, "CS off", "CS on");
 	}
 
 	void ABComparison::Update(double a_now, const std::vector<DrawCallRow>& a_rows)
@@ -264,9 +321,9 @@ namespace cs::features::performance_overlay
 				throw std::runtime_error(std::format("{} was quarantined", feature->GetName()));
 		}
 		++_framesSinceSwitch;
-		if (_framesSinceSwitch >= kSettleFrames && a_now - _lastSwitch >= kSettleSeconds) {
-			// Per-type rows freeze without draw profiling, so a cost run keeps only Total.
-			if (!_costRun) {
+		if (_framesSinceSwitch >= kSettleFrames && a_now - _lastSwitch >= _settleSeconds) {
+			// Per-type rows freeze without draw profiling, so a scripted run keeps only Total.
+			if (!_scripted) {
 				_aggregator.OnFrame(a_rows);
 			} else if (const auto total = std::ranges::find(a_rows, -1, &DrawCallRow::shaderType); total != a_rows.end()) {
 				_aggregator.OnFrame({ *total });
@@ -274,7 +331,7 @@ namespace cs::features::performance_overlay
 		}
 		if (a_now - _lastSwitch > static_cast<double>(_testInterval)) {
 			++_windowsDone;
-			if (_costRun && _windowsDone >= _windowLimit) {
+			if (_scripted && _windowsDone >= _windowLimit) {
 				SetInterval(0);
 				return;
 			}
@@ -286,17 +343,19 @@ namespace cs::features::performance_overlay
 		}
 	}
 
-	void ABComparison::LogCostSummary() const
+	void ABComparison::LogSummary() const
 	{
 		if (!_lastSummary)
 			return;
 		const auto& summary = *_lastSummary;
 		if (!summary.comparable) {
-			L->info("CS cost: not measured, {} windows, {}", summary.windows, ValidityName(summary.validity));
+			L->info("{} vs {}: not measured, {} windows, {}", _labelB, _labelA, summary.windows, ValidityName(summary.validity));
 			return;
 		}
-		L->info("CS cost: on {:.2f} ms ({:.1f} FPS), off {:.2f} ms ({:.1f} FPS), cost {:+.2f} ms, {} windows, {}",
-			summary.meanB, summary.fpsB, summary.meanA, summary.fpsA, summary.delta, summary.windows, ValidityName(summary.validity));
+		L->info("{} vs {}: {} {:.2f} ms ({:.1f} FPS), {} {:.2f} ms ({:.1f} FPS), delta {:+.2f}{} ms, {} windows, {}",
+			_labelB, _labelA, _labelB, summary.meanB, summary.fpsB, _labelA, summary.meanA, summary.fpsA, summary.delta,
+			summary.deltaStdErr ? std::format(" \u00b1 {:.2f}", *summary.deltaStdErr) : std::string{},
+			summary.windows, ValidityName(summary.validity));
 	}
 
 	std::string ABComparison::CostHelp() const
@@ -308,10 +367,11 @@ namespace cs::features::performance_overlay
 			if (!feature->FollowsShaderOwnership())
 				unaffected += std::format("{}{}", unaffected.empty() ? "" : ", ", feature->GetDisplayName());
 		}
+		const RunOptions options;
 		return std::format(
 			"Alternates custom shaders on and off in {} second windows for {} cycles. Off still includes CS hooks and per-draw lookups{}, "
 			"so it reads lower than removing the plugin.",
-			kCostWindowSeconds, kCostWindows / 2,
+			options.windowSeconds, options.cycles,
 			unaffected.empty() ? "" : std::format(", and features that do not follow shader ownership ({})", unaffected));
 	}
 
@@ -341,7 +401,7 @@ namespace cs::features::performance_overlay
 			if (dmui::ui::Button("Capture USER Baseline"))
 				CaptureBaseline();
 		}
-		const dmui::DisabledScope disabled{ CostRunning() };
+		const dmui::DisabledScope disabled{ ScriptedRunning() };
 		int interval = _testInterval;
 		if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed)
 			Attempt([&] { SetInterval(interval); });
@@ -352,9 +412,9 @@ namespace cs::features::performance_overlay
 		{
 			const dmui::DisabledScope disabled{ _testing || _restorePending };
 			if (dmui::ui::Button("Measure CS cost"))
-				Attempt([&] { StartCostRun(); });
+				Attempt([&] { StartCostRun(RunOptions{}); });
 		}
-		if (CostRunning() && dmui::ui::Button("Stop CS Cost Measurement"))
+		if (ScriptedRunning() && dmui::ui::Button("Stop CS Cost Measurement"))
 			Attempt([&] { SetInterval(0); });
 		dmui::ui::TextWrapped("%s", CostHelp().c_str());
 	}
@@ -365,7 +425,7 @@ namespace cs::features::performance_overlay
 			const auto progress = GetProgress();
 			dmui::ui::Text("Variant %s (%s): %.1f seconds left",
 				_variantB ? "B" : "A", (_variantB ? _labelB : _labelA).c_str(), progress.windowSecondsLeft);
-			if (progress.costRun)
+			if (progress.scripted)
 				dmui::ui::Text("Window %d of %d", progress.window, progress.windows);
 		}
 		std::vector<std::string> changes;
@@ -406,13 +466,15 @@ namespace cs::features::performance_overlay
 		const auto summary = Summarize();
 		if (!summary)
 			return;
-		if (_costRun && summary->comparable) {
-			dmui::ui::Text("CS cost: %+.2f ms per frame (%.2f ms / %.1f FPS on, %.2f ms / %.1f FPS off)",
-				summary->delta, summary->meanB, summary->fpsB, summary->meanA, summary->fpsA);
+		if (_scripted && summary->comparable) {
+			const auto margin = summary->deltaStdErr ? std::format(" \u00b1 {:.2f}", *summary->deltaStdErr) : std::string{};
+			dmui::ui::Text("%s minus %s: %+.2f ms%s per frame (%.2f ms / %.1f FPS %s, %.2f ms / %.1f FPS %s)",
+				_labelB.c_str(), _labelA.c_str(), summary->delta, margin.c_str(),
+				summary->meanB, summary->fpsB, _labelB.c_str(), summary->meanA, summary->fpsA, _labelA.c_str());
 		}
 		dmui::ui::Text("%s: %d frames, %.1f seconds, %d excluded, %.1f%% valid", ValidityName(summary->validity).data(),
 			summary->frames, summary->duration, summary->excluded, summary->validPercent);
-		if (_costRun)
+		if (_scripted)
 			return;
 		if (!dmui::ui::BeginTable("ABResults", 7, dmui::ui::TableFlags::kSortable))
 			return;
