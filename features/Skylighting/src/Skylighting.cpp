@@ -51,6 +51,7 @@ namespace cs::features
 
 		constexpr std::uint64_t kSummaryIntervalFrames = 300;
 		constexpr std::string_view kProbeUpdatePass = "Skylighting::ProbeUpdate";
+		constexpr std::string_view kCascadeCopyPass = "Skylighting::CascadeCopy";
 
 		constexpr float kRadiansToDegrees = 180.0f / std::numbers::pi_v<float>;
 
@@ -855,7 +856,10 @@ namespace cs::features
 
 		if (!EnsureCascadeCopy(device, snapshot.texture, snapshot.count))
 			return CascadeSkip::kCopyTarget;
-		cs::engine::CopyResourcePreservingOM(a_context, _cascadeCopy.get(), snapshot.texture);
+		{
+			cs::render::annotation::ScopedEvent event(kCascadeCopyPass);
+			cs::engine::CopyResourcePreservingOM(a_context, _cascadeCopy.get(), snapshot.texture);
+		}
 		_copyGeneration = lights.generation;
 
 		_cascadeCounters.count.store(snapshot.count, std::memory_order_relaxed);
