@@ -42,7 +42,8 @@ namespace cs::features::true_pbr
 			if (path.empty())
 				continue;
 			RE::NiPointer<RE::NiTexture> texture;
-			RE::BSShaderManager::GetTexture(path.c_str(), true, texture, false, spec.srgb, true);
+			// The engine passes allowDegrade false on its loader threads.
+			RE::BSShaderManager::GetTexture(path.c_str(), true, texture, false, spec.srgb, false);
 			if (!texture || engine::IsEngineDefaultTexture(texture.get())) {
 				Warn(a_record, spec.source, path);
 				continue;
