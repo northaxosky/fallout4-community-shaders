@@ -72,42 +72,41 @@ namespace cs::features::remote_control
 			return settings::TomlToJson(access.snapshot());
 		}
 
+		Json ComparisonRefusal()
+		{
+			return Error("an A/B comparison is active", { { "hint", "stop it in the Performance Overlay first" } });
+		}
+
+		std::expected<Feature*, Json> FindHealthyFeature(std::string_view a_shortName)
+		{
+			auto* feature = FindFeature(a_shortName, true);
+			if (!feature)
+				return std::unexpected(Error("feature not found or not loaded", { { "shortName", std::string(a_shortName) } }));
+			if (!feature->IsHealthy())
+				return std::unexpected(Error("feature is degraded or failed", { { "shortName", std::string(a_shortName) } }));
+			return feature;
+		}
+
 		Json EditableFeature(const std::string& a_shortName, Feature*& a_feature)
 		{
-			a_feature = FindFeature(a_shortName, true);
-			if (!a_feature)
-				return Error("feature not found or not loaded", { { "shortName", a_shortName } });
-			if (!a_feature->IsHealthy())
-				return Error("feature is degraded or failed", { { "shortName", a_shortName } });
-			if (settings::liveComparisonActive)
-				return Error("an A/B comparison is active", { { "hint", "stop it in the Performance Overlay first" } });
-			return {};
+			const auto feature = FindHealthyFeature(a_shortName);
+			if (!feature)
+				return feature.error();
+			a_feature = *feature;
+			return settings::liveComparisonActive ? ComparisonRefusal() : Json{};
 		}
 
 		Json Set(const std::string& a_shortName, const Json& a_settings)
 		{
-			Feature* feature{};
-			if (auto refusal = EditableFeature(a_shortName, feature); !refusal.is_null())
-				return refusal;
-			const auto& access = feature->GetLiveSettingsAccess();
-			if (!access.snapshot || !access.prepare)
-				return Error("feature exposes no live settings", { { "shortName", a_shortName } });
-
-			const auto values = settings::JsonToToml(a_settings);
-			if (!values)
-				return Error(values.error(), { { "shortName", a_shortName } });
-			const auto issues = settings::ClassifyKeys(*values, access.snapshot(), feature->GetSettingsSchema());
-			if (!issues.empty()) {
-				Json refusal{ { "shortName", a_shortName } };
-				if (!issues.restartOnly.empty())
-					refusal["restartOnly"] = issues.restartOnly;
-				if (!issues.unknown.empty())
-					refusal["unknown"] = issues.unknown;
-				return Error(issues.restartOnly.empty() ? "unknown settings keys" : "restart-only settings cannot apply live", std::move(refusal));
-			}
+			if (settings::liveComparisonActive)
+				return ComparisonRefusal();
+			auto parsed = ParseFeatureSettings(a_shortName, a_settings);
+			if (!parsed)
+				return std::move(parsed.error());
+			auto& [feature, values] = *parsed;
 
 			std::string error;
-			auto prepared = FeatureManager::Get().PrepareLiveSettings(*feature, *values, "RemoteControl::Set", error);
+			auto prepared = FeatureManager::Get().PrepareLiveSettings(*feature, values, "RemoteControl::Set", error);
 			if (!prepared)
 				return Error(std::move(error), { { "shortName", a_shortName } });
 			try {
@@ -146,7 +145,7 @@ namespace cs::features::remote_control
 			if (!feature->IsHealthy())
 				return Error("feature is degraded or failed", { { "shortName", a_shortName } });
 			if (settings::liveComparisonActive)
-				return Error("an A/B comparison is active", { { "hint", "stop it in the Performance Overlay first" } });
+				return ComparisonRefusal();
 
 			const bool enabled = a_enabled.is_boolean() ? a_enabled.get<bool>() : !feature->IsSwitchedOn();
 			feature->SetEnabled(enabled);
@@ -202,6 +201,31 @@ namespace cs::features::remote_control
 				return Error("missing required object parameter 'settings'");
 			return OnFrame([shortName, values = a_args["settings"]] { return Set(shortName, values); });
 		}
+	}
+
+	std::expected<FeatureSettings, Json> ParseFeatureSettings(std::string_view a_shortName, const Json& a_settings)
+	{
+		const auto shortName = std::string(a_shortName);
+		const auto feature = FindHealthyFeature(shortName);
+		if (!feature)
+			return std::unexpected(feature.error());
+		const auto& access = (*feature)->GetLiveSettingsAccess();
+		if (!access.snapshot || !access.prepare)
+			return std::unexpected(Error("feature exposes no live settings", { { "shortName", shortName } }));
+
+		auto values = settings::JsonToToml(a_settings);
+		if (!values)
+			return std::unexpected(Error(values.error(), { { "shortName", shortName } }));
+		const auto issues = settings::ClassifyKeys(*values, access.snapshot(), (*feature)->GetSettingsSchema());
+		if (!issues.empty()) {
+			Json refusal{ { "shortName", shortName } };
+			if (!issues.restartOnly.empty())
+				refusal["restartOnly"] = issues.restartOnly;
+			if (!issues.unknown.empty())
+				refusal["unknown"] = issues.unknown;
+			return std::unexpected(Error(issues.restartOnly.empty() ? "unknown settings keys" : "restart-only settings cannot apply live", std::move(refusal)));
+		}
+		return FeatureSettings{ *feature, std::move(*values) };
 	}
 
 	const Tool kFeatureTool{
