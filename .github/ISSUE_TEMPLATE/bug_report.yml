@@ -50,24 +50,6 @@ body:
     validations:
       required: true
 
-  - type: checkboxes
-    id: features
-    attributes:
-      label: Enabled features
-      description: Select every feature with `load = true`.
-      options:
-        - label: Screen Space Shadows
-        - label: Terrain Shadows
-        - label: Screen Space GI
-        - label: Inverse Square Lighting
-        - label: Dynamic Cubemaps
-        - label: Water Effects
-        - label: Motion Vector Fixes
-        - label: Upscaling
-        - label: Frame Generation
-        - label: Performance Overlay
-        - label: RenderDoc
-
   - type: input
     id: upscaling
     attributes:
@@ -97,7 +79,7 @@ body:
       description: |
         Drag and drop these files:
         - `Documents\My Games\Fallout4\F4SE\FO4CommunityShaders.log`
-        - `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml` (in MO2, under Overwrite)
+        - `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.toml` (in MO2, under Overwrite), renamed to `.txt` because GitHub rejects `.toml`
         - The crash log, for crashes
     validations:
       required: true
