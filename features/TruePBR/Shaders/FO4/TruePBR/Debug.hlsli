@@ -40,7 +40,6 @@ namespace TruePBRDebug
 		a_emissive = FO4SharedData::DebugMode == TruePBRDebugMode::Record ? RecordColor(a_record) : float3(1.0, 0.0, 1.0);
 	}
 
-	// Uv offset times ten in red and green, the parallax shadow in blue.
 	void ApplyParallax(float2 a_uvDelta, float a_shadow, inout float3 a_albedo, inout float3 a_emissive)
 	{
 		a_albedo = 0.0;

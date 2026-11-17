@@ -5,15 +5,6 @@
 
 namespace cs::features::true_pbr
 {
-	RecordId MaterialTags::Find(const void* a_material) const
-	{
-		if (Count() == 0)
-			return 0;
-		std::shared_lock lock(_lock);
-		const auto found = _tags.find(a_material);
-		return found == _tags.end() ? RecordId{ 0 } : found->second.id;
-	}
-
 	engine::PrepassRecord MaterialTags::Lookup(const void* a_material) const
 	{
 		if (Count() == 0)
@@ -53,19 +44,18 @@ namespace cs::features::true_pbr
 		displaced = Replace(a_material, a_id, std::move(a_textures), true);
 	}
 
-	bool MaterialTags::Inherit(const void* a_dest, const void* a_source)
+	void MaterialTags::Inherit(const void* a_dest, const void* a_source)
 	{
 		Entry displaced;
 		std::unique_lock lock(_lock);
 		const auto source = _tags.find(a_source);
 		if (source == _tags.end()) {
 			displaced = Replace(a_dest, 0, {}, false);
-			return false;
+			return;
 		}
 		const auto id = source->second.id;
 		auto textures = source->second.textures;
 		displaced = Replace(a_dest, id, std::move(textures), true);
-		return true;
 	}
 
 	void MaterialTags::Erase(const void* a_material)

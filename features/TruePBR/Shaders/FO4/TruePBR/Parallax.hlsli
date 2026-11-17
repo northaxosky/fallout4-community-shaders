@@ -1,7 +1,7 @@
 #ifndef FO4_TRUE_PBR_PARALLAX_HLSLI
 #define FO4_TRUE_PBR_PARALLAX_HLSLI
 
-// FO4: PBR displacement is bound by the host; the Extended Materials kernel is called as upstream does.
+// FO4: t4 is host-bound; the EM kernel is called as upstream.
 Texture2D<float4> g_tPbrDisplacement : register(t4);
 SamplerState g_sPbrDisplacement : register(s4);
 
@@ -24,7 +24,7 @@ namespace TruePBRParallax
 
 		float2 dims;
 		g_tPbrDisplacement.GetDimensions(dims.x, dims.y);
-		// FO4: the kernel compiles the coarse mip rule; this is upstream's TRUE_PBR mip.
+		// FO4: kernel compiles the coarse rule; this is upstream's TRUE_PBR mip.
 		const float mipLevel = max(ExtendedMaterials::GetMipLevelFromDims(a_uv, dims * 2.0) - 1.0, 0.0);
 
 		StochasticOffsets noOffset = (StochasticOffsets)0;

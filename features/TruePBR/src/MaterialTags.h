@@ -16,16 +16,14 @@ namespace cs::features::true_pbr
 	class MaterialTags
 	{
 	public:
-		// 0 when untagged. Lock-free while nothing is tagged.
-		[[nodiscard]] RecordId Find(const void* a_material) const;
-		// The textures stay valid while the material lives.
+		// Lock-free while nothing is tagged. The textures stay valid while the material lives.
 		[[nodiscard]] engine::PrepassRecord Lookup(const void* a_material) const;
 
 		// A different tag already there means a shared material; counted.
 		void Assign(const void* a_material, RecordId a_id, RecordTextureSet a_textures = {});
 
-		// Gives a_dest a_source's tag; false when a_source has none (a_dest is untagged).
-		bool Inherit(const void* a_dest, const void* a_source);
+		// Copies a_source's tag to a_dest; untags a_dest when none.
+		void Inherit(const void* a_dest, const void* a_source);
 
 		void Erase(const void* a_material);
 

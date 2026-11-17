@@ -492,7 +492,7 @@ namespace cs::engine
 		return false;
 	}
 
-	// Mirrors the engine's inlined Renderer::SetTexture and its mode writes for a PS slot.
+	// Mirrors the engine's inlined Renderer::SetTexture plus mode writes.
 	inline void SetPixelShaderTexture(
 		std::uint32_t a_slot,
 		const RE::BSGraphics::Texture& a_texture,
