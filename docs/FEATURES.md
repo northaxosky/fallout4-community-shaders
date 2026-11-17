@@ -64,7 +64,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Terrain Helper | Mixed | Displacement-slot gather/bind* | Ext: default-land ESP package | NS | M | M | Low |
 | [Terrain Shadows](deviations/TerrainShadows.md) | Port | Height-field producer, world receivers, time/transition events, secondary/remaining receivers, diagnostics | — | Pt | H | L | High |
 | [Terrain Variation](deviations/TerrainVariation.md) | Port | Landscape stochastic sampling, LOD anti-tiling, landscape-textured meshes, height/PBR coherence (needs Extended Materials/TruePBR consumers) | — | Pt | H | M | High |
-| [TruePBR](deviations/TruePBR.md) | Mixed | Surface POM (EM marcher under `TRUE_PBR`+`HasDisplacement`; same slice as Extended Materials POM) | Ext: PBR material loader (done: BGSM version 100 load and texture swap), RMAOS lighting (done: base lobes, direct and indirect), coat/fuzz/SSS/hair, landscape/grass PBR, glints | Pt | H | M | Med |
+| [TruePBR](deviations/TruePBR.md) | Mixed | Surface POM (EM marcher, own `_p` slice at t4) | Ext: PBR material loader (done: BGSM version 100 load and texture swap), RMAOS lighting (done: base lobes, direct and indirect), coat/fuzz/SSS/hair, landscape/grass PBR, glints | Pt | H | M | Med |
 | [Unified Water](deviations/UnifiedWater.md) | Port | Optical distance blend, distant terrain tile generation/lifetime, cache UI, material identity fix | FO4-specific requirement: preserve vanilla placed-water distance rendering. N/A: Skyrim world flowmap | Pt | M | S/M | Med |
 | [Upscaling](deviations/Upscaling.md) | Port | SR/native AA, DR/RCAS/reflection/depth consumers, canonical SDK depth, masks, underwater chain, FG/UI/Reflex | — | Pt | H | L | High |
 | [Vanilla PBR](deviations/VanillaPBR.md) | Extension | — | FO4-original gloss/intensity mappings, deferred direct GGX, and the Dynamic Cubemaps live cube inside the native envmap formula, based on upstream PR #2332 | Pt | H | M | High |
@@ -79,7 +79,7 @@ are FO4-only rule-4 port features.
 
 - **Parallax (Extended Materials / TruePBR).** TruePBR relief is Extended Materials' marcher
   (`ExtendedMaterialsParallaxCore.hlsli`) gated by `TRUE_PBR`, `EnableParallax` and `HasDisplacement`
-  (`Lighting.hlsl:1175-1217`), so it ships as one EM slice in `DFPrepass` before material sampling. Vanilla
+  (`Lighting.hlsl:1287-1329`), so it ships as one EM slice in `DFPrepass` before material sampling. Vanilla
   textures carry no height, but FO4 parallax texture packs store it in the `_s` (specular/smoothness) alpha,
   which `DFPrepass` already binds at t2 (landscape t8+). Reading it is a relocated upstream datum, so the
   slice is a port. BGSMs carry no parallax marker, so, following ENB's `_s` alpha convention, the host admits objects whose
