@@ -30,6 +30,9 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.renderdoc");
+
+		constexpr char kPerformanceWarning[] =
+			"RenderDoc is loaded and severely impacts performance. Disable startup loading and restart to unload it.";
 	}
 
 	using renderdoc_settings::kEngineD3D11Target;
@@ -601,7 +604,7 @@ namespace cs::features
 	{
 		if (!_api)
 			return {};
-		return "RenderDoc is loaded and severely impacts performance. Disable startup loading and restart to unload it.";
+		return kPerformanceWarning;
 	}
 
 	void RenderDoc::DrawOverlay()
@@ -724,9 +727,8 @@ namespace cs::features
 			if (dmui::ui::Button("Trigger Capture"))
 				TriggerCapture();
 			dmui::ui::EndDisabled();
-			dmui::ui::TextWrapped(
-				"RenderDoc is loaded and may severely impact performance. Disable startup loading and restart to unload it. "
-				"Upscaling and frame generation may be incompatible with captures.");
+			dmui::ui::TextWrapped(kPerformanceWarning);
+			dmui::ui::TextWrapped("Upscaling and frame generation may be incompatible with captures.");
 
 			if (!_api)
 				dmui::ui::TextDisabled("Runtime load failed - install RenderDoc or fix the DLL path, then restart.");

@@ -107,8 +107,7 @@ work runs on the thread that edits feature settings.
 frame observer. Preset identity, name, path, and capture directory are captured when opening
 the relevant dialog. Rejected submissions retain the text and show validation or filesystem
 errors in the host dialog. Notifications post directly to the any-thread host service;
-without a connected host, they are logged instead. A feature's `GetStartupNotice` warning is
-posted once, when the host first reports ready.
+without a connected host, they are logged instead.
 
 Performance hotkeys are registered disabled unless their owning feature is healthy and enabled.
 RenderDoc capture hotkeys additionally require a loaded capture API. IDs use the
