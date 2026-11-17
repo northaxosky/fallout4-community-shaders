@@ -381,6 +381,18 @@ namespace cs::engine
 			a_record.world[3][3] = 1.0f;
 		}
 
+		// Names the first technique bit outside kBatchableTechnique.
+		[[nodiscard]] BatchFallback UnbatchableReason(std::uint32_t a_bits) noexcept
+		{
+			if (a_bits & std::to_underlying(Flag::kAlphaTest))
+				return BatchFallback::kAlphaTest;
+			if (a_bits & std::to_underlying(Flag::kAdditionalAlphaMask))
+				return BatchFallback::kAlphaMask;
+			if (a_bits & std::to_underlying(Flag::kTreeAnim))
+				return BatchFallback::kTreeAnim;
+			return BatchFallback::kTechniqueOther;
+		}
+
 		[[nodiscard]] bool IsMeshLOD(RE::BSGeometry& a_geometry) noexcept
 		{
 			static const REL::Relocation<const RE::NiRTTI*> rtti{ RE::BSMeshLODTriShape::Ni_RTTI };
@@ -394,8 +406,10 @@ namespace cs::engine
 			std::uint32_t a_technique,
 			BatchClass& a_class)
 		{
-			if ((a_technique & ~kBatchableTechnique) != 0 || a_property.flags.any(ShaderFlag::kVATSTarget))
-				return BatchFallback::kTechnique;
+			if (const auto unbatchable = a_technique & ~kBatchableTechnique)
+				return UnbatchableReason(unbatchable);
+			if (a_property.flags.any(ShaderFlag::kVATSTarget))
+				return BatchFallback::kVatsTarget;
 			// The engine builds no draw for animated properties; neither do we.
 			const auto* alpha = a_geometry.GetAlphaProperty();
 			if (a_property.controllers || (alpha && alpha->controllers))
@@ -403,7 +417,7 @@ namespace cs::engine
 
 			const bool merge = (a_technique & kMergeTechnique) == kMergeTechnique;
 			if (!(g_classMask.load(std::memory_order_relaxed) & 1u << static_cast<unsigned>(merge ? BatchClass::kMergeInstanced : BatchClass::kPlain)))
-				return BatchFallback::kTechnique;
+				return BatchFallback::kClassDisabled;
 			auto* shape = static_cast<RE::BSTriShape*>(&a_geometry);
 			auto* renderer = static_cast<RE::BSGraphics::TriShape*>(a_geometry.rendererData);
 			if (!renderer)
@@ -417,7 +431,7 @@ namespace cs::engine
 			if (merge) {
 				merged = a_geometry.IsBSMergeInstancedTriShape();
 				if (!merged)
-					return BatchFallback::kTechnique;
+					return BatchFallback::kMergeShape;
 				// The engine reads the LOD bands only for type 5, else numTriangles.
 				indexCount = (a_geometry.type == kMeshLODType ? a_geometry.GetRenderableTris(kDefaultLodMode) : shape->numTriangles) * 3;
 			} else if (a_geometry.type == kPlainType) {
@@ -425,10 +439,10 @@ namespace cs::engine
 			} else if (a_geometry.type == kMeshLODType && IsMeshLOD(a_geometry)) {
 				indexCount = a_geometry.GetRenderableTris(kDefaultLodMode) * 3;
 			} else {
-				return BatchFallback::kTechnique;
+				return BatchFallback::kGeometryType;
 			}
 			if (indexCount == 0)
-				return BatchFallback::kTechnique;
+				return BatchFallback::kNoIndices;
 
 			const int vertexHeap = g_heaps.Slot(*renderer->vertexBuffer);
 			const int indexHeap = g_heaps.Slot(*renderer->indexBuffer);

@@ -576,7 +576,7 @@ namespace cs::features
 			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
-			"batched_plain={} batched_merge={} batch_draws={} batch_pool_records={} batch_fallback_technique={} batch_fallback_animated={} batch_fallback_renderer_data={} batch_fallback_buffer={} batch_fallback_structured={} batch_fallback_heap_view={} batch_fallback_pool_full={} batch_fallback_arena_full={} "
+			"batched_plain={} batched_merge={} batch_draws={} batch_pool_records={} batch_fallback_technique={} batch_fallback_alpha_test={} batch_fallback_alpha_mask={} batch_fallback_tree_anim={} batch_fallback_technique_other={} batch_fallback_vats_target={} batch_fallback_class_disabled={} batch_fallback_merge_shape={} batch_fallback_geometry_type={} batch_fallback_no_indices={} batch_fallback_animated={} batch_fallback_renderer_data={} batch_fallback_buffer={} batch_fallback_structured={} batch_fallback_heap_view={} batch_fallback_pool_full={} batch_fallback_arena_full={} "
 			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_gather={:.3f} ms_passes={:.3f} ms_batch={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"sun_live_frames={} sun_live_skipped_unavailable={} sun_live_skipped_not_full_sky={} sun_live_skipped_no_light={} sun_live_skipped_unsupported_count={} sun_live_skipped_no_target={} sun_live_skipped_invalid={} sun_live_skipped_source={} sun_live_skipped_disabled={} "
@@ -590,7 +590,7 @@ namespace cs::features
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
 			count(batch.batched[0]), count(batch.batched[1]), count(batch.draws), batch.poolRecords.load(std::memory_order_relaxed),
-			fallback(BatchFallback::kTechnique), fallback(BatchFallback::kAnimated), fallback(BatchFallback::kRendererData), fallback(BatchFallback::kBufferNotReady),
+			cs::engine::TechniqueFallbacks(batch), fallback(BatchFallback::kAlphaTest), fallback(BatchFallback::kAlphaMask), fallback(BatchFallback::kTreeAnim), fallback(BatchFallback::kTechniqueOther), fallback(BatchFallback::kVatsTarget), fallback(BatchFallback::kClassDisabled), fallback(BatchFallback::kMergeShape), fallback(BatchFallback::kGeometryType), fallback(BatchFallback::kNoIndices), fallback(BatchFallback::kAnimated), fallback(BatchFallback::kRendererData), fallback(BatchFallback::kBufferNotReady),
 			fallback(BatchFallback::kStructuredNotReady), fallback(BatchFallback::kHeapView), fallback(BatchFallback::kPoolFull), fallback(BatchFallback::kArenaFull),
 			cpuMsAverage, _windowCpuMsMax, captureMs, gatherMs, passesMs, batchMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange,
@@ -635,7 +635,16 @@ namespace cs::features
 			.Field("batched_merge", count(batch.batched[static_cast<std::size_t>(cs::engine::BatchClass::kMergeInstanced)]))
 			.Field("batch_draws", count(batch.draws))
 			.Field("batch_pool_records", static_cast<std::uint64_t>(batch.poolRecords.load(std::memory_order_relaxed)))
-			.Field("batch_fallback_technique", batchFallback(BatchFallback::kTechnique))
+			.Field("batch_fallback_technique", cs::engine::TechniqueFallbacks(batch))
+			.Field("batch_fallback_alpha_test", batchFallback(BatchFallback::kAlphaTest))
+			.Field("batch_fallback_alpha_mask", batchFallback(BatchFallback::kAlphaMask))
+			.Field("batch_fallback_tree_anim", batchFallback(BatchFallback::kTreeAnim))
+			.Field("batch_fallback_technique_other", batchFallback(BatchFallback::kTechniqueOther))
+			.Field("batch_fallback_vats_target", batchFallback(BatchFallback::kVatsTarget))
+			.Field("batch_fallback_class_disabled", batchFallback(BatchFallback::kClassDisabled))
+			.Field("batch_fallback_merge_shape", batchFallback(BatchFallback::kMergeShape))
+			.Field("batch_fallback_geometry_type", batchFallback(BatchFallback::kGeometryType))
+			.Field("batch_fallback_no_indices", batchFallback(BatchFallback::kNoIndices))
 			.Field("batch_fallback_animated", batchFallback(BatchFallback::kAnimated))
 			.Field("batch_fallback_renderer_data", batchFallback(BatchFallback::kRendererData))
 			.Field("batch_fallback_buffer", batchFallback(BatchFallback::kBufferNotReady))
