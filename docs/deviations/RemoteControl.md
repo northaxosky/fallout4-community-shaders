@@ -12,3 +12,4 @@
 | Divergence | `capture screenshot` returns `queued` and no artifact | Returns `requestId`; `communityshaders.capture.completed` reports `kind:"screenshot"` with `path,bytes` or `error` | A caller cannot otherwise find the file ([Screenshot](Screenshot.md)) |
 | Divergence | No CS cost measurement | `communityshaders.perf` runs scripted Performance Overlay comparisons of custom shaders or live settings | Validation needs a scripted cost reading ([Performance Overlay](PerformanceOverlay.md)) |
 | Divergence | A Nsight Perf pass ends before Present, so the overlay is not measured | A pass brackets `Main::Swap`, so the DearModdingUI overlay and Present are measured | `Main::Swap` renders and presents |
+| Divergence | `inspect profiler` reports D3D11 passes | Adds `d3d12Passes` {name,gpuMs,gpuAvgMs,gpuP95Ms} from D3D12 timestamp queries | DLSS/FSR and the D3D12 present run on the private D3D12 device |

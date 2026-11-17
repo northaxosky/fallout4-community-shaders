@@ -49,6 +49,12 @@ namespace cs::features::remote_control
 					continue;
 				shaders.push_back({ { "name", shader.name }, { "calls", shader.calls }, { "ms", shader.milliseconds } });
 			}
+			auto d3d12Passes = Json::array();
+			for (const auto& pass : render::profiling::GetExternalGpuPasses()) {
+				if (!a_filter.empty() && !pass.name.contains(a_filter))
+					continue;
+				d3d12Passes.push_back({ { "name", pass.name }, { "gpuMs", pass.lastMs }, { "gpuAvgMs", pass.avgMs }, { "gpuP95Ms", pass.p95Ms } });
+			}
 			const auto frame = profiler.GetFrameStats();
 			Json result{
 				{ "totalGpuMs", profiler.GetTotalTimeMs() },
@@ -57,6 +63,7 @@ namespace cs::features::remote_control
 				{ "frame", { { "ms", frame.lastMs }, { "avgMs", frame.avgMs }, { "p95Ms", frame.p95Ms }, { "p99Ms", frame.p99Ms }, { "samples", frame.count }, { "frameGeneration", render::TemporalPipeline::Get().GetFrameGenerationDiagnostics(false).active } } },
 				{ "passes", std::move(passes) },
 				{ "shaders", std::move(shaders) },
+				{ "d3d12Passes", std::move(d3d12Passes) },
 			};
 			if (result["passes"].empty())
 				result["hint"] = "GPU timing wakes on this request; poll again for passes";
@@ -95,7 +102,7 @@ namespace cs::features::remote_control
 
 	const Tool kInspectTool{
 		"communityshaders.inspect",
-		R"({"description":"Read Community Shaders engine state. Kind-dispatched; the response is a JSON object. kind=state -> {plugin,version,frame_count}. kind=shadercache -> {compiling,completedTasks,totalTasks,failedTasks,durationMs,cache:{hit,absent,stale,rejected,written},frame_count}; the task counts describe the running runtime shader compile batch, else the last finished one (see the communityshaders.shaderRecompiled event). kind=profiler -> {totalGpuMs,totalCpuMs,frame_count,frame:{ms,avgMs,p95Ms,p99Ms,samples,frameGeneration} (engine-frame wall clock; presents run ~2x when frameGeneration),passes:[{name,gpuMs,gpuAvgMs,gpuP95Ms,gpuP99Ms,cpuMs,cpuAvgMs,gpuHistory:[...]}],shaders:[{name,calls,ms}]}; optional filter param matches pass and shader names.","readOnly":true,"inputSchema":{"type":"object","properties":{"kind":{"type":"string","enum":["state","shadercache","profiler"]},"filter":{"type":"string"}},"required":["kind"]}})",
+		R"({"description":"Read Community Shaders engine state. Kind-dispatched; the response is a JSON object. kind=state -> {plugin,version,frame_count}. kind=shadercache -> {compiling,completedTasks,totalTasks,failedTasks,durationMs,cache:{hit,absent,stale,rejected,written},frame_count}; the task counts describe the running runtime shader compile batch, else the last finished one (see the communityshaders.shaderRecompiled event). kind=profiler -> {totalGpuMs,totalCpuMs,frame_count,frame:{ms,avgMs,p95Ms,p99Ms,samples,frameGeneration} (engine-frame wall clock; presents run ~2x when frameGeneration),passes:[{name,gpuMs,gpuAvgMs,gpuP95Ms,gpuP99Ms,cpuMs,cpuAvgMs,gpuHistory:[...]}],shaders:[{name,calls,ms}],d3d12Passes:[{name,gpuMs,gpuAvgMs,gpuP95Ms}] (GPU timestamps on the D3D12 super-resolution and present lists, e.g. D3D12::SuperResolution/Provider; they time DLSS/FSR and our D3D12 work apart from the D3D11 passes and appear once the profiler is active)}; optional filter param matches pass, shader and D3D12 pass names.","readOnly":true,"inputSchema":{"type":"object","properties":{"kind":{"type":"string","enum":["state","shadercache","profiler"]},"filter":{"type":"string"}},"required":["kind"]}})",
 		&Handle
 	};
 }
