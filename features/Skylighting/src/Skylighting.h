@@ -108,7 +108,15 @@ namespace cs::features
 			kNoGrid,
 			kDisabled
 		};
-		void DispatchProbeUpdate(ID3D11DeviceContext* a_context);
+		// Null views bind null: no cascades, so every probe reads lit.
+		struct ProbeCascades
+		{
+			ID3D11ShaderResourceView* array = nullptr;
+			ID3D11ShaderResourceView* lights = nullptr;
+		};
+		// The one probe update per frame: after the sun pass, else after the lights.
+		void UpdateProbes(const ProbeCascades& a_cascades);
+		void DispatchProbeUpdate(ID3D11DeviceContext* a_context, const ProbeCascades& a_cascades);
 
 		enum class CascadeSkip : std::uint8_t
 		{
@@ -116,13 +124,12 @@ namespace cs::features
 			kUnavailable,
 			kNotFullSky,
 			kSunCascades,
-			kCopyTarget,
+			kSource,
 			kDisabled
 		};
-		// After the sun's Render(7); copies the cascades the shared block describes.
-		void CopySunCascades();
-		CascadeSkip PublishSunCascades(ID3D11DeviceContext* a_context);
-		bool EnsureCascadeCopy(ID3D11Device* a_device, ID3D11Texture2D* a_source, std::uint32_t a_count);
+		// After the sun's Render(7); updates against the live cascades it describes.
+		void OnSunShadowRender();
+		CascadeSkip AcquireSunCascades(ProbeCascades& a_cascades);
 		void RenderDebug(ID3D11DeviceContext* a_context);
 		// Healthy with probes created, whether or not the feature is enabled.
 		ID3D11ShaderResourceView* GetBindableProbeArraySRV() const noexcept;
@@ -160,12 +167,6 @@ namespace cs::features
 		std::unique_ptr<cs::buffer::Texture3D> _texShadowVisibility;
 		winrt::com_ptr<ID3D11SamplerState> _comparisonSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _probeUpdateCompute;
-		// Focus and local shadows overwrite the stock array; cascades live in a copy.
-		winrt::com_ptr<ID3D11Texture2D> _cascadeCopy;
-		winrt::com_ptr<ID3D11ShaderResourceView> _cascadeCopySRV;
-		D3D11_TEXTURE2D_DESC _cascadeDesc{};
-		// Render thread only: light data generation the copy was taken for; 0 is none.
-		std::uint64_t _copyGeneration = 0;
 		std::atomic_bool _probesReady{ false };
 
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _debugCompute;
@@ -240,10 +241,10 @@ namespace cs::features
 			// Latest frame: cell id, array origin, valid margin.
 			std::array<std::atomic<std::int32_t>, 9> grid{};
 		} _probeCounters;
-		// Sun cascade copies; a skip publishes neutral data, never stale cascades.
+		// Frames the update sampled live cascades; a skip binds none.
 		struct CascadeCounters
 		{
-			std::atomic<std::uint64_t> copies{ 0 };
+			std::atomic<std::uint64_t> liveFrames{ 0 };
 			std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(CascadeSkip::kDisabled) + 1> skipped{};
 			std::array<std::atomic<std::uint64_t>, cs::engine::kSunCascadeStatusCount> statusSkipped{};
 			std::atomic<std::uint32_t> count{ 0 };
@@ -263,6 +264,8 @@ namespace cs::features
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
 		ProbeState _probeState = ProbeState::kPending;
+		// Render thread only; the frame whose probe update was already evaluated.
+		std::uint32_t _probeUpdateFrame = UINT32_MAX;
 		bool _loggedFirstCapture = false;
 		bool _loggedTargetFailure = false;
 	};
