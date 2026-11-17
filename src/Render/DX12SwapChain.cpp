@@ -1357,7 +1357,15 @@ namespace cs::render
 
 	void DX12SwapChain::MarkQuarantined() noexcept
 	{
-		_quarantined = true;
+		if (!std::exchange(_quarantined, true)) {
+			try {
+				L->error(
+					"Device removed reasons: D3D12={:#010x} D3D11={:#010x}",
+					_device12 ? static_cast<std::uint32_t>(_device12->GetDeviceRemovedReason()) : 0u,
+					_device11 ? static_cast<std::uint32_t>(_device11->GetDeviceRemovedReason()) : 0u);
+			} catch (...) {
+			}
+		}
 		if (_presentationBound && _callbacks.quarantinePresentation) {
 			_callbacks.quarantinePresentation();
 		}
