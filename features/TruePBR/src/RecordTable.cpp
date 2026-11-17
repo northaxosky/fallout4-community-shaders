@@ -12,10 +12,12 @@ namespace cs::features::true_pbr
 	{
 		const auto parameters = a_record.material.ResolvedParameters();
 		const bool hasEmissive = !a_record.material.Texture(PbrTexture::kEmissive).empty();
+		const bool interlayer = (a_record.material.featureFlags & feature::kInterlayerParallax) != 0;
 		return {
 			.roughnessScale = parameters[ParameterIndex("roughnessScale")],
 			.specularLevel = parameters[ParameterIndex("specularLevel")],
-			.flags = TruePBRRecord::Valid | (hasEmissive ? TruePBRRecord::HasEmissive : 0u)
+			.flags = TruePBRRecord::Valid | (hasEmissive ? TruePBRRecord::HasEmissive : 0u) | (interlayer ? TruePBRRecord::InterlayerParallax : 0u),
+			.displacementScale = parameters[ParameterIndex("displacementScale")]
 		};
 	}
 

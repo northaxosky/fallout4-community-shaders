@@ -2,6 +2,7 @@
 #define FO4_TRUE_PBR_RECORD_H
 
 #ifdef __cplusplus
+#	include <cstddef>
 #	include <cstdint>
 #endif
 
@@ -14,6 +15,8 @@ namespace TruePBRRecord
 
 	static const uint Valid = 1;
 	static const uint HasEmissive = 2;
+	// Two-layer interlayer parallax; the single-layer march skips these.
+	static const uint InterlayerParallax = 4;
 	// MRT3 alpha of a TruePBR pixel, in 8-bit units.
 	static const uint ClassTag = 128;
 
@@ -22,10 +25,11 @@ namespace TruePBRRecord
 		float roughnessScale;
 		float specularLevel;
 		uint flags;
-		uint reserved;
+		float displacementScale;
 	};
 #ifdef __cplusplus
 	static_assert(sizeof(Row) == 16);
+	static_assert(offsetof(Row, displacementScale) == 12);
 #else
 	bool IsClassTag(float a_unorm)
 	{
