@@ -50,7 +50,7 @@ namespace cs::features
 			FeatureDebugView{ "roughness", "Roughness", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "metallic_f0", "F0 (metals carry their color)", FeatureDebugViewKind::kFullscreen },
 			FeatureDebugView{ "ambient_occlusion", "Material ambient occlusion", FeatureDebugViewKind::kFullscreen },
-			FeatureDebugView{ "parallax_offset", "Parallax offset (uv x10 in RG, shadow in B)", FeatureDebugViewKind::kFullscreen }
+			FeatureDebugView{ "parallax_offset", "Parallax offset (uv x5 + 0.5 in RG, shadow in B)", FeatureDebugViewKind::kFullscreen }
 		};
 	}
 

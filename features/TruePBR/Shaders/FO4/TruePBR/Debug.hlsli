@@ -43,7 +43,7 @@ namespace TruePBRDebug
 	void ApplyParallax(float2 a_uvDelta, float a_shadow, inout float3 a_albedo, inout float3 a_emissive)
 	{
 		a_albedo = 0.0;
-		a_emissive = float3(abs(a_uvDelta) * 10.0, a_shadow);
+		a_emissive = float3(a_uvDelta * 5.0 + 0.5, a_shadow);
 	}
 
 	void ApplyMaterial(float3 a_baseColor, float a_roughness, float3 a_f0, float a_ao, inout float3 a_albedo, inout float3 a_emissive)
