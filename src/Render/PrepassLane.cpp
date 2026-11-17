@@ -74,9 +74,6 @@ namespace cs::engine
 		constexpr std::size_t kLaneDwords = sizeof(PrepassLanePayload) / sizeof(float);
 
 		constexpr std::size_t kRecordTextureCount = static_cast<std::size_t>(PrepassRecordTexture::kCount);
-		constexpr std::array<std::uint32_t, kRecordTextureCount> kRecordTextureSlots{
-			PrepassLaneTexture::DisplacementSlot, PrepassLaneTexture::Features0Slot, PrepassLaneTexture::Features1Slot
-		};
 
 		struct PrepassLaneRequest
 		{
@@ -151,7 +148,7 @@ namespace cs::engine
 			for (std::size_t index = 0; index < kRecordTextureCount; ++index) {
 				const auto* texture = a_record.textures[index];
 				const auto* renderer = texture ? texture->rendererTexture : nullptr;
-				if (!renderer || IsEngineDefaultTexture(texture))
+				if (!renderer)
 					continue;
 				a_request.textures[index] = renderer;
 				a_request.payload.texturesBound |= 1u << index;
@@ -166,7 +163,7 @@ namespace cs::engine
 				return;
 			for (std::size_t index = 0; index < kRecordTextureCount; ++index) {
 				if (const auto* texture = a_request.textures[index])
-					SetPixelShaderTexture(kRecordTextureSlots[index], *texture, a_request.addressMode, RE::BSGraphics::TextureFilterMode::kAniso);
+					SetPixelShaderTexture(PrepassLaneTexture::FirstSlot + static_cast<std::uint32_t>(index), *texture, a_request.addressMode, RE::BSGraphics::TextureFilterMode::kAniso);
 			}
 			g_laneTextured.fetch_add(1, std::memory_order_relaxed);
 		}

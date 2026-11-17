@@ -5,7 +5,7 @@
 #	include <cstdint>
 #endif
 
-// cb2 pad lane: .x flags, .y record id, .z emissive scale bits, .w bound record textures.
+// cb2 pad lane: .x flags, .y record id, .z emissive bits, .w textures.
 namespace PrepassLaneTexture
 {
 #ifdef __cplusplus
@@ -13,14 +13,9 @@ namespace PrepassLaneTexture
 #else
 	static const uint
 #endif
-		// Bits of .w; bit i marks record texture i as bound.
-		Displacement = 1,
-		Features0 = 2,
-		Features1 = 4,
-		// Pixel shader slots of record textures 0..2.
-		DisplacementSlot = 4,
-		Features0Slot = 5,
-		Features1Slot = 6;
+		// Record texture i: bit 1 << i of .w, pixel slot FirstSlot + i.
+		FirstSlot = 4,
+		Displacement = 1;
 }
 
 namespace PrepassLaneFlag
