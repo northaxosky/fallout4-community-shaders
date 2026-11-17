@@ -25,7 +25,6 @@
 
 #include <DearModdingUI/Client.h>
 
-#include <algorithm>
 #include <array>
 #include <format>
 
@@ -278,10 +277,8 @@ namespace cs::features
 		ui::DrawStatusText(Log(), std::format("{} PBR material files loaded this session.", records), dmui::TextTone::kInherit);
 		if (!IsEnabled() && records != 0)
 			ui::DrawStatusText(Log(), "True PBR is switched off, but loaded PBR materials keep their PBR textures and render through vanilla shading until restart.", dmui::TextTone::kStatusWarning);
-		bool parallax = false;
-		for (const auto* feature : FeatureManager::Get().GetAll())
-			parallax = parallax || (feature->GetName() == "ExtendedMaterials" && feature->IsEnabled());
-		if (!parallax)
+		const auto* extendedMaterials = FeatureManager::Get().Find("ExtendedMaterials");
+		if (!extendedMaterials || !extendedMaterials->IsLoaded() || !extendedMaterials->IsEnabled())
 			ui::DrawStatusText(Log(), "PBR parallax needs Extended Materials, which is not active; PBR surfaces render flat.", dmui::TextTone::kStatusWarning);
 		settings::SettingsEdit edit{ *this };
 		const auto field = edit.Bind(kSchema, _settings);

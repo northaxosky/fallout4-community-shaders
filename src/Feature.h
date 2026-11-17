@@ -411,6 +411,7 @@ namespace cs
 			});
 		}
 		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }
+		[[nodiscard]] Feature* Find(std::string_view a_name) const noexcept;
 		bool ApplyDebugViews(std::span<const FeatureDebugSelection> a_selections);
 		Feature* GetFullscreenDebugFeature() const noexcept
 		{

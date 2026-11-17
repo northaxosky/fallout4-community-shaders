@@ -175,16 +175,19 @@ namespace cs
 		return instance;
 	}
 
+	Feature* FeatureManager::Find(std::string_view a_name) const noexcept
+	{
+		const auto found = std::ranges::find(_registeredFeatures, a_name, [](const Feature* a_feature) { return a_feature->GetName(); });
+		return found == _registeredFeatures.end() ? nullptr : *found;
+	}
+
 	void FeatureManager::Register(Feature* a_feature)
 	{
 		if (std::find(_registeredFeatures.begin(), _registeredFeatures.end(), a_feature) != _registeredFeatures.end()) {
 			return;
 		}
 
-		const auto name = a_feature->GetName();
-		if (std::find_if(_registeredFeatures.begin(), _registeredFeatures.end(), [name](const Feature* a_registered) {
-				return a_registered->GetName() == name;
-			}) != _registeredFeatures.end()) {
+		if (Find(a_feature->GetName())) {
 			return;
 		}
 
