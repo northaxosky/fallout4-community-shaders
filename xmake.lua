@@ -434,6 +434,9 @@ local function use_shader_test_cache()
     end
 end
 
+-- Hang guard: a cold CI compile of every variant runs about ten minutes.
+local shader_test_timeout = 1800000
+
 -- One gate binary per compiler: d3dcompiler_47.dll resolves from the executable directory.
 -- A nil compiler selects the pinned Windows SDK copy; otherwise it is a project-relative path.
 local function stock_shader_identity_target(name, compiler, tests)
@@ -468,7 +471,7 @@ local function stock_shader_identity_target(name, compiler, tests)
                     path.join(os.projectdir(), "tests/data", spec.file),
                     spec.mode
                 },
-                run_timeout = 600000
+                run_timeout = shader_test_timeout
             })
         end
     end)
@@ -502,7 +505,7 @@ target("RuntimeShaderTests", function()
     after_build(stage_shader_compiler)
     add_tests("RuntimeShaderCompile", {
         runargs = { path.join(os.projectdir(), "build/ShaderStage/Shaders") },
-        run_timeout = 600000
+        run_timeout = shader_test_timeout
     })
 end)
 
