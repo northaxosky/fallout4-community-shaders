@@ -37,6 +37,10 @@ namespace cs::compat
 						});
 						if (found == plugins.end())
 							return std::nullopt;
+						if (a_rule.exempt && a_rule.exempt(found->version)) {
+							L->info("{} detected ({} {}): it runs in a compatible mode, so nothing is turned off", a_rule.mod, found->name, found->version.string("."));
+							return std::nullopt;
+						}
 						return std::format("{} {} ({})", found->name, found->version.string("."), found->file.filename().string());
 					}
 				case Source::kGameFile:

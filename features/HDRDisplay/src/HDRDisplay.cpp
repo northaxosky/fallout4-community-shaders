@@ -1,9 +1,12 @@
 #include "HDRDisplay.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
 
 #include <DearModdingUI/Client.h>
 
+#include "Api/CommunityShadersAPI.h"
 #include "HDRDetection.h"
 #include "Host/HostClient.h"
 #include "Log.h"
@@ -244,4 +247,23 @@ namespace cs::features
 		};
 		static AutoRegister _autoRegister;
 	}
+}
+
+extern "C" DLLEXPORT bool CS_GetHdrOutputState(CS_HdrOutputState* a_state) noexcept
+{
+	// Callers built before sceneEncoding pass a struct that ends at peakNits.
+	if (!a_state || a_state->size < offsetof(CS_HdrOutputState, sceneEncoding))
+		return false;
+	const auto* hdr = cs::features::HDRDisplay::GetSingleton();
+	const auto settings = hdr->GetOutputSettings();
+	const CS_HdrOutputState state{
+		.size = a_state->size,
+		.hdrActive = hdr->IsHdrActive() ? 1u : 0u,
+		.paperWhiteNits = settings.paperWhite,
+		.peakNits = settings.peakNits,
+		.sceneEncoding = CS_HdrSceneEncoding_LinearPaperWhite,
+		.lutOutputEncoding = CS_HdrLutOutputEncoding_SignedGamma22PaperWhite,
+	};
+	std::memcpy(a_state, &state, std::min<std::size_t>(state.size, sizeof(state)));
+	return true;
 }
