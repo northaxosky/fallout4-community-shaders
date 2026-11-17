@@ -103,6 +103,7 @@ namespace cs::features::performance_overlay
 		_a = _b = {};
 		_aggregator.Clear();
 		_lastSummary.reset();
+		_costRun = false;
 		_testError.clear();
 	}
 

@@ -78,7 +78,7 @@ namespace cs::features::remote_control
 			}
 			if (!comparison.Testing() && !comparison.RestorePending())
 				return Error("no comparison is running");
-			if (comparison.Testing() && !comparison.CostRunning())
+			if (!comparison.LastRunWasCost())
 				return Error("the running comparison is not a cost measurement", { { "hint", "stop it in the Performance Overlay" } });
 			if (auto stopped = overlay->StopComparison(); !stopped)
 				return Error("the comparison could not be stopped", { { "detail", std::move(stopped.error()) } });
