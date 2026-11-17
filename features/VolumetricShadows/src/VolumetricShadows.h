@@ -70,7 +70,6 @@ namespace cs::features
 		// After the sun's Render(7), while the borrowed cascades are valid.
 		void Produce();
 		Skip DownsampleAndBlur(ID3D11DeviceContext* a_context);
-		bool EnsureSourceView(ID3D11Device* a_device, const cs::engine::SunCascadeSnapshot& a_snapshot);
 		void ClearToLit(ID3D11DeviceContext* a_context);
 		void Dispatch(ID3D11DeviceContext* a_context, std::string_view a_pass, ID3D11ComputeShader* a_shader, ID3D11ShaderResourceView* a_input, ID3D11UnorderedAccessView* a_output, std::uint32_t a_groupsX, std::uint32_t a_groupsY);
 		void Blur(ID3D11DeviceContext* a_context, std::size_t a_mip);
@@ -97,10 +96,6 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _blurHorizontal;
 		winrt::com_ptr<ID3D11ComputeShader> _blurVertical;
 
-		// Render thread only; the view is cached for the borrowed cascade texture.
-		winrt::com_ptr<ID3D11ShaderResourceView> _sourceSRV;
-		ID3D11Texture2D* _sourceTexture = nullptr;
-		D3D11_TEXTURE2D_DESC _sourceDesc{};
 		// Render thread only; lit maps sample nothing stale.
 		bool _mapsLit = true;
 		cs::engine::SunCascadeStatus _sunStatus = cs::engine::SunCascadeStatus::kOk;

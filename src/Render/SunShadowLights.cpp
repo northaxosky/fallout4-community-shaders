@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstring>
 #include <format>
+#include <utility>
 
 namespace cs::engine
 {
@@ -34,8 +35,16 @@ namespace cs::engine
 			std::byte bytes[sizeof(DirectionalShadowLightData<kMaxLayoutCascades>)];
 		};
 
+		// The reference keeps the engine array alive under the view.
+		struct CascadeView
+		{
+			winrt::com_ptr<ID3D11Texture2D> texture;
+			winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		};
+
 		bool g_hooked = false;
 		SunShadowLightState g_state;
+		CascadeView g_cascadeView;
 		// Indexed by the layout's cascade count.
 		std::array<Slot, kMaxLayoutCascades + 1> g_slots;
 
@@ -87,6 +96,32 @@ namespace cs::engine
 			return true;
 		}
 
+		[[nodiscard]] bool EnsureCascadeView(const SunCascadeSnapshot& a_snapshot)
+		{
+			if (g_cascadeView.texture.get() == a_snapshot.texture)
+				return true;
+			g_cascadeView = {};
+			auto* device = GetDevice();
+			D3D11_TEXTURE2D_DESC source{};
+			a_snapshot.texture->GetDesc(&source);
+			if (!device || source.Format != DXGI_FORMAT_R16_TYPELESS || source.ArraySize != a_snapshot.count ||
+				source.MipLevels != 1 || source.SampleDesc.Count != 1 || !(source.BindFlags & D3D11_BIND_SHADER_RESOURCE))
+				return false;
+			const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
+				.Format = DXGI_FORMAT_R16_UNORM,
+				.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY,
+				.Texture2DArray = { .MostDetailedMip = 0, .MipLevels = 1, .FirstArraySlice = 0, .ArraySize = source.ArraySize }
+			};
+			winrt::com_ptr<ID3D11ShaderResourceView> srv;
+			if (FAILED(device->CreateShaderResourceView(a_snapshot.texture, &srvDesc, srv.put())))
+				return false;
+			cs::render::annotation::SetName(srv.get(), "SunShadowLights/CascadeArray.SRV");
+			g_cascadeView.texture.copy_from(a_snapshot.texture);
+			g_cascadeView.srv = std::move(srv);
+			L->info("sun cascades: {}x{}x{} R16_TYPELESS, SRV R16_UNORM", source.Width, source.Height, source.ArraySize);
+			return true;
+		}
+
 		void Retire()
 		{
 			if (!g_state.published)
@@ -129,6 +164,7 @@ namespace cs::engine
 			if (status != SunCascadeStatus::kOk) {
 				// A failed frame must not leave the previous cascades visible.
 				Retire();
+				g_cascadeView = {};
 				g_state.status = status;
 				return;
 			}
@@ -155,6 +191,13 @@ namespace cs::engine
 	const SunShadowLightState& GetSunShadowLightState() noexcept
 	{
 		return g_state;
+	}
+
+	ID3D11ShaderResourceView* GetSunCascadeArraySRV() noexcept
+	{
+		if (!g_state.published || !g_state.snapshot.texture || !EnsureCascadeView(g_state.snapshot))
+			return nullptr;
+		return g_cascadeView.srv.get();
 	}
 
 	ID3D11ShaderResourceView* GetSunShadowLightsSRV(const SunShadowLightLayout& a_layout) noexcept
