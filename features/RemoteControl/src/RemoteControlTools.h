@@ -41,6 +41,7 @@ namespace cs::features::remote_control
 	extern const Tool kCaptureTool;
 	extern const Tool kPerfTool;
 	extern const Tool kNvPerfTool;
+	extern const Tool kDevFlagsTool;
 
 	[[nodiscard]] std::span<const Tool* const> GetTools() noexcept;
 

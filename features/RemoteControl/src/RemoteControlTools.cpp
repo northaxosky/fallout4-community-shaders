@@ -25,7 +25,8 @@ namespace cs::features::remote_control
 			&kSettingsTool,
 			&kCaptureTool,
 			&kPerfTool,
-			&kNvPerfTool
+			&kNvPerfTool,
+			&kDevFlagsTool
 		};
 
 		// No exception may cross the DLL boundary; write the result once.

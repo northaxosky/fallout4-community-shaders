@@ -59,6 +59,8 @@ function main(target)
             "src/Features/PerformanceOverlay/CircularBuffer.h",
             "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.h",
             "src/Features/PerformanceOverlay/ABTesting/ABTestAggregator.cpp",
+            "src/Features/RemoteControl/DevFlags.h",
+            "src/Features/RemoteControl/DevFlags.cpp",
             "src/Features/RemoteControl/NvPerf.h",
             "src/Features/RemoteControl/NvPerf.cpp",
             "src/Features/RemoteControl/NvPerfHost.h",
