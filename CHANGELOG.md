@@ -7,6 +7,9 @@
 - Sky Sync: a dark flat quad no longer covers the view when the sun is below eye level, e.g. at night with the alternate sun path.
 - Performance Overlay: "Measure CS cost" alternates custom shaders on and off and reports their frame-time cost.
 - Upscaling/Frame Generation: FSR and DLSS no longer turn off when video memory use exceeds the budget.
+- Skylighting: sky light no longer leaks under roofs, awnings and overpasses.
+- Sky Sync: shadow caster swaps finish their fade when crossing exterior cells, and the alternate sun path stays continuous across midnight.
+- Profiling: the Profiling page holds the Performance Overlay settings; the overlay can hide chosen pass groups, and switched-off features' passes read 0.
 
 ## 0.5.1
 
