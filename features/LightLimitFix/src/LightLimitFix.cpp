@@ -559,6 +559,13 @@ namespace cs::features
 		g_state.sidecar.RestoreNativeRadii();
 		g_state.deferred.Clear();
 	}
+	void LightLimitFix::OnEnabledChanged(bool a_enabled) noexcept
+	{
+		if (a_enabled)
+			return;
+		std::scoped_lock lock(g_state.mutex);
+		g_state.sidecar.RestoreNativeRadii();
+	}
 	std::span<const FeatureDebugView> LightLimitFix::GetDebugViews() const noexcept
 	{
 		return kDebugViews;

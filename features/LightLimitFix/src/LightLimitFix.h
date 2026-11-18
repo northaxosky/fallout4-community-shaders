@@ -25,6 +25,7 @@ namespace cs::features
 		void OnDataLoaded() override;
 		void OnPostPostLoad() override;
 		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override;
+		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void Prepass() override;
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
