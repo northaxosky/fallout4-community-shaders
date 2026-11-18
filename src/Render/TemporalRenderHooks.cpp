@@ -453,7 +453,6 @@ namespace cs::render
 		upscaling->_windowSizeChanging = true;
 		func(a_this, a_arg);
 		upscaling->_windowSizeChanging = false;
-		RequestReset(ResetReason::kResize);
 
 		GuardedThunkBody("Upscaling window-size rebuild", [&] {
 			if (std::exchange(upscaling->_windowRebuildDeferred, false)) {
