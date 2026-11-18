@@ -726,7 +726,7 @@ struct PS_OUTPUT
 		tbnTr[1] = normalize(tbnTr[1]);
 		tbnTr[2] = normalize(tbnTr[2]);
 
-		float pixelOffset = 0;
+		float2 surfaceHeight = 0;
 #		if defined(EMAT_LANDSCAPE)
 		DisplacementParams displacementParams[6];
 		displacementParams[0].DisplacementScale = 1.f;
@@ -786,7 +786,7 @@ struct PS_OUTPUT
 			[branch] if (displacementParams.HeightScale > 0.0)
 			{
 				mipLevel = ExtendedMaterials::GetMipLevel(uv, g_tMaterial);
-				uv = ExtendedMaterials::GetParallaxCoords(viewPosition.z, uv, mipLevel, viewDirection, tbnTr, screenNoise, g_tMaterial, g_sMaterial, 3, displacementParams, applyMeshTV, meshOffset, pixelOffset);
+				uv = ExtendedMaterials::GetParallaxCoords(viewPosition.z, uv, mipLevel, viewDirection, tbnTr, screenNoise, g_tMaterial, g_sMaterial, 3, displacementParams, applyMeshTV, meshOffset, surfaceHeight);
 				const float parallaxShadowQuality = viewPosition.z < ExtendedMaterials::ParallaxCheapDistance ? ExtendedMaterials::ParallaxNearShadowQuality : ExtendedMaterials::ParallaxFarShadowQuality;
 				[branch] if (SharedData::extendedMaterialSettings.EnableShadows && parallaxShadowQuality > 0.0)
 				{
@@ -844,7 +844,7 @@ struct PS_OUTPUT
 		                              ExtendedMaterials::TerrainMaxWeightedHeightScale(landInput, displacementParams) > 0.01;
 			[branch] if (doTerrainPom)
 			{
-				uv = ExtendedMaterials::GetParallaxCoords(landInput, viewPosition.z, uv, mipLevels, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, pixelOffset, weights);
+				uv = ExtendedMaterials::GetParallaxCoords(landInput, viewPosition.z, uv, mipLevels, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, surfaceHeight, weights);
 			}
 			else if (SharedData::extendedMaterialSettings.EnableHeightBlending)
 			{

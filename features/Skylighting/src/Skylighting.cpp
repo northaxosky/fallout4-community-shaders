@@ -765,7 +765,8 @@ namespace cs::features
 			.ArrayOrigin = { arrayOrigin(cellID.x, 0), arrayOrigin(cellID.y, 1), arrayOrigin(cellID.z, 2), 0 },
 			.ValidMargin = { static_cast<int>(cellIDDiff.x), static_cast<int>(cellIDDiff.y), static_cast<int>(cellIDDiff.z), 0 },
 			.MinDiffuseVisibility = _settings.MinDiffuseVisibility,
-			.MinSpecularVisibility = _settings.MinSpecularVisibility
+			.MinSpecularVisibility = _settings.MinSpecularVisibility,
+			.AccumulateOcclusion = 1u
 		};
 		_grid.frame = graphics->frameCount;
 		a_feature.skylightingSettings = _grid.block;
