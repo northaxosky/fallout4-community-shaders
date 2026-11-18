@@ -48,10 +48,11 @@ namespace cs::engine
 		constexpr std::uint32_t kSideFaces = 0xF;
 		constexpr std::uint32_t kPolarFirstFace = 4;
 		constexpr std::uint32_t kDownFace = 5;
+		// World frames: pause and menu frames do not age the faces.
 		// The eye is the previous render's camera; reject pre-load records.
-		constexpr std::uint32_t kMaxCameraAgeFrames = 2;
+		constexpr std::uint64_t kMaxCameraAgeFrames = 2;
 		// The hook skips interiors and loads; a longer gap means stale faces.
-		constexpr std::uint32_t kMaxRenderGapFrames = 1;
+		constexpr std::uint64_t kMaxRenderGapFrames = 1;
 		// Sky-Lower: the color below the dome.
 		constexpr std::size_t kSkyLowerColor = 7;
 
@@ -151,7 +152,7 @@ namespace cs::engine
 		std::atomic_bool g_disabled{ false };
 		std::atomic_bool g_valid{ false };
 		std::atomic<std::uint32_t> g_faceMask{ 0 };
-		std::atomic<std::uint32_t> g_lastRenderFrame{ 0 };
+		std::atomic<std::uint64_t> g_lastRenderFrame{ 0 };
 		Counters g_counters;
 
 		// Never destroyed: static teardown must not free into the game heap.
@@ -197,14 +198,14 @@ namespace cs::engine
 			g_lodEye.reset();
 		}
 
-		[[nodiscard]] bool RenderIsCurrent(std::uint32_t a_frame) noexcept
+		[[nodiscard]] bool RenderIsCurrent(std::uint64_t a_worldFrame) noexcept
 		{
-			return a_frame - g_lastRenderFrame.load(std::memory_order_relaxed) <= kMaxRenderGapFrames;
+			return a_worldFrame - g_lastRenderFrame.load(std::memory_order_relaxed) <= kMaxRenderGapFrames;
 		}
 
-		[[nodiscard]] bool IsCurrentlyValid(std::uint32_t a_frame) noexcept
+		[[nodiscard]] bool IsCurrentlyValid() noexcept
 		{
-			return g_valid.load(std::memory_order_acquire) && RenderIsCurrent(a_frame);
+			return g_valid.load(std::memory_order_acquire) && RenderIsCurrent(render::GetFrameState().worldFrame);
 		}
 
 		// The main menu and loads reach the hook without a loaded world.
@@ -685,7 +686,8 @@ namespace cs::engine
 				return;
 			g_lastFrame = state->frameCount;
 
-			if (!RenderIsCurrent(state->frameCount))
+			const auto worldFrame = render::GetFrameState().worldFrame;
+			if (!RenderIsCurrent(worldFrame))
 				Invalidate();
 			if (!WorldLoaded()) {
 				g_counters.skippedNoWorld.fetch_add(1, std::memory_order_relaxed);
@@ -695,7 +697,6 @@ namespace cs::engine
 
 			if (!AnyConsumerWantsCube()) {
 				g_counters.skippedNoDemand.fetch_add(1, std::memory_order_relaxed);
-				Invalidate();
 				return;
 			}
 			if (IsInterior()) {
@@ -721,16 +722,14 @@ namespace cs::engine
 
 			// This frame's camera is published later; use the previous render's.
 			const auto record = GetCapturedWorldCameraRecord();
-			if (!record || state->frameCount - record->frameCount > kMaxCameraAgeFrames) {
+			if (!record || worldFrame - record->worldFrame > kMaxCameraAgeFrames) {
 				g_counters.skippedNoCamera.fetch_add(1, std::memory_order_relaxed);
-				Invalidate();
 				return;
 			}
 			const auto origin = CameraWorldOrigin(*record);
 			const RE::NiPoint3 eye{ origin.x, origin.y, origin.z };
 			if (!std::isfinite(eye.x) || !std::isfinite(eye.y) || !std::isfinite(eye.z)) {
 				g_counters.skippedNoCamera.fetch_add(1, std::memory_order_relaxed);
-				Invalidate();
 				return;
 			}
 			if (g_lastEye && g_lastEye->GetDistance(eye) > kEyeJumpLimit)
@@ -755,7 +754,7 @@ namespace cs::engine
 			g_published.Update(reinterpret_cast<ID3D11Texture2D*>(GetEngineCube()->texture), faces);
 
 			g_counters.renders.fetch_add(1, std::memory_order_relaxed);
-			g_lastRenderFrame.store(state->frameCount, std::memory_order_relaxed);
+			g_lastRenderFrame.store(worldFrame, std::memory_order_relaxed);
 			if (g_faceMask.load(std::memory_order_relaxed) == kAllFaces)
 				g_valid.store(true, std::memory_order_release);
 		}
@@ -845,8 +844,7 @@ namespace cs::engine
 
 	ID3D11ShaderResourceView* GetSkyReflectionCubeSRV() noexcept
 	{
-		const auto* state = GetGraphicsState();
-		if (!state || !IsCurrentlyValid(state->frameCount))
+		if (!IsCurrentlyValid())
 			return nullptr;
 		const auto* cube = GetEngineCube();
 		if (!cube)
@@ -861,8 +859,7 @@ namespace cs::engine
 		SkyReflectionCubeStatus status;
 		status.hookInstalled = g_hookInstalled.load(std::memory_order_relaxed);
 		status.disabled = g_disabled.load(std::memory_order_relaxed);
-		const auto* state = GetGraphicsState();
-		status.valid = state && IsCurrentlyValid(state->frameCount);
+		status.valid = IsCurrentlyValid();
 		status.faceMask = g_faceMask.load(std::memory_order_relaxed);
 		status.consumers = static_cast<std::uint32_t>(g_consumers.size());
 		status.renders = g_counters.renders.load(std::memory_order_relaxed);
