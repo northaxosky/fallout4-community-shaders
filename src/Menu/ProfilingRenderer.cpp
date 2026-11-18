@@ -210,18 +210,13 @@ namespace cs
 			dmui::ui::TableSetupColumn("%", metricFlags, kTimingTablePercentColumnWidth * scale);
 	}
 
-	std::string ProfilingRenderer::GroupOf(std::string_view a_passName)
-	{
-		return std::string(a_passName.substr(0, a_passName.find("::")));
-	}
-
 	std::vector<std::string> ProfilingRenderer::CurrentGroups()
 	{
 		render::profiling::KeepActive();
 		std::vector<std::string> groups;
 		for (const auto& result : render::profiling::GetProfiler().GetResults()) {
 			if (result.valid)
-				groups.push_back(GroupOf(result.name));
+				groups.emplace_back(render::profiling::GroupOf(result.name));
 		}
 		std::ranges::sort(groups);
 		groups.erase(std::ranges::unique(groups).begin(), groups.end());
@@ -247,7 +242,7 @@ namespace cs
 
 			float timeMs = cpuMode ? result.cpuTimeMs : result.gpuTimeMs;
 
-			const auto groupName = GroupOf(result.name);
+			const std::string groupName(render::profiling::GroupOf(result.name));
 			if (IsHidden(a_hiddenGroups, groupName))
 				continue;
 
@@ -394,8 +389,6 @@ namespace cs
 
 				for (const GroupEntry* groupRow : groups) {
 					const auto& group = *groupRow;
-					if (IsHidden(a_hiddenGroups, group.name))
-						continue;
 					dmui::ui::TableNextRow();
 					(void)dmui::ui::TableNextColumn();
 

@@ -36,7 +36,6 @@ namespace cs::features::performance_overlay
 		float TextSize = 1.0f;
 		float BackgroundOpacity = 0.5f;
 		bool ShowBorder = true;
-		// Profiler groups left out of the overlay's graph; the Profiling page shows all.
 		settings::StringList HiddenProfilerGroups;
 		std::string toggleHotkey = "F10";
 

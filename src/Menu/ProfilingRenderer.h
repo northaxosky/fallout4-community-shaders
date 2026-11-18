@@ -33,7 +33,7 @@ namespace cs
 			CPU
 		};
 
-		/** @brief Where the statistics draw; each surface keeps its own graph history. */
+		/** @brief Where the statistics draw; each surface keeps its own graph. */
 		enum class Surface
 		{
 			kPage,    ///< Full view: mode toggle, graph, and pass table.
@@ -47,12 +47,9 @@ namespace cs
 		 * per-pass timing statistics with average, P95, and P99 columns.
 		 *
 		 * @param surface Which view to draw.
-		 * @param hiddenGroups Groups left out of this view's graph and table.
+		 * @param hiddenGroups Groups left out of this view's graph.
 		 */
 		static void RenderStatistics(Surface surface = Surface::kPage, std::span<const std::string> hiddenGroups = {});
-
-		/** @brief The group of a pass name: the part before "::", else the whole name. */
-		static std::string GroupOf(std::string_view passName);
 
 		/** @brief Sorted names of the groups in the current profiler results. */
 		static std::vector<std::string> CurrentGroups();

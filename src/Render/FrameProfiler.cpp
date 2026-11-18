@@ -68,10 +68,7 @@ namespace cs::render::profiling
 		{
 			const auto& features = FeatureManager::Get().GetRegisteredFeatures();
 			for (const auto& result : a_profiler.GetResults()) {
-				const auto split = result.name.find("::");
-				if (split == std::string::npos)
-					continue;
-				const std::string_view group(result.name.data(), split);
+				const auto group = GroupOf(result.name);
 				const auto feature = std::ranges::find_if(features, [&](const Feature* a_feature) {
 					return a_feature && a_feature->GetName() == group;
 				});

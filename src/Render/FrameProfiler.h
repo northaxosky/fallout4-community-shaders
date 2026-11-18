@@ -23,6 +23,11 @@ namespace cs::render::profiling
 	void MarkEngineFrame() noexcept;
 
 	Profiler& GetProfiler() noexcept;
+	// A pass's group: the name before "::", else the whole name.
+	constexpr std::string_view GroupOf(std::string_view a_passName) noexcept
+	{
+		return a_passName.substr(0, a_passName.find("::"));
+	}
 	// Any thread; the one GPU-query gate. Call each frame timings are read.
 	void KeepActive(std::uint32_t a_frames = 2) noexcept;
 	// Overlay consumer; gates per-shader draw timings only, not GPU queries.
