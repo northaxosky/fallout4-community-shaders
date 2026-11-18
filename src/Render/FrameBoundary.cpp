@@ -1,6 +1,7 @@
 #include "Render/FrameBoundary.h"
 
 #include <atomic>
+#include <cassert>
 #include <exception>
 #include <mutex>
 #include <utility>
@@ -9,6 +10,7 @@
 #include "Log.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameDispatcher.h"
+#include "Render/FrameThread.h"
 #include "Render/RuntimeCallback.h"
 
 namespace cs::render
@@ -55,9 +57,10 @@ namespace cs::render
 		{
 			static void thunk(RE::Main* a_main)
 			{
+				RecordFrameThread();
 				RunAll(preSwap, "pre-swap");
 				func(a_main);
-				// Same thread as DearModdingUI page callbacks (they run inside Present).
+				// DearModdingUI page callbacks run mid-UI-pass and Post their mutations here.
 				for (const auto& failure : GetFrameDispatcher().Drain())
 					L->error("Frame task failed: {}", failure);
 				RunAll(postSwap, "post-swap");
@@ -114,5 +117,13 @@ namespace cs::render
 	bool FrameBoundaryInstalled() noexcept
 	{
 		return installed.load(std::memory_order_acquire);
+	}
+
+	void AssertFrameThread(const char* a_what) noexcept
+	{
+		const bool onThread = OnFrameThread();
+		assert(onThread && "structural mutation must run on the frame thread");
+		if (!onThread)
+			L->error("{} ran off the frame thread; post it with PostToFrame", a_what);
 	}
 }

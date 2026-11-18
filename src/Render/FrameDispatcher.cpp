@@ -2,6 +2,8 @@
 
 #include <exception>
 
+#include "Log.h"
+
 namespace cs::render
 {
 	bool FrameDispatcher::Post(std::function<void()> a_task)
@@ -41,5 +43,11 @@ namespace cs::render
 	{
 		static FrameDispatcher dispatcher;
 		return dispatcher;
+	}
+
+	void PostToFrame(std::function<void()> a_task)
+	{
+		if (!GetFrameDispatcher().Post(std::move(a_task)))
+			cs::log::Get("cs.render.framedispatcher")->error("Frame queue is full; mutation dropped");
 	}
 }

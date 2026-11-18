@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Render/FrameThread.h"
 #include "Settings/SettingsSchema.h"
 
 #include <algorithm>
+#include <cassert>
 #include <exception>
 #include <mutex>
 
@@ -91,6 +93,7 @@ namespace cs::settings
 
 	inline void ApplyPreparedLiveSettings(std::span<PreparedLiveSettings> a_prepared)
 	{
+		assert(render::OnFrameThread() && "live settings swap must run on the frame thread");
 		for (auto& value : a_prepared)
 			value.swap();
 		try {

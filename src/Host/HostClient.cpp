@@ -9,6 +9,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Menu/SettingsLayout.h"
 #include "Plugin.h"
+#include "Render/FrameDispatcher.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
@@ -19,6 +20,7 @@
 #include <array>
 #include <exception>
 #include <format>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -65,8 +67,14 @@ namespace cs::host
 				return;
 			settings::SettingsEdit edit{ a_feature };
 			bool enabled = a_feature.IsSwitchedOn();
-			if (edit.Apply(ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled())))
-				a_feature.SetEnabled(enabled);
+			if (edit.Apply(ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled()))) {
+				// Persist after the swap: the edit's own flush would save the old value.
+				render::PostToFrame([&a_feature, enabled] {
+					a_feature.SetEnabled(enabled);
+					if (!a_feature.Persist())
+						throw std::runtime_error(std::format("{}: failed to save enabled state", a_feature.GetName()));
+				});
+			}
 		}
 
 		// One collapsed Debug section: views, feature tooling, then profiling.
@@ -514,21 +522,23 @@ namespace cs::host
 		};
 
 		const auto restoreFeatureDefaults = [&] {
-			try {
-				a_feature.RestoreDefaults();
-			} catch (const std::exception& error) {
-				reportCallbackFailure(
-					"DearModdingUI::RestoreDefaultSettings",
-					"Feature reset callback failed",
-					error.what());
-				throw;
-			} catch (...) {
-				reportCallbackFailure(
-					"DearModdingUI::RestoreDefaultSettings",
-					"Feature reset callback failed",
-					"non-standard exception");
-				throw;
-			}
+			render::PostToFrame([&a_feature, report = reportCallbackFailure] {
+				try {
+					(void)a_feature.RestoreDefaults();
+				} catch (const std::exception& error) {
+					report(
+						"DearModdingUI::RestoreDefaultSettings",
+						"Feature reset callback failed",
+						error.what());
+					throw;
+				} catch (...) {
+					report(
+						"DearModdingUI::RestoreDefaultSettings",
+						"Feature reset callback failed",
+						"non-standard exception");
+					throw;
+				}
+			});
 		};
 
 		const bool loadAtBoot = LoadAtBoot(a_feature);

@@ -10,6 +10,7 @@
 #include "Plugin.h"
 #include "Render/Engine.h"
 #include "Render/FrameAnnotations.h"
+#include "Render/FrameDispatcher.h"
 #include "Render/ShaderCacheClear.h"
 #include "Render/ShaderInjection.h"
 #include "RenderDoc.h"
@@ -47,7 +48,7 @@ namespace
 		const auto saved = cs::feature_config::UpdateTopLevelSection(
 			"shader_ownership", toml::table{ { "enable_shaders", a_config.enableShaders }, { "targets", std::move(targets) } });
 		if (saved)
-			cs::FeatureManager::Get().ApplyShaderOwnership(a_config);
+			cs::render::PostToFrame([config = a_config] { cs::FeatureManager::Get().ApplyShaderOwnership(config); });
 		else
 			L->warn("Failed to save shader ownership: {}", saved.error);
 	}
@@ -257,11 +258,13 @@ namespace cs
 		}
 		for (const auto& [feature, view] : _debugViews.Previews())
 			selections.push_back({ .feature = feature, .view = view });
-		if (!FeatureManager::Get().ApplyDebugViews(selections)) {
+		render::PostToFrame([this, selections = std::move(selections)] {
+			if (FeatureManager::Get().ApplyDebugViews(selections))
+				return;
 			L->warn("Invalid debug-view state; disabling debug views");
 			_debugViews.Clear();
 			FeatureManager::Get().ApplyDebugViews({});
-		}
+		});
 	}
 
 	void Menu::SetDebugViewSelection(const Feature& a_feature, std::string_view a_view)

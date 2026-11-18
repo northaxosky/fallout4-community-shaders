@@ -5,6 +5,7 @@
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "OverlayTable.h"
+#include "Render/FrameDispatcher.h"
 #include "Render/ShaderInjection.h"
 #include "Settings/LiveSettings.h"
 #include "Shared/PerfUtils.h"
@@ -177,8 +178,6 @@ namespace cs::features::performance_overlay
 	void ABComparison::Apply(const State& a_state, bool a_restoring)
 	{
 		auto& manager = FeatureManager::Get();
-		if (a_state.ownership != engine::GetShaderOwnershipConfig())
-			manager.ApplyShaderOwnership(a_state.ownership);
 		std::vector<cs::settings::PreparedLiveSettings> prepared;
 		for (const auto& [feature, values] : a_state.live) {
 			if (!a_restoring && !feature->IsHealthy())
@@ -191,7 +190,11 @@ namespace cs::features::performance_overlay
 				value->finalize = {};
 			prepared.push_back(std::move(*value));
 		}
-		cs::settings::ApplyPreparedLiveSettings(prepared);
+		render::PostToFrame([&manager, ownership = a_state.ownership, prepared = std::move(prepared)]() mutable {
+			if (ownership != engine::GetShaderOwnershipConfig())
+				manager.ApplyShaderOwnership(ownership);
+			cs::settings::ApplyPreparedLiveSettings(prepared);
+		});
 	}
 
 	void ABComparison::Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds)

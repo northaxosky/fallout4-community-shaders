@@ -25,6 +25,9 @@ namespace cs::render
 		// Frame thread only. Returns one message per posted task that threw.
 		[[nodiscard]] std::vector<std::string> Drain() noexcept;
 
+		// Runs on the frame thread at the next frame boundary; false when full.
+		[[nodiscard]] bool Post(std::function<void()> a_task);
+
 		// A timeout cancels the task so it never runs late.
 		template <class T>
 		[[nodiscard]] std::expected<T, std::string> RunOnFrame(
@@ -75,11 +78,12 @@ namespace cs::render
 		}
 
 	private:
-		[[nodiscard]] bool Post(std::function<void()> a_task);
-
 		std::mutex _mutex;
 		std::deque<std::function<void()>> _queue;
 	};
 
 	FrameDispatcher& GetFrameDispatcher() noexcept;
+
+	// Structural mutations (enable, ownership, debug views, live swaps) go here.
+	void PostToFrame(std::function<void()> a_task);
 }
