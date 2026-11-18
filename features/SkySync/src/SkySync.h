@@ -208,8 +208,8 @@ namespace cs::features
 		float GetSunExtremeY() const;
 		// Sun::Update's arc, with the night half below the horizon, not mirrored.
 		RE::NiPoint3 CalculateVanillaSunDirection(float a_hour, float a_sunrise, float a_sunset) const;
-		// Angle along the alternate path's arc, 0 at sunrise and pi at sunset.
-		static float GetAlternateSunPhase(float a_hour, float a_sunrise, float a_sunset) { return DirectX::XM_PI * (a_hour - a_sunrise) / (a_sunset - a_sunrise); }
+		// Angle on the alternate circle: 0 at sunrise, pi at sunset, 2 pi at the next sunrise.
+		static float GetAlternateSunPhase(float a_hour, float a_sunrise, float a_sunset);
 		// Unit direction on the alternate arc, tilted by the sun angle.
 		static RE::NiPoint3 CalculateAlternateSunDirection(float a_hour, float a_sunrise, float a_sunset, float a_sunAngle);
 

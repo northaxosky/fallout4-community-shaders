@@ -355,11 +355,12 @@ namespace cs::features
 		bool resetTransition = false;
 
 		if (cell != _currentCell) {
-			resetTransition = true;
 			const auto prevCell = _currentCell;
 			const bool resetFaderForCellChange = cell && prevCell &&
 			                                     (cell->IsInterior() != _currentCellInterior ||
 													 GetCellWorldspace(cell) != _currentWorldspace.load(std::memory_order_relaxed));
+			// Crossing exterior cells must not cut a fade short; only a new space or first cell snaps it
+			resetTransition = !prevCell || resetFaderForCellChange;
 			if (cell)
 				SetSkyRotation(*a_sky, cell);
 			else
@@ -408,14 +409,18 @@ namespace cs::features
 
 		const bool transitionCompleted = std::exchange(_immediateTransitionReady, false);
 		const FadeContext context{ _sunBelowHorizon, _flashWeight, _settings.MinShadowElevation };
+		const bool wasTransitioning = _shadowFader.transitioning;
+		const Caster previousTarget = _shadowFader.target;
 		_shadowFader.Update(*a_sky, context, directions, intensities, _settings.ShadowTransitionDuration, fadeAdvance, transitionCompleted || resetTransition);
+		// A finished caster fade completes a transition so cached shadows refresh; a zero-length swap counts too
+		const bool casterSettled = (wasTransitioning || _shadowFader.target != previousTarget) && !_shadowFader.transitioning;
 
 		_twilightCap = GetTwilightCap(timing, hour, sunHeight);
 		UpdateMoonlightFade(fadeAdvance / kSecondsPerGameHour, transitionCompleted);
 		// At night follow the light's direction, so the dim stays continuous
 		_currentDim = _sunBelowHorizon ? _moonlightFade * GetHorizonDim(GetHeightAboveHorizon(_shadowFader.dimDir)) : GetHorizonDim(sunHeight);
 
-		return transitionCompleted;
+		return transitionCompleted || casterSettled;
 	}
 
 	float SkySync::GetHeightAboveHorizon(const RE::NiPoint3& a_dir) const
@@ -508,6 +513,15 @@ namespace cs::features
 		RE::NiPoint3 dir{ x, GetSunExtremeY(), z };
 		dir.Unitize();
 		return dir;
+	}
+
+	float SkySync::GetAlternateSunPhase(float a_hour, float a_sunrise, float a_sunset)
+	{
+		const float dayLength = a_sunset - a_sunrise;
+		const float hoursSinceSunrise = a_hour >= a_sunrise ? a_hour - a_sunrise : a_hour + kHoursPerDay - a_sunrise;
+		if (hoursSinceSunrise < dayLength)
+			return DirectX::XM_PI * hoursSinceSunrise / dayLength;
+		return DirectX::XM_PI * (1.0f + (hoursSinceSunrise - dayLength) / (kHoursPerDay - dayLength));
 	}
 
 	RE::NiPoint3 SkySync::CalculateAlternateSunDirection(float a_hour, float a_sunrise, float a_sunset, float a_sunAngle)
