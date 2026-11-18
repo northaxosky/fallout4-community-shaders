@@ -175,9 +175,11 @@ namespace cs::features::performance_overlay
 		return state;
 	}
 
-	void ABComparison::Apply(const State& a_state, bool a_restoring, std::function<void(std::string_view)> a_done)
+	void ABComparison::Apply(const State& a_state, bool a_restoring)
 	{
 		auto& manager = FeatureManager::Get();
+		if (a_state.ownership != engine::GetShaderOwnershipConfig())
+			manager.ApplyShaderOwnership(a_state.ownership);
 		std::vector<cs::settings::PreparedLiveSettings> prepared;
 		for (const auto& [feature, values] : a_state.live) {
 			if (!a_restoring && !feature->IsHealthy())
@@ -190,34 +192,7 @@ namespace cs::features::performance_overlay
 				value->finalize = {};
 			prepared.push_back(std::move(*value));
 		}
-		render::PostToFrame([&manager, ownership = a_state.ownership, prepared = std::move(prepared), done = std::move(a_done)]() mutable {
-			std::string error;
-			try {
-				if (ownership != engine::GetShaderOwnershipConfig())
-					manager.ApplyShaderOwnership(ownership);
-				cs::settings::ApplyPreparedLiveSettings(prepared);
-			} catch (const std::exception& failure) {
-				error = failure.what();
-			}
-			if (done)
-				done(error);
-		});
-	}
-
-	void ABComparison::FinishRestore(std::string_view a_error)
-	{
-		if (!a_error.empty()) {
-			// Stay restore-pending so the retry button and the live-setting lock remain.
-			_testError += (_testError.empty() ? "" : "; ") + std::format("{} restoration failed: {}", _labelB, a_error);
-			L->error("{}", _testError);
-			Fail(_testError);
-			return;
-		}
-		_restorePending = false;
-		cs::settings::liveComparisonActive = false;
-		_lastSummary = Summarize();
-		if (_scripted)
-			LogSummary();
+		cs::settings::ApplyPreparedLiveSettings(prepared);
 	}
 
 	void ABComparison::Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds)
@@ -253,21 +228,26 @@ namespace cs::features::performance_overlay
 	{
 		if (!a_interval) {
 			if (_testing || _restorePending) {
-				// Leave the run so shaders stop toggling; a failed restore keeps the retry.
-				_testing = false;
-				_restorePending = true;
-				_testInterval = 0;
-				_aggregator.OnTestEnd();
 				try {
-					Apply(_b, true, [this](std::string_view a_error) { FinishRestore(a_error); });
+					Apply(_b, true);
 				} catch (const std::exception& error) {
+					// Leave the run so shaders stop toggling; a retry restores.
 					const auto message = std::format("{} restoration failed: {}", _labelB, error.what());
 					_testError += (_testError.empty() ? "" : "; ") + message;
 					L->error("{}", _testError);
+					_testing = false;
+					_restorePending = true;
+					_testInterval = 0;
+					_aggregator.OnTestEnd();
 					throw std::runtime_error(message);
 				}
-				return;
+				_aggregator.OnTestEnd();
+				_lastSummary = Summarize();
+				if (_scripted)
+					LogSummary();
 			}
+			_testing = false;
+			_restorePending = false;
 			cs::settings::liveComparisonActive = false;
 			_testInterval = 0;
 			return;
@@ -360,10 +340,7 @@ namespace cs::features::performance_overlay
 				SetInterval(0);
 				return;
 			}
-			Apply(_variantB ? _a : _b, false, [this](std::string_view a_error) {
-				if (!a_error.empty())
-					Abort(a_error);
-			});
+			Apply(_variantB ? _a : _b);
 			_variantB = !_variantB;
 			_aggregator.OnABSwitch(_variantB ? ABVariant::B : ABVariant::A);
 			_lastSwitch = a_now;
@@ -413,17 +390,19 @@ namespace cs::features::performance_overlay
 		return {};
 	}
 
-	void ABComparison::Attempt(const std::function<void()>& a_action)
+	void ABComparison::Attempt(std::function<void()> a_action)
 	{
-		if (auto result = Try(a_action); !result)
-			Fail(std::move(result.error()));
+		render::PostToFrame([this, action = std::move(a_action)] {
+			if (auto result = Try(action); !result)
+				Fail(std::move(result.error()));
+		});
 	}
 
 	void ABComparison::DrawControls()
 	{
 		dmui::ui::TextWrapped("Capture USER before editing TEST. Set the interval to 0 to restore TEST.");
 		if (const auto retry = std::format("Retry {} Restoration", _labelB); _restorePending && dmui::ui::Button(retry.c_str()))
-			Attempt([&] { SetInterval(0); });
+			Attempt([this] { SetInterval(0); });
 		{
 			const dmui::DisabledScope disabled{ _testing || _restorePending };
 			if (dmui::ui::Button("Capture USER Baseline"))
@@ -432,7 +411,7 @@ namespace cs::features::performance_overlay
 		const dmui::DisabledScope disabled{ ScriptedRunning() };
 		int interval = _testInterval;
 		if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed)
-			Attempt([&] { SetInterval(interval); });
+			Attempt([this, interval] { SetInterval(interval); });
 	}
 
 	void ABComparison::DrawCostControls()
@@ -440,10 +419,10 @@ namespace cs::features::performance_overlay
 		{
 			const dmui::DisabledScope disabled{ _testing || _restorePending };
 			if (dmui::ui::Button("Measure CS cost"))
-				Attempt([&] { StartCostRun(RunOptions{}); });
+				Attempt([this] { StartCostRun(RunOptions{}); });
 		}
 		if (ScriptedRunning() && dmui::ui::Button("Stop Scripted Comparison"))
-			Attempt([&] { SetInterval(0); });
+			Attempt([this] { SetInterval(0); });
 		dmui::ui::TextWrapped("%s", CostHelp().c_str());
 	}
 

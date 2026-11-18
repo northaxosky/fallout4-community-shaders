@@ -130,11 +130,7 @@ namespace cs::features
 
 	std::expected<void, std::string> PerformanceOverlay::StopComparison()
 	{
-		auto stopped = performance_overlay::ABComparison::Try([&] { _comparison.SetInterval(0); });
-		// At the frame boundary the restore has already run; a failure shows as pending.
-		if (stopped && render::AtFrameBoundary() && _comparison.RestorePending())
-			return std::unexpected(_comparison.Error());
-		return stopped;
+		return performance_overlay::ABComparison::Try([&] { _comparison.SetInterval(0); });
 	}
 
 	void PerformanceOverlay::AccumulatePresentTime()
@@ -301,12 +297,16 @@ namespace cs::features
 		}
 		// FO4: DearModdingUI supplies the native-frame UI cadence independently of the deferred scene.
 		UpdateGraphValues();
-		try {
-			if (_comparison.Testing())
-				_comparison.Update(Util::GetNowSecs(), BuildRows(_frameMs));
-		} catch (const std::exception& error) {
-			_comparison.Abort(error.what());
-		}
+		if (!_comparison.Testing())
+			return;
+		render::PostToFrame([this, rows = BuildRows(_frameMs), now = Util::GetNowSecs()] {
+			try {
+				if (_comparison.Testing())
+					_comparison.Update(now, rows);
+			} catch (const std::exception& error) {
+				_comparison.Abort(error.what());
+			}
+		});
 	}
 
 	std::vector<DrawCallRow> PerformanceOverlay::BuildRows(float a_totalMs) const
