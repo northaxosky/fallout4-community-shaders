@@ -6,6 +6,16 @@
 
 namespace cs::render
 {
+	namespace
+	{
+		thread_local bool t_atBoundary = false;
+	}
+
+	bool AtFrameBoundary() noexcept
+	{
+		return t_atBoundary;
+	}
+
 	bool FrameDispatcher::Post(std::function<void()> a_task)
 	{
 		const std::scoped_lock lock{ _mutex };
@@ -24,6 +34,7 @@ namespace cs::render
 				const std::scoped_lock lock{ _mutex };
 				batch.swap(_queue);
 			}
+			t_atBoundary = true;
 			for (auto& task : batch) {
 				try {
 					task();
@@ -33,7 +44,9 @@ namespace cs::render
 					failures.emplace_back("non-standard exception");
 				}
 			}
+			t_atBoundary = false;
 		} catch (...) {
+			t_atBoundary = false;
 			failures.emplace_back("frame dispatcher drain failed");
 		}
 		return failures;
@@ -47,6 +60,10 @@ namespace cs::render
 
 	void PostToFrame(std::function<void()> a_task)
 	{
+		if (AtFrameBoundary()) {
+			a_task();
+			return;
+		}
 		if (!GetFrameDispatcher().Post(std::move(a_task)))
 			cs::log::Get("cs.render.framedispatcher")->error("Frame queue is full; mutation dropped");
 	}

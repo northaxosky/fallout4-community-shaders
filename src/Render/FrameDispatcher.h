@@ -84,6 +84,10 @@ namespace cs::render
 
 	FrameDispatcher& GetFrameDispatcher() noexcept;
 
-	// Structural mutations (enable, ownership, debug views, live swaps) go here.
+	// True while the dispatcher drains on this thread: the frame boundary itself.
+	[[nodiscard]] bool AtFrameBoundary() noexcept;
+
+	// Structural mutations (enable, ownership, debug views, live swaps) go here;
+	// a task posted from inside a drain runs inline, still at the boundary.
 	void PostToFrame(std::function<void()> a_task);
 }

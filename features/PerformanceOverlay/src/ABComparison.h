@@ -113,7 +113,9 @@ namespace cs::features::performance_overlay
 			bool operator==(const State&) const = default;
 		};
 		static State Capture();
-		static void Apply(const State&, bool a_restoring = false);
+		// Applies at the frame boundary; a_done gets an empty error once applied.
+		static void Apply(const State&, bool a_restoring, std::function<void(std::string_view)> a_done);
+		void FinishRestore(std::string_view a_error);
 		// A zero window limit runs until stopped.
 		void Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds);
 		void Attempt(const std::function<void()>& a_action);

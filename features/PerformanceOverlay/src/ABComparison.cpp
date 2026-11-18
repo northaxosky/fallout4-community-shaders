@@ -175,7 +175,7 @@ namespace cs::features::performance_overlay
 		return state;
 	}
 
-	void ABComparison::Apply(const State& a_state, bool a_restoring)
+	void ABComparison::Apply(const State& a_state, bool a_restoring, std::function<void(std::string_view)> a_done)
 	{
 		auto& manager = FeatureManager::Get();
 		std::vector<cs::settings::PreparedLiveSettings> prepared;
@@ -190,11 +190,34 @@ namespace cs::features::performance_overlay
 				value->finalize = {};
 			prepared.push_back(std::move(*value));
 		}
-		render::PostToFrame([&manager, ownership = a_state.ownership, prepared = std::move(prepared)]() mutable {
-			if (ownership != engine::GetShaderOwnershipConfig())
-				manager.ApplyShaderOwnership(ownership);
-			cs::settings::ApplyPreparedLiveSettings(prepared);
+		render::PostToFrame([&manager, ownership = a_state.ownership, prepared = std::move(prepared), done = std::move(a_done)]() mutable {
+			std::string error;
+			try {
+				if (ownership != engine::GetShaderOwnershipConfig())
+					manager.ApplyShaderOwnership(ownership);
+				cs::settings::ApplyPreparedLiveSettings(prepared);
+			} catch (const std::exception& failure) {
+				error = failure.what();
+			}
+			if (done)
+				done(error);
 		});
+	}
+
+	void ABComparison::FinishRestore(std::string_view a_error)
+	{
+		if (!a_error.empty()) {
+			// Stay restore-pending so the retry button and the live-setting lock remain.
+			_testError += (_testError.empty() ? "" : "; ") + std::format("{} restoration failed: {}", _labelB, a_error);
+			L->error("{}", _testError);
+			Fail(_testError);
+			return;
+		}
+		_restorePending = false;
+		cs::settings::liveComparisonActive = false;
+		_lastSummary = Summarize();
+		if (_scripted)
+			LogSummary();
 	}
 
 	void ABComparison::Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds)
@@ -230,26 +253,21 @@ namespace cs::features::performance_overlay
 	{
 		if (!a_interval) {
 			if (_testing || _restorePending) {
+				// Leave the run so shaders stop toggling; a failed restore keeps the retry.
+				_testing = false;
+				_restorePending = true;
+				_testInterval = 0;
+				_aggregator.OnTestEnd();
 				try {
-					Apply(_b, true);
+					Apply(_b, true, [this](std::string_view a_error) { FinishRestore(a_error); });
 				} catch (const std::exception& error) {
-					// Leave the run so shaders stop toggling; a retry restores.
 					const auto message = std::format("{} restoration failed: {}", _labelB, error.what());
 					_testError += (_testError.empty() ? "" : "; ") + message;
 					L->error("{}", _testError);
-					_testing = false;
-					_restorePending = true;
-					_testInterval = 0;
-					_aggregator.OnTestEnd();
 					throw std::runtime_error(message);
 				}
-				_aggregator.OnTestEnd();
-				_lastSummary = Summarize();
-				if (_scripted)
-					LogSummary();
+				return;
 			}
-			_testing = false;
-			_restorePending = false;
 			cs::settings::liveComparisonActive = false;
 			_testInterval = 0;
 			return;
@@ -342,7 +360,10 @@ namespace cs::features::performance_overlay
 				SetInterval(0);
 				return;
 			}
-			Apply(_variantB ? _a : _b);
+			Apply(_variantB ? _a : _b, false, [this](std::string_view a_error) {
+				if (!a_error.empty())
+					Abort(a_error);
+			});
 			_variantB = !_variantB;
 			_aggregator.OnABSwitch(_variantB ? ABVariant::B : ABVariant::A);
 			_lastSwitch = a_now;

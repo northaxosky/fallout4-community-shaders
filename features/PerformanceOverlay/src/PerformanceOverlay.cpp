@@ -8,6 +8,7 @@
 #include "Menu/SettingsEdit.h"
 #include "OverlayTable.h"
 #include "Render/FrameBoundary.h"
+#include "Render/FrameDispatcher.h"
 #include "Render/FrameProfiler.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -129,7 +130,11 @@ namespace cs::features
 
 	std::expected<void, std::string> PerformanceOverlay::StopComparison()
 	{
-		return performance_overlay::ABComparison::Try([&] { _comparison.SetInterval(0); });
+		auto stopped = performance_overlay::ABComparison::Try([&] { _comparison.SetInterval(0); });
+		// At the frame boundary the restore has already run; a failure shows as pending.
+		if (stopped && render::AtFrameBoundary() && _comparison.RestorePending())
+			return std::unexpected(_comparison.Error());
+		return stopped;
 	}
 
 	void PerformanceOverlay::AccumulatePresentTime()
