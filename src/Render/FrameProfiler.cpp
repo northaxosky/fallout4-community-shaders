@@ -1,5 +1,6 @@
 #include "Render/FrameProfiler.h"
 
+#include "Feature.h"
 #include "Log.h"
 #include "Render/Annotation.h"
 #include "Render/RenderHooks.h"
@@ -61,6 +62,23 @@ namespace cs::render::profiling
 			static ProfilerState state;
 			return state;
 		}
+
+		// Rows of switched-off or suspended features read 0 instead of their last cost.
+		void MarkSwitchedOffPasses(Profiler& a_profiler)
+		{
+			const auto& features = FeatureManager::Get().GetRegisteredFeatures();
+			for (const auto& result : a_profiler.GetResults()) {
+				const auto split = result.name.find("::");
+				if (split == std::string::npos)
+					continue;
+				const std::string_view group(result.name.data(), split);
+				const auto feature = std::ranges::find_if(features, [&](const Feature* a_feature) {
+					return a_feature && a_feature->GetName() == group;
+				});
+				if (feature != features.end() && !(*feature)->IsEnabled())
+					a_profiler.MarkPassSkipped(result.name);
+			}
+		}
 	}
 
 	void InitializeD3D11(
@@ -105,6 +123,7 @@ namespace cs::render::profiling
 		}
 		if (wanted && state.initialized) {
 			state.profiler.BeginFrame();
+			MarkSwitchedOffPasses(state.profiler);
 		} else if (state.initialized) {
 			state.profiler.Release();
 			state.initialized = false;
