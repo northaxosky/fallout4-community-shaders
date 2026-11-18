@@ -71,7 +71,7 @@ namespace cs::util
 		}
 	}
 
-	// Every reflected binding on a claimed exclusive slot must carry a name the table claims there.
+	// Exclusive slots accept only the reflected names the table lists.
 	[[nodiscard]] inline std::string ValidateSubstrateSlots(ID3D11ShaderReflection* reflection)
 	{
 		D3D11_SHADER_DESC desc{};

@@ -24,9 +24,7 @@ namespace cs::render
 		kSlotAnyStage = kSlotVertex | kSlotPixel | kSlotCompute
 	};
 
-	// A run of consecutive slots one owner binds. Names are the HLSL declarations, empty where
-	// a stock shader names the slot. An exclusive run rejects any other reflected name; a shared
-	// run sits on slots stock shaders declare too, so only its constants are authoritative.
+	// Consecutive slots one owner binds; exclusive runs reject unlisted reflected names.
 	struct SlotBlock
 	{
 		static constexpr std::size_t kMaxCount = 4;
@@ -89,7 +87,7 @@ namespace cs::render
 	inline constexpr SlotBlock kCloudShadowsSlot{ SlotKind::kTexture, kSlotPixel, true, 25, { "CloudShadowsTexture" } };
 	inline constexpr SlotBlock kCloudLayerCubeSlot{ SlotKind::kTexture, kSlotPixel, false, 26, { "CloudLayerTexture" } };
 	inline constexpr SlotBlock kCloudOverlayConstantsSlot{ SlotKind::kConstantBuffer, kSlotPixel, false, 8, { "Overlay" } };
-	// Reflections, environment, then the engine cube water and SSLR name for themselves.
+	// Reflections, environment, then the cube water and SSLR name themselves.
 	inline constexpr SlotBlock kDynamicCubemapsSlot{ SlotKind::kTexture, kSlotPixel, true, 30,
 		{ "EnvReflectionsTexture", "EnvTexture", "" } };
 	// Environment, reflections, then the box-mipped sharp twin.
@@ -102,7 +100,7 @@ namespace cs::render
 		{ "Cones", "lights", "lightList", "lightGrid" } };
 	inline constexpr SlotBlock kLlfLocalShadowSlot{ SlotKind::kTexture, kSlotPixel, true, 102,
 		{ "LocalShadows", "LocalShadowMaps" } };
-	// FO4: native composite inputs occupy low slots; retain main's t26-t29 boundary.
+	// FO4: native composite inputs hold the low slots; keep main's t26-t29.
 	inline constexpr SlotBlock kSsgiCompositionSlot{ SlotKind::kTexture, kSlotPixel, true, 26,
 		{ "OcclusionTexture", "BounceLumaTexture", "BounceChromaTexture", "NormalTexture" } };
 	inline constexpr SlotBlock kSsgiSpecularSlot{ SlotKind::kTexture, kSlotPixel, true, 38, { "SpecularTexture" } };
@@ -126,7 +124,7 @@ namespace cs::render
 	inline constexpr SlotBlock kIblSHSlot{ SlotKind::kTexture, kSlotPixel | kSlotCompute, true, 76,
 		{ "EnvIBLTexture", "SkyIBLTexture" } };
 	inline constexpr SlotBlock kSsgiConsumerSlot{ SlotKind::kConstantBuffer, kSlotPixel | kSlotCompute, true, 10, { "Consumer" } };
-	// Probes, then albedo, MRT4 (vertex AO), shadow visibility; t51/t52 are albedo and vertex AO.
+	// Probes, albedo, vertex AO (MRT4), shadow visibility.
 	inline constexpr SlotBlock kSkylightingProbeSlot{ SlotKind::kTexture, kSlotPixel | kSlotCompute, true, 50,
 		{ "SkylightingProbeArray", "AlbedoTexture", "VertexAOTexture", "ShadowVisibilityProbeArray" } };
 	inline constexpr SlotBlock kSkylightingCoverageSlot{ SlotKind::kTexture, kSlotPixel | kSlotCompute, true, 56,

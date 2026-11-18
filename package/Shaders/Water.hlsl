@@ -224,7 +224,7 @@ float FO4WaterSunShadow(float3 worldPosition, float2 screenPosition)
 #			define WATER
 #		endif
 #		ifdef SKYLIGHTING
-// FO4: Dynamic Cubemaps includes Skylighting, so its registers must precede that include.
+// FO4: Dynamic Cubemaps includes Skylighting; set its registers first.
 #			define SKYLIGHTING_PROBE_REGISTER t50
 #			define SKYLIGHTING_COVERAGE_REGISTER t56
 #			define SKYLIGHTING_ZENITH_REGISTER t57
