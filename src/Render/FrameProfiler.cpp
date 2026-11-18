@@ -46,12 +46,6 @@ namespace cs::render::profiling
 			std::string pausedPass;
 			std::map<int, ShaderTiming> shaderFrame;
 			std::vector<ShaderTiming> shaderTimings;
-			struct ExternalPass
-			{
-				Profiler::RollingHistory history;
-				std::uint64_t lastSampleFrame{};
-			};
-			std::map<std::string, ExternalPass, std::less<>> externalPasses;
 			int shaderType = -1;
 			double lastDraw{};
 			std::atomic<std::uint64_t> sequence{};
@@ -125,11 +119,7 @@ namespace cs::render::profiling
 			state.profiler.Release();
 			state.initialized = false;
 		}
-		const auto sequence = ++state.sequence;
-		// Mirrors the profiler: a switched-off path stops reporting.
-		std::erase_if(state.externalPasses, [&](const auto& a_entry) {
-			return sequence - a_entry.second.lastSampleFrame > Profiler::kTimerRetireFrames;
-		});
+		++state.sequence;
 		state.shaderType = -1;
 		// Per-shader timings are collected only while the overlay wants them.
 		if (!state.enabled)
@@ -227,25 +217,6 @@ namespace cs::render::profiling
 					   event.Begin(kPass, false);
 				   },
 				   engine::HookPriority::InnermostPre);
-	}
-
-	void RecordExternalGpuPass(std::string_view a_name, float a_ms)
-	{
-		auto& state = State();
-		auto it = state.externalPasses.find(a_name);
-		if (it == state.externalPasses.end())
-			it = state.externalPasses.emplace(std::string(a_name), ProfilerState::ExternalPass{}).first;
-		it->second.history.PushSample(a_ms);
-		it->second.lastSampleFrame = state.sequence.load(std::memory_order_relaxed);
-	}
-
-	std::vector<ExternalGpuPass> GetExternalGpuPasses()
-	{
-		std::vector<ExternalGpuPass> passes;
-		for (const auto& [name, pass] : State().externalPasses) {
-			passes.push_back({ name, pass.history.lastMs, pass.history.GetAverage(), pass.history.GetPercentile(95.0f) });
-		}
-		return passes;
 	}
 
 	void SetShaderFamily(int a_type, std::string_view a_name)

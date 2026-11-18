@@ -84,6 +84,8 @@ namespace cs
 			float avgMs;
 			float p95Ms;
 			float p99Ms;
+			// Timed on another GPU timeline: listed, but in no total or share.
+			bool external = false;
 		};
 		struct GroupEntry
 		{

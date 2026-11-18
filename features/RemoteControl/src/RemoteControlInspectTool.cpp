@@ -28,9 +28,14 @@ namespace cs::features::remote_control
 			render::profiling::KeepActive(3600);
 			auto& profiler = render::profiling::GetProfiler();
 			auto passes = Json::array();
+			auto d3d12Passes = Json::array();
 			for (const auto& pass : profiler.GetStatistics()) {
 				if (!pass.valid || (!a_filter.empty() && !pass.name.contains(a_filter)))
 					continue;
+				if (pass.external) {
+					d3d12Passes.push_back({ { "name", pass.name }, { "gpuMs", pass.gpuTimeMs }, { "gpuAvgMs", pass.avgMs }, { "gpuP95Ms", pass.p95Ms } });
+					continue;
+				}
 				auto history = Json::array();
 				for (std::uint32_t i = 0; i < pass.historyCount; ++i)
 					history.push_back(pass.GetHistorySample(i));
@@ -48,12 +53,6 @@ namespace cs::features::remote_control
 				if (!a_filter.empty() && !shader.name.contains(a_filter))
 					continue;
 				shaders.push_back({ { "name", shader.name }, { "calls", shader.calls }, { "ms", shader.milliseconds } });
-			}
-			auto d3d12Passes = Json::array();
-			for (const auto& pass : render::profiling::GetExternalGpuPasses()) {
-				if (!a_filter.empty() && !pass.name.contains(a_filter))
-					continue;
-				d3d12Passes.push_back({ { "name", pass.name }, { "gpuMs", pass.lastMs }, { "gpuAvgMs", pass.avgMs }, { "gpuP95Ms", pass.p95Ms } });
 			}
 			const auto frame = profiler.GetFrameStats();
 			Json result{

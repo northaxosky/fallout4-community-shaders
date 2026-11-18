@@ -64,6 +64,8 @@ function main(target)
             "src/Features/RemoteControl/NvPerf.h",
             "src/Features/RemoteControl/NvPerf.cpp",
             "src/Features/RemoteControl/NvPerfHost.h",
+            "src/Utils/D3D12GpuTimer.h",
+            "src/Utils/D3D12GpuTimer.cpp",
             "src/Utils/PerfUtils.h",
             "src/Utils/WinApi.h",
             "src/Utils/WinApi.cpp",

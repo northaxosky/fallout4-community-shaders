@@ -48,8 +48,10 @@ namespace cs::render::profiling
 			if (!result.valid || !result.name.starts_with(a_prefix))
 				continue;
 			const auto pass = result.name.substr(a_prefix.size());
-			a_sink.Field(pass + "_gpu_ms", result.gpuTimeMs)
-				.Field(pass + "_cpu_ms", result.cpuTimeMs);
+			a_sink.Field(pass + "_gpu_ms", result.gpuTimeMs);
+			if (result.external)
+				continue;
+			a_sink.Field(pass + "_cpu_ms", result.cpuTimeMs);
 			++count;
 		}
 		a_sink.Field("timing_passes", count);
@@ -62,18 +64,6 @@ namespace cs::render::profiling
 		float calls{};
 		float milliseconds{};
 	};
-
-	struct ExternalGpuPass
-	{
-		std::string name;
-		float lastMs{};
-		float avgMs{};
-		float p95Ms{};
-	};
-
-	// GPU passes timed outside the D3D11 profiler; frame thread only.
-	void RecordExternalGpuPass(std::string_view a_name, float a_ms);
-	std::vector<ExternalGpuPass> GetExternalGpuPasses();
 
 	void SetShaderFamily(int a_type, std::string_view a_name);
 	void RecordDraw();
