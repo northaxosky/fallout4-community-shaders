@@ -21,6 +21,7 @@ namespace cs::features
 		std::string_view GetDisplayName() const override { return "Performance Overlay"; }
 		std::string GetFeatureSummary() const override { return "FPS, frame times, draw calls, VRAM usage, and shader performance."; }
 		bool SupportsEnableToggle() const override { return false; }
+		bool IsInFeatureList() const override { return false; }
 		std::string GetCategory() const override { return FeatureCategories::kUtility; }
 		bool Configure(const toml::table&, std::string&) override;
 		void Load() override;

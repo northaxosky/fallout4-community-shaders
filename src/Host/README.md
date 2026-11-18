@@ -15,9 +15,10 @@ support are skipped and that UI is not shown. Other major versions are rejected 
 compatibility shim is provided for superseded development snapshots. It then registers all category
 descriptors before any page that references their stable IDs:
 
-- Home, Advanced, Profiling, Presets, and Changelog pages under the General category;
-- one settings page for every menu-visible registered feature, including inactive features under
-  Unloaded;
+- Home, Advanced, Profiling, Presets, and Changelog pages under the General category; Profiling
+  shows pass timings, then the Performance Overlay feature page (`Feature::IsInFeatureList`);
+- one settings page for every menu-visible registered feature that is in the feature list,
+  including inactive features under Unloaded;
 - the managed Performance Overlay and Shader Compilation Overlay pages;
 - the Clear Shader Cache action;
 - frame and page-activity observers;

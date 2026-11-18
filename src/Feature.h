@@ -190,6 +190,9 @@ namespace cs
 
 		virtual bool IsInMenu() const { return true; }
 
+		// False hides the feature's own page; its settings live on another page.
+		virtual bool IsInFeatureList() const { return true; }
+
 		// Inactive features defer menu wiring.
 		virtual void DrawUnloadedUI() {}
 

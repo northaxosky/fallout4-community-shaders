@@ -121,6 +121,7 @@ namespace cs::host
 			DMUI_HotkeyContextPolicy a_contextPolicy = DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
 		void PublishInitialStatus() noexcept;
 		void DrawPage(Page& a_page);
+		void DrawProfilingPage(Feature* a_overlay);
 		void DrawFeaturePage(Feature& a_feature);
 		void DrawOverlayPage();
 		void DrawShaderCompileOverlayPage();

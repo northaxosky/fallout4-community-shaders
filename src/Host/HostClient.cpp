@@ -46,7 +46,8 @@ namespace cs::host
 				.category = a_feature.GetCategory(),
 				.summary = a_feature.GetFeatureSummary(),
 				.active = a_feature.IsActive(),
-				.installed = a_feature.IsInstalled()
+				.installed = a_feature.IsInstalled(),
+				.inFeatureList = a_feature.IsInFeatureList()
 			};
 		}
 
@@ -203,6 +204,8 @@ namespace cs::host
 			auto page = std::make_unique<Page>();
 			page->feature = descriptor.kind == HostPageKind::kFeature ?
 			                    features[descriptor.featureIndex] :
+			                descriptor.kind == HostPageKind::kProfiling ?
+			                    features::PerformanceOverlay::GetSingleton() :
 			                    nullptr;
 			page->descriptor = std::move(descriptor);
 			const dmui::PageDescriptor pageDescriptor{
@@ -387,7 +390,7 @@ namespace cs::host
 			Menu::Get().DrawAdvanced(_client);
 			break;
 		case HostPageKind::kProfiling:
-			ProfilingRenderer::RenderStatistics();
+			DrawProfilingPage(a_page.feature);
 			break;
 		case HostPageKind::kPresets:
 			Menu::Get().DrawPresets(_client);
@@ -406,6 +409,18 @@ namespace cs::host
 			DrawShaderCompileOverlayPage();
 			break;
 		}
+	}
+
+	// Pass timings, then the Performance Overlay feature page.
+	void HostClient::DrawProfilingPage(Feature* a_overlay)
+	{
+		constexpr ui::Collapsible open{ .expandedByDefault = true, .framed = false };
+		if (const ui::Section section{ "profiling-timings", "Pass Timings", open }; section)
+			ProfilingRenderer::RenderStatistics();
+		if (!a_overlay)
+			return;
+		if (const ui::Section section{ "profiling-overlay", "Performance Overlay", open }; section)
+			DrawFeaturePage(*a_overlay);
 	}
 
 	void HostClient::DrawFeaturePage(Feature& a_feature)
