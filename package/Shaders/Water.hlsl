@@ -547,7 +547,10 @@ float3 surfaceColor(
 		float pointingAlignment = dot(reflect(eyeDirection, float3(0, 0, 1)), reflectionDirection) * 0.5 + 0.5;
 		float ssrAmount = sqrt(min(pointingAlignment, pointingDirection));
 		// FO4: t9 is raw and t10 blurred; the offset UV keeps the stock clamp.
-		float2 ssrReflectionUv = min(screenUv + 0.05 * normal.xy, perGeometry[1].xy);
+		float2 ssrReflectionUv = screenUv + 0.05 * normal.xy;
+#					if !defined(OG)
+		ssrReflectionUv = min(ssrReflectionUv, perGeometry[1].xy);
+#					endif
 		float4 ssrReflectionColorBlurred = texture10.SampleLevel(sampler10, ssrReflectionUv, 0.0);
 		float4 ssrReflectionColorRaw = texture9.SampleLevel(sampler9, ssrReflectionUv, 0.0);
 		float4 ssrReflectionColor = lerp(ssrReflectionColorBlurred, ssrReflectionColorRaw, ssrAmount * 0.7);
