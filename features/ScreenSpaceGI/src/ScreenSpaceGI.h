@@ -73,11 +73,6 @@ namespace cs::features
 		void UpdateConsumer(bool a_enabled, bool a_tiled);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
-		// FO4: native composite inputs occupy low slots; retain main's t26-t29 boundary.
-		static constexpr UINT kCompositionSlot = 26;
-		static constexpr UINT kCompositionCount = 4;
-		static constexpr UINT kSpecularSlot = 38;
-		static constexpr UINT kConsumerSlot = 10;
 		static constexpr std::size_t kResolutionModes = 3;
 		Settings _settings;
 		Resources _textures;

@@ -23,6 +23,7 @@
 #include "Render/ShaderObservers.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
+#include "Render/SubstrateSlots.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/SettingsPersistence.h"
 #include "SkinProfile.h"
@@ -77,7 +78,7 @@ namespace cs::features
 			FailLoad("Subsurface Scattering shader contribution registration failed.");
 			return;
 		}
-		_profileTarget = cs::engine::RegisterPrepassExtraTarget(*this, { .name = "SubsurfaceScattering/Profile", .rtvSlot = kProfileRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .active = [this] { return CanRun(); } });
+		_profileTarget = cs::engine::RegisterPrepassExtraTarget(*this, { .name = "SubsurfaceScattering/Profile", .rtvSlot = cs::render::kSssProfileTargetSlot.first, .format = DXGI_FORMAT_R8_UNORM, .active = [this] { return CanRun(); } });
 		if (!_profileTarget || !cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kW, &sss::IsHumanSkinDraw)) {
 			FailLoad("Subsurface Scattering skin profile registration failed.");
 			return;
@@ -266,7 +267,7 @@ namespace cs::features
 		// Every frame starts on the stock blur; the dispatch opts out of it.
 		UpdateConsumer(false);
 		auto* cb = _consumer->CB();
-		cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, kConsumerSlot, 1, &cb);
+		cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, cs::render::kSssConsumerSlot.first, 1, &cb);
 	}
 
 	void SubsurfaceScattering::OnPreSecondDeferredComposite()
@@ -309,7 +310,7 @@ namespace cs::features
 			auto* sampler = cs::render::GetPointClampSampler();
 			context->CSSetSamplers(0, 1, &sampler);
 			auto* constants = _constants->CB();
-			context->CSSetConstantBuffers(kConstantsSlot, 1, &constants);
+			context->CSSetConstantBuffers(cs::render::kSssConstantsSlot.first, 1, &constants);
 			ComputePasses pass(context);
 			cs::render::annotation::ScopedEvent dispatch("SubsurfaceScattering::Dispatch", false);
 			const auto scatter = [&](ID3D11ComputeShader* a_shader, ID3D11ShaderResourceView* a_input,

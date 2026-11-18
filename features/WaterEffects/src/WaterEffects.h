@@ -36,9 +36,6 @@ namespace cs::features
 			kSubmersion
 		};
 
-		static constexpr std::uint32_t kCausticsPSSlot = 65;
-		static constexpr std::uint32_t kCausticsSamplerPSSlot = 14;
-
 		static WaterEffects* GetSingleton();
 
 		std::string_view GetName() const override { return "WaterEffects"; }

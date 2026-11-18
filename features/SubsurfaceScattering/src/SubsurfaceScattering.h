@@ -87,11 +87,6 @@ namespace cs::features
 		void UpdateConsumer(bool a_produced);
 		FeatureDebugTexture GetDebugTexture(Preview a_view) const;
 
-		// FO4: the native composite owns b0, b2 and b12; b9 is free.
-		static constexpr UINT kConsumerSlot = 9;
-		static constexpr UINT kConstantsSlot = 1;
-		// FO4: SV_Target7 follows the six G-buffer targets and Extended Materials at 6.
-		static constexpr std::uint32_t kProfileRTVSlot = 7;
 		Settings _settings;
 		Resources _textures;
 		subsurface_scattering::Constants _data{};

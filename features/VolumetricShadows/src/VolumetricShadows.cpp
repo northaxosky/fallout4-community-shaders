@@ -1,5 +1,6 @@
 #include "VolumetricShadows.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <d3d11.h>
 
@@ -270,8 +271,8 @@ namespace cs::features
 			return;
 		ID3D11ShaderResourceView* const map = _map.srv.get();
 		ID3D11ShaderResourceView* const lights = cs::engine::GetSunShadowLightsSRV<2>();
-		cs::engine::BindInjectionShaderResources(a_context, volumetric_shadows_shader::kSharedShadowMapSlot, 1, &map);
-		cs::engine::BindInjectionShaderResources(a_context, volumetric_shadows_shader::kShadowLightsSlot, 1, &lights);
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kVolumetricShadowsMapSlot, 1, &map);
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kVolumetricShadowsLightsSlot, 1, &lights);
 		(a_target == cs::engine::ShaderInjectionTarget::kBsWater   ? _counters.waterDraws :
 			a_target == cs::engine::ShaderInjectionTarget::kEffect ? _counters.effectDraws :
 																	 _counters.lightDraws)

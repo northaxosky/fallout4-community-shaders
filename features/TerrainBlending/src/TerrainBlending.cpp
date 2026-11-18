@@ -1,5 +1,6 @@
 #include "TerrainBlending.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include "Log.h"
 #include "Render/Annotation.h"
@@ -34,9 +35,6 @@ namespace cs::features
 
 		using namespace cs::engine::prepass_technique;
 
-		// Free in the landscape pixel stage; slots from 16 up are not engine-owned.
-		constexpr UINT kObjectDepthSlot = 55;
-		constexpr UINT kReplayPassSlot = 8;
 		// Upstream offsets terrain whose bound is within this many units of the eye.
 		constexpr float kOffsetRange = 1024.0f;
 
@@ -303,8 +301,8 @@ namespace cs::features
 		const REX::TScopeExit clear{ [context]() noexcept {
 			ID3D11ShaderResourceView* noView = nullptr;
 			ID3D11Buffer* noBuffer = nullptr;
-			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kObjectDepthSlot, 1, &noView);
-			cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, kReplayPassSlot, 1, &noBuffer);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, cs::render::kTerrainBlendingObjectDepthSlot, 1, &noView);
+			cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, cs::render::kTerrainBlendingReplaySlot, 1, &noBuffer);
 		} };
 		{
 			cs::render::annotation::ScopedEvent timing("TerrainBlending::OpaqueReplay");
@@ -325,8 +323,8 @@ namespace cs::features
 			return;
 		auto* depth = g_replay.depthSRV.get();
 		auto* constants = g_replay.passBuffer[pass].get();
-		cs::engine::BindInjectionShaderResources(a_context, kObjectDepthSlot, 1, &depth);
-		cs::engine::BindInjectionConstantBuffers(a_context, kReplayPassSlot, 1, &constants);
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kTerrainBlendingObjectDepthSlot, 1, &depth);
+		cs::engine::BindInjectionConstantBuffers(a_context, cs::render::kTerrainBlendingReplaySlot, 1, &constants);
 		// The draw scope restores the captured blend state after the draw.
 		cs::engine::CaptureShaderInjectionBlendState(a_context);
 		constexpr float blendFactor[4]{};

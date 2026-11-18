@@ -1,5 +1,6 @@
 #include "ExtendedMaterials.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -34,9 +35,6 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.extendedmaterials");
-
-		constexpr std::uint32_t kParallaxShadowRTVSlot = 6;
-		constexpr std::uint32_t kParallaxShadowPSSlot = 66;
 
 		// Height lives in the _s alpha, so only formats that store alpha can carry it.
 		[[nodiscard]] bool HasAlphaChannel(DXGI_FORMAT a_format) noexcept
@@ -103,7 +101,7 @@ namespace cs::features
 			FailLoad("Extended Materials shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassExtraTarget(*this, { .name = "ExtendedMaterials/ParallaxShadow", .rtvSlot = kParallaxShadowRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .clear = { 1, 1, 1, 1 }, .publishSlot = kParallaxShadowPSSlot, .active = [this] { return ShadowsActive(); } })) {
+		if (!cs::engine::RegisterPrepassExtraTarget(*this, { .name = "ExtendedMaterials/ParallaxShadow", .rtvSlot = cs::render::kParallaxShadowTargetSlot, .format = DXGI_FORMAT_R8_UNORM, .clear = { 1, 1, 1, 1 }, .publishSlot = cs::render::kParallaxShadowSlot, .active = [this] { return ShadowsActive(); } })) {
 			FailLoad("Extended Materials parallax shadows need the prepass target.");
 			return;
 		}

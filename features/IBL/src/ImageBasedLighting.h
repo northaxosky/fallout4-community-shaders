@@ -27,10 +27,6 @@ namespace cs::features
 	public:
 		using Settings = image_based_lighting::Settings;
 
-		// IBL_DEFERRED's t14/t15 collide with the native composite.
-		static constexpr std::uint32_t kSHSlot = 76;
-		static constexpr std::uint32_t kSHSlotCount = 2;
-
 		static ImageBasedLighting* GetSingleton();
 
 		std::string_view GetName() const override { return "ImageBasedLighting"; }

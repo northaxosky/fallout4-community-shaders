@@ -77,8 +77,6 @@ namespace cs::features
 		ID3D11ComputeShader* GetComputeRaymarch();
 		FeatureDebugTexture GetShadowMaskDebugTexture() const;
 
-		static constexpr uint kMaskPSSlot = 45;
-
 		Settings _settings;
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _whiteFallbackReady{ false };

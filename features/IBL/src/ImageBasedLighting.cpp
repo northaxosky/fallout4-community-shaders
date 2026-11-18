@@ -1,5 +1,6 @@
 #include "ImageBasedLighting.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <d3d11.h>
@@ -134,7 +135,7 @@ namespace cs::features
 
 		_projectCompute = util::RequireComputeShader("IBL/DiffuseIBL.CS", L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl");
 		_resourcesReady.store(true, std::memory_order_release);
-		L->info("SH textures ready: 2x 3x1 R16G16B16A16_FLOAT at t{}-t{}.", kSHSlot, kSHSlot + kSHSlotCount - 1);
+		L->info("SH textures ready: 2x 3x1 R16G16B16A16_FLOAT at t{}-t{}.", cs::render::kIblSHSlot.first, cs::render::kIblSHSlot.first + cs::render::kIblSHSlot.count - 1);
 	}
 
 	std::string_view ImageBasedLighting::GetRegistrationFailureMessage() const
@@ -201,8 +202,8 @@ namespace cs::features
 		if (!a_context || !_resourcesReady.load(std::memory_order_acquire))
 			return;
 		// Disabled scenes keep the bindings: the zero b6 flag skips them.
-		const std::array<ID3D11ShaderResourceView*, kSHSlotCount> views{ _envSH->srv.get(), _skySH->srv.get() };
-		engine::BindInjectionShaderResources(a_context, kSHSlot, kSHSlotCount, views.data());
+		const std::array<ID3D11ShaderResourceView*, cs::render::kIblSHSlot.count> views{ _envSH->srv.get(), _skySH->srv.get() };
+		engine::BindInjectionShaderResources(a_context, cs::render::kIblSHSlot.first, cs::render::kIblSHSlot.count, views.data());
 		_counters.consumerBinds.fetch_add(1, std::memory_order_relaxed);
 	}
 

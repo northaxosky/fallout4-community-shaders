@@ -1,5 +1,6 @@
 #include "TerrainShadows.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
@@ -60,11 +61,11 @@ namespace cs::features
 			explicit ScopedShadowHeightBindings(ID3D11DeviceContext* a_context, bool a_saveFeatureBuffer = false) :
 				_context(a_context), _saveFeatureBuffer(a_saveFeatureBuffer)
 			{
-				_context->PSGetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, _pixel.put());
-				_context->CSGetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, _compute.put());
+				_context->PSGetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, _pixel.put());
+				_context->CSGetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, _compute.put());
 				ID3D11ShaderResourceView* nullSRV = nullptr;
-				_context->PSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &nullSRV);
-				_context->CSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &nullSRV);
+				_context->PSSetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, &nullSRV);
+				_context->CSSetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, &nullSRV);
 				if (_saveFeatureBuffer)
 					_context->CSGetConstantBuffers(6, 1, _featureBuffer.put());
 			}
@@ -72,8 +73,8 @@ namespace cs::features
 			{
 				ID3D11ShaderResourceView* pixel = _pixel.get();
 				ID3D11ShaderResourceView* compute = _compute.get();
-				_context->PSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &pixel);
-				_context->CSSetShaderResources(TerrainShadows::kShadowHeightPSSlot, 1, &compute);
+				_context->PSSetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, &pixel);
+				_context->CSSetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, &compute);
 				if (_saveFeatureBuffer) {
 					ID3D11Buffer* buffer = _featureBuffer.get();
 					_context->CSSetConstantBuffers(6, 1, &buffer);
@@ -206,8 +207,8 @@ namespace cs::features
 			"Terrain shadows installed: hooks=post_deferred_prepass+deferred_lights+"
 			"deferred_composite, consumers=BSDFLight+BSDFComposite t{}/s{}+host debug, "
 			"enabled={}, debug_views=shadow_term+heightmap.",
-			kShadowHeightPSSlot,
-			cs::render::kLinearClampSamplerSlot,
+			cs::render::kTerrainShadowsHeightSlot.first,
+			cs::render::kLinearClampSamplerSlot.first,
 			IsEnabled());
 	}
 
@@ -456,7 +457,7 @@ namespace cs::features
 		_mapLoaded.store(false, std::memory_order_release);
 		if (a_context) {
 			ID3D11ShaderResourceView* nullSRV = nullptr;
-			a_context->PSSetShaderResources(kShadowHeightPSSlot, 1, &nullSRV);
+			a_context->PSSetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, &nullSRV);
 		}
 		_shadowTexture.reset();
 		_heightTexture.reset();
@@ -912,7 +913,7 @@ namespace cs::features
 			ID3D11UnorderedAccessView* uavs[1] = { _shadowStatsUav.get() };
 			ID3D11Buffer* buffers[1] = { _shadowStatsCB.get() };
 			a_context->CSSetShaderResources(0, 1, &height);
-			a_context->CSSetShaderResources(kShadowHeightPSSlot, 1, &shadow);
+			a_context->CSSetShaderResources(cs::render::kTerrainShadowsHeightSlot.first, 1, &shadow);
 			ID3D11SamplerState* sampler = cs::render::GetLinearClampSampler();
 			a_context->CSSetSamplers(0, 1, &sampler);
 			ID3D11Buffer* featureBuffer = _shadowStatsFeatureCB.get();
@@ -969,7 +970,7 @@ namespace cs::features
 	{
 		if (auto* context = GetImmediateContext()) {
 			auto* srv = GetShadowHeightSRV();
-			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kShadowHeightPSSlot, 1, &srv);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, cs::render::kTerrainShadowsHeightSlot.first, 1, &srv);
 		}
 	}
 

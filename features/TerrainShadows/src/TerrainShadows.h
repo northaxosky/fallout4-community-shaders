@@ -24,8 +24,6 @@ namespace cs::features
 	class TerrainShadows : public ShaderFeature<terrain_shader::kShaderDefines>
 	{
 	public:
-		static constexpr std::uint32_t kShadowHeightPSSlot = 60;
-
 		enum class DebugVisualization : std::uint32_t
 		{
 			kOff,

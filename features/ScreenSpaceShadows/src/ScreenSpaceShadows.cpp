@@ -1,5 +1,6 @@
 #include "ScreenSpaceShadows.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXMath.h>
@@ -697,9 +698,9 @@ namespace cs::features
 			return;
 		}
 		const auto bind = [&](ID3D11ShaderResourceView* a_view) {
-			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kMaskPSSlot, 1, &a_view);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, cs::render::kScreenSpaceShadowsMaskSlot.first, 1, &a_view);
 			winrt::com_ptr<ID3D11ShaderResourceView> actual;
-			a_context->PSGetShaderResources(kMaskPSSlot, 1, actual.put());
+			a_context->PSGetShaderResources(cs::render::kScreenSpaceShadowsMaskSlot.first, 1, actual.put());
 			return actual.get() == a_view;
 		};
 		_maskBound.store(

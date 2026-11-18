@@ -5,6 +5,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/RgbaPreview.h"
+#include "Render/SubstrateSlots.h"
 #include "ShaderDefines.h"
 
 #include <DirectXMath.h>
@@ -92,12 +93,8 @@ namespace cs::features
 		static constexpr std::uint32_t kBc6hScratchMipLevels = 7;
 		static constexpr std::uint32_t kPreviewWidth = 512;
 		static constexpr std::uint32_t kPreviewHeight = 256;
-		static constexpr std::uint32_t kDynamicCubemapPSSlot = 30;
-		static constexpr std::uint32_t kDynamicCubemapPSSlotCount = 3;
 		// Water's CubeMapTex and the SSLR water march's SkyReflectionTex.
-		static constexpr std::uint32_t kEngineCubePSSlot = kDynamicCubemapPSSlot + 2;
-		static constexpr std::uint32_t kCompositionPSSlot = 39;
-		static constexpr std::uint32_t kCompositionPSSlotCount = 3;
+		static constexpr std::uint32_t kEngineCubePSSlot = cs::render::kDynamicCubemapsSlot.first + 2;
 
 		struct CubeTexture
 		{

@@ -3,6 +3,7 @@
 #include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/SharedData.h"
+#include "Render/SubstrateSlots.h"
 #include "ShaderDefines.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
@@ -99,7 +100,7 @@ namespace cs::features::vanilla_pbr
 		if (!_created || !a_context)
 			return;
 		winrt::com_ptr<ID3D11ShaderResourceView> view;
-		a_context->PSGetShaderResources(kAuthoredCubePSSlot, 1, view.put());
+		a_context->PSGetShaderResources(cs::render::kVanillaPbrAuthoredCubeSlot, 1, view.put());
 		if (!view || view == _authoredView || view == _capturedAuthored)
 			return;
 		// Other composite families bind buffers here.

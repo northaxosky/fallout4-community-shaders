@@ -32,6 +32,7 @@
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/SkyReflectionCube.h"
+#include "Render/SubstrateSlots.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
@@ -299,10 +300,10 @@ namespace cs::features
 		L->info(
 			"Registered post-sky capture, forward BSWater consumption at t{}-t{}, "
 			"composite consumption at t{}-t{}, and deferred lighting contributions.",
-			kDynamicCubemapPSSlot,
-			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1,
-			kCompositionPSSlot,
-			kCompositionPSSlot + kCompositionPSSlotCount - 1);
+			cs::render::kDynamicCubemapsSlot.first,
+			cs::render::kDynamicCubemapsSlot.first + cs::render::kDynamicCubemapsSlot.count - 1,
+			cs::render::kDynamicCubemapsCompositionSlot.first,
+			cs::render::kDynamicCubemapsCompositionSlot.first + cs::render::kDynamicCubemapsCompositionSlot.count - 1);
 	}
 
 	void DynamicCubemaps::Prepass()
@@ -316,7 +317,7 @@ namespace cs::features
 		if (!a_context) {
 			return;
 		}
-		std::array<ID3D11ShaderResourceView*, kCompositionPSSlotCount> resources{
+		std::array<ID3D11ShaderResourceView*, cs::render::kDynamicCubemapsCompositionSlot.count> resources{
 			GetEnvironmentSRV(), GetReflectionsSRV(), GetSharpReflectionsSRV()
 		};
 		if (Operational() &&
@@ -325,7 +326,7 @@ namespace cs::features
 			resources[1] = cs::engine::GetSkyReflectionCubeSRV();
 		}
 		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel,
-			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
+			cs::render::kDynamicCubemapsCompositionSlot.first, cs::render::kDynamicCubemapsCompositionSlot.count, resources.data());
 	}
 
 	// Upstream VanillaBinding: SSLR sky hits sample the engine cube.
@@ -716,7 +717,7 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		std::array<ID3D11ShaderResourceView*, kDynamicCubemapPSSlotCount> views{};
+		std::array<ID3D11ShaderResourceView*, cs::render::kDynamicCubemapsSlot.count> views{};
 		if (_injectionsOperational.load(std::memory_order_acquire) &&
 			_resourcesReady.load(std::memory_order_acquire)) {
 			const bool active =
@@ -736,7 +737,7 @@ namespace cs::features
 			}
 		}
 		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel,
-			kDynamicCubemapPSSlot,
+			cs::render::kDynamicCubemapsSlot.first,
 			static_cast<UINT>(views.size()),
 			views.data());
 		// Engine PS constant buffers stop at b2 and b12/b13, so forward consumers keep the substrate.

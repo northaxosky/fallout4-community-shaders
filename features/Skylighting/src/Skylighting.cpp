@@ -1,5 +1,6 @@
 #include "Skylighting.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <d3d11.h>
@@ -194,11 +195,11 @@ namespace cs::features
 			lighting ? cs::engine::GetRenderTargetSRV(RE::BSGraphics::RenderTargetID::kGBufferEmissive) : nullptr,
 			shadowVisibility ? _texShadowVisibility->srv.get() : nullptr
 		};
-		cs::engine::BindInjectionShaderResources(a_context, kProbeArraySlot, shadowVisibility ? 4 : lighting ? 3 :
-																											   1,
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kSkylightingProbeSlot.first, shadowVisibility ? 4 : lighting ? 3 :
+																																	   1,
 			views.data());
 		const std::array<ID3D11ShaderResourceView*, 2> coverage{ _texProbeCoverage->srv.get(), _zenithMap.Target().depthSRV };
-		cs::engine::BindInjectionShaderResources(a_context, kCoverageSlot, static_cast<UINT>(coverage.size()), coverage.data());
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kSkylightingCoverageSlot.first, static_cast<UINT>(coverage.size()), coverage.data());
 		if (shadowVisibility && ActiveLightReadsShadowVisibility())
 			_probeCounters.shadowVisDraws.fetch_add(1, std::memory_order_relaxed);
 		auto& counter = a_consumer == Consumer::kWater     ? _probeCounters.waterDraws :
@@ -312,8 +313,8 @@ namespace cs::features
 	void Skylighting::UnbindCoverage(ID3D11DeviceContext* a_context)
 	{
 		ID3D11ShaderResourceView* const none[2]{};
-		a_context->CSSetShaderResources(kCoverageSlot, 2, none);
-		a_context->PSSetShaderResources(kCoverageSlot, 2, none);
+		a_context->CSSetShaderResources(cs::render::kSkylightingCoverageSlot.first, 2, none);
+		a_context->PSSetShaderResources(cs::render::kSkylightingCoverageSlot.first, 2, none);
 	}
 
 	void Skylighting::CreateOcclusionResources(ID3D11Device* a_device)
@@ -986,8 +987,8 @@ namespace cs::features
 
 		// Consumers bind the probes as SRVs at t50; the UAV writes need them free.
 		ID3D11ShaderResourceView* const noProbes = nullptr;
-		a_context->CSSetShaderResources(kProbeArraySlot, 1, &noProbes);
-		a_context->PSSetShaderResources(kProbeArraySlot, 1, &noProbes);
+		a_context->CSSetShaderResources(cs::render::kSkylightingProbeSlot.first, 1, &noProbes);
+		a_context->PSSetShaderResources(cs::render::kSkylightingProbeSlot.first, 1, &noProbes);
 		UnbindCoverage(a_context);
 
 		// FO4: no ESRAM shadow, so t3 repeats the cascades; none binds null.

@@ -51,12 +51,7 @@ namespace cs::features
 		constexpr const wchar_t* kPreviewPath = L"Data\\Shaders\\FO4\\CubemapPreviewCS.hlsl";
 		constexpr const wchar_t* kOverlayPath = L"Data\\Shaders\\FO4\\CloudShadows\\DebugOverlay.hlsl";
 		constexpr std::string_view kPreviewUnavailable = "Cloud occlusion preview not populated.";
-		// RT0 color, RT1 motion; the capture cube takes the next free slot.
-		constexpr std::uint32_t kCaptureTargetSlot = 2;
 		constexpr std::uint32_t kTargetSlots = 8;
-		// b4 to b7 are the substrate; the overlay's own constants follow.
-		constexpr std::uint32_t kOverlayConstantsSlot = 8;
-		constexpr std::uint32_t kLayerCubeSlot = 26;
 		constexpr std::uint32_t kPaletteSize = 16;
 		constexpr std::uint32_t kModeLayers = 3;
 		constexpr std::array<float, 3> kSkirtColor{ 0.9f, 0.9f, 0.9f };
@@ -318,7 +313,7 @@ namespace cs::features
 			if (target)
 				target->Release();
 		}
-		cs::engine::OverrideInjectionFrameShaderResource(a_context, cloud_shadows_shader::kCloudDepthSlot, depth);
+		cs::engine::OverrideInjectionFrameShaderResource(a_context, cs::render::kSkyDepthSlot, depth);
 	}
 
 	bool CloudShadows::CaptureCloudDraw(ID3D11DeviceContext* a_context, bool a_skirt)
@@ -357,13 +352,13 @@ namespace cs::features
 		// The draw scope restores the targets, blend state and depth slot.
 		cs::engine::CaptureShaderInjectionRenderTargets(a_context);
 		cs::engine::CaptureShaderInjectionBlendState(a_context);
-		ID3D11RenderTargetView* targets[kCaptureTargetSlot + 2]{};
-		a_context->OMGetRenderTargets(kCaptureTargetSlot, targets, nullptr);
-		targets[kCaptureTargetSlot] = a_skirt ? nullptr : _faceRTV[capture->face].get();
-		targets[kCaptureTargetSlot + 1] = layers ? _layerFaceRTV[capture->face].get() : nullptr;
+		ID3D11RenderTargetView* targets[cs::render::kCloudCaptureTargetSlot + 2]{};
+		a_context->OMGetRenderTargets(cs::render::kCloudCaptureTargetSlot, targets, nullptr);
+		targets[cs::render::kCloudCaptureTargetSlot] = a_skirt ? nullptr : _faceRTV[capture->face].get();
+		targets[cs::render::kCloudCaptureTargetSlot + 1] = layers ? _layerFaceRTV[capture->face].get() : nullptr;
 		// FO4: the face depth is sampled, so it cannot stay bound.
-		a_context->OMSetRenderTargets(layers ? kCaptureTargetSlot + 2 : kCaptureTargetSlot + 1, targets, nullptr);
-		for (std::uint32_t slot = 0; slot < kCaptureTargetSlot; ++slot) {
+		a_context->OMSetRenderTargets(layers ? cs::render::kCloudCaptureTargetSlot + 2 : cs::render::kCloudCaptureTargetSlot + 1, targets, nullptr);
+		for (std::uint32_t slot = 0; slot < cs::render::kCloudCaptureTargetSlot; ++slot) {
 			if (targets[slot])
 				targets[slot]->Release();
 		}
@@ -381,9 +376,9 @@ namespace cs::features
 		ID3D11RenderTargetView* targets[kTargetSlots]{};
 		ID3D11DepthStencilView* depth = nullptr;
 		a_context->OMGetRenderTargets(kTargetSlots, targets, &depth);
-		if (targets[kCaptureTargetSlot] || targets[kCaptureTargetSlot + 1]) {
+		if (targets[cs::render::kCloudCaptureTargetSlot] || targets[cs::render::kCloudCaptureTargetSlot + 1]) {
 			cs::engine::CaptureShaderInjectionRenderTargets(a_context);
-			for (auto slot : { kCaptureTargetSlot, kCaptureTargetSlot + 1 }) {
+			for (const std::uint32_t slot : { cs::render::kCloudCaptureTargetSlot.first, cs::render::kCloudCaptureTargetSlot.first + 1 }) {
 				if (targets[slot])
 					targets[slot]->Release();
 				targets[slot] = nullptr;
@@ -410,7 +405,7 @@ namespace cs::features
 			ClearWithoutClouds(context);
 		// Disabled, the opacity is zero and the lookup multiplies by one.
 		ID3D11ShaderResourceView* const cube = _cubeSRV.get();
-		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, cloud_shadows_shader::kCloudShadowsSlot, 1, &cube);
+		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, cs::render::kCloudShadowsSlot, 1, &cube);
 		_counters.framesBound.fetch_add(1, std::memory_order_relaxed);
 		RenderDebugPreview(context);
 	}
@@ -624,16 +619,16 @@ namespace cs::features
 		context->OMSetBlendState(_overlayBlend.get(), kBlendFactor, 0xFFFFFFFFu);
 		cs::render::BindSharedData(context, cs::engine::ShaderStage::kPixel);
 		ID3D11ShaderResourceView* const views[]{ depth };
-		context->PSSetShaderResources(cloud_shadows_shader::kCloudDepthSlot, 1, views);
+		context->PSSetShaderResources(cs::render::kSkyDepthSlot, 1, views);
 		ID3D11ShaderResourceView* const cube = _cubeSRV.get();
-		context->PSSetShaderResources(cloud_shadows_shader::kCloudShadowsSlot, 1, &cube);
+		context->PSSetShaderResources(cs::render::kCloudShadowsSlot, 1, &cube);
 		ID3D11SamplerState* const sampler = cs::render::GetLinearClampSampler();
 		context->PSSetSamplers(cs::render::kLinearClampSamplerSlot, 1, &sampler);
 		ID3D11Buffer* const constants = _overlayConstants.get();
-		context->PSSetConstantBuffers(kOverlayConstantsSlot, 1, &constants);
+		context->PSSetConstantBuffers(cs::render::kCloudOverlayConstantsSlot, 1, &constants);
 		if (mode == kModeLayers) {
 			ID3D11ShaderResourceView* const layerCube = _layerCubeSRV.get();
-			context->PSSetShaderResources(kLayerCubeSlot, 1, &layerCube);
+			context->PSSetShaderResources(cs::render::kCloudLayerCubeSlot, 1, &layerCube);
 		}
 		pass.Draw(_overlayPS[mode - 1].get());
 		_counters.overlayFrames.fetch_add(1, std::memory_order_relaxed);

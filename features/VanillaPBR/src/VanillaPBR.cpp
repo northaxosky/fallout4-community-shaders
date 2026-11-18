@@ -9,6 +9,7 @@
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
@@ -81,13 +82,13 @@ namespace cs::features
 			_blurMatch.Release();
 		// Unbound first: the table is rewritten as a compute output.
 		ID3D11ShaderResourceView* table = nullptr;
-		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, vanilla_pbr::kLiveLODPSSlot, 1, &table);
+		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, cs::render::kVanillaPbrLiveLODSlot, 1, &table);
 		_blurMatchActive = IsEnabled() && _liveEnvironmentEnabled.load() && _liveEnvironmentReady.load() &&
 		                   _blurMatchCreated.load(std::memory_order_acquire);
 		if (!_blurMatchActive)
 			return;
 		table = _blurMatch.Update(context, DynamicCubemaps::GetSingleton()->GetSharpReflectionsSRV());
-		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, vanilla_pbr::kLiveLODPSSlot, 1, &table);
+		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, cs::render::kVanillaPbrLiveLODSlot, 1, &table);
 	}
 
 	bool VanillaPBR::ValidateInjectionPrerequisites(std::string& a_error)

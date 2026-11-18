@@ -1,5 +1,6 @@
 #include "ScreenSpaceGI.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
@@ -363,7 +364,7 @@ namespace cs::features
 			UpdateConsumer(true, tiled);
 			ID3D11SamplerState* samplers[]{ cs::render::GetPointClampSampler(), cs::render::GetLinearClampSampler() };
 			context->CSSetSamplers(0, 2, samplers);
-			ComputePasses pass(context, kConsumerSlot, _consumer->CB());
+			ComputePasses pass(context, cs::render::kSsgiConsumerSlot.first, _consumer->CB());
 			cs::render::annotation::ScopedEvent generation("ScreenSpaceGI::Generate", false);
 			auto& t = _textures;
 			const auto specularSRV = [&](UINT a_index) { return t.specular[a_index] ? t.specular[a_index]->srv.get() : nullptr; };
@@ -446,8 +447,8 @@ namespace cs::features
 		const bool ready = IsEnabled() && _produced && state && _hasFrame && _lastFrame == state->frameCount;
 		UpdateConsumer(ready, _tiled);
 		auto* cb = _consumer->CB();
-		cs::engine::BindFrameConstantBuffers(a_context, cs::engine::ShaderStage::kPixel, kConsumerSlot, 1, &cb);
-		ID3D11ShaderResourceView* views[kCompositionCount]{};
+		cs::engine::BindFrameConstantBuffers(a_context, cs::engine::ShaderStage::kPixel, cs::render::kSsgiConsumerSlot.first, 1, &cb);
+		ID3D11ShaderResourceView* views[cs::render::kSsgiCompositionSlot.count]{};
 		if (ready) {
 			auto& t = _textures;
 			const bool hq = _settings.enableExperimentalSpecularGI;
@@ -457,9 +458,9 @@ namespace cs::features
 			views[2] = hq ? nullptr : t.chroma[_outputGI]->srv.get();
 			views[3] = t.normalGloss->srv.get();
 		}
-		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kCompositionSlot, kCompositionCount, views);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, cs::render::kSsgiCompositionSlot.first, cs::render::kSsgiCompositionSlot.count, views);
 		auto* specular = ready && _textures.specular[_outputAO] ? _textures.specular[_outputAO]->srv.get() : nullptr;
-		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kSpecularSlot, 1, &specular);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, cs::render::kSsgiSpecularSlot.first, 1, &specular);
 		++_binds;
 	}
 

@@ -1,5 +1,6 @@
 #include "WaterEffects.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
@@ -121,8 +122,8 @@ namespace cs::features
 		L->info(
 			"Water caustics installed: hooks=deferred_lights+deferred_composite, "
 			"consumers=BSDFLight+BSDFComposite t{}/s{}+host debug, enabled={}.",
-			kCausticsPSSlot,
-			kCausticsSamplerPSSlot,
+			cs::render::kWaterCausticsSlot.first,
+			cs::render::kWaterCausticsSamplerSlot.first,
 			IsEnabled());
 	}
 
@@ -271,8 +272,8 @@ namespace cs::features
 		cs::render::BindSharedData(a_context, cs::engine::ShaderStage::kPixel);
 		auto* texture = _causticsSrv.get();
 		auto* sampler = _causticsSampler.get();
-		a_context->PSSetShaderResources(kCausticsPSSlot, 1, &texture);
-		a_context->PSSetSamplers(kCausticsSamplerPSSlot, 1, &sampler);
+		a_context->PSSetShaderResources(cs::render::kWaterCausticsSlot.first, 1, &texture);
+		a_context->PSSetSamplers(cs::render::kWaterCausticsSamplerSlot.first, 1, &sampler);
 		pass.Draw(_debugPS[mode == DebugVisualization::kSubmersion ? 1 : 0].get());
 		_debugFrameReady = true;
 		cs::render::InvalidateFullscreenDebugData();
@@ -316,7 +317,7 @@ namespace cs::features
 	{
 		if (auto* context = GetImmediateContext()) {
 			auto* srv = CanBind() ? _causticsSrv.get() : nullptr;
-			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kCausticsPSSlot, 1, &srv);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, cs::render::kWaterCausticsSlot.first, 1, &srv);
 		}
 	}
 
@@ -325,7 +326,7 @@ namespace cs::features
 		if (!a_context || !CanBind())
 			return;
 		ID3D11SamplerState* sampler = _causticsSampler.get();
-		cs::engine::BindInjectionSamplers(a_context, kCausticsSamplerPSSlot, 1, &sampler);
+		cs::engine::BindInjectionSamplers(a_context, cs::render::kWaterCausticsSamplerSlot.first, 1, &sampler);
 		_binds.fetch_add(1, std::memory_order_relaxed);
 	}
 

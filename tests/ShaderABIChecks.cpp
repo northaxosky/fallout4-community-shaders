@@ -476,7 +476,6 @@ namespace
 	}
 	std::string VerifyVolumetricShadowsABI(const std::filesystem::path& a_root)
 	{
-		namespace slots = cs::features::volumetric_shadows_shader;
 		std::string error;
 		// Host binds cascades at t0/t1, the map mip at u0, a clamp sampler at s0.
 		for (const char* define : { "DOWNSAMPLE_SHADOW_MIP0", "DOWNSAMPLE_SHADOW_MIP1" }) {
@@ -498,8 +497,8 @@ namespace
 		const auto consumer = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "VOLUMETRIC_SHADOWS", "1" } }, "ps_5_0", error, &consumerBlob);
 		if (!consumer)
 			return error;
-		if (BindPoint(consumer.Get(), "VolumetricShadows::SharedShadowMap") != slots::kSharedShadowMapSlot ||
-			BindPoint(consumer.Get(), "DirectionalShadowLights") != slots::kShadowLightsSlot)
+		if (BindPoint(consumer.Get(), "VolumetricShadows::SharedShadowMap") != cs::render::kVolumetricShadowsMapSlot ||
+			BindPoint(consumer.Get(), "DirectionalShadowLights") != cs::render::kVolumetricShadowsLightsSlot)
 			return "consumer: ABI slot mismatch";
 		// Injection binds the host sampler only for shaders declaring it by name.
 		const auto use = cs::util::ReflectShaderSamplers(consumerBlob->GetBufferPointer(), consumerBlob->GetBufferSize());
@@ -584,7 +583,6 @@ namespace
 
 	std::string VerifyCloudShadowsABI(const std::filesystem::path& a_root)
 	{
-		namespace slots = cs::features::cloud_shadows_shader;
 		std::string error;
 		// The host binds the face depth, the cube output and the layer output.
 		const auto sky = Reflect(a_root, "Sky.hlsl", { { "BSSKY_PIXEL_SHADER", "1" }, { "PSHADER", "1" }, { "TEX", "1" }, { "CLOUDS", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
@@ -592,12 +590,12 @@ namespace
 			return error;
 		D3D11_SHADER_DESC desc{};
 		sky->GetDesc(&desc);
-		if (BindPoint(sky.Get(), "TexDepthSampler") != slots::kCloudDepthSlot || desc.OutputParameters != 4)
+		if (BindPoint(sky.Get(), "TexDepthSampler") != cs::render::kSkyDepthSlot || desc.OutputParameters != 4)
 			return "Sky: ABI depth slot or output count mismatch";
 		const auto consumer = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
 		if (!consumer)
 			return error;
-		if (BindPoint(consumer.Get(), "CloudShadows::CloudShadowsTexture") != slots::kCloudShadowsSlot)
+		if (BindPoint(consumer.Get(), "CloudShadows::CloudShadowsTexture") != cs::render::kCloudShadowsSlot)
 			return "consumer: ABI slot mismatch";
 		return {};
 	}
@@ -609,8 +607,8 @@ namespace
 		const auto composite = Reflect(a_root, "DFComposite.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY", "1" }, { "VANILLA_PBR", "1" }, { "DYNAMIC_CUBEMAPS", "1" } }, "ps_5_0", error);
 		if (!composite)
 			return error;
-		if (BindPoint(composite.Get(), "VanillaPBR::LiveLODTexture") != vpbr::kLiveLODPSSlot ||
-			BindPoint(composite.Get(), "g_tIblProbeCube") != vpbr::kAuthoredCubePSSlot)
+		if (BindPoint(composite.Get(), "VanillaPBR::LiveLODTexture") != cs::render::kVanillaPbrLiveLODSlot ||
+			BindPoint(composite.Get(), "g_tIblProbeCube") != cs::render::kVanillaPbrAuthoredCubeSlot)
 			return "DFComposite: ABI slot mismatch";
 		const auto detail = Reflect(a_root, "FO4/VanillaPBR/BlurDetailCS.hlsl", vpbr::kBlurMatchShaderDefines, "cs_5_0", error);
 		if (!detail)

@@ -28,6 +28,7 @@
 #include "Render/RuntimeCallback.h"
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 #include "Settings/LiveSettings.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -39,11 +40,6 @@ namespace cs::features
 		using namespace light_limit_fix;
 		using Flag = RE::OBJ_LIGH::Flag;
 		namespace native = engine::local_lights;
-		constexpr std::uint32_t kRasterSlot = 11;
-		constexpr std::uint32_t kTiledSlot = 8;
-		constexpr std::uint32_t kStrictSlot = 3;
-		constexpr std::uint32_t kForwardSlot = 34;
-		constexpr std::uint32_t kLocalShadowSlot = 102;
 		constexpr auto kDirectory = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Lights";
 		// FO4: only the clustered view has a source.
 		constexpr std::array<FeatureDebugView, 1> kDebugViews{ { { "clustered_lights", "Clustered Lights Count", FeatureDebugViewKind::kFullscreen } } };
@@ -457,38 +453,38 @@ namespace cs::features
 				switch (registration.targetId) {
 				case engine::ShaderInjectionTarget::kDfTiledLighting:
 					registration.bind = [](ID3D11DeviceContext* context) {
-						auto* view = Enabled() ? g_state.deferred.TiledView() : nullptr;
-						engine::BindInjectionShaderResources(context, kTiledSlot, 1, &view);
+						auto* view = g_state.deferred.TiledView();
+						engine::BindInjectionShaderResources(context, cs::render::kLlfTiledSlot.first, 1, &view);
 					};
 					break;
 				case engine::ShaderInjectionTarget::kEffect:
 				case engine::ShaderInjectionTarget::kBsWater:
 					registration.bind = [](ID3D11DeviceContext* context) {
-						const bool ready = Enabled() && g_state.gridBuilt.load();
+						const bool ready = g_state.gridBuilt.load();
 						ID3D11ShaderResourceView* views[]{
 							ready ? g_state.grid.ConesView() : nullptr, ready ? g_state.grid.LightsView() : nullptr,
 							ready ? g_state.grid.IndexListView() : nullptr, ready ? g_state.grid.GridView() : nullptr
 						};
-						engine::BindInjectionShaderResources(context, kForwardSlot, std::size(views), views);
+						engine::BindInjectionShaderResources(context, cs::render::kLlfForwardSlot.first, std::size(views), views);
 						ID3D11ShaderResourceView* shadows[]{
 							ready ? g_state.localShadows.DataView() : nullptr, ready ? g_state.localShadows.CacheView() : nullptr
 						};
-						engine::BindInjectionShaderResources(context, kLocalShadowSlot, std::size(shadows), shadows);
+						engine::BindInjectionShaderResources(context, cs::render::kLlfLocalShadowSlot.first, std::size(shadows), shadows);
 						auto* strict = ready ? g_state.strict.CB() : nullptr;
-						engine::BindInjectionConstantBuffers(context, kStrictSlot, 1, &strict);
+						engine::BindInjectionConstantBuffers(context, cs::render::kLlfStrictSlot.first, 1, &strict);
 					};
 					break;
 				case engine::ShaderInjectionTarget::kBsdfLight:
 					registration.bind = [](ID3D11DeviceContext* context) {
-						const LightData data = Enabled() ? g_rasterData : LightData{};
+						const LightData data = g_rasterData;
 						ID3D11Buffer* buffer = nullptr;
 						try {
 							buffer = g_state.deferred.RasterBuffer(data);
 						} catch (...) {
-							engine::BindInjectionConstantBuffers(context, kRasterSlot, 1, &buffer);
+							engine::BindInjectionConstantBuffers(context, cs::render::kLlfRasterSlot.first, 1, &buffer);
 							throw;
 						}
-						engine::BindInjectionConstantBuffers(context, kRasterSlot, 1, &buffer);
+						engine::BindInjectionConstantBuffers(context, cs::render::kLlfRasterSlot.first, 1, &buffer);
 						if (IsInverseSquare(data))
 							++g_state.rasterDraws;
 					};
