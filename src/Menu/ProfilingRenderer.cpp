@@ -115,6 +115,11 @@ namespace cs
 			};
 		}
 
+		bool IsHidden(std::span<const std::string> a_hidden, const std::string& a_group)
+		{
+			return std::ranges::find(a_hidden, a_group) != a_hidden.end();
+		}
+
 		// FO4: DmUI has no TreeNodeEx; a selectable with an arrow toggles the group.
 		bool GroupNode(const std::string& a_name, std::unordered_set<std::string>& a_expanded)
 		{
@@ -205,7 +210,25 @@ namespace cs
 			dmui::ui::TableSetupColumn("%", metricFlags, kTimingTablePercentColumnWidth * scale);
 	}
 
-	void ProfilingRenderer::RenderGraph()
+	std::string ProfilingRenderer::GroupOf(std::string_view a_passName)
+	{
+		return std::string(a_passName.substr(0, a_passName.find("::")));
+	}
+
+	std::vector<std::string> ProfilingRenderer::CurrentGroups()
+	{
+		render::profiling::KeepActive();
+		std::vector<std::string> groups;
+		for (const auto& result : render::profiling::GetProfiler().GetResults()) {
+			if (result.valid)
+				groups.push_back(GroupOf(result.name));
+		}
+		std::ranges::sort(groups);
+		groups.erase(std::ranges::unique(groups).begin(), groups.end());
+		return groups;
+	}
+
+	void ProfilingRenderer::RenderGraph(GraphState& a_graph, std::span<const std::string> a_hiddenGroups)
 	{
 		render::profiling::KeepActive();
 		auto& profiler = render::profiling::GetProfiler();
@@ -224,12 +247,9 @@ namespace cs
 
 			float timeMs = cpuMode ? result.cpuTimeMs : result.gpuTimeMs;
 
-			std::string groupName;
-			auto pos = result.name.find("::");
-			if (pos != std::string::npos)
-				groupName = result.name.substr(0, pos);
-			else
-				groupName = result.name;
+			const auto groupName = GroupOf(result.name);
+			if (IsHidden(a_hiddenGroups, groupName))
+				continue;
 
 			legit::ProfilerTask task;
 			task.startTime = accumulated / 1000.0;
@@ -241,7 +261,7 @@ namespace cs
 		}
 
 		if (!tasks.empty())
-			gpuGraph.Render(tasks, kMainGraphLegendWidth, kMainGraphHeight, kMainGraphMinFrameTimeSec);
+			a_graph.Render(tasks, kMainGraphLegendWidth, kMainGraphHeight, kMainGraphMinFrameTimeSec);
 	}
 
 	void ProfilingRenderer::GraphState::Render(const std::vector<legit::ProfilerTask>& tasks, float baseLegendWidth, float baseHeight, float minFrameTimeSec)
@@ -257,8 +277,10 @@ namespace cs
 		dmui::ui::Spacing();
 	}
 
-	void ProfilingRenderer::RenderStatistics(bool showTable, bool showModeToggle)
+	void ProfilingRenderer::RenderStatistics(Surface a_surface, std::span<const std::string> a_hiddenGroups)
 	{
+		const bool showTable = a_surface == Surface::kPage;
+		const bool showModeToggle = showTable;
 		render::profiling::KeepActive();
 		auto& profiler = render::profiling::GetProfiler();
 
@@ -332,7 +354,7 @@ namespace cs
 			return;
 		}
 
-		RenderGraph();
+		RenderGraph(showTable ? gpuGraph : overlayGraph, a_hiddenGroups);
 
 		if (showTable) {
 			float availHeight = dmui::ui::GetContentRegionAvail().y - dmui::ui::GetFrameHeight();
@@ -372,6 +394,8 @@ namespace cs
 
 				for (const GroupEntry* groupRow : groups) {
 					const auto& group = *groupRow;
+					if (IsHidden(a_hiddenGroups, group.name))
+						continue;
 					dmui::ui::TableNextRow();
 					(void)dmui::ui::TableNextColumn();
 

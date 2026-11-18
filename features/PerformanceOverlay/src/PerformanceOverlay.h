@@ -46,6 +46,7 @@ namespace cs::features
 	private:
 		bool SaveSettings() override;
 		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(performance_overlay::kSchema, settings); }
+		void DrawGroupFilter(cs::settings::SettingsEdit&);
 		void DrawDrawCalls(const std::vector<DrawCallRow>&);
 		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4 DMUI_ThemeColors::*);
 		static float OverlayContentWidth() noexcept;

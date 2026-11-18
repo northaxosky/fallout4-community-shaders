@@ -94,6 +94,7 @@ namespace cs::features
 		auto candidate = settings;
 		if (!cs::settings::Parse(performance_overlay::kSchema, a_config, candidate, a_error))
 			return false;
+		candidate.NormalizeHiddenGroups();
 		settings = candidate;
 		return true;
 	}
@@ -439,9 +440,50 @@ namespace cs::features
 			if (settings.ShowDrawCalls)
 				DrawDrawCalls(BuildRows(_displayMs));
 			if (settings.ShowCSPasses)
-				ProfilingRenderer::RenderStatistics(false, false);
+				ProfilingRenderer::RenderStatistics(ProfilingRenderer::Surface::kOverlay, settings.HiddenProfilerGroups);
 		}
 		_comparison.DrawResults();
+	}
+
+	void PerformanceOverlay::DrawGroupFilter(cs::settings::SettingsEdit& a_edit)
+	{
+		auto& hidden = settings.HiddenProfilerGroups;
+		const ui::Section section{ "overlay-pass-groups", "Overlay Pass Groups", ui::Collapsible{ .count = hidden.size() } };
+		if (!section)
+			return;
+		auto groups = ProfilingRenderer::CurrentGroups();
+		groups.insert(groups.end(), hidden.begin(), hidden.end());
+		std::ranges::sort(groups);
+		groups.erase(std::ranges::unique(groups).begin(), groups.end());
+
+		const auto button = [&](const char* a_id, const char* a_label, const char* a_help, auto a_apply) {
+			const auto result = ui::DrawActionField({ a_id, { .label = a_label, .help = a_help } }, [&](const char* a_suffix) {
+				const bool pressed = dmui::ui::Button(std::format("{}{}", a_label, a_suffix).c_str());
+				return ui::EditResult{ pressed, pressed };
+			});
+			if (a_edit.Apply(result))
+				a_apply();
+		};
+		button("overlay-groups-show-all", "Show all", "Draws every profiler group in the overlay.", [&] { hidden.clear(); });
+		button("overlay-groups-hide-all", "Hide all", "Hides every group listed here from the overlay.", [&] { hidden = groups; });
+
+		if (groups.empty())
+			dmui::ui::TextDisabled("No profiler groups yet (enter game world)");
+		for (const auto& group : groups) {
+			const auto listed = std::ranges::find(hidden, group);
+			bool shown = listed == hidden.end();
+			const auto result = ui::DrawActionField({ "overlay-group-" + group, { .label = group } }, [&](const char* a_suffix) {
+				const bool changed = dmui::ui::Checkbox(std::format("Show{}", a_suffix).c_str(), &shown);
+				return ui::EditResult{ changed, changed };
+			});
+			if (!a_edit.Apply(result))
+				continue;
+			if (shown)
+				hidden.erase(listed);
+			else
+				hidden.push_back(group);
+			settings.NormalizeHiddenGroups();
+		}
 	}
 
 	void PerformanceOverlay::DrawSettings()
@@ -463,6 +505,8 @@ namespace cs::features
 				}
 			}
 		}
+		if (settings.ShowInOverlay && settings.ShowCSPasses)
+			DrawGroupFilter(edit);
 		if (settings.ShowInOverlay) {
 			if (const ui::Section section{ "overlay-layout", "Appearance" }; section) {
 				field(&Settings::TextSize, { .format = "%.2f", .flags = clamped });
