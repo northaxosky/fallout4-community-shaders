@@ -364,7 +364,7 @@ target("FeatureConfigTests", function()
     for _, feature in ipairs(features) do
         add_includedirs("features/" .. feature .. "/src")
     end
-    add_packages("vcpkg::tomlplusplus")
+    add_packages("spdlog", "vcpkg::tomlplusplus")
 end)
 
 target("AgilityBootstrapTests", function()

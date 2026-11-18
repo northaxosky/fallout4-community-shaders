@@ -1,7 +1,6 @@
 #include "Render/FrameBoundary.h"
 
 #include <atomic>
-#include <cassert>
 #include <exception>
 #include <mutex>
 #include <utility>
@@ -60,7 +59,7 @@ namespace cs::render
 				RecordFrameThread();
 				RunAll(preSwap, "pre-swap");
 				func(a_main);
-				// DearModdingUI page callbacks run mid-UI-pass and Post their mutations here.
+				// UI page callbacks run mid-pass and post their mutations here.
 				for (const auto& failure : GetFrameDispatcher().Drain())
 					L->error("Frame task failed: {}", failure);
 				RunAll(postSwap, "post-swap");
@@ -117,13 +116,5 @@ namespace cs::render
 	bool FrameBoundaryInstalled() noexcept
 	{
 		return installed.load(std::memory_order_acquire);
-	}
-
-	void AssertFrameThread(const char* a_what) noexcept
-	{
-		const bool onThread = OnFrameThread();
-		assert(onThread && "structural mutation must run on the frame thread");
-		if (!onThread)
-			L->error("{} ran off the frame thread; post it with PostToFrame", a_what);
 	}
 }

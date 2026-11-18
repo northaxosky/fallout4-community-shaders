@@ -65,10 +65,9 @@ namespace cs::host
 		{
 			if (!a_feature.SupportsEnableToggle())
 				return;
-			settings::SettingsEdit edit{ a_feature };
 			bool enabled = a_feature.IsSwitchedOn();
-			if (edit.Apply(ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled()))) {
-				// Persist after the swap: the edit's own flush would save the old value.
+			if (ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled()).changed) {
+				// Not a SettingsEdit: its flush would save the old value.
 				render::PostToFrame([&a_feature, enabled] {
 					a_feature.SetEnabled(enabled);
 					if (!a_feature.Persist())

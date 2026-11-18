@@ -251,14 +251,14 @@ namespace cs
 		}
 
 		_debugViews = std::move(valid);
-		std::vector<FeatureDebugSelection> selections;
-		if (!_debugViews.Fullscreen().Empty()) {
-			selections.push_back({ .feature = _debugViews.Fullscreen().feature,
-				.view = _debugViews.Fullscreen().view });
-		}
-		for (const auto& [feature, view] : _debugViews.Previews())
-			selections.push_back({ .feature = feature, .view = view });
-		render::PostToFrame([this, selections = std::move(selections)] {
+		render::PostToFrame([this] {
+			std::vector<FeatureDebugSelection> selections;
+			if (!_debugViews.Fullscreen().Empty()) {
+				selections.push_back({ .feature = _debugViews.Fullscreen().feature,
+					.view = _debugViews.Fullscreen().view });
+			}
+			for (const auto& [feature, view] : _debugViews.Previews())
+				selections.push_back({ .feature = feature, .view = view });
 			if (FeatureManager::Get().ApplyDebugViews(selections))
 				return;
 			L->warn("Invalid debug-view state; disabling debug views");
@@ -905,11 +905,13 @@ namespace cs
 		{
 			const dmui::DisabledScope disabled{ !pending };
 			if (dmui::ui::Button("Load") && pending) {
-				std::string error;
-				if (!presets.Apply(*pending, error))
-					presets.lastError = "Load failed: " + error;
-				else
-					presets.lastError.clear();
+				render::PostToFrame([&presets, meta = *pending] {
+					std::string error;
+					if (!presets.Apply(meta, error))
+						presets.lastError = "Load failed: " + error;
+					else
+						presets.lastError.clear();
+				});
 			}
 		}
 

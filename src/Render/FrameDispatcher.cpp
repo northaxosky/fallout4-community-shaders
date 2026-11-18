@@ -3,19 +3,11 @@
 #include <exception>
 
 #include "Log.h"
+#include "Render/FrameBoundary.h"
+#include "Render/FrameThread.h"
 
 namespace cs::render
 {
-	namespace
-	{
-		thread_local bool t_atBoundary = false;
-	}
-
-	bool AtFrameBoundary() noexcept
-	{
-		return t_atBoundary;
-	}
-
 	bool FrameDispatcher::Post(std::function<void()> a_task)
 	{
 		const std::scoped_lock lock{ _mutex };
@@ -34,7 +26,7 @@ namespace cs::render
 				const std::scoped_lock lock{ _mutex };
 				batch.swap(_queue);
 			}
-			t_atBoundary = true;
+			inFrameDrain = true;
 			for (auto& task : batch) {
 				try {
 					task();
@@ -44,9 +36,9 @@ namespace cs::render
 					failures.emplace_back("non-standard exception");
 				}
 			}
-			t_atBoundary = false;
+			inFrameDrain = false;
 		} catch (...) {
-			t_atBoundary = false;
+			inFrameDrain = false;
 			failures.emplace_back("frame dispatcher drain failed");
 		}
 		return failures;
@@ -60,7 +52,7 @@ namespace cs::render
 
 	void PostToFrame(std::function<void()> a_task)
 	{
-		if (AtFrameBoundary()) {
+		if (AtFrameBoundary() || !FrameBoundaryInstalled()) {
 			a_task();
 			return;
 		}

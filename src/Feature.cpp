@@ -2,8 +2,8 @@
 
 #include "Compat/Compat.h"
 #include "Log.h"
-#include "Render/FrameBoundary.h"
 #include "Render/FrameState.h"
+#include "Render/FrameThread.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
@@ -77,7 +77,7 @@ namespace cs
 
 	void Feature::SetEnabled(bool a_enabled) noexcept
 	{
-		render::AssertFrameThread("Feature::SetEnabled");
+		render::CheckFrameBoundary("Feature::SetEnabled");
 		const bool before = IsEnabled();
 		_enabled.store(a_enabled, std::memory_order_release);
 		if (IsEnabled() != before)
@@ -391,7 +391,7 @@ namespace cs
 	bool FeatureManager::ApplyDebugViews(
 		std::span<const FeatureDebugSelection> a_selections)
 	{
-		render::AssertFrameThread("FeatureManager::ApplyDebugViews");
+		render::CheckFrameBoundary("FeatureManager::ApplyDebugViews");
 		std::unordered_map<Feature*, std::string_view> selected;
 		Feature* fullscreen = nullptr;
 		auto healthy = GetAll();
@@ -706,7 +706,7 @@ namespace cs
 
 	void FeatureManager::ApplyShaderOwnership(const feature_config::ShaderOwnershipConfig& a_config)
 	{
-		render::AssertFrameThread("FeatureManager::ApplyShaderOwnership");
+		render::CheckFrameBoundary("FeatureManager::ApplyShaderOwnership");
 		engine::ApplyShaderOwnershipConfig(a_config);
 		RefreshShaderOwnership();
 	}

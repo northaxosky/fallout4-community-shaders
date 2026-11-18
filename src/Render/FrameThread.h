@@ -1,22 +1,33 @@
 #pragma once
 
 #include <atomic>
+#include <spdlog/spdlog.h>
 #include <thread>
 
 namespace cs::render
 {
-	// The main thread, recorded by the frame-boundary hook; unset until the first frame.
+	// Main thread, recorded by the frame-boundary hook; unset before frame one.
 	inline std::atomic<std::thread::id> frameThread{};
+
+	// Set by the dispatcher while it drains posted tasks.
+	inline thread_local bool inFrameDrain = false;
 
 	inline void RecordFrameThread() noexcept
 	{
 		frameThread.store(std::this_thread::get_id(), std::memory_order_release);
 	}
 
-	// True on the main thread, or before the first frame (startup callers).
-	[[nodiscard]] inline bool OnFrameThread() noexcept
+	// True while the dispatcher drains on this thread: the frame boundary itself.
+	[[nodiscard]] inline bool AtFrameBoundary() noexcept
 	{
-		const auto thread = frameThread.load(std::memory_order_acquire);
-		return thread == std::thread::id{} || thread == std::this_thread::get_id();
+		return inFrameDrain;
+	}
+
+	// Structural mutators call this; startup runs before the thread is recorded.
+	inline void CheckFrameBoundary(const char* a_what) noexcept
+	{
+		if (inFrameDrain || frameThread.load(std::memory_order_acquire) == std::thread::id{})
+			return;
+		spdlog::error("{} ran mid-frame; post it with PostToFrame", a_what);
 	}
 }

@@ -23,7 +23,4 @@ namespace cs::render
 	bool InstallFrameBoundary();
 
 	[[nodiscard]] bool FrameBoundaryInstalled() noexcept;
-
-	// Structural mutators call this; logs and asserts off the frame thread.
-	void AssertFrameThread(const char* a_what) noexcept;
 }
