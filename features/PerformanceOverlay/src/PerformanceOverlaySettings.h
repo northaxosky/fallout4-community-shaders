@@ -2,6 +2,8 @@
 
 #include "Settings/SettingsSchema.h"
 
+#include <algorithm>
+
 namespace cs::features::performance_overlay
 {
 	struct Settings
@@ -34,7 +36,14 @@ namespace cs::features::performance_overlay
 		float TextSize = 1.0f;
 		float BackgroundOpacity = 0.5f;
 		bool ShowBorder = true;
+		settings::StringList HiddenProfilerGroups;
 		std::string toggleHotkey = "F10";
+
+		void NormalizeHiddenGroups()
+		{
+			std::ranges::sort(HiddenProfilerGroups);
+			HiddenProfilerGroups.erase(std::ranges::unique(HiddenProfilerGroups).begin(), HiddenProfilerGroups.end());
+		}
 	};
 
 	inline constexpr settings::Schema kSchema{
@@ -51,6 +60,7 @@ namespace cs::features::performance_overlay
 			settings::Field{ "TextSize", "Text Size", &Settings::TextSize, settings::Range{ 0.8f, 1.2f } },
 			settings::Field{ "BackgroundOpacity", "Background Opacity", &Settings::BackgroundOpacity, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "ShowBorder", "Show Border", &Settings::ShowBorder },
+			settings::StringListField<Settings>{ "HiddenProfilerGroups", "Hidden Profiler Groups", &Settings::HiddenProfilerGroups }.Help("Profiler groups left out of the overlay's pass graph."),
 			settings::Field{ "toggle_hotkey", "Suggested overlay toggle binding; the host's saved override takes precedence.", &Settings::toggleHotkey } }
 	};
 }

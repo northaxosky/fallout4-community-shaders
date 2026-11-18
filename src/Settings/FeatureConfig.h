@@ -66,12 +66,16 @@ namespace cs::feature_config
 		{
 			return enabled[static_cast<std::size_t>(a_target)];
 		}
+
+		bool operator==(const ShaderOwnershipTargets&) const = default;
 	};
 
 	struct ShaderOwnershipConfig
 	{
 		bool enableShaders{ false };
 		ShaderOwnershipTargets targets;
+
+		bool operator==(const ShaderOwnershipConfig&) const = default;
 	};
 
 	struct ShaderOwnershipParseResult
@@ -81,8 +85,9 @@ namespace cs::feature_config
 		std::string error;
 	};
 
-	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root);
-	// Invalid or missing values use the default; a_error names an invalid one.
+	ShaderOwnershipConfig DefaultShaderOwnership();
+	// Invalid or missing values use a_base; error names an invalid one.
+	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root, const ShaderOwnershipConfig& a_base = DefaultShaderOwnership());
 
 	struct WriteResult
 	{

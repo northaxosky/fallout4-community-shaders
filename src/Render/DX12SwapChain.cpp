@@ -19,6 +19,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Annotation.h"
+#include "Render/FrameProfiler.h"
 #include "Render/InterfaceLayer.h"
 #include "Render/RendererContext.h"
 #include "Render/TemporalPipeline.h"
@@ -156,6 +157,9 @@ namespace cs::render
 			for (const auto& submission : _presentSubmissions) {
 				retain(submission.allocator.get());
 				retain(submission.commandList.get());
+			}
+			for (auto* resource : _gpuTimer.Resources()) {
+				retain(resource);
 			}
 			for (const auto& backBuffer : _backBuffers) {
 				retain(backBuffer.get());
@@ -367,6 +371,7 @@ namespace cs::render
 		for (auto& submission : _presentSubmissions) {
 			submission = {};
 		}
+		_gpuTimer.Release();
 		_rcas.ResetD3D12();
 		_retirementQueue = nullptr;
 		_queue = nullptr;
@@ -546,6 +551,12 @@ namespace cs::render
 			&queueDesc, IID_PPV_ARGS(_retirementQueue.put())));
 		cs::render::annotation::SetName(_retirementQueue.get(),
 			"Upscaling/FrameGeneration.InputRetirementQueue");
+		// Failure leaves the timer disabled; submissions still work.
+		if (!_gpuTimer.Initialize(_device12.get(), _queue.get(),
+				static_cast<std::uint32_t>(_srSubmissions.size() + _presentSubmissions.size()),
+				render::profiling::GetProfiler())) {
+			cs::log::Get("cs.render.d3d12gputimer")->warn("D3D12 GPU timestamps are unavailable; D3D12 passes are not timed");
+		}
 		const auto createSubmissions = [&](auto& a_submissions,
 										   std::string_view a_phase) {
 			for (UINT index = 0; index < a_submissions.size(); ++index) {
@@ -558,6 +569,7 @@ namespace cs::render
 					submission.allocator.get(), nullptr,
 					IID_PPV_ARGS(submission.commandList.put())));
 				DX::ThrowIfFailed(submission.commandList->Close());
+				submission.timing = _gpuTimer.Reserve();
 				cs::render::annotation::SetName(
 					submission.allocator.get(),
 					std::format(
@@ -1116,9 +1128,11 @@ namespace cs::render
 		_presentSubmissionMayBeInFlight = false;
 		for (auto& submission : _srSubmissions) {
 			submission.completionValue = 0;
+			submission.timing.Discard();
 		}
 		for (auto& submission : _presentSubmissions) {
 			submission.completionValue = 0;
+			submission.timing.Discard();
 		}
 		_nextSrSubmission = 0;
 		_nextPresentSubmission = 0;
@@ -1357,7 +1371,15 @@ namespace cs::render
 
 	void DX12SwapChain::MarkQuarantined() noexcept
 	{
-		_quarantined = true;
+		if (!std::exchange(_quarantined, true)) {
+			try {
+				L->error(
+					"Device removed reasons: D3D12={:#010x} D3D11={:#010x}",
+					_device12 ? static_cast<std::uint32_t>(_device12->GetDeviceRemovedReason()) : 0u,
+					_device11 ? static_cast<std::uint32_t>(_device11->GetDeviceRemovedReason()) : 0u);
+			} catch (...) {
+			}
+		}
 		if (_presentationBound && _callbacks.quarantinePresentation) {
 			_callbacks.quarantinePresentation();
 		}
@@ -1460,6 +1482,8 @@ namespace cs::render
 			DX::ThrowIfFailed(submission->commandList->Reset(
 				submission->allocator.get(), nullptr));
 			auto* commandList = submission->commandList.get();
+			_gpuTimer.Begin(submission->timing);
+			_gpuTimer.BeginScope(commandList, submission->timing, "D3D12::SuperResolution");
 			auto request = a_request;
 			request.recording = render::temporal::D3D12RecordingContext{
 				.commandList = commandList,
@@ -1472,7 +1496,9 @@ namespace cs::render
 			request.motionVectors = motion;
 			request.reactiveMask = reactive;
 			request.transparencyCompositionMask = transparency;
+			_gpuTimer.BeginScope(commandList, submission->timing, "D3D12::SuperResolution/Provider");
 			auto providerResult = a_provider.Record(request);
+			_gpuTimer.EndScope(commandList, submission->timing, "D3D12::SuperResolution/Provider");
 			if (!providerResult.Succeeded()) {
 				DX::ThrowIfFailed(commandList->Close());
 				if (providerResult.code ==
@@ -1498,12 +1524,15 @@ namespace cs::render
 				};
 			}
 			if (a_request.postProcessSharpening) {
-				if (!_rcas.RecordSharpen(commandList,
-						submission->postProcessDescriptors,
-						output.resource, output.state,
-						publication.resource, publication.state,
-						a_request.outputWidth, a_request.outputHeight,
-						a_request.postProcessSharpness)) {
+				_gpuTimer.BeginScope(commandList, submission->timing, "D3D12::SuperResolution/Sharpen");
+				const bool sharpened = _rcas.RecordSharpen(commandList,
+					submission->postProcessDescriptors,
+					output.resource, output.state,
+					publication.resource, publication.state,
+					a_request.outputWidth, a_request.outputHeight,
+					a_request.postProcessSharpness);
+				_gpuTimer.EndScope(commandList, submission->timing, "D3D12::SuperResolution/Sharpen");
+				if (!sharpened) {
 					DX::ThrowIfFailed(commandList->Close());
 					return {
 						.code =
@@ -1516,6 +1545,8 @@ namespace cs::render
 				}
 				providerResult.publicationOutputReady = true;
 			}
+			_gpuTimer.EndScope(commandList, submission->timing, "D3D12::SuperResolution");
+			_gpuTimer.Resolve(commandList, submission->timing);
 			DX::ThrowIfFailed(commandList->Close());
 			ID3D12CommandList* lists[]{ commandList };
 			_queue->ExecuteCommandLists(1, lists);
@@ -1523,6 +1554,7 @@ namespace cs::render
 			const UINT64 d3d12Done = _nextFenceValue++;
 			DX::ThrowIfFailed(_queue->Signal(_fence12.get(), d3d12Done));
 			submission->completionValue = d3d12Done;
+			_gpuTimer.Commit(submission->timing);
 			DX::ThrowIfFailed(_context11->Wait(_fence11.get(), d3d12Done));
 			providerResult.workState =
 				render::temporal::ProviderWorkState::kOutputReady;
@@ -1689,6 +1721,7 @@ namespace cs::render
 			auto& candidate = a_records[index];
 			if (!candidate.completionValue ||
 				completed >= candidate.completionValue) {
+				_gpuTimer.Collect(candidate.timing);
 				a_cursor =
 					(index + 1) % static_cast<UINT>(a_records.size());
 				a_record = &candidate;
@@ -1703,6 +1736,7 @@ namespace cs::render
 				"A temporal D3D12 command allocator did not retire safely.");
 			return wait;
 		}
+		_gpuTimer.Collect(oldest.timing);
 		a_record = &oldest;
 		a_cursor =
 			(a_cursor + 1) % static_cast<UINT>(a_records.size());
@@ -1926,6 +1960,9 @@ namespace cs::render
 				copySource = nullptr;
 			}
 			cs::render::annotation::SetMarker("FG_D3D11ProductionComplete");
+			// D3D11 time across the round trip; minus D3D12::Present is the handoff.
+			cs::render::annotation::SpannedEvent handoff;
+			handoff.Begin("Render::PresentHandoff");
 			const UINT64 d3d11Ready = _nextFenceValue++;
 			DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Ready));
 			DX::ThrowIfFailed(_queue->Wait(_fence12.get(), d3d11Ready));
@@ -1934,12 +1971,15 @@ namespace cs::render
 				submission->allocator.get(), nullptr));
 
 			auto* commandList = submission->commandList.get();
+			_gpuTimer.Begin(submission->timing);
+			_gpuTimer.BeginScope(commandList, submission->timing, "D3D12::Present");
 			if (copySource) {
 				auto timing =
 					render::TemporalPipeline::Get().MeasureFrameGenerationCpuPhase(
 						render::FrameGenerationCpuPhase::kCopyRecord);
 				cs::render::annotation::ScopedEvent copyScope(commandList,
 					"FG_CopyRealFrame");
+				_gpuTimer.BeginScope(commandList, submission->timing, "D3D12::Present/CopyRealFrame");
 				const std::array barriersBefore{
 					Transition(copySource->resource12.get(),
 						D3D12_RESOURCE_STATE_COMMON,
@@ -1962,6 +2002,7 @@ namespace cs::render
 				};
 				commandList->ResourceBarrier(static_cast<UINT>(barriersAfter.size()),
 					barriersAfter.data());
+				_gpuTimer.EndScope(commandList, submission->timing, "D3D12::Present/CopyRealFrame");
 			}
 
 			if (_provider && requested) {
@@ -1993,6 +2034,7 @@ namespace cs::render
 			if (_provider && requested) {
 				cs::render::annotation::ScopedEvent prepareScope(commandList,
 					"FG_ConfigurePrepare");
+				_gpuTimer.BeginScope(commandList, submission->timing, "D3D12::Present/FrameGenerationPrepare");
 				request.recording =
 					render::temporal::D3D12RecordingContext{ .commandList = commandList,
 						.queue = _queue.get(),
@@ -2033,6 +2075,7 @@ namespace cs::render
 						render::FrameGenerationCpuPhase::kPrepareFrame);
 					return render::temporal::PrepareFrameSafely(*_provider, request);
 				}();
+				_gpuTimer.EndScope(commandList, submission->timing, "D3D12::Present/FrameGenerationPrepare");
 				const auto& prepareResult = preparation.prepare;
 				frameGenerationPrepared = preparation.prepared;
 				_providerGenerationEnabled = frameGenerationPrepared;
@@ -2066,6 +2109,8 @@ namespace cs::render
 				_providerGenerationEnabled = false;
 			}
 
+			_gpuTimer.EndScope(commandList, submission->timing, "D3D12::Present");
+			_gpuTimer.Resolve(commandList, submission->timing);
 			DX::ThrowIfFailed(commandList->Close());
 			ID3D12CommandList* lists[] = { commandList };
 			_queue->ExecuteCommandLists(1, lists);
@@ -2073,8 +2118,10 @@ namespace cs::render
 			const UINT64 d3d12Done = _nextFenceValue++;
 			DX::ThrowIfFailed(_queue->Signal(_fence12.get(), d3d12Done));
 			submission->completionValue = d3d12Done;
+			_gpuTimer.Commit(submission->timing);
 			_allocatorFenceValues[_frameSlot] = d3d12Done;
 			const HRESULT producerWait = _context11->Wait(_fence11.get(), d3d12Done);
+			handoff.End();
 			DX::ThrowIfFailed(producerWait);
 			_presentSubmissionMayBeInFlight = false;
 			_preparedFrameGeneration =
@@ -2654,9 +2701,11 @@ namespace cs::render
 		_presentSubmissionMayBeInFlight = false;
 		for (auto& submission : _srSubmissions) {
 			submission.completionValue = 0;
+			submission.timing.Discard();
 		}
 		for (auto& submission : _presentSubmissions) {
 			submission.completionValue = 0;
+			submission.timing.Discard();
 		}
 		_nextSrSubmission = 0;
 		_nextPresentSubmission = 0;

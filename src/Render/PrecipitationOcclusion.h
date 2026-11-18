@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,8 +84,8 @@ namespace cs::engine
 		float boxSize = 0.0f;
 		// Precipitation travel direction written to the engine's direction global.
 		DirectX::XMFLOAT3 travelDirection{};
-		// Ortho frustum quarter of the box: 0 to 3.
-		std::uint32_t quadrant = 0;
+		// Ortho frustum quarter of the box, 0 to 3; empty keeps the full frustum.
+		std::optional<std::uint32_t> quadrant;
 		OccluderPolicy occluders;
 		OccluderBatchOptions batching;
 		OcclusionCaptureTarget target;
@@ -110,6 +111,8 @@ namespace cs::engine
 		std::string name;
 		bool installed = false;
 		std::string detail;
+		// Telemetry-only hooks may fail without failing the capture.
+		bool required = true;
 	};
 
 	// Registers the capture thunks and the occluder pass hook; call during Load.
@@ -130,7 +133,7 @@ namespace cs::engine
 	struct ActiveCapture
 	{
 		std::atomic<const RE::BSShaderAccumulator*> accumulator{ nullptr };
-		std::uint32_t quadrant = 0;
+		std::optional<std::uint32_t> quadrant;
 		OccluderPolicy occluders;
 		const RE::NiCamera* camera = nullptr;
 		OccluderBatchMode batchMode = OccluderBatchMode::kOff;
@@ -194,11 +197,15 @@ namespace cs::engine
 
 	using CaptureClock = std::chrono::steady_clock;
 
-	// Capture CPU time; passes sums every worker thread's slot-44 time.
+	// Wall time on the capture thread, except passes, which sums worker threads.
 	struct CaptureTimings
 	{
 		std::atomic<CaptureClock::rep> capture{ 0 };
 		std::atomic<CaptureClock::rep> gather{ 0 };
+		// BSShaderUtil::AccumulateScene: cull, classify and record every occluder.
+		std::atomic<CaptureClock::rep> accumulate{ 0 };
+		// BSShaderUtil::RenderScene: the engine's draws of the delegated occluders.
+		std::atomic<CaptureClock::rep> render{ 0 };
 		std::atomic<CaptureClock::rep> passes{ 0 };
 		// The batched occluder draw, on the render thread.
 		std::atomic<CaptureClock::rep> batch{ 0 };

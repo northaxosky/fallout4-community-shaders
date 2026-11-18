@@ -12,4 +12,5 @@
 | Divergence | The UI composites over the scene in gamma space | While the HDR container is active the interface is split from the scene, and frame generation blends it in the output encoding (PQ with HDR on, gamma 2.2 with it off): DLSS-G recomposes it over an encoded HUD-less frame; FSR 3 and FSR 4 frame generation composite it over a scene-only back buffer | Real and generated frames must match; frames without a separate interface skip generation |
 | Pending | Sun scaling, Bink video white, AutoHDR | Omitted | Their consumers are not ported |
 | Divergence | HDR is detected on the swap chain's containing output | Detected on the monitor of the game window | The proxy chain exposes no containing output |
+| Divergence | HDR TAA replaces the speed-change history decay with a PQ luma change | TAA keeps the speed-change decay in HDR | The term is on-screen speed, not luma; without it history survives camera moves and trails dark edges |
 | Divergence | Exclusive fullscreen only warns | Native presentation stays and HDR is inactive | The D3D12 proxy presents black in exclusive fullscreen |

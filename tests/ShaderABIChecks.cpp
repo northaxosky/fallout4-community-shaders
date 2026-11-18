@@ -83,9 +83,11 @@ namespace
 			F(MaxRainWetness), F(MaxPuddleWetness), F(MaxShoreWetness), F(ShoreRange), F(PuddleRadius), F(PuddleMaxAngle), F(PuddleMinWetness),
 			F(MinRainWetness), F(SkinWetness), F(WeatherTransitionSpeed), F(EnableRaindropFx), F(EnableSplashes), F(EnableRipples), F(EnableVanillaRipples),
 			F(RaindropFxRange), F(RaindropGridSizeRcp), F(RaindropIntervalRcp), F(RaindropChance), F(SplashesLifetime), F(SplashesStrength),
-			F(SplashesMinRadius), F(SplashesMaxRadius), F(RippleStrength), F(RippleRadius), F(RippleBreadth), F(RippleLifetimeRcp), F(pad0));
-		const auto sky = FIELDS(SkylightingSettings, F(OcclusionViewProj), F(OcclusionSHBasis4Pi), F(PosOffset), F(ArrayOrigin), F(ValidMargin),
-			F(MinDiffuseVisibility), F(MinSpecularVisibility), F(pad0));
+			F(SplashesMinRadius), F(SplashesMaxRadius), F(RippleStrength), F(RippleRadius), F(RippleBreadth), F(RippleLifetimeRcp), F(WallRainDensity),
+			F(WallRainDropSize), F(WallRainSpeed), F(WallRainLayering), F(WallRainNormalStrength), F(WallRainWetness), F(WallRainDarkening),
+			F(EnableWallRain), F(WallRainTrailLength));
+		const auto sky = FIELDS(SkylightingSettings, F(OcclusionViewProj), F(ZenithViewProj), F(OcclusionSHBasis4Pi), F(PosOffset), F(ArrayOrigin),
+			F(ValidMargin), F(ZenithOffset), F(ZenithValid), F(MinDiffuseVisibility), F(MinSpecularVisibility), F(AccumulateOcclusion), F(pad0));
 		const auto cloud = FIELDS(CloudShadowsSettings, F(Opacity), F(pad0));
 		const auto lod = FIELDS(LODBlendingSettings, F(LODTerrainBrightness), F(LODObjectBrightness), F(LODObjectSnowBrightness),
 			F(DisableTerrainVertexColors), F(LODTerrainGamma), F(LODObjectGamma), F(LODObjectSnowGamma), F(pad0));
@@ -138,6 +140,8 @@ namespace
 		const auto rain = FIELDS(RainRefractionSettings, F(Enable), F(MotionStretch), F(MotionTransparency), F(pad0), F(TextureBounds), F(TextureRadiusScale), F(pad1));
 		const auto sun = FIELDS(ProceduralSunSettings, F(enabled), F(sunDiskCos), F(diskIntensity), F(edgeSoftness), F(haloEnabled),
 			F(sunHaloCos), F(haloIntensity), F(haloFalloff), F(cloudOcclusionStrength), F(sunQuadModelRadius), F(pad0));
+		const auto aurora = FIELDS(ProceduralAuroraSettings, F(FringeColor), F(BodyColor), F(CrownColor), F(Brightness), F(Time), F(RayDetail),
+			F(Softness), F(FoldStrength), F(RayStrength), F(Seed), F(Enabled), F(Atmosphere), F(CurtainSize), F(CurtainCount), F(BodyDisplayColor));
 #undef FIELDS
 #undef F
 		struct Block
@@ -157,7 +161,8 @@ namespace
 			{ 6, "enbSettings", enb }, { 6, "terrainBlendingSettings", blending },
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
-			{ 6, "rainRefractionSettings", rain }, { 6, "proceduralSunSettings", sun }
+			{ 6, "rainRefractionSettings", rain }, { 6, "proceduralSunSettings", sun },
+			{ 6, "proceduralAuroraSettings", aurora }
 		};
 		D3D11_SHADER_DESC shader{};
 		a_reflection->GetDesc(&shader);
@@ -268,7 +273,8 @@ namespace
 			ABI(SharedFeatureDataCB, enbSettings), ABI(SharedFeatureDataCB, terrainBlendingSettings),
 			ABI(SharedFeatureDataCB, exponentialHeightFogSettings), ABI(SharedFeatureDataCB, truePBRSettings),
 			ABI(SharedFeatureDataCB, skinData), ABI(SharedFeatureDataCB, horizonFixSettings),
-			ABI(SharedFeatureDataCB, rainRefractionSettings), ABI(SharedFeatureDataCB, proceduralSunSettings)
+			ABI(SharedFeatureDataCB, rainRefractionSettings), ABI(SharedFeatureDataCB, proceduralSunSettings),
+			ABI(SharedFeatureDataCB, proceduralAuroraSettings)
 		};
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, DebugOwner), ABI(FO4SharedDataCB, DebugMode),
@@ -399,6 +405,11 @@ namespace
 			return "DirectionalShadowLights: ABI slot mismatch";
 		if (binding.NumSamples != sizeof(cs::engine::DirectionalShadowLightData<cs::engine::kMaxSunCascades>))
 			return "DirectionalShadowLights: ABI structure stride mismatch";
+		// The host binds the zenith depth at t4 and the coverage UAV at u4.
+		for (const char* name : { "srcZenithDepth", "outCoverage" }) {
+			if (FAILED(reflection->GetResourceBindingDescByName(name, &binding)) || binding.BindPoint != 4)
+				return std::string(name) + ": ABI slot mismatch";
+		}
 		return {};
 	}
 	Microsoft::WRL::ComPtr<ID3D11ShaderReflection> Reflect(const std::filesystem::path& a_root, const std::filesystem::path& a_path, const std::vector<std::pair<const char*, const char*>>& a_defines, const char* a_profile, std::string& a_error, Microsoft::WRL::ComPtr<ID3DBlob>* a_blob = nullptr)

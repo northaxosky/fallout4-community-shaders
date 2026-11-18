@@ -29,6 +29,7 @@ namespace cs::host
 		std::string summary;
 		bool active{ false };
 		bool installed{ false };
+		bool inFeatureList{ true };
 	};
 
 	struct HostPageDescriptor

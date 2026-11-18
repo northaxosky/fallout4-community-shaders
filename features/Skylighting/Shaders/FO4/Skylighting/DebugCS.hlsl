@@ -2,6 +2,8 @@
 #include "FO4/GBuffer.hlsli"
 
 #define SKYLIGHTING_PROBE_REGISTER t1
+#define SKYLIGHTING_COVERAGE_REGISTER t2
+#define SKYLIGHTING_ZENITH_REGISTER t3
 #include "Skylighting/Skylighting.hlsli"
 
 Texture2D<float2> Normal : register(t0);

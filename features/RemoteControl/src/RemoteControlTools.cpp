@@ -24,7 +24,9 @@ namespace cs::features::remote_control
 			&kShaderCacheTool,
 			&kSettingsTool,
 			&kCaptureTool,
-			&kNvPerfTool
+			&kPerfTool,
+			&kNvPerfTool,
+			&kDevFlagsTool
 		};
 
 		// No exception may cross the DLL boundary; write the result once.

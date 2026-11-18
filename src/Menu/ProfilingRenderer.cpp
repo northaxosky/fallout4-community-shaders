@@ -115,6 +115,11 @@ namespace cs
 			};
 		}
 
+		bool IsHidden(std::span<const std::string> a_hidden, const std::string& a_group)
+		{
+			return std::ranges::find(a_hidden, a_group) != a_hidden.end();
+		}
+
 		// FO4: DmUI has no TreeNodeEx; a selectable with an arrow toggles the group.
 		bool GroupNode(const std::string& a_name, std::unordered_set<std::string>& a_expanded)
 		{
@@ -205,7 +210,20 @@ namespace cs
 			dmui::ui::TableSetupColumn("%", metricFlags, kTimingTablePercentColumnWidth * scale);
 	}
 
-	void ProfilingRenderer::RenderGraph()
+	std::vector<std::string> ProfilingRenderer::CurrentGroups()
+	{
+		render::profiling::KeepActive();
+		std::vector<std::string> groups;
+		for (const auto& result : render::profiling::GetProfiler().GetResults()) {
+			if (result.valid)
+				groups.emplace_back(render::profiling::GroupOf(result.name));
+		}
+		std::ranges::sort(groups);
+		groups.erase(std::ranges::unique(groups).begin(), groups.end());
+		return groups;
+	}
+
+	void ProfilingRenderer::RenderGraph(GraphState& a_graph, std::span<const std::string> a_hiddenGroups)
 	{
 		render::profiling::KeepActive();
 		auto& profiler = render::profiling::GetProfiler();
@@ -219,17 +237,14 @@ namespace cs
 
 		double accumulated = 0.0;
 		for (const auto& result : results) {
-			if (!result.valid)
+			if (!result.valid || result.external)
 				continue;
 
 			float timeMs = cpuMode ? result.cpuTimeMs : result.gpuTimeMs;
 
-			std::string groupName;
-			auto pos = result.name.find("::");
-			if (pos != std::string::npos)
-				groupName = result.name.substr(0, pos);
-			else
-				groupName = result.name;
+			const std::string groupName(render::profiling::GroupOf(result.name));
+			if (IsHidden(a_hiddenGroups, groupName))
+				continue;
 
 			legit::ProfilerTask task;
 			task.startTime = accumulated / 1000.0;
@@ -241,7 +256,7 @@ namespace cs
 		}
 
 		if (!tasks.empty())
-			gpuGraph.Render(tasks, kMainGraphLegendWidth, kMainGraphHeight, kMainGraphMinFrameTimeSec);
+			a_graph.Render(tasks, kMainGraphLegendWidth, kMainGraphHeight, kMainGraphMinFrameTimeSec);
 	}
 
 	void ProfilingRenderer::GraphState::Render(const std::vector<legit::ProfilerTask>& tasks, float baseLegendWidth, float baseHeight, float minFrameTimeSec)
@@ -257,8 +272,10 @@ namespace cs
 		dmui::ui::Spacing();
 	}
 
-	void ProfilingRenderer::RenderStatistics(bool showTable, bool showModeToggle)
+	void ProfilingRenderer::RenderStatistics(Surface a_surface, std::span<const std::string> a_hiddenGroups)
 	{
+		const bool showTable = a_surface == Surface::kPage;
+		const bool showModeToggle = showTable;
 		render::profiling::KeepActive();
 		auto& profiler = render::profiling::GetProfiler();
 
@@ -294,9 +311,11 @@ namespace cs
 				float p95 = cpuMode ? result.cpuP95Ms : result.p95Ms;
 				float p99 = cpuMode ? result.cpuP99Ms : result.p99Ms;
 
-				cachedTotalAvgMs += avg;
-				cachedTotalP95Ms += p95;
-				cachedTotalP99Ms += p99;
+				if (!result.external) {
+					cachedTotalAvgMs += avg;
+					cachedTotalP95Ms += p95;
+					cachedTotalP99Ms += p99;
+				}
 
 				auto pos = result.name.find("::");
 				if (pos != std::string::npos) {
@@ -310,10 +329,12 @@ namespace cs
 					}
 
 					auto& group = cachedGroups[groupIndex[groupName]];
-					group.totalAvgMs += avg;
-					group.totalP95Ms += p95;
-					group.totalP99Ms += p99;
-					group.passes.push_back({ passLabel, avg, p95, p99 });
+					if (!result.external) {
+						group.totalAvgMs += avg;
+						group.totalP95Ms += p95;
+						group.totalP99Ms += p99;
+					}
+					group.passes.push_back({ passLabel, avg, p95, p99, result.external });
 				} else {
 					groupIndex[result.name] = cachedGroups.size();
 					cachedGroups.push_back({ result.name, avg, p95, p99 });
@@ -332,7 +353,7 @@ namespace cs
 			return;
 		}
 
-		RenderGraph();
+		RenderGraph(showTable ? gpuGraph : overlayGraph, a_hiddenGroups);
 
 		if (showTable) {
 			float availHeight = dmui::ui::GetContentRegionAvail().y - dmui::ui::GetFrameHeight();
@@ -358,7 +379,7 @@ namespace cs
 					groups.push_back(&group);
 				Util::SortTableRows(groups, sort, groupSorts);
 
-				const auto metrics = [](float a_avg, float a_p95, float a_p99) {
+				const auto metrics = [](float a_avg, float a_p95, float a_p99, bool a_external = false) {
 					(void)dmui::ui::TableNextColumn();
 					TextHeat("%.3f", a_avg, cachedMaxAvgMs);
 					(void)dmui::ui::TableNextColumn();
@@ -366,7 +387,7 @@ namespace cs
 					(void)dmui::ui::TableNextColumn();
 					TextHeat("%.3f", a_p99, cachedMaxP99Ms);
 					(void)dmui::ui::TableNextColumn();
-					if (cachedTotalAvgMs > 0.0f)
+					if (!a_external && cachedTotalAvgMs > 0.0f)
 						TextHeat("%5.1f", (a_avg / cachedTotalAvgMs) * 100.0f, 100.0f);
 				};
 
@@ -394,7 +415,7 @@ namespace cs
 								dmui::ui::Indent();
 								dmui::ui::TextUnformatted(pass.label.c_str());
 								dmui::ui::Unindent();
-								metrics(pass.avgMs, pass.p95Ms, pass.p99Ms);
+								metrics(pass.avgMs, pass.p95Ms, pass.p99Ms, pass.external);
 							}
 						}
 					}
@@ -421,6 +442,7 @@ namespace cs
 			float avgMs;
 			float p95Ms;
 			float p99Ms;
+			bool external;
 		};
 
 		std::vector<Entry> entries;
@@ -461,10 +483,12 @@ namespace cs
 				p95 = cpuMode ? statistics.cpuP95Ms : statistics.p95Ms;
 				p99 = cpuMode ? statistics.cpuP99Ms : statistics.p99Ms;
 			}
-			entries.push_back({ label, timeMs, avg, p95, p99 });
-			totalAvg += avg;
-			totalP95 += p95;
-			totalP99 += p99;
+			entries.push_back({ label, timeMs, avg, p95, p99, r.external });
+			if (!r.external) {
+				totalAvg += avg;
+				totalP95 += p95;
+				totalP99 += p99;
+			}
 			maxAvg = std::max(maxAvg, avg);
 			maxP95 = std::max(maxP95, p95);
 			maxP99 = std::max(maxP99, p99);
@@ -478,6 +502,8 @@ namespace cs
 		std::vector<legit::ProfilerTask> tasks;
 		double accumulated = 0.0;
 		for (const auto& e : entries) {
+			if (e.external)
+				continue;
 			legit::ProfilerTask task;
 			task.startTime = accumulated / 1000.0;
 			task.endTime = (accumulated + e.timeMs) / 1000.0;

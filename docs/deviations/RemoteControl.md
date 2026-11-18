@@ -10,4 +10,6 @@
 | Divergence | `inspect shadercache` reports the compile set and `currentFailedCount`; `shaderRecompiled` fires when the set ends | Reports the running runtime compile batch and disk-cache counters, no `currentFailedCount`; the event fires per batch | FO4 compiles variants on demand |
 | Divergence | No debug-view selection | `feature debugView` selects a feature debug view live, not persisted | Validation switches views without a restart |
 | Divergence | `capture screenshot` returns `queued` and no artifact | Returns `requestId`; `communityshaders.capture.completed` reports `kind:"screenshot"` with `path,bytes` or `error` | A caller cannot otherwise find the file ([Screenshot](Screenshot.md)) |
+| Divergence | No CS cost measurement | `communityshaders.perf` runs scripted Performance Overlay comparisons of custom shaders or live settings | Validation needs a scripted cost reading ([Performance Overlay](PerformanceOverlay.md)) |
 | Divergence | A Nsight Perf pass ends before Present, so the overlay is not measured | A pass brackets `Main::Swap`, so the DearModdingUI overlay and Present are measured | `Main::Swap` renders and presents |
+| Divergence | `inspect profiler` reports D3D11 passes | Adds `d3d12Passes` {name,gpuMs,gpuAvgMs,gpuP95Ms} from D3D12 timestamps | DLSS/FSR and the D3D12 present run on the private D3D12 device |

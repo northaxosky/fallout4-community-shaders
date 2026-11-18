@@ -49,17 +49,23 @@ namespace cs::render
 		std::uint32_t EnableRaindropFx, EnableSplashes, EnableRipples, EnableVanillaRipples;
 		float RaindropFxRange, RaindropGridSizeRcp, RaindropIntervalRcp, RaindropChance;
 		float SplashesLifetime, SplashesStrength, SplashesMinRadius, SplashesMaxRadius;
-		float RippleStrength, RippleRadius, RippleBreadth, RippleLifetimeRcp, pad0;
+		float RippleStrength, RippleRadius, RippleBreadth, RippleLifetimeRcp, WallRainDensity;
+		float WallRainDropSize, WallRainSpeed, WallRainLayering, WallRainNormalStrength;
+		float WallRainWetness, WallRainDarkening;
+		std::uint32_t EnableWallRain;
+		float WallRainTrailLength;
 	};
 	struct SkylightingSettings
 	{
 		// Neutral: a far PosOffset puts every lookup outside the grid (unit SH, vis 1).
-		DirectX::XMFLOAT4X4 OcclusionViewProj{};
+		DirectX::XMFLOAT4X4 OcclusionViewProj{}, ZenithViewProj{};
 		DirectX::XMFLOAT4 OcclusionSHBasis4Pi{}, PosOffset{ 1.0e30f, 1.0e30f, 1.0e30f, 0.0f };
 		std::uint32_t ArrayOrigin[4]{};
 		std::int32_t ValidMargin[4]{};
+		float ZenithOffset[3]{};
+		std::uint32_t ZenithValid = 0;
 		float MinDiffuseVisibility = 1.0f, MinSpecularVisibility = 1.0f;
-		std::uint32_t pad0[2]{};
+		std::uint32_t AccumulateOcclusion = 0, pad0 = 0;
 	};
 	struct CloudShadowsSettings
 	{
@@ -215,6 +221,14 @@ namespace cs::render
 		float sunHaloCos, haloIntensity, haloFalloff;
 		float cloudOcclusionStrength, sunQuadModelRadius, pad0[2];
 	};
+	// Shared SharedData.hlsli still declares this block; it is always zero-filled.
+	struct ProceduralAuroraSettings
+	{
+		DirectX::XMFLOAT4 FringeColor, BodyColor, CrownColor;
+		float Brightness, Time, RayDetail, Softness, FoldStrength, RayStrength, Seed;
+		std::uint32_t Enabled;
+		float Atmosphere[3], CurtainSize, CurtainCount, BodyDisplayColor[3];
+	};
 
 	struct alignas(16) SharedFeatureDataCB
 	{
@@ -240,6 +254,7 @@ namespace cs::render
 		HorizonFixSettings horizonFixSettings{};
 		RainRefractionSettings rainRefractionSettings{};
 		ProceduralSunSettings proceduralSunSettings{};
+		ProceduralAuroraSettings proceduralAuroraSettings{};
 	};
 #define CS_FEATURE_LAYOUT(member, offset, size)                     \
 	static_assert(offsetof(SharedFeatureDataCB, member) == offset); \
@@ -249,23 +264,24 @@ namespace cs::render
 	CS_FEATURE_LAYOUT(cubemapCreatorSettings, 80, 32);
 	CS_FEATURE_LAYOUT(terraOccSettings, 112, 48);
 	CS_FEATURE_LAYOUT(lightLimitFixSettings, 160, 48);
-	CS_FEATURE_LAYOUT(wetnessEffectsSettings, 208, 192);
-	CS_FEATURE_LAYOUT(skylightingSettings, 400, 144);
-	CS_FEATURE_LAYOUT(cloudShadowsSettings, 544, 16);
-	CS_FEATURE_LAYOUT(lodBlendingSettings, 560, 32);
-	CS_FEATURE_LAYOUT(hairSpecularSettings, 592, 80);
-	CS_FEATURE_LAYOUT(terrainVariationSettings, 672, 16);
-	CS_FEATURE_LAYOUT(iblSettings, 688, 48);
-	CS_FEATURE_LAYOUT(extendedTranslucencySettings, 736, 16);
-	CS_FEATURE_LAYOUT(linearLightingSettings, 752, 80);
-	CS_FEATURE_LAYOUT(enbSettings, 832, 512);
-	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1344, 16);
-	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1360, 256);
-	CS_FEATURE_LAYOUT(truePBRSettings, 1616, 16);
-	CS_FEATURE_LAYOUT(skinData, 1632, 112);
-	CS_FEATURE_LAYOUT(horizonFixSettings, 1744, 16);
-	CS_FEATURE_LAYOUT(rainRefractionSettings, 1760, 48);
-	CS_FEATURE_LAYOUT(proceduralSunSettings, 1808, 48);
+	CS_FEATURE_LAYOUT(wetnessEffectsSettings, 208, 224);
+	CS_FEATURE_LAYOUT(skylightingSettings, 432, 224);
+	CS_FEATURE_LAYOUT(cloudShadowsSettings, 656, 16);
+	CS_FEATURE_LAYOUT(lodBlendingSettings, 672, 32);
+	CS_FEATURE_LAYOUT(hairSpecularSettings, 704, 80);
+	CS_FEATURE_LAYOUT(terrainVariationSettings, 784, 16);
+	CS_FEATURE_LAYOUT(iblSettings, 800, 48);
+	CS_FEATURE_LAYOUT(extendedTranslucencySettings, 848, 16);
+	CS_FEATURE_LAYOUT(linearLightingSettings, 864, 80);
+	CS_FEATURE_LAYOUT(enbSettings, 944, 512);
+	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1456, 16);
+	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1472, 256);
+	CS_FEATURE_LAYOUT(truePBRSettings, 1728, 16);
+	CS_FEATURE_LAYOUT(skinData, 1744, 112);
+	CS_FEATURE_LAYOUT(horizonFixSettings, 1856, 16);
+	CS_FEATURE_LAYOUT(rainRefractionSettings, 1872, 48);
+	CS_FEATURE_LAYOUT(proceduralSunSettings, 1920, 48);
+	CS_FEATURE_LAYOUT(proceduralAuroraSettings, 1968, 112);
 #undef CS_FEATURE_LAYOUT
-	static_assert(sizeof(SharedFeatureDataCB) == 1856);
+	static_assert(sizeof(SharedFeatureDataCB) == 2080);
 }

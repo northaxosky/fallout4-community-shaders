@@ -14,6 +14,7 @@
 #include "Render/ShaderInjection.h"
 #include "RenderDoc.h"
 #include "Settings/FeatureConfig.h"
+#include "Settings/LiveSettings.h"
 #include "Settings/PresetManager.h"
 #include "Settings/SettingsRegistry.h"
 #include "Telemetry/Telemetry.h"
@@ -598,6 +599,8 @@ namespace cs
 		auto ownership =
 			feature_config::ParseShaderOwnership(feature_config::GetRoot());
 		if (const ui::Section section{ "section-shader-ownership", "Shader Ownership" }; section) {
+			// A comparison restores the ownership it started from.
+			const dmui::DisabledScope disabled{ cs::settings::liveComparisonActive };
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-ownership", [&] {
 					{
 						if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {

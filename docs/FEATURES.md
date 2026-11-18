@@ -51,19 +51,22 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Linear Lighting | N/A | Shared-color compatibility (done), optional calibration controls | N/A: linearization (FO4 is linear), ENB | Substrate | L | S | High |
 | [LOD Blending](deviations/LODBlending.md) | Port | Terrain/object LOD brightness-gamma, terrain/grass vertex-color removal | N/A: snow-LOD | Pt | H | S | High |
 | [Performance Overlay](deviations/PerformanceOverlay.md) | Port | FPS/VRAM/frame/draw diagnostics, A/B comparison, family/total toggles, history plots, FG timing labels | — | Pt | H | M | High |
+| Post Processing | Port (provisional) | Camera effects, color grading/LUT, vignette, bloom, glare/flare, exposure, DoF, motion blur at the Effects11 tonemap attachment | N/A: imagespace debug view and mode switch | NS | M | L | Low |
+| Procedural Aurora | Port (provisional) | Procedural curtains in the Sky dome pass, vanilla ribbon cull, per-night seed and storm level, Effects11 handoff | — | NS | L | M | Low |
 | Procedural Sun | Port | Analytic sun disc and corona in the Sky shader's sun pass; yields to an Effects11 preset's own procedural sun | — | NS | M | S/M | Med |
 | Rain Refraction | Port | Rain-drop refraction texture and consumer; reads Light Limit Fix's clustered lights | — | NS | M | M | Low |
-| [Remote Control](deviations/RemoteControl.md) | Port | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc and screenshot capture and NvPerf tools and events | — | Pt | H | M | High |
+| [Remote Control](deviations/RemoteControl.md) | Port | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc and screenshot capture and NvPerf and dev-flag tools and events | — | Pt | H | M | High |
 | [Screen Space GI](deviations/ScreenSpaceGI.md) | Port | AO, GI, temporal, specular GI, vertex AO (relocated), provider wiring | — | Pt | H | M | High |
 | [Screen-Space Shadows](deviations/ScreenSpaceShadows.md) | Port | Bend raymarch, direct/back visibility, tree/alpha/secondary receivers, preview/telemetry | — | Pt | H | M | High |
 | [Screenshot](deviations/Screenshot.md) | Port | SDR PNG, aspect crops, async save, clipboard, scene-only capture, HDR PNG through HDR Display; HDR AVIF pending | N/A: crop editor and preview, SDR BMP | Pt | M | S | High |
-| Skin | Mixed | Detail normal/color, default dual-lobe*, transmittance*, sweat inputs* | Ext: RFAOS/wet textures, wet-skin film | NS | H | M | Med |
+| Skin | Mixed | Detail normal/color, default dual-lobe*, transmittance*, sweat inputs* | Ext: RFAOS/wet textures, wet-skin film. N/A: skin editor and per-character material layers (Skyrim FaceGen/race identity) | NS | H | M | Med |
 | [Sky Sync](deviations/SkySync.md) | Port | Alternate sun path, moon casting*, dawn/dusk + godray dimming, celestial transitions | N/A: Skyrim compat checks | Pt | M | M | Med |
 | [Subsurface Scattering](deviations/SubsurfaceScattering.md) | Mixed | Separable and Burley on native class-5 skin, per-draw Human/Base profile, character light | — | Pt | H | M | Med |
 | [Terrain Blending](deviations/TerrainBlending.md) | Port | Deferred landscape replay, depth-ramp alpha blend into the G-buffer, offset Z-prepass for near terrain | Pending: no-blend mesh flag | Pt | H | L | Med |
 | Terrain Helper | Mixed | Displacement-slot gather/bind* | Ext: default-land ESP package | NS | M | M | Low |
 | [Terrain Shadows](deviations/TerrainShadows.md) | Port | Height-field producer, world receivers, time/transition events, secondary/remaining receivers, diagnostics | — | Pt | H | L | High |
 | [Terrain Variation](deviations/TerrainVariation.md) | Port | Landscape stochastic sampling, LOD anti-tiling, landscape-textured meshes, height/PBR coherence (needs Extended Materials/TruePBR consumers) | — | Pt | H | M | High |
+| Tree Wind | Mixed | Distant-tree billboard sway in the DistantTree VS from a weather wind clock | N/A: DynDOLOD tree-LOD shapes and their bend weights | NS | M | S/M | Low |
 | [TruePBR](deviations/TruePBR.md) | Mixed | Surface POM (EM marcher, own `_p` slice at t4) | Ext: PBR material loader (done: BGSM version 100 load and texture swap), RMAOS lighting (done: base lobes, direct and indirect), coat/fuzz/SSS/hair, landscape/grass PBR, glints | Pt | H | M | Med |
 | [Unified Water](deviations/UnifiedWater.md) | Port | Optical distance blend, distant terrain tile generation/lifetime, cache UI, material identity fix | FO4-specific requirement: preserve vanilla placed-water distance rendering. N/A: Skyrim world flowmap | Pt | M | S/M | Med |
 | [Upscaling](deviations/Upscaling.md) | Port | SR/native AA, DR/RCAS/reflection/depth consumers, canonical SDK depth, masks, underwater chain, FG/UI/Reflex | — | Pt | H | L | High |

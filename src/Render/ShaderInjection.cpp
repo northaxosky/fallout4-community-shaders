@@ -1622,6 +1622,16 @@ namespace cs::engine
 		return GetService().enabled.load(std::memory_order_relaxed);
 	}
 
+	feature_config::ShaderOwnershipConfig GetShaderOwnershipConfig() noexcept
+	{
+		auto& service = GetService();
+		feature_config::ShaderOwnershipConfig config;
+		config.enableShaders = service.enabled.load(std::memory_order_relaxed);
+		for (const auto& target : GetShaderInjectionTargets())
+			config.targets[target.id] = service.baselineOwnership[ToIndex(target.id)].load(std::memory_order_relaxed);
+		return config;
+	}
+
 	std::vector<ShaderInjectionTarget> GetUnownedShaderTargets(std::string_view a_contributor)
 	{
 		auto& service = GetService();

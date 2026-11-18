@@ -1,5 +1,6 @@
 #pragma once
 
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <span>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <toml++/toml.hpp>
 
 namespace DevBenchAPI
 {
@@ -37,7 +39,9 @@ namespace cs::features::remote_control
 	extern const Tool kShaderCacheTool;
 	extern const Tool kSettingsTool;
 	extern const Tool kCaptureTool;
+	extern const Tool kPerfTool;
 	extern const Tool kNvPerfTool;
+	extern const Tool kDevFlagsTool;
 
 	[[nodiscard]] std::span<const Tool* const> GetTools() noexcept;
 
@@ -52,4 +56,13 @@ namespace cs::features::remote_control
 	[[nodiscard]] Feature* FindFeature(std::string_view a_shortName, bool a_loadedOnly);
 	[[nodiscard]] Json Error(std::string a_message, Json a_details = Json::object());
 	[[nodiscard]] Json OnFrame(std::function<Json()> a_task);
+
+	struct FeatureSettings
+	{
+		Feature* feature{};
+		toml::table values;
+	};
+
+	// A loaded, healthy feature's validated live settings object, or the refusal.
+	[[nodiscard]] std::expected<FeatureSettings, Json> ParseFeatureSettings(std::string_view a_shortName, const Json& a_settings);
 }

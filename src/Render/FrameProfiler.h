@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct ID3D11Device;
 struct ID3D11DeviceContext;
@@ -22,6 +23,11 @@ namespace cs::render::profiling
 	void MarkEngineFrame() noexcept;
 
 	Profiler& GetProfiler() noexcept;
+	// A pass's group: the name before "::", else the whole name.
+	constexpr std::string_view GroupOf(std::string_view a_passName) noexcept
+	{
+		return a_passName.substr(0, a_passName.find("::"));
+	}
 	// Any thread; the one GPU-query gate. Call each frame timings are read.
 	void KeepActive(std::uint32_t a_frames = 2) noexcept;
 	// Overlay consumer; gates per-shader draw timings only, not GPU queries.
@@ -42,8 +48,10 @@ namespace cs::render::profiling
 			if (!result.valid || !result.name.starts_with(a_prefix))
 				continue;
 			const auto pass = result.name.substr(a_prefix.size());
-			a_sink.Field(pass + "_gpu_ms", result.gpuTimeMs)
-				.Field(pass + "_cpu_ms", result.cpuTimeMs);
+			a_sink.Field(pass + "_gpu_ms", result.gpuTimeMs);
+			if (result.external)
+				continue;
+			a_sink.Field(pass + "_cpu_ms", result.cpuTimeMs);
 			++count;
 		}
 		a_sink.Field("timing_passes", count);

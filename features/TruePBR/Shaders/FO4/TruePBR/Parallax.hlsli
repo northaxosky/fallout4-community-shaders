@@ -10,7 +10,7 @@ namespace TruePBRParallax
 	struct Result
 	{
 		float2 uv;
-		float pixelOffset;
+		float2 surfaceHeight;
 		float shadow;
 	};
 
@@ -18,7 +18,6 @@ namespace TruePBRParallax
 	Result March(float2 a_uv, float a_viewZ, float3 a_viewDirection, float3x3 a_tbnTr, float a_noise, float a_displacementScale, DisplacementParams a_params)
 	{
 		Result result;
-		result.pixelOffset = 0.0;
 		result.shadow = 1.0;
 		a_params.HeightScale *= a_displacementScale;
 
@@ -28,7 +27,7 @@ namespace TruePBRParallax
 		const float mipLevel = max(ExtendedMaterials::GetMipLevelFromDims(a_uv, dims * 2.0) - 1.0, 0.0);
 
 		StochasticOffsets noOffset = (StochasticOffsets)0;
-		result.uv = ExtendedMaterials::GetParallaxCoords(a_viewZ, a_uv, mipLevel, a_viewDirection, a_tbnTr, a_noise, g_tPbrDisplacement, g_sPbrDisplacement, 0, a_params, false, noOffset, result.pixelOffset);
+		result.uv = ExtendedMaterials::GetParallaxCoords(a_viewZ, a_uv, mipLevel, a_viewDirection, a_tbnTr, a_noise, g_tPbrDisplacement, g_sPbrDisplacement, 0, a_params, false, noOffset, result.surfaceHeight);
 
 		const float shadowQuality = a_viewZ < ExtendedMaterials::ParallaxCheapDistance ? ExtendedMaterials::ParallaxNearShadowQuality : ExtendedMaterials::ParallaxFarShadowQuality;
 		[branch] if (SharedData::extendedMaterialSettings.EnableShadows && shadowQuality > 0.0)

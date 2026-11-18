@@ -62,17 +62,59 @@ namespace cs::engine
 					// The Update that follows in ComputeProjection republishes the world.
 					MakeBasisRightHanded(*a_camera);
 
-					const auto corner = g_active.quadrant;
+					if (const auto corner = g_active.quadrant) {
+						const float frustumSize = a_frustum->top;
 
-					const float frustumSize = a_frustum->top;
-
-					a_frustum->bottom = (corner == 0 || corner == 1) ? -frustumSize : 0.0f;
-					a_frustum->left = (corner == 0 || corner == 2) ? -frustumSize : 0.0f;
-					a_frustum->right = (corner == 1 || corner == 3) ? frustumSize : 0.0f;
-					a_frustum->top = (corner == 2 || corner == 3) ? frustumSize : 0.0f;
+						a_frustum->bottom = (*corner == 0 || *corner == 1) ? -frustumSize : 0.0f;
+						a_frustum->left = (*corner == 0 || *corner == 2) ? -frustumSize : 0.0f;
+						a_frustum->right = (*corner == 1 || *corner == 3) ? frustumSize : 0.0f;
+						a_frustum->top = (*corner == 2 || *corner == 3) ? frustumSize : 0.0f;
+					}
 				}
 
 				func(a_camera, a_frustum);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Impl calls these two in sequence; QEnabled stays off during a capture.
+		constexpr CallSiteAnchor kImplAccumulateScene{
+			.name = "Precipitation::RenderOcclusionMapImpl -> BSShaderUtil::AccumulateScene",
+			.function = RE::ID::Precipitation::RenderOcclusionMapImpl,
+			.offset = { 0x3ED, 0x5F9, 0x5F9 },
+			.target = RE::ID::BSShaderUtil::AccumulateScene
+		};
+		constexpr CallSiteAnchor kImplRenderScene{
+			.name = "Precipitation::RenderOcclusionMapImpl -> BSShaderUtil::RenderScene",
+			.function = RE::ID::Precipitation::RenderOcclusionMapImpl,
+			.offset = { 0x3FD, 0x609, 0x609 },
+			.target = RE::ID::BSShaderUtil::RenderScene
+		};
+
+		// Adds the call's wall time to a slot while a capture runs on this thread.
+		template <class Call>
+		void TimeOnCapture(std::atomic<CaptureClock::rep>& a_slot, const Call& a_call)
+		{
+			if (!GetActiveCaptureOnWalkThread())
+				return a_call();
+			const ScopedCaptureTimer timer{ a_slot };
+			a_call();
+		}
+
+		struct ImplAccumulateScene_Hook
+		{
+			static void thunk(RE::NiCamera* a_camera, RE::NiAVObject* a_scene, RE::NiCullingProcess& a_process, bool a_resetCamera)
+			{
+				TimeOnCapture(g_timings.accumulate, [&] { func(a_camera, a_scene, a_process, a_resetCamera); });
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct ImplRenderScene_Hook
+		{
+			static void thunk(RE::NiCamera* a_camera, RE::BSShaderAccumulator* a_accumulator, bool a_jitter)
+			{
+				TimeOnCapture(g_timings.render, [&] { func(a_camera, a_accumulator, a_jitter); });
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -294,6 +336,10 @@ namespace cs::engine
 	{
 		std::vector<HookInstall> installs;
 		installs.push_back(InstallCallSiteHook(kProjectionSetViewFrustum, &stl::write_thunk_call<SetViewFrustum_Hook>));
+		installs.push_back(InstallCallSiteHook(kImplAccumulateScene, &stl::write_thunk_call<ImplAccumulateScene_Hook>));
+		installs.back().required = false;
+		installs.push_back(InstallCallSiteHook(kImplRenderScene, &stl::write_thunk_call<ImplRenderScene_Hook>));
+		installs.back().required = false;
 		installs.push_back(InstallOccluderPassHook());
 		installs.push_back(InstallOccluderDepthBiasHook());
 		installs.push_back(InstallOccluderGatherHook());

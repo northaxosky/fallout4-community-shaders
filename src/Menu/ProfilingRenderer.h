@@ -1,5 +1,6 @@
 #pragma once
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -32,16 +33,26 @@ namespace cs
 			CPU
 		};
 
+		/** @brief Where the statistics draw; each surface keeps its own graph. */
+		enum class Surface
+		{
+			kPage,    ///< Full view: mode toggle, graph, and pass table.
+			kOverlay  ///< Compact view: the graph alone.
+		};
+
 		/**
-		 * @brief Renders the main profiling statistics view with timing graph and pass table.
+		 * @brief Renders the profiling statistics view for a surface.
 		 *
-		 * Draws a frame time graph, a GPU/CPU mode toggle, and a grouped table of
+		 * The page shows a GPU/CPU mode toggle, a frame time graph, and a grouped table of
 		 * per-pass timing statistics with average, P95, and P99 columns.
 		 *
-		 * @param showTable If true, renders the detailed timing table below the graph.
-		 * @param showModeToggle If true, renders the GPU/CPU timing mode toggle.
+		 * @param surface Which view to draw.
+		 * @param hiddenGroups Groups left out of this view's graph.
 		 */
-		static void RenderStatistics(bool showTable = true, bool showModeToggle = true);
+		static void RenderStatistics(Surface surface = Surface::kPage, std::span<const std::string> hiddenGroups = {});
+
+		/** @brief Sorted names of the groups in the current profiler results. */
+		static std::vector<std::string> CurrentGroups();
 
 		/**
 		 * @brief Renders timer entries for a specific feature as an inline graph and table.
@@ -73,6 +84,8 @@ namespace cs
 			float avgMs;
 			float p95Ms;
 			float p99Ms;
+			// Timed on another GPU timeline: listed, but in no total or share.
+			bool external = false;
 		};
 		struct GroupEntry
 		{
@@ -117,6 +130,7 @@ namespace cs
 			void Render(const std::vector<legit::ProfilerTask>& tasks, float baseLegendWidth, float baseHeight, float minFrameTimeSec);
 		};
 		static inline GraphState gpuGraph;
+		static inline GraphState overlayGraph;
 		static inline std::unordered_map<std::string, GraphState> featureGraphs;
 
 		static inline std::unordered_map<std::string, dmui::ui::Color32> groupColorMap;
@@ -127,7 +141,7 @@ namespace cs
 		static void TextHeat(const char* fmt, float value, float maxValue);
 		static void RenderTimingModeToggle();
 		static void SetupTimingTableColumns(bool includePercentColumn);
-		static void RenderGraph();
+		static void RenderGraph(GraphState& graph, std::span<const std::string> hiddenGroups);
 		static std::string GetFeatureTimerPrefix(const std::string& featurePrefix);
 		static bool IsFeatureTimerResult(const Profiler::TimerResult& result, std::string_view prefix);
 	};

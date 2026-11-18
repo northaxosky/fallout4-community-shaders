@@ -34,6 +34,7 @@ namespace cs::features
 
 		// PS slot of the probe array for forward consumers; compute binds t50 too.
 		static constexpr std::uint32_t kProbeArraySlot = 50;
+		static constexpr std::uint32_t kCoverageSlot = 51;
 		static constexpr std::uint32_t kShadowVisibilitySlot = 53;
 
 		static Skylighting* GetSingleton();
@@ -99,6 +100,8 @@ namespace cs::features
 		void QueueReset(ResetReason a_reason) noexcept { _queuedReset.fetch_or(a_reason, std::memory_order_acq_rel); }
 		void ApplyQueuedReset();
 		void ResetSkylighting(ID3D11DeviceContext* a_context);
+		// Zenith depth is a DSV in capture; coverage is a UAV in the update.
+		static void UnbindCoverage(ID3D11DeviceContext* a_context);
 
 		enum class ProbeState : std::uint8_t
 		{
@@ -109,7 +112,15 @@ namespace cs::features
 			kNoGrid,
 			kDisabled
 		};
-		void DispatchProbeUpdate(ID3D11DeviceContext* a_context);
+		// Null views bind null: no cascades, so every probe reads lit.
+		struct ProbeCascades
+		{
+			ID3D11ShaderResourceView* array = nullptr;
+			ID3D11ShaderResourceView* lights = nullptr;
+		};
+		// The one probe update per frame: after the sun pass, else after the lights.
+		void UpdateProbes(const ProbeCascades& a_cascades);
+		void DispatchProbeUpdate(ID3D11DeviceContext* a_context, const ProbeCascades& a_cascades);
 
 		enum class CascadeSkip : std::uint8_t
 		{
@@ -117,13 +128,12 @@ namespace cs::features
 			kUnavailable,
 			kNotFullSky,
 			kSunCascades,
-			kCopyTarget,
+			kSource,
 			kDisabled
 		};
-		// After the sun's Render(7); copies the cascades the shared block describes.
-		void CopySunCascades();
-		CascadeSkip PublishSunCascades(ID3D11DeviceContext* a_context);
-		bool EnsureCascadeCopy(ID3D11Device* a_device, ID3D11Texture2D* a_source, std::uint32_t a_count);
+		// After the sun's Render(7); updates against the live cascades it describes.
+		void OnSunShadowRender();
+		CascadeSkip AcquireSunCascades(ProbeCascades& a_cascades);
 		void RenderDebug(ID3D11DeviceContext* a_context);
 		// Healthy with probes created, whether or not the feature is enabled.
 		ID3D11ShaderResourceView* GetBindableProbeArraySRV() const noexcept;
@@ -136,7 +146,7 @@ namespace cs::features
 			kTiled
 		};
 		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
-		// Probes, then the G-buffer views, then shadow visibility.
+		// Probes, coverage and zenith depth, the G-buffer views, shadow visibility.
 		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t
@@ -149,6 +159,8 @@ namespace cs::features
 		Settings _settings;
 
 		cs::engine::OcclusionDepthMap _occlusionMap;
+		// Top-down depth: which probes share a receiver's side of a roof.
+		cs::engine::OcclusionDepthMap _zenithMap;
 		std::atomic_bool _debugPreviewEnabled{ false };
 		// Debug only: every Nth capture diffs the batch against the engine; 0 is off.
 		std::atomic<std::uint32_t> _batchValidationInterval{ 0 };
@@ -157,16 +169,11 @@ namespace cs::features
 		static constexpr std::array<std::uint32_t, 3> kProbeArrayDims{ 256, 256, 128 };
 		std::unique_ptr<cs::buffer::Texture3D> _texProbeArray;
 		std::unique_ptr<cs::buffer::Texture3D> _texAccumFramesArray;
+		std::unique_ptr<cs::buffer::Texture3D> _texProbeCoverage;
 		std::unique_ptr<cs::buffer::Texture3D> _texShadowBitmask;
 		std::unique_ptr<cs::buffer::Texture3D> _texShadowVisibility;
 		winrt::com_ptr<ID3D11SamplerState> _comparisonSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _probeUpdateCompute;
-		// Focus and local shadows overwrite the stock array; cascades live in a copy.
-		winrt::com_ptr<ID3D11Texture2D> _cascadeCopy;
-		winrt::com_ptr<ID3D11ShaderResourceView> _cascadeCopySRV;
-		D3D11_TEXTURE2D_DESC _cascadeDesc{};
-		// Render thread only: light data generation the copy was taken for; 0 is none.
-		std::uint64_t _copyGeneration = 0;
 		std::atomic_bool _probesReady{ false };
 
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 2> _debugCompute;
@@ -182,6 +189,11 @@ namespace cs::features
 		// Slack below the grid for eye movement between grid update and render.
 		static constexpr float OCCLUSION_BELOW_GRID_MARGIN = 512.f;
 		static constexpr float MIN_OCCLUDER_RADIUS = 32.0f;
+		// Every 7th capture looks straight down; coprime with the 4 quadrants.
+		static constexpr std::uint32_t kZenithInterval = 7;
+		static constexpr float kZenithExtent = 4096.f;
+		// Matches Skylighting::COVERAGE_UNKNOWN in Skylighting.hlsli.
+		static constexpr std::uint32_t kCoverageUnknown = 2;
 
 		// cached variables
 		// World height of the probe grid's bottom layer, from the snapped grid origin.
@@ -190,6 +202,11 @@ namespace cs::features
 		// SH basis of the occlusion direction times 4 pi; evaluated once per capture.
 		DirectX::XMFLOAT4 OcclusionSHBasis4Pi{};
 		std::uint32_t frameCount = 0;
+		DirectX::XMFLOAT4X4 ZenithTransform{};
+		DirectX::XMFLOAT3 _zenithAnchor{};
+		bool _zenithFrame = false;
+		// The anchor is only current at the next in-world pack.
+		bool _zenithPending = false;
 		// The probe update needs a published matrix; the first capture can fail.
 		bool _hasOcclusion = false;
 
@@ -206,6 +223,9 @@ namespace cs::features
 		struct CaptureCounters
 		{
 			std::atomic<std::uint64_t> captures{ 0 };
+			std::atomic<std::uint64_t> zenithCaptures{ 0 };
+			// Render thread writes; set once an anchor latches a zenith capture.
+			std::atomic_bool zenithValid{ false };
 			std::atomic<std::uint64_t> skippedInterior{ 0 };
 			std::atomic<std::uint64_t> skippedDisabled{ 0 };
 			std::atomic<std::uint64_t> skippedTargets{ 0 };
@@ -214,6 +234,9 @@ namespace cs::features
 			std::atomic<float> cpuMsMax{ 0.0f };
 			std::atomic<float> captureMs{ 0 };
 			std::atomic<float> gatherMs{ 0 };
+			std::atomic<float> accumulateMs{ 0 };
+			std::atomic<float> renderMs{ 0 };
+			std::atomic<float> setupTeardownMs{ 0 };
 			std::atomic<float> passesMs{ 0 };
 			std::atomic<float> batchMs{ 0 };
 			std::atomic_bool stockTargetRestored{ true };
@@ -241,10 +264,10 @@ namespace cs::features
 			// Latest frame: cell id, array origin, valid margin.
 			std::array<std::atomic<std::int32_t>, 9> grid{};
 		} _probeCounters;
-		// Sun cascade copies; a skip publishes neutral data, never stale cascades.
+		// Frames the update sampled live cascades; a skip binds none.
 		struct CascadeCounters
 		{
-			std::atomic<std::uint64_t> copies{ 0 };
+			std::atomic<std::uint64_t> liveFrames{ 0 };
 			std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(CascadeSkip::kDisabled) + 1> skipped{};
 			std::array<std::atomic<std::uint64_t>, cs::engine::kSunCascadeStatusCount> statusSkipped{};
 			std::atomic<std::uint32_t> count{ 0 };
@@ -259,11 +282,15 @@ namespace cs::features
 		std::uint32_t _windowCaptures = 0;
 		cs::engine::CaptureClock::rep _timingSnapshot = 0;
 		cs::engine::CaptureClock::rep _gatherSnapshot = 0;
+		cs::engine::CaptureClock::rep _accumulateSnapshot = 0;
+		cs::engine::CaptureClock::rep _renderSnapshot = 0;
 		cs::engine::CaptureClock::rep _passesSnapshot = 0;
 		cs::engine::CaptureClock::rep _batchSnapshot = 0;
 		std::uint64_t _anchorFrames = 0;
 		CaptureState _loggedState = CaptureState::kDisabled;
 		ProbeState _probeState = ProbeState::kPending;
+		// Render thread only; the frame whose probe update was already evaluated.
+		std::uint32_t _probeUpdateFrame = UINT32_MAX;
 		bool _loggedFirstCapture = false;
 		bool _loggedTargetFailure = false;
 	};

@@ -30,6 +30,7 @@ namespace cs::host
 	namespace
 	{
 		constexpr std::uint32_t kBindingPollFrames = 120;
+		constexpr std::uint32_t kStartupNoticeMilliseconds = 10000;
 
 		constexpr dmui::ClientOptions kClientOptions{
 			.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT
@@ -45,7 +46,8 @@ namespace cs::host
 				.category = a_feature.GetCategory(),
 				.summary = a_feature.GetFeatureSummary(),
 				.active = a_feature.IsActive(),
-				.installed = a_feature.IsInstalled()
+				.installed = a_feature.IsInstalled(),
+				.inFeatureList = a_feature.IsInFeatureList()
 			};
 		}
 
@@ -202,6 +204,8 @@ namespace cs::host
 			auto page = std::make_unique<Page>();
 			page->feature = descriptor.kind == HostPageKind::kFeature ?
 			                    features[descriptor.featureIndex] :
+			                descriptor.kind == HostPageKind::kProfiling ?
+			                    features::PerformanceOverlay::GetSingleton() :
 			                    nullptr;
 			page->descriptor = std::move(descriptor);
 			const dmui::PageDescriptor pageDescriptor{
@@ -386,7 +390,7 @@ namespace cs::host
 			Menu::Get().DrawAdvanced(_client);
 			break;
 		case HostPageKind::kProfiling:
-			ProfilingRenderer::RenderStatistics();
+			DrawProfilingPage(a_page.feature);
 			break;
 		case HostPageKind::kPresets:
 			Menu::Get().DrawPresets(_client);
@@ -405,6 +409,18 @@ namespace cs::host
 			DrawShaderCompileOverlayPage();
 			break;
 		}
+	}
+
+	// Pass timings, then the Performance Overlay feature page.
+	void HostClient::DrawProfilingPage(Feature* a_overlay)
+	{
+		constexpr ui::Collapsible open{ .expandedByDefault = true, .framed = false };
+		if (const ui::Section section{ "profiling-timings", "Pass Timings", open }; section)
+			ProfilingRenderer::RenderStatistics();
+		if (!a_overlay)
+			return;
+		if (const ui::Section section{ "profiling-overlay", "Performance Overlay", open }; section)
+			DrawFeaturePage(*a_overlay);
 	}
 
 	void HostClient::DrawFeaturePage(Feature& a_feature)
@@ -702,10 +718,11 @@ namespace cs::host
 		try {
 			const auto state = _client.QueryState();
 			if (state && state->state == DMUI_HOST_STATE_READY &&
-				!_readyLogged.exchange(true)) {
+				!_readySeen.exchange(true)) {
 				L->info(
 					"DearModdingUI forwarding backend is ready; hosted pages, overlays, and "
 					"hotkeys are active");
+				PostStartupNotices();
 			} else if (state && state->state == DMUI_HOST_STATE_UNAVAILABLE &&
 					   !_unavailableLogged.exchange(true)) {
 				L->warn(
@@ -749,6 +766,18 @@ namespace cs::host
 			SyncShaderCompileOverlay();
 		} catch (...) {
 			L->error("DearModdingUI frame observer failed");
+		}
+	}
+
+	void HostClient::PostStartupNotices() noexcept
+	{
+		auto& features = FeatureManager::Get();
+		for (auto* feature : features.GetAll()) {
+			features.RunRuntimeCallback(*feature, "DearModdingUI::StartupNotice", [&] {
+				if (auto notice = feature->GetStartupNotice(); !notice.empty())
+					PostNotification(DMUI_STATUS_SEVERITY_WARNING, std::move(notice),
+						kStartupNoticeMilliseconds, std::string(feature->GetDisplayName()));
+			});
 		}
 	}
 

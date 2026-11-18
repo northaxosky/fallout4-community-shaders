@@ -6,6 +6,7 @@
 #include "Menu/ProfilingRenderer.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
+#include "OverlayTable.h"
 #include "Render/FrameBoundary.h"
 #include "Render/FrameProfiler.h"
 #include "Render/RenderHooks.h"
@@ -30,6 +31,10 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.performanceoverlay");
+
+		using performance_overlay::DrawMilliseconds;
+		using performance_overlay::SortHeaders;
+		using performance_overlay::SortRows;
 
 		float Percentage(float a_part, float a_total)
 		{
@@ -68,46 +73,6 @@ namespace cs::features
 			}
 		}
 
-		// Name columns sort A to Z first and metric columns slowest first.
-		template <std::size_t N>
-		Util::TableSortSpec SortHeaders(const char* const (&a_labels)[N], int a_defaultColumn)
-		{
-			using dmui::ui::TableColumnFlags;
-			for (std::size_t i = 0; i < N; ++i) {
-				auto flags = i ? TableColumnFlags::kPreferSortDescending : TableColumnFlags::kNone;
-				if (static_cast<int>(i) == a_defaultColumn)
-					flags |= TableColumnFlags::kDefaultSort;
-				dmui::ui::TableSetupColumn(a_labels[i], flags);
-			}
-			dmui::ui::TableHeadersRow();
-			return Util::ReadTableSortSpec(a_defaultColumn, false);
-		}
-
-		template <class Row, class Metric>
-		void SortRows(std::vector<Row>& a_rows, const Util::TableSortSpec& a_sort, Metric a_metric)
-		{
-			const int column = a_sort.column;
-			Util::SortTableRowsWith<Row>(a_rows, a_sort, [&](const Row& a, const Row& b, bool a_ascending) {
-				if constexpr (requires { a.shaderType; }) {
-					if (a.shaderType < 0 || b.shaderType < 0) {
-						if (a.shaderType < 0 && b.shaderType < 0)
-							return a.shaderType < b.shaderType;
-						return a.shaderType >= 0;
-					}
-				}
-				const auto left = a_metric(a), right = a_metric(b);
-				const int order = column == 0 ? a.label.compare(b.label) : (left > right) - (left < right);
-				return a_ascending ? order < 0 : order > 0;
-			});
-		}
-
-		std::string Milliseconds(float a_value)
-		{
-			if (std::abs(a_value) < 1e-4f)
-				return "0 ms";
-			return a_value < 0.1f ? std::format("{:.3f} ms", a_value) : std::format("{:.2f} ms", a_value);
-		}
-
 		dmui::TextTone MetricTone(float a_value, bool a_costPerCall)
 		{
 			using Settings = performance_overlay::Settings;
@@ -115,53 +80,6 @@ namespace cs::features
 			const float warning = a_costPerCall ? Settings::kCostPerCallWarningThreshold : Settings::kFrameTimeWarningThreshold;
 			return a_value < good ? dmui::TextTone::kSuccess : a_value < warning ? dmui::TextTone::kWarning :
 			                                                                       dmui::TextTone::kError;
-		}
-
-		dmui::TextTone ComparisonTone(float a_left, float a_right)
-		{
-			return a_left < a_right ? dmui::TextTone::kSuccess : a_left > a_right ? dmui::TextTone::kError :
-			                                                                        dmui::TextTone::kInherit;
-		}
-
-		void DrawMilliseconds(float a_value, dmui::TextTone a_tone = dmui::TextTone::kInherit, bool a_microseconds = false)
-		{
-			std::string text;
-			if (a_microseconds && a_value < performance_overlay::Settings::kMicrosecondThreshold)
-				text = std::abs(a_value * 1000.0f) < 1e-4f ? "0 us" : std::format("{:.2f} us", a_value * 1000.0f);
-			else
-				text = Milliseconds(a_value);
-			(void)dmui::DrawStyledText(host::HostClient::Get().Client(), text, { .tone = a_tone });
-		}
-
-		void DrawDelta(float a_baseline, float a_test)
-		{
-			const float delta = a_test - a_baseline;
-			const float percent = a_baseline > 0.0f ? 100.0f * delta / a_baseline : 0.0f;
-			auto text = (delta > 0.0f ? "+" : "") + Milliseconds(delta);
-			if (std::abs(percent) >= performance_overlay::Settings::kPercentDisplayThreshold)
-				text += std::format(" ({:+.1f}%)", percent);
-			(void)dmui::DrawStyledText(host::HostClient::Get().Client(), text,
-				{ .tone = ComparisonTone(a_test, a_baseline) });
-		}
-
-		nlohmann::json SnapshotJson(const std::map<Feature*, toml::table>& a_snapshot)
-		{
-			auto result = nlohmann::json::object();
-			for (const auto& [feature, values] : a_snapshot) {
-				auto& output = result[std::string(feature->GetName())];
-				output = nlohmann::json::object();
-				for (const auto& [key, node] : values) {
-					if (const auto* boolean = node.as_boolean())
-						output[std::string(key.str())] = boolean->get();
-					else if (const auto* integer = node.as_integer())
-						output[std::string(key.str())] = integer->get();
-					else if (const auto* number = node.as_floating_point())
-						output[std::string(key.str())] = number->get();
-					else if (const auto* text = node.as_string())
-						output[std::string(key.str())] = text->get();
-				}
-			}
-			return result;
 		}
 	}
 
@@ -176,6 +94,7 @@ namespace cs::features
 		auto candidate = settings;
 		if (!cs::settings::Parse(performance_overlay::kSchema, a_config, candidate, a_error))
 			return false;
+		candidate.NormalizeHiddenGroups();
 		settings = candidate;
 		return true;
 	}
@@ -195,6 +114,24 @@ namespace cs::features
 			settings.ShowInOverlay, settings.FrameHistorySize, settings.toggleHotkey);
 	}
 
+	std::expected<void, std::string> PerformanceOverlay::StartComparison(const performance_overlay::ABComparison::Variant& a_variant, const performance_overlay::ABComparison::RunOptions& a_options)
+	{
+		const auto state = host::HostClient::Get().Client().QueryState();
+		if (!state || state->state != DMUI_HOST_STATE_READY)
+			return std::unexpected("the DearModdingUI host is not ready, and the comparison advances only from its frame tick");
+		return performance_overlay::ABComparison::Try([&] {
+			if (a_variant.Empty())
+				_comparison.StartCostRun(a_options);
+			else
+				_comparison.StartRun(a_variant, a_options, "variant", "current");
+		});
+	}
+
+	std::expected<void, std::string> PerformanceOverlay::StopComparison()
+	{
+		return performance_overlay::ABComparison::Try([&] { _comparison.SetInterval(0); });
+	}
+
 	void PerformanceOverlay::AccumulatePresentTime()
 	{
 		LARGE_INTEGER end;
@@ -205,7 +142,7 @@ namespace cs::features
 
 	void PerformanceOverlay::OnDataLoaded()
 	{
-		_baseline = CaptureSettings();
+		_comparison.CaptureBaseline();
 		QueryPerformanceCounter(&_lastFrame);
 		_history.Resize(static_cast<std::size_t>(settings.FrameHistorySize));
 		_postHistory.Resize(static_cast<std::size_t>(settings.FrameHistorySize));
@@ -218,122 +155,12 @@ namespace cs::features
 	void PerformanceOverlay::OnRuntimeQuarantined(std::string_view, std::string_view) noexcept
 	{
 		render::profiling::SetEnabled(false);
-		AbortTest("Performance Overlay was quarantined; restart required");
-	}
-
-	void PerformanceOverlay::AbortTest(std::string_view a_reason) noexcept
-	{
-		_testError = a_reason;
-		L->error("A/B test stopped: {}", _testError);
-		try {
-			SetTestInterval(0);
-		} catch (const std::exception& error) {
-			_testError += std::format("; TEST restoration failed: {}", error.what());
-			L->error("{}", _testError);
-			_testing = false;
-			_restorePending = true;
-			cs::settings::liveComparisonActive = true;
-			_testInterval = 0;
-			_aggregator.OnTestEnd();
-		}
-		Menu::ShowToast(_testError, 8.0, DMUI_STATUS_SEVERITY_ERROR, std::string(GetDisplayName()));
+		_comparison.Abort("Performance Overlay was quarantined; restart required");
 	}
 
 	bool PerformanceOverlay::SaveSettings()
 	{
 		return cs::settings::SaveDelta(performance_overlay::kSchema, GetConfigKey(), settings, *L);
-	}
-
-	PerformanceOverlay::Snapshot PerformanceOverlay::CaptureSettings()
-	{
-		Snapshot snapshot;
-		for (auto* feature : FeatureManager::Get().GetAll()) {
-			const auto& access = feature->GetLiveSettingsAccess();
-			if (!feature->IsHealthy() || !access.snapshot)
-				continue;
-			auto values = access.snapshot();
-			for (const auto key : access.notComparable)
-				values.erase(key);
-			snapshot.emplace(feature, std::move(values));
-		}
-		return snapshot;
-	}
-
-	void PerformanceOverlay::ApplySettings(const Snapshot& a_snapshot, bool a_restoring)
-	{
-		std::vector<cs::settings::PreparedLiveSettings> prepared;
-		for (const auto& [feature, values] : a_snapshot) {
-			if (!a_restoring && !feature->IsHealthy())
-				throw std::runtime_error(std::format("{} is no longer healthy", feature->GetName()));
-			std::string error;
-			auto value = FeatureManager::Get().PrepareLiveSettings(*feature, values, "ABComparison::Finalize", error);
-			if (!value)
-				throw std::runtime_error(std::format("{}: {}", feature->GetName(), error));
-			if (a_restoring && !feature->IsHealthy())
-				value->finalize = {};
-			prepared.push_back(std::move(*value));
-		}
-		cs::settings::ApplyPreparedLiveSettings(prepared);
-	}
-
-	void PerformanceOverlay::SetTestInterval(int a_interval)
-	{
-		if (!a_interval) {
-			if (_testing || _restorePending) {
-				ApplySettings(_test, true);
-				_aggregator.OnTestEnd();
-			}
-			_testing = false;
-			_restorePending = false;
-			cs::settings::liveComparisonActive = false;
-			_testInterval = 0;
-			return;
-		}
-		if (_restorePending)
-			throw std::runtime_error("Restore TEST before starting another comparison");
-		if (!_testing) {
-			if (_baseline.empty())
-				throw std::runtime_error("No healthy live-effect settings are available for A/B testing");
-			auto test = CaptureSettings();
-			if (test.size() != _baseline.size())
-				throw std::runtime_error("Loaded features changed; capture a new USER baseline");
-			for (const auto& [feature, values] : test) {
-				(void)values;
-				if (!_baseline.contains(feature))
-					throw std::runtime_error("Loaded features changed; capture a new USER baseline");
-			}
-			if (test == _baseline)
-				throw std::runtime_error("USER and TEST live settings are identical");
-			_test = std::move(test);
-			_aggregator.Clear();
-			_aggregator.SetSettingsA(SnapshotJson(_baseline));
-			_aggregator.SetSettingsB(SnapshotJson(_test));
-			_variantB = true;
-			_aggregator.OnABSwitch(ABVariant::B);
-			_lastSwitch = Util::GetNowSecs();
-			_testing = true;
-			cs::settings::liveComparisonActive = true;
-		}
-		_testInterval = a_interval;
-		_testError.clear();
-	}
-
-	void PerformanceOverlay::UpdateTest(double a_now)
-	{
-		if (!_testing)
-			return;
-		for (const auto& [feature, values] : _test) {
-			(void)values;
-			if (!feature->IsHealthy())
-				throw std::runtime_error(std::format("{} was quarantined", feature->GetName()));
-		}
-		_aggregator.OnFrame(BuildRows());
-		if (a_now - _lastSwitch > static_cast<double>(_testInterval)) {
-			ApplySettings(_variantB ? _baseline : _test);
-			_variantB = !_variantB;
-			_aggregator.OnABSwitch(_variantB ? ABVariant::B : ABVariant::A);
-			_lastSwitch = a_now;
-		}
 	}
 
 	void PerformanceOverlay::UpdateGraphValues()
@@ -454,9 +281,11 @@ namespace cs::features
 	{
 		_vramUsed = a_used;
 		_vramBudget = a_budget;
-		const bool consuming = settings.ShowInOverlay || _testing;
-		render::profiling::SetEnabled(consuming);
-		if (consuming)
+		// A cost run needs frame time only, so draw profiling stays off for it.
+		const bool drawTimings = settings.ShowInOverlay || _comparison.WantsDrawTimings();
+		const bool consuming = drawTimings || _comparison.Testing();
+		render::profiling::SetEnabled(drawTimings);
+		if (drawTimings)
 			render::profiling::KeepActive();
 		if (!consuming) {
 			QueryPerformanceCounter(&_lastFrame);
@@ -468,13 +297,14 @@ namespace cs::features
 		// FO4: DearModdingUI supplies the native-frame UI cadence independently of the deferred scene.
 		UpdateGraphValues();
 		try {
-			UpdateTest(Util::GetNowSecs());
+			if (_comparison.Testing())
+				_comparison.Update(Util::GetNowSecs(), BuildRows(_frameMs));
 		} catch (const std::exception& error) {
-			AbortTest(error.what());
+			_comparison.Abort(error.what());
 		}
 	}
 
-	std::vector<DrawCallRow> PerformanceOverlay::BuildRows() const
+	std::vector<DrawCallRow> PerformanceOverlay::BuildRows(float a_totalMs) const
 	{
 		std::vector<DrawCallRow> rows;
 		float measured{}, calls{};
@@ -490,21 +320,21 @@ namespace cs::features
 				ShaderTooltip(timing.type),
 				true, {}, {} });
 		}
-		float other = _displayMs - measured;
+		float other = a_totalMs - measured;
 		if (std::abs(other) < 1e-4f)
 			other = 0.0f;
 		const float csPasses = render::profiling::GetProfiler().GetTotalTimeMs();
 		// Capped at the unattributed time it is carved from.
 		const float present = std::min(_smoothPresentMs, std::max(0.0f, other));
 		const float remainingOther = std::max(0.0f, other - present);
-		rows.push_back({ "CS Passes:", -3, -1, csPasses, Percentage(csPasses, _displayMs), 0.0f,
+		rows.push_back({ "CS Passes:", -3, -1, csPasses, Percentage(csPasses, a_totalMs), 0.0f,
 			"GPU time spent in Community Shaders compute passes (profiled).", true, {}, {} });
-		rows.push_back({ "Present:", -4, -1, present, Percentage(present, _displayMs), 0.0f,
+		rows.push_back({ "Present:", -4, -1, present, Percentage(present, a_totalMs), 0.0f,
 			"CPU time spent waiting inside Main::Swap, which presents the frame. Capped at the frame time not attributed to shader types, so it can read lower than the measured wait.", true, {}, {} });
-		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, _displayMs), 0.0f,
+		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, a_totalMs), 0.0f,
 			"Frame time not attributed to any measured shader type or to Present. This includes UI, post-processing, engine work, and CS compute passes (whose GPU time is shown separately).", true, {}, {} });
-		rows.push_back({ "Total:", -1, static_cast<int>(calls), _displayMs, 100.0f,
-			CostPerCall(_displayMs, calls), "Total frame time.", true, {}, {} });
+		rows.push_back({ "Total:", -1, static_cast<int>(calls), a_totalMs, 100.0f,
+			CostPerCall(a_totalMs, calls), "Total frame time.", true, {}, {} });
 		return rows;
 	}
 
@@ -576,109 +406,6 @@ namespace cs::features
 		dmui::ui::EndTable();
 	}
 
-	void PerformanceOverlay::DrawTestResults()
-	{
-		if (_testing)
-			dmui::ui::Text("Variant %s: %.1f seconds left",
-				_variantB ? "B (TEST)" : "A (USER)",
-				std::max(0.0, _testInterval - (Util::GetNowSecs() - _lastSwitch)));
-		std::vector<std::string> changes;
-		for (const auto& [feature, values] : _test) {
-			const auto baseline = _baseline.find(feature);
-			if (baseline == _baseline.end())
-				continue;
-			for (const auto& [key, value] : values) {
-				const auto* original = baseline->second.get(key);
-				if (original && toml::node_view<const toml::node>{ original } == toml::node_view<const toml::node>{ &value })
-					continue;
-				std::ostringstream text;
-				text << feature->GetName() << "." << key.str() << ": ";
-				if (original)
-					original->visit([&](const auto& node) { text << node; });
-				text << " -> ";
-				value.visit([&](const auto& node) { text << node; });
-				changes.push_back(text.str());
-			}
-		}
-		if (!changes.empty()) {
-			if (const ui::Section section{ "overlay-ab-changes", "Changes from USER", ui::Collapsible{ .count = changes.size(), .framed = false } }; section) {
-				for (const auto& change : changes)
-					dmui::ui::TextUnformatted(change.c_str());
-			}
-		}
-		if (!_testError.empty())
-			dmui::ui::Text("A/B error: %s", _testError.c_str());
-		if (!_aggregator.HasResults())
-			return;
-		const int frames = _aggregator.GetTotalFrameCount();
-		const float duration = _aggregator.GetTotalTestDuration();
-		int excluded{};
-		bool hasSamplesA = false;
-		bool hasSamplesB = false;
-		for (const auto& interval : _aggregator.GetIntervals()) {
-			excluded += interval.excludedFrames;
-			hasSamplesA = hasSamplesA || (interval.variant == ABVariant::A && !interval.frameRows.empty());
-			hasSamplesB = hasSamplesB || (interval.variant == ABVariant::B && !interval.frameRows.empty());
-		}
-		const bool hasBothVariants = hasSamplesA && hasSamplesB;
-		const float validPercent = frames + excluded > 0 ? 100.0f * static_cast<float>(frames) / static_cast<float>(frames + excluded) : 0.0f;
-		const char* validity = hasBothVariants && frames >= kMinimumSamplesForValidity && duration >= kMinimumTestDuration &&
-		                               validPercent >= kMinimumValidFramesPercent ?
-		                           "Valid" :
-		                       hasBothVariants && frames >= kMinimumSamplesForMarginal && duration >= kMinimumDurationForMarginal ? "Marginal" :
-		                                                                                                                            "Insufficient";
-		dmui::ui::Text("%s: %d frames, %.1f seconds, %d excluded, %.1f%% valid", validity, frames, duration, excluded, validPercent);
-		if (!dmui::ui::BeginTable("ABResults", 7, dmui::ui::TableFlags::kSortable))
-			return;
-		const char* labels[]{ "Shader Type", "A Avg", "B Avg", "Delta", "A Median", "B Median", "Median Delta" };
-		const auto sort = SortHeaders(labels, 3);
-		auto rows = _aggregator.GetAggregatedResults();
-		SortRows(rows, sort, [&sort](const auto& row) {
-			switch (sort.column) {
-			case 1:
-				return row.meanA;
-			case 2:
-				return row.meanB;
-			case 4:
-				return row.medianA;
-			case 5:
-				return row.medianB;
-			case 6:
-				return row.medianB - row.medianA;
-			default:
-				return row.delta;
-			}
-		});
-		for (const auto& row : rows) {
-			dmui::ui::TableNextRow();
-			(void)dmui::ui::TableSetColumnIndex(0);
-			dmui::ui::TextUnformatted(row.label.c_str());
-			const float values[]{ row.meanA, row.meanB, row.delta, row.medianA, row.medianB, row.medianB - row.medianA };
-			for (int i = 0; i < 6; ++i) {
-				(void)dmui::ui::TableSetColumnIndex(i + 1);
-				const bool available = (i == 0 || i == 3) ? row.frameCountA > 0 :
-				                       (i == 1 || i == 4) ? row.frameCountB > 0 :
-				                                            row.frameCountA > 0 && row.frameCountB > 0;
-				if (!available) {
-					dmui::ui::TextUnformatted("-");
-				} else if (i == 2 || i == 5) {
-					DrawDelta(i == 2 ? row.meanA : row.medianA, i == 2 ? row.meanB : row.medianB);
-				} else {
-					const float counterpart = i == 0 ? row.meanB : i == 1 ? row.meanA :
-					                                           i == 3     ? row.medianB :
-					                                                        row.medianA;
-					const auto tone = row.frameCountA > 0 && row.frameCountB > 0 ?
-					                      ComparisonTone(values[i], counterpart) :
-					                      dmui::TextTone::kInherit;
-					DrawMilliseconds(values[i], tone);
-				}
-				if (row.shaderType == -1 && row.frameCountA > 0 && row.frameCountB > 0)
-					ui::Tooltip("A (USER): %.2f FPS; B (TEST): %.2f FPS", Util::CalcFPS(row.meanA), Util::CalcFPS(row.meanB));
-			}
-		}
-		dmui::ui::EndTable();
-	}
-
 	void PerformanceOverlay::DrawOverlay()
 	{
 		if (!IsOverlayActive())
@@ -711,11 +438,52 @@ namespace cs::features
 				}
 			}
 			if (settings.ShowDrawCalls)
-				DrawDrawCalls(BuildRows());
+				DrawDrawCalls(BuildRows(_displayMs));
 			if (settings.ShowCSPasses)
-				ProfilingRenderer::RenderStatistics(false, false);
+				ProfilingRenderer::RenderStatistics(ProfilingRenderer::Surface::kOverlay, settings.HiddenProfilerGroups);
 		}
-		DrawTestResults();
+		_comparison.DrawResults();
+	}
+
+	void PerformanceOverlay::DrawGroupFilter(cs::settings::SettingsEdit& a_edit)
+	{
+		auto& hidden = settings.HiddenProfilerGroups;
+		const ui::Section section{ "overlay-pass-groups", "Overlay Pass Groups", ui::Collapsible{ .count = hidden.size() } };
+		if (!section)
+			return;
+		auto groups = ProfilingRenderer::CurrentGroups();
+		groups.insert(groups.end(), hidden.begin(), hidden.end());
+		std::ranges::sort(groups);
+		groups.erase(std::ranges::unique(groups).begin(), groups.end());
+
+		const auto button = [&](const char* a_id, const char* a_label, const char* a_help, auto a_apply) {
+			const auto result = ui::DrawActionField({ a_id, { .label = a_label, .help = a_help } }, [&](const char* a_suffix) {
+				const bool pressed = dmui::ui::Button(std::format("{}{}", a_label, a_suffix).c_str());
+				return ui::EditResult{ pressed, pressed };
+			});
+			if (a_edit.Apply(result))
+				a_apply();
+		};
+		button("overlay-groups-show-all", "Show all", "Draws every profiler group in the overlay.", [&] { hidden.clear(); });
+		button("overlay-groups-hide-all", "Hide all", "Hides every group listed here from the overlay.", [&] { hidden = groups; });
+
+		if (groups.empty())
+			dmui::ui::TextDisabled("No profiler groups yet (enter game world)");
+		for (const auto& group : groups) {
+			const auto listed = std::ranges::find(hidden, group);
+			bool shown = listed == hidden.end();
+			const auto result = ui::DrawActionField({ "overlay-group-" + group, { .label = group } }, [&](const char* a_suffix) {
+				const bool changed = dmui::ui::Checkbox(std::format("Show{}", a_suffix).c_str(), &shown);
+				return ui::EditResult{ changed, changed };
+			});
+			if (!a_edit.Apply(result))
+				continue;
+			if (shown)
+				hidden.erase(listed);
+			else
+				hidden.push_back(group);
+			settings.NormalizeHiddenGroups();
+		}
 	}
 
 	void PerformanceOverlay::DrawSettings()
@@ -737,6 +505,8 @@ namespace cs::features
 				}
 			}
 		}
+		if (settings.ShowInOverlay && settings.ShowCSPasses)
+			DrawGroupFilter(edit);
 		if (settings.ShowInOverlay) {
 			if (const ui::Section section{ "overlay-layout", "Appearance" }; section) {
 				field(&Settings::TextSize, { .format = "%.2f", .flags = clamped });
@@ -749,27 +519,9 @@ namespace cs::features
 			}
 		}
 		if (const ui::Section section{ "overlay-ab-test", "A/B Testing" }; section) {
-			dmui::ui::TextWrapped("Capture USER before editing TEST. Set the interval to 0 to restore TEST.");
-			if (_restorePending && dmui::ui::Button("Retry TEST Restoration"))
-				AbortTest("Retrying TEST restoration");
-			dmui::ui::BeginDisabled(_testing || _restorePending);
-			if (dmui::ui::Button("Capture USER Baseline")) {
-				_baseline = CaptureSettings();
-				_test.clear();
-				_aggregator.Clear();
-				_testError.clear();
-			}
-			dmui::ui::EndDisabled();
-			int interval = _testInterval;
-			if (ui::EditSetting({ "overlay-ab-test-interval", { .label = "A/B Test Interval" } }, interval, 0, cs::settings::Range{ 0, 10 }).changed) {
-				try {
-					SetTestInterval(interval);
-				} catch (const std::exception& error) {
-					_testError = error.what();
-					Menu::ShowToast(_testError, 6.0, DMUI_STATUS_SEVERITY_ERROR, std::string(GetDisplayName()));
-				}
-			}
-			DrawTestResults();
+			_comparison.DrawControls();
+			_comparison.DrawCostControls();
+			_comparison.DrawResults();
 		}
 	}
 
@@ -791,7 +543,7 @@ namespace cs::features
 
 	void PerformanceOverlay::RestoreDefaultSettings()
 	{
-		SetTestInterval(0);
+		_comparison.SetInterval(0);
 		settings = Settings{};
 		_history.Resize(600);
 		_postHistory.Resize(600);
@@ -813,8 +565,9 @@ namespace cs::features
 			.Field("refresh_hz", static_cast<double>(_refreshHz))
 			.Field("frame_history_size", static_cast<std::int64_t>(settings.FrameHistorySize))
 			.Field("engine_frame_sequence", static_cast<std::int64_t>(render::profiling::FrameSequence()))
-			.Field("ab_testing", _testing)
-			.Field("ab_restore_pending", _restorePending)
+			.Field("ab_testing", _comparison.Testing())
+			.Field("ab_restore_pending", _comparison.RestorePending())
+			.Field("ab_scripted_running", _comparison.ScriptedRunning())
 			.Field("post_fg_calculated", _frameGeneration)
 			.Field("vram_available", _vramBudget > 0)
 			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsed / (1024 * 1024)))

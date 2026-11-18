@@ -121,10 +121,12 @@ namespace cs::host
 			DMUI_HotkeyContextPolicy a_contextPolicy = DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
 		void PublishInitialStatus() noexcept;
 		void DrawPage(Page& a_page);
+		void DrawProfilingPage(Feature* a_overlay);
 		void DrawFeaturePage(Feature& a_feature);
 		void DrawOverlayPage();
 		void DrawShaderCompileOverlayPage();
 		void ObserveFrame() noexcept;
+		void PostStartupNotices() noexcept;
 		void ObservePageActivity(const dmui::PageActivity& a_activity) noexcept;
 		void SyncPerformanceOverlay() noexcept;
 		void SyncShaderCompileOverlay() noexcept;
@@ -158,7 +160,7 @@ namespace cs::host
 		std::uint32_t _bindingPollCountdown{};
 		std::atomic_bool _overlayVisible{ false };
 		std::atomic_bool _registrationComplete{};
-		std::atomic_bool _readyLogged{};
+		std::atomic_bool _readySeen{};
 		std::atomic_bool _unavailableLogged{};
 		std::mutex _swapChainMutex;
 		IDXGISwapChain* _pendingSwapChain{};
