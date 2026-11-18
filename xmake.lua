@@ -354,13 +354,24 @@ target("FeatureConfigTests", function()
     set_group("unit")
     add_files(
         "tests/FeatureConfigTests.cpp",
+        "tests/TruePbrTests.cpp",
         "features/LightLimitFix/src/Authoring/LightAuthoring.cpp",
+        "features/TruePBR/src/Format/BgsmV100.cpp",
+        "features/TruePBR/src/Format/PbrValidation.cpp",
+        "features/TruePBR/src/MaterialRegistry.cpp",
         "src/Settings/FeatureConfig.cpp"
     )
     add_headerfiles(
         "src/Settings/FeatureConfig.h",
-        "src/Settings/FeatureKeys.h"
+        "src/Settings/FeatureKeys.h",
+        "src/Utils/ByteCodec.h",
+        "features/TruePBR/src/Format/BgsmV100.h",
+        "features/TruePBR/src/Format/PbrMaterial.h",
+        "features/TruePBR/src/Format/PbrSchema.h",
+        "features/TruePBR/src/Format/PbrValidation.h",
+        "features/TruePBR/src/MaterialRegistry.h"
     )
+    add_defines('FO4CS_TRUEPBR_TEST_DATA="' .. (path.join(os.projectdir(), "tests", "data", "truepbr"):gsub("\\", "/")) .. '"')
     for _, feature in ipairs(features) do
         add_includedirs("features/" .. feature .. "/src")
     end
@@ -423,6 +434,9 @@ local function use_shader_test_cache()
     end
 end
 
+-- Hang guard: a cold CI compile of every variant runs about ten minutes.
+local shader_test_timeout = 1800000
+
 -- One gate binary per compiler: d3dcompiler_47.dll resolves from the executable directory.
 -- A nil compiler selects the pinned Windows SDK copy; otherwise it is a project-relative path.
 local function stock_shader_identity_target(name, compiler, tests)
@@ -457,7 +471,7 @@ local function stock_shader_identity_target(name, compiler, tests)
                     path.join(os.projectdir(), "tests/data", spec.file),
                     spec.mode
                 },
-                run_timeout = 600000
+                run_timeout = shader_test_timeout
             })
         end
     end)
@@ -491,7 +505,7 @@ target("RuntimeShaderTests", function()
     after_build(stage_shader_compiler)
     add_tests("RuntimeShaderCompile", {
         runargs = { path.join(os.projectdir(), "build/ShaderStage/Shaders") },
-        run_timeout = 600000
+        run_timeout = shader_test_timeout
     })
 end)
 
@@ -508,7 +522,8 @@ target("ShaderCacheTests", function()
     add_headerfiles(
         "src/Utils/CSSha256.h",
         "src/Utils/ShaderCompile.h",
-        "src/Utils/ShaderCache/ByteCodec.h",
+        "src/Utils/ByteCodec.h",
+        "src/Utils/ShaderCache/DigestCodec.h",
         "src/Utils/ShaderCache/CacheRecord.h",
         "src/Utils/ShaderCache/CacheStorage.h",
         "src/Utils/ShaderCache/CompilerIdentity.h",

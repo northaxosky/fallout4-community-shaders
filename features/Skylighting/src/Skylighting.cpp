@@ -27,6 +27,7 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
 #include "Render/FrameProfiler.h"
+#include "Render/GBufferViews.h"
 #include "Render/OccluderBatch.h"
 #include "Render/PrecipitationOcclusion.h"
 #include "Render/RenderExtents.h"
@@ -187,17 +188,15 @@ namespace cs::features
 		                      (a_consumer == Consumer::kComposite && cs::engine::ActiveCompositeHasLiveEnvironment());
 		// Only the raster sun reads shadow visibility; tiled has no directional lobes.
 		const bool shadowVisibility = a_consumer == Consumer::kLight;
-		const std::array<ID3D11ShaderResourceView*, 4> views{
-			probes,
-			lighting ? cs::engine::GetRenderTargetSRV(RE::BSGraphics::RenderTargetID::kGBufferAlbedoSpecular) : nullptr,
-			lighting ? cs::engine::GetRenderTargetSRV(RE::BSGraphics::RenderTargetID::kGBufferEmissive) : nullptr,
-			shadowVisibility ? _texShadowVisibility->srv.get() : nullptr
-		};
-		cs::engine::BindInjectionShaderResources(a_context, kProbeArraySlot, shadowVisibility ? 4 : lighting ? 3 :
-																											   1,
-			views.data());
+		cs::engine::BindInjectionShaderResources(a_context, kProbeArraySlot, 1, &probes);
 		const std::array<ID3D11ShaderResourceView*, 2> coverage{ _texProbeCoverage->srv.get(), _zenithMap.Target().depthSRV };
 		cs::engine::BindInjectionShaderResources(a_context, kCoverageSlot, static_cast<UINT>(coverage.size()), coverage.data());
+		if (lighting)
+			cs::engine::BindGBufferViews(a_context);
+		if (shadowVisibility) {
+			auto* visibility = _texShadowVisibility->srv.get();
+			cs::engine::BindInjectionShaderResources(a_context, kShadowVisibilitySlot, 1, &visibility);
+		}
 		if (shadowVisibility && ActiveLightReadsShadowVisibility())
 			_probeCounters.shadowVisDraws.fetch_add(1, std::memory_order_relaxed);
 		auto& counter = a_consumer == Consumer::kWater     ? _probeCounters.waterDraws :

@@ -472,6 +472,59 @@ namespace cs::engine
 		return texture ? static_cast<DXGI_FORMAT>(texture->header.format) : DXGI_FORMAT_UNKNOWN;
 	}
 
+	// True for the engine's stand-in for a texture that did not load.
+	[[nodiscard]] inline bool IsEngineDefaultTexture(const RE::NiTexture* a_texture) noexcept
+	{
+		const auto* state = RE::BSGraphics::State::GetSingleton();
+		if (!state || !a_texture)
+			return false;
+		const RE::NiTexture* standIns[]{
+			state->defaultTextureBlack.get(), state->defaultTextureWhite.get(), state->defaultTextureGrey.get(),
+			state->defaultHeightMap.get(), state->defaultReflectionCubeMap.get(), state->defaultFaceDetailMap.get(),
+			state->defaultHighFreqNormalMap.get(), state->defaultTexEffectMap.get(), state->defaultTextureWhiteNoiseMap.get(),
+			state->defaultTextureWhiteNoiseMapSmall.get(), state->defaultTextureNormalMap.get(), state->defaultTextureDiffuseMap.get(),
+			state->defaultSplineMap.get(), state->defaultTextureDissolvePattern.get()
+		};
+		for (const auto* standIn : standIns) {
+			if (standIn == a_texture)
+				return true;
+		}
+		return false;
+	}
+
+	// Mirrors the engine's inlined Renderer::SetTexture plus mode writes.
+	inline void SetPixelShaderTexture(
+		std::uint32_t a_slot,
+		const RE::BSGraphics::Texture& a_texture,
+		RE::BSGraphics::TextureAddressMode a_address,
+		RE::BSGraphics::TextureFilterMode a_filter) noexcept
+	{
+		auto* context = GetActiveContext();
+		if (!context)
+			return;
+		auto& state = context->shadowState;
+		if (a_slot >= std::size(state.psTexture))
+			return;
+		const std::uint32_t bit = 1u << a_slot;
+		auto* const view = a_texture.srView;
+		if (state.psTexture[a_slot] != view) {
+			state.psTexture[a_slot] = view;
+			state.psResourceModifiedBits |= bit;
+			if (state.psTextureMinLODMode[a_slot] != a_texture.minLOD) {
+				state.psTextureMinLODMode[a_slot] = a_texture.minLOD;
+				state.psSamplerModifiedBits |= bit;
+			}
+		}
+		if (state.psTextureAddressMode[a_slot] != a_address) {
+			state.psTextureAddressMode[a_slot] = a_address;
+			state.psSamplerModifiedBits |= bit;
+		}
+		if (state.psTextureFilterMode[a_slot] != a_filter) {
+			state.psTextureFilterMode[a_slot] = a_filter;
+			state.psSamplerModifiedBits |= bit;
+		}
+	}
+
 	[[nodiscard]] inline ID3D11Texture2D* GetRenderTargetTexture(RE::BSGraphics::RenderTargetID a_renderTarget)
 	{
 		auto* target = ResolveRenderTarget(a_renderTarget);

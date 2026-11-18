@@ -1,6 +1,6 @@
 #include "Utils/ShaderCache/CacheRecord.h"
 
-#include "Utils/ShaderCache/ByteCodec.h"
+#include "Utils/ShaderCache/DigestCodec.h"
 
 #include <algorithm>
 
@@ -73,7 +73,7 @@ namespace cs::shader_cache
 
 		ByteWriter writer(a_bytes);
 		writer.Text(a_manifest.rootLocator);
-		writer.Digest(a_manifest.rootDigest);
+		WriteDigest(writer, a_manifest.rootDigest);
 		writer.U64(a_manifest.rootLength);
 		writer.U32(static_cast<std::uint32_t>(a_manifest.includes.size()));
 		for (const auto& include : a_manifest.includes) {
@@ -93,7 +93,7 @@ namespace cs::shader_cache
 				writer.U8(static_cast<std::uint8_t>(probe.status));
 				writer.Text(probe.path);
 				if (probe.status == ProbeStatus::kSuccess) {
-					writer.Digest(probe.contentDigest);
+					WriteDigest(writer, probe.contentDigest);
 					writer.U64(probe.contentLength);
 				}
 			}
@@ -112,7 +112,7 @@ namespace cs::shader_cache
 	{
 		a_manifest = {};
 		ByteReader reader(a_bytes);
-		if (!reader.Text(a_manifest.rootLocator, kMaxLocatorBytes) || !reader.Digest(a_manifest.rootDigest) || !reader.U64(a_manifest.rootLength)) {
+		if (!reader.Text(a_manifest.rootLocator, kMaxLocatorBytes) || !ReadDigest(reader, a_manifest.rootDigest) || !reader.U64(a_manifest.rootLength)) {
 			return RecordStatus::kMalformedManifest;
 		}
 		if (!ValidLocator(a_manifest.rootLocator) || sha256::Sha256IsZero(a_manifest.rootDigest)) {
@@ -152,7 +152,7 @@ namespace cs::shader_cache
 				if (!reader.Text(probe.path, kMaxLocatorBytes) || !ValidLocator(probe.path)) {
 					return RecordStatus::kMalformedManifest;
 				}
-				if (probe.status == ProbeStatus::kSuccess && (!reader.Digest(probe.contentDigest) || !reader.U64(probe.contentLength) || sha256::Sha256IsZero(probe.contentDigest))) {
+				if (probe.status == ProbeStatus::kSuccess && (!ReadDigest(reader, probe.contentDigest) || !reader.U64(probe.contentLength) || sha256::Sha256IsZero(probe.contentDigest))) {
 					return RecordStatus::kMalformedManifest;
 				}
 				include.probes.push_back(std::move(probe));
@@ -184,9 +184,9 @@ namespace cs::shader_cache
 		ByteWriter writer(a_bytes);
 		writer.Bytes(kRecordMagic.data(), kRecordMagic.size());
 		writer.U32(kRecordSchemaVersion);
-		writer.Digest(a_record.logicalDigest);
-		writer.Digest(a_record.recipeDigest);
-		writer.Digest(a_record.dependencyDigest);
+		WriteDigest(writer, a_record.logicalDigest);
+		WriteDigest(writer, a_record.recipeDigest);
+		WriteDigest(writer, a_record.dependencyDigest);
 		writer.U8(static_cast<std::uint8_t>(a_record.stage));
 		writer.Text(a_record.profile);
 		writer.U64(static_cast<std::uint64_t>(manifestBytes.size()));
@@ -198,7 +198,7 @@ namespace cs::shader_cache
 			a_bytes.clear();
 			return false;
 		}
-		writer.Digest(payloadDigest);
+		WriteDigest(writer, payloadDigest);
 		writer.Bytes(manifestBytes.data(), manifestBytes.size());
 		writer.Bytes(a_record.payload.data(), a_record.payload.size());
 		return true;
@@ -224,7 +224,7 @@ namespace cs::shader_cache
 			return RecordStatus::kUnsupportedVersion;
 
 		std::uint8_t stage = 0;
-		if (!reader.Digest(a_record.logicalDigest) || !reader.Digest(a_record.recipeDigest) || !reader.Digest(a_record.dependencyDigest) || !reader.U8(stage)) {
+		if (!ReadDigest(reader, a_record.logicalDigest) || !ReadDigest(reader, a_record.recipeDigest) || !ReadDigest(reader, a_record.dependencyDigest) || !reader.U8(stage)) {
 			return RecordStatus::kTruncated;
 		}
 		if (!IsKnownStage(stage))
@@ -246,7 +246,7 @@ namespace cs::shader_cache
 		}
 
 		sha256::Sha256Result payloadDigest{};
-		if (!reader.Digest(payloadDigest))
+		if (!ReadDigest(reader, payloadDigest))
 			return RecordStatus::kTruncated;
 
 		const auto manifestBytes = reader.View(static_cast<std::size_t>(manifestLength));

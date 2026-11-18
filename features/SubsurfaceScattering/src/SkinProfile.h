@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Render/ShaderSubclassHooks.h"
+#include "Render/PrepassLane.h"
 
 namespace cs::features::subsurface_scattering
 {

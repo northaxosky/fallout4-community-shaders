@@ -7,6 +7,7 @@
 #include "../features/VolumetricShadows/src/ShaderDefines.h"
 #include "Render/DirectionalShadowLightData.h"
 #include "Render/ForwardDraw.h"
+#include "Render/PrepassLane.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/SubstrateSlots.h"
 #include "ScreenSpaceGIConstants.h"
@@ -290,7 +291,7 @@ namespace
 			ABI(FO4SharedDataCB, EnabledScreenSpaceGI), ABI(FO4SharedDataCB, EnabledUnifiedWater),
 			ABI(FO4SharedDataCB, EnabledScreenSpaceShadows), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
 			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledLODBlending),
-			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, pad0),
+			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, EnabledTruePBR),
 			ABI(FO4SharedDataCB, pad1), ABI(FO4SharedDataCB, SunDiscDirection),
 			ABI(FO4SharedDataCB, SunGlareColor)
 		};
@@ -627,6 +628,34 @@ namespace
 			return "BlurMatchCS: " + mismatch;
 		return {};
 	}
+
+	std::string VerifyPrepassLaneABI(const std::filesystem::path& a_root)
+	{
+		std::string error;
+		const auto lane = Reflect(a_root, "DFPrepass.hlsl", { { "BSDFPREPASS_PS_SOURCE", "1" } }, "ps_5_0", error);
+		if (!lane)
+			return error;
+		const auto landscape = Reflect(a_root, "DFPrepass.hlsl", { { "BSDFPREPASS_PS_SOURCE", "1" }, { "LANDSCAPE", "1" } }, "ps_5_0", error);
+		if (!landscape)
+			return error;
+		const auto variable = [](ID3D11ShaderReflection* a_reflection, const char* a_name, D3D11_SHADER_VARIABLE_DESC& a_desc, D3D11_SHADER_TYPE_DESC& a_type) {
+			auto* cb = a_reflection->GetConstantBufferByName("PerCall_CB2");
+			auto* member = cb ? cb->GetVariableByName(a_name) : nullptr;
+			return member && SUCCEEDED(member->GetDesc(&a_desc)) && SUCCEEDED(member->GetType()->GetDesc(&a_type));
+		};
+		D3D11_SHADER_VARIABLE_DESC laneVariable{}, reflect{}, spec{};
+		D3D11_SHADER_TYPE_DESC laneType{}, reflectType{}, specType{};
+		if (!variable(lane.Get(), "PrepassFeatureLane", laneVariable, laneType) ||
+			!variable(landscape.Get(), "WetnessControl_Reflect", reflect, reflectType) ||
+			!variable(landscape.Get(), "WetnessControl_Spec", spec, specType))
+			return "PerCall_CB2 is missing the lane or its landscape neighbors";
+		using cs::engine::PrepassLanePayload;
+		if (laneType.Type != D3D_SVT_UINT || laneType.Rows != 1 || laneType.Columns != 4 || laneVariable.Size != sizeof(PrepassLanePayload))
+			return "PrepassFeatureLane is not a uint4";
+		if (laneVariable.StartOffset != reflect.StartOffset || laneVariable.StartOffset + sizeof(PrepassLanePayload) != spec.StartOffset)
+			return "PrepassFeatureLane is not the register directly before WetnessControl_Spec";
+		return {};
+	}
 #undef ABI
 }
 
@@ -650,5 +679,7 @@ std::string VerifyShaderABI(const std::filesystem::path& a_root)
 		return "Cloud Shadows ABI: " + error;
 	if (auto error = VerifyVanillaPBRABI(a_root); !error.empty())
 		return "Vanilla PBR ABI: " + error;
+	if (auto error = VerifyPrepassLaneABI(a_root); !error.empty())
+		return "Prepass lane ABI: " + error;
 	return {};
 }

@@ -111,6 +111,11 @@
 #		define FO4_PREPASS_VERTEX_AO 1
 #	endif
 
+// FO4: one shared target; R parallax shadow, G human skin, B material AO.
+#	if defined(EXTENDED_MATERIALS) || defined(SUBSURFACE_SCATTERING) || defined(FO4_TRUE_PBR)
+#		define FO4_PREPASS_AUX
+#	endif
+
 // FO4: loaded landscape replays after objects with alpha-blended writes.
 #	if defined(TERRAIN_BLENDING) && LANDSCAPE && !BLEND && !INSTANCED
 #		define FO4_TERRAIN_BLENDING
@@ -135,6 +140,20 @@
 #	endif
 
 #	include "FO4/FO4ShaderData.hlsli"
+#	include "FO4/PrepassLane.h"
+#	if defined(FO4_TRUE_PBR)
+#		include "FO4/TruePBR/Debug.hlsli"
+// FO4: variants that can shade a record; the rest keep the vanilla path.
+#		if TEXTURE && !BLEND && !LANDSCAPE && !INSTANCED && !TESSELLATE_DISP_HEIGHT && !(HAIR || EYE || FACE || SKIN_TINT || GRADIENT_REMAP || LOD_LANDSCAPE || TREE_ANIM || GRASS || PIPBOY_SCREEN || MENU_SCREEN || DISMEMBERMENT_MEATCUFF || BONE_TINTING)
+#			define FO4_TRUE_PBR_BRANCH
+#			include "FO4/TruePBR/Prepass.hlsli"
+#		endif
+#	endif
+#	if defined(FO4_TRUE_PBR_BRANCH)
+#		define FO4_PBR_PIXEL pbrPixel
+#	else
+#		define FO4_PBR_PIXEL false
+#	endif
 
 // FO4: Skyrim mesh exclusions as prepass variants; host rejects object LOD.
 #	if defined(TERRAIN_VARIATION) && TEXTURE && !LANDSCAPE && !(LOD_LANDSCAPE || SKIN_TINT || HAIR || EYE || TREE_ANIM || DISMEMBERMENT_MEATCUFF)
@@ -264,8 +283,8 @@ cbuffer PerCall_CB2 : register(b2)
 #	if LANDSCAPE
 	float4 WetnessControl_Reflect;  // Landscape material gate.
 #	else
-	// The host locates this lane as the register before WetnessControl_Spec; keep the two adjacent (ShaderSubclassHooks.cpp).
-	float4 PrepassFeatureLane;
+	// The host finds this lane by its slot before WetnessControl_Spec.
+	uint4 PrepassFeatureLane;
 #	endif
 #	if LANDSCAPE
 	float4 WetnessControl_Spec;   // Landscape flags.
@@ -452,6 +471,9 @@ float HeightScaleOf(Texture2D<float4> a_texture, SamplerState a_sampler)
 #		undef LANDSCAPE
 #		include "ExtendedMaterials/ExtendedMaterials.hlsli"
 #		define LANDSCAPE 0
+#		if defined(FO4_TRUE_PBR_BRANCH)
+#			include "FO4/TruePBR/Parallax.hlsli"
+#		endif
 #	elif defined(EMAT_LANDSCAPE)
 // FO4: four layers, height in each _s alpha; layers 5-6 weigh zero.
 struct EMLandscapeInput
@@ -591,13 +613,12 @@ struct PS_OUTPUT
 	float2 motionVec: SV_Target5;
 #		endif
 #	endif
-#	if defined(EXTENDED_MATERIALS)
-	// FO4: upstream shades parallax shadows forward; DFLight reads them from here.
-	float4 parallaxShadow: SV_Target6;
+#	if defined(FO4_PREPASS_AUX)
+	float4 aux: SV_Target6;
 #	endif
-#	if defined(SUBSURFACE_SCATTERING)
-	// FO4: upstream's lighting mask carries the Human profile; SSS reads it here.
-	float4 sssProfile: SV_Target7;
+#	if defined(FO4_TRUE_PBR)
+	// F0 of the lit surface; alpha is only the blend factor.
+	float4 f0: SV_Target7;
 #	endif
 };
 
@@ -628,6 +649,22 @@ struct PS_OUTPUT
 		}
 #	else
 	PS_OUTPUT output;
+#	endif
+#	if defined(FO4_TRUE_PBR_BRANCH)
+		// The flag, not the id, says the row is valid.
+		TruePBRRecord::Row pbrRow = (TruePBRRecord::Row)0;
+		[branch] if (FO4SharedData::EnabledTruePBR != 0 && (PrepassFeatureLane.y & 0xFFFF) != 0)
+			pbrRow = TruePBRPrepass::Records[PrepassFeatureLane.y & 0xFFFF];
+		const bool pbrPixel = (pbrRow.flags & TruePBRRecord::Valid) != 0;
+#		if defined(EMAT_OBJECT)
+		// FO4: the host binds t4 only for draws that have a displacement texture.
+		const bool pbrParallax = pbrPixel && (PrepassFeatureLane.w & PrepassLaneTexture::Displacement) != 0 && (pbrRow.flags & TruePBRRecord::InterlayerParallax) == 0;
+#		endif
+#	endif
+#	if defined(EMAT_OBJECT) && defined(FO4_TRUE_PBR_BRANCH)
+#		define FO4_PBR_PARALLAX pbrParallax
+#	else
+#		define FO4_PBR_PARALLAX false
 #	endif
 #	if defined(EXTENDED_MATERIALS)
 		float parallaxShadow = 1.0;
@@ -689,8 +726,8 @@ struct PS_OUTPUT
 #	endif
 #	if defined(TERRAIN_VARIATION_MESH)
 		// Lattice cell comes from the geometric UV, before the parallax block below rewrites uv.
-		// FO4: the host flags eligible meshes in PrepassFeatureLane.y.
-		const bool applyMeshTV = PrepassFeatureLane.y != 0.0 && FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableMeshSupport;
+		// FO4: the host flags eligible meshes in the lane.
+		const bool applyMeshTV = (PrepassFeatureLane.x & PrepassLaneFlag::TerrainVariation) != 0 && FO4SharedData::EnabledTerrainVariation != 0 && SharedData::terrainVariationSettings.enableMeshSupport && !FO4_PBR_PIXEL;
 		StochasticOffsets meshOffset = (StochasticOffsets)0;
 		[branch] if (applyMeshTV)
 		{
@@ -750,7 +787,7 @@ struct PS_OUTPUT
 			&& SharedData::extendedMaterialSettings.EnableTerrainParallax
 #		else
 			// FO4: only the marcher below reads this; upstream runs it on all EMAT draws.
-			&& SharedData::extendedMaterialSettings.EnableParallax && PrepassFeatureLane.z != 0.0
+			&& SharedData::extendedMaterialSettings.EnableParallax && ((PrepassFeatureLane.x & PrepassLaneFlag::ExtendedMaterials) != 0 || FO4_PBR_PARALLAX)
 #		endif
 		) {
 			float3 ndx = ddx(vertexNormal);
@@ -778,9 +815,13 @@ struct PS_OUTPUT
 		}
 #	endif
 
+#	if defined(EMAT_OBJECT) && defined(FO4_TRUE_PBR_BRANCH)
+		const float2 geometricUv = uv;
+		float2 pbrUvDelta = 0.0;
+#	endif
 #	if defined(EMAT_OBJECT)
-		// FO4: PrepassFeatureLane.z marks non-LOD meshes whose _s format stores alpha.
-		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && PrepassFeatureLane.z != 0.0)
+		// FO4: the lane flags non-LOD meshes whose _s format stores alpha.
+		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && (PrepassFeatureLane.x & PrepassLaneFlag::ExtendedMaterials) != 0 && !FO4_PBR_PIXEL)
 		{
 			displacementParams.HeightScale *= HeightScaleOf(g_tMaterial, g_sMaterial);
 			[branch] if (displacementParams.HeightScale > 0.0)
@@ -802,6 +843,15 @@ struct PS_OUTPUT
 				}
 			}
 		}
+#		if defined(FO4_TRUE_PBR_BRANCH)
+		[branch] if (SharedData::extendedMaterialSettings.EnableParallax && pbrParallax)
+		{
+			const TruePBRParallax::Result pbrMarch = TruePBRParallax::March(uv, viewPosition.z, viewDirection, tbnTr, screenNoise, pbrRow.displacementScale, displacementParams);
+			uv = pbrMarch.uv;
+			parallaxShadow = pbrMarch.shadow;
+			pbrUvDelta = uv - geometricUv;
+		}
+#		endif
 #	endif
 
 #	if LANDSCAPE
@@ -995,8 +1045,8 @@ struct PS_OUTPUT
 		if (FO4SharedData::EnabledLODBlending != 0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODTerrainGamma) * SharedData::lodBlendingSettings.LODTerrainBrightness;
 #		elif !LANDSCAPE && !GRASS
-		// FO4: object LOD has no technique define; the host bakes the BTO flag into PrepassFeatureLane, which stock never reads.
-		if (PrepassFeatureLane.x != 0.0 && FO4SharedData::EnabledLODBlending != 0)
+		// FO4: object LOD has no technique define, so the lane carries it.
+		if ((PrepassFeatureLane.x & PrepassLaneFlag::ObjectLOD) != 0 && FO4SharedData::EnabledLODBlending != 0)
 			albedoSample.xyz = pow(abs(albedoSample.xyz), SharedData::lodBlendingSettings.LODObjectGamma) * SharedData::lodBlendingSettings.LODObjectBrightness;
 #		endif
 #	endif
@@ -1101,6 +1151,10 @@ struct PS_OUTPUT
 		}
 #	endif
 
+#	if defined(FO4_TRUE_PBR_BRANCH)
+		// Before the native vertex color multiply; the PBR decode has its own.
+		const float3 pbrBaseSample = albedoSample.xyz;
+#	endif
 #	if VC
 #		if LANDSCAPE
 		landAlbedo *= input.vertexColor.xyz;
@@ -1179,6 +1233,17 @@ struct PS_OUTPUT
 #		if EYE && COMBINED
 		clip(albedoSample.a - eyeParams.x);
 #		else
+#			if defined(EMAT_OBJECT) && defined(FO4_TRUE_PBR_BRANCH)
+		// Upstream tests alpha at the geometric uv; the vertex alpha multiply stays.
+		[branch] if (any(pbrUvDelta != 0.0))
+		{
+			albedoSample.a = SAMPLE_MATERIAL(g_tAlbedo, g_sAlbedo, geometricUv).a
+#				if VC
+		                     * input.vertexColor.a
+#				endif
+				;
+		}
+#			endif
 		clip(albedoSample.a - EmissiveColor_row0.w);
 #		endif
 #	endif
@@ -1493,6 +1558,10 @@ struct PS_OUTPUT
 #	if PIPBOY_SCREEN
 		output.specTint.xyz += pipboySample * PipboyParams.w;
 #	endif
+#	if defined(FO4_TRUE_PBR)
+		// FO4: float target; keep vanilla emission within its 8-bit range.
+		output.specTint.xyz = saturate(output.specTint.xyz);
+#	endif
 
 #	if BLEND
 		float blendAlpha = (AlphaScale_row0.y == 1.0) ? albedoSample.a : 1.0;
@@ -1695,26 +1764,74 @@ struct PS_OUTPUT
 		output.motionVec = (currNDC - prevNDC) * float2(-0.5, 0.5);
 #		endif
 #	endif
-#	if defined(EXTENDED_MATERIALS)
-	// Every draw writes, so surfaces drawn over parallax never keep its shadow.
-#		if BLEND
-		output.parallaxShadow = float4(parallaxShadow, 0, 0, output.albedo.w);
+#	if defined(FO4_PREPASS_AUX)
+	// Every draw writes all channels, so nothing keeps another surface's value.
+#		if defined(EXTENDED_MATERIALS)
+		const float auxParallaxShadow = parallaxShadow;
 #		else
-		output.parallaxShadow = float4(parallaxShadow, 0, 0, 1);
+		const float auxParallaxShadow = 1.0;
 #		endif
+#		if defined(SUBSURFACE_SCATTERING) && !LANDSCAPE
+		const float auxHumanSkin = (PrepassFeatureLane.x & PrepassLaneFlag::HumanSkin) != 0 ? 1.0 : 0.0;
+#		else
+		const float auxHumanSkin = 0.0;
+#		endif
+#		if BLEND
+		const float auxCoverage = output.albedo.w;
+#		else
+		const float auxCoverage = 1.0;
+#		endif
+		output.aux = float4(auxParallaxShadow, auxHumanSkin, 1, auxCoverage);
 #	endif
-#	if defined(SUBSURFACE_SCATTERING)
-	// Every draw writes, so surfaces drawn over skin never keep its profile.
-#		if LANDSCAPE
-		const float sssProfile = 0.0;
+#	if defined(FO4_TRUE_PBR)
+		output.f0 = float4(0.04, 0.04, 0.04, auxCoverage);
+#	endif
+#	if defined(FO4_TRUE_PBR_BRANCH)
+		[branch] if (pbrPixel)
+		{
+			const float3 encodedVertexColor =
+#		if VC
+				TruePBRPrepass::EncodedVertexColor(input.vertexColor.xyz);
 #		else
-		const float sssProfile = PrepassFeatureLane.w != 0.0 ? 1.0 : 0.0;
+				1.0;
 #		endif
-#		if BLEND
-		output.sssProfile = float4(sssProfile, 0, 0, output.albedo.w);
-#		else
-		output.sssProfile = float4(sssProfile, 0, 0, 1);
+			TruePBRPrepass::Surface surface = TruePBRPrepass::Decode(pbrBaseSample, materialSample, pbrRow, encodedVertexColor);
+			// Wetness: relative gloss, and upstream's porosity darkening.
+			const float dryGloss = svScrolls.x ? anchor.x * anchor.x : anchor.x;
+			surface.roughness = TruePBRPrepass::WetRoughness(surface.roughness, sval.x, dryGloss);
+			const float wetDarkening = WetnessControl_Spec.w == -1.0 ? 0.0 : saturate(WorldWetnessAndRainTransition.x);
+			surface.baseColor = TruePBRPrepass::WetDarkening(surface.baseColor, surface.metallic, wetDarkening);
+
+			output.albedo = float4(surface.baseColor, 0.0);
+			output.material = 0.0;
+			output.auxA = float4(1.0 - surface.roughness, 0.0, 0.0, TruePBRRecord::ClassTag / 255.0);
+			float3 emission = 0.0;
+#		if GLOWMAP
+			[branch] if ((pbrRow.flags & TruePBRRecord::HasEmissive) != 0)
+				emission = TruePBRPrepass::Emission(glowMapSample.xyz, EmissiveColor_row0.xyz, asfloat(PrepassFeatureLane.z), encodedVertexColor);
 #		endif
+			output.specTint.xyz = emission;
+#		if defined(FO4_PREPASS_VERTEX_AO)
+#			if VC
+			output.specTint.w = TruePBRPrepass::VertexOcclusion(encodedVertexColor);
+#			else
+			output.specTint.w = 0.0;
+#			endif
+#		endif
+			output.aux.xyz = float3(auxParallaxShadow, 0.0, surface.ao);
+			output.f0.xyz = surface.f0;
+			[branch] if (TruePBRDebug::IsMaterialView())
+				TruePBRDebug::ApplyMaterial(surface.baseColor, surface.roughness, surface.f0, surface.ao, output.albedo.xyz, output.specTint.xyz);
+#		if defined(EMAT_OBJECT)
+			[branch] if (TruePBRDebug::IsParallaxView())
+				TruePBRDebug::ApplyParallax(pbrUvDelta, auxParallaxShadow, output.albedo.xyz, output.specTint.xyz);
+#		endif
+		}
+#	endif
+#	if defined(FO4_TRUE_PBR) && !LANDSCAPE
+		// FO4: landscape draws carry no lane.
+		[branch] if (TruePBRDebug::IsRecordView() && PrepassFeatureLane.y != 0)
+			TruePBRDebug::Apply(PrepassFeatureLane.y, output.albedo.xyz, output.specTint.xyz);
 #	endif
 #	if defined(FO4_TERRAIN_BLENDING)
 		// The colour draw reads every blended target's alpha as the lerp factor.
@@ -1727,11 +1844,11 @@ struct PS_OUTPUT
 #		if PREPASS_MOTION_VECTOR
 			output.motionVec.w = terrainBlendFactor;
 #		endif
-#		if defined(EXTENDED_MATERIALS)
-			output.parallaxShadow.w = terrainBlendFactor;
+#		if defined(FO4_PREPASS_AUX)
+			output.aux.w = terrainBlendFactor;
 #		endif
-#		if defined(SUBSURFACE_SCATTERING)
-			output.sssProfile.w = terrainBlendFactor;
+#		if defined(FO4_TRUE_PBR)
+			output.f0.w = terrainBlendFactor;
 #		endif
 		}
 #	endif

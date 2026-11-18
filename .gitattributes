@@ -7,3 +7,5 @@ package/Textures/**/*.dds filter=lfs diff=lfs merge=lfs -text
 *.hlsl text eol=crlf
 *.hlsli text eol=crlf
 package/Shaders/**/*.h text eol=crlf
+# TruePBR fixtures are byte-exact; the TSV carries file offsets.
+tests/data/truepbr/** -text

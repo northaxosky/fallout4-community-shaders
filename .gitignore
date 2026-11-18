@@ -45,3 +45,6 @@ test-results/
 # OS
 .DS_Store
 Thumbs.db
+
+# TruePBR fixture generator output
+tests/data/truepbr/generator/obj/

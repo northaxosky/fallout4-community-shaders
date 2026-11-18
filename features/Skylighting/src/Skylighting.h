@@ -34,8 +34,8 @@ namespace cs::features
 
 		// PS slot of the probe array for forward consumers; compute binds t50 too.
 		static constexpr std::uint32_t kProbeArraySlot = 50;
-		// FO4: t51/t52 hold albedo and vertex AO and t55 is Terrain Blending.
-		static constexpr std::uint32_t kCoverageSlot = 56;
+		static constexpr std::uint32_t kCoverageSlot = 51;
+		static constexpr std::uint32_t kShadowVisibilitySlot = 53;
 
 		static Skylighting* GetSingleton();
 
@@ -146,8 +146,7 @@ namespace cs::features
 			kTiled
 		};
 		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
-		// Probes at kProbeArraySlot, then albedo, MRT4 (vertex AO), shadow visibility.
-		// Coverage and zenith depth follow at kCoverageSlot.
+		// Probes, coverage and zenith depth, the G-buffer views, shadow visibility.
 		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t

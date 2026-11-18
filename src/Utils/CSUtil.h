@@ -2,6 +2,7 @@
 
 #include "Render/ShaderStage.h"
 #include "Utils/ShaderCache/RevalidationContext.h"
+#include "Utils/StringCompare.h"
 
 #include <d3d11.h>
 #include <winrt/base.h>
@@ -16,18 +17,6 @@
 
 namespace cs::util
 {
-	// ASCII case-insensitive equality, as the engine compares editor IDs and names.
-	[[nodiscard]] inline bool EqualsIgnoreCase(std::string_view a_lhs, std::string_view a_rhs) noexcept
-	{
-		if (a_lhs.size() != a_rhs.size())
-			return false;
-		for (std::size_t i = 0; i < a_lhs.size(); ++i) {
-			if (std::tolower(static_cast<unsigned char>(a_lhs[i])) != std::tolower(static_cast<unsigned char>(a_rhs[i])))
-				return false;
-		}
-		return true;
-	}
-
 	HRESULT CreateShaderChild(
 		ID3D11Device& a_device,
 		engine::ShaderStage a_stage,

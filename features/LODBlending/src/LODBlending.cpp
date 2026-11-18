@@ -15,9 +15,9 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/ObjectLOD.h"
+#include "Render/PrepassLane.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -67,7 +67,7 @@ namespace cs::features
 			FailLoad("LOD Blending shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kX, &ClassifyObjectLOD)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassDrawFlag::kObjectLOD, &ClassifyObjectLOD)) {
 			FailLoad("LOD Blending prepass draw classifier installation failed.");
 			return;
 		}
@@ -79,7 +79,7 @@ namespace cs::features
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed));
-		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kX, "lod");
+		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassDrawFlag::kObjectLOD, "lod");
 	}
 
 	std::string_view LODBlending::GetRegistrationFailureMessage() const

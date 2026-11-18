@@ -23,6 +23,11 @@
 #	include "FO4/DynamicCubemaps/Composite.hlsli"
 #endif
 
+#include "FO4/TruePBRConsumer.hlsli"
+#ifdef FO4_TRUE_PBR
+#	include "FO4/TruePBR/Composite.hlsli"
+#endif
+
 float3 AuthoredEnvironment(TextureCubeArray<float4> probe, SamplerState probeSampler, float3 direction, float lod,
 	float slice, float rain)
 {
@@ -404,6 +409,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float matSliceFloat = matRaw.y;
 	float matGlossOrSpec = matRaw.z;
 	float glossSquaredScaled = matGlossOrSpec * matGlossOrSpec * 50.0;
+	FO4_TRUE_PBR_NO_NATIVE_REFLECTION(shadingData.z, glossSquaredScaled);
 	bool hasIBL = (matSliceFloat > 0.5 / 255.0);
 	float3 iblColor = float3(0, 0, 0);
 	if (hasIBL) {
@@ -521,6 +527,7 @@ PS_OUTPUT main(PS_INPUT input)
 		output.color.xyz = ambientAccum * aoFactor + glossFactor * glossSquaredScaled * reflection;
 	}
 #	endif
+	FO4_TRUE_PBR_RESOLVE(shadingData.z, output.color.xyz, modulated, aoFactor, input.position.xy, g_sIBLProbeCube);
 	output.color.w = 1.0;
 	return output;
 }
@@ -875,6 +882,7 @@ PS_OUTPUT main(PS_INPUT input)
 			shadingData.y * 3.0 *
 			min(1.0, 1.0 / rsqrt(saturate(shadingData.x - 0.3)));
 		float glossSquaredScaled = material.z * material.z * 50.0;
+		FO4_TRUE_PBR_NO_NATIVE_REFLECTION(shadingData.z, glossSquaredScaled);
 #	if !defined(OG)
 		float2 litSceneUv = min(uv, SunColor_row3.xy);
 		float4 litScene = g_tLitScene.Sample(g_sLitScene, litSceneUv);
@@ -905,6 +913,7 @@ PS_OUTPUT main(PS_INPUT input)
 			aoColor = ambientAccum * ao + glossFactor * glossSquaredScaled * reflection;
 		}
 #	endif
+		FO4_TRUE_PBR_RESOLVE(shadingData.z, aoColor, modulated, ao, input.position.xy, g_sIblProbeCube);
 
 		float fogPlaneDistance =
 			dot(ViewToWorld_row2, float4(positionView, 1.0)) + PosAdjust.z;
@@ -1120,7 +1129,7 @@ float3 sampleDirectLighting(float2 coordinate)
 }
 
 float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFactor,
-	float gloss, float3 environment, float3 centerColor
+	float gloss, float3 environment, float3 centerColor, float materialClass, float2 pixelPosition
 #	if defined(OG) && OUTPUTMASK && FOGSTACK
 	// OG passes the output mask sampled before exclusion.
 	,
@@ -1128,9 +1137,12 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 #	endif
 )
 {
+	FO4_TRUE_PBR_NO_NATIVE_REFLECTION(materialClass, gloss);
 	float3 color = environment * glossFactor;
 	color *= gloss;
 	color = color * directLighting + centerColor;
+	const float3 unoccluded = color;
+	float occlusion = 1.0;
 #	if OUTPUTMASK
 #		if !defined(OG)
 	float outputMask =
@@ -1138,12 +1150,15 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 							 outputMaskSampler, min(coordinate, screenSetup[5].xy))
 			.x;
 	color *= outputMask;
+	occlusion = outputMask;
 #		elif !FOGSTACK
 	// OG samples the output mask without the cb2[5].xy clamp.
-	color *= outputMaskTexture.Sample(outputMaskSampler, coordinate).x;
+	occlusion = outputMaskTexture.Sample(outputMaskSampler, coordinate).x;
+	color *= occlusion;
 #		else
 	// OG applies the pre-exclusion mask before adding wet reflections.
 	color *= outputMask;
+	occlusion = outputMask;
 #		endif
 #	endif
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
@@ -1160,6 +1175,7 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 		        environment * glossFactor * gloss * VanillaPBR::LiveReflectionWeight(directLighting, liveMask);
 	}
 #	endif
+	FO4_TRUE_PBR_RESOLVE(materialClass, color, unoccluded, occlusion, pixelPosition, environmentSampler);
 	return color;
 }
 
@@ -1314,7 +1330,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 	}
 
 #	if !FOGSTACK
-	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor),
+	return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor, surface.z, position.xy),
 		1.0);
 #	else
 #		if OUTPUTMASK && defined(OG)
@@ -1328,7 +1344,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 		float roughFactor = min(1.0 / rsqrt(saturate(surface.x - 0.3)), 1.0);
 		glossFactor *= roughFactor;
 		float gloss = material.y * material.y * 50.0;
-		float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
+		float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor, surface.z, position.xy
 #		if OUTPUTMASK && defined(OG)
 			// OG passes the output mask sampled before exclusion.
 			,
@@ -1557,6 +1573,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 		float s = min(1.0 / rsqrt(saturate(surf.x - 0.3)), 1.0);
 		k = k * s;
 		float g2 = (prm.y * prm.y) * 50.0;
+		FO4_TRUE_PBR_NO_NATIVE_REFLECTION(surf.z, g2);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 		// FO4: the live reflection joins after the mask, with its own weight.
 		float3 liveReflection = VanillaPBR::LiveEnvironmentUsed ? cube * k * g2 : 0.0;
@@ -1564,12 +1581,16 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 #	endif
 			col = ((cube * k) * g2) * b3 + col;
 
+		const float3 unoccluded = col;
+		float occlusion = 1.0;
 #	if OUTPUTMASK
 #		if !defined(OG)
 		float mask = TexMask.Sample(SampMask, min(uv, SunColor_row3.xy)).x;
 #		endif
 		col = col * mask;
+		occlusion = mask;
 #	endif
+		FO4_TRUE_PBR_RESOLVE(surf.z, col, unoccluded, occlusion, svpos.xy, SampCube);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 #		if OUTPUTMASK
 		col += liveReflection * VanillaPBR::LiveReflectionWeight(b3, mask);
@@ -2704,6 +2725,7 @@ float4 main(PSInput input) : SV_Target0
 			1.0 / rsqrt(saturate(typeData.x - 0.3)));
 		gloss *= roughFactor;
 		float specularScale = material.y * material.y * 50.0;
+		FO4_TRUE_PBR_NO_NATIVE_REFLECTION(typeData.z, specularScale);
 #	else
 	float gloss = typeData.y * 3.0;
 	float roughFactor = min(
@@ -2712,6 +2734,7 @@ float4 main(PSInput input) : SV_Target0
 	gloss *= roughFactor;
 	material = materialTexture.SampleLevel(materialSampler, uv, 0.0).yz;
 	float specularScale = material.y * material.y * 50.0;
+	FO4_TRUE_PBR_NO_NATIVE_REFLECTION(typeData.z, specularScale);
 	if (material.x > (0.5 / 255.0)) {
 		float2 encodedNormal =
 			normalTexture.SampleLevel(normalSampler, uv, 0.0).xy * 4.0 - 2.0;
@@ -2770,6 +2793,8 @@ float4 main(PSInput input) : SV_Target0
 #	endif
 			color = mad(reflectionColor * gloss * specularScale, diffuse, color);
 
+		const float3 unoccluded = color;
+		float occlusion = 1.0;
 #	if COMPOSITE_MODULATION
 #		if !defined(OG)
 		float2 modulationUV = min(uv, screenData[5].xy);
@@ -2780,7 +2805,9 @@ float4 main(PSInput input) : SV_Target0
 		float modulation = modulationTexture.Sample(modulationSampler, uv).x;
 #		endif
 		color *= modulation;
+		occlusion = modulation;
 #	endif
+		FO4_TRUE_PBR_RESOLVE(typeData.z, color, unoccluded, occlusion, input.position.xy, probeSampler);
 #	if defined(VANILLA_PBR) && defined(DYNAMIC_CUBEMAPS)
 #		if COMPOSITE_MODULATION
 		const float liveAO = modulation;

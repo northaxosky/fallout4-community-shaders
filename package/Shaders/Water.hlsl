@@ -230,8 +230,6 @@ TextureCube<float3> CubeMapTex : register(t32);
 #	endif
 #	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
 #		define SKYLIGHTING_PROBE_REGISTER t50
-#		define SKYLIGHTING_COVERAGE_REGISTER t56
-#		define SKYLIGHTING_ZENITH_REGISTER t57
 #		include "Skylighting/Skylighting.hlsli"
 #	endif
 

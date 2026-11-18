@@ -74,11 +74,8 @@ namespace cs::features::remote_control
 
 	Feature* FindFeature(std::string_view a_shortName, bool a_loadedOnly)
 	{
-		for (auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
-			if (feature->GetName() == a_shortName)
-				return !a_loadedOnly || feature->IsLoaded() ? feature : nullptr;
-		}
-		return nullptr;
+		auto* feature = FeatureManager::Get().Find(a_shortName);
+		return feature && (!a_loadedOnly || feature->IsLoaded()) ? feature : nullptr;
 	}
 
 	Json Error(std::string a_message, Json a_details)

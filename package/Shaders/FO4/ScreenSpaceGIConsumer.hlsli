@@ -7,6 +7,7 @@
 #include "FO4/AmbientConsumer.hlsli"
 #include "FO4/FO4ShaderData.hlsli"
 #include "FO4/ScreenSpaceGI/Contracts.hlsli"
+#include "FO4/ViewPosition.hlsli"
 
 namespace ScreenSpaceGI
 {
@@ -40,21 +41,13 @@ namespace ScreenSpaceGI
 		float2 ssgiIlCoCg = BounceChromaTexture.Load(texel);
 		float3 ssgiIl = max(0, Color::YCoCgToRGB(float3(ssgiIlY, ssgiIlCoCg)));
 		// FO4: native HDR/albedo are linear; convert once at the upstream colour boundary.
+		// FO4: upstream exports the indirect diffuse weight on PBR pixels.
+		FO4_TRUE_PBR_EXPORTED_ALBEDO(albedo, screenPosition, normalVS, FO4GBuffer::GetViewPosition(screenPosition));
 		float3 linAlbedo = albedo;
 		float3 multiBounceSSGIAo = MultiBounceAO(linAlbedo, ssgiAo);
 		// FO4: native diffuse folds in powered DALC without an upstream Masks.z channel.
 		float3 directionalAmbientColor = FO4Ambient::DiffuseAlbedo(screenPosition, normalVS, normalWS, albedo, vertexAO);
-		float maxScale = 1.0;
-		if (directionalAmbientColor.x > 0.0)
-			maxScale = min(maxScale, diffuseColor.x / directionalAmbientColor.x);
-		if (directionalAmbientColor.y > 0.0)
-			maxScale = min(maxScale, diffuseColor.y / directionalAmbientColor.y);
-		if (directionalAmbientColor.z > 0.0)
-			maxScale = min(maxScale, diffuseColor.z / directionalAmbientColor.z);
-		directionalAmbientColor *= maxScale;
-		diffuseColor = max(0.0, diffuseColor - directionalAmbientColor);
-		diffuseColor *= sqrt(multiBounceSSGIAo);
-		diffuseColor += directionalAmbientColor * multiBounceSSGIAo;
+		diffuseColor = FO4Ambient::SplitOcclusion(diffuseColor, directionalAmbientColor, multiBounceSSGIAo, sqrt(multiBounceSSGIAo));
 		diffuseColor += ssgiIl * linAlbedo;
 		return diffuseColor;
 	}

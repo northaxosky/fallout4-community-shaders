@@ -2,7 +2,9 @@
 #define FO4_SKYLIGHTING_CONSUMER
 
 #include "FO4/FO4ShaderData.hlsli"
+#include "FO4/GBufferViews.hlsli"
 #include "FO4/SunShadowFamilies.hlsli"
+#include "FO4/TruePBRConsumer.hlsli"
 
 #ifdef SKYLIGHTING
 // FO4: directional families with sun lobes read visibility at t53.
@@ -11,9 +13,6 @@
 #	endif
 // FO4: pixel and compute lighting read the probe array at the same slot.
 #	define SKYLIGHTING_PROBE_REGISTER t50
-// FO4: t51/t52 hold albedo and vertex AO, so probe coverage moves to t56/t57.
-#	define SKYLIGHTING_COVERAGE_REGISTER t56
-#	define SKYLIGHTING_ZENITH_REGISTER t57
 #	include "Common/Color.hlsli"
 #	include "Skylighting/Skylighting.hlsli"
 #endif
@@ -43,10 +42,6 @@ namespace Skylighting
 #endif
 
 #ifdef SKYLIGHTING
-	Texture2D<float4> AlbedoTexture : register(t51);
-	// FO4: MRT4 alpha stores 1 - vertexAO, upstream's Masks2.x.
-	Texture2D<float4> VertexAOTexture : register(t52);
-
 	// FO4: shadow visibility of the last SampleShadowVisibility; lobes share it.
 	static float ShadowVisibility = 1.0;
 
@@ -85,15 +80,11 @@ namespace Skylighting
 	{
 		[branch] if (FO4SharedData::EnabledSkylighting == 0) return 1.0;
 		int3 texel = int3(int2(pixelPosition), 0);
-		return GetAmbientScale(viewPosition, normalView, AlbedoTexture.Load(texel).xyz, 1.0 - VertexAOTexture.Load(texel).w);
-	}
-
-	float3 GetViewPosition(float2 pixelPosition)
-	{
-		float2 uv = FrameBuffer::GetDynamicResolutionUnadjustedScreenPosition(pixelPosition * SharedData::BufferDim.zw);
-		float4 view = mul(FrameBuffer::CameraProjInverse,
-			float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), SharedData::GetDepth(uv), 1.0));
-		return view.xyz / view.w;
+		float3 albedo = FO4GBufferViews::Albedo.Load(texel).xyz;
+		// FO4: upstream passes the exported indirect albedo.
+		FO4_TRUE_PBR_EXPORTED_ALBEDO(albedo, pixelPosition, normalView, viewPosition);
+		// FO4: MRT4 alpha stores 1 - vertexAO, upstream's Masks2.x.
+		return GetAmbientScale(viewPosition, normalView, albedo, 1.0 - FO4GBufferViews::Emissive.Load(texel).w);
 	}
 
 	// FO4: composite reflections share upstream's lobe; positions are view space.

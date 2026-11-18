@@ -4,6 +4,7 @@
 
 #include "Host/HostClient.h"
 #include "Log.h"
+#include "Menu/SettingWidgets.h"
 #include "Render/Annotation.h"
 #include "Render/FrameBoundary.h"
 
@@ -110,10 +111,7 @@ namespace cs::features
 	void RemoteControl::DrawHostStatus()
 	{
 		auto& client = host::HostClient::Get().Client();
-		const auto draw = [&](std::string_view a_text, dmui::TextTone a_tone) {
-			if (!dmui::DrawStyledText(client, a_text, { .tone = a_tone, .wrapped = true }))
-				L->warn("DearModdingUI draw failed: {}", DMUI_ResultToString(client.LastResult()));
-		};
+		const auto draw = [](std::string_view a_text, dmui::TextTone a_tone) { ui::DrawStatusText(L, a_text, a_tone); };
 
 		if (!IsEnabled())
 			draw("Remote Control is disabled; every tool answers with an error.", dmui::TextTone::kStatusDisable);

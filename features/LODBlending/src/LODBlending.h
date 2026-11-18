@@ -3,7 +3,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "LODBlendingSettings.h"
-#include "Render/ShaderSubclassHooks.h"
+#include "Render/PrepassLane.h"
 #include "ShaderDefines.h"
 
 #include <atomic>

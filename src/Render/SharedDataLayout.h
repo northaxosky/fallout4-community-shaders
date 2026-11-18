@@ -99,7 +99,7 @@ namespace cs::render
 		// Engine DALC rows, so vanilla ambient replays exactly beside the linear SH.
 		DirectX::XMFLOAT4 DirectionalAmbient[3]{};
 		std::uint32_t EnabledLODBlending = 0, EnabledLightLimitFix = 0;
-		std::uint32_t pad0 = 0, pad1 = 0;
+		std::uint32_t EnabledTruePBR = 0, pad1 = 0;
 		// Unit direction to the drawn sun disc; the light's if unavailable.
 		DirectX::XMFLOAT4 SunDiscDirection{};
 		// BSDFComposite's fog sun glare color; w is its weight, zero when off.
@@ -130,7 +130,7 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, DirectionalAmbient) == 64);
 	static_assert(offsetof(FO4SharedDataCB, EnabledLODBlending) == 112);
 	static_assert(offsetof(FO4SharedDataCB, EnabledLightLimitFix) == 116);
-	static_assert(offsetof(FO4SharedDataCB, pad0) == 120);
+	static_assert(offsetof(FO4SharedDataCB, EnabledTruePBR) == 120);
 	static_assert(offsetof(FO4SharedDataCB, pad1) == 124);
 	static_assert(offsetof(FO4SharedDataCB, SunDiscDirection) == 128);
 	static_assert(offsetof(FO4SharedDataCB, SunGlareColor) == 144);

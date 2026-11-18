@@ -24,8 +24,8 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/ObjectLOD.h"
 #include "Render/OverlayShape.h"
+#include "Render/PrepassLane.h"
 #include "Render/ShaderInjection.h"
-#include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
 #include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
@@ -115,7 +115,7 @@ namespace cs::features
 		{
 			auto* pass = a_draw.pass;
 			auto* geometry = pass->GetGeometry();
-			auto* lightProperty = netimmerse_cast<RE::BSLightingShaderProperty*>(pass->GetShaderProperty());
+			auto* lightProperty = a_draw.LightingProperty();
 			if (!geometry || !lightProperty || a_draw.InObjectLOD() || cs::engine::IsOverlayShape(pass)) {
 				return false;
 			}
@@ -163,7 +163,7 @@ namespace cs::features
 			FailLoad("Terrain Variation shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kY, &IsLandscapeTexturedMesh)) {
+		if (!cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassDrawFlag::kTerrainVariation, &IsLandscapeTexturedMesh)) {
 			FailLoad("Terrain Variation prepass draw classifier installation failed.");
 			return;
 		}
@@ -175,7 +175,7 @@ namespace cs::features
 		a_sink
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("registrations_ready", _registrationsReady.load(std::memory_order_relaxed));
-		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassLaneComponent::kY, "mesh");
+		cs::engine::WritePrepassLaneTelemetry(a_sink, cs::engine::PrepassDrawFlag::kTerrainVariation, "mesh");
 	}
 
 	std::string_view TerrainVariation::GetRegistrationFailureMessage() const

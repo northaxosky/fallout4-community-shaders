@@ -12,6 +12,7 @@
 #	include "DFTiledLighting/TileCullCS.hlsli"
 #else
 
+#	include "FO4/TruePBRConsumer.hlsli"
 #	if defined(VANILLA_PBR)
 #		include "FO4/VanillaPBR.hlsli"
 #	endif
@@ -139,11 +140,13 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 	float positionViewInverseLength = viewData.x;
 	float3 viewDirection = viewData.yzw;
 	float4 material = GBufferMaterial.Load(uint3(pixel, 0));
+	FO4_TRUE_PBR_DECODE(pbr, float2(pixel), material);
 
 	bool materialOne = abs(material.w * 255.0 - 1.0) < 0.25;
 	float materialSpecular = materialOne ? 0.0 : material.y;
 	FO4_AMBIENT_SKYLIGHTING_SET(float2(pixel), positionView, normalView);
 	diffuseAccum = FO4Ambient::Diffuse(EvaluateAmbientGradient(normalView), normalView);
+	FO4_TRUE_PBR_AMBIENT(pbr, GBufferAlbedo.Load(uint3(pixel, 0)).xyz, normalView, viewDirection, diffuseAccum);
 
 	float normalDotView = dot(normalView, viewDirection);
 	float3 reflectionDirection =
@@ -205,6 +208,7 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 		float3 viewDirection =
 			-positionView * positionViewInverseLength;
 		float4 material = GBufferMaterial.Load(uint3(pixel, 0));
+		FO4_TRUE_PBR_DECODE(pbr, float2(pixel), material);
 #	endif
 
 		float roughness = 1.0 - material.x;
@@ -451,6 +455,9 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 					}
 				}
 
+				// FO4: flag 16 mirrors the raster specular choice.
+				FO4_TRUE_PBR_DIRECT(pbr, normalView, viewDirection, lightDirection, light.Color, (light.Flags & 16u) != 0, diffuse, specular);
+				FO4_TRUE_PBR_OVERRIDE(pbr, ignoreRim, true);
 				[branch] if (!ignoreRim)
 				{
 					float rim = saturate(

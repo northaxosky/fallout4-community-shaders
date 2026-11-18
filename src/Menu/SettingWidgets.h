@@ -1,9 +1,11 @@
 #pragma once
 
+#include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/SettingField.h"
 #include "Settings/SettingsSchema.h"
 
+#include <DearModdingUI/Client.h>
 #include <DearModdingUI/Presentation.h>
 #include <DearModdingUI/UI.h>
 
@@ -33,6 +35,14 @@ namespace cs::ui
 	{
 		if (dmui::ui::IsItemHovered(dmui::ui::HoveredFlags::kForTooltip))
 			dmui::ui::SetTooltip(a_format, a_args...);
+	}
+
+	// Wrapped styled text; a failed draw is logged to a_log.
+	inline void DrawStatusText(spdlog::logger* a_log, std::string_view a_text, dmui::TextTone a_tone)
+	{
+		auto& client = host::HostClient::Get().Client();
+		if (!dmui::DrawStyledText(client, a_text, { .tone = a_tone, .wrapped = true }))
+			a_log->warn("DearModdingUI draw failed: {}", DMUI_ResultToString(client.LastResult()));
 	}
 
 	// Builds the text only while the tooltip shows.

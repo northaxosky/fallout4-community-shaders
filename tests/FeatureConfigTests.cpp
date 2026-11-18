@@ -21,6 +21,7 @@
 #include "SkylightingSettings.h"
 #include "SubsurfaceScatteringSettings.h"
 #include "TerrainVariationSettings.h"
+#include "TruePBRSettings.h"
 #include "VanillaPBRSettings.h"
 #include "World/WeatherVariableRegistry.h"
 
@@ -31,6 +32,8 @@
 #include <iostream>
 #include <set>
 #include <sstream>
+
+void RunTruePbrTests(const std::filesystem::path& a_directory);
 
 namespace
 {
@@ -61,6 +64,7 @@ namespace
 			std::pair{ "TerrainVariation", MakeSchemaView(terrain_variation::kSchema) },
 			std::pair{ "TerrainBlending", SchemaView{} },
 			std::pair{ "ExtendedMaterials", MakeSchemaView(extended_materials::kSchema) },
+			std::pair{ "TruePBR", MakeSchemaView(true_pbr::kSchema) },
 			std::pair{ "MotionVectorFixes", SchemaView{} },
 			std::pair{ "Upscaling", MakeSchemaView(cs::render::temporal::kSchema) },
 			std::pair{ "FrameGeneration", MakeSchemaView(frame_generation::kSchema) },
@@ -336,6 +340,7 @@ int main()
 		TestWeatherProfiles(registry, directory / "weather.toml");
 		TestLiveSettingsRollback();
 		TestLightAuthoring();
+		RunTruePbrTests(std::filesystem::path(FO4CS_TRUEPBR_TEST_DATA));
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';
 		++cs::tests::failures;
