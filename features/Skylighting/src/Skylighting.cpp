@@ -410,6 +410,38 @@ namespace cs::features
 			LogCaptureSummary(state, changed ? spdlog::level::info : spdlog::level::debug);
 	}
 
+	bool Skylighting::CaptureCadence::ShouldCapture(const DirectX::XMFLOAT3& a_cell, std::uint32_t a_stillInterval) noexcept
+	{
+		const auto moved = [&](float a_from, float a_to) { return std::abs(a_to - a_from) >= kMovedCells; };
+		if (!_hasCell || moved(_cell.x, a_cell.x) || moved(_cell.y, a_cell.y) || moved(_cell.z, a_cell.z)) {
+			// A scroll brings in unset probes; occlusion depends on position only.
+			Invalidate();
+			_cell = a_cell;
+			_hasCell = true;
+		}
+		if (a_stillInterval <= 1 || !Settled())
+			return true;
+		return ++_framesSinceCapture >= a_stillInterval;
+	}
+
+	void Skylighting::CaptureCadence::OnCaptured(std::optional<std::uint32_t> a_quadrant) noexcept
+	{
+		_framesSinceCapture = 0;
+		if (a_quadrant)
+			++_quadrantCaptures[*a_quadrant];
+	}
+
+	void Skylighting::CaptureCadence::Invalidate() noexcept
+	{
+		_quadrantCaptures = {};
+		_framesSinceCapture = 0;
+	}
+
+	bool Skylighting::CaptureCadence::Settled() const noexcept
+	{
+		return std::ranges::all_of(_quadrantCaptures, [](std::uint32_t a_count) { return a_count >= kSettledCaptures; });
+	}
+
 	Skylighting::CaptureState Skylighting::CaptureReadiness() const
 	{
 		if (!IsHealthy() || !IsEnabled() || !_occlusionMap.Ready() || !_zenithMap.Ready() || !_probesReady.load(std::memory_order_acquire))
@@ -419,6 +451,7 @@ namespace cs::features
 
 	Skylighting::CaptureState Skylighting::CaptureFrame()
 	{
+		_accumulateCapture = false;
 		const auto readiness = CaptureReadiness();
 		if (readiness == CaptureState::kDisabled) {
 			if (!IsEnabled())
@@ -435,6 +468,14 @@ namespace cs::features
 		}
 
 		ApplyQueuedReset();
+
+		const bool capture = _cadence.ShouldCapture(_grid.cellID, _settings.StillCaptureInterval);
+		_counters.settled.store(_cadence.Settled(), std::memory_order_relaxed);
+		if (!capture) {
+			// The probes keep their history; this frame's update adds no sample.
+			_counters.skippedSettled.fetch_add(1, std::memory_order_relaxed);
+			return CaptureState::kCaptured;
+		}
 
 		// Clock reads only feed the summary log and telemetry.
 		const bool timed = cs::telemetry::pump::Enabled();
@@ -513,7 +554,10 @@ namespace cs::features
 				_zenithPending = true;
 			}
 			_counters.zenithCaptures.fetch_add(1, std::memory_order_relaxed);
+			_cadence.OnCaptured(std::nullopt);
 		} else {
+			_cadence.OnCaptured(frameCount % 4);
+			_accumulateCapture = true;
 			const auto basis = SphericalHarmonics::Scale(SphericalHarmonics::Evaluate(float3(-PrecipitationShaderDirectionF.x, -PrecipitationShaderDirectionF.y, -PrecipitationShaderDirectionF.z)), 4.0f * std::numbers::pi_v<float>);
 			OcclusionSHBasis4Pi = { basis.c0, basis.c1[0], basis.c1[1], basis.c1[2] };
 			OcclusionTransform = result.matrix;
@@ -610,7 +654,7 @@ namespace cs::features
 		CaptureLog->log(
 			a_level,
 			"summary enabled={} state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
-			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} zenith_frame={} zenith_captures={} zenith_valid={} "
+			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} zenith_frame={} zenith_captures={} zenith_valid={} skipped_settled={} settled={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
 			"batched_plain={} batched_merge={} batch_draws={} batch_pool_records={} batch_fallback_technique={} batch_fallback_alpha_test={} batch_fallback_alpha_mask={} batch_fallback_tree_anim={} batch_fallback_technique_other={} batch_fallback_vats_target={} batch_fallback_class_disabled={} batch_fallback_merge_shape={} batch_fallback_geometry_type={} batch_fallback_no_indices={} batch_fallback_animated={} batch_fallback_renderer_data={} batch_fallback_buffer={} batch_fallback_structured={} batch_fallback_heap_view={} batch_fallback_pool_full={} batch_fallback_arena_full={} "
@@ -624,6 +668,7 @@ namespace cs::features
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionSHBasis4Pi.x, OcclusionSHBasis4Pi.y, OcclusionSHBasis4Pi.z, OcclusionSHBasis4Pi.w, frameCount % 4,
 			_zenithFrame ? 1 : 0, count(_counters.zenithCaptures), _counters.zenithValid.load(std::memory_order_relaxed) ? 1 : 0,
+			count(_counters.skippedSettled), _counters.settled.load(std::memory_order_relaxed) ? 1 : 0,
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
@@ -660,6 +705,8 @@ namespace cs::features
 			.Field("captures", count(_counters.captures))
 			.Field("zenith_captures", count(_counters.zenithCaptures))
 			.Field("zenith_valid", _counters.zenithValid.load(std::memory_order_relaxed))
+			.Field("skipped_settled", count(_counters.skippedSettled))
+			.Field("settled", _counters.settled.load(std::memory_order_relaxed))
 			.Field("skipped_interior", count(_counters.skippedInterior))
 			.Field("skipped_disabled", count(_counters.skippedDisabled))
 			.Field("skipped_targets", count(_counters.skippedTargets))
@@ -807,7 +854,7 @@ namespace cs::features
 			.ZenithValid = _counters.zenithValid.load(std::memory_order_relaxed) ? 1u : 0u,
 			.MinDiffuseVisibility = _settings.MinDiffuseVisibility,
 			.MinSpecularVisibility = _settings.MinSpecularVisibility,
-			.AccumulateOcclusion = _zenithFrame ? 0u : 1u
+			.AccumulateOcclusion = _accumulateCapture ? 1u : 0u
 		};
 		_grid.frame = graphics->frameCount;
 		a_feature.skylightingSettings = _grid.block;
@@ -827,6 +874,7 @@ namespace cs::features
 				_probeCounters.resetsEnable.fetch_add(1, std::memory_order_relaxed);
 			// FO4: capture can fail at load; the update waits for a fresh matrix.
 			_hasOcclusion = false;
+			_cadence.Invalidate();
 			_summaryPending = true;
 		}
 	}
@@ -981,8 +1029,10 @@ namespace cs::features
 			field(&Settings::MinDiffuseVisibility, { .format = "%.2f" });
 			field(&Settings::MinSpecularVisibility, { .format = "%.2f" });
 		}
-		if (const ui::Section section{ "skylighting-performance", "Performance" }; section)
+		if (const ui::Section section{ "skylighting-performance", "Performance" }; section) {
 			field(&Settings::BatchOccluders);
+			field(&Settings::StillCaptureInterval);
+		}
 		if (const ui::Section section{ "skylighting-rebuild", "Rebuild" }; section) {
 			if (dmui::ui::Button("Rebuild Skylighting"))
 				QueueReset(kResetRebuild);

@@ -8,6 +8,7 @@
 - Performance Overlay: "Measure CS cost" alternates custom shaders on and off and reports their frame-time cost.
 - Upscaling/Frame Generation: FSR and DLSS no longer turn off when video memory use exceeds the budget.
 - Skylighting: sky light no longer leaks under roofs, awnings and overpasses.
+- Skylighting: once its probes settle and the camera stays put, the sky occlusion capture runs every 8th frame instead of every frame (Still Capture Interval; 1 restores every frame).
 - Sky Sync: shadow caster swaps finish their fade when crossing exterior cells, and the alternate sun path stays continuous across midnight.
 - Profiling: the Profiling page holds the Performance Overlay settings; the overlay can hide chosen pass groups, and switched-off features' passes read 0.
 - Remote Control: `communityshaders.devflags` lists, sets and resets named runtime switches for candidate code paths.

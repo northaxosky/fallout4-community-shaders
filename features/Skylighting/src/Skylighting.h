@@ -98,6 +98,28 @@ namespace cs::features
 			kResetEnable = 4
 		};
 		void QueueReset(ResetReason a_reason) noexcept { _queuedReset.fetch_or(a_reason, std::memory_order_acq_rel); }
+
+		// Full rate until each quadrant settles, then every Nth frame in one cell.
+		class CaptureCadence
+		{
+		public:
+			// The R8 sample count saturates here; probes become a moving average.
+			static constexpr std::uint32_t kSettledCaptures = 255;
+			// Two cells, so an eye on a cell boundary cannot keep resetting it.
+			static constexpr float kMovedCells = 2.0f;
+
+			[[nodiscard]] bool ShouldCapture(const DirectX::XMFLOAT3& a_cell, std::uint32_t a_stillInterval) noexcept;
+			// A jittered capture names its quadrant; a zenith capture names none.
+			void OnCaptured(std::optional<std::uint32_t> a_quadrant) noexcept;
+			void Invalidate() noexcept;
+			[[nodiscard]] bool Settled() const noexcept;
+
+		private:
+			std::array<std::uint32_t, 4> _quadrantCaptures{};
+			DirectX::XMFLOAT3 _cell{};
+			bool _hasCell = false;
+			std::uint32_t _framesSinceCapture = 0;
+		};
 		void ApplyQueuedReset();
 		void ResetSkylighting(ID3D11DeviceContext* a_context);
 		// Zenith depth is a DSV in capture; coverage is a UAV in the update.
@@ -206,6 +228,9 @@ namespace cs::features
 		DirectX::XMFLOAT4X4 ZenithTransform{};
 		DirectX::XMFLOAT3 _zenithAnchor{};
 		bool _zenithFrame = false;
+		CaptureCadence _cadence;
+		// This frame's capture is a jittered one the probe update may accumulate.
+		bool _accumulateCapture = false;
 		// The anchor is only current at the next in-world pack.
 		bool _zenithPending = false;
 		// The probe update needs a published matrix; the first capture can fail.
@@ -225,6 +250,9 @@ namespace cs::features
 		{
 			std::atomic<std::uint64_t> captures{ 0 };
 			std::atomic<std::uint64_t> zenithCaptures{ 0 };
+			// Frames the cadence skipped while the probes were settled.
+			std::atomic<std::uint64_t> skippedSettled{ 0 };
+			std::atomic_bool settled{ false };
 			// Render thread writes; set once an anchor latches a zenith capture.
 			std::atomic_bool zenithValid{ false };
 			std::atomic<std::uint64_t> skippedInterior{ 0 };

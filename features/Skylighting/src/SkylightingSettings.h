@@ -2,6 +2,7 @@
 
 #include "Settings/SettingsSchema.h"
 
+#include <cstdint>
 #include <numbers>
 
 namespace cs::features::skylighting
@@ -13,6 +14,7 @@ namespace cs::features::skylighting
 		float MinSpecularVisibility = 0.1f;
 		// Batches opaque static occluders instead of one engine draw each.
 		bool BatchOccluders = true;
+		std::uint32_t StillCaptureInterval = 8;
 	};
 
 	// Radians; the upstream UI slider and load clamp both span 0 to 90 degrees.
@@ -24,6 +26,7 @@ namespace cs::features::skylighting
 			settings::Field{ "MaxZenith", "Max Zenith Angle", &Settings::MaxZenith, settings::Range{ 0.0f, kMaxZenithLimit } }.Help("Smaller angles create a more focused top-down shadow."),
 			settings::Field{ "MinDiffuseVisibility", "Diffuse Min Visibility", &Settings::MinDiffuseVisibility, settings::Range{ 0.01f, 1.0f } },
 			settings::Field{ "MinSpecularVisibility", "Specular Min Visibility", &Settings::MinSpecularVisibility, settings::Range{ 0.01f, 1.0f } },
-			settings::Field{ "BatchOccluders", "Batch Occluder Draws", &Settings::BatchOccluders }.Help("Draws opaque static occluders in a few batched calls. Off uses one engine draw each.") }
+			settings::Field{ "BatchOccluders", "Batch Occluder Draws", &Settings::BatchOccluders }.Help("Draws opaque static occluders in a few batched calls. Off uses one engine draw each."),
+			settings::Field{ "StillCaptureInterval", "Still Capture Interval", &Settings::StillCaptureInterval, settings::Range{ 1u, 32u } }.Help("Frames between sky occlusion captures once the probes have settled and the camera stays in one probe cell. 1 captures every frame.") }
 	};
 }
