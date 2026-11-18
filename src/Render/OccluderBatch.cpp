@@ -6,6 +6,7 @@
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/ScopedContextState.h"
+#include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
 
@@ -574,10 +575,12 @@ namespace cs::engine
 			return BatchDecision::kStock;
 		auto batchClass = BatchClass::kPlain;
 		const auto reason = TryRecord(a_property, a_geometry, a_technique, batchClass);
-		const bool counting = !g_validating.load(std::memory_order_relaxed);
+		// Only telemetry reads these; validation's scratch captures stay out.
+		const bool counting = telemetry::pump::Enabled() && !g_validating.load(std::memory_order_relaxed);
 		if (reason) {
-			if (counting)
+			if (counting) {
 				Count(*reason);
+			}
 			return BatchDecision::kStock;
 		}
 		if (counting)

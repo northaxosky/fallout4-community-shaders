@@ -103,7 +103,7 @@ namespace cs::features
 		bool installed = true;
 		for (const auto& hook : cs::engine::InstallOcclusionCaptureHooks()) {
 			CaptureLog->info("hook {}: {} ({})", hook.name, hook.installed ? "installed" : "unavailable", hook.detail);
-			installed = installed && hook.installed;
+			installed = installed && (hook.installed || !hook.required);
 		}
 		const bool registered = cs::engine::RegisterPostPrecipitationOcclusion(*this, [this] { RenderOcclusion(); });
 		CaptureLog->info("hook Precipitation::RenderOcclusionMap detour: {}", registered ? "installed" : "unavailable");
@@ -123,8 +123,7 @@ namespace cs::features
 			FailLoad("Skylighting shadow history needs the shared sun shadow light data");
 			return;
 		}
-		// FO4: focus and local shadows reuse the array, so the update runs here.
-		// Late: the light state published at Early priority is read here.
+		// FO4: focus/local shadows reuse the array; Late reads Early-published state.
 		if (!cs::engine::RegisterPostSunShadowRender(*this, [this] { OnSunShadowRender(); }, cs::engine::HookPriority::Late)) {
 			FailLoad("Skylighting shadow history needs the main sun shadow render hook");
 			return;
@@ -543,6 +542,13 @@ namespace cs::features
 		const float captureMs = windowMs(timings.capture, _timingSnapshot);
 		_counters.captureMs.store(captureMs, std::memory_order_relaxed);
 		const float gatherMs = windowMs(timings.gather, _gatherSnapshot);
+		const float accumulateMs = windowMs(timings.accumulate, _accumulateSnapshot);
+		const float renderMs = windowMs(timings.render, _renderSnapshot);
+		// Impl time outside accumulate and render: lock, binds, release.
+		const float setupTeardownMs = std::max(0.0f, captureMs - accumulateMs - renderMs);
+		_counters.accumulateMs.store(accumulateMs, std::memory_order_relaxed);
+		_counters.renderMs.store(renderMs, std::memory_order_relaxed);
+		_counters.setupTeardownMs.store(setupTeardownMs, std::memory_order_relaxed);
 		const float passesMs = windowMs(timings.passes, _passesSnapshot);
 		const float batchMs = windowMs(timings.batch, _batchSnapshot);
 		_counters.batchMs.store(batchMs, std::memory_order_relaxed);
@@ -577,7 +583,7 @@ namespace cs::features
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
 			"batched_plain={} batched_merge={} batch_draws={} batch_pool_records={} batch_fallback_technique={} batch_fallback_alpha_test={} batch_fallback_alpha_mask={} batch_fallback_tree_anim={} batch_fallback_technique_other={} batch_fallback_vats_target={} batch_fallback_class_disabled={} batch_fallback_merge_shape={} batch_fallback_geometry_type={} batch_fallback_no_indices={} batch_fallback_animated={} batch_fallback_renderer_data={} batch_fallback_buffer={} batch_fallback_structured={} batch_fallback_heap_view={} batch_fallback_pool_full={} batch_fallback_arena_full={} "
-			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_gather={:.3f} ms_passes={:.3f} ms_batch={:.3f} stock_ds8_restored={} "
+			"cpu_ms_avg={:.3f} cpu_ms_max={:.3f} ms_capture={:.3f} ms_gather={:.3f} ms_accumulate={:.3f} ms_render={:.3f} ms_setup_teardown={:.3f} ms_passes={:.3f} ms_batch={:.3f} stock_ds8_restored={} "
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"sun_live_frames={} sun_live_skipped_unavailable={} sun_live_skipped_not_full_sky={} sun_live_skipped_no_light={} sun_live_skipped_unsupported_count={} sun_live_skipped_no_target={} sun_live_skipped_invalid={} sun_live_skipped_source={} sun_live_skipped_disabled={} "
 			"cascade_count={} split_end=({:.1f},{:.1f},{:.1f}) "
@@ -592,7 +598,7 @@ namespace cs::features
 			count(batch.batched[0]), count(batch.batched[1]), count(batch.draws), batch.poolRecords.load(std::memory_order_relaxed),
 			cs::engine::TechniqueFallbacks(batch), fallback(BatchFallback::kAlphaTest), fallback(BatchFallback::kAlphaMask), fallback(BatchFallback::kTreeAnim), fallback(BatchFallback::kTechniqueOther), fallback(BatchFallback::kVatsTarget), fallback(BatchFallback::kClassDisabled), fallback(BatchFallback::kMergeShape), fallback(BatchFallback::kGeometryType), fallback(BatchFallback::kNoIndices), fallback(BatchFallback::kAnimated), fallback(BatchFallback::kRendererData), fallback(BatchFallback::kBufferNotReady),
 			fallback(BatchFallback::kStructuredNotReady), fallback(BatchFallback::kHeapView), fallback(BatchFallback::kPoolFull), fallback(BatchFallback::kArenaFull),
-			cpuMsAverage, _windowCpuMsMax, captureMs, gatherMs, passesMs, batchMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
+			cpuMsAverage, _windowCpuMsMax, captureMs, gatherMs, accumulateMs, renderMs, setupTeardownMs, passesMs, batchMs, _counters.stockTargetRestored.load(std::memory_order_relaxed) ? 1 : 0,
 			extentX, extentY, depthRange,
 			count(_cascadeCounters.liveFrames), cascadeSkipped(CascadeSkip::kUnavailable), cascadeSkipped(CascadeSkip::kNotFullSky), statusSkipped(cs::engine::SunCascadeStatus::kNoLight),
 			statusSkipped(cs::engine::SunCascadeStatus::kUnsupportedCount), statusSkipped(cs::engine::SunCascadeStatus::kNoTarget), statusSkipped(cs::engine::SunCascadeStatus::kInvalid), cascadeSkipped(CascadeSkip::kSource), cascadeSkipped(CascadeSkip::kDisabled),
@@ -629,6 +635,9 @@ namespace cs::features
 			.Field("stock_ds8_restored", _counters.stockTargetRestored.load(std::memory_order_relaxed))
 			.Field("ms_capture", static_cast<double>(_counters.captureMs.load(std::memory_order_relaxed)))
 			.Field("ms_gather", static_cast<double>(_counters.gatherMs.load(std::memory_order_relaxed)))
+			.Field("ms_accumulate", static_cast<double>(_counters.accumulateMs.load(std::memory_order_relaxed)))
+			.Field("ms_render", static_cast<double>(_counters.renderMs.load(std::memory_order_relaxed)))
+			.Field("ms_setup_teardown", static_cast<double>(_counters.setupTeardownMs.load(std::memory_order_relaxed)))
 			.Field("ms_passes", static_cast<double>(_counters.passesMs.load(std::memory_order_relaxed)))
 			.Field("ms_batch", static_cast<double>(_counters.batchMs.load(std::memory_order_relaxed)))
 			.Field("batched_plain", count(batch.batched[static_cast<std::size_t>(cs::engine::BatchClass::kPlain)]))
@@ -813,7 +822,7 @@ namespace cs::features
 		} else {
 			state = ProbeState::kPending;
 		}
-		// Every outcome counts as this frame's update, so the fallback cannot repeat it.
+		// Any outcome counts as this frame's update; the fallback won't repeat it.
 		if (graphics && state != ProbeState::kPending)
 			_probeUpdateFrame = graphics->frameCount;
 		if (std::exchange(_probeState, state) != state)

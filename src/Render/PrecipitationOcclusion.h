@@ -110,6 +110,8 @@ namespace cs::engine
 		std::string name;
 		bool installed = false;
 		std::string detail;
+		// Telemetry-only hooks may fail without failing the capture.
+		bool required = true;
 	};
 
 	// Registers the capture thunks and the occluder pass hook; call during Load.
@@ -194,11 +196,15 @@ namespace cs::engine
 
 	using CaptureClock = std::chrono::steady_clock;
 
-	// Capture CPU time; passes sums every worker thread's slot-44 time.
+	// Wall time on the capture thread, except passes, which sums worker threads.
 	struct CaptureTimings
 	{
 		std::atomic<CaptureClock::rep> capture{ 0 };
 		std::atomic<CaptureClock::rep> gather{ 0 };
+		// BSShaderUtil::AccumulateScene: cull, classify and record every occluder.
+		std::atomic<CaptureClock::rep> accumulate{ 0 };
+		// BSShaderUtil::RenderScene: the engine's draws of the delegated occluders.
+		std::atomic<CaptureClock::rep> render{ 0 };
 		std::atomic<CaptureClock::rep> passes{ 0 };
 		// The batched occluder draw, on the render thread.
 		std::atomic<CaptureClock::rep> batch{ 0 };

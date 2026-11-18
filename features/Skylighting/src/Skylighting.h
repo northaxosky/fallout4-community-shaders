@@ -214,6 +214,9 @@ namespace cs::features
 			std::atomic<float> cpuMsMax{ 0.0f };
 			std::atomic<float> captureMs{ 0 };
 			std::atomic<float> gatherMs{ 0 };
+			std::atomic<float> accumulateMs{ 0 };
+			std::atomic<float> renderMs{ 0 };
+			std::atomic<float> setupTeardownMs{ 0 };
 			std::atomic<float> passesMs{ 0 };
 			std::atomic<float> batchMs{ 0 };
 			std::atomic_bool stockTargetRestored{ true };
@@ -259,6 +262,8 @@ namespace cs::features
 		std::uint32_t _windowCaptures = 0;
 		cs::engine::CaptureClock::rep _timingSnapshot = 0;
 		cs::engine::CaptureClock::rep _gatherSnapshot = 0;
+		cs::engine::CaptureClock::rep _accumulateSnapshot = 0;
+		cs::engine::CaptureClock::rep _renderSnapshot = 0;
 		cs::engine::CaptureClock::rep _passesSnapshot = 0;
 		cs::engine::CaptureClock::rep _batchSnapshot = 0;
 		std::uint64_t _anchorFrames = 0;
