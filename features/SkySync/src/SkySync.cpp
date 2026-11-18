@@ -412,7 +412,8 @@ namespace cs::features
 		const bool wasTransitioning = _shadowFader.transitioning;
 		const Caster previousTarget = _shadowFader.target;
 		_shadowFader.Update(*a_sky, context, directions, intensities, _settings.ShadowTransitionDuration, fadeAdvance, transitionCompleted || resetTransition);
-		// A finished caster fade completes a transition so cached shadows refresh; a zero-length swap counts too
+		// A finished caster fade completes a transition, so cached shadows refresh.
+		// A swap can start and finish in one update, so a changed target counts too.
 		const bool casterSettled = (wasTransitioning || _shadowFader.target != previousTarget) && !_shadowFader.transitioning;
 
 		_twilightCap = GetTwilightCap(timing, hour, sunHeight);

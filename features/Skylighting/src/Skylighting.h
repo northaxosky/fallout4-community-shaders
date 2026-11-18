@@ -36,7 +36,6 @@ namespace cs::features
 		static constexpr std::uint32_t kProbeArraySlot = 50;
 		// FO4: t51/t52 hold albedo and vertex AO and t55 is Terrain Blending.
 		static constexpr std::uint32_t kCoverageSlot = 56;
-		static constexpr std::uint32_t kZenithSlot = 57;
 
 		static Skylighting* GetSingleton();
 
@@ -101,7 +100,7 @@ namespace cs::features
 		void QueueReset(ResetReason a_reason) noexcept { _queuedReset.fetch_or(a_reason, std::memory_order_acq_rel); }
 		void ApplyQueuedReset();
 		void ResetSkylighting(ID3D11DeviceContext* a_context);
-		// Zenith depth is a depth target during capture; coverage is a UAV in the update.
+		// Zenith depth is a DSV in capture; coverage is a UAV in the update.
 		static void UnbindCoverage(ID3D11DeviceContext* a_context);
 
 		enum class ProbeState : std::uint8_t
@@ -191,7 +190,7 @@ namespace cs::features
 		// Slack below the grid for eye movement between grid update and render.
 		static constexpr float OCCLUSION_BELOW_GRID_MARGIN = 512.f;
 		static constexpr float MIN_OCCLUDER_RADIUS = 32.0f;
-		// Coprime with the 4 frustum quadrants so none is starved.
+		// Every 7th capture looks straight down; coprime with the 4 quadrants.
 		static constexpr std::uint32_t kZenithInterval = 7;
 		static constexpr float kZenithExtent = 4096.f;
 		// Matches Skylighting::COVERAGE_UNKNOWN in Skylighting.hlsli.
