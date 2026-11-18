@@ -223,15 +223,18 @@ float FO4WaterSunShadow(float3 worldPosition, float2 screenPosition)
 #		ifndef WATER
 #			define WATER
 #		endif
+#		ifdef SKYLIGHTING
+// FO4: Dynamic Cubemaps includes Skylighting, so its registers must precede that include.
+#			define SKYLIGHTING_PROBE_REGISTER t50
+#			define SKYLIGHTING_COVERAGE_REGISTER t56
+#			define SKYLIGHTING_ZENITH_REGISTER t57
+#		endif
 #		include "FO4/DynamicCubemaps/DynamicCubemaps.hlsli"
 SamplerState sampler3 : register(s3);
 // FO4: the host-rendered engine reflection cube, upstream's CubeMapTex.
 TextureCube<float3> CubeMapTex : register(t32);
 #	endif
 #	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
-#		define SKYLIGHTING_PROBE_REGISTER t50
-#		define SKYLIGHTING_COVERAGE_REGISTER t56
-#		define SKYLIGHTING_ZENITH_REGISTER t57
 #		include "Skylighting/Skylighting.hlsli"
 #	endif
 
