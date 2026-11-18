@@ -605,7 +605,7 @@ namespace cs::features
 						"ScreenSpaceShadows::Raymarch");
 					cs::engine::ComputeOMScope scope(context);
 
-					const auto sceneCamera = cs::engine::GetWorldCameraRecord();
+					const auto sceneCamera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 					if (!sceneCamera) {
 						return;
 					}

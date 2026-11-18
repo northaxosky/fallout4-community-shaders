@@ -264,21 +264,6 @@ namespace cs::engine
 		float _offsetY = 0.0f;
 	};
 
-	[[nodiscard]] inline bool TryGetWorldSceneProjection(
-		DirectX::XMFLOAT4X4& a_outProj,
-		DirectX::XMFLOAT4X4& a_outInvProj,
-		DirectX::XMFLOAT4& a_outNdcToViewMul,
-		DirectX::XMFLOAT4& a_outNdcToViewAdd)
-	{
-		const auto camera = GetWorldCameraRecord();
-		if (!camera) {
-			return false;
-		}
-
-		GetWorldSceneProjection(*camera, a_outProj, a_outInvProj, a_outNdcToViewMul, a_outNdcToViewAdd);
-		return true;
-	}
-
 	// OG/NG/AE prepass 2850CB0/2096710/21F38B0 writes the transposed near inverse at shadow +0x8A0.
 	[[nodiscard]] inline std::optional<DirectX::XMFLOAT4X4> GetPrepassFirstPersonProjectionInverse() noexcept
 	{

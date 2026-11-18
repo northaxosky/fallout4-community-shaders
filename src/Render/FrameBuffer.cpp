@@ -20,6 +20,35 @@ namespace cs::engine
 		std::optional<std::uint32_t> g_prepassFrame;
 		std::uint64_t g_prepassWorldFrame = 0;
 
+		// Render thread; world+jitter valid from MainRenderSetup to DeferredPrePass.
+		std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept
+		{
+			const auto* state = GetGraphicsState();
+			const auto* camera = RE::Main::WorldRootCamera();
+			if (!state || !camera)
+				return std::nullopt;
+			// Cache +0x140 and record stride/key +0x250/+0x238/+0x240 match OG, NG and AE.
+			static_assert(offsetof(RE::BSGraphics::State, cameraDataCache) == 0x140);
+			static_assert(sizeof(RE::BSGraphics::CameraStateData) == 0x250);
+			static_assert(offsetof(RE::BSGraphics::CameraStateData, referenceCamera) == 0x238);
+			static_assert(offsetof(RE::BSGraphics::CameraStateData, useJitter) == 0x240);
+			for (const auto& entry : state->cameraDataCache) {
+				if (entry.referenceCamera != camera || !entry.useJitter)
+					continue;
+				WorldCameraRecord record{};
+				std::memcpy(&record.View, entry.camViewData.viewMat, sizeof(record.View));
+				std::memcpy(&record.Projection, entry.camViewData.projMat, sizeof(record.Projection));
+				std::memcpy(&record.ViewProjection, entry.camViewData.viewProjMat, sizeof(record.ViewProjection));
+				std::memcpy(&record.ViewProjectionUnjittered, entry.camViewData.viewProjUnjittered, sizeof(record.ViewProjectionUnjittered));
+				std::memcpy(&record.PreviousViewProjectionUnjittered, entry.camViewData.previousViewProjUnjittered, sizeof(record.PreviousViewProjectionUnjittered));
+				record.PosAdjust = { entry.posAdjust.x, entry.posAdjust.y, entry.posAdjust.z, 0 };
+				record.PreviousPosAdjust = { entry.previousPosAdjust.x, entry.previousPosAdjust.y, entry.previousPosAdjust.z, 0 };
+				record.frameCount = state->frameCount;
+				return PrepareWorldCameraRecord(record) ? std::optional{ record } : std::nullopt;
+			}
+			return std::nullopt;
+		}
+
 		void CaptureWorldCamera() noexcept
 		{
 			std::scoped_lock lock(g_prepassCameraMutex);
@@ -47,34 +76,6 @@ namespace cs::engine
 		                        RegisterPostDeferredPrePass(CaptureWorldCamera, priority);
 		if (!registered)
 			L->error("World-camera capture disabled: pre-pass hook registration failed.");
-	}
-
-	std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept
-	{
-		const auto* state = GetGraphicsState();
-		const auto* camera = RE::Main::WorldRootCamera();
-		if (!state || !camera)
-			return std::nullopt;
-		// Cache +0x140 and record stride/key +0x250/+0x238/+0x240 match OG, NG and AE.
-		static_assert(offsetof(RE::BSGraphics::State, cameraDataCache) == 0x140);
-		static_assert(sizeof(RE::BSGraphics::CameraStateData) == 0x250);
-		static_assert(offsetof(RE::BSGraphics::CameraStateData, referenceCamera) == 0x238);
-		static_assert(offsetof(RE::BSGraphics::CameraStateData, useJitter) == 0x240);
-		for (const auto& entry : state->cameraDataCache) {
-			if (entry.referenceCamera != camera || !entry.useJitter)
-				continue;
-			WorldCameraRecord record{};
-			std::memcpy(&record.View, entry.camViewData.viewMat, sizeof(record.View));
-			std::memcpy(&record.Projection, entry.camViewData.projMat, sizeof(record.Projection));
-			std::memcpy(&record.ViewProjection, entry.camViewData.viewProjMat, sizeof(record.ViewProjection));
-			std::memcpy(&record.ViewProjectionUnjittered, entry.camViewData.viewProjUnjittered, sizeof(record.ViewProjectionUnjittered));
-			std::memcpy(&record.PreviousViewProjectionUnjittered, entry.camViewData.previousViewProjUnjittered, sizeof(record.PreviousViewProjectionUnjittered));
-			record.PosAdjust = { entry.posAdjust.x, entry.posAdjust.y, entry.posAdjust.z, 0 };
-			record.PreviousPosAdjust = { entry.previousPosAdjust.x, entry.previousPosAdjust.y, entry.previousPosAdjust.z, 0 };
-			record.frameCount = state->frameCount;
-			return PrepareWorldCameraRecord(record) ? std::optional{ record } : std::nullopt;
-		}
-		return std::nullopt;
 	}
 
 	std::optional<WorldCameraRecord> GetCapturedWorldCameraRecord(

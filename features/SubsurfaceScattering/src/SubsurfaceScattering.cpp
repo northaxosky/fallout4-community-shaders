@@ -281,7 +281,7 @@ namespace cs::features
 			_skippedFrames.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		auto* depth = cs::render::GetCanonicalSceneDepthSRV();
 		// FO4: raw depth marks first-person pixels, which canonical depth cannot.
 		auto* rawDepth = cs::engine::GetSceneDepthSRV();

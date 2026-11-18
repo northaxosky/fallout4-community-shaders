@@ -176,9 +176,7 @@ namespace cs::engine
 		       std::isfinite(previous.x) && std::isfinite(previous.y) && std::isfinite(previous.z);
 	}
 
-	// Render thread; world+jitter valid from MainRenderSetup to DeferredPrePass.
-	[[nodiscard]] std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept;
-	// Pre-prepass capture; pass the frame when rendering, omit for diagnostics.
+	// Pre-prepass snapshot; pass the frame when rendering, omit for diagnostics.
 	[[nodiscard]] std::optional<WorldCameraRecord> GetCapturedWorldCameraRecord(
 		std::optional<std::uint64_t> a_frame = std::nullopt) noexcept;
 

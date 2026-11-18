@@ -826,7 +826,7 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			RE::BSGraphics::RenderTargetID::kMain);
-		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
+		const auto frameBuffer = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		const bool cameraReady = frameBuffer.has_value();
 		_cameraReadyLastFrame.store(cameraReady, std::memory_order_relaxed);
 		if (!context || !depthSRV || !colorSRV || !cameraReady) {
@@ -898,19 +898,15 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			RE::BSGraphics::RenderTargetID::kMain);
-		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
+		const auto frameBuffer = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
+		if (!context || !depthSRV || !colorSRV || !frameBuffer)
+			return;
 		DirectX::XMFLOAT4X4 projection{};
 		DirectX::XMFLOAT4X4 inverseProjection{};
 		DirectX::XMFLOAT4 ndcToViewMul{};
 		DirectX::XMFLOAT4 ndcToViewAdd{};
-		if (!context || !depthSRV || !colorSRV || !frameBuffer ||
-			!cs::engine::TryGetWorldSceneProjection(
-				projection,
-				inverseProjection,
-				ndcToViewMul,
-				ndcToViewAdd)) {
-			return;
-		}
+		cs::engine::GetWorldSceneProjection(
+			*frameBuffer, projection, inverseProjection, ndcToViewMul, ndcToViewAdd);
 
 		const std::uint32_t index = a_reflections ? 1 : 0;
 		const double now = std::chrono::duration<double>(

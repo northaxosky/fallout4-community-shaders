@@ -728,7 +728,7 @@ namespace cs::features
 		float2 a_screenSize,
 		float2 a_renderSize)
 	{
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		if (!camera)
 			return false;
 		const auto depth = cs::engine::GetCameraDepthParameters(*camera);

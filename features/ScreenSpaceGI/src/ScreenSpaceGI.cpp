@@ -302,7 +302,7 @@ namespace cs::features
 		if (!_prepare || !_noise || !_constants || !EnsureResources() ||
 			std::ranges::any_of(_shaders, [](const auto& a_shader) { return !a_shader; }))
 			return;
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		_cameraReady = camera.has_value();
 		const bool tiled = RE::DrawWorld::QTiledLighting();
 		auto* manager = cs::engine::GetRenderTargetManager();

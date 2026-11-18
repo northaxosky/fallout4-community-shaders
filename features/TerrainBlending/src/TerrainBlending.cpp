@@ -222,7 +222,7 @@ namespace cs::features
 		if (!property || !property->flags.all(ShaderFlag::kMultiTextureLandscape) ||
 			property->flags.any(ShaderFlag::kLODLandscape) || !IsOperational())
 			return nullptr;
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		if (!camera)
 			return nullptr;
 		const RE::NiPoint3 eye{ camera->PosAdjust.x, camera->PosAdjust.y, camera->PosAdjust.z };

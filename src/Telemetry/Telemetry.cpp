@@ -233,7 +233,7 @@ namespace cs::telemetry
 					TomlVector3(position.x, position.y, position.z));
 			}
 
-			const auto camera = cs::engine::GetWorldCameraRecord();
+			const auto camera = cs::engine::GetCapturedWorldCameraRecord();
 			a_root.insert_or_assign("camera_snapshot_valid", camera.has_value());
 			a_root.insert_or_assign(
 				"camera_orientation_source",
@@ -267,7 +267,7 @@ namespace cs::telemetry
 
 		void CollectFrameBuffer(Sink& a_sink)
 		{
-			const auto camera = cs::engine::GetWorldCameraRecord();
+			const auto camera = cs::engine::GetCapturedWorldCameraRecord();
 			a_sink.Field("camera_record_valid", camera.has_value());
 			if (!camera) {
 				return;
