@@ -33,7 +33,6 @@ namespace cs::render
 
 		std::atomic_uint64_t g_menu{ 0 };
 		std::atomic_uint64_t g_resets{ 0 };
-		std::atomic_uint32_t g_worldEngineFrame{ 0 };
 		std::atomic_uint8_t g_pendingResets{ 0 };
 		std::atomic_uint64_t g_worldFrame{ 0 };
 
@@ -68,8 +67,6 @@ namespace cs::render
 			state.mainOrLoading = (bits & kMainOrLoading) != 0;
 			state.worldFrozen = (bits & kWorldFrozen) != 0;
 			state.worldFrame = g_worldFrame.load(std::memory_order_acquire);
-			state.worldRendered = state.worldFrame != 0 &&
-			                      g_worldEngineFrame.load(std::memory_order_acquire) == a_frame;
 			const auto resets = g_resets.load(std::memory_order_acquire);
 			state.resets = FrameOf(resets) == a_frame ? BitsOf(resets) : std::uint8_t{ 0 };
 			return state;
@@ -81,7 +78,7 @@ namespace cs::render
 		const auto frame = engine::GetFrameCount();
 		auto menu = g_menu.load(std::memory_order_acquire);
 		if (!Latched(menu, frame)) {
-			// First sampler wins; sampled lock-free because DearModdingUI callbacks can re-enter.
+			// First sampler wins; lock-free because UI callbacks can re-enter.
 			const auto sampled = Pack(frame, SampleMenuBits());
 			while (!Latched(menu, frame)) {
 				if (g_menu.compare_exchange_weak(menu, sampled, std::memory_order_acq_rel)) {
@@ -98,15 +95,13 @@ namespace cs::render
 		g_pendingResets.fetch_or(static_cast<std::uint8_t>(a_reason), std::memory_order_acq_rel);
 	}
 
-	std::uint64_t BeginWorldFrame() noexcept
+	void BeginWorldFrame() noexcept
 	{
 		const auto state = GetFrameState();
-		const auto world = g_worldFrame.fetch_add(1, std::memory_order_acq_rel) + 1;
-		g_worldEngineFrame.store(state.engineFrame, std::memory_order_release);
+		g_worldFrame.fetch_add(1, std::memory_order_acq_rel);
 		if (!state.mainOrLoading) {
 			if (const auto bits = g_pendingResets.exchange(0, std::memory_order_acq_rel))
 				g_resets.store(Pack(state.engineFrame, bits), std::memory_order_release);
 		}
-		return world;
 	}
 }

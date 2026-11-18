@@ -49,8 +49,6 @@ namespace cs::engine
 		constexpr std::uint32_t kPolarFirstFace = 4;
 		constexpr std::uint32_t kDownFace = 5;
 		// World frames: pause and menu frames do not age the faces.
-		// The eye is the previous render's camera; reject pre-load records.
-		constexpr std::uint64_t kMaxCameraAgeFrames = 2;
 		// The hook skips interiors and loads; a longer gap means stale faces.
 		constexpr std::uint64_t kMaxRenderGapFrames = 1;
 		// Sky-Lower: the color below the dome.
@@ -722,7 +720,7 @@ namespace cs::engine
 
 			// This frame's camera is published later; use the previous render's.
 			const auto record = GetCapturedWorldCameraRecord();
-			if (!record || worldFrame - record->worldFrame > kMaxCameraAgeFrames) {
+			if (!record) {
 				g_counters.skippedNoCamera.fetch_add(1, std::memory_order_relaxed);
 				return;
 			}

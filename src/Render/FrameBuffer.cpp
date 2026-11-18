@@ -18,7 +18,6 @@ namespace cs::engine
 		std::mutex g_prepassCameraMutex;
 		std::optional<WorldCameraRecord> g_prepassCamera;
 		std::optional<std::uint32_t> g_prepassFrame;
-		std::uint64_t g_prepassWorldFrame = 0;
 
 		// Render thread; world+jitter valid from MainRenderSetup to DeferredPrePass.
 		std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept
@@ -54,11 +53,9 @@ namespace cs::engine
 			std::scoped_lock lock(g_prepassCameraMutex);
 			const auto frame = GetFrameCount();
 			if (g_prepassFrame != frame)
-				g_prepassWorldFrame = render::BeginWorldFrame();
+				render::BeginWorldFrame();
 			if (g_prepassFrame != frame || !g_prepassCamera) {
 				g_prepassCamera = GetWorldCameraRecord();
-				if (g_prepassCamera)
-					g_prepassCamera->worldFrame = g_prepassWorldFrame;
 				g_prepassFrame = frame;
 			}
 		}

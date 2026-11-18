@@ -18,7 +18,6 @@ namespace cs::engine
 		DirectX::XMFLOAT4 ViewToWorld[3]{};
 		DirectX::XMFLOAT4 PosAdjust{}, PreviousPosAdjust{};
 		std::uint32_t frameCount = 0;
-		std::uint64_t worldFrame = 0;
 	};
 
 	[[nodiscard]] inline DirectX::XMFLOAT3 CameraWorldOrigin(
