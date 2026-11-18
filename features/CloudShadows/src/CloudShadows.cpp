@@ -275,7 +275,7 @@ namespace cs::features
 		}
 		if (_clearedWithoutClouds || !_cube)
 			return;
-		cs::render::annotation::ScopedEvent timing("CloudShadows/ClearNoClouds");
+		cs::render::annotation::ScopedEvent timing("CloudShadows::ClearNoClouds");
 		ClearAllFaces(a_context);
 		_clearedWithoutClouds = true;
 		_counters.noCloudClears.fetch_add(1, std::memory_order_relaxed);
@@ -338,7 +338,7 @@ namespace cs::features
 		cs::render::annotation::SetMarker("CloudShadows/CloudDraw");
 		// The face composite restarts at the first cloud draw of each face render.
 		if (std::exchange(_clearedSerial, capture->serial) != capture->serial) {
-			cs::render::annotation::ScopedEvent timing("CloudShadows/ClearLayer");
+			cs::render::annotation::ScopedEvent timing("CloudShadows::ClearLayer");
 			ClearFace(a_context, capture->face);
 			_counters.facesCleared.fetch_add(1, std::memory_order_relaxed);
 		}
@@ -348,7 +348,7 @@ namespace cs::features
 		if (layers) {
 			if (std::exchange(_layerClearedSerial, capture->serial) != capture->serial) {
 				constexpr float kClear[4]{};
-				cs::render::annotation::ScopedEvent timing("CloudShadows/ClearLayers");
+				cs::render::annotation::ScopedEvent timing("CloudShadows::ClearLayers");
 				a_context->ClearRenderTargetView(_layerFaceRTV[capture->face].get(), kClear);
 			}
 			_counters.layerDraws.fetch_add(1, std::memory_order_relaxed);
@@ -619,7 +619,7 @@ namespace cs::features
 		const cs::render::FullscreenPass::Scope pass(_overlayPass, context, frameBuffer, desc.Width, desc.Height);
 		if (!pass.IsActive())
 			return;
-		cs::render::annotation::ScopedEvent timing("CloudShadows/Overlay");
+		cs::render::annotation::ScopedEvent timing("CloudShadows::Overlay");
 		constexpr float kBlendFactor[4]{};
 		context->OMSetBlendState(_overlayBlend.get(), kBlendFactor, 0xFFFFFFFFu);
 		cs::render::BindSharedData(context, cs::engine::ShaderStage::kPixel);
@@ -643,7 +643,7 @@ namespace cs::features
 	{
 		if (!_previewSelected.load(std::memory_order_acquire) || !_previewCS || !_cubeSRV)
 			return;
-		cs::render::annotation::ScopedEvent timing("CloudShadows/Preview");
+		cs::render::annotation::ScopedEvent timing("CloudShadows::Preview");
 		_preview.Convert(a_context, _previewCS.get(), _cubeSRV.get(), cs::render::GetLinearClampSampler());
 	}
 
