@@ -18,6 +18,7 @@
 #include "Render/CanonicalDepth.h"
 #include "Render/ComputePasses.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -290,7 +291,7 @@ namespace cs::features
 		_cameraReady = false;
 		_tiledAvailable = false;
 		_motionAvailable = false;
-		if (cs::render::IsHistoryResetFrame())
+		if (cs::render::GetFrameState().HasReset())
 			QueueReset("loading_screen_closed");
 		if (!IsEnabled())
 			return;

@@ -47,7 +47,4 @@ namespace cs::engine
 
 	// The engine's main sun-shadow eligibility for the current cell.
 	bool HasSunShadows() noexcept;
-
-	// The main menu or a loading screen is open.
-	bool IsMainOrLoadingMenuOpen() noexcept;
 }

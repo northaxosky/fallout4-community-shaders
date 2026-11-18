@@ -5,13 +5,13 @@
 #include <DearModdingUI/Client.h>
 
 #include "HDRDetection.h"
-#include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/FrameState.h"
 #include "Render/HookRegistry.h"
 #include "Render/InterfaceLayer.h"
 #include "Render/RenderHooks.h"
@@ -189,7 +189,7 @@ namespace cs::features
 	{
 		// The host shell blurs the back buffer, so it must hold the whole frame.
 		render::InterfaceLayer::Get().BeginScene(
-			render::TemporalPipeline::Get().IsHdrContainerActive() && !host::HostClient::IsShellOpen());
+			render::TemporalPipeline::Get().IsHdrContainerActive() && !render::GetFrameState().shellOpen);
 	}
 
 	void HDRDisplay::SeparateInterface()
@@ -202,11 +202,11 @@ namespace cs::features
 
 	void HDRDisplay::WriteSharedFrameData(render::SharedDataCB& a_shared)
 	{
-		const auto* ui = RE::UI::GetSingleton();
+		const auto frame = render::GetFrameState();
 		float menuScene = kMenuSceneGameplay;
-		if (engine::IsMainOrLoadingMenuOpen())
+		if (frame.mainOrLoading)
 			menuScene = kMenuSceneMainOrLoading;
-		else if (ui && ui->GameIsPaused())
+		else if (frame.paused)
 			menuScene = kMenuScenePaused;
 		a_shared.HDRData = {
 			IsHdrActive() ? 1.0f : 0.0f,

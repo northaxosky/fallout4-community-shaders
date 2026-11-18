@@ -1,4 +1,5 @@
 #include "RE/D/DrawWorld.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalRendererInternals.h"
@@ -214,7 +215,7 @@ namespace cs::render
 	void TemporalRenderer::BeginRenderUI()
 	{
 		GuardedThunkBody("Upscaling scene history reset", [] {
-			if (IsHistoryResetFrame()) {
+			if (GetFrameState().HasReset()) {
 				TemporalPipeline::Get().RequestSuperResolutionReset();
 				TemporalPipeline::Get().RequestFrameGenerationReset();
 			}
@@ -452,6 +453,7 @@ namespace cs::render
 		upscaling->_windowSizeChanging = true;
 		func(a_this, a_arg);
 		upscaling->_windowSizeChanging = false;
+		RequestReset(ResetReason::kResize);
 
 		GuardedThunkBody("Upscaling window-size rebuild", [&] {
 			if (std::exchange(upscaling->_windowRebuildDeferred, false)) {

@@ -3,6 +3,7 @@
 #include "Compat/Compat.h"
 #include "Log.h"
 #include "Render/FrameBoundary.h"
+#include "Render/FrameState.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
@@ -49,7 +50,7 @@ namespace
 			RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 		{
 			if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening) {
-				cs::render::RequestHistoryReset();
+				cs::render::RequestReset(cs::render::ResetReason::kLoad);
 				cs::FeatureManager::Get().OnLoadingMenuClosedAll();
 			}
 			return RE::BSEventNotifyControl::kContinue;

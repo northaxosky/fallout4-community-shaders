@@ -18,6 +18,7 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameProfiler.h"
+#include "Render/FrameState.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -152,7 +153,7 @@ namespace cs::features
 
 	bool ImageBasedLighting::IsSceneDisabled(const Settings& a_settings)
 	{
-		return a_settings.DisableInLoadingScreen && engine::IsMainOrLoadingMenuOpen();
+		return a_settings.DisableInLoadingScreen && render::GetFrameState().mainOrLoading;
 	}
 
 	const ImageBasedLighting::FrameState& ImageBasedLighting::EvaluateFrame()

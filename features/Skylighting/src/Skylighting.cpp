@@ -27,6 +27,7 @@
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
 #include "Render/FrameProfiler.h"
+#include "Render/FrameState.h"
 #include "Render/OccluderBatch.h"
 #include "Render/PrecipitationOcclusion.h"
 #include "Render/RenderExtents.h"
@@ -882,7 +883,7 @@ namespace cs::features
 	void Skylighting::Prepass()
 	{
 		// FO4 captures occlusion before the world-frame reset is latched.
-		if (cs::render::IsHistoryResetFrame()) {
+		if (cs::render::GetFrameState().HasReset()) {
 			QueueReset(kResetLoad);
 			if (CaptureReadiness() == CaptureState::kCaptured)
 				ApplyQueuedReset();

@@ -1,3 +1,4 @@
+#include "Render/FrameState.h"
 #include "Render/TemporalRendererInternals.h"
 
 namespace cs::render
@@ -69,13 +70,9 @@ namespace cs::render
 			return false;
 		}
 
-		auto* ui = RE::UI::GetSingleton();
-		const bool menuOpen =
-			!ui || ui->GameIsPaused() ||
-			ui->GetMenuOpen<RE::MainMenu>() ||
-			ui->GetMenuOpen<RE::LoadingMenu>();
+		const auto frame = GetFrameState();
 		return render::TemporalPipeline::Get().IsFrameGenerationEnabledForFrame(
-			menuOpen);
+			frame.paused || frame.mainOrLoading);
 	}
 
 	std::pair<std::uint32_t, std::uint32_t> TemporalRenderer::GetRenderSize() const noexcept

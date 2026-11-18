@@ -23,6 +23,7 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
 #include "Render/RenderTargetFormats.h"
 #include "Render/RendererContext.h"
@@ -807,7 +808,7 @@ namespace cs::features
 		_lastCallbackFrame = state->frameCount;
 		_lastCallbackFrameValid = true;
 
-		if (_queuedReset.exchange(false, std::memory_order_acq_rel) || cs::render::IsHistoryResetFrame()) {
+		if (_queuedReset.exchange(false, std::memory_order_acq_rel) || cs::render::GetFrameState().HasReset()) {
 			ResetCapture();
 		}
 		// Reset capture when game time jumps (wait menu, timescale changes, console commands).

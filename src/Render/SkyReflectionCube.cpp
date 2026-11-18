@@ -6,6 +6,7 @@
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameBuffer.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/RuntimeCallback.h"
@@ -210,7 +211,7 @@ namespace cs::engine
 		[[nodiscard]] bool WorldLoaded() noexcept
 		{
 			const auto* player = RE::PlayerCharacter::GetSingleton();
-			return player && player->parentCell && RE::UI::GetSingleton() && !IsMainOrLoadingMenuOpen();
+			return player && player->parentCell && RE::UI::GetSingleton() && !render::GetFrameState().mainOrLoading;
 		}
 
 		[[nodiscard]] bool AnyConsumerWants(

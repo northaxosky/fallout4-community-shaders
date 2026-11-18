@@ -3,8 +3,8 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/Engine.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
-#include "Render/SharedData.h"
 
 #include <cstring>
 #include <mutex>
@@ -18,15 +18,18 @@ namespace cs::engine
 		std::mutex g_prepassCameraMutex;
 		std::optional<WorldCameraRecord> g_prepassCamera;
 		std::optional<std::uint32_t> g_prepassFrame;
+		std::uint64_t g_prepassWorldFrame = 0;
 
 		void CaptureWorldCamera() noexcept
 		{
 			std::scoped_lock lock(g_prepassCameraMutex);
 			const auto frame = GetFrameCount();
 			if (g_prepassFrame != frame)
-				render::LatchHistoryResetFrame();
+				g_prepassWorldFrame = render::BeginWorldFrame();
 			if (g_prepassFrame != frame || !g_prepassCamera) {
 				g_prepassCamera = GetWorldCameraRecord();
+				if (g_prepassCamera)
+					g_prepassCamera->worldFrame = g_prepassWorldFrame;
 				g_prepassFrame = frame;
 			}
 		}
