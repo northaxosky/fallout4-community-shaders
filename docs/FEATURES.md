@@ -55,7 +55,7 @@ Status: **Pt** partial, **NS** not started; finished features leave the map. Pay
 | Procedural Aurora | Port (provisional) | Procedural curtains in the Sky dome pass, vanilla ribbon cull, per-night seed and storm level, Effects11 handoff | — | NS | L | M | Low |
 | Procedural Sun | Port | Analytic sun disc and corona in the Sky shader's sun pass; yields to an Effects11 preset's own procedural sun | — | NS | M | S/M | Med |
 | Rain Refraction | Port | Rain-drop refraction texture and consumer; reads Light Limit Fix's clustered lights | — | NS | M | M | Low |
-| [Remote Control](deviations/RemoteControl.md) | Port | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc and screenshot capture and NvPerf tools and events | — | Pt | H | M | High |
+| [Remote Control](deviations/RemoteControl.md) | Port | DevBench C-ABI bridge; feature, settings, inspection, shader-cache and RenderDoc and screenshot capture and NvPerf and dev-flag tools and events | — | Pt | H | M | High |
 | [Screen Space GI](deviations/ScreenSpaceGI.md) | Port | AO, GI, temporal, specular GI, vertex AO (relocated), provider wiring | — | Pt | H | M | High |
 | [Screen-Space Shadows](deviations/ScreenSpaceShadows.md) | Port | Bend raymarch, direct/back visibility, tree/alpha/secondary receivers, preview/telemetry | — | Pt | H | M | High |
 | [Screenshot](deviations/Screenshot.md) | Port | SDR PNG, aspect crops, async save, clipboard, scene-only capture, HDR PNG through HDR Display; HDR AVIF pending | N/A: crop editor and preview, SDR BMP | Pt | M | S | High |
