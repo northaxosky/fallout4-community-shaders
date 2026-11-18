@@ -381,7 +381,8 @@ namespace cs::features
 
 	void ScreenSpaceShadows::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
 	{
-		a_fo4.EnabledScreenSpaceShadows = 1u;
+		// Refreshed after the prepass bind; a stock slot would read stale shadows.
+		a_fo4.EnabledScreenSpaceShadows = _maskBound.load(std::memory_order_relaxed) ? 1u : 0u;
 	}
 
 	bool ScreenSpaceShadows::IsShadowMaskReady()
@@ -512,7 +513,6 @@ namespace cs::features
 		}
 
 		_dispatchedLastFrame.store(0, std::memory_order_relaxed);
-		_maskBoundLastFrame.store(false, std::memory_order_relaxed);
 		render::Extent required;
 		render::Extent allocation;
 		auto* device = cs::util::GetD3DDevice();
@@ -692,17 +692,19 @@ namespace cs::features
 		                         sss_resources::Covers({ _allocWidth, _allocHeight }, _requiredMaskExtent) ?
 		                     _maskTexture->srv.get() :
 		                     fallback;
-		if (!selected)
+		if (!selected) {
+			_maskBound.store(false, std::memory_order_relaxed);
 			return;
+		}
 		const auto bind = [&](ID3D11ShaderResourceView* a_view) {
 			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kMaskPSSlot, 1, &a_view);
 			winrt::com_ptr<ID3D11ShaderResourceView> actual;
 			a_context->PSGetShaderResources(kMaskPSSlot, 1, actual.put());
 			return actual.get() == a_view;
 		};
-		if (bind(selected) || (selected != fallback && fallback && bind(fallback))) {
-			_maskBoundLastFrame.store(true, std::memory_order_relaxed);
-		}
+		_maskBound.store(
+			bind(selected) || (selected != fallback && fallback && bind(fallback)),
+			std::memory_order_relaxed);
 	}
 
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -730,7 +732,7 @@ namespace cs::features
 					std::memory_order_relaxed) &&
 					!_whiteFallbackReady.load(
 						std::memory_order_acquire))
-			.Field("mask_bound", _maskBoundLastFrame.load(std::memory_order_relaxed))
+			.Field("mask_bound", _maskBound.load(std::memory_order_relaxed))
 			.Field("dispatches", static_cast<std::int64_t>(_dispatchedLastFrame.load(std::memory_order_relaxed)))
 			.Dimensions("mask", _allocWidth, _allocHeight)
 			.Dimensions(

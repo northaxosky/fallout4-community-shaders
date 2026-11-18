@@ -83,7 +83,7 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _whiteFallbackReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
-		std::atomic_bool _maskBoundLastFrame{ false };
+		std::atomic_bool _maskBound{ false };
 		std::atomic_bool _debugPreviewEnabled{ false };
 		std::atomic<float> _sunX{ 0.0f };
 		std::atomic<float> _sunY{ 0.0f };
