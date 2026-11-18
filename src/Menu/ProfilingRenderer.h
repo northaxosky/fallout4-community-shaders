@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <span>
 #include <string>
 #include <string_view>
@@ -93,14 +94,28 @@ namespace cs
 			float totalAvgMs = 0.0f;
 			float totalP95Ms = 0.0f;
 			float totalP99Ms = 0.0f;
+			// Every row is external: the header sums them, outside the grand total.
+			bool external = false;
 			std::vector<PassEntry> passes;
 		};
 		static inline float cachedTotalAvgMs = 0.0f;
 		static inline float cachedTotalP95Ms = 0.0f;
 		static inline float cachedTotalP99Ms = 0.0f;
-		static inline float cachedMaxAvgMs = 0.0f;
-		static inline float cachedMaxP95Ms = 0.0f;
-		static inline float cachedMaxP99Ms = 0.0f;
+		struct TimingMax
+		{
+			float avgMs = 0.0f;
+			float p95Ms = 0.0f;
+			float p99Ms = 0.0f;
+
+			void Include(float a_avg, float a_p95, float a_p99)
+			{
+				avgMs = std::max(avgMs, a_avg);
+				p95Ms = std::max(p95Ms, a_p95);
+				p99Ms = std::max(p99Ms, a_p99);
+			}
+		};
+		static inline TimingMax cachedMax;
+		static inline TimingMax cachedExternalMax;
 		static inline std::vector<GroupEntry> cachedGroups;
 		// FO4: DmUI has no tree nodes, so the expanded groups are kept here.
 		static inline std::unordered_set<std::string> expandedGroups;

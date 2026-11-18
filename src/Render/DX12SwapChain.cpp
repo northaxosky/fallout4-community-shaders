@@ -552,11 +552,9 @@ namespace cs::render
 		cs::render::annotation::SetName(_retirementQueue.get(),
 			"Upscaling/FrameGeneration.InputRetirementQueue");
 		// Failure leaves the timer disabled; submissions still work.
-		if (!_gpuTimer.Initialize(_device12.get(), _queue.get(),
-				static_cast<std::uint32_t>(_srSubmissions.size() + _presentSubmissions.size()),
-				render::profiling::GetProfiler())) {
-			cs::log::Get("cs.render.d3d12gputimer")->warn("D3D12 GPU timestamps are unavailable; D3D12 passes are not timed");
-		}
+		_gpuTimer.Initialize(_device12.get(), _queue.get(),
+			static_cast<std::uint32_t>(_srSubmissions.size() + _presentSubmissions.size()),
+			profiling::GetProfiler());
 		const auto createSubmissions = [&](auto& a_submissions,
 										   std::string_view a_phase) {
 			for (UINT index = 0; index < a_submissions.size(); ++index) {

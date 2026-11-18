@@ -14,12 +14,12 @@
 
 #include "RCAS/RCAS.h"
 #include "ReShade/ReShadeRuntime.h"
+#include "Render/D3D12GpuTimer.h"
 #include "Render/DXGISwapChainProxy.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/HdrCompose.h"
 #include "Render/TemporalProvider.h"
 #include "Utils/CSBuffer.h"
-#include "Utils/D3D12GpuTimer.h"
 
 namespace cs::features
 {
@@ -224,7 +224,7 @@ namespace cs::render
 			winrt::com_ptr<ID3D12GraphicsCommandList> commandList;
 			winrt::com_ptr<ID3D12DescriptorHeap> postProcessDescriptors;
 			std::uint64_t completionValue = 0;
-			Util::D3D12GpuTimer::Record timing;
+			D3D12GpuTimer::Record timing;
 		};
 		HRESULT AcquireSubmission(
 			std::array<SubmissionRecord, 2>& a_records,
@@ -264,7 +264,7 @@ namespace cs::render
 		winrt::com_ptr<ID3D12Device> _captureDevice12;
 		winrt::com_ptr<ID3D12CommandQueue> _queue;
 		winrt::com_ptr<ID3D12CommandQueue> _retirementQueue;
-		Util::D3D12GpuTimer _gpuTimer;
+		D3D12GpuTimer _gpuTimer;
 		std::array<SubmissionRecord, 2> _srSubmissions;
 		std::array<SubmissionRecord, 2> _presentSubmissions;
 		winrt::com_ptr<ID3D12Resource> _backBuffers[2];

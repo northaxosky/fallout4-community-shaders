@@ -298,9 +298,8 @@ namespace cs
 			cachedTotalAvgMs = 0.0f;
 			cachedTotalP95Ms = 0.0f;
 			cachedTotalP99Ms = 0.0f;
-			cachedMaxAvgMs = 0.0f;
-			cachedMaxP95Ms = 0.0f;
-			cachedMaxP99Ms = 0.0f;
+			cachedMax = {};
+			cachedExternalMax = {};
 			std::unordered_map<std::string, size_t> groupIndex;
 
 			for (const auto& result : profiler.GetStatistics()) {
@@ -341,10 +340,23 @@ namespace cs
 				}
 			}
 
-			for (const auto& group : cachedGroups) {
-				cachedMaxAvgMs = std::max(cachedMaxAvgMs, group.totalAvgMs);
-				cachedMaxP95Ms = std::max(cachedMaxP95Ms, group.totalP95Ms);
-				cachedMaxP99Ms = std::max(cachedMaxP99Ms, group.totalP99Ms);
+			for (auto& group : cachedGroups) {
+				group.external = !group.passes.empty() && std::ranges::all_of(group.passes, &PassEntry::external);
+				for (const auto& pass : group.passes) {
+					if (!pass.external)
+						continue;
+					cachedExternalMax.Include(pass.avgMs, pass.p95Ms, pass.p99Ms);
+					if (group.external) {
+						group.totalAvgMs += pass.avgMs;
+						group.totalP95Ms += pass.p95Ms;
+						group.totalP99Ms += pass.p99Ms;
+					}
+				}
+				if (group.external) {
+					cachedExternalMax.Include(group.totalAvgMs, group.totalP95Ms, group.totalP99Ms);
+					continue;
+				}
+				cachedMax.Include(group.totalAvgMs, group.totalP95Ms, group.totalP99Ms);
 			}
 		}
 
@@ -380,12 +392,13 @@ namespace cs
 				Util::SortTableRows(groups, sort, groupSorts);
 
 				const auto metrics = [](float a_avg, float a_p95, float a_p99, bool a_external = false) {
+					const auto& max = a_external ? cachedExternalMax : cachedMax;
 					(void)dmui::ui::TableNextColumn();
-					TextHeat("%.3f", a_avg, cachedMaxAvgMs);
+					TextHeat("%.3f", a_avg, max.avgMs);
 					(void)dmui::ui::TableNextColumn();
-					TextHeat("%.3f", a_p95, cachedMaxP95Ms);
+					TextHeat("%.3f", a_p95, max.p95Ms);
 					(void)dmui::ui::TableNextColumn();
-					TextHeat("%.3f", a_p99, cachedMaxP99Ms);
+					TextHeat("%.3f", a_p99, max.p99Ms);
 					(void)dmui::ui::TableNextColumn();
 					if (!a_external && cachedTotalAvgMs > 0.0f)
 						TextHeat("%5.1f", (a_avg / cachedTotalAvgMs) * 100.0f, 100.0f);
@@ -401,7 +414,7 @@ namespace cs
 						metrics(group.totalAvgMs, group.totalP95Ms, group.totalP99Ms);
 					} else {
 						bool open = GroupNode(group.name, expandedGroups);
-						metrics(group.totalAvgMs, group.totalP95Ms, group.totalP99Ms);
+						metrics(group.totalAvgMs, group.totalP95Ms, group.totalP99Ms, group.external);
 						if (open) {
 							std::vector<const PassEntry*> passes;
 							passes.reserve(group.passes.size());
