@@ -239,11 +239,6 @@ PS_OUTPUT main(PS_INPUT input)
 	float range = bounds.z - bounds.y;
 	float along = bounds.x - bounds.y;
 	float speedChange = abs(speedFraction - previousSpeedFraction);
-#		ifdef HDR_OUTPUT
-	// Upstream decays by PQ luma change; 20 and 100 were tuned for gamma luma.
-	if (UseHDR)
-		speedChange = abs(historyLuma - lC) * 0.05;
-#		endif
 	float steadyA = max(1.0 - speedChange * 20.0, 0.0);
 	float steadyB = max(1.0 - speedChange * 100.0, 0.0);
 	float ramp = saturate(flagged * 0.2 + min(history.w, flagged));
