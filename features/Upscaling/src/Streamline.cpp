@@ -252,7 +252,7 @@ namespace cs::features
 		}
 
 		if (SL_FAILED(res, slInit(pref, sl::kSDKVersion))) {
-			L->critical("Failed to initialize Streamline: {}", magic_enum::enum_name(res));
+			L->critical("Failed to initialize Streamline: slInit returned {} ({})", magic_enum::enum_name(res), std::to_underlying(res));
 		} else {
 			initialized = true;
 			featureDLSS = false;
