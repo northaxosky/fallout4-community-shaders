@@ -13,6 +13,12 @@
 - Profiling: the Profiling page holds the Performance Overlay settings; the overlay can hide chosen pass groups, and switched-off features' passes read 0.
 - Remote Control: `communityshaders.devflags` lists, sets and resets named runtime switches for candidate code paths.
 - Image Based Lighting: sky ambient no longer flickers when the player jumps, most visible on buildings at night.
+- Water: screen-space reflections now work on the original game runtime with Dynamic Cubemaps.
+- Water: Skylighting now applies to water with Dynamic Cubemaps on.
+- Dynamic Cubemaps: sky reflections and ambient no longer drop out after a skipped frame.
+- Upscaling: NaN pixels no longer leave black blocks in the upscaled image.
+- Light Limit Fix: native light radii are restored while it is suspended.
+- Screen Space Shadows: surfaces read no contact shadows instead of stale ones when the mask is unavailable.
 
 ## 0.5.1
 
