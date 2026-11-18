@@ -12,6 +12,7 @@
 - Sky Sync: shadow caster swaps finish their fade when crossing exterior cells, and the alternate sun path stays continuous across midnight.
 - Profiling: the Profiling page holds the Performance Overlay settings; the overlay can hide chosen pass groups, and switched-off features' passes read 0.
 - Remote Control: `communityshaders.devflags` lists, sets and resets named runtime switches for candidate code paths.
+- Image Based Lighting: sky ambient no longer flickers when the player jumps, most visible on buildings at night.
 
 ## 0.5.1
 
