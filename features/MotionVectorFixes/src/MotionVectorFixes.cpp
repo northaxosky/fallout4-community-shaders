@@ -8,6 +8,7 @@
 
 #include "Log.h"
 #include "Render/EngineCallSite.h"
+#include "Render/FrameState.h"
 #include "Render/LightingRenderPasses.h"
 #include "Telemetry/Telemetry.h"
 
@@ -133,9 +134,7 @@ namespace cs::features
 		{
 			if (!Enabled())
 				return;
-			auto* main = RE::Main::GetSingleton();
-			const bool frozen =
-				main && main->gameActive && (main->inMenuMode || main->freezeTime);
+			const bool frozen = cs::render::GetFrameState().worldFrozen;
 			const bool lod =
 				a_call.property && a_call.property->flags.any(
 									   ShaderFlag::kLODObjects,

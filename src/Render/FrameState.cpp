@@ -4,63 +4,93 @@
 #include "Render/Engine.h"
 
 #include <atomic>
-#include <mutex>
 
 namespace cs::render
 {
 	namespace
 	{
-		std::mutex g_mutex;
-		FrameState g_latched;
-		bool g_hasLatch = false;
-		std::uint32_t g_worldEngineFrame = 0;
-		std::uint32_t g_resetEngineFrame = 0;
-		std::uint8_t g_resetBits = 0;
+		// Frame in the high word, flags in the low byte.
+		constexpr std::uint8_t kShellOpen = 1 << 0;
+		constexpr std::uint8_t kPaused = 1 << 1;
+		constexpr std::uint8_t kMainOrLoading = 1 << 2;
+		constexpr std::uint8_t kWorldFrozen = 1 << 3;
+		constexpr std::uint8_t kLatched = 1 << 7;
+
+		constexpr std::uint64_t Pack(std::uint32_t a_frame, std::uint8_t a_bits) noexcept
+		{
+			return (static_cast<std::uint64_t>(a_frame) << 32) | a_bits;
+		}
+
+		constexpr std::uint32_t FrameOf(std::uint64_t a_packed) noexcept
+		{
+			return static_cast<std::uint32_t>(a_packed >> 32);
+		}
+
+		constexpr std::uint8_t BitsOf(std::uint64_t a_packed) noexcept
+		{
+			return static_cast<std::uint8_t>(a_packed);
+		}
+
+		std::atomic_uint64_t g_menu{ 0 };
+		std::atomic_uint64_t g_resets{ 0 };
+		std::atomic_uint32_t g_worldEngineFrame{ 0 };
 		std::atomic_uint8_t g_pendingResets{ 0 };
 		std::atomic_uint64_t g_worldFrame{ 0 };
 
-		// Sampled outside the lock: DearModdingUI callbacks can re-enter from its own lock.
-		FrameState SampleMenuState(std::uint32_t a_frame) noexcept
+		bool Latched(std::uint64_t a_packed, std::uint32_t a_frame) noexcept
+		{
+			return (BitsOf(a_packed) & kLatched) != 0 && FrameOf(a_packed) == a_frame;
+		}
+
+		std::uint8_t SampleMenuBits() noexcept
 		{
 			const auto* ui = RE::UI::GetSingleton();
+			const auto* main = RE::Main::GetSingleton();
+			std::uint8_t bits = kLatched;
+			if (ui && (ui->GetMenuOpen<RE::MainMenu>() || ui->GetMenuOpen<RE::LoadingMenu>()))
+				bits |= kMainOrLoading;
+			if (!ui || ui->GameIsPaused())
+				bits |= kPaused;
+			if (host::HostClient::IsShellOpen())
+				bits |= kShellOpen;
+			if (main && main->gameActive && (main->inMenuMode || main->freezeTime))
+				bits |= kWorldFrozen;
+			return bits;
+		}
+
+		FrameState Compose(std::uint64_t a_menu, std::uint32_t a_frame) noexcept
+		{
+			const auto bits = BitsOf(a_menu);
 			FrameState state;
 			state.engineFrame = a_frame;
-			state.mainOrLoading = ui && (ui->GetMenuOpen<RE::MainMenu>() || ui->GetMenuOpen<RE::LoadingMenu>());
-			state.paused = !ui || ui->GameIsPaused();
-			state.shellOpen = host::HostClient::IsShellOpen();
-			return state;
-		}
-
-		FrameState Compose(std::uint32_t a_frame) noexcept
-		{
-			auto state = g_latched;
+			state.shellOpen = (bits & kShellOpen) != 0;
+			state.paused = (bits & kPaused) != 0;
+			state.mainOrLoading = (bits & kMainOrLoading) != 0;
+			state.worldFrozen = (bits & kWorldFrozen) != 0;
 			state.worldFrame = g_worldFrame.load(std::memory_order_acquire);
-			state.worldRendered = state.worldFrame != 0 && g_worldEngineFrame == a_frame;
-			state.resets = g_resetEngineFrame == a_frame ? g_resetBits : std::uint8_t{ 0 };
+			state.worldRendered = state.worldFrame != 0 &&
+			                      g_worldEngineFrame.load(std::memory_order_acquire) == a_frame;
+			const auto resets = g_resets.load(std::memory_order_acquire);
+			state.resets = FrameOf(resets) == a_frame ? BitsOf(resets) : std::uint8_t{ 0 };
 			return state;
-		}
-
-		bool Latched(std::uint32_t a_frame) noexcept
-		{
-			return g_hasLatch && g_latched.engineFrame == a_frame;
 		}
 	}
 
 	FrameState GetFrameState() noexcept
 	{
 		const auto frame = engine::GetFrameCount();
-		{
-			std::scoped_lock lock(g_mutex);
-			if (Latched(frame))
-				return Compose(frame);
+		auto menu = g_menu.load(std::memory_order_acquire);
+		if (!Latched(menu, frame)) {
+			// First sampler wins; sampled lock-free because DearModdingUI callbacks can re-enter.
+			const auto sampled = Pack(frame, SampleMenuBits());
+			while (!Latched(menu, frame)) {
+				if (g_menu.compare_exchange_weak(menu, sampled, std::memory_order_acq_rel)) {
+					menu = sampled;
+					break;
+				}
+			}
 		}
-		const auto sampled = SampleMenuState(frame);
-		std::scoped_lock lock(g_mutex);
-		if (!Latched(frame)) {
-			g_latched = sampled;
-			g_hasLatch = true;
-		}
-		return Compose(frame);
+		return Compose(menu, frame);
 	}
 
 	void RequestReset(ResetReason a_reason) noexcept
@@ -72,13 +102,10 @@ namespace cs::render
 	{
 		const auto state = GetFrameState();
 		const auto world = g_worldFrame.fetch_add(1, std::memory_order_acq_rel) + 1;
-		std::scoped_lock lock(g_mutex);
-		g_worldEngineFrame = state.engineFrame;
+		g_worldEngineFrame.store(state.engineFrame, std::memory_order_release);
 		if (!state.mainOrLoading) {
-			if (const auto bits = g_pendingResets.exchange(0, std::memory_order_acq_rel)) {
-				g_resetBits = bits;
-				g_resetEngineFrame = state.engineFrame;
-			}
+			if (const auto bits = g_pendingResets.exchange(0, std::memory_order_acq_rel))
+				g_resets.store(Pack(state.engineFrame, bits), std::memory_order_release);
 		}
 		return world;
 	}

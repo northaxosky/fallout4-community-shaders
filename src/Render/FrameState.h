@@ -20,12 +20,13 @@ namespace cs::render
 		bool shellOpen = false;         // the DearModdingUI shell is visible
 		bool paused = false;            // UI reports the game paused, or no UI exists
 		bool mainOrLoading = false;     // main menu or loading screen
+		bool worldFrozen = false;       // game active in a menu or frozen time; motion is stale
 		std::uint8_t resets = 0;        // ResetReason bits applied to this world frame
 
 		[[nodiscard]] bool HasReset() const noexcept { return resets != 0; }
 	};
 
-	// Any thread. Menu flags latch on the first call after frameCount changes.
+	// Any thread, lock-free. Menu flags latch on the first call after frameCount changes.
 	[[nodiscard]] FrameState GetFrameState() noexcept;
 
 	// Any thread. Applied to the next world frame that begins outside main and loading menus.
