@@ -117,6 +117,8 @@ namespace cs::render
 		bool HasRequiredResources(UpscaleMethod a_upscalemethod) const noexcept;
 		winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[static_cast<std::size_t>(UpscaleMethod::kCount)];
 		ID3D11ComputeShader* GetEncodeTexturesCS();
+		winrt::com_ptr<ID3D11ComputeShader> sanitizeColorCS;
+		ID3D11ComputeShader* GetSanitizeColorCS();
 
 		winrt::com_ptr<ID3D11PixelShader> depthRefractionUpscalePS;
 		ID3D11PixelShader* GetDepthRefractionUpscalePS();
@@ -165,6 +167,7 @@ namespace cs::render
 		void BeginRenderUI();
 		void EndRenderUI();
 		bool PerformUpscaling();
+		bool CaptureInputColor(ID3D11DeviceContext* a_context, ID3D11Texture2D* a_sceneColor, std::uint32_t a_width, std::uint32_t a_height);
 		bool PreflightExternalResolve(UpscaleMethod a_method);
 		bool ApplySpatialFallback(
 			ID3D11Texture2D* a_sceneColor,

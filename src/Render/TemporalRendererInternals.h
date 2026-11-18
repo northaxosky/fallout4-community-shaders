@@ -58,6 +58,7 @@ namespace cs::render::renderer_detail
 	inline auto* L = cs::log::Get("cs.feature.upscaling");
 
 	constexpr const wchar_t* kEncodeTexturesPath = L"Data\\Shaders\\FO4\\Upscaling\\EncodeTexturesCS.hlsl";
+	constexpr const wchar_t* kSanitizeColorPath = L"Data\\Shaders\\FO4\\Upscaling\\SanitizeColorCS.hlsl";
 	constexpr const wchar_t* kDepthRefractionUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\DepthRefractionUpscalePS.hlsl";
 	constexpr const wchar_t* kChainInputsUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\ChainInputsUpscalePS.hlsl";
 	constexpr const wchar_t* kUpscaleVSPath = L"Data\\Shaders\\FO4\\Upscaling\\UpscaleVS.hlsl";

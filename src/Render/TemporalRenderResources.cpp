@@ -336,6 +336,15 @@ namespace cs::render
 		return encodeTexturesCS[methodIndex].get();
 	}
 
+	ID3D11ComputeShader* TemporalRenderer::GetSanitizeColorCS()
+	{
+		if (!sanitizeColorCS) {
+			L->debug("Compiling SanitizeColorCS.hlsl");
+			sanitizeColorCS = cs::util::CompileComputeShader("Upscaling/SanitizeColor.CS", kSanitizeColorPath);
+		}
+		return sanitizeColorCS.get();
+	}
+
 	ID3D11PixelShader* TemporalRenderer::GetDepthRefractionUpscalePS()
 	{
 		if (!depthRefractionUpscalePS) {

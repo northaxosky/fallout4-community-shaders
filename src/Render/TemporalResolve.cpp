@@ -269,6 +269,33 @@ namespace cs::render
 		       render::temporal::kMaxConsecutiveSuperResolutionSkips;
 	}
 
+	// One render-size pass: providers keep non-finite input in their history.
+	bool TemporalRenderer::CaptureInputColor(
+		ID3D11DeviceContext* a_context, ID3D11Texture2D* a_sceneColor,
+		std::uint32_t a_width, std::uint32_t a_height)
+	{
+		auto* sourceSRV = cs::engine::GetRenderTargetSRV(kSceneColorTarget);
+		auto* shader = GetSanitizeColorCS();
+		if (!sourceSRV || !shader || !upscalingDataCB || !upscalingTexture || !upscalingTexture->uav ||
+			!ViewReferencesTexture(sourceSRV, a_sceneColor)) {
+			return false;
+		}
+		cs::render::annotation::ScopedEvent inputScope("Upscaling::CaptureInputColor");
+		cs::engine::ComputeOMScope scope(a_context, 1, 0, 1, 1);
+		UpscalingDataCB data;
+		data.trueSamplingDim = float2(static_cast<float>(a_width), static_cast<float>(a_height));
+		data.pad0 = { 0.0f, 0.0f };
+		upscalingDataCB->Update(data);
+		auto* constants = upscalingDataCB->CB();
+		a_context->CSSetConstantBuffers(0, 1, &constants);
+		a_context->CSSetShaderResources(0, 1, &sourceSRV);
+		auto* uav = upscalingTexture->uav.get();
+		a_context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
+		a_context->CSSetShader(shader, nullptr, 0);
+		a_context->Dispatch((a_width + 7) / 8, (a_height + 7) / 8, 1);
+		return true;
+	}
+
 	bool TemporalRenderer::PerformUpscaling()
 	{
 		cs::render::annotation::ScopedEvent upscaleScope("Upscaling::SuperResolution", false);
@@ -304,11 +331,9 @@ namespace cs::render
 			return finish(false);
 		}
 
-		{
-			cs::render::annotation::ScopedEvent inputScope(
-				"Upscaling::CaptureInputColor");
-			cs::engine::CopyResourcePreservingOM(
-				context, upscalingTexture->resource.get(), sceneColor.get());
+		if (!CaptureInputColor(context, sceneColor.get(), renderWidth, renderHeight)) {
+			ScheduleNativeSuperResolutionFallback();
+			return finish(false);
 		}
 
 		const bool captured = cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame()).has_value();
