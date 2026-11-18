@@ -62,14 +62,14 @@ namespace cs::engine
 					// The Update that follows in ComputeProjection republishes the world.
 					MakeBasisRightHanded(*a_camera);
 
-					const auto corner = g_active.quadrant;
+					if (const auto corner = g_active.quadrant) {
+						const float frustumSize = a_frustum->top;
 
-					const float frustumSize = a_frustum->top;
-
-					a_frustum->bottom = (corner == 0 || corner == 1) ? -frustumSize : 0.0f;
-					a_frustum->left = (corner == 0 || corner == 2) ? -frustumSize : 0.0f;
-					a_frustum->right = (corner == 1 || corner == 3) ? frustumSize : 0.0f;
-					a_frustum->top = (corner == 2 || corner == 3) ? frustumSize : 0.0f;
+						a_frustum->bottom = (*corner == 0 || *corner == 1) ? -frustumSize : 0.0f;
+						a_frustum->left = (*corner == 0 || *corner == 2) ? -frustumSize : 0.0f;
+						a_frustum->right = (*corner == 1 || *corner == 3) ? frustumSize : 0.0f;
+						a_frustum->top = (*corner == 2 || *corner == 3) ? frustumSize : 0.0f;
+					}
 				}
 
 				func(a_camera, a_frustum);

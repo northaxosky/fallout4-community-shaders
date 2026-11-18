@@ -104,8 +104,8 @@ namespace Skylighting
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
 		float3 V = normalize(FrameBuffer::ViewToWorld(-viewPosition, false));
-		float3 R = reflect(-V, normalWS);
-		sh2 skylightingSH = SampleProbes(ClampToArrayHeight(positionMS), R);
+		// Normal-biased: a reflection-vector bias shows the probe grid.
+		sh2 skylightingSH = SampleSpecular(SampleProbes(positionMS, normalWS), positionMS);
 		float fadeOut = GetHorizontalFadeOutFactor(positionMS);
 #	ifdef IBL
 		SpecularVisibility result;

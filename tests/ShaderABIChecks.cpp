@@ -404,6 +404,11 @@ namespace
 			return "DirectionalShadowLights: ABI slot mismatch";
 		if (binding.NumSamples != sizeof(cs::engine::DirectionalShadowLightData<cs::engine::kMaxSunCascades>))
 			return "DirectionalShadowLights: ABI structure stride mismatch";
+		// The host binds the zenith depth at t4 and the coverage UAV at u4.
+		for (const char* name : { "srcZenithDepth", "outCoverage" }) {
+			if (FAILED(reflection->GetResourceBindingDescByName(name, &binding)) || binding.BindPoint != 4)
+				return std::string(name) + ": ABI slot mismatch";
+		}
 		return {};
 	}
 	Microsoft::WRL::ComPtr<ID3D11ShaderReflection> Reflect(const std::filesystem::path& a_root, const std::filesystem::path& a_path, const std::vector<std::pair<const char*, const char*>>& a_defines, const char* a_profile, std::string& a_error, Microsoft::WRL::ComPtr<ID3DBlob>* a_blob = nullptr)

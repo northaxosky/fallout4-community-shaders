@@ -196,6 +196,8 @@ namespace cs::features
 		cs::engine::BindInjectionShaderResources(a_context, kProbeArraySlot, shadowVisibility ? 4 : lighting ? 3 :
 																											   1,
 			views.data());
+		const std::array<ID3D11ShaderResourceView*, 2> coverage{ _texProbeCoverage->srv.get(), _zenithMap.Target().depthSRV };
+		cs::engine::BindInjectionShaderResources(a_context, kCoverageSlot, static_cast<UINT>(coverage.size()), coverage.data());
 		if (shadowVisibility && ActiveLightReadsShadowVisibility())
 			_probeCounters.shadowVisDraws.fetch_add(1, std::memory_order_relaxed);
 		auto& counter = a_consumer == Consumer::kWater     ? _probeCounters.waterDraws :
@@ -242,6 +244,7 @@ namespace cs::features
 		};
 		_texProbeArray = create(DXGI_FORMAT_R16G16B16A16_FLOAT, "Skylighting/ProbeArray");
 		_texAccumFramesArray = create(DXGI_FORMAT_R8_UINT, "Skylighting/AccumFramesArray");
+		_texProbeCoverage = create(DXGI_FORMAT_R8_UINT, "Skylighting/ProbeCoverage");
 		_texShadowBitmask = create(DXGI_FORMAT_R32_UINT, "Skylighting/ShadowBitmask");
 		_texShadowVisibility = create(DXGI_FORMAT_R8_UNORM, "Skylighting/ShadowVisibility");
 
@@ -265,7 +268,7 @@ namespace cs::features
 		a_device->GetImmediateContext(context.put());
 		ResetSkylighting(context.get());
 		_probesReady.store(true, std::memory_order_release);
-		CaptureLog->info("probe arrays: {}x{}x{} R16G16B16A16_FLOAT, R8_UINT, R32_UINT, R8_UNORM",
+		CaptureLog->info("probe arrays: {}x{}x{} R16G16B16A16_FLOAT, R8_UINT x2, R32_UINT, R8_UNORM",
 			kProbeArrayDims[0], kProbeArrayDims[1], kProbeArrayDims[2]);
 	}
 
@@ -290,6 +293,10 @@ namespace cs::features
 		// ClearUnorderedAccessViewUint always reads four values
 		const UINT clr[4] = { 0, 0, 0, 0 };
 		a_context->ClearUnorderedAccessViewUint(_texAccumFramesArray->uav.get(), clr);
+		const UINT unknownCoverage[4] = { kCoverageUnknown, kCoverageUnknown, kCoverageUnknown, kCoverageUnknown };
+		a_context->ClearUnorderedAccessViewUint(_texProbeCoverage->uav.get(), unknownCoverage);
+		_counters.zenithValid.store(false, std::memory_order_relaxed);
+		_zenithPending = false;
 		// All 32 history bits lit, so a reset does not fade in from black while the history refills
 		const UINT litHistory[4] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
 		a_context->ClearUnorderedAccessViewUint(_texShadowBitmask->uav.get(), litHistory);
@@ -301,10 +308,18 @@ namespace cs::features
 		probeGridBottomZ = -FLT_MAX;
 	}
 
+	void Skylighting::UnbindCoverage(ID3D11DeviceContext* a_context)
+	{
+		ID3D11ShaderResourceView* const none[2]{};
+		a_context->CSSetShaderResources(kCoverageSlot, 2, none);
+		a_context->PSSetShaderResources(kCoverageSlot, 2, none);
+	}
+
 	void Skylighting::CreateOcclusionResources(ID3D11Device* a_device)
 	{
 		_occlusionMap.Create(a_device, "Skylighting/Occlusion");
-		CaptureLog->info("occlusion depth target: {0}x{0} R16_TYPELESS, DSV D16_UNORM, SRV R16_UNORM", cs::engine::kOcclusionMapSize);
+		_zenithMap.Create(a_device, "Skylighting/ZenithOcclusion");
+		CaptureLog->info("occlusion depth targets: 2x {0}x{0} R16_TYPELESS, DSV D16_UNORM, SRV R16_UNORM", cs::engine::kOcclusionMapSize);
 	}
 
 	std::span<const FeatureDebugView> Skylighting::GetDebugViews() const noexcept
@@ -360,12 +375,12 @@ namespace cs::features
 		auto* target = cs::render::AcquireFullscreenDebugTarget();
 		if (!target)
 			return;
-		cs::engine::ComputeOMScope scope(a_context, 2, 0, 1, 0);
+		cs::engine::ComputeOMScope scope(a_context, 4, 0, 1, 0);
 		cs::render::ScopedComputeSharedDataBinding substrate(a_context);
 		cs::render::annotation::ScopedEvent event("Skylighting::Debug", false);
-		ID3D11ShaderResourceView* srvs[]{ normals, _texProbeArray->srv.get() };
+		ID3D11ShaderResourceView* srvs[]{ normals, _texProbeArray->srv.get(), _texProbeCoverage->srv.get(), _zenithMap.Target().depthSRV };
 		ID3D11UnorderedAccessView* uavs[]{ target->uav.get() };
-		a_context->CSSetShaderResources(0, 2, srvs);
+		a_context->CSSetShaderResources(0, 4, srvs);
 		a_context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 		a_context->CSSetShader(shader, nullptr, 0);
 		a_context->Dispatch((extent.width + 7) / 8, (extent.height + 7) / 8, 1);
@@ -397,7 +412,7 @@ namespace cs::features
 
 	Skylighting::CaptureState Skylighting::CaptureReadiness() const
 	{
-		if (!IsHealthy() || !IsEnabled() || !_occlusionMap.Ready() || !_probesReady.load(std::memory_order_acquire))
+		if (!IsHealthy() || !IsEnabled() || !_occlusionMap.Ready() || !_zenithMap.Ready() || !_probesReady.load(std::memory_order_acquire))
 			return CaptureState::kDisabled;
 		return cs::engine::IsInterior() ? CaptureState::kInterior : CaptureState::kCaptured;
 	}
@@ -426,50 +441,57 @@ namespace cs::features
 		const auto start = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
 		frameCount++;
+		_zenithFrame = frameCount % kZenithInterval == 0;
 
-		DirectX::XMFLOAT2 vPoint;
-		{
-			constexpr float rcpRandMax = 1.f / RAND_MAX;
-			static int randSeed = std::rand();
-			static std::uint32_t randFrameCount = 0;
+		DirectX::XMFLOAT3 PrecipitationShaderDirectionF{ 0.0f, 0.0f, -1.0f };
+		if (!_zenithFrame) {
+			DirectX::XMFLOAT2 vPoint;
+			{
+				constexpr float rcpRandMax = 1.f / RAND_MAX;
+				static int randSeed = std::rand();
+				static std::uint32_t randFrameCount = 0;
 
-			// r2 sequence
-			vPoint = { randSeed * rcpRandMax + (float)randFrameCount * 0.245122333753f, randSeed * rcpRandMax + (float)randFrameCount * 0.430159709002f };
-			vPoint.x -= static_cast<unsigned long long>(vPoint.x);
-			vPoint.y -= static_cast<unsigned long long>(vPoint.y);
+				// r2 sequence
+				vPoint = { randSeed * rcpRandMax + (float)randFrameCount * 0.245122333753f, randSeed * rcpRandMax + (float)randFrameCount * 0.430159709002f };
+				vPoint.x -= static_cast<unsigned long long>(vPoint.x);
+				vPoint.y -= static_cast<unsigned long long>(vPoint.y);
 
-			randFrameCount++;
-			if (randFrameCount == 1000) {
-				randFrameCount = 0;
-				randSeed = std::rand();
+				randFrameCount++;
+				if (randFrameCount == 1000) {
+					randFrameCount = 0;
+					randSeed = std::rand();
+				}
+
+				// disc transformation
+				vPoint.x = sqrt(vPoint.x) * sin(_settings.MaxZenith);
+				vPoint.y *= 6.28318530718f;
+
+				vPoint = { vPoint.x * cos(vPoint.y), vPoint.x * sin(vPoint.y) };
 			}
 
-			// disc transformation
-			vPoint.x = sqrt(vPoint.x) * sin(_settings.MaxZenith);
-			vPoint.y *= 6.28318530718f;
-
-			vPoint = { vPoint.x * cos(vPoint.y), vPoint.x * sin(vPoint.y) };
-		}
-
-		DirectX::XMFLOAT3 PrecipitationShaderDirectionF{ -vPoint.x, -vPoint.y, -sqrt(1 - (vPoint.x * vPoint.x + vPoint.y * vPoint.y)) };
-		DirectX::XMStoreFloat3(&PrecipitationShaderDirectionF, DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&PrecipitationShaderDirectionF)));
-		// Rounding past the unit disc would hand the engine a NaN direction.
-		if (!std::isfinite(PrecipitationShaderDirectionF.x + PrecipitationShaderDirectionF.y + PrecipitationShaderDirectionF.z)) {
-			_counters.failed.fetch_add(1, std::memory_order_relaxed);
-			return CaptureState::kFailed;
+			PrecipitationShaderDirectionF = { -vPoint.x, -vPoint.y, -sqrt(1 - (vPoint.x * vPoint.x + vPoint.y * vPoint.y)) };
+			DirectX::XMStoreFloat3(&PrecipitationShaderDirectionF, DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&PrecipitationShaderDirectionF)));
+			// Rounding past the unit disc would hand the engine a NaN direction.
+			if (!std::isfinite(PrecipitationShaderDirectionF.x + PrecipitationShaderDirectionF.y + PrecipitationShaderDirectionF.z)) {
+				_counters.failed.fetch_add(1, std::memory_order_relaxed);
+				return CaptureState::kFailed;
+			}
+		} else if (auto* context = cs::engine::GetImmediateContext()) {
+			// Consumers bound the zenith depth as an SRV since the last update.
+			UnbindCoverage(context);
 		}
 
 		// FO4: the adapter swaps DS8 and the globals, projects twice, restores.
 		const cs::engine::OcclusionCaptureRequest request{
-			.boxSize = occlusionDistance,
+			.boxSize = _zenithFrame ? kZenithExtent : occlusionDistance,
 			.travelDirection = PrecipitationShaderDirectionF,
-			.quadrant = frameCount % 4,
+			.quadrant = _zenithFrame ? std::nullopt : std::optional{ frameCount % 4 },
 			.occluders = {
 				.minOccluderRadius = MIN_OCCLUDER_RADIUS,
 				.belowGridMargin = OCCLUSION_BELOW_GRID_MARGIN,
 				.probeGridBottomZ = probeGridBottomZ },
 			.batching = { _settings.BatchOccluders, _batchValidationInterval.load(std::memory_order_relaxed) },
-			.target = _occlusionMap.Target()
+			.target = _zenithFrame ? _zenithMap.Target() : _occlusionMap.Target()
 		};
 		cs::engine::OcclusionCaptureResult result;
 		const auto status = cs::engine::CaptureOcclusion(request, result);
@@ -484,10 +506,19 @@ namespace cs::features
 			return CaptureState::kTargets;
 		}
 
-		const auto basis = SphericalHarmonics::Scale(SphericalHarmonics::Evaluate(float3(-PrecipitationShaderDirectionF.x, -PrecipitationShaderDirectionF.y, -PrecipitationShaderDirectionF.z)), 4.0f * std::numbers::pi_v<float>);
-		OcclusionSHBasis4Pi = { basis.c0, basis.c1[0], basis.c1[1], basis.c1[2] };
-		OcclusionTransform = result.matrix;
-		_hasOcclusion = true;
+		if (_zenithFrame) {
+			const auto& rows = result.matrix.m;
+			if (std::ranges::all_of(rows, [](const auto& a_row) { return std::ranges::all_of(a_row, [](float a_value) { return std::isfinite(a_value); }); })) {
+				ZenithTransform = result.matrix;
+				_zenithPending = true;
+			}
+			_counters.zenithCaptures.fetch_add(1, std::memory_order_relaxed);
+		} else {
+			const auto basis = SphericalHarmonics::Scale(SphericalHarmonics::Evaluate(float3(-PrecipitationShaderDirectionF.x, -PrecipitationShaderDirectionF.y, -PrecipitationShaderDirectionF.z)), 4.0f * std::numbers::pi_v<float>);
+			OcclusionSHBasis4Pi = { basis.c0, basis.c1[0], basis.c1[1], basis.c1[2] };
+			OcclusionTransform = result.matrix;
+			_hasOcclusion = true;
+		}
 
 		_counters.captures.fetch_add(1, std::memory_order_relaxed);
 		_counters.stockTargetRestored.store(result.stockTargetRestored, std::memory_order_relaxed);
@@ -579,7 +610,7 @@ namespace cs::features
 		CaptureLog->log(
 			a_level,
 			"summary enabled={} state={} anchor_frames={} frame={} captures={} skipped_interior={} skipped_disabled={} skipped_targets={} failed={} "
-			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} "
+			"L={:.0f} sh4pi=({:.3f},{:.3f},{:.3f},{:.3f}) quadrant={} zenith_frame={} zenith_captures={} zenith_valid={} "
 			"accepted={} delegated={} own_built={} own_new={} own_landscape={} own_not_casting={} own_alpha_blended={} own_other={} stock_only={} "
 			"rej_skinned={} rej_flags={} rej_radius={} rej_below_grid={} rej_bsx={} "
 			"batched_plain={} batched_merge={} batch_draws={} batch_pool_records={} batch_fallback_technique={} batch_fallback_alpha_test={} batch_fallback_alpha_mask={} batch_fallback_tree_anim={} batch_fallback_technique_other={} batch_fallback_vats_target={} batch_fallback_class_disabled={} batch_fallback_merge_shape={} batch_fallback_geometry_type={} batch_fallback_no_indices={} batch_fallback_animated={} batch_fallback_renderer_data={} batch_fallback_buffer={} batch_fallback_structured={} batch_fallback_heap_view={} batch_fallback_pool_full={} batch_fallback_arena_full={} "
@@ -592,6 +623,7 @@ namespace cs::features
 			IsEnabled() ? 1 : 0, stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
 			occlusionDistance, OcclusionSHBasis4Pi.x, OcclusionSHBasis4Pi.y, OcclusionSHBasis4Pi.z, OcclusionSHBasis4Pi.w, frameCount % 4,
+			_zenithFrame ? 1 : 0, count(_counters.zenithCaptures), _counters.zenithValid.load(std::memory_order_relaxed) ? 1 : 0,
 			count(stats.accepted), count(stats.delegated), ownTotal, count(stats.ownNew),
 			own(Own::kLandscape), own(Own::kNotCasting), own(Own::kAlphaBlended), own(Own::kOther), count(stats.stockOnly),
 			rejected(Reject::kSkinned), rejected(Reject::kFlags), rejected(Reject::kRadius), rejected(Reject::kBelowGrid), rejected(Reject::kBsx),
@@ -626,6 +658,8 @@ namespace cs::features
 		const auto statusSkipped = [&](cs::engine::SunCascadeStatus a_status) { return count(_cascadeCounters.statusSkipped[static_cast<std::size_t>(a_status)]); };
 		a_sink
 			.Field("captures", count(_counters.captures))
+			.Field("zenith_captures", count(_counters.zenithCaptures))
+			.Field("zenith_valid", _counters.zenithValid.load(std::memory_order_relaxed))
 			.Field("skipped_interior", count(_counters.skippedInterior))
 			.Field("skipped_disabled", count(_counters.skippedDisabled))
 			.Field("skipped_targets", count(_counters.skippedTargets))
@@ -758,15 +792,22 @@ namespace cs::features
 		const auto arrayOrigin = [&](float a_cell, std::size_t a_axis) {
 			return (static_cast<std::uint32_t>(static_cast<int>(a_cell)) - kProbeArrayDims[a_axis] / 2) % kProbeArrayDims[a_axis];
 		};
+		if (std::exchange(_zenithPending, false)) {
+			_zenithAnchor = { anchor.x, anchor.y, anchor.z };
+			_counters.zenithValid.store(true, std::memory_order_relaxed);
+		}
 		_grid.block = {
 			.OcclusionViewProj = OcclusionTransform,
+			.ZenithViewProj = ZenithTransform,
 			.OcclusionSHBasis4Pi = OcclusionSHBasis4Pi,
 			.PosOffset = { cellOrigin.x - anchor.x, cellOrigin.y - anchor.y, cellOrigin.z - anchor.z, 0.0f },
 			.ArrayOrigin = { arrayOrigin(cellID.x, 0), arrayOrigin(cellID.y, 1), arrayOrigin(cellID.z, 2), 0 },
 			.ValidMargin = { static_cast<int>(cellIDDiff.x), static_cast<int>(cellIDDiff.y), static_cast<int>(cellIDDiff.z), 0 },
+			.ZenithOffset = { anchor.x - _zenithAnchor.x, anchor.y - _zenithAnchor.y, anchor.z - _zenithAnchor.z },
+			.ZenithValid = _counters.zenithValid.load(std::memory_order_relaxed) ? 1u : 0u,
 			.MinDiffuseVisibility = _settings.MinDiffuseVisibility,
 			.MinSpecularVisibility = _settings.MinSpecularVisibility,
-			.AccumulateOcclusion = 1u
+			.AccumulateOcclusion = _zenithFrame ? 0u : 1u
 		};
 		_grid.frame = graphics->frameCount;
 		a_feature.skylightingSettings = _grid.block;
@@ -891,26 +932,29 @@ namespace cs::features
 	void Skylighting::DispatchProbeUpdate(ID3D11DeviceContext* a_context, const ProbeCascades& a_cascades)
 	{
 		// The engine may still have the cascade array bound as a depth target.
-		cs::engine::ComputeOMScope scope(a_context, 4, 1, 4, 0);
+		cs::engine::ComputeOMScope scope(a_context, 5, 1, 5, 0);
 		cs::render::ScopedComputeSharedDataBinding substrate(a_context);
 
 		// Consumers bind the probes as SRVs at t50; the UAV writes need them free.
 		ID3D11ShaderResourceView* const noProbes = nullptr;
 		a_context->CSSetShaderResources(kProbeArraySlot, 1, &noProbes);
 		a_context->PSSetShaderResources(kProbeArraySlot, 1, &noProbes);
+		UnbindCoverage(a_context);
 
 		// FO4: no ESRAM shadow, so t3 repeats the cascades; none binds null.
-		std::array<ID3D11ShaderResourceView*, 4> srvs = {
+		std::array<ID3D11ShaderResourceView*, 5> srvs = {
 			_occlusionMap.Target().depthSRV,
 			a_cascades.array,
 			a_cascades.lights,
-			a_cascades.array
+			a_cascades.array,
+			_zenithMap.Target().depthSRV
 		};
-		std::array<ID3D11UnorderedAccessView*, 4> uavs = {
+		std::array<ID3D11UnorderedAccessView*, 5> uavs = {
 			_texProbeArray->uav.get(),
 			_texAccumFramesArray->uav.get(),
 			_texShadowBitmask->uav.get(),
-			_texShadowVisibility->uav.get()
+			_texShadowVisibility->uav.get(),
+			_texProbeCoverage->uav.get()
 		};
 		std::array<ID3D11SamplerState*, 1> samplers = {
 			_comparisonSampler.get()

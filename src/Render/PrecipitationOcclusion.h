@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,8 +84,8 @@ namespace cs::engine
 		float boxSize = 0.0f;
 		// Precipitation travel direction written to the engine's direction global.
 		DirectX::XMFLOAT3 travelDirection{};
-		// Ortho frustum quarter of the box: 0 to 3.
-		std::uint32_t quadrant = 0;
+		// Ortho frustum quarter of the box, 0 to 3; empty keeps the full frustum.
+		std::optional<std::uint32_t> quadrant;
 		OccluderPolicy occluders;
 		OccluderBatchOptions batching;
 		OcclusionCaptureTarget target;
@@ -132,7 +133,7 @@ namespace cs::engine
 	struct ActiveCapture
 	{
 		std::atomic<const RE::BSShaderAccumulator*> accumulator{ nullptr };
-		std::uint32_t quadrant = 0;
+		std::optional<std::uint32_t> quadrant;
 		OccluderPolicy occluders;
 		const RE::NiCamera* camera = nullptr;
 		OccluderBatchMode batchMode = OccluderBatchMode::kOff;
