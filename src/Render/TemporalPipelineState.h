@@ -49,7 +49,7 @@ namespace cs::render::temporal
 	{
 		bool upscalingEligible = false;
 		bool frameGenerationEligible = false;
-		// HDR Display is loaded; the presenter becomes the HDR container.
+		// HDR Display is loaded and Windows HDR is on at launch.
 		bool hdrDisplay = false;
 		bool superResolutionEnabled = true;
 		bool frameGenerationEnabled = true;

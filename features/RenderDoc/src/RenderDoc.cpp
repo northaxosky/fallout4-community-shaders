@@ -589,7 +589,7 @@ namespace cs::features
 	void RenderDoc::OnFrameBoundary()
 	{
 		ApplyPendingComments();
-		// Behind the temporal proxy, its present is the game-frame boundary.
+		// Behind the D3D12 presenter, its present is the game-frame boundary.
 		if (!_d3d12TargetAvailable.load(std::memory_order_acquire))
 			OnGameFramePresented();
 		PollCaptureCompletion();

@@ -138,6 +138,7 @@ namespace cs::render
 		[[nodiscard]] PresentFrame BeginFrame() noexcept;
 		[[nodiscard]] bool PrepareReShade() noexcept;
 		void ReleaseReShade() noexcept;
+		[[nodiscard]] bool FrameGenerationQuarantined() const noexcept;
 		void NotifyPresentationBinding() noexcept;
 
 		InteropBridge* _bridge = nullptr;

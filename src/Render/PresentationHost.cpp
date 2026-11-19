@@ -169,7 +169,7 @@ namespace cs::render
 		_published = false;
 		ReleaseReShade();
 		_hdrCompose.Reset();
-		const bool quarantined = _bridge && _bridge->IsQuarantined() && _frameGeneration;
+		const bool quarantined = FrameGenerationQuarantined();
 		if (quarantined) {
 			// The GPU may still read these; the presenter retains its own.
 			InteropBridge::Retain(_proxyBuffer);
@@ -383,9 +383,14 @@ namespace cs::render
 				   _frameGeneration ? features::ReShadeRuntime::Attach::kHosted : features::ReShadeRuntime::Attach::kAdopt);
 	}
 
+	bool PresentationHost::FrameGenerationQuarantined() const noexcept
+	{
+		return _bridge && _bridge->IsQuarantined() && _frameGeneration;
+	}
+
 	void PresentationHost::ReleaseReShade() noexcept
 	{
-		if (_bridge && _bridge->IsQuarantined() && _frameGeneration) {
+		if (FrameGenerationQuarantined()) {
 			_reshade.Abandon();
 		} else {
 			_reshade.Destroy();
@@ -453,6 +458,13 @@ namespace cs::render
 		const DXGI_PRESENT_PARAMETERS* a_parameters, bool a_usePresent1) noexcept
 	{
 		auto& pipeline = render::TemporalPipeline::Get();
+		// The vendor chain may still hold quarantined GPU work.
+		if (FrameGenerationQuarantined()) {
+			if (_callbacks.clearCapture) {
+				_callbacks.clearCapture();
+			}
+			return DXGI_ERROR_DEVICE_REMOVED;
+		}
 		const PresentArgs args{ .syncInterval = a_syncInterval, .flags = a_flags, .parameters = a_parameters, .present1 = a_usePresent1 };
 		if (a_flags & DXGI_PRESENT_TEST) {
 			pipeline.BeginPresentAttempt(a_flags);
@@ -470,10 +482,7 @@ namespace cs::render
 			}
 		} };
 		HRESULT result = DXGI_ERROR_INVALID_CALL;
-		if (_bridge && _bridge->IsQuarantined() && _frameGeneration) {
-			// The vendor chain may still hold quarantined GPU work.
-			result = DXGI_ERROR_DEVICE_REMOVED;
-		} else if (!IsReady()) {
+		if (!IsReady()) {
 			if (_presenter) {
 				pipeline.BeginPresentAttempt(a_flags);
 				result = _presenter->PresentChain(args);

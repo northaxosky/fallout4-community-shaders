@@ -22,7 +22,7 @@ namespace cs::render
 		std::function<void()> unbindPresentation;
 		// Behind a D3D12 presenter the D3D11 device has no chain; frames end here.
 		std::function<void()> gameFramePresented;
-		// Set when HDR Display is loaded; the chain then becomes the HDR container.
+		// Set when HDR Display is loaded and Windows HDR is on at launch.
 		std::function<hdr::OutputSettings()> queryHdrOutput;
 	};
 }  // namespace cs::render
