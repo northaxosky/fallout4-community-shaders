@@ -145,11 +145,13 @@ namespace cs::features::performance_overlay
 	{
 		_testError = a_reason;
 		L->error("A/B test stopped: {}", _testError);
-		try {
-			SetInterval(0);
-		} catch (const std::exception&) {
-			// The stop path already recorded the failed restoration.
-		}
+		render::PostToFrame([this] {
+			try {
+				SetInterval(0);
+			} catch (const std::exception&) {
+				// The stop path already recorded the failed restoration.
+			}
+		});
 		Menu::ShowToast(_testError, 8.0, DMUI_STATUS_SEVERITY_ERROR, std::string(_owner.GetDisplayName()));
 	}
 
