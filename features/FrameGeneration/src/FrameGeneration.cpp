@@ -505,10 +505,15 @@ namespace cs::features
 					dlssCapabilities.availability ==
 						render::temporal::CapabilityAvailability::kSupported &&
 					dlssCapabilities.IsCurrent();
-				if (capabilitiesCurrent &&
-					dlssCapabilities.maxGeneratedFrames > 0) {
+				// Outside a frame-generation session nothing is probed; the launch validates.
+				const bool capabilitiesUnprobed =
+					dlssCapabilities.availability == render::temporal::CapabilityAvailability::kUnknown &&
+					!dlssCapabilities.configurationQueryFailed;
+				const std::uint32_t knownMaxGenerated = capabilitiesCurrent ? dlssCapabilities.maxGeneratedFrames : capabilitiesUnprobed ? 3u :
+				                                                                                                                           0u;
+				if (knownMaxGenerated > 0) {
 					const auto maxGeneratedFrames = std::min(
-						dlssCapabilities.maxGeneratedFrames,
+						knownMaxGenerated,
 						std::numeric_limits<std::uint32_t>::max() - 1);
 					generationOptions.reserve(maxGeneratedFrames + 1);
 					for (std::uint32_t generated = 1;
@@ -523,10 +528,8 @@ namespace cs::features
 				}
 				const bool currentFixedSupported =
 					_live.Draft().dlssgMode == 0 &&
-					capabilitiesCurrent &&
 					_live.Draft().dlssgFixedMultiplier >= 2 &&
-					_live.Draft().dlssgFixedMultiplier - 1 <=
-						dlssCapabilities.maxGeneratedFrames;
+					_live.Draft().dlssgFixedMultiplier - 1 <= knownMaxGenerated;
 				if (_live.Draft().dlssgMode == 0 &&
 					!currentFixedSupported) {
 					const auto reason = capabilitiesCurrent                       ? std::format(
@@ -547,8 +550,8 @@ namespace cs::features
 							false });
 				}
 				const bool dynamicSupported =
-					capabilitiesCurrent &&
-					dlssCapabilities.dynamicModeSupported;
+					capabilitiesUnprobed ||
+					(capabilitiesCurrent && dlssCapabilities.dynamicModeSupported);
 				std::string dynamicReason;
 				if (!dynamicSupported) {
 					dynamicReason = dlssCapabilities.configurationQueryFailed ? "runtime capability check failed" : capabilitiesCurrent ? "not supported by this runtime" :
