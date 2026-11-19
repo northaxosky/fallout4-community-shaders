@@ -437,7 +437,7 @@ namespace cs
 		for (auto* feature : GetAll()) {
 			if (auto* live = feature->GetLiveSettings()) {
 				const auto stored = feature_config::GetFeature(feature->GetConfigKey());
-				live->ReloadNext(stored ? stored->get_as<toml::table>("settings") : nullptr);
+				live->ReloadNext(stored ? &*stored : nullptr);
 			}
 		}
 		if (const auto ownership = feature_config::ParseShaderOwnership(reloaded.root); ownership.valid)
@@ -543,8 +543,10 @@ namespace cs
 
 		for (auto* feature : _registeredFeatures) {
 			const auto key = feature->GetConfigKey();
-			if (auto* live = feature->GetLiveSettings())
+			if (auto* live = feature->GetLiveSettings()) {
 				live->section = { "features", key, "settings" };
+				live->log = feature->Log();
+			}
 			const auto* featureTable = features->get(key)->as_table();
 			const auto activation = feature_config::ParseActivation(*featureTable);
 			if (!activation.valid) {

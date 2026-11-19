@@ -105,6 +105,11 @@ namespace cs::settings
 		bool shared = true;
 		// UI thread: an edit finished since the last QueueEdits.
 		bool editCompleted = false;
+		// The owning feature's channel; stamped by FeatureManager.
+		spdlog::logger* log = nullptr;
+
+	protected:
+		spdlog::logger& Logger() const noexcept { return log ? *log : *spdlog::default_logger_raw(); }
 	};
 
 	// Owns a feature's live settings. Every write is a commit prepared at the frame boundary:
@@ -314,7 +319,7 @@ namespace cs::settings
 		{
 			Settings parsed{};
 			if (std::string error; a_stored && !Parse(kSchema, *a_stored, parsed, error)) {
-				spdlog::warn("Stored settings left unchanged for the next launch: {}", error);
+				Logger().warn("Stored settings left unchanged for the next launch: {}", error);
 				return;
 			}
 			std::scoped_lock lock(_mutex);
@@ -366,13 +371,13 @@ namespace cs::settings
 				const std::vector<std::string_view> path(section.begin(), section.end());
 				const auto result = feature_config::UpdateOwnedSettings(path, table, feature_config::SectionWrite::kMerge);
 				if (!result) {
-					spdlog::error("Failed to save settings: {}", result.error);
+					Logger().error("Failed to save settings: {}", result.error);
 					return false;
 				}
 				_unsaved.clear();
 				return true;
 			} catch (const std::exception& error) {
-				spdlog::error("Failed to save settings: {}", error.what());
+				Logger().error("Failed to save settings: {}", error.what());
 				return false;
 			}
 		}
