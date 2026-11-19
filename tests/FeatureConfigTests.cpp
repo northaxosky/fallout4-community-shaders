@@ -150,7 +150,7 @@ namespace
 		constexpr std::array path{
 			std::string_view("features"), std::string_view("ScreenSpaceShadows"), std::string_view("settings")
 		};
-		CHECK(UpdateOwnedSettingsAt(a_path, path, toml::parse("ShadowContrast = 2.0\n")));
+		CHECK(UpdateOwnedSettings(path, toml::parse("ShadowContrast = 2.0\n")));
 		auto root = LoadFile(a_path).table;
 		CHECK(root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == true);
 		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["ShadowContrast"].value<double>() == 2.0);
@@ -160,14 +160,14 @@ namespace
 		const auto activeFeature = GetFeature("ScreenSpaceShadows");
 		CHECK(activeFeature && ParseActivation(*activeFeature).load);
 
-		CHECK(UpdateOwnedSettingsAt(a_path, path, {}));
+		CHECK(UpdateOwnedSettings(path, {}));
 		const auto reset = ReadFile(a_path);
 		CHECK(reset.find("# SurfaceThickness = 0.02\n") != std::string::npos);
 		CHECK(reset.find("# ShadowContrast = 1.0\n") != std::string::npos);
 		// The activation fields share a section; writing one must not drop the other.
 		const auto writeActivation = [&](std::string_view a_feature, std::string_view a_field, bool a_value) {
 			const std::array sectionPath{ std::string_view("features"), a_feature };
-			return static_cast<bool>(UpdateOwnedSettingsAt(a_path, sectionPath, toml::table{ { a_field, a_value } }, SectionWrite::kMerge));
+			return static_cast<bool>(UpdateOwnedSettings(sectionPath, toml::table{ { a_field, a_value } }, SectionWrite::kMerge));
 		};
 		CHECK(reset.find("# enabled = true\n") != std::string::npos);
 		CHECK(writeActivation("ScreenSpaceShadows", "enabled", false));
@@ -233,7 +233,7 @@ namespace
 		constexpr std::array path{
 			std::string_view("features"), std::string_view("ImageBasedLighting"), std::string_view("weather")
 		};
-		CHECK(UpdateOwnedSettingsAt(a_path, path, edited.Serialize()));
+		CHECK(UpdateOwnedSettings(path, edited.Serialize()));
 		Profiles reloaded{ ibl::kWeatherSchema, ibl::kWeatherVariables };
 		CHECK(reloaded.Configure(LoadFile(a_path).table["features"]["ImageBasedLighting"]["weather"].node(), error));
 		CHECK(reloaded.Serialize() == edited.Serialize());
@@ -250,8 +250,26 @@ namespace
 		CHECK(loaded.status == FileLoadStatus::kParseError);
 		CHECK(!ParseActivation(*loaded.root["features"]["ScreenSpaceShadows"].as_table()).load);
 		constexpr std::array path{ std::string_view("logging") };
-		CHECK(!UpdateOwnedSettingsAt(a_path, path, toml::parse("level = 'debug'")));
+		CHECK(!UpdateOwnedSettings(path, toml::parse("level = 'debug'")));
 		CHECK(ReadFile(a_path) == invalid);
+	}
+
+	// The file is the source of truth: writes merge onto it and never overwrite one that is broken.
+	void TestExternalEdits(const Registry& a_registry, const std::filesystem::path& a_path)
+	{
+		CHECK(InitializeAt(a_path, a_registry).error.empty());
+		WriteFile(a_path, "[features.ScreenSpaceShadows]\nload = true\n[logging]\nlevel = 'debug'\n");
+		constexpr std::array path{ std::string_view("preset") };
+		CHECK(UpdateOwnedSettings(path, toml::parse("active = 'user'\n")));
+		const auto merged = LoadFile(a_path).table;
+		CHECK(merged["features"]["ScreenSpaceShadows"]["load"].value<bool>() == true);
+		CHECK(merged["logging"]["level"].value<std::string>() == "debug");
+		CHECK(merged["preset"]["active"].value<std::string>() == "user");
+
+		const std::string broken = "[preset\nactive = 'x'\n";
+		WriteFile(a_path, broken);
+		CHECK(!UpdateOwnedSettings(path, toml::parse("active = 'other'\n")));
+		CHECK(ReadFile(a_path) == broken);
 	}
 
 	void TestLiveSettingsRollback()

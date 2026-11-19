@@ -104,8 +104,8 @@ namespace cs::feature_config
 		kMerge
 	};
 
-	WriteResult UpdateOwnedSettingsAt(
-		const std::filesystem::path& a_filePath,
+	// Merges onto the file as it is on disk; refuses when it does not parse.
+	WriteResult UpdateOwnedSettings(
 		std::span<const std::string_view> a_path,
 		const toml::table& a_value,
 		SectionWrite a_mode = SectionWrite::kReplace);

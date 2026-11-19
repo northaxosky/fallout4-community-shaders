@@ -599,31 +599,38 @@ namespace cs
 
 	void Menu::DrawShaderSettings(dmui::Client& a_client)
 	{
-		auto ownership =
-			feature_config::ParseShaderOwnership(feature_config::GetRoot());
+		// Live ownership is what the engine applies; the stored table may be invalid.
+		const auto stored = feature_config::ParseShaderOwnership(feature_config::GetRoot());
+		auto config = engine::GetShaderOwnershipConfig();
 		if (const ui::Section section{ "section-shader-ownership", "Shader Ownership" }; section) {
 			// A comparison restores the ownership it started from.
 			const dmui::DisabledScope disabled{ cs::settings::liveComparisonActive };
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-ownership", [&] {
-					{
-						if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
-								if (dmui::ui::Checkbox("##enable-shaders", &ownership.config.enableShaders))
-									SaveShaderOwnership(ownership.config);
-								return true;
-							}))
-							return false;
-					}
+					if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
+							const dmui::DisabledScope readOnly{ !stored.valid };
+							if (dmui::ui::Checkbox("##enable-shaders", &config.enableShaders))
+								SaveShaderOwnership(config);
+							return true;
+						}))
+						return false;
 
 					for (const auto& target : engine::GetShaderInjectionTargets()) {
 						if (!ui::DrawRow(a_client, target.name.data(), target.label.data(), "", [&](auto&) {
-								if (dmui::ui::Checkbox("##enabled", &ownership.config.targets[target.id]))
-									SaveShaderOwnership(ownership.config);
+								const dmui::DisabledScope readOnly{ !stored.valid };
+								if (dmui::ui::Checkbox("##enabled", &config.targets[target.id]))
+									SaveShaderOwnership(config);
 								return true;
 							}))
 							return false;
 					}
-					if (!ownership.valid) {
-						return ui::DrawRow(a_client, "shader-ownership-error", "Configuration error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, ownership.error, { .tone = dmui::TextTone::kStatusError }); });
+					if (!stored.valid) {
+						if (!ui::DrawRow(a_client, "shader-ownership-error", "Configuration error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, stored.error, { .tone = dmui::TextTone::kStatusError }); }))
+							return false;
+						return ui::DrawRow(a_client, "shader-ownership-restore", "Restore default ownership", "Replaces the invalid stored table.", [&](auto&) {
+							if (dmui::ui::Button("Restore"))
+								SaveShaderOwnership(feature_config::DefaultShaderOwnership());
+							return true;
+						});
 					}
 					return true;
 				}),
