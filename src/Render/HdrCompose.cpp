@@ -55,7 +55,8 @@ namespace cs::render::hdr
 		_shader = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\HDROutputCS.hlsl", "HDROutputCS");
 		_encodeInterface = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\UIBrightnessCS.hlsl", "UIBrightnessCS");
 		_compositeInterface = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\InterfaceCompositeCS.hlsl", "InterfaceCompositeCS");
-		if (!_shader || !_encodeInterface || !_compositeInterface || FAILED(a_device.CreateBuffer(&desc, nullptr, _constants.put()))) {
+		_toScRgb = CompileCompute(a_device, L"Data\\Shaders\\HDRDisplay\\PqToScRgbCS.hlsl", "PqToScRgbCS");
+		if (!_shader || !_encodeInterface || !_compositeInterface || !_toScRgb || FAILED(a_device.CreateBuffer(&desc, nullptr, _constants.put()))) {
 			Reset();
 			return false;
 		}
@@ -68,6 +69,7 @@ namespace cs::render::hdr
 		_shader = nullptr;
 		_encodeInterface = nullptr;
 		_compositeInterface = nullptr;
+		_toScRgb = nullptr;
 		_constants = nullptr;
 	}
 
@@ -108,6 +110,16 @@ namespace cs::render::hdr
 		annotation::ScopedEvent annotationScope("Render::HdrCompose", false);
 		ID3D11ShaderResourceView* inputs[]{ &a_scene, a_interface ? a_interface : &a_scene };
 		Run(a_context, *_shader, inputs, a_output, a_width, a_height);
+	}
+
+	void Compose::ConvertToScRgb(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_signal,
+		ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const OutputSettings& a_settings)
+	{
+		if (!UpdateConstants(a_context, a_settings, true))
+			return;
+		annotation::ScopedEvent annotationScope("Render::HdrCompose::ToScRgb", false);
+		ID3D11ShaderResourceView* inputs[]{ &a_signal };
+		Run(a_context, *_toScRgb, inputs, a_output, a_width, a_height);
 	}
 
 	void Compose::EncodeInterface(ID3D11DeviceContext& a_context, ID3D11UnorderedAccessView& a_interface,

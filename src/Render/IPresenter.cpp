@@ -23,7 +23,15 @@ namespace cs::render
 		}
 		compose->Dispatch(*context, *source->srv11, separated ? proxy->srv11.get() : nullptr,
 			*output->uav11, width, height, hdr);
-		return output;
+		if (!scRgbOutput) {
+			return output;
+		}
+		if (!scRgbOutput->uav11 || !output->srv11) {
+			CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "scRGB output is unavailable; the frame is not presented.");
+			return nullptr;
+		}
+		compose->ConvertToScRgb(*context, *output->srv11, *scRgbOutput->uav11, width, height, hdr);
+		return scRgbOutput;
 	}
 
 	HRESULT PresenterChain::Present(const PresentArgs& a_args) const noexcept
@@ -36,7 +44,8 @@ namespace cs::render
 
 	void PresenterChain::ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept
 	{
-		const auto colorSpace = hdr::ColorSpace(a_settings);
+		// An fp16 chain carries linear scRGB whether or not HDR is on.
+		const auto colorSpace = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 : hdr::ColorSpace(a_settings);
 		if (!chain || appliedColorSpace == colorSpace) {
 			return;
 		}
@@ -50,6 +59,7 @@ namespace cs::render
 		// Static metadata misbehaves on some monitors, so none is sent.
 		chain->SetHDRMetaData(DXGI_HDR_METADATA_TYPE_NONE, 0, nullptr);
 		L->info("HDR container color space set to {}",
-			a_settings.enabled ? "G2084 (HDR10)" : "G22 (SDR)");
+			colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 ? "G10 (scRGB)" : a_settings.enabled ? "G2084 (HDR10)" :
+																										 "G22 (SDR)");
 	}
 }  // namespace cs::render

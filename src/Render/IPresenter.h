@@ -21,6 +21,8 @@ namespace cs::render
 		SharedD3D11D3D12Texture* proxy = nullptr;
 		SharedD3D11D3D12Texture* scene = nullptr;
 		SharedD3D11D3D12Texture* output = nullptr;
+		// Set when the chain is fp16 scRGB: the signal is converted into it.
+		SharedD3D11D3D12Texture* scRgbOutput = nullptr;
 		UINT width = 0;
 		UINT height = 0;
 		hdr::OutputSettings hdr;

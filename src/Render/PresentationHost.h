@@ -123,11 +123,14 @@ namespace cs::render
 			std::unique_ptr<SharedD3D11D3D12Texture> hdrOutput;
 			// HDR container only: the scene, while the proxy collects just the interface.
 			std::unique_ptr<SharedD3D11D3D12Texture> hdrScene;
+			// fp16 scRGB chains only: the signal converted for the chain.
+			std::unique_ptr<SharedD3D11D3D12Texture> scRgbOutput;
 
-			[[nodiscard]] bool Complete(bool a_hdr) const noexcept { return proxy && (!a_hdr || (hdrOutput && hdrScene)); }
+			[[nodiscard]] bool Complete(bool a_hdr, bool a_scRgb) const noexcept { return proxy && (!a_hdr || (hdrOutput && hdrScene)) && (!a_scRgb || scRgbOutput); }
 		};
 		[[nodiscard]] HRESULT CreateSurfaces(UINT a_width, UINT a_height, Surfaces& a_surfaces) const;
 		void ClearSurfaces() noexcept;
+		[[nodiscard]] bool IsScRgbChain() const noexcept { return _hdrContainer && _presenter && _presenter->Desc().Format == DXGI_FORMAT_R16G16B16A16_FLOAT; }
 		[[nodiscard]] IDXGISwapChain4* Inner() const noexcept { return _presenter ? _presenter->Chain() : nullptr; }
 		[[nodiscard]] std::optional<features::ScRgbProxy> ScRgbFor(
 			const SharedD3D11D3D12Texture* a_color, float a_whiteNits, bool a_enabled) const noexcept;
@@ -153,6 +156,7 @@ namespace cs::render
 		std::unique_ptr<SharedD3D11D3D12Texture> _proxyBuffer;
 		std::unique_ptr<SharedD3D11D3D12Texture> _hdrOutput;
 		std::unique_ptr<SharedD3D11D3D12Texture> _hdrScene;
+		std::unique_ptr<SharedD3D11D3D12Texture> _scRgbOutput;
 		hdr::Compose _hdrCompose;
 		winrt::com_ptr<DXGISwapChainProxy> _proxy;
 		features::ReShadeRuntime _reshade;

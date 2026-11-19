@@ -32,13 +32,23 @@ namespace cs::features
 
 		// The device beneath ReShade's proxy, found through a resource it creates; a_device without ReShade.
 		[[nodiscard]] static winrt::com_ptr<ID3D11Device> NativeDevice(ID3D11Device& a_device) noexcept;
-		// ReShade attaching its own runtime to this window's chain is logged as an error.
+		// More than one effect runtime for this window is logged as an error.
 		static void GuardWindow(HWND a_window) noexcept;
+
+		// Who owns the effect runtime. Hosted: a chain ReShade never hooks (D3D12), where CS
+		// creates and presents one. Adopt: ReShade hooked the chain and made its own.
+		enum class Attach
+		{
+			kHosted,
+			kAdopt
+		};
+		// Registers with ReShade so runtimes created before ours are seen.
+		static void Arm() noexcept;
 
 		// Creates the runtime once per Destroy; a failed attempt is not retried.
 		// An HDR container makes the copy fp16 so scRGB survives.
 		bool Ensure(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
-			ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer) noexcept;
+			ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer, Attach a_attach) noexcept;
 		// Leaks the runtime on purpose: ReShade must not run after quarantine.
 		void Abandon() noexcept;
 		void Destroy() noexcept;

@@ -40,6 +40,7 @@ namespace cs::render
 			return rollbackResult;
 		}
 		_bridge = &a_bridge;
+		features::ReShadeRuntime::Arm();
 		_callbacks = std::move(a_callbacks);
 		_hdrContainer = static_cast<bool>(_callbacks.queryHdrOutput);
 		_hdrDegraded = false;
@@ -97,8 +98,11 @@ namespace cs::render
 			if (!_presenter) {
 				// The one place the chain's device is chosen: the native one, so ReShade's factory proxy never sees the chain.
 				const auto chainDevice = features::ReShadeRuntime::NativeDevice(*a_device);
+				// ReShade's copy follows the chain format, so HDR here is fp16 scRGB, not R10 HDR10.
+				auto d3d11Request = request;
+				d3d11Request.format = _hdrContainer ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
 				std::unique_ptr<D3D11FlipPresenter> presenter;
-				result = D3D11FlipPresenter::Create(*chainDevice, request, presenter);
+				result = D3D11FlipPresenter::Create(*chainDevice, d3d11Request, presenter);
 				if (SUCCEEDED(result)) {
 					_presenter = std::move(presenter);
 				}
@@ -110,6 +114,7 @@ namespace cs::render
 				if (SUCCEEDED(result)) {
 					_proxyBuffer = std::move(surfaces.proxy);
 					_hdrOutput = std::move(surfaces.hdrOutput);
+					_scRgbOutput = std::move(surfaces.scRgbOutput);
 					_hdrScene = std::move(surfaces.hdrScene);
 				}
 			}
@@ -179,6 +184,7 @@ namespace cs::render
 		_proxyBuffer.reset();
 		_hdrOutput.reset();
 		_hdrScene.reset();
+		_scRgbOutput.reset();
 		if (std::exchange(_presentationBound, false) && _callbacks.unbindPresentation) {
 			_callbacks.unbindPresentation();
 		}
@@ -216,8 +222,12 @@ namespace cs::render
 			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 			surfaces.hdrOutput = SharedD3D11D3D12Texture::Create(
 				_device11.get(), device12, desc, "Present/HdrOutput");
+			if (IsScRgbChain()) {
+				surfaces.scRgbOutput = SharedD3D11D3D12Texture::Create(
+					_device11.get(), device12, desc, "Present/ScRgbOutput");
+			}
 		}
-		if (!surfaces.Complete(_hdrContainer)) {
+		if (!surfaces.Complete(_hdrContainer, IsScRgbChain())) {
 			return E_OUTOFMEMORY;
 		}
 		a_surfaces = std::move(surfaces);
@@ -260,7 +270,7 @@ namespace cs::render
 	bool PresentationHost::IsReady() const noexcept
 	{
 		return _published && _presenter && _presenter->IsReady() && _context11 &&
-		       _proxyBuffer && (!_hdrContainer || (_hdrOutput && _hdrScene));
+		       _proxyBuffer && (!_hdrContainer || (_hdrOutput && _hdrScene)) && (!IsScRgbChain() || _scRgbOutput);
 	}
 
 	bool PresentationHost::IsFrameGenerationReady() const noexcept
@@ -369,7 +379,8 @@ namespace cs::render
 	{
 		return features::ReShadeRuntime::IsInstalled() && IsReady() && _outwardDevice11 &&
 		       _reshade.Ensure(*this, *Inner(), *_outwardDevice11,
-				   _presenter->Desc().Width, _presenter->Desc().Height, _hdrContainer);
+				   _presenter->Desc().Width, _presenter->Desc().Height, _hdrContainer,
+				   _frameGeneration ? features::ReShadeRuntime::Attach::kHosted : features::ReShadeRuntime::Attach::kAdopt);
 	}
 
 	void PresentationHost::ReleaseReShade() noexcept
@@ -421,6 +432,7 @@ namespace cs::render
 			.proxy = _proxyBuffer.get(),
 			.scene = _hdrScene.get(),
 			.output = _hdrOutput.get(),
+			.scRgbOutput = _scRgbOutput.get(),
 			.width = _presenter->Desc().Width,
 			.height = _presenter->Desc().Height,
 			.hdr = _hdrContainer && _callbacks.queryHdrOutput ? _callbacks.queryHdrOutput() : hdr::OutputSettings{},
@@ -706,7 +718,7 @@ namespace cs::render
 		const auto& resized = _presenter->Desc();
 		const bool sizeChanged = resized.Width != oldWidth || resized.Height != oldHeight;
 		if (sizeChanged) {
-			if (!pending.Complete(_hdrContainer) || targetWidth != resized.Width || targetHeight != resized.Height) {
+			if (!pending.Complete(_hdrContainer, IsScRgbChain()) || targetWidth != resized.Width || targetHeight != resized.Height) {
 				const HRESULT surfaceResult = CreateSurfaces(resized.Width, resized.Height, pending);
 				if (FAILED(surfaceResult)) {
 					_published = false;
@@ -718,6 +730,7 @@ namespace cs::render
 			ReleaseReShade();
 			_proxyBuffer = std::move(pending.proxy);
 			_hdrOutput = std::move(pending.hdrOutput);
+			_scRgbOutput = std::move(pending.scRgbOutput);
 			_hdrScene = std::move(pending.hdrScene);
 		}
 		_proxyDesc.BufferDesc.Width = resized.Width;

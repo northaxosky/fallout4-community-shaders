@@ -22,6 +22,7 @@
 #include "Render/InteropBridge.h"
 #include "Render/PresentationHost.h"
 #include "Render/RendererContext.h"
+#include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
 #include "RenderDoc.h"
 #include "Streamline.h"
@@ -344,23 +345,35 @@ namespace cs::render
 			}
 		}
 
-		// The provider whose presenter should carry this session, or null for D3D11.
+		// The provider whose presenter should carry this session, or null with a_reason for D3D11.
 		temporal::IFrameGenerationProvider*
-		StartupFrameGeneration(const temporal::RequestedTopology& a_request) noexcept
+		StartupFrameGeneration(const temporal::RequestedTopology& a_request, std::string& a_reason)
 		{
-			if (!bridge.IsReady() || !a_request.frameGenerationEligible ||
-				!a_request.frameGenerationEnabled) {
+			if (!a_request.frameGenerationEligible || !a_request.frameGenerationEnabled) {
 				return nullptr;
 			}
-			auto* provider = FrameGenerationProvider(a_request.frameGeneration);
-			if (!provider || !provider->IsAvailable()) {
-				return nullptr;
+			const auto method = a_request.frameGeneration;
+			const std::string name{ temporal::presentation::Name(method) };
+			auto* provider = FrameGenerationProvider(method);
+			if (!bridge.IsReady()) {
+				a_reason = "The interop bridge is unavailable, so " + name + " frame generation cannot run.";
+			} else if (!provider) {
+				a_reason = name + " frame generation has no provider.";
+			} else if (method == temporal::FrameGenerationMethod::kDLSSG &&
+					   !latencyHooksInstalled.load(std::memory_order_acquire)) {
+				a_reason = "DLSS frame generation needs the latency hooks, which failed to install.";
+			} else if (!provider->IsAvailable()) {
+				const auto capability = streamline.GetFidelityFXCapabilities().fsr4FrameGeneration;
+				if (method == temporal::FrameGenerationMethod::kFSR4 &&
+					capability.availability != temporal::CapabilityAvailability::kUnknown && !capability.IsAvailable()) {
+					a_reason = "FSR 4 frame generation is unavailable on this GPU: " + temporal::presentation::FidelityFXReason(capability.unavailableReason);
+				} else {
+					a_reason = name + " frame generation is unavailable; see the log.";
+				}
+			} else {
+				return provider;
 			}
-			if (a_request.frameGeneration == temporal::FrameGenerationMethod::kDLSSG &&
-				!latencyHooksInstalled.load(std::memory_order_acquire)) {
-				return nullptr;
-			}
-			return provider;
+			return nullptr;
 		}
 
 		// Latency hooks can be absent; the engine frame then identifies the frame.
@@ -1042,7 +1055,9 @@ namespace cs::render
 								"super resolution is unavailable.",
 						static_cast<std::uint32_t>(bridgeResult)));
 			}
-			auto* presentation = _impl->StartupFrameGeneration(request);
+			std::string refusal;
+			auto* presentation = _impl->StartupFrameGeneration(request, refusal);
+			_impl->frameGenerationFallback = refusal;
 			proxyResult = _impl->host.Initialize(
 				_impl->bridge, device, immediateContext, *a_context.swapChainDesc,
 				presentation,
@@ -1173,8 +1188,14 @@ namespace cs::render
 		}
 
 		if (const auto& fallback = _impl->host.GetPresenterFallback()) {
-			_impl->frameGenerationFallback = fallback->message.empty() ? "The frame-generation presenter could not be created; presenting through D3D11." : fallback->message;
-			PostFailure(temporal::FailureDomain::kFrameGeneration, _impl->frameGenerationFallback);
+			_impl->frameGenerationFallback = fallback->message.empty() ? "The frame-generation presenter could not be created." : fallback->message;
+		}
+		if (!_impl->frameGenerationFallback.empty()) {
+			_impl->frameGenerationFallback += " Presenting through D3D11 without frame generation.";
+			L->warn("{}", _impl->frameGenerationFallback);
+			std::scoped_lock lock(_impl->mutex);
+			_impl->failureDomain = temporal::FailureDomain::kFrameGeneration;
+			_impl->failure = _impl->frameGenerationFallback;
 		}
 		if (_impl->host.IsHdrDegraded()) {
 			FeatureManager::Get().ReportDegraded(
