@@ -495,10 +495,6 @@ namespace cs::render::temporal
 		// A frame-generation provider currently owns presentation.
 		bool frameGenerationPresentation = false;
 
-		[[nodiscard]] ID3D12Device* D3D12Device() const noexcept
-		{
-			return api == DeviceApi::kD3D12 ? static_cast<ID3D12Device*>(device) : nullptr;
-		}
 		[[nodiscard]] ID3D11Device* D3D11Device() const noexcept
 		{
 			return api == DeviceApi::kD3D11 ? static_cast<ID3D11Device*>(device) : nullptr;

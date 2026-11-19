@@ -80,8 +80,6 @@ namespace cs::render
 		virtual void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept = 0;
 		// Drops D3D11-side inputs the next frame rewrites.
 		virtual void ClearInputs(ID3D11DeviceContext& a_context) noexcept = 0;
-		// Releases the chain; false means GPU work could not be proven finished.
-		[[nodiscard]] virtual HRESULT Release() noexcept = 0;
 	};
 
 	// The chain state both presenters share.

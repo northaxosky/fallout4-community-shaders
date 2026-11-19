@@ -22,8 +22,7 @@ namespace cs::render
 		[[nodiscard]] ResizeOutcome Resize(UINT a_width, UINT a_height, UINT a_flags) noexcept override;
 		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept override { _chain.ApplyHdrColorSpace(a_settings); }
 		void ClearInputs(ID3D11DeviceContext&) noexcept override {}
-		[[nodiscard]] HRESULT Release() noexcept override;
-
+	
 	private:
 		HRESULT RefreshBackBuffer() noexcept;
 

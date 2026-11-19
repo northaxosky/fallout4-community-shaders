@@ -34,7 +34,6 @@ namespace cs::render
 		[[nodiscard]] ResizeOutcome Resize(UINT a_width, UINT a_height, UINT a_flags) noexcept override;
 		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept override { _chain.ApplyHdrColorSpace(a_settings); }
 		void ClearInputs(ID3D11DeviceContext& a_context) noexcept override;
-		[[nodiscard]] HRESULT Release() noexcept override;
 
 		[[nodiscard]] temporal::IFrameGenerationProvider& Provider() const noexcept { return _provider; }
 		[[nodiscard]] bool IsFrameGenerationReady() const noexcept;
@@ -80,6 +79,8 @@ namespace cs::render
 		[[nodiscard]] temporal::ColorContract PresentContract() const;
 		[[nodiscard]] HRESULT RefreshBackBuffers() noexcept;
 		void ResetSubmissions() noexcept;
+		// Releases the chain; a failure means the GPU could not be proven idle.
+		[[nodiscard]] HRESULT Release() noexcept;
 		[[nodiscard]] temporal::ProviderResult ReleaseResources() noexcept;
 		// The only release path: pause, drain, then free the provider's resources.
 		[[nodiscard]] temporal::ProviderResult DrainAndDestroy(std::atomic_uint64_t& a_drains) noexcept;
@@ -108,7 +109,6 @@ namespace cs::render
 		bool _faulted = false;
 		temporal::FailurePolicy _failures{ temporal::kFrameGenerationFailureLimit };
 		bool _providerGenerationEnabled = false;
-		bool _providerPresentationActive = false;
 		bool _presentPrepared = false;
 		bool _presentSubmissionMayBeInFlight = false;
 		bool _preparedFrameGeneration = false;

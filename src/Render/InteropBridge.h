@@ -100,7 +100,6 @@ namespace cs::render
 
 		[[nodiscard]] ID3D11Device5* GetD3D11Device() const noexcept { return _device11.get(); }
 		[[nodiscard]] ID3D11DeviceContext4* GetD3D11Context() const noexcept { return _context11.get(); }
-		[[nodiscard]] IDXGIAdapter* GetAdapter() const noexcept { return _adapter.get(); }
 		[[nodiscard]] ID3D12Device* GetD3D12Device() const noexcept { return _device12.get(); }
 		// The device beneath the vendor wrapper; null if it could not be unwrapped.
 		[[nodiscard]] ID3D12Device* GetCaptureDevice() const noexcept { return _captureDevice12.get(); }
@@ -140,7 +139,6 @@ namespace cs::render
 
 		winrt::com_ptr<ID3D11Device5> _device11;
 		winrt::com_ptr<ID3D11DeviceContext4> _context11;
-		winrt::com_ptr<IDXGIAdapter> _adapter;
 		winrt::com_ptr<ID3D12DeviceFactory> _deviceFactory;
 		winrt::com_ptr<ID3D12Device> _device12;
 		winrt::com_ptr<ID3D12Device> _captureDevice12;

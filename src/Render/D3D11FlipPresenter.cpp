@@ -142,11 +142,4 @@ namespace cs::render
 		_chain.appliedColorSpace.reset();
 		return { .result = resizeResult, .resized = true };
 	}
-
-	HRESULT D3D11FlipPresenter::Release() noexcept
-	{
-		_backBuffer = nullptr;
-		_chain.chain = nullptr;
-		return S_OK;
-	}
 }  // namespace cs::render

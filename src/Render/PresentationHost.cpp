@@ -45,7 +45,6 @@ namespace cs::render
 		_hdrContainer = static_cast<bool>(_callbacks.queryHdrOutput);
 		_hdrDegraded = false;
 		_presenterFallback.reset();
-		_creationDesc = a_desc;
 		_proxyDesc = a_desc;
 
 		HRESULT result = S_OK;
@@ -145,9 +144,7 @@ namespace cs::render
 		_presentationBound = true;
 		NotifyPresentationBinding();
 		ClearSurfaces();
-		if (_frameGeneration) {
-			_frameGeneration->ClearInputs(*_context11);
-		}
+		_presenter->ClearInputs(*_context11);
 		const auto& chain = _presenter->Desc();
 		L->info("Published the D3D11-facing facade at {}x{} {} on the {} presenter",
 			chain.Width, chain.Height,
@@ -474,7 +471,10 @@ namespace cs::render
 			}
 		} };
 		HRESULT result = DXGI_ERROR_INVALID_CALL;
-		if (!IsReady()) {
+		if (_bridge && _bridge->IsQuarantined() && _frameGeneration) {
+			// The vendor chain may still hold quarantined GPU work.
+			result = DXGI_ERROR_DEVICE_REMOVED;
+		} else if (!IsReady()) {
 			if (_presenter) {
 				pipeline.BeginPresentAttempt(a_flags);
 				result = _presenter->PresentChain(args);
@@ -644,7 +644,6 @@ namespace cs::render
 		const HRESULT result = Inner()->ResizeTarget(a_target);
 		if (SUCCEEDED(result)) {
 			_proxyDesc.BufferDesc = *a_target;
-			_creationDesc.BufferDesc = *a_target;
 		}
 		return result;
 	}
@@ -748,16 +747,11 @@ namespace cs::render
 		}
 		_proxyDesc.BufferDesc.Width = resized.Width;
 		_proxyDesc.BufferDesc.Height = resized.Height;
-		_creationDesc.BufferDesc.Width = resized.Width;
-		_creationDesc.BufferDesc.Height = resized.Height;
-		_creationDesc.BufferDesc.Format = _proxyDesc.BufferDesc.Format;
 		if (FAILED(outcome.result)) {
 			return outcome.result;
 		}
 		ClearSurfaces();
-		if (_frameGeneration) {
-			_frameGeneration->ClearInputs(*_context11);
-		}
+		_presenter->ClearInputs(*_context11);
 		render::TemporalPipeline::Get().OnDisplayResized(resized.Width, resized.Height);
 		return outcome.result;
 	}

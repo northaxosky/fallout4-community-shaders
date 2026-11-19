@@ -1049,10 +1049,15 @@ namespace cs::render
 
 		HRESULT proxyResult = E_FAIL;
 		try {
-			// A failed bridge leaves D3D11 presentation intact; super resolution is then not admitted.
-			const HRESULT bridgeResult = _impl->bridge.Initialize(
-				a_context.adapter, device, immediateContext, _impl->interop,
-				[this] { _impl->latencyRouter.QuarantinePresentation(); });
+			// A failed bridge leaves D3D11 presentation intact.
+			const bool needsBridge = request.upscalingEligible || request.frameGenerationEligible;
+			const HRESULT bridgeResult = !needsBridge ? S_OK : _impl->bridge.Initialize(
+																   a_context.adapter, device, immediateContext, _impl->interop,
+																   [this] {
+																	   if (_impl->host.GetPresentationProvider()) {
+																		   _impl->latencyRouter.QuarantinePresentation();
+																	   }
+																   });
 			if (FAILED(bridgeResult)) {
 				PostFailure(temporal::FailureDomain::kTransport,
 					std::format("The interop bridge could not be created ({:#010x}); "

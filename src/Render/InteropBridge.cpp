@@ -224,7 +224,6 @@ namespace cs::render
 		_captureDevice12 = nullptr;
 		_device12 = nullptr;
 		_deviceFactory = nullptr;
-		_adapter = nullptr;
 		_context11 = nullptr;
 		_device11 = nullptr;
 		_runtime = nullptr;
@@ -320,7 +319,6 @@ namespace cs::render
 			DX::ThrowIfFailed(a_device->QueryInterface(IID_PPV_ARGS(dxgiDevice.put())));
 			DX::ThrowIfFailed(dxgiDevice->GetAdapter(actualAdapter.put()));
 		}
-		_adapter = actualAdapter;
 		features::AgilityBootstrapDiagnostics agilityDiagnostics;
 		DX::ThrowIfFailed(features::CreatePrivateD3D12Device(
 			actualAdapter.get(), _runtime->D3D12SdkDirectory(),

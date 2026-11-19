@@ -132,7 +132,6 @@ namespace cs::render
 		desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
 		desc.Flags = a_request.flags & kInheritedFlags;
 
-		_providerPresentationActive = true;
 		const auto created = _provider.CreatePresentation(
 			{ .adapter = a_request.adapter,
 				.device = _bridge.GetD3D12Device(),
@@ -370,7 +369,6 @@ namespace cs::render
 				result.message.empty() ? "frame-generation display resources could not be released" : result.message);
 			return E_FAIL;
 		}
-		_providerPresentationActive = false;
 		for (auto& submission : _presentSubmissions) {
 			submission = {};
 		}
@@ -561,9 +559,6 @@ namespace cs::render
 
 	HRESULT D3D12FrameGenPresenter::PresentImpl(const PresentFrame& a_frame, const PresentArgs& a_args)
 	{
-		if (_bridge.IsQuarantined()) {
-			return DXGI_ERROR_DEVICE_REMOVED;
-		}
 		auto& pipeline = render::TemporalPipeline::Get();
 		auto* queue = _bridge.GetCommandQueue();
 		auto& timer = _bridge.GetGpuTimer();

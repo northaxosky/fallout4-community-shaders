@@ -162,7 +162,6 @@ namespace cs::render
 		hdr::Compose _hdrCompose;
 		winrt::com_ptr<DXGISwapChainProxy> _proxy;
 		features::ReShadeRuntime _reshade;
-		DXGI_SWAP_CHAIN_DESC _creationDesc{};
 		DXGI_SWAP_CHAIN_DESC _proxyDesc{};
 		std::uint32_t _adapterVendorId = 0;
 		bool _hdrContainer = false;
