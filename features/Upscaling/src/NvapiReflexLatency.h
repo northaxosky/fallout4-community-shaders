@@ -12,7 +12,7 @@
 
 namespace cs::features
 {
-	// NVIDIA Reflex through NVAPI on the D3D11 device that presents the flip chain.
+	// NVIDIA Reflex through NVAPI on the D3D11 flip chain's device.
 	class NvapiReflexLatency final : public render::temporal::ILatencyProvider
 	{
 	public:

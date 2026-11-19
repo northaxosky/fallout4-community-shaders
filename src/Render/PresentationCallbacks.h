@@ -20,7 +20,7 @@ namespace cs::render
 		std::function<void(const render::temporal::PresentationBinding&)> bindPresentation;
 		// Rollback only, after the swap chain is gone.
 		std::function<void()> unbindPresentation;
-		// The D3D11 device has no swap chain of its own behind a D3D12 presenter, so game frames end here.
+		// Behind a D3D12 presenter the D3D11 device has no chain; frames end here.
 		std::function<void()> gameFramePresented;
 		// Set when HDR Display is loaded; the chain then becomes the HDR container.
 		std::function<hdr::OutputSettings()> queryHdrOutput;

@@ -408,7 +408,7 @@ namespace cs::features
 			return std::unexpected(CaptureRefusal{
 				std::format("capture target unavailable: {}", CaptureTargetDisplayName(a_request.target)),
 				a_request.target == CaptureTarget::kTemporalD3D12 ?
-					"the temporal D3D12 proxy is active only with Upscaling or Frame Generation outside exclusive fullscreen" :
+					"the D3D12 target exists only in Frame Generation sessions outside exclusive fullscreen" :
 					"the engine D3D11 device binds at startup; retry once the game has finished loading" });
 		}
 		if (auto refusal = CheckCaptureDiskSpace(static_cast<int>(a_request.frames)))

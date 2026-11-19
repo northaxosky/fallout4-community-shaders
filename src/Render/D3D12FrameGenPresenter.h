@@ -11,8 +11,7 @@
 
 namespace cs::render
 {
-	// Presents the facade's frames through a vendor-owned D3D12 swap chain on the
-	// bridge's device, which is what frame generation needs.
+	// Presents through a vendor D3D12 chain on the bridge's device.
 	class D3D12FrameGenPresenter final : public IPresenter
 	{
 	public:
@@ -73,7 +72,7 @@ namespace cs::render
 		[[nodiscard]] HRESULT CreateChain(const ChainRequest& a_request, temporal::ProviderResult& a_failure);
 		[[nodiscard]] SlotTextures CreateSlotBuffers(const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name) const;
 		[[nodiscard]] HRESULT CreateBuffers(UINT a_width, UINT a_height, FrameGenerationBuffers& a_buffers) const;
-		// Takes the new buffers and has the provider size its display resources to them.
+		// Takes the new buffers and sizes the provider's resources to them.
 		[[nodiscard]] HRESULT CommitBuffers(FrameGenerationBuffers&& a_buffers, UINT a_width, UINT a_height);
 		[[nodiscard]] HRESULT RestoreProvider(UINT a_width, UINT a_height);
 		[[nodiscard]] temporal::ColorContract PresentContract() const;
@@ -87,7 +86,7 @@ namespace cs::render
 		[[nodiscard]] HRESULT PresentImpl(const PresentFrame& a_frame, const PresentArgs& a_args);
 		// Writes this slot's inputs, returns the encoded back buffer; null skips.
 		[[nodiscard]] const SharedD3D11D3D12Texture* ComposeHdrFrameGenerationInputs(const PresentFrame& a_frame) noexcept;
-		// False when the drain failed and the bridge is quarantined; the list is then closed.
+		// False when the drain failed and the list is closed.
 		[[nodiscard]] bool ProveIdle(ID3D12GraphicsCommandList* a_list) noexcept;
 
 		InteropBridge& _bridge;

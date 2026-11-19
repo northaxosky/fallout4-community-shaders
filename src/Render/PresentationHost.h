@@ -20,17 +20,14 @@
 
 namespace cs::render
 {
-	// The facade the engine sees in every hosted session, and everything on the D3D11
-	// side of it: frame texture, HDR targets, ReShade, resize translation and the
-	// RenderDoc frame boundary. A presenter puts the frames on screen.
+	// The facade the engine sees, and the D3D11 side behind it.
 	class PresentationHost : public IDXGISwapChainProxyOwner
 	{
 	public:
 		PresentationHost() = default;
 		~PresentationHost();
 
-		// a_provider is the admitted frame-generation provider, or null for D3D11 presentation;
-		// if its presenter cannot be created the D3D11 one takes over.
+		// a_provider: the admitted FG provider, or null for the D3D11 presenter.
 		[[nodiscard]] HRESULT Initialize(InteropBridge& a_bridge,
 			ID3D11Device* a_device, ID3D11DeviceContext* a_context,
 			const DXGI_SWAP_CHAIN_DESC& a_desc, temporal::IFrameGenerationProvider* a_provider,
@@ -59,7 +56,7 @@ namespace cs::render
 		[[nodiscard]] SharedD3D11D3D12Texture* GetMotionTexture() const noexcept;
 		// Empty unless the HDR container is active.
 		[[nodiscard]] hdr::SceneTarget GetHdrSceneTarget() const noexcept;
-		// Encodes with the presenter's compose; false unless the HDR container is active.
+		// Encodes with the compose pass; false unless the HDR container is active.
 		[[nodiscard]] bool ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
 			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept;
 		[[nodiscard]] temporal::PresentInputRetirementDiagnostics
@@ -71,7 +68,7 @@ namespace cs::render
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		// Creates the ReShade runtime on first use; false if absent or unusable.
 		[[nodiscard]] bool ReShadeEffectsEnabled() noexcept;
-		// A non-zero a_hdrWhiteNits hands ReShade the HDR color as scRGB with that white.
+		// A non-zero a_hdrWhiteNits gives ReShade scRGB at that white.
 		void RenderReShadeEffects(ID3D11DeviceContext& a_context,
 			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth, float a_hdrWhiteNits = 0.0f) noexcept;
 

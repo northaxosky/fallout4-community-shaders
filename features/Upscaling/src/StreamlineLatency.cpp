@@ -274,7 +274,7 @@ namespace cs::features
 	render::temporal::LatencyDiagnostics
 	StreamlineLatency::GetLatencyDiagnostics() const noexcept
 	{
-		// Reflex paces the device that presents, which is the private D3D12 one only under frame generation.
+		// Reflex paces the presenting device: D3D12 only under frame generation.
 		if (!_presenting.load(std::memory_order_acquire)) {
 			return {};
 		}

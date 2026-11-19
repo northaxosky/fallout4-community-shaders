@@ -473,7 +473,7 @@ namespace cs::render
 
 	bool D3D12FrameGenPresenter::ProveIdle(ID3D12GraphicsCommandList* a_list) noexcept
 	{
-		// The provider may still reference its inputs; only an idle GPU proves it does not.
+		// Only an idle GPU proves the provider no longer reads its inputs.
 		if (SUCCEEDED(_bridge.Drain())) {
 			return true;
 		}

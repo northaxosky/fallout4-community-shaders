@@ -59,7 +59,7 @@ namespace cs::render
 			DXGI_ADAPTER_DESC adapterDesc{};
 			_adapterVendorId = SUCCEEDED(adapter->GetDesc(&adapterDesc)) ? adapterDesc.VendorId : 0;
 
-			// Chosen before the format: an R10 chain nothing can fill would present nothing.
+			// Chosen before the format: an R10 chain nothing fills presents nothing.
 			if (_hdrContainer && !_hdrCompose.Initialize(*_device11)) {
 				L->error("HDR compose is unavailable; presenting SDR");
 				_hdrContainer = false;
@@ -95,9 +95,9 @@ namespace cs::render
 				}
 			}
 			if (!_presenter) {
-				// The one place the chain's device is chosen: the native one, so ReShade's factory proxy never sees the chain.
+				// Beneath ReShade's proxy: the adopt path alone attaches its runtime.
 				const auto chainDevice = features::ReShadeRuntime::NativeDevice(*a_device);
-				// ReShade's copy follows the chain format, so HDR here is fp16 scRGB, not R10 HDR10.
+				// ReShade's copy follows the chain format: fp16 scRGB for HDR.
 				auto d3d11Request = request;
 				d3d11Request.format = _hdrContainer ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
 				std::unique_ptr<D3D11FlipPresenter> presenter;
@@ -146,9 +146,8 @@ namespace cs::render
 		ClearSurfaces();
 		_presenter->ClearInputs(*_context11);
 		const auto& chain = _presenter->Desc();
-		L->info("Published the D3D11-facing facade at {}x{} {} on the {} presenter",
-			chain.Width, chain.Height,
-			_hdrContainer ? "R10G10B10A2_UNORM (HDR container)" : "R8G8B8A8_UNORM",
+		L->info("Published the D3D11-facing facade at {}x{}, format {}, HDR container {}, on the {} presenter",
+			chain.Width, chain.Height, static_cast<unsigned>(chain.Format), _hdrContainer,
 			_frameGeneration ? "D3D12 frame-generation" : "D3D11 flip");
 		return S_OK;
 	}
@@ -442,7 +441,7 @@ namespace cs::render
 			.separated = _hdrContainer && InterfaceLayer::Get().ConsumeSeparated() && _hdrScene
 		};
 		if (PrepareReShade()) {
-			// A separated frame's proxy holds only the interface, composed after the effects.
+			// A separated frame's proxy holds only the interface, composed after.
 			const auto* color = frame.separated ? frame.scene : frame.proxy;
 			const auto scRgb = ScRgbFor(color, frame.hdr.paperWhite, frame.hdr.enabled);
 			_reshade.Present(*_context11, *color->texture11, scRgb ? &*scRgb : nullptr);
@@ -496,7 +495,7 @@ namespace cs::render
 			}
 		}
 		if (result != DXGI_ERROR_WAS_STILL_DRAWING) {
-			// Only the frame-generation presenter's chain reaches Streamline's own present hooks.
+			// Only the frame-generation chain reaches Streamline's present hooks.
 			if (_bridge && !_frameGeneration) {
 				_bridge->NotifyHostFramePresented(a_flags);
 			}

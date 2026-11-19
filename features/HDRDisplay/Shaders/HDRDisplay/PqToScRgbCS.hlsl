@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
-// Converts the composed output signal (PQ/BT.2020, or gamma 2.2 SDR) to linear scRGB, 1.0 = 80 nits.
+// Converts the composed signal (PQ or gamma 2.2) to linear scRGB.
 
 #include "Common/Color.hlsli"
 

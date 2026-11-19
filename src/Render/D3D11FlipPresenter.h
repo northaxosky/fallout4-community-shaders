@@ -4,8 +4,7 @@
 
 namespace cs::render
 {
-	// A flip-model chain on the engine's own D3D11 device: SDR is R8, and HDR is the
-	// R10 container the compose pass encodes into.
+	// A flip chain on the engine's D3D11 device: R8, or fp16 scRGB for HDR.
 	class D3D11FlipPresenter final : public IPresenter
 	{
 	public:
@@ -22,7 +21,7 @@ namespace cs::render
 		[[nodiscard]] ResizeOutcome Resize(UINT a_width, UINT a_height, UINT a_flags) noexcept override;
 		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept override { _chain.ApplyHdrColorSpace(a_settings); }
 		void ClearInputs(ID3D11DeviceContext&) noexcept override {}
-	
+
 	private:
 		HRESULT RefreshBackBuffer() noexcept;
 

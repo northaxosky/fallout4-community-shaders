@@ -2,7 +2,7 @@
 
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
-| Divergence | `capture renderdoc` triggers a global capture of `frames` frames | Adds `device` (`d3d11` default, `d3d12`); `d3d12` is refused unless the temporal proxy is active | A global trigger misses the game D3D11 frame behind the D3D12 proxy ([RenderDoc](RenderDoc.md)) |
+| Divergence | `capture renderdoc` triggers a global capture of `frames` frames | Adds `device` (`d3d11` default, `d3d12`); `d3d12` is refused unless Frame Generation presents on D3D12 | A global trigger misses the game D3D11 frame behind the facade ([RenderDoc](RenderDoc.md)) |
 | Divergence | `capture` returns `queued` and no artifact | Returns `requestId`; `communityshaders.capture.completed` reports `captures:[{path,bytes}]` or `error` | A caller cannot otherwise find the file |
 | Divergence | `feature toggle` flips `Feature::loaded` and answers `queued` | Flips the framework `enabled` switch of a loaded feature and answers `{enabled}` | `loaded` stops CPU work while compiled shaders keep reading stale data |
 | Divergence | `feature set` ignores unknown keys | Unknown and restart-only keys are refused (`unknown`/`restartOnly`) and nothing is applied | Restart-only settings cannot change live |

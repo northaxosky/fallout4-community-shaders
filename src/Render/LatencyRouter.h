@@ -38,7 +38,7 @@ namespace cs::render::temporal
 		LatencyDiagnostics diagnostics;
 	};
 
-	// A backend may have one provider per presentation API; the one in use reports available.
+	// One provider per presentation API; the one in use reports available.
 	[[nodiscard]] inline const LatencyDiagnostics& FindDiagnostics(
 		std::span<const LatencyBackendStatus> a_backends,
 		LatencyBackend a_backend) noexcept

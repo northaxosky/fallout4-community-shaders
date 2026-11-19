@@ -30,13 +30,12 @@ namespace cs::features
 		// False when no ReShade module is loaded; cheap after the first call.
 		[[nodiscard]] static bool IsInstalled() noexcept;
 
-		// The device beneath ReShade's proxy, found through a resource it creates; a_device without ReShade.
+		// The device beneath ReShade's proxy; a_device without ReShade.
 		[[nodiscard]] static winrt::com_ptr<ID3D11Device> NativeDevice(ID3D11Device& a_device) noexcept;
 		// More than one effect runtime for this window is logged as an error.
 		static void GuardWindow(HWND a_window) noexcept;
 
-		// Who owns the effect runtime. Hosted: a chain ReShade never hooks (D3D12), where CS
-		// creates and presents one. Adopt: ReShade hooked the chain and made its own.
+		// Hosted: CS creates and presents the runtime. Adopt: ReShade's own.
 		enum class Attach
 		{
 			kHosted,

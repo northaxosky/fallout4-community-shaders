@@ -669,7 +669,7 @@ namespace cs::render::temporal
 		std::optional<GpuCompletionDependency> inputCompletion;
 	};
 
-	// Pause never frees; resources are freed only by DestroyAfterDrain after a drain.
+	// Pause never frees; DestroyAfterDrain does, after a drain.
 	class IFrameGenerationProvider
 	{
 	public:

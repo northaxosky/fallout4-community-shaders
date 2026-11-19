@@ -55,21 +55,20 @@ namespace cs::render
 		virtual ~IInteropRuntime() = default;
 
 		[[nodiscard]] virtual std::filesystem::path D3D12SdkDirectory() const = 0;
-		// Swaps in the runtime's wrapper; on failure the device stays raw and the runtime is off.
+		// Swaps in the runtime's wrapper; on failure the device stays raw.
 		virtual void UpgradeDevice(winrt::com_ptr<ID3D12Device>& a_device, IDXGIAdapter& a_adapter) = 0;
 		// The device beneath the wrapper, for native tooling.
 		[[nodiscard]] virtual bool NativeDevice(ID3D12Device* a_device, ID3D12Device** a_native) const = 0;
 		// Chains the bridge creates never carry the runtime's presentation hooks.
 		[[nodiscard]] virtual temporal::ProviderResult DisablePresentationHooks() = 0;
 		[[nodiscard]] virtual bool SharpensSuperResolution() const noexcept = 0;
-		// A real host Present with no runtime chain behind it, so the runtime's own frame bookkeeping runs.
+		// A host Present with no runtime chain, for its frame bookkeeping.
 		virtual void OnHostFramePresented(std::uint32_t a_presentFlags) noexcept = 0;
 		// Before the host reallocates textures shared with the runtime.
 		virtual void OnHostResize() noexcept = 0;
 	};
 
-	// The private D3D12 device shared with the engine's D3D11 device: super resolution
-	// runs here in every session, and the frame-generation presenter borrows its queue.
+	// The private D3D12 device: super resolution runs here, FG borrows its queue.
 	class InteropBridge
 	{
 	public:
@@ -111,7 +110,7 @@ namespace cs::render
 		[[nodiscard]] std::uint64_t NextRetirementValue() noexcept { return _nextInputRetirementValue++; }
 		[[nodiscard]] D3D12GpuTimer& GetGpuTimer() noexcept { return _gpuTimer; }
 
-		// Command lists for the presenter's own submissions share the bridge's timer and fence.
+		// Presenter submissions share the bridge's timer and fence.
 		void CreateSubmissions(SubmissionRing& a_ring, std::string_view a_phase);
 		[[nodiscard]] HRESULT AcquireSubmission(
 			SubmissionRing& a_ring, UINT& a_cursor, SubmissionRecord*& a_record) noexcept;

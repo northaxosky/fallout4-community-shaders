@@ -61,7 +61,7 @@ namespace cs::render::temporal
 		FrameGenerationConfiguration frameGenerationConfiguration;
 		std::uint64_t revision = 0;
 
-		// The session presents through a frame-generation chain; otherwise D3D11 presents.
+		// True when a frame-generation chain presents; otherwise D3D11 does.
 		[[nodiscard]] bool StartsFrameGeneration() const noexcept { return frameGenerationEligible && frameGenerationEnabled; }
 
 		auto operator<=>(const RequestedTopology&) const = default;
@@ -225,7 +225,7 @@ namespace cs::render::temporal
 						a_sr != SuperResolutionMethod::kNone;
 				}
 			}
-			// The presenter is chosen at startup, so only the DLSS-G configuration moves live.
+			// The presenter is fixed at startup; only the DLSS-G config moves live.
 			if (!_quarantined.frameGeneration && !_frameGenerationFailed &&
 				_effective.frameGeneration == FrameGenerationMethod::kDLSSG) {
 				target.frameGenerationConfiguration = a_fgConfiguration;
@@ -246,7 +246,7 @@ namespace cs::render::temporal
 			UpdatePendingRestart();
 		}
 
-		// A resize retries a latched native fallback; settings changes do via SubmitLive.
+		// A resize retries a latched fallback; settings changes do via SubmitLive.
 		void RetrySuperResolution(std::uint64_t a_revision)
 		{
 			if (_superResolutionFailed) {

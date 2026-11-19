@@ -29,7 +29,7 @@ namespace cs::render
 		bool hdrContainer = false;
 		bool separated = false;
 
-		// The signal the display shows; null when the container has nothing to present.
+		// The signal on screen; null when the container has nothing to show.
 		[[nodiscard]] const SharedD3D11D3D12Texture* ComposeDisplay() const noexcept;
 	};
 

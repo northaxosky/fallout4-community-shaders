@@ -82,7 +82,7 @@ namespace cs::features
 			std::erase(g_runtimes, a_runtime);
 		}
 
-		// ReShade stays registered for the process: runtimes can exist before any of ours.
+		// Stays registered for the process; runtimes can predate ours.
 		bool EnsureAddon() noexcept
 		{
 			static const bool registered = [] {
@@ -209,12 +209,12 @@ namespace cs::features
 		public:
 			virtual ~Attachment() = default;
 			[[nodiscard]] virtual effect_runtime* Runtime() noexcept = 0;
-			// Draws ReShade's overlay on the copy; an adopted runtime does that at the real Present.
+			// Draws the overlay on the copy; adopt does it at the real Present.
 			[[nodiscard]] virtual bool PresentsOverlay() const noexcept { return false; }
 			virtual void Present(effect_runtime&) noexcept {}
 		};
 
-		// A chain ReShade did not hook: CS creates the runtime on a proxy of it and presents it.
+		// Hosted: ReShade never hooked the chain, so CS makes the runtime.
 		class HostedAttachment final : public Attachment
 		{
 		public:
@@ -249,7 +249,7 @@ namespace cs::features
 			effect_runtime* _runtime = nullptr;
 		};
 
-		// ReShade hooked the chain and made its own runtime; CS only renders effects through it.
+		// Adopt: ReShade made its own runtime; CS only renders effects.
 		class AdoptedAttachment final : public Attachment
 		{
 		public:
@@ -420,7 +420,7 @@ namespace cs::features
 		if (!IsInstalled()) {
 			return device;
 		}
-		// ReShade proxies the device but not resources, so a resource reports the device beneath.
+		// A resource reports the device beneath ReShade's proxy.
 		D3D11_TEXTURE2D_DESC desc{};
 		desc.Width = 1;
 		desc.Height = 1;

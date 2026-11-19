@@ -21,7 +21,7 @@ namespace cs::render
 		if (!a_request.window) {
 			return E_INVALIDARG;
 		}
-		// The factory behind the chain's own device, so ReShade's hooks see no proxied device.
+		// The chain's own device, beneath ReShade's proxy.
 		winrt::com_ptr<IDXGIDevice> dxgiDevice;
 		winrt::com_ptr<IDXGIAdapter> adapter;
 		winrt::com_ptr<IDXGIFactory2> factory;

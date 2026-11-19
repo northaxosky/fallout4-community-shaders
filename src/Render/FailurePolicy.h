@@ -9,7 +9,7 @@ namespace cs::render::temporal
 	inline constexpr std::uint32_t kSuperResolutionFailureLimit = 30;
 	inline constexpr std::uint32_t kFrameGenerationFailureLimit = 5;
 
-	// A failed frame is skipped; a run of them latches the feature off until Retry.
+	// A failed frame is skipped; a run of them latches until Retry.
 	class FailurePolicy
 	{
 	public:

@@ -24,8 +24,7 @@ namespace AMD::AntiLag2DX11
 
 namespace cs::features
 {
-	// AMD Radeon Anti-Lag 2 on the native device that presents CS's proxy swap chain:
-	// the D3D11 flip chain's device, or the private D3D12 one under frame generation.
+	// AMD Anti-Lag 2 on the device that presents the CS swap chain.
 	// No driver call happens until Configure first asks for a mode other than off.
 	class AntiLag2Latency final : public render::temporal::ILatencyProvider
 	{
