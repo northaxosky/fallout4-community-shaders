@@ -125,19 +125,7 @@ namespace cs::features
 
 	bool ScreenSpaceShadows::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(sss_settings::kSchema, a_config, candidate, a_error)) {
-			return false;
-		}
-
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(sss_settings::kSchema, _settings);
-		return true;
-	}
-
-	bool ScreenSpaceShadows::SaveSettings()
-	{
-		return settings::SaveDelta(sss_settings::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void ScreenSpaceShadows::Load()
@@ -755,19 +743,13 @@ namespace cs::features
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(sss_settings::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "sss-general", "General" }; section) {
 			field(&Settings::SurfaceThickness, { .label = "Surface thickness" });
 			field(&Settings::BilinearThreshold, { .label = "Bilinear threshold" });
 			field(&Settings::ShadowContrast, { .label = "Shadow contrast" });
 			field(&Settings::SampleCount, { .label = "Sample count multiplier" });
 		}
-	}
-
-	void ScreenSpaceShadows::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

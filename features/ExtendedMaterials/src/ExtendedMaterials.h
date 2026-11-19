@@ -24,7 +24,6 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
@@ -37,10 +36,10 @@ namespace cs::features
 		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		ExtendedMaterials() = default;
 
-		bool SaveSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		[[nodiscard]] bool ShadowsActive() const noexcept;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(extended_materials::kSchema, _settings); }
 
-		Settings _settings;
+		settings::LiveSettings<extended_materials::kSchema> _live;
+		const Settings& _settings = _live.Get();
 	};
 }

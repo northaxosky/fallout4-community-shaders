@@ -59,17 +59,7 @@ namespace cs::features
 
 	bool SubsurfaceScattering::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(sss::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(sss::kSchema, _settings);
-		return true;
-	}
-
-	bool SubsurfaceScattering::SaveSettings()
-	{
-		return settings::SaveDelta(sss::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void SubsurfaceScattering::Load()
@@ -383,11 +373,11 @@ namespace cs::features
 	void SubsurfaceScattering::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(sss::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		// The mean free path member splits into a color and a distance field.
 		const auto meanFreePath = [&](settings::Color4 Settings::* a_member) {
-			auto& value = _settings.*a_member;
-			const Settings defaultSettings{};
+			auto& value = field.Values().*a_member;
+			const Settings defaultSettings = _live.DefaultSettings();
 			const auto& defaults = defaultSettings.*a_member;
 			const std::string key(sss::kSchema.Find(a_member).key);
 			settings::Float3 color{ value[0], value[1], value[2] };
@@ -405,7 +395,7 @@ namespace cs::features
 				dmui::ChoiceOption<int>{ sss::kBurley, "Burley", "burley" }
 			};
 			field.Choice(&Settings::ssMode, modes, { .label = "Mode" });
-			if (_settings.ssMode == sss::kSeparable) {
+			if (_live.Draft().ssMode == sss::kSeparable) {
 				static const std::array scatter{
 					dmui::ChoiceOption<int>{ sss::kPreScatter, "Pre-scatter", "pre" },
 					dmui::ChoiceOption<int>{ sss::kPostScatter, "Post-scatter", "post" },
@@ -416,7 +406,7 @@ namespace cs::features
 				field(&Settings::burleySamples, { .label = "Burley Samples" });
 			}
 		}
-		if (_settings.ssMode == sss::kSeparable) {
+		if (_live.Draft().ssMode == sss::kSeparable) {
 			if (const ui::Section section{ "sss-base-profile", "Base Profile" }; section) {
 				field(&Settings::baseProfileBlurRadius, { .label = "Blur Radius", .format = "%.2f" });
 				field(&Settings::baseProfileThickness, { .label = "Thickness", .format = "%.2f" });
@@ -437,15 +427,9 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "sss-character-light", "Character Light" }; section) {
 			field(&Settings::enableCharacterLighting, { .label = "Enable Character Lighting" });
-			if (_settings.enableCharacterLighting)
+			if (_live.Draft().enableCharacterLighting)
 				field(&Settings::characterLightingStrength, { .label = "Strength", .format = "%.2f" });
 		}
-	}
-
-	void SubsurfaceScattering::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

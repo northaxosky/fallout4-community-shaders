@@ -34,7 +34,6 @@ namespace cs::features
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override { RestoreNativeControls(); }
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
@@ -71,8 +70,7 @@ namespace cs::features
 			kDiffuse
 		};
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(subsurface_scattering::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		bool CompileShaders();
 		bool EnsureResources(ID3D11Texture2D* a_target);
 		void UpdateKernels();
@@ -87,7 +85,8 @@ namespace cs::features
 		void UpdateConsumer(bool a_produced);
 		FeatureDebugTexture GetDebugTexture(Preview a_view) const;
 
-		Settings _settings;
+		settings::LiveSettings<subsurface_scattering::kSchema> _live;
+		const Settings& _settings = _live.Get();
 		Resources _textures;
 		subsurface_scattering::Constants _data{};
 		std::array<float, 12> _kernelKey{};

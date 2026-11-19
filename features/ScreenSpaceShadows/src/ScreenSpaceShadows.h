@@ -30,7 +30,6 @@ namespace cs::features
 		void Prepass() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
 		bool IsShadowMaskReady();
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 
@@ -57,8 +56,7 @@ namespace cs::features
 
 		ScreenSpaceShadows() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(sss_settings::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		void OnPreDeferredLights();
 		void BindShadowMask(ID3D11DeviceContext* a_context);
 		bool EnsureResources();
@@ -77,7 +75,8 @@ namespace cs::features
 		ID3D11ComputeShader* GetComputeRaymarch();
 		FeatureDebugTexture GetShadowMaskDebugTexture() const;
 
-		Settings _settings;
+		settings::LiveSettings<sss_settings::kSchema> _live;
+		const Settings& _settings = _live.Get();
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _whiteFallbackReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };

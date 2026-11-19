@@ -22,9 +22,7 @@ namespace cs::features
 		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) override;
 		void DrawSettings() override;
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(vanilla_pbr::kSchema, _settings); }
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
@@ -33,7 +31,8 @@ namespace cs::features
 
 	private:
 		bool ValidateInjectionPrerequisites(std::string&) override;
-		vanilla_pbr::Settings _settings;
+		settings::LiveSettings<vanilla_pbr::kSchema> _live;
+		const vanilla_pbr::Settings& _settings = _live.Get();
 		std::atomic_uint32_t _debugMode{ 0 };
 		std::atomic_bool _directEnabled{ false }, _liveEnvironmentEnabled{ false }, _liveEnvironmentReady{ false };
 		vanilla_pbr::BlurMatch _blurMatch;

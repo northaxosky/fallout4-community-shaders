@@ -38,12 +38,7 @@ namespace cs::features
 
 	bool VanillaPBR::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(vanilla_pbr::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(vanilla_pbr::kSchema, _settings);
-		return true;
+		return _live.Configure(a_config, a_error);
 	}
 
 	void VanillaPBR::Load()
@@ -119,22 +114,11 @@ namespace cs::features
 		_liveEnvironmentReady = environmentReady;
 	}
 
-	bool VanillaPBR::SaveSettings()
-	{
-		return settings::SaveDelta(vanilla_pbr::kSchema, GetConfigKey(), _settings, *Log());
-	}
-
-	void VanillaPBR::RestoreDefaultSettings()
-	{
-		_settings = {};
-		SaveSettings();
-	}
-
 	void VanillaPBR::DrawSettings()
 	{
 		using namespace vanilla_pbr;
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "vanilla-pbr-general", "General" }; section) {
 			field(&Settings::EnableGGX, { .help = "Replace direct Phong specular with GGX." });
 			field(&Settings::EnableEyeSpecialHandling);

@@ -87,17 +87,7 @@ namespace cs::features
 
 	bool Skylighting::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(skylighting::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(skylighting::kSchema, _settings);
-		return true;
-	}
-
-	bool Skylighting::SaveSettings()
-	{
-		return settings::SaveDelta(skylighting::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void Skylighting::Load()
@@ -1024,7 +1014,7 @@ namespace cs::features
 	void Skylighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(skylighting::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 
 		if (const ui::Section section{ "skylighting-visibility", "Visibility" }; section) {
 			dmui::ui::Text("%s", "Minimum visibility values. Diffuse darkens objects. Specular removes the sky from reflections.");
@@ -1055,12 +1045,6 @@ namespace cs::features
 			interval, std::uint32_t{ 0 }, settings::Range<std::uint32_t>{ 0, 3600 });
 		if (edit.changed)
 			_batchValidationInterval.store(interval, std::memory_order_relaxed);
-	}
-
-	void Skylighting::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

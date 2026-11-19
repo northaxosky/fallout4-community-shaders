@@ -76,17 +76,7 @@ namespace cs::features
 
 	bool ExtendedMaterials::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(extended_materials::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(extended_materials::kSchema, _settings);
-		return true;
-	}
-
-	bool ExtendedMaterials::SaveSettings()
-	{
-		return settings::SaveDelta(extended_materials::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	bool ExtendedMaterials::ShadowsActive() const noexcept
@@ -145,7 +135,7 @@ namespace cs::features
 	void ExtendedMaterials::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(extended_materials::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "extended-materials-parallax", "Parallax" }; section) {
 			field(&Settings::EnableParallax);
 			field(&Settings::EnableTerrain);
@@ -154,12 +144,6 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "extended-materials-shadows", "Approximate Soft Shadows" }; section)
 			field(&Settings::EnableShadows);
-	}
-
-	void ExtendedMaterials::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

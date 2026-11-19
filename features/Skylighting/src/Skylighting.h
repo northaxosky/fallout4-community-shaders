@@ -49,7 +49,6 @@ namespace cs::features
 		void DrawSettings() override;
 		bool HasDebugUI() const override { return true; }
 		void DrawDebug() override;
-		void RestoreDefaultSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -64,8 +63,7 @@ namespace cs::features
 		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		Skylighting() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(skylighting::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 		// Captures the occlusion map from a random zenith direction after stock.
 		void RenderOcclusion();
@@ -172,7 +170,8 @@ namespace cs::features
 			kUp
 		};
 
-		Settings _settings;
+		settings::LiveSettings<skylighting::kSchema> _live;
+		const Settings& _settings = _live.Get();
 
 		cs::engine::OcclusionDepthMap _occlusionMap;
 		// Top-down depth: which probes share a receiver's side of a roof.

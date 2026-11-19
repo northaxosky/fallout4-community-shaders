@@ -27,7 +27,6 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
@@ -40,9 +39,9 @@ namespace cs::features
 		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		LODBlending() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(lod_blending::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
-		Settings _settings;
+		settings::LiveSettings<lod_blending::kSchema> _live;
+		const Settings& _settings = _live.Get();
 	};
 }

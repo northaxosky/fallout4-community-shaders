@@ -119,17 +119,7 @@ namespace cs::features
 
 	bool CloudShadows::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(cloud_shadows::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(cloud_shadows::kSchema, _settings);
-		return true;
-	}
-
-	bool CloudShadows::SaveSettings()
-	{
-		return settings::SaveDelta(cloud_shadows::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void CloudShadows::Load()
@@ -684,15 +674,9 @@ namespace cs::features
 	void CloudShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(cloud_shadows::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "cloud-shadows-appearance", "Appearance" }; section)
 			field(&Settings::Opacity, { .format = "%.1f" });
-	}
-
-	void CloudShadows::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	void CloudShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
