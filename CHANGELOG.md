@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Upscaling/Frame Generation: frame generation on/off and its method now apply at the next launch; other sessions present through a D3D11 flip-model swap chain, where Reflex and Anti-Lag 2 are unavailable until a D3D11 backend lands.
 - Dynamic Cubemaps: `material_reflections` is removed; Vanilla PBR's Live Environment replaces it.
 - Vanilla PBR: new feature. GGX direct specular for vanilla materials; envmapped surfaces reflect the live world through vanilla's envmap formula, keeping authored strength, blur and metal tint, lit by ambient light only.
 - Sky Sync: a dark flat quad no longer covers the view when the sun is below eye level, e.g. at night with the alternate sun path.

@@ -36,7 +36,7 @@ namespace cs::render
 
 	bool TemporalRenderer::IsFrameGenerationDx12PathActive() const noexcept
 	{
-		return render::TemporalPipeline::Get().IsFrameGenerationProxyActive();
+		return render::TemporalPipeline::Get().IsFrameGenerationPresenterActive();
 	}
 
 	bool TemporalRenderer::IsFrameGenerationActive() const noexcept

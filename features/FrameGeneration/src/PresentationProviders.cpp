@@ -276,6 +276,13 @@ namespace cs::features
 			std::string(Name()) + " reported a post-Present failure.");
 	}
 
+	void StreamlinePresentation::ObservePresent(UINT a_syncInterval) noexcept
+	{
+		if (_method == Method::kDLSSG) {
+			_runtime.ObserveDLSSGPresent(a_syncInterval);
+		}
+	}
+
 	ProviderResult StreamlinePresentation::ValidateConfiguration(
 		const render::temporal::FrameGenerationConfiguration&
 			a_configuration) const

@@ -649,32 +649,8 @@ namespace cs::features
 
 			field(&Settings::frameGenerationAllowInMenus, { .label = "Allow in menus" });
 
-			const auto effectiveName =
-				render::temporal::presentation::Name(status.effective.frameGeneration);
-			const auto selectedName = MethodName(_live.Draft().frameGenerationMethod);
-			const auto selectedAvailability = availability(_live.Draft().frameGenerationMethod);
-			if (status.transitionInFlight) {
-				dmui::ui::TextDisabled(
-					"Switching to %.*s...",
-					static_cast<int>(selectedName.size()),
-					selectedName.data());
-			} else if (selectedAvailability.kind !=
-					   render::temporal::presentation::AvailabilityKind::kAvailable) {
-				dmui::ui::TextWrapped(
-					"%s. %.*s remains active.",
-					selectedAvailability.reason.c_str(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			} else if (status.effective.frameGeneration !=
-						   static_cast<render::temporal::FrameGenerationMethod>(
-							   _live.Draft().frameGenerationMethod) &&
-					   !status.failure.empty()) {
-				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Debug.",
-					static_cast<int>(selectedName.size()),
-					selectedName.data(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
+			if (status.pending.required) {
+				dmui::ui::TextWrapped("%s", status.pending.reason.c_str());
 			}
 		}
 	}

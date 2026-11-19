@@ -35,6 +35,41 @@ namespace cs::features
 			}
 		}
 
+		// ReShade stays registered for the process: the capture below must outlive every runtime.
+		std::atomic<ID3D11Device*> g_nativeDevice{};
+		std::atomic<HWND> g_ownedWindow{};
+		std::atomic_bool g_creatingRuntime{ false };
+
+		void OnInitDevice(::reshade::api::device* a_device)
+		{
+			if (a_device->get_api() == ::reshade::api::device_api::d3d11) {
+				g_nativeDevice.store(reinterpret_cast<ID3D11Device*>(a_device->get_native()), std::memory_order_release);
+			}
+		}
+
+		void OnInitEffectRuntime(effect_runtime* a_runtime)
+		{
+			const auto window = g_ownedWindow.load(std::memory_order_acquire);
+			if (!g_creatingRuntime.load(std::memory_order_acquire) && window &&
+				a_runtime->get_hwnd() == window) {
+				L->error("ReShade attached its own runtime to the chain Community Shaders presents on; effects will run twice");
+			}
+		}
+
+		bool EnsureAddon() noexcept
+		{
+			static const bool registered = [] {
+				const auto module = cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnInitDevice));
+				if (!::reshade::register_addon(module)) {
+					return false;
+				}
+				::reshade::register_event<::reshade::addon_event::init_device>(&OnInitDevice);
+				::reshade::register_event<::reshade::addon_event::init_effect_runtime>(&OnInitEffectRuntime);
+				return true;
+			}();
+			return registered;
+		}
+
 		template <class T>
 		::reshade::api::resource_view ViewHandle(T* a_view) noexcept
 		{
@@ -171,7 +206,6 @@ namespace cs::features
 			}
 			if (addonRegistered) {
 				::reshade::unregister_event<::reshade::addon_event::reshade_reloaded_effects>(&OnReloadedEffects);
-				::reshade::unregister_addon(cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnReloadedEffects)));
 			}
 			if (proxy) {
 				proxy->DetachOwner();
@@ -237,15 +271,18 @@ namespace cs::features
 			proxy.attach(new render::DXGISwapChainProxy(*owner, a_inner));
 
 			// Events need an add-on identity; without it, rebind every frame.
-			addonRegistered = ::reshade::register_addon(cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnReloadedEffects)));
+			addonRegistered = EnsureAddon();
 			if (addonRegistered) {
 				::reshade::register_event<::reshade::addon_event::reshade_reloaded_effects>(&OnReloadedEffects);
 			}
 			g_effectsReloaded.store(true, std::memory_order_release);
 
 			// A relative path resolves against ReShade's base path, like its own runtime.
-			if (!::reshade::create_effect_runtime(::reshade::api::device_api::d3d11, device.get(),
-					nullptr, proxy.get(), "ReShade.ini", &runtime)) {
+			g_creatingRuntime.store(true, std::memory_order_release);
+			const bool created = ::reshade::create_effect_runtime(::reshade::api::device_api::d3d11, device.get(),
+				nullptr, proxy.get(), "ReShade.ini", &runtime);
+			g_creatingRuntime.store(false, std::memory_order_release);
+			if (!created) {
 				runtime = nullptr;
 				DX::ThrowIfFailed(E_FAIL);
 			}
@@ -301,6 +338,30 @@ namespace cs::features
 		}
 	};
 
+	void ReShadeRuntime::ArmDeviceCapture() noexcept
+	{
+		if (IsInstalled()) {
+			(void)EnsureAddon();
+		}
+	}
+
+	winrt::com_ptr<ID3D11Device> ReShadeRuntime::NativeDevice(ID3D11Device& a_device) noexcept
+	{
+		winrt::com_ptr<ID3D11Device> device;
+		device.copy_from(&a_device);
+		if (IsInstalled()) {
+			if (auto* native = g_nativeDevice.load(std::memory_order_acquire)) {
+				device.copy_from(native);
+			}
+		}
+		return device;
+	}
+
+	void ReShadeRuntime::GuardWindow(HWND a_window) noexcept
+	{
+		g_ownedWindow.store(a_window, std::memory_order_release);
+	}
+
 	ReShadeRuntime::ReShadeRuntime() noexcept = default;
 
 	ReShadeRuntime::~ReShadeRuntime() = default;
@@ -341,13 +402,6 @@ namespace cs::features
 	{
 		_impl.reset();
 		_attempted = false;
-	}
-
-	void ReShadeRuntime::ReplaceInner(IDXGISwapChain4* a_inner) noexcept
-	{
-		if (_impl && _impl->proxy) {
-			_impl->proxy->ReplaceInner(a_inner);
-		}
 	}
 
 	bool ReShadeRuntime::EffectsEnabled() const noexcept

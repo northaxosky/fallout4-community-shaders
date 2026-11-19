@@ -238,7 +238,7 @@ namespace cs::features
 			case LatencyBackend::kNone:
 				switch (latency.unavailableReason) {
 				case LatencyUnavailableReason::kNeedsD3D12Presentation:
-					latencyStatus = "AMD Anti-Lag 2 requires Upscaling or Frame Generation in borderless windowed mode";
+					latencyStatus = "Latency reduction currently needs Frame Generation";
 					break;
 				case LatencyUnavailableReason::kPresentationFailed:
 					latencyStatus = "Inactive because Direct3D 12 presentation failed";

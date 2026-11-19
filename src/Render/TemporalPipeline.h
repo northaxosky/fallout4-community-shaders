@@ -212,7 +212,10 @@ namespace cs::render
 		TemporalRenderer& Renderer() noexcept;
 		[[nodiscard]] temporal::EffectiveConfiguration
 		GetEffectiveConfiguration() const;
+		// The facade stands between the engine and the swap chain, whichever presenter is behind it.
 		[[nodiscard]] bool IsFrameGenerationProxyActive() const noexcept;
+		// The D3D12 presenter carries the session, so frame-generation inputs can be captured.
+		[[nodiscard]] bool IsFrameGenerationPresenterActive() const noexcept;
 		// True while the presenter carries the HDR container; never in fullscreen.
 		[[nodiscard]] bool IsHdrContainerActive() const noexcept;
 		// The fp16 scene texture rendered into while the interface is separate.

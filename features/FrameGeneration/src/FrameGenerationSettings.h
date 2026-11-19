@@ -19,8 +19,8 @@ namespace cs::features::frame_generation
 
 	inline constexpr settings::Schema kSchema{
 		std::tuple{
-			settings::Field{ "frame_generation_method", "Method: 0 Off, 1 FSR 3, 2 DLSS, 3 FSR 4; admitted providers switch at a frame boundary.", &Settings::frameGenerationMethod,
-				settings::Range{ 0u, static_cast<std::uint32_t>(Method::kFSR4) } }
+			settings::Field{ "frame_generation_method", "Method: 0 Off, 1 FSR 3, 2 DLSS, 3 FSR 4; applies at the next launch.", &Settings::frameGenerationMethod,
+				settings::Range{ 0u, static_cast<std::uint32_t>(Method::kFSR4) }, settings::ApplyTiming::kNextLaunch }
 				.Help("The frame generation provider. Methods that are unavailable are disabled and give the reason."),
 			settings::Field{ "frame_generation_allow_in_menus", "Allow generated frames in pause, main, loading, and Pip-Boy menus.", &Settings::frameGenerationAllowInMenus },
 			settings::Field{ "dlssg_mode", "DLSS-G mode: 0 fixed multiplier, 1 dynamic MFG.", &Settings::dlssgMode, settings::Range{ 0u, 1u } },

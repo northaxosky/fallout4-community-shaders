@@ -561,24 +561,6 @@ namespace cs::render::temporal
 		a_preparedTransaction = false;
 	}
 
-	inline void CommitResizeBridgeState(
-		const DXGI_SWAP_CHAIN_DESC1& a_innerDescription,
-		DXGI_SWAP_CHAIN_DESC& a_proxyDescription,
-		DXGI_SWAP_CHAIN_DESC1& a_publishedInnerDescription,
-		std::array<std::uint64_t, 2>& a_allocatorFenceValues,
-		PresentInputReuseGate& a_inputReuseGate, std::uint32_t& a_frameSlot,
-		bool& a_presentPrepared, bool& a_preparedFrameGeneration,
-		bool& a_vendorConsumptionPossible, bool& a_preparedTransaction) noexcept
-	{
-		a_publishedInnerDescription = a_innerDescription;
-		a_proxyDescription.BufferDesc.Width = a_innerDescription.Width;
-		a_proxyDescription.BufferDesc.Height = a_innerDescription.Height;
-		ResetPresentationProtocol(a_allocatorFenceValues, a_inputReuseGate,
-			a_frameSlot, a_presentPrepared,
-			a_preparedFrameGeneration,
-			a_vendorConsumptionPossible, a_preparedTransaction);
-	}
-
 	class PresentedFrameAccumulator
 	{
 	public:

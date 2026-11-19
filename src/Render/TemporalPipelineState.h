@@ -75,6 +75,8 @@ namespace cs::render::temporal
 		std::array<bool, static_cast<std::size_t>(FrameGenerationMethod::kCount)>
 			admittedFg{};
 		FrameGenerationMethod activeFg = FrameGenerationMethod::kOff;
+		// Why the requested frame-generation presenter was replaced by the D3D11 one.
+		std::string frameGenerationFallback;
 		std::uint64_t adapterLuid = 0;
 		std::string rejectionReason;
 	};
@@ -169,6 +171,11 @@ namespace cs::render::temporal
 				_effective.frameGeneration = FrameGenerationMethod::kOff;
 			}
 			UpdateEffectiveEnablement();
+			if (!_session->frameGenerationFallback.empty()) {
+				_frameGenerationFailed = true;
+				_frameGenerationFailureReason = _session->frameGenerationFallback;
+				UpdatePendingRestart();
+			}
 			return true;
 		}
 
@@ -176,8 +183,6 @@ namespace cs::render::temporal
 			bool a_srEnabled,
 			SuperResolutionMethod a_sr,
 			std::uint32_t a_qualityMode,
-			bool a_fgEnabled,
-			FrameGenerationMethod a_fg,
 			std::uint64_t a_revision,
 			FrameGenerationConfiguration a_fgConfiguration = {})
 		{
@@ -188,15 +193,11 @@ namespace cs::render::temporal
 			_request->superResolutionEnabled = a_srEnabled;
 			_request->superResolution = a_sr;
 			_request->qualityMode = a_qualityMode;
-			_request->frameGenerationEnabled = a_fgEnabled;
-			_request->frameGeneration = a_fg;
 			_request->frameGenerationConfiguration = a_fgConfiguration;
 			_request->revision = a_revision;
 			if (!_session) {
 				_restartForSuperResolutionMethod =
 					a_sr != _startupRequest->superResolution;
-				_restartForFrameGenerationMethod =
-					a_fg != _startupRequest->frameGeneration;
 				UpdatePendingRestart();
 				return;
 			}
@@ -205,13 +206,9 @@ namespace cs::render::temporal
 				_transitionInFlight ? *_transitionInFlight : _effective;
 			auto target = transitionBase;
 			const auto srIndex = static_cast<std::size_t>(a_sr);
-			const auto fgIndex = static_cast<std::size_t>(a_fg);
 			const bool srAdmitted =
 				srIndex < _session->admittedSr.size() &&
 				_session->admittedSr[srIndex];
-			const bool fgAdmitted =
-				fgIndex < _session->admittedFg.size() &&
-				_session->admittedFg[fgIndex];
 			const bool externalSrRequested =
 				a_sr == SuperResolutionMethod::kFSR3 ||
 				a_sr == SuperResolutionMethod::kFSR4 ||
@@ -219,9 +216,6 @@ namespace cs::render::temporal
 			_restartForSuperResolutionMethod =
 				a_srEnabled && externalSrRequested &&
 				a_sr != _startupRequest->superResolution && !srAdmitted;
-			_restartForFrameGenerationMethod =
-				a_fgEnabled && a_fg != FrameGenerationMethod::kOff &&
-				!fgAdmitted;
 			if (!_quarantined.superResolution &&
 				(!_superResolutionFailed || !externalSrRequested)) {
 				if (!a_srEnabled) {
@@ -235,27 +229,10 @@ namespace cs::render::temporal
 						a_sr != SuperResolutionMethod::kNone;
 				}
 			}
-			if (!_quarantined.frameGeneration &&
-				!_frameGenerationFailed) {
-				if (!a_fgEnabled ||
-					a_fg == FrameGenerationMethod::kOff) {
-					target.frameGenerationEnabled = false;
-					if (a_fg != FrameGenerationMethod::kOff &&
-						fgAdmitted) {
-						target.frameGeneration = a_fg;
-					}
-				} else if (fgAdmitted &&
-						   !_restartForFrameGenerationMethod) {
-					target.frameGeneration = a_fg;
-					if (a_fg == FrameGenerationMethod::kDLSSG) {
-						target.frameGenerationConfiguration =
-							a_fgConfiguration;
-					}
-					target.frameGenerationEnabled =
-						_startupRequest->frameGenerationEligible &&
-						a_fg != FrameGenerationMethod::kOff &&
-						_session->proxyInstalled;
-				}
+			// The presenter is chosen at startup, so only the DLSS-G configuration moves live.
+			if (!_quarantined.frameGeneration && !_frameGenerationFailed &&
+				_effective.frameGeneration == FrameGenerationMethod::kDLSSG) {
+				target.frameGenerationConfiguration = a_fgConfiguration;
 			}
 			const bool changed =
 				target.superResolutionEnabled !=
@@ -342,47 +319,6 @@ namespace cs::render::temporal
 			} else {
 				_pendingTransition.reset();
 			}
-			_frameGenerationFailed = false;
-			_frameGenerationFailureReason.clear();
-			UpdateEffectiveEnablement();
-			UpdatePendingRestart();
-			return true;
-		}
-
-		[[nodiscard]] bool
-		CommitPendingFrameGenerationFallback(
-			std::uint64_t a_revision,
-			std::string a_reason) noexcept
-		{
-			const EffectiveConfiguration* completed = nullptr;
-			if (_transitionInFlight &&
-				_transitionInFlight->revision == a_revision) {
-				completed = &*_transitionInFlight;
-			} else if (_pendingTransition &&
-					   _pendingTransition->revision == a_revision) {
-				completed = &*_pendingTransition;
-			}
-			if (!completed) {
-				return false;
-			}
-			_effective = *completed;
-			_effective.frameGenerationEnabled = false;
-			_effective.frameGeneration = FrameGenerationMethod::kOff;
-			if (_session) {
-				_session->activeFg = FrameGenerationMethod::kOff;
-			}
-			if (_transitionInFlight &&
-				_transitionInFlight->revision == a_revision) {
-				_transitionInFlight.reset();
-			} else {
-				_pendingTransition.reset();
-			}
-			if (_pendingTransition &&
-				_pendingTransition->frameGenerationEnabled) {
-				_pendingTransition.reset();
-			}
-			_frameGenerationFailed = true;
-			_frameGenerationFailureReason = std::move(a_reason);
 			UpdateEffectiveEnablement();
 			UpdatePendingRestart();
 			return true;
@@ -498,16 +434,13 @@ namespace cs::render::temporal
 			} else if (_frameGenerationFailed) {
 				_pending.required = true;
 				_pending.reason = _frameGenerationFailureReason;
-			} else if (_restartForSuperResolutionMethod ||
-					   _restartForFrameGenerationMethod) {
+			} else if (_restartForSuperResolutionMethod) {
 				_pending.required = true;
 				_pending.reason =
-					_restartForSuperResolutionMethod ? (_session ? "The requested super-resolution provider is "
-																   "unavailable in the current session." :
-																   "The requested super-resolution method differs "
-																   "from the frozen startup request.") :
-													   "The requested frame-generation provider is unavailable "
-													   "in the current session.";
+					_session ? "The requested super-resolution provider is "
+							   "unavailable in the current session." :
+							   "The requested super-resolution method differs "
+							   "from the frozen startup request.";
 			}
 		}
 
@@ -523,7 +456,6 @@ namespace cs::render::temporal
 		bool _frameGenerationFailed = false;
 		std::string _frameGenerationFailureReason;
 		bool _restartForSuperResolutionMethod = false;
-		bool _restartForFrameGenerationMethod = false;
 		FailureImpact _quarantined;
 		std::string _quarantineReason;
 	};

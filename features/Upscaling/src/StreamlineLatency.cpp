@@ -236,30 +236,55 @@ namespace cs::features
 		return diagnostics;
 	}
 
+	void StreamlineLatency::BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept
+	{
+		_presenting.store(a_binding.frameGenerationPresentation, std::memory_order_release);
+	}
+
+	void StreamlineLatency::UnbindPresentation() noexcept
+	{
+		_presenting.store(false, std::memory_order_release);
+	}
+
 	ProviderResult StreamlineLatency::Configure(const LatencyOptions& a_options)
 	{
+		if (!_presenting.load(std::memory_order_acquire)) {
+			return { .code = ProviderResultCode::kUnavailable };
+		}
 		return _runtime.ConfigureLatency(a_options);
 	}
 
 	ProviderResult StreamlineLatency::Sleep(std::uint32_t a_frame)
 	{
+		if (!_presenting.load(std::memory_order_acquire)) {
+			return { .code = ProviderResultCode::kUnavailable };
+		}
 		return _runtime.SleepLatency(a_frame);
 	}
 
 	ProviderResult StreamlineLatency::SetLatencyMarker(
 		LatencyMarker a_marker, std::uint32_t a_frame)
 	{
+		if (!_presenting.load(std::memory_order_acquire)) {
+			return { .code = ProviderResultCode::kUnavailable };
+		}
 		return _runtime.SetLatencyMarker(a_marker, a_frame);
 	}
 
 	render::temporal::LatencyDiagnostics
 	StreamlineLatency::GetLatencyDiagnostics() const noexcept
 	{
+		// Reflex paces the device that presents, which is the private D3D12 one only under frame generation.
+		if (!_presenting.load(std::memory_order_acquire)) {
+			render::temporal::LatencyDiagnostics diagnostics;
+			diagnostics.unavailableReason = render::temporal::LatencyUnavailableReason::kNeedsD3D12Presentation;
+			return diagnostics;
+		}
 		return _runtime.GetLatencyDiagnostics();
 	}
 
 	bool StreamlineLatency::IsAvailable() const noexcept
 	{
-		return _runtime.IsLatencyAvailable();
+		return _presenting.load(std::memory_order_acquire) && _runtime.IsLatencyAvailable();
 	}
 }

@@ -690,6 +690,8 @@ namespace cs::render::temporal
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
 		[[nodiscard]] virtual ProviderResult
 		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) = 0;
+		// Every accepted present, before status collection.
+		virtual void ObservePresent(UINT) noexcept {}
 		// The provider composites the interface itself; the back buffer is scene only.
 		[[nodiscard]] virtual bool PresentsSceneOnlyBackBuffer() const noexcept
 		{

@@ -41,6 +41,7 @@ namespace cs::features
 		SetGenerationEnabled(bool a_enabled) override;
 		[[nodiscard]] render::temporal::ProviderResult
 		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) override;
+		void ObservePresent(UINT a_syncInterval) noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		ValidateConfiguration(
 			const render::temporal::FrameGenerationConfiguration&

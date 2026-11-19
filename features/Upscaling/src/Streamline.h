@@ -434,6 +434,8 @@ namespace cs::features
 			_runtime(a_runtime)
 		{}
 
+		void BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept override;
+		void UnbindPresentation() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		Configure(const render::temporal::LatencyOptions& a_options) override;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -447,5 +449,6 @@ namespace cs::features
 
 	private:
 		Streamline& _runtime;
+		std::atomic_bool _presenting{ false };
 	};
 }

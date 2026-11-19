@@ -4,6 +4,7 @@
 
 #include <d3d11.h>
 #include <dxgi1_6.h>
+#include <winrt/base.h>
 
 #include "Render/DXGISwapChainProxy.h"
 
@@ -29,6 +30,13 @@ namespace cs::features
 		// False when no ReShade module is loaded; cheap after the first call.
 		[[nodiscard]] static bool IsInstalled() noexcept;
 
+		// Call before the engine device exists, so ReShade's device event is seen.
+		static void ArmDeviceCapture() noexcept;
+		// The device beneath ReShade's proxy, through its public add-on API; a_device without ReShade.
+		[[nodiscard]] static winrt::com_ptr<ID3D11Device> NativeDevice(ID3D11Device& a_device) noexcept;
+		// ReShade attaching its own runtime to this window's chain is logged as an error.
+		static void GuardWindow(HWND a_window) noexcept;
+
 		// Creates the runtime once per Destroy; a failed attempt is not retried.
 		// An HDR container makes the copy fp16 so scRGB survives.
 		bool Ensure(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
@@ -36,7 +44,6 @@ namespace cs::features
 		// Leaks the runtime on purpose: ReShade must not run after quarantine.
 		void Abandon() noexcept;
 		void Destroy() noexcept;
-		void ReplaceInner(IDXGISwapChain4* a_inner) noexcept;
 
 		[[nodiscard]] bool EffectsEnabled() const noexcept;
 		// Depth is the canonical output-resolution depth, or null if unavailable.
