@@ -209,8 +209,9 @@ namespace cs::features
 		public:
 			virtual ~Attachment() = default;
 			[[nodiscard]] virtual effect_runtime* Runtime() noexcept = 0;
-			// Draws ReShade's overlay on the copy; the adopted runtime does that at the real Present.
-			virtual void Present(effect_runtime& a_runtime) noexcept = 0;
+			// Draws ReShade's overlay on the copy; an adopted runtime does that at the real Present.
+			[[nodiscard]] virtual bool PresentsOverlay() const noexcept { return false; }
+			virtual void Present(effect_runtime&) noexcept {}
 		};
 
 		// A chain ReShade did not hook: CS creates the runtime on a proxy of it and presents it.
@@ -239,6 +240,7 @@ namespace cs::features
 				}
 			}
 			effect_runtime* Runtime() noexcept override { return _runtime; }
+			bool PresentsOverlay() const noexcept override { return true; }
 			void Present(effect_runtime& a_runtime) noexcept override { ::reshade::update_and_present_effect_runtime(&a_runtime); }
 
 		private:
@@ -259,7 +261,6 @@ namespace cs::features
 				}
 			}
 			effect_runtime* Runtime() noexcept override { return FindRuntime(_window); }
-			void Present(effect_runtime&) noexcept override {}
 
 		private:
 			HWND _window = nullptr;
@@ -535,10 +536,6 @@ namespace cs::features
 	void ReShadeRuntime::RenderEffects(ID3D11DeviceContext& a_context, ID3D11Resource& a_color,
 		ID3D11ShaderResourceView* a_depth, const ScRgbProxy* a_scRgb) noexcept
 	{
-		static std::atomic_uint traced{ 0 };
-		const bool trace = traced.fetch_add(1) < 3;
-		if (trace)
-			L->info("ReShade render_effects begin");
 		WithColorCopy(a_context, a_color, a_scRgb, "Upscaling::ReShade/Effects", [&](Impl& a_impl) {
 			cs::render::ScopedContextState state(&a_context, a_impl.contextState.get());
 			if (!state.IsActive()) {
@@ -550,20 +547,15 @@ namespace cs::features
 				runtime->get_command_queue()->get_immediate_command_list(),
 				ViewHandle(a_impl.rtv.get()), ViewHandle(a_impl.rtvSrgb.get()));
 		});
-		if (trace)
-			L->info("ReShade render_effects end");
 	}
 
 	void ReShadeRuntime::Present(ID3D11DeviceContext& a_context, ID3D11Resource& a_color, const ScRgbProxy* a_scRgb) noexcept
 	{
-		static std::atomic_uint traced{ 0 };
-		const bool trace = traced.fetch_add(1) < 3;
-		if (trace)
-			L->info("ReShade update_and_present begin");
+		if (!_impl || !_impl->attachment || !_impl->attachment->PresentsOverlay()) {
+			return;
+		}
 		WithColorCopy(a_context, a_color, a_scRgb, "Upscaling::ReShade/Present", [](Impl& a_impl) {
 			a_impl.attachment->Present(*a_impl.Runtime());
 		});
-		if (trace)
-			L->info("ReShade update_and_present end");
 	}
 }

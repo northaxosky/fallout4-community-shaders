@@ -453,7 +453,6 @@ namespace cs::render::temporal
 	{
 		kNone,
 		kUnsupportedAdapter,
-		kNeedsD3D12Presentation,
 		kPresentationFailed,
 		kInitializeFailed,
 		kUpdateFailing

@@ -225,8 +225,6 @@ namespace cs::features
 			diagnostics.unavailableReason = Reason::kPresentationFailed;
 		} else if (_initializationFailed) {
 			diagnostics.unavailableReason = _adapterVendorId != kAmdVendorId ? Reason::kUnsupportedAdapter : Reason::kInitializeFailed;
-		} else if (!_device) {
-			diagnostics.unavailableReason = Reason::kNeedsD3D12Presentation;
 		} else if (usable && _enabled && lastUpdate < 0) {
 			diagnostics.unavailableReason = Reason::kUpdateFailing;
 		}

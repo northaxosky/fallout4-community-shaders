@@ -237,9 +237,6 @@ namespace cs::features
 				break;
 			case LatencyBackend::kNone:
 				switch (latency.unavailableReason) {
-				case LatencyUnavailableReason::kNeedsD3D12Presentation:
-					latencyStatus = "Latency reduction currently needs Frame Generation";
-					break;
 				case LatencyUnavailableReason::kPresentationFailed:
 					latencyStatus = "Inactive because Direct3D 12 presentation failed";
 					break;

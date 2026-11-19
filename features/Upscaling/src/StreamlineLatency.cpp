@@ -276,9 +276,7 @@ namespace cs::features
 	{
 		// Reflex paces the device that presents, which is the private D3D12 one only under frame generation.
 		if (!_presenting.load(std::memory_order_acquire)) {
-			render::temporal::LatencyDiagnostics diagnostics;
-			diagnostics.unavailableReason = render::temporal::LatencyUnavailableReason::kNeedsD3D12Presentation;
-			return diagnostics;
+			return {};
 		}
 		return _runtime.GetLatencyDiagnostics();
 	}

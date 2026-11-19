@@ -1,7 +1,5 @@
 #include "D3D11FlipPresenter.h"
 
-#include <atomic>
-
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Annotation.h"
@@ -12,12 +10,6 @@ namespace cs::render
 	namespace
 	{
 		auto* L = cs::log::Get("cs.render.d3d11presenter");
-
-		// One-shot trace of the first presents, to place a crash.
-		bool TraceFrame(std::atomic_uint& a_count) noexcept
-		{
-			return a_count.fetch_add(1) < 3;
-		}
 
 		constexpr UINT kInheritedFlags =
 			DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
@@ -101,29 +93,17 @@ namespace cs::render
 
 	HRESULT D3D11FlipPresenter::Present(const PresentFrame& a_frame, const PresentArgs& a_args) noexcept
 	{
-		static std::atomic_uint traced{ 0 };
-		const bool trace = TraceFrame(traced);
-		if (trace)
-			L->info("Present enter: pending={} hdr={} separated={}", _framePending, a_frame.hdrContainer, a_frame.separated);
 		if (!_framePending) {
 			if (a_frame.hdrContainer) {
 				ApplyHdrColorSpace(a_frame.hdr);
 			}
-			if (trace)
-				L->info("Compose begin");
 			const auto* source = a_frame.ComposeDisplay();
-			if (trace)
-				L->info("Compose end: source={}", static_cast<const void*>(source));
 			D3D11_TEXTURE2D_DESC sourceDesc{};
 			if (source) {
 				source->texture11->GetDesc(&sourceDesc);
 			}
 			if (source && sourceDesc.Format == _chain.desc.Format) {
-				if (trace)
-					L->info("CopyResource begin");
 				a_frame.context->CopyResource(_backBuffer.get(), source->texture11.get());
-				if (trace)
-					L->info("CopyResource end");
 			} else if (source) {
 				CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
 			}
@@ -134,8 +114,6 @@ namespace cs::render
 		pipeline.BeginPresentAttempt(a_args.flags);
 		const HRESULT result = PresentChain(a_args);
 		pipeline.EndPresentAttempt(a_args.flags, result);
-		if (trace)
-			L->info("Chain Present returned {:#010x}", static_cast<std::uint32_t>(result));
 		if (result != DXGI_ERROR_WAS_STILL_DRAWING) {
 			_framePending = false;
 		}
