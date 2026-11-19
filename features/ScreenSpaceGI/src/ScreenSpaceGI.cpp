@@ -46,19 +46,21 @@ namespace cs::features
 
 	bool ScreenSpaceGI::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(ssgi_settings::kSchema, a_config, candidate, a_error))
+		if (!_live.Configure(a_config, a_error))
 			return false;
-		_settings = candidate;
 		_recompile = true;
-		_liveSettings = settings::BindLiveSettings(ssgi_settings::kSchema, _settings,
-			[this] { _recompile = true; QueueReset("live_settings"); });
 		return true;
 	}
 
-	bool ScreenSpaceGI::SaveSettings()
+	void ScreenSpaceGI::OnSettingsChanged(const Settings& a_previous)
 	{
-		return settings::SaveDelta(ssgi_settings::kSchema, GetConfigKey(), _settings, *L);
+		// Only these fields change the compiled shaders or invalidate the history.
+		if (a_previous.enableGI == _settings.enableGI && a_previous.enableExperimentalSpecularGI == _settings.enableExperimentalSpecularGI &&
+			a_previous.resolutionMode == _settings.resolutionMode && a_previous.enableTemporalDenoiser == _settings.enableTemporalDenoiser &&
+			a_previous.numSlices == _settings.numSlices && a_previous.numSteps == _settings.numSteps)
+			return;
+		_recompile = true;
+		QueueReset("live_settings");
 	}
 
 	void ScreenSpaceGI::Load()
@@ -492,29 +494,25 @@ namespace cs::features
 	{
 		static bool showAdvanced = false;
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(ssgi_settings::kSchema, _settings);
-		const auto compile = [&](bool a_changed) {
-			if (a_changed)
-				_recompile = true;
-		};
+		const auto field = edit.Bind(_live);
 		const auto preset = [&](int a_slices, int a_steps, int a_resolution, bool a_gi) {
-			_settings.numSlices = a_slices;
-			_settings.numSteps = a_steps;
+			auto& draft = field.Values();
+			draft.numSlices = a_slices;
+			draft.numSteps = a_steps;
 			if (a_resolution >= 0)
-				_settings.resolutionMode = a_resolution;
-			_settings.enableBlur = true;
-			_settings.enableGI = a_gi;
-			_recompile = true;
+				draft.resolutionMode = a_resolution;
+			draft.enableBlur = true;
+			draft.enableGI = a_gi;
 			edit.Apply({ true, true });
 		};
 		if (const ui::Section section{ "ssgi-toggles", "Toggles" }; section) {
 			ui::EditSetting({ "ssgi-show-advanced", { .label = "Show Advanced Options" } }, showAdvanced, false);
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
-			compile(field(&Settings::enableGI, { .label = "Indirect Lighting (IL)" }));
+			field(&Settings::enableGI, { .label = "Indirect Lighting (IL)" });
 			dmui::ui::EndDisabled();
 			field(&Settings::enableVanillaSSAO, { .label = "Vanilla SSAO" });
 			if (showAdvanced)
-				compile(field(&Settings::enableExperimentalSpecularGI, { .label = "(Experimental) HQ Specular IL" }));
+				field(&Settings::enableExperimentalSpecularGI, { .label = "(Experimental) HQ Specular IL" });
 		}
 		if (const ui::Section section{ "ssgi-quality", "Quality/Performance" }; section) {
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
@@ -540,9 +538,9 @@ namespace cs::features
 			for (std::uint32_t i = 0; i < presets.size(); ++i) {
 				const auto& p = presets[i];
 				presetOptions.push_back({ i + 1, p.label, p.key });
-				if (!current && _settings.numSlices == p.slices && _settings.numSteps == p.steps &&
-					_settings.enableGI == p.gi && _settings.enableBlur &&
-					(p.resolution < 0 || _settings.resolutionMode == p.resolution))
+				if (!current && _live.Draft().numSlices == p.slices && _live.Draft().numSteps == p.steps &&
+					_live.Draft().enableGI == p.gi && _live.Draft().enableBlur &&
+					(p.resolution < 0 || _live.Draft().resolutionMode == p.resolution))
 					current = i + 1;
 			}
 			const auto chosen = ui::PickChoice<std::uint32_t>(
@@ -561,34 +559,34 @@ namespace cs::features
 				dmui::ChoiceOption<int>{ 1, "Half", "half" },
 				dmui::ChoiceOption<int>{ 2, "Quarter", "quarter" }
 			};
-			compile(field.Choice(&Settings::resolutionMode, resolutions, { .label = "Resolution", .help = "Resolution of the indirect lighting pass; lower is faster." }));
+			field.Choice(&Settings::resolutionMode, resolutions, { .label = "Resolution", .help = "Resolution of the indirect lighting pass; lower is faster." });
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual", "Visual" }; section) {
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
 			field(&Settings::aoPower, { .label = "AO Power", .format = "%.2f" });
-			dmui::ui::BeginDisabled(!_settings.enableGI);
+			dmui::ui::BeginDisabled(!_live.Draft().enableGI);
 			field(&Settings::giStrength, { .label = "IL Source Brightness", .format = "%.2f" });
 			dmui::ui::EndDisabled();
 			field(&Settings::aoRadius, { .label = "AO radius", .format = "%.1f units" });
-			dmui::ui::BeginDisabled(!_settings.enableGI);
+			dmui::ui::BeginDisabled(!_live.Draft().enableGI);
 			field(&Settings::giRadius, { .label = "IL radius", .format = "%.1f units" });
 			dmui::ui::EndDisabled();
 			if (showAdvanced)
 				field(&Settings::minScreenRadius, { .label = "Min Screen Radius", .format = "%.3f" });
 			// One schema array edited as two sliders.
-			const Settings defaults{};
+			const Settings defaults = _live.DefaultSettings();
 			const settings::Range fade{ 10000.0f, 50000.0f };
 			edit.Apply(ui::EditSetting({ "DepthFadeNear", { .label = "Depth Fade Near", .help = "Distance where the effect starts to fade out, in game units.", .format = "%.0f units" } },
-				_settings.depthFadeRange[0], defaults.depthFadeRange[0], fade));
+				field.Values().depthFadeRange[0], defaults.depthFadeRange[0], fade));
 			edit.Apply(ui::EditSetting({ "DepthFadeFar", { .label = "Depth Fade Far", .help = "Distance where the effect has fully faded out, in game units.", .format = "%.0f units" } },
-				_settings.depthFadeRange[1], defaults.depthFadeRange[1], fade));
+				field.Values().depthFadeRange[1], defaults.depthFadeRange[1], fade));
 			if (showAdvanced)
 				field(&Settings::thickness, { .label = "Thickness", .format = "%.1f units" });
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual-il", "Visual - IL" }; section) {
-			dmui::ui::BeginDisabled(!IsSwitchedOn() || !_settings.enableGI);
+			dmui::ui::BeginDisabled(!IsSwitchedOn() || !_live.Draft().enableGI);
 			if (showAdvanced)
 				field(&Settings::giDistanceCompensation, { .label = "IL Distance Compensation", .format = "%.1f" });
 			field(&Settings::giSaturation, { .label = "IL Saturation", .format = "%.1f%%", .scale = 100.0f });
@@ -596,29 +594,22 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "ssgi-denoising", "Denoising" }; section) {
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
-			compile(field(&Settings::enableTemporalDenoiser, { .label = "Temporal Denoiser" }));
+			field(&Settings::enableTemporalDenoiser, { .label = "Temporal Denoiser" });
 			field(&Settings::enableBlur, { .label = "Blur" });
 			if (showAdvanced) {
-				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser);
+				dmui::ui::BeginDisabled(!_live.Draft().enableTemporalDenoiser);
 				field(&Settings::maxAccumFrames, { .label = "Max Frame Accumulation" });
 				dmui::ui::EndDisabled();
-				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser && !_settings.enableGI);
+				dmui::ui::BeginDisabled(!_live.Draft().enableTemporalDenoiser && !_live.Draft().enableGI);
 				field(&Settings::depthDisocclusion, { .label = "Movement Disocclusion", .format = "%.1f%%", .scale = 100.0f });
 				dmui::ui::EndDisabled();
-				dmui::ui::BeginDisabled(!_settings.enableBlur);
+				dmui::ui::BeginDisabled(!_live.Draft().enableBlur);
 				field(&Settings::blurRadius, { .label = "Blur Radius", .format = "%.1f px" });
 				field(&Settings::distanceNormalisation, { .label = "Geometry Weight", .format = "%.2f" });
 				dmui::ui::EndDisabled();
 			}
 			dmui::ui::EndDisabled();
 		}
-	}
-
-	void ScreenSpaceGI::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		_recompile = true;
-		SaveSettings();
 	}
 
 	namespace

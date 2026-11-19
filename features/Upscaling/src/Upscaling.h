@@ -37,26 +37,30 @@ namespace cs::features
 		void DrawSettings() override;
 		bool HasDebugUI() const override { return true; }
 		void DrawDebug() override;
-		std::vector<std::string_view> GetRestartSettings() const override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 		void OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept override;
 
-		Settings settings;
+	private:
+		// Swaps whole, so the derived enabled flag travels with the method.
+		settings::LiveSettings<render::temporal::kSchema> _live{ { .normalize = [](Settings& a_settings) { a_settings.enabled = a_settings.upscaleMethod != static_cast<std::uint32_t>(UpscaleMethod::kNone); },
+			.finalize = [this](const Settings&) { SubmitConfiguration(); } } };
+
+	public:
+		// Restart-only fields hold their boot values.
+		const Settings& settings = _live.Get();
 
 		// The Z-prepass alpha test while the main-view mip bias is active, else null.
 		[[nodiscard]] ID3D11PixelShader* GetZPrepassAlphaPS() const noexcept;
 
 	private:
 		Upscaling() = default;
+		void SubmitConfiguration();
 		engine::OwnedShaderDefineProvider _mipBiasDefines{ upscaling::kMipBiasShaderDefines, *this };
 		engine::OwnedShaderDefineProvider _imageSpaceUvDefines{ upscaling::kImageSpaceUvShaderDefines, *this };
 		winrt::com_ptr<ID3D11PixelShader> _zPrepassAlphaPS;
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(render::temporal::kSchema, settings); }
-		Settings _bootSettings;
 	};
 }

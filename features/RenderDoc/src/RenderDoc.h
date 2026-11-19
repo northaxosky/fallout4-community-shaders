@@ -66,8 +66,7 @@ namespace cs::features
 		void DrawOverlay() override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		std::string GetStartupNotice() const override;
-		std::vector<std::string_view> GetRestartSettings() const override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		void OnFrameBoundary();
@@ -101,8 +100,6 @@ namespace cs::features
 	private:
 		RenderDoc() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(renderdoc_settings::kSchema, _settings); }
 		bool TryLoadRuntime(std::string& a_error);
 		bool ResolveCapturePath(std::string& a_error);
 		void ApplyCapturePath();
@@ -146,8 +143,13 @@ namespace cs::features
 
 		void Complete(CaptureCompletion a_completion);
 
-		Settings _settings;
-		Settings _bootSettings;
+		// Not shared: out of presets, A/B and Remote Control, and still saved during a comparison.
+		settings::LiveSettings<renderdoc_settings::kSchema> _live{ { .normalize = [](Settings& a_settings) { a_settings.captureFrameCount = std::clamp(a_settings.captureFrameCount, renderdoc::kMinCaptureFrameCount, renderdoc::kMaxCaptureFrameCount); },
+			.finalize = [this](const Settings& a_previous) {
+				if (a_previous.captureFolder != _settings.captureFolder)
+					ApplyCapturePath(); },
+			.shared = false } };
+		const Settings& _settings = _live.Get();
 		std::filesystem::path _resolvedCaptureFolder;
 		std::string _resolvedCaptureFolderUtf8;
 		HMODULE _module = nullptr;

@@ -31,7 +31,7 @@ namespace cs::features
 		void OnEnabledChanged(bool) noexcept override { QueueReset("enabled_changed"); }
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
@@ -60,8 +60,7 @@ namespace cs::features
 			bool normalGlossSpecular = false;
 		};
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(ssgi_settings::kSchema, _settings); }
+		void OnSettingsChanged(const Settings& a_previous);
 		bool EnsureResources();
 		void EnsurePrepareResources(Resources&, UINT, UINT);
 		bool CompileShaders();
@@ -74,7 +73,8 @@ namespace cs::features
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
 		static constexpr std::size_t kResolutionModes = 3;
-		Settings _settings;
+		settings::LiveSettings<ssgi_settings::kSchema> _live{ { .finalize = [this](const Settings& a_previous) { OnSettingsChanged(a_previous); } } };
+		const Settings& _settings = _live.Get();
 		Resources _textures;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
 		std::optional<ConsumerCB> _consumerData;

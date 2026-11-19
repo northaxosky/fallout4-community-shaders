@@ -187,14 +187,7 @@ namespace cs::features
 
 	bool RenderDoc::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!renderdoc_settings::Parse(a_config, candidate, a_error)) {
-			return false;
-		}
-
-		_settings = candidate;
-		_bootSettings = candidate;
-		return true;
+		return _live.Configure(a_config, a_error);
 	}
 
 	void RenderDoc::Load()
@@ -212,11 +205,6 @@ namespace cs::features
 
 		if (!render::RegisterPostSwap(*this, [this] { OnFrameBoundary(); }))
 			L->error("RenderDoc frame boundary registration failed; captures unavailable");
-	}
-
-	bool RenderDoc::SaveSettings()
-	{
-		return settings::SaveDelta(renderdoc_settings::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	bool RenderDoc::TryLoadRuntime(std::string& a_error)
@@ -675,7 +663,7 @@ namespace cs::features
 	{
 		// FO4: visible controls and native dialogs are owned by the forwarding host.
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(renderdoc_settings::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 
 		const bool d3d11Available =
 			_d3d11TargetAvailable.load(std::memory_order_acquire);
@@ -701,13 +689,11 @@ namespace cs::features
 			}
 
 			field(&Settings::dllPath, { .label = "DLL path" });
-			if (field.Edit(&Settings::captureFolder, { .label = "Capture folder" }).completed)
-				ApplyCapturePath();
+			field(&Settings::captureFolder, { .label = "Capture folder" });
 
 			field(&Settings::captureFrameCount);
-			_settings.captureFrameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
 			dmui::ui::TextDisabled("Required free space: %llu MiB.",
-				renderdoc::RequiredSpaceBytes(_settings.captureFrameCount) / (1024 * 1024));
+				renderdoc::RequiredSpaceBytes(_live.Draft().captureFrameCount) / (1024 * 1024));
 
 			// Not persisted: the text is embedded in the next capture, then cleared.
 			ui::DrawField(
@@ -803,19 +789,6 @@ namespace cs::features
 			dmui::ui::PopID();
 		}
 		dmui::ui::EndTable();
-	}
-
-	std::vector<std::string_view> RenderDoc::GetRestartSettings() const
-	{
-		return cs::settings::RestartRequired(renderdoc_settings::kSchema, _bootSettings, _settings);
-	}
-
-	void RenderDoc::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
-		ApplyCapturePath();
-		L->info("Settings reset to defaults");
 	}
 
 	namespace

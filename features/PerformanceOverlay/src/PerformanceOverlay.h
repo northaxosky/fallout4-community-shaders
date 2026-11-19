@@ -41,12 +41,18 @@ namespace cs::features
 		DMUI_ManagedOverlayOptions ManagedOverlayOptions() const noexcept;
 		const std::string& SuggestedToggleHotkey() const noexcept { return settings.toggleHotkey; }
 		using Settings = performance_overlay::Settings;
-		Settings settings;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 	private:
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(performance_overlay::kSchema, settings); }
-		void DrawGroupFilter(cs::settings::SettingsEdit&);
+		// Not shared: out of presets, A/B and Remote Control, and still saved during a comparison.
+		settings::LiveSettings<performance_overlay::kSchema> _live{ { .normalize = [](Settings& a_settings) { a_settings.NormalizeHiddenGroups(); },
+			.shared = false } };
+
+	public:
+		const Settings& settings = _live.Get();
+
+	private:
+		void DrawGroupFilter(cs::settings::SettingsEdit&, Settings& a_draft);
 		void DrawDrawCalls(const std::vector<DrawCallRow>&);
 		void DrawGraph(const char*, const char*, const CircularBuffer<float>&, dmui::ui::Vec4 DMUI_ThemeColors::*);
 		static float OverlayContentWidth() noexcept;

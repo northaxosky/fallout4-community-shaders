@@ -92,12 +92,7 @@ namespace cs::features
 
 	bool PerformanceOverlay::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = settings;
-		if (!cs::settings::Parse(performance_overlay::kSchema, a_config, candidate, a_error))
-			return false;
-		candidate.NormalizeHiddenGroups();
-		settings = candidate;
-		return true;
+		return _live.Configure(a_config, a_error);
 	}
 
 	void PerformanceOverlay::Load()
@@ -157,11 +152,6 @@ namespace cs::features
 	{
 		render::profiling::SetEnabled(false);
 		_comparison.Abort("Performance Overlay was quarantined; restart required");
-	}
-
-	bool PerformanceOverlay::SaveSettings()
-	{
-		return cs::settings::SaveDelta(performance_overlay::kSchema, GetConfigKey(), settings, *L);
 	}
 
 	void PerformanceOverlay::UpdateGraphValues()
@@ -450,9 +440,9 @@ namespace cs::features
 		_comparison.DrawResults();
 	}
 
-	void PerformanceOverlay::DrawGroupFilter(cs::settings::SettingsEdit& a_edit)
+	void PerformanceOverlay::DrawGroupFilter(cs::settings::SettingsEdit& a_edit, Settings& a_draft)
 	{
-		auto& hidden = settings.HiddenProfilerGroups;
+		auto& hidden = a_draft.HiddenProfilerGroups;
 		const ui::Section section{ "overlay-pass-groups", "Overlay Pass Groups", ui::Collapsible{ .count = hidden.size() } };
 		if (!section)
 			return;
@@ -487,32 +477,32 @@ namespace cs::features
 				hidden.erase(listed);
 			else
 				hidden.push_back(group);
-			settings.NormalizeHiddenGroups();
+			a_draft.NormalizeHiddenGroups();
 		}
 	}
 
 	void PerformanceOverlay::DrawSettings()
 	{
 		cs::settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(performance_overlay::kSchema, settings);
+		const auto field = edit.Bind(_live);
 		constexpr auto clamped = dmui::ui::SliderFlags::kAlwaysClamp;
 		if (const ui::Section section{ "overlay-content", "Display Options" }; section) {
 			field(&Settings::ShowInOverlay);
-			if (settings.ShowInOverlay) {
+			if (_live.Draft().ShowInOverlay) {
 				field(&Settings::ShowFPS);
 				field(&Settings::ShowDrawCalls);
 				field(&Settings::ShowVRAM);
 				field(&Settings::ShowCSPasses);
-				if (settings.ShowFPS) {
+				if (_live.Draft().ShowFPS) {
 					field(&Settings::ShowPreFGFrameTimeGraph, { .label = _frameGeneration ? "Show Pre-FG Frametime Graph" : "Show Frametime Graph" });
 					if (_frameGeneration)
 						field(&Settings::ShowPostFGFrameTimeGraph);
 				}
 			}
 		}
-		if (settings.ShowInOverlay && settings.ShowCSPasses)
-			DrawGroupFilter(edit);
-		if (settings.ShowInOverlay) {
+		if (_live.Draft().ShowInOverlay && _live.Draft().ShowCSPasses)
+			DrawGroupFilter(edit, field.Values());
+		if (_live.Draft().ShowInOverlay) {
 			if (const ui::Section section{ "overlay-layout", "Appearance" }; section) {
 				field(&Settings::TextSize, { .format = "%.2f", .flags = clamped });
 				field(&Settings::BackgroundOpacity, { .format = "%.2f", .flags = clamped });
@@ -549,7 +539,6 @@ namespace cs::features
 	void PerformanceOverlay::RestoreDefaultSettings()
 	{
 		_comparison.SetInterval(0);
-		settings = Settings{};
 		_history.Resize(600);
 		_postHistory.Resize(600);
 		_displayMs = _displayFps = _postDisplayMs = _postDisplayFps = 0.0f;
@@ -558,7 +547,6 @@ namespace cs::features
 		_graphMax = 50.0f;
 		_minFrameMs = 1000.0f;
 		_maxFrameMs = 0.0f;
-		SaveSettings();
 	}
 
 	void PerformanceOverlay::CollectTelemetry(cs::telemetry::Sink& a_sink) const

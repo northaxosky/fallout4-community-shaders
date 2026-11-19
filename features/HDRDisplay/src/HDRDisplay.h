@@ -37,7 +37,7 @@ namespace cs::features
 		void Load() override;
 		void WriteSharedFrameData(render::SharedDataCB& a_shared) override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 		[[nodiscard]] render::hdr::OutputSettings GetOutputSettings() const noexcept;
 
@@ -53,16 +53,23 @@ namespace cs::features
 	private:
 		HDRDisplay() = default;
 
-		bool SaveSettings() override;
 		std::string_view GetRegistrationFailureMessage() const override { return "HDR Display could not register its imagespace shader define."; }
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(hdr_display::kSchema, _settings); }
 
 		// Start of Render_UI: the interface layer redirects the target to the scene.
 		void OnPreImagespace();
 		// The scene is final; the interface takes the proxy. Idempotent for pauses.
 		void SeparateInterface();
 
-		Settings _settings;
+		settings::LiveSettings<hdr_display::kSchema> _live{ { .normalize = [](Settings& a_settings) {
+																  // Paper white stays below peak, as upstream clamps on load.
+																  a_settings.paperWhite = std::min(a_settings.paperWhite, a_settings.peakNits - 1); },
+			// Defaults re-seed from the display, like upstream.
+			.defaults = [this] {
+				Settings defaults;
+				defaults.enableHDR = _windowsHdrOn.load(std::memory_order_acquire);
+				defaults.autoDetected = _settings.autoDetected;
+				return defaults; } } };
+		const Settings& _settings = _live.Get();
 		hdr_display::CaptureComposer _capture;
 		std::atomic_bool _displayKnown{ false };
 		std::atomic_bool _displaySupportsHdr{ false };

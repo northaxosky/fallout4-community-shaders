@@ -18,7 +18,6 @@
 #include "Render/ScreenshotSites.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalPipeline.h"
-#include "Settings/SettingsPersistence.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
 
@@ -95,31 +94,7 @@ namespace cs::features
 
 	bool HDRDisplay::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(hdr_display::kSchema, a_config, candidate, a_error))
-			return false;
-		// Paper white stays below peak, as upstream clamps on load.
-		candidate.paperWhite = std::min(candidate.paperWhite, candidate.peakNits - 1);
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(hdr_display::kSchema, _settings, [this] {
-			_settings.paperWhite = std::min(_settings.paperWhite, _settings.peakNits - 1);
-		});
-		return true;
-	}
-
-	bool HDRDisplay::SaveSettings()
-	{
-		return settings::SaveDelta(hdr_display::kSchema, GetConfigKey(), _settings, *L);
-	}
-
-	void HDRDisplay::RestoreDefaultSettings()
-	{
-		const bool autoDetected = _settings.autoDetected;
-		_settings = Settings{};
-		// Defaults re-seed from the display, like upstream.
-		_settings.enableHDR = _windowsHdrOn.load(std::memory_order_acquire);
-		_settings.autoDetected = autoDetected;
-		SaveSettings();
+		return _live.Configure(a_config, a_error);
 	}
 
 	void HDRDisplay::SeedFromDisplay(HWND a_window)
@@ -133,9 +108,11 @@ namespace cs::features
 		_displayKnown.store(true, std::memory_order_release);
 		if (_settings.autoDetected)
 			return;
-		_settings.enableHDR = capability->hdrEnabled;
-		_settings.autoDetected = true;
-		SaveSettings();
+		std::string error;
+		if (!FeatureManager::Get().CommitLiveSettings(
+				*this, toml::table{ { "enableHDR", capability->hdrEnabled }, { "autoDetected", true } },
+				settings::Scope::kImmediate, settings::Persist::kNow, "HDRDisplay::SeedFromDisplay", error))
+			L->error("HDR display seeding failed: {}", error);
 	}
 
 	bool HDRDisplay::IsHdrActive() const noexcept
@@ -219,7 +196,7 @@ namespace cs::features
 	void HDRDisplay::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(hdr_display::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		constexpr auto clamped = dmui::ui::SliderFlags::kAlwaysClamp;
 
 		if (const ui::Section section{ "hdr-display-output", "Output" }; section) {
