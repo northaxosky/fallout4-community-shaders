@@ -18,6 +18,8 @@ namespace cs::features
 		[[nodiscard]] bool NativeDevice(ID3D12Device* a_device, ID3D12Device** a_native) const override;
 		[[nodiscard]] render::temporal::ProviderResult DisablePresentationHooks() override;
 		[[nodiscard]] bool SharpensSuperResolution() const noexcept override;
+		void OnHostFramePresented(std::uint32_t a_presentFlags) noexcept override;
+		void OnHostResize() noexcept override;
 
 	private:
 		Streamline& _runtime;

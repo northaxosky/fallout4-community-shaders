@@ -529,6 +529,15 @@ namespace cs::features
 				"slFSRGQuiesce",
 				(void*&)slFSRGQuiesce);
 		}
+		// Missing in older sl.common builds; the host then skips both calls.
+		slGetFeatureFunction(
+			sl::kFeatureCommon,
+			"slCommonFrameEnd",
+			(void*&)slCommonFrameEnd);
+		slGetFeatureFunction(
+			sl::kFeatureCommon,
+			"slCommonResize",
+			(void*&)slCommonResize);
 		if (featurePCL) {
 			slGetFeatureFunction(
 				sl::kFeaturePCL,

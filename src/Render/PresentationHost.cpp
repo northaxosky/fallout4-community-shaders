@@ -491,8 +491,14 @@ namespace cs::render
 				result = E_FAIL;
 			}
 		}
-		if (result != DXGI_ERROR_WAS_STILL_DRAWING && _callbacks.clearCapture) {
-			_callbacks.clearCapture();
+		if (result != DXGI_ERROR_WAS_STILL_DRAWING) {
+			// Only the frame-generation presenter's chain reaches Streamline's own present hooks.
+			if (_bridge && !_frameGeneration) {
+				_bridge->NotifyHostFramePresented(a_flags);
+			}
+			if (_callbacks.clearCapture) {
+				_callbacks.clearCapture();
+			}
 		}
 		return result;
 	}
@@ -705,6 +711,9 @@ namespace cs::render
 		const UINT oldHeight = _presenter->Desc().Height;
 		Surfaces pending;
 		if (targetWidth != oldWidth || targetHeight != oldHeight) {
+			if (_bridge && !_frameGeneration) {
+				_bridge->NotifyHostResize();
+			}
 			const HRESULT surfaceResult = CreateSurfaces(targetWidth, targetHeight, pending);
 			if (FAILED(surfaceResult)) {
 				return surfaceResult;

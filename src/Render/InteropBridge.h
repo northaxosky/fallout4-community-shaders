@@ -61,6 +61,10 @@ namespace cs::render
 		// Chains the bridge creates never carry the runtime's presentation hooks.
 		[[nodiscard]] virtual temporal::ProviderResult DisablePresentationHooks() = 0;
 		[[nodiscard]] virtual bool SharpensSuperResolution() const noexcept = 0;
+		// A real host Present with no runtime chain behind it, so the runtime's own frame bookkeeping runs.
+		virtual void OnHostFramePresented(std::uint32_t a_presentFlags) noexcept = 0;
+		// Before the host reallocates textures shared with the runtime.
+		virtual void OnHostResize() noexcept = 0;
 	};
 
 	// The private D3D12 device shared with the engine's D3D11 device: super resolution
@@ -79,6 +83,9 @@ namespace cs::render
 			std::function<void()> a_onQuarantine);
 		[[nodiscard]] HRESULT Rollback() noexcept;
 		[[nodiscard]] HRESULT Drain() noexcept;
+		// For sessions where the runtime's own chain does not present.
+		void NotifyHostFramePresented(std::uint32_t a_presentFlags) noexcept;
+		void NotifyHostResize() noexcept;
 
 		[[nodiscard]] bool IsReady() const noexcept;
 		[[nodiscard]] bool IsQuarantined() const noexcept { return _quarantined; }

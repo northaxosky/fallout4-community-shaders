@@ -68,4 +68,18 @@ namespace cs::features
 	{
 		return _runtime.featureDLSS;
 	}
+
+	void StreamlineInterop::OnHostFramePresented(std::uint32_t a_presentFlags) noexcept
+	{
+		if (_runtime.slCommonFrameEnd) {
+			(void)_runtime.slCommonFrameEnd(a_presentFlags);
+		}
+	}
+
+	void StreamlineInterop::OnHostResize() noexcept
+	{
+		if (_runtime.slCommonResize) {
+			(void)_runtime.slCommonResize();
+		}
+	}
 }

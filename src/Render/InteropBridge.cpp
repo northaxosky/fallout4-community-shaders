@@ -235,6 +235,20 @@ namespace cs::render
 		return S_OK;
 	}
 
+	void InteropBridge::NotifyHostFramePresented(std::uint32_t a_presentFlags) noexcept
+	{
+		if (_runtime) {
+			_runtime->OnHostFramePresented(a_presentFlags);
+		}
+	}
+
+	void InteropBridge::NotifyHostResize() noexcept
+	{
+		if (_runtime) {
+			_runtime->OnHostResize();
+		}
+	}
+
 	HRESULT InteropBridge::Drain() noexcept
 	{
 		if (_quarantined) {

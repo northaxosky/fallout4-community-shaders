@@ -10,6 +10,7 @@
 #pragma warning(push)
 #pragma warning(disable: 4471)
 #include <sl.h>
+#include <sl_common.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
 #include <sl_dlss_g.h>
@@ -63,6 +64,8 @@ namespace cs::features
 		PFun_slReflexGetState* slReflexGetState{};
 		PFun_slReflexSleep* slReflexSleep{};
 		PFun_slReflexSetOptions* slReflexSetOptions{};
+		sl::PFun_slCommonFrameEnd* slCommonFrameEnd{};
+		sl::PFun_slCommonResize* slCommonResize{};
 
 		PFun_slDLSSSetOptions* slDLSSSetOptions{};
 		PFun_slDLSSGetOptimalSettings* slDLSSGetOptimalSettings{};
