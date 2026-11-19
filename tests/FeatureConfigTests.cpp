@@ -299,7 +299,8 @@ namespace
 			WriteFile(a_path, "[features.LightLimitFix.settings]\nlocal_shadow_slots = 32\n[features.Upscaling.settings]\nquality_mode = 3\n");
 			CHECK(commit(binding, "enable_local_shadows = true\nlocal_shadow_filter_scale = 1.5\n", Scope::kImmediate, Persist::kNow));
 			CHECK(binding.Get().enableLocalShadows && binding.Get().localShadowFilterScale == 1.5f);
-			const auto stored = LoadFile(a_path).table["features"];
+			const auto table = LoadFile(a_path).table;
+			const auto stored = table["features"];
 			CHECK(stored["LightLimitFix"]["settings"]["enable_local_shadows"].value<bool>() == true);
 			CHECK(stored["LightLimitFix"]["settings"]["local_shadow_filter_scale"].value<double>() == 1.5);
 			CHECK(stored["LightLimitFix"]["settings"]["local_shadow_slots"].value<std::int64_t>() == 32);
@@ -395,6 +396,8 @@ int main()
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");
+		TestExternalEdits(registry, directory / "external.toml");
+		TestSettingsTransactions(registry, directory / "transactions.toml");
 		TestWeatherProfiles(registry, directory / "weather.toml");
 		TestLightAuthoring();
 	} catch (const std::exception& error) {
