@@ -48,8 +48,7 @@ namespace cs::engine
 		constexpr std::uint32_t kSideFaces = 0xF;
 		constexpr std::uint32_t kPolarFirstFace = 4;
 		constexpr std::uint32_t kDownFace = 5;
-		// World frames: pause and menu frames do not age the faces.
-		// The hook skips interiors and loads; a longer gap means stale faces.
+		// World frames: menus do not age faces; a longer gap means stale faces.
 		constexpr std::uint64_t kMaxRenderGapFrames = 1;
 		// Sky-Lower: the color below the dome.
 		constexpr std::size_t kSkyLowerColor = 7;

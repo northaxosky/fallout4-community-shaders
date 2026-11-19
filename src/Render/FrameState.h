@@ -7,8 +7,7 @@ namespace cs::render
 	// Why feature history must restart; the producer is the load screen.
 	enum class ResetReason : std::uint8_t
 	{
-		kLoad = 1 << 0,
-		kResize = 1 << 1
+		kLoad = 1 << 0
 	};
 
 	// One coherent view of the engine frame; read it, never re-query UI state.
@@ -16,11 +15,11 @@ namespace cs::render
 	{
 		std::uint32_t engineFrame = 0;  // BSGraphics frameCount: counts presents
 		std::uint64_t worldFrame = 0;   // world prepasses begun so far
-		bool shellOpen = false;         // the DearModdingUI shell is visible
-		bool paused = false;            // game paused, or no UI exists
-		bool mainOrLoading = false;     // main menu or loading screen
-		bool worldFrozen = false;       // active game in a menu or frozen time
-		std::uint8_t resets = 0;        // ResetReason bits applied to this world frame
+		bool shellOpen = false;
+		bool paused = false;  // game paused, or no UI exists
+		bool mainOrLoading = false;
+		bool worldFrozen = false;  // active game in a menu or frozen time
+		std::uint8_t resets = 0;   // ResetReason bits applied to this world frame
 
 		[[nodiscard]] bool HasReset() const noexcept { return resets != 0; }
 	};

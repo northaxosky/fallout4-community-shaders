@@ -24,7 +24,7 @@ namespace cs::render
 		kSlotAnyStage = kSlotVertex | kSlotPixel | kSlotCompute
 	};
 
-	// Consecutive slots one owner binds; exclusive runs reject unlisted reflected names.
+	// Consecutive slots of one owner; exclusive runs reject unlisted names.
 	struct SlotBlock
 	{
 		static constexpr std::size_t kMaxCount = 4;

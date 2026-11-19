@@ -56,7 +56,7 @@ namespace cs::render
 		{
 			static void thunk(RE::Main* a_main)
 			{
-				RecordFrameThread();
+				frameStarted.store(true, std::memory_order_release);
 				RunAll(preSwap, "pre-swap");
 				func(a_main);
 				// UI page callbacks run mid-pass and post their mutations here.

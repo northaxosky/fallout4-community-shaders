@@ -3,7 +3,6 @@
 #include <exception>
 
 #include "Log.h"
-#include "Render/FrameBoundary.h"
 #include "Render/FrameThread.h"
 
 namespace cs::render
@@ -52,7 +51,7 @@ namespace cs::render
 
 	void PostToFrame(std::function<void()> a_task)
 	{
-		if (AtFrameBoundary() || !FrameBoundaryInstalled()) {
+		if (RunsInline()) {
 			a_task();
 			return;
 		}

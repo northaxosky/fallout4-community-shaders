@@ -163,7 +163,6 @@ namespace cs::features
 			kTiled
 		};
 		static std::optional<Consumer> ConsumerFor(cs::engine::ShaderInjectionTarget a_target) noexcept;
-		// Binds the probe slot block, then the coverage and zenith block.
 		void BindConsumer(ID3D11DeviceContext* a_context, Consumer a_consumer);
 
 		enum class DebugVisualization : std::uint32_t

@@ -84,6 +84,6 @@ namespace cs::render
 
 	FrameDispatcher& GetFrameDispatcher() noexcept;
 
-	// Structural mutations go here; runs inline inside a drain or without a boundary.
+	// Structural mutations go here; inline in a drain or with no boundary.
 	void PostToFrame(std::function<void()> a_task);
 }
