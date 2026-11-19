@@ -20,50 +20,34 @@ namespace cs::features
 			Streamline& a_runtime, Method a_method) noexcept;
 
 		[[nodiscard]] const char* Name() const noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult
-		PrepareDevice(ID3D12Device** a_device) override;
-		[[nodiscard]] render::temporal::ProviderResult
-		PrepareFactory(IDXGIFactory4** a_factory) override;
 		[[nodiscard]] render::temporal::ProviderResult CreatePresentation(
 			const render::temporal::PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) override;
-		[[nodiscard]] render::temporal::ProviderResult
-		SetPresentationActive(bool a_active) override;
+		[[nodiscard]] render::temporal::ProviderResult ReleasePresentation(
+			winrt::com_ptr<IDXGISwapChain4>& a_swapChain) noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			const render::temporal::ColorContract& a_color,
 			std::uint32_t a_bufferCount) override;
 		[[nodiscard]] render::temporal::ProviderResult PrepareFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
-		[[nodiscard]] render::temporal::ProviderResult CancelFrame(
-			const render::temporal::FrameGenerationRequest& a_request) override;
+		[[nodiscard]] render::temporal::ProviderResult Pause() override;
+		[[nodiscard]] render::temporal::PresentStatus
+		CollectPresentStatus(UINT a_syncInterval, UINT a_presentFlags,
+			HRESULT a_presentResult) override;
 		[[nodiscard]] render::temporal::ProviderResult
-		SetGenerationEnabled(bool a_enabled) override;
-		[[nodiscard]] render::temporal::ProviderResult
-		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) override;
-		void ObservePresent(UINT a_syncInterval) noexcept override;
+		DestroyAfterDrain() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		ValidateConfiguration(
 			const render::temporal::FrameGenerationConfiguration&
 				a_configuration) const override;
 		[[nodiscard]] bool PresentsSceneOnlyBackBuffer() const noexcept override;
-		[[nodiscard]] render::temporal::FrameGenerationCapabilities
-		GetCapabilities() const noexcept override;
-		[[nodiscard]] std::optional<std::uint32_t>
-		ConsumeGeneratedFrameCount() noexcept override;
-		[[nodiscard]] std::optional<std::uint32_t>
-		ConsumePresentedFrameCount() noexcept override;
-		[[nodiscard]] std::optional<render::temporal::GpuCompletionDependency>
-		ConsumePresentInputCompletionDependency() noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult Quiesce() override;
-		[[nodiscard]] render::temporal::ProviderResult
-		ReleaseDisplayResources() noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult
-		DestroyAfterDrain() noexcept override;
 		[[nodiscard]] bool IsAvailable() const noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
+		[[nodiscard]] render::temporal::ProviderResult SetPresentationActive(bool a_active);
+
 		Streamline& _runtime;
 		Method _method;
 		winrt::com_ptr<ID3D12CommandQueue> _presentQueue;

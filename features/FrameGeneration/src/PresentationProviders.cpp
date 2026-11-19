@@ -47,17 +47,6 @@ namespace cs::features
 		return "Unknown Frame Generation";
 	}
 
-	ProviderResult StreamlinePresentation::PrepareDevice(ID3D12Device** a_device)
-	{
-		return _runtime.PrepareD3D12Device(a_device) ? ProviderResult::Ok() : Failure("Streamline could not upgrade and bind the D3D12 device.");
-	}
-
-	ProviderResult
-	StreamlinePresentation::PrepareFactory(IDXGIFactory4** a_factory)
-	{
-		return _runtime.PrepareDXGIFactory(a_factory) ? ProviderResult::Ok() : Failure("Streamline could not upgrade the DXGI factory.");
-	}
-
 	ProviderResult StreamlinePresentation::CreatePresentation(
 		const render::temporal::PresentationCreateContext& a_context,
 		IDXGISwapChain4** a_swapChain)
@@ -72,8 +61,19 @@ namespace cs::features
 			return Failure(
 				_method == Method::kDLSSG ? "DLSS-G, Reflex, or PCL is unavailable." : "Native FSR-G or its completion-fence API is unavailable.");
 		}
+		winrt::com_ptr<IDXGIFactory4> factory;
+		factory.copy_from(a_context.factory);
+		IDXGIFactory4* upgraded = factory.detach();
+		const bool prepared = _runtime.PrepareDXGIFactory(&upgraded);
+		factory.attach(upgraded);
+		if (!prepared || !factory) {
+			return Failure("Streamline could not upgrade the DXGI factory.");
+		}
+		if (auto active = SetPresentationActive(true); !active.Succeeded()) {
+			return active;
+		}
 		winrt::com_ptr<IDXGISwapChain1> swapChain;
-		const HRESULT result = a_context.factory->CreateSwapChainForHwnd(
+		const HRESULT result = factory->CreateSwapChainForHwnd(
 			a_context.queue, a_context.window, a_context.description, nullptr,
 			nullptr, swapChain.put());
 		if (FAILED(result)) {
@@ -88,8 +88,16 @@ namespace cs::features
 				queryResult);
 		}
 		_presentQueue.copy_from(a_context.queue);
-		_presentationActive = true;
 		return ProviderResult::Ok();
+	}
+
+	ProviderResult StreamlinePresentation::ReleasePresentation(
+		winrt::com_ptr<IDXGISwapChain4>& a_swapChain) noexcept
+	{
+		// The chain's destruction must still reach the registered hooks.
+		a_swapChain = nullptr;
+		_presentQueue = nullptr;
+		return _presentationActive ? SetPresentationActive(false) : ProviderResult::Ok();
 	}
 
 	ProviderResult
@@ -163,71 +171,7 @@ namespace cs::features
 		return tagged ? ProviderResult::Ok() : Failure(std::string(Name()) + " input preparation failed.");
 	}
 
-	ProviderResult StreamlinePresentation::CancelFrame(
-		const render::temporal::FrameGenerationRequest& a_request)
-	{
-		const bool tagsCleared = _runtime.ClearFrameGenerationTags(
-			static_cast<std::uint32_t>(a_request.realFrame),
-			a_request.recording.commandList);
-		bool disabled = false;
-		if (_method == Method::kDLSSG) {
-			_configuration = a_request.configuration;
-			disabled = _runtime.ConfigureDLSSG(false, _configuration,
-				_width, _height, _width, _height, _bufferCount, _color, true);
-		} else {
-			auto request = a_request;
-			request.enabled = false;
-			disabled = _runtime.ConfigureFSRG(false, request,
-				_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3);
-		}
-		_enabled = false;
-		if (!tagsCleared) {
-			return Failure(std::string(Name()) +
-						   " cancellation could not invalidate the frame tags.");
-		}
-		return disabled ? ProviderResult::Ok() : Failure(std::string(Name()) + " cancellation could not disable the SDK.");
-	}
-
-	ProviderResult StreamlinePresentation::SetGenerationEnabled(bool a_enabled)
-	{
-		if (a_enabled && !_ready) {
-			return Failure(
-				std::string(Name()) + " presentation is not ready.");
-		}
-		if (!a_enabled &&
-			((_method == Method::kDLSSG &&
-				 !_runtime.HasDLSSGResources()) ||
-				(_method != Method::kDLSSG && !_ready))) {
-			_enabled = false;
-			return ProviderResult::Ok();
-		}
-		_enabled = a_enabled;
-		if (!a_enabled && !_runtime.ClearCurrentFrameGenerationTags()) {
-			return Failure(std::string(Name()) +
-						   " invalid input tags could not be cleared.");
-		}
-		if (_method == Method::kDLSSG) {
-			return _runtime.ConfigureDLSSG(a_enabled, _configuration,
-					   _width, _height, _width, _height, _bufferCount, _color, true) ?
-			           ProviderResult::Ok() :
-			           Failure("DLSS-G enablement change failed.");
-		}
-		render::temporal::FrameGenerationRequest request;
-		request.enabled = a_enabled;
-		request.renderWidth = _width;
-		request.renderHeight = _height;
-		request.outputWidth = _width;
-		request.outputHeight = _height;
-		request.color = _color;
-		request.peakLuminanceNits = _peakLuminanceNits;
-		return _runtime.ConfigureFSRG(a_enabled, request,
-				   _method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3) ?
-		           ProviderResult::Ok() :
-		           Failure(std::string(Name()) +
-						   " enablement change failed.");
-	}
-
-	ProviderResult StreamlinePresentation::Quiesce()
+	ProviderResult StreamlinePresentation::Pause()
 	{
 		_enabled = false;
 		if (!_runtime.ClearCurrentFrameGenerationTags()) {
@@ -261,26 +205,48 @@ namespace cs::features
 		return ProviderResult::Ok();
 	}
 
-	ProviderResult
-	StreamlinePresentation::CollectPresentStatus(UINT a_presentFlags,
-		HRESULT a_presentResult)
+	render::temporal::PresentStatus StreamlinePresentation::CollectPresentStatus(
+		UINT a_syncInterval, UINT a_presentFlags, HRESULT a_presentResult)
 	{
 		if (!render::temporal::ShouldObservePresentStatus(a_presentFlags,
 				a_presentResult)) {
-			return ProviderResult::Ok();
+			return {};
 		}
-		if (_method == Method::kDLSSG ? _runtime.LastDLSSGStateSucceeded() : _runtime.PollFSRGState(_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3)) {
-			return ProviderResult::Ok();
-		}
-		return Failure(
-			std::string(Name()) + " reported a post-Present failure.");
-	}
-
-	void StreamlinePresentation::ObservePresent(UINT a_syncInterval) noexcept
-	{
 		if (_method == Method::kDLSSG) {
 			_runtime.ObserveDLSSGPresent(a_syncInterval);
 		}
+		if (!_enabled) {
+			return {};
+		}
+		render::temporal::PresentStatus status;
+		if (_method == Method::kDLSSG) {
+			status.generatedFrames = _runtime.ConsumeDLSSGGeneratedFrameCount();
+			status.presentedFrames = _runtime.ConsumeDLSSGPresentedFrameCount();
+			if (_presentationActive && _presentQueue) {
+				// D3D12 DLSS-G orders its readers on the queue used to create presentation.
+				status.inputCompletion.emplace();
+				status.inputCompletion->orderedQueue = _presentQueue;
+			}
+		} else {
+			status.inputCompletion = _runtime.ConsumeFSRGInputCompletionDependency();
+		}
+		const bool succeeded = _method == Method::kDLSSG ? _runtime.LastDLSSGStateSucceeded() : _runtime.PollFSRGState(_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3);
+		if (!succeeded) {
+			status.result = Failure(
+				std::string(Name()) + " reported a post-Present failure.");
+		}
+		return status;
+	}
+
+	ProviderResult StreamlinePresentation::DestroyAfterDrain() noexcept
+	{
+		const auto destroy = _method == Method::kDLSSG ? _runtime.DestroyDLSSGResources() : _runtime.DestroyFSRGResources();
+		if (!destroy.Succeeded()) {
+			return destroy;
+		}
+		_ready = false;
+		_enabled = false;
+		return ProviderResult::Ok();
 	}
 
 	ProviderResult StreamlinePresentation::ValidateConfiguration(
@@ -297,68 +263,6 @@ namespace cs::features
 	bool StreamlinePresentation::PresentsSceneOnlyBackBuffer() const noexcept
 	{
 		return _method != Method::kDLSSG;
-	}
-
-	render::temporal::FrameGenerationCapabilities
-	StreamlinePresentation::GetCapabilities() const noexcept
-	{
-		return _method == Method::kDLSSG ? _runtime.GetDLSSGCapabilities() : render::temporal::IFrameGenerationProvider::GetCapabilities();
-	}
-
-	std::optional<std::uint32_t>
-	StreamlinePresentation::ConsumeGeneratedFrameCount() noexcept
-	{
-		return _method == Method::kDLSSG ? std::optional<std::uint32_t>{
-			_runtime.ConsumeDLSSGGeneratedFrameCount()
-		} :
-		                                   std::nullopt;
-	}
-
-	std::optional<std::uint32_t>
-	StreamlinePresentation::ConsumePresentedFrameCount() noexcept
-	{
-		return _method == Method::kDLSSG ? std::optional<std::uint32_t>{
-			_runtime.ConsumeDLSSGPresentedFrameCount()
-		} :
-		                                   std::nullopt;
-	}
-
-	std::optional<render::temporal::GpuCompletionDependency>
-	StreamlinePresentation::ConsumePresentInputCompletionDependency() noexcept
-	{
-		if (_method == Method::kDLSSG) {
-			if (!_presentationActive || !_presentQueue) {
-				return std::nullopt;
-			}
-			// D3D12 DLSS-G orders its readers on the queue used to create presentation.
-			render::temporal::GpuCompletionDependency dependency;
-			dependency.orderedQueue = _presentQueue;
-			return dependency;
-		}
-		return _runtime.ConsumeFSRGInputCompletionDependency();
-	}
-
-	ProviderResult StreamlinePresentation::ReleaseDisplayResources() noexcept
-	{
-		const auto destroy = _method == Method::kDLSSG ? _runtime.DestroyDLSSGResources() : _runtime.DestroyFSRGResources();
-		if (!destroy.Succeeded()) {
-			return destroy;
-		}
-		_ready = false;
-		_enabled = false;
-		return ProviderResult::Ok();
-	}
-
-	ProviderResult StreamlinePresentation::DestroyAfterDrain() noexcept
-	{
-		const auto destroy = _method == Method::kDLSSG ? _runtime.DestroyDLSSGResources() : _runtime.DestroyFSRGResources();
-		if (!destroy.Succeeded()) {
-			return destroy;
-		}
-		_ready = false;
-		_enabled = false;
-		_presentQueue = nullptr;
-		return ProviderResult::Ok();
 	}
 
 	bool StreamlinePresentation::IsAvailable() const noexcept

@@ -2,7 +2,6 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -35,41 +34,11 @@ namespace cs::render::temporal
 		return message;
 	}
 
-	struct ProviderDisplayDescription
-	{
-		std::uint32_t width = 0;
-		std::uint32_t height = 0;
-		ColorContract color;
-		std::uint32_t bufferCount = 0;
-	};
-
 	[[nodiscard]] constexpr bool
 	ShouldObservePresentStatus(UINT a_presentFlags,
 		HRESULT a_presentResult) noexcept
 	{
 		return !(a_presentFlags & DXGI_PRESENT_TEST) && SUCCEEDED(a_presentResult);
-	}
-
-	struct PresentStatusCollection
-	{
-		ProviderResult result{ .code = ProviderResultCode::kSuccess };
-		std::optional<std::uint32_t> generatedFrames;
-		std::optional<std::uint32_t> presentedFrames;
-		bool observed = false;
-	};
-
-	[[nodiscard]] inline PresentStatusCollection
-	CollectAcceptedPresentStatus(IFrameGenerationProvider& a_provider,
-		UINT a_presentFlags, HRESULT a_presentResult)
-	{
-		if (!ShouldObservePresentStatus(a_presentFlags, a_presentResult)) {
-			return {};
-		}
-		return { .result =
-					 a_provider.CollectPresentStatus(a_presentFlags, a_presentResult),
-			.generatedFrames = a_provider.ConsumeGeneratedFrameCount(),
-			.presentedFrames = a_provider.ConsumePresentedFrameCount(),
-			.observed = true };
 	}
 
 	enum class PresentInputRetirementOperation : std::uint8_t
@@ -169,146 +138,6 @@ namespace cs::render::temporal
 			.operation =
 				PresentInputRetirementOperation::kSignalSharedRetirement
 		};
-	}
-
-	template <class Drain>
-	[[nodiscard]] ProviderResult
-	QuiesceDrainAndRelease(IFrameGenerationProvider& a_provider, Drain&& a_drain)
-	{
-		auto result = a_provider.Quiesce();
-		if (!result.Succeeded()) {
-			return result;
-		}
-		const auto drainStart = std::chrono::steady_clock::now();
-		const bool drained = std::forward<Drain>(a_drain)();
-		const auto drainMicroseconds =
-			static_cast<std::uint64_t>(
-				std::chrono::duration_cast<std::chrono::microseconds>(
-					std::chrono::steady_clock::now() - drainStart)
-					.count());
-		if (!drained) {
-			return { .code = ProviderResultCode::kFailure,
-				.hresult = E_FAIL,
-				.message =
-					"GPU work did not drain before provider resource release.",
-				.failureDomain = FailureDomain::kTransport,
-				.globalDrainAttempted = true,
-				.globalDrainCompleted = false,
-				.globalDrainCpuMicroseconds = drainMicroseconds };
-		}
-		result = a_provider.ReleaseDisplayResources();
-		const bool providerDrainAttempted = result.globalDrainAttempted;
-		const bool providerDrainCompleted = result.globalDrainCompleted;
-		result.globalDrainAttempted = true;
-		result.globalDrainCompleted =
-			!providerDrainAttempted || providerDrainCompleted;
-		result.globalDrainCpuMicroseconds += drainMicroseconds;
-		return result;
-	}
-
-	template <class Drain, class ReleasePresentation>
-	[[nodiscard]] ProviderResult
-	RetirePresentationProvider(
-		IFrameGenerationProvider& a_provider, Drain&& a_drain,
-		ReleasePresentation&& a_releasePresentation)
-	{
-		auto result = QuiesceDrainAndRelease(
-			a_provider, std::forward<Drain>(a_drain));
-		if (!result.Succeeded()) {
-			return result;
-		}
-		const auto drainAttempted = result.globalDrainAttempted;
-		const auto drainCompleted = result.globalDrainCompleted;
-		const auto drainMicroseconds = result.globalDrainCpuMicroseconds;
-		result = a_provider.DestroyAfterDrain();
-		result.globalDrainAttempted = drainAttempted;
-		result.globalDrainCompleted = drainCompleted;
-		result.globalDrainCpuMicroseconds = drainMicroseconds;
-		if (!result.Succeeded()) {
-			return result;
-		}
-		// Swap-chain destruction must still reach the provider's registered hooks.
-		std::forward<ReleasePresentation>(a_releasePresentation)();
-		result = a_provider.SetPresentationActive(false);
-		result.globalDrainAttempted = drainAttempted;
-		result.globalDrainCompleted = drainCompleted;
-		result.globalDrainCpuMicroseconds = drainMicroseconds;
-		return result;
-	}
-
-	[[nodiscard]] inline ProviderResult RestoreProviderAfterResize(
-		IFrameGenerationProvider& a_provider, HRESULT a_resizeResult,
-		const ProviderDisplayDescription& a_oldDescription,
-		const std::optional<ProviderDisplayDescription>& a_newDescription)
-	{
-		const auto& description = SUCCEEDED(a_resizeResult) && a_newDescription ? *a_newDescription : a_oldDescription;
-		return a_provider.CreateDisplayResources(
-			description.width, description.height, description.color,
-			description.bufferCount);
-	}
-
-	struct ResizeProviderRestoration
-	{
-		HRESULT nativeResizeResult = E_FAIL;
-		ProviderResult providerResult;
-	};
-
-	[[nodiscard]] inline ResizeProviderRestoration
-	RestoreProviderAndPreserveResizeResult(
-		IFrameGenerationProvider& a_provider, HRESULT a_resizeResult,
-		const ProviderDisplayDescription& a_oldDescription,
-		const std::optional<ProviderDisplayDescription>& a_newDescription)
-	{
-		return { .nativeResizeResult = a_resizeResult,
-			.providerResult = RestoreProviderAfterResize(
-				a_provider, a_resizeResult, a_oldDescription, a_newDescription) };
-	}
-
-	[[nodiscard]] constexpr HRESULT
-	CompleteNativeResize(HRESULT a_nativeResizeResult,
-		HRESULT a_bridgeResult) noexcept
-	{
-		return FAILED(a_bridgeResult) ? a_bridgeResult : a_nativeResizeResult;
-	}
-
-	template <class Drain, class Commit>
-	[[nodiscard]] HRESULT CommitAfterGpuDrain(bool a_replacementsReady,
-		Drain&& a_drain, Commit&& a_commit)
-	{
-		if (!a_replacementsReady) {
-			return E_FAIL;
-		}
-		const HRESULT result = a_drain();
-		if (FAILED(result)) {
-			return result;
-		}
-		a_commit();
-		return S_OK;
-	}
-
-	struct SafePreparationResult
-	{
-		ProviderResult prepare;
-		ProviderResult cancel;
-		bool prepared = false;
-		bool safeToPresent = false;
-	};
-
-	[[nodiscard]] inline SafePreparationResult
-	PrepareFrameSafely(IFrameGenerationProvider& a_provider,
-		const FrameGenerationRequest& a_request)
-	{
-		SafePreparationResult result;
-		result.prepare = a_provider.PrepareFrame(a_request);
-		result.prepared = result.prepare.Succeeded();
-		if (result.prepared) {
-			result.cancel = { .code = ProviderResultCode::kSuccess };
-			result.safeToPresent = true;
-			return result;
-		}
-		result.cancel = a_provider.CancelFrame(a_request);
-		result.safeToPresent = result.cancel.Succeeded();
-		return result;
 	}
 
 	struct PresentInputRetirementToken

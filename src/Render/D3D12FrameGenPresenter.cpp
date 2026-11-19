@@ -119,13 +119,6 @@ namespace cs::render
 	{
 		winrt::com_ptr<IDXGIFactory4> factory;
 		DX::ThrowIfFailed(a_request.adapter->GetParent(IID_PPV_ARGS(factory.put())));
-		IDXGIFactory4* preparedFactory = factory.detach();
-		const auto prepared = _provider.PrepareFactory(&preparedFactory);
-		factory.attach(preparedFactory);
-		if (!prepared.Succeeded() || !factory) {
-			a_failure = prepared.Succeeded() ? temporal::ProviderResult::Fail("The DXGI factory was lost.", temporal::FailureDomain::kStreamline) : prepared;
-			return FAILED(prepared.hresult) ? prepared.hresult : E_FAIL;
-		}
 
 		auto& desc = _chain.desc;
 		desc = {};
@@ -139,11 +132,6 @@ namespace cs::render
 		desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
 		desc.Flags = a_request.flags & kInheritedFlags;
 
-		const auto activation = _provider.SetPresentationActive(true);
-		if (!activation.Succeeded()) {
-			a_failure = activation;
-			return FAILED(activation.hresult) ? activation.hresult : E_FAIL;
-		}
 		_providerPresentationActive = true;
 		const auto created = _provider.CreatePresentation(
 			{ .adapter = a_request.adapter,
@@ -290,14 +278,8 @@ namespace cs::render
 
 	HRESULT D3D12FrameGenPresenter::RestoreProvider(UINT a_width, UINT a_height)
 	{
-		const temporal::ProviderDisplayDescription description{
-			.width = a_width,
-			.height = a_height,
-			.color = PresentContract(),
-			.bufferCount = _chain.desc.BufferCount
-		};
-		const auto result = temporal::RestoreProviderAfterResize(
-			_provider, S_OK, description, description);
+		const auto result = _provider.CreateDisplayResources(
+			a_width, a_height, PresentContract(), _chain.desc.BufferCount);
 		if (!result.Succeeded()) {
 			_failures.Latch();
 			FailFrame(result.message.empty() ? "Frame-generation provider restoration failed" : result.message.c_str());
@@ -335,7 +317,7 @@ namespace cs::render
 		_nextPresentSubmission = 0;
 	}
 
-	void D3D12FrameGenPresenter::ReleaseResources() noexcept
+	temporal::ProviderResult D3D12FrameGenPresenter::ReleaseResources() noexcept
 	{
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
@@ -345,9 +327,30 @@ namespace cs::render
 		for (auto& backBuffer : _backBuffers) {
 			backBuffer = nullptr;
 		}
-		_chain.chain = nullptr;
 		++_inputResourceGeneration;
 		ResetSubmissions();
+		// The provider's hooks must see the chain die.
+		return _provider.ReleasePresentation(_chain.chain);
+	}
+
+	temporal::ProviderResult D3D12FrameGenPresenter::DrainAndDestroy(
+		std::atomic_uint64_t& a_drains) noexcept
+	{
+		if (const auto paused = _provider.Pause(); !paused.Succeeded()) {
+			// Destruction follows, so a failed pause is not fatal.
+			L->warn("{}", temporal::FormatProviderFailure("Pause before release", paused));
+		}
+		_retirementDiagnostics.globalDrainAttempts.fetch_add(1, std::memory_order_relaxed);
+		if (FAILED(_bridge.Drain())) {
+			_retirementDiagnostics.globalDrainFailures.fetch_add(1, std::memory_order_relaxed);
+			_retirementDiagnostics.violations.fetch_add(1, std::memory_order_relaxed);
+			return temporal::ProviderResult::Fail(
+				"GPU work did not drain before provider resource release.",
+				temporal::FailureDomain::kTransport);
+		}
+		a_drains.fetch_add(1, std::memory_order_relaxed);
+		_retirementDiagnostics.providerDrains.fetch_add(1, std::memory_order_relaxed);
+		return _provider.DestroyAfterDrain();
 	}
 
 	HRESULT D3D12FrameGenPresenter::Release() noexcept
@@ -355,23 +358,17 @@ namespace cs::render
 		if (_bridge.IsQuarantined()) {
 			return DXGI_ERROR_DEVICE_REMOVED;
 		}
-		if (!_providerPresentationActive) {
-			ReleaseResources();
-			for (auto& submission : _presentSubmissions) {
-				submission = {};
-			}
-			return S_OK;
+		// Without a chain there is nothing of the provider's to drain.
+		auto result = _chain.chain ? DrainAndDestroy(_retirementDiagnostics.teardownDrains) : temporal::ProviderResult::Ok();
+		if (result.Succeeded()) {
+			result = ReleaseResources();
 		}
-		const auto release = temporal::RetirePresentationProvider(
-			_provider, [this]() { return SUCCEEDED(_bridge.Drain()); },
-			[this]() { ReleaseResources(); });
-		RecordGlobalDrain("teardown", release);
-		if (!release.Succeeded()) {
+		if (!result.Succeeded()) {
 			_bridge.MarkQuarantined();
 			L->critical(
 				"Temporal D3D12 resources quarantined after failed provider "
 				"drain: {}",
-				release.message.empty() ? "frame-generation display resources could not be released" : release.message);
+				result.message.empty() ? "frame-generation display resources could not be released" : result.message);
 			return E_FAIL;
 		}
 		_providerPresentationActive = false;
@@ -379,33 +376,6 @@ namespace cs::render
 			submission = {};
 		}
 		return S_OK;
-	}
-
-	void D3D12FrameGenPresenter::RecordGlobalDrain(
-		std::string_view a_reason, const temporal::ProviderResult& a_result) noexcept
-	{
-		if (!a_result.globalDrainAttempted) {
-			return;
-		}
-		_retirementDiagnostics.globalDrainAttempts.fetch_add(
-			1, std::memory_order_relaxed);
-		auto* counter = &_retirementDiagnostics.teardownDrains;
-		if (a_reason == "startup") {
-			counter = &_retirementDiagnostics.startupDrains;
-		} else if (a_reason == "disable") {
-			counter = &_retirementDiagnostics.disableDrains;
-		} else if (a_reason == "resize") {
-			counter = &_retirementDiagnostics.resizeDrains;
-		}
-		if (a_result.globalDrainCompleted) {
-			counter->fetch_add(1, std::memory_order_relaxed);
-			_retirementDiagnostics.providerDrains.fetch_add(1,
-				std::memory_order_relaxed);
-		} else {
-			_retirementDiagnostics.globalDrainFailures.fetch_add(
-				1, std::memory_order_relaxed);
-			_retirementDiagnostics.violations.fetch_add(1, std::memory_order_relaxed);
-		}
 	}
 
 	void D3D12FrameGenPresenter::FailFrame(const char* a_reason) noexcept
@@ -751,28 +721,27 @@ namespace cs::render
 				}
 				pipeline.RecordFrameGenerationFrameTimeInput(
 					request.frameTimeMilliseconds);
-				const auto preparation = [&] {
+				const auto prepareResult = [&] {
 					auto timing = pipeline.MeasureFrameGenerationCpuPhase(
 						render::FrameGenerationCpuPhase::kPrepareFrame);
-					return temporal::PrepareFrameSafely(_provider, request);
+					return _provider.PrepareFrame(request);
 				}();
 				timer.EndScope(commandList, submission->timing, "D3D12::Present/FrameGenerationPrepare");
-				const auto& prepareResult = preparation.prepare;
-				frameGenerationPrepared = preparation.prepared;
+				frameGenerationPrepared = prepareResult.Succeeded();
 				_providerGenerationEnabled = frameGenerationPrepared;
 				if (!frameGenerationPrepared) {
 					_vendorConsumptionPossible = false;
 					FailFrame("Prepare frame", prepareResult);
-					if (!preparation.safeToPresent) {
-						L->error("{}", temporal::FormatProviderFailure(
-										   "Cancel frame", preparation.cancel));
+					const auto paused = _provider.Pause();
+					if (!paused.Succeeded()) {
+						L->error("{}", temporal::FormatProviderFailure("Pause after failed prepare", paused));
 						if (!ProveIdle(commandList)) {
 							return E_FAIL;
 						}
 					}
 				}
 			} else if (_providerGenerationEnabled) {
-				const auto disable = _provider.SetGenerationEnabled(false);
+				const auto disable = _provider.Pause();
 				if (!disable.Succeeded()) {
 					FailFrame("Disable frame generation", disable);
 					if (!ProveIdle(commandList)) {
@@ -813,33 +782,22 @@ namespace cs::render
 			return _chain.Present(a_args);
 		}();
 		pipeline.EndPresentAttempt(a_args.flags, presentResult);
-		if (temporal::ShouldObservePresentStatus(a_args.flags, presentResult)) {
-			_provider.ObservePresent(a_args.syncInterval);
-		}
-		temporal::PresentStatusCollection status;
-		if ((_vendorConsumptionPossible || _providerGenerationEnabled) &&
-			temporal::ShouldObservePresentStatus(a_args.flags, presentResult)) {
+		auto status = [&] {
 			auto timing = pipeline.MeasureFrameGenerationCpuPhase(
 				render::FrameGenerationCpuPhase::kCollectPresentStatus);
-			status = temporal::CollectAcceptedPresentStatus(_provider, a_args.flags,
-				presentResult);
-		}
-		if (status.observed) {
+			return _provider.CollectPresentStatus(a_args.syncInterval, a_args.flags, presentResult);
+		}();
+		if (status.generatedFrames || status.presentedFrames) {
 			pipeline.RecordGeneratedFrames(status.generatedFrames);
 			pipeline.RecordPresentedFrames(status.presentedFrames);
 		}
-		const bool disableProviderAfterRetirement =
-			status.observed && !status.result.Succeeded();
+		const bool disableProviderAfterRetirement = !status.result.Succeeded();
 		std::optional<temporal::PresentInputRetirementToken>
 			retirementToken;
 		if (_vendorConsumptionPossible &&
 			presentResult != DXGI_ERROR_WAS_STILL_DRAWING) {
-			std::optional<temporal::GpuCompletionDependency> dependency;
+			const auto& dependency = status.inputCompletion;
 			temporal::PresentInputRetirementSubmission retirement;
-			if (SUCCEEDED(presentResult)) {
-				dependency =
-					_provider.ConsumePresentInputCompletionDependency();
-			}
 			temporal::PresentInputRetirementToken token{
 				.value = _bridge.NextRetirementValue(),
 				.realFrame = _preparedRealFrame,
@@ -886,7 +844,7 @@ namespace cs::render
 			if (FAILED(drainResult)) {
 				return drainResult;
 			}
-			const auto disableResult = _provider.SetGenerationEnabled(false);
+			const auto disableResult = _provider.Pause();
 			if (disableResult.Succeeded()) {
 				_providerGenerationEnabled = false;
 			} else {
@@ -947,11 +905,7 @@ namespace cs::render
 				havePending = true;
 			}
 
-			const auto releaseResult =
-				temporal::QuiesceDrainAndRelease(_provider, [&]() {
-					return SUCCEEDED(_bridge.Drain());
-				});
-			RecordGlobalDrain("resize", releaseResult);
+			const auto releaseResult = DrainAndDestroy(_retirementDiagnostics.resizeDrains);
 			if (!releaseResult.Succeeded()) {
 				_faulted = true;
 				FailFrame(releaseResult.message.empty() ? "Frame-generation display resources could not be released "
@@ -972,16 +926,9 @@ namespace cs::render
 				if (FAILED(RefreshBackBuffers())) {
 					_faulted = true;
 				}
-				const temporal::ProviderDisplayDescription oldDescription{
-					.width = oldWidth,
-					.height = oldHeight,
-					.color = PresentContract(),
-					.bufferCount = _chain.desc.BufferCount
-				};
-				const auto restoration =
-					temporal::RestoreProviderAndPreserveResizeResult(
-						_provider, resizeResult, oldDescription, std::nullopt);
-				if (!restoration.providerResult.Succeeded()) {
+				const auto restored = _provider.CreateDisplayResources(
+					oldWidth, oldHeight, PresentContract(), _chain.desc.BufferCount);
+				if (!restored.Succeeded()) {
 					FailFrame(
 						"Frame-generation provider could not be restored "
 						"after rejected resize");
@@ -1018,18 +965,11 @@ namespace cs::render
 			_chain.desc = resizedDesc;
 			const HRESULT providerResult = sizeChanged ? CommitBuffers(std::move(pending), resizedDesc.Width, resizedDesc.Height) :
 			                                             RestoreProvider(resizedDesc.Width, resizedDesc.Height);
-			if (FAILED(providerResult)) {
-				_faulted = true;
-				FailFrame(
-					"Frame-generation bridge resources could not be "
-					"recreated after resize");
-				return { .result = temporal::CompleteNativeResize(resizeResult, providerResult), .resized = true };
-			}
 			if (providerResult == S_FALSE) {
 				FailFrame(
 					"Frame-generation provider could not be restored after resize");
 			}
-			return { .result = temporal::CompleteNativeResize(resizeResult, providerResult), .resized = true };
+			return { .result = resizeResult, .resized = true };
 		} catch (const std::exception& e) {
 			FailFrame(e.what());
 			return { .result = E_FAIL };

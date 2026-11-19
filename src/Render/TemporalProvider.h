@@ -680,72 +680,51 @@ namespace cs::render::temporal
 		}
 	};
 
+	// What a present reported back; empty when nothing was observed.
+	struct PresentStatus
+	{
+		ProviderResult result{ .code = ProviderResultCode::kSuccess };
+		std::optional<std::uint32_t> generatedFrames;
+		std::optional<std::uint32_t> presentedFrames;
+		// When the provider's reads of the presented frame's inputs finish.
+		std::optional<GpuCompletionDependency> inputCompletion;
+	};
+
+	// Pause never frees; resources are freed only by DestroyAfterDrain after a drain.
 	class IFrameGenerationProvider
 	{
 	public:
 		virtual ~IFrameGenerationProvider() = default;
 		[[nodiscard]] virtual const char* Name() const noexcept = 0;
-		[[nodiscard]] virtual ProviderResult
-		PrepareDevice(ID3D12Device** a_device) = 0;
-		[[nodiscard]] virtual ProviderResult
-		PrepareFactory(IDXGIFactory4** a_factory) = 0;
+		// Creates the swap chain with the provider's presentation hooks armed.
 		[[nodiscard]] virtual ProviderResult
 		CreatePresentation(const PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) = 0;
+		// Releases the chain, then disarms the hooks.
 		[[nodiscard]] virtual ProviderResult
-		SetPresentationActive(bool)
-		{
-			return { .code = ProviderResultCode::kSuccess };
-		}
+		ReleasePresentation(winrt::com_ptr<IDXGISwapChain4>& a_swapChain) noexcept = 0;
 		[[nodiscard]] virtual ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			const ColorContract& a_color, std::uint32_t a_bufferCount) = 0;
 		[[nodiscard]] virtual ProviderResult
 		PrepareFrame(const FrameGenerationRequest& a_request) = 0;
-		[[nodiscard]] virtual ProviderResult
-		CancelFrame(const FrameGenerationRequest& a_request) = 0;
-		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
-		[[nodiscard]] virtual ProviderResult
-		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) = 0;
-		// Every accepted present, before status collection.
-		virtual void ObservePresent(UINT) noexcept {}
-		// The provider composites the interface itself; the back buffer is scene only.
-		[[nodiscard]] virtual bool PresentsSceneOnlyBackBuffer() const noexcept
-		{
-			return false;
-		}
+		// Stops generating and invalidates input tags; the SDK stays resident.
+		[[nodiscard]] virtual ProviderResult Pause() = 0;
+		// Called for every present; collects only while generating.
+		[[nodiscard]] virtual PresentStatus
+		CollectPresentStatus(UINT a_syncInterval, UINT a_presentFlags,
+			HRESULT a_presentResult) = 0;
+		[[nodiscard]] virtual ProviderResult DestroyAfterDrain() noexcept = 0;
 		[[nodiscard]] virtual ProviderResult ValidateConfiguration(
 			const FrameGenerationConfiguration&) const
 		{
 			return { .code = ProviderResultCode::kSuccess };
 		}
-		[[nodiscard]] virtual FrameGenerationCapabilities
-		GetCapabilities() const noexcept
+		// The provider composites the interface itself; the back buffer is scene only.
+		[[nodiscard]] virtual bool PresentsSceneOnlyBackBuffer() const noexcept
 		{
-			return {
-				.availability = CapabilityAvailability::kSupported,
-				.configurationKnown = true,
-				.maxGeneratedFrames = 1
-			};
+			return false;
 		}
-		[[nodiscard]] virtual std::optional<std::uint32_t>
-		ConsumeGeneratedFrameCount() noexcept
-		{
-			return std::nullopt;
-		}
-		[[nodiscard]] virtual std::optional<std::uint32_t>
-		ConsumePresentedFrameCount() noexcept
-		{
-			return std::nullopt;
-		}
-		[[nodiscard]] virtual std::optional<GpuCompletionDependency>
-		ConsumePresentInputCompletionDependency() noexcept
-		{
-			return std::nullopt;
-		}
-		[[nodiscard]] virtual ProviderResult Quiesce() = 0;
-		[[nodiscard]] virtual ProviderResult ReleaseDisplayResources() noexcept = 0;
-		[[nodiscard]] virtual ProviderResult DestroyAfterDrain() noexcept = 0;
 		[[nodiscard]] virtual bool IsAvailable() const noexcept
 		{
 			return true;

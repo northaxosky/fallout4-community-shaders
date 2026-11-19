@@ -80,11 +80,12 @@ namespace cs::render
 		[[nodiscard]] temporal::ColorContract PresentContract() const;
 		[[nodiscard]] HRESULT RefreshBackBuffers() noexcept;
 		void ResetSubmissions() noexcept;
-		void ReleaseResources() noexcept;
+		[[nodiscard]] temporal::ProviderResult ReleaseResources() noexcept;
+		// The only release path: pause, drain, then free the provider's resources.
+		[[nodiscard]] temporal::ProviderResult DrainAndDestroy(std::atomic_uint64_t& a_drains) noexcept;
 		[[nodiscard]] HRESULT PresentImpl(const PresentFrame& a_frame, const PresentArgs& a_args);
 		// Writes this slot's inputs, returns the encoded back buffer; null skips.
 		[[nodiscard]] const SharedD3D11D3D12Texture* ComposeHdrFrameGenerationInputs(const PresentFrame& a_frame) noexcept;
-		void RecordGlobalDrain(std::string_view a_reason, const temporal::ProviderResult& a_result) noexcept;
 		// False when the drain failed and the bridge is quarantined; the list is then closed.
 		[[nodiscard]] bool ProveIdle(ID3D12GraphicsCommandList* a_list) noexcept;
 
