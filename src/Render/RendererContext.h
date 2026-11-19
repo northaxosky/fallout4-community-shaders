@@ -2,6 +2,7 @@
 
 #include <d3d11.h>
 
+#include <cstddef>
 #include <cstdint>
 
 #include "Render/ComputeScope.h"
@@ -19,7 +20,14 @@ namespace cs::engine
 	// Preserve bound RTVs across copies.
 	void CopyResourcePreservingOM(ID3D11DeviceContext* a_ctx, ID3D11Resource* a_dst, ID3D11Resource* a_src) noexcept;
 
-	bool WaitForGpuIdle(ID3D11DeviceContext* a_ctx) noexcept;
+	// Write-discard upload into a dynamic buffer; the map result on failure.
+	[[nodiscard]] HRESULT WriteDiscard(ID3D11DeviceContext* a_ctx, ID3D11Buffer* a_buffer, const void* a_data, std::size_t a_size) noexcept;
+
+	template <class T>
+	[[nodiscard]] HRESULT WriteDiscard(ID3D11DeviceContext* a_ctx, ID3D11Buffer* a_buffer, const T& a_data) noexcept
+	{
+		return WriteDiscard(a_ctx, a_buffer, &a_data, sizeof(T));
+	}
 
 	// Unbind OM before compute sampling; restore it last.
 	class OMScope

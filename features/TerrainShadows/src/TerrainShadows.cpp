@@ -777,13 +777,7 @@ namespace cs::features
 
 		for (std::uint32_t update = 0; update < updateCount; ++update) {
 			data.StartPxCoord = ts::SliceStartCoord(_plan, _shadowUpdateIndex);
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (FAILED(a_context->Map(
-					_shadowUpdateCB.get(),
-					0,
-					D3D11_MAP_WRITE_DISCARD,
-					0,
-					&mapped))) {
+			if (FAILED(engine::WriteDiscard(a_context, _shadowUpdateCB.get(), data))) {
 				CS_LOG_EVERY_MS(
 					L,
 					kMissingMapLogIntervalMs,
@@ -791,8 +785,6 @@ namespace cs::features
 					"Terrain shadow constant-buffer map failed; skipping this slice.");
 				return false;
 			}
-			std::memcpy(mapped.pData, &data, sizeof(data));
-			a_context->Unmap(_shadowUpdateCB.get(), 0);
 			a_context->Dispatch(_plan.dispatchCount, 1, 1);
 			_shadowUpdateIndex = (_shadowUpdateIndex + 1) % _plan.maxUpdates;
 			if (_slicesSinceRebuild < _plan.maxUpdates)
@@ -883,19 +875,12 @@ namespace cs::features
 		cbData.PosRange[1] = _loadedMetadata.pos1[2];
 		cbData.ZRange[0] = _loadedMetadata.zRange[0];
 		cbData.ZRange[1] = _loadedMetadata.zRange[1];
-		D3D11_MAPPED_SUBRESOURCE cbMapped{};
-		if (FAILED(a_context->Map(
-				_shadowStatsCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped))) {
+		if (FAILED(engine::WriteDiscard(a_context, _shadowStatsCB.get(), cbData)))
 			return;
-		}
-		std::memcpy(cbMapped.pData, &cbData, sizeof(cbData));
-		a_context->Unmap(_shadowStatsCB.get(), 0);
 		cs::render::SharedFeatureDataCB feature{};
 		feature.terraOccSettings = BuildActiveFeatureBlock();
-		if (FAILED(a_context->Map(_shadowStatsFeatureCB.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped)))
+		if (FAILED(engine::WriteDiscard(a_context, _shadowStatsFeatureCB.get(), feature)))
 			return;
-		std::memcpy(cbMapped.pData, &feature, sizeof(feature));
-		a_context->Unmap(_shadowStatsFeatureCB.get(), 0);
 
 		const std::array<std::uint32_t, 8> initialStats{
 			0, 0, 0, 0, 0, 0, 65535, 0
@@ -1022,7 +1007,6 @@ namespace cs::features
 		std::string_view a_detail,
 		StatusSeverity a_severity)
 	{
-		_worldspaceResolved.store(!a_worldspace.empty(), std::memory_order_release);
 		const std::lock_guard<std::mutex> guard(_statusMutex);
 		if (_statusWorldspace != a_worldspace)
 			_statusWorldspace = a_worldspace;
@@ -1082,10 +1066,6 @@ namespace cs::features
 				"debug_visualization",
 				DebugVisualizationName(
 					_debugVisualization.load(std::memory_order_relaxed)))
-			.Field(
-				"consumer_depth_missing",
-				static_cast<std::int64_t>(
-					_consumerDepthMissing.load(std::memory_order_relaxed)))
 			.Field(
 				"debug_depth_missing",
 				static_cast<std::int64_t>(

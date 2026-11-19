@@ -139,7 +139,6 @@ namespace cs::features
 		std::atomic_bool _shadowResourcesReady{ false };
 		std::atomic_bool _shadowPopulated{ false };
 		std::atomic_bool _mapLoaded{ false };
-		std::atomic_bool _worldspaceResolved{ false };
 
 		std::atomic_uint32_t _sourceWidth{ 0 };
 		std::atomic_uint32_t _sourceHeight{ 0 };
@@ -152,7 +151,6 @@ namespace cs::features
 		std::atomic_uint64_t _prepassRuns{ 0 };
 		std::atomic_size_t _discoveredMaps{ 0 };
 
-		std::atomic_uint64_t _consumerDepthMissing{ 0 };
 		std::atomic_uint64_t _debugDepthMissing{ 0 };
 
 		std::atomic_uint64_t _shadowStatSamples{ 0 };

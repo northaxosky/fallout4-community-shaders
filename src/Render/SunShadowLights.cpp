@@ -5,6 +5,7 @@
 #include "Render/DirectionalShadowLightData.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
 
 #include <d3d11.h>
 #include <winrt/base.h>
@@ -88,12 +89,7 @@ namespace cs::engine
 
 		[[nodiscard]] bool Write(ID3D11DeviceContext* a_context, const Slot& a_slot, const void* a_data)
 		{
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (!a_slot.buffer || FAILED(a_context->Map(a_slot.buffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-				return false;
-			std::memcpy(mapped.pData, a_data, a_slot.layout->stride);
-			a_context->Unmap(a_slot.buffer.get(), 0);
-			return true;
+			return a_slot.buffer && SUCCEEDED(WriteDiscard(a_context, a_slot.buffer.get(), a_data, a_slot.layout->stride));
 		}
 
 		[[nodiscard]] bool EnsureCascadeView(const SunCascadeSnapshot& a_snapshot)

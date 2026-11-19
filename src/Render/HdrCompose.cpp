@@ -73,18 +73,14 @@ namespace cs::render::hdr
 
 	bool Compose::UpdateConstants(ID3D11DeviceContext& a_context, const OutputSettings& a_settings, bool a_skipInterface)
 	{
-		D3D11_MAPPED_SUBRESOURCE mapped{};
-		if (FAILED(a_context.Map(_constants.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-			return false;
-		*static_cast<PerFrame*>(mapped.pData) = {
+		const PerFrame constants{
 			.enableHDR = a_settings.enabled ? 1.0f : 0.0f,
 			.paperWhite = a_settings.paperWhite,
 			.peakNits = a_settings.peakNits,
 			.skipUIComposite = a_skipInterface ? 1.0f : 0.0f,
 			.uiBrightness = a_settings.uiBrightness
 		};
-		a_context.Unmap(_constants.get(), 0);
-		return true;
+		return SUCCEEDED(engine::WriteDiscard(&a_context, _constants.get(), constants));
 	}
 
 	void Compose::Run(ID3D11DeviceContext& a_context, ID3D11ComputeShader& a_shader,

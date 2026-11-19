@@ -25,6 +25,7 @@
 #include "Render/FrameProfiler.h"
 #include "Render/FullscreenPass.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
@@ -564,11 +565,7 @@ namespace cs::features
 	{
 		float sun[4]{};
 		sun[3] = cs::engine::TryGetSunDiscDirectionWS(sun[0], sun[1], sun[2]) ? 1.0f : 0.0f;
-		D3D11_MAPPED_SUBRESOURCE mapped{};
-		if (FAILED(a_context->Map(_overlayConstants.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-			return;
-		std::memcpy(mapped.pData, sun, sizeof(sun));
-		a_context->Unmap(_overlayConstants.get(), 0);
+		(void)cs::engine::WriteDiscard(a_context, _overlayConstants.get(), sun, sizeof(sun));
 	}
 
 	void CloudShadows::RenderOverlay()

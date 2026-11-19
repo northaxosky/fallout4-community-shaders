@@ -9,6 +9,7 @@
 #include "Render/ForwardDraw.h"
 #include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalRenderer.h"
@@ -202,26 +203,6 @@ namespace cs::render
 
 		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data, std::size_t a_firstBuffer = 0) noexcept;
 
-		bool WriteConstantBuffer(
-			ID3D11DeviceContext* a_context,
-			ID3D11Buffer* a_buffer,
-			const void* a_data,
-			std::size_t a_size) noexcept
-		{
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (FAILED(a_context->Map(
-					a_buffer,
-					0,
-					D3D11_MAP_WRITE_DISCARD,
-					0,
-					&mapped))) {
-				return false;
-			}
-			std::memcpy(mapped.pData, a_data, a_size);
-			a_context->Unmap(a_buffer, 0);
-			return true;
-		}
-
 		ID3D11DeviceContext* GetImmediateContext() noexcept
 		{
 			auto* rendererData = RE::BSGraphics::GetRendererData();
@@ -322,7 +303,7 @@ namespace cs::render
 			const void* sources[]{ &a_data.frame, &a_data.shared, &a_data.feature, &a_data.fo4 };
 			auto& state = GetSubstrateState();
 			for (std::size_t index = a_firstBuffer; index < kSubstrateBufferCount; ++index)
-				if (!WriteConstantBuffer(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index]))
+				if (FAILED(engine::WriteDiscard(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index])))
 					return false;
 			state.fo4 = a_data.fo4;
 			if (a_firstBuffer == 0) {
@@ -362,7 +343,7 @@ namespace cs::render
 			fo4.DebugParams = { debug.params[0], debug.params[1], debug.params[2], debug.params[3] };
 			// Producers can change debug resources between lighting and composite, not between draws.
 			if (std::memcmp(&fo4, &state.fo4, sizeof(fo4)) != 0) {
-				if (!WriteConstantBuffer(a_context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), &fo4, sizeof(fo4))) {
+				if (FAILED(engine::WriteDiscard(a_context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), fo4))) {
 					CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared debug constant-buffer map failed.");
 					return;
 				}
@@ -443,7 +424,7 @@ namespace cs::render
 		if (!state.sharedWritten || !context)
 			return;
 		state.shared.MipBias = a_bias;
-		if (!WriteConstantBuffer(context, state.buffers[kSharedDataSlot - kFrameDataSlot].get(), &state.shared, sizeof(state.shared)))
+		if (FAILED(engine::WriteDiscard(context, state.buffers[kSharedDataSlot - kFrameDataSlot].get(), state.shared)))
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared mip bias constant-buffer map failed.");
 	}
 
@@ -581,12 +562,5 @@ namespace cs::render
 		case engine::ShaderStage::kCount:
 			break;
 		}
-	}
-
-	bool IsSharedDataCurrent() noexcept
-	{
-		const auto* graphicsState = engine::GetGraphicsState();
-		return IsSharedDataReady() && graphicsState &&
-		       GetSubstrateState().lastFrame.load(std::memory_order_relaxed) == graphicsState->frameCount;
 	}
 }

@@ -116,19 +116,6 @@ namespace cs::features
 			a_context->CSSetShader(nullptr, nullptr, 0);
 		}
 
-		void UpdateBuffer(
-			ID3D11DeviceContext* a_context,
-			ID3D11Buffer* a_buffer,
-			const void* a_data,
-			std::size_t a_size)
-		{
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			DX::ThrowIfFailed(a_context->Map(
-				a_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
-			std::memcpy(mapped.pData, a_data, a_size);
-			a_context->Unmap(a_buffer, 0);
-		}
-
 		struct AutoRegister
 		{
 			AutoRegister()
@@ -909,9 +896,9 @@ namespace cs::features
 		_previousCaptureTime[index] = now;
 		_resetCapture[index] = false;
 		_cameraPreviousPosAdjust[index] = cameraOrigin;
-		UpdateBuffer(context, _updateBuffer.get(), &constants, sizeof(constants));
+		DX::ThrowIfFailed(engine::WriteDiscard(context, _updateBuffer.get(), constants));
 		const PrepareCaptureCB preparation{ inverseProjection };
-		UpdateBuffer(context, _prepareBuffer.get(), &preparation, sizeof(preparation));
+		DX::ThrowIfFailed(engine::WriteDiscard(context, _prepareBuffer.get(), preparation));
 
 		auto& stream = Stream(a_reflections);
 		const bool tiledLighting = RE::DrawWorld::QTiledLighting();
@@ -1053,11 +1040,7 @@ namespace cs::features
 			SpecularMapFilterSettingsCB constants{};
 			constants.roughness =
 				static_cast<float>(level) * roughnessStep;
-			UpdateBuffer(
-				context,
-				_filterBuffer.get(),
-				&constants,
-				sizeof(constants));
+			DX::ThrowIfFailed(engine::WriteDiscard(context, _filterBuffer.get(), constants));
 			ID3D11UnorderedAccessView* uav =
 				_filtered.mipUavs[level].get();
 			context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
@@ -1098,11 +1081,7 @@ namespace cs::features
 					.textureSizeInBlocksY = blocks,
 					.mipLevel = level
 				};
-				UpdateBuffer(
-					context,
-					_bc6hBuffer.get(),
-					&constants,
-					sizeof(constants));
+				DX::ThrowIfFailed(engine::WriteDiscard(context, _bc6hBuffer.get(), constants));
 				ID3D11UnorderedAccessView* output =
 					_bc6hScratchUAVs[level].get();
 				context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
