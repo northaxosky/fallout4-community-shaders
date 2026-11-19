@@ -105,6 +105,7 @@ namespace cs::render
 				result = D3D11FlipPresenter::Create(*chainDevice, d3d11Request, presenter);
 				if (SUCCEEDED(result)) {
 					_presenter = std::move(presenter);
+					_chainDevice11 = chainDevice;
 				}
 			}
 			if (SUCCEEDED(result)) {
@@ -191,6 +192,7 @@ namespace cs::render
 		_callbacks = {};
 		_presenterFallback.reset();
 		_context11 = nullptr;
+		_chainDevice11 = nullptr;
 		_outwardDevice11 = nullptr;
 		_device11 = nullptr;
 		_bridge = nullptr;
@@ -344,7 +346,9 @@ namespace cs::render
 	void PresentationHost::NotifyPresentationBinding() noexcept
 	{
 		if (_presentationBound && _presenter && _callbacks.bindPresentation) {
-			_callbacks.bindPresentation({ .device = _frameGeneration ? _captureDevice12.get() : nullptr,
+			const bool d3d12 = _frameGeneration != nullptr;
+			_callbacks.bindPresentation({ .device = d3d12 ? static_cast<IUnknown*>(_captureDevice12.get()) : _chainDevice11.get(),
+				.api = d3d12 ? temporal::DeviceApi::kD3D12 : temporal::DeviceApi::kD3D11,
 				.adapterVendorId = _adapterVendorId,
 				.swapChain = _presenter->Chain(),
 				.frameGenerationPresentation = _frameGeneration != nullptr });

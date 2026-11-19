@@ -290,6 +290,7 @@ target(plugin_name, function()
         "extern/RenderDoc/include",
         "extern/ReShade/include",
         "extern/Streamline/include",
+        "extern/Streamline/external/nvapi",
         "extern/bethesda-devbench/include"
     )
 
@@ -306,6 +307,9 @@ target(plugin_name, function()
         add_packages("vcpkg::tracy")
         add_defines("TRACY_SUPPORT", "TRACY_ENABLE")
     end
+
+    add_linkdirs("extern/Streamline/external/nvapi/amd64")
+    add_links("nvapi64")
 
     add_syslinks(
         "bcrypt",

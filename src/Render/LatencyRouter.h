@@ -38,17 +38,25 @@ namespace cs::render::temporal
 		LatencyDiagnostics diagnostics;
 	};
 
+	// A backend may have one provider per presentation API; the one in use reports available.
 	[[nodiscard]] inline const LatencyDiagnostics& FindDiagnostics(
 		std::span<const LatencyBackendStatus> a_backends,
 		LatencyBackend a_backend) noexcept
 	{
 		static const LatencyDiagnostics none;
+		const LatencyDiagnostics* found = &none;
 		for (const auto& status : a_backends) {
-			if (status.backend == a_backend) {
+			if (status.backend != a_backend) {
+				continue;
+			}
+			if (status.diagnostics.available) {
 				return status.diagnostics;
 			}
+			if (found == &none) {
+				found = &status.diagnostics;
+			}
 		}
-		return none;
+		return *found;
 	}
 
 	// Routes to the first backend whose driver reports low latency.

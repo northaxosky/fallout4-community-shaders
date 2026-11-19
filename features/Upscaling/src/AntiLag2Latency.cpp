@@ -44,9 +44,9 @@ namespace cs::features
 	void AntiLag2Latency::BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept
 	{
 		std::scoped_lock lock(_mutex);
-		if (a_binding.device != _device.get()) {
+		if (a_binding.D3D12Device() != _device.get()) {
 			ShutdownLocked();
-			_device.copy_from(a_binding.device);
+			_device.copy_from(a_binding.D3D12Device());
 			_adapterVendorId = a_binding.adapterVendorId;
 		}
 		_swapChain = a_binding.swapChain;

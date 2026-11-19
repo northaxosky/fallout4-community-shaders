@@ -147,6 +147,8 @@ namespace cs::render
 		winrt::com_ptr<ID3D11Device5> _device11;
 		winrt::com_ptr<ID3D11Device> _outwardDevice11;
 		winrt::com_ptr<ID3D11DeviceContext4> _context11;
+		// The device the D3D11 flip chain was created on, beneath any ReShade proxy.
+		winrt::com_ptr<ID3D11Device> _chainDevice11;
 		winrt::com_ptr<ID3D12Device> _captureDevice12;
 		TemporalPresentationCallbacks _callbacks;
 		std::unique_ptr<IPresenter> _presenter;

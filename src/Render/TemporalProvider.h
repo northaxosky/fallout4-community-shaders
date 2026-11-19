@@ -481,14 +481,32 @@ namespace cs::render::temporal
 		std::uint32_t gpuFrameTimeUs = 0;
 	};
 
+	enum class DeviceApi : std::uint8_t
+	{
+		kNone,
+		kD3D11,
+		kD3D12
+	};
+
 	// The native device and swap chain that a latency backend may talk to.
 	struct PresentationBinding
 	{
-		ID3D12Device* device = nullptr;
+		// The device that presents; api says which interface it is.
+		IUnknown* device = nullptr;
+		DeviceApi api = DeviceApi::kNone;
 		std::uint32_t adapterVendorId = 0;
 		IDXGISwapChain* swapChain = nullptr;
 		// A frame-generation provider currently owns presentation.
 		bool frameGenerationPresentation = false;
+
+		[[nodiscard]] ID3D12Device* D3D12Device() const noexcept
+		{
+			return api == DeviceApi::kD3D12 ? static_cast<ID3D12Device*>(device) : nullptr;
+		}
+		[[nodiscard]] ID3D11Device* D3D11Device() const noexcept
+		{
+			return api == DeviceApi::kD3D11 ? static_cast<ID3D11Device*>(device) : nullptr;
+		}
 	};
 
 	// Latency belongs to the device, not the presentation path.

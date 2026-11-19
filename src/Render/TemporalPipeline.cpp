@@ -13,6 +13,7 @@
 #include "FrameGeneration.h"
 #include "HDRDisplay.h"
 #include "Log.h"
+#include "NvapiReflexLatency.h"
 #include "PresentationProviders.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
@@ -278,9 +279,11 @@ namespace cs::render
 		features::Streamline streamline;
 		features::StreamlineLatency streamlineLatency{ streamline };
 		// Declared before the host so it outlives every presenter.
+		features::NvapiReflexLatency nvapiReflex;
 		features::AntiLag2Latency antiLag2;
 		temporal::LatencyRouter latencyRouter{
 			{ temporal::LatencyBackend::kReflex, &streamlineLatency },
+			{ temporal::LatencyBackend::kReflex, &nvapiReflex },
 			{ temporal::LatencyBackend::kAntiLag2, &antiLag2 }
 		};
 		features::StreamlineSuperResolution dlssProvider{
