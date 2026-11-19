@@ -458,17 +458,12 @@ namespace cs::render
 		const DXGI_PRESENT_PARAMETERS* a_parameters, bool a_usePresent1) noexcept
 	{
 		auto& pipeline = render::TemporalPipeline::Get();
-		// The vendor chain may still hold quarantined GPU work.
-		if (FrameGenerationQuarantined()) {
-			if (_callbacks.clearCapture) {
-				_callbacks.clearCapture();
-			}
-			return DXGI_ERROR_DEVICE_REMOVED;
-		}
 		const PresentArgs args{ .syncInterval = a_syncInterval, .flags = a_flags, .parameters = a_parameters, .present1 = a_usePresent1 };
 		if (a_flags & DXGI_PRESENT_TEST) {
 			pipeline.BeginPresentAttempt(a_flags);
-			const HRESULT result = _presenter ? _presenter->PresentChain(args) : DXGI_ERROR_INVALID_CALL;
+			// The vendor chain may still hold quarantined GPU work.
+			const HRESULT result = FrameGenerationQuarantined() ? DXGI_ERROR_DEVICE_REMOVED : _presenter ? _presenter->PresentChain(args) :
+			                                                                                               DXGI_ERROR_INVALID_CALL;
 			pipeline.EndPresentAttempt(a_flags, result);
 			if (_frameGeneration) {
 				_frameGeneration->RecordTestPresent(a_flags, result);
@@ -482,7 +477,9 @@ namespace cs::render
 			}
 		} };
 		HRESULT result = DXGI_ERROR_INVALID_CALL;
-		if (!IsReady()) {
+		if (FrameGenerationQuarantined()) {
+			result = DXGI_ERROR_DEVICE_REMOVED;
+		} else if (!IsReady()) {
 			if (_presenter) {
 				pipeline.BeginPresentAttempt(a_flags);
 				result = _presenter->PresentChain(args);

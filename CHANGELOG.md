@@ -4,7 +4,7 @@
 
 - Frame Generation: turning it on or off, or changing its method, now applies at the next launch.
 - Upscaling: lower input latency and less video memory without frame generation.
-- HDR Display: HDR output now needs Windows HDR on when the game starts.
+- HDR Display: HDR output needs Windows HDR on at launch and turns off while Windows HDR is off.
 - Dynamic Cubemaps: `material_reflections` is removed; Vanilla PBR's Live Environment replaces it.
 - Vanilla PBR: new feature. GGX direct specular for vanilla materials; envmapped surfaces reflect the live world through vanilla's envmap formula, keeping authored strength, blur and metal tint, lit by ambient light only.
 - Sky Sync: a dark flat quad no longer covers the view when the sun is below eye level, e.g. at night with the alternate sun path.

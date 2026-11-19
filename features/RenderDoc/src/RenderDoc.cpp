@@ -463,7 +463,7 @@ namespace cs::features
 				capture.countBefore = _captures.Count();
 				capture.remaining = capture.request.frames;
 				capture.started = true;
-				// Behind the proxy the window's swap chain belongs to D3D12 (17bd6de7).
+				// Behind the D3D12 presenter the window's swap chain belongs to D3D12.
 				if (capture.request.target == CaptureTarget::kEngineD3D11 && _d3d12TargetAvailable.load(std::memory_order_acquire))
 					capture.binding.window = nullptr;
 				_api->StartFrameCapture(device, capture.binding.window);
