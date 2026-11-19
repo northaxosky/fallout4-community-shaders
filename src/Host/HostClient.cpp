@@ -61,6 +61,16 @@ namespace cs::host
 			       feature->get("load")->value_or(false);
 		}
 
+		// Widgets edit the draft; a stale one would post old values back.
+		template <class Draw>
+		void DrawEditing(Feature& a_feature, Draw&& a_draw)
+		{
+			if (auto* live = a_feature.GetLiveSettings())
+				live->BeginDraft();
+			a_draw();
+			FeatureManager::Get().CommitEdits(a_feature, false);
+		}
+
 		void DrawEnabledToggle(Feature& a_feature)
 		{
 			if (!a_feature.SupportsEnableToggle())
@@ -461,14 +471,13 @@ namespace cs::host
 			const bool comparing = isComparing();
 			const char* callback = "DearModdingUI::DrawSettings";
 			try {
-				{
+				DrawEditing(a_feature, [&] {
 					const dmui::DisabledScope disabled{ comparing };
 					DrawEnabledToggle(a_feature);
 					a_feature.DrawSettings();
 					callback = "DearModdingUI::DrawDebug";
 					DrawFeatureDebugSection(a_feature);
-				}
-				FeatureManager::Get().CommitEdits(a_feature, false);
+				});
 			} catch (const std::exception& error) {
 				FeatureManager::Get().QuarantineRuntimeCallback(
 					a_feature,
@@ -661,10 +670,7 @@ namespace cs::host
 		if (state.runtimeState == FeatureRuntimeState::kFailed ||
 			state.runtimeState == FeatureRuntimeState::kDegraded) {
 			try {
-				if (auto* live = a_feature.GetLiveSettings())
-					live->BeginDraft();
-				a_feature.DrawFailLoadMessage();
-				FeatureManager::Get().CommitEdits(a_feature, false);
+				DrawEditing(a_feature, [&] { a_feature.DrawFailLoadMessage(); });
 			} catch (const std::exception& error) {
 				reportCallbackFailure(
 					"DearModdingUI::DrawFailLoadMessage",
