@@ -3,7 +3,6 @@
 #include "Utils/CSSha256.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -33,9 +32,6 @@ namespace cs::shader_cache
 
 		FileObservation Observe(const std::string& a_locator);
 
-		[[nodiscard]] std::size_t ObservedPaths() const;
-		[[nodiscard]] std::size_t Reads() const noexcept;
-
 	private:
 		struct Entry
 		{
@@ -45,6 +41,5 @@ namespace cs::shader_cache
 
 		mutable std::mutex _lock;
 		std::unordered_map<std::string, std::shared_ptr<Entry>> _entries;
-		std::atomic<std::size_t> _reads{ 0 };
 	};
 }

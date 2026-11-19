@@ -57,11 +57,6 @@ namespace cs::features::remote_control
 		}
 	}
 
-	std::span<const Tool* const> GetTools() noexcept
-	{
-		return kTools;
-	}
-
 	std::vector<std::string_view> RegisterTools(DevBenchAPI::IDevBenchInterface001& a_host)
 	{
 		std::vector<std::string_view> names;

@@ -2029,19 +2029,6 @@ namespace cs::engine
 		}
 	}
 
-	void DispatchShaderInjections(
-		ShaderInjectionTarget a_target,
-		ID3D11DeviceContext* a_context,
-		util::ShaderSamplerUse a_samplers) noexcept
-	{
-		if (!a_context || !IsValidTarget(a_target))
-			return;
-
-		const auto plan = GetService().published.load(std::memory_order_acquire);
-		if (const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr)
-			DispatchTarget(*target, a_context, a_samplers);
-	}
-
 	namespace
 	{
 		void ObserveNativeShaderImpl(
@@ -2539,21 +2526,6 @@ namespace cs::engine
 		ShaderInjectionTarget a_target) noexcept
 	{
 		return t_activeTarget == a_target ? t_activeDefines : nullptr;
-	}
-
-	ShaderInjectionOutcomeSnapshot GetShaderInjectionOutcomeSnapshot(
-		ShaderInjectionTarget a_target) noexcept
-	{
-		ShaderInjectionOutcomeSnapshot snapshot;
-		if (!IsValidTarget(a_target))
-			return snapshot;
-		auto& service = GetService();
-		const auto& runtime = service.runtime[ToIndex(a_target)];
-		SwapCountersGuard counterGuard(service);
-		snapshot.matches = runtime.matches.load(std::memory_order_relaxed);
-		snapshot.substitutions =
-			runtime.substitutions.load(std::memory_order_relaxed);
-		return snapshot;
 	}
 
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(

@@ -480,10 +480,4 @@ namespace cs::engine
 		auto* target = ResolveDepthStencilTarget(a_target);
 		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srViewDepth) : nullptr;
 	}
-
-	[[nodiscard]] inline ID3D11ShaderResourceView* GetDepthStencilStencilSRV(RE::BSGraphics::DepthStencilTargetID a_target)
-	{
-		auto* target = ResolveDepthStencilTarget(a_target);
-		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srViewStencil) : nullptr;
-	}
 }

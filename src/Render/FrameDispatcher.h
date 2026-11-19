@@ -52,12 +52,7 @@ namespace cs::render
 				if (!shared->phase.compare_exchange_strong(expected, Shared::kRunning))
 					return;
 				try {
-					if constexpr (std::is_void_v<T>) {
-						task();
-						shared->result.set_value({});
-					} else {
-						shared->result.set_value(task());
-					}
+					shared->result.set_value(task());
 				} catch (const std::exception& error) {
 					shared->result.set_value(std::unexpected(std::string(error.what())));
 				} catch (...) {

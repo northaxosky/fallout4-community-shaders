@@ -64,16 +64,6 @@ namespace
 		return true;
 	}
 
-	std::string ToLower(std::string_view a_in)
-	{
-		std::string out;
-		out.reserve(a_in.size());
-		for (char c : a_in) {
-			out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-		}
-		return out;
-	}
-
 	std::string Iso8601UtcNow()
 	{
 		const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -160,7 +150,7 @@ namespace cs
 		id.reserve(2 + a_name.size());
 		id.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(a_scope))));
 		id.push_back(':');
-		id.append(ToLower(a_name));
+		id.append(cs::util::ToLowerAscii(a_name));
 		return id;
 	}
 
@@ -210,13 +200,13 @@ namespace cs
 		std::sort(_entries.begin(), _entries.end(), [](const PresetMeta& a, const PresetMeta& b) {
 			if (a.builtin != b.builtin)
 				return a.builtin;
-			return ToLower(a.name) < ToLower(b.name);
+			return cs::util::ToLowerAscii(a.name) < cs::util::ToLowerAscii(b.name);
 		});
 	}
 
 	const PresetMeta* PresetManager::FindByIdentity(std::string_view a_identity) const
 	{
-		const std::string needle = ToLower(a_identity);
+		const std::string needle = cs::util::ToLowerAscii(a_identity);
 		for (const auto& e : _entries) {
 			if (e.identity == needle)
 				return &e;
@@ -497,7 +487,7 @@ namespace cs
 			L->warn("preset.{}; using preset defaults", error);
 			return;
 		}
-		activeIdentity = ToLower(preset.active);
+		activeIdentity = cs::util::ToLowerAscii(preset.active);
 		autoLoadOnBoot = preset.autoLoadOnBoot;
 	}
 

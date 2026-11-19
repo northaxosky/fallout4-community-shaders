@@ -201,12 +201,6 @@ namespace cs::engine
 		std::uint64_t draws = 0;
 	};
 
-	struct ShaderInjectionOutcomeSnapshot
-	{
-		std::uint64_t matches = 0;
-		std::uint64_t substitutions = 0;
-	};
-
 	struct ComputeDispatchBridgeStatus
 	{
 		bool installed = false;
@@ -287,10 +281,6 @@ namespace cs::engine
 		RE::BSGraphics::VertexShader* vertex = nullptr;
 		RE::BSGraphics::PixelShader* pixel = nullptr;
 	};
-	void DispatchShaderInjections(
-		ShaderInjectionTarget a_target,
-		ID3D11DeviceContext* a_context,
-		util::ShaderSamplerUse a_samplers = {}) noexcept;
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept;
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
@@ -337,8 +327,6 @@ namespace cs::engine
 	bool ActiveShaderInjectionVariantHasAnyDefine(
 		ShaderInjectionTarget a_target,
 		std::span<const std::string_view> a_defines) noexcept;
-	ShaderInjectionOutcomeSnapshot GetShaderInjectionOutcomeSnapshot(
-		ShaderInjectionTarget a_target) noexcept;
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(ShaderInjectionTarget a_target);
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept;
 }

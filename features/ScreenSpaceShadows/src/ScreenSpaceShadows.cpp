@@ -154,6 +154,13 @@ namespace cs::features
 		_allocHeight = a_height;
 	}
 
+	void ScreenSpaceShadows::PublishRequiredMaskExtent(render::Extent a_required)
+	{
+		_requiredMaskExtent = a_required;
+		_requiredMaskWidthTelemetry.store(a_required.width, std::memory_order_relaxed);
+		_requiredMaskHeightTelemetry.store(a_required.height, std::memory_order_relaxed);
+	}
+
 	bool ScreenSpaceShadows::TryGetMaskExtents(
 		render::Extent& a_required,
 		render::Extent& a_allocation) const
@@ -357,13 +364,7 @@ namespace cs::features
 				required,
 				allocation);
 		}
-		_requiredMaskExtent = required;
-		_requiredMaskWidthTelemetry.store(
-			required.width,
-			std::memory_order_relaxed);
-		_requiredMaskHeightTelemetry.store(
-			required.height,
-			std::memory_order_relaxed);
+		PublishRequiredMaskExtent(required);
 		(void)EnsureResources();
 	}
 
@@ -371,26 +372,6 @@ namespace cs::features
 	{
 		// Refreshed after the prepass bind; a stock slot would read stale shadows.
 		a_fo4.EnabledScreenSpaceShadows = _maskBound.load(std::memory_order_relaxed) ? 1u : 0u;
-	}
-
-	bool ScreenSpaceShadows::IsShadowMaskReady()
-	{
-		if (!_registrationsReady.load(std::memory_order_acquire))
-			return false;
-		(void)EnsureResources();
-		render::Extent required;
-		render::Extent allocation;
-		auto* device = cs::util::GetD3DDevice();
-		const bool fallbackReady =
-			device && TryGetMaskExtents(required, allocation) && EnsureWhiteFallback(device, required, allocation);
-		_requiredMaskExtent = required;
-		_requiredMaskWidthTelemetry.store(
-			required.width,
-			std::memory_order_relaxed);
-		_requiredMaskHeightTelemetry.store(
-			required.height,
-			std::memory_order_relaxed);
-		return fallbackReady;
 	}
 
 	bool ScreenSpaceShadows::EnsureResources()
@@ -506,13 +487,7 @@ namespace cs::features
 		auto* device = cs::util::GetD3DDevice();
 		const bool extentsValid =
 			device && TryGetMaskExtents(required, allocation);
-		_requiredMaskExtent = required;
-		_requiredMaskWidthTelemetry.store(
-			required.width,
-			std::memory_order_relaxed);
-		_requiredMaskHeightTelemetry.store(
-			required.height,
-			std::memory_order_relaxed);
+		PublishRequiredMaskExtent(required);
 		if (extentsValid) {
 			(void)EnsureWhiteFallback(
 				device,

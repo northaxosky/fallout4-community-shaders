@@ -40,20 +40,8 @@ namespace cs::shader_cache
 		// read outside the lock to avoid serializing the batch
 		std::call_once(entry->once, [this, &a_locator, &entry] {
 			entry->observation = ObserveFile(a_locator);
-			_reads.fetch_add(1, std::memory_order_relaxed);
 		});
 
 		return entry->observation;
-	}
-
-	std::size_t RevalidationContext::ObservedPaths() const
-	{
-		const std::scoped_lock lock(_lock);
-		return _entries.size();
-	}
-
-	std::size_t RevalidationContext::Reads() const noexcept
-	{
-		return _reads.load(std::memory_order_relaxed);
 	}
 }

@@ -19,11 +19,6 @@ namespace cs::sha1
 		return out;
 	}
 
-	bool Sha1IsZero(const Sha1Result& r) noexcept
-	{
-		return std::all_of(r.bytes.begin(), r.bytes.end(), [](std::uint8_t b) { return b == 0; });
-	}
-
 	std::string Sha1ToHex(const Sha1Result& r)
 	{
 		static constexpr char kHex[] = "0123456789abcdef";

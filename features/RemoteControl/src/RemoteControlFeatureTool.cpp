@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <exception>
-#include <span>
 #include <string>
 #include <vector>
 

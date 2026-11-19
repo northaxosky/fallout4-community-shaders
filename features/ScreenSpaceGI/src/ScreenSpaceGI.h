@@ -72,7 +72,6 @@ namespace cs::features
 		void UpdateConsumer(bool a_enabled, bool a_tiled);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
-		static constexpr std::size_t kResolutionModes = 3;
 		settings::LiveSettings<ssgi_settings::kSchema> _live{ { .finalize = [this](const Settings& a_previous) { OnSettingsChanged(a_previous); } } };
 		const Settings& _settings = _live.Get();
 		Resources _textures;

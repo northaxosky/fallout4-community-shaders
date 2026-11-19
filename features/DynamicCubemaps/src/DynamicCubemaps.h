@@ -27,11 +27,6 @@ struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
 struct ID3D11UnorderedAccessView;
 
-namespace cs
-{
-	struct DynamicCubemapsFeatureData;
-}
-
 namespace cs::features
 {
 	class DynamicCubemaps :

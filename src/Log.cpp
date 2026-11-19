@@ -3,6 +3,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/SettingsRegistry.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/CSUtil.h"
 
 #include <algorithm>
 #include <array>
@@ -59,14 +60,6 @@ namespace cs::log
 			a_logger.flush_on(a_default.flush_level());
 			a_logger.set_pattern(kPattern);
 			ApplyConfiguredLevel(a_logger);
-		}
-
-		std::string Lowercase(std::string_view a_value)
-		{
-			std::string lowered(a_value);
-			std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-				[](unsigned char a_char) { return static_cast<char>(std::tolower(a_char)); });
-			return lowered;
 		}
 	}
 
@@ -139,7 +132,7 @@ namespace cs::log
 
 	std::optional<spdlog::level::level_enum> LevelFromString(std::string_view a_level)
 	{
-		const auto lowered = Lowercase(a_level);
+		const auto lowered = util::ToLowerAscii(a_level);
 		if (lowered == "trace")
 			return spdlog::level::trace;
 		if (lowered == "debug")

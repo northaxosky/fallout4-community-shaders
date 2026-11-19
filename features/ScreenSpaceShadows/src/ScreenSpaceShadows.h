@@ -30,7 +30,6 @@ namespace cs::features
 		void Prepass() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
-		bool IsShadowMaskReady();
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 
 		bool ProducesTelemetry() const override { return true; }
@@ -60,6 +59,7 @@ namespace cs::features
 		void OnPreDeferredLights();
 		void BindShadowMask(ID3D11DeviceContext* a_context);
 		bool EnsureResources();
+		void PublishRequiredMaskExtent(render::Extent a_required);
 		bool TryGetMaskExtents(
 			render::Extent& a_required,
 			render::Extent& a_allocation) const;

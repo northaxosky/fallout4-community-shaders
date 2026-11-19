@@ -22,6 +22,7 @@
 #include "Render/FrameBoundary.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/F4SEUserDirectory.h"
+#include "Utils/PathUtf8.h"
 #include "Utils/ShaderCache/ShaderRecipe.h"
 
 namespace cs::features
@@ -45,11 +46,6 @@ namespace cs::features
 
 	namespace
 	{
-		int ClampCaptureFrameCount(int a_value)
-		{
-			return std::clamp(a_value, renderdoc::kMinCaptureFrameCount, renderdoc::kMaxCaptureFrameCount);
-		}
-
 		std::string RuntimeName()
 		{
 			switch (REX::FModule::GetRuntimeIndex()) {
@@ -84,19 +80,10 @@ namespace cs::features
 			}
 		}
 
-		std::string PathToUtf8(const std::filesystem::path& a_path)
-		{
-			std::string utf8;
-			if (REX::UTF16_TO_UTF8(a_path.native(), utf8)) {
-				return utf8;
-			}
-			return a_path.string();
-		}
-
 		// FO4: the host owns native external opening, including failure reporting.
 		void OpenCaptureLocation(const std::filesystem::path& a_path, DMUI_ExternalTargetKind a_kind)
 		{
-			const auto utf8 = PathToUtf8(std::filesystem::absolute(a_path));
+			const auto utf8 = util::PathToUtf8(std::filesystem::absolute(a_path));
 			auto& client = host::HostClient::Get().Client();
 			std::uint32_t nativeError{};
 			if (!client.OpenExternal({ .targetKind = a_kind, .target = utf8.c_str() }, &nativeError)) {
@@ -224,7 +211,7 @@ namespace cs::features
 			a_error = std::format("RenderDoc runtime path resolution failed for settings.dll_path '{}': {}", _settings.dllPath, error.what());
 			return false;
 		}
-		const auto pathUtf8 = PathToUtf8(path);
+		const auto pathUtf8 = util::PathToUtf8(path);
 		// Post-D3D loading can crash.
 		_module = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!_module) {
@@ -275,7 +262,7 @@ namespace cs::features
 			return false;
 		}
 		_resolvedCaptureFolder = std::move(*folder);
-		_resolvedCaptureFolderUtf8 = PathToUtf8(_resolvedCaptureFolder);
+		_resolvedCaptureFolderUtf8 = util::PathToUtf8(_resolvedCaptureFolder);
 		return true;
 	}
 
@@ -298,8 +285,8 @@ namespace cs::features
 		// FO4: runtime identity comes from CommonLibF4; the session stamp keeps names unique.
 		static const auto sessionStart = std::chrono::current_zone()->to_local(
 			std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
-		auto pathTemplate = PathToUtf8(_resolvedCaptureFolder /
-									   std::format("Fallout4_{}_{}_{:%Y%m%d_%H%M%S}", RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string("."), sessionStart));
+		auto pathTemplate = util::PathToUtf8(_resolvedCaptureFolder /
+											 std::format("Fallout4_{}_{}_{:%Y%m%d_%H%M%S}", RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string("."), sessionStart));
 		_api->SetCaptureFilePathTemplate(pathTemplate.c_str());
 	}
 
@@ -551,7 +538,7 @@ namespace cs::features
 			L->warn("RenderDoc runtime not loaded; install RenderDoc or fix dll_path, then restart with the feature loaded");
 			return;
 		}
-		const auto frameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
+		const auto frameCount = _settings.captureFrameCount;
 		const auto request = RequestCapture({ _settings.captureTarget, static_cast<std::uint32_t>(frameCount) });
 		if (!request) {
 			L->warn("RenderDoc capture aborted: {}", request.error().message);
@@ -768,8 +755,8 @@ namespace cs::features
 			return _fileSortDescending ? comparison > 0 : comparison < 0;
 		});
 		for (const auto& file : files) {
-			const auto filename = PathToUtf8(file.path.filename());
-			const auto path = PathToUtf8(file.path);
+			const auto filename = util::PathToUtf8(file.path.filename());
+			const auto path = util::PathToUtf8(file.path);
 			dmui::ui::PushID(path.c_str());
 			dmui::ui::TableNextRow();
 			(void)dmui::ui::TableSetColumnIndex(0);

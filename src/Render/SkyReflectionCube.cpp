@@ -209,7 +209,7 @@ namespace cs::engine
 		[[nodiscard]] bool WorldLoaded() noexcept
 		{
 			const auto* player = RE::PlayerCharacter::GetSingleton();
-			return player && player->parentCell && RE::UI::GetSingleton() && !render::GetFrameState().mainOrLoading;
+			return player && player->parentCell && !render::GetFrameState().mainOrLoading;
 		}
 
 		[[nodiscard]] bool AnyConsumerWants(
