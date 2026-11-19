@@ -21,8 +21,6 @@ namespace cs::settings
 
 		bool Apply(ui::EditResult a_result) noexcept
 		{
-			_feature._settingsSavePending |= a_result.changed;
-			_feature._settingsEditCompleted |= a_result.completed;
 			if (auto* live = _feature.GetLiveSettings())
 				live->editCompleted |= a_result.completed;
 			return a_result.changed;
@@ -36,13 +34,6 @@ namespace cs::settings
 			return SchemaEdit<std::remove_cvref_t<decltype(kSchema)>, Settings>{ *this, kSchema, a_live.Draft(), a_live.DefaultSettings() };
 		}
 
-		// Edits through a schema's members, each as a field row with a Reset.
-		template <class Schema, class Settings>
-		SchemaEdit<Schema, Settings> Bind(const Schema& a_schema, Settings& a_settings) noexcept
-		{
-			return { *this, a_schema, a_settings };
-		}
-
 	private:
 		Feature& _feature;
 	};
@@ -52,7 +43,7 @@ namespace cs::settings
 	class SchemaEdit
 	{
 	public:
-		SchemaEdit(SettingsEdit& a_edit, const Schema& a_schema, Settings& a_settings, Settings a_defaults = {}) noexcept :
+		SchemaEdit(SettingsEdit& a_edit, const Schema& a_schema, Settings& a_settings, Settings a_defaults) noexcept :
 			_edit(a_edit), _schema(a_schema), _settings(a_settings), _defaults(std::move(a_defaults)) {}
 
 		// The draft, for controls drawn outside the schema rows.

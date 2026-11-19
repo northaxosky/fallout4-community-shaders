@@ -109,9 +109,6 @@ namespace cs::feature_config
 		std::span<const std::string_view> a_path,
 		const toml::table& a_value,
 		SectionWrite a_mode = SectionWrite::kReplace);
-	WriteResult UpdateFeatureOwnedSettings(
-		std::string_view a_featureKey,
-		const toml::table& a_delta);
 	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load);
 	WriteResult UpdateFeatureEnabled(std::string_view a_featureKey, bool a_enabled);
 	WriteResult UpdateTopLevelSection(

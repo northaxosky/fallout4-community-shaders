@@ -33,7 +33,6 @@
 #include "Render/SharedDataLayout.h"
 #include "Render/SkyReflectionCube.h"
 #include "Render/SubstrateSlots.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"

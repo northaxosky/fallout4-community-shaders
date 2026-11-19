@@ -10,7 +10,6 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
 #include "Settings/PresetManager.h"
-#include "Settings/SettingsPersistence.h"
 
 #include <toml++/toml.hpp>
 
@@ -85,78 +84,9 @@ namespace cs
 			OnEnabledChanged(!before);
 	}
 
-	void Feature::SetEnabled(bool a_enabled) noexcept
-	{
-		render::CheckFrameBoundary("Feature::SetEnabled");
-		SetInput(_enabled, a_enabled);
-	}
-
 	void Feature::SetSuspended(bool a_suspended) noexcept
 	{
 		SetInput(_suspended, a_suspended);
-	}
-
-	bool Feature::SaveEnabled()
-	{
-		return !SupportsEnableToggle() || settings::SaveEnabled(GetConfigKey(), IsSwitchedOn(), *Log());
-	}
-
-	bool Feature::Persist()
-	{
-		return SaveSettings() && SaveEnabled();
-	}
-
-	void Feature::FlushSettings(bool a_completedOnly)
-	{
-		if (!_settingsSavePending || (a_completedOnly && !_settingsEditCompleted))
-			return;
-		_settingsEditCompleted = false;
-		if (Persist())
-			_settingsSavePending = false;
-	}
-
-	bool Feature::RestoreDefaults()
-	{
-		RestoreDefaultSettings();
-		if (SupportsEnableToggle()) {
-			SetEnabled(DefaultEnabled());
-		}
-		return Persist();
-	}
-
-	void Feature::ComposeEnabledLiveSettings()
-	{
-		if (!SupportsEnableToggle())
-			return;
-		_liveSettings = {
-			[this, inner = std::move(_liveSettings.snapshot)] {
-				auto snapshot = inner ? inner() : toml::table{};
-				snapshot.insert_or_assign("enabled", _enabled.load(std::memory_order_acquire));
-				return snapshot;
-			},
-			[this, inner = std::move(_liveSettings.prepare)](
-				const toml::table& a_snapshot, std::string& a_error) -> std::optional<settings::PreparedLiveSettings> {
-				bool enabled = _enabled.load(std::memory_order_acquire);
-				if (!settings::AcceptSetting(feature_config::ReadBool(a_snapshot, "enabled", enabled), "enabled", "boolean", a_error))
-					return std::nullopt;
-				settings::PreparedLiveSettings prepared;
-				if (inner) {
-					auto value = inner(a_snapshot, a_error);
-					if (!value)
-						return std::nullopt;
-					prepared = std::move(*value);
-				}
-				prepared.swap = [this, enabled, featureSwap = std::move(prepared.swap)]() mutable {
-					if (featureSwap)
-						featureSwap();
-					const bool previous = _enabled.load(std::memory_order_acquire);
-					SetEnabled(enabled);
-					enabled = previous;
-				};
-				return prepared;
-			},
-			std::move(_liveSettings.notComparable)
-		};
 	}
 
 	spdlog::logger* Feature::Log() const
@@ -264,9 +194,6 @@ namespace cs
 			skipped = &live->notComparable;
 			if (a_feature.SupportsEnableToggle())
 				snapshot.insert_or_assign("enabled", a_feature.IsSwitchedOn());
-		} else if (a_feature._liveSettings.snapshot) {
-			snapshot = a_feature._liveSettings.snapshot();
-			skipped = &a_feature._liveSettings.notComparable;
 		} else if (a_feature.SupportsEnableToggle()) {
 			snapshot.insert_or_assign("enabled", a_feature.IsSwitchedOn());
 		} else {
@@ -296,62 +223,40 @@ namespace cs
 		}
 
 		std::optional<settings::PreparedLiveSettings> value;
-		if (a_feature.UsesLegacySettings()) {
-			if (!a_feature._liveSettings.prepare) {
-				a_error = "feature has no live settings";
+		if (!live && !a_feature.SupportsEnableToggle()) {
+			a_error = "feature has no live settings";
+			return std::nullopt;
+		}
+		toml::table rest = a_values;
+		std::optional<bool> enabled;
+		if (a_feature.SupportsEnableToggle()) {
+			bool requested = a_feature.IsSwitchedOn();
+			if (!settings::AcceptSetting(feature_config::ReadBool(a_values, "enabled", requested), "enabled", "boolean", a_error))
 				return std::nullopt;
-			}
-			value = a_feature._liveSettings.prepare(a_values, a_error);
+			if (a_values.contains("enabled"))
+				enabled = requested;
+			rest.erase("enabled");
+		}
+		if (live) {
+			value = live->Prepare(rest, a_scope, a_persist, a_error);
 			if (!value)
 				return std::nullopt;
-			if (a_persist != settings::Persist::kNo) {
-				value->persist = [feature = &a_feature, a_persist] {
-					if (a_persist == settings::Persist::kDeferred) {
-						feature->_settingsSavePending = true;
-						return true;
-					}
-					const bool saved = feature->Persist();
-					if (saved)
-						feature->_settingsSavePending = false;
-					return saved;
-				};
-			}
 		} else {
-			if (!live && !a_feature.SupportsEnableToggle()) {
-				a_error = "feature has no live settings";
-				return std::nullopt;
-			}
-			toml::table rest = a_values;
-			std::optional<bool> enabled;
-			if (a_feature.SupportsEnableToggle()) {
-				bool requested = a_feature.IsSwitchedOn();
-				if (!settings::AcceptSetting(feature_config::ReadBool(a_values, "enabled", requested), "enabled", "boolean", a_error))
-					return std::nullopt;
-				if (a_values.contains("enabled"))
-					enabled = requested;
-				rest.erase("enabled");
-			}
-			if (live) {
-				value = live->Prepare(rest, a_scope, a_persist, a_error);
-				if (!value)
-					return std::nullopt;
-			} else {
-				value.emplace();
-			}
-			if (enabled) {
-				value->swap = [feature = &a_feature, requested = *enabled, inner = std::move(value->swap)]() mutable {
-					if (inner)
-						inner();
-					const bool previous = feature->_enabled.load(std::memory_order_acquire);
-					feature->SetInput(feature->_enabled, requested);
-					requested = previous;
+			value.emplace();
+		}
+		if (enabled) {
+			value->swap = [feature = &a_feature, requested = *enabled, inner = std::move(value->swap)]() mutable {
+				if (inner)
+					inner();
+				const bool previous = feature->_enabled.load(std::memory_order_acquire);
+				feature->SetInput(feature->_enabled, requested);
+				requested = previous;
+			};
+			if (a_persist != settings::Persist::kNo) {
+				value->persist = [feature = &a_feature, inner = std::move(value->persist)] {
+					const bool saved = inner ? inner() : true;
+					return PersistEnabled(*feature) && saved;
 				};
-				if (a_persist != settings::Persist::kNo) {
-					value->persist = [feature = &a_feature, inner = std::move(value->persist)] {
-						const bool saved = inner ? inner() : true;
-						return PersistEnabled(*feature) && saved;
-					};
-				}
 			}
 		}
 
@@ -431,12 +336,6 @@ namespace cs
 
 	bool FeatureManager::RestoreDefaults(Feature& a_feature, std::string& a_error)
 	{
-		if (a_feature.UsesLegacySettings()) {
-			if (a_feature.RestoreDefaults())
-				return true;
-			a_error = "failed to save";
-			return false;
-		}
 		a_feature.RestoreDefaultSettings();
 		toml::table values;
 		if (auto* live = a_feature.GetLiveSettings())
@@ -449,11 +348,7 @@ namespace cs
 	void FeatureManager::CommitEdits(Feature& a_feature, bool a_pageExit)
 	{
 		auto* live = a_feature.GetLiveSettings();
-		if (!live) {
-			a_feature.FlushSettings(!a_pageExit);
-			return;
-		}
-		if (!live->QueueEdits(a_pageExit))
+		if (!live || !live->QueueEdits(a_pageExit))
 			return;
 		render::PostToFrame([this, feature = &a_feature, live] {
 			const auto pending = live->TakePending();
@@ -473,8 +368,6 @@ namespace cs
 			const bool saved = live->Save();
 			return (!a_feature.SupportsEnableToggle() || PersistEnabled(a_feature)) && saved;
 		}
-		if (a_feature.UsesLegacySettings())
-			return a_feature.Persist();
 		return !a_feature.SupportsEnableToggle() || PersistEnabled(a_feature);
 	}
 
@@ -670,8 +563,6 @@ namespace cs
 					L->warn("Feature {} configuration enabled key must be a boolean; using the default", key);
 				}
 				feature->_enabled.store(enabled, std::memory_order_release);
-				if (feature->UsesLegacySettings())
-					feature->ComposeEnabledLiveSettings();
 
 				const auto* deactivation = compat::Find(*feature);
 				const bool desiredActive = activation.valid && activation.load && !deactivation;

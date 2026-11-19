@@ -30,7 +30,6 @@
 #include "Render/SharedDataLayout.h"
 #include "Render/SubstrateSlots.h"
 #include "Settings/LiveSettings.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features

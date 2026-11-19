@@ -20,7 +20,6 @@
 #include "Menu/SettingsEdit.h"
 #include "REX/CONVERT.h"
 #include "Render/FrameBoundary.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/F4SEUserDirectory.h"
 #include "Utils/ShaderCache/ShaderRecipe.h"

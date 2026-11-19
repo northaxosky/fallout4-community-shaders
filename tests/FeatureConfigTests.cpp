@@ -341,31 +341,6 @@ namespace
 		}
 	}
 
-	void TestLiveSettingsRollback()
-	{
-		using namespace cs::features::sss_settings;
-		Settings value;
-		float published = value.SurfaceThickness;
-		auto access = BindLiveSettings(kSchema, value, [&] {
-			published = value.SurfaceThickness;
-			if (value.ShadowContrast > 3.0f)
-				throw std::runtime_error("Effect finalization failed");
-		});
-		const auto before = value;
-		std::string error;
-		auto prepared = access.prepare(toml::parse("SurfaceThickness = 0.04\nShadowContrast = 3.5"), error);
-		CHECK(prepared.has_value());
-		if (!prepared)
-			return;
-		std::array transaction{ std::move(*prepared) };
-		try {
-			ApplyPreparedLiveSettings(transaction);
-			CHECK(false);
-		} catch (const std::runtime_error&) {
-			CHECK(value.SurfaceThickness == before.SurfaceThickness && value.ShadowContrast == before.ShadowContrast);
-			CHECK(published == before.SurfaceThickness);
-		}
-	}
 	void TestLightAuthoring()
 	{
 		using namespace cs::features::light_limit_fix;
@@ -421,7 +396,6 @@ int main()
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");
 		TestWeatherProfiles(registry, directory / "weather.toml");
-		TestLiveSettingsRollback();
 		TestLightAuthoring();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';

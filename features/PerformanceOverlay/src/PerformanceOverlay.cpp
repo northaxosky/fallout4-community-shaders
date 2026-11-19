@@ -13,7 +13,6 @@
 #include "Render/RenderHooks.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/TemporalPipeline.h"
-#include "Settings/SettingsPersistence.h"
 #include "Shared/PerfUtils.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/UI.h"

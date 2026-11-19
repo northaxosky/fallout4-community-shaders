@@ -6,7 +6,6 @@
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/HookRegistry.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/CelestialTransition.h"

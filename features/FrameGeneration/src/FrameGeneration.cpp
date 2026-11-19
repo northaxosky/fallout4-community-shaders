@@ -17,7 +17,6 @@
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features

@@ -25,7 +25,6 @@
 #include "Render/SharedData.h"
 #include "Render/SubstrateSlots.h"
 #include "Render/TemporalRenderer.h"
-#include "Settings/SettingsPersistence.h"
 #include "SkinProfile.h"
 #include "SubsurfaceScatteringKernel.h"
 #include "Telemetry/Telemetry.h"

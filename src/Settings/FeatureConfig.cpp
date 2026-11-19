@@ -458,12 +458,6 @@ namespace cs::feature_config
 		return written;
 	}
 
-	WriteResult UpdateFeatureOwnedSettings(std::string_view a_featureKey, const toml::table& a_delta)
-	{
-		const std::array path{ std::string_view("features"), a_featureKey, std::string_view("settings") };
-		return UpdateOwnedSettings(path, a_delta);
-	}
-
 	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load)
 	{
 		const std::array path{ std::string_view("features"), a_featureKey };

@@ -24,7 +24,6 @@
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 

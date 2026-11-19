@@ -16,7 +16,6 @@
 #include "Render/RenderHooks.h"
 #include "Render/ScreenshotSites.h"
 #include "ScreenshotFile.h"
-#include "Settings/SettingsPersistence.h"
 #include "Utils/PathUtf8.h"
 
 #include <array>

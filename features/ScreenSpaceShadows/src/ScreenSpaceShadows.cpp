@@ -32,7 +32,6 @@
 #include "Render/ShaderInjection.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"

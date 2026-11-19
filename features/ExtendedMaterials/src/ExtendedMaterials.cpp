@@ -22,7 +22,6 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 #include "RE/B/BSLightingShaderMaterialBase.h"

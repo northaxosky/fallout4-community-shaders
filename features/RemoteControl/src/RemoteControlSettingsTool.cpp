@@ -32,7 +32,7 @@ namespace cs::features::remote_control
 
 	const Tool kSettingsTool{
 		"communityshaders.settings",
-		R"({"description":"Save, load, or reset the GLOBAL Community Shaders user configuration (FO4CommunityShaders.toml). Action-dispatched; returns {action,done:true} once applied at the next frame. save: persist every feature's current settings and 'enabled' switch. load: reread the file and apply its live settings to every loaded feature (settings that apply only at restart are not touched); use it to roll live communityshaders.feature changes back to the saved baseline. reset: restore every loaded feature to its defaults, then save.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["save","load","reset"]}},"required":["action"]}})",
+		R"({"description":"Save, load, or reset the GLOBAL Community Shaders user configuration (FO4CommunityShaders.toml). Action-dispatched; returns {action,done:true} once applied at the next frame. save: persist every feature's current live settings and 'enabled' switch; restart-only values keep their file value unless they were edited in the menu. load: reread the file and apply its live settings to every loaded feature (settings that apply only at restart are not applied, but become the pending restart values); use it to roll live communityshaders.feature changes back to the saved baseline. reset: restore every loaded feature to its defaults, then save. save, load and reset are refused while an A/B comparison runs.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["save","load","reset"]}},"required":["action"]}})",
 		&Handle
 	};
 }

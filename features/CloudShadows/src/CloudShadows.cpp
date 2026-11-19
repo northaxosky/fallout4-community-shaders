@@ -30,7 +30,6 @@
 #include "Render/SharedData.h"
 #include "Render/SkyReflectionCube.h"
 #include "Render/SubstrateSlots.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"

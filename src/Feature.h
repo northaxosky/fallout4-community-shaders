@@ -90,8 +90,6 @@ namespace cs
 			return !SupportsEnableToggle() || _enabled.load(std::memory_order_acquire);
 		}
 		bool IsSuspended() const noexcept { return _suspended.load(std::memory_order_acquire); }
-		// Host-frame thread; readers are on the render path.
-		void SetEnabled(bool a_enabled) noexcept;
 
 		// Configure must remain side-effect-free.
 		virtual bool Configure(const toml::table&, std::string&) { return true; }
@@ -119,39 +117,27 @@ namespace cs
 		}
 
 		virtual void DrawSettings() {}
-		// False keeps recorded edits pending for a later flush.
-		virtual bool SaveSettings() { return true; }
-		bool Persist();
-		virtual settings::SettingsBinding GetSettingsBinding() const { return {}; }
 		// The feature's settings transaction; null for features without schema fields.
 		virtual settings::LiveSettingsAccess* GetLiveSettings() { return nullptr; }
 		settings::LiveSettingsAccess* GetLiveSettings() const { return const_cast<Feature*>(this)->GetLiveSettings(); }
 		settings::SchemaView GetSettingsSchema() const
 		{
-			if (auto* live = GetLiveSettings())
-				return live->Schema();
-			const auto binding = GetSettingsBinding();
-			return binding ? binding.schema() : settings::SchemaView{};
+			auto* live = GetLiveSettings();
+			return live ? live->Schema() : settings::SchemaView{};
 		}
-		const settings::LiveSettingsBag& GetLiveSettingsAccess() const noexcept { return _liveSettings; }
 		// Takes part in presets, A/B comparison and Remote Control.
 		bool SharesLiveSettings() const
 		{
-			if (auto* live = GetLiveSettings())
-				return live->shared;
-			return static_cast<bool>(_liveSettings.snapshot) || SupportsEnableToggle();
+			auto* live = GetLiveSettings();
+			return live ? live->shared : SupportsEnableToggle();
 		}
 		// Descriptions of the restart-only settings whose stored value differs from the running one.
 		std::vector<std::string_view> RestartPending() const
 		{
-			if (auto* live = GetLiveSettings())
-				return live->RestartPending();
-			return GetRestartSettings();
+			auto* live = GetLiveSettings();
+			return live ? live->RestartPending() : std::vector<std::string_view>{};
 		}
 
-		// Persists edits recorded by settings::SettingsEdit, optionally only once an edit completes.
-		void FlushSettings(bool a_completedOnly = false);
-		virtual std::vector<std::string_view> GetRestartSettings() const { return {}; }
 		// Per-weather overrides from the `weather` table; null when absent.
 		virtual weather::Profiles* GetWeatherProfiles() { return nullptr; }
 		// The CS Editor draws a section with this title; empty opts out.
@@ -171,19 +157,14 @@ namespace cs
 		// Render thread only; the texture is borrowed until the next render callback.
 		virtual FullscreenDebugData GetFullscreenDebugData() const noexcept { return {}; }
 
+		// Resets state outside the settings; FeatureManager::RestoreDefaults commits the settings.
 		virtual void RestoreDefaultSettings() {}
-		bool RestoreDefaults();
 
-		bool HasResettableSettings() const { return SupportsEnableToggle() || GetLiveSettings() || static_cast<bool>(GetSettingsBinding()); }
+		bool HasResettableSettings() const { return SupportsEnableToggle() || GetLiveSettings(); }
 		bool HasModifiedSettings() const
 		{
-			bool modified = false;
-			if (auto* live = GetLiveSettings()) {
-				modified = live->Modified();
-			} else if (const auto binding = GetSettingsBinding()) {
-				modified = binding.modified();
-			}
-			return modified || (SupportsEnableToggle() && IsSwitchedOn() != DefaultEnabled());
+			auto* live = GetLiveSettings();
+			return (live && live->Modified()) || (SupportsEnableToggle() && IsSwitchedOn() != DefaultEnabled());
 		}
 
 		// Overlays render even while settings are closed.
@@ -222,12 +203,7 @@ namespace cs
 		// Show load failures instead of silently skipping.
 		virtual void DrawFailLoadMessage() {}
 
-	protected:
-		bool SaveEnabled();
-		settings::LiveSettingsBag _liveSettings;
-
 	private:
-		friend class settings::SettingsEdit;
 		friend class FeatureManager;
 		void SetState(FeatureState a_state)
 		{
@@ -263,9 +239,6 @@ namespace cs
 			auto expected = FeatureRuntimeState::kActive;
 			return _runtimeState.compare_exchange_strong(expected, FeatureRuntimeState::kDegraded, std::memory_order_acq_rel);
 		}
-		void ComposeEnabledLiveSettings();
-		// Settings still on the pre-transaction path.
-		bool UsesLegacySettings() const { return !GetLiveSettings() && static_cast<bool>(GetSettingsBinding()); }
 		void ResetLoadFailure() noexcept
 		{
 			_loadFailed = false;
@@ -283,8 +256,6 @@ namespace cs
 		bool _loaded = false;
 		std::atomic_bool _enabled{ true };
 		std::atomic_bool _suspended{ false };
-		bool _settingsSavePending = false;
-		bool _settingsEditCompleted = false;
 		std::string _loadFailureReason;
 	};
 

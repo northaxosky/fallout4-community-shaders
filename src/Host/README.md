@@ -72,8 +72,8 @@ successful clicks open the default browser. Host dispatch or launch failures fol
 link-row failure logging path; there is no shell or clipboard fallback. Disabled placeholders remain
 non-actionable.
 
-Every feature page opens with the framework `Enabled` checkbox (`Feature::SetEnabled`, saved as `enabled`
-beside `load`) unless the feature opts out through `SupportsEnableToggle()`.
+Every feature page opens with the framework `Enabled` checkbox (committed through `FeatureManager::CommitLiveSettings`,
+saved as `enabled` beside `load`) unless the feature opts out through `SupportsEnableToggle()`.
 
 Feature pages group controls with `cs::ui::Section` (`Menu\Section.h`): a host panel titled by the
 native section header. `ui::Collapsible` swaps in the host's collapsing header; the host keeps no
@@ -81,8 +81,11 @@ expanded state, so the section remembers it per session and the host shows the i
 Every control on a feature page is a host field row (`Menu\SettingField.h`, `Menu\SettingWidgets.h`):
 a label beside the control, a description from the schema `.Help()` text, a per-row Reset enabled
 while the value differs from its default, and a "Restart required" warning for settings in
-`Feature::GetRestartSettings()`. Fields cannot nest in a host settings row, so pages are
-`Section`s of standalone fields. `SettingsEdit::Bind(schema, settings)` draws schema members;
+`Feature::RestartPending()`. Fields cannot nest in a host settings row, so pages are
+`Section`s of standalone fields. `SettingsEdit::Bind(_live)` draws schema members from the feature's
+draft; widgets never write live state. After the page draws, `FeatureManager::CommitEdits` posts the
+changed keys as one commit at the frame boundary (text fields commit when the edit completes), and
+leaving the page flushes the keys still unsaved;
 `ui::EditSetting`, `ui::EditChoice` and `ui::DrawField` cover values outside a schema. The page ends
 with a "Restore defaults" field, enabled while `Feature::HasModifiedSettings()` reports a
 difference from the schema defaults. Notifications carry a title (feature or preset name, else Community Shaders).

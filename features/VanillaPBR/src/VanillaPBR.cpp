@@ -10,7 +10,6 @@
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/SubstrateSlots.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
