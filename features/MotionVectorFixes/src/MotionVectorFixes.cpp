@@ -20,7 +20,6 @@ namespace cs::features
 
 		using ShaderFlag = RE::BSShaderProperty::EShaderPropertyFlag;
 
-		std::atomic_bool g_loadingMenuOpen{ false };
 		std::atomic_uint64_t g_corrections{ 0 };
 
 		bool Enabled()
@@ -73,26 +72,6 @@ namespace cs::features
 			}
 		}
 
-		class MenuOpenCloseHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
-		{
-		public:
-			static MenuOpenCloseHandler* GetSingleton()
-			{
-				static MenuOpenCloseHandler instance;
-				return &instance;
-			}
-
-			RE::BSEventNotifyControl ProcessEvent(
-				const RE::MenuOpenCloseEvent& a_event,
-				RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
-			{
-				if (a_event.menuName == RE::LoadingMenu::MENU_NAME) {
-					g_loadingMenuOpen.store(a_event.opening, std::memory_order_relaxed);
-				}
-				return RE::BSEventNotifyControl::kContinue;
-			}
-		};
-
 		struct TESObjectREFR_SetSequencePosition
 		{
 			static void thunk(RE::NiAVObject* a_object, RE::NiUpdateData* a_updateData)
@@ -135,13 +114,14 @@ namespace cs::features
 			if (!Enabled())
 				return;
 			const bool frozen = cs::render::GetFrameState().worldFrozen;
+			const bool loading = cs::render::IsAnyMenuOpen({ cs::render::TrackedMenu::kLoading });
 			const bool lod =
 				a_call.property && a_call.property->flags.any(
 									   ShaderFlag::kLODObjects,
 									   ShaderFlag::kLODLandscape,
 									   ShaderFlag::kLODLandBlend,
 									   ShaderFlag::kMultiTextureLandscape);
-			if (a_call.geometry && !g_loadingMenuOpen.load(std::memory_order_relaxed) &&
+			if (a_call.geometry && !loading &&
 				(frozen || lod)) {
 				a_call.geometry->previousWorld = a_call.geometry->world;
 				g_corrections.fetch_add(1, std::memory_order_relaxed);
@@ -181,24 +161,12 @@ namespace cs::features
 		L->info("Installed previous-transform corrections");
 	}
 
-	void MotionVectorFixes::OnDataLoaded()
-	{
-		auto* ui = RE::UI::GetSingleton();
-		if (!ui) {
-			L->warn("Menu event source is unavailable");
-			return;
-		}
-		ui->RegisterSink<RE::MenuOpenCloseEvent>(MenuOpenCloseHandler::GetSingleton());
-		_menuSinkRegistered = true;
-	}
-
 	void MotionVectorFixes::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		a_sink
 			.Field("player_update_hook", _playerUpdateHooked)
 			.Field("set_sequence_position_hook", _setSequencePositionHooked)
-			.Field("menu_sink_registered", _menuSinkRegistered)
-			.Field("loading_menu", g_loadingMenuOpen.load(std::memory_order_relaxed))
+			.Field("loading_menu", cs::render::IsAnyMenuOpen({ cs::render::TrackedMenu::kLoading }))
 			.Field("corrections", g_corrections.load(std::memory_order_relaxed));
 	}
 

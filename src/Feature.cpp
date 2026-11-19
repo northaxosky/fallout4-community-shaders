@@ -42,20 +42,13 @@ namespace
 		}
 	}
 
-	class LoadingMenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+	void OnTrackedMenu(cs::render::TrackedMenu a_menu, bool a_opening)
 	{
-	public:
-		RE::BSEventNotifyControl ProcessEvent(
-			const RE::MenuOpenCloseEvent& a_event,
-			RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
-		{
-			if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening) {
-				cs::render::RequestReset(cs::render::ResetReason::kLoad);
-				cs::FeatureManager::Get().OnLoadingMenuClosedAll();
-			}
-			return RE::BSEventNotifyControl::kContinue;
+		if (a_menu == cs::render::TrackedMenu::kLoading && !a_opening) {
+			cs::render::RequestReset(cs::render::ResetReason::kLoad);
+			cs::FeatureManager::Get().OnLoadingMenuClosedAll();
 		}
-	};
+	}
 }
 
 namespace cs
@@ -591,10 +584,8 @@ namespace cs
 
 	void FeatureManager::OnDataLoadedAll()
 	{
-		static LoadingMenuSink loadingMenuSink;
-		if (auto* ui = RE::UI::GetSingleton())
-			ui->RegisterSink<RE::MenuOpenCloseEvent>(&loadingMenuSink);
-		else
+		cs::render::AddMenuListener(&OnTrackedMenu);
+		if (!cs::render::RegisterMenuEvents())
 			L->warn("UI event source unavailable; loading-menu callbacks are disabled.");
 		DispatchRuntimeCallbacks(*this, "OnDataLoaded", [](Feature& a_feature) {
 			a_feature.OnDataLoaded();

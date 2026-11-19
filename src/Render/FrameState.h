@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <initializer_list>
 
 namespace cs::render
 {
@@ -23,6 +24,27 @@ namespace cs::render
 
 		[[nodiscard]] bool HasReset() const noexcept { return resets != 0; }
 	};
+
+	// Menus whose open state the engine event stream tracks for us.
+	enum class TrackedMenu : std::uint8_t
+	{
+		kMain = 1 << 0,
+		kLoading = 1 << 1,
+		kSleepWait = 1 << 2,
+		kPipboy = 1 << 3
+	};
+
+	// Runs on the UI thread after the tracked state updated; ignores other menus.
+	using MenuListener = void (*)(TrackedMenu a_menu, bool a_opening);
+
+	// Must precede RegisterMenuEvents to see the first events. Idempotent.
+	void AddMenuListener(MenuListener a_listener) noexcept;
+
+	// Main thread, once the UI singleton exists. False when it is unavailable.
+	bool RegisterMenuEvents();
+
+	// Any thread. Everything reads open until events are registered.
+	[[nodiscard]] bool IsAnyMenuOpen(std::initializer_list<TrackedMenu> a_menus) noexcept;
 
 	// Any thread, lock-free. Menu flags latch on the first call each frame.
 	[[nodiscard]] FrameState GetFrameState() noexcept;

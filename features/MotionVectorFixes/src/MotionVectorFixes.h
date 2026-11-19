@@ -15,13 +15,11 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kDisplay; }
 
 		void Load() override;
-		void OnDataLoaded() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 	private:
 		bool _playerUpdateHooked = false;
 		bool _setSequencePositionHooked = false;
-		bool _menuSinkRegistered = false;
 	};
 }
