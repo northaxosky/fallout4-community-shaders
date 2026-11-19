@@ -28,7 +28,6 @@ namespace cs::host
 		std::string category;
 		std::string summary;
 		bool active{ false };
-		bool installed{ false };
 		bool inFeatureList{ true };
 	};
 

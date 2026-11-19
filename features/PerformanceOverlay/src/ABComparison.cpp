@@ -8,7 +8,7 @@
 #include "Render/FrameDispatcher.h"
 #include "Render/ShaderInjection.h"
 #include "Settings/LiveSettings.h"
-#include "Shared/PerfUtils.h"
+#include "Utils/PerfUtils.h"
 
 #include <algorithm>
 #include <cmath>

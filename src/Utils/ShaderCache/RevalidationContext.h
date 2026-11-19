@@ -3,7 +3,6 @@
 #include "Utils/CSSha256.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -39,7 +38,7 @@ namespace cs::shader_cache
 			FileObservation observation;
 		};
 
-		mutable std::mutex _lock;
+		std::mutex _lock;
 		std::unordered_map<std::string, std::shared_ptr<Entry>> _entries;
 	};
 }

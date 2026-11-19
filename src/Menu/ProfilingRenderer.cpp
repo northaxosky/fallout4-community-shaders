@@ -1,7 +1,7 @@
 #include "ProfilingRenderer.h"
 
 #include "Render/FrameProfiler.h"
-#include "Shared/PerfUtils.h"
+#include "Utils/PerfUtils.h"
 
 #include <DearModdingUI/UI/Colors.h>
 #include <DearModdingUI/UI/DrawList.h>

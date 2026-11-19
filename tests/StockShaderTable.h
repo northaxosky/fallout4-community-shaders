@@ -12,6 +12,7 @@
 
 namespace cs::shader_test
 {
+	// Throws so a failing row or precondition reports through its caller.
 	inline void Require(bool a_condition, const std::string& a_message)
 	{
 		if (!a_condition)

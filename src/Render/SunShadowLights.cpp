@@ -12,7 +12,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstring>
 #include <format>
 #include <utility>
 

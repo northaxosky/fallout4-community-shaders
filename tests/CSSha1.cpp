@@ -2,8 +2,6 @@
 
 #include "Utils/BCryptHash.h"
 
-#include <algorithm>
-
 namespace cs::sha1
 {
 	void Sha1InitOnce()

@@ -48,7 +48,6 @@ namespace cs::host
 				.category = a_feature.GetCategory(),
 				.summary = a_feature.GetFeatureSummary(),
 				.active = a_feature.IsActive(),
-				.installed = a_feature.IsInstalled(),
 				.inFeatureList = a_feature.IsInFeatureList()
 			};
 		}

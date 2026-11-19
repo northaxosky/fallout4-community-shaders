@@ -41,7 +41,6 @@ namespace
 		bool contributed = false;
 	};
 
-	// Throws so a failing row or precondition reports through its caller.
 	using cs::shader_test::IsHex;
 	using cs::shader_test::Require;
 

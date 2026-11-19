@@ -13,8 +13,8 @@
 #include "Render/RenderHooks.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/TemporalPipeline.h"
-#include "Shared/PerfUtils.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/PerfUtils.h"
 #include "Utils/UI.h"
 
 #include <DearModdingUI/Client.h>
