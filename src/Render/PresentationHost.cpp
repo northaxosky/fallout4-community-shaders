@@ -331,10 +331,17 @@ namespace cs::render
 		}
 	}
 
-	void PresentationHost::DisableFrameGeneration(const char* a_reason) noexcept
+	void PresentationHost::FailFrame(const char* a_reason) noexcept
 	{
 		if (_frameGeneration) {
-			_frameGeneration->DisableFrameGeneration(a_reason);
+			_frameGeneration->FailFrame(a_reason);
+		}
+	}
+
+	void PresentationHost::RetryFrameGeneration() noexcept
+	{
+		if (_frameGeneration) {
+			_frameGeneration->RetryFrameGeneration();
 		}
 	}
 
@@ -659,11 +666,11 @@ namespace cs::render
 			return ResizeBuffersImpl(a_bufferCount, a_width, a_height, a_format, a_flags);
 		} catch (const std::exception& e) {
 			L->error("Resize failed: {}", e.what());
-			DisableFrameGeneration(e.what());
+			FailFrame(e.what());
 			return E_FAIL;
 		} catch (...) {
 			L->error("Resize raised a non-standard exception");
-			DisableFrameGeneration("unhandled resize failure");
+			FailFrame("unhandled resize failure");
 			return E_FAIL;
 		}
 	}
@@ -735,7 +742,7 @@ namespace cs::render
 				const HRESULT surfaceResult = CreateSurfaces(resized.Width, resized.Height, pending);
 				if (FAILED(surfaceResult)) {
 					_published = false;
-					DisableFrameGeneration("resized display resources were unavailable");
+					FailFrame("resized display resources were unavailable");
 					return surfaceResult;
 				}
 			}

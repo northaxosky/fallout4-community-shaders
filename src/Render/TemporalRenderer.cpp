@@ -321,7 +321,7 @@ namespace cs::render
 		ClearFrameGenerationCaptureState();
 		// An entered imagespace or material scope must finish its own restoration first.
 		_quarantineCleanupPending.store(true, std::memory_order_release);
-		render::TemporalPipeline::Get().PostFailure(
+		render::TemporalPipeline::Get().Quarantine(
 			render::temporal::FailureDomain::kEngine,
 			a_where ? a_where : "Temporal engine integration failed.");
 		if (!alreadyQuarantined) {
@@ -360,6 +360,6 @@ namespace cs::render
 	{
 		_hooksInstalled.store(false, std::memory_order_release);
 		_resourcesReady.store(false, std::memory_order_release);
-		TemporalPipeline::Get().PostFailure(temporal::FailureDomain::kEngine, std::move(a_reason));
+		TemporalPipeline::Get().Quarantine(temporal::FailureDomain::kEngine, std::move(a_reason));
 	}
 }

@@ -193,6 +193,7 @@ namespace cs::render::temporal
 				return;
 			}
 
+			_superResolutionFailed = false;
 			_request->superResolutionEnabled = a_srEnabled;
 			_request->superResolution = a_sr;
 			_request->qualityMode = a_qualityMode;
@@ -254,6 +255,15 @@ namespace cs::render::temporal
 				_pendingTransition = target;
 			}
 			UpdatePendingRestart();
+		}
+
+		// A resize retries a latched native fallback; settings changes do via SubmitLive.
+		void RetrySuperResolution(std::uint64_t a_revision)
+		{
+			if (_superResolutionFailed) {
+				SubmitLive(_request->superResolutionEnabled, _request->superResolution,
+					_request->qualityMode, a_revision, _request->frameGenerationConfiguration);
+			}
 		}
 
 		[[nodiscard]] const std::optional<EffectiveConfiguration>&
@@ -576,9 +586,6 @@ namespace cs::render::temporal
 		std::uint64_t _realFrame = 0;
 		std::uint64_t _engineFrame = 0;
 	};
-
-	// Consecutive skipped world frames before the provider is deemed broken.
-	inline constexpr std::uint32_t kMaxConsecutiveSuperResolutionSkips = 30;
 
 	struct FrameIdentity
 	{

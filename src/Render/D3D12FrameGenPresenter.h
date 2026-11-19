@@ -4,6 +4,7 @@
 #include <memory>
 #include <string_view>
 
+#include "Render/FailurePolicy.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/IPresenter.h"
 #include "Render/PresentationCallbacks.h"
@@ -47,8 +48,10 @@ namespace cs::render
 		void RecordTestPresent(UINT a_flags, HRESULT a_result) noexcept;
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept { _frameGenerationInputsReady = a_ready; }
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
-		void DisableFrameGeneration(const char* a_reason) noexcept;
-		void DisableFrameGeneration(std::string_view a_operation,
+		// A settings change gives a latched frame generation another chance.
+		void RetryFrameGeneration() noexcept { _failures.Retry(); }
+		void FailFrame(const char* a_reason) noexcept;
+		void FailFrame(std::string_view a_operation,
 			const temporal::ProviderResult& a_result) noexcept;
 
 	private:
@@ -83,6 +86,8 @@ namespace cs::render
 		// Writes this slot's inputs, returns the encoded back buffer; null skips.
 		[[nodiscard]] const SharedD3D11D3D12Texture* ComposeHdrFrameGenerationInputs(const PresentFrame& a_frame) noexcept;
 		void RecordGlobalDrain(std::string_view a_reason, const temporal::ProviderResult& a_result) noexcept;
+		// False when the drain failed and the bridge is quarantined; the list is then closed.
+		[[nodiscard]] bool ProveIdle(ID3D12GraphicsCommandList* a_list) noexcept;
 
 		InteropBridge& _bridge;
 		temporal::IFrameGenerationProvider& _provider;
@@ -102,7 +107,7 @@ namespace cs::render
 		bool _hdrContainer = false;
 		bool _faulted = false;
 		bool _frameGenerationInputsReady = false;
-		bool _frameGenerationDisabled = false;
+		temporal::FailurePolicy _failures{ temporal::kFrameGenerationFailureLimit };
 		bool _providerGenerationEnabled = false;
 		bool _providerPresentationActive = false;
 		bool _presentPrepared = false;

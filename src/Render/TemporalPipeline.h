@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Render/FailurePolicy.h"
 #include "Render/FrameGenerationCpuTiming.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/HdrCompose.h"
@@ -173,13 +174,18 @@ namespace cs::render
 		void BeginPresentAttempt(UINT a_flags) noexcept;
 		void EndPresentAttempt(UINT a_flags, HRESULT a_result) noexcept;
 		[[nodiscard]] std::uint64_t CurrentRealFrame() const noexcept;
+		// Records why a frame or feature failed; nothing is switched off.
 		void PostFailure(temporal::FailureDomain a_domain,
+			std::string a_message) noexcept;
+		// Only when GPU completion cannot be proven; off until restart.
+		void Quarantine(temporal::FailureDomain a_domain,
 			std::string a_message) noexcept;
 		void FailSuperResolutionToNative(std::string reason) noexcept;
 		void AdvanceEngineResourceGeneration() noexcept;
 		void AdvanceDisplayGeneration(std::uint32_t a_width,
 			std::uint32_t a_height) noexcept;
 		void RequestSuperResolutionReset() noexcept;
+		[[nodiscard]] temporal::FailurePolicy& SuperResolutionPolicy() noexcept;
 		[[nodiscard]] bool ClaimWorldFrame(std::uint64_t a_engineFrame) noexcept;
 		void SkipWorldFrame() noexcept;
 		void RequestFrameGenerationReset() noexcept;
@@ -285,6 +291,8 @@ namespace cs::render
 			std::uint64_t a_frame) noexcept;
 		void ReportLatencyResult(const temporal::ProviderResult& a_result) noexcept;
 		void ApplyPendingConfiguration();
+		void Report(temporal::FailureDomain a_domain, std::string a_message,
+			bool a_quarantine) noexcept;
 
 		struct Impl;
 		std::unique_ptr<Impl> _impl;

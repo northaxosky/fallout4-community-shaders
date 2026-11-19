@@ -229,6 +229,7 @@ namespace cs::render
 		_device11 = nullptr;
 		_runtime = nullptr;
 		_onQuarantine = nullptr;
+		_superResolution.Retry();
 		_nextSrSubmission = 0;
 		_nextFenceValue = 1;
 		_nextInputRetirementValue = 1;
@@ -476,7 +477,7 @@ namespace cs::render
 		MarkQuarantined();
 		if (firstFailure) {
 			try {
-				render::TemporalPipeline::Get().PostFailure(
+				render::TemporalPipeline::Get().Quarantine(
 					render::temporal::FailureDomain::kTransport,
 					std::string(a_reason));
 			} catch (...) {
@@ -559,7 +560,7 @@ namespace cs::render
 				.hresult = E_INVALIDARG,
 				.message =
 					"D3D12 super resolution requires shared producer resources.",
-				.failureDomain = temporal::FailureDomain::kTransport
+				.failureDomain = temporal::FailureDomain::kSuperResolution
 			};
 		}
 

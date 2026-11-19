@@ -567,6 +567,8 @@ namespace cs::render
 		}
 		const auto revision =
 			_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel);
+		_impl->bridge.SuperResolutionPolicy().Retry();
+		_impl->host.RetryFrameGeneration();
 		std::scoped_lock lock(_impl->mutex);
 		_impl->requestedRenderSettings = upscaling->settings;
 		const auto superResolution =
@@ -1385,19 +1387,36 @@ namespace cs::render
 	void TemporalPipeline::PostFailure(temporal::FailureDomain a_domain,
 		std::string a_message) noexcept
 	{
+		Report(a_domain, std::move(a_message), false);
+	}
+
+	void TemporalPipeline::Quarantine(temporal::FailureDomain a_domain,
+		std::string a_message) noexcept
+	{
+		Report(a_domain, std::move(a_message), true);
+	}
+
+	void TemporalPipeline::Report(temporal::FailureDomain a_domain,
+		std::string a_message, bool a_quarantine) noexcept
+	{
 		try {
 			std::array<TemporalTraceEntry, Impl::kTraceCapacity> trace;
 			std::size_t traceCount = 0;
 			std::uint64_t traceSequence = 0;
 			{
 				std::scoped_lock lock(_impl->mutex);
+				// A skipped frame repeats its message every frame.
+				if (!a_quarantine && _impl->failureDomain == a_domain &&
+					_impl->failure == a_message) {
+					return;
+				}
 				_impl->failureDomain = a_domain;
 				_impl->failure = a_message;
 				const auto& effective = _impl->topology.Effective();
 				auto impact = temporal::ClassifyFailure(
 					a_domain, effective.superResolution, effective.frameGeneration);
 				const auto& session = _impl->topology.Session();
-				const bool runtimeActive = session && session->valid;
+				const bool runtimeActive = a_quarantine && session && session->valid;
 				if (runtimeActive) {
 					_impl->topology.Quarantine(impact,
 						_impl->configurationRevision.fetch_add(
@@ -1472,12 +1491,20 @@ namespace cs::render
 		++_impl->display.displayGeneration;
 		_impl->resetEpochs.RequestSuperResolution();
 		_impl->resetEpochs.RequestFrameGeneration();
+		_impl->topology.RetrySuperResolution(
+			_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel) + 1);
+		_impl->bridge.SuperResolutionPolicy().Retry();
 	}
 
 	void TemporalPipeline::RequestSuperResolutionReset() noexcept
 	{
 		std::scoped_lock lock(_impl->mutex);
 		_impl->resetEpochs.RequestSuperResolution();
+	}
+
+	temporal::FailurePolicy& TemporalPipeline::SuperResolutionPolicy() noexcept
+	{
+		return _impl->bridge.SuperResolutionPolicy();
 	}
 
 	bool TemporalPipeline::ClaimWorldFrame(std::uint64_t a_engineFrame) noexcept
@@ -1948,7 +1975,7 @@ namespace cs::render
 
 	void TemporalPipeline::FailFrameGenerationFrame(const char* a_reason) noexcept
 	{
-		_impl->host.DisableFrameGeneration(a_reason);
+		_impl->host.FailFrame(a_reason);
 	}
 
 	void TemporalPipeline::ResetFrameGenerationCaptureDiagnostics() noexcept

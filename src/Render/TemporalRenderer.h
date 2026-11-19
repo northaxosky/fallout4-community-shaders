@@ -179,10 +179,10 @@ namespace cs::render
 		void UpscaleChainInputs();
 		void UpscaleDepth(ID3D11DeviceContext* a_context);
 		void UpscaleMotionAndMasks(ID3D11DeviceContext* a_context);
-		// kSkipped is transient: no provider work, no native fallback.
+		// kSkipped is transient: no provider work.
 		temporal::ProviderResultCode Upscale();
-		// Returns true once consecutive skips mean the provider is broken.
-		[[nodiscard]] bool NoteSuperResolutionSkip() noexcept;
+		// The frame fell back; a run of them latches native TAA.
+		void NoteSuperResolutionFailure() noexcept;
 
 		void CaptureFrameGenerationInputs();
 		void CaptureHUDLessColor();
@@ -190,7 +190,6 @@ namespace cs::render
 			const TemporalPipeline::FrameGenerationCaptureResources& capture);
 		void RenderReShadeEffects();
 		void FinishPreUiScene(bool a_resolved, bool a_captureHudless);
-		void RecordFrameGenerationFailure() noexcept;
 		void InvalidateEngineDerivedResources();
 		void RefreshEngineResources();
 
@@ -452,7 +451,6 @@ namespace cs::render
 		std::atomic_uint32_t _providerFailures{ 0 };
 		std::atomic_uint32_t _spatialFallbacks{ 0 };
 		std::atomic_uint32_t _transientFailures{ 0 };
-		std::uint32_t _consecutiveSkips = 0;
 		std::atomic_uint32_t _missedResolveFrames{ 0 };
 		std::atomic_bool _renderUiFullEffectsPath{ false };
 		std::atomic_bool _spatialFallbackThisFrame{ false };

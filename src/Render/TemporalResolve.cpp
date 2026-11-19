@@ -238,7 +238,7 @@ namespace cs::render
 			if (!upscaled &&
 				providerResult.failureDomain ==
 					render::temporal::FailureDomain::kTransport) {
-				render::TemporalPipeline::Get().PostFailure(
+				render::TemporalPipeline::Get().Quarantine(
 					providerResult.failureDomain,
 					providerResult.message.empty() ? "Super-resolution transport did not establish a safe output dependency." : providerResult.message);
 			}
@@ -251,22 +251,27 @@ namespace cs::render
 		_upscaledThisFrame = upscaled;
 		if (upscaled) {
 			_upscaleDispatches.fetch_add(1, std::memory_order_relaxed);
-			_consecutiveSkips = 0;
 			return render::temporal::ProviderResultCode::kSuccess;
 		}
 		if (providerSkipped) {
+			_transientFailures.fetch_add(1, std::memory_order_relaxed);
 			return render::temporal::ProviderResultCode::kSkipped;
 		}
 		_providerFailures.fetch_add(1, std::memory_order_relaxed);
 		return render::temporal::ProviderResultCode::kFailure;
 	}
 
-	bool TemporalRenderer::NoteSuperResolutionSkip() noexcept
+	void TemporalRenderer::NoteSuperResolutionFailure() noexcept
 	{
-		_transientFailures.fetch_add(1, std::memory_order_relaxed);
-		render::TemporalPipeline::Get().SkipWorldFrame();
-		return ++_consecutiveSkips >=
-		       render::temporal::kMaxConsecutiveSuperResolutionSkips;
+		auto& pipeline = render::TemporalPipeline::Get();
+		pipeline.SkipWorldFrame();
+		if (pipeline.SuperResolutionPolicy().Failed()) {
+			L->error(
+				"super resolution failed {} consecutive world frames; "
+				"native TAA begins next frame.",
+				render::temporal::kSuperResolutionFailureLimit);
+			ScheduleNativeSuperResolutionFallback();
+		}
 	}
 
 	// One render-size pass: providers keep non-finite input in their history.
@@ -361,19 +366,8 @@ namespace cs::render
 			}
 			_spatialFallbacks.fetch_add(1, std::memory_order_relaxed);
 			_spatialFallbackThisFrame.store(true, std::memory_order_release);
-			if (outcome == render::temporal::ProviderResultCode::kFailure) {
-				L->warn(
-					"spatial fallback published after provider evaluation failure; "
-					"native TAA begins next frame.");
-				ScheduleNativeSuperResolutionFallback();
-			} else if (worldFrame) {
-				if (NoteSuperResolutionSkip()) {
-					L->error(
-						"super resolution skipped {} consecutive world frames; "
-						"native TAA begins next frame.",
-						render::temporal::kMaxConsecutiveSuperResolutionSkips);
-					ScheduleNativeSuperResolutionFallback();
-				}
+			if (worldFrame) {
+				NoteSuperResolutionFailure();
 			} else if (captured) {
 				// Later world frame of a latency frame: structural, not a provider skip.
 				render::TemporalPipeline::Get().SkipWorldFrame();
@@ -398,6 +392,7 @@ namespace cs::render
 				_upscaledThisFrame);
 		}
 		if (published) {
+			render::TemporalPipeline::Get().SuperResolutionPolicy().Succeeded();
 			render::TemporalPipeline::Get().ConsumeSuperResolutionReset(true);
 			UpscaleChainInputs();
 			return finish(true, true);
@@ -413,10 +408,7 @@ namespace cs::render
 		}
 		_spatialFallbacks.fetch_add(1, std::memory_order_relaxed);
 		_spatialFallbackThisFrame.store(true, std::memory_order_release);
-		L->warn(
-			"spatial fallback published after provider publication failure; "
-			"native TAA begins next frame.");
-		ScheduleNativeSuperResolutionFallback();
+		NoteSuperResolutionFailure();
 		UpscaleChainInputs();
 		return finish(true, false);
 	}

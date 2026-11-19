@@ -439,8 +439,8 @@ namespace cs::render
 				{ capture.width, capture.height },
 				capture.frameSlot);
 		if (!transactionReady) {
-			render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
-			RecordFrameGenerationFailure();
+			render::TemporalPipeline::Get().FailFrameGenerationFrame(
+				"the frame-generation input packet was rejected");
 			return;
 		}
 		render::TemporalPipeline::Get().RecordFrameGenerationDispatch();
@@ -482,10 +482,5 @@ namespace cs::render
 			.ResetFrameGenerationCaptureDiagnostics();
 		render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
 		InvalidateFirstPersonAlphaState();
-	}
-
-	void TemporalRenderer::RecordFrameGenerationFailure() noexcept
-	{
-		render::TemporalPipeline::Get().RecordFrameGenerationFailure();
 	}
 }

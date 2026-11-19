@@ -67,7 +67,8 @@ namespace cs::render
 
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void SetOutwardD3D11Device(ID3D11Device* a_device) noexcept;
-		void DisableFrameGeneration(const char* a_reason) noexcept;
+		void FailFrame(const char* a_reason) noexcept;
+		void RetryFrameGeneration() noexcept;
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		// Creates the ReShade runtime on first use; false if absent or unusable.
 		[[nodiscard]] bool ReShadeEffectsEnabled() noexcept;

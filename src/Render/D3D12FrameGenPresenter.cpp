@@ -184,7 +184,7 @@ namespace cs::render
 
 	bool D3D12FrameGenPresenter::IsFrameGenerationReady() const noexcept
 	{
-		return IsReady() && !_frameGenerationDisabled && _provider.IsReady() &&
+		return IsReady() && !_failures.Latched() && _provider.IsReady() &&
 		       _buffers.hudless[0] && _buffers.hudless[1] &&
 		       (!_hdrContainer || (_buffers.ui[0] && _buffers.ui[1])) &&
 		       _buffers.depth[0] && _buffers.depth[1] && _buffers.motion[0] &&
@@ -265,13 +265,13 @@ namespace cs::render
 		FrameGenerationBuffers&& a_buffers, UINT a_width, UINT a_height)
 	{
 		_frameGenerationInputsReady = false;
-		_frameGenerationDisabled = false;
+		_failures.Retry();
 		_buffers = std::move(a_buffers);
 		++_inputResourceGeneration;
 		const auto providerResult = _provider.CreateDisplayResources(
 			a_width, a_height, PresentContract(), _chain.desc.BufferCount);
 		if (!providerResult.Succeeded()) {
-			_frameGenerationDisabled = true;
+			_failures.Latch();
 			L->error(
 				"Frame-generation provider resources were not recreated; "
 				"real-frame presentation remains active");
@@ -301,10 +301,11 @@ namespace cs::render
 		const auto result = temporal::RestoreProviderAfterResize(
 			_provider, S_OK, description, description);
 		if (!result.Succeeded()) {
-			DisableFrameGeneration(result.message.empty() ? "Frame-generation provider restoration failed" : result.message.c_str());
+			_failures.Latch();
+			FailFrame(result.message.empty() ? "Frame-generation provider restoration failed" : result.message.c_str());
 			return S_FALSE;
 		}
-		_frameGenerationDisabled = false;
+		_failures.Retry();
 		return S_OK;
 	}
 
@@ -410,38 +411,36 @@ namespace cs::render
 		}
 	}
 
-	void D3D12FrameGenPresenter::DisableFrameGeneration(const char* a_reason) noexcept
+	void D3D12FrameGenPresenter::FailFrame(const char* a_reason) noexcept
 	{
-		const bool firstFailure = !_frameGenerationDisabled;
-		_frameGenerationDisabled = true;
+		const char* reason = a_reason ? a_reason : "unknown failure";
 		_frameGenerationInputsReady = false;
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
 		}
 		render::TemporalPipeline::Get().RequestFrameGenerationReset();
-		if (firstFailure && !_bridge.IsQuarantined()) {
-			if (_callbacks.recordFailure) {
-				_callbacks.recordFailure(a_reason ? a_reason : "Unknown frame-generation failure.");
-			}
+		const bool latched = _failures.Failed();
+		if (!_bridge.IsQuarantined() && _callbacks.recordFailure) {
+			_callbacks.recordFailure(reason);
 		}
 		try {
-			L->error("Frame generation disabled: {}",
-				a_reason ? a_reason : "unknown failure");
+			L->error("Frame generation skipped a frame{}: {}",
+				latched ? " and latched off until a settings change or resize" : "", reason);
 		} catch (...) {
 		}
 	}
 
-	void D3D12FrameGenPresenter::DisableFrameGeneration(
+	void D3D12FrameGenPresenter::FailFrame(
 		std::string_view a_operation, const temporal::ProviderResult& a_result) noexcept
 	{
 		const auto reason =
 			temporal::FormatProviderFailure(a_operation, a_result);
-		DisableFrameGeneration(reason.c_str());
+		FailFrame(reason.c_str());
 	}
 
 	bool D3D12FrameGenPresenter::AcquireFrameGenerationInputWrite() noexcept
 	{
-		if (_frameGenerationDisabled || !_bridge.GetRetirementFence12() || !_bridge.GetRetirementFence11() ||
+		if (_failures.Latched() || !_bridge.GetRetirementFence12() || !_bridge.GetRetirementFence11() ||
 			!_bridge.GetRetirementQueue()) {
 			return false;
 		}
@@ -503,10 +502,22 @@ namespace cs::render
 				acquired.waitRequired, std::memory_order_relaxed);
 		}
 		if (!acquired.Succeeded()) {
-			DisableFrameGeneration(
+			FailFrame(
 				temporal::PresentInputAcquireFailureMessage(acquired.code));
 		}
 		return acquired.Succeeded();
+	}
+
+	bool D3D12FrameGenPresenter::ProveIdle(ID3D12GraphicsCommandList* a_list) noexcept
+	{
+		// The provider may still reference its inputs; only an idle GPU proves it does not.
+		if (SUCCEEDED(_bridge.Drain())) {
+			return true;
+		}
+		(void)a_list->Close();
+		_vendorConsumptionPossible = false;
+		_preparedTransaction = false;
+		return false;
 	}
 
 	const SharedD3D11D3D12Texture* D3D12FrameGenPresenter::ComposeHdrFrameGenerationInputs(
@@ -542,7 +553,7 @@ namespace cs::render
 				}
 			});
 		if (!written) {
-			DisableFrameGeneration("frame-generation HDR inputs were still in provider use");
+			FailFrame("frame-generation HDR inputs were still in provider use");
 			return nullptr;
 		}
 		return sceneOnly ? hudless : a_frame.output;
@@ -563,7 +574,7 @@ namespace cs::render
 			const auto result = static_cast<HRESULT>(e.code());
 			_bridge.Quarantine(
 				"Temporal D3D12 presentation command submission failed.");
-			DisableFrameGeneration(
+			FailFrame(
 				winrt::to_string(e.message()).c_str());
 			return result;
 		} catch (const std::exception& e) {
@@ -571,14 +582,14 @@ namespace cs::render
 				_bridge.Quarantine(
 					"Temporal D3D12 presentation work could not be retired.");
 			}
-			DisableFrameGeneration(e.what());
+			FailFrame(e.what());
 			return E_FAIL;
 		} catch (...) {
 			if (_presentSubmissionMayBeInFlight) {
 				_bridge.Quarantine(
 					"Temporal D3D12 presentation work could not be retired.");
 			}
-			DisableFrameGeneration("unhandled presentation failure");
+			FailFrame("unhandled presentation failure");
 			return E_FAIL;
 		}
 	}
@@ -614,7 +625,7 @@ namespace cs::render
 				}
 			}
 			bool requested = frameGenerationRequested &&
-			                 _frameGenerationInputsReady && !_frameGenerationDisabled &&
+			                 _frameGenerationInputsReady && !_failures.Latched() &&
 			                 request.enabled;
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const SharedD3D11D3D12Texture* copySource = a_frame.proxy;
@@ -691,7 +702,7 @@ namespace cs::render
 				} else if (!validation.Succeeded()) {
 					requested = false;
 					_vendorConsumptionPossible = false;
-					DisableFrameGeneration(
+					FailFrame(
 						"Frame-generation option validation",
 						validation);
 				}
@@ -756,32 +767,25 @@ namespace cs::render
 				_providerGenerationEnabled = frameGenerationPrepared;
 				if (!frameGenerationPrepared) {
 					_vendorConsumptionPossible = false;
-					DisableFrameGeneration("Prepare frame", prepareResult);
+					FailFrame("Prepare frame", prepareResult);
 					if (!preparation.safeToPresent) {
 						L->error("{}", temporal::FormatProviderFailure(
 										   "Cancel frame", preparation.cancel));
-						DX::ThrowIfFailed(commandList->Close());
-						_presentPrepared = false;
-						_preparedFrameGeneration = false;
-						_vendorConsumptionPossible = false;
-						_preparedTransaction = false;
-						_bridge.Quarantine(
-							"Frame-generation cancellation could not prove that "
-							"vendor input references were cleared.");
-						return E_FAIL;
+						if (!ProveIdle(commandList)) {
+							return E_FAIL;
+						}
 					}
 				}
 			} else if (_providerGenerationEnabled) {
 				const auto disable = _provider.SetGenerationEnabled(false);
 				if (!disable.Succeeded()) {
-					DisableFrameGeneration("Disable frame generation", disable);
-					DX::ThrowIfFailed(commandList->Close());
-					_bridge.Quarantine(
-						"Frame-generation disable failed before plain "
-						"presentation.");
-					return E_FAIL;
+					FailFrame("Disable frame generation", disable);
+					if (!ProveIdle(commandList)) {
+						return E_FAIL;
+					}
+				} else {
+					_providerGenerationEnabled = false;
 				}
-				_providerGenerationEnabled = false;
 			}
 
 			timer.EndScope(commandList, submission->timing, "D3D12::Present");
@@ -799,7 +803,7 @@ namespace cs::render
 			DX::ThrowIfFailed(producerWait);
 			_presentSubmissionMayBeInFlight = false;
 			_preparedFrameGeneration =
-				requested && frameGenerationPrepared && !_frameGenerationDisabled;
+				requested && frameGenerationPrepared && !_failures.Latched();
 			if (_preparedTransaction) {
 				pipeline.SetFrameGenerationPrepared(_frameSlot, _preparedFrameGeneration);
 			}
@@ -878,32 +882,21 @@ namespace cs::render
 					1, std::memory_order_relaxed);
 				_bridge.Quarantine(
 					"Frame-generation input retirement dependency failed.");
-				DisableFrameGeneration(
-					"Frame-generation input retirement dependency failed");
 				return retirement.result;
 			}
 		}
 		if (disableProviderAfterRetirement) {
+			// Drain quarantines the bridge itself when it cannot prove the GPU idle.
 			const HRESULT drainResult = _bridge.Drain();
 			if (FAILED(drainResult)) {
-				_bridge.Quarantine(
-					"Frame-generation status failure could not drain safely.");
-				DisableFrameGeneration(
-					"Frame-generation status failure could not drain safely");
 				return drainResult;
 			}
-			const auto disableResult =
-				_provider.SetGenerationEnabled(false);
-			if (!disableResult.Succeeded()) {
-				_bridge.Quarantine(
-					"Frame-generation provider disable failed after Present.");
-				L->error("{}", temporal::FormatProviderFailure(
-								   "Disable after present failure", disableResult));
-				DisableFrameGeneration(
-					"Disable after present failure", disableResult);
-				return E_FAIL;
+			const auto disableResult = _provider.SetGenerationEnabled(false);
+			if (disableResult.Succeeded()) {
+				_providerGenerationEnabled = false;
+			} else {
+				FailFrame("Disable after present failure", disableResult);
 			}
-			_providerGenerationEnabled = false;
 			if (_preparedTransaction) {
 				pipeline.SetFrameGenerationPrepared(_frameSlot, false);
 			}
@@ -912,7 +905,7 @@ namespace cs::render
 			pipeline.RecordPresentAttempt(_frameSlot, a_args.flags, presentResult);
 		}
 		if (disableProviderAfterRetirement) {
-			DisableFrameGeneration("Collect present status", status.result);
+			FailFrame("Collect present status", status.result);
 		}
 		if (presentResult == DXGI_ERROR_WAS_STILL_DRAWING) {
 			return presentResult;
@@ -922,9 +915,10 @@ namespace cs::render
 				1, std::memory_order_relaxed);
 			_bridge.Quarantine(
 				"Present failed after vendor input consumption became possible.");
-			DisableFrameGeneration(
-				"Present failed after vendor input consumption became possible");
 			return presentResult;
+		}
+		if (_preparedFrameGeneration && !disableProviderAfterRetirement) {
+			_failures.Succeeded();
 		}
 		_inputReuseGate.MarkSubmitted(_frameSlot, retirementToken);
 		_presentPrepared = false;
@@ -965,12 +959,10 @@ namespace cs::render
 				});
 			RecordGlobalDrain("resize", releaseResult);
 			if (!releaseResult.Succeeded()) {
-				_bridge.Quarantine(
-					"Frame-generation display resources could not be retired "
-					"for resize.");
-				DisableFrameGeneration(releaseResult.message.empty() ? "Frame-generation display resources could not be released "
-																	   "for resize" :
-																	   releaseResult.message.c_str());
+				_faulted = true;
+				FailFrame(releaseResult.message.empty() ? "Frame-generation display resources could not be released "
+														  "for resize" :
+														  releaseResult.message.c_str());
 				return { .result = E_FAIL };
 			}
 			_providerGenerationEnabled = false;
@@ -997,7 +989,7 @@ namespace cs::render
 					temporal::RestoreProviderAndPreserveResizeResult(
 						_provider, resizeResult, oldDescription, std::nullopt);
 				if (!restoration.providerResult.Succeeded()) {
-					DisableFrameGeneration(
+					FailFrame(
 						"Frame-generation provider could not be restored "
 						"after rejected resize");
 				}
@@ -1009,7 +1001,7 @@ namespace cs::render
 			const HRESULT descResult = _chain.chain->GetDesc1(&resizedDesc);
 			if (FAILED(descResult)) {
 				_faulted = true;
-				DisableFrameGeneration("resized swap-chain description was unavailable");
+				FailFrame("resized swap-chain description was unavailable");
 				return { .result = descResult };
 			}
 			const bool sizeChanged =
@@ -1019,13 +1011,13 @@ namespace cs::render
 				const HRESULT bufferResult = CreateBuffers(resizedDesc.Width, resizedDesc.Height, pending);
 				if (FAILED(bufferResult)) {
 					_faulted = true;
-					DisableFrameGeneration("resized display resources were unavailable");
+					FailFrame("resized display resources were unavailable");
 					return { .result = bufferResult };
 				}
 			}
 			if (FAILED(RefreshBackBuffers())) {
 				_faulted = true;
-				DisableFrameGeneration("resized back buffers were unavailable");
+				FailFrame("resized back buffers were unavailable");
 				return { .result = E_FAIL };
 			}
 
@@ -1035,21 +1027,21 @@ namespace cs::render
 			                                             RestoreProvider(resizedDesc.Width, resizedDesc.Height);
 			if (FAILED(providerResult)) {
 				_faulted = true;
-				DisableFrameGeneration(
+				FailFrame(
 					"Frame-generation bridge resources could not be "
 					"recreated after resize");
 				return { .result = temporal::CompleteNativeResize(resizeResult, providerResult), .resized = true };
 			}
 			if (providerResult == S_FALSE) {
-				DisableFrameGeneration(
+				FailFrame(
 					"Frame-generation provider could not be restored after resize");
 			}
 			return { .result = temporal::CompleteNativeResize(resizeResult, providerResult), .resized = true };
 		} catch (const std::exception& e) {
-			DisableFrameGeneration(e.what());
+			FailFrame(e.what());
 			return { .result = E_FAIL };
 		} catch (...) {
-			DisableFrameGeneration("unhandled resize failure");
+			FailFrame("unhandled resize failure");
 			return { .result = E_FAIL };
 		}
 	}

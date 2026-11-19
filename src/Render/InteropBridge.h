@@ -14,6 +14,7 @@
 
 #include "RCAS/RCAS.h"
 #include "Render/D3D12GpuTimer.h"
+#include "Render/FailurePolicy.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/TemporalProvider.h"
 #include "Utils/CSBuffer.h"
@@ -89,6 +90,8 @@ namespace cs::render
 
 		[[nodiscard]] bool IsReady() const noexcept;
 		[[nodiscard]] bool IsQuarantined() const noexcept { return _quarantined; }
+		// The renderer reports each world frame's super-resolution outcome here.
+		[[nodiscard]] temporal::FailurePolicy& SuperResolutionPolicy() noexcept { return _superResolution; }
 		// A quarantined GPU may still read these; they live until the process ends.
 		static void Retain(IUnknown* a_object);
 		static void Retain(const std::unique_ptr<SharedD3D11D3D12Texture>& a_texture);
@@ -154,6 +157,7 @@ namespace cs::render
 		features::RCAS _rcas;
 		IInteropRuntime* _runtime = nullptr;
 		std::function<void()> _onQuarantine;
+		temporal::FailurePolicy _superResolution{ temporal::kSuperResolutionFailureLimit };
 		HANDLE _fenceEvent = nullptr;
 		std::uint32_t _adapterVendorId = 0;
 		std::uint32_t _nextSrSubmission = 0;

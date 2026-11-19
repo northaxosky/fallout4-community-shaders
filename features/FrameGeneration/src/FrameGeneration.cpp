@@ -204,7 +204,7 @@ namespace cs::features
 
 	void FrameGeneration::OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept
 	{
-		render::TemporalPipeline::Get().PostFailure(
+		render::TemporalPipeline::Get().Quarantine(
 			render::temporal::FailureDomain::kFrameGeneration,
 			std::string(a_phase) + ": " + std::string(a_reason));
 	}
