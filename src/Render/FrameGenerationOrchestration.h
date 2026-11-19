@@ -153,18 +153,14 @@ namespace cs::render::temporal
 		std::uint64_t acquisitions = 0;
 		std::uint64_t immediateAcquisitions = 0;
 		std::uint64_t gpuWaits = 0;
-		std::uint64_t providerDrains = 0;
 		std::uint64_t globalDrainAttempts = 0;
 		std::uint64_t globalDrainFailures = 0;
 		std::uint64_t waitFailures = 0;
 		std::uint64_t signals = 0;
 		std::uint64_t signalFailures = 0;
 		std::uint64_t violations = 0;
-		std::uint64_t startupDrains = 0;
-		std::uint64_t disableDrains = 0;
 		std::uint64_t resizeDrains = 0;
 		std::uint64_t teardownDrains = 0;
-		std::uint64_t steadyDrains = 0;
 		std::uint64_t lastRealFrame = 0;
 		std::uint64_t lastResourceGeneration = 0;
 		std::uint64_t lastRequiredFence = 0;
@@ -182,7 +178,6 @@ namespace cs::render::temporal
 				.immediateAcquisitions =
 					immediateAcquisitions.load(std::memory_order_relaxed),
 				.gpuWaits = gpuWaits.load(std::memory_order_relaxed),
-				.providerDrains = providerDrains.load(std::memory_order_relaxed),
 				.globalDrainAttempts =
 					globalDrainAttempts.load(std::memory_order_relaxed),
 				.globalDrainFailures =
@@ -191,8 +186,6 @@ namespace cs::render::temporal
 				.signals = signals.load(std::memory_order_relaxed),
 				.signalFailures = signalFailures.load(std::memory_order_relaxed),
 				.violations = violations.load(std::memory_order_relaxed),
-				.startupDrains = startupDrains.load(std::memory_order_relaxed),
-				.disableDrains = disableDrains.load(std::memory_order_relaxed),
 				.resizeDrains = resizeDrains.load(std::memory_order_relaxed),
 				.teardownDrains = teardownDrains.load(std::memory_order_relaxed),
 				.lastRealFrame = lastRealFrame.load(std::memory_order_relaxed),
@@ -212,15 +205,12 @@ namespace cs::render::temporal
 		std::atomic_uint64_t acquisitions{ 0 };
 		std::atomic_uint64_t immediateAcquisitions{ 0 };
 		std::atomic_uint64_t gpuWaits{ 0 };
-		std::atomic_uint64_t providerDrains{ 0 };
 		std::atomic_uint64_t globalDrainAttempts{ 0 };
 		std::atomic_uint64_t globalDrainFailures{ 0 };
 		std::atomic_uint64_t waitFailures{ 0 };
 		std::atomic_uint64_t signals{ 0 };
 		std::atomic_uint64_t signalFailures{ 0 };
 		std::atomic_uint64_t violations{ 0 };
-		std::atomic_uint64_t startupDrains{ 0 };
-		std::atomic_uint64_t disableDrains{ 0 };
 		std::atomic_uint64_t resizeDrains{ 0 };
 		std::atomic_uint64_t teardownDrains{ 0 };
 		std::atomic_uint64_t lastRealFrame{ 0 };
@@ -363,11 +353,6 @@ namespace cs::render::temporal
 		{
 			_pending.fill(std::nullopt);
 			_acquired.fill(false);
-		}
-
-		[[nodiscard]] bool IsPending(std::uint32_t a_slot) const noexcept
-		{
-			return a_slot < _pending.size() && _pending[a_slot].has_value();
 		}
 
 	private:

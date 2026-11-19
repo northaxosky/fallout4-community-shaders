@@ -110,7 +110,6 @@ namespace cs::render
 		[[nodiscard]] ID3D11Fence* GetRetirementFence11() const noexcept { return _inputRetirementFence11.get(); }
 		[[nodiscard]] ID3D12Fence* GetPresentingCompletionFence() const noexcept { return _presentingCompletionFence.get(); }
 		[[nodiscard]] std::uint64_t NextRetirementValue() noexcept { return _nextInputRetirementValue++; }
-		[[nodiscard]] std::uint32_t GetAdapterVendorId() const noexcept { return _adapterVendorId; }
 		[[nodiscard]] D3D12GpuTimer& GetGpuTimer() noexcept { return _gpuTimer; }
 
 		// Command lists for the presenter's own submissions share the bridge's timer and fence.
@@ -159,7 +158,6 @@ namespace cs::render
 		std::function<void()> _onQuarantine;
 		temporal::FailurePolicy _superResolution{ temporal::kSuperResolutionFailureLimit };
 		HANDLE _fenceEvent = nullptr;
-		std::uint32_t _adapterVendorId = 0;
 		std::uint32_t _nextSrSubmission = 0;
 		std::uint64_t _nextFenceValue = 1;
 		std::uint64_t _nextInputRetirementValue = 1;

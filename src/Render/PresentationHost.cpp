@@ -758,7 +758,7 @@ namespace cs::render
 		if (_frameGeneration) {
 			_frameGeneration->ClearInputs(*_context11);
 		}
-		render::TemporalPipeline::Get().AdvanceDisplayGeneration(resized.Width, resized.Height);
+		render::TemporalPipeline::Get().OnDisplayResized(resized.Width, resized.Height);
 		return outcome.result;
 	}
 

@@ -161,7 +161,7 @@ namespace cs::render
 		if (upscaling->_nativeSuperResolutionFallbackPending.exchange(
 				false, std::memory_order_acq_rel)) {
 			render::TemporalPipeline::Get().FailSuperResolutionToNative(
-				"External super resolution failed after render-state commitment; native TAA is active until restart.");
+				"External super resolution failed after render-state commitment; native TAA is active until a settings change or resize.");
 			upscaling->RestoreNativeFrameState();
 		}
 		upscaling->FinalizeQuarantineAtFrameBoundary();
@@ -245,7 +245,7 @@ namespace cs::render
 				ScheduleNativeSuperResolutionFallback();
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
-					"The full-effects Render_UI path skipped the pre-tonemap seam; temporal rendering is disabled until restart.");
+					"The full-effects Render_UI path skipped the pre-tonemap seam; native TAA is active until a settings change or resize.");
 			} else if (!fullEffectsPath && resolveSeen) {
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,

@@ -70,7 +70,6 @@ namespace cs::render::temporal
 	struct SessionTopology
 	{
 		bool valid = false;
-		bool bridgePresent = false;
 		bool proxyInstalled = false;
 		bool latencyHooksInstalled = false;
 		bool hdrDisplay = false;
@@ -80,18 +79,12 @@ namespace cs::render::temporal
 		FrameGenerationMethod activeFg = FrameGenerationMethod::kOff;
 		// Why the requested frame-generation presenter was replaced by the D3D11 one.
 		std::string frameGenerationFallback;
-		std::uint64_t adapterLuid = 0;
 		std::string rejectionReason;
 	};
 
 	struct DisplayState
 	{
 		Extent output;
-		Extent viewport;
-		std::uint32_t format = 0;
-		std::uint64_t deviceGeneration = 0;
-		std::uint64_t displayGeneration = 0;
-		std::uint64_t engineResourceGeneration = 0;
 	};
 
 	struct EffectiveConfiguration
@@ -220,8 +213,7 @@ namespace cs::render::temporal
 			_restartForSuperResolutionMethod =
 				a_srEnabled && externalSrRequested &&
 				a_sr != _startupRequest->superResolution && !srAdmitted;
-			if (!_quarantined.superResolution &&
-				(!_superResolutionFailed || !externalSrRequested)) {
+			if (!_quarantined.superResolution) {
 				if (!a_srEnabled) {
 					target.superResolutionEnabled = false;
 				} else if (srAdmitted &&
@@ -264,12 +256,6 @@ namespace cs::render::temporal
 				SubmitLive(_request->superResolutionEnabled, _request->superResolution,
 					_request->qualityMode, a_revision, _request->frameGenerationConfiguration);
 			}
-		}
-
-		[[nodiscard]] const std::optional<EffectiveConfiguration>&
-		PendingTransition() const noexcept
-		{
-			return _pendingTransition;
 		}
 
 		[[nodiscard]] std::optional<EffectiveConfiguration>
@@ -376,16 +362,13 @@ namespace cs::render::temporal
 			UpdatePendingRestart();
 		}
 
-		void FailSuperResolutionToNative(
-			std::uint64_t a_revision,
-			std::string a_reason)
+		void FailSuperResolutionToNative(std::uint64_t a_revision)
 		{
 			if (_quarantined.superResolution) {
 				UpdatePendingRestart();
 				return;
 			}
 			_superResolutionFailed = true;
-			_superResolutionFailureReason = std::move(a_reason);
 			_effective.superResolution = SuperResolutionMethod::kTAA;
 			_effective.revision = a_revision;
 			_pendingTransition.reset();
@@ -441,9 +424,6 @@ namespace cs::render::temporal
 				_pending.required = true;
 				_pending.reason = _quarantineReason +
 				                  " Restart required before the affected temporal processing can resume.";
-			} else if (_superResolutionFailed) {
-				_pending.required = true;
-				_pending.reason = _superResolutionFailureReason;
 			} else if (_frameGenerationFailed) {
 				_pending.required = true;
 				_pending.reason = _frameGenerationFailureReason;
@@ -465,7 +445,6 @@ namespace cs::render::temporal
 		EffectiveConfiguration _effective;
 		PendingRestart _pending;
 		bool _superResolutionFailed = false;
-		std::string _superResolutionFailureReason;
 		bool _frameGenerationFailed = false;
 		std::string _frameGenerationFailureReason;
 		bool _restartForSuperResolutionMethod = false;
@@ -502,7 +481,6 @@ namespace cs::render::temporal
 			++_frame;
 			_phase = LatencyPhase::kSleep;
 			_presentAttempts = 0;
-			_renderSubmitEnded = false;
 			return _frame;
 		}
 
@@ -533,7 +511,6 @@ namespace cs::render::temporal
 				_phase != LatencyPhase::kPresentRetry) {
 				return false;
 			}
-			_renderSubmitEnded = true;
 			_phase = LatencyPhase::kPresent;
 			++_presentAttempts;
 			return true;
@@ -556,13 +533,11 @@ namespace cs::render::temporal
 		[[nodiscard]] std::uint64_t Frame() const noexcept { return _frame; }
 		[[nodiscard]] LatencyPhase Phase() const noexcept { return _phase; }
 		[[nodiscard]] std::uint32_t PresentAttempts() const noexcept { return _presentAttempts; }
-		[[nodiscard]] bool RenderSubmitEnded() const noexcept { return _renderSubmitEnded; }
 
 	private:
 		std::uint64_t _frame = 0;
 		LatencyPhase _phase = LatencyPhase::kIdle;
 		std::uint32_t _presentAttempts = 0;
-		bool _renderSubmitEnded = false;
 	};
 
 	// One constants set per latency-frame token: the first world frame owns it.

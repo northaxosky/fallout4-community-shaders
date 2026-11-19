@@ -349,7 +349,6 @@ namespace cs::render
 				temporal::FailureDomain::kTransport);
 		}
 		a_drains.fetch_add(1, std::memory_order_relaxed);
-		_retirementDiagnostics.providerDrains.fetch_add(1, std::memory_order_relaxed);
 		return _provider.DestroyAfterDrain();
 	}
 

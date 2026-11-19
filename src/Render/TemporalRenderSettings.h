@@ -28,9 +28,6 @@ namespace cs::render::temporal
 		kCount
 	};
 
-	inline constexpr std::uint32_t kMaxFrameGenerationMethodValue =
-		static_cast<std::uint32_t>(FrameGenerationMethod::kFSR4);
-
 	inline constexpr std::uint32_t kMaxLatencyReductionValue = 2;
 
 	inline constexpr std::uint32_t kMaxUpscaleMethodValue =

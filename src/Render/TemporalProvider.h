@@ -56,9 +56,6 @@ namespace cs::render::temporal
 		ProviderWorkState workState = ProviderWorkState::kNone;
 		bool outputDependencyEstablished = false;
 		bool publicationOutputReady = false;
-		bool globalDrainAttempted = false;
-		bool globalDrainCompleted = false;
-		std::uint64_t globalDrainCpuMicroseconds = 0;
 
 		[[nodiscard]] static ProviderResult Ok(
 			ProviderWorkState a_workState = ProviderWorkState::kNone,
@@ -616,20 +613,6 @@ namespace cs::render::temporal
 		FidelityFXAlgorithmCapability fsr4SuperResolution;
 		FidelityFXAlgorithmCapability fsr4FrameGeneration;
 	};
-
-	[[nodiscard]] constexpr std::string_view
-	FidelityFXD3D12RuntimeSourceName(
-		std::uint32_t a_source) noexcept
-	{
-		switch (a_source) {
-		case 1:
-			return "system";
-		case 2:
-			return "Agility SDK";
-		default:
-			return "unknown";
-		}
-	}
 
 	struct PresentationCreateContext
 	{

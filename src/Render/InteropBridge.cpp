@@ -360,8 +360,6 @@ namespace cs::render
 				"Native D3D12 capture target is unavailable; RenderDoc temporal "
 				"captures will remain disabled");
 		}
-		DXGI_ADAPTER_DESC adapterDesc{};
-		_adapterVendorId = SUCCEEDED(actualAdapter->GetDesc(&adapterDesc)) ? adapterDesc.VendorId : 0;
 		cs::render::annotation::SetName(_device12.get(),
 			"Upscaling/FrameGeneration.Device");
 

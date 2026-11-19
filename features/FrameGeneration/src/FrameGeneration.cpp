@@ -68,9 +68,6 @@ namespace cs::features
 				"input_retirement_gpu_waits",
 				&render::temporal::PresentInputRetirementDiagnostics::gpuWaits },
 			RetirementCounterField{
-				"input_retirement_provider_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::providerDrains },
-			RetirementCounterField{
 				"input_retirement_global_drain_attempts",
 				&render::temporal::PresentInputRetirementDiagnostics::
 					globalDrainAttempts },
@@ -91,20 +88,11 @@ namespace cs::features
 				"input_retirement_violations",
 				&render::temporal::PresentInputRetirementDiagnostics::violations },
 			RetirementCounterField{
-				"input_retirement_startup_global_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::startupDrains },
-			RetirementCounterField{
-				"input_retirement_disable_global_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::disableDrains },
-			RetirementCounterField{
 				"input_retirement_resize_global_drains",
 				&render::temporal::PresentInputRetirementDiagnostics::resizeDrains },
 			RetirementCounterField{
 				"input_retirement_teardown_global_drains",
 				&render::temporal::PresentInputRetirementDiagnostics::teardownDrains },
-			RetirementCounterField{
-				"input_retirement_steady_global_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::steadyDrains },
 			RetirementCounterField{
 				"input_retirement_last_real_frame",
 				&render::temporal::PresentInputRetirementDiagnostics::lastRealFrame },

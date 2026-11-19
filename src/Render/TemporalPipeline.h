@@ -182,8 +182,7 @@ namespace cs::render
 		void Quarantine(temporal::FailureDomain a_domain,
 			std::string a_message) noexcept;
 		void FailSuperResolutionToNative(std::string reason) noexcept;
-		void AdvanceEngineResourceGeneration() noexcept;
-		void AdvanceDisplayGeneration(std::uint32_t a_width,
+		void OnDisplayResized(std::uint32_t a_width,
 			std::uint32_t a_height) noexcept;
 		void RequestSuperResolutionReset() noexcept;
 		[[nodiscard]] temporal::FailurePolicy& SuperResolutionPolicy() noexcept;

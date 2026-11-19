@@ -491,7 +491,6 @@ namespace cs::render
 
 	void TemporalRenderer::InvalidateEngineDerivedResources()
 	{
-		render::TemporalPipeline::Get().AdvanceEngineResourceGeneration();
 		InvalidateFirstPersonAlphaState();
 		dynamicResolution.Release();
 		_superResolutionDebugSnapshot.request.Invalidate();

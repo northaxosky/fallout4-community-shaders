@@ -1220,7 +1220,7 @@ namespace cs::render
 	}
 
 	void TemporalPipeline::OnPostCreateDeviceAndSwapChain(
-		IDXGIAdapter* a_adapter, ID3D11Device** a_device,
+		IDXGIAdapter*, ID3D11Device** a_device,
 		IDXGISwapChain** a_swapChain)
 	{
 		temporal::RequestedTopology request;
@@ -1296,7 +1296,6 @@ namespace cs::render
 		temporal::SessionTopology session;
 		session.valid = true;
 		session.proxyInstalled = temporalProxyPath;
-		session.bridgePresent = _impl->bridge.IsReady();
 		session.latencyHooksInstalled =
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire);
 		session.admittedSr = srAdmission.methods;
@@ -1310,16 +1309,6 @@ namespace cs::render
 			session.activeFg = request.frameGeneration;
 		}
 		session.frameGenerationFallback = _impl->frameGenerationFallback;
-		if (a_adapter) {
-			DXGI_ADAPTER_DESC desc{};
-			if (SUCCEEDED(a_adapter->GetDesc(&desc))) {
-				session.adapterLuid =
-					(static_cast<std::uint64_t>(
-						 static_cast<std::uint32_t>(desc.AdapterLuid.HighPart))
-						<< 32) |
-					desc.AdapterLuid.LowPart;
-			}
-		}
 
 		bool admitted = false;
 		temporal::UpscalingSettings admittedSettings;
@@ -1367,7 +1356,6 @@ namespace cs::render
 		bool active = false;
 		{
 			std::scoped_lock lock(_impl->mutex);
-			++_impl->display.deviceGeneration;
 			const auto& request = _impl->topology.Request();
 			active = request &&
 			         (request->upscalingEligible || request->frameGenerationEligible);
@@ -1459,12 +1447,13 @@ namespace cs::render
 	void TemporalPipeline::FailSuperResolutionToNative(
 		std::string a_reason) noexcept
 	{
+		PostFailure(temporal::FailureDomain::kSuperResolution, a_reason);
 		try {
 			const auto revision =
 				_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel) +
 				1;
 			std::scoped_lock lock(_impl->mutex);
-			_impl->topology.FailSuperResolutionToNative(revision, std::move(a_reason));
+			_impl->topology.FailSuperResolutionToNative(revision);
 			_impl->effectiveRenderSettings.upscaleMethod =
 				static_cast<std::uint32_t>(
 					features::Upscaling::UpscaleMethod::kTAA);
@@ -1475,18 +1464,11 @@ namespace cs::render
 		}
 	}
 
-	void TemporalPipeline::AdvanceEngineResourceGeneration() noexcept
-	{
-		std::scoped_lock lock(_impl->mutex);
-		++_impl->display.engineResourceGeneration;
-	}
-
-	void TemporalPipeline::AdvanceDisplayGeneration(
+	void TemporalPipeline::OnDisplayResized(
 		std::uint32_t a_width, std::uint32_t a_height) noexcept
 	{
 		std::scoped_lock lock(_impl->mutex);
 		_impl->display.output = { a_width, a_height };
-		++_impl->display.displayGeneration;
 		_impl->resetEpochs.RequestSuperResolution();
 		_impl->resetEpochs.RequestFrameGeneration();
 		_impl->topology.RetrySuperResolution(
