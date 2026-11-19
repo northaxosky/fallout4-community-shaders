@@ -370,11 +370,9 @@ namespace cs::features
 		void Convert(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView* a_source, ID3D11RenderTargetView* a_target,
 			ID3D11PixelShader* a_shader, float a_whiteNits, UINT a_width, UINT a_height)
 		{
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (FAILED(a_context.Map(convertConstants.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+			const float scale = a_whiteNits / 80.0f;
+			if (FAILED(cs::engine::WriteDiscard(&a_context, convertConstants.get(), scale)))
 				return;
-			*static_cast<float*>(mapped.pData) = a_whiteNits / 80.0f;
-			a_context.Unmap(convertConstants.get(), 0);
 			const render::FullscreenPass::Scope pass(convertPass, &a_context, a_target, a_width, a_height);
 			if (!pass.IsActive())
 				return;
