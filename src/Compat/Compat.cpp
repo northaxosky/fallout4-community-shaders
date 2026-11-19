@@ -3,6 +3,7 @@
 #include "Compat/PluginScan.h"
 #include "Compat/Rules.h"
 #include "ENB/ENBSeriesAPI.h"
+#include "Feature.h"
 #include "Log.h"
 #include "Utils/CSUtil.h"
 
@@ -54,9 +55,11 @@ namespace cs::compat
 		};
 	}
 
-	bool Finding::Affects(std::string_view a_featureKey) const noexcept
+	bool Finding::Affects(const Feature& a_feature) const noexcept
 	{
-		return rule.features.empty() || std::ranges::find(rule.features, a_featureKey) != rule.features.end();
+		return rule.features.empty() || std::ranges::any_of(rule.features, [&](FeatureRef a_ref) {
+			return a_ref() == &a_feature;
+		});
 	}
 
 	void Detect()
@@ -86,10 +89,10 @@ namespace cs::compat
 		return g_findings;
 	}
 
-	const Finding* Find(std::string_view a_featureKey) noexcept
+	const Finding* Find(const Feature& a_feature) noexcept
 	{
 		const auto found = std::ranges::find_if(g_findings, [&](const Finding& a_finding) {
-			return a_finding.Affects(a_featureKey);
+			return a_finding.Affects(a_feature);
 		});
 		return found == g_findings.end() ? nullptr : &*found;
 	}

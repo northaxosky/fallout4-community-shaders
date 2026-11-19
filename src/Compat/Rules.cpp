@@ -1,6 +1,13 @@
 #include "Compat/Rules.h"
 
-#include "Settings/FeatureKeys.h"
+#include "DynamicCubemaps.h"
+#include "Feature.h"
+#include "FrameGeneration.h"
+#include "HDRDisplay.h"
+#include "ImageBasedLighting.h"
+#include "MotionVectorFixes.h"
+#include "RenderDoc.h"
+#include "Upscaling.h"
 
 #include <array>
 
@@ -8,14 +15,20 @@ namespace cs::compat
 {
 	namespace
 	{
-		namespace fk = cs::feature_config;
+		using namespace cs::features;
 
-		constexpr std::array<std::string_view, 1> kMotionVectorFixes{ fk::kMotionVectorFixes };
+		template <class T>
+		Feature* Ref() noexcept
+		{
+			return T::GetSingleton();
+		}
+
+		constexpr std::array<FeatureRef, 1> kMotionVectorFixes{ Ref<MotionVectorFixes> };
 		// Image Based Lighting needs Dynamic Cubemaps.
-		constexpr std::array<std::string_view, 2> kDynamicCubemaps{ fk::kDynamicCubemaps, fk::kImageBasedLighting };
-		constexpr std::array<std::string_view, 1> kHdrDisplay{ fk::kHDRDisplay };
+		constexpr std::array<FeatureRef, 2> kDynamicCubemaps{ Ref<DynamicCubemaps>, Ref<ImageBasedLighting> };
+		constexpr std::array<FeatureRef, 1> kHdrDisplay{ Ref<HDRDisplay> };
 		// These replace the game's device creation.
-		constexpr std::array<std::string_view, 4> kDeviceCreation{ fk::kHDRDisplay, fk::kUpscaling, fk::kFrameGeneration, fk::kRenderDoc };
+		constexpr std::array<FeatureRef, 4> kDeviceCreation{ Ref<HDRDisplay>, Ref<Upscaling>, Ref<FrameGeneration>, Ref<RenderDoc> };
 
 		constexpr std::array kRules{
 			Rule{ "Motion Vector Fixes", { Source::kF4SEPlugin, "MotionVectorFixes" }, kMotionVectorFixes,

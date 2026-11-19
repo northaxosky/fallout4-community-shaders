@@ -4,6 +4,11 @@
 #include <string>
 #include <string_view>
 
+namespace cs
+{
+	class Feature;
+}
+
 namespace cs::compat
 {
 	enum class Source
@@ -19,12 +24,15 @@ namespace cs::compat
 		std::string_view id = {};
 	};
 
+	// A feature singleton accessor, so a renamed or removed feature breaks the build.
+	using FeatureRef = Feature* (*)() noexcept;
+
 	struct Rule
 	{
 		std::string_view mod;
 		Identity identity;
 		// Features kept inactive; empty means every feature.
-		std::span<const std::string_view> features;
+		std::span<const FeatureRef> features;
 		// Shown to users as is.
 		std::string_view reason;
 	};
@@ -35,7 +43,7 @@ namespace cs::compat
 		// What was detected, e.g. "FO4Isotope 1.4.0 (FO4Isotope.dll)".
 		std::string source;
 
-		bool Affects(std::string_view a_featureKey) const noexcept;
+		bool Affects(const Feature& a_feature) const noexcept;
 	};
 
 	// One-shot detection. Call from F4SEPlugin_Load after the logger is attached.
@@ -44,5 +52,5 @@ namespace cs::compat
 	std::span<const Finding> Findings() noexcept;
 
 	// First finding that deactivates the feature; null if none.
-	const Finding* Find(std::string_view a_featureKey) noexcept;
+	const Finding* Find(const Feature& a_feature) noexcept;
 }

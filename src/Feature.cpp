@@ -435,6 +435,8 @@ namespace cs
 	{
 		_loadedFeatures.clear();
 		for (auto* feature : _registeredFeatures) {
+			if (!std::ranges::contains(feature_config::kAllFeatureKeys, feature->GetConfigKey()))
+				L->error("Feature {} is missing from kAllFeatureKeys; it registers last", feature->GetName());
 			feature->SetState({});
 			feature->_enabled.store(feature->DefaultEnabled(), std::memory_order_release);
 		}
@@ -472,7 +474,7 @@ namespace cs
 				feature->_enabled.store(enabled, std::memory_order_release);
 				feature->ComposeEnabledLiveSettings();
 
-				const auto* deactivation = compat::Find(key);
+				const auto* deactivation = compat::Find(*feature);
 				const bool desiredActive = activation.valid && activation.load && !deactivation;
 				feature->SetState({ .desiredActive = desiredActive,
 					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,

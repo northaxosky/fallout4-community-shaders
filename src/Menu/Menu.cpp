@@ -1055,7 +1055,7 @@ namespace cs
 		const DMUI_DialogDescriptor descriptor{
 			DMUI_DIALOG_KIND_CONFIRM,
 			captures ? "Clear RenderDoc Captures" : "Clear Shader Cache",
-			captures ? "This permanently deletes every regular file in the configured capture directory, not only .rdc files." :
+			captures ? "This permanently deletes every .rdc file in the configured capture directory." :
 					   "This deletes every compiled shader record on disk. Shaders are recompiled the next time they are needed.",
 			"Clear",
 			"Cancel",
