@@ -37,7 +37,7 @@ namespace cs::features::remote_control
 				{ "category", a_feature.GetCategory() },
 				{ "inMenu", a_feature.IsInMenu() },
 			};
-			const auto pending = a_feature.GetRestartSettings();
+			const auto pending = a_feature.RestartPending();
 			auto restartFields = Json::array();
 			for (const auto& field : a_feature.GetSettingsSchema()) {
 				if (field.timing != settings::ApplyTiming::kNextLaunch)
@@ -66,15 +66,10 @@ namespace cs::features::remote_control
 			auto* feature = FindFeature(a_shortName, true);
 			if (!feature)
 				return Error("feature not found or not loaded", { { "shortName", a_shortName } });
-			const auto& access = feature->GetLiveSettingsAccess();
-			if (!access.snapshot)
+			const auto snapshot = FeatureManager::Get().SnapshotLiveSettings(*feature);
+			if (!snapshot)
 				return Error("feature exposes no live settings", { { "shortName", a_shortName } });
-			return settings::TomlToJson(access.snapshot());
-		}
-
-		Json ComparisonRefusal()
-		{
-			return Error("an A/B comparison is active", { { "hint", "stop it in the Performance Overlay first" } });
+			return settings::TomlToJson(*snapshot);
 		}
 
 		std::expected<Feature*, Json> FindHealthyFeature(std::string_view a_shortName)
@@ -87,30 +82,19 @@ namespace cs::features::remote_control
 			return feature;
 		}
 
-		Json EditableFeature(const std::string& a_shortName, Feature*& a_feature)
-		{
-			const auto feature = FindHealthyFeature(a_shortName);
-			if (!feature)
-				return feature.error();
-			a_feature = *feature;
-			return settings::liveComparisonActive ? ComparisonRefusal() : Json{};
-		}
-
 		Json Set(const std::string& a_shortName, const Json& a_settings)
 		{
-			if (settings::liveComparisonActive)
-				return ComparisonRefusal();
 			auto parsed = ParseFeatureSettings(a_shortName, a_settings);
 			if (!parsed)
 				return std::move(parsed.error());
 			auto& [feature, values] = *parsed;
 
 			std::string error;
-			auto prepared = FeatureManager::Get().PrepareLiveSettings(*feature, values, "RemoteControl::Set", error);
+			auto prepared = FeatureManager::Get().PrepareLiveSettings(*feature, values, settings::Scope::kImmediate, settings::Persist::kNo, "RemoteControl::Set", error);
 			if (!prepared)
 				return Error(std::move(error), { { "shortName", a_shortName } });
 			try {
-				settings::ApplyPreparedLiveSettings(std::span{ &*prepared, 1 });
+				(void)settings::ApplyPreparedLiveSettings(std::span{ &*prepared, 1 });
 			} catch (const std::exception& failure) {
 				return Error("settings could not be applied", { { "shortName", a_shortName }, { "detail", failure.what() } });
 			}
@@ -119,11 +103,13 @@ namespace cs::features::remote_control
 
 		Json Reset(const std::string& a_shortName)
 		{
-			Feature* feature{};
-			if (auto refusal = EditableFeature(a_shortName, feature); !refusal.is_null())
-				return refusal;
+			const auto feature = FindHealthyFeature(a_shortName);
+			if (!feature)
+				return feature.error();
+			std::string error;
 			try {
-				feature->RestoreDefaults();
+				if (!FeatureManager::Get().RestoreDefaults(**feature, error))
+					return Error("reset failed", { { "shortName", a_shortName }, { "detail", error } });
 			} catch (const std::exception& failure) {
 				return Error("reset failed", { { "shortName", a_shortName }, { "detail", failure.what() } });
 			}
@@ -144,11 +130,11 @@ namespace cs::features::remote_control
 				return Error("feature does not support toggling", { { "shortName", a_shortName } });
 			if (!feature->IsHealthy())
 				return Error("feature is degraded or failed", { { "shortName", a_shortName } });
-			if (settings::liveComparisonActive)
-				return ComparisonRefusal();
 
 			const bool enabled = a_enabled.is_boolean() ? a_enabled.get<bool>() : !feature->IsSwitchedOn();
-			feature->SetEnabled(enabled);
+			std::string error;
+			if (!FeatureManager::Get().CommitLiveSettings(*feature, toml::table{ { "enabled", enabled } }, settings::Scope::kImmediate, settings::Persist::kNo, "RemoteControl::Toggle", error))
+				return Error("toggle failed", { { "shortName", a_shortName }, { "detail", error } });
 			auto* self = RemoteControl::GetSingleton();
 			// Its own disable would otherwise be muted.
 			self->EmitEvent("communityshaders.feature.changed",
@@ -209,14 +195,14 @@ namespace cs::features::remote_control
 		const auto feature = FindHealthyFeature(shortName);
 		if (!feature)
 			return std::unexpected(feature.error());
-		const auto& access = (*feature)->GetLiveSettingsAccess();
-		if (!access.snapshot || !access.prepare)
+		const auto snapshot = FeatureManager::Get().SnapshotLiveSettings(**feature);
+		if (!snapshot)
 			return std::unexpected(Error("feature exposes no live settings", { { "shortName", shortName } }));
 
 		auto values = settings::JsonToToml(a_settings);
 		if (!values)
 			return std::unexpected(Error(values.error(), { { "shortName", shortName } }));
-		const auto issues = settings::ClassifyKeys(*values, access.snapshot(), (*feature)->GetSettingsSchema());
+		const auto issues = settings::ClassifyKeys(*values, *snapshot, (*feature)->GetSettingsSchema());
 		if (!issues.empty()) {
 			Json refusal{ { "shortName", shortName } };
 			if (!issues.restartOnly.empty())

@@ -272,6 +272,75 @@ namespace
 		CHECK(ReadFile(a_path) == broken);
 	}
 
+	// Commits go through the binding onto a real store file, as a feature's would.
+	void TestSettingsTransactions(const Registry& a_registry, const std::filesystem::path& a_path)
+	{
+		namespace llf = cs::features::light_limit_fix;
+		using Binding = LiveSettings<llf::kSchema>;
+		const auto open = [&](Binding& a_binding, std::string_view a_file) {
+			WriteFile(a_path, a_file);
+			CHECK(InitializeAt(a_path, a_registry).error.empty());
+			a_binding.section = { "features", "LightLimitFix", "settings" };
+			std::string error;
+			CHECK(a_binding.Configure(GetRoot()["features"]["LightLimitFix"].ref<toml::table>(), error));
+		};
+		const auto commit = [](Binding& a_binding, std::string_view a_values, Scope a_scope, Persist a_persist) {
+			std::string error;
+			auto prepared = a_binding.Prepare(toml::parse(a_values), a_scope, a_persist, error);
+			CHECK(prepared.has_value());
+			std::array transaction{ std::move(*prepared) };
+			return ApplyPreparedLiveSettings(transaction);
+		};
+
+		{
+			Binding binding;
+			open(binding, "");
+			// Another section and an unrelated key edited by hand since the load.
+			WriteFile(a_path, "[features.LightLimitFix.settings]\nlocal_shadow_slots = 32\n[features.Upscaling.settings]\nquality_mode = 3\n");
+			CHECK(commit(binding, "enable_local_shadows = true\nlocal_shadow_filter_scale = 1.5\n", Scope::kImmediate, Persist::kNow));
+			CHECK(binding.Get().enableLocalShadows && binding.Get().localShadowFilterScale == 1.5f);
+			const auto stored = LoadFile(a_path).table["features"];
+			CHECK(stored["LightLimitFix"]["settings"]["enable_local_shadows"].value<bool>() == true);
+			CHECK(stored["LightLimitFix"]["settings"]["local_shadow_filter_scale"].value<double>() == 1.5);
+			CHECK(stored["LightLimitFix"]["settings"]["local_shadow_slots"].value<std::int64_t>() == 32);
+			CHECK(stored["Upscaling"]["settings"]["quality_mode"].value<std::int64_t>() == 3);
+		}
+		{
+			Binding binding;
+			open(binding, "");
+			CHECK(commit(binding, "derive_unauthored_lights = true\n", Scope::kAll, Persist::kNow));
+			CHECK(!binding.Get().deriveUnauthoredLights);
+			CHECK(binding.RestartPending().size() == 1);
+			CHECK(LoadFile(a_path).table["features"]["LightLimitFix"]["settings"]["derive_unauthored_lights"].value<bool>() == true);
+		}
+		{
+			Binding binding;
+			open(binding, "");
+			WriteFile(a_path, "[features.LightLimitFix.settings]\nderive_unauthored_lights = true\n");
+			const auto before = ReadFile(a_path);
+			const auto stored = toml::parse(before);
+			binding.ReloadNext(stored["features"]["LightLimitFix"].as_table());
+			CHECK(ReadFile(a_path) == before);
+			CHECK(binding.RestartPending().size() == 1);
+		}
+		{
+			Binding binding({ .finalize = [](const llf::Settings& a_previous) {
+				if (!a_previous.enableLocalShadows)
+					throw std::runtime_error("Effect finalization failed");
+			} });
+			open(binding, "");
+			const auto before = ReadFile(a_path);
+			try {
+				(void)commit(binding, "enable_local_shadows = true\nderive_unauthored_lights = true\n", Scope::kAll, Persist::kNow);
+				CHECK(false);
+			} catch (const std::runtime_error&) {
+				CHECK(!binding.Get().enableLocalShadows);
+				CHECK(binding.RestartPending().empty());
+				CHECK(ReadFile(a_path) == before);
+			}
+		}
+	}
+
 	void TestLiveSettingsRollback()
 	{
 		using namespace cs::features::sss_settings;

@@ -9,8 +9,6 @@ namespace cs::features::remote_control
 	{
 		Json Apply(const std::string& a_action)
 		{
-			if (settings::liveComparisonActive)
-				return Error("an A/B comparison is active", { { "hint", "stop it in the Performance Overlay first" } });
 			auto& manager = FeatureManager::Get();
 			std::string error;
 			const bool done = a_action == "save" ? manager.SaveAllSettings(error) :

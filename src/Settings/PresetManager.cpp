@@ -35,16 +35,6 @@ namespace
 		std::string key;
 	};
 
-	bool PresetKeyMatches(std::string_view a_key, std::string_view a_configKey)
-	{
-		const auto normalize = [](std::string_view key) {
-			return key | std::views::filter([](char c) { return c != '_'; }) |
-			       std::views::transform([](unsigned char c) { return std::tolower(c); });
-		};
-		// Earlier presets used lowercase and snake_case feature names.
-		return std::ranges::equal(normalize(a_key), normalize(a_configKey));
-	}
-
 	bool CollectHealthyPresetParticipants(
 		cs::FeatureManager& a_manager,
 		std::vector<PresetParticipant>& a_out,
@@ -55,8 +45,7 @@ namespace
 			if (!a_manager.PrepareRuntimeCallback(*feature, "PresetManager::Collect")) {
 				continue;
 			}
-			const auto& access = feature->GetLiveSettingsAccess();
-			if (!access.snapshot || !access.prepare)
+			if (!feature->SharesLiveSettings())
 				continue;
 			std::string key;
 			try {
@@ -252,10 +241,6 @@ namespace cs
 
 	bool PresetManager::Apply(const PresetMeta& a_meta, std::string& a_err)
 	{
-		if (settings::liveComparisonActive) {
-			a_err = "Stop the A/B comparison before applying a preset";
-			return false;
-		}
 		toml::table table;
 		try {
 			table = toml::parse_file(a_meta.path.string());
@@ -303,7 +288,7 @@ namespace cs
 			const auto match = std::ranges::find_if(
 				participants,
 				[&](const PresetParticipant& a_participant) {
-					return PresetKeyMatches(key.str(), a_participant.key);
+					return key.str() == a_participant.key;
 				});
 			if (match == participants.end()) {
 				L->warn("preset '{}' references feature '{}' which is not healthy-active or participating; skipping",
@@ -322,7 +307,7 @@ namespace cs
 		for (const auto& entry : staged) {
 			try {
 				auto value = featureManager.PrepareLiveSettingsFromOverrides(
-					*entry.feature, entry.subtable, nullptr, "PresetManager::Finalize", a_err);
+					*entry.feature, entry.subtable, nullptr, settings::Persist::kNow, "PresetManager::Finalize", a_err);
 				if (!value) {
 					a_err = "feature '" + entry.key + "' failed to stage: " + a_err;
 					return false;
@@ -345,80 +330,17 @@ namespace cs
 			}
 		}
 		try {
-			settings::ApplyPreparedLiveSettings(prepared);
+			if (!settings::ApplyPreparedLiveSettings(prepared)) {
+				a_err = "live preset state was swapped, but feature files could not be saved; active preset identity was not persisted; see log";
+				Menu::ShowToast("Applied '" + a_meta.name + "' but active preset could not be saved",
+					5.0, DMUI_STATUS_SEVERITY_ERROR, a_meta.name);
+				return false;
+			}
 		} catch (const std::exception& e) {
 			a_err = std::string("preset finalization failed: ") + e.what();
 			return false;
 		} catch (...) {
 			a_err = "preset finalization failed: non-standard exception";
-			return false;
-		}
-
-		// Finalization failures leave disk stale but memory consistent.
-		std::vector<std::string> finalizeErrors;
-		for (const auto& entry : staged) {
-			if (!featureManager.PrepareRuntimeCallback(
-					*entry.feature,
-					"PresetManager::Save")) {
-				finalizeErrors.emplace_back(
-					"feature '" + entry.key + "' finalize skipped because its owner is no longer healthy");
-				L->error("{}", finalizeErrors.back());
-				continue;
-			}
-
-			try {
-				if (!entry.feature->Persist()) {
-					finalizeErrors.emplace_back(
-						"feature '" + entry.key + "' finalize failed to save settings");
-					L->error("{}", finalizeErrors.back());
-				}
-			} catch (const std::exception& ex) {
-				featureManager.QuarantineRuntimeCallback(
-					*entry.feature,
-					"PresetManager::Save",
-					ex.what());
-				std::ostringstream oss;
-				oss << "feature '" << entry.key << "' finalize failed: " << ex.what();
-				finalizeErrors.emplace_back(oss.str());
-				L->error("{}", finalizeErrors.back());
-			} catch (...) {
-				featureManager.QuarantineRuntimeCallback(
-					*entry.feature,
-					"PresetManager::Save",
-					"non-standard exception");
-				std::ostringstream oss;
-				oss << "feature '" << entry.key << "' finalize failed: unknown exception";
-				finalizeErrors.emplace_back(oss.str());
-				L->error("{}", finalizeErrors.back());
-			}
-		}
-
-		if (!finalizeErrors.empty()) {
-			std::ostringstream oss;
-			oss << "live preset state was swapped, but " << finalizeErrors.size()
-				<< " finalize error(s) left feature files stale; active preset identity was not persisted; see log";
-			a_err = oss.str();
-			L->warn(
-				"Applied preset: {} ({}, {} feature(s)) with {} finalize error(s); "
-				"active preset on disk left unchanged so next boot reapplies the previous state",
-				a_meta.name, a_meta.builtin ? "builtin" : "user", staged.size(), finalizeErrors.size());
-			// Skip saving when any feature leaves disk stale.
-			Menu::ShowToast("Applied '" + a_meta.name + "' with " +
-								std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted",
-				5.0,
-				DMUI_STATUS_SEVERITY_ERROR,
-				a_meta.name);
-			return false;
-		}
-
-		activeIdentity = a_meta.identity;
-		activeName = a_meta.name;
-		pendingComboIdentity = a_meta.identity;
-		if (!SaveCoreConfig()) {
-			a_err = "live preset state was swapped, but active preset identity could not be saved";
-			L->error("{}", a_err);
-			Menu::ShowToast("Applied '" + a_meta.name + "' but active preset could not be saved",
-				5.0, DMUI_STATUS_SEVERITY_ERROR, a_meta.name);
 			return false;
 		}
 
@@ -468,7 +390,7 @@ namespace cs
 
 			toml::table sub;
 			try {
-				sub = participant.feature->GetLiveSettingsAccess().snapshot();
+				sub = featureManager.SnapshotLiveSettings(*participant.feature).value_or(toml::table{});
 			} catch (const std::exception& e) {
 				featureManager.QuarantineRuntimeCallback(
 					*participant.feature,

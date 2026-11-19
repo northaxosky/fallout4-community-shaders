@@ -68,8 +68,11 @@ namespace cs::host
 			bool enabled = a_feature.IsSwitchedOn();
 			if (ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled()).changed) {
 				render::PostToFrame([&a_feature, enabled] {
-					a_feature.SetEnabled(enabled);
-					settings::SettingsEdit{ a_feature }.Apply({ true, true });
+					std::string error;
+					if (!FeatureManager::Get().CommitLiveSettings(
+							a_feature, toml::table{ { "enabled", enabled } }, settings::Scope::kImmediate,
+							settings::Persist::kNow, "DearModdingUI::Enable", error))
+						L->warn("{} enable switch failed: {}", a_feature.GetName(), error);
 				});
 			}
 		}
@@ -446,7 +449,7 @@ namespace cs::host
 		};
 
 		const auto isComparing = [&] {
-			return settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
+			return settings::liveComparisonActive && a_feature.SharesLiveSettings();
 		};
 
 		// Enabled toggle, settings and Debug section, saved once an edit completes.
@@ -465,7 +468,7 @@ namespace cs::host
 					callback = "DearModdingUI::DrawDebug";
 					DrawFeatureDebugSection(a_feature);
 				}
-				a_feature.FlushSettings(true);
+				FeatureManager::Get().CommitEdits(a_feature, false);
 			} catch (const std::exception& error) {
 				FeatureManager::Get().QuarantineRuntimeCallback(
 					a_feature,
@@ -521,7 +524,9 @@ namespace cs::host
 		const auto restoreFeatureDefaults = [&] {
 			render::PostToFrame([&a_feature, report = reportCallbackFailure] {
 				try {
-					(void)a_feature.RestoreDefaults();
+					std::string error;
+					if (!FeatureManager::Get().RestoreDefaults(a_feature, error))
+						L->warn("{} restore defaults failed: {}", a_feature.GetName(), error);
 				} catch (const std::exception& error) {
 					report(
 						"DearModdingUI::RestoreDefaultSettings",
@@ -651,7 +656,7 @@ namespace cs::host
 			LogFailure("draw feature settings table");
 
 		// Fields cannot nest in a host row, so the failure UI and controls sit outside the table.
-		const auto restartSettings = a_feature.GetRestartSettings();
+		const auto restartSettings = a_feature.RestartPending();
 		const ui::FieldPage page{ restartSettings };
 		if (state.runtimeState == FeatureRuntimeState::kFailed ||
 			state.runtimeState == FeatureRuntimeState::kDegraded) {
@@ -806,7 +811,7 @@ namespace cs::host
 			if (!manager.PrepareMenuCallback(feature, phase))
 				return;
 			try {
-				feature.FlushSettings();
+				manager.CommitEdits(feature, true);
 			} catch (const std::exception& error) {
 				manager.QuarantineRuntimeCallback(feature, phase, error.what());
 			} catch (...) {

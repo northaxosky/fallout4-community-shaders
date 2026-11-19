@@ -166,13 +166,10 @@ namespace cs::features::performance_overlay
 		State state;
 		state.ownership = engine::GetShaderOwnershipConfig();
 		for (auto* feature : FeatureManager::Get().GetAll()) {
-			const auto& access = feature->GetLiveSettingsAccess();
-			if (!feature->IsHealthy() || !access.snapshot)
+			auto values = FeatureManager::Get().SnapshotLiveSettings(*feature, true);
+			if (!feature->IsHealthy() || !values)
 				continue;
-			auto values = access.snapshot();
-			for (const auto key : access.notComparable)
-				values.erase(key);
-			state.live.emplace(feature, std::move(values));
+			state.live.emplace(feature, std::move(*values));
 		}
 		return state;
 	}
@@ -182,12 +179,13 @@ namespace cs::features::performance_overlay
 		auto& manager = FeatureManager::Get();
 		if (a_state.ownership != engine::GetShaderOwnershipConfig())
 			manager.ApplyShaderOwnership(a_state.ownership);
+		const cs::settings::ComparisonKey key{};
 		std::vector<cs::settings::PreparedLiveSettings> prepared;
 		for (const auto& [feature, values] : a_state.live) {
 			if (!a_restoring && !feature->IsHealthy())
 				throw std::runtime_error(std::format("{} is no longer healthy", feature->GetName()));
 			std::string error;
-			auto value = manager.PrepareLiveSettings(*feature, values, "ABComparison::Finalize", error);
+			auto value = manager.PrepareLiveSettings(*feature, values, cs::settings::Scope::kImmediate, cs::settings::Persist::kNo, "ABComparison::Finalize", error, &key);
 			if (!value)
 				throw std::runtime_error(std::format("{}: {}", feature->GetName(), error));
 			if (a_restoring && !feature->IsHealthy())
@@ -288,6 +286,7 @@ namespace cs::features::performance_overlay
 			throw std::runtime_error(std::format("settleSeconds must be from {} up to but not including windowSeconds ({})",
 				kMinSettleSeconds, a_options.windowSeconds));
 		}
+		const cs::settings::ComparisonKey pass{};
 		auto current = Capture();
 		auto variant = current;
 		for (const auto& [feature, overrides] : a_variant.settings) {
@@ -299,7 +298,7 @@ namespace cs::features::performance_overlay
 					throw std::runtime_error(std::format("{}.{} is not a comparable live setting", feature->GetName(), key.str()));
 				live->second.insert_or_assign(key, node);
 			}
-			if (std::string error; !FeatureManager::Get().PrepareLiveSettings(*feature, live->second, "ABComparison::StartRun", error))
+			if (std::string error; !FeatureManager::Get().PrepareLiveSettings(*feature, live->second, cs::settings::Scope::kImmediate, cs::settings::Persist::kNo, "ABComparison::StartRun", error, &pass))
 				throw std::runtime_error(std::format("{}: {}", feature->GetName(), error));
 		}
 		if (a_variant.ownership)

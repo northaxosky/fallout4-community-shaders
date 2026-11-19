@@ -123,12 +123,31 @@ namespace cs
 		virtual bool SaveSettings() { return true; }
 		bool Persist();
 		virtual settings::SettingsBinding GetSettingsBinding() const { return {}; }
+		// The feature's settings transaction; null for features without schema fields.
+		virtual settings::LiveSettingsAccess* GetLiveSettings() { return nullptr; }
+		settings::LiveSettingsAccess* GetLiveSettings() const { return const_cast<Feature*>(this)->GetLiveSettings(); }
 		settings::SchemaView GetSettingsSchema() const
 		{
+			if (auto* live = GetLiveSettings())
+				return live->Schema();
 			const auto binding = GetSettingsBinding();
 			return binding ? binding.schema() : settings::SchemaView{};
 		}
-		const settings::LiveSettingsAccess& GetLiveSettingsAccess() const noexcept { return _liveSettings; }
+		const settings::LiveSettingsBag& GetLiveSettingsAccess() const noexcept { return _liveSettings; }
+		// Takes part in presets, A/B comparison and Remote Control.
+		bool SharesLiveSettings() const
+		{
+			if (auto* live = GetLiveSettings())
+				return live->shared;
+			return static_cast<bool>(_liveSettings.snapshot) || SupportsEnableToggle();
+		}
+		// Descriptions of the restart-only settings whose stored value differs from the running one.
+		std::vector<std::string_view> RestartPending() const
+		{
+			if (auto* live = GetLiveSettings())
+				return live->RestartPending();
+			return GetRestartSettings();
+		}
 
 		// Persists edits recorded by settings::SettingsEdit, optionally only once an edit completes.
 		void FlushSettings(bool a_completedOnly = false);
@@ -155,12 +174,16 @@ namespace cs
 		virtual void RestoreDefaultSettings() {}
 		bool RestoreDefaults();
 
-		bool HasResettableSettings() const { return SupportsEnableToggle() || static_cast<bool>(GetSettingsBinding()); }
+		bool HasResettableSettings() const { return SupportsEnableToggle() || GetLiveSettings() || static_cast<bool>(GetSettingsBinding()); }
 		bool HasModifiedSettings() const
 		{
-			const auto binding = GetSettingsBinding();
-			return (binding && binding.modified()) ||
-			       (SupportsEnableToggle() && IsSwitchedOn() != DefaultEnabled());
+			bool modified = false;
+			if (auto* live = GetLiveSettings()) {
+				modified = live->Modified();
+			} else if (const auto binding = GetSettingsBinding()) {
+				modified = binding.modified();
+			}
+			return modified || (SupportsEnableToggle() && IsSwitchedOn() != DefaultEnabled());
 		}
 
 		// Overlays render even while settings are closed.
@@ -201,7 +224,7 @@ namespace cs
 
 	protected:
 		bool SaveEnabled();
-		settings::LiveSettingsAccess _liveSettings;
+		settings::LiveSettingsBag _liveSettings;
 
 	private:
 		friend class settings::SettingsEdit;
@@ -241,6 +264,8 @@ namespace cs
 			return _runtimeState.compare_exchange_strong(expected, FeatureRuntimeState::kDegraded, std::memory_order_acq_rel);
 		}
 		void ComposeEnabledLiveSettings();
+		// Settings still on the pre-transaction path.
+		bool UsesLegacySettings() const { return !GetLiveSettings() && static_cast<bool>(GetSettingsBinding()); }
 		void ResetLoadFailure() noexcept
 		{
 			_loadFailed = false;
@@ -382,17 +407,37 @@ namespace cs
 			}
 		}
 
+		// Live immediate settings plus 'enabled'; null when the feature takes no part in presets or A/B.
+		std::optional<toml::table> SnapshotLiveSettings(const Feature& a_feature, bool a_forComparison = false) const;
+		// Frame boundary only. Shared features refuse during a comparison unless it passes the key.
 		std::optional<settings::PreparedLiveSettings> PrepareLiveSettings(
 			Feature& a_feature,
 			const toml::table& a_values,
+			settings::Scope a_scope,
+			settings::Persist a_persist,
 			std::string_view a_phase,
-			std::string& a_error);
+			std::string& a_error,
+			const settings::ComparisonKey* a_key = nullptr);
+		// Absent keys mean the default; `enabled` composes in.
 		std::optional<settings::PreparedLiveSettings> PrepareLiveSettingsFromOverrides(
 			Feature& a_feature,
 			const toml::table* a_overrides,
 			const toml::node* a_enabled,
+			settings::Persist a_persist,
 			std::string_view a_phase,
 			std::string& a_error);
+		// Prepares and applies one feature's commit at the frame boundary.
+		bool CommitLiveSettings(
+			Feature& a_feature,
+			const toml::table& a_values,
+			settings::Scope a_scope,
+			settings::Persist a_persist,
+			std::string_view a_phase,
+			std::string& a_error);
+		// Resets non-settings state, then commits every default and saves.
+		bool RestoreDefaults(Feature& a_feature, std::string& a_error);
+		// UI thread: posts the page's edits as one commit; a_pageExit flushes deferred keys.
+		void CommitEdits(Feature& a_feature, bool a_pageExit);
 		// Keeps the feature loaded but marks part of it unavailable.
 		void ReportDegraded(Feature& a_feature, std::string a_detail);
 		bool SaveAllSettings(std::string& a_error);
@@ -427,6 +472,7 @@ namespace cs
 	private:
 		FeatureManager() = default;
 		void RefreshShaderOwnership();
+		bool SaveFeature(Feature& a_feature);
 		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _loadedFeatures;
 		std::atomic<Feature*> _fullscreenDebugFeature{ nullptr };
