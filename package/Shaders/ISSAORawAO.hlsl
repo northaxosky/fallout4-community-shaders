@@ -2,6 +2,7 @@
 // Copyright (c) 2026 northaxosky
 #define FO4CS_VS_GEOMETRY_OFFSET
 #include "FO4/ImageSpaceVS.hlsli"
+#include "FO4/SphereMapNormal.hlsli"
 
 #ifdef PSHADER
 cbuffer ISSAORawAOConstants : register(b2)
@@ -65,7 +66,7 @@ float unpackKey(float2 p)
 
 float3 DecodeNormal(float2 encoded)
 {
-	float2 fenc = encoded * 4 - 2;
+	float2 fenc = FO4GBuffer::UnpackSphereMapXY(encoded);
 	float f = dot(fenc, fenc);
 	float g = sqrt(1 - f / 4);
 	float3 n;

@@ -7,6 +7,7 @@
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
 #include "Common/DeferredContracts.hlsli"
+#include "FO4/SphereMapNormal.hlsli"
 #include "FO4/SkylightingConsumer.hlsli"
 #if defined(VANILLA_PBR) || defined(VANILLA_PBR_FULLSCREEN_DEBUG)
 #	include "FO4/VanillaPBR.hlsli"
@@ -407,7 +408,7 @@ PS_OUTPUT main(PS_INPUT input)
 	bool hasIBL = (matSliceFloat > 0.5 / 255.0);
 	float3 iblColor = float3(0, 0, 0);
 	if (hasIBL) {
-		float2 enc = g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
+		float2 enc = FO4GBuffer::UnpackSphereMapXY(g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
 		float encDotEnc = dot(enc, enc);
 		float zRecon = 1.0 - encDotEnc * 0.25;
 		float3 normalView = float3(enc * sqrt(zRecon), -(1.0 - encDotEnc * 0.5));
@@ -757,7 +758,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float3 iblColor = float3(0.0, 0.0, 0.0);
 	if (hasIbl) {
 		float2 encodedNormal =
-			g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
+			FO4GBuffer::UnpackSphereMapXY(g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
 		float encodedLengthSquared = dot(encodedNormal, encodedNormal);
 		float3 normalView = float3(
 			encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
@@ -1244,7 +1245,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 
 	float3 environment = 0.0;
 	if (material.x > 0.0019607844296842813) {
-		float2 encodedNormal = normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy * 4.0 - 2.0;
+		float2 encodedNormal = FO4GBuffer::UnpackSphereMapXY(normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy);
 		float normalLengthSquared = dot(encodedNormal, encodedNormal);
 		float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
 		float3 normal = float3(encodedNormal * sqrt(normalFactors.x), -normalFactors.y);
@@ -1511,7 +1512,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 	float3 cube = 0.0;
 	if (prm.x > 0.5 / 255.0) {
 		float4 nn;
-		nn.xy = TexNormal.SampleLevel(SampNormal, uv, 0).xy * 4.0 - 2.0;
+		nn.xy = FO4GBuffer::UnpackSphereMapXY(TexNormal.SampleLevel(SampNormal, uv, 0).xy);
 		float f = dot(nn.xy, nn.xy);
 		nn.zw = 1.0 - f * float2(0.25, 0.5);
 		nn.xy = nn.xy * sqrt(nn.z);
@@ -2613,7 +2614,7 @@ float4 main(PSInput input) : SV_Target0
 	float3 probeColor = 0.0;
 	if (material.x > (0.5 / 255.0)) {
 		float2 encodedNormal =
-			normalTexture.SampleLevel(normalSampler, uv, 0.0).xy * 4.0 - 2.0;
+			FO4GBuffer::UnpackSphereMapXY(normalTexture.SampleLevel(normalSampler, uv, 0.0).xy);
 		float encodedLengthSquared = dot(encodedNormal, encodedNormal);
 		float normalScale = sqrt(1.0 - encodedLengthSquared * 0.25);
 		float3 normal = float3(
@@ -2714,7 +2715,7 @@ float4 main(PSInput input) : SV_Target0
 	float specularScale = material.y * material.y * 50.0;
 	if (material.x > (0.5 / 255.0)) {
 		float2 encodedNormal =
-			normalTexture.SampleLevel(normalSampler, uv, 0.0).xy * 4.0 - 2.0;
+			FO4GBuffer::UnpackSphereMapXY(normalTexture.SampleLevel(normalSampler, uv, 0.0).xy);
 		float encodedLengthSquared = dot(encodedNormal, encodedNormal);
 		float normalScale = sqrt(1.0 - encodedLengthSquared * 0.25);
 		float3 normal = float3(
@@ -3605,7 +3606,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float2 screenUv = input.position.xy * cb2[0].xy;
 	float depth = g_tDepth.SampleLevel(g_sDepth, screenUv, 0.0).x;
 	float2 encodedNormal = g_tNormal.SampleLevel(g_sNormal, screenUv, 0.0).xy;
-	float2 octahedral = encodedNormal * 4.0 - 2.0;
+	float2 octahedral = FO4GBuffer::UnpackSphereMapXY(encodedNormal);
 	float normalLengthSq = dot(octahedral, octahedral);
 	float2 octahedralFactors =
 		1.0 - normalLengthSq * float2(0.25, 0.5);
@@ -3932,7 +3933,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float2 screenUv = input.position.xy * cb2[0].xy;
 	float depth = g_tDepth.SampleLevel(g_sDepth, screenUv, 0.0).x;
 	float2 encodedNormal = g_tNormal.SampleLevel(g_sNormal, screenUv, 0.0).xy;
-	float2 octahedral = encodedNormal * 4.0 - 2.0;
+	float2 octahedral = FO4GBuffer::UnpackSphereMapXY(encodedNormal);
 	float normalLengthSq = dot(octahedral, octahedral);
 	float2 octahedralFactors =
 		1.0 - normalLengthSq * float2(0.25, 0.5);

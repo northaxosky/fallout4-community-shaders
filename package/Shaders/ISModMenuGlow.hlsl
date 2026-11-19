@@ -2,6 +2,7 @@
 // Copyright (c) 2026 northaxosky
 #define FO4CS_VS_GEOMETRY_OFFSET
 #include "FO4/ImageSpaceVS.hlsli"
+#include "FO4/SphereMapNormal.hlsli"
 
 #ifdef PSHADER
 cbuffer ModMenuGlowConstants : register(b2)
@@ -27,7 +28,7 @@ typedef VS_OUTPUT PS_INPUT;
 
 float3 DecodeNormal(float2 encoded)
 {
-	float2 n = encoded * 4.0 - 2.0;
+	float2 n = FO4GBuffer::UnpackSphereMapXY(encoded);
 	float f = dot(n, n);
 	float g = sqrt(1.0 - f * 0.25);
 	return float3(n * g, -(1.0 - f * 0.5));
