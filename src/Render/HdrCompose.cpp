@@ -20,7 +20,7 @@ namespace cs::render::hdr
 		{
 			float enableHDR, paperWhite, peakNits, skipUIComposite;
 			float uiBrightness, isSceneLinear, isMainOrLoadingMenu, fgTweenMenuMidAlphaBoost;
-			float previewSDR, applyAutoHDR, pad0, pad1;
+			float previewSDR, applyAutoHDR, windowsHdr, pad0;
 		};
 		static_assert(sizeof(PerFrame) == 48);
 
@@ -80,7 +80,8 @@ namespace cs::render::hdr
 			.paperWhite = a_settings.paperWhite,
 			.peakNits = a_settings.peakNits,
 			.skipUIComposite = a_skipInterface ? 1.0f : 0.0f,
-			.uiBrightness = a_settings.uiBrightness
+			.uiBrightness = a_settings.uiBrightness,
+			.windowsHdr = a_settings.windowsHdr ? 1.0f : 0.0f
 		};
 		return SUCCEEDED(engine::WriteDiscard(&a_context, _constants.get(), constants));
 	}

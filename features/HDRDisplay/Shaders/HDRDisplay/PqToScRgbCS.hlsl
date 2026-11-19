@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
-// Converts the composed signal (PQ or gamma 2.2) to linear scRGB.
+// Converts the signal (PQ or gamma 2.2) to linear scRGB, 1.0 = 80 nits.
 
 #include "Common/Color.hlsli"
 
@@ -11,6 +11,7 @@ cbuffer PerFrame : register(b0)
 {
 	float enableHDR : packoffset(c0.x);
 	float paperWhite : packoffset(c0.y);
+	float windowsHdr : packoffset(c2.z);
 }
 
 [numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
@@ -27,5 +28,6 @@ cbuffer PerFrame : register(b0)
 	} else {
 		linearColor = TransferFunctions::Gamma22ToLinear(saturate(signal));
 	}
-	Output[dispatchID.xy] = float4(linearColor * (paperWhite / 80.0), 1.0);
+	float white = windowsHdr > 0.5 ? paperWhite / 80.0 : 1.0;
+	Output[dispatchID.xy] = float4(linearColor * white, 1.0);
 }

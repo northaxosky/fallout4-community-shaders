@@ -15,7 +15,7 @@
 
 namespace cs::features
 {
-	// Presents through an HDR10 container; the interface lands alone in the proxy.
+	// HDR through the presenter's container; the UI lands alone in the proxy.
 	class HDRDisplay : public ShaderFeature<hdr_display_shader::kShaderDefines>
 	{
 	public:
@@ -43,6 +43,8 @@ namespace cs::features
 
 		// First run only: HDR starts on when Windows HDR is on for the game's monitor.
 		void SeedFromDisplay(HWND a_window);
+		// Rereads Windows HDR for the monitor the window is on, once a second.
+		void RefreshDisplay() noexcept;
 
 		// Windows HDR was on at launch; the HDR container needs it.
 		[[nodiscard]] bool IsWindowsHdrOn() const noexcept { return _windowsHdrOn.load(std::memory_order_acquire); }
@@ -77,5 +79,8 @@ namespace cs::features
 		std::atomic_bool _displayKnown{ false };
 		std::atomic_bool _displaySupportsHdr{ false };
 		std::atomic_bool _windowsHdrOn{ false };
+		static constexpr std::int64_t kDisplayPollMs = 1000;
+		std::atomic<HWND> _window{ nullptr };
+		std::atomic<std::int64_t> _lastDisplayCheckMs{ 0 };
 	};
 }

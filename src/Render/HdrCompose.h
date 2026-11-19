@@ -12,6 +12,8 @@ namespace cs::render::hdr
 	struct OutputSettings
 	{
 		bool enabled = false;
+		// Windows HDR is on now; off means scRGB white is 1.0, not paper white.
+		bool windowsHdr = true;
 		float paperWhite = 203.0f;
 		float peakNits = 1000.0f;
 		float uiBrightness = 1.0f;

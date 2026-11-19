@@ -1,6 +1,7 @@
 #include "HDRDisplay.h"
 
 #include <algorithm>
+#include <chrono>
 
 #include <DearModdingUI/Client.h>
 
@@ -99,6 +100,7 @@ namespace cs::features
 
 	void HDRDisplay::SeedFromDisplay(HWND a_window)
 	{
+		_window.store(a_window, std::memory_order_release);
 		const auto capability = hdr_display::QueryDisplayCapability(a_window);
 		if (!capability)
 			return;
@@ -115,9 +117,29 @@ namespace cs::features
 			L->error("HDR display seeding failed: {}", error);
 	}
 
+	void HDRDisplay::RefreshDisplay() noexcept
+	{
+		const auto window = _window.load(std::memory_order_acquire);
+		if (!window || !_displayKnown.load(std::memory_order_acquire))
+			return;
+		const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch())
+		                     .count();
+		auto last = _lastDisplayCheckMs.load(std::memory_order_relaxed);
+		if (now - last < kDisplayPollMs || !_lastDisplayCheckMs.compare_exchange_strong(last, now))
+			return;
+		const auto capability = hdr_display::QueryDisplayCapability(window);
+		if (!capability)
+			return;
+		if (_windowsHdrOn.exchange(capability->hdrEnabled, std::memory_order_acq_rel) != capability->hdrEnabled)
+			L->info("Windows HDR is now {} for the game monitor", capability->hdrEnabled ? "on" : "off");
+		_displaySupportsHdr.store(capability->hdrSupported, std::memory_order_release);
+	}
+
 	bool HDRDisplay::IsHdrActive() const noexcept
 	{
-		return _settings.enableHDR && render::TemporalPipeline::Get().IsHdrContainerActive();
+		return _settings.enableHDR && _windowsHdrOn.load(std::memory_order_acquire) &&
+		       render::TemporalPipeline::Get().IsHdrContainerActive();
 	}
 
 	const buffer::Texture2D* HDRDisplay::ComposeCapture(bool a_hdr, bool a_interface)
@@ -130,7 +152,8 @@ namespace cs::features
 	render::hdr::OutputSettings HDRDisplay::GetOutputSettings() const noexcept
 	{
 		return {
-			.enabled = _settings.enableHDR,
+			.enabled = _settings.enableHDR && _windowsHdrOn.load(std::memory_order_acquire),
+			.windowsHdr = _windowsHdrOn.load(std::memory_order_acquire),
 			.paperWhite = static_cast<float>(_settings.paperWhite),
 			.peakNits = static_cast<float>(_settings.peakNits),
 			.uiBrightness = _settings.uiBrightness
