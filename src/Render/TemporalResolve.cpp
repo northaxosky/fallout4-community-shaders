@@ -656,7 +656,6 @@ namespace cs::render
 	void TemporalRenderer::ResolveSceneBeforeImagespace()
 	{
 		_resolveSeamSeen.store(true, std::memory_order_release);
-		LatchFrameGenerationDecision();
 		_sceneResolved = false;
 		_vatsMaskUpscaled = false;
 		_preUiHandoff = {};
@@ -665,7 +664,7 @@ namespace cs::render
 		}
 		_preUiHandoff = temporal::PlanPreUiHandoff(
 			_renderUiFullEffectsPath.load(std::memory_order_acquire),
-			ShouldUseFrameGenerationThisFrame(),
+			GeneratesThisFrame(),
 			IsDrivingFrameState());
 		if (_preUiHandoff.captureFrameGenerationInputs) {
 			CaptureFrameGenerationInputs();

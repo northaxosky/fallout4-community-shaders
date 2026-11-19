@@ -1114,9 +1114,7 @@ namespace cs::render
 																	  1000.0f :
 																  0.0f;
 							}
-							result.enabled =
-								frozen && result.camera.valid &&
-								upscaling->ShouldUseFrameGenerationThisFrame();
+							result.enabled = frozen && result.camera.valid;
 							if (!frozen) {
 								result.resetHistory =
 									TemporalPipeline::Get()
@@ -1538,7 +1536,7 @@ namespace cs::render
 	{
 		std::scoped_lock lock(_impl->mutex);
 		const bool frameGenerationConsumes =
-			_impl->renderer.ShouldUseFrameGenerationThisFrame();
+			_impl->renderer.GeneratesThisFrame();
 		const auto& effective = _impl->topology.Effective();
 		return _impl->resetEpochs.SuperResolutionPending() ||
 		       (frameGenerationConsumes &&
@@ -1827,18 +1825,12 @@ namespace cs::render
 		       _impl->host.ComposeToTarget(a_scene, a_interface, a_output, a_width, a_height, a_settings);
 	}
 
-	bool TemporalPipeline::IsFrameGenerationEnabledForFrame(
-		bool a_inExcludedMenu) const noexcept
+	bool TemporalPipeline::CanGenerateFrame(const FrameState& a_frame) const noexcept
 	{
-		return IsFrameGenerationProxyActive() &&
+		const bool excludedMenu = a_frame.paused || a_frame.mainOrLoading;
+		return IsFrameGenerationPresenterActive() && _impl->host.IsFrameGenerationReady() &&
 		       _impl->frameGenerationEnabled.load(std::memory_order_acquire) &&
-		       (!a_inExcludedMenu ||
-				   _impl->allowFrameGenerationInMenus.load(std::memory_order_acquire));
-	}
-
-	bool TemporalPipeline::AllowFrameGenerationInMenus() const noexcept
-	{
-		return _impl->allowFrameGenerationInMenus.load(std::memory_order_acquire);
+		       (!excludedMenu || _impl->allowFrameGenerationInMenus.load(std::memory_order_acquire));
 	}
 
 	FrameGenerationDiagnostics
@@ -1959,18 +1951,15 @@ namespace cs::render
 			hdrDisplay->IsHdrActive() ? hdrDisplay->GetOutputSettings().paperWhite : 0.0f);
 	}
 
-	void TemporalPipeline::SetFrameGenerationInputsReady(bool a_ready) noexcept
+	void TemporalPipeline::AbandonFrameGenerationFrames() noexcept
 	{
-		if (!a_ready) {
-			std::scoped_lock lock(_impl->mutex);
-			for (auto& frame : _impl->frames) {
-				frame.Abandon();
-			}
-			for (auto& frozen : _impl->frozenFrameConstants) {
-				frozen.reset();
-			}
+		std::scoped_lock lock(_impl->mutex);
+		for (auto& frame : _impl->frames) {
+			frame.Abandon();
 		}
-		_impl->host.SetFrameGenerationInputsReady(a_ready);
+		for (auto& frozen : _impl->frozenFrameConstants) {
+			frozen.reset();
+		}
 	}
 
 	void TemporalPipeline::FailFrameGenerationFrame(const char* a_reason) noexcept

@@ -65,7 +65,6 @@ namespace cs::render
 		[[nodiscard]] temporal::PresentInputRetirementDiagnostics
 		GetInputRetirementDiagnostics() const noexcept;
 
-		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void SetOutwardD3D11Device(ID3D11Device* a_device) noexcept;
 		void FailFrame(const char* a_reason) noexcept;
 		void RetryFrameGeneration() noexcept;

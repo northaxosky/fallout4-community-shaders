@@ -264,7 +264,6 @@ namespace cs::render
 	HRESULT D3D12FrameGenPresenter::CommitBuffers(
 		FrameGenerationBuffers&& a_buffers, UINT a_width, UINT a_height)
 	{
-		_frameGenerationInputsReady = false;
 		_failures.Retry();
 		_buffers = std::move(a_buffers);
 		++_inputResourceGeneration;
@@ -291,7 +290,6 @@ namespace cs::render
 
 	HRESULT D3D12FrameGenPresenter::RestoreProvider(UINT a_width, UINT a_height)
 	{
-		_frameGenerationInputsReady = false;
 		const temporal::ProviderDisplayDescription description{
 			.width = a_width,
 			.height = a_height,
@@ -342,7 +340,6 @@ namespace cs::render
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
 		}
-		_frameGenerationInputsReady = false;
 		_providerGenerationEnabled = false;
 		_buffers = {};
 		for (auto& backBuffer : _backBuffers) {
@@ -414,7 +411,6 @@ namespace cs::render
 	void D3D12FrameGenPresenter::FailFrame(const char* a_reason) noexcept
 	{
 		const char* reason = a_reason ? a_reason : "unknown failure";
-		_frameGenerationInputsReady = false;
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
 		}
@@ -604,8 +600,7 @@ namespace cs::render
 		auto& timer = _bridge.GetGpuTimer();
 
 		if (!_presentPrepared) {
-			const bool frameGenerationRequested =
-				pipeline.Renderer().ShouldUseFrameGenerationThisFrame();
+			const bool frameGenerationRequested = pipeline.Renderer().TakeFrameGenerationFrame();
 			auto request = frameGenerationRequested &&
 			                       _callbacks.queryFrameState ?
 			                   _callbacks.queryFrameState() :
@@ -625,7 +620,7 @@ namespace cs::render
 				}
 			}
 			bool requested = frameGenerationRequested &&
-			                 _frameGenerationInputsReady && !_failures.Latched() &&
+			                 !_failures.Latched() &&
 			                 request.enabled;
 			// An R8 proxy copied into the R10 chain would be reinterpreted bit for bit.
 			const SharedD3D11D3D12Texture* copySource = a_frame.proxy;
@@ -926,7 +921,6 @@ namespace cs::render
 		_vendorConsumptionPossible = false;
 		_preparedTransaction = false;
 		_preparedRealFrame = 0;
-		_frameGenerationInputsReady = false;
 		if (SUCCEEDED(presentResult)) {
 			_frameSlot =
 				(_frameSlot + 1) %
@@ -966,7 +960,6 @@ namespace cs::render
 				return { .result = E_FAIL };
 			}
 			_providerGenerationEnabled = false;
-			_frameGenerationInputsReady = false;
 			ResetSubmissions();
 			for (auto& backBuffer : _backBuffers) {
 				backBuffer = nullptr;

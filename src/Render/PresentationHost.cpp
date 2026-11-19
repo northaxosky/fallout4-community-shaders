@@ -317,13 +317,6 @@ namespace cs::render
 		return _frameGeneration ? _frameGeneration->GetInputRetirementDiagnostics() : temporal::PresentInputRetirementDiagnostics{};
 	}
 
-	void PresentationHost::SetFrameGenerationInputsReady(bool a_ready) noexcept
-	{
-		if (_frameGeneration) {
-			_frameGeneration->SetFrameGenerationInputsReady(a_ready);
-		}
-	}
-
 	void PresentationHost::SetOutwardD3D11Device(ID3D11Device* a_device) noexcept
 	{
 		if (a_device) {

@@ -3,6 +3,7 @@
 #include "Render/FailurePolicy.h"
 #include "Render/FrameGenerationCpuTiming.h"
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/FrameState.h"
 #include "Render/HdrCompose.h"
 #include "Render/LatencyRouter.h"
 #include "Render/SwapChainHook.h"
@@ -229,9 +230,8 @@ namespace cs::render
 		// Runs the presenter's HDR compose into a_output; false unless the container is active.
 		[[nodiscard]] bool ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
 			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept;
-		[[nodiscard]] bool
-		IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
-		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;
+		// The one gate for a frame: presenter, readiness, enablement and menus.
+		[[nodiscard]] bool CanGenerateFrame(const FrameState& a_frame) const noexcept;
 		[[nodiscard]] FrameGenerationDiagnostics
 		GetFrameGenerationDiagnostics(
 			bool a_includeLiveEngineState = true) const noexcept;
@@ -246,7 +246,7 @@ namespace cs::render
 		// Under HDR output ReShade gets the color as scRGB at paper white.
 		void RenderReShadeEffects(ID3D11DeviceContext& a_context,
 			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth) noexcept;
-		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
+		void AbandonFrameGenerationFrames() noexcept;
 		void FailFrameGenerationFrame(const char* a_reason) noexcept;
 		void ResetFrameGenerationCaptureDiagnostics() noexcept;
 		void RecordFrameGenerationCapture(bool a_alphaConditioned) noexcept;

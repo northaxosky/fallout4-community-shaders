@@ -46,7 +46,6 @@ namespace cs::render
 		GetInputRetirementDiagnostics() const noexcept { return _retirementDiagnostics.Snapshot(); }
 		// A DXGI_PRESENT_TEST attempt belongs to the frame the transaction prepared.
 		void RecordTestPresent(UINT a_flags, HRESULT a_result) noexcept;
-		void SetFrameGenerationInputsReady(bool a_ready) noexcept { _frameGenerationInputsReady = a_ready; }
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		// A settings change gives a latched frame generation another chance.
 		void RetryFrameGeneration() noexcept { _failures.Retry(); }
@@ -106,7 +105,6 @@ namespace cs::render
 		UINT _nextPresentSubmission = 0;
 		bool _hdrContainer = false;
 		bool _faulted = false;
-		bool _frameGenerationInputsReady = false;
 		temporal::FailurePolicy _failures{ temporal::kFrameGenerationFailureLimit };
 		bool _providerGenerationEnabled = false;
 		bool _providerPresentationActive = false;

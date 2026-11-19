@@ -452,7 +452,7 @@ namespace cs::render
 			resourcesReady && PreflightExternalResolve(method);
 		_spatialFallbackPreflightReady.store(ok, std::memory_order_release);
 
-		if (IsFrameGenerationDx12PathActive() && !_copyDepthForFrameGenerationCS) {
+		if (render::TemporalPipeline::Get().IsFrameGenerationPresenterActive() && !_copyDepthForFrameGenerationCS) {
 			_copyDepthForFrameGenerationCS = cs::util::CompileComputeShader("Upscaling/CopyDepthForFrameGeneration.CS", kCopyDepthForFrameGenerationPath);
 			if (!_copyDepthForFrameGenerationCS) {
 				render::TemporalPipeline::Get().FailFrameGenerationFrame(

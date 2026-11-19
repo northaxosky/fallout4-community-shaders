@@ -11,7 +11,7 @@ namespace cs::render
 	{
 		InvalidateFirstPersonAlphaState();
 		if (!_resourcesReady.load(std::memory_order_acquire) ||
-			!ShouldUseFrameGenerationThisFrame() ||
+			!GeneratesThisFrame() ||
 			!cs::engine::GetCapturedWorldCameraRecord(GetEngineFrame()) ||
 			!_copyDepthForFrameGenerationCS ||
 			!_frameGenerationCopyCB) {
@@ -100,7 +100,7 @@ namespace cs::render
 		InvalidateFirstPersonAlphaState();
 		if (stamp.stage != FirstPersonAlphaStage::kPrepared ||
 			stamp.engineFrame != GetEngineFrame() ||
-			!ShouldUseFrameGenerationThisFrame()) {
+			!GeneratesThisFrame()) {
 			return;
 		}
 
@@ -202,7 +202,7 @@ namespace cs::render
 		_hudlessCapturePending = false;
 		render::TemporalPipeline::Get()
 			.ResetFrameGenerationCaptureDiagnostics();
-		render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
+		SetFrameGenerationInputsReady(false);
 	}
 
 	void TemporalRenderer::InvalidateFirstPersonAlphaState() noexcept
@@ -369,7 +369,7 @@ namespace cs::render
 			cs::engine::GetRenderTargetRTV(RE::BSGraphics::RenderTargetID::kFrameBuffer);
 		const auto& hudless = capture.hudlessColor;
 		if (!context || !frameBufferRTV || !hudless.resource) {
-			render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
+			SetFrameGenerationInputsReady(false);
 			return false;
 		}
 
@@ -378,7 +378,7 @@ namespace cs::render
 		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
 		if (!frameBufferResource ||
 			FAILED(frameBufferResource->QueryInterface(IID_PPV_ARGS(frameBuffer.put())))) {
-			render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
+			SetFrameGenerationInputsReady(false);
 			return false;
 		}
 
@@ -430,7 +430,7 @@ namespace cs::render
 		if (!capture.hdrContainer && !CopyHUDLessColor(capture)) {
 			return;
 		}
-		render::TemporalPipeline::Get().SetFrameGenerationInputsReady(true);
+		SetFrameGenerationInputsReady(true);
 		const auto [renderWidth, renderHeight] = GetRenderSize();
 		const bool transactionReady =
 			render::TemporalPipeline::Get().RecordInputPacket(
@@ -480,7 +480,11 @@ namespace cs::render
 		_hudlessCapturePending = false;
 		render::TemporalPipeline::Get()
 			.ResetFrameGenerationCaptureDiagnostics();
-		render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
+		{
+			std::scoped_lock lock(_frameGenerationMutex);
+			CurrentFrameGenerationFrame().generate = false;
+		}
+		SetFrameGenerationInputsReady(false);
 		InvalidateFirstPersonAlphaState();
 	}
 }

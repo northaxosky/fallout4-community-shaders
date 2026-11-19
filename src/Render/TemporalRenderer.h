@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -58,9 +59,10 @@ namespace cs::render
 		void InitializeTemporalState();
 		void ClearFrameGenerationCaptureState() noexcept;
 		void QuarantineAfterException(const char* a_where) noexcept;
-		// Decided once per frame at the pre-UI seam; Present reads the latch.
-		bool ShouldUseFrameGenerationThisFrame() const noexcept;
-		void LatchFrameGenerationDecision() noexcept;
+		// One record per world frame decides frame generation.
+		[[nodiscard]] bool GeneratesThisFrame() noexcept;
+		// Present takes the record once; true when it asks for a generated frame.
+		[[nodiscard]] bool TakeFrameGenerationFrame() noexcept;
 		[[nodiscard]] std::pair<std::uint32_t, std::uint32_t> GetRenderSize() const noexcept;
 		[[nodiscard]] float2 GetAppliedJitter() const noexcept { return jitter; }
 		[[nodiscard]] float GetMipBias() const;
@@ -106,9 +108,15 @@ namespace cs::render
 		ResourceConfiguration GetResourceConfiguration(UpscaleMethod a_method) const noexcept;
 
 		bool IsUpscalingActive() const;
-		bool IsFrameGenerationDx12PathActive() const noexcept;
-		bool IsFrameGenerationActive() const noexcept;
-		bool EvaluateFrameGenerationDecision() const noexcept;
+		struct FrameGenerationFrame
+		{
+			std::uint64_t worldFrame = 0;
+			bool generate = false;
+			bool inputsReady = false;
+		};
+		// Built on first use in a world frame; callers hold _frameGenerationMutex.
+		FrameGenerationFrame& CurrentFrameGenerationFrame() noexcept;
+		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		UpscaleMethod GetUpscaleMethod() const;
 
 		bool CheckResources(UpscaleMethod a_upscalemethod);
@@ -447,7 +455,8 @@ namespace cs::render
 		std::atomic<float> _mipBias{ 0.0f };
 		std::atomic_uint32_t _upscaleDispatches{ 0 };
 		std::atomic_uint32_t _resetSubmissions{ 0 };
-		std::atomic_uint64_t _frameGenerationLatchFrame{ 0 };
+		std::mutex _frameGenerationMutex;
+		FrameGenerationFrame _frameGeneration;
 		std::atomic_uint32_t _providerFailures{ 0 };
 		std::atomic_uint32_t _spatialFallbacks{ 0 };
 		std::atomic_uint32_t _transientFailures{ 0 };

@@ -34,45 +34,43 @@ namespace cs::render
 				   extent.height < state->screenHeight);
 	}
 
-	bool TemporalRenderer::IsFrameGenerationDx12PathActive() const noexcept
+	TemporalRenderer::FrameGenerationFrame& TemporalRenderer::CurrentFrameGenerationFrame() noexcept
 	{
-		return render::TemporalPipeline::Get().IsFrameGenerationPresenterActive();
-	}
-
-	bool TemporalRenderer::IsFrameGenerationActive() const noexcept
-	{
-		const auto status = render::TemporalPipeline::Get().GetStatus();
-		return IsFrameGenerationDx12PathActive() &&
-		       status.effective.frameGenerationEnabled;
-	}
-
-	bool TemporalRenderer::ShouldUseFrameGenerationThisFrame() const noexcept
-	{
-		const auto latched =
-			_frameGenerationLatchFrame.load(std::memory_order_acquire);
-		// Expires when the pre-UI seam stops running, e.g. loading screens.
-		return latched != 0 && GetEngineFrame() + 1 - latched <= 1;
-	}
-
-	void TemporalRenderer::LatchFrameGenerationDecision() noexcept
-	{
-		_frameGenerationLatchFrame.store(
-			EvaluateFrameGenerationDecision() ? GetEngineFrame() + 1 : 0,
-			std::memory_order_release);
-	}
-
-	bool TemporalRenderer::EvaluateFrameGenerationDecision() const noexcept
-	{
-		if (!IsFrameGenerationDx12PathActive() ||
-			!render::TemporalPipeline::Get()
-				.GetFrameGenerationCaptureResources()
-				.ready) {
-			return false;
-		}
-
 		const auto frame = GetFrameState();
-		return render::TemporalPipeline::Get().IsFrameGenerationEnabledForFrame(
-			frame.paused || frame.mainOrLoading);
+		if (_frameGeneration.worldFrame != frame.worldFrame) {
+			_frameGeneration = {
+				.worldFrame = frame.worldFrame,
+				.generate = render::TemporalPipeline::Get().CanGenerateFrame(frame)
+			};
+		}
+		return _frameGeneration;
+	}
+
+	bool TemporalRenderer::GeneratesThisFrame() noexcept
+	{
+		std::scoped_lock lock(_frameGenerationMutex);
+		return CurrentFrameGenerationFrame().generate;
+	}
+
+	bool TemporalRenderer::TakeFrameGenerationFrame() noexcept
+	{
+		std::scoped_lock lock(_frameGenerationMutex);
+		auto& record = CurrentFrameGenerationFrame();
+		const bool generate = record.generate && record.inputsReady;
+		record.generate = false;
+		record.inputsReady = false;
+		return generate;
+	}
+
+	void TemporalRenderer::SetFrameGenerationInputsReady(bool a_ready) noexcept
+	{
+		{
+			std::scoped_lock lock(_frameGenerationMutex);
+			CurrentFrameGenerationFrame().inputsReady = a_ready;
+		}
+		if (!a_ready) {
+			render::TemporalPipeline::Get().AbandonFrameGenerationFrames();
+		}
 	}
 
 	std::pair<std::uint32_t, std::uint32_t> TemporalRenderer::GetRenderSize() const noexcept
