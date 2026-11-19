@@ -43,4 +43,27 @@ namespace cs::render::temporal
 		std::atomic_uint32_t _consecutive{ 0 };
 		std::atomic_bool _latched{ false };
 	};
+
+	// Dev fault injection: an armed DevFlags flag fails the next a_count calls, then disarms.
+	class InjectedFaults
+	{
+	public:
+		void Poll(std::atomic_bool& a_flag, std::uint32_t a_count) noexcept
+		{
+			if (a_flag.exchange(false, std::memory_order_relaxed)) {
+				_remaining.store(a_count, std::memory_order_relaxed);
+			}
+		}
+
+		[[nodiscard]] bool Take() noexcept
+		{
+			auto left = _remaining.load(std::memory_order_relaxed);
+			while (left && !_remaining.compare_exchange_weak(left, left - 1, std::memory_order_relaxed)) {
+			}
+			return left != 0;
+		}
+
+	private:
+		std::atomic_uint32_t _remaining{ 0 };
+	};
 }  // namespace cs::render::temporal

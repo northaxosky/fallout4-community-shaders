@@ -4,6 +4,8 @@
 
 #include <winrt/base.h>
 
+#include "Features/RemoteControl/DevFlags.h"
+#include "Render/FailurePolicy.h"
 #include "Streamline.h"
 
 namespace cs::features
@@ -142,6 +144,14 @@ namespace cs::features
 	ProviderResult StreamlinePresentation::PrepareFrame(
 		const render::temporal::FrameGenerationRequest& a_request)
 	{
+		static render::temporal::InjectedFaults injected;
+		static auto& failThree = DevFlags::Get("tmp::fail_fg_prepare_3");
+		static auto& failSix = DevFlags::Get("tmp::fail_fg_prepare_6");
+		injected.Poll(failThree, 3);
+		injected.Poll(failSix, 6);
+		if (injected.Take()) {
+			return Failure("Injected frame-generation failure.");
+		}
 		if (!_ready) {
 			return Failure(
 				std::string(Name()) + " presentation is not ready.");

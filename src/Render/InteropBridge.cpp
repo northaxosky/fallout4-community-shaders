@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "Features/RemoteControl/DevFlags.h"
 #include "Log.h"
 #include "Render/Annotation.h"
 #include "Render/FrameProfiler.h"
@@ -586,7 +587,12 @@ namespace cs::render
 			request.reactiveMask = reactive;
 			request.transparencyCompositionMask = transparency;
 			_gpuTimer.BeginScope(commandList, submission->timing, "D3D12::SuperResolution/Provider");
-			auto providerResult = a_provider.Record(request);
+			static temporal::InjectedFaults injected;
+			static auto& failThirtyOne = DevFlags::Get("tmp::fail_sr_record_31");
+			injected.Poll(failThirtyOne, 31);
+			auto providerResult = injected.Take() ?
+			                          temporal::ProviderResult::Fail("Injected super-resolution failure.", temporal::FailureDomain::kSuperResolution) :
+			                          a_provider.Record(request);
 			_gpuTimer.EndScope(commandList, submission->timing, "D3D12::SuperResolution/Provider");
 			if (!providerResult.Succeeded()) {
 				DX::ThrowIfFailed(commandList->Close());
