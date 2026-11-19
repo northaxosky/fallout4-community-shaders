@@ -87,7 +87,8 @@ namespace cs::features
 			bool a_loadDlss,
 			bool a_loadFsr,
 			bool a_loadDlssG,
-			bool a_loadFsrG);
+			bool a_loadFsrG,
+			bool a_loadReflex);
 
 		bool PrepareD3D12Device(ID3D12Device** a_device);
 		bool GetNativeD3D12Device(
@@ -306,6 +307,7 @@ namespace cs::features
 		bool _fsrFeatureRequested = false;
 		bool _fsrGResourcesConfigured = false;
 		bool _fsrGFeatureRequested = false;
+		bool _reflexFeatureRequested = false;
 		std::atomic<render::temporal::CapabilityAvailability>
 			_fsr4SrAvailability{
 				render::temporal::CapabilityAvailability::kUnknown

@@ -61,6 +61,9 @@ namespace cs::render::temporal
 		FrameGenerationConfiguration frameGenerationConfiguration;
 		std::uint64_t revision = 0;
 
+		// The session presents through a frame-generation chain; otherwise D3D11 presents.
+		[[nodiscard]] bool StartsFrameGeneration() const noexcept { return frameGenerationEligible && frameGenerationEnabled; }
+
 		auto operator<=>(const RequestedTopology&) const = default;
 	};
 

@@ -349,7 +349,7 @@ namespace cs::render
 		temporal::IFrameGenerationProvider*
 		StartupFrameGeneration(const temporal::RequestedTopology& a_request, std::string& a_reason)
 		{
-			if (!a_request.frameGenerationEligible || !a_request.frameGenerationEnabled) {
+			if (!a_request.StartsFrameGeneration()) {
 				return nullptr;
 			}
 			const auto method = a_request.frameGeneration;
@@ -974,7 +974,8 @@ namespace cs::render
 				request.streamlineLogLevel, request.upscalingEligible,
 				request.upscalingEligible,
 				loadDlssFrameGeneration,
-				request.frameGenerationEligible);
+				request.frameGenerationEligible,
+				request.StartsFrameGeneration());
 		}
 	}
 

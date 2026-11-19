@@ -154,12 +154,14 @@ namespace cs::features
 		bool a_loadDlss,
 		bool a_loadFsr,
 		bool a_loadDlssG,
-		bool a_loadFsrG)
+		bool a_loadFsrG,
+		bool a_loadReflex)
 	{
 		triedInitialization = true;
 		_dlssGFeatureRequested = a_loadDlssG;
 		_fsrFeatureRequested = a_loadFsr;
 		_fsrGFeatureRequested = a_loadFsrG;
+		_reflexFeatureRequested = a_loadReflex;
 
 		const auto interposerPath =
 			std::filesystem::path(Streamline::PluginDir) / L"sl.interposer.dll";
@@ -188,7 +190,10 @@ namespace cs::features
 			featuresToLoad[featureCount++] = sl::kFeatureDLSS_G;
 		}
 		featuresToLoad[featureCount++] = sl::kFeaturePCL;
-		featuresToLoad[featureCount++] = sl::kFeatureReflex;
+		// D3D11 sessions pace through NVAPI on the presenting device instead.
+		if (a_loadReflex) {
+			featuresToLoad[featureCount++] = sl::kFeatureReflex;
+		}
 		if (a_loadFsrG) {
 			featuresToLoad[featureCount++] = sl::kFeatureFSR_G;
 		}
@@ -412,7 +417,9 @@ namespace cs::features
 			checkFeatureAvailability(sl::kFeatureFSR, "FSR", featureFSR);
 		}
 		checkFeatureAvailability(sl::kFeaturePCL, "PCL", featurePCL);
-		checkFeatureAvailability(sl::kFeatureReflex, "Reflex", featureReflex);
+		if (_reflexFeatureRequested) {
+			checkFeatureAvailability(sl::kFeatureReflex, "Reflex", featureReflex);
+		}
 		if (_dlssGFeatureRequested) {
 			checkFeatureAvailability(sl::kFeatureDLSS_G, "DLSS-G", featureDLSSG);
 			_dlssGAvailability.store(
