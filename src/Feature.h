@@ -71,7 +71,6 @@ namespace cs
 			const auto state = _runtimeState.load(std::memory_order_acquire);
 			return state == FeatureRuntimeState::kActive || state == FeatureRuntimeState::kDegraded;
 		}
-		bool IsDegraded() const noexcept { return _runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kDegraded; }
 		bool IsHealthy() const noexcept { return _runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kActive; }
 		bool IsLoaded() const noexcept override { return _loaded; }
 		Feature* GetRuntimeOwner() const noexcept override { return const_cast<Feature*>(this); }
@@ -96,8 +95,6 @@ namespace cs
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
-		// Runs on the UI event thread; queue render-thread work instead of doing it.
-		virtual void OnLoadingMenuClosed() {}
 		virtual void Prepass() {}
 		virtual void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) {}
 		// Fills the b5 frame block the host built; the b6 and b8 writers cannot reach it.
@@ -140,9 +137,6 @@ namespace cs
 
 		// Per-weather overrides from the `weather` table; null when absent.
 		virtual weather::Profiles* GetWeatherProfiles() { return nullptr; }
-		// The CS Editor draws a section with this title; empty opts out.
-		virtual std::string_view GetWeatherAnalysisTitle() const { return {}; }
-		virtual void DrawWeatherAnalysis() {}
 
 		virtual bool ProducesTelemetry() const { return false; }
 		// Telemetry must read only cached or atomic state.
@@ -188,17 +182,12 @@ namespace cs
 
 		virtual std::string GetFeatureSummary() const { return {}; }
 
-		virtual std::optional<std::string> GetFeatureModLink() const { return {}; }
-
 		virtual std::string GetCategory() const { return FeatureCategories::kOther; }
 
 		virtual bool IsInMenu() const { return true; }
 
 		// False hides the feature's own page; its settings live on another page.
 		virtual bool IsInFeatureList() const { return true; }
-
-		// Inactive features defer menu wiring.
-		virtual void DrawUnloadedUI() {}
 
 		// Show load failures instead of silently skipping.
 		virtual void DrawFailLoadMessage() {}
@@ -350,7 +339,6 @@ namespace cs
 		void PrepareAll();
 		void ActivateAll();
 		void OnDataLoadedAll();
-		void OnLoadingMenuClosedAll();
 		void OnPostPostLoadAll();
 		void PrepassAll();
 

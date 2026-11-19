@@ -460,18 +460,6 @@ namespace cs::features::cs_editor
 		dmui::ui::EndTable();
 	}
 
-	void WeatherPanel::DrawFeatureAnalysis(const Feature& a_editor)
-	{
-		for (auto* feature : FeatureManager::Get().GetAll()) {
-			const auto title = feature->GetWeatherAnalysisTitle();
-			if (feature == &a_editor || title.empty())
-				continue;
-			const auto id = std::format("cs-editor-analysis-{}", feature->GetName());
-			if (const ui::Section section{ id.c_str(), std::string(title).c_str() }; section)
-				feature->DrawWeatherAnalysis();
-		}
-	}
-
 	RE::TESWeather* WeatherPanel::GetTargetWeather(const RE::Sky& a_sky) const
 	{
 		return _selected ? _selected : a_sky.currentWeather;

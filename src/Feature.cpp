@@ -49,14 +49,6 @@ namespace
 			a_feature.Log()->error("Failed to save enabled state: {}", result.error);
 		return result.success;
 	}
-
-	void OnTrackedMenu(cs::render::TrackedMenu a_menu, bool a_opening)
-	{
-		if (a_menu == cs::render::TrackedMenu::kLoading && !a_opening) {
-			cs::render::RequestReset(cs::render::ResetReason::kLoad);
-			cs::FeatureManager::Get().OnLoadingMenuClosedAll();
-		}
-	}
 }
 
 namespace cs
@@ -685,18 +677,10 @@ namespace cs
 
 	void FeatureManager::OnDataLoadedAll()
 	{
-		cs::render::AddMenuListener(&OnTrackedMenu);
 		if (!cs::render::RegisterMenuEvents())
-			L->warn("UI event source unavailable; loading-menu callbacks are disabled.");
+			L->warn("UI event source unavailable; menu tracking is disabled.");
 		DispatchRuntimeCallbacks(*this, "OnDataLoaded", [](Feature& a_feature) {
 			a_feature.OnDataLoaded();
-		});
-	}
-
-	void FeatureManager::OnLoadingMenuClosedAll()
-	{
-		DispatchRuntimeCallbacks(*this, "OnLoadingMenuClosed", [](Feature& a_feature) {
-			a_feature.OnLoadingMenuClosed();
 		});
 	}
 

@@ -80,6 +80,8 @@ namespace cs::render
 					if (a_event.menuName != tracked.name)
 						continue;
 					SetOpen(tracked.menu, a_event.opening);
+					if (tracked.menu == TrackedMenu::kLoading && !a_event.opening)
+						RequestReset(ResetReason::kLoad);
 					for (const auto& slot : g_listeners) {
 						if (const auto listener = slot.load(std::memory_order_acquire))
 							listener(tracked.menu, a_event.opening);

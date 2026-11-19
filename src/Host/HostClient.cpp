@@ -612,50 +612,6 @@ namespace cs::host
 						return false;
 					}
 				}
-			} else {
-				try {
-					a_feature.DrawUnloadedUI();
-				} catch (const std::exception& error) {
-					reportCallbackFailure(
-						"DearModdingUI::DrawUnloadedUI",
-						"Feature help callback failed",
-						error.what());
-					throw;
-				} catch (...) {
-					reportCallbackFailure(
-						"DearModdingUI::DrawUnloadedUI",
-						"Feature help callback failed",
-						"non-standard exception");
-					throw;
-				}
-				std::optional<std::string> modLink;
-				try {
-					modLink = a_feature.GetFeatureModLink();
-				} catch (const std::exception& error) {
-					reportCallbackFailure(
-						"DearModdingUI::GetFeatureModLink",
-						"Feature link callback failed",
-						error.what());
-					throw;
-				} catch (...) {
-					reportCallbackFailure(
-						"DearModdingUI::GetFeatureModLink",
-						"Feature link callback failed",
-						"non-standard exception");
-					throw;
-				}
-				if (modLink && !modLink->empty()) {
-					const std::array links{
-						dmui::Link{
-							.label = "Open feature mod page",
-							.external = {
-								.targetKind = DMUI_EXTERNAL_TARGET_URI,
-								.target = modLink->c_str() },
-							.action = dmui::LinkAction::kOpenExternal }
-					};
-					if (!_client.DrawLinkRow("feature-mod-link", links))
-						LogFailure("draw feature mod link");
-				}
 			}
 			return true; });
 				}
