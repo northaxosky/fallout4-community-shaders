@@ -18,7 +18,7 @@
 - Dynamic Cubemaps: sky reflections and ambient no longer drop out for a few frames when a frame skips the sky update.
 - Lighting: meshes with broken normals no longer cause flickering black boxes, most visible with DLSS or FSR.
 - Settings: saving keeps hand edits to the TOML made while the game runs, and a broken TOML is never overwritten.
-- Settings: every change applies at a frame boundary, and HDR paper white stays clamped from every source.
+- HDR Display: paper white stays below peak brightness when set by a preset or Remote Control.
 - Presets: preset keys must match feature config keys exactly; older presets with lowercase keys no longer load.
 - Light Limit Fix: lights return to their vanilla radius while its shaders are off.
 - Screen Space Shadows: stale contact shadows no longer show when the shadow mask cannot be bound.
