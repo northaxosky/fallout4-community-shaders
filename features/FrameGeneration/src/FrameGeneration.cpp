@@ -506,10 +506,12 @@ namespace cs::features
 						render::temporal::CapabilityAvailability::kSupported &&
 					dlssCapabilities.IsCurrent();
 				// Outside a frame-generation session nothing is probed; the launch validates.
+				constexpr std::uint32_t kUnprobedMaxGenerated = 3;
 				const bool capabilitiesUnprobed =
-					dlssCapabilities.availability == render::temporal::CapabilityAvailability::kUnknown &&
+					status.session.activeFg != render::temporal::FrameGenerationMethod::kDLSSG &&
+					dlssCapabilities.availability != render::temporal::CapabilityAvailability::kUnsupported &&
 					!dlssCapabilities.configurationQueryFailed;
-				const std::uint32_t knownMaxGenerated = capabilitiesCurrent ? dlssCapabilities.maxGeneratedFrames : capabilitiesUnprobed ? 3u :
+				const std::uint32_t knownMaxGenerated = capabilitiesCurrent ? dlssCapabilities.maxGeneratedFrames : capabilitiesUnprobed ? kUnprobedMaxGenerated :
 				                                                                                                                           0u;
 				if (knownMaxGenerated > 0) {
 					const auto maxGeneratedFrames = std::min(

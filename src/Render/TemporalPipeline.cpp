@@ -971,8 +971,8 @@ namespace cs::render
 		const bool streamlineRequested =
 			request.upscalingEligible || request.frameGenerationEligible;
 		if (streamlineRequested) {
-			const bool loadDlssFrameGeneration =
-				request.frameGenerationEligible;
+			// sl.dlss_g needs sl.reflex, which only a frame-generation session loads.
+			const bool loadDlssFrameGeneration = request.StartsFrameGeneration();
 			_impl->streamline.LoadInterposer(
 				request.streamlineLogLevel, request.upscalingEligible,
 				request.upscalingEligible,
@@ -1047,7 +1047,7 @@ namespace cs::render
 			_impl->creationState.store(TemporalCreationState::kNative,
 				std::memory_order_release);
 			PostFailure(temporal::FailureDomain::kTransport,
-				std::format("Frame-generation proxy device creation failed "
+				std::format("Presentation device creation failed "
 							"({:#010x}); native creation remains safe.",
 					static_cast<std::uint32_t>(deviceResult)));
 			return std::nullopt;
@@ -1162,7 +1162,11 @@ namespace cs::render
 					.queryHdrOutput =
 						hdrOutput ?
 							std::function<hdr::OutputSettings()>{
-								[] { return features::HDRDisplay::GetSingleton()->GetOutputSettings(); } } :
+								[] {
+									auto* hdrDisplay = features::HDRDisplay::GetSingleton();
+									hdrDisplay->RefreshDisplay();
+									return hdrDisplay->GetOutputSettings();
+								} } :
 							std::function<hdr::OutputSettings()>{} });
 			_impl->activePresentation = _impl->host.GetPresentationProvider();
 		} catch (const std::exception& e) {
