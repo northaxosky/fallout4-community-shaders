@@ -348,7 +348,7 @@ namespace cs::render
 			}
 		}
 
-		// The provider whose presenter should carry this session, or null with a_reason for D3D11.
+		// The provider whose presenter carries the session, or null with a_reason.
 		temporal::IFrameGenerationProvider*
 		StartupFrameGeneration(const temporal::RequestedTopology& a_request, std::string& a_reason)
 		{
@@ -1006,11 +1006,17 @@ namespace cs::render
 				"creation request.");
 			return std::nullopt;
 		}
+		// The HDR container needs Windows HDR on at launch.
+		bool hdrOutput = false;
 		if (request.hdrDisplay) {
-			features::HDRDisplay::GetSingleton()->SeedFromDisplay(
-				a_context.swapChainDesc->OutputWindow);
+			auto* hdrDisplay = features::HDRDisplay::GetSingleton();
+			hdrDisplay->SeedFromDisplay(a_context.swapChainDesc->OutputWindow);
+			hdrOutput = hdrDisplay->IsWindowsHdrOn();
 		}
-		// The D3D12 proxy presents black in exclusive fullscreen.
+		if (!request.upscalingEligible && !request.frameGenerationEligible && !hdrOutput) {
+			return std::nullopt;
+		}
+		// The facade does not support exclusive fullscreen.
 		if (!a_context.swapChainDesc->Windowed) {
 			_impl->creationState.store(TemporalCreationState::kNative,
 				std::memory_order_release);
@@ -1051,13 +1057,11 @@ namespace cs::render
 		try {
 			// A failed bridge leaves D3D11 presentation intact.
 			const bool needsBridge = request.upscalingEligible || request.frameGenerationEligible;
-			const HRESULT bridgeResult = !needsBridge ? S_OK : _impl->bridge.Initialize(
-																   a_context.adapter, device, immediateContext, _impl->interop,
-																   [this] {
-																	   if (_impl->host.GetPresentationProvider()) {
-																		   _impl->latencyRouter.QuarantinePresentation();
-																	   }
-																   });
+			const HRESULT bridgeResult = !needsBridge ? S_OK : _impl->bridge.Initialize(a_context.adapter, device, immediateContext, _impl->interop, [this] {
+				if (_impl->host.GetPresentationProvider()) {
+					_impl->latencyRouter.QuarantinePresentation();
+				}
+			});
 			if (FAILED(bridgeResult)) {
 				PostFailure(temporal::FailureDomain::kTransport,
 					std::format("The interop bridge could not be created ({:#010x}); "
@@ -1156,7 +1160,7 @@ namespace cs::render
 								->OnGameFramePresented();
 						},
 					.queryHdrOutput =
-						request.hdrDisplay ?
+						hdrOutput ?
 							std::function<hdr::OutputSettings()>{
 								[] { return features::HDRDisplay::GetSingleton()->GetOutputSettings(); } } :
 							std::function<hdr::OutputSettings()>{} });
@@ -1179,7 +1183,7 @@ namespace cs::render
 				"Presentation host construction raised a non-standard exception.");
 		}
 		if (FAILED(proxyResult) || !_impl->host.GetProxy()) {
-			// Native presentation keeps the old behavior: no bridge, no external super resolution.
+			// Native presentation: no bridge, no external super resolution.
 			(void)_impl->bridge.Rollback();
 			immediateContext->Release();
 			device->Release();

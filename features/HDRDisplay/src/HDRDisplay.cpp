@@ -201,7 +201,7 @@ namespace cs::features
 
 		if (const ui::Section section{ "hdr-display-output", "Output" }; section) {
 			if (!render::TemporalPipeline::Get().IsHdrContainerActive())
-				dmui::ui::TextDisabled("HDR output is inactive; it needs borderless windowed mode.");
+				dmui::ui::TextDisabled("HDR output is inactive; it needs borderless windowed mode and Windows HDR on at launch.");
 			else if (_displayKnown.load(std::memory_order_acquire))
 				dmui::ui::TextDisabled(_windowsHdrOn.load(std::memory_order_acquire)       ? "Windows HDR is on." :
 									   _displaySupportsHdr.load(std::memory_order_acquire) ? "Windows HDR is off for this display." :

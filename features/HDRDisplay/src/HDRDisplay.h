@@ -44,6 +44,9 @@ namespace cs::features
 		// First run only: HDR starts on when Windows HDR is on for the game's monitor.
 		void SeedFromDisplay(HWND a_window);
 
+		// Windows HDR was on at launch; the HDR container needs it.
+		[[nodiscard]] bool IsWindowsHdrOn() const noexcept { return _windowsHdrOn.load(std::memory_order_acquire); }
+
 		// True while the frame renders HDR: enabled, with a container to present it.
 		[[nodiscard]] bool IsHdrActive() const noexcept;
 
