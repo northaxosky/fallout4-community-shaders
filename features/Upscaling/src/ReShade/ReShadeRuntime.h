@@ -30,9 +30,7 @@ namespace cs::features
 		// False when no ReShade module is loaded; cheap after the first call.
 		[[nodiscard]] static bool IsInstalled() noexcept;
 
-		// Call before the engine device exists, so ReShade's device event is seen.
-		static void ArmDeviceCapture() noexcept;
-		// The device beneath ReShade's proxy, through its public add-on API; a_device without ReShade.
+		// The device beneath ReShade's proxy, found through a resource it creates; a_device without ReShade.
 		[[nodiscard]] static winrt::com_ptr<ID3D11Device> NativeDevice(ID3D11Device& a_device) noexcept;
 		// ReShade attaching its own runtime to this window's chain is logged as an error.
 		static void GuardWindow(HWND a_window) noexcept;

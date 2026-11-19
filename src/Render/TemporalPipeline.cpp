@@ -1010,7 +1010,6 @@ namespace cs::render
 		ID3D11Device* device = nullptr;
 		ID3D11DeviceContext* immediateContext = nullptr;
 		D3D_FEATURE_LEVEL featureLevel{};
-		features::ReShadeRuntime::ArmDeviceCapture();
 		const HRESULT deviceResult = a_context.createDevice(
 			a_context.adapter, a_context.driverType, a_context.software,
 			a_context.flags, a_context.featureLevels, a_context.featureLevelCount,

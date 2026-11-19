@@ -36,16 +36,8 @@ namespace cs::features
 		}
 
 		// ReShade stays registered for the process: the capture below must outlive every runtime.
-		std::atomic<ID3D11Device*> g_nativeDevice{};
 		std::atomic<HWND> g_ownedWindow{};
 		std::atomic_bool g_creatingRuntime{ false };
-
-		void OnInitDevice(::reshade::api::device* a_device)
-		{
-			if (a_device->get_api() == ::reshade::api::device_api::d3d11) {
-				g_nativeDevice.store(reinterpret_cast<ID3D11Device*>(a_device->get_native()), std::memory_order_release);
-			}
-		}
 
 		void OnInitEffectRuntime(effect_runtime* a_runtime)
 		{
@@ -59,11 +51,10 @@ namespace cs::features
 		bool EnsureAddon() noexcept
 		{
 			static const bool registered = [] {
-				const auto module = cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnInitDevice));
+				const auto module = cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnInitEffectRuntime));
 				if (!::reshade::register_addon(module)) {
 					return false;
 				}
-				::reshade::register_event<::reshade::addon_event::init_device>(&OnInitDevice);
 				::reshade::register_event<::reshade::addon_event::init_effect_runtime>(&OnInitEffectRuntime);
 				return true;
 			}();
@@ -338,20 +329,29 @@ namespace cs::features
 		}
 	};
 
-	void ReShadeRuntime::ArmDeviceCapture() noexcept
-	{
-		if (IsInstalled()) {
-			(void)EnsureAddon();
-		}
-	}
-
 	winrt::com_ptr<ID3D11Device> ReShadeRuntime::NativeDevice(ID3D11Device& a_device) noexcept
 	{
 		winrt::com_ptr<ID3D11Device> device;
 		device.copy_from(&a_device);
-		if (IsInstalled()) {
-			if (auto* native = g_nativeDevice.load(std::memory_order_acquire)) {
-				device.copy_from(native);
+		if (!IsInstalled()) {
+			return device;
+		}
+		// ReShade proxies the device but not resources, so a resource reports the device beneath.
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = 1;
+		desc.Height = 1;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		winrt::com_ptr<ID3D11Texture2D> probe;
+		if (SUCCEEDED(a_device.CreateTexture2D(&desc, nullptr, probe.put()))) {
+			winrt::com_ptr<ID3D11Device> native;
+			probe->GetDevice(native.put());
+			if (native) {
+				return native;
 			}
 		}
 		return device;
@@ -439,6 +439,10 @@ namespace cs::features
 	void ReShadeRuntime::RenderEffects(ID3D11DeviceContext& a_context, ID3D11Resource& a_color,
 		ID3D11ShaderResourceView* a_depth, const ScRgbProxy* a_scRgb) noexcept
 	{
+		static std::atomic_uint traced{ 0 };
+		const bool trace = traced.fetch_add(1) < 3;
+		if (trace)
+			L->info("ReShade render_effects begin");
 		WithColorCopy(a_context, a_color, a_scRgb, "Upscaling::ReShade/Effects", [&](Impl& a_impl) {
 			cs::render::ScopedContextState state(&a_context, a_impl.contextState.get());
 			if (!state.IsActive()) {
@@ -449,12 +453,20 @@ namespace cs::features
 				a_impl.runtime->get_command_queue()->get_immediate_command_list(),
 				ViewHandle(a_impl.rtv.get()), ViewHandle(a_impl.rtvSrgb.get()));
 		});
+		if (trace)
+			L->info("ReShade render_effects end");
 	}
 
 	void ReShadeRuntime::Present(ID3D11DeviceContext& a_context, ID3D11Resource& a_color, const ScRgbProxy* a_scRgb) noexcept
 	{
+		static std::atomic_uint traced{ 0 };
+		const bool trace = traced.fetch_add(1) < 3;
+		if (trace)
+			L->info("ReShade update_and_present begin");
 		WithColorCopy(a_context, a_color, a_scRgb, "Upscaling::ReShade/Present", [](Impl& a_impl) {
 			::reshade::update_and_present_effect_runtime(a_impl.runtime);
 		});
+		if (trace)
+			L->info("ReShade update_and_present end");
 	}
 }

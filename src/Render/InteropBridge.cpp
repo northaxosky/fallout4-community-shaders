@@ -308,7 +308,7 @@ namespace cs::render
 		_adapter = actualAdapter;
 		features::AgilityBootstrapDiagnostics agilityDiagnostics;
 		DX::ThrowIfFailed(features::CreatePrivateD3D12Device(
-			actualAdapter.get(), _runtime->D3D12SdkDirectory() ,
+			actualAdapter.get(), _runtime->D3D12SdkDirectory(),
 			_deviceFactory, _device12.put(), &agilityDiagnostics));
 		if (agilityDiagnostics.UsedSdkFactory()) {
 			const auto& version = agilityDiagnostics.loadedVersion;
