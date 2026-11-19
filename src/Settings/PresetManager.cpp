@@ -344,6 +344,17 @@ namespace cs
 			return false;
 		}
 
+		activeIdentity = a_meta.identity;
+		activeName = a_meta.name;
+		pendingComboIdentity = a_meta.identity;
+		if (!SaveCoreConfig()) {
+			a_err = "live preset state was swapped, but active preset identity could not be saved";
+			L->error("{}", a_err);
+			Menu::ShowToast("Applied '" + a_meta.name + "' but active preset could not be saved",
+				5.0, DMUI_STATUS_SEVERITY_ERROR, a_meta.name);
+			return false;
+		}
+
 		L->info("Applied preset: {} ({}, {} feature(s))", a_meta.name,
 			a_meta.builtin ? "builtin" : "user", staged.size());
 		Menu::ShowToast("Applied preset '" + a_meta.name + "'", 2.5, DMUI_STATUS_SEVERITY_INFO, a_meta.name);
@@ -356,7 +367,7 @@ namespace cs
 		bool a_allowOverwrite)
 	{
 		if (settings::liveComparisonActive) {
-			a_err = "Stop the A/B comparison before saving a preset";
+			a_err = std::string(settings::kComparisonRefusal);
 			return false;
 		}
 		if (!a_allowOverwrite && std::filesystem::exists(a_path)) {

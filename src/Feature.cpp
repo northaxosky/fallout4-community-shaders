@@ -400,6 +400,10 @@ namespace cs
 
 	bool FeatureManager::LoadAllSettings(std::string& a_error)
 	{
+		if (settings::liveComparisonActive.load(std::memory_order_acquire)) {
+			a_error = settings::kComparisonRefusal;
+			return false;
+		}
 		const auto reloaded = feature_config::Reload();
 		if (reloaded.status != feature_config::FileLoadStatus::kParsed &&
 			reloaded.status != feature_config::FileLoadStatus::kMissing) {
@@ -433,7 +437,7 @@ namespace cs
 			a_error = "non-standard exception";
 			return false;
 		}
-		// Restart-only values are never applied live; the file's become the pending ones.
+		// Restart-only values become pending, never live.
 		for (auto* feature : GetAll()) {
 			if (auto* live = feature->GetLiveSettings()) {
 				const auto stored = feature_config::GetFeature(feature->GetConfigKey());
@@ -450,25 +454,26 @@ namespace cs
 	bool FeatureManager::ResetAllSettings(std::string& a_error)
 	{
 		constexpr std::string_view phase = "ResetAllSettings";
+		if (settings::liveComparisonActive.load(std::memory_order_acquire)) {
+			a_error = settings::kComparisonRefusal;
+			return false;
+		}
 		std::string failed;
 		for (auto* feature : GetAll()) {
-			if (!PrepareRuntimeCallback(*feature, phase))
+			if (!feature->HasResettableSettings() || !PrepareRuntimeCallback(*feature, phase))
 				continue;
+			std::string reason;
 			try {
-				if (RestoreDefaults(*feature, a_error))
+				if (RestoreDefaults(*feature, reason))
 					continue;
 			} catch (const std::exception& error) {
-				a_error = std::format("{}: {}", feature->GetName(), error.what());
-				return false;
+				reason = error.what();
 			} catch (...) {
-				a_error = std::format("{}: non-standard exception", feature->GetName());
-				return false;
+				reason = "non-standard exception";
 			}
-			failed += (failed.empty() ? "" : ", ");
-			failed += feature->GetName();
+			failed += std::format("{}{}: {}", failed.empty() ? "" : "; ", feature->GetName(), reason);
 		}
-		if (!failed.empty())
-			a_error = "failed to save: " + failed;
+		a_error = failed;
 		return failed.empty();
 	}
 
