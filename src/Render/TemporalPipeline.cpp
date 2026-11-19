@@ -731,9 +731,7 @@ namespace cs::render
 		{
 			std::scoped_lock lock(_impl->mutex);
 			committed =
-				_impl->topology.CommitPendingTransition(
-					pending->revision,
-					presentation && pending->frameGenerationEnabled ? pending->frameGeneration : temporal::FrameGenerationMethod::kOff);
+				_impl->topology.CommitPendingTransition(pending->revision);
 			if (committed) {
 				const auto& effective = _impl->topology.Effective();
 				_impl->effectiveRenderSettings =

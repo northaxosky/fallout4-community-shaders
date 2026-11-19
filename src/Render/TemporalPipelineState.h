@@ -233,10 +233,7 @@ namespace cs::render::temporal
 			const bool changed =
 				target.superResolutionEnabled !=
 					transitionBase.superResolutionEnabled ||
-				target.frameGenerationEnabled !=
-					transitionBase.frameGenerationEnabled ||
 				target.superResolution != transitionBase.superResolution ||
-				target.frameGeneration != transitionBase.frameGeneration ||
 				target.frameGenerationConfiguration !=
 					transitionBase.frameGenerationConfiguration ||
 				target.qualityMode != transitionBase.qualityMode;
@@ -285,18 +282,6 @@ namespace cs::render::temporal
 		[[nodiscard]] bool CommitPendingTransition(
 			std::uint64_t a_revision) noexcept
 		{
-			return CommitPendingTransition(
-				a_revision,
-				_pendingTransition &&
-						_pendingTransition->frameGenerationEnabled ?
-					_pendingTransition->frameGeneration :
-					FrameGenerationMethod::kOff);
-		}
-
-		[[nodiscard]] bool CommitPendingTransition(
-			std::uint64_t a_revision,
-			FrameGenerationMethod a_activeFrameGeneration) noexcept
-		{
 			const EffectiveConfiguration* completed = nullptr;
 			if (_transitionInFlight &&
 				_transitionInFlight->revision == a_revision) {
@@ -307,9 +292,6 @@ namespace cs::render::temporal
 			}
 			if (!completed) {
 				return false;
-			}
-			if (_session) {
-				_session->activeFg = a_activeFrameGeneration;
 			}
 			_effective = *completed;
 			if (_transitionInFlight &&
