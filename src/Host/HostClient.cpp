@@ -67,11 +67,9 @@ namespace cs::host
 				return;
 			bool enabled = a_feature.IsSwitchedOn();
 			if (ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled()).changed) {
-				// Not a SettingsEdit: its flush would save the old value.
 				render::PostToFrame([&a_feature, enabled] {
 					a_feature.SetEnabled(enabled);
-					if (!a_feature.Persist())
-						throw std::runtime_error(std::format("{}: failed to save enabled state", a_feature.GetName()));
+					settings::SettingsEdit{ a_feature }.Apply({ true, true });
 				});
 			}
 		}
