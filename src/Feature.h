@@ -225,7 +225,8 @@ namespace cs
 			state.ApplyActivationResult(a_result);
 			SetState(std::move(state));
 		}
-		// Flips the effective state like SetEnabled, firing OnEnabledChanged.
+		// Sole caller of OnEnabledChanged: stores an input, notifies on an effective flip.
+		void SetInput(std::atomic_bool& a_input, bool a_value) noexcept;
 		void SetSuspended(bool a_suspended) noexcept;
 		// Active features carry no detail, so it can hold a neutral note.
 		void SetActiveNote(std::string a_note)

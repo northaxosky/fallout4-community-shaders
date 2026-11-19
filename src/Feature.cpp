@@ -68,21 +68,23 @@ namespace cs
 		return ActivationResult::Active();
 	}
 
-	void Feature::SetEnabled(bool a_enabled) noexcept
+	void Feature::SetInput(std::atomic_bool& a_input, bool a_value) noexcept
 	{
-		render::CheckFrameBoundary("Feature::SetEnabled");
 		const bool before = IsEnabled();
-		_enabled.store(a_enabled, std::memory_order_release);
+		a_input.store(a_value, std::memory_order_release);
 		if (IsEnabled() != before)
 			OnEnabledChanged(!before);
 	}
 
+	void Feature::SetEnabled(bool a_enabled) noexcept
+	{
+		render::CheckFrameBoundary("Feature::SetEnabled");
+		SetInput(_enabled, a_enabled);
+	}
+
 	void Feature::SetSuspended(bool a_suspended) noexcept
 	{
-		const bool before = IsEnabled();
-		_suspended.store(a_suspended, std::memory_order_release);
-		if (IsEnabled() != before)
-			OnEnabledChanged(!before);
+		SetInput(_suspended, a_suspended);
 	}
 
 	bool Feature::SaveEnabled()
