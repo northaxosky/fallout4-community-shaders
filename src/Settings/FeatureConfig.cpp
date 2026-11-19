@@ -441,7 +441,7 @@ namespace cs::feature_config
 		const auto* section = FindSection(store.registry, path);
 		if (!section)
 			return WriteError(store.path, "unregistered settings section");
-		// Merge onto the file as it is now so edits made since the last load survive.
+		// Merge onto the file so later hand edits survive.
 		const auto loaded = LoadFile(store.path);
 		if (loaded.status == FileLoadStatus::kParseError || loaded.status == FileLoadStatus::kIoError)
 			return WriteError(store.path, "refusing to overwrite an unreadable file: " + loaded.error);

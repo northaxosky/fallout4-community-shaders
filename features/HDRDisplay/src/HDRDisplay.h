@@ -61,7 +61,7 @@ namespace cs::features
 		void SeparateInterface();
 
 		settings::LiveSettings<hdr_display::kSchema> _live{ { .normalize = [](Settings& a_settings) {
-																  // Paper white stays below peak, as upstream clamps on load.
+																  // Paper white stays below peak, as upstream clamps it.
 																  a_settings.paperWhite = std::min(a_settings.paperWhite, a_settings.peakNits - 1); },
 			// Defaults re-seed from the display, like upstream.
 			.defaults = [this] {

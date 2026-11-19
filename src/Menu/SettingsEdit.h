@@ -13,7 +13,7 @@ namespace cs::settings
 	template <class Schema, class Settings>
 	class SchemaEdit;
 
-	// Records edit completion on the feature; HostClient commits the draft after the page draws.
+	// Records edit completion; HostClient commits the draft.
 	class SettingsEdit
 	{
 	public:

@@ -90,14 +90,8 @@ namespace cs::features::remote_control
 			auto& [feature, values] = *parsed;
 
 			std::string error;
-			auto prepared = FeatureManager::Get().PrepareLiveSettings(*feature, values, settings::Scope::kImmediate, settings::Persist::kNo, "RemoteControl::Set", error);
-			if (!prepared)
+			if (!FeatureManager::Get().CommitLiveSettings(*feature, values, settings::Scope::kImmediate, settings::Persist::kNo, "RemoteControl::Set", error))
 				return Error(std::move(error), { { "shortName", a_shortName } });
-			try {
-				(void)settings::ApplyPreparedLiveSettings(std::span{ &*prepared, 1 });
-			} catch (const std::exception& failure) {
-				return Error("settings could not be applied", { { "shortName", a_shortName }, { "detail", failure.what() } });
-			}
 			return { { "action", "set" }, { "shortName", a_shortName }, { "applied", true } };
 		}
 

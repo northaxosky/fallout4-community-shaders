@@ -599,7 +599,7 @@ namespace cs
 
 	void Menu::DrawShaderSettings(dmui::Client& a_client)
 	{
-		// Live ownership is what the engine applies; the stored table may be invalid.
+		// Draw live ownership; the stored table may be invalid.
 		const auto stored = feature_config::ParseShaderOwnership(feature_config::GetRoot());
 		auto config = engine::GetShaderOwnershipConfig();
 		if (const ui::Section section{ "section-shader-ownership", "Shader Ownership" }; section) {

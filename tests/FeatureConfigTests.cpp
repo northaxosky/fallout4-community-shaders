@@ -254,7 +254,7 @@ namespace
 		CHECK(ReadFile(a_path) == invalid);
 	}
 
-	// The file is the source of truth: writes merge onto it and never overwrite one that is broken.
+	// Writes merge onto the file and refuse a broken one.
 	void TestExternalEdits(const Registry& a_registry, const std::filesystem::path& a_path)
 	{
 		CHECK(InitializeAt(a_path, a_registry).error.empty());
@@ -272,7 +272,7 @@ namespace
 		CHECK(ReadFile(a_path) == broken);
 	}
 
-	// Commits go through the binding onto a real store file, as a feature's would.
+	// Commits go through the binding onto a real store file.
 	void TestSettingsTransactions(const Registry& a_registry, const std::filesystem::path& a_path)
 	{
 		namespace llf = cs::features::light_limit_fix;

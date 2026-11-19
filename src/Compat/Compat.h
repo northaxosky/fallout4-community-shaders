@@ -24,7 +24,7 @@ namespace cs::compat
 		std::string_view id = {};
 	};
 
-	// A feature singleton accessor, so a renamed or removed feature breaks the build.
+	// Singleton accessor: a renamed feature breaks the build.
 	using FeatureRef = Feature* (*)() noexcept;
 
 	struct Rule

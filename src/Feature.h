@@ -117,7 +117,7 @@ namespace cs
 		}
 
 		virtual void DrawSettings() {}
-		// The feature's settings transaction; null for features without schema fields.
+		// Settings transaction; null without schema fields.
 		virtual settings::LiveSettingsAccess* GetLiveSettings() { return nullptr; }
 		settings::LiveSettingsAccess* GetLiveSettings() const { return const_cast<Feature*>(this)->GetLiveSettings(); }
 		settings::SchemaView GetSettingsSchema() const
@@ -131,7 +131,7 @@ namespace cs
 			auto* live = GetLiveSettings();
 			return live ? live->shared : SupportsEnableToggle();
 		}
-		// Descriptions of the restart-only settings whose stored value differs from the running one.
+		// Restart-only fields whose next-launch value differs.
 		std::vector<std::string_view> RestartPending() const
 		{
 			auto* live = GetLiveSettings();
@@ -157,7 +157,7 @@ namespace cs
 		// Render thread only; the texture is borrowed until the next render callback.
 		virtual FullscreenDebugData GetFullscreenDebugData() const noexcept { return {}; }
 
-		// Resets state outside the settings; FeatureManager::RestoreDefaults commits the settings.
+		// Resets non-settings state before the defaults commit.
 		virtual void RestoreDefaultSettings() {}
 
 		bool HasResettableSettings() const { return SupportsEnableToggle() || GetLiveSettings(); }
@@ -224,7 +224,7 @@ namespace cs
 			state.ApplyActivationResult(a_result);
 			SetState(std::move(state));
 		}
-		// Sole caller of OnEnabledChanged: stores an input, notifies on an effective flip.
+		// Sole OnEnabledChanged caller; notifies on an effective flip.
 		void SetInput(std::atomic_bool& a_input, bool a_value) noexcept;
 		void SetSuspended(bool a_suspended) noexcept;
 		// Active features carry no detail, so it can hold a neutral note.
@@ -378,9 +378,9 @@ namespace cs
 			}
 		}
 
-		// Live immediate settings plus 'enabled'; null when the feature takes no part in presets or A/B.
+		// Live settings plus 'enabled'; null outside presets and A/B.
 		std::optional<toml::table> SnapshotLiveSettings(const Feature& a_feature, bool a_forComparison = false) const;
-		// Frame boundary only. Shared features refuse during a comparison unless it passes the key.
+		// Frame boundary only; shared features refuse during A/B.
 		std::optional<settings::PreparedLiveSettings> PrepareLiveSettings(
 			Feature& a_feature,
 			const toml::table& a_values,
@@ -407,7 +407,7 @@ namespace cs
 			std::string& a_error);
 		// Resets non-settings state, then commits every default and saves.
 		bool RestoreDefaults(Feature& a_feature, std::string& a_error);
-		// UI thread: posts the page's edits as one commit; a_pageExit flushes deferred keys.
+		// UI thread: posts the page's edits as one commit.
 		void CommitEdits(Feature& a_feature, bool a_pageExit);
 		// Keeps the feature loaded but marks part of it unavailable.
 		void ReportDegraded(Feature& a_feature, std::string a_detail);

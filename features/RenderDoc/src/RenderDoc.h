@@ -143,9 +143,8 @@ namespace cs::features
 
 		void Complete(CaptureCompletion a_completion);
 
-		// Not shared: out of presets, A/B and Remote Control, and still saved during a comparison.
-		settings::LiveSettings<renderdoc_settings::kSchema> _live{ { .normalize = [](Settings& a_settings) { a_settings.captureFrameCount = std::clamp(a_settings.captureFrameCount, renderdoc::kMinCaptureFrameCount, renderdoc::kMaxCaptureFrameCount); },
-			.finalize = [this](const Settings& a_previous) {
+		// Not shared: skips presets, A/B and Remote Control.
+		settings::LiveSettings<renderdoc_settings::kSchema> _live{ { .finalize = [this](const Settings& a_previous) {
 				if (a_previous.captureFolder != _settings.captureFolder)
 					ApplyCapturePath(); },
 			.shared = false } };

@@ -44,7 +44,7 @@ namespace cs::features
 		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 	private:
-		// Not shared: out of presets, A/B and Remote Control, and still saved during a comparison.
+		// Not shared: skips presets, A/B and Remote Control.
 		settings::LiveSettings<performance_overlay::kSchema> _live{ { .normalize = [](Settings& a_settings) { a_settings.NormalizeHiddenGroups(); },
 			.shared = false } };
 

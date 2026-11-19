@@ -34,7 +34,7 @@ namespace cs::settings
 		kNow
 	};
 
-	// kAll also admits restart-only keys, which reach the next-launch copy only.
+	// kAll also admits restart-only keys (next launch).
 	enum class Scope : std::uint8_t
 	{
 		kImmediate,
@@ -77,31 +77,31 @@ namespace cs::settings
 		virtual toml::table Snapshot() const = 0;
 		// Every field.
 		virtual toml::table Defaults() const = 0;
-		// Frame boundary only: builds the candidate and the swap that lands it.
+		// Frame boundary only: builds the candidate and its swap.
 		virtual std::optional<PreparedLiveSettings> Prepare(const toml::table& a_values, Scope a_scope, Persist a_persist, std::string& a_error) = 0;
 		// UI: resyncs the draft when a commit landed since the last call.
 		virtual void BeginDraft() = 0;
-		// UI: folds the draft's changes into the pending commit; true when the caller must post it.
+		// UI: queues draft changes; true when the caller posts.
 		virtual bool QueueEdits(bool a_pageExit) = 0;
 		// Frame boundary: the pending commit, if any.
 		virtual std::optional<PendingCommit> TakePending() = 0;
-		// A failed commit leaves the draft stale; this makes the next BeginDraft resync.
+		// Makes the next BeginDraft resync after a failed commit.
 		virtual void Resync() noexcept = 0;
 		// Writes the keys committed with kDeferred.
 		virtual bool Flush() = 0;
 		// Writes every immediate field and the deferred keys.
 		virtual bool Save() = 0;
 		virtual bool Modified() const = 0;
-		// Descriptions of the restart-only fields whose next-launch value differs from live.
+		// Restart-only field descriptions that differ from live.
 		virtual std::vector<std::string_view> RestartPending() const = 0;
-		// Reads the next-launch values from the stored `[features.X]` table; writes nothing.
+		// Reads next-launch values from `[features.X]`; no write.
 		virtual void ReloadNext(const toml::table* a_stored) = 0;
 
-		// The registry section this binding persists to; stamped by FeatureManager.
+		// Registry section to persist to; stamped by FeatureManager.
 		std::vector<std::string> section;
 		// Live-settable keys that an A/B comparison must not capture.
 		std::vector<std::string_view> notComparable;
-		// False keeps it out of presets, A/B and Remote Control, and out of the comparison lock.
+		// False skips presets, A/B, Remote Control and the A/B lock.
 		bool shared = true;
 		// UI thread: an edit finished since the last QueueEdits.
 		bool editCompleted = false;
@@ -112,8 +112,7 @@ namespace cs::settings
 		spdlog::logger& Logger() const noexcept { return log ? *log : *spdlog::default_logger_raw(); }
 	};
 
-	// Owns a feature's live settings. Every write is a commit prepared at the frame boundary:
-	// the whole struct swaps, so derived members travel with it. Readers use Get().
+	// A feature's live settings; commits swap the whole struct.
 	template <const auto& kSchema>
 	class LiveSettings final : public LiveSettingsAccess
 	{
@@ -124,7 +123,7 @@ namespace cs::settings
 		{
 			// Clamps a candidate; runs on every path.
 			std::function<void(Settings&)> normalize;
-			// Runs after the swap with the previous values; a throw rolls the commit back.
+			// After the swap; a throw rolls back.
 			std::function<void(const Settings& a_previous)> finalize;
 			// Defaults that depend on runtime state.
 			std::function<Settings()> defaults;
@@ -144,7 +143,7 @@ namespace cs::settings
 			shared = _hooks.shared;
 		}
 
-		// Boot seed: live, next-launch and draft all start from the stored values.
+		// Boot seed: live, next-launch and draft start stored.
 		bool Configure(const toml::table& a_featureTable, std::string& a_error)
 		{
 			Settings candidate{};
@@ -215,7 +214,7 @@ namespace cs::settings
 					named.emplace(key.str());
 			}
 
-			// After the swap the holders contain the previous values, which finalize and rollback use.
+			// After the swap the holders hold the previous values.
 			const auto held = std::make_shared<Settings>(std::move(candidate));
 			const auto heldNext = std::make_shared<Settings>(std::move(next));
 			PreparedLiveSettings prepared;
@@ -271,7 +270,7 @@ namespace cs::settings
 				},
 					kSchema.fields);
 			}
-			// A finished drag has no diff left, so the deferred keys flush on their own.
+			// A finished drag has no diff; deferred keys still flush.
 			if (edits.empty() && !(flush && (_posted || !_unsaved.empty())))
 				return false;
 			for (const auto& [key, value] : edits)
