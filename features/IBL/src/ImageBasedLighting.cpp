@@ -51,24 +51,13 @@ namespace cs::features
 
 	bool ImageBasedLighting::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(ibl::kSchema, a_config, candidate, a_error) ||
-			!_weather.Configure(a_config.get("weather"), a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(ibl::kSchema, _settings, [this] { PublishSettings(); });
-		return true;
+		return _live.Configure(a_config, a_error) && _weather.Configure(a_config.get("weather"), a_error);
 	}
 
 	void ImageBasedLighting::PublishSettings()
 	{
 		const std::lock_guard lock(_settingsMutex);
 		_published = _settings;
-	}
-
-	bool ImageBasedLighting::SaveSettings()
-	{
-		return settings::SaveDelta(ibl::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void ImageBasedLighting::Load()
@@ -293,40 +282,30 @@ namespace cs::features
 	void ImageBasedLighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(ibl::kSchema, _settings);
-		bool changed = false;
+		const auto field = edit.Bind(_live);
 
 		if (const ui::Section section{ "ibl-general", "General" }; section)
-			changed |= field(&ibl::Settings::DisableInLoadingScreen);
+			field(&ibl::Settings::DisableInLoadingScreen);
 		if (const ui::Section section{ "ibl-sources", "Sources" }; section) {
-			changed |= field(&ibl::Settings::EnvIBLScale, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::SkyIBLScale, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::EnvIBLSaturation, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::SkyIBLSaturation, { .format = "%.2f" });
+			field(&ibl::Settings::EnvIBLScale, { .format = "%.2f" });
+			field(&ibl::Settings::SkyIBLScale, { .format = "%.2f" });
+			field(&ibl::Settings::EnvIBLSaturation, { .format = "%.2f" });
+			field(&ibl::Settings::SkyIBLSaturation, { .format = "%.2f" });
 		}
 		if (const ui::Section section{ "ibl-ambient", "Ambient Matching" }; section) {
-			changed |= field(&ibl::Settings::DALCAmount, { .format = "%.2f" });
+			field(&ibl::Settings::DALCAmount, { .format = "%.2f" });
 			static const std::array modes{
 				dmui::ChoiceOption<std::uint32_t>{ 0, "Luminance Ratio", "luminance-ratio" },
 				dmui::ChoiceOption<std::uint32_t>{ 1, "Color Ratio", "color-ratio" },
 				dmui::ChoiceOption<std::uint32_t>{ 2, "DALC + Sky", "dalc-sky" },
 				dmui::ChoiceOption<std::uint32_t>{ 3, "DALC + Sky (Directional)", "dalc-sky-directional" }
 			};
-			changed |= field.Choice(&ibl::Settings::DALCMode, modes);
+			field.Choice(&ibl::Settings::DALCMode, modes);
 		}
 		if (const ui::Section section{ "ibl-fog", "Fog" }; section) {
-			changed |= field(&ibl::Settings::FogAmount, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::PreserveFogLuminance);
+			field(&ibl::Settings::FogAmount, { .format = "%.2f" });
+			field(&ibl::Settings::PreserveFogLuminance);
 		}
-		if (changed)
-			PublishSettings();
-	}
-
-	void ImageBasedLighting::RestoreDefaultSettings()
-	{
-		_settings = {};
-		PublishSettings();
-		SaveSettings();
 	}
 
 	namespace

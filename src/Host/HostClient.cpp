@@ -661,7 +661,10 @@ namespace cs::host
 		if (state.runtimeState == FeatureRuntimeState::kFailed ||
 			state.runtimeState == FeatureRuntimeState::kDegraded) {
 			try {
+				if (auto* live = a_feature.GetLiveSettings())
+					live->BeginDraft();
 				a_feature.DrawFailLoadMessage();
+				FeatureManager::Get().CommitEdits(a_feature, false);
 			} catch (const std::exception& error) {
 				reportCallbackFailure(
 					"DearModdingUI::DrawFailLoadMessage",

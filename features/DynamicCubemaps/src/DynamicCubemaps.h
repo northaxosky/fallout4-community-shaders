@@ -65,7 +65,6 @@ namespace cs::features
 		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -74,7 +73,6 @@ namespace cs::features
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
-		std::vector<std::string_view> GetRestartSettings() const override;
 
 		// Null unless enabled, operational and published, so consumers fail neutral.
 		ID3D11ShaderResourceView* GetEnvironmentSRV() const noexcept;
@@ -167,8 +165,7 @@ namespace cs::features
 
 		DynamicCubemaps() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(dynamic_cubemaps::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		void PublishSettings() noexcept;
 		void PostDeferred();
 		void BindComposition(ID3D11DeviceContext* a_context);
@@ -212,8 +209,8 @@ namespace cs::features
 		std::atomic<DebugVisualization> _debugVisualization{
 			DebugVisualization::kOff
 		};
-		Settings _settings;
-		Settings _bootSettings;
+		settings::LiveSettings<dynamic_cubemaps::kSchema> _live{ { .finalize = [this](const Settings&) { PublishSettings(); } } };
+		const Settings& _settings = _live.Get();
 
 		CaptureStream _baseStream;
 		CaptureStream _reflectionsStream;

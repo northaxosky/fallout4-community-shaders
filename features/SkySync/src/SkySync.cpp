@@ -133,27 +133,7 @@ namespace cs::features
 
 	bool SkySync::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(sky_sync::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = std::move(candidate);
-		_liveSettings = settings::BindLiveSettings(sky_sync::kSchema, _settings, [this] { RefreshWorldspaceDisabled(); }, {}, {}, &_worldspaceMutex);
-		return true;
-	}
-
-	bool SkySync::SaveSettings()
-	{
-		return settings::SaveDelta(sky_sync::kSchema, GetConfigKey(), _settings, *L);
-	}
-
-	void SkySync::RestoreDefaultSettings()
-	{
-		{
-			std::scoped_lock lock(_worldspaceMutex);
-			_settings = Settings{};
-			RefreshWorldspaceDisabledLocked();
-		}
-		SaveSettings();
+		return _live.Configure(a_config, a_error);
 	}
 
 	void SkySync::Load()
@@ -610,11 +590,15 @@ namespace cs::features
 		a_sky.root->Update(updateData);
 	}
 
+	bool SkySync::IsListed(const std::vector<std::string>& a_list, std::string_view a_editorID)
+	{
+		// Editor IDs are case-insensitive in the engine
+		return !a_editorID.empty() && std::ranges::any_of(a_list, [a_editorID](const std::string& a_listed) { return util::EqualsIgnoreCase(a_listed, a_editorID); });
+	}
+
 	bool SkySync::IsWorldspaceListed(const RE::TESWorldSpace* a_worldspace) const
 	{
-		const auto editorID = GetEditorID(a_worldspace);
-		// Editor IDs are case-insensitive in the engine
-		return !editorID.empty() && std::ranges::any_of(_settings.DisabledWorldspaces, [editorID](const std::string& a_listed) { return util::EqualsIgnoreCase(a_listed, editorID); });
+		return IsListed(_settings.DisabledWorldspaces, GetEditorID(a_worldspace));
 	}
 
 	void SkySync::RefreshWorldspaceDisabledLocked()
@@ -843,13 +827,13 @@ namespace cs::features
 		};
 
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(sky_sync::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 
 		if (const ui::Section section{ "sky-sync-sun", "Sun" }; section) {
 			field(&Settings::UseAlternateSunPath);
-			if (_settings.UseAlternateSunPath) {
+			if (_live.Draft().UseAlternateSunPath) {
 				field.Choice(&Settings::SunPath, sunPaths);
-				if (_settings.SunPath == sky_sync::SunPathMode::kCustom)
+				if (_live.Draft().SunPath == sky_sync::SunPathMode::kCustom)
 					field(&Settings::CustomAngle, { .format = "%.0f", .flags = dmui::ui::SliderFlags::kAlwaysClamp });
 			}
 		}
@@ -868,32 +852,27 @@ namespace cs::features
 			field(&Settings::HorizonElevation, { .format = "%.1f deg", .flags = clamped });
 			field(&Settings::DimSunlightUnderHorizon);
 			field(&Settings::DimVolumetricLighting);
-			if (_settings.DimSunlightUnderHorizon || _settings.DimVolumetricLighting) {
+			if (_live.Draft().DimSunlightUnderHorizon || _live.Draft().DimVolumetricLighting) {
 				field(&Settings::HorizonFadeHours, { .format = "%.1f h", .flags = clamped });
 				field(&Settings::HorizonFadeElevation, { .format = "%.1f deg", .flags = clamped });
 			}
 		}
 
-		if (const ui::Section section{ "sky-sync-worldspaces", "Disabled Worldspaces", ui::Collapsible{ .count = _settings.DisabledWorldspaces.size() } }; section) {
-			std::scoped_lock lock(_worldspaceMutex);
-			bool listChanged = field(&Settings::DisabledWorldspaces, { .label = "Worldspace Editor IDs" });
+		if (const ui::Section section{ "sky-sync-worldspaces", "Disabled Worldspaces", ui::Collapsible{ .count = _live.Draft().DisabledWorldspaces.size() } }; section) {
+			field(&Settings::DisabledWorldspaces, { .label = "Worldspace Editor IDs" });
 
 			const auto player = RE::PlayerCharacter::GetSingleton();
 			const auto cell = player ? player->GetParentCell() : nullptr;
 			const std::string editorID(GetEditorID(GetCellWorldspace(cell)));
-			const bool listed = IsWorldspaceListed(GetCellWorldspace(cell));
+			const bool listed = IsListed(field.Values().DisabledWorldspaces, editorID);
 			const dmui::DisabledScope disabled{ editorID.empty() || listed };
 			const auto add = ui::DrawActionField({ "AddCurrentWorldspace", { .label = "Current worldspace", .help = "Adds the player's current worldspace to the list." } },
 				[&](const char* a_label) {
 					const bool pressed = dmui::ui::Button(("Add " + (editorID.empty() ? std::string("-") : editorID) + a_label).c_str());
 					return ui::EditResult{ pressed, pressed };
 				});
-			if (edit.Apply(add)) {
-				_settings.DisabledWorldspaces.push_back(editorID);
-				listChanged = true;
-			}
-			if (listChanged)
-				RefreshWorldspaceDisabledLocked();
+			if (edit.Apply(add))
+				field.Values().DisabledWorldspaces.push_back(editorID);
 		}
 	}
 

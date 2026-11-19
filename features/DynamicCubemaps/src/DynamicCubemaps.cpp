@@ -225,19 +225,7 @@ namespace cs::features
 		const toml::table& a_config,
 		std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(dynamic_cubemaps::kSchema, a_config, candidate, a_error)) {
-			return false;
-		}
-		_settings = candidate;
-		_bootSettings = candidate;
-		_liveSettings = settings::BindLiveSettings(dynamic_cubemaps::kSchema, _settings, [this] { PublishSettings(); });
-		return true;
-	}
-
-	std::vector<std::string_view> DynamicCubemaps::GetRestartSettings() const
-	{
-		return settings::RestartRequired(dynamic_cubemaps::kSchema, _bootSettings, _settings);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void DynamicCubemaps::OnEnabledChanged(bool a_enabled) noexcept
@@ -250,11 +238,6 @@ namespace cs::features
 	{
 		_enabledSSR.store(_settings.enabledSSR, std::memory_order_release);
 		_engineCubeLod.store(_settings.engineCubeLod, std::memory_order_release);
-	}
-
-	bool DynamicCubemaps::SaveSettings()
-	{
-		return settings::SaveDelta(dynamic_cubemaps::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void DynamicCubemaps::Load()
@@ -271,7 +254,7 @@ namespace cs::features
 		}
 
 		// FO4 vanilla never renders the reflections cube; the host does.
-		cs::engine::SetSkyReflectionCubeSize(static_cast<std::uint32_t>(_bootSettings.engineCubeSize));
+		cs::engine::SetSkyReflectionCubeSize(static_cast<std::uint32_t>(_settings.engineCubeSize));
 		// Upstream's SSR targets are R16G16B16A16_FLOAT; FO4's are 8-bit sRGB.
 		using RE::BSGraphics::RenderTargetID;
 		for (const auto target : { RenderTargetID::kSSR, RenderTargetID::kSSRBlurred0, RenderTargetID::kSSRBlurred1 }) {
@@ -1287,12 +1270,11 @@ namespace cs::features
 	void DynamicCubemaps::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(dynamic_cubemaps::kSchema, _settings);
-		bool changed = false;
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "dynamic-cubemaps-ssr", "Screen Space Reflections" }; section)
-			changed |= field(&Settings::enabledSSR, { .label = "Enable Screen Space Reflections" });
+			field(&Settings::enabledSSR, { .label = "Enable Screen Space Reflections" });
 		if (const ui::Section section{ "dynamic-cubemaps-engine-cube", "Engine Reflection Cube" }; section) {
-			changed |= field(&Settings::engineCubeLod, { .label = "Engine Cube LOD" });
+			field(&Settings::engineCubeLod, { .label = "Engine Cube LOD" });
 			using dynamic_cubemaps::EngineCubeSize;
 			static constexpr std::array kSizes{
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k256, "256", "256", true },
@@ -1300,16 +1282,8 @@ namespace cs::features
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k1024, "1024", "1024", true },
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k2048, "2048", "2048", true }
 			};
-			changed |= field.Choice(&Settings::engineCubeSize, kSizes, { .label = "Engine Cube Size" });
+			field.Choice(&Settings::engineCubeSize, kSizes, { .label = "Engine Cube Size" });
 		}
-		if (changed)
-			PublishSettings();
 	}
 
-	void DynamicCubemaps::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		PublishSettings();
-		SaveSettings();
-	}
 }

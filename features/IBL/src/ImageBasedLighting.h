@@ -43,7 +43,6 @@ namespace cs::features
 		void Prepass() override;
 		void DrawSettings() override;
 		void OnEnabledChanged(bool a_enabled) noexcept override;
-		void RestoreDefaultSettings() override;
 
 		bool DefaultEnabled() const override { return false; }
 		weather::Profiles* GetWeatherProfiles() override { return &_weather; }
@@ -58,8 +57,7 @@ namespace cs::features
 		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		ImageBasedLighting() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(image_based_lighting::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 		void PublishSettings();
 		// The evaluated settings for the current frame; render thread only.
@@ -78,7 +76,8 @@ namespace cs::features
 		// Zeroes the target when the source is absent.
 		void Project(ID3D11DeviceContext* a_context, ID3D11ShaderResourceView* a_source, buffer::Texture2D& a_target, std::string_view a_pass);
 
-		Settings _settings;
+		settings::LiveSettings<image_based_lighting::kSchema> _live{ { .finalize = [this](const Settings&) { PublishSettings(); } } };
+		const Settings& _settings = _live.Get();
 		Settings _published;
 		mutable std::mutex _settingsMutex;
 		weather::VariableRegistry<std::remove_cv_t<decltype(image_based_lighting::kWeatherSchema)>> _weather{

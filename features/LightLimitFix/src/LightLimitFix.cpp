@@ -402,12 +402,8 @@ namespace cs::features
 	}
 	bool LightLimitFix::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(light_limit_fix::kSchema, a_config, candidate, a_error))
+		if (!_live.Configure(a_config, a_error))
 			return false;
-		_settings = candidate;
-		_bootSettings = candidate;
-		_liveSettings = settings::BindLiveSettings(light_limit_fix::kSchema, _settings, [this] { PublishSettings(); });
 		PublishSettings();
 		return true;
 	}
@@ -426,20 +422,6 @@ namespace cs::features
 			.resolution = _localShadowResolution.load(std::memory_order_acquire),
 			.samples = _localShadowSamples.load(std::memory_order_acquire),
 			.filterScale = _localShadowFilterScale.load(std::memory_order_acquire) };
-	}
-	bool LightLimitFix::SaveSettings()
-	{
-		return settings::SaveDelta(light_limit_fix::kSchema, GetConfigKey(), _settings, *Log());
-	}
-	std::vector<std::string_view> LightLimitFix::GetRestartSettings() const
-	{
-		return settings::RestartRequired(light_limit_fix::kSchema, _bootSettings, _settings);
-	}
-	void LightLimitFix::RestoreDefaultSettings()
-	{
-		_settings = {};
-		PublishSettings();
-		SaveSettings();
 	}
 	void LightLimitFix::Load()
 	{
@@ -644,7 +626,7 @@ namespace cs::features
 	void LightLimitFix::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(light_limit_fix::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "llf-general", "General" }; section) {
 			const auto help = std::format(
 				"Off: only lights authored in {}\\*.toml are inverse-square. On: lights "
@@ -653,16 +635,13 @@ namespace cs::features
 				kDirectory);
 			field(&Settings::deriveUnauthoredLights, { .help = help });
 		}
-		bool changed = false;
 		if (const ui::Section section{ "llf-local-shadows", "Local Shadows" }; section) {
-			changed |= field(&Settings::enableLocalShadows, { .label = "Enable Local Shadows" });
-			changed |= field(&Settings::localShadowSlots, { .label = "Shadow Cache Slots" });
-			changed |= field.Choice(&Settings::localShadowResolution, { .label = "Shadow Cache Resolution" });
-			changed |= field.Choice(&Settings::localShadowSamples, { .label = "Shadow Filter Samples" });
-			changed |= field(&Settings::localShadowFilterScale, { .label = "Shadow Filter Scale" });
+			field(&Settings::enableLocalShadows, { .label = "Enable Local Shadows" });
+			field(&Settings::localShadowSlots, { .label = "Shadow Cache Slots" });
+			field.Choice(&Settings::localShadowResolution, { .label = "Shadow Cache Resolution" });
+			field.Choice(&Settings::localShadowSamples, { .label = "Shadow Filter Samples" });
+			field(&Settings::localShadowFilterScale, { .label = "Shadow Filter Scale" });
 		}
-		if (changed)
-			PublishSettings();
 	}
 	void LightLimitFix::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
