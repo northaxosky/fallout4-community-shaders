@@ -252,7 +252,6 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 		[loop] for (uint i = 0; i < lightCount; ++i)
 		{
 			TiledLight light = Lights[TileLists[tileIndex].Indices[i]];
-#	include "FO4/SphereMapNormal.hlsli"
 #	ifdef LIGHT_LIMIT_FIX
 			LightLimitFix::Light lightData = (LightLimitFix::Light)0;
 			[branch] if (FO4SharedData::EnabledLightLimitFix != 0)
@@ -483,7 +482,6 @@ void ShadeTiledPixel(uint tileIndex, uint2 pixel)
 				light.Attenuation.x);
 			float attenuation =
 				exp2(log2(1.0 - falloff) * 2.2);
-#	include "FO4/SphereMapNormal.hlsli"
 #	ifdef LIGHT_LIMIT_FIX
 			// FO4: t8 uses the same accepted-append index as native t6.
 			attenuation = FO4LightLimitFix::GetAttenuation(
