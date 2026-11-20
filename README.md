@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logos/logo_cs_mini.png" alt="Fallout 4 Community Shaders logo" width="240">
+</p>
+
 <div align="center">
 
 # Fallout 4 Community Shaders
