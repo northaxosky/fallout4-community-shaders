@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 
 #include <winrt/base.h>
 
@@ -32,10 +33,6 @@ namespace cs::features
 		};
 
 		void UpdateRenderTargets(float a_widthRatio, float a_heightRatio);
-
-		void OverrideRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy = {});
-		// An empty list copies every proxied target back.
-		void ResetRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy = {});
 
 		void OverrideDepth(bool a_doCopy = true);
 		void ResetDepth();
@@ -65,6 +62,10 @@ namespace cs::features
 		[[nodiscard]] ProxyTexture GetProxyTexture(RE::BSGraphics::RenderTargetID a_target) const noexcept;
 
 	private:
+		void OverrideRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy);
+		void ResetRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy);
+		void RestoreRenderTargetData(RE::BSGraphics::RenderTargetManager& a_manager) const;
+		void RepointBoundSRVs(bool a_toProxy) const;
 		void UpdateRenderTarget(RE::BSGraphics::RenderTargetID a_target, float a_widthRatio, float a_heightRatio);
 		// Snapshots the engine target and mirrors its fields into the proxy.
 		void CaptureOriginal(RE::BSGraphics::RenderTargetID a_target, const RE::BSGraphics::RenderTarget& a_engineTarget);
@@ -114,9 +115,7 @@ namespace cs::features
 		bool _hasProxies = false;
 		bool _renderTargetsOverridden = false;
 		bool _depthOverridden = false;
-		bool _proxyPass = false;
 		cs::engine::ImageSpaceTriangleSwap _triangleSwap;
-		float _proxyPassWidthRatio = 1.0f;
-		float _proxyPassHeightRatio = 1.0f;
+		std::optional<cs::engine::DynamicResolutionState> _proxyPassState;
 	};
 }

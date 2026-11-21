@@ -262,11 +262,7 @@ namespace cs::render
 			if (!IsDrivingFrameState()) {
 				return;
 			}
-			if (auto* state = cs::engine::GetGraphicsState()) {
-				state->offsetX = 0.0f;
-				state->offsetY = 0.0f;
-			}
-			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
+			cs::engine::DropRenderScale();
 		});
 
 		_imagespaceScope = false;
@@ -373,13 +369,8 @@ namespace cs::render
 	{
 		auto* upscaling = GetSingleton();
 
-		bool overrideActive = false;
-		if (upscaling->IsDrivingFrameState() && upscaling->dynamicResolution.HasProxies()) {
-			if (auto* renderTargetManager = cs::engine::GetRenderTargetManager()) {
-				overrideActive = renderTargetManager->GetDynamicWidthRatio() != 1.0f ||
-				                 renderTargetManager->GetDynamicHeightRatio() != 1.0f;
-			}
-		}
+		const bool overrideActive =
+			upscaling->IsDrivingFrameState() && upscaling->dynamicResolution.ProxyPassAvailable();
 
 		if (overrideActive) {
 			GuardedThunkBody("Upscaling lens-flare depth override", [&] {

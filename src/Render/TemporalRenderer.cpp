@@ -229,8 +229,8 @@ namespace cs::render
 			const auto [renderWidth, renderHeight] = GetRenderSize();
 			if (renderWidth > 0 && renderHeight > 0) {
 				// FO4: the camera builder divides these offsets by the dynamic ratio.
-				state->offsetX = -2.0f * jitter.x * widthRatio / static_cast<float>(renderWidth);
-				state->offsetY = 2.0f * jitter.y * heightRatio / static_cast<float>(renderHeight);
+				cs::engine::SetJitter({ -2.0f * jitter.x * widthRatio / static_cast<float>(renderWidth),
+					2.0f * jitter.y * heightRatio / static_cast<float>(renderHeight) });
 			}
 		}
 
@@ -266,10 +266,7 @@ namespace cs::render
 	{
 		_upscaledThisFrame = false;
 		_srPublishedToFramebuffer.store(false, std::memory_order_release);
-		if (auto* state = cs::engine::GetGraphicsState()) {
-			state->offsetX = 0.0f;
-			state->offsetY = 0.0f;
-		}
+		cs::engine::SetJitter({});
 		cs::engine::SetDynamicResolutionRatios(1.0f, 1.0f);
 		if (const auto* state = cs::engine::GetGraphicsState()) {
 			_renderSize.SetNative(state->screenWidth, state->screenHeight);
@@ -327,12 +324,13 @@ namespace cs::render
 		if (!_quarantineCleanupPending.exchange(false, std::memory_order_acq_rel)) {
 			return;
 		}
+		// Release first: its abort may apply a scaled capture.
 		try {
-			RestoreNativeFrameState();
+			dynamicResolution.Release();
 		} catch (...) {
 		}
 		try {
-			dynamicResolution.Release();
+			RestoreNativeFrameState();
 		} catch (...) {
 		}
 	}

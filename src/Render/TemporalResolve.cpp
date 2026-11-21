@@ -687,11 +687,7 @@ namespace cs::render
 
 		if (external && upscaled) {
 			// The chain, UI and native TAA now run full-extent without jitter.
-			if (auto* state = cs::engine::GetGraphicsState()) {
-				state->offsetX = 0.0f;
-				state->offsetY = 0.0f;
-			}
-			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
+			cs::engine::DropRenderScale();
 			// The engine bakes the render ratio into its dynamic triangle UVs.
 			_chainTriangle.Apply();
 			// Only the chain's VATS effect reads logical 15.
@@ -716,10 +712,7 @@ namespace cs::render
 		}
 
 		// Jitter must not leak into UI regardless of whether the resolve succeeded.
-		if (auto* state = cs::engine::GetGraphicsState()) {
-			state->offsetX = 0.0f;
-			state->offsetY = 0.0f;
-		}
+		cs::engine::SetJitter({});
 		FinishPreUiScene(
 			_sceneResolved, _preUiHandoff.ShouldCaptureHudlessColor(_sceneResolved));
 		SetTemporalEnabled(GetUpscaleMethod() == UpscaleMethod::kTAA);

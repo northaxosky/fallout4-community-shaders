@@ -742,9 +742,7 @@ namespace cs::engine
 			};
 
 			cs::render::annotation::ScopedEvent container("SkyReflectionCube", false);
-			std::optional<UnscaledRenderScope> unscaled;
-			if (manager->IsDynamicResolutionCurrentlyActivated())
-				unscaled.emplace();
+			UnscaledRenderScope unscaled{ manager->IsDynamicResolutionCurrentlyActivated() };
 			UnbindAuxiliaryTargets(*manager, context->shadowState);
 			SetupCamera(**g_camera, eye, worldCamera->viewFrustum.far);
 			const auto faces = RenderFaces(**g_camera, *sky->root, *manager, context->shadowState, clear, eye);
