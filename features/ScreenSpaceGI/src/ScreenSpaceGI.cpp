@@ -20,6 +20,7 @@
 #include "Render/ComputePasses.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameState.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -307,7 +308,6 @@ namespace cs::features
 		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		_cameraReady = camera.has_value();
 		const bool tiled = RE::DrawWorld::QTiledLighting();
-		auto* manager = cs::engine::GetRenderTargetManager();
 		auto* depth = cs::render::GetCanonicalSceneDepthSRV();
 		auto* normals = cs::engine::GetRenderTargetSRV(RT::kGBufferNormal);
 		// FO4: GBufferAmbient carries glossiness, specular, backlighting and SSS.
@@ -319,7 +319,7 @@ namespace cs::features
 		auto* motion = cs::engine::GetRenderTargetSRV(RT::kGBufferMotionVectors);
 		_motionAvailable = motion != nullptr;
 		_tiledAvailable = diffuseB != nullptr;
-		if (!camera || !manager || !depth || !normals || !motion ||
+		if (!camera || !depth || !normals || !motion ||
 			(_settings.enableExperimentalSpecularGI && !material) ||
 			(_settings.enableGI && (!albedo || !emissive || !diffuse || (tiled && !diffuseB))) ||
 			!cs::render::IsSharedDataReady()) {
@@ -335,8 +335,9 @@ namespace cs::features
 		_previousOrigin[0] = previous.x;
 		_previousOrigin[1] = previous.y;
 		_previousOrigin[2] = previous.z;
-		const UINT width = static_cast<UINT>(std::floor(_width * manager->GetDynamicWidthRatio()));
-		const UINT height = static_cast<UINT>(std::floor(_height * manager->GetDynamicHeightRatio()));
+		const auto render = cs::render::GetRenderResolution().render;
+		const UINT width = render.width;
+		const UINT height = render.height;
 		const UINT internalWidth = width >> _settings.resolutionMode;
 		const UINT internalHeight = height >> _settings.resolutionMode;
 		if (!internalWidth || !internalHeight)

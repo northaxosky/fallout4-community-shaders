@@ -253,11 +253,8 @@ namespace cs::features
 			_debugDepthMissing.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
-		const auto* graphics = cs::engine::GetGraphicsState();
-		if (!graphics)
-			return;
-		const auto extent = cs::render::GetActiveExtent(graphics->screenWidth, graphics->screenHeight);
-		if (!extent.width || !extent.height)
+		const auto extent = cs::render::GetRenderResolution().render;
+		if (!extent.IsValid())
 			return;
 		auto* debugTarget = cs::render::AcquireFullscreenDebugTarget();
 		if (!debugTarget)

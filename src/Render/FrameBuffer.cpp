@@ -4,6 +4,7 @@
 #include "PCH.h"
 #include "Render/Engine.h"
 #include "Render/FrameState.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 
 #include <cstring>
@@ -18,6 +19,36 @@ namespace cs::engine
 		std::mutex g_prepassCameraMutex;
 		std::optional<WorldCameraRecord> g_prepassCamera;
 		std::optional<std::uint32_t> g_prepassFrame;
+		render::RenderResolution g_resolution;
+		std::optional<DirectX::XMFLOAT2> g_lastRatio;
+
+		render::RenderResolution NativeResolution() noexcept
+		{
+			const auto* state = GetGraphicsState();
+			render::RenderResolution native;
+			native.output = { state ? state->screenWidth : 0u, state ? state->screenHeight : 0u };
+			native.render = native.output;
+			return native;
+		}
+
+		// Reads the live engine ratio once; b4 and every reader share the result.
+		void LatchRenderResolution() noexcept
+		{
+			auto latched = NativeResolution();
+			if (const auto* manager = GetRenderTargetManager()) {
+				const auto width = manager->GetDynamicWidthRatio();
+				const auto height = manager->GetDynamicHeightRatio();
+				latched.widthRatio = width > 0.0f ? width : 1.0f;
+				latched.heightRatio = height > 0.0f ? height : 1.0f;
+			}
+			latched.render = { render::ScaledExtent(latched.output.width, latched.widthRatio),
+				render::ScaledExtent(latched.output.height, latched.heightRatio) };
+			const auto previous = g_lastRatio.value_or(DirectX::XMFLOAT2{ latched.widthRatio, latched.heightRatio });
+			latched.previousWidthRatio = previous.x;
+			latched.previousHeightRatio = previous.y;
+			g_lastRatio = DirectX::XMFLOAT2{ latched.widthRatio, latched.heightRatio };
+			g_resolution = latched;
+		}
 
 		// Render thread; world+jitter valid from MainRenderSetup to DeferredPrePass.
 		std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept
@@ -52,8 +83,10 @@ namespace cs::engine
 		{
 			std::scoped_lock lock(g_prepassCameraMutex);
 			const auto frame = GetFrameCount();
-			if (g_prepassFrame != frame)
+			if (g_prepassFrame != frame) {
+				LatchRenderResolution();
 				render::BeginWorldFrame();
+			}
 			if (g_prepassFrame != frame || !g_prepassCamera) {
 				g_prepassCamera = GetWorldCameraRecord();
 				g_prepassFrame = frame;
@@ -82,5 +115,14 @@ namespace cs::engine
 		if (!g_prepassCamera || (a_frame && g_prepassCamera->frameCount != *a_frame))
 			return std::nullopt;
 		return g_prepassCamera;
+	}
+}
+
+namespace cs::render
+{
+	RenderResolution GetRenderResolution() noexcept
+	{
+		std::scoped_lock lock(engine::g_prepassCameraMutex);
+		return engine::g_prepassFrame == engine::GetFrameCount() ? engine::g_resolution : engine::NativeResolution();
 	}
 }

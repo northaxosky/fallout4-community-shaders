@@ -81,7 +81,7 @@ namespace cs::render
 		}
 		const auto method = GetUpscaleMethod();
 		if (!IsExternalUpscaler(method)) {
-			const auto extent = GetActiveExtent(state->screenWidth, state->screenHeight);
+			const auto extent = render::GetRenderResolution().render;
 			return { extent.width, extent.height };
 		}
 		const auto extent = _renderSize.Requested();
@@ -111,7 +111,6 @@ namespace cs::render
 	{
 		if (!a_state || !a_state->screenWidth || !a_state->screenHeight) {
 			_renderSize.SetNative(0, 0);
-			resolutionScale = { 1.0f, 1.0f };
 			return {
 				.code = temporal::ProviderResultCode::kFailure,
 				.message =
@@ -120,7 +119,6 @@ namespace cs::render
 		}
 
 		_renderSize.SetNative(a_state->screenWidth, a_state->screenHeight);
-		resolutionScale = { 1.0f, 1.0f };
 		if (!IsExternalUpscaler(a_method)) {
 			return { .code = temporal::ProviderResultCode::kSuccess };
 		}
@@ -186,10 +184,6 @@ namespace cs::render
 			return;
 		}
 		_renderSize.CommitRequested();
-		resolutionScale = {
-			_renderSize.WidthRatio(),
-			_renderSize.HeightRatio()
-		};
 
 		float2 screenSize{ (float)state->screenWidth, (float)state->screenHeight };
 		const bool upscalerActive = IsExternalUpscaler(upscaleMethod);
@@ -229,11 +223,11 @@ namespace cs::render
 		// Jitter is computed for any vendor method (including Native AA at scale 1.0); proxies only below native.
 		const bool vendorMethod = IsExternalUpscaler(method);
 		const bool scaleActive = vendorMethod &&
-		                         (resolutionScale.x < 0.99f || resolutionScale.y < 0.99f);
+		                         _renderSize.Committed() != render::Extent{ state->screenWidth, state->screenHeight };
 		const float widthRatio =
-			scaleActive ? resolutionScale.x : 1.0f;
+			scaleActive ? _renderSize.WidthRatio() : 1.0f;
 		const float heightRatio =
-			scaleActive ? resolutionScale.y : 1.0f;
+			scaleActive ? _renderSize.HeightRatio() : 1.0f;
 
 		if (vendorMethod) {
 			const auto [renderWidth, renderHeight] = GetRenderSize();
@@ -286,7 +280,6 @@ namespace cs::render
 		} else {
 			_renderSize.SetNative(0, 0);
 		}
-		resolutionScale = { 1.0f, 1.0f };
 		_resolutionScalePublished = false;
 		_mipBias.store(0.0f, std::memory_order_relaxed);
 		ForceViewportToRenderTargetDimensions();

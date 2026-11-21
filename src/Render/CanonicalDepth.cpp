@@ -84,8 +84,8 @@ namespace cs::render
 			const auto* state = engine::GetGraphicsState();
 			if (desc.SampleDesc.Count != 1 || !state)
 				return false;
-			const auto active = GetActiveExtent(state->screenWidth, state->screenHeight);
-			if (!active.width || !active.height)
+			const auto active = GetRenderResolution().render;
+			if (!active.IsValid())
 				return false;
 			Resize(a_product, desc.Width, desc.Height);
 			CanonicalDepthData data{};

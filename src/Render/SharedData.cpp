@@ -8,6 +8,7 @@
 #include "Render/Engine.h"
 #include "Render/ForwardDraw.h"
 #include "Render/FrameState.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -55,8 +56,6 @@ namespace cs::render
 			SharedDataCB shared{};
 			bool sharedWritten = false;
 			float mipBias = 0.0f;
-			DirectX::XMFLOAT2 previousRatio{ 1.0f, 1.0f };
-			bool hasResolutionHistory = false;
 			// Render thread only.
 			float timer = 0.0f;
 			bool updateInstalled = false;
@@ -247,25 +246,15 @@ namespace cs::render
 				const auto nextTimer = state.timer + delta;
 				data.shared = BuildSharedData(nextTimer, *camera, data.fo4);
 				FeatureManager::Get().WriteSharedFrameDataAll(data.shared);
-				const auto* manager = engine::GetRenderTargetManager();
+				const auto resolution = GetRenderResolution();
 				// OG deferred, water and tiled-lighting shaders carry no dynamic-resolution constants.
 				const bool fullScale = REX::FModule::IsRuntimeOG();
-				const DirectX::XMFLOAT2 ratio{
-					manager && !fullScale ? manager->GetDynamicWidthRatio() : 1.0f,
-					manager && !fullScale ? manager->GetDynamicHeightRatio() : 1.0f
+				const DirectX::XMFLOAT2 ratio{ fullScale ? 1.0f : resolution.widthRatio, fullScale ? 1.0f : resolution.heightRatio };
+				const DirectX::XMFLOAT2 previousRatio{
+					fullScale ? 1.0f : resolution.previousWidthRatio, fullScale ? 1.0f : resolution.previousHeightRatio
 				};
-				if (!(ratio.x > 0.0f) || !(ratio.y > 0.0f))
-					return;
-				const auto previousRatio = state.hasResolutionHistory ? state.previousRatio : ratio;
-				const auto* clampTarget = engine::ResolveRenderTarget(RE::BSGraphics::RenderTargetID::kMain);
-				if (!clampTarget || !clampTarget->texture)
-					return;
-				D3D11_TEXTURE2D_DESC clampDesc{};
-				reinterpret_cast<ID3D11Texture2D*>(clampTarget->texture)->GetDesc(&clampDesc);
-				const float size = static_cast<float>(clampDesc.Width);
-				if (!(size > 0.0f))
-					return;
-				const float clamp = REX::FModule::IsRuntimeOG() ? (std::trunc(size * ratio.x) - 1.0f) / size : ratio.x - 0.5f / size;
+				const float size = static_cast<float>(resolution.output.width);
+				const float clamp = fullScale ? (std::trunc(size * ratio.x) - 1.0f) / size : ratio.x - 0.5f / size;
 				data.frame = PackFrameData(*camera, ratio, previousRatio, ratio.x - clamp);
 				data.fo4.DeltaTime = delta;
 				data.shared.ResetHistory = GetFrameState().HasReset() ? 1u : 0u;
@@ -278,8 +267,6 @@ namespace cs::render
 					return;
 				}
 				state.timer = nextTimer;
-				state.previousRatio = ratio;
-				state.hasResolutionHistory = true;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
 				state.debugFrame = UINT32_MAX;
 			} catch (const std::exception& e) {

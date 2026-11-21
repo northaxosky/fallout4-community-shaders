@@ -27,6 +27,7 @@
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
@@ -165,33 +166,13 @@ namespace cs::features
 		render::Extent& a_required,
 		render::Extent& a_allocation) const
 	{
-		auto* state = cs::engine::GetGraphicsState();
-		if (!state || state->screenWidth == 0 || state->screenHeight == 0)
+		const auto resolution = render::GetRenderResolution();
+		if (!resolution.render.IsValid())
 			return false;
-		float widthRatio = 1.0f;
-		float heightRatio = 1.0f;
-		if (auto* rtm = cs::engine::GetRenderTargetManager()) {
-			widthRatio = rtm->GetDynamicWidthRatio();
-			heightRatio = rtm->GetDynamicHeightRatio();
-		}
-		if (!std::isfinite(widthRatio) || widthRatio <= 0.0f)
-			widthRatio = 1.0f;
-		if (!std::isfinite(heightRatio) || heightRatio <= 0.0f)
-			heightRatio = 1.0f;
-		const auto requiredWidth = std::ceil(
-			static_cast<double>(state->screenWidth) * static_cast<double>(widthRatio));
-		const auto requiredHeight = std::ceil(
-			static_cast<double>(state->screenHeight) * static_cast<double>(heightRatio));
-		if (requiredWidth < 1.0 || requiredHeight < 1.0 || requiredWidth > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || requiredHeight > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
-			return false;
-		}
-		a_required = {
-			static_cast<std::uint32_t>(requiredWidth),
-			static_cast<std::uint32_t>(requiredHeight)
-		};
+		a_required = resolution.render;
 		a_allocation = {
-			std::max(state->screenWidth, a_required.width),
-			std::max(state->screenHeight, a_required.height)
+			std::max(resolution.output.width, a_required.width),
+			std::max(resolution.output.height, a_required.height)
 		};
 		return true;
 	}
@@ -441,15 +422,12 @@ namespace cs::features
 
 	std::uint32_t ScreenSpaceShadows::GetScaledSampleCount() const
 	{
-		auto* state = cs::engine::GetGraphicsState();
-		auto* rtm = cs::engine::GetRenderTargetManager();
-		if (!state || !rtm) {
+		const auto resolution = render::GetRenderResolution();
+		if (!resolution.render.IsValid()) {
 			return sss_math::kMinSampleCount;
 		}
-
-		const float width = static_cast<float>(state->screenWidth) * rtm->GetDynamicWidthRatio();
-		const float height = static_cast<float>(state->screenHeight) * rtm->GetDynamicHeightRatio();
-		return sss_math::ScaleSampleCount(_settings.SampleCount, width, height);
+		return sss_math::ScaleSampleCount(_settings.SampleCount,
+			static_cast<float>(resolution.render.width), static_cast<float>(resolution.render.height));
 	}
 
 	ID3D11ComputeShader* ScreenSpaceShadows::GetComputeRaymarch()
@@ -552,15 +530,11 @@ namespace cs::features
 		if (shader && cs::engine::TryGetSunDirectionWS(sx, sy, sz)) {
 			// FO4: canonical depth puts first-person casters in the world projection.
 			auto* depthSRV = cs::render::GetCanonicalSceneDepthSRV();
-			auto* rtm = cs::engine::GetRenderTargetManager();
-			if (depthSRV && rtm && _raymarchCB && _pointBorderSampler) {
-				const float widthRatio = rtm->GetDynamicWidthRatio();
-				const float heightRatio = rtm->GetDynamicHeightRatio();
-				const float renderWidth = static_cast<float>(state->screenWidth) * widthRatio;
-				const float renderHeight = static_cast<float>(state->screenHeight) * heightRatio;
+			if (depthSRV && _raymarchCB && _pointBorderSampler) {
+				const auto resolution = render::GetRenderResolution();
 				int viewportSize[2] = {
-					static_cast<int>(renderWidth),
-					static_cast<int>(renderHeight)
+					static_cast<int>(resolution.render.width),
+					static_cast<int>(resolution.render.height)
 				};
 
 				if (viewportSize[0] > 0 && viewportSize[1] > 0) {
@@ -615,8 +589,8 @@ namespace cs::features
 							cb.NearDepthValue = kNearDepthValue;
 							cb.InvDepthTextureSize[0] = 1.0f / static_cast<float>(viewportSize[0]);
 							cb.InvDepthTextureSize[1] = 1.0f / static_cast<float>(viewportSize[1]);
-							cb.DynamicRes[0] = widthRatio;
-							cb.DynamicRes[1] = heightRatio;
+							cb.DynamicRes[0] = resolution.widthRatio;
+							cb.DynamicRes[1] = resolution.heightRatio;
 							cb.settings = _settings;
 							_raymarchCB->Update(cb);
 							context->Dispatch(

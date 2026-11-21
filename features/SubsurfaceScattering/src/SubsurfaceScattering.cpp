@@ -18,6 +18,7 @@
 #include "Render/FrameProfiler.h"
 #include "Render/PrepassExtraTargets.h"
 #include "Render/PrepassTechnique.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderObservers.h"
@@ -262,8 +263,7 @@ namespace cs::features
 	void SubsurfaceScattering::OnPreSecondDeferredComposite()
 	{
 		auto* context = cs::engine::GetImmediateContext();
-		auto* manager = cs::engine::GetRenderTargetManager();
-		if (!CanRun() || !context || !manager || !_consumer ||
+		if (!CanRun() || !context || !_consumer ||
 			!_prepare || !_extract || !_extractBurley || !_horizontal || !_vertical || !_burley)
 			return;
 		// Upstream dispatches only on frames that drew skin.
@@ -287,8 +287,9 @@ namespace cs::features
 			!cs::render::IsSharedDataReady() || !EnsureResources(colorTexture))
 			return;
 		auto& t = _textures;
-		const UINT width = static_cast<UINT>(std::floor(t.width * manager->GetDynamicWidthRatio()));
-		const UINT height = static_cast<UINT>(std::floor(t.height * manager->GetDynamicHeightRatio()));
+		const auto render = cs::render::GetRenderResolution().render;
+		const UINT width = render.width;
+		const UINT height = render.height;
 		if (!width || !height)
 			return;
 		try {

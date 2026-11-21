@@ -464,10 +464,6 @@ namespace cs::render
 		_resourcesReady.store(ok, std::memory_order_release);
 		if (ok) {
 			_renderSize.CommitRequested();
-			resolutionScale = {
-				_renderSize.WidthRatio(),
-				_renderSize.HeightRatio()
-			};
 			L->info("Created upscaling resources after render-target creation");
 		} else if (IsExternalUpscaler(method)) {
 			if (!sizeResult.Succeeded()) {
@@ -528,10 +524,6 @@ namespace cs::render
 		recreated = recreated && PreflightExternalResolve(method);
 		if (recreated) {
 			_renderSize.CommitRequested();
-			resolutionScale = {
-				_renderSize.WidthRatio(),
-				_renderSize.HeightRatio()
-			};
 		} else {
 			if (IsExternalUpscaler(method)) {
 				if (!sizeResult.Succeeded()) {

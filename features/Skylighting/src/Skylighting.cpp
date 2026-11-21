@@ -357,11 +357,10 @@ namespace cs::features
 			return;
 		auto* shader = _debugCompute[mode == DebugVisualization::kUp ? 1 : 0].get();
 		auto* normals = cs::engine::GetRenderTargetSRV(RE::BSGraphics::RenderTargetID::kGBufferNormal);
-		const auto* graphics = cs::engine::GetGraphicsState();
-		if (!shader || !normals || !graphics || !cs::render::IsSharedDataReady())
+		if (!shader || !normals || !cs::render::IsSharedDataReady())
 			return;
-		const auto extent = cs::render::GetActiveExtent(graphics->screenWidth, graphics->screenHeight);
-		if (!extent.width || !extent.height)
+		const auto extent = cs::render::GetRenderResolution().render;
+		if (!extent.IsValid())
 			return;
 		auto* target = cs::render::AcquireFullscreenDebugTarget();
 		if (!target)

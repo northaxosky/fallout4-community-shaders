@@ -71,7 +71,7 @@ namespace cs::render
 		void InvalidateProxy(RE::BSGraphics::RenderTargetID a_target) noexcept { dynamicResolution.InvalidateProxy(a_target); }
 		std::pair<float, bool> GetReadiness() const noexcept
 		{
-			return { resolutionScale.x, _resourcesReady.load(std::memory_order_acquire) };
+			return { _renderSize.WidthRatio(), _resourcesReady.load(std::memory_order_acquire) };
 		}
 
 	private:
@@ -94,7 +94,6 @@ namespace cs::render
 		cs::buffer::ConstantBuffer* jitterCB = nullptr;
 		cs::buffer::ConstantBuffer* upscalingDataCB = nullptr;
 
-		float2 resolutionScale = { 1.0f, 1.0f };
 		temporal::RenderSizeState _renderSize;
 		struct ResourceConfiguration
 		{

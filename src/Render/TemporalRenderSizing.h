@@ -21,15 +21,11 @@ namespace cs::render::temporal
 		float ratio = static_cast<float>(
 			static_cast<double>(a_renderExtent) /
 			static_cast<double>(a_outputExtent));
-		while (static_cast<std::uint32_t>(
-				   static_cast<float>(a_outputExtent) * ratio) <
-			   a_renderExtent) {
+		while (ScaledExtent(a_outputExtent, ratio) < a_renderExtent) {
 			ratio = std::nextafter(
 				ratio, std::numeric_limits<float>::infinity());
 		}
-		while (static_cast<std::uint32_t>(
-				   static_cast<float>(a_outputExtent) * ratio) >
-			   a_renderExtent) {
+		while (ScaledExtent(a_outputExtent, ratio) > a_renderExtent) {
 			ratio = std::nextafter(ratio, 0.0f);
 		}
 		return ratio;
