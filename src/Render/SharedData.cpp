@@ -254,7 +254,7 @@ namespace cs::render
 					fullScale ? 1.0f : resolution.previousWidthRatio, fullScale ? 1.0f : resolution.previousHeightRatio
 				};
 				const float size = static_cast<float>(resolution.output.width);
-				const float clamp = fullScale ? (std::trunc(size * ratio.x) - 1.0f) / size : ratio.x - 0.5f / size;
+				const float clamp = fullScale ? (size - 1.0f) / size : ratio.x - 0.5f / size;
 				data.frame = PackFrameData(*camera, ratio, previousRatio, ratio.x - clamp);
 				data.fo4.DeltaTime = delta;
 				data.shared.ResetHistory = GetFrameState().HasReset() ? 1u : 0u;

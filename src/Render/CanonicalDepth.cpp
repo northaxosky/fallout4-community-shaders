@@ -137,8 +137,7 @@ namespace cs::render
 
 	ID3D11ShaderResourceView* UpdateOutputCanonicalDepth(ID3D11DeviceContext* a_context, const engine::WorldCameraRecord& a_camera)
 	{
-		// The resolve resets the live ratio, not the latched record.
-		// Upscaled depth is unjittered.
+		// Unjittered and live: the resolve resets the ratio, not the latch.
 		return Update(output, a_context, a_camera, a_camera.ProjectionUnjittered, ReadLiveResolution().render) ? output.depth->srv.get() : nullptr;
 	}
 
