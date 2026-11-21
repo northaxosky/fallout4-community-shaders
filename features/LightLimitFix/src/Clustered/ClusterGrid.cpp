@@ -37,10 +37,7 @@ namespace cs::features::light_limit_fix
 
 	ClusterDimensions ClusterGrid::ActiveDimensions() noexcept
 	{
-		const auto* state = engine::GetGraphicsState();
-		if (!state)
-			return {};
-		const auto extent = render::GetActiveExtent(state->screenWidth, state->screenHeight);
+		const auto extent = render::GetRenderResolution().render;
 		return Dimensions(extent.width, extent.height);
 	}
 
@@ -49,8 +46,6 @@ namespace cs::features::light_limit_fix
 		const auto* state = engine::GetGraphicsState();
 		if (!state || !state->screenWidth || !state->screenHeight)
 			throw std::runtime_error("the LLF cluster grid has no screen size");
-		const auto size = Dimensions(state->screenWidth, state->screenHeight);
-		_capacity = size[0] * size[1] * size[2];
 
 		_buildShader = util::RequireComputeShader("LightLimitFix/ClusterBuilding.CS", kBuildPath);
 		_cullShader = util::RequireComputeShader("LightLimitFix/ClusterCulling.CS", kCullPath);
@@ -61,10 +56,19 @@ namespace cs::features::light_limit_fix
 
 		_lights = MakeBuffer<LightData>("LLF Lights", kMaxLights, true);
 		_cones = MakeBuffer<ConeData>("LLF Cones", kMaxLights, true);
-		_clusters = MakeBuffer<ClusterAABB>("LLF Clusters", _capacity, false);
 		_lightIndexCounter = MakeBuffer<std::uint32_t>("LLF Light Index Counter", 1, false);
-		_lightIndexList = MakeBuffer<std::uint32_t>("LLF Light Index List", _capacity * kClusterMaxLights, false);
-		_lightGrid = MakeBuffer<LightGrid>("LLF Light Grid", _capacity, false);
+		const auto size = Dimensions(state->screenWidth, state->screenHeight);
+		EnsureCapacity(size[0] * size[1] * size[2]);
+	}
+
+	void ClusterGrid::EnsureCapacity(std::uint32_t a_count)
+	{
+		if (a_count <= _capacity)
+			return;
+		_clusters = MakeBuffer<ClusterAABB>("LLF Clusters", a_count, false);
+		_lightIndexList = MakeBuffer<std::uint32_t>("LLF Light Index List", a_count * kClusterMaxLights, false);
+		_lightGrid = MakeBuffer<LightGrid>("LLF Light Grid", a_count, false);
+		_capacity = a_count;
 	}
 
 	bool ClusterGrid::Build(const LightGather& a_gather, const engine::WorldCameraRecord& a_camera)
@@ -72,8 +76,9 @@ namespace cs::features::light_limit_fix
 		auto* context = engine::GetImmediateContext();
 		const auto clusterSize = ActiveDimensions();
 		const auto clusterCount = clusterSize[0] * clusterSize[1] * clusterSize[2];
-		if (!context || clusterCount == 0 || clusterCount > _capacity)
+		if (!context || clusterCount == 0)
 			return false;
+		EnsureCapacity(clusterCount);
 
 		const auto lights = a_gather.Lights();
 		const auto cones = a_gather.Cones();
