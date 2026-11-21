@@ -102,15 +102,7 @@ namespace cs::render
 		HRESULT SetHDRMetaData(DXGI_HDR_METADATA_TYPE a_type, UINT a_size,
 			void* a_metadata) noexcept override;
 
-		HRESULT SetPrivateData(REFGUID a_name, UINT a_size,
-			const void* a_data) noexcept;
-		HRESULT SetPrivateDataInterface(REFGUID a_name,
-			const IUnknown* a_unknown) noexcept;
-		HRESULT GetPrivateData(REFGUID a_name, UINT* a_size, void* a_data) noexcept;
-		HRESULT GetParent(REFIID a_iid, void** a_parent) noexcept;
 		HRESULT GetContainingOutput(IDXGIOutput** a_output) noexcept;
-		HRESULT GetFrameStatistics(DXGI_FRAME_STATISTICS* a_stats) noexcept;
-		HRESULT GetLastPresentCount(UINT* a_count) noexcept;
 
 	private:
 		struct Surfaces

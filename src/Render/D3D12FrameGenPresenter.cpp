@@ -90,11 +90,11 @@ namespace cs::render
 				FrameGenerationBuffers buffers;
 				result = presenter->CreateBuffers(presenter->_chain.desc.Width, presenter->_chain.desc.Height, buffers);
 				if (SUCCEEDED(result)) {
-					result = presenter->CommitBuffers(std::move(buffers), presenter->_chain.desc.Width, presenter->_chain.desc.Height);
-				}
-				if (result == S_FALSE) {
-					failure = ProviderResult::Fail("The frame-generation display resources are unavailable.", FailureDomain::kFrameGeneration);
-					result = E_FAIL;
+					const auto committed = presenter->CommitBuffers(std::move(buffers), presenter->_chain.desc.Width, presenter->_chain.desc.Height);
+					if (!committed.Succeeded()) {
+						failure = committed;
+						result = E_FAIL;
+					}
 				}
 			}
 			if (FAILED(result)) {
@@ -149,9 +149,6 @@ namespace cs::render
 			                                                                       E_FAIL;
 		}
 		_frameIndex = _chain.chain->GetCurrentBackBufferIndex();
-		if (_hdrContainer && _callbacks.queryHdrOutput) {
-			ApplyHdrColorSpace(_callbacks.queryHdrOutput());
-		}
 		return S_OK;
 	}
 
@@ -248,22 +245,12 @@ namespace cs::render
 		return S_OK;
 	}
 
-	HRESULT D3D12FrameGenPresenter::CommitBuffers(
+	temporal::ProviderResult D3D12FrameGenPresenter::CommitBuffers(
 		FrameGenerationBuffers&& a_buffers, UINT a_width, UINT a_height)
 	{
-		_failures.Retry();
 		_buffers = std::move(a_buffers);
 		++_inputResourceGeneration;
-		const auto providerResult = _provider.CreateDisplayResources(
-			a_width, a_height, PresentContract(), _chain.desc.BufferCount);
-		if (!providerResult.Succeeded()) {
-			_failures.Latch();
-			L->error(
-				"Frame-generation provider resources were not recreated; "
-				"real-frame presentation remains active");
-			return S_FALSE;
-		}
-		return S_OK;
+		return RestoreProvider(a_width, a_height);
 	}
 
 	temporal::ColorContract D3D12FrameGenPresenter::PresentContract() const
@@ -275,17 +262,16 @@ namespace cs::render
 		return temporal::ContainerContract(hdr);
 	}
 
-	HRESULT D3D12FrameGenPresenter::RestoreProvider(UINT a_width, UINT a_height)
+	temporal::ProviderResult D3D12FrameGenPresenter::RestoreProvider(UINT a_width, UINT a_height)
 	{
-		const auto result = _provider.CreateDisplayResources(
+		auto result = _provider.CreateDisplayResources(
 			a_width, a_height, PresentContract(), _chain.desc.BufferCount);
-		if (!result.Succeeded()) {
+		if (result.Succeeded()) {
+			_failures.Retry();
+		} else {
 			_failures.Latch();
-			FailFrame(result.message.empty() ? "Frame-generation provider restoration failed" : result.message.c_str());
-			return S_FALSE;
 		}
-		_failures.Retry();
-		return S_OK;
+		return result;
 	}
 
 	void D3D12FrameGenPresenter::ClearInputs(ID3D11DeviceContext& a_context) noexcept
@@ -304,10 +290,12 @@ namespace cs::render
 
 	void D3D12FrameGenPresenter::ResetSubmissions() noexcept
 	{
-		temporal::ResetPresentationProtocol(
-			_allocatorFenceValues, _inputReuseGate, _frameSlot, _presentPrepared,
-			_preparedFrameGeneration, _vendorConsumptionPossible,
-			_preparedTransaction);
+		_inputReuseGate.Reset();
+		_frameSlot = 0;
+		_presentPrepared = false;
+		_preparedFrameGeneration = false;
+		_vendorConsumptionPossible = false;
+		_preparedTransaction = false;
 		_presentSubmissionMayBeInFlight = false;
 		for (auto& submission : _presentSubmissions) {
 			submission.completionValue = 0;
@@ -378,13 +366,18 @@ namespace cs::render
 	void D3D12FrameGenPresenter::FailFrame(const char* a_reason) noexcept
 	{
 		const char* reason = a_reason ? a_reason : "unknown failure";
-		if (_callbacks.clearCapture) {
-			_callbacks.clearCapture();
-		}
-		render::TemporalPipeline::Get().RequestFrameGenerationReset();
-		const bool latched = _failures.Failed();
-		if (!_bridge.IsQuarantined() && _callbacks.recordFailure) {
-			_callbacks.recordFailure(reason);
+		// One present or resize counts once; later failures are only logged.
+		const bool counted = !std::exchange(_failureReported, true);
+		bool latched = false;
+		if (counted) {
+			if (_callbacks.clearCapture) {
+				_callbacks.clearCapture();
+			}
+			render::TemporalPipeline::Get().RequestFrameGenerationReset();
+			latched = _failures.Failed();
+			if (!_bridge.IsQuarantined() && _callbacks.recordFailure) {
+				_callbacks.recordFailure(reason);
+			}
 		}
 		try {
 			L->error("Frame generation skipped a frame{}: {}",
@@ -524,6 +517,7 @@ namespace cs::render
 
 	HRESULT D3D12FrameGenPresenter::Present(const PresentFrame& a_frame, const PresentArgs& a_args) noexcept
 	{
+		_failureReported = false;
 		try {
 			const HRESULT result = PresentImpl(a_frame, a_args);
 			if (result == DXGI_ERROR_DEVICE_REMOVED ||
@@ -598,13 +592,8 @@ namespace cs::render
 				}
 				copySource = hdrFrameGenerationBackBuffer ? hdrFrameGenerationBackBuffer : a_frame.ComposeDisplay();
 			}
-			if (copySource) {
-				D3D11_TEXTURE2D_DESC sourceDesc{};
-				copySource->texture11->GetDesc(&sourceDesc);
-				if (sourceDesc.Format != _chain.desc.Format) {
-					CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
-					copySource = nullptr;
-				}
+			if (copySource && !_chain.AcceptsSource(*copySource)) {
+				copySource = nullptr;
 			}
 			cs::render::annotation::SetMarker("FG_D3D11ProductionComplete");
 			// D3D11 time across the round trip; minus D3D12::Present is the handoff.
@@ -755,7 +744,6 @@ namespace cs::render
 			const UINT64 d3d12Done = _bridge.SignalQueue();
 			submission->completionValue = d3d12Done;
 			timer.Commit(submission->timing);
-			_allocatorFenceValues[_frameSlot] = d3d12Done;
 			const HRESULT producerWait = _bridge.D3D11WaitsForQueue(d3d12Done);
 			handoff.End();
 			DX::ThrowIfFailed(producerWait);
@@ -886,6 +874,7 @@ namespace cs::render
 
 	ResizeOutcome D3D12FrameGenPresenter::Resize(UINT a_width, UINT a_height, UINT a_flags) noexcept
 	{
+		_failureReported = false;
 		try {
 			const UINT oldWidth = _chain.desc.Width;
 			const UINT oldHeight = _chain.desc.Height;
@@ -920,12 +909,9 @@ namespace cs::render
 				if (FAILED(RefreshBackBuffers())) {
 					_faulted = true;
 				}
-				const auto restored = _provider.CreateDisplayResources(
-					oldWidth, oldHeight, PresentContract(), _chain.desc.BufferCount);
+				const auto restored = RestoreProvider(oldWidth, oldHeight);
 				if (!restored.Succeeded()) {
-					FailFrame(
-						"Frame-generation provider could not be restored "
-						"after rejected resize");
+					FailFrame("Restore the frame-generation provider after a rejected resize", restored);
 				}
 				render::TemporalPipeline::Get().RequestFrameGenerationReset();
 				return { .result = resizeResult };
@@ -957,11 +943,10 @@ namespace cs::render
 
 			_chain.appliedColorSpace.reset();
 			_chain.desc = resizedDesc;
-			const HRESULT providerResult = sizeChanged ? CommitBuffers(std::move(pending), resizedDesc.Width, resizedDesc.Height) :
-			                                             RestoreProvider(resizedDesc.Width, resizedDesc.Height);
-			if (providerResult == S_FALSE) {
-				FailFrame(
-					"Frame-generation provider could not be restored after resize");
+			const auto restored = sizeChanged ? CommitBuffers(std::move(pending), resizedDesc.Width, resizedDesc.Height) :
+			                                    RestoreProvider(resizedDesc.Width, resizedDesc.Height);
+			if (!restored.Succeeded()) {
+				FailFrame("Restore the frame-generation provider after resize", restored);
 			}
 			return { .result = resizeResult, .resized = true };
 		} catch (const std::exception& e) {

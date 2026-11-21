@@ -42,6 +42,17 @@ namespace cs::render
 		return a_args.present1 ? chain->Present1(a_args.syncInterval, a_args.flags, a_args.parameters) : chain->Present(a_args.syncInterval, a_args.flags);
 	}
 
+	bool PresenterChain::AcceptsSource(const SharedD3D11D3D12Texture& a_source) const noexcept
+	{
+		D3D11_TEXTURE2D_DESC sourceDesc{};
+		a_source.texture11->GetDesc(&sourceDesc);
+		if (sourceDesc.Format == desc.Format) {
+			return true;
+		}
+		CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
+		return false;
+	}
+
 	void PresenterChain::ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept
 	{
 		// An fp16 chain carries linear scRGB whether or not HDR is on.

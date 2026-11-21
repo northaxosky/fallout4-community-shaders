@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Annotation.h"
+#include "Render/DXGISwapChainFacadeContract.h"
 #include "Render/TemporalPipeline.h"
 
 namespace cs::render
@@ -98,14 +99,8 @@ namespace cs::render
 				ApplyHdrColorSpace(a_frame.hdr);
 			}
 			const auto* source = a_frame.ComposeDisplay();
-			D3D11_TEXTURE2D_DESC sourceDesc{};
-			if (source) {
-				source->texture11->GetDesc(&sourceDesc);
-			}
-			if (source && sourceDesc.Format == _chain.desc.Format) {
+			if (source && _chain.AcceptsSource(*source)) {
 				a_frame.context->CopyResource(_backBuffer.get(), source->texture11.get());
-			} else if (source) {
-				CS_LOG_EVERY_MS(L, 5000, spdlog::level::err, "Present source format does not match the swap chain; the frame is not presented.");
 			}
 			_framePending = true;
 		}
@@ -124,7 +119,7 @@ namespace cs::render
 	{
 		_framePending = false;
 		_backBuffer = nullptr;
-		const UINT flags = a_flags | (_chain.desc.Flags & (DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT));
+		const UINT flags = swap_chain_facade::PreservePrivateResizeFlags(a_flags, _chain.desc);
 		const HRESULT resizeResult = _chain.chain->ResizeBuffers(_chain.desc.BufferCount, a_width, a_height, _chain.desc.Format, flags);
 		if (FAILED(resizeResult)) {
 			(void)RefreshBackBuffer();

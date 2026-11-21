@@ -60,7 +60,7 @@ namespace cs::render
 		bool resized = false;
 	};
 
-	// A real swap chain behind the facade; the host owns everything D3D11.
+	// A real swap chain behind the facade; the host owns the facade surfaces and compose.
 	class IPresenter
 	{
 	public:
@@ -90,6 +90,8 @@ namespace cs::render
 		std::optional<DXGI_COLOR_SPACE_TYPE> appliedColorSpace;
 
 		[[nodiscard]] HRESULT Present(const PresentArgs& a_args) const noexcept;
+		// False, and logged, when the source cannot be copied into the back buffer.
+		[[nodiscard]] bool AcceptsSource(const SharedD3D11D3D12Texture& a_source) const noexcept;
 		// Applied once per change; a rejection is not retried every frame.
 		void ApplyHdrColorSpace(const hdr::OutputSettings& a_settings) noexcept;
 	};

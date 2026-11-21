@@ -360,21 +360,6 @@ namespace cs::render::temporal
 		std::array<bool, 2> _acquired{};
 	};
 
-	inline void ResetPresentationProtocol(
-		std::array<std::uint64_t, 2>& a_allocatorFenceValues,
-		PresentInputReuseGate& a_inputReuseGate, std::uint32_t& a_frameSlot,
-		bool& a_presentPrepared, bool& a_preparedFrameGeneration,
-		bool& a_vendorConsumptionPossible, bool& a_preparedTransaction) noexcept
-	{
-		a_allocatorFenceValues.fill(0);
-		a_inputReuseGate.Reset();
-		a_frameSlot = 0;
-		a_presentPrepared = false;
-		a_preparedFrameGeneration = false;
-		a_vendorConsumptionPossible = false;
-		a_preparedTransaction = false;
-	}
-
 	class PresentedFrameAccumulator
 	{
 	public:

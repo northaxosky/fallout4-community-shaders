@@ -761,43 +761,8 @@ namespace cs::render
 		return outcome.result;
 	}
 
-	HRESULT PresentationHost::SetPrivateData(REFGUID a_name, UINT a_size,
-		const void* a_data) noexcept
-	{
-		return Inner() ? Inner()->SetPrivateData(a_name, a_size, a_data) : E_FAIL;
-	}
-
-	HRESULT
-	PresentationHost::SetPrivateDataInterface(REFGUID a_name,
-		const IUnknown* a_unknown) noexcept
-	{
-		return Inner() ? Inner()->SetPrivateDataInterface(a_name, a_unknown) : E_FAIL;
-	}
-
-	HRESULT PresentationHost::GetPrivateData(REFGUID a_name, UINT* a_size,
-		void* a_data) noexcept
-	{
-		return Inner() ? Inner()->GetPrivateData(a_name, a_size, a_data) : E_FAIL;
-	}
-
-	HRESULT PresentationHost::GetParent(REFIID a_iid, void** a_parent) noexcept
-	{
-		return Inner() ? Inner()->GetParent(a_iid, a_parent) : E_FAIL;
-	}
-
 	HRESULT PresentationHost::GetContainingOutput(IDXGIOutput** a_output) noexcept
 	{
 		return Inner() ? Inner()->GetContainingOutput(a_output) : E_FAIL;
-	}
-
-	HRESULT
-	PresentationHost::GetFrameStatistics(DXGI_FRAME_STATISTICS* a_stats) noexcept
-	{
-		return Inner() ? Inner()->GetFrameStatistics(a_stats) : E_FAIL;
-	}
-
-	HRESULT PresentationHost::GetLastPresentCount(UINT* a_count) noexcept
-	{
-		return Inner() ? Inner()->GetLastPresentCount(a_count) : E_FAIL;
 	}
 }  // namespace cs::render

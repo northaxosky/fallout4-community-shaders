@@ -178,7 +178,7 @@ namespace cs::render
 		// Records why a frame or feature failed; nothing is switched off.
 		void PostFailure(temporal::FailureDomain a_domain,
 			std::string a_message) noexcept;
-		// Only when GPU completion cannot be proven; off until restart.
+		// Switches the affected processing off until restart.
 		void Quarantine(temporal::FailureDomain a_domain,
 			std::string a_message) noexcept;
 		void FailSuperResolutionToNative(std::string reason) noexcept;

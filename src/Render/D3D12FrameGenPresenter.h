@@ -73,8 +73,9 @@ namespace cs::render
 		[[nodiscard]] SlotTextures CreateSlotBuffers(const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name) const;
 		[[nodiscard]] HRESULT CreateBuffers(UINT a_width, UINT a_height, FrameGenerationBuffers& a_buffers) const;
 		// Takes the new buffers and sizes the provider's resources to them.
-		[[nodiscard]] HRESULT CommitBuffers(FrameGenerationBuffers&& a_buffers, UINT a_width, UINT a_height);
-		[[nodiscard]] HRESULT RestoreProvider(UINT a_width, UINT a_height);
+		[[nodiscard]] temporal::ProviderResult CommitBuffers(FrameGenerationBuffers&& a_buffers, UINT a_width, UINT a_height);
+		// A failure latches frame generation; the caller reports it once.
+		[[nodiscard]] temporal::ProviderResult RestoreProvider(UINT a_width, UINT a_height);
 		[[nodiscard]] temporal::ColorContract PresentContract() const;
 		[[nodiscard]] HRESULT RefreshBackBuffers() noexcept;
 		void ResetSubmissions() noexcept;
@@ -98,7 +99,6 @@ namespace cs::render
 		FrameGenerationBuffers _buffers;
 		temporal::PresentInputReuseGate _inputReuseGate;
 		temporal::AtomicPresentInputRetirementDiagnostics _retirementDiagnostics;
-		std::array<std::uint64_t, 2> _allocatorFenceValues{};
 		std::uint64_t _preparedRealFrame = 0;
 		std::uint64_t _inputResourceGeneration = 0;
 		UINT _frameIndex = 0;
@@ -106,6 +106,7 @@ namespace cs::render
 		UINT _nextPresentSubmission = 0;
 		bool _hdrContainer = false;
 		bool _faulted = false;
+		bool _failureReported = false;
 		temporal::FailurePolicy _failures{ temporal::kFrameGenerationFailureLimit };
 		bool _providerGenerationEnabled = false;
 		bool _presentPrepared = false;

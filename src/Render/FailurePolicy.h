@@ -5,7 +5,7 @@
 
 namespace cs::render::temporal
 {
-	// Consecutive failed world frames before a feature latches off.
+	// Consecutive presents that reported a failure before a feature latches off.
 	inline constexpr std::uint32_t kSuperResolutionFailureLimit = 30;
 	inline constexpr std::uint32_t kFrameGenerationFailureLimit = 5;
 
