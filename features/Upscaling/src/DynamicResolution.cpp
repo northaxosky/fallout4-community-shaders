@@ -183,8 +183,8 @@ namespace cs::features
 			uav->GetDesc(&uaViewDesc);
 		}
 
-		textureDesc.Width = static_cast<std::uint32_t>(static_cast<float>(textureDesc.Width) * a_widthRatio);
-		textureDesc.Height = static_cast<std::uint32_t>(static_cast<float>(textureDesc.Height) * a_heightRatio);
+		textureDesc.Width = cs::render::ScaledExtent(textureDesc.Width, a_widthRatio);
+		textureDesc.Height = cs::render::ScaledExtent(textureDesc.Height, a_heightRatio);
 
 		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
@@ -262,8 +262,8 @@ namespace cs::features
 			return;
 		}
 
-		texDesc.Width = static_cast<std::uint32_t>(static_cast<float>(texDesc.Width) * a_widthRatio);
-		texDesc.Height = static_cast<std::uint32_t>(static_cast<float>(texDesc.Height) * a_heightRatio);
+		texDesc.Width = cs::render::ScaledExtent(texDesc.Width, a_widthRatio);
+		texDesc.Height = cs::render::ScaledExtent(texDesc.Height, a_heightRatio);
 		texDesc.Format = DXGI_FORMAT_R32_FLOAT;
 		texDesc.Usage = D3D11_USAGE_DEFAULT;
 		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;

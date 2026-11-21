@@ -31,18 +31,10 @@ namespace cs::engine
 			return native;
 		}
 
-		// Reads the live engine ratio once; b4 and every reader share the result.
+		// Latches once per world frame; b4 and world-frame readers share the result.
 		void LatchRenderResolution() noexcept
 		{
-			auto latched = NativeResolution();
-			if (const auto* manager = GetRenderTargetManager()) {
-				const auto width = manager->GetDynamicWidthRatio();
-				const auto height = manager->GetDynamicHeightRatio();
-				latched.widthRatio = width > 0.0f ? width : 1.0f;
-				latched.heightRatio = height > 0.0f ? height : 1.0f;
-			}
-			latched.render = { render::ScaledExtent(latched.output.width, latched.widthRatio),
-				render::ScaledExtent(latched.output.height, latched.heightRatio) };
+			auto latched = render::ReadLiveResolution();
 			const auto previous = g_lastRatio.value_or(DirectX::XMFLOAT2{ latched.widthRatio, latched.heightRatio });
 			latched.previousWidthRatio = previous.x;
 			latched.previousHeightRatio = previous.y;
@@ -120,6 +112,21 @@ namespace cs::engine
 
 namespace cs::render
 {
+	RenderResolution ReadLiveResolution() noexcept
+	{
+		auto live = engine::NativeResolution();
+		if (const auto* manager = engine::GetRenderTargetManager()) {
+			const auto width = manager->GetDynamicWidthRatio();
+			const auto height = manager->GetDynamicHeightRatio();
+			live.widthRatio = width > 0.0f ? width : 1.0f;
+			live.heightRatio = height > 0.0f ? height : 1.0f;
+		}
+		live.render = { ScaledExtent(live.output.width, live.widthRatio), ScaledExtent(live.output.height, live.heightRatio) };
+		live.previousWidthRatio = live.widthRatio;
+		live.previousHeightRatio = live.heightRatio;
+		return live;
+	}
+
 	RenderResolution GetRenderResolution() noexcept
 	{
 		std::scoped_lock lock(engine::g_prepassCameraMutex);

@@ -137,15 +137,9 @@ namespace cs::render
 
 	ID3D11ShaderResourceView* UpdateOutputCanonicalDepth(ID3D11DeviceContext* a_context, const engine::WorldCameraRecord& a_camera)
 	{
-		// Phase 2 scope decision: the resolve resets the live ratio, not the record.
-		const auto* state = engine::GetGraphicsState();
-		const auto* manager = engine::GetRenderTargetManager();
-		const Extent active = state && manager ?
-		                          Extent{ ScaledExtent(state->screenWidth, manager->GetDynamicWidthRatio()),
-									  ScaledExtent(state->screenHeight, manager->GetDynamicHeightRatio()) } :
-		                          Extent{};
+		// The resolve resets the live ratio, not the latched record.
 		// Upscaled depth is unjittered.
-		return Update(output, a_context, a_camera, a_camera.ProjectionUnjittered, active) ? output.depth->srv.get() : nullptr;
+		return Update(output, a_context, a_camera, a_camera.ProjectionUnjittered, ReadLiveResolution().render) ? output.depth->srv.get() : nullptr;
 	}
 
 	ID3D11ShaderResourceView* GetCanonicalSceneDepthSRV() noexcept

@@ -17,6 +17,9 @@ namespace cs::render
 		[[nodiscard]] bool Scaled() const noexcept { return render != output; }
 	};
 
+	// The live engine ratio right now; unlike the latch it follows scope changes.
+	[[nodiscard]] RenderResolution ReadLiveResolution() noexcept;
+
 	// Native outside a world frame (menus, loading, startup).
 	[[nodiscard]] RenderResolution GetRenderResolution() noexcept;
 }
