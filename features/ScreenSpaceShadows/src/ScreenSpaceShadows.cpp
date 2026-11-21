@@ -170,10 +170,7 @@ namespace cs::features
 		if (!resolution.render.IsValid())
 			return false;
 		a_required = resolution.render;
-		a_allocation = {
-			std::max(resolution.output.width, a_required.width),
-			std::max(resolution.output.height, a_required.height)
-		};
+		a_allocation = resolution.output;
 		return true;
 	}
 
@@ -488,10 +485,6 @@ namespace cs::features
 		}
 
 		const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		auto* state = cs::engine::GetGraphicsState();
-		if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
-			return;
-		}
 		if (allocation.width != _allocWidth || allocation.height != _allocHeight) {
 			try {
 				CreateMaskTexture(

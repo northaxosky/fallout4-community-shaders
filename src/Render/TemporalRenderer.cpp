@@ -75,10 +75,6 @@ namespace cs::render
 
 	std::pair<std::uint32_t, std::uint32_t> TemporalRenderer::GetRenderSize() const noexcept
 	{
-		const auto* state = cs::engine::GetGraphicsState();
-		if (!state) {
-			return { 0, 0 };
-		}
 		const auto method = GetUpscaleMethod();
 		if (!IsExternalUpscaler(method)) {
 			const auto extent = render::GetRenderResolution().render;

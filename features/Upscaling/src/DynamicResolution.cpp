@@ -9,6 +9,7 @@
 #include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
+#include "Render/Extent.h"
 #include "Render/RendererContext.h"
 #include "Utils/CSUtil.h"
 
@@ -384,10 +385,10 @@ namespace cs::features
 		// Report the scaled dimensions so callers that query render-target sizes stay correct.
 		for (int i = 0; i < 100; i++) {
 			originalRenderTargetData[i] = renderTargetManager->renderTargetData[i];
-			renderTargetManager->renderTargetData[i].width = static_cast<std::uint32_t>(
-				static_cast<float>(renderTargetManager->renderTargetData[i].width) * widthRatio);
-			renderTargetManager->renderTargetData[i].height = static_cast<std::uint32_t>(
-				static_cast<float>(renderTargetManager->renderTargetData[i].height) * heightRatio);
+			renderTargetManager->renderTargetData[i].width = cs::render::ScaledExtent(
+				renderTargetManager->renderTargetData[i].width, widthRatio);
+			renderTargetManager->renderTargetData[i].height = cs::render::ScaledExtent(
+				renderTargetManager->renderTargetData[i].height, heightRatio);
 		}
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
@@ -557,8 +558,8 @@ namespace cs::features
 		auto* liveTexture = reinterpret_cast<ID3D11Texture2D*>(engineTarget->texture);
 		D3D11_TEXTURE2D_DESC liveDesc{};
 		liveTexture->GetDesc(&liveDesc);
-		liveDesc.Width = static_cast<std::uint32_t>(static_cast<float>(liveDesc.Width) * _proxyPassWidthRatio);
-		liveDesc.Height = static_cast<std::uint32_t>(static_cast<float>(liveDesc.Height) * _proxyPassHeightRatio);
+		liveDesc.Width = cs::render::ScaledExtent(liveDesc.Width, _proxyPassWidthRatio);
+		liveDesc.Height = cs::render::ScaledExtent(liveDesc.Height, _proxyPassHeightRatio);
 
 		bool reusable = false;
 		if (auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxy.texture)) {
