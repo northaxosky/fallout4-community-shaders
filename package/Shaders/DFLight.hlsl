@@ -12,8 +12,8 @@
 #	include "FO4/ExtendedMaterialsConsumer.hlsli"
 #endif
 #include "FO4/AmbientConsumer.hlsli"
-#include "FO4/SphereMapNormal.hlsli"
 #include "FO4/SoftSunShadow.hlsli"
+#include "FO4/SphereMapNormal.hlsli"
 
 #include "FO4/LightLimitFixRaster.hlsli"
 #if defined(VANILLA_PBR)
@@ -6303,6 +6303,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float directContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : 1.0;
 			float transmissionContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : contactVisibility.y;
 			finalDiffuse *= directContactShadow;
+			FO4_SOFT_LOBE_SCALE_UNLOADED(softDiffuse, directContactShadow);
 #			ifdef SPECULAR
 			brdfSpecular *= directContactShadow;
 #			endif
