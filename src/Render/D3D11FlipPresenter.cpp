@@ -1,7 +1,6 @@
 #include "D3D11FlipPresenter.h"
 
 #include "Log.h"
-#include "LogThrottle.h"
 #include "Render/Annotation.h"
 #include "Render/DXGISwapChainFacadeContract.h"
 #include "Render/TemporalPipeline.h"

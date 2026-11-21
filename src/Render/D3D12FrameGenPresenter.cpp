@@ -5,6 +5,7 @@
 #include <exception>
 #include <format>
 #include <optional>
+#include <tuple>
 #include <utility>
 
 #include "Log.h"
@@ -366,22 +367,17 @@ namespace cs::render
 	void D3D12FrameGenPresenter::FailFrame(const char* a_reason) noexcept
 	{
 		const char* reason = a_reason ? a_reason : "unknown failure";
-		// One present or resize counts once; later failures are only logged.
-		const bool counted = !std::exchange(_failureReported, true);
-		bool latched = false;
-		if (counted) {
-			if (_callbacks.clearCapture) {
-				_callbacks.clearCapture();
-			}
-			render::TemporalPipeline::Get().RequestFrameGenerationReset();
-			latched = _failures.Failed();
-			if (!_bridge.IsQuarantined() && _callbacks.recordFailure) {
-				_callbacks.recordFailure(reason);
-			}
+		if (_callbacks.clearCapture) {
+			_callbacks.clearCapture();
+		}
+		render::TemporalPipeline::Get().RequestFrameGenerationReset();
+		std::ignore = _failures.Failed();
+		if (!_bridge.IsQuarantined() && _callbacks.recordFailure) {
+			_callbacks.recordFailure(reason);
 		}
 		try {
 			L->error("Frame generation skipped a frame{}: {}",
-				latched ? " and latched off until a settings change or resize" : "", reason);
+				_failures.Latched() ? " and is off until a settings change or resize" : "", reason);
 		} catch (...) {
 		}
 	}
@@ -509,7 +505,6 @@ namespace cs::render
 				}
 			});
 		if (!written) {
-			FailFrame("frame-generation HDR inputs were still in provider use");
 			return nullptr;
 		}
 		return sceneOnly ? hudless : a_frame.output;
@@ -517,7 +512,6 @@ namespace cs::render
 
 	HRESULT D3D12FrameGenPresenter::Present(const PresentFrame& a_frame, const PresentArgs& a_args) noexcept
 	{
-		_failureReported = false;
 		try {
 			const HRESULT result = PresentImpl(a_frame, a_args);
 			if (result == DXGI_ERROR_DEVICE_REMOVED ||
@@ -830,7 +824,7 @@ namespace cs::render
 			if (disableResult.Succeeded()) {
 				_providerGenerationEnabled = false;
 			} else {
-				FailFrame("Disable after present failure", disableResult);
+				L->error("{}", temporal::FormatProviderFailure("Disable after present failure", disableResult));
 			}
 			if (_preparedTransaction) {
 				pipeline.SetFrameGenerationPrepared(_frameSlot, false);
@@ -874,7 +868,6 @@ namespace cs::render
 
 	ResizeOutcome D3D12FrameGenPresenter::Resize(UINT a_width, UINT a_height, UINT a_flags) noexcept
 	{
-		_failureReported = false;
 		try {
 			const UINT oldWidth = _chain.desc.Width;
 			const UINT oldHeight = _chain.desc.Height;

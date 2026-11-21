@@ -60,7 +60,7 @@ namespace cs::render
 		bool resized = false;
 	};
 
-	// A real swap chain behind the facade; the host owns the facade surfaces and compose.
+	// A real swap chain behind the facade; the host owns surfaces and compose.
 	class IPresenter
 	{
 	public:

@@ -187,8 +187,6 @@ namespace cs::render
 						(dimensions.outputHeight + 7) / 8,
 						1);
 				})) {
-			render::TemporalPipeline::Get().FailFrameGenerationFrame(
-				"frame-generation shared inputs were still in provider use");
 			return;
 		}
 
@@ -348,8 +346,6 @@ namespace cs::render
 							(capture.height + 7) / 8,
 							1);
 					})) {
-				render::TemporalPipeline::Get().FailFrameGenerationFrame(
-					"frame-generation shared inputs were still in provider use");
 				return;
 			}
 		}
@@ -406,8 +402,6 @@ namespace cs::render
 						hudless.resource,
 						frameBuffer.get());
 				})) {
-			render::TemporalPipeline::Get().FailFrameGenerationFrame(
-				"frame-generation HUD-less input was still in provider use");
 			return false;
 		}
 		CaptureFrameGenerationHudlessDebugSnapshot();

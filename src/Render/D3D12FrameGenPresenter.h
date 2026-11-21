@@ -106,7 +106,6 @@ namespace cs::render
 		UINT _nextPresentSubmission = 0;
 		bool _hdrContainer = false;
 		bool _faulted = false;
-		bool _failureReported = false;
 		temporal::FailurePolicy _failures{ temporal::kFrameGenerationFailureLimit };
 		bool _providerGenerationEnabled = false;
 		bool _presentPrepared = false;
