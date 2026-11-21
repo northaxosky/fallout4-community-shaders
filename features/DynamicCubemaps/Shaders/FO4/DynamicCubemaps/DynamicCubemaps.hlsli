@@ -11,6 +11,15 @@
 
 namespace DynamicCubemaps
 {
+	// Null cubes are bound until the first publish and on reflection activation.
+	bool IsUsable()
+	{
+		uint cubeWidth, cubeHeight, envWidth, envHeight;
+		EnvReflectionsTexture.GetDimensions(cubeWidth, cubeHeight);
+		EnvTexture.GetDimensions(envWidth, envHeight);
+		return FO4SharedData::EnabledDynamicCubemaps != 0 && cubeWidth != 0 && envWidth != 0;
+	}
+
 	// Debug views replace the environment with a known world-space reference.
 	bool TryGetDebugEnvironment(float3 direction, SamplerState cubeSampler, out float3 color)
 	{

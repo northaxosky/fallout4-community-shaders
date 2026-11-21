@@ -483,10 +483,7 @@ float3 surfaceColor(
 	color = lerp(color, perMaterial[5].xyz, saturate(slope * 1.9 + 0.35));
 #	if defined(REFLECTIONS) || defined(DYNAMIC_CUBEMAPS)
 #		ifdef DYNAMIC_CUBEMAPS
-	uint cubeWidth, cubeHeight, envWidth, envHeight;
-	DynamicCubemaps::EnvReflectionsTexture.GetDimensions(cubeWidth, cubeHeight);
-	DynamicCubemaps::EnvTexture.GetDimensions(envWidth, envHeight);
-	[branch] if (FO4SharedData::EnabledDynamicCubemaps != 0 && cubeWidth != 0 && envWidth != 0)
+	[branch] if (DynamicCubemaps::IsUsable())
 	{
 #			if defined(REFLECTIONS)
 		// FO4: without a fresh engine cube the sky gradient stays the far reflection.
@@ -574,7 +571,7 @@ float fresnelTerm(float grazing)
 	float f0 = perMaterial[13].z;
 #	if defined(DYNAMIC_CUBEMAPS)
 	// FO4 translation: Skyrim-scale F0 is FO4's F0 times its reflection amount.
-	if (FO4SharedData::EnabledDynamicCubemaps != 0)
+	if (DynamicCubemaps::IsUsable())
 		f0 *= perMaterial[8].y;
 #	endif
 	return (1.0 - f0) * pow(grazing, 5) + f0;
@@ -1022,7 +1019,7 @@ float4 main(PS_INPUT input) : SV_Target0
 
 	float reflectionWeight = fresnel * perMaterial[8].y;
 #		if defined(DYNAMIC_CUBEMAPS)
-	if (FO4SharedData::EnabledDynamicCubemaps != 0)
+	if (DynamicCubemaps::IsUsable())
 		reflectionWeight = fresnel;
 #		endif
 	float3 color = lerp(refraction, water, reflectionWeight);
