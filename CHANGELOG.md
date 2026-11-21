@@ -26,6 +26,7 @@
 - Presets: preset keys must match feature config keys exactly; older presets with lowercase keys no longer load.
 - Light Limit Fix: lights return to their vanilla radius while its shaders are off.
 - Screen Space Shadows: stale contact shadows no longer show when the shadow mask cannot be bound.
+- Dynamic Cubemaps: screen-space reflections look vanilla again while the feature is switched off.
 
 ## 0.5.1
 

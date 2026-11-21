@@ -15,7 +15,7 @@
 | Divergence | `CreateCubemapRenderTarget_Reflections` and `CreateDepthStencil_Reflections` shrink the engine cube and its depth to 256 | `engine_cube_size` (default 1024) sizes the rendered cube and grows depth 7 to match; consumers read it box-filtered to 256 | FO4 object-LOD trees are sub-texel at 256 and scramble between redraws |
 | Divergence | Water reflection weight is fresnel with the authored F0 | F0 is scaled by FO4's reflection amount (`VarAmounts.y`); weight is fresnel alone | FO4 F0 is about 4x Skyrim's; unscaled it mirrors the sky on near water |
 | Divergence | Loaded DC defines `ENABLESSR` for water | Live `enabled_ssr` gates all SSLR while DC is enabled | Avoids recompilation; SSLR feeds surfaces and water |
-| Divergence | SSLR confidence is linear | FO4 squares it; linear while DC is loaded | Stock bytes stay identical without DC |
+| Divergence | SSLR confidence is linear | FO4 squares it; linear while DC is enabled | Stock bytes stay identical without DC |
 | Forced | Water SSR hits add the previous frame's alpha-only target, reprojected, times `fAlphaWeight` | Not added | FO4 effect shaders write no separate alpha-only target |
 | Pending | `ApplyReflections` is disabled, so SSR reaches water only | Deferred surfaces keep native SSLR and its Hi-Z tracer | Needs Vanilla PBR and SSGI specular adapters beyond the native cube path |
 | N/A | Forward `Lighting.hlsl` sentinel path | | FO4 world and first-person emit no forward BSLighting passes |
