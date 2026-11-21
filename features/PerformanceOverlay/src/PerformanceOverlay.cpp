@@ -138,7 +138,7 @@ namespace cs::features
 	bool PerformanceOverlay::FramesCapped() const
 	{
 		// Frame time then reflects the limiter, not GPU cost.
-		return _frameGeneration || (_refreshHz > 0.0f && _fps >= _refreshHz * 0.97f) || _smoothPresentMs > _frameMs * 0.5f;
+		return _frameGeneration || (_refreshHz > 0.0f && _fps >= _refreshHz * 0.97f);
 	}
 
 	void PerformanceOverlay::OnDataLoaded()
