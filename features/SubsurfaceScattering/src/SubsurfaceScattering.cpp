@@ -366,7 +366,7 @@ namespace cs::features
 	void SubsurfaceScattering::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		a_sink.Field("hooks_registered", _registrationsReady.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("skin_drawn", _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount()).Field("skin_buckets", static_cast<std::int64_t>(_skinBuckets.load(std::memory_order_relaxed))).Field("skipped_frames", static_cast<std::int64_t>(_skippedFrames.load(std::memory_order_relaxed))).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
-		cs::render::profiling::CollectPassTimings(a_sink, "SubsurfaceScattering::");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	void SubsurfaceScattering::DrawSettings()

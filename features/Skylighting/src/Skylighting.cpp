@@ -793,7 +793,7 @@ namespace cs::features
 			.Field("split_end_1", static_cast<double>(_cascadeCounters.splitEnd[1].load(std::memory_order_relaxed)))
 			.Field("split_end_2", static_cast<double>(_cascadeCounters.splitEnd[2].load(std::memory_order_relaxed)))
 			.Field("cascade_overlap", static_cast<double>(_cascadeCounters.overlap.load(std::memory_order_relaxed)));
-		cs::render::profiling::CollectPassTimings(a_sink, "Skylighting::");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	void Skylighting::WriteSharedData(render::SharedFeatureDataCB& a_feature, render::FO4SharedDataCB& a_fo4)

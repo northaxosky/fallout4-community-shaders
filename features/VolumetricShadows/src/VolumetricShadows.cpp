@@ -338,7 +338,7 @@ namespace cs::features
 			.Field("dflight_draws_bound", count(_counters.lightDraws))
 			.Field("water_draws_bound", count(_counters.waterDraws))
 			.Field("effect_draws_bound", count(_counters.effectDraws));
-		cs::render::profiling::CollectPassTimings(a_sink, "VolumetricShadows::");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	namespace

@@ -346,6 +346,11 @@ namespace cs
 					if (!pass.external)
 						continue;
 					cachedExternalMax.Include(pass.avgMs, pass.p95Ms, pass.p99Ms);
+					// A child's time is already inside its parent's row.
+					const auto slash = pass.label.rfind('/');
+					if (slash != std::string::npos &&
+						std::ranges::any_of(group.passes, [&](const PassEntry& a_parent) { return a_parent.label == pass.label.substr(0, slash); }))
+						continue;
 					if (group.external) {
 						group.totalAvgMs += pass.avgMs;
 						group.totalP95Ms += pass.p95Ms;

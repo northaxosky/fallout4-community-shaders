@@ -695,7 +695,7 @@ namespace cs::features
 			.Field("layer_draws", count(_counters.layerDraws))
 			.Dimensions("cube", size, size)
 			.Field("cube_mips", _counters.cubeMips.load(std::memory_order_relaxed));
-		cs::render::profiling::CollectPassTimings(a_sink, "CloudShadows/");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	namespace

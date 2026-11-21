@@ -275,7 +275,7 @@ namespace cs::features
 			.Field("cleared_projections", count(_counters.cleared))
 			.Field("skipped_scene", count(_counters.skippedScene))
 			.Field("consumer_binds", count(_counters.consumerBinds));
-		render::profiling::CollectPassTimings(a_sink, "ImageBasedLighting::");
+		render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	void ImageBasedLighting::DrawSettings()

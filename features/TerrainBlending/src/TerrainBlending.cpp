@@ -305,7 +305,7 @@ namespace cs::features
 			cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, cs::render::kTerrainBlendingReplaySlot, 1, &noBuffer);
 		} };
 		{
-			cs::render::annotation::ScopedEvent timing("TerrainBlending::OpaqueReplay");
+			cs::render::annotation::ScopedEvent timing("Render::LandscapePrepass");
 			DrawHeld(a_buckets, kOpaque);
 		}
 		{
@@ -350,7 +350,7 @@ namespace cs::features
 			.Field("data_draws", _dataDraws.load(std::memory_order_relaxed))
 			.Field("depth_copies", _depthCopies.load(std::memory_order_relaxed))
 			.Field("z_passes_offset", _zPassesOffset.load(std::memory_order_relaxed));
-		cs::render::profiling::CollectPassTimings(a_sink, "TerrainBlending::");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	namespace
