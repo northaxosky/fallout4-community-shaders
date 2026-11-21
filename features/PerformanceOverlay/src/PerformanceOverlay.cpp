@@ -137,7 +137,6 @@ namespace cs::features
 
 	bool PerformanceOverlay::FramesCapped() const
 	{
-		// Frame time then reflects the limiter, not GPU cost.
 		return _frameGeneration || (_refreshHz > 0.0f && _fps >= _refreshHz * 0.97f);
 	}
 
@@ -327,8 +326,8 @@ namespace cs::features
 		// Capped at the unattributed time it is carved from.
 		const float present = std::min(_smoothPresentMs, std::max(0.0f, other));
 		const float remainingOther = std::max(0.0f, other - present);
-		rows.push_back({ "CS passes (timed):", -3, -1, csPasses, Percentage(csPasses, a_totalMs), 0.0f,
-			"GPU time spent in Community Shaders compute passes (profiled).", true, {}, {} });
+		rows.push_back({ "Timed passes:", -3, -1, csPasses, Percentage(csPasses, a_totalMs), 0.0f,
+			"GPU time of every profiled pass, including engine passes such as the deferred composite and landscape prepass.", true, {}, {} });
 		rows.push_back({ "Present:", -4, -1, present, Percentage(present, a_totalMs), 0.0f,
 			"CPU time spent waiting inside Main::Swap, which presents the frame. Capped at the frame time not attributed to shader types, so it can read lower than the measured wait.", true, {}, {} });
 		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, a_totalMs), 0.0f,

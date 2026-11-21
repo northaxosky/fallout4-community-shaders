@@ -24,7 +24,7 @@ namespace cs::features::performance_overlay
 			kValid,
 			kMarginal,
 			kInsufficient,
-			// Most frames were limited by vsync, a cap or frame generation.
+			// Most frames ran at the refresh rate or under frame generation.
 			kCapped
 		};
 
@@ -116,8 +116,8 @@ namespace cs::features::performance_overlay
 			bool operator==(const State&) const = default;
 		};
 		static State Capture();
-		// A null a_from applies everything; else only features that differ from it.
-		static void Apply(const State&, const State* a_from = nullptr, bool a_restoring = false);
+		// Skips features already live at the target unless restoring.
+		static void Apply(const State&, bool a_restoring = false);
 		// A zero window limit runs until stopped.
 		void Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds);
 		void Attempt(std::function<void()> a_action);

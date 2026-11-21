@@ -180,20 +180,16 @@ namespace cs::render::profiling
 	{
 		// Stock composite only; feature callbacks stay outside the pass.
 		// Timestamp queries touch no bindings, so both hooks only observe.
-		static bool began = false;
 		static annotation::SpannedEvent event;
 		constexpr auto kPass = "DeferredComposite";
 		return engine::RegisterPostDeferredComposite(
 				   [] {
 					   event.End();
-					   if (std::exchange(began, false))
-						   EndPass();
 				   },
 				   engine::HookPriority::InnermostPost) &&
 		       engine::RegisterPreDeferredComposite(
 				   [] {
-					   began = BeginPass(kPass);
-					   event.Begin(kPass, false);
+					   event.Begin(kPass);
 				   },
 				   engine::HookPriority::InnermostPre);
 	}

@@ -123,7 +123,6 @@ namespace cs::features::performance_overlay
 			summary.fpsB = Util::CalcFPS(row.meanB);
 		}
 		summary.validPercent = summary.frames + summary.excluded > 0 ? 100.0f * static_cast<float>(summary.frames) / static_cast<float>(summary.frames + summary.excluded) : 0.0f;
-		// Wall frame time measures the limiter, not the work, when frames are capped.
 		const bool capped = _cappedFrames * 2 > _measuredFrames;
 		summary.validity = hasBothVariants && summary.frames >= kMinimumSamplesForValidity && summary.duration >= kMinimumTestDuration &&
 		                           summary.validPercent >= kMinimumValidFramesPercent ?
@@ -177,22 +176,19 @@ namespace cs::features::performance_overlay
 		return state;
 	}
 
-	void ABComparison::Apply(const State& a_state, const State* a_from, bool a_restoring)
+	void ABComparison::Apply(const State& a_state, bool a_restoring)
 	{
 		auto& manager = FeatureManager::Get();
 		if (a_state.ownership != engine::GetShaderOwnershipConfig())
 			manager.ApplyShaderOwnership(a_state.ownership);
-		const bool sameOwnership = a_from && a_from->ownership == a_state.ownership;
 		const cs::settings::ComparisonKey key{};
 		std::vector<cs::settings::PreparedLiveSettings> prepared;
 		for (const auto& [feature, values] : a_state.live) {
 			if (!a_restoring && !feature->IsHealthy())
 				throw std::runtime_error(std::format("{} is no longer healthy", feature->GetName()));
 			// Re-preparing runs finalize hooks and bumps versions, which skews timings.
-			if (sameOwnership) {
-				if (const auto previous = a_from->live.find(feature); previous != a_from->live.end() && previous->second == values)
-					continue;
-			}
+			if (!a_restoring && manager.SnapshotLiveSettings(*feature, true) == values)
+				continue;
 			std::string error;
 			auto value = manager.PrepareLiveSettings(*feature, values, cs::settings::Scope::kImmediate, cs::settings::Persist::kNo, "ABComparison::Finalize", error, &key);
 			if (!value)
@@ -239,7 +235,7 @@ namespace cs::features::performance_overlay
 		if (!a_interval) {
 			if (_testing || _restorePending) {
 				try {
-					Apply(_b, nullptr, true);
+					Apply(_b, true);
 				} catch (const std::exception& error) {
 					// Leave the run so shaders stop toggling; a retry restores.
 					const auto message = std::format("{} restoration failed: {}", _labelB, error.what());
@@ -353,7 +349,7 @@ namespace cs::features::performance_overlay
 				SetInterval(0);
 				return;
 			}
-			Apply(_variantB ? _a : _b, _variantB ? &_b : &_a);
+			Apply(_variantB ? _a : _b);
 			_variantB = !_variantB;
 			_aggregator.OnABSwitch(_variantB ? ABVariant::B : ABVariant::A);
 			_lastSwitch = a_now;
