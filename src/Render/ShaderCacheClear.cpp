@@ -19,8 +19,7 @@ namespace cs::engine
 				return result;
 			}
 		}
-		InvalidateNativeShaderVariantCompilations();
-		PrewarmAllShaderInjectionVariants();
+		ResetShaderInjectionVariants();
 		result.succeeded = true;
 		return result;
 	}

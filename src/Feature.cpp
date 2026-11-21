@@ -511,8 +511,7 @@ namespace cs
 					changedTargets.push_back(target);
 			}
 		}
-		engine::InvalidateNativeShaderVariantCompilations(changedTargets);
-		engine::PrewarmShaderInjectionVariants(changedTargets);
+		engine::RebuildShaderInjectionVariants(changedTargets);
 		_fullscreenDebugFeature.store(fullscreen, std::memory_order_release);
 		return true;
 	}

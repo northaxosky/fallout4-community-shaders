@@ -1907,17 +1907,16 @@ namespace cs::engine
 			}
 		}
 
-		std::size_t PrewarmVariants(std::span<const ShaderInjectionTarget> a_targets, bool a_all)
+		void PrewarmVariants(std::span<const ShaderInjectionTarget> a_targets, bool a_all)
 		{
 			auto& service = GetService();
 			const auto plan = service.published.load(std::memory_order_acquire);
 			if (!plan)
-				return 0;
+				return;
 			std::array<std::size_t, static_cast<std::size_t>(ShaderInjectionTarget::kCount)> perTarget{};
 			std::size_t total = 0;
 			const auto prewarm = [&](const NativeVariantKey& a_key) {
-				if (!ShaderEnabled(a_key.target) ||
-					(!a_all && std::ranges::find(a_targets, a_key.target) == a_targets.end()) ||
+				if ((!a_all && std::ranges::find(a_targets, a_key.target) == a_targets.end()) ||
 					(SupportedStages(a_key.target) & ShaderStageBit(a_key.stage)) == 0)
 					return;
 				const auto* target = FindPublishedTarget(*plan, a_key.target);
@@ -1959,33 +1958,25 @@ namespace cs::engine
 				}
 			}
 			L->info("Shader prewarm: {} variants queued ({})", total, breakdown.empty() ? "none" : breakdown);
-			return total;
 		}
 	}
 
-	std::size_t PrewarmAllShaderInjectionVariants()
-	{
-		return PrewarmVariants({}, true);
-	}
-
-	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets)
-	{
-		return a_targets.empty() ? 0 : PrewarmVariants(a_targets, false);
-	}
-
-	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept
+	void RebuildShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets)
 	{
 		if (a_targets.empty())
 			return;
 		auto& service = GetService();
-		std::scoped_lock lock(service.nativeVariantMutex);
-		std::erase_if(service.nativeVariants, [a_targets](const auto& a_entry) {
-			return std::ranges::find(a_targets, a_entry.first.target) != a_targets.end();
-		});
-		service.bindingEpoch.fetch_add(1, std::memory_order_release);
+		{
+			std::scoped_lock lock(service.nativeVariantMutex);
+			std::erase_if(service.nativeVariants, [a_targets](const auto& a_entry) {
+				return std::ranges::find(a_targets, a_entry.first.target) != a_targets.end();
+			});
+			service.bindingEpoch.fetch_add(1, std::memory_order_release);
+		}
+		PrewarmVariants(a_targets, false);
 	}
 
-	void InvalidateNativeShaderVariantCompilations() noexcept
+	void ResetShaderInjectionVariants()
 	{
 		auto& service = GetService();
 		const auto plan =
@@ -1994,11 +1985,14 @@ namespace cs::engine
 			return;
 
 		plan->compilationCache->Invalidate();
-		std::scoped_lock lock(service.nativeVariantMutex);
-		service.nativeVariants.clear();
-		service.shaderSourceAvailability.clear();
-		service.unsupportedNativeVariantReported.fill(false);
-		service.bindingEpoch.fetch_add(1, std::memory_order_release);
+		{
+			std::scoped_lock lock(service.nativeVariantMutex);
+			service.nativeVariants.clear();
+			service.shaderSourceAvailability.clear();
+			service.unsupportedNativeVariantReported.fill(false);
+			service.bindingEpoch.fetch_add(1, std::memory_order_release);
+		}
+		PrewarmVariants({}, true);
 	}
 
 	void StopNativeShaderVariantCompilations() noexcept

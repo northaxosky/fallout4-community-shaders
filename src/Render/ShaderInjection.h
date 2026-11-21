@@ -267,10 +267,6 @@ namespace cs::engine
 		std::string& a_error);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
-	// Re-queues every loaded engine technique of contributed targets.
-	std::size_t PrewarmAllShaderInjectionVariants();
-	// Limited to a_targets, e.g. after invalidation; empty queues nothing.
-	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets);
 	bool EnsureComputeDispatchBridgeInstalled(
 		ID3D11DeviceContext* a_immediateContext) noexcept;
 	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;
@@ -313,11 +309,12 @@ namespace cs::engine
 		ScopedNativeShaderObservationBypass& operator=(ScopedNativeShaderObservationBypass&&) = delete;
 	};
 
-	void InvalidateNativeShaderVariantCompilations() noexcept;
+	// Cache clear: drops all variants and compiles, re-queues loaded techniques.
+	void ResetShaderInjectionVariants();
 	// Drops queued compiles and joins the workers; later requests fail fast.
 	void StopNativeShaderVariantCompilations() noexcept;
-	// Define changes retire target lookups and native identities, retaining immutable compiled variants.
-	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept;
+	// Define change: retires a_targets' lookups, keeps compiles, re-queues.
+	void RebuildShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets);
 
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept;
