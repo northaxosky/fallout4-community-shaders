@@ -15,6 +15,6 @@
 | Divergence | FSR quality ratio for all providers | SDK render-size queries, quality 0-4, provider-specific sizing | DLSS/FSR optimal extents |
 | Divergence | Provider selection and `upscaleMethodNoDLSS` | FSR4 is a method value; one SR preference is persisted | |
 | Divergence | D3D11 RCAS | D3D12 RCAS on SDR output | In-house backend |
-| Divergence | Default DLSS GPU/model presets | Explicit non-default preset policy alongside RCAS controls | |
+| Divergence | Preset defaults to 0, which picks J/M/L by GPU series and quality mode | Preset defaults to K; 0 leaves NVIDIA's per-mode choice | K costs less at Performance and Ultra Performance |
 | Pending | Reactive/transparency masks from TAA xy and water normal.z | Masks are zero | Production mask inputs not ported |
 | Pending | Underwater-mask upscale (`UnderwaterMaskUpscalePS`) | Own depth/refraction publication and linear-depth regeneration instead | Underwater producer/consumer chain not ported |

@@ -177,7 +177,7 @@ namespace cs::features
 					static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
 					static const std::array presets{
 						dmui::ChoiceOption<std::uint32_t>{
-							0, "Default", "default" },
+							0, "NVIDIA default", "default" },
 						dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
 						dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
 						dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },

@@ -4,6 +4,7 @@
 
 - Frame Generation: turning it on or off, or changing its method, now applies at the next launch.
 - Upscaling: lower input latency and less video memory without frame generation.
+- Upscaling: the DLSS preset defaults to K, which costs less at Performance and Ultra Performance; "NVIDIA default" restores NVIDIA's per-mode choice.
 - HDR Display: HDR output needs Windows HDR on at launch and turns off while Windows HDR is off.
 - Dynamic Cubemaps: `material_reflections` is removed; Vanilla PBR's Live Environment replaces it.
 - Vanilla PBR: new feature. GGX direct specular for vanilla materials; envmapped surfaces reflect the live world through vanilla's envmap formula, keeping authored strength, blur and metal tint, lit by ambient light only.

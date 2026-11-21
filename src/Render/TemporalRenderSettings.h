@@ -56,7 +56,7 @@ namespace cs::render::temporal
 		float sharpnessFSR = 0.0f;
 		bool sharpnessEnabledDLSS = false;
 		float sharpnessDLSS = 0.0f;
-		std::uint32_t presetDLSS = 0;        // 0=Default, 1=J, 2=K, 3=L, 4=M
+		std::uint32_t presetDLSS = 2;        // 0=NVIDIA default, 1=J, 2=K, 3=L, 4=M
 		std::uint32_t latencyReduction = 1;  // 0=Off, 1=On, 2=On + Boost
 		bool latencyFpsLimitEnabled = false;
 		float latencyFpsLimit = 60.0f;
@@ -68,7 +68,7 @@ namespace cs::render::temporal
 			settings::Field{ "upscale_method", "Method: 0 Off, 1 TAA, 2 FSR 3, 3 DLSS, 4 FSR 4; admitted providers switch at a frame boundary.", &UpscalingSettings::upscaleMethod, settings::Range{ 0u, kMaxUpscaleMethodValue } }.Help("The upscaler to use. Methods that are unavailable are disabled and give the reason."),
 			settings::Field{ "quality_mode", "Quality: 0 Native AA, 1 Quality, 2 Balanced, 3 Performance, 4 Ultra Performance.", &UpscalingSettings::qualityMode, settings::Range{ 0u, 4u } }.Help("Render resolution relative to the output; lower quality renders fewer pixels."),
 			settings::Field{ "streamline_log_level", "Streamline logging: 0 Off, 1 Default, 2 Verbose.", &UpscalingSettings::streamlineLogLevel, settings::Range{ 0u, 2u }, settings::ApplyTiming::kNextLaunch }.Help("Streamline log verbosity."),
-			settings::Field{ "preset_dlss", "DLSS preset: 0 Default, 1 J, 2 K, 3 L, 4 M.", &UpscalingSettings::presetDLSS, settings::Range{ 0u, 4u } }.Help("DLSS model preset; Default lets DLSS choose."),
+			settings::Field{ "preset_dlss", "DLSS preset: 0 NVIDIA default, 1 J, 2 K, 3 L, 4 M.", &UpscalingSettings::presetDLSS, settings::Range{ 0u, 4u } }.Help("DLSS model preset; NVIDIA default uses NVIDIA's own choice per quality mode."),
 			settings::Field{ "sharpness_fsr", "FSR sharpening strength.", &UpscalingSettings::sharpnessFSR, settings::Range{ 0.0f, 1.0f } },
 			settings::Field{ "sharpness_enabled_dlss", "Enable DLSS sharpening.", &UpscalingSettings::sharpnessEnabledDLSS },
 			settings::Field{ "sharpness_dlss", "DLSS sharpening strength.", &UpscalingSettings::sharpnessDLSS, settings::Range{ 0.0f, 1.0f } },
