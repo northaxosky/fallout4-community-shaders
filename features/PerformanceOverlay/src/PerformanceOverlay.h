@@ -59,6 +59,7 @@ namespace cs::features
 		void UpdateGraphValues();
 		void ResetFrameStats();
 		void AccumulatePresentTime();
+		bool FramesCapped() const;
 		void AccumulateFrameStats();
 		void UpdateFrameStats();
 		// The total is raw for comparisons and smoothed for the on-screen rows.

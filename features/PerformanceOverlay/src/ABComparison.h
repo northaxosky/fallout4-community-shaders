@@ -23,7 +23,9 @@ namespace cs::features::performance_overlay
 		{
 			kValid,
 			kMarginal,
-			kInsufficient
+			kInsufficient,
+			// Most frames were limited by vsync, a cap or frame generation.
+			kCapped
 		};
 
 		// Total frame time; delta is B minus A, set only when comparable.
@@ -51,6 +53,7 @@ namespace cs::features::performance_overlay
 		static constexpr std::string_view ValidityName(Validity a_validity) noexcept
 		{
 			return a_validity == Validity::kValid ? "Valid" : a_validity == Validity::kMarginal ? "Marginal" :
+			                                              a_validity == Validity::kCapped       ? "Frame-capped" :
 			                                                                                      "Insufficient";
 		}
 
@@ -99,7 +102,7 @@ namespace cs::features::performance_overlay
 		static std::expected<void, std::string> Try(const std::function<void()>& a_action);
 		std::string CostHelp() const;
 		// Throws when a compared feature stops being healthy or a state cannot apply.
-		void Update(double a_now, const std::vector<DrawCallRow>& a_rows);
+		void Update(double a_now, const std::vector<DrawCallRow>& a_rows, bool a_capped);
 		void DrawControls();
 		void DrawCostControls();
 		void DrawResults();
@@ -113,7 +116,8 @@ namespace cs::features::performance_overlay
 			bool operator==(const State&) const = default;
 		};
 		static State Capture();
-		static void Apply(const State&, bool a_restoring = false);
+		// A null a_from applies everything; else only features that differ from it.
+		static void Apply(const State&, const State* a_from = nullptr, bool a_restoring = false);
 		// A zero window limit runs until stopped.
 		void Begin(State a_a, State a_b, std::string a_labelA, std::string a_labelB, int a_interval, int a_windowLimit, double a_settleSeconds);
 		void Attempt(std::function<void()> a_action);
@@ -125,7 +129,7 @@ namespace cs::features::performance_overlay
 		ABTestAggregator _aggregator;
 		std::optional<Summary> _lastSummary;
 		bool _testing{}, _variantB = true, _restorePending{}, _scripted{};
-		int _testInterval{}, _windowsDone{}, _windowLimit{}, _framesSinceSwitch{};
+		int _testInterval{}, _windowsDone{}, _windowLimit{}, _framesSinceSwitch{}, _measuredFrames{}, _cappedFrames{};
 		double _lastSwitch{}, _settleSeconds{ RunOptions{}.settleSeconds };
 		std::string _testError;
 	};
