@@ -322,16 +322,16 @@ namespace cs::features
 		float other = a_totalMs - measured;
 		if (std::abs(other) < 1e-4f)
 			other = 0.0f;
-		const float csPasses = render::profiling::GetProfiler().GetTotalTimeMs();
+		const float timedPasses = render::profiling::GetProfiler().GetTotalTimeMs();
 		// Capped at the unattributed time it is carved from.
 		const float present = std::min(_smoothPresentMs, std::max(0.0f, other));
 		const float remainingOther = std::max(0.0f, other - present);
-		rows.push_back({ "Timed passes:", -3, -1, csPasses, Percentage(csPasses, a_totalMs), 0.0f,
+		rows.push_back({ "Timed passes:", -3, -1, timedPasses, Percentage(timedPasses, a_totalMs), 0.0f,
 			"GPU time of every profiled pass, including engine passes such as the deferred composite and landscape prepass.", true, {}, {} });
 		rows.push_back({ "Present:", -4, -1, present, Percentage(present, a_totalMs), 0.0f,
 			"CPU time spent waiting inside Main::Swap, which presents the frame. Capped at the frame time not attributed to shader types, so it can read lower than the measured wait.", true, {}, {} });
 		rows.push_back({ "Other:", -2, -1, remainingOther, Percentage(remainingOther, a_totalMs), 0.0f,
-			"Frame time not attributed to any measured shader type or to Present. This includes UI, post-processing, engine work, and CS compute passes (whose GPU time is shown separately).", true, {}, {} });
+			"Frame time not attributed to any measured shader type or to Present. This includes UI, post-processing, engine work, and timed passes (whose GPU time is shown separately).", true, {}, {} });
 		rows.push_back({ "Total:", -1, static_cast<int>(calls), a_totalMs, 100.0f,
 			CostPerCall(a_totalMs, calls), "Total frame time.", true, {}, {} });
 		return rows;
