@@ -219,6 +219,7 @@ namespace cs::features
 			return {};
 		}
 		render::temporal::PresentStatus status;
+		bool succeeded = false;
 		if (_method == Method::kDLSSG) {
 			status.generatedFrames = _runtime.ConsumeDLSSGGeneratedFrameCount();
 			status.presentedFrames = _runtime.ConsumeDLSSGPresentedFrameCount();
@@ -227,10 +228,12 @@ namespace cs::features
 				status.inputCompletion.emplace();
 				status.inputCompletion->orderedQueue = _presentQueue;
 			}
+			succeeded = _runtime.LastDLSSGStateSucceeded();
 		} else {
-			status.inputCompletion = _runtime.ConsumeFSRGInputCompletionDependency();
+			status.inputCompletion = _runtime.PollFSRGInputCompletion(
+				_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3);
+			succeeded = status.inputCompletion.has_value();
 		}
-		const bool succeeded = _method == Method::kDLSSG ? _runtime.LastDLSSGStateSucceeded() : _runtime.PollFSRGState(_method == Method::kFSR4 ? sl::FSRGAlgorithm::eFSR4 : sl::FSRGAlgorithm::eFSR3);
 		if (!succeeded) {
 			status.result = Failure(
 				std::string(Name()) + " reported a post-Present failure.");

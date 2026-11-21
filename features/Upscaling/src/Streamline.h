@@ -194,10 +194,9 @@ namespace cs::features
 			const render::temporal::FrameGenerationRequest& a_request);
 		bool CheckFSRGCompletionCapability(
 			sl::FSRGAlgorithm a_algorithm) noexcept;
-		bool PollFSRGState(
-			sl::FSRGAlgorithm a_algorithm) noexcept;
+		// The latest Present's host-input completion; empty on failure.
 		[[nodiscard]] std::optional<render::temporal::GpuCompletionDependency>
-		ConsumeFSRGInputCompletionDependency() noexcept;
+		PollFSRGInputCompletion(sl::FSRGAlgorithm a_algorithm) noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
 		DestroyFSRGResources() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -240,7 +239,7 @@ namespace cs::features
 			ID3D12GraphicsCommandList* a_commandList = nullptr) noexcept;
 		[[nodiscard]] sl::Result
 		ClearCurrentFrameGenerationTagsChecked() noexcept;
-		bool PollFSRGState(
+		std::optional<render::temporal::GpuCompletionDependency> PollFSRGState(
 			sl::FSRGAlgorithm a_algorithm,
 			bool a_requireSubmittedDependency) noexcept;
 		std::uint32_t _lastFrameToken = UINT32_MAX;
@@ -272,8 +271,6 @@ namespace cs::features
 		std::atomic_uint32_t _reflexGpuFrameTimeUs{ 0 };
 		render::temporal::PresentedFrameAccumulator _dlssGPresentedFrames;
 		render::temporal::PresentedFrameAccumulator _dlssGGeneratedFrames;
-		std::optional<render::temporal::GpuCompletionDependency>
-			_fsrGInputCompletionDependency;
 		sl::DLSSGStatus _dlssGStatus = sl::DLSSGStatus::eOk;
 		bool _dlssGLastStateQuerySucceeded = false;
 		std::atomic<render::temporal::CapabilityAvailability>

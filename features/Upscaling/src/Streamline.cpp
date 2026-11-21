@@ -1825,22 +1825,23 @@ namespace cs::features
 	bool Streamline::CheckFSRGCompletionCapability(
 		sl::FSRGAlgorithm a_algorithm) noexcept
 	{
-		return PollFSRGState(a_algorithm, false);
+		return PollFSRGState(a_algorithm, false).has_value();
 	}
 
-	bool Streamline::PollFSRGState(
+	std::optional<render::temporal::GpuCompletionDependency>
+	Streamline::PollFSRGInputCompletion(
 		sl::FSRGAlgorithm a_algorithm) noexcept
 	{
 		return PollFSRGState(a_algorithm, true);
 	}
 
-	bool Streamline::PollFSRGState(
+	std::optional<render::temporal::GpuCompletionDependency>
+	Streamline::PollFSRGState(
 		sl::FSRGAlgorithm a_algorithm,
 		bool a_requireSubmittedDependency) noexcept
 	{
-		_fsrGInputCompletionDependency.reset();
 		if (!featureFSRG || !slFSRGGetState) {
-			return false;
+			return std::nullopt;
 		}
 		sl::FSRGState state{};
 		const auto result = slFSRGGetState(viewport, state);
@@ -1848,7 +1849,7 @@ namespace cs::features
 			L->error(
 				"Could not query FSR-G state: {}",
 				magic_enum::enum_name(result));
-			return false;
+			return std::nullopt;
 		}
 		winrt::com_ptr<ID3D12Fence> completionFence;
 		completionFence.attach(
@@ -1863,7 +1864,7 @@ namespace cs::features
 			L->error(
 				"FSR-G does not expose the required host-input completion "
 				"fence");
-			return false;
+			return std::nullopt;
 		}
 		if (validation ==
 			streamline_fidelityfx::FSRGStateValidation::
@@ -1873,7 +1874,7 @@ namespace cs::features
 				static_cast<std::uint32_t>(state.algorithm),
 				static_cast<std::uint32_t>(state.available),
 				static_cast<std::uint32_t>(a_algorithm));
-			return false;
+			return std::nullopt;
 		}
 		if (validation ==
 			streamline_fidelityfx::FSRGStateValidation::
@@ -1881,16 +1882,13 @@ namespace cs::features
 			L->error(
 				"FSR-G did not expose a submitted host-input completion "
 				"value after Present");
-			return false;
+			return std::nullopt;
 		}
-		if (state.completionFenceValue) {
-			_fsrGInputCompletionDependency =
-				render::temporal::GpuCompletionDependency{
-					.fence = std::move(completionFence),
-					.value = state.completionFenceValue
-				};
-		}
-		return true;
+		// Before any Present the capability check sees value 0.
+		return render::temporal::GpuCompletionDependency{
+			.fence = std::move(completionFence),
+			.value = state.completionFenceValue
+		};
 	}
 
 	bool Streamline::ClearCurrentFrameGenerationTags() noexcept
@@ -1912,13 +1910,6 @@ namespace cs::features
 	std::uint32_t Streamline::ConsumeDLSSGGeneratedFrameCount() noexcept
 	{
 		return _dlssGGeneratedFrames.Consume();
-	}
-
-	std::optional<render::temporal::GpuCompletionDependency>
-	Streamline::ConsumeFSRGInputCompletionDependency() noexcept
-	{
-		return std::exchange(
-			_fsrGInputCompletionDependency, std::nullopt);
 	}
 
 	render::temporal::ProviderResult
@@ -2028,7 +2019,6 @@ namespace cs::features
 					render::temporal::FailureDomain::kStreamline
 			};
 		}
-		_fsrGInputCompletionDependency.reset();
 		(void)SetLatencyConstraint(_fsrGForcesLatencyOff, false);
 		_fsrGResourcesConfigured = false;
 		return {
