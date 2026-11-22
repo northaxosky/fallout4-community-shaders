@@ -255,17 +255,15 @@ namespace cs::engine
 		class PublishedCube
 		{
 		public:
-			void Update(ID3D11Texture2D* a_engine, std::uint32_t a_faces)
+			void Update(std::uint32_t a_faces)
 			{
 				auto* context = GetImmediateContext();
-				if (!a_engine || !context || !a_faces || !Ensure(a_engine))
-					return;
-				if (!_level)
+				if (!_level || !context || !a_faces)
 					return;
 				const auto chainMips = _level + 1;
 				for (std::uint32_t face = 0; face < 6; ++face) {
 					if (a_faces & (1u << face))
-						context->CopySubresourceRegion(_chain->resource.get(), D3D11CalcSubresource(0, face, chainMips), 0, 0, 0, a_engine, D3D11CalcSubresource(0, face, 1), nullptr);
+						context->CopySubresourceRegion(_chain->resource.get(), D3D11CalcSubresource(0, face, chainMips), 0, 0, 0, _engine.get(), D3D11CalcSubresource(0, face, 1), nullptr);
 				}
 				context->GenerateMips(_chain->srv.get());
 				for (std::uint32_t face = 0; face < 6; ++face) {
@@ -277,21 +275,25 @@ namespace cs::engine
 			// Null when the engine cube is already the published size.
 			[[nodiscard]] ID3D11ShaderResourceView* SRV() const noexcept { return _level ? _published->srv.get() : nullptr; }
 
-		private:
-			bool Ensure(ID3D11Texture2D* a_engine)
+			// Follows engine cube recreation; false while the engine cube is unusable.
+			[[nodiscard]] bool Bind(ID3D11Texture2D* a_engine)
 			{
-				if (_engine == a_engine)
+				if (_engine.get() == a_engine)
 					return true;
+				// A recreated engine cube starts empty, so every face renders again.
+				Invalidate();
+				_engine = nullptr;
+				_level = 0;
+				_chain.reset();
+				_published.reset();
 				D3D11_TEXTURE2D_DESC engine{};
 				a_engine->GetDesc(&engine);
 				if (engine.Width != engine.Height || !std::has_single_bit(engine.Width))
 					return false;
-				_level = engine.Width > kPublishedSize ? static_cast<std::uint32_t>(std::countr_zero(engine.Width / kPublishedSize)) : 0;
-				_chain.reset();
-				_published.reset();
-				_engine = a_engine;
-				if (!_level)
+				_engine.copy_from(a_engine);
+				if (engine.Width <= kPublishedSize)
 					return true;
+				_level = static_cast<std::uint32_t>(std::countr_zero(engine.Width / kPublishedSize));
 
 				// Each 2x2 mip step averages, so level n is a 2^n box filter.
 				D3D11_TEXTURE2D_DESC desc{};
@@ -325,7 +327,9 @@ namespace cs::engine
 				return true;
 			}
 
-			const ID3D11Texture2D* _engine = nullptr;
+		private:
+			// Owned so a recreated cube cannot reuse the bound address.
+			winrt::com_ptr<ID3D11Texture2D> _engine;
 			std::uint32_t _level = 0;
 			std::unique_ptr<cs::buffer::Texture2D> _chain;
 			std::unique_ptr<cs::buffer::Texture2D> _published;
@@ -711,7 +715,9 @@ namespace cs::engine
 			auto* worldCamera = RE::Main::WorldRootCamera();
 			auto* manager = GetRenderTargetManager();
 			auto* context = GetActiveContext();
-			if (!sky || !sky->root || !worldCamera || !manager || !context || !GetEngineCube()) {
+			auto* engineCube = GetEngineCube();
+			if (!sky || !sky->root || !worldCamera || !manager || !context || !engineCube ||
+				!g_published.Bind(reinterpret_cast<ID3D11Texture2D*>(engineCube->texture))) {
 				g_counters.skippedNoTargets.fetch_add(1, std::memory_order_relaxed);
 				Invalidate();
 				return;
@@ -746,7 +752,7 @@ namespace cs::engine
 			UnbindAuxiliaryTargets(*manager, context->shadowState);
 			SetupCamera(**g_camera, eye, worldCamera->viewFrustum.far);
 			const auto faces = RenderFaces(**g_camera, *sky->root, *manager, context->shadowState, clear, eye);
-			g_published.Update(reinterpret_cast<ID3D11Texture2D*>(GetEngineCube()->texture), faces);
+			g_published.Update(faces);
 
 			g_counters.renders.fetch_add(1, std::memory_order_relaxed);
 			g_lastRenderFrame.store(worldFrame, std::memory_order_relaxed);
