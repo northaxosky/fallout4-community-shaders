@@ -31,6 +31,7 @@
 - Dynamic Cubemaps: screen-space reflections look vanilla again while the feature is switched off.
 - Water: reflection strength stays vanilla until Dynamic Cubemaps' cubes are ready.
 - Screen Space GI: changing Slices or Steps no longer resets the denoiser history.
+- Screen Space GI: half and quarter resolution upsampling is smooth in flat areas instead of blocky and cheaper, and normals line up at those resolutions.
 
 ## 0.5.1
 
