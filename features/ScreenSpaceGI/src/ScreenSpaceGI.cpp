@@ -56,8 +56,7 @@ namespace cs::features
 	{
 		// Only these fields change the shaders or history.
 		if (a_previous.enableGI == _settings.enableGI && a_previous.enableExperimentalSpecularGI == _settings.enableExperimentalSpecularGI &&
-			a_previous.resolutionMode == _settings.resolutionMode && a_previous.enableTemporalDenoiser == _settings.enableTemporalDenoiser &&
-			a_previous.numSlices == _settings.numSlices && a_previous.numSteps == _settings.numSteps)
+			a_previous.resolutionMode == _settings.resolutionMode && a_previous.enableTemporalDenoiser == _settings.enableTemporalDenoiser)
 			return;
 		_recompile = true;
 		QueueReset("live_settings");

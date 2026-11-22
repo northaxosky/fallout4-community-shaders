@@ -30,6 +30,7 @@
 - Screen Space Shadows: stale contact shadows no longer show when the shadow mask cannot be bound.
 - Dynamic Cubemaps: screen-space reflections look vanilla again while the feature is switched off.
 - Water: reflection strength stays vanilla until Dynamic Cubemaps' cubes are ready.
+- Screen Space GI: changing Slices or Steps no longer resets the denoiser history.
 
 ## 0.5.1
 
