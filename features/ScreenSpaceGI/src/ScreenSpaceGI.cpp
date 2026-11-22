@@ -382,7 +382,9 @@ namespace cs::features
 				{ t.radianceTemp->uav.get(), t.accumulation[!_lastAccum]->uav.get(), t.ao[!ao]->uav.get(),
 					t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
 				internalWidth, internalHeight, 8, "ScreenSpaceGI::RadianceDisocc");
-			prefilter(2, t.radianceTemp->srv.get(), t.radiance, internalWidth, internalHeight, "ScreenSpaceGI::PrefilterRadiance");
+			// gi.cs reads the radiance mips only under GI.
+			if (_settings.enableGI)
+				prefilter(2, t.radianceTemp->srv.get(), t.radiance, internalWidth, internalHeight, "ScreenSpaceGI::PrefilterRadiance");
 			ao = !ao;
 			gi = !gi;
 			_lastAccum = !_lastAccum;
