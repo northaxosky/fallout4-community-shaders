@@ -64,6 +64,15 @@ namespace cs::render
 			return;
 		}
 
+		// Without the boundary, FSR3 reactive stays zero rather than rejecting init.
+		if (!cs::engine::RegisterPostForwardSky([] {
+				GuardedThunkBody("Upscaling pre-alpha capture", [] {
+					GetSingleton()->CapturePreAlphaScene();
+				});
+			})) {
+			L->warn("Post-sky hook unavailable; FSR 3 reactive mask stays zero.");
+		}
+
 		for (const auto& hook : callHooks) {
 			hook.install(hook.site);
 		}
@@ -424,6 +433,10 @@ namespace cs::render
 		} catch (...) {
 			upscaling->QuarantineAfterException("Upscaling mip bias scope (forward)");
 		}
+		// After Forward returns the alpha phase is in kMain; godrays have not run.
+		GuardedThunkBody("Upscaling reactive mask", [&] {
+			upscaling->GenerateReactiveMask();
+		});
 	}
 
 	void TemporalRenderer::BSImageSpace_Init_FXAA::thunk(RE::ImageSpaceManager* a_this)

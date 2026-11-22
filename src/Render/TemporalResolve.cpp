@@ -81,16 +81,15 @@ namespace cs::render
 					"Upscaling::EncodeTextures");
 				cs::ComputeScope computeScope(context);
 
-				// Null t0 and the G-buffer normal's unused channel produce the accepted zero masks.
-				auto* normalsSRV = cs::engine::GetRenderTargetSRV(kNormalsTarget);
+				auto* materialClassSRV = cs::engine::GetRenderTargetSRV(kMaterialClassTarget);
 				auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(
 					RE::BSGraphics::DepthStencilTargetID::kMain);
 				auto* encodeShader = GetEncodeTexturesCS();
-				if (!depthSRV || !encodeShader) {
+				if (!materialClassSRV || !depthSRV || !encodeShader) {
 					return render::temporal::ProviderResultCode::kSkipped;
 				}
 
-				ID3D11ShaderResourceView* views[4] = { nullptr, normalsSRV,
+				ID3D11ShaderResourceView* views[3] = { materialClassSRV,
 					motionVectorSRV, depthSRV };
 				context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 				context->CSSetShader(encodeShader, nullptr, 0);
@@ -103,8 +102,7 @@ namespace cs::render
 				auto upscalingBuffer = upscalingDataCB->CB();
 				context->CSSetConstantBuffers(0, 1, &upscalingBuffer);
 
-				ID3D11UnorderedAccessView* uavs[4] = {
-					reactiveMaskTexture->uav.get(),
+				ID3D11UnorderedAccessView* uavs[3] = {
 					transparencyCompositionMaskTexture->uav.get(),
 					motionVectorCopyTexture->uav.get(),
 					superResolutionDepthTexture->uav.get()
@@ -113,8 +111,7 @@ namespace cs::render
 
 				context->Dispatch((renderWidth + 7) / 8, (renderHeight + 7) / 8, 1);
 
-				ID3D11UnorderedAccessView* nullUAVs[4] = { nullptr, nullptr, nullptr,
-					nullptr };
+				ID3D11UnorderedAccessView* nullUAVs[3] = { nullptr, nullptr, nullptr };
 				context->CSSetUnorderedAccessViews(0, ARRAYSIZE(nullUAVs), nullUAVs,
 					nullptr);
 
@@ -274,6 +271,71 @@ namespace cs::render
 		}
 	}
 
+	void TemporalRenderer::CapturePreAlphaScene()
+	{
+		_preAlphaSceneFrame.reset();
+		if (!IsDrivingVendorUpscaler() || GetUpscaleMethod() != UpscaleMethod::kFSR3) {
+			return;
+		}
+		auto* context = cs::engine::GetImmediateContext();
+		auto* sceneColor = cs::engine::GetRenderTargetTexture(kSceneColorTarget);
+		if (!context || !sceneColor ||
+			!EnsureShaderReadableCopy(preAlphaSceneCopy, sceneColor,
+				DXGI_FORMAT_R11G11B10_FLOAT, "Upscaling/PreAlphaScene")) {
+			return;
+		}
+		cs::render::annotation::ScopedEvent captureScope("Upscaling::CapturePreAlphaScene");
+		cs::engine::CopyResourcePreservingOM(context, preAlphaSceneCopy->resource.get(), sceneColor);
+		_preAlphaSceneFrame = GetEngineFrame();
+	}
+
+	void TemporalRenderer::GenerateReactiveMask()
+	{
+		if (!IsDrivingVendorUpscaler() || GetUpscaleMethod() != UpscaleMethod::kFSR3 ||
+			!reactiveMaskTexture || !reactiveMaskTexture->uav) {
+			return;
+		}
+		auto* context = cs::engine::GetImmediateContext();
+		if (!context) {
+			return;
+		}
+
+		const auto snapshotFrame = std::exchange(_preAlphaSceneFrame, std::nullopt);
+		auto* postAlphaSRV = cs::engine::GetRenderTargetSRV(kSceneColorTarget);
+		auto* materialClassSRV = cs::engine::GetRenderTargetSRV(kMaterialClassTarget);
+		auto* shader = GetReactiveMaskCS();
+		const auto [width, height] = GetRenderSize();
+		if (snapshotFrame != GetEngineFrame() || !preAlphaSceneCopy || !preAlphaSceneCopy->srv ||
+			!postAlphaSRV || !materialClassSRV || !shader || !upscalingDataCB || width == 0 || height == 0) {
+			// A stale or missing input would saturate the difference.
+			const float zero[4]{};
+			context->ClearUnorderedAccessViewFloat(reactiveMaskTexture->uav.get(), zero);
+			return;
+		}
+
+		cs::render::annotation::ScopedEvent reactiveScope("Upscaling::ReactiveMask");
+		ID3D11ShaderResourceView* views[3] = { preAlphaSceneCopy->srv.get(), postAlphaSRV, materialClassSRV };
+		DispatchRenderSizeCompute(context, shader, views, reactiveMaskTexture->uav.get(), width, height);
+	}
+
+	void TemporalRenderer::DispatchRenderSizeCompute(
+		ID3D11DeviceContext* a_context, ID3D11ComputeShader* a_shader,
+		std::span<ID3D11ShaderResourceView* const> a_views, ID3D11UnorderedAccessView* a_uav,
+		std::uint32_t a_width, std::uint32_t a_height)
+	{
+		cs::engine::ComputeOMScope scope(a_context, static_cast<UINT>(a_views.size()), 0, 1, 1);
+		UpscalingDataCB data;
+		data.trueSamplingDim = float2(static_cast<float>(a_width), static_cast<float>(a_height));
+		data.pad0 = { 0.0f, 0.0f };
+		upscalingDataCB->Update(data);
+		auto* constants = upscalingDataCB->CB();
+		a_context->CSSetConstantBuffers(0, 1, &constants);
+		a_context->CSSetShaderResources(0, static_cast<UINT>(a_views.size()), a_views.data());
+		a_context->CSSetUnorderedAccessViews(0, 1, &a_uav, nullptr);
+		a_context->CSSetShader(a_shader, nullptr, 0);
+		a_context->Dispatch((a_width + 7) / 8, (a_height + 7) / 8, 1);
+	}
+
 	// One render-size pass: providers keep non-finite input in their history.
 	bool TemporalRenderer::CaptureInputColor(
 		ID3D11DeviceContext* a_context, ID3D11Texture2D* a_sceneColor,
@@ -286,18 +348,7 @@ namespace cs::render
 			return false;
 		}
 		cs::render::annotation::ScopedEvent inputScope("Upscaling::CaptureInputColor");
-		cs::engine::ComputeOMScope scope(a_context, 1, 0, 1, 1);
-		UpscalingDataCB data;
-		data.trueSamplingDim = float2(static_cast<float>(a_width), static_cast<float>(a_height));
-		data.pad0 = { 0.0f, 0.0f };
-		upscalingDataCB->Update(data);
-		auto* constants = upscalingDataCB->CB();
-		a_context->CSSetConstantBuffers(0, 1, &constants);
-		a_context->CSSetShaderResources(0, 1, &sourceSRV);
-		auto* uav = upscalingTexture->uav.get();
-		a_context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
-		a_context->CSSetShader(shader, nullptr, 0);
-		a_context->Dispatch((a_width + 7) / 8, (a_height + 7) / 8, 1);
+		DispatchRenderSizeCompute(a_context, shader, std::span(&sourceSRV, 1), upscalingTexture->uav.get(), a_width, a_height);
 		return true;
 	}
 
@@ -602,8 +653,8 @@ namespace cs::render
 	{
 		auto* motionTexture = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
 		auto* motionRTV = cs::engine::GetRenderTargetRTV(kMotionVectorTarget);
-		auto* maskTexture = cs::engine::GetRenderTargetTexture(kPipboyMaskTarget);
-		auto* maskRTV = cs::engine::GetRenderTargetRTV(kPipboyMaskTarget);
+		auto* maskTexture = cs::engine::GetRenderTargetTexture(kMaterialClassTarget);
+		auto* maskRTV = cs::engine::GetRenderTargetRTV(kMaterialClassTarget);
 		auto* chainInputsPS = GetChainInputsUpscalePS();
 		if (!motionTexture || !motionRTV || !maskTexture || !maskRTV || !chainInputsPS) {
 			return;

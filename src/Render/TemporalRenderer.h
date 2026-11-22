@@ -124,6 +124,8 @@ namespace cs::render
 		bool HasRequiredResources(UpscaleMethod a_upscalemethod) const noexcept;
 		winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[static_cast<std::size_t>(UpscaleMethod::kCount)];
 		ID3D11ComputeShader* GetEncodeTexturesCS();
+		winrt::com_ptr<ID3D11ComputeShader> reactiveMaskCS;
+		ID3D11ComputeShader* GetReactiveMaskCS();
 		winrt::com_ptr<ID3D11ComputeShader> sanitizeColorCS;
 		ID3D11ComputeShader* GetSanitizeColorCS();
 
@@ -158,6 +160,11 @@ namespace cs::render
 		std::unique_ptr<cs::buffer::Texture2D> pipboyMaskCopy;
 		std::unique_ptr<cs::buffer::Texture2D> vatsMaskFull;
 		std::unique_ptr<cs::buffer::Texture2D> motionVectorSourceCopy;
+		// Opaque-only kMain, copied at the post-sky boundary for FSR3's reactive mask.
+		std::unique_ptr<cs::buffer::Texture2D> preAlphaSceneCopy;
+		std::optional<std::uint64_t> _preAlphaSceneFrame;
+		void CapturePreAlphaScene();
+		void GenerateReactiveMask();
 		static bool EnsureShaderReadableCopy(
 			std::unique_ptr<cs::buffer::Texture2D>& a_copy,
 			ID3D11Texture2D* a_source,
@@ -175,6 +182,13 @@ namespace cs::render
 		void EndRenderUI();
 		bool PerformUpscaling();
 		bool CaptureInputColor(ID3D11DeviceContext* a_context, ID3D11Texture2D* a_sceneColor, std::uint32_t a_width, std::uint32_t a_height);
+		void DispatchRenderSizeCompute(
+			ID3D11DeviceContext* a_context,
+			ID3D11ComputeShader* a_shader,
+			std::span<ID3D11ShaderResourceView* const> a_views,
+			ID3D11UnorderedAccessView* a_uav,
+			std::uint32_t a_width,
+			std::uint32_t a_height);
 		bool PreflightExternalResolve(UpscaleMethod a_method);
 		bool ApplySpatialFallback(
 			ID3D11Texture2D* a_sceneColor,

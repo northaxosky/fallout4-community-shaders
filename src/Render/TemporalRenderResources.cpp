@@ -97,6 +97,12 @@ namespace cs::render
 		if (!reactiveMaskTexture) {
 			reactiveMaskTexture = createTexture(
 				maskDesc, "Upscaling/ReactiveMask");
+			// Only FSR 3 writes it; DLSS and FSR 4 read zero.
+			auto* context = cs::engine::GetImmediateContext();
+			if (reactiveMaskTexture && reactiveMaskTexture->uav && context) {
+				const float zero[4]{};
+				context->ClearUnorderedAccessViewFloat(reactiveMaskTexture->uav.get(), zero);
+			}
 		}
 		if (!transparencyCompositionMaskTexture) {
 			transparencyCompositionMaskTexture = createTexture(
@@ -224,6 +230,8 @@ namespace cs::render
 		pipboyMaskCopy.reset();
 		vatsMaskFull.reset();
 		motionVectorSourceCopy.reset();
+		preAlphaSceneCopy.reset();
+		_preAlphaSceneFrame.reset();
 	}
 
 	bool TemporalRenderer::EnsureShaderReadableCopy(
@@ -334,6 +342,15 @@ namespace cs::render
 			encodeTexturesCS[methodIndex] = cs::util::CompileComputeShader(std::format("Upscaling/EncodeTextures[{}].CS", methodIndex), kEncodeTexturesPath, defines);
 		}
 		return encodeTexturesCS[methodIndex].get();
+	}
+
+	ID3D11ComputeShader* TemporalRenderer::GetReactiveMaskCS()
+	{
+		if (!reactiveMaskCS) {
+			L->debug("Compiling ReactiveMaskCS.hlsl");
+			reactiveMaskCS = cs::util::CompileComputeShader("Upscaling/ReactiveMask.CS", kReactiveMaskPath);
+		}
+		return reactiveMaskCS.get();
 	}
 
 	ID3D11ComputeShader* TemporalRenderer::GetSanitizeColorCS()

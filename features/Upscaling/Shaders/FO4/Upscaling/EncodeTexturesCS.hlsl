@@ -3,6 +3,7 @@
 // Ported from Skyrim Community Shaders.
 
 #include "FO4/FO4ShaderData.hlsli"
+#include "FO4/Upscaling/MaterialClass.hlsli"
 
 cbuffer UpscalingData : register(b0)
 {
@@ -10,16 +11,14 @@ cbuffer UpscalingData : register(b0)
 	float2 pad0;
 };
 
-Texture2D<float2> TAAMask : register(t0);
-Texture2D<float4> NormalsWaterMask : register(t1);
-Texture2D<float2> MotionVectorMask : register(t2);
-Texture2D<float> DepthMask : register(t3);
+Texture2D<float4> MaterialClassMask : register(t0);
+Texture2D<float2> MotionVectorMask : register(t1);
+Texture2D<float> DepthMask : register(t2);
 
-RWTexture2D<float> ReactiveMask : register(u0);
-RWTexture2D<float> TransparencyCompositionMask : register(u1);
-RWTexture2D<float2> MotionVectorOutput : register(u2);
+RWTexture2D<float> TransparencyCompositionMask : register(u0);
+RWTexture2D<float2> MotionVectorOutput : register(u1);
 #if defined(DEPTH_OUTPUT)
-RWTexture2D<float> DepthOutput : register(u3);
+RWTexture2D<float> DepthOutput : register(u2);
 #endif
 
 #if defined(DLSS)
@@ -44,8 +43,8 @@ groupshared float2 TileMotion[DILATE_TILE * DILATE_TILE];
 	if (any(dispatchID.xy >= uint2(TrueSamplingDim)))
 		return;
 
-	float2 taaMask = TAAMask[dispatchID.xy];
-	float transparencyCompositionMask = NormalsWaterMask[dispatchID.xy].z;
+	// FO4 translation: water stencil classes 2 and 3 stand in for water normal.z.
+	const float transparencyCompositionMask = IsWaterClass(MaterialClassMask[dispatchID.xy].a) ? 1.0 : 0.0;
 
 #if defined(DLSS)
 	const uint centerIndex = (groupThreadID.y + 2) * DILATE_TILE + groupThreadID.x + 2;
@@ -94,9 +93,6 @@ groupshared float2 TileMotion[DILATE_TILE * DILATE_TILE];
 	// Providers need typed R32_FLOAT depth rather than the engine's typeless depth resource.
 	DepthOutput[dispatchID.xy] = DepthMask[dispatchID.xy];
 #endif
-
-	float reactiveMask = taaMask.x * 0.1 + taaMask.y;
-	ReactiveMask[dispatchID.xy] = reactiveMask;
 
 	TransparencyCompositionMask[dispatchID.xy] = transparencyCompositionMask;
 }

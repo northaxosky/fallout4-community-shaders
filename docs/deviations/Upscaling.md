@@ -11,10 +11,10 @@
 | Forced | Menus and offscreen cameras render after upscaling | Interface3D and local-map callbacks run after the pre-tonemap resolve at ratio 1; Pip-Boy and local-map draws are also forced unscaled when the resolve fails; offscreen cameras (precipitation, facegen) lock dynamic resolution | FO4 runs these callbacks inside Render_UI |
 | Forced | Imagespace effects sample depth, refraction normals, velocity and the Pip-Boy/VATS masks at plain UV | After super resolution these targets are nearest-upscaled to full extent and the chain runs at ratio 1 with the unit triangle | FO4 bakes the render ratio into the dynamic triangle UVs and reads these targets unscaled |
 | Divergence | Motion blur and dilated provider motion share one texture | Chain velocity comes from the undilated engine target, not the DLSS-dilated copy | The copy is stale on spatial-fallback frames |
-| Divergence | Direct FidelityFX FSR3 dispatch | Streamline FSR3/FSR4 D3D12 providers; the encoder writes undilated motion to u2 for FSR | In-house SDK/backend |
+| Divergence | Direct FidelityFX FSR3 dispatch | Streamline FSR3/FSR4 D3D12 providers; the encoder writes undilated motion for FSR | In-house SDK/backend |
 | Divergence | FSR quality ratio for all providers | SDK render-size queries, quality 0-4, provider-specific sizing | DLSS/FSR optimal extents |
 | Divergence | Provider selection and `upscaleMethodNoDLSS` | FSR4 is a method value; one SR preference is persisted | |
 | Divergence | D3D11 RCAS | D3D12 RCAS on SDR output | In-house backend |
 | Divergence | Preset defaults to 0, which picks J/M/L by GPU series and quality mode | Preset defaults to K; 0 leaves NVIDIA's per-mode choice | K costs less at Performance and Ultra Performance |
-| Pending | Reactive/transparency masks from TAA xy and water normal.z | Masks are zero | Production mask inputs not ported |
+| Forced | Reactive from the engine TAA mask; transparency from water normal.z | FSR 3 reactive from the color difference across the alpha phase; transparency from the water stencil class; DLSS and FSR 4 reactive zero | FO4 has no TAA mask target or water normal.z; current DLSS models ignore the bias mask and FSR 4 does not need one |
 | Pending | Underwater-mask upscale (`UnderwaterMaskUpscalePS`) | Own depth/refraction publication and linear-depth regeneration instead | Underwater producer/consumer chain not ported |

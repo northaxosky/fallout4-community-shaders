@@ -58,6 +58,7 @@ namespace cs::render::renderer_detail
 	inline auto* L = cs::log::Get("cs.feature.upscaling");
 
 	constexpr const wchar_t* kEncodeTexturesPath = L"Data\\Shaders\\FO4\\Upscaling\\EncodeTexturesCS.hlsl";
+	constexpr const wchar_t* kReactiveMaskPath = L"Data\\Shaders\\FO4\\Upscaling\\ReactiveMaskCS.hlsl";
 	constexpr const wchar_t* kSanitizeColorPath = L"Data\\Shaders\\FO4\\Upscaling\\SanitizeColorCS.hlsl";
 	constexpr const wchar_t* kDepthRefractionUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\DepthRefractionUpscalePS.hlsl";
 	constexpr const wchar_t* kChainInputsUpscalePath = L"Data\\Shaders\\FO4\\Upscaling\\ChainInputsUpscalePS.hlsl";
@@ -71,11 +72,10 @@ namespace cs::render::renderer_detail
 	constexpr auto kSceneColorTarget = RE::BSGraphics::RenderTargetID::kMain;
 	constexpr auto kPreAlphaColorTarget = RE::BSGraphics::RenderTargetID::kMainCopy;
 	constexpr auto kMotionVectorTarget = RE::BSGraphics::RenderTargetID::kGBufferMotionVectors;
-	// Alpha carries the material class ISHDR reads to bypass Pip-Boy pixels.
-	constexpr auto kPipboyMaskTarget = RE::BSGraphics::RenderTargetID::kGBufferAmbient;
+	// Alpha is the material class: Pip-Boy for ISHDR, water is 2 and 3.
+	constexpr auto kMaterialClassTarget = RE::BSGraphics::RenderTargetID::kGBufferAmbient;
 	// ISVatsTarget reads the VATS coverage mask as its Mask texture.
 	constexpr auto kVatsMaskTarget = RE::BSGraphics::RenderTargetID::kMenuBackground;
-	constexpr auto kNormalsTarget = RE::BSGraphics::RenderTargetID::kGBufferNormal;
 	constexpr auto kRefractionNormalTarget = RE::BSGraphics::RenderTargetID::kRefractionNormals;
 
 	inline std::string_view UpscaleMethodName(TemporalRenderer::UpscaleMethod a_method) noexcept

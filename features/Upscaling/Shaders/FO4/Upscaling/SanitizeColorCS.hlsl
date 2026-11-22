@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "FO4/Upscaling/IsFinite.hlsli"
+
 cbuffer UpscalingData : register(b0)
 {
 	float2 TrueSamplingDim;
@@ -8,12 +10,6 @@ cbuffer UpscalingData : register(b0)
 
 Texture2D<float4> Source : register(t0);
 RWTexture2D<float4> Output : register(u0);
-
-// Bit test: fast-math folds isfinite away.
-bool IsFinite(float4 a_value)
-{
-	return all((asuint(a_value) & 0x7F800000) != 0x7F800000);
-}
 
 [numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
 	if (any(dispatchID.xy >= uint2(TrueSamplingDim)))
