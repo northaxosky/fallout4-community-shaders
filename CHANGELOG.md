@@ -35,6 +35,7 @@
 - Screen Space GI: stray over-dark ambient occlusion pixels are gone, and indirect lighting is slightly cheaper.
 - Screen Space GI: ambient occlusion strength no longer varies with Slices.
 - Screen Space GI: HQ Specular IL no longer over-brightens, and nearby geometry now occludes it.
+- Screen Space GI: indirect light and ambient occlusion trail less while turning or moving.
 
 ## 0.5.1
 
