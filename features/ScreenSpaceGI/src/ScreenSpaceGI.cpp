@@ -215,6 +215,7 @@ namespace cs::features
 					a_pair[i] = CreateComputeTexture(width, height, a_format, std::format("{}[{}]", a_name, i));
 			};
 			pair(resources.ao, DXGI_FORMAT_R16_UNORM, "SSGI/AO");
+			resources.aoOutput = CreateComputeTexture(width, height, DXGI_FORMAT_R16_UNORM, "SSGI/AOOutput");
 			pair(resources.accumulation, DXGI_FORMAT_R8_UNORM, "SSGI/Accumulation");
 			pair(resources.luma, DXGI_FORMAT_R16G16B16A16_FLOAT, "SSGI/Luma");
 			pair(resources.chroma, DXGI_FORMAT_R16G16_FLOAT, "SSGI/Chroma");
@@ -231,6 +232,7 @@ namespace cs::features
 				for (auto& texture : *textures)
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
 			context->ClearUnorderedAccessViewFloat(_textures.previousGeometry->uav.get(), clear);
+			context->ClearUnorderedAccessViewFloat(_textures.aoOutput->uav.get(), clear);
 			_resourcesReady = true;
 			return true;
 		} catch (const std::exception& e) {
@@ -391,7 +393,7 @@ namespace cs::features
 			prefilter(3, t.normalGloss->srv.get(), t.normals, internalWidth, internalHeight, "ScreenSpaceGI::PrefilterNormals");
 			pass.Run(_shaders[4].get(), { t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.radiance.texture->srv.get(), _noise.get(), t.accumulation[_lastAccum]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao), t.normals.texture->srv.get(), t.ao[ao]->srv.get() },
 				{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(),
-					specularUAV(!ao), t.previousGeometry->uav.get() },
+					specularUAV(!ao), t.previousGeometry->uav.get(), t.aoOutput->uav.get() },
 				internalWidth, internalHeight, 8, "ScreenSpaceGI::GI");
 			ao = !ao;
 			gi = !gi;
@@ -407,7 +409,7 @@ namespace cs::features
 			}
 			if (_settings.resolutionMode != 0) {
 				pass.Run(_shaders[6].get(), { t.depth.texture->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao) },
-					{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
+					{ t.aoOutput->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
 					width, height, 8, "ScreenSpaceGI::Upsample");
 				ao = !ao;
 				gi = !gi;
@@ -455,7 +457,7 @@ namespace cs::features
 		if (ready) {
 			auto& t = _textures;
 			const bool hq = _settings.enableExperimentalSpecularGI;
-			views[0] = t.ao[_outputAO]->srv.get();
+			views[0] = t.aoOutput->srv.get();
 			// Upstream Deferred.cpp:362-364 binds null diffuse GI in HQ mode.
 			views[1] = hq ? nullptr : t.luma[_outputGI]->srv.get();
 			views[2] = hq ? nullptr : t.chroma[_outputGI]->srv.get();
@@ -479,7 +481,7 @@ namespace cs::features
 	{
 		FeatureDebugTexture result{ .unavailableText = "Buffer not allocated." };
 		if (_preview && _resourcesReady) {
-			result.texture = _textures.ao[_outputAO]->srv.get();
+			result.texture = _textures.aoOutput->srv.get();
 			result.width = _width;
 			result.height = _height;
 		}

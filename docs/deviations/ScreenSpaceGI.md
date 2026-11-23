@@ -17,3 +17,4 @@
 
 - `gi.cs.hlsl`: the experimental specular half-angle calculation uses inconsistent angular units.
 - `Deferred.cpp`: experimental HQ specular binds null diffuse Y/CoCg SRVs although `DeferredCompositeCS.hlsl` still samples them.
+- `gi.cs.hlsl`: experimental specular radiance is also weighted by the diffuse new-bit count.

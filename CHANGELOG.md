@@ -33,6 +33,8 @@
 - Screen Space GI: changing Slices or Steps no longer resets the denoiser history.
 - Screen Space GI: half and quarter resolution upsampling is smooth in flat areas instead of blocky and cheaper, and normals line up at those resolutions.
 - Screen Space GI: stray over-dark ambient occlusion pixels are gone, and indirect lighting is slightly cheaper.
+- Screen Space GI: ambient occlusion strength no longer varies with Slices.
+- Screen Space GI: HQ Specular IL no longer over-brightens, and nearby geometry now occludes it.
 
 ## 0.5.1
 

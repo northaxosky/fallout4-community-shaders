@@ -55,7 +55,7 @@ namespace cs::features
 		struct Resources
 		{
 			MipTexture depth, radiance, normals;
-			Texture normalGloss, diffuse, radianceTemp, previousGeometry;
+			Texture normalGloss, diffuse, radianceTemp, previousGeometry, aoOutput;
 			TexturePair ao, luma, chroma, specular, accumulation;
 			bool normalGlossSpecular = false;
 		};
