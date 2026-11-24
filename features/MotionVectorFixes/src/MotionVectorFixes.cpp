@@ -8,8 +8,10 @@
 
 #include "Log.h"
 #include "Render/EngineCallSite.h"
+#include "Render/FeatureShaderBindings.h"
 #include "Render/FrameState.h"
 #include "Render/LightingRenderPasses.h"
+#include "Render/SharedDataLayout.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -158,7 +160,17 @@ namespace cs::features
 			FailLoad("Motion Vector Fixes pass-list hook registration failed.");
 			return;
 		}
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
+			FailLoad("Motion Vector Fixes shader contribution registration failed.");
+			return;
+		}
+		_registrationsReady.store(true, std::memory_order_release);
 		L->info("Installed previous-transform corrections");
+	}
+
+	void MotionVectorFixes::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
+	{
+		a_fo4.EnabledMotionVectorFixes = 1u;
 	}
 
 	void MotionVectorFixes::CollectTelemetry(cs::telemetry::Sink& a_sink) const

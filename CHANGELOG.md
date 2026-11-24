@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Motion Vector Fixes: grass swaying in wind now has motion vectors.
 - Upscaling: FSR 3 ghosts less on fire, smoke and particles; DLSS and FSR ghost less on water.
 - Frame Generation: turning it on or off, or changing its method, now applies at the next launch.
 - Upscaling: lower input latency and less video memory without frame generation.

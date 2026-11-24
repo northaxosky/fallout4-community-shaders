@@ -1741,6 +1741,18 @@ struct PS_OUTPUT
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // Exact AE 1.11.240 PrePass ordinary, tessellated, instanced, combined and terrain vertex cells.
 
+// FO4: tree-wind grass writes its previous gust; stock reuses the current one.
+#	if defined(MOTION_VECTOR_FIXES) && GRASS && VC && (TREE_ANIM || SPLINE)
+#		define FO4_GRASS_PREVIOUS_GUST
+#		define SPLINE_PREVIOUS_POSITION previousPosition
+// FO4: bend at the previous length; the current one drops the radial gust.
+#		define TREE_PREVIOUS_DISTANCE (FO4SharedData::EnabledMotionVectorFixes != 0 ? length(previousDelta) : treeDistance)
+#		include "FO4/FO4ShaderData.hlsli"
+#	else
+#		define SPLINE_PREVIOUS_POSITION position
+#		define TREE_PREVIOUS_DISTANCE treeDistance
+#	endif
+
 cbuffer PerFrame_CB12 : register(b12)
 {
 	float4 WorldToView_row0;
@@ -2565,13 +2577,15 @@ VertexOutput main(VertexInput input)
 	binormal = normalize(binormal + grassGust);
 	tangent = normalize(tangent + grassGust);
 	position.xyz = grassPlaced + grassGust + input.grass_origin.xyz;
-#		if VC && !(TREE_ANIM || SPLINE)
+#		if VC && (!(TREE_ANIM || SPLINE) || defined(FO4_GRASS_PREVIOUS_GUST))
 	// The previous gust only shapes the previous frame, so it is taken after the blade lands.
 	float3 grassPreviousGust = grassLean * (GrassGust(grassAngle.y, grassSpan) * (VERTEX_COLOR.a * VERTEX_COLOR.a * 0.5));
 #		elif !(TREE_ANIM || SPLINE)
 	float3 grassPreviousGust = float3(0.0, 0.0, 0.0);
 #		endif
-#		if TREE_ANIM || SPLINE
+#		if defined(FO4_GRASS_PREVIOUS_GUST)
+	float4 previousPosition = float4(FO4SharedData::EnabledMotionVectorFixes != 0 ? grassPlaced + (input.grass_origin.xyz + grassPreviousGust) : position.xyz, 1.0);
+#		elif TREE_ANIM || SPLINE
 	// A blade under another wind regime carries one gust, so both frames leave from it.
 	float4 previousPosition = float4(position.xyz, 1.0);
 #		else
@@ -2820,13 +2834,13 @@ VertexOutput main(VertexInput input)
 	                       previousOrigin;
 	float previousRatio =
 		(previousDelta.x + previousDelta.y + previousDelta.z) / TreeParams.x;
-	float3 previous = BendTree(previousOrigin, previousDelta, treeDistance,
+	float3 previous = BendTree(previousOrigin, previousDelta, TREE_PREVIOUS_DISTANCE,
 		(windLean * TreeThrow(previousRatio, windSeed, windTime.y * windStrength)) * windWeight);
 #	elif SPLINE
 	float3 previous = ProjectRows(
 		float4(PreviousWorld_row0.xyz, previousSway.x),
 		float4(PreviousWorld_row1.xyz, previousSway.y),
-		float4(PreviousWorld_row2.xyz, previousOrigin.z), position);
+		float4(PreviousWorld_row2.xyz, previousOrigin.z), SPLINE_PREVIOUS_POSITION);
 #	elif GRASS
 	float3 previous = TransformRows(PreviousWorld_row0,
 		PreviousWorld_row1, PreviousWorld_row2,
