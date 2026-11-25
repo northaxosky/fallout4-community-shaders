@@ -34,7 +34,12 @@ namespace cs::features
 
 		void UpdateRenderTargets(float a_widthRatio, float a_heightRatio);
 
-		void OverrideDepth(bool a_doCopy = true);
+		enum class DepthCopy : std::uint8_t
+		{
+			kReuseFrame,  // first copy of the frame; later calls reuse it
+			kRefresh      // re-copy depth only, for readers after late depth writes
+		};
+		void OverrideDepth(DepthCopy a_copy = DepthCopy::kReuseFrame);
 		void ResetDepth();
 
 		// Ratio-1 draws into render-resolution proxies so stock TexCoord spans [0, 1].
@@ -71,7 +76,7 @@ namespace cs::features
 		void CaptureOriginal(RE::BSGraphics::RenderTargetID a_target, const RE::BSGraphics::RenderTarget& a_engineTarget);
 		void OverrideRenderTarget(RE::BSGraphics::RenderTargetID a_target, bool a_doCopy);
 		void ResetRenderTarget(RE::BSGraphics::RenderTargetID a_target, bool a_doCopy);
-		bool CopyDepth();
+		bool CopyDepth(bool a_linearize);
 		void ReleaseProxy(RE::BSGraphics::RenderTargetID a_target);
 		void RestoreEngineSlot(RE::BSGraphics::RenderTargetID a_target);
 		bool IsProxyTexture(const void* a_texture) const noexcept;

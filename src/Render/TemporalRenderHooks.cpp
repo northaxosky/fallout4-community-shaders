@@ -383,7 +383,7 @@ namespace cs::render
 
 		if (overrideActive) {
 			GuardedThunkBody("Upscaling lens-flare depth override", [&] {
-				upscaling->dynamicResolution.OverrideDepth(true);
+				upscaling->dynamicResolution.OverrideDepth(cs::features::DynamicResolution::DepthCopy::kRefresh);
 			});
 		}
 

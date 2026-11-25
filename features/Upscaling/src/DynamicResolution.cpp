@@ -445,7 +445,7 @@ namespace cs::features
 		_renderTargetsOverridden = false;
 	}
 
-	void DynamicResolution::OverrideDepth(bool a_doCopy)
+	void DynamicResolution::OverrideDepth(DepthCopy a_copy)
 	{
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData || !_depthOverrideTexture) {
@@ -463,13 +463,13 @@ namespace cs::features
 		}
 		_originalDepthView = reinterpret_cast<ID3D11ShaderResourceView*>(mainDepth->srViewDepth);
 
-		if (a_doCopy) {
-			const auto frame = cs::engine::GetFrameCount();
-			if (!_depthCopyFrame.IsCurrent(frame)) {
-				if (!CopyDepth())
-					return;
-				_depthCopyFrame.Mark(frame);
-			}
+		const auto frame = cs::engine::GetFrameCount();
+		const bool firstCopy = !_depthCopyFrame.IsCurrent(frame);
+		if (firstCopy || a_copy == DepthCopy::kRefresh) {
+			// Linear depth is for early-frame readers; a refresh must not rewrite it.
+			if (!CopyDepth(firstCopy))
+				return;
+			_depthCopyFrame.Mark(frame);
 		}
 
 		mainDepth->srViewDepth =
@@ -503,7 +503,7 @@ namespace cs::features
 		// Engaged first so EndProxyPass unwinds a partially applied override.
 		_proxyPassState = cs::engine::DynamicResolutionState::Capture();
 		OverrideRenderTargets(a_toProxy);
-		OverrideDepth(true);
+		OverrideDepth();
 		cs::engine::DynamicResolutionState{}.Apply();
 		if (a_triangle == ProxyTriangle::kUnit) {
 			_triangleSwap.Apply();
@@ -562,7 +562,7 @@ namespace cs::features
 		originalRenderTargets[Index(a_target)] = {};
 	}
 
-	bool DynamicResolution::CopyDepth()
+	bool DynamicResolution::CopyDepth(bool a_linearize)
 	{
 		auto* context = cs::engine::GetImmediateContext();
 		auto* state = cs::engine::GetGraphicsState();
@@ -571,9 +571,9 @@ namespace cs::features
 		}
 
 		auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(RE::BSGraphics::DepthStencilTargetID::kMain);
-		auto* linearDepthUAV = cs::engine::GetRenderTargetUAV(RenderTargetID::kSAOCameraZ);
+		auto* linearDepthUAV = a_linearize ? cs::engine::GetRenderTargetUAV(RenderTargetID::kSAOCameraZ) : nullptr;
 		auto* depthUAV = _depthOverrideTexture->uav.get();
-		if (!depthSRV || !linearDepthUAV || !depthUAV) {
+		if (!depthSRV || (a_linearize && !linearDepthUAV) || !depthUAV) {
 			return false;
 		}
 
@@ -596,7 +596,7 @@ namespace cs::features
 		if (!UpdateAndBindUpscalingCB(context, screenSize, renderSize))
 			return false;
 
-		{
+		if (a_linearize) {
 			cs::render::annotation::ScopedEvent annotationScope(
 				"Upscaling::DynamicResolution/LinearizeDepth");
 			ID3D11ShaderResourceView* views[] = { depthSRV };
