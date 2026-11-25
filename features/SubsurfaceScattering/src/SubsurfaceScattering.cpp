@@ -244,8 +244,15 @@ namespace cs::features
 		if (!(a_technique & (pt::kSkinTint | pt::kFace)))
 			return;
 		auto* self = GetSingleton();
-		self->_skinFrame.store(cs::engine::GetFrameCount(), std::memory_order_relaxed);
+		const auto frame = cs::engine::GetFrameCount();
+		self->_skinFrame.store(frame, std::memory_order_relaxed);
 		self->_skinBuckets.fetch_add(1, std::memory_order_relaxed);
+		// FO4: Prepare masks out first-person skin, so it never needs a dispatch.
+		if (const auto* accumulator = RE::BSShaderManager::GetCurrentAccumulator(); accumulator && accumulator->firstPerson) {
+			self->_firstPersonSkinBuckets.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+		self->_worldSkinFrame.store(frame, std::memory_order_relaxed);
 	}
 
 	void SubsurfaceScattering::OnPreDeferredComposite()
@@ -267,7 +274,7 @@ namespace cs::features
 			!_prepare || !_extract || !_extractBurley || !_horizontal || !_vertical || !_burley)
 			return;
 		// Upstream dispatches only on frames that drew skin.
-		if (!SkinDrawnThisFrame()) {
+		if (!WorldSkinDrawnThisFrame()) {
 			_skippedFrames.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
@@ -366,7 +373,7 @@ namespace cs::features
 
 	void SubsurfaceScattering::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		a_sink.Field("hooks_registered", _registrationsReady.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("skin_drawn", _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount()).Field("skin_buckets", static_cast<std::int64_t>(_skinBuckets.load(std::memory_order_relaxed))).Field("skipped_frames", static_cast<std::int64_t>(_skippedFrames.load(std::memory_order_relaxed))).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
+		a_sink.Field("hooks_registered", _registrationsReady.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("skin_drawn", SkinDrawnThisFrame()).Field("world_skin_drawn", WorldSkinDrawnThisFrame()).Field("skin_buckets", static_cast<std::int64_t>(_skinBuckets.load(std::memory_order_relaxed))).Field("first_person_skin_buckets", static_cast<std::int64_t>(_firstPersonSkinBuckets.load(std::memory_order_relaxed))).Field("skipped_frames", static_cast<std::int64_t>(_skippedFrames.load(std::memory_order_relaxed))).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
 		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 

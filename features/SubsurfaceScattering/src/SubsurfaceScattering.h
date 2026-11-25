@@ -77,6 +77,7 @@ namespace cs::features
 		void UpdateConstants(const cs::engine::WorldCameraRecord&);
 		bool CanRun() const noexcept { return _registrationsReady && IsEnabled() && !_unsupported && !_failed; }
 		bool SkinDrawnThisFrame() const noexcept { return _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount(); }
+		bool WorldSkinDrawnThisFrame() const noexcept { return _worldSkinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount(); }
 		void ApplyNativeControls();
 		void RestoreNativeControls() noexcept;
 		void OnPreDeferredComposite();
@@ -100,8 +101,8 @@ namespace cs::features
 		std::atomic_bool _unsupported{ false }, _produced{ false };
 		std::atomic<Preview> _preview{ Preview::kNone };
 		std::atomic_bool _nativeApplied{ false };
-		std::atomic_uint32_t _dispatches{ 0 }, _skinBuckets{ 0 }, _skippedFrames{ 0 };
-		std::atomic_uint32_t _skinFrame{ UINT32_MAX };
+		std::atomic_uint32_t _dispatches{ 0 }, _skinBuckets{ 0 }, _firstPersonSkinBuckets{ 0 }, _skippedFrames{ 0 };
+		std::atomic_uint32_t _skinFrame{ UINT32_MAX }, _worldSkinFrame{ UINT32_MAX };
 		std::atomic<std::uint8_t> _lastMode{ 0 };
 	};
 }
