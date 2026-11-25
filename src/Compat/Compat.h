@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include "REL/Version.h"
+#include "Compat/PluginScan.h"
 
 namespace cs
 {
@@ -37,8 +37,8 @@ namespace cs::compat
 		std::span<const FeatureRef> features;
 		// Shown to users as is.
 		std::string_view reason;
-		// When set and true for the plugin's version, the detected mod runs in a mode the rule does not apply to.
-		bool (*exempt)(const REL::Version& a_version) = nullptr;
+		// kF4SEPlugin only: true skips the rule for a compatible plugin mode.
+		bool (*exempt)(const ScannedPlugin& a_plugin) = nullptr;
 	};
 
 	struct Finding
