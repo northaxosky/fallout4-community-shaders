@@ -2,6 +2,7 @@
 
 #include "Sidecar/LightSidecar.h"
 
+#include <cmath>
 #include <mutex>
 
 namespace cs::features::light_limit_fix
@@ -44,7 +45,8 @@ namespace cs::features::light_limit_fix
 			const auto& position = niLight->world.translate;
 			light.positionWS.data = { position.x - a_posAdjust.x, position.y - a_posAdjust.y, position.z - a_posAdjust.z };
 
-			if ((light.color.x + light.color.y + light.color.z) * light.fade <= 1e-4f || light.radius <= 1e-4f)
+			// FO4: kNegative lights carry negated color; upstream drops them.
+			if ((std::abs(light.color.x) + std::abs(light.color.y) + std::abs(light.color.z)) * light.fade <= 1e-4f || light.radius <= 1e-4f)
 				return;
 			if (_lights.size() >= kMaxLights) {
 				++_stats.dropped;

@@ -21,8 +21,8 @@ Derivation fills only `inverse_square`, `size` and an intensity scale
 match the native curve's (clamped to 0.01 to just below 50, the sqrt(2) sentinel).
 The scale then matches the d^2-weighted energy of the native curve out to its
 radius with that size. Derived lights keep the native radius. Lights stay native
-when DATA flag 0x4 negates color, the radial scalar is 0, native energy is not
-positive, or the radius is at most 0.1.
+when the radial scalar is 0, native energy is not positive, or the radius is at
+most 0.1.
 
 ```toml
 [[lights]]

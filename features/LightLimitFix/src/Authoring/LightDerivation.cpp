@@ -49,7 +49,7 @@ namespace cs::features::light_limit_fix
 	std::optional<DerivedLight> DeriveLight(const NativeLight& a_light)
 	{
 		namespace native = engine::local_lights;
-		if (a_light.negatedColor || a_light.b == 0 || !(a_light.radius > kMinRadius))
+		if (a_light.b == 0 || !(a_light.radius > kMinRadius))
 			return std::nullopt;
 		const auto nativeCurve = [&](double a_x) {
 			return static_cast<double>(native::RadialFalloff(static_cast<float>(a_x), a_light.a, a_light.b, a_light.c));

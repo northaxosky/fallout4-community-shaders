@@ -148,8 +148,7 @@ namespace cs::features
 							.fade = fade,
 							.a = data.attenConstant,
 							.b = data.attenScalar,
-							.c = data.attenExponent,
-							.negatedColor = data.flags.any(Flag::kNegative) })) {
+							.c = data.attenExponent })) {
 						authored = derived->authored;
 						intensityScale = derived->intensityScale;
 						found = true;
