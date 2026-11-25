@@ -97,8 +97,10 @@ namespace cs::render
 	{
 		std::uint32_t EnableIBL, PreserveFogLuminance, UseStaticIBL;
 		float DALCAmount, EnvIBLScale, SkyIBLScale, EnvIBLSaturation, SkyIBLSaturation, FogAmount;
-		std::uint32_t DALCMode, ENBSkyFalloff;
-		float pad0;
+		std::uint32_t DALCMode, EnableReflectionFallback;
+		float ReflectionFallbackDistance;
+		std::uint32_t ENBSkyFalloff;
+		float pad0, pad1, pad2;
 	};
 	struct ExtendedTranslucencySettings
 	{
@@ -177,15 +179,11 @@ namespace cs::render
 		std::uint32_t respectVanillaFogFade, disableVanillaFog;
 		DirectX::XMFLOAT4 fogInscatteringColor;
 		float originalFogColorAmount;
-		std::uint32_t volumetricFogEnabled, volumetricGridPixelSize, volumetricGridSizeZ;
-		float volumetricFogDistance, volumetricFogStartDistance, volumetricFogNearFadeInDistance, volumetricFogExtinctionScale;
+		std::uint32_t volumetricFogEnabled;
+		float volumetricFogStartDistance, volumetricFogNearFadeInDistance;
 		DirectX::XMFLOAT4 volumetricFogAlbedo, volumetricFogEmissive;
-		float volumetricDirectionalScatteringIntensity, volumetricShadowBias;
-		float volumetricDepthDistributionScale, volumetricSkyLightingIntensity;
-		float volumetricFogScatteringDistribution, volumetricHistoryWeight;
-		std::uint32_t volumetricHistoryMissSampleCount;
-		float volumetricSampleJitterMultiplier, volumetricUpsampleJitterMultiplier, volumetricNearGridDistance;
-		std::uint32_t volumetricFarGridPixelSize, volumetricFarGridSizeZ;
+		float volumetricDirectionalScatteringIntensity, volumetricSkyLightingIntensity;
+		float volumetricFogScatteringDistribution, volumetricFogExtinctionScale;
 		float volumetricLocalLightScatteringIntensity, volumetricFogNoiseScale, volumetricFogNoiseThreshold, pad3;
 		float volumetricFogNoiseVelocity[3], pad0;
 		DirectX::XMFLOAT4 originalFogColorOverride;
@@ -205,12 +203,62 @@ namespace cs::render
 	{
 		float farWaterDistance, pad[3];
 	};
+	// Shared SharedData.hlsli declares Physical Sky; FO4 has none, so it is zero-filled.
+	struct PhysSkyData
+	{
+		DirectX::XMFLOAT2 texDim, rcpTexDim, frameDim, rcpFrameDim;
+		float zCameraPlanet;
+		DirectX::XMFLOAT3 sunDir, sunlightColor;
+		float trMix;
+		DirectX::XMFLOAT3 masserDir;
+		float apLumMix;
+		DirectX::XMFLOAT3 masserColor;
+		float apTrMix;
+		DirectX::XMFLOAT3 secundaDir;
+		float sunDiskCos;
+		DirectX::XMFLOAT3 secundaColor;
+		std::uint32_t enabled;
+		float pad, vanillaMix, zBottom, rPlanet, rAtmosphere;
+		DirectX::XMFLOAT3 groundAlbedo;
+		DirectX::XMFLOAT2 cloudShadowRemapRange;
+		float aerosolFalloff, aerosolPhaseG;
+		DirectX::XMFLOAT3 aerosolScatter;
+		std::uint32_t halfResApShadow;
+		DirectX::XMFLOAT3 aerosolAbsorption;
+		float rayleighFalloff;
+		DirectX::XMFLOAT3 rayleighScatter;
+		float ozoneAltitude, ozoneThickness;
+		DirectX::XMFLOAT3 ozoneAbsorption;
+		std::uint32_t enableVanillaClouds;
+		float cloudRelightMix, cloudOriginalMix, silverLiningMix, silverLiningSpread;
+		std::uint32_t enableVolumetricClouds;
+		float shadowVolumeRange, lowestCloudAltitude, highestCloudAltitude;
+		DirectX::XMFLOAT3 volCloudScatter;
+		std::uint32_t volCloudUseSun;
+		DirectX::XMFLOAT3 volCloudAbsorption;
+		float volCloudLowBottom, volCloudLowThickness;
+		std::uint32_t lightSkyStatics;
+		float skyStaticsBrightness;
+		DirectX::XMFLOAT4 lightningPositionRadius, lightningEndPosition, lightningColorIntensity, lightningControl;
+		DirectX::XMFLOAT4 lightningPhotometry, lightningPlacement, lightningChannelEmitter;
+		DirectX::XMFLOAT4 lightningPreparationPositionRadius, lightningPreparationControl, diskAngularRadius;
+		DirectX::XMFLOAT3 dirLightBodyDir;
+		std::uint32_t dirLightDiskIndex;
+		DirectX::XMFLOAT4 dirLightDisc, diskBillboardScale, moonDiscRadiance[2];
+	};
 	struct RainRefractionSettings
 	{
 		std::uint32_t Enable;
 		float MotionStretch, MotionTransparency, pad0;
 		DirectX::XMFLOAT4 TextureBounds;
 		float TextureRadiusScale[2], pad1[2];
+	};
+	// Shared SharedData.hlsli declares this Physical Sky block; it is always zero-filled.
+	struct ViewAtmosphereSettings
+	{
+		std::uint32_t enabled, nearPixelSize, nearSlices, middlePixelSize, middleSlices;
+		std::uint32_t distantPixelSize, distantSlices, historyMissSamples;
+		float nearRange, localRange, historyWeight, sampleJitter, shadowBias, depthDistribution, lookupJitter, padding;
 	};
 	// Shared SharedData.hlsli still declares this block; it is always zero-filled.
 	struct ProceduralSunSettings
@@ -252,7 +300,9 @@ namespace cs::render
 		TruePBRSettings truePBRSettings{};
 		SkinData skinData{};
 		HorizonFixSettings horizonFixSettings{};
+		PhysSkyData physSkyData{};
 		RainRefractionSettings rainRefractionSettings{};
+		ViewAtmosphereSettings viewAtmosphereSettings{};
 		ProceduralSunSettings proceduralSunSettings{};
 		ProceduralAuroraSettings proceduralAuroraSettings{};
 	};
@@ -270,18 +320,20 @@ namespace cs::render
 	CS_FEATURE_LAYOUT(lodBlendingSettings, 672, 32);
 	CS_FEATURE_LAYOUT(hairSpecularSettings, 704, 80);
 	CS_FEATURE_LAYOUT(terrainVariationSettings, 784, 16);
-	CS_FEATURE_LAYOUT(iblSettings, 800, 48);
-	CS_FEATURE_LAYOUT(extendedTranslucencySettings, 848, 16);
-	CS_FEATURE_LAYOUT(linearLightingSettings, 864, 80);
-	CS_FEATURE_LAYOUT(enbSettings, 944, 512);
-	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1456, 16);
-	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1472, 256);
-	CS_FEATURE_LAYOUT(truePBRSettings, 1728, 16);
-	CS_FEATURE_LAYOUT(skinData, 1744, 112);
-	CS_FEATURE_LAYOUT(horizonFixSettings, 1856, 16);
-	CS_FEATURE_LAYOUT(rainRefractionSettings, 1872, 48);
-	CS_FEATURE_LAYOUT(proceduralSunSettings, 1920, 48);
-	CS_FEATURE_LAYOUT(proceduralAuroraSettings, 1968, 112);
+	CS_FEATURE_LAYOUT(iblSettings, 800, 64);
+	CS_FEATURE_LAYOUT(extendedTranslucencySettings, 864, 16);
+	CS_FEATURE_LAYOUT(linearLightingSettings, 880, 80);
+	CS_FEATURE_LAYOUT(enbSettings, 960, 512);
+	CS_FEATURE_LAYOUT(terrainBlendingSettings, 1472, 16);
+	CS_FEATURE_LAYOUT(exponentialHeightFogSettings, 1488, 208);
+	CS_FEATURE_LAYOUT(truePBRSettings, 1696, 16);
+	CS_FEATURE_LAYOUT(skinData, 1712, 112);
+	CS_FEATURE_LAYOUT(horizonFixSettings, 1824, 16);
+	CS_FEATURE_LAYOUT(physSkyData, 1840, 560);
+	CS_FEATURE_LAYOUT(rainRefractionSettings, 2400, 48);
+	CS_FEATURE_LAYOUT(viewAtmosphereSettings, 2448, 64);
+	CS_FEATURE_LAYOUT(proceduralSunSettings, 2512, 48);
+	CS_FEATURE_LAYOUT(proceduralAuroraSettings, 2560, 112);
 #undef CS_FEATURE_LAYOUT
-	static_assert(sizeof(SharedFeatureDataCB) == 2080);
+	static_assert(sizeof(SharedFeatureDataCB) == 2672);
 }

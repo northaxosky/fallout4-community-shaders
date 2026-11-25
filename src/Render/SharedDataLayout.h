@@ -53,6 +53,8 @@ namespace cs::render
 		float WaterSystemHeight = -(std::numeric_limits<float>::max)();
 		std::uint32_t PostWaterComposite = 0, ResetHistory = 0, TonemapOwner = 0;
 		DirectX::XMFLOAT4 AmbientSHR{}, AmbientSHG{}, AmbientSHB{}, HDRData{};
+		// FO4 has no pre-exposure; identity keeps ENABLE_LL Encode/Decode lossless.
+		float PreExposure = 1.0f, RcpPreExposure = 1.0f, PreviousPreExposure = 1.0f, PreExposureHistoryRatio = 1.0f;
 	};
 #define CS_SHARED_OFFSET(member, offset) static_assert(offsetof(SharedDataCB, member) == offset)
 	CS_SHARED_OFFSET(WaterData, 0);
@@ -82,8 +84,12 @@ namespace cs::render
 	CS_SHARED_OFFSET(AmbientSHG, 624);
 	CS_SHARED_OFFSET(AmbientSHB, 640);
 	CS_SHARED_OFFSET(HDRData, 656);
+	CS_SHARED_OFFSET(PreExposure, 672);
+	CS_SHARED_OFFSET(RcpPreExposure, 676);
+	CS_SHARED_OFFSET(PreviousPreExposure, 680);
+	CS_SHARED_OFFSET(PreExposureHistoryRatio, 684);
 #undef CS_SHARED_OFFSET
-	static_assert(sizeof(SharedDataCB) == 672);
+	static_assert(sizeof(SharedDataCB) == 688);
 
 	struct alignas(16) FO4SharedDataCB
 	{

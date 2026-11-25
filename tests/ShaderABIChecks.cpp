@@ -54,10 +54,12 @@ namespace
 			D3D11_SHADER_TYPE_DESC member{};
 			if (expected == a_fields.end() || FAILED(a_type->GetMemberTypeByIndex(index)->GetDesc(&member)))
 				return std::string(name) + ": missing struct member";
-			const UINT size = member.Class == D3D_SVC_MATRIX_ROWS    ? 16 * member.Rows :
-			                  member.Class == D3D_SVC_MATRIX_COLUMNS ? 16 * member.Columns :
-			                                                           4 * member.Rows * member.Columns;
-			if (member.Offset != expected->offset || size != expected->size || member.Elements != 0)
+			const UINT element = member.Class == D3D_SVC_MATRIX_ROWS    ? 16 * member.Rows :
+			                     member.Class == D3D_SVC_MATRIX_COLUMNS ? 16 * member.Columns :
+			                                                              4 * member.Rows * member.Columns;
+			// HLSL array elements each start a register; only the last is unpadded.
+			const UINT size = member.Elements ? 16 * (member.Elements - 1) + element : element;
+			if (member.Offset != expected->offset || size != expected->size)
 				return std::string(name) + ": struct offset/size mismatch";
 		}
 		return {};
@@ -95,7 +97,8 @@ namespace
 			F(Transmission), F(EnableSelfShadow), F(SelfShadowStrength), F(SelfShadowExponent), F(SelfShadowScale), F(HairMode), F(pad));
 		const auto variation = FIELDS(TerrainVariationSettings, F(enableLODTerrainTilingFix), F(enableMeshSupport), F(pad));
 		const auto ibl = FIELDS(IBLSettings, F(EnableIBL), F(PreserveFogLuminance), F(UseStaticIBL), F(DALCAmount), F(EnvIBLScale), F(SkyIBLScale),
-			F(EnvIBLSaturation), F(SkyIBLSaturation), F(FogAmount), F(DALCMode), F(ENBSkyFalloff), F(pad0));
+			F(EnvIBLSaturation), F(SkyIBLSaturation), F(FogAmount), F(DALCMode), F(EnableReflectionFallback), F(ReflectionFallbackDistance),
+			F(ENBSkyFalloff), F(pad0), F(pad1), F(pad2));
 		const auto translucency = FIELDS(ExtendedTranslucencySettings, F(MaterialModel), F(Reduction), F(Softness), F(Strength));
 		const auto linear = FIELDS(LinearLightingSettings, F(isMainOrLoadingMenu), F(diffuseGamma), F(directionalLightMult), F(pointLightMult),
 			F(ambientMult), F(glowmapMult), F(effectLightingMult), F(membraneEffectMult), F(bloodEffectMult), F(projectedEffectMult),
@@ -127,15 +130,26 @@ namespace
 			F(fogDensity), F(fogHeight2), F(fogHeightFalloff2), F(fogDensity2), F(directionalInscatteringMultiplier), F(directionalInscatteringAnisotropy),
 			F(useSkyIBL), F(inscatteringTint), F(cubemapMipLevel),
 			F(sunlightAttenuationAmount), F(respectVanillaFogFade), F(disableVanillaFog), F(fogInscatteringColor), F(originalFogColorAmount),
-			F(volumetricFogEnabled), F(volumetricGridPixelSize), F(volumetricGridSizeZ), F(volumetricFogDistance), F(volumetricFogStartDistance),
-			F(volumetricFogNearFadeInDistance), F(volumetricFogExtinctionScale), F(volumetricFogAlbedo), F(volumetricFogEmissive),
-			F(volumetricDirectionalScatteringIntensity), F(volumetricShadowBias), F(volumetricDepthDistributionScale), F(volumetricSkyLightingIntensity),
-			F(volumetricFogScatteringDistribution), F(volumetricHistoryWeight), F(volumetricHistoryMissSampleCount), F(volumetricSampleJitterMultiplier),
-			F(volumetricUpsampleJitterMultiplier), F(volumetricNearGridDistance), F(volumetricFarGridPixelSize), F(volumetricFarGridSizeZ),
-			F(volumetricLocalLightScatteringIntensity), F(volumetricFogNoiseScale), F(volumetricFogNoiseThreshold), F(pad3), F(volumetricFogNoiseVelocity), F(pad0), F(originalFogColorOverride));
+			F(volumetricFogEnabled), F(volumetricFogStartDistance), F(volumetricFogNearFadeInDistance), F(volumetricFogAlbedo), F(volumetricFogEmissive),
+			F(volumetricDirectionalScatteringIntensity), F(volumetricSkyLightingIntensity), F(volumetricFogScatteringDistribution),
+			F(volumetricFogExtinctionScale), F(volumetricLocalLightScatteringIntensity), F(volumetricFogNoiseScale), F(volumetricFogNoiseThreshold), F(pad3), F(volumetricFogNoiseVelocity), F(pad0), F(originalFogColorOverride));
 		const auto pbr = FIELDS(TruePBRSettings, F(VertexAOStrength), F(EnableMicroShadows), F(MicroShadowStrength), F(pad));
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
+		const auto physSky = FIELDS(PhysSkyData, F(texDim), F(rcpTexDim), F(frameDim), F(rcpFrameDim), F(zCameraPlanet), F(sunDir),
+			F(sunlightColor), F(trMix), F(masserDir), F(apLumMix), F(masserColor), F(apTrMix), F(secundaDir), F(sunDiskCos), F(secundaColor),
+			F(enabled), F(pad), F(vanillaMix), F(zBottom), F(rPlanet), F(rAtmosphere), F(groundAlbedo), F(cloudShadowRemapRange),
+			F(aerosolFalloff), F(aerosolPhaseG), F(aerosolScatter), F(halfResApShadow), F(aerosolAbsorption), F(rayleighFalloff),
+			F(rayleighScatter), F(ozoneAltitude), F(ozoneThickness), F(ozoneAbsorption), F(enableVanillaClouds), F(cloudRelightMix),
+			F(cloudOriginalMix), F(silverLiningMix), F(silverLiningSpread), F(enableVolumetricClouds), F(shadowVolumeRange),
+			F(lowestCloudAltitude), F(highestCloudAltitude), F(volCloudScatter), F(volCloudUseSun), F(volCloudAbsorption),
+			F(volCloudLowBottom), F(volCloudLowThickness), F(lightSkyStatics), F(skyStaticsBrightness), F(lightningPositionRadius),
+			F(lightningEndPosition), F(lightningColorIntensity), F(lightningControl), F(lightningPhotometry), F(lightningPlacement),
+			F(lightningChannelEmitter), F(lightningPreparationPositionRadius), F(lightningPreparationControl), F(diskAngularRadius),
+			F(dirLightBodyDir), F(dirLightDiskIndex), F(dirLightDisc), F(diskBillboardScale), F(moonDiscRadiance));
+		const auto atmosphere = FIELDS(ViewAtmosphereSettings, F(enabled), F(nearPixelSize), F(nearSlices), F(middlePixelSize),
+			F(middleSlices), F(distantPixelSize), F(distantSlices), F(historyMissSamples), F(nearRange), F(localRange), F(historyWeight),
+			F(sampleJitter), F(shadowBias), F(depthDistribution), F(lookupJitter), F(padding));
 		const auto rain = FIELDS(RainRefractionSettings, F(Enable), F(MotionStretch), F(MotionTransparency), F(pad0), F(TextureBounds), F(TextureRadiusScale), F(pad1));
 		const auto sun = FIELDS(ProceduralSunSettings, F(enabled), F(sunDiskCos), F(diskIntensity), F(edgeSoftness), F(haloEnabled),
 			F(sunHaloCos), F(haloIntensity), F(haloFalloff), F(cloudOcclusionStrength), F(sunQuadModelRadius), F(pad0));
@@ -160,7 +174,8 @@ namespace
 			{ 6, "enbSettings", enb }, { 6, "terrainBlendingSettings", blending },
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
-			{ 6, "rainRefractionSettings", rain }, { 6, "proceduralSunSettings", sun },
+			{ 6, "physSkyData", physSky }, { 6, "rainRefractionSettings", rain },
+			{ 6, "viewAtmosphereSettings", atmosphere }, { 6, "proceduralSunSettings", sun },
 			{ 6, "proceduralAuroraSettings", aurora }
 		};
 		D3D11_SHADER_DESC shader{};
@@ -259,7 +274,9 @@ namespace
 			ABI(SharedDataCB, HasDirectionalShadows), ABI(SharedDataCB, InMapMenu), ABI(SharedDataCB, HideSky),
 			ABI(SharedDataCB, MipBias), ABI(SharedDataCB, WaterSystemHeight),
 			ABI(SharedDataCB, PostWaterComposite), ABI(SharedDataCB, ResetHistory), ABI(SharedDataCB, TonemapOwner),
-			ABI(SharedDataCB, AmbientSHR), ABI(SharedDataCB, AmbientSHG), ABI(SharedDataCB, AmbientSHB), ABI(SharedDataCB, HDRData)
+			ABI(SharedDataCB, AmbientSHR), ABI(SharedDataCB, AmbientSHG), ABI(SharedDataCB, AmbientSHB), ABI(SharedDataCB, HDRData),
+			ABI(SharedDataCB, PreExposure), ABI(SharedDataCB, RcpPreExposure), ABI(SharedDataCB, PreviousPreExposure),
+			ABI(SharedDataCB, PreExposureHistoryRatio)
 		};
 		const ABIField feature[]{
 			ABI(SharedFeatureDataCB, grassLightingSettings), ABI(SharedFeatureDataCB, extendedMaterialSettings),
@@ -272,7 +289,8 @@ namespace
 			ABI(SharedFeatureDataCB, enbSettings), ABI(SharedFeatureDataCB, terrainBlendingSettings),
 			ABI(SharedFeatureDataCB, exponentialHeightFogSettings), ABI(SharedFeatureDataCB, truePBRSettings),
 			ABI(SharedFeatureDataCB, skinData), ABI(SharedFeatureDataCB, horizonFixSettings),
-			ABI(SharedFeatureDataCB, rainRefractionSettings), ABI(SharedFeatureDataCB, proceduralSunSettings),
+			ABI(SharedFeatureDataCB, physSkyData), ABI(SharedFeatureDataCB, rainRefractionSettings),
+			ABI(SharedFeatureDataCB, viewAtmosphereSettings), ABI(SharedFeatureDataCB, proceduralSunSettings),
 			ABI(SharedFeatureDataCB, proceduralAuroraSettings)
 		};
 		const ABIField fo4[]{
