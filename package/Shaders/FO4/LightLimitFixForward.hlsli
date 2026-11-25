@@ -118,10 +118,13 @@ namespace FO4LightLimitFix
 			float x = saturate(distance * light.invRadius);
 			float attenuation = GetAttenuation(light, distance, 1.0 - x * x);
 			float3 towardLight = normalize(lightDirection);
-			float shadow = 1.0;
-			[branch] if (HasLocalShadow(light)) shadow = GetLocalShadow(light, viewPosition, worldPosition, towardLight, Random::InterleavedGradientNoise(screenPosition, SharedData::FrameCount));
 			float3 H = normalize(towardLight - viewDirection);
-			result += GetLinearColor(light.color, light.lightFlags) * pow(saturate(dot(H, normal)), specularPower) * light.fade * attenuation * shadow;
+			float3 lightColor = GetLinearColor(light.color, light.lightFlags) * pow(saturate(dot(H, normal)), specularPower) * light.fade * attenuation;
+			// Water lights only with its narrow specular lobe, which a lamp's reflection fills on a few pixels: the local
+			// shadow (a filtered cube map lookup) is only read where the lobe adds something.
+			[branch] if (HasLocalShadow(light) && max(lightColor.x, max(lightColor.y, lightColor.z)) > 1e-4)
+				lightColor *= GetLocalShadow(light, viewPosition, worldPosition, towardLight, Random::InterleavedGradientNoise(screenPosition, SharedData::FrameCount));
+			result += lightColor;
 		}
 		return result * 3;
 	}
