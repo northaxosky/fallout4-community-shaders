@@ -1,8 +1,7 @@
 #include "Render/RendererContext.h"
 
-#include "Render/Annotation.h"
-
 #include <array>
+#include <cstring>
 
 namespace cs::engine
 {
@@ -20,38 +19,15 @@ namespace cs::engine
 		a_ctx->CopyResource(a_dst, a_src);
 	}
 
-	bool WaitForGpuIdle(ID3D11DeviceContext* a_ctx) noexcept
+	HRESULT WriteDiscard(ID3D11DeviceContext* a_ctx, ID3D11Buffer* a_buffer, const void* a_data, std::size_t a_size) noexcept
 	{
-		if (!a_ctx)
-			return false;
-
-		ID3D11Device* device = nullptr;
-		a_ctx->GetDevice(&device);
-		if (!device)
-			return false;
-
-		D3D11_QUERY_DESC queryDesc{};
-		queryDesc.Query = D3D11_QUERY_EVENT;
-
-		ID3D11Query* query = nullptr;
-		const HRESULT createResult = device->CreateQuery(&queryDesc, &query);
-		device->Release();
-		if (FAILED(createResult) || !query)
-			return false;
-		cs::render::annotation::SetName(query, "Render/GpuIdle.Query");
-
-		a_ctx->End(query);
-		a_ctx->Flush();
-
-		HRESULT result = S_FALSE;
-		while (result == S_FALSE) {
-			result = a_ctx->GetData(query, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
-			if (result == S_FALSE)
-				SwitchToThread();
-		}
-
-		query->Release();
-		return SUCCEEDED(result);
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		const auto result = a_ctx->Map(a_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+		if (FAILED(result))
+			return result;
+		std::memcpy(mapped.pData, a_data, a_size);
+		a_ctx->Unmap(a_buffer, 0);
+		return S_OK;
 	}
 
 	OMScope::OMScope(ID3D11DeviceContext* a_ctx) noexcept :

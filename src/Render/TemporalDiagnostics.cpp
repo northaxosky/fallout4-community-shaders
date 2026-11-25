@@ -628,7 +628,7 @@ namespace cs::render
 		const auto* renderTargetManager = cs::engine::GetRenderTargetManager();
 		const std::uint32_t fullWidth = state ? state->screenWidth : 0;
 		const std::uint32_t fullHeight = state ? state->screenHeight : 0;
-		const auto activeExtent = GetActiveExtent(fullWidth, fullHeight);
+		const auto resolution = GetRenderResolution();
 		a_sink
 			.Field("enabled", settings.enabled)
 			.Field(
@@ -678,16 +678,16 @@ namespace cs::render
 			.Field("full_height", static_cast<std::int64_t>(fullHeight))
 			.Field("render_width", static_cast<std::int64_t>(renderWidth))
 			.Field("render_height", static_cast<std::int64_t>(renderHeight))
-			.Field("active_width", static_cast<std::int64_t>(activeExtent.width))
-			.Field("active_height", static_cast<std::int64_t>(activeExtent.height))
+			.Field("active_width", static_cast<std::int64_t>(resolution.render.width))
+			.Field("active_height", static_cast<std::int64_t>(resolution.render.height))
 			.Field(
 				"input_color_format",
 				static_cast<std::int64_t>(DXGI_FORMAT_R11G11B10_FLOAT))
 			.Field("input_transfer", std::string_view{ "linear" })
 			.Field("input_color_stage", std::string_view{ "pre_tonemap" })
 			.Field("input_lut_baked", false)
-			.Field("dynamic_width_ratio", static_cast<double>(activeExtent.widthRatio))
-			.Field("dynamic_height_ratio", static_cast<double>(activeExtent.heightRatio))
+			.Field("dynamic_width_ratio", static_cast<double>(resolution.widthRatio))
+			.Field("dynamic_height_ratio", static_cast<double>(resolution.heightRatio))
 			.Field("scale_published", _resolutionScalePublished)
 			.Field("provider_failures", static_cast<std::int64_t>(_providerFailures.load(std::memory_order_relaxed)))
 			.Field("spatial_fallbacks", static_cast<std::int64_t>(_spatialFallbacks.load(std::memory_order_relaxed)))
@@ -713,8 +713,8 @@ namespace cs::render
 				"provider_preview_failure",
 				ProviderOutputDebugFailureName(
 					_providerOutputDebugFailure.load(std::memory_order_acquire)))
-			.Field("resolution_scale_x", static_cast<double>(resolutionScale.x))
-			.Field("resolution_scale_y", static_cast<double>(resolutionScale.y))
+			.Field("resolution_scale_x", static_cast<double>(_renderSize.WidthRatio()))
+			.Field("resolution_scale_y", static_cast<double>(_renderSize.HeightRatio()))
 			.Field("mip_bias", static_cast<double>(_mipBias.load(std::memory_order_relaxed)))
 			.Field("dispatches", static_cast<std::int64_t>(_upscaleDispatches.load(std::memory_order_relaxed)))
 			.Field("sr_reset_submissions", static_cast<std::int64_t>(_resetSubmissions.load(std::memory_order_relaxed)));

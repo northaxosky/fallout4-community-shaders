@@ -23,6 +23,7 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameBuffer.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
 #include "Render/RenderTargetFormats.h"
 #include "Render/RendererContext.h"
@@ -31,7 +32,7 @@
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/SkyReflectionCube.h"
-#include "Settings/SettingsPersistence.h"
+#include "Render/SubstrateSlots.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
@@ -113,19 +114,6 @@ namespace cs::features
 			a_context->CSSetConstantBuffers(0, 1, &nullBuffer);
 			a_context->CSSetSamplers(0, 1, &nullSampler);
 			a_context->CSSetShader(nullptr, nullptr, 0);
-		}
-
-		void UpdateBuffer(
-			ID3D11DeviceContext* a_context,
-			ID3D11Buffer* a_buffer,
-			const void* a_data,
-			std::size_t a_size)
-		{
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			DX::ThrowIfFailed(a_context->Map(
-				a_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
-			std::memcpy(mapped.pData, a_data, a_size);
-			a_context->Unmap(a_buffer, 0);
 		}
 
 		struct AutoRegister
@@ -223,19 +211,7 @@ namespace cs::features
 		const toml::table& a_config,
 		std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(dynamic_cubemaps::kSchema, a_config, candidate, a_error)) {
-			return false;
-		}
-		_settings = candidate;
-		_bootSettings = candidate;
-		_liveSettings = settings::BindLiveSettings(dynamic_cubemaps::kSchema, _settings, [this] { PublishSettings(); });
-		return true;
-	}
-
-	std::vector<std::string_view> DynamicCubemaps::GetRestartSettings() const
-	{
-		return settings::RestartRequired(dynamic_cubemaps::kSchema, _bootSettings, _settings);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void DynamicCubemaps::OnEnabledChanged(bool a_enabled) noexcept
@@ -248,11 +224,6 @@ namespace cs::features
 	{
 		_enabledSSR.store(_settings.enabledSSR, std::memory_order_release);
 		_engineCubeLod.store(_settings.engineCubeLod, std::memory_order_release);
-	}
-
-	bool DynamicCubemaps::SaveSettings()
-	{
-		return settings::SaveDelta(dynamic_cubemaps::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void DynamicCubemaps::Load()
@@ -269,7 +240,7 @@ namespace cs::features
 		}
 
 		// FO4 vanilla never renders the reflections cube; the host does.
-		cs::engine::SetSkyReflectionCubeSize(static_cast<std::uint32_t>(_bootSettings.engineCubeSize));
+		cs::engine::SetSkyReflectionCubeSize(static_cast<std::uint32_t>(_settings.engineCubeSize));
 		// Upstream's SSR targets are R16G16B16A16_FLOAT; FO4's are 8-bit sRGB.
 		using RE::BSGraphics::RenderTargetID;
 		for (const auto target : { RenderTargetID::kSSR, RenderTargetID::kSSRBlurred0, RenderTargetID::kSSRBlurred1 }) {
@@ -298,10 +269,10 @@ namespace cs::features
 		L->info(
 			"Registered post-sky capture, forward BSWater consumption at t{}-t{}, "
 			"composite consumption at t{}-t{}, and deferred lighting contributions.",
-			kDynamicCubemapPSSlot,
-			kDynamicCubemapPSSlot + kDynamicCubemapPSSlotCount - 1,
-			kCompositionPSSlot,
-			kCompositionPSSlot + kCompositionPSSlotCount - 1);
+			cs::render::kDynamicCubemapsSlot.first,
+			cs::render::kDynamicCubemapsSlot.first + cs::render::kDynamicCubemapsSlot.count - 1,
+			cs::render::kDynamicCubemapsCompositionSlot.first,
+			cs::render::kDynamicCubemapsCompositionSlot.first + cs::render::kDynamicCubemapsCompositionSlot.count - 1);
 	}
 
 	void DynamicCubemaps::Prepass()
@@ -315,7 +286,7 @@ namespace cs::features
 		if (!a_context) {
 			return;
 		}
-		std::array<ID3D11ShaderResourceView*, kCompositionPSSlotCount> resources{
+		std::array<ID3D11ShaderResourceView*, cs::render::kDynamicCubemapsCompositionSlot.count> resources{
 			GetEnvironmentSRV(), GetReflectionsSRV(), GetSharpReflectionsSRV()
 		};
 		if (Operational() &&
@@ -324,7 +295,7 @@ namespace cs::features
 			resources[1] = cs::engine::GetSkyReflectionCubeSRV();
 		}
 		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel,
-			kCompositionPSSlot, kCompositionPSSlotCount, resources.data());
+			cs::render::kDynamicCubemapsCompositionSlot.first, cs::render::kDynamicCubemapsCompositionSlot.count, resources.data());
 	}
 
 	// Upstream VanillaBinding: SSLR sky hits sample the engine cube.
@@ -715,7 +686,7 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		std::array<ID3D11ShaderResourceView*, kDynamicCubemapPSSlotCount> views{};
+		std::array<ID3D11ShaderResourceView*, cs::render::kDynamicCubemapsSlot.count> views{};
 		if (_injectionsOperational.load(std::memory_order_acquire) &&
 			_resourcesReady.load(std::memory_order_acquire)) {
 			const bool active =
@@ -735,7 +706,7 @@ namespace cs::features
 			}
 		}
 		cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel,
-			kDynamicCubemapPSSlot,
+			cs::render::kDynamicCubemapsSlot.first,
 			static_cast<UINT>(views.size()),
 			views.data());
 		// Engine PS constant buffers stop at b2 and b12/b13, so forward consumers keep the substrate.
@@ -771,6 +742,14 @@ namespace cs::features
 		_resetCapture = { true, true };
 	}
 
+	void DynamicCubemaps::ResetReflections()
+	{
+		_cubemapValid[1].store(false, std::memory_order_release);
+		_resetCapture[1] = true;
+		// An in-flight capture predates this reset and must not publish as valid.
+		_reflectionsResetCaptured = false;
+	}
+
 	void DynamicCubemaps::ResolveReflectionMode()
 	{
 		const bool engineCube = cs::engine::GetSkyReflectionCubeSRV() != nullptr;
@@ -780,11 +759,10 @@ namespace cs::features
 		const bool fake = active && (!engineCube || cs::engine::IsSkyHidden());
 		_engineReflectionCube.store(engineCube, std::memory_order_relaxed);
 		const bool previousActive = _activeReflections.exchange(active, std::memory_order_acq_rel);
-		if (active && !previousActive) {
-			_cubemapValid[1].store(false, std::memory_order_release);
-			_resetCapture[1] = true;
-		}
-		_fakeReflections.store(fake, std::memory_order_release);
+		// History from the other mode must not blend into the new one.
+		const bool modeChanged = _fakeReflections.exchange(fake, std::memory_order_acq_rel) != fake;
+		if (active && (!previousActive || modeChanged))
+			ResetReflections();
 	}
 
 	void DynamicCubemaps::UpdateCubemap()
@@ -807,7 +785,7 @@ namespace cs::features
 		_lastCallbackFrame = state->frameCount;
 		_lastCallbackFrameValid = true;
 
-		if (_queuedReset.exchange(false, std::memory_order_acq_rel) || cs::render::IsHistoryResetFrame()) {
+		if (_queuedReset.exchange(false, std::memory_order_acq_rel) || cs::render::GetFrameState().HasReset(cs::render::kWorldAnchoredResets)) {
 			ResetCapture();
 		}
 		// Reset capture when game time jumps (wait menu, timescale changes, console commands).
@@ -825,7 +803,7 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			RE::BSGraphics::RenderTargetID::kMain);
-		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
+		const auto frameBuffer = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		const bool cameraReady = frameBuffer.has_value();
 		_cameraReadyLastFrame.store(cameraReady, std::memory_order_relaxed);
 		if (!context || !depthSRV || !colorSRV || !cameraReady) {
@@ -897,19 +875,15 @@ namespace cs::features
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* colorSRV = cs::engine::GetRenderTargetSRV(
 			RE::BSGraphics::RenderTargetID::kMain);
-		const auto frameBuffer = cs::engine::GetWorldCameraRecord();
+		const auto frameBuffer = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
+		if (!context || !depthSRV || !colorSRV || !frameBuffer)
+			return;
 		DirectX::XMFLOAT4X4 projection{};
 		DirectX::XMFLOAT4X4 inverseProjection{};
 		DirectX::XMFLOAT4 ndcToViewMul{};
 		DirectX::XMFLOAT4 ndcToViewAdd{};
-		if (!context || !depthSRV || !colorSRV || !frameBuffer ||
-			!cs::engine::TryGetWorldSceneProjection(
-				projection,
-				inverseProjection,
-				ndcToViewMul,
-				ndcToViewAdd)) {
-			return;
-		}
+		cs::engine::GetWorldSceneProjection(
+			*frameBuffer, projection, inverseProjection, ndcToViewMul, ndcToViewAdd);
 
 		const std::uint32_t index = a_reflections ? 1 : 0;
 		const double now = std::chrono::duration<double>(
@@ -927,11 +901,13 @@ namespace cs::features
 		// FO4 prepared positions are eye-relative, not relative to the engine's position-adjust anchor.
 		constants.CaptureCameraOrigin = { cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, 0.0f };
 		_previousCaptureTime[index] = now;
+		if (a_reflections && _resetCapture[index])
+			_reflectionsResetCaptured = true;
 		_resetCapture[index] = false;
 		_cameraPreviousPosAdjust[index] = cameraOrigin;
-		UpdateBuffer(context, _updateBuffer.get(), &constants, sizeof(constants));
+		DX::ThrowIfFailed(engine::WriteDiscard(context, _updateBuffer.get(), constants));
 		const PrepareCaptureCB preparation{ inverseProjection };
-		UpdateBuffer(context, _prepareBuffer.get(), &preparation, sizeof(preparation));
+		DX::ThrowIfFailed(engine::WriteDiscard(context, _prepareBuffer.get(), preparation));
 
 		auto& stream = Stream(a_reflections);
 		const bool tiledLighting = RE::DrawWorld::QTiledLighting();
@@ -1073,11 +1049,7 @@ namespace cs::features
 			SpecularMapFilterSettingsCB constants{};
 			constants.roughness =
 				static_cast<float>(level) * roughnessStep;
-			UpdateBuffer(
-				context,
-				_filterBuffer.get(),
-				&constants,
-				sizeof(constants));
+			DX::ThrowIfFailed(engine::WriteDiscard(context, _filterBuffer.get(), constants));
 			ID3D11UnorderedAccessView* uav =
 				_filtered.mipUavs[level].get();
 			context->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
@@ -1118,11 +1090,7 @@ namespace cs::features
 					.textureSizeInBlocksY = blocks,
 					.mipLevel = level
 				};
-				UpdateBuffer(
-					context,
-					_bc6hBuffer.get(),
-					&constants,
-					sizeof(constants));
+				DX::ThrowIfFailed(engine::WriteDiscard(context, _bc6hBuffer.get(), constants));
 				ID3D11UnorderedAccessView* output =
 					_bc6hScratchUAVs[level].get();
 				context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
@@ -1159,8 +1127,12 @@ namespace cs::features
 		context->CopyResource(
 			(a_reflections ? _reflectionsSharp : _environmentSharp).texture.get(),
 			_inferred.texture.get());
-		_cubemapValid[a_reflections ? 1 : 0].store(
-			true, std::memory_order_release);
+		if (!a_reflections) {
+			_cubemapValid[0].store(true, std::memory_order_release);
+		} else if (std::exchange(_reflectionsResetCaptured, false)) {
+			_cubemapValid[1].store(true, std::memory_order_release);
+			_reflectionsGeneration.fetch_add(1, std::memory_order_release);
+		}
 	}
 
 	void DynamicCubemaps::RenderCubemapPreview()
@@ -1289,12 +1261,11 @@ namespace cs::features
 	void DynamicCubemaps::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(dynamic_cubemaps::kSchema, _settings);
-		bool changed = false;
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "dynamic-cubemaps-ssr", "Screen Space Reflections" }; section)
-			changed |= field(&Settings::enabledSSR, { .label = "Enable Screen Space Reflections" });
+			field(&Settings::enabledSSR, { .label = "Enable Screen Space Reflections" });
 		if (const ui::Section section{ "dynamic-cubemaps-engine-cube", "Engine Reflection Cube" }; section) {
-			changed |= field(&Settings::engineCubeLod, { .label = "Engine Cube LOD" });
+			field(&Settings::engineCubeLod, { .label = "Engine Cube LOD" });
 			using dynamic_cubemaps::EngineCubeSize;
 			static constexpr std::array kSizes{
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k256, "256", "256", true },
@@ -1302,16 +1273,8 @@ namespace cs::features
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k1024, "1024", "1024", true },
 				dmui::ChoiceOption<EngineCubeSize>{ EngineCubeSize::k2048, "2048", "2048", true }
 			};
-			changed |= field.Choice(&Settings::engineCubeSize, kSizes, { .label = "Engine Cube Size" });
+			field.Choice(&Settings::engineCubeSize, kSizes, { .label = "Engine Cube Size" });
 		}
-		if (changed)
-			PublishSettings();
 	}
 
-	void DynamicCubemaps::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		PublishSettings();
-		SaveSettings();
-	}
 }

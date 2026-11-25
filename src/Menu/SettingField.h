@@ -41,7 +41,7 @@ namespace cs::ui
 		// Unique on the page; also the widget id behind the hidden label.
 		std::string_view id;
 		FieldPresentation look;
-		// Names the setting in GetRestartSettings(); the label when empty.
+		// Names the setting in RestartPending(); the label when empty.
 		std::string_view restart;
 	};
 
@@ -49,7 +49,7 @@ namespace cs::ui
 	class FieldPage
 	{
 	public:
-		// a_restart lists the settings (GetRestartSettings) that need a restart.
+		// a_restart lists the settings (RestartPending) that need a restart.
 		explicit FieldPage(std::span<const std::string_view> a_restart) noexcept :
 			_restart(a_restart), _previous(Slot())
 		{

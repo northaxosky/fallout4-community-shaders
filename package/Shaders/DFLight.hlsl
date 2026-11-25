@@ -13,6 +13,7 @@
 #endif
 #include "FO4/AmbientConsumer.hlsli"
 #include "FO4/SoftSunShadow.hlsli"
+#include "FO4/SphereMapNormal.hlsli"
 
 #include "FO4/LightLimitFixRaster.hlsli"
 #if defined(VANILLA_PBR)
@@ -440,7 +441,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 float3 DecodeOctahedralNormal(float2 enc01)
 {
-	float2 enc = enc01 * 4.0 - 2.0;
+	float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 	float encLenSq = dot(enc, enc);
 	float z = -(1.0 - encLenSq * 0.5);
 	float recon = 1.0 - encLenSq * 0.25;
@@ -803,7 +804,7 @@ SamplerState g_sLightCookie : register(s7);
 
 float3 DecodeOctahedralNormal(float2 enc01)
 {
-	float2 enc = enc01 * 4.0 - 2.0;
+	float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 	float encLenSq = dot(enc, enc);
 	float z = -(1.0 - encLenSq * 0.5);
 	float recon = 1.0 - encLenSq * 0.25;
@@ -1156,7 +1157,7 @@ SamplerState g_sMainDepth : register(s3);
 
 float3 DecodeOctahedralNormal(float2 enc01)
 {
-	float2 enc = enc01 * 4.0 - 2.0;
+	float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 	float encLenSq = dot(enc, enc);
 	float recon = 1.0 - encLenSq * 0.25;
 	float z = 1.0 - encLenSq * 0.5;
@@ -2170,7 +2171,7 @@ float2 goboUV = float2(omniUV.x,
 
 	float3 DecodeOctahedralNormal(float2 enc01)
 	{
-		float2 enc = enc01 * 4.0 - 2.0;
+		float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 		float encLenSq = dot(enc, enc);
 		float recon = 1.0 - encLenSq * 0.25;
 		float z = 1.0 - encLenSq * 0.5;
@@ -2834,7 +2835,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 	float3 DecodeOctahedralNormal(float2 enc01)
 	{
-		float2 enc = enc01 * 4.0 - 2.0;
+		float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 		float encLenSq = dot(enc, enc);
 		float recon = 1.0 - encLenSq * 0.25;
 		float z = 1.0 - encLenSq * 0.5;
@@ -3781,7 +3782,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 		float3 DecodeOctahedralNormal(float2 enc01)
 		{
-			float2 enc = enc01 * 4.0 - 2.0;
+			float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 			float encLenSq = dot(enc, enc);
 			float recon = 1.0 - encLenSq * 0.25;
 			float z = 1.0 - encLenSq * 0.5;
@@ -4667,7 +4668,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 
 		float3 DecodeOctahedralNormal(float2 enc01)
 		{
-			float2 enc = enc01 * 4.0 - 2.0;
+			float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 			float encLenSq = dot(enc, enc);
 			float recon = 1.0 - encLenSq * 0.25;
 			float z = 1.0 - encLenSq * 0.5;
@@ -5174,7 +5175,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 			float3 posView = posViewH.xyz / posViewH.www;
 
 			float materialCode = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv4.xy).w;
-			float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv4.xy).xy * 4.0 - 2.0;
+			float2 normalEnc = FO4GBuffer::UnpackSphereMapXY(g_tGbufferNormal.Sample(g_sGbufferNormal, uv4.xy).xy);
 
 			float encodedZ = 1.0 - dot(normalEnc, normalEnc) * 0.5;
 			bool isMaterial1 = abs(materialCode * 255.0 - 1.0) < 0.25;
@@ -5548,7 +5549,7 @@ static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
 #	ifdef AMBIENT
 
 			float3 material = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv4.xy).xyw;
-			float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv4.xy).xy * 4.0 - 2.0;
+			float2 normalEnc = FO4GBuffer::UnpackSphereMapXY(g_tGbufferNormal.Sample(g_sGbufferNormal, uv4.xy).xy);
 
 			float encSq = dot(normalEnc, normalEnc);
 			float3 normal;
@@ -5798,7 +5799,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 
 		float3 DecodeOctahedralNormal(float2 enc01)
 		{
-			float2 enc = enc01 * 4.0 - 2.0;
+			float2 enc = FO4GBuffer::UnpackSphereMapXY(enc01);
 			float encLenSq = dot(enc, enc);
 #	if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) || defined(FO4_UNSHADOWED_AMBIENT_ROUGHNESS)
 			float recon = 1.0 - encLenSq * 0.25;
@@ -6302,6 +6303,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float directContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : 1.0;
 			float transmissionContactShadow = NdotL_raw >= 0.0 ? contactVisibility.x : contactVisibility.y;
 			finalDiffuse *= directContactShadow;
+			FO4_SOFT_LOBE_SCALE_UNLOADED(softDiffuse, directContactShadow);
 #			ifdef SPECULAR
 			brdfSpecular *= directContactShadow;
 #			endif
@@ -6498,7 +6500,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 material =
 				g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv).xyw;
 			float2 encodedNormal =
-				g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy * 4.0 - 2.0;
+				FO4GBuffer::UnpackSphereMapXY(g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy);
 			float encodedLengthSquared = dot(encodedNormal, encodedNormal);
 			float3 normalView = float3(
 				encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
@@ -6626,7 +6628,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 positionView = positionViewH.xyz / positionViewH.w;
 
 			float2 encodedNormal =
-				g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy * 4.0 - 2.0;
+				FO4GBuffer::UnpackSphereMapXY(g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy);
 			float encodedLengthSquared = dot(encodedNormal, encodedNormal);
 			float3 normalView = float3(
 				encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
@@ -6756,7 +6758,7 @@ static const float FO4_SPECULAR_SCALE = 3.1415927;
 			float3 positionView = positionViewH.xyz / positionViewH.w;
 
 			float2 encodedNormal =
-				g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy * 4.0 - 2.0;
+				FO4GBuffer::UnpackSphereMapXY(g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy);
 			float encodedLengthSquared = dot(encodedNormal, encodedNormal);
 			float3 normalView = float3(
 				encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),

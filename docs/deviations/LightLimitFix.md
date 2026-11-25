@@ -21,7 +21,7 @@
 | N/A | Surface clustered shading | | Opaque lighting is native tiled |
 | N/A | Light Limit and Strict Lights Count visualizations | | They visualize surface clustered shading |
 | N/A | Shadow Mask visualization | | No FO4 shadow mask |
-| Forced | CPU-decoded light color, `BRDFScale` 1/pi after `PointLight` | Applied to inverse-square radiance; unflagged color decodes with power 2.2 in deferred and forward consumers | Native local BRDF has no 1/pi and light color is `pow(diffuse, 2.2)` |
+| Forced | CPU-decoded light color, `BRDFScale` 1/pi after `PointLight` | Applied to inverse-square radiance; unflagged color decodes with signed power 2.2 in deferred and forward consumers; negative lights are kept and subtract | Native local BRDF has no 1/pi and light color is `pow(diffuse, 2.2)` |
 | Forced | 256-entry cluster list | Native 127-index tile appends are guarded so enlarged radii cannot spill into adjacent tiles | Native tile list size |
 | Forced | `BSLight_GetLuminance` | Same attenuation on mean preconversion diffuse x dimmer x 4; render-only `currentFade` excluded | |
 | Divergence | Lights are inverse-square only when authored | `derive_unauthored_lights` (default off, restart) fits `inverse_square`, `size` and an intensity scale per instance to the native falloff and radius; native radius kept; a TOML entry is authoritative | Gives every light inverse-square falloff without authoring |

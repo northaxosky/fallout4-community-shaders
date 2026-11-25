@@ -198,14 +198,6 @@ namespace cs::telemetry
 			return result;
 		}
 
-		[[nodiscard]] std::string FormatFloat4(const DirectX::XMFLOAT4& a_value)
-		{
-			std::string result = FormatVector3(a_value.x, a_value.y, a_value.z);
-			result.push_back(' ');
-			AppendDouble(result, a_value.w);
-			return result;
-		}
-
 		[[nodiscard]] toml::array TomlVector3(
 			float a_x,
 			float a_y,
@@ -233,7 +225,7 @@ namespace cs::telemetry
 					TomlVector3(position.x, position.y, position.z));
 			}
 
-			const auto camera = cs::engine::GetWorldCameraRecord();
+			const auto camera = cs::engine::GetCapturedWorldCameraRecord();
 			a_root.insert_or_assign("camera_snapshot_valid", camera.has_value());
 			a_root.insert_or_assign(
 				"camera_orientation_source",
@@ -267,7 +259,7 @@ namespace cs::telemetry
 
 		void CollectFrameBuffer(Sink& a_sink)
 		{
-			const auto camera = cs::engine::GetWorldCameraRecord();
+			const auto camera = cs::engine::GetCapturedWorldCameraRecord();
 			a_sink.Field("camera_record_valid", camera.has_value());
 			if (!camera) {
 				return;

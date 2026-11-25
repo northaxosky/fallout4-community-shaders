@@ -75,7 +75,7 @@ Report problems through [Issues](https://github.com/northaxosky/fallout4-communi
 | **Motion Vector Fixes** | Motion-data corrections for temporal rendering. |
 | **Upscaling** | TAA, FSR 3/4, and DLSS. |
 | **Frame Generation** | FSR 3/4, DLSS, and supported Multi Frame Generation modes. |
-| **HDR Display** | HDR10 output with configurable paper white and peak brightness; needs borderless windowed mode. |
+| **HDR Display** | HDR10 output with configurable paper white and peak brightness; needs borderless windowed mode and Windows HDR on at launch. |
 | **Performance Overlay** | FPS, frame-time, and latency graphs, plus per-feature GPU timings. |
 | **CS Editor** | Weather picker, weather lock, time controls, and per-weather feature overrides. |
 | **RenderDoc** | In-game frame capture for debugging. |
@@ -128,7 +128,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 - FSR 4 requires compatible AMD Radeon hardware.
 - Upscaling (except TAA) and frame generation require borderless windowed mode.
 - ReShade (standard `dxgi.dll` install) works with Upscaling and Frame Generation: effects apply before the UI, appear in generated frames, and get non-reversed depth (`RESHADE_DEPTH_INPUT_IS_REVERSED=0`).
-- Supported upscaling and frame-generation methods can change while playing; switching may briefly pause rendering.
+- Upscaling methods can change while playing, and switching may briefly pause rendering; frame generation on/off and its method need a restart.
 - Terrain Shadows ships heightmaps for the base-game and DLC worldspaces; other worldspaces need an xLODGen height map export.
 - RenderDoc capture requires an installed RenderDoc, found automatically; `dll_path` overrides it.
 - Remote Control registers its tools only when the DevBench plugin is installed; it runs no server of its own.

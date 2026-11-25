@@ -109,11 +109,9 @@ namespace VanillaPBR
 		float f0 = UseEyeSpecialHandling(materialClass) ? 0.027 :
 		           masked                               ? saturate(FO4SharedData::VanillaPBRBaseF0Multiplier) :
 		                                                  F0(intensity);
-		float2 envBRDF = BRDF::EnvBRDF(roughness, NdotV);
-		float compensation = 1.0 + f0 * (rcp(max(envBRDF.x + envBRDF.y, 1e-4)) - 1.0);
 		float3 specular = BRDF::D_GGX(roughness, NdotH) *
 		                  BRDF::Vis_SmithJointApprox(roughness, NdotV, NdotL) *
-		                  BRDF::F_Schlick(f0.xxx, 1.0.xxx, VdotH) * compensation;
+		                  BRDF::F_Schlick(f0.xxx, 1.0.xxx, VdotH) * BRDF::GGXEnergyCompensation(roughness, NdotV, f0.xxx);
 		if (masked)
 			specular *= intensity;
 		// FO4: native specular accumulation is not divided by three.

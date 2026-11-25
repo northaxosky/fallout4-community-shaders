@@ -1,4 +1,5 @@
 #include "RE/D/DrawWorld.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
 #include "Render/SharedData.h"
 #include "Render/TemporalRendererInternals.h"
@@ -61,6 +62,15 @@ namespace cs::render
 				cs::engine::HookPriority::EnclosingPre)) {
 			RejectInitialization("The Render_UI hooks could not be registered.");
 			return;
+		}
+
+		// Without the boundary, FSR3 reactive stays zero rather than rejecting init.
+		if (!cs::engine::RegisterPostForwardSky([] {
+				GuardedThunkBody("Upscaling pre-alpha capture", [] {
+					GetSingleton()->CapturePreAlphaScene();
+				});
+			})) {
+			L->warn("Post-sky hook unavailable; FSR 3 reactive mask stays zero.");
 		}
 
 		for (const auto& hook : callHooks) {
@@ -160,7 +170,7 @@ namespace cs::render
 		if (upscaling->_nativeSuperResolutionFallbackPending.exchange(
 				false, std::memory_order_acq_rel)) {
 			render::TemporalPipeline::Get().FailSuperResolutionToNative(
-				"External super resolution failed after render-state commitment; native TAA is active until restart.");
+				"External super resolution failed after render-state commitment; native TAA is active until a settings change or resize.");
 			upscaling->RestoreNativeFrameState();
 		}
 		upscaling->FinalizeQuarantineAtFrameBoundary();
@@ -214,7 +224,7 @@ namespace cs::render
 	void TemporalRenderer::BeginRenderUI()
 	{
 		GuardedThunkBody("Upscaling scene history reset", [] {
-			if (IsHistoryResetFrame()) {
+			if (GetFrameState().HasReset()) {
 				TemporalPipeline::Get().RequestSuperResolutionReset();
 				TemporalPipeline::Get().RequestFrameGenerationReset();
 			}
@@ -244,7 +254,7 @@ namespace cs::render
 				ScheduleNativeSuperResolutionFallback();
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
-					"The full-effects Render_UI path skipped the pre-tonemap seam; temporal rendering is disabled until restart.");
+					"The full-effects Render_UI path skipped the pre-tonemap seam; native TAA is active until a settings change or resize.");
 			} else if (!fullEffectsPath && resolveSeen) {
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
@@ -261,11 +271,7 @@ namespace cs::render
 			if (!IsDrivingFrameState()) {
 				return;
 			}
-			if (auto* state = cs::engine::GetGraphicsState()) {
-				state->offsetX = 0.0f;
-				state->offsetY = 0.0f;
-			}
-			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
+			cs::engine::DropRenderScale();
 		});
 
 		_imagespaceScope = false;
@@ -372,17 +378,12 @@ namespace cs::render
 	{
 		auto* upscaling = GetSingleton();
 
-		bool overrideActive = false;
-		if (upscaling->IsDrivingFrameState() && upscaling->dynamicResolution.HasProxies()) {
-			if (auto* renderTargetManager = cs::engine::GetRenderTargetManager()) {
-				overrideActive = renderTargetManager->GetDynamicWidthRatio() != 1.0f ||
-				                 renderTargetManager->GetDynamicHeightRatio() != 1.0f;
-			}
-		}
+		const bool overrideActive =
+			upscaling->IsDrivingFrameState() && upscaling->dynamicResolution.ProxyPassAvailable();
 
 		if (overrideActive) {
 			GuardedThunkBody("Upscaling lens-flare depth override", [&] {
-				upscaling->dynamicResolution.OverrideDepth(true);
+				upscaling->dynamicResolution.OverrideDepth(cs::features::DynamicResolution::DepthCopy::kRefresh);
 			});
 		}
 
@@ -432,6 +433,10 @@ namespace cs::render
 		} catch (...) {
 			upscaling->QuarantineAfterException("Upscaling mip bias scope (forward)");
 		}
+		// After Forward returns the alpha phase is in kMain; godrays have not run.
+		GuardedThunkBody("Upscaling reactive mask", [&] {
+			upscaling->GenerateReactiveMask();
+		});
 	}
 
 	void TemporalRenderer::BSImageSpace_Init_FXAA::thunk(RE::ImageSpaceManager* a_this)

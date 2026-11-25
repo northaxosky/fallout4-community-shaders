@@ -7,7 +7,10 @@
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
 #include "Render/ForwardDraw.h"
+#include "Render/FrameState.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
+#include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalRenderer.h"
@@ -34,8 +37,6 @@ namespace cs::render
 	namespace
 	{
 		auto* L = cs::log::Get("cs.render.shareddata");
-		std::atomic_bool g_historyResetRequested{ false };
-		std::atomic_uint64_t g_historyResetFrame{ UINT64_MAX };
 		struct SubstrateData
 		{
 			FrameDataCB frame{};
@@ -55,8 +56,6 @@ namespace cs::render
 			SharedDataCB shared{};
 			bool sharedWritten = false;
 			float mipBias = 0.0f;
-			DirectX::XMFLOAT2 previousRatio{ 1.0f, 1.0f };
-			bool hasResolutionHistory = false;
 			// Render thread only.
 			float timer = 0.0f;
 			bool updateInstalled = false;
@@ -203,26 +202,6 @@ namespace cs::render
 
 		bool WriteSubstrate(ID3D11DeviceContext* a_context, const SubstrateData& a_data, std::size_t a_firstBuffer = 0) noexcept;
 
-		bool WriteConstantBuffer(
-			ID3D11DeviceContext* a_context,
-			ID3D11Buffer* a_buffer,
-			const void* a_data,
-			std::size_t a_size) noexcept
-		{
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (FAILED(a_context->Map(
-					a_buffer,
-					0,
-					D3D11_MAP_WRITE_DISCARD,
-					0,
-					&mapped))) {
-				return false;
-			}
-			std::memcpy(mapped.pData, a_data, a_size);
-			a_context->Unmap(a_buffer, 0);
-			return true;
-		}
-
 		ID3D11DeviceContext* GetImmediateContext() noexcept
 		{
 			auto* rendererData = RE::BSGraphics::GetRendererData();
@@ -267,28 +246,18 @@ namespace cs::render
 				const auto nextTimer = state.timer + delta;
 				data.shared = BuildSharedData(nextTimer, *camera, data.fo4);
 				FeatureManager::Get().WriteSharedFrameDataAll(data.shared);
-				const auto* manager = engine::GetRenderTargetManager();
+				const auto resolution = GetRenderResolution();
 				// OG deferred, water and tiled-lighting shaders carry no dynamic-resolution constants.
 				const bool fullScale = REX::FModule::IsRuntimeOG();
-				const DirectX::XMFLOAT2 ratio{
-					manager && !fullScale ? manager->GetDynamicWidthRatio() : 1.0f,
-					manager && !fullScale ? manager->GetDynamicHeightRatio() : 1.0f
+				const DirectX::XMFLOAT2 ratio{ fullScale ? 1.0f : resolution.widthRatio, fullScale ? 1.0f : resolution.heightRatio };
+				const DirectX::XMFLOAT2 previousRatio{
+					fullScale ? 1.0f : resolution.previousWidthRatio, fullScale ? 1.0f : resolution.previousHeightRatio
 				};
-				if (!(ratio.x > 0.0f) || !(ratio.y > 0.0f))
-					return;
-				const auto previousRatio = state.hasResolutionHistory ? state.previousRatio : ratio;
-				const auto* clampTarget = engine::ResolveRenderTarget(RE::BSGraphics::RenderTargetID::kMain);
-				if (!clampTarget || !clampTarget->texture)
-					return;
-				D3D11_TEXTURE2D_DESC clampDesc{};
-				reinterpret_cast<ID3D11Texture2D*>(clampTarget->texture)->GetDesc(&clampDesc);
-				const float size = static_cast<float>(clampDesc.Width);
-				if (!(size > 0.0f))
-					return;
-				const float clamp = REX::FModule::IsRuntimeOG() ? (std::trunc(size * ratio.x) - 1.0f) / size : ratio.x - 0.5f / size;
+				const float size = static_cast<float>(resolution.output.width);
+				const float clamp = fullScale ? (size - 1.0f) / size : ratio.x - 0.5f / size;
 				data.frame = PackFrameData(*camera, ratio, previousRatio, ratio.x - clamp);
 				data.fo4.DeltaTime = delta;
-				data.shared.ResetHistory = IsHistoryResetFrame() ? 1u : 0u;
+				data.shared.ResetHistory = GetFrameState().HasReset() ? 1u : 0u;
 				if (!WriteSubstrate(context, data)) {
 					CS_LOG_EVERY_MS(
 						L,
@@ -298,8 +267,6 @@ namespace cs::render
 					return;
 				}
 				state.timer = nextTimer;
-				state.previousRatio = ratio;
-				state.hasResolutionHistory = true;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
 				state.debugFrame = UINT32_MAX;
 			} catch (const std::exception& e) {
@@ -323,7 +290,7 @@ namespace cs::render
 			const void* sources[]{ &a_data.frame, &a_data.shared, &a_data.feature, &a_data.fo4 };
 			auto& state = GetSubstrateState();
 			for (std::size_t index = a_firstBuffer; index < kSubstrateBufferCount; ++index)
-				if (!WriteConstantBuffer(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index]))
+				if (FAILED(engine::WriteDiscard(a_context, state.buffers[index].get(), sources[index], kBufferSizes[index])))
 					return false;
 			state.fo4 = a_data.fo4;
 			if (a_firstBuffer == 0) {
@@ -363,7 +330,7 @@ namespace cs::render
 			fo4.DebugParams = { debug.params[0], debug.params[1], debug.params[2], debug.params[3] };
 			// Producers can change debug resources between lighting and composite, not between draws.
 			if (std::memcmp(&fo4, &state.fo4, sizeof(fo4)) != 0) {
-				if (!WriteConstantBuffer(a_context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), &fo4, sizeof(fo4))) {
+				if (FAILED(engine::WriteDiscard(a_context, state.buffers[kFO4SharedDataSlot - kFrameDataSlot].get(), fo4))) {
 					CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared debug constant-buffer map failed.");
 					return;
 				}
@@ -444,7 +411,7 @@ namespace cs::render
 		if (!state.sharedWritten || !context)
 			return;
 		state.shared.MipBias = a_bias;
-		if (!WriteConstantBuffer(context, state.buffers[kSharedDataSlot - kFrameDataSlot].get(), &state.shared, sizeof(state.shared)))
+		if (FAILED(engine::WriteDiscard(context, state.buffers[kSharedDataSlot - kFrameDataSlot].get(), state.shared)))
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Shared mip bias constant-buffer map failed.");
 	}
 
@@ -456,25 +423,6 @@ namespace cs::render
 	ID3D11SamplerState* GetPointClampSampler() noexcept
 	{
 		return GetSubstrateState().pointClamp.get();
-	}
-
-	void RequestHistoryReset() noexcept
-	{
-		g_historyResetRequested.store(true, std::memory_order_release);
-	}
-
-	void LatchHistoryResetFrame() noexcept
-	{
-		const auto* graphics = engine::GetGraphicsState();
-		if (graphics && !engine::IsMainOrLoadingMenuOpen() &&
-			g_historyResetRequested.exchange(false, std::memory_order_acq_rel))
-			g_historyResetFrame.store(graphics->frameCount, std::memory_order_release);
-	}
-
-	bool IsHistoryResetFrame() noexcept
-	{
-		const auto* graphics = engine::GetGraphicsState();
-		return graphics && g_historyResetFrame.load(std::memory_order_acquire) == graphics->frameCount;
 	}
 
 	bool IsSharedDataReady() noexcept
@@ -601,12 +549,5 @@ namespace cs::render
 		case engine::ShaderStage::kCount:
 			break;
 		}
-	}
-
-	bool IsSharedDataCurrent() noexcept
-	{
-		const auto* graphicsState = engine::GetGraphicsState();
-		return IsSharedDataReady() && graphicsState &&
-		       GetSubstrateState().lastFrame.load(std::memory_order_relaxed) == graphicsState->frameCount;
 	}
 }

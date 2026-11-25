@@ -1,5 +1,6 @@
 #include "TerrainBlending.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include "Log.h"
 #include "Render/Annotation.h"
@@ -34,9 +35,6 @@ namespace cs::features
 
 		using namespace cs::engine::prepass_technique;
 
-		// Free in the landscape pixel stage; slots from 16 up are not engine-owned.
-		constexpr UINT kObjectDepthSlot = 55;
-		constexpr UINT kReplayPassSlot = 8;
 		// Upstream offsets terrain whose bound is within this many units of the eye.
 		constexpr float kOffsetRange = 1024.0f;
 
@@ -222,7 +220,7 @@ namespace cs::features
 		if (!property || !property->flags.all(ShaderFlag::kMultiTextureLandscape) ||
 			property->flags.any(ShaderFlag::kLODLandscape) || !IsOperational())
 			return nullptr;
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		if (!camera)
 			return nullptr;
 		const RE::NiPoint3 eye{ camera->PosAdjust.x, camera->PosAdjust.y, camera->PosAdjust.z };
@@ -303,11 +301,11 @@ namespace cs::features
 		const REX::TScopeExit clear{ [context]() noexcept {
 			ID3D11ShaderResourceView* noView = nullptr;
 			ID3D11Buffer* noBuffer = nullptr;
-			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, kObjectDepthSlot, 1, &noView);
-			cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, kReplayPassSlot, 1, &noBuffer);
+			cs::engine::BindFrameShaderResources(context, cs::engine::ShaderStage::kPixel, cs::render::kTerrainBlendingObjectDepthSlot, 1, &noView);
+			cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, cs::render::kTerrainBlendingReplaySlot, 1, &noBuffer);
 		} };
 		{
-			cs::render::annotation::ScopedEvent timing("TerrainBlending::OpaqueReplay");
+			cs::render::annotation::ScopedEvent timing("Render::LandscapePrepass");
 			DrawHeld(a_buckets, kOpaque);
 		}
 		{
@@ -325,8 +323,8 @@ namespace cs::features
 			return;
 		auto* depth = g_replay.depthSRV.get();
 		auto* constants = g_replay.passBuffer[pass].get();
-		cs::engine::BindInjectionShaderResources(a_context, kObjectDepthSlot, 1, &depth);
-		cs::engine::BindInjectionConstantBuffers(a_context, kReplayPassSlot, 1, &constants);
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kTerrainBlendingObjectDepthSlot, 1, &depth);
+		cs::engine::BindInjectionConstantBuffers(a_context, cs::render::kTerrainBlendingReplaySlot, 1, &constants);
 		// The draw scope restores the captured blend state after the draw.
 		cs::engine::CaptureShaderInjectionBlendState(a_context);
 		constexpr float blendFactor[4]{};
@@ -352,7 +350,7 @@ namespace cs::features
 			.Field("data_draws", _dataDraws.load(std::memory_order_relaxed))
 			.Field("depth_copies", _depthCopies.load(std::memory_order_relaxed))
 			.Field("z_passes_offset", _zPassesOffset.load(std::memory_order_relaxed));
-		cs::render::profiling::CollectPassTimings(a_sink, "TerrainBlending::");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	namespace

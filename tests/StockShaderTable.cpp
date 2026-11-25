@@ -11,17 +11,6 @@ namespace cs::shader_test
 {
 	namespace
 	{
-		void Require(bool a_condition, const std::string& a_message)
-		{
-			if (!a_condition)
-				throw std::runtime_error(a_message);
-		}
-
-		bool IsHex(std::string_view a_text, std::size_t a_length)
-		{
-			return a_text.size() == a_length && a_text.find_first_not_of("0123456789abcdef") == a_text.npos;
-		}
-
 		engine::GameRuntime ParseRuntime(std::string_view a_build)
 		{
 			for (const auto [prefix, runtime] : { std::pair{ "OG-", engine::GameRuntime::kOG }, std::pair{ "NG-", engine::GameRuntime::kNG },

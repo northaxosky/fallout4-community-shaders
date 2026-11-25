@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 northaxosky
 #include "FO4/ImageSpaceVS.hlsli"
+#include "FO4/SphereMapNormal.hlsli"
 
 #ifdef PSHADER
 cbuffer PerFrame : register(b12)
@@ -59,7 +60,7 @@ PS_OUTPUT main(PS_INPUT input)
 	viewPosition.xyz /= viewPosition.w;
 	float3 viewDirection = normalize(-viewPosition.xyz);
 
-	float2 encodedNormal = NormalTex.Sample(NormalSampler, input.TexCoord).xy * 4 - 2;
+	float2 encodedNormal = FO4GBuffer::UnpackSphereMapXY(NormalTex.Sample(NormalSampler, input.TexCoord).xy);
 	float f = dot(encodedNormal, encodedNormal);
 	float3 normal;
 	normal.xy = encodedNormal * sqrt(1 - f / 4);

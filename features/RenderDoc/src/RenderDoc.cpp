@@ -20,9 +20,9 @@
 #include "Menu/SettingsEdit.h"
 #include "REX/CONVERT.h"
 #include "Render/FrameBoundary.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/F4SEUserDirectory.h"
+#include "Utils/PathUtf8.h"
 #include "Utils/ShaderCache/ShaderRecipe.h"
 
 namespace cs::features
@@ -30,6 +30,9 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.renderdoc");
+
+		constexpr char kPerformanceWarning[] =
+			"RenderDoc is loaded and severely impacts performance. Disable startup loading and restart to unload it.";
 	}
 
 	using renderdoc_settings::kEngineD3D11Target;
@@ -43,11 +46,6 @@ namespace cs::features
 
 	namespace
 	{
-		int ClampCaptureFrameCount(int a_value)
-		{
-			return std::clamp(a_value, renderdoc::kMinCaptureFrameCount, renderdoc::kMaxCaptureFrameCount);
-		}
-
 		std::string RuntimeName()
 		{
 			switch (REX::FModule::GetRuntimeIndex()) {
@@ -82,19 +80,10 @@ namespace cs::features
 			}
 		}
 
-		std::string PathToUtf8(const std::filesystem::path& a_path)
-		{
-			std::string utf8;
-			if (REX::UTF16_TO_UTF8(a_path.native(), utf8)) {
-				return utf8;
-			}
-			return a_path.string();
-		}
-
 		// FO4: the host owns native external opening, including failure reporting.
 		void OpenCaptureLocation(const std::filesystem::path& a_path, DMUI_ExternalTargetKind a_kind)
 		{
-			const auto utf8 = PathToUtf8(std::filesystem::absolute(a_path));
+			const auto utf8 = util::PathToUtf8(std::filesystem::absolute(a_path));
 			auto& client = host::HostClient::Get().Client();
 			std::uint32_t nativeError{};
 			if (!client.OpenExternal({ .targetKind = a_kind, .target = utf8.c_str() }, &nativeError)) {
@@ -184,14 +173,7 @@ namespace cs::features
 
 	bool RenderDoc::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!renderdoc_settings::Parse(a_config, candidate, a_error)) {
-			return false;
-		}
-
-		_settings = candidate;
-		_bootSettings = candidate;
-		return true;
+		return _live.Configure(a_config, a_error);
 	}
 
 	void RenderDoc::Load()
@@ -209,11 +191,6 @@ namespace cs::features
 
 		if (!render::RegisterPostSwap(*this, [this] { OnFrameBoundary(); }))
 			L->error("RenderDoc frame boundary registration failed; captures unavailable");
-	}
-
-	bool RenderDoc::SaveSettings()
-	{
-		return settings::SaveDelta(renderdoc_settings::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	bool RenderDoc::TryLoadRuntime(std::string& a_error)
@@ -234,7 +211,7 @@ namespace cs::features
 			a_error = std::format("RenderDoc runtime path resolution failed for settings.dll_path '{}': {}", _settings.dllPath, error.what());
 			return false;
 		}
-		const auto pathUtf8 = PathToUtf8(path);
+		const auto pathUtf8 = util::PathToUtf8(path);
 		// Post-D3D loading can crash.
 		_module = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!_module) {
@@ -285,7 +262,7 @@ namespace cs::features
 			return false;
 		}
 		_resolvedCaptureFolder = std::move(*folder);
-		_resolvedCaptureFolderUtf8 = PathToUtf8(_resolvedCaptureFolder);
+		_resolvedCaptureFolderUtf8 = util::PathToUtf8(_resolvedCaptureFolder);
 		return true;
 	}
 
@@ -308,8 +285,8 @@ namespace cs::features
 		// FO4: runtime identity comes from CommonLibF4; the session stamp keeps names unique.
 		static const auto sessionStart = std::chrono::current_zone()->to_local(
 			std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
-		auto pathTemplate = PathToUtf8(_resolvedCaptureFolder /
-									   std::format("Fallout4_{}_{}_{:%Y%m%d_%H%M%S}", RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string("."), sessionStart));
+		auto pathTemplate = util::PathToUtf8(_resolvedCaptureFolder /
+											 std::format("Fallout4_{}_{}_{:%Y%m%d_%H%M%S}", RuntimeName(), REX::FModule::GetCurrentModule().GetFileVersion().string("."), sessionStart));
 		_api->SetCaptureFilePathTemplate(pathTemplate.c_str());
 	}
 
@@ -431,7 +408,7 @@ namespace cs::features
 			return std::unexpected(CaptureRefusal{
 				std::format("capture target unavailable: {}", CaptureTargetDisplayName(a_request.target)),
 				a_request.target == CaptureTarget::kTemporalD3D12 ?
-					"the temporal D3D12 proxy is active only with Upscaling or Frame Generation outside exclusive fullscreen" :
+					"the D3D12 target exists only in Frame Generation sessions outside exclusive fullscreen" :
 					"the engine D3D11 device binds at startup; retry once the game has finished loading" });
 		}
 		if (auto refusal = CheckCaptureDiskSpace(static_cast<int>(a_request.frames)))
@@ -447,7 +424,7 @@ namespace cs::features
 			_captures.QueueComments(BuildAutomaticCaptureComments(_commentsBuf.data()));
 			_commentsBuf[0] = 0;
 		}
-		const auto id = ++_lastRequestId;
+		const auto id = capture::NextRequestId();
 		_active = ActiveCapture{ .id = id, .request = a_request, .binding = std::move(binding) };
 		_annotationForce.emplace();
 		return id;
@@ -486,7 +463,7 @@ namespace cs::features
 				capture.countBefore = _captures.Count();
 				capture.remaining = capture.request.frames;
 				capture.started = true;
-				// Behind the proxy the window's swap chain belongs to D3D12 (17bd6de7).
+				// Behind the D3D12 presenter the window's swap chain belongs to D3D12.
 				if (capture.request.target == CaptureTarget::kEngineD3D11 && _d3d12TargetAvailable.load(std::memory_order_acquire))
 					capture.binding.window = nullptr;
 				_api->StartFrameCapture(device, capture.binding.window);
@@ -561,7 +538,7 @@ namespace cs::features
 			L->warn("RenderDoc runtime not loaded; install RenderDoc or fix dll_path, then restart with the feature loaded");
 			return;
 		}
-		const auto frameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
+		const auto frameCount = _settings.captureFrameCount;
 		const auto request = RequestCapture({ _settings.captureTarget, static_cast<std::uint32_t>(frameCount) });
 		if (!request) {
 			L->warn("RenderDoc capture aborted: {}", request.error().message);
@@ -597,6 +574,13 @@ namespace cs::features
 		}
 	}
 
+	std::string RenderDoc::GetStartupNotice() const
+	{
+		if (!_api)
+			return {};
+		return kPerformanceWarning;
+	}
+
 	void RenderDoc::DrawOverlay()
 	{
 		ApplyPendingComments();
@@ -605,7 +589,7 @@ namespace cs::features
 	void RenderDoc::OnFrameBoundary()
 	{
 		ApplyPendingComments();
-		// Behind the temporal proxy, its present is the game-frame boundary.
+		// Behind the D3D12 presenter, its present is the game-frame boundary.
 		if (!_d3d12TargetAvailable.load(std::memory_order_acquire))
 			OnGameFramePresented();
 		PollCaptureCompletion();
@@ -665,7 +649,7 @@ namespace cs::features
 	{
 		// FO4: visible controls and native dialogs are owned by the forwarding host.
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(renderdoc_settings::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 
 		const bool d3d11Available =
 			_d3d11TargetAvailable.load(std::memory_order_acquire);
@@ -691,13 +675,11 @@ namespace cs::features
 			}
 
 			field(&Settings::dllPath, { .label = "DLL path" });
-			if (field.Edit(&Settings::captureFolder, { .label = "Capture folder" }).completed)
-				ApplyCapturePath();
+			field(&Settings::captureFolder, { .label = "Capture folder" });
 
 			field(&Settings::captureFrameCount);
-			_settings.captureFrameCount = ClampCaptureFrameCount(_settings.captureFrameCount);
 			dmui::ui::TextDisabled("Required free space: %llu MiB.",
-				renderdoc::RequiredSpaceBytes(_settings.captureFrameCount) / (1024 * 1024));
+				renderdoc::RequiredSpaceBytes(_live.Draft().captureFrameCount) / (1024 * 1024));
 
 			// Not persisted: the text is embedded in the next capture, then cleared.
 			ui::DrawField(
@@ -717,9 +699,8 @@ namespace cs::features
 			if (dmui::ui::Button("Trigger Capture"))
 				TriggerCapture();
 			dmui::ui::EndDisabled();
-			dmui::ui::TextWrapped(
-				"RenderDoc is loaded and may severely impact performance. Disable startup loading and restart to unload it. "
-				"Upscaling and frame generation may be incompatible with captures.");
+			dmui::ui::TextWrapped(kPerformanceWarning);
+			dmui::ui::TextWrapped("Upscaling and frame generation may be incompatible with captures.");
 
 			if (!_api)
 				dmui::ui::TextDisabled("Runtime load failed - install RenderDoc or fix the DLL path, then restart.");
@@ -774,8 +755,8 @@ namespace cs::features
 			return _fileSortDescending ? comparison > 0 : comparison < 0;
 		});
 		for (const auto& file : files) {
-			const auto filename = PathToUtf8(file.path.filename());
-			const auto path = PathToUtf8(file.path);
+			const auto filename = util::PathToUtf8(file.path.filename());
+			const auto path = util::PathToUtf8(file.path);
 			dmui::ui::PushID(path.c_str());
 			dmui::ui::TableNextRow();
 			(void)dmui::ui::TableSetColumnIndex(0);
@@ -794,19 +775,6 @@ namespace cs::features
 			dmui::ui::PopID();
 		}
 		dmui::ui::EndTable();
-	}
-
-	std::vector<std::string_view> RenderDoc::GetRestartSettings() const
-	{
-		return cs::settings::RestartRequired(renderdoc_settings::kSchema, _bootSettings, _settings);
-	}
-
-	void RenderDoc::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
-		ApplyCapturePath();
-		L->info("Settings reset to defaults");
 	}
 
 	namespace

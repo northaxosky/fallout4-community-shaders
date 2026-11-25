@@ -23,7 +23,7 @@ namespace cs::features::light_limit_fix
 
 		// Throws when a shader or resource cannot be created.
 		void Create();
-		// Throws on upload failure; false when the grid cannot hold the frame.
+		// Throws on upload or resize failure; false when there is nothing to build.
 		bool Build(const LightGather& a_gather, const engine::WorldCameraRecord& a_camera);
 
 		ID3D11ShaderResourceView* LightsView() const { return _lights->SRV(); }
@@ -32,6 +32,8 @@ namespace cs::features::light_limit_fix
 		ID3D11ShaderResourceView* GridView() const { return _lightGrid->SRV(); }
 
 	private:
+		void EnsureCapacity(std::uint32_t a_count);
+
 		winrt::com_ptr<ID3D11ComputeShader> _buildShader;
 		winrt::com_ptr<ID3D11ComputeShader> _cullShader;
 		std::unique_ptr<buffer::ConstantBuffer> _buildCB;

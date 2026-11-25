@@ -14,6 +14,5 @@ namespace cs::sha1
 
 	void Sha1InitOnce();
 	Sha1Result Sha1Compute(const void* data, std::size_t len) noexcept;
-	bool Sha1IsZero(const Sha1Result& r) noexcept;
 	std::string Sha1ToHex(const Sha1Result& r);
 }

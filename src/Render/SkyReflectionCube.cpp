@@ -6,6 +6,7 @@
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameBuffer.h"
+#include "Render/FrameState.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/RuntimeCallback.h"
@@ -47,10 +48,8 @@ namespace cs::engine
 		constexpr std::uint32_t kSideFaces = 0xF;
 		constexpr std::uint32_t kPolarFirstFace = 4;
 		constexpr std::uint32_t kDownFace = 5;
-		// The eye is the previous render's camera; reject pre-load records.
-		constexpr std::uint32_t kMaxCameraAgeFrames = 2;
-		// The hook skips interiors and loads; a longer gap means stale faces.
-		constexpr std::uint32_t kMaxRenderGapFrames = 1;
+		// World frames: menus do not age faces; a longer gap means stale faces.
+		constexpr std::uint64_t kMaxRenderGapFrames = 1;
 		// Sky-Lower: the color below the dome.
 		constexpr std::size_t kSkyLowerColor = 7;
 
@@ -150,7 +149,7 @@ namespace cs::engine
 		std::atomic_bool g_disabled{ false };
 		std::atomic_bool g_valid{ false };
 		std::atomic<std::uint32_t> g_faceMask{ 0 };
-		std::atomic<std::uint32_t> g_lastRenderFrame{ 0 };
+		std::atomic<std::uint64_t> g_lastRenderFrame{ 0 };
 		Counters g_counters;
 
 		// Never destroyed: static teardown must not free into the game heap.
@@ -196,21 +195,21 @@ namespace cs::engine
 			g_lodEye.reset();
 		}
 
-		[[nodiscard]] bool RenderIsCurrent(std::uint32_t a_frame) noexcept
+		[[nodiscard]] bool RenderIsCurrent(std::uint64_t a_worldFrame) noexcept
 		{
-			return a_frame - g_lastRenderFrame.load(std::memory_order_relaxed) <= kMaxRenderGapFrames;
+			return a_worldFrame - g_lastRenderFrame.load(std::memory_order_relaxed) <= kMaxRenderGapFrames;
 		}
 
-		[[nodiscard]] bool IsCurrentlyValid(std::uint32_t a_frame) noexcept
+		[[nodiscard]] bool IsCurrentlyValid() noexcept
 		{
-			return g_valid.load(std::memory_order_acquire) && RenderIsCurrent(a_frame);
+			return g_valid.load(std::memory_order_acquire) && RenderIsCurrent(render::GetFrameState().worldFrame);
 		}
 
 		// The main menu and loads reach the hook without a loaded world.
 		[[nodiscard]] bool WorldLoaded() noexcept
 		{
 			const auto* player = RE::PlayerCharacter::GetSingleton();
-			return player && player->parentCell && RE::UI::GetSingleton() && !IsMainOrLoadingMenuOpen();
+			return player && player->parentCell && !render::GetFrameState().mainOrLoading;
 		}
 
 		[[nodiscard]] bool AnyConsumerWants(
@@ -256,17 +255,15 @@ namespace cs::engine
 		class PublishedCube
 		{
 		public:
-			void Update(ID3D11Texture2D* a_engine, std::uint32_t a_faces)
+			void Update(std::uint32_t a_faces)
 			{
 				auto* context = GetImmediateContext();
-				if (!a_engine || !context || !a_faces || !Ensure(a_engine))
-					return;
-				if (!_level)
+				if (!_level || !context || !a_faces)
 					return;
 				const auto chainMips = _level + 1;
 				for (std::uint32_t face = 0; face < 6; ++face) {
 					if (a_faces & (1u << face))
-						context->CopySubresourceRegion(_chain->resource.get(), D3D11CalcSubresource(0, face, chainMips), 0, 0, 0, a_engine, D3D11CalcSubresource(0, face, 1), nullptr);
+						context->CopySubresourceRegion(_chain->resource.get(), D3D11CalcSubresource(0, face, chainMips), 0, 0, 0, _engine.get(), D3D11CalcSubresource(0, face, 1), nullptr);
 				}
 				context->GenerateMips(_chain->srv.get());
 				for (std::uint32_t face = 0; face < 6; ++face) {
@@ -278,21 +275,25 @@ namespace cs::engine
 			// Null when the engine cube is already the published size.
 			[[nodiscard]] ID3D11ShaderResourceView* SRV() const noexcept { return _level ? _published->srv.get() : nullptr; }
 
-		private:
-			bool Ensure(ID3D11Texture2D* a_engine)
+			// Follows engine cube recreation; false while the engine cube is unusable.
+			[[nodiscard]] bool Bind(ID3D11Texture2D* a_engine)
 			{
-				if (_engine == a_engine)
+				if (_engine.get() == a_engine)
 					return true;
+				// A recreated engine cube starts empty, so every face renders again.
+				Invalidate();
+				_engine = nullptr;
+				_level = 0;
+				_chain.reset();
+				_published.reset();
 				D3D11_TEXTURE2D_DESC engine{};
 				a_engine->GetDesc(&engine);
 				if (engine.Width != engine.Height || !std::has_single_bit(engine.Width))
 					return false;
-				_level = engine.Width > kPublishedSize ? static_cast<std::uint32_t>(std::countr_zero(engine.Width / kPublishedSize)) : 0;
-				_chain.reset();
-				_published.reset();
-				_engine = a_engine;
-				if (!_level)
+				_engine.copy_from(a_engine);
+				if (engine.Width <= kPublishedSize)
 					return true;
+				_level = static_cast<std::uint32_t>(std::countr_zero(engine.Width / kPublishedSize));
 
 				// Each 2x2 mip step averages, so level n is a 2^n box filter.
 				D3D11_TEXTURE2D_DESC desc{};
@@ -326,7 +327,9 @@ namespace cs::engine
 				return true;
 			}
 
-			const ID3D11Texture2D* _engine = nullptr;
+		private:
+			// Owned so a recreated cube cannot reuse the bound address.
+			winrt::com_ptr<ID3D11Texture2D> _engine;
 			std::uint32_t _level = 0;
 			std::unique_ptr<cs::buffer::Texture2D> _chain;
 			std::unique_ptr<cs::buffer::Texture2D> _published;
@@ -684,7 +687,8 @@ namespace cs::engine
 				return;
 			g_lastFrame = state->frameCount;
 
-			if (!RenderIsCurrent(state->frameCount))
+			const auto worldFrame = render::GetFrameState().worldFrame;
+			if (!RenderIsCurrent(worldFrame))
 				Invalidate();
 			if (!WorldLoaded()) {
 				g_counters.skippedNoWorld.fetch_add(1, std::memory_order_relaxed);
@@ -694,7 +698,6 @@ namespace cs::engine
 
 			if (!AnyConsumerWantsCube()) {
 				g_counters.skippedNoDemand.fetch_add(1, std::memory_order_relaxed);
-				Invalidate();
 				return;
 			}
 			if (IsInterior()) {
@@ -712,7 +715,9 @@ namespace cs::engine
 			auto* worldCamera = RE::Main::WorldRootCamera();
 			auto* manager = GetRenderTargetManager();
 			auto* context = GetActiveContext();
-			if (!sky || !sky->root || !worldCamera || !manager || !context || !GetEngineCube()) {
+			auto* engineCube = GetEngineCube();
+			if (!sky || !sky->root || !worldCamera || !manager || !context || !engineCube ||
+				!g_published.Bind(reinterpret_cast<ID3D11Texture2D*>(engineCube->texture))) {
 				g_counters.skippedNoTargets.fetch_add(1, std::memory_order_relaxed);
 				Invalidate();
 				return;
@@ -720,16 +725,14 @@ namespace cs::engine
 
 			// This frame's camera is published later; use the previous render's.
 			const auto record = GetCapturedWorldCameraRecord();
-			if (!record || state->frameCount - record->frameCount > kMaxCameraAgeFrames) {
+			if (!record) {
 				g_counters.skippedNoCamera.fetch_add(1, std::memory_order_relaxed);
-				Invalidate();
 				return;
 			}
 			const auto origin = CameraWorldOrigin(*record);
 			const RE::NiPoint3 eye{ origin.x, origin.y, origin.z };
 			if (!std::isfinite(eye.x) || !std::isfinite(eye.y) || !std::isfinite(eye.z)) {
 				g_counters.skippedNoCamera.fetch_add(1, std::memory_order_relaxed);
-				Invalidate();
 				return;
 			}
 			if (g_lastEye && g_lastEye->GetDistance(eye) > kEyeJumpLimit)
@@ -745,16 +748,14 @@ namespace cs::engine
 			};
 
 			cs::render::annotation::ScopedEvent container("SkyReflectionCube", false);
-			std::optional<UnscaledRenderScope> unscaled;
-			if (manager->IsDynamicResolutionCurrentlyActivated())
-				unscaled.emplace();
+			UnscaledRenderScope unscaled{ manager->IsDynamicResolutionCurrentlyActivated() };
 			UnbindAuxiliaryTargets(*manager, context->shadowState);
 			SetupCamera(**g_camera, eye, worldCamera->viewFrustum.far);
 			const auto faces = RenderFaces(**g_camera, *sky->root, *manager, context->shadowState, clear, eye);
-			g_published.Update(reinterpret_cast<ID3D11Texture2D*>(GetEngineCube()->texture), faces);
+			g_published.Update(faces);
 
 			g_counters.renders.fetch_add(1, std::memory_order_relaxed);
-			g_lastRenderFrame.store(state->frameCount, std::memory_order_relaxed);
+			g_lastRenderFrame.store(worldFrame, std::memory_order_relaxed);
 			if (g_faceMask.load(std::memory_order_relaxed) == kAllFaces)
 				g_valid.store(true, std::memory_order_release);
 		}
@@ -844,8 +845,7 @@ namespace cs::engine
 
 	ID3D11ShaderResourceView* GetSkyReflectionCubeSRV() noexcept
 	{
-		const auto* state = GetGraphicsState();
-		if (!state || !IsCurrentlyValid(state->frameCount))
+		if (!IsCurrentlyValid())
 			return nullptr;
 		const auto* cube = GetEngineCube();
 		if (!cube)
@@ -860,8 +860,7 @@ namespace cs::engine
 		SkyReflectionCubeStatus status;
 		status.hookInstalled = g_hookInstalled.load(std::memory_order_relaxed);
 		status.disabled = g_disabled.load(std::memory_order_relaxed);
-		const auto* state = GetGraphicsState();
-		status.valid = state && IsCurrentlyValid(state->frameCount);
+		status.valid = IsCurrentlyValid();
 		status.faceMask = g_faceMask.load(std::memory_order_relaxed);
 		status.consumers = static_cast<std::uint32_t>(g_consumers.size());
 		status.renders = g_counters.renders.load(std::memory_order_relaxed);

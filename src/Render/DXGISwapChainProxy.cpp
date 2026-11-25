@@ -10,11 +10,6 @@ namespace cs::render
 		_inner.copy_from(&a_inner);
 	}
 
-	void DXGISwapChainProxy::ReplaceInner(IDXGISwapChain4* a_inner) noexcept
-	{
-		_inner.copy_from(a_inner);
-	}
-
 	void DXGISwapChainProxy::DetachOwner() noexcept
 	{
 		_owner = nullptr;

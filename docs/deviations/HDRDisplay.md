@@ -2,14 +2,15 @@
 
 | Kind | Upstream | FO4 | Why |
 |---|---|---|---|
-| Divergence | Redirects the game's swap chain and UI targets, then composites into the back buffer | The presenter owns an R10 HDR10 swap chain behind the D3D12 proxy; the game keeps an R8 back buffer, backed by an fp16 proxy | Presentation is host-owned, and the game must never see the container format |
+| Divergence | Redirects the game's swap chain and UI targets, then composites into the back buffer | The host owns the swap chain behind the facade: R10 HDR10 on the D3D12 frame-generation presenter, fp16 scRGB on the D3D11 flip presenter, created only when Windows HDR is on at launch; HDR output then follows Windows HDR; the game keeps an R8 back buffer, backed by an fp16 proxy | Presentation is host-owned, and the game must never see the container format |
 | Forced | The Reinhard and Hejl curves continue linearly past a branch point before the shoulder | Hable continues linearly past its inflection point, solved at run time from the toe numerator; it is vanilla below that point | FO4's tonemap is Hable, not Reinhard or Hejl |
 | Divergence | The UI draws into its own target; the compose scales it by the interface brightness | The scene is redirected to a separate texture during the final render pass and the fp16 proxy collects only the UI | Scaleform caches the frame target's view, so the UI cannot be redirected |
 | Forced | UI blends write coverage as-is | Engine alpha-over blends onto the UI layer accumulate alpha as One/InvSrcAlpha, and additive blends keep it; the layer is not split while the DearModdingUI shell is open | FO4's UI blend states square or skip alpha on the opaque frame target, and the shell blurs the back buffer |
 | Forced | No LUT stage | The gamma LUT grades values above 1 by radial scaling: the color is divided by its largest channel above 1, graded, and scaled back | FO4 grades through 3D LUTs after the tonemap and clamps there |
-| Divergence | The pause freeze-frame stays 8-bit | The menu background and freeze-frame stores are fp16 | They copy from the scene target |
+| Divergence | The pause freeze-frame and TAA history stay 8-bit | The menu background, freeze-frame and TAA history targets are fp16 | The stores copy from the scene target, and the history's gamma luma exceeds 1 in HDR, which UNORM8 clamps |
 | Divergence | ReShade has no HDR handling | The hosted runtime runs on the scene texture before the UI, as scRGB on an fp16 copy | Effects get the HDR scene |
 | Divergence | The UI composites over the scene in gamma space | While the HDR container is active the interface is split from the scene, and frame generation blends it in the output encoding (PQ with HDR on, gamma 2.2 with it off): DLSS-G recomposes it over an encoded HUD-less frame; FSR 3 and FSR 4 frame generation composite it over a scene-only back buffer | Real and generated frames must match; frames without a separate interface skip generation |
 | Pending | Sun scaling, Bink video white, AutoHDR | Omitted | Their consumers are not ported |
 | Divergence | HDR is detected on the swap chain's containing output | Detected on the monitor of the game window | The proxy chain exposes no containing output |
-| Divergence | Exclusive fullscreen only warns | Native presentation stays and HDR is inactive | The D3D12 proxy presents black in exclusive fullscreen |
+| Divergence | HDR TAA replaces the speed-change history decay with a PQ luma change | TAA keeps the speed-change decay in HDR | The term is on-screen speed, not luma; without it history survives camera moves and trails dark edges |
+| Divergence | Exclusive fullscreen only warns | Native presentation stays and HDR is inactive | The facade does not support exclusive fullscreen |

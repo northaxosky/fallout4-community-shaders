@@ -223,13 +223,18 @@ float FO4WaterSunShadow(float3 worldPosition, float2 screenPosition)
 #		ifndef WATER
 #			define WATER
 #		endif
+#		ifdef SKYLIGHTING
+// FO4: Dynamic Cubemaps includes Skylighting; set its registers first.
+#			define SKYLIGHTING_PROBE_REGISTER t50
+#			define SKYLIGHTING_COVERAGE_REGISTER t56
+#			define SKYLIGHTING_ZENITH_REGISTER t57
+#		endif
 #		include "FO4/DynamicCubemaps/DynamicCubemaps.hlsli"
 SamplerState sampler3 : register(s3);
 // FO4: the host-rendered engine reflection cube, upstream's CubeMapTex.
 TextureCube<float3> CubeMapTex : register(t32);
 #	endif
 #	if defined(SKYLIGHTING) && defined(DYNAMIC_CUBEMAPS)
-#		define SKYLIGHTING_PROBE_REGISTER t50
 #		include "Skylighting/Skylighting.hlsli"
 #	endif
 
@@ -478,10 +483,7 @@ float3 surfaceColor(
 	color = lerp(color, perMaterial[5].xyz, saturate(slope * 1.9 + 0.35));
 #	if defined(REFLECTIONS) || defined(DYNAMIC_CUBEMAPS)
 #		ifdef DYNAMIC_CUBEMAPS
-	uint cubeWidth, cubeHeight, envWidth, envHeight;
-	DynamicCubemaps::EnvReflectionsTexture.GetDimensions(cubeWidth, cubeHeight);
-	DynamicCubemaps::EnvTexture.GetDimensions(envWidth, envHeight);
-	[branch] if (FO4SharedData::EnabledDynamicCubemaps != 0 && cubeWidth != 0 && envWidth != 0)
+	[branch] if (DynamicCubemaps::IsUsable())
 	{
 #			if defined(REFLECTIONS)
 		// FO4: without a fresh engine cube the sky gradient stays the far reflection.
@@ -545,7 +547,10 @@ float3 surfaceColor(
 		float pointingAlignment = dot(reflect(eyeDirection, float3(0, 0, 1)), reflectionDirection) * 0.5 + 0.5;
 		float ssrAmount = sqrt(min(pointingAlignment, pointingDirection));
 		// FO4: t9 is raw and t10 blurred; the offset UV keeps the stock clamp.
-		float2 ssrReflectionUv = min(screenUv + 0.05 * normal.xy, perGeometry[1].xy);
+		float2 ssrReflectionUv = screenUv + 0.05 * normal.xy;
+#					if !defined(OG)
+		ssrReflectionUv = min(ssrReflectionUv, perGeometry[1].xy);
+#					endif
 		float4 ssrReflectionColorBlurred = texture10.SampleLevel(sampler10, ssrReflectionUv, 0.0);
 		float4 ssrReflectionColorRaw = texture9.SampleLevel(sampler9, ssrReflectionUv, 0.0);
 		float4 ssrReflectionColor = lerp(ssrReflectionColorBlurred, ssrReflectionColorRaw, ssrAmount * 0.7);
@@ -566,7 +571,7 @@ float fresnelTerm(float grazing)
 	float f0 = perMaterial[13].z;
 #	if defined(DYNAMIC_CUBEMAPS)
 	// FO4 translation: Skyrim-scale F0 is FO4's F0 times its reflection amount.
-	if (FO4SharedData::EnabledDynamicCubemaps != 0)
+	if (DynamicCubemaps::IsUsable())
 		f0 *= perMaterial[8].y;
 #	endif
 	return (1.0 - f0) * pow(grazing, 5) + f0;
@@ -1014,7 +1019,7 @@ float4 main(PS_INPUT input) : SV_Target0
 
 	float reflectionWeight = fresnel * perMaterial[8].y;
 #		if defined(DYNAMIC_CUBEMAPS)
-	if (FO4SharedData::EnabledDynamicCubemaps != 0)
+	if (DynamicCubemaps::IsUsable())
 		reflectionWeight = fresnel;
 #		endif
 	float3 color = lerp(refraction, water, reflectionWeight);

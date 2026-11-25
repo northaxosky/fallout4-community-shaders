@@ -438,49 +438,6 @@ namespace cs::settings
 	}
 
 	template <class... Fields>
-	bool DiffersFromDefaults(
-		const Schema<Fields...>& a_schema,
-		const typename Schema<Fields...>::SettingsType& a_value)
-	{
-		const typename Schema<Fields...>::SettingsType defaults{};
-		return std::apply([&](const auto&... a_fields) {
-			return ((a_value.*a_fields.member != defaults.*a_fields.member) || ...);
-		},
-			a_schema.fields);
-	}
-
-	template <class... Fields>
-	SettingsBinding BindSettings(
-		const Schema<Fields...>& a_schema,
-		const typename Schema<Fields...>::SettingsType& a_value)
-	{
-		return {
-			[&a_schema] { return MakeSchemaView(a_schema); },
-			[&a_schema, &a_value] { return DiffersFromDefaults(a_schema, a_value); }
-		};
-	}
-
-	template <class... Fields>
-	std::vector<std::string_view> RestartRequired(
-		const Schema<Fields...>& a_schema,
-		const typename Schema<Fields...>::SettingsType& a_boot,
-		const typename Schema<Fields...>::SettingsType& a_current)
-	{
-		std::vector<std::string_view> result;
-		std::apply([&](const auto&... a_fields) {
-			const auto check = [&](const auto& field) {
-				if (field.timing == ApplyTiming::kImmediate ||
-					a_boot.*field.member == a_current.*field.member)
-					return;
-				result.push_back(field.description);
-			};
-			(check(a_fields), ...);
-		},
-			a_schema.fields);
-		return result;
-	}
-
-	template <class... Fields>
 	bool ParseTable(
 		const Schema<Fields...>& a_schema,
 		const toml::table& a_table,

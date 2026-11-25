@@ -150,6 +150,8 @@ namespace cs::host
 			std::string(kOverlayCategory)
 		};
 		for (const auto& feature : a_features) {
+			if (!feature.inFeatureList)
+				continue;
 			if (!feature.active) {
 				categoryNames.emplace(kUnloadedCategory);
 				continue;
@@ -185,9 +187,11 @@ namespace cs::host
 			       std::tie(a_rhs.sortKey, a_rhs.displayName, a_rhs.id);
 		});
 
-		std::vector<std::size_t> order(a_features.size());
-		for (std::size_t i = 0; i < order.size(); ++i)
-			order[i] = i;
+		std::vector<std::size_t> order;
+		order.reserve(a_features.size());
+		for (std::size_t i = 0; i < a_features.size(); ++i)
+			if (a_features[i].inFeatureList)
+				order.push_back(i);
 		std::ranges::sort(order, [&a_features](std::size_t a_lhs, std::size_t a_rhs) {
 			const auto& lhs = a_features[a_lhs];
 			const auto& rhs = a_features[a_rhs];

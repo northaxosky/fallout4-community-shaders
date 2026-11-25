@@ -15,6 +15,7 @@
 #	if defined(VANILLA_PBR)
 #		include "FO4/VanillaPBR.hlsli"
 #	endif
+#	include "FO4/SphereMapNormal.hlsli"
 #	ifdef LIGHT_LIMIT_FIX
 #		include "FO4/LightLimitFixConsumer.hlsli"
 StructuredBuffer<LightLimitFix::Light> LightLimitFixLights : register(t8);
@@ -69,7 +70,7 @@ RWTexture2D<float4> SpecularOutput : register(u1);
 
 float3 DecodeOctahedralNormal(float2 encoded)
 {
-	float2 octahedral = encoded * 4.0 - 2.0;
+	float2 octahedral = FO4GBuffer::UnpackSphereMapXY(encoded);
 	float lengthSquared = dot(octahedral, octahedral);
 	float2 reconstruction =
 		1.0 - lengthSquared * float2(0.25, 0.5);

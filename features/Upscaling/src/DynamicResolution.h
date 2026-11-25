@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 
 #include <winrt/base.h>
 
@@ -33,11 +34,12 @@ namespace cs::features
 
 		void UpdateRenderTargets(float a_widthRatio, float a_heightRatio);
 
-		void OverrideRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy = {});
-		// An empty list copies every proxied target back.
-		void ResetRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy = {});
-
-		void OverrideDepth(bool a_doCopy = true);
+		enum class DepthCopy : std::uint8_t
+		{
+			kReuseFrame,  // first copy of the frame; later calls reuse it
+			kRefresh      // re-copy depth only, for readers after late depth writes
+		};
+		void OverrideDepth(DepthCopy a_copy = DepthCopy::kReuseFrame);
 		void ResetDepth();
 
 		// Ratio-1 draws into render-resolution proxies so stock TexCoord spans [0, 1].
@@ -65,12 +67,16 @@ namespace cs::features
 		[[nodiscard]] ProxyTexture GetProxyTexture(RE::BSGraphics::RenderTargetID a_target) const noexcept;
 
 	private:
+		void OverrideRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy);
+		void ResetRenderTargets(std::initializer_list<RE::BSGraphics::RenderTargetID> a_toCopy);
+		void RestoreRenderTargetData(RE::BSGraphics::RenderTargetManager& a_manager) const;
+		void RepointBoundSRVs(bool a_toProxy) const;
 		void UpdateRenderTarget(RE::BSGraphics::RenderTargetID a_target, float a_widthRatio, float a_heightRatio);
 		// Snapshots the engine target and mirrors its fields into the proxy.
 		void CaptureOriginal(RE::BSGraphics::RenderTargetID a_target, const RE::BSGraphics::RenderTarget& a_engineTarget);
 		void OverrideRenderTarget(RE::BSGraphics::RenderTargetID a_target, bool a_doCopy);
 		void ResetRenderTarget(RE::BSGraphics::RenderTargetID a_target, bool a_doCopy);
-		bool CopyDepth();
+		bool CopyDepth(bool a_linearize);
 		void ReleaseProxy(RE::BSGraphics::RenderTargetID a_target);
 		void RestoreEngineSlot(RE::BSGraphics::RenderTargetID a_target);
 		bool IsProxyTexture(const void* a_texture) const noexcept;
@@ -114,9 +120,7 @@ namespace cs::features
 		bool _hasProxies = false;
 		bool _renderTargetsOverridden = false;
 		bool _depthOverridden = false;
-		bool _proxyPass = false;
 		cs::engine::ImageSpaceTriangleSwap _triangleSwap;
-		float _proxyPassWidthRatio = 1.0f;
-		float _proxyPassHeightRatio = 1.0f;
+		std::optional<cs::engine::DynamicResolutionState> _proxyPassState;
 	};
 }

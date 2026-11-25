@@ -1,6 +1,7 @@
 #include "AntiLag2Latency.h"
 
 #pragma warning(push)
+#include "AntiLag2-SDK/ffx_antilag2_dx11.h"
 #include "AntiLag2-SDK/ffx_antilag2_dx12.h"
 #pragma warning(pop)
 
@@ -35,7 +36,8 @@ namespace cs::features
 	}
 
 	AntiLag2Latency::AntiLag2Latency() :
-		_context(std::make_unique<AMD::AntiLag2DX12::Context>())
+		_context(std::make_unique<AMD::AntiLag2DX12::Context>()),
+		_context11(std::make_unique<AMD::AntiLag2DX11::Context>())
 	{}
 
 	// The driver may already be unloaded during static destruction, so only DetachDevice releases it.
@@ -44,9 +46,10 @@ namespace cs::features
 	void AntiLag2Latency::BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept
 	{
 		std::scoped_lock lock(_mutex);
-		if (a_binding.device != _device.get()) {
+		if (a_binding.device != _device.get() || a_binding.api != _api) {
 			ShutdownLocked();
 			_device.copy_from(a_binding.device);
+			_api = a_binding.api;
 			_adapterVendorId = a_binding.adapterVendorId;
 		}
 		_swapChain = a_binding.swapChain;
@@ -70,11 +73,17 @@ namespace cs::features
 	void AntiLag2Latency::ShutdownLocked() noexcept
 	{
 		if (_initialized) {
-			(void)AMD::AntiLag2DX12::DeInitialize(_context.get());
+			if (_api == render::temporal::DeviceApi::kD3D11) {
+				(void)AMD::AntiLag2DX11::DeInitialize(_context11.get());
+			} else {
+				(void)AMD::AntiLag2DX12::DeInitialize(_context.get());
+			}
 			L->info("Anti-Lag 2 released");
 		}
 		*_context = {};
+		*_context11 = {};
 		_device = nullptr;
+		_api = render::temporal::DeviceApi::kNone;
 		_adapterVendorId = 0;
 		_swapChain = nullptr;
 		_frameGenerationPresentation = false;
@@ -100,17 +109,34 @@ namespace cs::features
 			L->warn("Anti-Lag 2 is unavailable: the presenting adapter is not AMD (vendor {:#06x})", _adapterVendorId);
 			return;
 		}
-		*_context = {};
-		_initializeResult = AMD::AntiLag2DX12::Initialize(_context.get(), _device.get());
+		_initializeResult = InitializeDriverLocked();
 		_initialized = _initializeResult == S_OK;
 		_initializationFailed = !_initialized;
 		if (_initialized) {
 			L->info("Anti-Lag 2 initialized on the presentation device");
 		} else if (_initializeResult == E_HANDLE) {
-			L->warn("Anti-Lag 2 is unavailable: the AMD D3D12 driver is not loaded");
+			L->warn("Anti-Lag 2 is unavailable: the AMD {} driver is not loaded",
+				_api == render::temporal::DeviceApi::kD3D11 ? "D3D11" : "D3D12");
 		} else {
 			L->warn("Anti-Lag 2 is unavailable on this GPU or driver ({:#010x})", static_cast<std::uint32_t>(_initializeResult));
 		}
+	}
+
+	HRESULT AntiLag2Latency::InitializeDriverLocked() noexcept
+	{
+		if (_api == render::temporal::DeviceApi::kD3D11) {
+			*_context11 = {};
+			return AMD::AntiLag2DX11::Initialize(_context11.get());
+		}
+		*_context = {};
+		return AMD::AntiLag2DX12::Initialize(_context.get(), static_cast<ID3D12Device*>(_device.get()));
+	}
+
+	HRESULT AntiLag2Latency::UpdateDriverLocked(bool a_enable, std::uint32_t a_maxFps) noexcept
+	{
+		return _api == render::temporal::DeviceApi::kD3D11 ?
+		           AMD::AntiLag2DX11::Update(_context11.get(), a_enable, a_maxFps) :
+		           AMD::AntiLag2DX12::Update(_context.get(), a_enable, a_maxFps);
 	}
 
 	ProviderResult AntiLag2Latency::Configure(const LatencyOptions& a_options)
@@ -132,7 +158,7 @@ namespace cs::features
 	{
 		std::scoped_lock lock(_mutex);
 		if (_initialized && !_presentationQuarantined && _enabled) {
-			(void)AMD::AntiLag2DX12::Update(_context.get(), false, 0);
+			(void)UpdateDriverLocked(false, 0);
 		}
 	}
 
@@ -148,7 +174,7 @@ namespace cs::features
 		// Each new frame's Update also resumes after Pause.
 		_lastSleepFrame = a_frame;
 		++_updateCalls;
-		const HRESULT result = AMD::AntiLag2DX12::Update(_context.get(), _enabled, _enabled ? _maxFps : 0);
+		const HRESULT result = UpdateDriverLocked(_enabled, _enabled ? _maxFps : 0);
 		_lastUpdateResult.store(result, std::memory_order_relaxed);
 		if (FAILED(result)) {
 			++_updateFailures;
@@ -199,8 +225,6 @@ namespace cs::features
 			diagnostics.unavailableReason = Reason::kPresentationFailed;
 		} else if (_initializationFailed) {
 			diagnostics.unavailableReason = _adapterVendorId != kAmdVendorId ? Reason::kUnsupportedAdapter : Reason::kInitializeFailed;
-		} else if (!_device) {
-			diagnostics.unavailableReason = Reason::kNeedsD3D12Presentation;
 		} else if (usable && _enabled && lastUpdate < 0) {
 			diagnostics.unavailableReason = Reason::kUpdateFailing;
 		}

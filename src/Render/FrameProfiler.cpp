@@ -1,12 +1,14 @@
 #include "Render/FrameProfiler.h"
 
+#include "Feature.h"
 #include "Log.h"
 #include "Render/Annotation.h"
 #include "Render/RenderHooks.h"
-#include "Shared/PerfUtils.h"
+#include "Utils/PerfUtils.h"
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <map>
 #include <utility>
 
@@ -39,9 +41,7 @@ namespace cs::render::profiling
 			Profiler profiler;
 			bool initialized{};
 			bool enabled{};
-			std::string activePass;
-			bool activeYields{};
-			std::string pausedPass;
+			std::vector<std::string> passStack;
 			std::map<int, ShaderTiming> shaderFrame;
 			std::vector<ShaderTiming> shaderTimings;
 			int shaderType = -1;
@@ -53,6 +53,20 @@ namespace cs::render::profiling
 		{
 			static ProfilerState state;
 			return state;
+		}
+
+		// Rows of switched-off or suspended features read 0 instead of their last cost.
+		void MarkSwitchedOffPasses(Profiler& a_profiler)
+		{
+			const auto& features = FeatureManager::Get().GetRegisteredFeatures();
+			for (const auto& result : a_profiler.GetResults()) {
+				const auto group = GroupOf(result.name);
+				const auto feature = std::ranges::find_if(features, [&](const Feature* a_feature) {
+					return a_feature && a_feature->GetName() == group;
+				});
+				if (feature != features.end() && !(*feature)->IsEnabled())
+					a_profiler.MarkPassSkipped(result.name);
+			}
 		}
 	}
 
@@ -82,13 +96,13 @@ namespace cs::render::profiling
 		if (state.tracyContext)
 			TracyD3D11Collect(state.tracyContext);
 #endif
-		if (!state.activePass.empty()) {
-			cs::log::Get("cs.profiler")->error("Pass {} crosses the engine-frame boundary", state.activePass);
+		if (!state.passStack.empty()) {
+			for (const auto& pass : state.passStack)
+				cs::log::Get("cs.profiler")->error("Pass {} crosses the engine-frame boundary", pass);
+			// Only the top pass is open; its parents already ended.
 			state.profiler.EndPass();
-			state.activePass.clear();
+			state.passStack.clear();
 		}
-		state.activeYields = false;
-		state.pausedPass.clear();
 		state.profiler.EndFrame();
 		const bool wanted = state.profiler.IsActive();
 		if (wanted && state.device && !state.initialized) {
@@ -98,6 +112,7 @@ namespace cs::render::profiling
 		}
 		if (wanted && state.initialized) {
 			state.profiler.BeginFrame();
+			MarkSwitchedOffPasses(state.profiler);
 		} else if (state.initialized) {
 			state.profiler.Release();
 			state.initialized = false;
@@ -140,64 +155,41 @@ namespace cs::render::profiling
 	bool BeginPass(std::string_view a_name)
 	{
 		auto& state = State();
-		// FO4: annotation scopes can nest, but the shared profiler requires disjoint passes.
 		if (!state.initialized || !state.profiler.IsActive())
 			return false;
-		if (!state.activePass.empty()) {
-			if (!state.activeYields)
-				return false;
-			// An engine pass pauses so the nested CS pass is timed once, outside it.
+		// Exclusive time: the parent pauses and resumes under its own name.
+		if (!state.passStack.empty())
 			state.profiler.EndPass();
-			state.pausedPass = std::move(state.activePass);
-			state.activeYields = false;
-		}
-		state.activePass = a_name;
-		state.profiler.BeginPass(state.activePass);
-		return true;
-	}
-
-	bool BeginEnginePass(std::string_view a_name)
-	{
-		if (!BeginPass(a_name))
-			return false;
-		State().activeYields = true;
+		state.passStack.emplace_back(a_name);
+		state.profiler.BeginPass(state.passStack.back());
 		return true;
 	}
 
 	void EndPass() noexcept
 	{
 		auto& state = State();
-		if (state.activePass.empty())
+		if (state.passStack.empty())
 			return;
 		state.profiler.EndPass();
-		state.activePass.clear();
-		state.activeYields = false;
-		if (!state.pausedPass.empty()) {
-			state.activePass = std::move(state.pausedPass);
-			state.pausedPass.clear();
-			state.activeYields = true;
-			state.profiler.BeginPass(state.activePass);
-		}
+		state.passStack.pop_back();
+		if (!state.passStack.empty())
+			state.profiler.BeginPass(state.passStack.back());
 	}
 
 	bool InstallDeferredCompositePass()
 	{
 		// Stock composite only; feature callbacks stay outside the pass.
 		// Timestamp queries touch no bindings, so both hooks only observe.
-		static bool began = false;
 		static annotation::SpannedEvent event;
 		constexpr auto kPass = "DeferredComposite";
 		return engine::RegisterPostDeferredComposite(
 				   [] {
 					   event.End();
-					   if (std::exchange(began, false))
-						   EndPass();
 				   },
 				   engine::HookPriority::InnermostPost) &&
 		       engine::RegisterPreDeferredComposite(
 				   [] {
-					   began = BeginEnginePass(kPass);
-					   event.Begin(kPass, false);
+					   event.Begin(kPass);
 				   },
 				   engine::HookPriority::InnermostPre);
 	}

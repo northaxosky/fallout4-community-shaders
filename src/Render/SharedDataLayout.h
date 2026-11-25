@@ -53,6 +53,8 @@ namespace cs::render
 		float WaterSystemHeight = -(std::numeric_limits<float>::max)();
 		std::uint32_t PostWaterComposite = 0, ResetHistory = 0, TonemapOwner = 0;
 		DirectX::XMFLOAT4 AmbientSHR{}, AmbientSHG{}, AmbientSHB{}, HDRData{};
+		// FO4 has no pre-exposure; identity keeps ENABLE_LL Encode/Decode lossless.
+		float PreExposure = 1.0f, RcpPreExposure = 1.0f, PreviousPreExposure = 1.0f, PreExposureHistoryRatio = 1.0f;
 	};
 #define CS_SHARED_OFFSET(member, offset) static_assert(offsetof(SharedDataCB, member) == offset)
 	CS_SHARED_OFFSET(WaterData, 0);
@@ -82,8 +84,12 @@ namespace cs::render
 	CS_SHARED_OFFSET(AmbientSHG, 624);
 	CS_SHARED_OFFSET(AmbientSHB, 640);
 	CS_SHARED_OFFSET(HDRData, 656);
+	CS_SHARED_OFFSET(PreExposure, 672);
+	CS_SHARED_OFFSET(RcpPreExposure, 676);
+	CS_SHARED_OFFSET(PreviousPreExposure, 680);
+	CS_SHARED_OFFSET(PreExposureHistoryRatio, 684);
 #undef CS_SHARED_OFFSET
-	static_assert(sizeof(SharedDataCB) == 672);
+	static_assert(sizeof(SharedDataCB) == 688);
 
 	struct alignas(16) FO4SharedDataCB
 	{
@@ -99,7 +105,7 @@ namespace cs::render
 		// Engine DALC rows, so vanilla ambient replays exactly beside the linear SH.
 		DirectX::XMFLOAT4 DirectionalAmbient[3]{};
 		std::uint32_t EnabledLODBlending = 0, EnabledLightLimitFix = 0;
-		std::uint32_t pad0 = 0, pad1 = 0;
+		std::uint32_t EnabledMotionVectorFixes = 0, pad1 = 0;
 		// Unit direction to the drawn sun disc; the light's if unavailable.
 		DirectX::XMFLOAT4 SunDiscDirection{};
 		// BSDFComposite's fog sun glare color; w is its weight, zero when off.
@@ -130,7 +136,7 @@ namespace cs::render
 	static_assert(offsetof(FO4SharedDataCB, DirectionalAmbient) == 64);
 	static_assert(offsetof(FO4SharedDataCB, EnabledLODBlending) == 112);
 	static_assert(offsetof(FO4SharedDataCB, EnabledLightLimitFix) == 116);
-	static_assert(offsetof(FO4SharedDataCB, pad0) == 120);
+	static_assert(offsetof(FO4SharedDataCB, EnabledMotionVectorFixes) == 120);
 	static_assert(offsetof(FO4SharedDataCB, pad1) == 124);
 	static_assert(offsetof(FO4SharedDataCB, SunDiscDirection) == 128);
 	static_assert(offsetof(FO4SharedDataCB, SunGlareColor) == 144);

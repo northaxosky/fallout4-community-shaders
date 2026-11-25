@@ -150,7 +150,7 @@ namespace
 		constexpr std::array path{
 			std::string_view("features"), std::string_view("ScreenSpaceShadows"), std::string_view("settings")
 		};
-		CHECK(UpdateOwnedSettingsAt(a_path, path, toml::parse("ShadowContrast = 2.0\n")));
+		CHECK(UpdateOwnedSettings(path, toml::parse("ShadowContrast = 2.0\n")));
 		auto root = LoadFile(a_path).table;
 		CHECK(root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == true);
 		CHECK(root["features"]["ScreenSpaceShadows"]["settings"]["ShadowContrast"].value<double>() == 2.0);
@@ -160,14 +160,14 @@ namespace
 		const auto activeFeature = GetFeature("ScreenSpaceShadows");
 		CHECK(activeFeature && ParseActivation(*activeFeature).load);
 
-		CHECK(UpdateOwnedSettingsAt(a_path, path, {}));
+		CHECK(UpdateOwnedSettings(path, {}));
 		const auto reset = ReadFile(a_path);
 		CHECK(reset.find("# SurfaceThickness = 0.02\n") != std::string::npos);
 		CHECK(reset.find("# ShadowContrast = 1.0\n") != std::string::npos);
 		// The activation fields share a section; writing one must not drop the other.
 		const auto writeActivation = [&](std::string_view a_feature, std::string_view a_field, bool a_value) {
 			const std::array sectionPath{ std::string_view("features"), a_feature };
-			return static_cast<bool>(UpdateOwnedSettingsAt(a_path, sectionPath, toml::table{ { a_field, a_value } }, SectionWrite::kMerge));
+			return static_cast<bool>(UpdateOwnedSettings(sectionPath, toml::table{ { a_field, a_value } }, SectionWrite::kMerge));
 		};
 		CHECK(reset.find("# enabled = true\n") != std::string::npos);
 		CHECK(writeActivation("ScreenSpaceShadows", "enabled", false));
@@ -233,7 +233,7 @@ namespace
 		constexpr std::array path{
 			std::string_view("features"), std::string_view("ImageBasedLighting"), std::string_view("weather")
 		};
-		CHECK(UpdateOwnedSettingsAt(a_path, path, edited.Serialize()));
+		CHECK(UpdateOwnedSettings(path, edited.Serialize()));
 		Profiles reloaded{ ibl::kWeatherSchema, ibl::kWeatherVariables };
 		CHECK(reloaded.Configure(LoadFile(a_path).table["features"]["ImageBasedLighting"]["weather"].node(), error));
 		CHECK(reloaded.Serialize() == edited.Serialize());
@@ -250,35 +250,98 @@ namespace
 		CHECK(loaded.status == FileLoadStatus::kParseError);
 		CHECK(!ParseActivation(*loaded.root["features"]["ScreenSpaceShadows"].as_table()).load);
 		constexpr std::array path{ std::string_view("logging") };
-		CHECK(!UpdateOwnedSettingsAt(a_path, path, toml::parse("level = 'debug'")));
+		CHECK(!UpdateOwnedSettings(path, toml::parse("level = 'debug'")));
 		CHECK(ReadFile(a_path) == invalid);
 	}
 
-	void TestLiveSettingsRollback()
+	// Writes merge onto the file and refuse a broken one.
+	void TestExternalEdits(const Registry& a_registry, const std::filesystem::path& a_path)
 	{
-		using namespace cs::features::sss_settings;
-		Settings value;
-		float published = value.SurfaceThickness;
-		auto access = BindLiveSettings(kSchema, value, [&] {
-			published = value.SurfaceThickness;
-			if (value.ShadowContrast > 3.0f)
-				throw std::runtime_error("Effect finalization failed");
-		});
-		const auto before = value;
-		std::string error;
-		auto prepared = access.prepare(toml::parse("SurfaceThickness = 0.04\nShadowContrast = 3.5"), error);
-		CHECK(prepared.has_value());
-		if (!prepared)
-			return;
-		std::array transaction{ std::move(*prepared) };
-		try {
-			ApplyPreparedLiveSettings(transaction);
-			CHECK(false);
-		} catch (const std::runtime_error&) {
-			CHECK(value.SurfaceThickness == before.SurfaceThickness && value.ShadowContrast == before.ShadowContrast);
-			CHECK(published == before.SurfaceThickness);
+		CHECK(InitializeAt(a_path, a_registry).error.empty());
+		WriteFile(a_path, "[features.ScreenSpaceShadows]\nload = true\n[logging]\nlevel = 'debug'\n");
+		constexpr std::array path{ std::string_view("preset") };
+		CHECK(UpdateOwnedSettings(path, toml::parse("active = 'user'\n")));
+		const auto merged = LoadFile(a_path).table;
+		CHECK(merged["features"]["ScreenSpaceShadows"]["load"].value<bool>() == true);
+		CHECK(merged["logging"]["level"].value<std::string>() == "debug");
+		CHECK(merged["preset"]["active"].value<std::string>() == "user");
+
+		const std::string broken = "[preset\nactive = 'x'\n";
+		WriteFile(a_path, broken);
+		CHECK(!UpdateOwnedSettings(path, toml::parse("active = 'other'\n")));
+		CHECK(ReadFile(a_path) == broken);
+	}
+
+	// Commits go through the binding onto a real store file.
+	void TestSettingsTransactions(const Registry& a_registry, const std::filesystem::path& a_path)
+	{
+		namespace llf = cs::features::light_limit_fix;
+		using Binding = LiveSettings<llf::kSchema>;
+		const auto open = [&](Binding& a_binding, std::string_view a_file) {
+			WriteFile(a_path, a_file);
+			CHECK(InitializeAt(a_path, a_registry).error.empty());
+			a_binding.section = { "features", "LightLimitFix", "settings" };
+			std::string error;
+			CHECK(a_binding.Configure(GetRoot()["features"]["LightLimitFix"].ref<toml::table>(), error));
+		};
+		const auto commit = [](Binding& a_binding, std::string_view a_values, Scope a_scope, Persist a_persist) {
+			std::string error;
+			auto prepared = a_binding.Prepare(toml::parse(a_values), a_scope, a_persist, error);
+			CHECK(prepared.has_value());
+			std::array transaction{ std::move(*prepared) };
+			return ApplyPreparedLiveSettings(transaction);
+		};
+
+		{
+			Binding binding;
+			open(binding, "");
+			// Another section and an unrelated key edited by hand since the load.
+			WriteFile(a_path, "[features.LightLimitFix.settings]\nlocal_shadow_slots = 32\n[features.Upscaling.settings]\nquality_mode = 3\n");
+			CHECK(commit(binding, "enable_local_shadows = true\nlocal_shadow_filter_scale = 1.5\n", Scope::kImmediate, Persist::kNow));
+			CHECK(binding.Get().enableLocalShadows && binding.Get().localShadowFilterScale == 1.5f);
+			const auto table = LoadFile(a_path).table;
+			const auto stored = table["features"];
+			CHECK(stored["LightLimitFix"]["settings"]["enable_local_shadows"].value<bool>() == true);
+			CHECK(stored["LightLimitFix"]["settings"]["local_shadow_filter_scale"].value<double>() == 1.5);
+			CHECK(stored["LightLimitFix"]["settings"]["local_shadow_slots"].value<std::int64_t>() == 32);
+			CHECK(stored["Upscaling"]["settings"]["quality_mode"].value<std::int64_t>() == 3);
+		}
+		{
+			Binding binding;
+			open(binding, "");
+			CHECK(commit(binding, "derive_unauthored_lights = true\n", Scope::kAll, Persist::kNow));
+			CHECK(!binding.Get().deriveUnauthoredLights);
+			CHECK(binding.RestartPending().size() == 1);
+			CHECK(LoadFile(a_path).table["features"]["LightLimitFix"]["settings"]["derive_unauthored_lights"].value<bool>() == true);
+		}
+		{
+			Binding binding;
+			open(binding, "");
+			WriteFile(a_path, "[features.LightLimitFix.settings]\nderive_unauthored_lights = true\n");
+			const auto before = ReadFile(a_path);
+			const auto stored = toml::parse(before);
+			binding.ReloadNext(stored["features"]["LightLimitFix"].as_table());
+			CHECK(ReadFile(a_path) == before);
+			CHECK(binding.RestartPending().size() == 1);
+		}
+		{
+			Binding binding({ .finalize = [](const llf::Settings& a_previous) {
+				if (!a_previous.enableLocalShadows)
+					throw std::runtime_error("Effect finalization failed");
+			} });
+			open(binding, "");
+			const auto before = ReadFile(a_path);
+			try {
+				(void)commit(binding, "enable_local_shadows = true\nderive_unauthored_lights = true\n", Scope::kAll, Persist::kNow);
+				CHECK(false);
+			} catch (const std::runtime_error&) {
+				CHECK(!binding.Get().enableLocalShadows);
+				CHECK(binding.RestartPending().empty());
+				CHECK(ReadFile(a_path) == before);
+			}
 		}
 	}
+
 	void TestLightAuthoring()
 	{
 		using namespace cs::features::light_limit_fix;
@@ -333,8 +396,9 @@ int main()
 		TestRegistry(registry);
 		TestDocument(registry, directory / "settings.toml");
 		TestInvalidDocument(registry, directory / "invalid.toml");
+		TestExternalEdits(registry, directory / "external.toml");
+		TestSettingsTransactions(registry, directory / "transactions.toml");
 		TestWeatherProfiles(registry, directory / "weather.toml");
-		TestLiveSettingsRollback();
 		TestLightAuthoring();
 	} catch (const std::exception& error) {
 		std::cerr << "Unexpected exception: " << error.what() << '\n';

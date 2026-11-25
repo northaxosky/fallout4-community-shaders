@@ -49,7 +49,6 @@ namespace cs::features
 		void DrawSettings() override;
 		bool HasDebugUI() const override { return true; }
 		void DrawDebug() override;
-		void RestoreDefaultSettings() override;
 
 		// Game-thread hooks. After Sky::Update: steers lights, consumes transitions.
 		void OnSkyUpdated(RE::Sky* a_sky);
@@ -64,8 +63,7 @@ namespace cs::features
 	private:
 		SkySync() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(sky_sync::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 		enum class Caster : std::uint8_t
 		{
@@ -117,7 +115,8 @@ namespace cs::features
 		static constexpr float kDefaultSunExtremeY = 25.0f;
 		static constexpr float kDefaultSunAlphaTransTime = 2.0f;
 
-		Settings _settings;
+		settings::LiveSettings<sky_sync::kSchema> _live{ { .finalize = [this](const Settings&) { RefreshWorldspaceDisabled(); }, .swapGuard = &_worldspaceMutex } };
+		const Settings& _settings = _live.Get();
 
 		const RE::Setting* _sunExtremeX = nullptr;
 		const RE::Setting* _sunExtremeY = nullptr;
@@ -188,6 +187,7 @@ namespace cs::features
 		void ResetSkyRotation(const RE::Sky* a_sky);
 		static void WriteSkyRotation(const RE::Sky& a_sky, float a_rotation);
 		// Whether the editor ID is in the disabled list.
+		static bool IsListed(const std::vector<std::string>& a_list, std::string_view a_editorID);
 		bool IsWorldspaceListed(const RE::TESWorldSpace* a_worldspace) const;
 		// Recomputes the cached flag; the Locked form needs _worldspaceMutex held.
 		void RefreshWorldspaceDisabledLocked();
@@ -208,8 +208,8 @@ namespace cs::features
 		float GetSunExtremeY() const;
 		// Sun::Update's arc, with the night half below the horizon, not mirrored.
 		RE::NiPoint3 CalculateVanillaSunDirection(float a_hour, float a_sunrise, float a_sunset) const;
-		// Angle along the alternate path's arc, 0 at sunrise and pi at sunset.
-		static float GetAlternateSunPhase(float a_hour, float a_sunrise, float a_sunset) { return DirectX::XM_PI * (a_hour - a_sunrise) / (a_sunset - a_sunrise); }
+		// Angle on the alternate circle: 0 at sunrise, pi at sunset, 2 pi at the next sunrise.
+		static float GetAlternateSunPhase(float a_hour, float a_sunrise, float a_sunset);
 		// Unit direction on the alternate arc, tilted by the sun angle.
 		static RE::NiPoint3 CalculateAlternateSunDirection(float a_hour, float a_sunrise, float a_sunset, float a_sunAngle);
 

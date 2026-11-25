@@ -15,7 +15,7 @@
 
 namespace cs::features
 {
-	// Presents through an HDR10 container; the interface lands alone in the proxy.
+	// HDR through the presenter's container; the UI lands alone in the proxy.
 	class HDRDisplay : public ShaderFeature<hdr_display_shader::kShaderDefines>
 	{
 	public:
@@ -37,12 +37,17 @@ namespace cs::features
 		void Load() override;
 		void WriteSharedFrameData(render::SharedDataCB& a_shared) override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 		[[nodiscard]] render::hdr::OutputSettings GetOutputSettings() const noexcept;
 
 		// First run only: HDR starts on when Windows HDR is on for the game's monitor.
 		void SeedFromDisplay(HWND a_window);
+		// Rereads Windows HDR for the monitor the window is on, once a second.
+		void RefreshDisplay() noexcept;
+
+		// Windows HDR is on for the game's monitor; the container needs it at launch.
+		[[nodiscard]] bool IsWindowsHdrOn() const noexcept { return _windowsHdrOn.load(std::memory_order_acquire); }
 
 		// True while the frame renders HDR: enabled, with a container to present it.
 		[[nodiscard]] bool IsHdrActive() const noexcept;
@@ -53,19 +58,29 @@ namespace cs::features
 	private:
 		HDRDisplay() = default;
 
-		bool SaveSettings() override;
 		std::string_view GetRegistrationFailureMessage() const override { return "HDR Display could not register its imagespace shader define."; }
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(hdr_display::kSchema, _settings); }
 
 		// Start of Render_UI: the interface layer redirects the target to the scene.
 		void OnPreImagespace();
 		// The scene is final; the interface takes the proxy. Idempotent for pauses.
 		void SeparateInterface();
 
-		Settings _settings;
+		settings::LiveSettings<hdr_display::kSchema> _live{ { .normalize = [](Settings& a_settings) {
+																  // Paper white stays below peak, as upstream clamps it.
+																  a_settings.paperWhite = std::min(a_settings.paperWhite, a_settings.peakNits - 1); },
+			// Defaults re-seed from the display, like upstream.
+			.defaults = [this] {
+				Settings defaults;
+				defaults.enableHDR = _windowsHdrOn.load(std::memory_order_acquire);
+				defaults.autoDetected = _settings.autoDetected;
+				return defaults; } } };
+		const Settings& _settings = _live.Get();
 		hdr_display::CaptureComposer _capture;
 		std::atomic_bool _displayKnown{ false };
 		std::atomic_bool _displaySupportsHdr{ false };
 		std::atomic_bool _windowsHdrOn{ false };
+		static constexpr std::int64_t kDisplayPollMs = 1000;
+		std::atomic<HWND> _window{ nullptr };
+		std::atomic<std::int64_t> _lastDisplayCheckMs{ 0 };
 	};
 }

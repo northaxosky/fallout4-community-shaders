@@ -1,6 +1,7 @@
 #include "HDRDisplay.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 
@@ -8,20 +9,19 @@
 
 #include "Api/CommunityShadersAPI.h"
 #include "HDRDetection.h"
-#include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Section.h"
 #include "Menu/SettingsEdit.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/FrameState.h"
 #include "Render/HookRegistry.h"
 #include "Render/InterfaceLayer.h"
 #include "Render/RenderHooks.h"
 #include "Render/ScreenshotSites.h"
 #include "Render/SharedDataLayout.h"
 #include "Render/TemporalPipeline.h"
-#include "Settings/SettingsPersistence.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
 
@@ -39,9 +39,13 @@ namespace cs::features
 		constexpr float kMenuScenePaused = 0.58f;
 		constexpr float kMenuSceneMainOrLoading = 1.0f;
 
-		// The pause freeze-frame stores copy from RT0, so they follow its format.
-		constexpr auto kMenuBackground = RE::BSGraphics::RenderTargetID::kMenuBackground;
-		constexpr auto kPauseFreezeFrame = RE::BSGraphics::RenderTargetID::kPauseFreezeFrame;
+		// Stores copy RT0; HDR gamma luma in TAA history exceeds 1, UNORM8 clamps it.
+		constexpr std::array kPromotedTargets{
+			RE::BSGraphics::RenderTargetID::kMenuBackground,
+			RE::BSGraphics::RenderTargetID::kPauseFreezeFrame,
+			RE::BSGraphics::RenderTargetID::kTemporalAAHistory0,
+			RE::BSGraphics::RenderTargetID::kTemporalAAHistory1,
+		};
 		constexpr auto kHdrSceneFormat = static_cast<RE::BSGraphics::Format>(DXGI_FORMAT_R16G16B16A16_FLOAT);
 
 		struct RenderTargetManager_CreateRenderTarget
@@ -49,7 +53,7 @@ namespace cs::features
 			static void thunk(RE::BSGraphics::RenderTargetManager* a_manager, RE::BSGraphics::RenderTargetID a_id,
 				const RE::BSGraphics::RenderTargetProperties* a_properties, RE::BSGraphics::RenderTargetCreationMode a_mode)
 			{
-				if (a_properties && (a_id == kMenuBackground || a_id == kPauseFreezeFrame) &&
+				if (a_properties && std::ranges::contains(kPromotedTargets, a_id) &&
 					render::TemporalPipeline::Get().IsHdrContainerActive()) {
 					auto promoted = *a_properties;
 					promoted.format = kHdrSceneFormat;
@@ -98,35 +102,12 @@ namespace cs::features
 
 	bool HDRDisplay::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(hdr_display::kSchema, a_config, candidate, a_error))
-			return false;
-		// Paper white stays below peak, as upstream clamps on load.
-		candidate.paperWhite = std::min(candidate.paperWhite, candidate.peakNits - 1);
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(hdr_display::kSchema, _settings, [this] {
-			_settings.paperWhite = std::min(_settings.paperWhite, _settings.peakNits - 1);
-		});
-		return true;
-	}
-
-	bool HDRDisplay::SaveSettings()
-	{
-		return settings::SaveDelta(hdr_display::kSchema, GetConfigKey(), _settings, *L);
-	}
-
-	void HDRDisplay::RestoreDefaultSettings()
-	{
-		const bool autoDetected = _settings.autoDetected;
-		_settings = Settings{};
-		// Defaults re-seed from the display, like upstream.
-		_settings.enableHDR = _windowsHdrOn.load(std::memory_order_acquire);
-		_settings.autoDetected = autoDetected;
-		SaveSettings();
+		return _live.Configure(a_config, a_error);
 	}
 
 	void HDRDisplay::SeedFromDisplay(HWND a_window)
 	{
+		_window.store(a_window, std::memory_order_release);
 		const auto capability = hdr_display::QueryDisplayCapability(a_window);
 		if (!capability)
 			return;
@@ -136,14 +117,36 @@ namespace cs::features
 		_displayKnown.store(true, std::memory_order_release);
 		if (_settings.autoDetected)
 			return;
-		_settings.enableHDR = capability->hdrEnabled;
-		_settings.autoDetected = true;
-		SaveSettings();
+		std::string error;
+		if (!FeatureManager::Get().CommitLiveSettings(
+				*this, toml::table{ { "enableHDR", capability->hdrEnabled }, { "autoDetected", true } },
+				settings::Scope::kImmediate, settings::Persist::kNow, "HDRDisplay::SeedFromDisplay", error))
+			L->error("HDR display seeding failed: {}", error);
+	}
+
+	void HDRDisplay::RefreshDisplay() noexcept
+	{
+		const auto window = _window.load(std::memory_order_acquire);
+		if (!window || !_displayKnown.load(std::memory_order_acquire))
+			return;
+		const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch())
+		                     .count();
+		auto last = _lastDisplayCheckMs.load(std::memory_order_relaxed);
+		if (now - last < kDisplayPollMs || !_lastDisplayCheckMs.compare_exchange_strong(last, now))
+			return;
+		const auto capability = hdr_display::QueryDisplayCapability(window);
+		if (!capability)
+			return;
+		if (_windowsHdrOn.exchange(capability->hdrEnabled, std::memory_order_acq_rel) != capability->hdrEnabled)
+			L->info("Windows HDR is now {} for the game monitor", capability->hdrEnabled ? "on" : "off");
+		_displaySupportsHdr.store(capability->hdrSupported, std::memory_order_release);
 	}
 
 	bool HDRDisplay::IsHdrActive() const noexcept
 	{
-		return _settings.enableHDR && render::TemporalPipeline::Get().IsHdrContainerActive();
+		return _settings.enableHDR && _windowsHdrOn.load(std::memory_order_acquire) &&
+		       render::TemporalPipeline::Get().IsHdrContainerActive();
 	}
 
 	const buffer::Texture2D* HDRDisplay::ComposeCapture(bool a_hdr, bool a_interface)
@@ -156,7 +159,8 @@ namespace cs::features
 	render::hdr::OutputSettings HDRDisplay::GetOutputSettings() const noexcept
 	{
 		return {
-			.enabled = _settings.enableHDR,
+			.enabled = _settings.enableHDR && _windowsHdrOn.load(std::memory_order_acquire),
+			.windowsHdr = _windowsHdrOn.load(std::memory_order_acquire),
 			.paperWhite = static_cast<float>(_settings.paperWhite),
 			.peakNits = static_cast<float>(_settings.peakNits),
 			.uiBrightness = _settings.uiBrightness
@@ -192,7 +196,7 @@ namespace cs::features
 	{
 		// The host shell blurs the back buffer, so it must hold the whole frame.
 		render::InterfaceLayer::Get().BeginScene(
-			render::TemporalPipeline::Get().IsHdrContainerActive() && !host::HostClient::IsShellOpen());
+			render::TemporalPipeline::Get().IsHdrContainerActive() && !render::GetFrameState().shellOpen);
 	}
 
 	void HDRDisplay::SeparateInterface()
@@ -205,11 +209,11 @@ namespace cs::features
 
 	void HDRDisplay::WriteSharedFrameData(render::SharedDataCB& a_shared)
 	{
-		const auto* ui = RE::UI::GetSingleton();
+		const auto frame = render::GetFrameState();
 		float menuScene = kMenuSceneGameplay;
-		if (engine::IsMainOrLoadingMenuOpen())
+		if (frame.mainOrLoading)
 			menuScene = kMenuSceneMainOrLoading;
-		else if (ui && ui->GameIsPaused())
+		else if (frame.paused)
 			menuScene = kMenuScenePaused;
 		a_shared.HDRData = {
 			IsHdrActive() ? 1.0f : 0.0f,
@@ -222,12 +226,12 @@ namespace cs::features
 	void HDRDisplay::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(hdr_display::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		constexpr auto clamped = dmui::ui::SliderFlags::kAlwaysClamp;
 
 		if (const ui::Section section{ "hdr-display-output", "Output" }; section) {
 			if (!render::TemporalPipeline::Get().IsHdrContainerActive())
-				dmui::ui::TextDisabled("HDR output is inactive; it needs borderless windowed mode.");
+				dmui::ui::TextDisabled("HDR output is inactive; it needs borderless windowed mode and Windows HDR on at launch.");
 			else if (_displayKnown.load(std::memory_order_acquire))
 				dmui::ui::TextDisabled(_windowsHdrOn.load(std::memory_order_acquire)       ? "Windows HDR is on." :
 									   _displaySupportsHdr.load(std::memory_order_acquire) ? "Windows HDR is off for this display." :

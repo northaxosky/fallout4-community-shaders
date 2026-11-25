@@ -54,10 +54,12 @@ namespace
 			D3D11_SHADER_TYPE_DESC member{};
 			if (expected == a_fields.end() || FAILED(a_type->GetMemberTypeByIndex(index)->GetDesc(&member)))
 				return std::string(name) + ": missing struct member";
-			const UINT size = member.Class == D3D_SVC_MATRIX_ROWS    ? 16 * member.Rows :
-			                  member.Class == D3D_SVC_MATRIX_COLUMNS ? 16 * member.Columns :
-			                                                           4 * member.Rows * member.Columns;
-			if (member.Offset != expected->offset || size != expected->size || member.Elements != 0)
+			const UINT element = member.Class == D3D_SVC_MATRIX_ROWS    ? 16 * member.Rows :
+			                     member.Class == D3D_SVC_MATRIX_COLUMNS ? 16 * member.Columns :
+			                                                              4 * member.Rows * member.Columns;
+			// HLSL array elements each start a register; only the last is unpadded.
+			const UINT size = member.Elements ? 16 * (member.Elements - 1) + element : element;
+			if (member.Offset != expected->offset || size != expected->size)
 				return std::string(name) + ": struct offset/size mismatch";
 		}
 		return {};
@@ -82,9 +84,11 @@ namespace
 			F(MaxRainWetness), F(MaxPuddleWetness), F(MaxShoreWetness), F(ShoreRange), F(PuddleRadius), F(PuddleMaxAngle), F(PuddleMinWetness),
 			F(MinRainWetness), F(SkinWetness), F(WeatherTransitionSpeed), F(EnableRaindropFx), F(EnableSplashes), F(EnableRipples), F(EnableVanillaRipples),
 			F(RaindropFxRange), F(RaindropGridSizeRcp), F(RaindropIntervalRcp), F(RaindropChance), F(SplashesLifetime), F(SplashesStrength),
-			F(SplashesMinRadius), F(SplashesMaxRadius), F(RippleStrength), F(RippleRadius), F(RippleBreadth), F(RippleLifetimeRcp), F(pad0));
-		const auto sky = FIELDS(SkylightingSettings, F(OcclusionViewProj), F(OcclusionSHBasis4Pi), F(PosOffset), F(ArrayOrigin), F(ValidMargin),
-			F(MinDiffuseVisibility), F(MinSpecularVisibility), F(pad0));
+			F(SplashesMinRadius), F(SplashesMaxRadius), F(RippleStrength), F(RippleRadius), F(RippleBreadth), F(RippleLifetimeRcp), F(WallRainDensity),
+			F(WallRainDropSize), F(WallRainSpeed), F(WallRainLayering), F(WallRainNormalStrength), F(WallRainWetness), F(WallRainDarkening),
+			F(EnableWallRain), F(WallRainTrailLength));
+		const auto sky = FIELDS(SkylightingSettings, F(OcclusionViewProj), F(ZenithViewProj), F(OcclusionSHBasis4Pi), F(PosOffset), F(ArrayOrigin),
+			F(ValidMargin), F(ZenithOffset), F(ZenithValid), F(MinDiffuseVisibility), F(MinSpecularVisibility), F(AccumulateOcclusion), F(pad0));
 		const auto cloud = FIELDS(CloudShadowsSettings, F(Opacity), F(pad0));
 		const auto lod = FIELDS(LODBlendingSettings, F(LODTerrainBrightness), F(LODObjectBrightness), F(LODObjectSnowBrightness),
 			F(DisableTerrainVertexColors), F(LODTerrainGamma), F(LODObjectGamma), F(LODObjectSnowGamma), F(pad0));
@@ -93,7 +97,8 @@ namespace
 			F(Transmission), F(EnableSelfShadow), F(SelfShadowStrength), F(SelfShadowExponent), F(SelfShadowScale), F(HairMode), F(pad));
 		const auto variation = FIELDS(TerrainVariationSettings, F(enableLODTerrainTilingFix), F(enableMeshSupport), F(pad));
 		const auto ibl = FIELDS(IBLSettings, F(EnableIBL), F(PreserveFogLuminance), F(UseStaticIBL), F(DALCAmount), F(EnvIBLScale), F(SkyIBLScale),
-			F(EnvIBLSaturation), F(SkyIBLSaturation), F(FogAmount), F(DALCMode), F(ENBSkyFalloff), F(pad0));
+			F(EnvIBLSaturation), F(SkyIBLSaturation), F(FogAmount), F(DALCMode), F(EnableReflectionFallback), F(ReflectionFallbackDistance),
+			F(ENBSkyFalloff), F(pad0), F(pad1), F(pad2));
 		const auto translucency = FIELDS(ExtendedTranslucencySettings, F(MaterialModel), F(Reduction), F(Softness), F(Strength));
 		const auto linear = FIELDS(LinearLightingSettings, F(isMainOrLoadingMenu), F(diffuseGamma), F(directionalLightMult), F(pointLightMult),
 			F(ambientMult), F(glowmapMult), F(effectLightingMult), F(membraneEffectMult), F(bloodEffectMult), F(projectedEffectMult),
@@ -125,18 +130,31 @@ namespace
 			F(fogDensity), F(fogHeight2), F(fogHeightFalloff2), F(fogDensity2), F(directionalInscatteringMultiplier), F(directionalInscatteringAnisotropy),
 			F(useSkyIBL), F(inscatteringTint), F(cubemapMipLevel),
 			F(sunlightAttenuationAmount), F(respectVanillaFogFade), F(disableVanillaFog), F(fogInscatteringColor), F(originalFogColorAmount),
-			F(volumetricFogEnabled), F(volumetricGridPixelSize), F(volumetricGridSizeZ), F(volumetricFogDistance), F(volumetricFogStartDistance),
-			F(volumetricFogNearFadeInDistance), F(volumetricFogExtinctionScale), F(volumetricFogAlbedo), F(volumetricFogEmissive),
-			F(volumetricDirectionalScatteringIntensity), F(volumetricShadowBias), F(volumetricDepthDistributionScale), F(volumetricSkyLightingIntensity),
-			F(volumetricFogScatteringDistribution), F(volumetricHistoryWeight), F(volumetricHistoryMissSampleCount), F(volumetricSampleJitterMultiplier),
-			F(volumetricUpsampleJitterMultiplier), F(volumetricNearGridDistance), F(volumetricFarGridPixelSize), F(volumetricFarGridSizeZ),
-			F(volumetricLocalLightScatteringIntensity), F(volumetricFogNoiseScale), F(volumetricFogNoiseThreshold), F(pad3), F(volumetricFogNoiseVelocity), F(pad0), F(originalFogColorOverride));
+			F(volumetricFogEnabled), F(volumetricFogStartDistance), F(volumetricFogNearFadeInDistance), F(volumetricFogAlbedo), F(volumetricFogEmissive),
+			F(volumetricDirectionalScatteringIntensity), F(volumetricSkyLightingIntensity), F(volumetricFogScatteringDistribution),
+			F(volumetricFogExtinctionScale), F(volumetricLocalLightScatteringIntensity), F(volumetricFogNoiseScale), F(volumetricFogNoiseThreshold), F(pad3), F(volumetricFogNoiseVelocity), F(pad0), F(originalFogColorOverride));
 		const auto pbr = FIELDS(TruePBRSettings, F(VertexAOStrength), F(EnableMicroShadows), F(MicroShadowStrength), F(pad));
 		const auto skin = FIELDS(SkinData, F(skinParams), F(skinParams2), F(skinDetailParams), F(sssParams), F(fuzzParams), F(physicalParams), F(wetParams));
 		const auto horizon = FIELDS(HorizonFixSettings, F(farWaterDistance), F(pad));
+		const auto physSky = FIELDS(PhysSkyData, F(texDim), F(rcpTexDim), F(frameDim), F(rcpFrameDim), F(zCameraPlanet), F(sunDir),
+			F(sunlightColor), F(trMix), F(masserDir), F(apLumMix), F(masserColor), F(apTrMix), F(secundaDir), F(sunDiskCos), F(secundaColor),
+			F(enabled), F(pad), F(vanillaMix), F(zBottom), F(rPlanet), F(rAtmosphere), F(groundAlbedo), F(cloudShadowRemapRange),
+			F(aerosolFalloff), F(aerosolPhaseG), F(aerosolScatter), F(halfResApShadow), F(aerosolAbsorption), F(rayleighFalloff),
+			F(rayleighScatter), F(ozoneAltitude), F(ozoneThickness), F(ozoneAbsorption), F(enableVanillaClouds), F(cloudRelightMix),
+			F(cloudOriginalMix), F(silverLiningMix), F(silverLiningSpread), F(enableVolumetricClouds), F(shadowVolumeRange),
+			F(lowestCloudAltitude), F(highestCloudAltitude), F(volCloudScatter), F(volCloudUseSun), F(volCloudAbsorption),
+			F(volCloudLowBottom), F(volCloudLowThickness), F(lightSkyStatics), F(skyStaticsBrightness), F(lightningPositionRadius),
+			F(lightningEndPosition), F(lightningColorIntensity), F(lightningControl), F(lightningPhotometry), F(lightningPlacement),
+			F(lightningChannelEmitter), F(lightningPreparationPositionRadius), F(lightningPreparationControl), F(diskAngularRadius),
+			F(dirLightBodyDir), F(dirLightDiskIndex), F(dirLightDisc), F(diskBillboardScale), F(moonDiscRadiance));
+		const auto atmosphere = FIELDS(ViewAtmosphereSettings, F(enabled), F(nearPixelSize), F(nearSlices), F(middlePixelSize),
+			F(middleSlices), F(distantPixelSize), F(distantSlices), F(historyMissSamples), F(nearRange), F(localRange), F(historyWeight),
+			F(sampleJitter), F(shadowBias), F(depthDistribution), F(lookupJitter), F(padding));
 		const auto rain = FIELDS(RainRefractionSettings, F(Enable), F(MotionStretch), F(MotionTransparency), F(pad0), F(TextureBounds), F(TextureRadiusScale), F(pad1));
 		const auto sun = FIELDS(ProceduralSunSettings, F(enabled), F(sunDiskCos), F(diskIntensity), F(edgeSoftness), F(haloEnabled),
 			F(sunHaloCos), F(haloIntensity), F(haloFalloff), F(cloudOcclusionStrength), F(sunQuadModelRadius), F(pad0));
+		const auto aurora = FIELDS(ProceduralAuroraSettings, F(FringeColor), F(BodyColor), F(CrownColor), F(Brightness), F(Time), F(RayDetail),
+			F(Softness), F(FoldStrength), F(RayStrength), F(Seed), F(Enabled), F(Atmosphere), F(CurtainSize), F(CurtainCount), F(BodyDisplayColor));
 #undef FIELDS
 #undef F
 		struct Block
@@ -156,7 +174,9 @@ namespace
 			{ 6, "enbSettings", enb }, { 6, "terrainBlendingSettings", blending },
 			{ 6, "exponentialHeightFogSettings", fog }, { 6, "truePBRSettings", pbr },
 			{ 6, "skinData", skin }, { 6, "horizonFixSettings", horizon },
-			{ 6, "rainRefractionSettings", rain }, { 6, "proceduralSunSettings", sun }
+			{ 6, "physSkyData", physSky }, { 6, "rainRefractionSettings", rain },
+			{ 6, "viewAtmosphereSettings", atmosphere }, { 6, "proceduralSunSettings", sun },
+			{ 6, "proceduralAuroraSettings", aurora }
 		};
 		D3D11_SHADER_DESC shader{};
 		a_reflection->GetDesc(&shader);
@@ -254,7 +274,9 @@ namespace
 			ABI(SharedDataCB, HasDirectionalShadows), ABI(SharedDataCB, InMapMenu), ABI(SharedDataCB, HideSky),
 			ABI(SharedDataCB, MipBias), ABI(SharedDataCB, WaterSystemHeight),
 			ABI(SharedDataCB, PostWaterComposite), ABI(SharedDataCB, ResetHistory), ABI(SharedDataCB, TonemapOwner),
-			ABI(SharedDataCB, AmbientSHR), ABI(SharedDataCB, AmbientSHG), ABI(SharedDataCB, AmbientSHB), ABI(SharedDataCB, HDRData)
+			ABI(SharedDataCB, AmbientSHR), ABI(SharedDataCB, AmbientSHG), ABI(SharedDataCB, AmbientSHB), ABI(SharedDataCB, HDRData),
+			ABI(SharedDataCB, PreExposure), ABI(SharedDataCB, RcpPreExposure), ABI(SharedDataCB, PreviousPreExposure),
+			ABI(SharedDataCB, PreExposureHistoryRatio)
 		};
 		const ABIField feature[]{
 			ABI(SharedFeatureDataCB, grassLightingSettings), ABI(SharedFeatureDataCB, extendedMaterialSettings),
@@ -267,7 +289,9 @@ namespace
 			ABI(SharedFeatureDataCB, enbSettings), ABI(SharedFeatureDataCB, terrainBlendingSettings),
 			ABI(SharedFeatureDataCB, exponentialHeightFogSettings), ABI(SharedFeatureDataCB, truePBRSettings),
 			ABI(SharedFeatureDataCB, skinData), ABI(SharedFeatureDataCB, horizonFixSettings),
-			ABI(SharedFeatureDataCB, rainRefractionSettings), ABI(SharedFeatureDataCB, proceduralSunSettings)
+			ABI(SharedFeatureDataCB, physSkyData), ABI(SharedFeatureDataCB, rainRefractionSettings),
+			ABI(SharedFeatureDataCB, viewAtmosphereSettings), ABI(SharedFeatureDataCB, proceduralSunSettings),
+			ABI(SharedFeatureDataCB, proceduralAuroraSettings)
 		};
 		const ABIField fo4[]{
 			ABI(FO4SharedDataCB, DebugOwner), ABI(FO4SharedDataCB, DebugMode),
@@ -284,7 +308,7 @@ namespace
 			ABI(FO4SharedDataCB, EnabledScreenSpaceGI), ABI(FO4SharedDataCB, EnabledUnifiedWater),
 			ABI(FO4SharedDataCB, EnabledScreenSpaceShadows), ABI(FO4SharedDataCB, EnabledVolumetricShadows),
 			ABI(FO4SharedDataCB, DirectionalAmbient), ABI(FO4SharedDataCB, EnabledLODBlending),
-			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, pad0),
+			ABI(FO4SharedDataCB, EnabledLightLimitFix), ABI(FO4SharedDataCB, EnabledMotionVectorFixes),
 			ABI(FO4SharedDataCB, pad1), ABI(FO4SharedDataCB, SunDiscDirection),
 			ABI(FO4SharedDataCB, SunGlareColor)
 		};
@@ -398,6 +422,11 @@ namespace
 			return "DirectionalShadowLights: ABI slot mismatch";
 		if (binding.NumSamples != sizeof(cs::engine::DirectionalShadowLightData<cs::engine::kMaxSunCascades>))
 			return "DirectionalShadowLights: ABI structure stride mismatch";
+		// The host binds the zenith depth at t4 and the coverage UAV at u4.
+		for (const char* name : { "srcZenithDepth", "outCoverage" }) {
+			if (FAILED(reflection->GetResourceBindingDescByName(name, &binding)) || binding.BindPoint != 4)
+				return std::string(name) + ": ABI slot mismatch";
+		}
 		return {};
 	}
 	Microsoft::WRL::ComPtr<ID3D11ShaderReflection> Reflect(const std::filesystem::path& a_root, const std::filesystem::path& a_path, const std::vector<std::pair<const char*, const char*>>& a_defines, const char* a_profile, std::string& a_error, Microsoft::WRL::ComPtr<ID3DBlob>* a_blob = nullptr)
@@ -465,7 +494,6 @@ namespace
 	}
 	std::string VerifyVolumetricShadowsABI(const std::filesystem::path& a_root)
 	{
-		namespace slots = cs::features::volumetric_shadows_shader;
 		std::string error;
 		// Host binds cascades at t0/t1, the map mip at u0, a clamp sampler at s0.
 		for (const char* define : { "DOWNSAMPLE_SHADOW_MIP0", "DOWNSAMPLE_SHADOW_MIP1" }) {
@@ -487,8 +515,8 @@ namespace
 		const auto consumer = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "VOLUMETRIC_SHADOWS", "1" } }, "ps_5_0", error, &consumerBlob);
 		if (!consumer)
 			return error;
-		if (BindPoint(consumer.Get(), "VolumetricShadows::SharedShadowMap") != slots::kSharedShadowMapSlot ||
-			BindPoint(consumer.Get(), "DirectionalShadowLights") != slots::kShadowLightsSlot)
+		if (BindPoint(consumer.Get(), "VolumetricShadows::SharedShadowMap") != cs::render::kVolumetricShadowsMapSlot ||
+			BindPoint(consumer.Get(), "DirectionalShadowLights") != cs::render::kVolumetricShadowsLightsSlot)
 			return "consumer: ABI slot mismatch";
 		// Injection binds the host sampler only for shaders declaring it by name.
 		const auto use = cs::util::ReflectShaderSamplers(consumerBlob->GetBufferPointer(), consumerBlob->GetBufferSize());
@@ -573,7 +601,6 @@ namespace
 
 	std::string VerifyCloudShadowsABI(const std::filesystem::path& a_root)
 	{
-		namespace slots = cs::features::cloud_shadows_shader;
 		std::string error;
 		// The host binds the face depth, the cube output and the layer output.
 		const auto sky = Reflect(a_root, "Sky.hlsl", { { "BSSKY_PIXEL_SHADER", "1" }, { "PSHADER", "1" }, { "TEX", "1" }, { "CLOUDS", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
@@ -581,12 +608,12 @@ namespace
 			return error;
 		D3D11_SHADER_DESC desc{};
 		sky->GetDesc(&desc);
-		if (BindPoint(sky.Get(), "TexDepthSampler") != slots::kCloudDepthSlot || desc.OutputParameters != 4)
+		if (BindPoint(sky.Get(), "TexDepthSampler") != cs::render::kSkyDepthSlot || desc.OutputParameters != 4)
 			return "Sky: ABI depth slot or output count mismatch";
 		const auto consumer = Reflect(a_root, ProbeShader(), { { "FO4CS_SUBSTRATE", "1" }, { "CLOUD_SHADOWS", "1" } }, "ps_5_0", error);
 		if (!consumer)
 			return error;
-		if (BindPoint(consumer.Get(), "CloudShadows::CloudShadowsTexture") != slots::kCloudShadowsSlot)
+		if (BindPoint(consumer.Get(), "CloudShadows::CloudShadowsTexture") != cs::render::kCloudShadowsSlot)
 			return "consumer: ABI slot mismatch";
 		return {};
 	}
@@ -598,8 +625,8 @@ namespace
 		const auto composite = Reflect(a_root, "DFComposite.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY", "1" }, { "VANILLA_PBR", "1" }, { "DYNAMIC_CUBEMAPS", "1" } }, "ps_5_0", error);
 		if (!composite)
 			return error;
-		if (BindPoint(composite.Get(), "VanillaPBR::LiveLODTexture") != vpbr::kLiveLODPSSlot ||
-			BindPoint(composite.Get(), "g_tIblProbeCube") != vpbr::kAuthoredCubePSSlot)
+		if (BindPoint(composite.Get(), "VanillaPBR::LiveLODTexture") != cs::render::kVanillaPbrLiveLODSlot ||
+			BindPoint(composite.Get(), "g_tIblProbeCube") != cs::render::kVanillaPbrAuthoredCubeSlot)
 			return "DFComposite: ABI slot mismatch";
 		const auto detail = Reflect(a_root, "FO4/VanillaPBR/BlurDetailCS.hlsl", vpbr::kBlurMatchShaderDefines, "cs_5_0", error);
 		if (!detail)

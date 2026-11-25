@@ -9,6 +9,8 @@
 #include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
+#include "Render/Extent.h"
+#include "Render/RenderExtents.h"
 #include "Render/RendererContext.h"
 #include "Utils/CSUtil.h"
 
@@ -182,8 +184,8 @@ namespace cs::features
 			uav->GetDesc(&uaViewDesc);
 		}
 
-		textureDesc.Width = static_cast<std::uint32_t>(static_cast<float>(textureDesc.Width) * a_widthRatio);
-		textureDesc.Height = static_cast<std::uint32_t>(static_cast<float>(textureDesc.Height) * a_heightRatio);
+		textureDesc.Width = cs::render::ScaledExtent(textureDesc.Width, a_widthRatio);
+		textureDesc.Height = cs::render::ScaledExtent(textureDesc.Height, a_heightRatio);
 
 		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
@@ -261,8 +263,8 @@ namespace cs::features
 			return;
 		}
 
-		texDesc.Width = static_cast<std::uint32_t>(static_cast<float>(texDesc.Width) * a_widthRatio);
-		texDesc.Height = static_cast<std::uint32_t>(static_cast<float>(texDesc.Height) * a_heightRatio);
+		texDesc.Width = cs::render::ScaledExtent(texDesc.Width, a_widthRatio);
+		texDesc.Height = cs::render::ScaledExtent(texDesc.Height, a_heightRatio);
 		texDesc.Format = DXGI_FORMAT_R32_FLOAT;
 		texDesc.Usage = D3D11_USAGE_DEFAULT;
 		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -361,11 +363,38 @@ namespace cs::features
 		*engineTarget = originalRenderTargets[index];
 	}
 
+	void DynamicResolution::RestoreRenderTargetData(RE::BSGraphics::RenderTargetManager& a_manager) const
+	{
+		std::ranges::copy(originalRenderTargetData, std::begin(a_manager.renderTargetData));
+	}
+
+	void DynamicResolution::RepointBoundSRVs(bool a_toProxy) const
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+		ID3D11ShaderResourceView* boundSRVs[16] = {};
+		context->PSGetShaderResources(0, 16, boundSRVs);
+		for (int slot = 0; slot < 16; slot++) {
+			if (!boundSRVs[slot]) {
+				continue;
+			}
+			for (const auto target : kProxiedTargets) {
+				const auto& original = originalRenderTargets[Index(target)];
+				const auto& proxy = proxyRenderTargets[Index(target)];
+				auto* from = reinterpret_cast<ID3D11ShaderResourceView*>(a_toProxy ? original.srView : proxy.srView);
+				auto* to = reinterpret_cast<ID3D11ShaderResourceView*>(a_toProxy ? proxy.srView : original.srView);
+				if (boundSRVs[slot] == from && to) {
+					context->PSSetShaderResources(slot, 1, &to);
+					break;
+				}
+			}
+			boundSRVs[slot]->Release();
+		}
+	}
+
 	void DynamicResolution::OverrideRenderTargets(std::initializer_list<RenderTargetID> a_toCopy)
 	{
-		if (!_hasProxies) {
-			return;
-		}
 		cs::render::annotation::ScopedEvent annotationScope(
 			"Upscaling::DynamicResolution/CopyToProxies");
 
@@ -378,40 +407,19 @@ namespace cs::features
 			return;
 		}
 
-		const float widthRatio = renderTargetManager->GetDynamicWidthRatio();
-		const float heightRatio = renderTargetManager->GetDynamicHeightRatio();
+		const float widthRatio = _proxyPassState->widthRatio;
+		const float heightRatio = _proxyPassState->heightRatio;
 
 		// Report the scaled dimensions so callers that query render-target sizes stay correct.
-		for (int i = 0; i < 100; i++) {
+		for (std::size_t i = 0; i < std::size(originalRenderTargetData); i++) {
 			originalRenderTargetData[i] = renderTargetManager->renderTargetData[i];
-			renderTargetManager->renderTargetData[i].width = static_cast<std::uint32_t>(
-				static_cast<float>(renderTargetManager->renderTargetData[i].width) * widthRatio);
-			renderTargetManager->renderTargetData[i].height = static_cast<std::uint32_t>(
-				static_cast<float>(renderTargetManager->renderTargetData[i].height) * heightRatio);
+			renderTargetManager->renderTargetData[i].width = cs::render::ScaledExtent(
+				renderTargetManager->renderTargetData[i].width, widthRatio);
+			renderTargetManager->renderTargetData[i].height = cs::render::ScaledExtent(
+				renderTargetManager->renderTargetData[i].height, heightRatio);
 		}
 
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-
-		// Repoint any pixel-shader SRV already bound from an original target to its proxy.
-		ID3D11ShaderResourceView* boundSRVs[16] = {};
-		context->PSGetShaderResources(0, 16, boundSRVs);
-		for (int slot = 0; slot < 16; slot++) {
-			if (!boundSRVs[slot]) {
-				continue;
-			}
-			for (const auto target : kProxiedTargets) {
-				auto* originalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(originalRenderTargets[Index(target)].srView);
-				auto* proxySRV = reinterpret_cast<ID3D11ShaderResourceView*>(proxyRenderTargets[Index(target)].srView);
-				if (boundSRVs[slot] == originalSRV && proxySRV) {
-					context->PSSetShaderResources(slot, 1, &proxySRV);
-					break;
-				}
-			}
-			boundSRVs[slot]->Release();
-		}
-
-		renderTargetManager->SetUseDynamicResolutionViewportAsDefaultViewport(false);
+		RepointBoundSRVs(true);
 		_renderTargetsOverridden = true;
 	}
 
@@ -424,7 +432,7 @@ namespace cs::features
 			"Upscaling::DynamicResolution/CopyFromProxies");
 
 		for (const auto target : kProxiedTargets) {
-			ResetRenderTarget(target, a_toCopy.size() == 0 || Contains(a_toCopy, target));
+			ResetRenderTarget(target, Contains(a_toCopy, target));
 		}
 
 		auto* renderTargetManager = cs::engine::GetRenderTargetManager();
@@ -432,35 +440,12 @@ namespace cs::features
 			return;
 		}
 
-		for (int i = 0; i < 100; i++) {
-			renderTargetManager->renderTargetData[i] = originalRenderTargetData[i];
-		}
-
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-
-		ID3D11ShaderResourceView* boundSRVs[16] = {};
-		context->PSGetShaderResources(0, 16, boundSRVs);
-		for (int slot = 0; slot < 16; slot++) {
-			if (!boundSRVs[slot]) {
-				continue;
-			}
-			for (const auto target : kProxiedTargets) {
-				auto* originalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(originalRenderTargets[Index(target)].srView);
-				auto* proxySRV = reinterpret_cast<ID3D11ShaderResourceView*>(proxyRenderTargets[Index(target)].srView);
-				if (boundSRVs[slot] == proxySRV && originalSRV) {
-					context->PSSetShaderResources(slot, 1, &originalSRV);
-					break;
-				}
-			}
-			boundSRVs[slot]->Release();
-		}
-
-		renderTargetManager->SetUseDynamicResolutionViewportAsDefaultViewport(true);
+		RestoreRenderTargetData(*renderTargetManager);
+		RepointBoundSRVs(false);
 		_renderTargetsOverridden = false;
 	}
 
-	void DynamicResolution::OverrideDepth(bool a_doCopy)
+	void DynamicResolution::OverrideDepth(DepthCopy a_copy)
 	{
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData || !_depthOverrideTexture) {
@@ -478,13 +463,13 @@ namespace cs::features
 		}
 		_originalDepthView = reinterpret_cast<ID3D11ShaderResourceView*>(mainDepth->srViewDepth);
 
-		if (a_doCopy) {
-			const auto frame = cs::engine::GetFrameCount();
-			if (!_depthCopyFrame.IsCurrent(frame)) {
-				if (!CopyDepth())
-					return;
-				_depthCopyFrame.Mark(frame);
-			}
+		const auto frame = cs::engine::GetFrameCount();
+		const bool firstCopy = !_depthCopyFrame.IsCurrent(frame);
+		if (firstCopy || a_copy == DepthCopy::kRefresh) {
+			// Linear depth is for early-frame readers; a refresh must not rewrite it.
+			if (!CopyDepth(firstCopy))
+				return;
+			_depthCopyFrame.Mark(frame);
 		}
 
 		mainDepth->srViewDepth =
@@ -506,10 +491,7 @@ namespace cs::features
 
 	bool DynamicResolution::ProxyPassAvailable() const
 	{
-		auto* renderTargetManager = cs::engine::GetRenderTargetManager();
-		return !_proxyPass && _hasProxies && renderTargetManager &&
-		       (renderTargetManager->GetDynamicWidthRatio() != 1.0f ||
-				   renderTargetManager->GetDynamicHeightRatio() != 1.0f);
+		return !_proxyPassState && _hasProxies && cs::render::ReadLiveResolution().Scaled();
 	}
 
 	bool DynamicResolution::BeginProxyPass(std::initializer_list<RenderTargetID> a_toProxy, ProxyTriangle a_triangle)
@@ -518,13 +500,11 @@ namespace cs::features
 			return false;
 		}
 
-		// Set first so EndProxyPass unwinds a partially applied override.
-		_proxyPass = true;
-		_proxyPassWidthRatio = cs::engine::GetRenderTargetManager()->GetDynamicWidthRatio();
-		_proxyPassHeightRatio = cs::engine::GetRenderTargetManager()->GetDynamicHeightRatio();
+		// Engaged first so EndProxyPass unwinds a partially applied override.
+		_proxyPassState = cs::engine::DynamicResolutionState::Capture();
 		OverrideRenderTargets(a_toProxy);
-		OverrideDepth(true);
-		cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
+		OverrideDepth();
+		cs::engine::DynamicResolutionState{}.Apply();
 		if (a_triangle == ProxyTriangle::kUnit) {
 			_triangleSwap.Apply();
 		}
@@ -533,22 +513,20 @@ namespace cs::features
 
 	void DynamicResolution::EndProxyPass(std::initializer_list<RenderTargetID> a_fromProxy)
 	{
-		if (!_proxyPass) {
+		if (!_proxyPassState) {
 			return;
 		}
-		_proxyPass = false;
 		_triangleSwap.Restore();
 		ResetRenderTargets(a_fromProxy);
 		ResetDepth();
-		if (_hasProxies) {
-			cs::engine::SetDynamicResolution(_proxyPassWidthRatio, _proxyPassHeightRatio, true);
-		}
+		_proxyPassState->Apply();
+		_proxyPassState.reset();
 	}
 
 	void DynamicResolution::ProxyAcquiredRenderTarget(RenderTargetID a_target)
 	{
 		auto* engineTarget = cs::engine::ResolveRenderTarget(a_target);
-		if (!_proxyPass || !engineTarget || !engineTarget->texture || IsProxyTexture(engineTarget->texture)) {
+		if (!_proxyPassState || !engineTarget || !engineTarget->texture || IsProxyTexture(engineTarget->texture)) {
 			return;
 		}
 
@@ -557,8 +535,8 @@ namespace cs::features
 		auto* liveTexture = reinterpret_cast<ID3D11Texture2D*>(engineTarget->texture);
 		D3D11_TEXTURE2D_DESC liveDesc{};
 		liveTexture->GetDesc(&liveDesc);
-		liveDesc.Width = static_cast<std::uint32_t>(static_cast<float>(liveDesc.Width) * _proxyPassWidthRatio);
-		liveDesc.Height = static_cast<std::uint32_t>(static_cast<float>(liveDesc.Height) * _proxyPassHeightRatio);
+		liveDesc.Width = cs::render::ScaledExtent(liveDesc.Width, _proxyPassState->widthRatio);
+		liveDesc.Height = cs::render::ScaledExtent(liveDesc.Height, _proxyPassState->heightRatio);
 
 		bool reusable = false;
 		if (auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxy.texture)) {
@@ -573,7 +551,7 @@ namespace cs::features
 			CaptureOriginal(a_target, *engineTarget);
 		} else {
 			ReleaseProxy(a_target);
-			UpdateRenderTarget(a_target, _proxyPassWidthRatio, _proxyPassHeightRatio);
+			UpdateRenderTarget(a_target, _proxyPassState->widthRatio, _proxyPassState->heightRatio);
 		}
 		OverrideRenderTarget(a_target, false);
 	}
@@ -584,7 +562,7 @@ namespace cs::features
 		originalRenderTargets[Index(a_target)] = {};
 	}
 
-	bool DynamicResolution::CopyDepth()
+	bool DynamicResolution::CopyDepth(bool a_linearize)
 	{
 		auto* context = cs::engine::GetImmediateContext();
 		auto* state = cs::engine::GetGraphicsState();
@@ -593,9 +571,9 @@ namespace cs::features
 		}
 
 		auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(RE::BSGraphics::DepthStencilTargetID::kMain);
-		auto* linearDepthUAV = cs::engine::GetRenderTargetUAV(RenderTargetID::kSAOCameraZ);
+		auto* linearDepthUAV = a_linearize ? cs::engine::GetRenderTargetUAV(RenderTargetID::kSAOCameraZ) : nullptr;
 		auto* depthUAV = _depthOverrideTexture->uav.get();
-		if (!depthSRV || !linearDepthUAV || !depthUAV) {
+		if (!depthSRV || (a_linearize && !linearDepthUAV) || !depthUAV) {
 			return false;
 		}
 
@@ -618,7 +596,7 @@ namespace cs::features
 		if (!UpdateAndBindUpscalingCB(context, screenSize, renderSize))
 			return false;
 
-		{
+		if (a_linearize) {
 			cs::render::annotation::ScopedEvent annotationScope(
 				"Upscaling::DynamicResolution/LinearizeDepth");
 			ID3D11ShaderResourceView* views[] = { depthSRV };
@@ -650,31 +628,22 @@ namespace cs::features
 
 	void DynamicResolution::AbortProxyPass()
 	{
-		auto* renderTargetManager = cs::engine::GetRenderTargetManager();
-
 		// Unwind an in-progress override so no engine slot keeps pointing at a proxy.
 		_triangleSwap.Restore();
 		ForEachTarget([&](RenderTargetID a_target) { RestoreEngineSlot(a_target); });
 		if (_renderTargetsOverridden) {
-			if (renderTargetManager) {
-				for (int i = 0; i < 100; i++) {
-					renderTargetManager->renderTargetData[i] = originalRenderTargetData[i];
-				}
-				renderTargetManager->SetUseDynamicResolutionViewportAsDefaultViewport(true);
+			if (auto* renderTargetManager = cs::engine::GetRenderTargetManager()) {
+				RestoreRenderTargetData(*renderTargetManager);
 			}
 			_renderTargetsOverridden = false;
 		}
 
-		_proxyPass = false;
-		InvalidateAllProxies();
-
-		// Restore the engine depth SRV if the override is still applied.
-		if (_depthOverridden) {
-			if (auto* mainDepth = cs::engine::ResolveDepthStencilTarget(RE::BSGraphics::DepthStencilTargetID::kMain)) {
-				mainDepth->srViewDepth = reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(_originalDepthView);
-			}
-			_depthOverridden = false;
+		if (_proxyPassState) {
+			_proxyPassState->Apply();
+			_proxyPassState.reset();
 		}
+		InvalidateAllProxies();
+		ResetDepth();
 	}
 
 	void DynamicResolution::Release()
@@ -728,7 +697,7 @@ namespace cs::features
 		float2 a_screenSize,
 		float2 a_renderSize)
 	{
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		if (!camera)
 			return false;
 		const auto depth = cs::engine::GetCameraDepthParameters(*camera);

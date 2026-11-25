@@ -64,7 +64,6 @@ namespace cs::features
 		if (const ui::Section section{ "cs-editor-information", "Weather Information" }; section)
 			_weather.DrawInformation(*sky);
 		_overrides.Draw(_weather.GetTargetWeather(*sky));
-		_weather.DrawFeatureAnalysis(*this);
 	}
 
 	namespace

@@ -94,7 +94,6 @@ namespace cs::feature_config
 			settings::Registry registry;
 			std::filesystem::path path;
 			toml::table root;
-			std::string readError;
 		};
 
 		Store& Config()
@@ -380,7 +379,6 @@ namespace cs::feature_config
 				return { store.root, loaded.status, loaded.error, {} };
 			store.registry = std::move(a_registry);
 			store.path = a_path;
-			store.readError = loaded.error;
 			std::vector<std::string> warnings;
 			if (loaded.status == FileLoadStatus::kParsed) {
 				std::vector<std::string> path;
@@ -432,61 +430,64 @@ namespace cs::feature_config
 		return std::nullopt;
 	}
 
-	WriteResult UpdateOwnedSettingsAt(
-		const std::filesystem::path& a_filePath, std::span<const std::string_view> a_path, const toml::table& a_value,
-		SectionWrite a_mode)
+	WriteResult UpdateOwnedSettings(
+		std::span<const std::string_view> a_path, const toml::table& a_value, SectionWrite a_mode)
 	{
 		auto& store = Config();
 		std::scoped_lock lock(store.mutex);
-		if (a_filePath != store.path)
-			return WriteError(a_filePath, "settings store has not been initialized for this path");
-		if (!store.readError.empty())
-			return WriteError(a_filePath, "writes are disabled until the settings file is repaired and the game restarted: " + store.readError);
+		if (store.path.empty())
+			return WriteError(store.path, "settings store has not been initialized");
 		const std::vector<std::string> path(a_path.begin(), a_path.end());
 		const auto* section = FindSection(store.registry, path);
 		if (!section)
-			return WriteError(a_filePath, "unregistered settings section");
-		auto candidate = store.root;
+			return WriteError(store.path, "unregistered settings section");
+		// Merge onto the file so later hand edits survive.
+		const auto loaded = LoadFile(store.path);
+		if (loaded.status == FileLoadStatus::kParseError || loaded.status == FileLoadStatus::kIoError)
+			return WriteError(store.path, "refusing to overwrite an unreadable file: " + loaded.error);
+		auto candidate = loaded.status == FileLoadStatus::kParsed ?
+		                     toml::parse(RenderDocument(store.registry, loaded.table)) :
+		                     store.root;
 		std::string error;
 		if (!MutateSection(candidate, store.registry, *section, a_value, a_mode, error))
-			return WriteError(a_filePath, error);
+			return WriteError(store.path, error);
 		const auto document = RenderDocument(store.registry, candidate);
-		const auto written = WriteIfChanged(a_filePath, document);
+		const auto written = WriteIfChanged(store.path, document);
 		if (written)
 			store.root = toml::parse(document);
 		return written;
 	}
 
-	WriteResult UpdateFeatureOwnedSettings(std::string_view a_featureKey, const toml::table& a_delta)
-	{
-		const std::array path{ std::string_view("features"), a_featureKey, std::string_view("settings") };
-		return UpdateOwnedSettingsAt(kConfigPath, path, a_delta);
-	}
-
 	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load)
 	{
 		const std::array path{ std::string_view("features"), a_featureKey };
-		return UpdateOwnedSettingsAt(kConfigPath, path, toml::table{ { "load", a_load } }, SectionWrite::kMerge);
+		return UpdateOwnedSettings(path, toml::table{ { "load", a_load } }, SectionWrite::kMerge);
 	}
 
 	WriteResult UpdateFeatureEnabled(std::string_view a_featureKey, bool a_enabled)
 	{
 		const std::array path{ std::string_view("features"), a_featureKey };
-		return UpdateOwnedSettingsAt(kConfigPath, path, toml::table{ { "enabled", a_enabled } }, SectionWrite::kMerge);
+		return UpdateOwnedSettings(path, toml::table{ { "enabled", a_enabled } }, SectionWrite::kMerge);
 	}
 
 	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value, SectionWrite a_mode)
 	{
 		const std::array path{ a_section };
-		return UpdateOwnedSettingsAt(kConfigPath, path, a_value, a_mode);
+		return UpdateOwnedSettings(path, a_value, a_mode);
 	}
 
-	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root)
+	ShaderOwnershipConfig DefaultShaderOwnership()
 	{
-		ShaderOwnershipParseResult result;
-		result.config.enableShaders = settings::core::ShaderOwnership{}.enableShaders;
+		ShaderOwnershipConfig config;
+		config.enableShaders = settings::core::ShaderOwnership{}.enableShaders;
 		for (const auto& target : engine::GetShaderInjectionTargets())
-			result.config.targets[target.id] = settings::core::ShaderTarget{}.enabled;
+			config.targets[target.id] = settings::core::ShaderTarget{}.enabled;
+		return config;
+	}
+
+	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root, const ShaderOwnershipConfig& a_base)
+	{
+		ShaderOwnershipParseResult result{ .config = a_base };
 		const auto* ownershipNode = a_root.get("shader_ownership");
 		if (!ownershipNode)
 			return result;
@@ -499,7 +500,7 @@ namespace cs::feature_config
 		const auto* ownership = ownershipNode->as_table();
 		if (!ownership)
 			return fail("shader_ownership must be a table");
-		settings::core::ShaderOwnership parsed;
+		settings::core::ShaderOwnership parsed{ .enableShaders = a_base.enableShaders };
 		if (std::string error; !settings::ParseTable(settings::core::kShaderOwnership, *ownership, parsed, error))
 			return fail("shader_ownership." + error);
 		result.config.enableShaders = parsed.enableShaders;
@@ -513,7 +514,7 @@ namespace cs::feature_config
 			const auto* target = engine::FindShaderInjectionTarget(key.str());
 			if (!target)
 				return fail("shader_ownership.targets contains unknown target '" + std::string(key.str()) + "'");
-			settings::core::ShaderTarget value;
+			settings::core::ShaderTarget value{ .enabled = a_base.targets[target->id] };
 			if (std::string error; !settings::ParseTable(settings::core::ShaderTargetSchema(target->name), *targets, value, error))
 				return fail("shader_ownership.targets." + error);
 			result.config.targets[target->id] = value.enabled;

@@ -2,6 +2,9 @@
 
 #include <exception>
 
+#include "Log.h"
+#include "Render/FrameThread.h"
+
 namespace cs::render
 {
 	bool FrameDispatcher::Post(std::function<void()> a_task)
@@ -22,6 +25,7 @@ namespace cs::render
 				const std::scoped_lock lock{ _mutex };
 				batch.swap(_queue);
 			}
+			inFrameDrain = true;
 			for (auto& task : batch) {
 				try {
 					task();
@@ -31,7 +35,9 @@ namespace cs::render
 					failures.emplace_back("non-standard exception");
 				}
 			}
+			inFrameDrain = false;
 		} catch (...) {
+			inFrameDrain = false;
 			failures.emplace_back("frame dispatcher drain failed");
 		}
 		return failures;
@@ -41,5 +47,15 @@ namespace cs::render
 	{
 		static FrameDispatcher dispatcher;
 		return dispatcher;
+	}
+
+	void PostToFrame(std::function<void()> a_task)
+	{
+		if (RunsInline()) {
+			a_task();
+			return;
+		}
+		if (!GetFrameDispatcher().Post(std::move(a_task)))
+			cs::log::Get("cs.render.framedispatcher")->error("Frame queue is full; mutation dropped");
 	}
 }

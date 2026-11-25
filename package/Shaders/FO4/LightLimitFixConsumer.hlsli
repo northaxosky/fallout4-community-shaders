@@ -10,10 +10,10 @@ namespace FO4LightLimitFix
 {
 	float3 GetLinearColor(float3 color, uint lightFlags)
 	{
-		// FO4: upstream decodes on the CPU; native light color keeps power 2.2.
+		// FO4: native color stays gamma 2.2; signed so kNegative lights subtract.
 		return (lightFlags & LightLimitFix::LightFlags::Linear) != 0 ?
 		           color :
-		           TransferFunctions::Gamma22ToLinear(color);
+		           TransferFunctions::SignedGamma22ToLinear(color);
 	}
 
 	float3 GetColor(float3 nativeColor, LightLimitFix::Light data)

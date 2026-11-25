@@ -726,7 +726,7 @@ struct PS_OUTPUT
 		tbnTr[1] = normalize(tbnTr[1]);
 		tbnTr[2] = normalize(tbnTr[2]);
 
-		float pixelOffset = 0;
+		float2 surfaceHeight = 0;
 #		if defined(EMAT_LANDSCAPE)
 		DisplacementParams displacementParams[6];
 		displacementParams[0].DisplacementScale = 1.f;
@@ -786,7 +786,7 @@ struct PS_OUTPUT
 			[branch] if (displacementParams.HeightScale > 0.0)
 			{
 				mipLevel = ExtendedMaterials::GetMipLevel(uv, g_tMaterial);
-				uv = ExtendedMaterials::GetParallaxCoords(viewPosition.z, uv, mipLevel, viewDirection, tbnTr, screenNoise, g_tMaterial, g_sMaterial, 3, displacementParams, applyMeshTV, meshOffset, pixelOffset);
+				uv = ExtendedMaterials::GetParallaxCoords(viewPosition.z, uv, mipLevel, viewDirection, tbnTr, screenNoise, g_tMaterial, g_sMaterial, 3, displacementParams, applyMeshTV, meshOffset, surfaceHeight);
 				const float parallaxShadowQuality = viewPosition.z < ExtendedMaterials::ParallaxCheapDistance ? ExtendedMaterials::ParallaxNearShadowQuality : ExtendedMaterials::ParallaxFarShadowQuality;
 				[branch] if (SharedData::extendedMaterialSettings.EnableShadows && parallaxShadowQuality > 0.0)
 				{
@@ -844,7 +844,7 @@ struct PS_OUTPUT
 		                              ExtendedMaterials::TerrainMaxWeightedHeightScale(landInput, displacementParams) > 0.01;
 			[branch] if (doTerrainPom)
 			{
-				uv = ExtendedMaterials::GetParallaxCoords(landInput, viewPosition.z, uv, mipLevels, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, pixelOffset, weights);
+				uv = ExtendedMaterials::GetParallaxCoords(landInput, viewPosition.z, uv, mipLevels, terrainMaxTexDim, viewDirection, tbnTr, screenNoise, displacementParams, sharedOffset, surfaceHeight, weights);
 			}
 			else if (SharedData::extendedMaterialSettings.EnableHeightBlending)
 			{
@@ -1513,12 +1513,7 @@ struct PS_OUTPUT
 #		else
 		output.auxA.w = blendAlpha;
 #		endif
-#		if HAIR && defined(FO4_PREPASS_VERTEX_AO)
-		// MRT4 alpha is also its blend factor, so hair writes 0 and keeps the value beneath instead of upstream's coverage-weighted 1 - vertexAO.
-		output.specTint.w = 0.0;
-#		else
 		output.specTint.w = blendAlpha;
-#		endif
 #	else
 #		ifdef FO4_PREPASS_VERTEX_AO
 	// 1 - vertexAO as upstream's Masks2; SSGI composite and Skylighting read it.
@@ -1740,6 +1735,18 @@ struct PS_OUTPUT
 #elif defined(BSDFPREPASS_VS_SOURCE)
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // Exact AE 1.11.240 PrePass ordinary, tessellated, instanced, combined and terrain vertex cells.
+
+// FO4: tree-wind grass writes its previous gust; stock reuses the current one.
+#	if defined(MOTION_VECTOR_FIXES) && GRASS && VC && (TREE_ANIM || SPLINE)
+#		define FO4_GRASS_PREVIOUS_GUST
+#		define SPLINE_PREVIOUS_POSITION previousPosition
+// FO4: bend at the previous length; the current one drops the radial gust.
+#		define TREE_PREVIOUS_DISTANCE (FO4SharedData::EnabledMotionVectorFixes != 0 ? length(previousDelta) : treeDistance)
+#		include "FO4/FO4ShaderData.hlsli"
+#	else
+#		define SPLINE_PREVIOUS_POSITION position
+#		define TREE_PREVIOUS_DISTANCE treeDistance
+#	endif
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -2565,13 +2572,15 @@ VertexOutput main(VertexInput input)
 	binormal = normalize(binormal + grassGust);
 	tangent = normalize(tangent + grassGust);
 	position.xyz = grassPlaced + grassGust + input.grass_origin.xyz;
-#		if VC && !(TREE_ANIM || SPLINE)
+#		if VC && (!(TREE_ANIM || SPLINE) || defined(FO4_GRASS_PREVIOUS_GUST))
 	// The previous gust only shapes the previous frame, so it is taken after the blade lands.
 	float3 grassPreviousGust = grassLean * (GrassGust(grassAngle.y, grassSpan) * (VERTEX_COLOR.a * VERTEX_COLOR.a * 0.5));
 #		elif !(TREE_ANIM || SPLINE)
 	float3 grassPreviousGust = float3(0.0, 0.0, 0.0);
 #		endif
-#		if TREE_ANIM || SPLINE
+#		if defined(FO4_GRASS_PREVIOUS_GUST)
+	float4 previousPosition = float4(FO4SharedData::EnabledMotionVectorFixes != 0 ? grassPlaced + (input.grass_origin.xyz + grassPreviousGust) : position.xyz, 1.0);
+#		elif TREE_ANIM || SPLINE
 	// A blade under another wind regime carries one gust, so both frames leave from it.
 	float4 previousPosition = float4(position.xyz, 1.0);
 #		else
@@ -2820,13 +2829,13 @@ VertexOutput main(VertexInput input)
 	                       previousOrigin;
 	float previousRatio =
 		(previousDelta.x + previousDelta.y + previousDelta.z) / TreeParams.x;
-	float3 previous = BendTree(previousOrigin, previousDelta, treeDistance,
+	float3 previous = BendTree(previousOrigin, previousDelta, TREE_PREVIOUS_DISTANCE,
 		(windLean * TreeThrow(previousRatio, windSeed, windTime.y * windStrength)) * windWeight);
 #	elif SPLINE
 	float3 previous = ProjectRows(
 		float4(PreviousWorld_row0.xyz, previousSway.x),
 		float4(PreviousWorld_row1.xyz, previousSway.y),
-		float4(PreviousWorld_row2.xyz, previousOrigin.z), position);
+		float4(PreviousWorld_row2.xyz, previousOrigin.z), SPLINE_PREVIOUS_POSITION);
 #	elif GRASS
 	float3 previous = TransformRows(PreviousWorld_row0,
 		PreviousWorld_row1, PreviousWorld_row2,

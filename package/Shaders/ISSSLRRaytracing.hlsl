@@ -340,7 +340,9 @@ float4 main(PS_INPUT input) : SV_Target0
 #	ifndef DYNAMIC_CUBEMAPS
 		confidence *= confidence;
 #	else
-		// FO4: upstream confidence is linear; stock squares it.
+		// FO4: upstream confidence is linear while DC runs; stock squares it.
+		if (FO4SharedData::EnabledDynamicCubemaps == 0)
+			confidence *= confidence;
 #	endif
 		if (!(OutsideView(ray) || iterations == 32 || blocked)) {
 			color = float4(

@@ -1,5 +1,6 @@
 #include "ImageBasedLighting.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <d3d11.h>
@@ -18,11 +19,11 @@
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameProfiler.h"
+#include "Render/FrameState.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
 #include "Render/SkyReflectionCube.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
@@ -49,24 +50,13 @@ namespace cs::features
 
 	bool ImageBasedLighting::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(ibl::kSchema, a_config, candidate, a_error) ||
-			!_weather.Configure(a_config.get("weather"), a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(ibl::kSchema, _settings, [this] { PublishSettings(); });
-		return true;
+		return _live.Configure(a_config, a_error) && _weather.Configure(a_config.get("weather"), a_error);
 	}
 
 	void ImageBasedLighting::PublishSettings()
 	{
 		const std::lock_guard lock(_settingsMutex);
 		_published = _settings;
-	}
-
-	bool ImageBasedLighting::SaveSettings()
-	{
-		return settings::SaveDelta(ibl::kSchema, GetConfigKey(), _settings, *L);
 	}
 
 	void ImageBasedLighting::Load()
@@ -133,7 +123,7 @@ namespace cs::features
 
 		_projectCompute = util::RequireComputeShader("IBL/DiffuseIBL.CS", L"Data\\Shaders\\IBL\\DiffuseIBLCS.hlsl");
 		_resourcesReady.store(true, std::memory_order_release);
-		L->info("SH textures ready: 2x 3x1 R16G16B16A16_FLOAT at t{}-t{}.", kSHSlot, kSHSlot + kSHSlotCount - 1);
+		L->info("SH textures ready: 2x 3x1 R16G16B16A16_FLOAT at t{}-t{}.", cs::render::kIblSHSlot.first, cs::render::kIblSHSlot.first + cs::render::kIblSHSlot.count - 1);
 	}
 
 	std::string_view ImageBasedLighting::GetRegistrationFailureMessage() const
@@ -152,7 +142,7 @@ namespace cs::features
 
 	bool ImageBasedLighting::IsSceneDisabled(const Settings& a_settings)
 	{
-		return a_settings.DisableInLoadingScreen && engine::IsMainOrLoadingMenuOpen();
+		return a_settings.DisableInLoadingScreen && render::GetFrameState().mainOrLoading;
 	}
 
 	const ImageBasedLighting::FrameState& ImageBasedLighting::EvaluateFrame()
@@ -200,8 +190,8 @@ namespace cs::features
 		if (!a_context || !_resourcesReady.load(std::memory_order_acquire))
 			return;
 		// Disabled scenes keep the bindings: the zero b6 flag skips them.
-		const std::array<ID3D11ShaderResourceView*, kSHSlotCount> views{ _envSH->srv.get(), _skySH->srv.get() };
-		engine::BindInjectionShaderResources(a_context, kSHSlot, kSHSlotCount, views.data());
+		const std::array<ID3D11ShaderResourceView*, cs::render::kIblSHSlot.count> views{ _envSH->srv.get(), _skySH->srv.get() };
+		engine::BindInjectionShaderResources(a_context, cs::render::kIblSHSlot.first, cs::render::kIblSHSlot.count, views.data());
 		_counters.consumerBinds.fetch_add(1, std::memory_order_relaxed);
 	}
 
@@ -285,46 +275,36 @@ namespace cs::features
 			.Field("cleared_projections", count(_counters.cleared))
 			.Field("skipped_scene", count(_counters.skippedScene))
 			.Field("consumer_binds", count(_counters.consumerBinds));
-		render::profiling::CollectPassTimings(a_sink, "ImageBasedLighting::");
+		render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	void ImageBasedLighting::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(ibl::kSchema, _settings);
-		bool changed = false;
+		const auto field = edit.Bind(_live);
 
 		if (const ui::Section section{ "ibl-general", "General" }; section)
-			changed |= field(&ibl::Settings::DisableInLoadingScreen);
+			field(&ibl::Settings::DisableInLoadingScreen);
 		if (const ui::Section section{ "ibl-sources", "Sources" }; section) {
-			changed |= field(&ibl::Settings::EnvIBLScale, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::SkyIBLScale, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::EnvIBLSaturation, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::SkyIBLSaturation, { .format = "%.2f" });
+			field(&ibl::Settings::EnvIBLScale, { .format = "%.2f" });
+			field(&ibl::Settings::SkyIBLScale, { .format = "%.2f" });
+			field(&ibl::Settings::EnvIBLSaturation, { .format = "%.2f" });
+			field(&ibl::Settings::SkyIBLSaturation, { .format = "%.2f" });
 		}
 		if (const ui::Section section{ "ibl-ambient", "Ambient Matching" }; section) {
-			changed |= field(&ibl::Settings::DALCAmount, { .format = "%.2f" });
+			field(&ibl::Settings::DALCAmount, { .format = "%.2f" });
 			static const std::array modes{
 				dmui::ChoiceOption<std::uint32_t>{ 0, "Luminance Ratio", "luminance-ratio" },
 				dmui::ChoiceOption<std::uint32_t>{ 1, "Color Ratio", "color-ratio" },
 				dmui::ChoiceOption<std::uint32_t>{ 2, "DALC + Sky", "dalc-sky" },
 				dmui::ChoiceOption<std::uint32_t>{ 3, "DALC + Sky (Directional)", "dalc-sky-directional" }
 			};
-			changed |= field.Choice(&ibl::Settings::DALCMode, modes);
+			field.Choice(&ibl::Settings::DALCMode, modes);
 		}
 		if (const ui::Section section{ "ibl-fog", "Fog" }; section) {
-			changed |= field(&ibl::Settings::FogAmount, { .format = "%.2f" });
-			changed |= field(&ibl::Settings::PreserveFogLuminance);
+			field(&ibl::Settings::FogAmount, { .format = "%.2f" });
+			field(&ibl::Settings::PreserveFogLuminance);
 		}
-		if (changed)
-			PublishSettings();
-	}
-
-	void ImageBasedLighting::RestoreDefaultSettings()
-	{
-		_settings = {};
-		PublishSettings();
-		SaveSettings();
 	}
 
 	namespace

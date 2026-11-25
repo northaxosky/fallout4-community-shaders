@@ -10,7 +10,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -24,6 +23,9 @@ namespace cs::render
 
 		// Frame thread only. Returns one message per posted task that threw.
 		[[nodiscard]] std::vector<std::string> Drain() noexcept;
+
+		// Runs on the frame thread at the next frame boundary; false when full.
+		[[nodiscard]] bool Post(std::function<void()> a_task);
 
 		// A timeout cancels the task so it never runs late.
 		template <class T>
@@ -49,12 +51,7 @@ namespace cs::render
 				if (!shared->phase.compare_exchange_strong(expected, Shared::kRunning))
 					return;
 				try {
-					if constexpr (std::is_void_v<T>) {
-						task();
-						shared->result.set_value({});
-					} else {
-						shared->result.set_value(task());
-					}
+					shared->result.set_value(task());
 				} catch (const std::exception& error) {
 					shared->result.set_value(std::unexpected(std::string(error.what())));
 				} catch (...) {
@@ -75,11 +72,12 @@ namespace cs::render
 		}
 
 	private:
-		[[nodiscard]] bool Post(std::function<void()> a_task);
-
 		std::mutex _mutex;
 		std::deque<std::function<void()>> _queue;
 	};
 
 	FrameDispatcher& GetFrameDispatcher() noexcept;
+
+	// Structural mutations go here; inline in a drain or with no boundary.
+	void PostToFrame(std::function<void()> a_task);
 }

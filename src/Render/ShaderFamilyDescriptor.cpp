@@ -41,7 +41,7 @@ namespace cs::engine
 			auto a_descriptor = a_family.descriptor;
 			const bool tessellatedVertex =
 				a_family.stage == ShaderStage::kVertex && (a_descriptor & (kTessellateDispHeight | kTessellateDispNormals)) != 0;
-			// FO4 vertex normalization is fitted to the pinned AE 1.11.240 route population.
+			// Stock folds these vertex bits; the AE and OG identity corpora pin it.
 			if (a_family.stage == ShaderStage::kVertex) {
 				if (!tessellatedVertex && (a_descriptor & (kLandscape | kLodLandscape)) == 0)
 					a_descriptor &= ~kLandLodBlend;

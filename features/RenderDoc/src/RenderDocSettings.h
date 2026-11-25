@@ -38,16 +38,4 @@ namespace cs::features::renderdoc_settings
 			settings::Field{ "capture_hotkey", "Suggested capture binding; the host's saved override takes precedence.", &Settings::captureHotkey },
 			settings::Field{ "multi_capture_hotkey", "Alternate capture binding using the same configured frame count; the host's saved override takes precedence.", &Settings::multiCaptureHotkey } }
 	};
-
-	inline bool Parse(const toml::table& a_config, Settings& a_settings, std::string& a_error)
-	{
-		auto normalized = a_config;
-		if (auto* table = normalized["settings"].as_table()) {
-			if (const auto count = (*table)["Capture Frame Count"].value<std::int64_t>())
-				table->insert_or_assign("Capture Frame Count", std::clamp(*count,
-																   static_cast<std::int64_t>(renderdoc::kMinCaptureFrameCount),
-																   static_cast<std::int64_t>(renderdoc::kMaxCaptureFrameCount)));
-		}
-		return settings::Parse(kSchema, normalized, a_settings, a_error);
-	}
 }

@@ -19,7 +19,6 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 #include "RE/B/BSGeometry.h"
@@ -48,17 +47,7 @@ namespace cs::features
 
 	bool LODBlending::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(lod_blending::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(lod_blending::kSchema, _settings);
-		return true;
-	}
-
-	bool LODBlending::SaveSettings()
-	{
-		return settings::SaveDelta(lod_blending::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void LODBlending::Load()
@@ -109,7 +98,7 @@ namespace cs::features
 	void LODBlending::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(lod_blending::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "lod-brightness", "Brightness" }; section) {
 			field(&Settings::LODTerrainBrightness, { .format = "%.2f" });
 			field(&Settings::LODObjectBrightness, { .format = "%.2f" });
@@ -120,12 +109,6 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "lod-terrain", "Terrain" }; section)
 			field(&Settings::DisableTerrainVertexColors);
-	}
-
-	void LODBlending::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

@@ -10,6 +10,7 @@
 #pragma warning(push)
 #pragma warning(disable: 4471)
 #include <sl.h>
+#include <sl_common.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
 #include <sl_dlss_g.h>
@@ -63,6 +64,8 @@ namespace cs::features
 		PFun_slReflexGetState* slReflexGetState{};
 		PFun_slReflexSleep* slReflexSleep{};
 		PFun_slReflexSetOptions* slReflexSetOptions{};
+		sl::PFun_slCommonFrameEnd* slCommonFrameEnd{};
+		sl::PFun_slCommonResize* slCommonResize{};
 
 		PFun_slDLSSSetOptions* slDLSSSetOptions{};
 		PFun_slDLSSGetOptimalSettings* slDLSSGetOptimalSettings{};
@@ -84,7 +87,8 @@ namespace cs::features
 			bool a_loadDlss,
 			bool a_loadFsr,
 			bool a_loadDlssG,
-			bool a_loadFsrG);
+			bool a_loadFsrG,
+			bool a_loadReflex);
 
 		bool PrepareD3D12Device(ID3D12Device** a_device);
 		bool GetNativeD3D12Device(
@@ -190,10 +194,9 @@ namespace cs::features
 			const render::temporal::FrameGenerationRequest& a_request);
 		bool CheckFSRGCompletionCapability(
 			sl::FSRGAlgorithm a_algorithm) noexcept;
-		bool PollFSRGState(
-			sl::FSRGAlgorithm a_algorithm) noexcept;
+		// The latest Present's host-input completion; empty on failure.
 		[[nodiscard]] std::optional<render::temporal::GpuCompletionDependency>
-		ConsumeFSRGInputCompletionDependency() noexcept;
+		PollFSRGInputCompletion(sl::FSRGAlgorithm a_algorithm) noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
 		DestroyFSRGResources() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -236,7 +239,7 @@ namespace cs::features
 			ID3D12GraphicsCommandList* a_commandList = nullptr) noexcept;
 		[[nodiscard]] sl::Result
 		ClearCurrentFrameGenerationTagsChecked() noexcept;
-		bool PollFSRGState(
+		std::optional<render::temporal::GpuCompletionDependency> PollFSRGState(
 			sl::FSRGAlgorithm a_algorithm,
 			bool a_requireSubmittedDependency) noexcept;
 		std::uint32_t _lastFrameToken = UINT32_MAX;
@@ -268,8 +271,6 @@ namespace cs::features
 		std::atomic_uint32_t _reflexGpuFrameTimeUs{ 0 };
 		render::temporal::PresentedFrameAccumulator _dlssGPresentedFrames;
 		render::temporal::PresentedFrameAccumulator _dlssGGeneratedFrames;
-		std::optional<render::temporal::GpuCompletionDependency>
-			_fsrGInputCompletionDependency;
 		sl::DLSSGStatus _dlssGStatus = sl::DLSSGStatus::eOk;
 		bool _dlssGLastStateQuerySucceeded = false;
 		std::atomic<render::temporal::CapabilityAvailability>
@@ -303,6 +304,7 @@ namespace cs::features
 		bool _fsrFeatureRequested = false;
 		bool _fsrGResourcesConfigured = false;
 		bool _fsrGFeatureRequested = false;
+		bool _reflexFeatureRequested = false;
 		std::atomic<render::temporal::CapabilityAvailability>
 			_fsr4SrAvailability{
 				render::temporal::CapabilityAvailability::kUnknown
@@ -434,6 +436,8 @@ namespace cs::features
 			_runtime(a_runtime)
 		{}
 
+		void BindPresentation(const render::temporal::PresentationBinding& a_binding) noexcept override;
+		void UnbindPresentation() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		Configure(const render::temporal::LatencyOptions& a_options) override;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -447,5 +451,6 @@ namespace cs::features
 
 	private:
 		Streamline& _runtime;
+		std::atomic_bool _presenting{ false };
 	};
 }

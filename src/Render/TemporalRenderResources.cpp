@@ -97,6 +97,12 @@ namespace cs::render
 		if (!reactiveMaskTexture) {
 			reactiveMaskTexture = createTexture(
 				maskDesc, "Upscaling/ReactiveMask");
+			// Only FSR 3 writes it; DLSS and FSR 4 read zero.
+			auto* context = cs::engine::GetImmediateContext();
+			if (reactiveMaskTexture && reactiveMaskTexture->uav && context) {
+				const float zero[4]{};
+				context->ClearUnorderedAccessViewFloat(reactiveMaskTexture->uav.get(), zero);
+			}
 		}
 		if (!transparencyCompositionMaskTexture) {
 			transparencyCompositionMaskTexture = createTexture(
@@ -224,6 +230,8 @@ namespace cs::render
 		pipboyMaskCopy.reset();
 		vatsMaskFull.reset();
 		motionVectorSourceCopy.reset();
+		preAlphaSceneCopy.reset();
+		_preAlphaSceneFrame.reset();
 	}
 
 	bool TemporalRenderer::EnsureShaderReadableCopy(
@@ -336,6 +344,24 @@ namespace cs::render
 		return encodeTexturesCS[methodIndex].get();
 	}
 
+	ID3D11ComputeShader* TemporalRenderer::GetReactiveMaskCS()
+	{
+		if (!reactiveMaskCS) {
+			L->debug("Compiling ReactiveMaskCS.hlsl");
+			reactiveMaskCS = cs::util::CompileComputeShader("Upscaling/ReactiveMask.CS", kReactiveMaskPath);
+		}
+		return reactiveMaskCS.get();
+	}
+
+	ID3D11ComputeShader* TemporalRenderer::GetSanitizeColorCS()
+	{
+		if (!sanitizeColorCS) {
+			L->debug("Compiling SanitizeColorCS.hlsl");
+			sanitizeColorCS = cs::util::CompileComputeShader("Upscaling/SanitizeColor.CS", kSanitizeColorPath);
+		}
+		return sanitizeColorCS.get();
+	}
+
 	ID3D11PixelShader* TemporalRenderer::GetDepthRefractionUpscalePS()
 	{
 		if (!depthRefractionUpscalePS) {
@@ -443,7 +469,7 @@ namespace cs::render
 			resourcesReady && PreflightExternalResolve(method);
 		_spatialFallbackPreflightReady.store(ok, std::memory_order_release);
 
-		if (IsFrameGenerationDx12PathActive() && !_copyDepthForFrameGenerationCS) {
+		if (render::TemporalPipeline::Get().IsFrameGenerationPresenterActive() && !_copyDepthForFrameGenerationCS) {
 			_copyDepthForFrameGenerationCS = cs::util::CompileComputeShader("Upscaling/CopyDepthForFrameGeneration.CS", kCopyDepthForFrameGenerationPath);
 			if (!_copyDepthForFrameGenerationCS) {
 				render::TemporalPipeline::Get().FailFrameGenerationFrame(
@@ -455,10 +481,6 @@ namespace cs::render
 		_resourcesReady.store(ok, std::memory_order_release);
 		if (ok) {
 			_renderSize.CommitRequested();
-			resolutionScale = {
-				_renderSize.WidthRatio(),
-				_renderSize.HeightRatio()
-			};
 			L->info("Created upscaling resources after render-target creation");
 		} else if (IsExternalUpscaler(method)) {
 			if (!sizeResult.Succeeded()) {
@@ -482,7 +504,6 @@ namespace cs::render
 
 	void TemporalRenderer::InvalidateEngineDerivedResources()
 	{
-		render::TemporalPipeline::Get().AdvanceEngineResourceGeneration();
 		InvalidateFirstPersonAlphaState();
 		dynamicResolution.Release();
 		_superResolutionDebugSnapshot.request.Invalidate();
@@ -520,10 +541,6 @@ namespace cs::render
 		recreated = recreated && PreflightExternalResolve(method);
 		if (recreated) {
 			_renderSize.CommitRequested();
-			resolutionScale = {
-				_renderSize.WidthRatio(),
-				_renderSize.HeightRatio()
-			};
 		} else {
 			if (IsExternalUpscaler(method)) {
 				if (!sizeResult.Succeeded()) {

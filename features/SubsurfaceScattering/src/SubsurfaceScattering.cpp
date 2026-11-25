@@ -18,13 +18,14 @@
 #include "Render/FrameProfiler.h"
 #include "Render/PrepassExtraTargets.h"
 #include "Render/PrepassTechnique.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderObservers.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
+#include "Render/SubstrateSlots.h"
 #include "Render/TemporalRenderer.h"
-#include "Settings/SettingsPersistence.h"
 #include "SkinProfile.h"
 #include "SubsurfaceScatteringKernel.h"
 #include "Telemetry/Telemetry.h"
@@ -58,17 +59,7 @@ namespace cs::features
 
 	bool SubsurfaceScattering::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(sss::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(sss::kSchema, _settings);
-		return true;
-	}
-
-	bool SubsurfaceScattering::SaveSettings()
-	{
-		return settings::SaveDelta(sss::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void SubsurfaceScattering::Load()
@@ -77,7 +68,7 @@ namespace cs::features
 			FailLoad("Subsurface Scattering shader contribution registration failed.");
 			return;
 		}
-		_profileTarget = cs::engine::RegisterPrepassExtraTarget(*this, { .name = "SubsurfaceScattering/Profile", .rtvSlot = kProfileRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .active = [this] { return CanRun(); } });
+		_profileTarget = cs::engine::RegisterPrepassExtraTarget(*this, { .name = "SubsurfaceScattering/Profile", .rtvSlot = cs::render::kSssProfileTargetSlot.first, .format = DXGI_FORMAT_R8_UNORM, .active = [this] { return CanRun(); } });
 		if (!_profileTarget || !cs::engine::RegisterPrepassDrawClassifier(*this, cs::engine::PrepassLaneComponent::kW, &sss::IsHumanSkinDraw)) {
 			FailLoad("Subsurface Scattering skin profile registration failed.");
 			return;
@@ -266,14 +257,13 @@ namespace cs::features
 		// Every frame starts on the stock blur; the dispatch opts out of it.
 		UpdateConsumer(false);
 		auto* cb = _consumer->CB();
-		cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, kConsumerSlot, 1, &cb);
+		cs::engine::BindFrameConstantBuffers(context, cs::engine::ShaderStage::kPixel, cs::render::kSssConsumerSlot.first, 1, &cb);
 	}
 
 	void SubsurfaceScattering::OnPreSecondDeferredComposite()
 	{
 		auto* context = cs::engine::GetImmediateContext();
-		auto* manager = cs::engine::GetRenderTargetManager();
-		if (!CanRun() || !context || !manager || !_consumer ||
+		if (!CanRun() || !context || !_consumer ||
 			!_prepare || !_extract || !_extractBurley || !_horizontal || !_vertical || !_burley)
 			return;
 		// Upstream dispatches only on frames that drew skin.
@@ -281,7 +271,7 @@ namespace cs::features
 			_skippedFrames.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		auto* depth = cs::render::GetCanonicalSceneDepthSRV();
 		// FO4: raw depth marks first-person pixels, which canonical depth cannot.
 		auto* rawDepth = cs::engine::GetSceneDepthSRV();
@@ -297,8 +287,9 @@ namespace cs::features
 			!cs::render::IsSharedDataReady() || !EnsureResources(colorTexture))
 			return;
 		auto& t = _textures;
-		const UINT width = static_cast<UINT>(std::floor(t.width * manager->GetDynamicWidthRatio()));
-		const UINT height = static_cast<UINT>(std::floor(t.height * manager->GetDynamicHeightRatio()));
+		const auto render = cs::render::GetRenderResolution().render;
+		const UINT width = render.width;
+		const UINT height = render.height;
 		if (!width || !height)
 			return;
 		try {
@@ -309,7 +300,7 @@ namespace cs::features
 			auto* sampler = cs::render::GetPointClampSampler();
 			context->CSSetSamplers(0, 1, &sampler);
 			auto* constants = _constants->CB();
-			context->CSSetConstantBuffers(kConstantsSlot, 1, &constants);
+			context->CSSetConstantBuffers(cs::render::kSssConstantsSlot.first, 1, &constants);
 			ComputePasses pass(context);
 			cs::render::annotation::ScopedEvent dispatch("SubsurfaceScattering::Dispatch", false);
 			const auto scatter = [&](ID3D11ComputeShader* a_shader, ID3D11ShaderResourceView* a_input,
@@ -376,17 +367,17 @@ namespace cs::features
 	void SubsurfaceScattering::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		a_sink.Field("hooks_registered", _registrationsReady.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("skin_drawn", _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount()).Field("skin_buckets", static_cast<std::int64_t>(_skinBuckets.load(std::memory_order_relaxed))).Field("skipped_frames", static_cast<std::int64_t>(_skippedFrames.load(std::memory_order_relaxed))).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
-		cs::render::profiling::CollectPassTimings(a_sink, "SubsurfaceScattering::");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	void SubsurfaceScattering::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(sss::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		// The mean free path member splits into a color and a distance field.
 		const auto meanFreePath = [&](settings::Color4 Settings::* a_member) {
-			auto& value = _settings.*a_member;
-			const Settings defaultSettings{};
+			auto& value = field.Values().*a_member;
+			const Settings defaultSettings = _live.DefaultSettings();
 			const auto& defaults = defaultSettings.*a_member;
 			const std::string key(sss::kSchema.Find(a_member).key);
 			settings::Float3 color{ value[0], value[1], value[2] };
@@ -404,7 +395,7 @@ namespace cs::features
 				dmui::ChoiceOption<int>{ sss::kBurley, "Burley", "burley" }
 			};
 			field.Choice(&Settings::ssMode, modes, { .label = "Mode" });
-			if (_settings.ssMode == sss::kSeparable) {
+			if (_live.Draft().ssMode == sss::kSeparable) {
 				static const std::array scatter{
 					dmui::ChoiceOption<int>{ sss::kPreScatter, "Pre-scatter", "pre" },
 					dmui::ChoiceOption<int>{ sss::kPostScatter, "Post-scatter", "post" },
@@ -415,7 +406,7 @@ namespace cs::features
 				field(&Settings::burleySamples, { .label = "Burley Samples" });
 			}
 		}
-		if (_settings.ssMode == sss::kSeparable) {
+		if (_live.Draft().ssMode == sss::kSeparable) {
 			if (const ui::Section section{ "sss-base-profile", "Base Profile" }; section) {
 				field(&Settings::baseProfileBlurRadius, { .label = "Blur Radius", .format = "%.2f" });
 				field(&Settings::baseProfileThickness, { .label = "Thickness", .format = "%.2f" });
@@ -436,15 +427,9 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "sss-character-light", "Character Light" }; section) {
 			field(&Settings::enableCharacterLighting, { .label = "Enable Character Lighting" });
-			if (_settings.enableCharacterLighting)
+			if (_live.Draft().enableCharacterLighting)
 				field(&Settings::characterLightingStrength, { .label = "Strength", .format = "%.2f" });
 		}
-	}
-
-	void SubsurfaceScattering::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

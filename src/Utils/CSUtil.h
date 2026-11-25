@@ -16,6 +16,14 @@
 
 namespace cs::util
 {
+	[[nodiscard]] inline std::string ToLowerAscii(std::string_view a_value)
+	{
+		std::string lowered(a_value);
+		for (auto& c : lowered)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		return lowered;
+	}
+
 	// ASCII case-insensitive equality, as the engine compares editor IDs and names.
 	[[nodiscard]] inline bool EqualsIgnoreCase(std::string_view a_lhs, std::string_view a_rhs) noexcept
 	{

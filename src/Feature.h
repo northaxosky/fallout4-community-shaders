@@ -71,7 +71,6 @@ namespace cs
 			const auto state = _runtimeState.load(std::memory_order_acquire);
 			return state == FeatureRuntimeState::kActive || state == FeatureRuntimeState::kDegraded;
 		}
-		bool IsDegraded() const noexcept { return _runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kDegraded; }
 		bool IsHealthy() const noexcept { return _runtimeState.load(std::memory_order_acquire) == FeatureRuntimeState::kActive; }
 		bool IsLoaded() const noexcept override { return _loaded; }
 		Feature* GetRuntimeOwner() const noexcept override { return const_cast<Feature*>(this); }
@@ -90,16 +89,12 @@ namespace cs
 			return !SupportsEnableToggle() || _enabled.load(std::memory_order_acquire);
 		}
 		bool IsSuspended() const noexcept { return _suspended.load(std::memory_order_acquire); }
-		// Host-frame thread; readers are on the render path.
-		void SetEnabled(bool a_enabled) noexcept;
 
 		// Configure must remain side-effect-free.
 		virtual bool Configure(const toml::table&, std::string&) { return true; }
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
-		// Runs on the UI event thread; queue render-thread work instead of doing it.
-		virtual void OnLoadingMenuClosed() {}
 		virtual void Prepass() {}
 		virtual void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB&) {}
 		// Fills the b5 frame block the host built; the b6 and b8 writers cannot reach it.
@@ -119,25 +114,29 @@ namespace cs
 		}
 
 		virtual void DrawSettings() {}
-		// False keeps recorded edits pending for a later flush.
-		virtual bool SaveSettings() { return true; }
-		bool Persist();
-		virtual settings::SettingsBinding GetSettingsBinding() const { return {}; }
+		// Settings transaction; null without schema fields.
+		virtual settings::LiveSettingsAccess* GetLiveSettings() { return nullptr; }
+		settings::LiveSettingsAccess* GetLiveSettings() const { return const_cast<Feature*>(this)->GetLiveSettings(); }
 		settings::SchemaView GetSettingsSchema() const
 		{
-			const auto binding = GetSettingsBinding();
-			return binding ? binding.schema() : settings::SchemaView{};
+			auto* live = GetLiveSettings();
+			return live ? live->Schema() : settings::SchemaView{};
 		}
-		const settings::LiveSettingsAccess& GetLiveSettingsAccess() const noexcept { return _liveSettings; }
+		// Takes part in presets, A/B comparison and Remote Control.
+		bool SharesLiveSettings() const
+		{
+			auto* live = GetLiveSettings();
+			return live ? live->shared : SupportsEnableToggle();
+		}
+		// Restart-only fields whose next-launch value differs.
+		std::vector<std::string_view> RestartPending() const
+		{
+			auto* live = GetLiveSettings();
+			return live ? live->RestartPending() : std::vector<std::string_view>{};
+		}
 
-		// Persists edits recorded by settings::SettingsEdit, optionally only once an edit completes.
-		void FlushSettings(bool a_completedOnly = false);
-		virtual std::vector<std::string_view> GetRestartSettings() const { return {}; }
 		// Per-weather overrides from the `weather` table; null when absent.
 		virtual weather::Profiles* GetWeatherProfiles() { return nullptr; }
-		// The CS Editor draws a section with this title; empty opts out.
-		virtual std::string_view GetWeatherAnalysisTitle() const { return {}; }
-		virtual void DrawWeatherAnalysis() {}
 
 		virtual bool ProducesTelemetry() const { return false; }
 		// Telemetry must read only cached or atomic state.
@@ -152,15 +151,14 @@ namespace cs
 		// Render thread only; the texture is borrowed until the next render callback.
 		virtual FullscreenDebugData GetFullscreenDebugData() const noexcept { return {}; }
 
+		// Resets non-settings state before the defaults commit.
 		virtual void RestoreDefaultSettings() {}
-		bool RestoreDefaults();
 
-		bool HasResettableSettings() const { return SupportsEnableToggle() || static_cast<bool>(GetSettingsBinding()); }
+		bool HasResettableSettings() const { return SupportsEnableToggle() || GetLiveSettings(); }
 		bool HasModifiedSettings() const
 		{
-			const auto binding = GetSettingsBinding();
-			return (binding && binding.modified()) ||
-			       (SupportsEnableToggle() && IsSwitchedOn() != DefaultEnabled());
+			auto* live = GetLiveSettings();
+			return (live && live->Modified()) || (SupportsEnableToggle() && IsSwitchedOn() != DefaultEnabled());
 		}
 
 		// Overlays render even while settings are closed.
@@ -168,6 +166,9 @@ namespace cs
 
 		// True while DrawOverlay needs frames.
 		virtual bool IsOverlayActive() const { return false; }
+
+		// Warning toast posted once when the host UI is ready; empty posts none.
+		virtual std::string GetStartupNotice() const { return {}; }
 
 		// Fires after D3D11 device creation.
 		virtual void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) {}
@@ -181,24 +182,17 @@ namespace cs
 
 		virtual std::string GetFeatureSummary() const { return {}; }
 
-		virtual std::optional<std::string> GetFeatureModLink() const { return {}; }
-
 		virtual std::string GetCategory() const { return FeatureCategories::kOther; }
 
 		virtual bool IsInMenu() const { return true; }
 
-		// Inactive features defer menu wiring.
-		virtual void DrawUnloadedUI() {}
+		// False hides the feature's own page; its settings live on another page.
+		virtual bool IsInFeatureList() const { return true; }
 
 		// Show load failures instead of silently skipping.
 		virtual void DrawFailLoadMessage() {}
 
-	protected:
-		bool SaveEnabled();
-		settings::LiveSettingsAccess _liveSettings;
-
 	private:
-		friend class settings::SettingsEdit;
 		friend class FeatureManager;
 		void SetState(FeatureState a_state)
 		{
@@ -219,7 +213,8 @@ namespace cs
 			state.ApplyActivationResult(a_result);
 			SetState(std::move(state));
 		}
-		// Flips the effective state like SetEnabled, firing OnEnabledChanged.
+		// Sole OnEnabledChanged caller; notifies on an effective flip.
+		void SetInput(std::atomic_bool& a_input, bool a_value) noexcept;
 		void SetSuspended(bool a_suspended) noexcept;
 		// Active features carry no detail, so it can hold a neutral note.
 		void SetActiveNote(std::string a_note)
@@ -233,7 +228,6 @@ namespace cs
 			auto expected = FeatureRuntimeState::kActive;
 			return _runtimeState.compare_exchange_strong(expected, FeatureRuntimeState::kDegraded, std::memory_order_acq_rel);
 		}
-		void ComposeEnabledLiveSettings();
 		void ResetLoadFailure() noexcept
 		{
 			_loadFailed = false;
@@ -251,8 +245,6 @@ namespace cs
 		bool _loaded = false;
 		std::atomic_bool _enabled{ true };
 		std::atomic_bool _suspended{ false };
-		bool _settingsSavePending = false;
-		bool _settingsEditCompleted = false;
 		std::string _loadFailureReason;
 	};
 
@@ -318,6 +310,7 @@ namespace cs
 		engine::ShaderDefineOptions GetShaderDefineOptions(engine::ShaderInjectionTarget a_target = engine::ShaderInjectionTarget::kCount) const override { return Declaration.GetShaderDefineOptions(a_target, IsFullscreenDebugSelected()); }
 		bool HasShaderDefine(engine::ShaderInjectionTarget a_target) const override { return Declaration.HasShaderDefine(a_target); }
 		bool RequiresShaderGraphicsPair(engine::ShaderInjectionTarget a_target) const override { return Declaration.RequiresShaderGraphicsPair(a_target); }
+		engine::ShaderStageMask GetShaderDefineStages(engine::ShaderInjectionTarget a_target) const override { return Declaration.GetShaderDefineStages(a_target); }
 		const engine::ShaderDefineProvider* GetShaderDefineDeclaration() const noexcept override { return &Declaration; }
 	};
 
@@ -347,7 +340,6 @@ namespace cs
 		void PrepareAll();
 		void ActivateAll();
 		void OnDataLoadedAll();
-		void OnLoadingMenuClosedAll();
 		void OnPostPostLoadAll();
 		void PrepassAll();
 
@@ -375,17 +367,37 @@ namespace cs
 			}
 		}
 
+		// Live settings plus 'enabled'; null outside presets and A/B.
+		std::optional<toml::table> SnapshotLiveSettings(const Feature& a_feature, bool a_forComparison = false) const;
+		// Frame boundary only; shared features refuse during A/B.
 		std::optional<settings::PreparedLiveSettings> PrepareLiveSettings(
 			Feature& a_feature,
 			const toml::table& a_values,
+			settings::Scope a_scope,
+			settings::Persist a_persist,
 			std::string_view a_phase,
-			std::string& a_error);
+			std::string& a_error,
+			const settings::ComparisonKey* a_key = nullptr);
+		// Absent keys mean the default; `enabled` composes in.
 		std::optional<settings::PreparedLiveSettings> PrepareLiveSettingsFromOverrides(
 			Feature& a_feature,
 			const toml::table* a_overrides,
 			const toml::node* a_enabled,
+			settings::Persist a_persist,
 			std::string_view a_phase,
 			std::string& a_error);
+		// Prepares and applies one feature's commit at the frame boundary.
+		bool CommitLiveSettings(
+			Feature& a_feature,
+			const toml::table& a_values,
+			settings::Scope a_scope,
+			settings::Persist a_persist,
+			std::string_view a_phase,
+			std::string& a_error);
+		// Resets non-settings state, then commits every default and saves.
+		bool RestoreDefaults(Feature& a_feature, std::string& a_error);
+		// UI thread: posts the page's edits as one commit.
+		void CommitEdits(Feature& a_feature, bool a_pageExit);
 		// Keeps the feature loaded but marks part of it unavailable.
 		void ReportDegraded(Feature& a_feature, std::string a_detail);
 		bool SaveAllSettings(std::string& a_error);
@@ -420,6 +432,7 @@ namespace cs
 	private:
 		FeatureManager() = default;
 		void RefreshShaderOwnership();
+		bool SaveFeature(Feature& a_feature);
 		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _loadedFeatures;
 		std::atomic<Feature*> _fullscreenDebugFeature{ nullptr };

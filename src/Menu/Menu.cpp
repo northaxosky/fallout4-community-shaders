@@ -10,10 +10,12 @@
 #include "Plugin.h"
 #include "Render/Engine.h"
 #include "Render/FrameAnnotations.h"
+#include "Render/FrameDispatcher.h"
 #include "Render/ShaderCacheClear.h"
 #include "Render/ShaderInjection.h"
 #include "RenderDoc.h"
 #include "Settings/FeatureConfig.h"
+#include "Settings/LiveSettings.h"
 #include "Settings/PresetManager.h"
 #include "Settings/SettingsRegistry.h"
 #include "Telemetry/Telemetry.h"
@@ -46,7 +48,7 @@ namespace
 		const auto saved = cs::feature_config::UpdateTopLevelSection(
 			"shader_ownership", toml::table{ { "enable_shaders", a_config.enableShaders }, { "targets", std::move(targets) } });
 		if (saved)
-			cs::FeatureManager::Get().ApplyShaderOwnership(a_config);
+			cs::render::PostToFrame([config = a_config] { cs::FeatureManager::Get().ApplyShaderOwnership(config); });
 		else
 			L->warn("Failed to save shader ownership: {}", saved.error);
 	}
@@ -249,18 +251,20 @@ namespace cs
 		}
 
 		_debugViews = std::move(valid);
-		std::vector<FeatureDebugSelection> selections;
-		if (!_debugViews.Fullscreen().Empty()) {
-			selections.push_back({ .feature = _debugViews.Fullscreen().feature,
-				.view = _debugViews.Fullscreen().view });
-		}
-		for (const auto& [feature, view] : _debugViews.Previews())
-			selections.push_back({ .feature = feature, .view = view });
-		if (!FeatureManager::Get().ApplyDebugViews(selections)) {
+		render::PostToFrame([this] {
+			std::vector<FeatureDebugSelection> selections;
+			if (!_debugViews.Fullscreen().Empty()) {
+				selections.push_back({ .feature = _debugViews.Fullscreen().feature,
+					.view = _debugViews.Fullscreen().view });
+			}
+			for (const auto& [feature, view] : _debugViews.Previews())
+				selections.push_back({ .feature = feature, .view = view });
+			if (FeatureManager::Get().ApplyDebugViews(selections))
+				return;
 			L->warn("Invalid debug-view state; disabling debug views");
 			_debugViews.Clear();
 			FeatureManager::Get().ApplyDebugViews({});
-		}
+		});
 	}
 
 	void Menu::SetDebugViewSelection(const Feature& a_feature, std::string_view a_view)
@@ -595,29 +599,38 @@ namespace cs
 
 	void Menu::DrawShaderSettings(dmui::Client& a_client)
 	{
-		auto ownership =
-			feature_config::ParseShaderOwnership(feature_config::GetRoot());
+		// Draw live ownership; the stored table may be invalid.
+		const auto stored = feature_config::ParseShaderOwnership(feature_config::GetRoot());
+		auto config = engine::GetShaderOwnershipConfig();
 		if (const ui::Section section{ "section-shader-ownership", "Shader Ownership" }; section) {
+			// A comparison restores the ownership it started from.
+			const dmui::DisabledScope disabled{ cs::settings::liveComparisonActive };
 			if (!CheckHostResult(a_client, ui::DrawTable(a_client, "advanced-shader-ownership", [&] {
-					{
-						if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
-								if (dmui::ui::Checkbox("##enable-shaders", &ownership.config.enableShaders))
-									SaveShaderOwnership(ownership.config);
-								return true;
-							}))
-							return false;
-					}
+					if (!ui::DrawRow(a_client, "shader-ownership-status", "Use Custom Shaders", "", [&](auto&) {
+							const dmui::DisabledScope readOnly{ !stored.valid };
+							if (dmui::ui::Checkbox("##enable-shaders", &config.enableShaders))
+								SaveShaderOwnership(config);
+							return true;
+						}))
+						return false;
 
 					for (const auto& target : engine::GetShaderInjectionTargets()) {
 						if (!ui::DrawRow(a_client, target.name.data(), target.label.data(), "", [&](auto&) {
-								if (dmui::ui::Checkbox("##enabled", &ownership.config.targets[target.id]))
-									SaveShaderOwnership(ownership.config);
+								const dmui::DisabledScope readOnly{ !stored.valid };
+								if (dmui::ui::Checkbox("##enabled", &config.targets[target.id]))
+									SaveShaderOwnership(config);
 								return true;
 							}))
 							return false;
 					}
-					if (!ownership.valid) {
-						return ui::DrawRow(a_client, "shader-ownership-error", "Configuration error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, ownership.error, { .tone = dmui::TextTone::kStatusError }); });
+					if (!stored.valid) {
+						if (!ui::DrawRow(a_client, "shader-ownership-error", "Configuration error", "", dmui::RowPresentation::Layout::kFullSpan, [&](auto&) -> bool { return dmui::DrawStyledText(a_client, stored.error, { .tone = dmui::TextTone::kStatusError }); }))
+							return false;
+						return ui::DrawRow(a_client, "shader-ownership-restore", "Restore default ownership", "Replaces the invalid stored table.", [&](auto&) {
+							if (dmui::ui::Button("Restore"))
+								SaveShaderOwnership(feature_config::DefaultShaderOwnership());
+							return true;
+						});
 					}
 					return true;
 				}),
@@ -899,11 +912,13 @@ namespace cs
 		{
 			const dmui::DisabledScope disabled{ !pending };
 			if (dmui::ui::Button("Load") && pending) {
-				std::string error;
-				if (!presets.Apply(*pending, error))
-					presets.lastError = "Load failed: " + error;
-				else
-					presets.lastError.clear();
+				render::PostToFrame([&presets, meta = *pending] {
+					std::string error;
+					if (!presets.Apply(meta, error))
+						presets.lastError = "Load failed: " + error;
+					else
+						presets.lastError.clear();
+				});
 			}
 		}
 
@@ -1040,7 +1055,7 @@ namespace cs
 		const DMUI_DialogDescriptor descriptor{
 			DMUI_DIALOG_KIND_CONFIRM,
 			captures ? "Clear RenderDoc Captures" : "Clear Shader Cache",
-			captures ? "This permanently deletes every regular file in the configured capture directory, not only .rdc files." :
+			captures ? "This permanently deletes every .rdc file in the configured capture directory." :
 					   "This deletes every compiled shader record on disk. Shaders are recompiled the next time they are needed.",
 			"Clear",
 			"Cancel",

@@ -2,9 +2,41 @@
 
 ## Unreleased
 
+- Motion Vector Fixes: grass swaying in wind now has motion vectors.
+- Upscaling: FSR 3 ghosts less on fire, smoke and particles; DLSS and FSR ghost less on water.
+- Frame Generation: turning it on or off, or changing its method, now applies at the next launch.
+- Upscaling: lower input latency and less video memory without frame generation.
+- Upscaling: the DLSS preset defaults to K, which costs less at Performance and Ultra Performance; "NVIDIA default" restores NVIDIA's per-mode choice.
+- HDR Display: HDR output needs Windows HDR on at launch and turns off while Windows HDR is off.
 - Dynamic Cubemaps: `material_reflections` is removed; Vanilla PBR's Live Environment replaces it.
 - Vanilla PBR: new feature. GGX direct specular for vanilla materials; envmapped surfaces reflect the live world through vanilla's envmap formula, keeping authored strength, blur and metal tint, lit by ambient light only.
 - Sky Sync: a dark flat quad no longer covers the view when the sun is below eye level, e.g. at night with the alternate sun path.
+- Performance Overlay: profiler rows are self time, and A/B results read Frame-capped at the refresh rate or with frame generation.
+- Performance Overlay: "Measure CS cost" alternates custom shaders on and off and reports their frame-time cost.
+- Upscaling/Frame Generation: FSR and DLSS no longer turn off when video memory use exceeds the budget.
+- Skylighting: sky light no longer leaks under roofs, awnings and overpasses.
+- Skylighting: once its probes settle and the camera stays put, the sky occlusion capture runs every 8th frame instead of every frame (Still Capture Interval; 1 restores every frame).
+- Sky Sync: shadow caster swaps finish their fade when crossing exterior cells, and the alternate sun path stays continuous across midnight.
+- Profiling: the Profiling page holds the Performance Overlay settings; the overlay can hide chosen pass groups, and switched-off features' passes read 0.
+- Remote Control: `communityshaders.devflags` lists, sets and resets named runtime switches for candidate code paths.
+- Image Based Lighting: sky ambient no longer flickers when the player jumps, most visible on buildings at night.
+- Water: screen-space reflections now work on OG 1.10.163 with Dynamic Cubemaps.
+- Water: Skylighting applies with Dynamic Cubemaps on.
+- Dynamic Cubemaps: sky reflections and ambient no longer drop out for a few frames when a frame skips the sky update.
+- Lighting: meshes with broken normals no longer cause flickering black boxes, most visible with DLSS or FSR.
+- Settings: saving keeps hand edits to the TOML made while the game runs, and a broken TOML is never overwritten.
+- HDR Display: paper white stays below peak brightness when set by a preset or Remote Control.
+- Presets: preset keys must match feature config keys exactly; older presets with lowercase keys no longer load.
+- Light Limit Fix: lights return to their vanilla radius while its shaders are off.
+- Screen Space Shadows: stale contact shadows no longer show when the shadow mask cannot be bound.
+- Dynamic Cubemaps: screen-space reflections look vanilla again while the feature is switched off.
+- Water: reflection strength stays vanilla until Dynamic Cubemaps' cubes are ready.
+- Screen Space GI: changing Slices or Steps no longer resets the denoiser history.
+- Screen Space GI: half and quarter resolution upsampling is smooth in flat areas instead of blocky and cheaper, and normals line up at those resolutions.
+- Screen Space GI: stray over-dark ambient occlusion pixels are gone, and indirect lighting is slightly cheaper.
+- Screen Space GI: ambient occlusion strength no longer varies with Slices.
+- Screen Space GI: HQ Specular IL no longer over-brightens, and nearby geometry now occludes it.
+- Screen Space GI: indirect light and ambient occlusion trail less while turning or moving.
 - Compatibility: Isotope 1.4.0 and later runs alongside HDR Display, Upscaling, Frame Generation and RenderDoc when its Hosted Presentation setting is on; it needs HDR Display enabled.
 
 ## 0.5.1

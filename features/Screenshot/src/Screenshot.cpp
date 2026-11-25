@@ -16,7 +16,6 @@
 #include "Render/RenderHooks.h"
 #include "Render/ScreenshotSites.h"
 #include "ScreenshotFile.h"
-#include "Settings/SettingsPersistence.h"
 #include "Utils/PathUtf8.h"
 
 #include <array>
@@ -100,23 +99,7 @@ namespace cs::features
 
 	bool Screenshot::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(screenshot_settings::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = std::move(candidate);
-		_liveSettings = settings::BindLiveSettings(screenshot_settings::kSchema, _settings);
-		return true;
-	}
-
-	bool Screenshot::SaveSettings()
-	{
-		return settings::SaveDelta(screenshot_settings::kSchema, GetConfigKey(), _settings, *L);
-	}
-
-	void Screenshot::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
+		return _live.Configure(a_config, a_error);
 	}
 
 	void Screenshot::Load()
@@ -137,7 +120,7 @@ namespace cs::features
 		auto* controls = RE::MenuControls::GetSingleton();
 		if (!controls || !controls->QueueScreenshot())
 			return std::unexpected(CaptureRefusal{ "A screenshot is already queued", "Retry on the next frame" });
-		const auto id = ++_lastRequestId;
+		const auto id = capture::NextRequestId();
 		_requested.store(id, std::memory_order_release);
 		return id;
 	}
@@ -365,7 +348,7 @@ namespace cs::features
 	void Screenshot::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(screenshot_settings::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 
 		if (const ui::Section section{ "screenshot-capture", "Capture" }; section) {
 			dmui::ui::TextWrapped("Print Screen captures with this feature; saving runs in the background.");
@@ -392,7 +375,7 @@ namespace cs::features
 		if (const ui::Section section{ "screenshot-output", "Output" }; section) {
 			field(&Settings::screenshotPath);
 			if (dmui::ui::Button("Open Folder")) {
-				const auto folder = screenshot_file::ResolveFolder(_settings.screenshotPath);
+				const auto folder = screenshot_file::ResolveFolder(_live.Draft().screenshotPath);
 				std::error_code ec;
 				std::filesystem::create_directories(folder, ec);
 				const auto utf8 = util::PathToUtf8(folder);

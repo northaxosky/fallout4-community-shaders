@@ -25,7 +25,6 @@ namespace cs::features::cs_editor
 		void DrawStatus(RE::Sky& a_sky);
 		void DrawControls(RE::Sky& a_sky);
 		void DrawInformation(RE::Sky& a_sky);
-		void DrawFeatureAnalysis(const Feature& a_editor);
 
 		// The picked weather, else the current one; overrides edit this weather.
 		RE::TESWeather* GetTargetWeather(const RE::Sky& a_sky) const;

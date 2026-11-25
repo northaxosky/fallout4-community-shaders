@@ -41,17 +41,8 @@ namespace
 		bool contributed = false;
 	};
 
-	// Throws so a failing row or precondition reports through its caller.
-	void Require(bool a_condition, const std::string& a_message)
-	{
-		if (!a_condition)
-			throw std::runtime_error(a_message);
-	}
-
-	bool IsHex(std::string_view a_text, std::size_t a_length)
-	{
-		return a_text.size() == a_length && a_text.find_first_not_of("0123456789abcdef") == a_text.npos;
-	}
+	using cs::shader_test::IsHex;
+	using cs::shader_test::Require;
 
 	std::filesystem::path ModulePath(HMODULE a_module)
 	{

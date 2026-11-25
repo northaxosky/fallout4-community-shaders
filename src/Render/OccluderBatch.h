@@ -27,8 +27,20 @@ namespace cs::engine
 	// Why an accepted occluder stays on the engine path.
 	enum class BatchFallback : std::uint8_t
 	{
-		// Alpha test, tree animation, alpha mask or another technique we skip.
-		kTechnique,
+		// The technique-level reasons are contiguous; see TechniqueFallbacks.
+		kAlphaTest,
+		kAlphaMask,
+		kTreeAnim,
+		// Any other technique bit the batch does not reproduce.
+		kTechniqueOther,
+		kVatsTarget,
+		// Validation bisecting disabled this batch class.
+		kClassDisabled,
+		// Merge technique on a geometry that is not a merge-instanced shape.
+		kMergeShape,
+		// Plain or LOD technique on a geometry type the batch does not read.
+		kGeometryType,
+		kNoIndices,
 		// Animated properties get no engine draw either.
 		kAnimated,
 		kRendererData,
@@ -54,6 +66,16 @@ namespace cs::engine
 	};
 
 	[[nodiscard]] BatchStats& GetBatchStats() noexcept;
+
+	// Sum of the technique-level reasons: what the single technique counter was.
+	[[nodiscard]] inline std::uint64_t TechniqueFallbacks(const BatchStats& a_stats) noexcept
+	{
+		std::uint64_t total = 0;
+		for (auto reason = static_cast<std::size_t>(BatchFallback::kAlphaTest);
+			reason <= static_cast<std::size_t>(BatchFallback::kNoIndices); ++reason)
+			total += a_stats.fallback[reason].load(std::memory_order_relaxed);
+		return total;
+	}
 
 	enum class BatchDecision : std::uint8_t
 	{

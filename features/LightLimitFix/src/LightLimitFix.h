@@ -25,6 +25,7 @@ namespace cs::features
 		void OnDataLoaded() override;
 		void OnPostPostLoad() override;
 		void OnRuntimeQuarantined(std::string_view, std::string_view) noexcept override;
+		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void Prepass() override;
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
@@ -32,12 +33,9 @@ namespace cs::features
 		void SetDebugView(std::string_view a_view) noexcept override;
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 		void DrawSettings() override;
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(light_limit_fix::kSchema, _settings); }
-		std::vector<std::string_view> GetRestartSettings() const override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		// Applies at the next launch: the boot value gates light creation.
-		bool DeriveUnauthoredLights() const noexcept { return _bootSettings.deriveUnauthoredLights; }
+		bool DeriveUnauthoredLights() const noexcept { return _settings.deriveUnauthoredLights; }
 		light_limit_fix::LocalShadowConfig GetLocalShadowConfig() const noexcept;
 		void DrawFailLoadMessage() override { DrawSettings(); }
 		bool ProducesTelemetry() const override { return true; }
@@ -48,8 +46,8 @@ namespace cs::features
 		LightLimitFix() { PublishSettings(); }
 		void PublishSettings() noexcept;
 
-		light_limit_fix::Settings _settings;
-		light_limit_fix::Settings _bootSettings;
+		settings::LiveSettings<light_limit_fix::kSchema> _live{ { .finalize = [this](const light_limit_fix::Settings&) { PublishSettings(); } } };
+		const light_limit_fix::Settings& _settings = _live.Get();
 		std::atomic_bool _enableLocalShadows;
 		std::atomic<std::uint32_t> _localShadowSlots, _localShadowResolution, _localShadowSamples;
 		std::atomic<float> _localShadowFilterScale;

@@ -28,7 +28,6 @@ namespace cs
 		// Identity is scope prefix plus lowercase name.
 		const PresetMeta* FindByIdentity(std::string_view a_identity) const;
 
-		// Marker payloads may use bare names.
 		const PresetMeta* FindByName(std::string_view a_name) const;
 
 		// Failures preserve live state and prevent preset persistence.
@@ -42,7 +41,6 @@ namespace cs
 
 		bool Delete(const PresetMeta& a_meta, std::string& a_err) const;
 
-		// Smoke markers override active-preset auto-loading.
 		void ResolveAndApplyBootPreset();
 
 		std::string activeIdentity;  // Survives Refresh().

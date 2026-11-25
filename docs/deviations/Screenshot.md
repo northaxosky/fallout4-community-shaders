@@ -9,3 +9,4 @@
 | Divergence | HDR PNG from R10 or fp16 back buffers | R10 PQ only | The compose pass writes R10 |
 | Pending | HDR AVIF (`HdrUseAvif`) | PNG only | The AVIF encoder is not ported |
 | N/A | SDR BMP (`SdrUsePng`) | SDR is always PNG | Lossless PNG covers it |
+| N/A | `DisableVanillaScreenshot` also drops a queued multi-screenshot | | No FO4 input queues a multi-screenshot |

@@ -61,7 +61,6 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
 
 		// Queues the engine screenshot; the completion carries the id.
 		[[nodiscard]] std::expected<RequestId, CaptureRefusal> RequestCapture();
@@ -92,8 +91,7 @@ namespace cs::features
 			Settings settings;
 		};
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(screenshot_settings::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 		// Before the interface draws: keeps the scene when the capture excludes it.
 		void OnPreInterface();
@@ -107,14 +105,14 @@ namespace cs::features
 		void Complete(CaptureCompletion a_completion);
 		void DrainCompletions();
 
-		Settings _settings;
+		settings::LiveSettings<screenshot_settings::kSchema> _live;
+		const Settings& _settings = _live.Get();
 		// Render thread only.
 		bool _queuedThisFrame = false;
 		std::unique_ptr<buffer::Texture2D> _scene;
 		bool _sceneKept = false;
 		std::vector<Readback> _readbacks;
 		std::atomic<RequestId> _requested{ 0 };
-		RequestId _lastRequestId{};
 		std::mutex _completionMutex;
 		std::vector<CaptureCompletion> _completions;
 		Observers _observers;

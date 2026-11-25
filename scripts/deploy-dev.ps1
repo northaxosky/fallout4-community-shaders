@@ -6,7 +6,7 @@
 	Clears the deploy environment variables, refuses to run while the game is open, builds releasedbg,
 	installs into build/isolated-install, mirrors that into the mod folder (keeping its ShaderCache,
 	Presets and plugin TOML), then overwrites the plugin TOML and verifies the DLL and PDB hashes.
-	Every feature the TOML leaves without a load key is loaded; RenderDoc loads only with -RenderDoc.
+	Every feature the TOML leaves without a load key is loaded, RenderDoc included unless -NoRenderDoc.
 	Use -WhatIf to list the steps without building or copying.
 
 .PARAMETER Mod
@@ -21,8 +21,8 @@
 .PARAMETER ModsRoot
 	Folder holding named mods.
 
-.PARAMETER RenderDoc
-	Load the RenderDoc feature; without it the deploy turns RenderDoc off, as its API hooks skew performance.
+.PARAMETER NoRenderDoc
+	Turn RenderDoc off for performance measurements; its API hooks skew timings.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -30,7 +30,7 @@ param(
 	[string]$Toml,
 	[string]$Preset = 'taa-all',
 	[string]$ModsRoot = 'C:\Games\Modding\Nucleus\mods',
-	[switch]$RenderDoc
+	[switch]$NoRenderDoc
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,7 +62,7 @@ if ($PSCmdlet.ShouldProcess($modPath, "build, install and deploy with $Toml")) {
 		ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object -Unique
 	if (-not $features) { throw 'No feature names found under features\.' }
 	# Pin dev tool loading so every deployed build can be inspected.
-	$tools = @{ RemoteControl = $true; CSEditor = $true; RenderDoc = $RenderDoc.IsPresent }
+	$tools = @{ RemoteControl = $true; CSEditor = $true; RenderDoc = -not $NoRenderDoc.IsPresent }
 	foreach ($feature in $features) {
 		$pinned = $tools.ContainsKey($feature)
 		$load = "load = $(($pinned ? $tools[$feature] : $true).ToString().ToLower())"

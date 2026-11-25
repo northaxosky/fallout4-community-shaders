@@ -148,10 +148,4 @@ namespace cs::engine
 		const auto* sky = RE::Sky::GetSingleton();
 		return ExteriorWorldspaceHasSky(*tes) && sky && sky->mode.get() != RE::Sky::Mode::kNone;
 	}
-
-	bool IsMainOrLoadingMenuOpen() noexcept
-	{
-		const auto* ui = RE::UI::GetSingleton();
-		return ui && (ui->GetMenuOpen<RE::MainMenu>() || ui->GetMenuOpen<RE::LoadingMenu>());
-	}
 }

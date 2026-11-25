@@ -11,6 +11,9 @@
 #	endif
 // FO4: pixel and compute lighting read the probe array at the same slot.
 #	define SKYLIGHTING_PROBE_REGISTER t50
+// FO4: t51/t52 hold albedo and vertex AO, so probe coverage moves to t56/t57.
+#	define SKYLIGHTING_COVERAGE_REGISTER t56
+#	define SKYLIGHTING_ZENITH_REGISTER t57
 #	include "Common/Color.hlsli"
 #	include "Skylighting/Skylighting.hlsli"
 #endif
@@ -101,8 +104,8 @@ namespace Skylighting
 		float3 positionMS = FrameBuffer::ViewToWorld(viewPosition);
 		float3 normalWS = normalize(FrameBuffer::ViewToWorld(normalView, false));
 		float3 V = normalize(FrameBuffer::ViewToWorld(-viewPosition, false));
-		float3 R = reflect(-V, normalWS);
-		sh2 skylightingSH = SampleProbes(ClampToArrayHeight(positionMS), R);
+		// Normal-biased: a reflection-vector bias shows the probe grid.
+		sh2 skylightingSH = SampleSpecular(SampleProbes(positionMS, normalWS), positionMS);
 		float fadeOut = GetHorizontalFadeOutFactor(positionMS);
 #	ifdef IBL
 		SpecularVisibility result;

@@ -12,6 +12,8 @@ namespace cs::render::hdr
 	struct OutputSettings
 	{
 		bool enabled = false;
+		// Windows HDR is on now; off means scRGB white is 1.0, not paper white.
+		bool windowsHdr = true;
 		float paperWhite = 203.0f;
 		float peakNits = 1000.0f;
 		float uiBrightness = 1.0f;
@@ -47,6 +49,10 @@ namespace cs::render::hdr
 			ID3D11ShaderResourceView* a_interface, ID3D11UnorderedAccessView& a_output,
 			UINT a_width, UINT a_height, const OutputSettings& a_settings);
 
+		// Re-encodes the composed signal as linear scRGB for an fp16 chain.
+		void ConvertToScRgb(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView& a_signal,
+			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const OutputSettings& a_settings);
+
 		// Frame generation blends in the output encoding; the UI is encoded in place.
 		void EncodeInterface(ID3D11DeviceContext& a_context, ID3D11UnorderedAccessView& a_interface,
 			UINT a_width, UINT a_height, const OutputSettings& a_settings);
@@ -65,6 +71,7 @@ namespace cs::render::hdr
 		winrt::com_ptr<ID3D11ComputeShader> _shader;
 		winrt::com_ptr<ID3D11ComputeShader> _encodeInterface;
 		winrt::com_ptr<ID3D11ComputeShader> _compositeInterface;
+		winrt::com_ptr<ID3D11ComputeShader> _toScRgb;
 		winrt::com_ptr<ID3D11Buffer> _constants;
 	};
 }

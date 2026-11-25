@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Render/FailurePolicy.h"
 #include "Render/FrameGenerationCpuTiming.h"
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/FrameState.h"
 #include "Render/HdrCompose.h"
 #include "Render/LatencyRouter.h"
 #include "Render/SwapChainHook.h"
@@ -173,13 +175,17 @@ namespace cs::render
 		void BeginPresentAttempt(UINT a_flags) noexcept;
 		void EndPresentAttempt(UINT a_flags, HRESULT a_result) noexcept;
 		[[nodiscard]] std::uint64_t CurrentRealFrame() const noexcept;
+		// Records why a frame or feature failed; nothing is switched off.
 		void PostFailure(temporal::FailureDomain a_domain,
 			std::string a_message) noexcept;
+		// Switches the affected processing off until restart.
+		void Quarantine(temporal::FailureDomain a_domain,
+			std::string a_message) noexcept;
 		void FailSuperResolutionToNative(std::string reason) noexcept;
-		void AdvanceEngineResourceGeneration() noexcept;
-		void AdvanceDisplayGeneration(std::uint32_t a_width,
+		void OnDisplayResized(std::uint32_t a_width,
 			std::uint32_t a_height) noexcept;
 		void RequestSuperResolutionReset() noexcept;
+		[[nodiscard]] temporal::FailurePolicy& SuperResolutionPolicy() noexcept;
 		[[nodiscard]] bool ClaimWorldFrame(std::uint64_t a_engineFrame) noexcept;
 		void SkipWorldFrame() noexcept;
 		void RequestFrameGenerationReset() noexcept;
@@ -212,7 +218,10 @@ namespace cs::render
 		TemporalRenderer& Renderer() noexcept;
 		[[nodiscard]] temporal::EffectiveConfiguration
 		GetEffectiveConfiguration() const;
+		// The facade sits between the engine and whichever presenter is behind it.
 		[[nodiscard]] bool IsFrameGenerationProxyActive() const noexcept;
+		// The D3D12 presenter carries the session, so FG inputs can be captured.
+		[[nodiscard]] bool IsFrameGenerationPresenterActive() const noexcept;
 		// True while the presenter carries the HDR container; never in fullscreen.
 		[[nodiscard]] bool IsHdrContainerActive() const noexcept;
 		// The fp16 scene texture rendered into while the interface is separate.
@@ -220,9 +229,8 @@ namespace cs::render
 		// Runs the presenter's HDR compose into a_output; false unless the container is active.
 		[[nodiscard]] bool ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
 			ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept;
-		[[nodiscard]] bool
-		IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
-		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;
+		// The one gate for a frame: presenter, readiness, enablement and menus.
+		[[nodiscard]] bool CanGenerateFrame(const FrameState& a_frame) const noexcept;
 		[[nodiscard]] FrameGenerationDiagnostics
 		GetFrameGenerationDiagnostics(
 			bool a_includeLiveEngineState = true) const noexcept;
@@ -237,7 +245,7 @@ namespace cs::render
 		// Under HDR output ReShade gets the color as scRGB at paper white.
 		void RenderReShadeEffects(ID3D11DeviceContext& a_context,
 			ID3D11Resource& a_color, ID3D11ShaderResourceView* a_depth) noexcept;
-		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
+		void AbandonFrameGenerationFrames() noexcept;
 		void FailFrameGenerationFrame(const char* a_reason) noexcept;
 		void ResetFrameGenerationCaptureDiagnostics() noexcept;
 		void RecordFrameGenerationCapture(bool a_alphaConditioned) noexcept;
@@ -282,6 +290,8 @@ namespace cs::render
 			std::uint64_t a_frame) noexcept;
 		void ReportLatencyResult(const temporal::ProviderResult& a_result) noexcept;
 		void ApplyPendingConfiguration();
+		void Report(temporal::FailureDomain a_domain, std::string a_message,
+			bool a_quarantine) noexcept;
 
 		struct Impl;
 		std::unique_ptr<Impl> _impl;

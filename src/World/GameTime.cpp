@@ -1,17 +1,13 @@
 #include "World/GameTime.h"
 
 #include "Log.h"
+#include "Render/FrameState.h"
 
 #include "RE/C/Calendar.h"
-#include "RE/L/LoadingMenu.h"
-#include "RE/P/PipboyMenu.h"
 #include "RE/T/TESGlobal.h"
-#include "RE/U/UI.h"
 
 #include <algorithm>
-#include <array>
 #include <mutex>
-#include <string_view>
 
 namespace cs::engine
 {
@@ -62,19 +58,10 @@ namespace cs::engine
 		}
 
 		// FO4: Pip-Boy launches fast travel; time must run or these menus hang.
-		constexpr std::array<std::string_view, 3> kTimeSensitiveMenus{
-			RE::LoadingMenu::MENU_NAME, "SleepWaitMenu", RE::PipboyMenu::MENU_NAME
-		};
-
-		bool IsTimeSensitiveMenu(const RE::BSFixedString& a_menuName)
-		{
-			return std::ranges::any_of(kTimeSensitiveMenus, [&](std::string_view a_name) { return a_menuName == a_name; });
-		}
-
 		bool IsAnyTimeSensitiveMenuOpen()
 		{
-			const auto* ui = RE::UI::GetSingleton();
-			return ui && std::ranges::any_of(kTimeSensitiveMenus, [&](std::string_view a_name) { return ui->GetMenuOpen(a_name); });
+			using render::TrackedMenu;
+			return render::IsAnyMenuOpen({ TrackedMenu::kLoading, TrackedMenu::kSleepWait, TrackedMenu::kPipboy });
 		}
 
 		void SetTimeRunningForMenu(bool a_needsRunningTime)
@@ -105,28 +92,18 @@ namespace cs::engine
 			}
 		}
 
-		class MenuGuard final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		void OnTrackedMenu(render::TrackedMenu a_menu, bool a_opening)
 		{
-		public:
-			RE::BSEventNotifyControl ProcessEvent(
-				const RE::MenuOpenCloseEvent& a_event,
-				RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
-			{
-				// Menus overlap in fast travel; end the guard once all are closed.
-				if (IsTimeSensitiveMenu(a_event.menuName))
-					SetTimeRunningForMenu(a_event.opening || IsAnyTimeSensitiveMenuOpen());
-				return RE::BSEventNotifyControl::kContinue;
-			}
-		};
+			if (a_menu == render::TrackedMenu::kMain)
+				return;
+			// Menus overlap in fast travel; end the guard once all are closed.
+			SetTimeRunningForMenu(a_opening || IsAnyTimeSensitiveMenuOpen());
+		}
 	}
 
 	void InstallGameTimeMenuGuard()
 	{
-		static MenuGuard guard;
-		if (auto* ui = RE::UI::GetSingleton())
-			ui->RegisterSink<RE::MenuOpenCloseEvent>(&guard);
-		else
-			L->error("UI event source unavailable; pausing time can hang fast travel");
+		render::AddMenuListener(&OnTrackedMenu);
 	}
 
 	void PauseGameTime()

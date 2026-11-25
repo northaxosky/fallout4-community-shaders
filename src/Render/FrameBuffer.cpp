@@ -3,11 +3,13 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/Engine.h"
+#include "Render/FrameState.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
-#include "Render/SharedData.h"
 
 #include <cstring>
 #include <mutex>
+#include <utility>
 
 namespace cs::engine
 {
@@ -18,17 +20,102 @@ namespace cs::engine
 		std::mutex g_prepassCameraMutex;
 		std::optional<WorldCameraRecord> g_prepassCamera;
 		std::optional<std::uint32_t> g_prepassFrame;
+		render::RenderResolution g_resolution;
+		std::optional<DirectX::XMFLOAT2> g_lastRatio;
+
+		// Per-frame origin jump in world units that continuous motion never reaches.
+		constexpr float kTeleportDistance = 2000.0f;
+
+		struct OriginSample
+		{
+			DirectX::XMFLOAT3 origin;
+			std::uint32_t frame;
+		};
+		std::optional<OriginSample> g_lastOrigin;
+
+		render::RenderResolution NativeResolution() noexcept
+		{
+			const auto* state = GetGraphicsState();
+			render::RenderResolution native;
+			native.output = { state ? state->screenWidth : 0u, state ? state->screenHeight : 0u };
+			native.render = native.output;
+			return native;
+		}
+
+		// Latches once per world frame; b4 and world-frame readers share the result.
+		void LatchRenderResolution() noexcept
+		{
+			auto latched = render::ReadLiveResolution();
+			const auto previous = g_lastRatio.value_or(DirectX::XMFLOAT2{ latched.widthRatio, latched.heightRatio });
+			latched.previousWidthRatio = previous.x;
+			latched.previousHeightRatio = previous.y;
+			g_lastRatio = DirectX::XMFLOAT2{ latched.widthRatio, latched.heightRatio };
+			g_resolution = latched;
+		}
+
+		// Render thread; world+jitter valid from MainRenderSetup to DeferredPrePass.
+		std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept
+		{
+			const auto* state = GetGraphicsState();
+			const auto* camera = RE::Main::WorldRootCamera();
+			if (!state || !camera)
+				return std::nullopt;
+			// Cache +0x140 and record stride/key +0x250/+0x238/+0x240 match OG, NG and AE.
+			static_assert(offsetof(RE::BSGraphics::State, cameraDataCache) == 0x140);
+			static_assert(sizeof(RE::BSGraphics::CameraStateData) == 0x250);
+			static_assert(offsetof(RE::BSGraphics::CameraStateData, referenceCamera) == 0x238);
+			static_assert(offsetof(RE::BSGraphics::CameraStateData, useJitter) == 0x240);
+			for (const auto& entry : state->cameraDataCache) {
+				if (entry.referenceCamera != camera || !entry.useJitter)
+					continue;
+				WorldCameraRecord record{};
+				std::memcpy(&record.View, entry.camViewData.viewMat, sizeof(record.View));
+				std::memcpy(&record.Projection, entry.camViewData.projMat, sizeof(record.Projection));
+				std::memcpy(&record.ViewProjection, entry.camViewData.viewProjMat, sizeof(record.ViewProjection));
+				std::memcpy(&record.ViewProjectionUnjittered, entry.camViewData.viewProjUnjittered, sizeof(record.ViewProjectionUnjittered));
+				std::memcpy(&record.PreviousViewProjectionUnjittered, entry.camViewData.previousViewProjUnjittered, sizeof(record.PreviousViewProjectionUnjittered));
+				record.PosAdjust = { entry.posAdjust.x, entry.posAdjust.y, entry.posAdjust.z, 0 };
+				record.PreviousPosAdjust = { entry.previousPosAdjust.x, entry.previousPosAdjust.y, entry.previousPosAdjust.z, 0 };
+				record.frameCount = state->frameCount;
+				return PrepareWorldCameraRecord(record) ? std::optional{ record } : std::nullopt;
+			}
+			return std::nullopt;
+		}
+
+		// The origin sums the recentering offset, so cell-border shifts cancel.
+		bool IsTeleport(const WorldCameraRecord& a_camera, std::uint32_t a_frame) noexcept
+		{
+			const auto origin = CameraWorldOrigin(a_camera);
+			const auto previous = std::exchange(g_lastOrigin, OriginSample{ origin, a_frame });
+			// A frame gap covers loads; frozen frames hold the camera still.
+			if (!previous || a_frame - previous->frame != 1)
+				return false;
+			if (const auto state = render::GetFrameState(); state.paused || state.worldFrozen)
+				return false;
+			const float dx = origin.x - previous->origin.x;
+			const float dy = origin.y - previous->origin.y;
+			const float dz = origin.z - previous->origin.z;
+			return dx * dx + dy * dy + dz * dz > kTeleportDistance * kTeleportDistance;
+		}
 
 		void CaptureWorldCamera() noexcept
 		{
 			std::scoped_lock lock(g_prepassCameraMutex);
 			const auto frame = GetFrameCount();
-			if (g_prepassFrame != frame)
-				render::LatchHistoryResetFrame();
-			if (g_prepassFrame != frame || !g_prepassCamera) {
+			const bool newFrame = g_prepassFrame != frame;
+			if (newFrame)
+				LatchRenderResolution();
+			if (newFrame || !g_prepassCamera) {
 				g_prepassCamera = GetWorldCameraRecord();
 				g_prepassFrame = frame;
+				if (g_prepassCamera && IsTeleport(*g_prepassCamera, frame)) {
+					L->debug("Camera teleport at frame {}", frame);
+					render::RequestReset(render::ResetReason::kTeleport);
+				}
 			}
+			// After the teleport check so this frame commits it, record or not.
+			if (newFrame)
+				render::BeginWorldFrame();
 		}
 	}
 
@@ -46,34 +133,6 @@ namespace cs::engine
 			L->error("World-camera capture disabled: pre-pass hook registration failed.");
 	}
 
-	std::optional<WorldCameraRecord> GetWorldCameraRecord() noexcept
-	{
-		const auto* state = GetGraphicsState();
-		const auto* camera = RE::Main::WorldRootCamera();
-		if (!state || !camera)
-			return std::nullopt;
-		// Cache +0x140 and record stride/key +0x250/+0x238/+0x240 match OG, NG and AE.
-		static_assert(offsetof(RE::BSGraphics::State, cameraDataCache) == 0x140);
-		static_assert(sizeof(RE::BSGraphics::CameraStateData) == 0x250);
-		static_assert(offsetof(RE::BSGraphics::CameraStateData, referenceCamera) == 0x238);
-		static_assert(offsetof(RE::BSGraphics::CameraStateData, useJitter) == 0x240);
-		for (const auto& entry : state->cameraDataCache) {
-			if (entry.referenceCamera != camera || !entry.useJitter)
-				continue;
-			WorldCameraRecord record{};
-			std::memcpy(&record.View, entry.camViewData.viewMat, sizeof(record.View));
-			std::memcpy(&record.Projection, entry.camViewData.projMat, sizeof(record.Projection));
-			std::memcpy(&record.ViewProjection, entry.camViewData.viewProjMat, sizeof(record.ViewProjection));
-			std::memcpy(&record.ViewProjectionUnjittered, entry.camViewData.viewProjUnjittered, sizeof(record.ViewProjectionUnjittered));
-			std::memcpy(&record.PreviousViewProjectionUnjittered, entry.camViewData.previousViewProjUnjittered, sizeof(record.PreviousViewProjectionUnjittered));
-			record.PosAdjust = { entry.posAdjust.x, entry.posAdjust.y, entry.posAdjust.z, 0 };
-			record.PreviousPosAdjust = { entry.previousPosAdjust.x, entry.previousPosAdjust.y, entry.previousPosAdjust.z, 0 };
-			record.frameCount = state->frameCount;
-			return PrepareWorldCameraRecord(record) ? std::optional{ record } : std::nullopt;
-		}
-		return std::nullopt;
-	}
-
 	std::optional<WorldCameraRecord> GetCapturedWorldCameraRecord(
 		std::optional<std::uint64_t> a_frame) noexcept
 	{
@@ -81,5 +140,29 @@ namespace cs::engine
 		if (!g_prepassCamera || (a_frame && g_prepassCamera->frameCount != *a_frame))
 			return std::nullopt;
 		return g_prepassCamera;
+	}
+}
+
+namespace cs::render
+{
+	RenderResolution ReadLiveResolution() noexcept
+	{
+		auto live = engine::NativeResolution();
+		if (const auto* manager = engine::GetRenderTargetManager()) {
+			const auto width = manager->GetDynamicWidthRatio();
+			const auto height = manager->GetDynamicHeightRatio();
+			live.widthRatio = width > 0.0f ? width : 1.0f;
+			live.heightRatio = height > 0.0f ? height : 1.0f;
+		}
+		live.render = { ScaledExtent(live.output.width, live.widthRatio), ScaledExtent(live.output.height, live.heightRatio) };
+		live.previousWidthRatio = live.widthRatio;
+		live.previousHeightRatio = live.heightRatio;
+		return live;
+	}
+
+	RenderResolution GetRenderResolution() noexcept
+	{
+		std::scoped_lock lock(engine::g_prepassCameraMutex);
+		return engine::g_prepassFrame == engine::GetFrameCount() ? engine::g_resolution : engine::NativeResolution();
 	}
 }

@@ -194,36 +194,36 @@ namespace cs::ui
 		return { .id = a_field.key, .look = look, .restart = a_field.description };
 	}
 
-	// A schema value as a field row with a Reset to its default.
+	// A schema value as a field row with a Reset to a_defaults.
 	template <class Field, class Settings>
 		requires requires(const Field& a_field) { a_field.member; a_field.help; }
-	EditResult EditSetting(const Field& a_field, Settings& a_settings, const FieldOptions& a_options = {})
+	EditResult EditSetting(const Field& a_field, Settings& a_settings, const Settings& a_defaults, const FieldOptions& a_options)
 	{
 		using Value = typename Field::ValueType;
 		settings::Range<Value> range{};
 		if constexpr (requires { a_field.edit; })
 			range = a_field.edit;
-		return EditSetting(SpecFor(a_field, a_options), a_settings.*a_field.member, Settings{}.*a_field.member, range);
+		return EditSetting(SpecFor(a_field, a_options), a_settings.*a_field.member, a_defaults.*a_field.member, range);
 	}
 
-	// A schema value as a dropdown field row with a Reset to its default.
+	// A schema value as a dropdown field row with a Reset to a_defaults.
 	template <class Field, class Settings>
 		requires requires(const Field& a_field) { a_field.member; a_field.help; }
-	EditResult EditChoice(const Field& a_field, Settings& a_settings,
-		std::span<const dmui::ChoiceOption<typename Field::ValueType>> a_options, const FieldOptions& a_dropdown = {})
+	EditResult EditChoice(const Field& a_field, Settings& a_settings, const Settings& a_defaults,
+		std::span<const dmui::ChoiceOption<typename Field::ValueType>> a_options, const FieldOptions& a_dropdown)
 	{
-		return EditChoice(SpecFor(a_field, a_dropdown), a_settings.*a_field.member, Settings{}.*a_field.member, a_options);
+		return EditChoice(SpecFor(a_field, a_dropdown), a_settings.*a_field.member, a_defaults.*a_field.member, a_options);
 	}
 
-	// A choice field's own choices as a dropdown field row.
+	// A choice field's own choices as a dropdown row.
 	template <class Field, class Settings>
 		requires requires(const Field& a_field) { a_field.member; a_field.help; a_field.choices; }
-	EditResult EditChoice(const Field& a_field, Settings& a_settings, const FieldOptions& a_dropdown = {})
+	EditResult EditChoice(const Field& a_field, Settings& a_settings, const Settings& a_defaults, const FieldOptions& a_dropdown)
 	{
 		using Value = typename Field::ValueType;
 		std::vector<dmui::ChoiceOption<Value>> options;
 		for (const auto& choice : a_field.choices)
 			options.push_back({ choice.value, std::string(choice.text), std::string(choice.text), true });
-		return EditChoice(a_field, a_settings, std::span<const dmui::ChoiceOption<Value>>{ options }, a_dropdown);
+		return EditChoice(a_field, a_settings, a_defaults, std::span<const dmui::ChoiceOption<Value>>{ options }, a_dropdown);
 	}
 }

@@ -24,7 +24,9 @@ namespace cs::features::remote_control
 			&kShaderCacheTool,
 			&kSettingsTool,
 			&kCaptureTool,
-			&kNvPerfTool
+			&kPerfTool,
+			&kNvPerfTool,
+			&kDevFlagsTool
 		};
 
 		// No exception may cross the DLL boundary; write the result once.
@@ -53,11 +55,6 @@ namespace cs::features::remote_control
 			}
 			a_write(a_sink, text.c_str());
 		}
-	}
-
-	std::span<const Tool* const> GetTools() noexcept
-	{
-		return kTools;
 	}
 
 	std::vector<std::string_view> RegisterTools(DevBenchAPI::IDevBenchInterface001& a_host)

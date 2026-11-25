@@ -66,12 +66,16 @@ namespace cs::feature_config
 		{
 			return enabled[static_cast<std::size_t>(a_target)];
 		}
+
+		bool operator==(const ShaderOwnershipTargets&) const = default;
 	};
 
 	struct ShaderOwnershipConfig
 	{
 		bool enableShaders{ false };
 		ShaderOwnershipTargets targets;
+
+		bool operator==(const ShaderOwnershipConfig&) const = default;
 	};
 
 	struct ShaderOwnershipParseResult
@@ -81,8 +85,9 @@ namespace cs::feature_config
 		std::string error;
 	};
 
-	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root);
-	// Invalid or missing values use the default; a_error names an invalid one.
+	ShaderOwnershipConfig DefaultShaderOwnership();
+	// Invalid or missing values use a_base; error names an invalid one.
+	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root, const ShaderOwnershipConfig& a_base = DefaultShaderOwnership());
 
 	struct WriteResult
 	{
@@ -99,14 +104,11 @@ namespace cs::feature_config
 		kMerge
 	};
 
-	WriteResult UpdateOwnedSettingsAt(
-		const std::filesystem::path& a_filePath,
+	// Merges onto the file as it is on disk; refuses when it does not parse.
+	WriteResult UpdateOwnedSettings(
 		std::span<const std::string_view> a_path,
 		const toml::table& a_value,
 		SectionWrite a_mode = SectionWrite::kReplace);
-	WriteResult UpdateFeatureOwnedSettings(
-		std::string_view a_featureKey,
-		const toml::table& a_delta);
 	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load);
 	WriteResult UpdateFeatureEnabled(std::string_view a_featureKey, bool a_enabled);
 	WriteResult UpdateTopLevelSection(

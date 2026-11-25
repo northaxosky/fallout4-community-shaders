@@ -201,12 +201,6 @@ namespace cs::engine
 		std::uint64_t draws = 0;
 	};
 
-	struct ShaderInjectionOutcomeSnapshot
-	{
-		std::uint64_t matches = 0;
-		std::uint64_t substitutions = 0;
-	};
-
 	struct ComputeDispatchBridgeStatus
 	{
 		bool installed = false;
@@ -265,16 +259,14 @@ namespace cs::engine
 	// Call only via FeatureManager::ApplyShaderOwnership.
 	void ApplyShaderOwnershipConfig(const feature_config::ShaderOwnershipConfig& a_config);
 	bool IsShaderInjectionEnabled() noexcept;
+	// The ownership last applied, not the saved configuration.
+	feature_config::ShaderOwnershipConfig GetShaderOwnershipConfig() noexcept;
 	std::vector<ShaderInjectionTarget> GetUnownedShaderTargets(std::string_view a_contributor);
 	bool ValidateShaderInjectionRoutes(
 		std::string_view a_contributor,
 		std::string& a_error);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
-	// Re-queues every loaded engine technique of contributed targets.
-	std::size_t PrewarmAllShaderInjectionVariants();
-	// Limited to a_targets, e.g. after invalidation; empty queues nothing.
-	std::size_t PrewarmShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets);
 	bool EnsureComputeDispatchBridgeInstalled(
 		ID3D11DeviceContext* a_immediateContext) noexcept;
 	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;
@@ -285,10 +277,6 @@ namespace cs::engine
 		RE::BSGraphics::VertexShader* vertex = nullptr;
 		RE::BSGraphics::PixelShader* pixel = nullptr;
 	};
-	void DispatchShaderInjections(
-		ShaderInjectionTarget a_target,
-		ID3D11DeviceContext* a_context,
-		util::ShaderSamplerUse a_samplers = {}) noexcept;
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept;
 	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
@@ -321,11 +309,12 @@ namespace cs::engine
 		ScopedNativeShaderObservationBypass& operator=(ScopedNativeShaderObservationBypass&&) = delete;
 	};
 
-	void InvalidateNativeShaderVariantCompilations() noexcept;
+	// Cache clear: drops all variants and compiles, re-queues loaded techniques.
+	void ResetShaderInjectionVariants();
 	// Drops queued compiles and joins the workers; later requests fail fast.
 	void StopNativeShaderVariantCompilations() noexcept;
-	// Define changes retire target lookups and native identities, retaining immutable compiled variants.
-	void InvalidateNativeShaderVariantCompilations(std::span<const ShaderInjectionTarget> a_targets) noexcept;
+	// Define change: retires a_targets' lookups, keeps compiles, re-queues.
+	void RebuildShaderInjectionVariants(std::span<const ShaderInjectionTarget> a_targets);
 
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept;
@@ -335,8 +324,6 @@ namespace cs::engine
 	bool ActiveShaderInjectionVariantHasAnyDefine(
 		ShaderInjectionTarget a_target,
 		std::span<const std::string_view> a_defines) noexcept;
-	ShaderInjectionOutcomeSnapshot GetShaderInjectionOutcomeSnapshot(
-		ShaderInjectionTarget a_target) noexcept;
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(ShaderInjectionTarget a_target);
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept;
 }

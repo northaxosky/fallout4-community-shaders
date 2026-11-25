@@ -5,12 +5,25 @@
 
 #include <cstdint>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace cs::shader_test
 {
+	// Throws so a failing row or precondition reports through its caller.
+	inline void Require(bool a_condition, const std::string& a_message)
+	{
+		if (!a_condition)
+			throw std::runtime_error(a_message);
+	}
+
+	[[nodiscard]] inline bool IsHex(std::string_view a_text, std::size_t a_length)
+	{
+		return a_text.size() == a_length && a_text.find_first_not_of("0123456789abcdef") == a_text.npos;
+	}
+
 	// One stock shader variant of the identity corpus; owns its descriptor strings.
 	struct StockShaderRow
 	{

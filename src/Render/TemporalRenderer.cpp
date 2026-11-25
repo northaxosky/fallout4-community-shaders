@@ -1,3 +1,4 @@
+#include "Render/FrameState.h"
 #include "Render/TemporalRendererInternals.h"
 
 namespace cs::render
@@ -33,60 +34,50 @@ namespace cs::render
 				   extent.height < state->screenHeight);
 	}
 
-	bool TemporalRenderer::IsFrameGenerationDx12PathActive() const noexcept
+	TemporalRenderer::FrameGenerationFrame& TemporalRenderer::CurrentFrameGenerationFrame() noexcept
 	{
-		return render::TemporalPipeline::Get().IsFrameGenerationProxyActive();
-	}
-
-	bool TemporalRenderer::IsFrameGenerationActive() const noexcept
-	{
-		const auto status = render::TemporalPipeline::Get().GetStatus();
-		return IsFrameGenerationDx12PathActive() &&
-		       status.effective.frameGenerationEnabled;
-	}
-
-	bool TemporalRenderer::ShouldUseFrameGenerationThisFrame() const noexcept
-	{
-		const auto latched =
-			_frameGenerationLatchFrame.load(std::memory_order_acquire);
-		// Expires when the pre-UI seam stops running, e.g. loading screens.
-		return latched != 0 && GetEngineFrame() + 1 - latched <= 1;
-	}
-
-	void TemporalRenderer::LatchFrameGenerationDecision() noexcept
-	{
-		_frameGenerationLatchFrame.store(
-			EvaluateFrameGenerationDecision() ? GetEngineFrame() + 1 : 0,
-			std::memory_order_release);
-	}
-
-	bool TemporalRenderer::EvaluateFrameGenerationDecision() const noexcept
-	{
-		if (!IsFrameGenerationDx12PathActive() ||
-			!render::TemporalPipeline::Get()
-				.GetFrameGenerationCaptureResources()
-				.ready) {
-			return false;
+		const auto frame = GetFrameState();
+		if (_frameGeneration.worldFrame != frame.worldFrame) {
+			_frameGeneration = {
+				.worldFrame = frame.worldFrame,
+				.generate = render::TemporalPipeline::Get().CanGenerateFrame(frame)
+			};
 		}
+		return _frameGeneration;
+	}
 
-		auto* ui = RE::UI::GetSingleton();
-		const bool menuOpen =
-			!ui || ui->GameIsPaused() ||
-			ui->GetMenuOpen<RE::MainMenu>() ||
-			ui->GetMenuOpen<RE::LoadingMenu>();
-		return render::TemporalPipeline::Get().IsFrameGenerationEnabledForFrame(
-			menuOpen);
+	bool TemporalRenderer::GeneratesThisFrame() noexcept
+	{
+		std::scoped_lock lock(_frameGenerationMutex);
+		return CurrentFrameGenerationFrame().generate;
+	}
+
+	bool TemporalRenderer::TakeFrameGenerationFrame() noexcept
+	{
+		std::scoped_lock lock(_frameGenerationMutex);
+		auto& record = CurrentFrameGenerationFrame();
+		const bool generate = record.generate && record.inputsReady;
+		record.generate = false;
+		record.inputsReady = false;
+		return generate;
+	}
+
+	void TemporalRenderer::SetFrameGenerationInputsReady(bool a_ready) noexcept
+	{
+		{
+			std::scoped_lock lock(_frameGenerationMutex);
+			CurrentFrameGenerationFrame().inputsReady = a_ready;
+		}
+		if (!a_ready) {
+			render::TemporalPipeline::Get().AbandonFrameGenerationFrames();
+		}
 	}
 
 	std::pair<std::uint32_t, std::uint32_t> TemporalRenderer::GetRenderSize() const noexcept
 	{
-		const auto* state = cs::engine::GetGraphicsState();
-		if (!state) {
-			return { 0, 0 };
-		}
 		const auto method = GetUpscaleMethod();
 		if (!IsExternalUpscaler(method)) {
-			const auto extent = GetActiveExtent(state->screenWidth, state->screenHeight);
+			const auto extent = render::GetRenderResolution().render;
 			return { extent.width, extent.height };
 		}
 		const auto extent = _renderSize.Requested();
@@ -116,7 +107,6 @@ namespace cs::render
 	{
 		if (!a_state || !a_state->screenWidth || !a_state->screenHeight) {
 			_renderSize.SetNative(0, 0);
-			resolutionScale = { 1.0f, 1.0f };
 			return {
 				.code = temporal::ProviderResultCode::kFailure,
 				.message =
@@ -125,7 +115,6 @@ namespace cs::render
 		}
 
 		_renderSize.SetNative(a_state->screenWidth, a_state->screenHeight);
-		resolutionScale = { 1.0f, 1.0f };
 		if (!IsExternalUpscaler(a_method)) {
 			return { .code = temporal::ProviderResultCode::kSuccess };
 		}
@@ -191,10 +180,6 @@ namespace cs::render
 			return;
 		}
 		_renderSize.CommitRequested();
-		resolutionScale = {
-			_renderSize.WidthRatio(),
-			_renderSize.HeightRatio()
-		};
 
 		float2 screenSize{ (float)state->screenWidth, (float)state->screenHeight };
 		const bool upscalerActive = IsExternalUpscaler(upscaleMethod);
@@ -234,18 +219,18 @@ namespace cs::render
 		// Jitter is computed for any vendor method (including Native AA at scale 1.0); proxies only below native.
 		const bool vendorMethod = IsExternalUpscaler(method);
 		const bool scaleActive = vendorMethod &&
-		                         (resolutionScale.x < 0.99f || resolutionScale.y < 0.99f);
+		                         _renderSize.Committed() != render::Extent{ state->screenWidth, state->screenHeight };
 		const float widthRatio =
-			scaleActive ? resolutionScale.x : 1.0f;
+			scaleActive ? _renderSize.WidthRatio() : 1.0f;
 		const float heightRatio =
-			scaleActive ? resolutionScale.y : 1.0f;
+			scaleActive ? _renderSize.HeightRatio() : 1.0f;
 
 		if (vendorMethod) {
 			const auto [renderWidth, renderHeight] = GetRenderSize();
 			if (renderWidth > 0 && renderHeight > 0) {
 				// FO4: the camera builder divides these offsets by the dynamic ratio.
-				state->offsetX = -2.0f * jitter.x * widthRatio / static_cast<float>(renderWidth);
-				state->offsetY = 2.0f * jitter.y * heightRatio / static_cast<float>(renderHeight);
+				cs::engine::SetJitter({ -2.0f * jitter.x * widthRatio / static_cast<float>(renderWidth),
+					2.0f * jitter.y * heightRatio / static_cast<float>(renderHeight) });
 			}
 		}
 
@@ -281,17 +266,13 @@ namespace cs::render
 	{
 		_upscaledThisFrame = false;
 		_srPublishedToFramebuffer.store(false, std::memory_order_release);
-		if (auto* state = cs::engine::GetGraphicsState()) {
-			state->offsetX = 0.0f;
-			state->offsetY = 0.0f;
-		}
+		cs::engine::SetJitter({});
 		cs::engine::SetDynamicResolutionRatios(1.0f, 1.0f);
 		if (const auto* state = cs::engine::GetGraphicsState()) {
 			_renderSize.SetNative(state->screenWidth, state->screenHeight);
 		} else {
 			_renderSize.SetNative(0, 0);
 		}
-		resolutionScale = { 1.0f, 1.0f };
 		_resolutionScalePublished = false;
 		_mipBias.store(0.0f, std::memory_order_relaxed);
 		ForceViewportToRenderTargetDimensions();
@@ -324,7 +305,7 @@ namespace cs::render
 		ClearFrameGenerationCaptureState();
 		// An entered imagespace or material scope must finish its own restoration first.
 		_quarantineCleanupPending.store(true, std::memory_order_release);
-		render::TemporalPipeline::Get().PostFailure(
+		render::TemporalPipeline::Get().Quarantine(
 			render::temporal::FailureDomain::kEngine,
 			a_where ? a_where : "Temporal engine integration failed.");
 		if (!alreadyQuarantined) {
@@ -343,12 +324,13 @@ namespace cs::render
 		if (!_quarantineCleanupPending.exchange(false, std::memory_order_acq_rel)) {
 			return;
 		}
+		// Release first: its abort may apply a scaled capture.
 		try {
-			RestoreNativeFrameState();
+			dynamicResolution.Release();
 		} catch (...) {
 		}
 		try {
-			dynamicResolution.Release();
+			RestoreNativeFrameState();
 		} catch (...) {
 		}
 	}
@@ -363,6 +345,6 @@ namespace cs::render
 	{
 		_hooksInstalled.store(false, std::memory_order_release);
 		_resourcesReady.store(false, std::memory_order_release);
-		TemporalPipeline::Get().PostFailure(temporal::FailureDomain::kEngine, std::move(a_reason));
+		TemporalPipeline::Get().Quarantine(temporal::FailureDomain::kEngine, std::move(a_reason));
 	}
 }

@@ -31,7 +31,7 @@ namespace cs::features
 		void OnEnabledChanged(bool) noexcept override { QueueReset("enabled_changed"); }
 		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink&) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
@@ -55,13 +55,12 @@ namespace cs::features
 		struct Resources
 		{
 			MipTexture depth, radiance, normals;
-			Texture normalGloss, diffuse, radianceTemp, previousGeometry;
+			Texture normalGloss, diffuse, radianceTemp, previousGeometry, aoOutput;
 			TexturePair ao, luma, chroma, specular, accumulation;
 			bool normalGlossSpecular = false;
 		};
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(ssgi_settings::kSchema, _settings); }
+		void OnSettingsChanged(const Settings& a_previous);
 		bool EnsureResources();
 		void EnsurePrepareResources(Resources&, UINT, UINT);
 		bool CompileShaders();
@@ -73,13 +72,8 @@ namespace cs::features
 		void UpdateConsumer(bool a_enabled, bool a_tiled);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
-		// FO4: native composite inputs occupy low slots; retain main's t26-t29 boundary.
-		static constexpr UINT kCompositionSlot = 26;
-		static constexpr UINT kCompositionCount = 4;
-		static constexpr UINT kSpecularSlot = 38;
-		static constexpr UINT kConsumerSlot = 10;
-		static constexpr std::size_t kResolutionModes = 3;
-		Settings _settings;
+		settings::LiveSettings<ssgi_settings::kSchema> _live{ { .finalize = [this](const Settings& a_previous) { OnSettingsChanged(a_previous); } } };
+		const Settings& _settings = _live.Get();
 		Resources _textures;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
 		std::optional<ConsumerCB> _consumerData;

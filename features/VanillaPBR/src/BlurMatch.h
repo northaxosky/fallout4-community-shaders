@@ -31,8 +31,8 @@ namespace cs::features::vanilla_pbr
 		// Render thread from here on; false leaves matching off.
 		bool Create(ID3D11Device* a_device, spdlog::logger& a_log) noexcept;
 		void CaptureAuthored(ID3D11DeviceContext* a_context) noexcept;
-		// Profiles this frame's share; returns the matched LOD table or null.
-		ID3D11ShaderResourceView* Update(ID3D11DeviceContext* a_context, ID3D11ShaderResourceView* a_live) noexcept;
+		// Profiles this frame's share; a new generation restarts the live profile.
+		ID3D11ShaderResourceView* Update(ID3D11DeviceContext* a_context, ID3D11ShaderResourceView* a_live, std::uint32_t a_generation) noexcept;
 		// Drops the adopted cubes, so a disabled feature pins no game textures.
 		void Release() noexcept;
 
@@ -82,6 +82,7 @@ namespace cs::features::vanilla_pbr
 		std::uint32_t _cursor = 0;
 		std::array<LiveStream, 2> _live;
 		std::uint32_t _liveTarget = 0;
+		std::uint32_t _liveGeneration = 0;
 
 		std::atomic_uint32_t _authoredSlots{ 0 };
 		std::atomic_uint32_t _profiledSlots{ 0 };

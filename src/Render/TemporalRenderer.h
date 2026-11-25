@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -58,9 +59,10 @@ namespace cs::render
 		void InitializeTemporalState();
 		void ClearFrameGenerationCaptureState() noexcept;
 		void QuarantineAfterException(const char* a_where) noexcept;
-		// Decided once per frame at the pre-UI seam; Present reads the latch.
-		bool ShouldUseFrameGenerationThisFrame() const noexcept;
-		void LatchFrameGenerationDecision() noexcept;
+		// One record per world frame decides frame generation.
+		[[nodiscard]] bool GeneratesThisFrame() noexcept;
+		// Present takes the record once; true when it asks for a generated frame.
+		[[nodiscard]] bool TakeFrameGenerationFrame() noexcept;
 		[[nodiscard]] std::pair<std::uint32_t, std::uint32_t> GetRenderSize() const noexcept;
 		[[nodiscard]] float2 GetAppliedJitter() const noexcept { return jitter; }
 		[[nodiscard]] float GetMipBias() const;
@@ -69,7 +71,7 @@ namespace cs::render
 		void InvalidateProxy(RE::BSGraphics::RenderTargetID a_target) noexcept { dynamicResolution.InvalidateProxy(a_target); }
 		std::pair<float, bool> GetReadiness() const noexcept
 		{
-			return { resolutionScale.x, _resourcesReady.load(std::memory_order_acquire) };
+			return { _renderSize.WidthRatio(), _resourcesReady.load(std::memory_order_acquire) };
 		}
 
 	private:
@@ -92,7 +94,6 @@ namespace cs::render
 		cs::buffer::ConstantBuffer* jitterCB = nullptr;
 		cs::buffer::ConstantBuffer* upscalingDataCB = nullptr;
 
-		float2 resolutionScale = { 1.0f, 1.0f };
 		temporal::RenderSizeState _renderSize;
 		struct ResourceConfiguration
 		{
@@ -106,9 +107,15 @@ namespace cs::render
 		ResourceConfiguration GetResourceConfiguration(UpscaleMethod a_method) const noexcept;
 
 		bool IsUpscalingActive() const;
-		bool IsFrameGenerationDx12PathActive() const noexcept;
-		bool IsFrameGenerationActive() const noexcept;
-		bool EvaluateFrameGenerationDecision() const noexcept;
+		struct FrameGenerationFrame
+		{
+			std::uint64_t worldFrame = 0;
+			bool generate = false;
+			bool inputsReady = false;
+		};
+		// Built on first use in a world frame; callers hold _frameGenerationMutex.
+		FrameGenerationFrame& CurrentFrameGenerationFrame() noexcept;
+		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		UpscaleMethod GetUpscaleMethod() const;
 
 		bool CheckResources(UpscaleMethod a_upscalemethod);
@@ -117,6 +124,10 @@ namespace cs::render
 		bool HasRequiredResources(UpscaleMethod a_upscalemethod) const noexcept;
 		winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[static_cast<std::size_t>(UpscaleMethod::kCount)];
 		ID3D11ComputeShader* GetEncodeTexturesCS();
+		winrt::com_ptr<ID3D11ComputeShader> reactiveMaskCS;
+		ID3D11ComputeShader* GetReactiveMaskCS();
+		winrt::com_ptr<ID3D11ComputeShader> sanitizeColorCS;
+		ID3D11ComputeShader* GetSanitizeColorCS();
 
 		winrt::com_ptr<ID3D11PixelShader> depthRefractionUpscalePS;
 		ID3D11PixelShader* GetDepthRefractionUpscalePS();
@@ -149,6 +160,11 @@ namespace cs::render
 		std::unique_ptr<cs::buffer::Texture2D> pipboyMaskCopy;
 		std::unique_ptr<cs::buffer::Texture2D> vatsMaskFull;
 		std::unique_ptr<cs::buffer::Texture2D> motionVectorSourceCopy;
+		// Opaque-only kMain, copied at the post-sky boundary for FSR3's reactive mask.
+		std::unique_ptr<cs::buffer::Texture2D> preAlphaSceneCopy;
+		std::optional<std::uint64_t> _preAlphaSceneFrame;
+		void CapturePreAlphaScene();
+		void GenerateReactiveMask();
 		static bool EnsureShaderReadableCopy(
 			std::unique_ptr<cs::buffer::Texture2D>& a_copy,
 			ID3D11Texture2D* a_source,
@@ -165,6 +181,14 @@ namespace cs::render
 		void BeginRenderUI();
 		void EndRenderUI();
 		bool PerformUpscaling();
+		bool CaptureInputColor(ID3D11DeviceContext* a_context, ID3D11Texture2D* a_sceneColor, std::uint32_t a_width, std::uint32_t a_height);
+		void DispatchRenderSizeCompute(
+			ID3D11DeviceContext* a_context,
+			ID3D11ComputeShader* a_shader,
+			std::span<ID3D11ShaderResourceView* const> a_views,
+			ID3D11UnorderedAccessView* a_uav,
+			std::uint32_t a_width,
+			std::uint32_t a_height);
 		bool PreflightExternalResolve(UpscaleMethod a_method);
 		bool ApplySpatialFallback(
 			ID3D11Texture2D* a_sceneColor,
@@ -176,10 +200,10 @@ namespace cs::render
 		void UpscaleChainInputs();
 		void UpscaleDepth(ID3D11DeviceContext* a_context);
 		void UpscaleMotionAndMasks(ID3D11DeviceContext* a_context);
-		// kSkipped is transient: no provider work, no native fallback.
+		// kSkipped is transient: no provider work.
 		temporal::ProviderResultCode Upscale();
-		// Returns true once consecutive skips mean the provider is broken.
-		[[nodiscard]] bool NoteSuperResolutionSkip() noexcept;
+		// The frame fell back; a run of them latches native TAA.
+		void NoteSuperResolutionFailure() noexcept;
 
 		void CaptureFrameGenerationInputs();
 		void CaptureHUDLessColor();
@@ -187,7 +211,6 @@ namespace cs::render
 			const TemporalPipeline::FrameGenerationCaptureResources& capture);
 		void RenderReShadeEffects();
 		void FinishPreUiScene(bool a_resolved, bool a_captureHudless);
-		void RecordFrameGenerationFailure() noexcept;
 		void InvalidateEngineDerivedResources();
 		void RefreshEngineResources();
 
@@ -445,11 +468,11 @@ namespace cs::render
 		std::atomic<float> _mipBias{ 0.0f };
 		std::atomic_uint32_t _upscaleDispatches{ 0 };
 		std::atomic_uint32_t _resetSubmissions{ 0 };
-		std::atomic_uint64_t _frameGenerationLatchFrame{ 0 };
+		std::mutex _frameGenerationMutex;
+		FrameGenerationFrame _frameGeneration;
 		std::atomic_uint32_t _providerFailures{ 0 };
 		std::atomic_uint32_t _spatialFallbacks{ 0 };
 		std::atomic_uint32_t _transientFailures{ 0 };
-		std::uint32_t _consecutiveSkips = 0;
 		std::atomic_uint32_t _missedResolveFrames{ 0 };
 		std::atomic_bool _renderUiFullEffectsPath{ false };
 		std::atomic_bool _spatialFallbackThisFrame{ false };

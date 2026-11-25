@@ -1,5 +1,6 @@
 #include "ExtendedMaterials.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 
@@ -21,7 +22,6 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 #include "RE/B/BSLightingShaderMaterialBase.h"
@@ -34,9 +34,6 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.extendedmaterials");
-
-		constexpr std::uint32_t kParallaxShadowRTVSlot = 6;
-		constexpr std::uint32_t kParallaxShadowPSSlot = 66;
 
 		// Height lives in the _s alpha, so only formats that store alpha can carry it.
 		[[nodiscard]] bool HasAlphaChannel(DXGI_FORMAT a_format) noexcept
@@ -78,17 +75,7 @@ namespace cs::features
 
 	bool ExtendedMaterials::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(extended_materials::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(extended_materials::kSchema, _settings);
-		return true;
-	}
-
-	bool ExtendedMaterials::SaveSettings()
-	{
-		return settings::SaveDelta(extended_materials::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	bool ExtendedMaterials::ShadowsActive() const noexcept
@@ -103,7 +90,7 @@ namespace cs::features
 			FailLoad("Extended Materials shader contribution registration failed.");
 			return;
 		}
-		if (!cs::engine::RegisterPrepassExtraTarget(*this, { .name = "ExtendedMaterials/ParallaxShadow", .rtvSlot = kParallaxShadowRTVSlot, .format = DXGI_FORMAT_R8_UNORM, .clear = { 1, 1, 1, 1 }, .publishSlot = kParallaxShadowPSSlot, .active = [this] { return ShadowsActive(); } })) {
+		if (!cs::engine::RegisterPrepassExtraTarget(*this, { .name = "ExtendedMaterials/ParallaxShadow", .rtvSlot = cs::render::kParallaxShadowTargetSlot, .format = DXGI_FORMAT_R8_UNORM, .clear = { 1, 1, 1, 1 }, .publishSlot = cs::render::kParallaxShadowSlot, .active = [this] { return ShadowsActive(); } })) {
 			FailLoad("Extended Materials parallax shadows need the prepass target.");
 			return;
 		}
@@ -147,7 +134,7 @@ namespace cs::features
 	void ExtendedMaterials::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(extended_materials::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "extended-materials-parallax", "Parallax" }; section) {
 			field(&Settings::EnableParallax);
 			field(&Settings::EnableTerrain);
@@ -156,12 +143,6 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "extended-materials-shadows", "Approximate Soft Shadows" }; section)
 			field(&Settings::EnableShadows);
-	}
-
-	void ExtendedMaterials::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

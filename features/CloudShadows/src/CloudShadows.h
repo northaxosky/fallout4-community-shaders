@@ -46,7 +46,6 @@ namespace cs::features
 		void DrawSettings() override;
 		bool HasDebugUI() const override;
 		void DrawDebug() override;
-		void RestoreDefaultSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -60,8 +59,7 @@ namespace cs::features
 		bool ValidateInjectionPrerequisites(std::string& a_error) override;
 		CloudShadows() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(cloud_shadows::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 
 		static constexpr std::uint32_t kFaceCount = 6;
 		static constexpr std::uint32_t kPreviewWidth = 512;
@@ -91,7 +89,8 @@ namespace cs::features
 		void UpdateOverlayConstants(ID3D11DeviceContext* a_context);
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
-		Settings _settings;
+		settings::LiveSettings<cloud_shadows::kSchema> _live;
+		const Settings& _settings = _live.Get();
 
 		// Render thread only.
 		winrt::com_ptr<ID3D11Texture2D> _cube;

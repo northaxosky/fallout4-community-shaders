@@ -212,39 +212,72 @@ namespace cs::engine
 		const bool _wasDisabled;
 	};
 
+	// A default-constructed value is the native state.
+	struct DynamicResolutionState
+	{
+		float widthRatio = 1.0f;
+		float heightRatio = 1.0f;
+		bool activated = false;
+		bool viewportAsDefault = false;
+
+		[[nodiscard]] static DynamicResolutionState Capture()
+		{
+			DynamicResolutionState state;
+			if (const auto* manager = GetRenderTargetManager()) {
+				state.widthRatio = manager->GetDynamicWidthRatio();
+				state.heightRatio = manager->GetDynamicHeightRatio();
+				state.activated = manager->IsDynamicResolutionCurrentlyActivated();
+				state.viewportAsDefault = manager->IsUsingDynamicResolutionViewportAsDefaultViewport();
+			}
+			return state;
+		}
+
+		void Apply() const
+		{
+			if (auto* manager = GetRenderTargetManager()) {
+				manager->SetDynamicResolutionState(widthRatio, heightRatio, activated);
+				manager->SetUseDynamicResolutionViewportAsDefaultViewport(viewportAsDefault);
+			}
+		}
+	};
+
+	inline DirectX::XMFLOAT2 SetJitter(DirectX::XMFLOAT2 a_offsets)
+	{
+		DirectX::XMFLOAT2 previous{};
+		if (auto* state = GetGraphicsState()) {
+			previous = { state->offsetX, state->offsetY };
+			state->offsetX = a_offsets.x;
+			state->offsetY = a_offsets.y;
+		}
+		return previous;
+	}
+
+	// Ratio 1 without jitter; the viewport flag is left to the engine.
+	inline void DropRenderScale()
+	{
+		SetJitter({});
+		SetDynamicResolution(1.0f, 1.0f, false);
+	}
+
 	// Full-extent offscreen draws: no render scale, viewport remap or jitter.
 	class UnscaledRenderScope
 	{
 	public:
 		explicit UnscaledRenderScope(bool a_active = true) noexcept :
-			_manager(a_active ? GetRenderTargetManager() : nullptr),
-			_state(a_active ? GetGraphicsState() : nullptr)
+			_active(a_active)
 		{
-			if (_manager) {
-				_widthRatio = _manager->GetDynamicWidthRatio();
-				_heightRatio = _manager->GetDynamicHeightRatio();
-				_activated = _manager->IsDynamicResolutionCurrentlyActivated();
-				_viewportAsDefault = _manager->IsUsingDynamicResolutionViewportAsDefaultViewport();
-				SetDynamicResolution(1.0f, 1.0f, false);
-				_manager->SetUseDynamicResolutionViewportAsDefaultViewport(false);
-			}
-			if (_state) {
-				_offsetX = _state->offsetX;
-				_offsetY = _state->offsetY;
-				_state->offsetX = 0.0f;
-				_state->offsetY = 0.0f;
+			if (_active) {
+				_dynamicResolution = DynamicResolutionState::Capture();
+				DynamicResolutionState{}.Apply();
+				_jitter = SetJitter({});
 			}
 		}
 
 		~UnscaledRenderScope() noexcept
 		{
-			if (_manager) {
-				SetDynamicResolution(_widthRatio, _heightRatio, _activated);
-				_manager->SetUseDynamicResolutionViewportAsDefaultViewport(_viewportAsDefault);
-			}
-			if (_state) {
-				_state->offsetX = _offsetX;
-				_state->offsetY = _offsetY;
+			if (_active) {
+				_dynamicResolution.Apply();
+				SetJitter(_jitter);
 			}
 		}
 
@@ -254,30 +287,10 @@ namespace cs::engine
 		UnscaledRenderScope& operator=(UnscaledRenderScope&&) = delete;
 
 	private:
-		RE::BSGraphics::RenderTargetManager* _manager;
-		RE::BSGraphics::State* _state;
-		float _widthRatio = 1.0f;
-		float _heightRatio = 1.0f;
-		bool _activated = false;
-		bool _viewportAsDefault = false;
-		float _offsetX = 0.0f;
-		float _offsetY = 0.0f;
+		const bool _active;
+		DynamicResolutionState _dynamicResolution;
+		DirectX::XMFLOAT2 _jitter{};
 	};
-
-	[[nodiscard]] inline bool TryGetWorldSceneProjection(
-		DirectX::XMFLOAT4X4& a_outProj,
-		DirectX::XMFLOAT4X4& a_outInvProj,
-		DirectX::XMFLOAT4& a_outNdcToViewMul,
-		DirectX::XMFLOAT4& a_outNdcToViewAdd)
-	{
-		const auto camera = GetWorldCameraRecord();
-		if (!camera) {
-			return false;
-		}
-
-		GetWorldSceneProjection(*camera, a_outProj, a_outInvProj, a_outNdcToViewMul, a_outNdcToViewAdd);
-		return true;
-	}
 
 	// OG/NG/AE prepass 2850CB0/2096710/21F38B0 writes the transposed near inverse at shadow +0x8A0.
 	[[nodiscard]] inline std::optional<DirectX::XMFLOAT4X4> GetPrepassFirstPersonProjectionInverse() noexcept
@@ -494,11 +507,5 @@ namespace cs::engine
 	{
 		auto* target = ResolveDepthStencilTarget(a_target);
 		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srViewDepth) : nullptr;
-	}
-
-	[[nodiscard]] inline ID3D11ShaderResourceView* GetDepthStencilStencilSRV(RE::BSGraphics::DepthStencilTargetID a_target)
-	{
-		auto* target = ResolveDepthStencilTarget(a_target);
-		return target ? reinterpret_cast<ID3D11ShaderResourceView*>(target->srViewStencil) : nullptr;
 	}
 }

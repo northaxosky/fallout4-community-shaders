@@ -12,8 +12,6 @@ namespace cs::features::light_limit_fix
 		float radius = 0;
 		float fade = 0;
 		float a = 0, b = 0, c = 0;
-		// LLF's pow(abs) color path would lose the negated sign.
-		bool negatedColor = false;
 	};
 
 	struct DerivedLight

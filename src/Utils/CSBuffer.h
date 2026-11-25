@@ -14,6 +14,7 @@
 #include <winrt/base.h>
 
 #include "Render/Annotation.h"
+#include "Render/RendererContext.h"
 
 namespace cs::buffer
 {
@@ -58,10 +59,7 @@ namespace cs::buffer
 		{
 			auto* ctx = reinterpret_cast<ID3D11DeviceContext*>(RE::BSGraphics::GetRendererData()->context);
 			if (desc.Usage & D3D11_USAGE_DYNAMIC) {
-				D3D11_MAPPED_SUBRESOURCE mapped{};
-				DX::ThrowIfFailed(ctx->Map(resource.get(), 0u, D3D11_MAP_WRITE_DISCARD, 0u, &mapped));
-				memcpy(mapped.pData, a_srcData, a_dataSize);
-				ctx->Unmap(resource.get(), 0);
+				DX::ThrowIfFailed(cs::engine::WriteDiscard(ctx, resource.get(), a_srcData, a_dataSize));
 			} else {
 				ctx->UpdateSubresource(resource.get(), 0, nullptr, a_srcData, 0, 0);
 			}
@@ -176,10 +174,7 @@ namespace cs::buffer
 		void Update(void const* a_srcData, std::size_t a_size)
 		{
 			auto* ctx = reinterpret_cast<ID3D11DeviceContext*>(RE::BSGraphics::GetRendererData()->context);
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			DX::ThrowIfFailed(ctx->Map(resource.get(), 0u, D3D11_MAP_WRITE_DISCARD, 0u, &mapped));
-			memcpy(mapped.pData, a_srcData, a_size);
-			ctx->Unmap(resource.get(), 0);
+			DX::ThrowIfFailed(cs::engine::WriteDiscard(ctx, resource.get(), a_srcData, a_size));
 		}
 
 	private:

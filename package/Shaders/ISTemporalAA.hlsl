@@ -53,7 +53,7 @@ float3 FromWorking(float3 pqColor)
 	return TransferFunctions::LinearToSignedGamma22(Color::BT2020ToBT709(DisplayMapping::PQtoLinear(pqColor, 10000.0)));
 }
 
-// History luma is stored as game gamma so the 8-bit target keeps highlights.
+// FO4: history luma is game gamma; HDR Display makes the target fp16.
 float EncodeHistoryLuma(float pqLuma)
 {
 	return TransferFunctions::LinearToSignedGamma22(DisplayMapping::PQtoLinear(pqLuma.xxx, 10000.0).x);
@@ -64,17 +64,12 @@ float DecodeHistoryLuma(float gammaLuma)
 	return DisplayMapping::LinearToPQ(TransferFunctions::SignedGamma22ToLinear(gammaLuma).xxx, 10000.0).x;
 }
 
-float3 SampleSource(float2 uv)
-{
-	float3 color = source.Sample(sourceSampler, uv).rgb;
-	return UseHDR ? ToWorking(color) : color;
-}
-#	else
+#	endif
+
 float3 SampleSource(float2 uv)
 {
 	return source.Sample(sourceSampler, uv).rgb;
 }
-#	endif
 
 float4 Tap(float3 color)
 {
@@ -151,15 +146,38 @@ PS_OUTPUT main(PS_INPUT input)
 	float2 previousUV = uv * PreviousInverseSize_PreviousMaxUV.zw + motionScaled * InverseSize_MaxUV.zw;
 	float4 history = accumulationBuffer.Sample(accumulationBufferSampler, previousUV);
 
-	float4 cNW = Tap(SampleSource(uvNW));
-	float4 cSE = Tap(SampleSource(uvSE));
-	float4 cNE = Tap(SampleSource(uvNE));
-	float4 cE = Tap(SampleSource(uvE));
-	float4 cN = Tap(SampleSource(uvN));
-	float4 cSW = Tap(SampleSource(uvSW));
-	float4 cW = Tap(SampleSource(uvW));
-	float4 cS = Tap(SampleSource(uvS));
+	float3 sNW = SampleSource(uvNW);
+	float3 sSE = SampleSource(uvSE);
+	float3 sNE = SampleSource(uvNE);
+	float3 sE = SampleSource(uvE);
+	float3 sN = SampleSource(uvN);
+	float3 sSW = SampleSource(uvSW);
+	float3 sW = SampleSource(uvW);
+	float3 sS = SampleSource(uvS);
 	float3 cC = SampleSource(uv);
+#	ifdef HDR_OUTPUT
+	// Explicit branch: both sides of a ternary run, so SDR would pay the PQ math.
+	[branch] if (UseHDR)
+	{
+		sNW = ToWorking(sNW);
+		sSE = ToWorking(sSE);
+		sNE = ToWorking(sNE);
+		sE = ToWorking(sE);
+		sN = ToWorking(sN);
+		sSW = ToWorking(sSW);
+		sW = ToWorking(sW);
+		sS = ToWorking(sS);
+		cC = ToWorking(cC);
+	}
+#	endif
+	float4 cNW = Tap(sNW);
+	float4 cSE = Tap(sSE);
+	float4 cNE = Tap(sNE);
+	float4 cE = Tap(sE);
+	float4 cN = Tap(sN);
+	float4 cSW = Tap(sSW);
+	float4 cW = Tap(sW);
+	float4 cS = Tap(sS);
 	float lNW = cNW.w;
 	float lSE = cSE.w;
 	float lNE = cNE.w;
@@ -171,7 +189,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float lC = Luma(cC);
 	float histL = history.x;
 #	ifdef HDR_OUTPUT
-	if (UseHDR)
+	[branch] if (UseHDR)
 		histL = DecodeHistoryLuma(history.x);
 #	endif
 
@@ -222,7 +240,7 @@ PS_OUTPUT main(PS_INPUT input)
 	output.History = float4(saturate((abs(lumaDelta * feedback) < 0.01) ? lC : lumaBlend),
 		0.0, speedFraction, 0.0);
 #		ifdef HDR_OUTPUT
-	if (UseHDR)
+	[branch] if (UseHDR)
 		output.History.x = EncodeHistoryLuma(output.History.x);
 #		endif
 #	else
@@ -239,11 +257,6 @@ PS_OUTPUT main(PS_INPUT input)
 	float range = bounds.z - bounds.y;
 	float along = bounds.x - bounds.y;
 	float speedChange = abs(speedFraction - previousSpeedFraction);
-#		ifdef HDR_OUTPUT
-	// Upstream decays by PQ luma change; 20 and 100 were tuned for gamma luma.
-	if (UseHDR)
-		speedChange = abs(historyLuma - lC) * 0.05;
-#		endif
 	float steadyA = max(1.0 - speedChange * 20.0, 0.0);
 	float steadyB = max(1.0 - speedChange * 100.0, 0.0);
 	float ramp = saturate(flagged * 0.2 + min(history.w, flagged));
@@ -256,7 +269,7 @@ PS_OUTPUT main(PS_INPUT input)
 	output.History = float4(saturate((abs(lumaDelta * feedback) < 0.01) ? lC : lumaBlend),
 		stabilityOut, speedFraction, ramp);
 #		ifdef HDR_OUTPUT
-	if (UseHDR)
+	[branch] if (UseHDR)
 		output.History.x = EncodeHistoryLuma(output.History.x);
 #		endif
 	float3 lowerColor = unsettled ? lowerUsed.xyz : lowerRaw.xyz;
@@ -270,7 +283,8 @@ PS_OUTPUT main(PS_INPUT input)
 	blended = saturate(feedback * (bracket - blended) + blended);
 #	ifdef HDR_OUTPUT
 	// Upstream skips detail recovery in HDR; the neighborhood delta blows up there.
-	if (UseHDR) {
+	[branch] if (UseHDR)
+	{
 		output.Color = float4(FromWorking(blended), 1.0);
 		return output;
 	}

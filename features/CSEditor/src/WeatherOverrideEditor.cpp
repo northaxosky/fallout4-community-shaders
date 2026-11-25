@@ -109,8 +109,7 @@ namespace cs::features::cs_editor
 				            .changed;
 			}
 
-			const auto& live = feature->GetLiveSettingsAccess();
-			const auto base = live.snapshot ? live.snapshot() : toml::table{};
+			const auto base = FeatureManager::Get().SnapshotLiveSettings(*feature).value_or(toml::table{});
 			for (const auto& variable : variables) {
 				bool active = profile.contains(variable.key);
 				auto value = BaseValue(variable, base);

@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 
+#include <d3d11.h>
 #include <d3d12.h>
 #include <dxgi.h>
 #include <winrt/base.h>
@@ -16,9 +17,14 @@ namespace AMD::AntiLag2DX12
 	struct Context;
 }
 
+namespace AMD::AntiLag2DX11
+{
+	struct Context;
+}
+
 namespace cs::features
 {
-	// AMD Radeon Anti-Lag 2 on the native D3D12 device that presents CS's proxy swap chain.
+	// AMD Anti-Lag 2 on the device that presents the CS swap chain.
 	// No driver call happens until Configure first asks for a mode other than off.
 	class AntiLag2Latency final : public render::temporal::ILatencyProvider
 	{
@@ -53,9 +59,14 @@ namespace cs::features
 
 		// Sleep holds this across Update, which can block for the driver's delay; callers run on the game thread.
 		mutable std::mutex _mutex;
+		[[nodiscard]] HRESULT InitializeDriverLocked() noexcept;
+		[[nodiscard]] HRESULT UpdateDriverLocked(bool a_enable, std::uint32_t a_maxFps) noexcept;
+
 		// Never moved: the frame-generation presenter thread holds its address.
 		const std::unique_ptr<AMD::AntiLag2DX12::Context> _context;
-		winrt::com_ptr<ID3D12Device> _device;
+		const std::unique_ptr<AMD::AntiLag2DX11::Context> _context11;
+		winrt::com_ptr<IUnknown> _device;
+		render::temporal::DeviceApi _api = render::temporal::DeviceApi::kNone;
 		std::uint32_t _adapterVendorId = 0;
 		IDXGISwapChain* _swapChain = nullptr;
 		IDXGISwapChain* _taggedSwapChain = nullptr;

@@ -62,6 +62,7 @@ namespace
 			{ "HDRDisplay/HDROutputCS.hlsl" },
 			{ "HDRDisplay/UIBrightnessCS.hlsl" },
 			{ "HDRDisplay/InterfaceCompositeCS.hlsl" },
+			{ "HDRDisplay/PqToScRgbCS.hlsl" },
 
 			{ "IBL/DiffuseIBLCS.hlsl" },
 
@@ -101,6 +102,8 @@ namespace
 			{ "VolumetricShadows/BlurShadowCS.hlsl", "cs_5_0", {}, { { { { "BLUR_HORIZONTAL", "1" } }, { { "BLUR_VERTICAL", "1" } } } } },
 
 			{ "FO4/Upscaling/EncodeTexturesCS.hlsl", "cs_5_0", { { "DEPTH_OUTPUT", "1" } }, { { {}, { { "DLSS", "" } }, { { "FSR", "" } } } } },
+			{ "FO4/Upscaling/ReactiveMaskCS.hlsl" },
+			{ "FO4/Upscaling/SanitizeColorCS.hlsl" },
 			{ "FO4/Upscaling/DepthRefractionUpscalePS.hlsl", "ps_5_0", {} },
 			{ "FO4/Upscaling/ChainInputsUpscalePS.hlsl", "ps_5_0" },
 			{ "ZPrePass.hlsl", "ps_5_0", { { "ALPHA_TEST", "" } } },

@@ -2,12 +2,14 @@
 
 #include "Compat/Compat.h"
 #include "Log.h"
+#include "Render/FrameDispatcher.h"
+#include "Render/FrameState.h"
+#include "Render/FrameThread.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
 #include "Settings/PresetManager.h"
-#include "Settings/SettingsPersistence.h"
 
 #include <toml++/toml.hpp>
 
@@ -40,20 +42,13 @@ namespace
 		}
 	}
 
-	class LoadingMenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+	bool PersistEnabled(cs::Feature& a_feature)
 	{
-	public:
-		RE::BSEventNotifyControl ProcessEvent(
-			const RE::MenuOpenCloseEvent& a_event,
-			RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
-		{
-			if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening) {
-				cs::render::RequestHistoryReset();
-				cs::FeatureManager::Get().OnLoadingMenuClosedAll();
-			}
-			return RE::BSEventNotifyControl::kContinue;
-		}
-	};
+		const auto result = cs::feature_config::UpdateFeatureEnabled(a_feature.GetConfigKey(), a_feature.IsSwitchedOn());
+		if (!result)
+			a_feature.Log()->error("Failed to save enabled state: {}", result.error);
+		return result.success;
+	}
 }
 
 namespace cs
@@ -73,83 +68,17 @@ namespace cs
 		return ActivationResult::Active();
 	}
 
-	void Feature::SetEnabled(bool a_enabled) noexcept
+	void Feature::SetInput(std::atomic_bool& a_input, bool a_value) noexcept
 	{
 		const bool before = IsEnabled();
-		_enabled.store(a_enabled, std::memory_order_release);
+		a_input.store(a_value, std::memory_order_release);
 		if (IsEnabled() != before)
 			OnEnabledChanged(!before);
 	}
 
 	void Feature::SetSuspended(bool a_suspended) noexcept
 	{
-		const bool before = IsEnabled();
-		_suspended.store(a_suspended, std::memory_order_release);
-		if (IsEnabled() != before)
-			OnEnabledChanged(!before);
-	}
-
-	bool Feature::SaveEnabled()
-	{
-		return !SupportsEnableToggle() || settings::SaveEnabled(GetConfigKey(), IsSwitchedOn(), *Log());
-	}
-
-	bool Feature::Persist()
-	{
-		return SaveSettings() && SaveEnabled();
-	}
-
-	void Feature::FlushSettings(bool a_completedOnly)
-	{
-		if (!_settingsSavePending || (a_completedOnly && !_settingsEditCompleted))
-			return;
-		_settingsEditCompleted = false;
-		if (Persist())
-			_settingsSavePending = false;
-	}
-
-	bool Feature::RestoreDefaults()
-	{
-		RestoreDefaultSettings();
-		if (SupportsEnableToggle()) {
-			SetEnabled(DefaultEnabled());
-		}
-		return Persist();
-	}
-
-	void Feature::ComposeEnabledLiveSettings()
-	{
-		if (!SupportsEnableToggle())
-			return;
-		_liveSettings = {
-			[this, inner = std::move(_liveSettings.snapshot)] {
-				auto snapshot = inner ? inner() : toml::table{};
-				snapshot.insert_or_assign("enabled", _enabled.load(std::memory_order_acquire));
-				return snapshot;
-			},
-			[this, inner = std::move(_liveSettings.prepare)](
-				const toml::table& a_snapshot, std::string& a_error) -> std::optional<settings::PreparedLiveSettings> {
-				bool enabled = _enabled.load(std::memory_order_acquire);
-				if (!settings::AcceptSetting(feature_config::ReadBool(a_snapshot, "enabled", enabled), "enabled", "boolean", a_error))
-					return std::nullopt;
-				settings::PreparedLiveSettings prepared;
-				if (inner) {
-					auto value = inner(a_snapshot, a_error);
-					if (!value)
-						return std::nullopt;
-					prepared = std::move(*value);
-				}
-				prepared.swap = [this, enabled, featureSwap = std::move(prepared.swap)]() mutable {
-					if (featureSwap)
-						featureSwap();
-					const bool previous = _enabled.load(std::memory_order_acquire);
-					SetEnabled(enabled);
-					enabled = previous;
-				};
-				return prepared;
-			},
-			std::move(_liveSettings.notComparable)
-		};
+		SetInput(_suspended, a_suspended);
 	}
 
 	spdlog::logger* Feature::Log() const
@@ -246,19 +175,84 @@ namespace cs
 		}
 	}
 
+	std::optional<toml::table> FeatureManager::SnapshotLiveSettings(const Feature& a_feature, bool a_forComparison) const
+	{
+		toml::table snapshot;
+		const std::vector<std::string_view>* skipped = nullptr;
+		if (auto* live = a_feature.GetLiveSettings()) {
+			if (!live->shared)
+				return std::nullopt;
+			snapshot = live->Snapshot();
+			skipped = &live->notComparable;
+			if (a_feature.SupportsEnableToggle())
+				snapshot.insert_or_assign("enabled", a_feature.IsSwitchedOn());
+		} else if (a_feature.SupportsEnableToggle()) {
+			snapshot.insert_or_assign("enabled", a_feature.IsSwitchedOn());
+		} else {
+			return std::nullopt;
+		}
+		if (a_forComparison && skipped) {
+			for (const auto key : *skipped)
+				snapshot.erase(key);
+		}
+		return snapshot;
+	}
+
 	std::optional<settings::PreparedLiveSettings> FeatureManager::PrepareLiveSettings(
 		Feature& a_feature,
 		const toml::table& a_values,
+		settings::Scope a_scope,
+		settings::Persist a_persist,
 		std::string_view a_phase,
-		std::string& a_error)
+		std::string& a_error,
+		const settings::ComparisonKey* a_key)
 	{
-		const auto& access = a_feature.GetLiveSettingsAccess();
-		if (!access.prepare) {
+		render::CheckFrameBoundary("FeatureManager::PrepareLiveSettings");
+		auto* live = a_feature.GetLiveSettings();
+		if ((!live || live->shared) && settings::liveComparisonActive.load(std::memory_order_acquire) && !a_key) {
+			a_error = settings::kComparisonRefusal;
+			return std::nullopt;
+		}
+
+		std::optional<settings::PreparedLiveSettings> value;
+		if (!live && !a_feature.SupportsEnableToggle()) {
 			a_error = "feature has no live settings";
 			return std::nullopt;
 		}
-		auto value = access.prepare(a_values, a_error);
-		if (value && value->finalize) {
+		toml::table rest = a_values;
+		std::optional<bool> enabled;
+		if (a_feature.SupportsEnableToggle()) {
+			bool requested = a_feature.IsSwitchedOn();
+			if (!settings::AcceptSetting(feature_config::ReadBool(a_values, "enabled", requested), "enabled", "boolean", a_error))
+				return std::nullopt;
+			if (a_values.contains("enabled"))
+				enabled = requested;
+			rest.erase("enabled");
+		}
+		if (live) {
+			value = live->Prepare(rest, a_scope, a_persist, a_error);
+			if (!value)
+				return std::nullopt;
+		} else {
+			value.emplace();
+		}
+		if (enabled) {
+			value->swap = [feature = &a_feature, requested = *enabled, inner = std::move(value->swap)]() mutable {
+				if (inner)
+					inner();
+				const bool previous = feature->_enabled.load(std::memory_order_acquire);
+				feature->SetInput(feature->_enabled, requested);
+				requested = previous;
+			};
+			if (a_persist != settings::Persist::kNo) {
+				value->persist = [feature = &a_feature, inner = std::move(value->persist)] {
+					const bool saved = inner ? inner() : true;
+					return PersistEnabled(*feature) && saved;
+				};
+			}
+		}
+
+		if (value->finalize) {
 			value->finalize = [this, feature = &a_feature, phase = std::string(a_phase), finalize = std::move(value->finalize)] {
 				if (!PrepareRuntimeCallback(*feature, phase))
 					return;
@@ -273,6 +267,18 @@ namespace cs
 				}
 			};
 		}
+		if (value->persist) {
+			value->persist = [this, feature = &a_feature, phase = std::string(a_phase), persist = std::move(value->persist)] {
+				try {
+					return persist();
+				} catch (const std::exception& error) {
+					QuarantineRuntimeCallback(*feature, phase, error.what());
+				} catch (...) {
+					QuarantineRuntimeCallback(*feature, phase, "non-standard exception");
+				}
+				return false;
+			};
+		}
 		return value;
 	}
 
@@ -280,6 +286,7 @@ namespace cs
 		Feature& a_feature,
 		const toml::table* a_overrides,
 		const toml::node* a_enabled,
+		settings::Persist a_persist,
 		std::string_view a_phase,
 		std::string& a_error)
 	{
@@ -292,18 +299,83 @@ namespace cs
 			for (const auto& [key, node] : *a_overrides)
 				values.insert_or_assign(key, node);
 		}
-		return PrepareLiveSettings(a_feature, values, a_phase, a_error);
+		return PrepareLiveSettings(a_feature, values, settings::Scope::kImmediate, a_persist, a_phase, a_error);
+	}
+
+	bool FeatureManager::CommitLiveSettings(
+		Feature& a_feature,
+		const toml::table& a_values,
+		settings::Scope a_scope,
+		settings::Persist a_persist,
+		std::string_view a_phase,
+		std::string& a_error)
+	{
+		try {
+			auto prepared = PrepareLiveSettings(a_feature, a_values, a_scope, a_persist, a_phase, a_error);
+			if (!prepared)
+				return false;
+			std::array transaction{ std::move(*prepared) };
+			if (settings::ApplyPreparedLiveSettings(transaction))
+				return true;
+			a_error = "the changes are live but could not be saved";
+		} catch (const std::exception& error) {
+			a_error = error.what();
+		} catch (...) {
+			a_error = "non-standard exception";
+		}
+		return false;
+	}
+
+	bool FeatureManager::RestoreDefaults(Feature& a_feature, std::string& a_error)
+	{
+		a_feature.RestoreDefaultSettings();
+		toml::table values;
+		if (auto* live = a_feature.GetLiveSettings())
+			values = live->Defaults();
+		if (a_feature.SupportsEnableToggle())
+			values.insert_or_assign("enabled", a_feature.DefaultEnabled());
+		return CommitLiveSettings(a_feature, values, settings::Scope::kAll, settings::Persist::kNow, "RestoreDefaults", a_error);
+	}
+
+	void FeatureManager::CommitEdits(Feature& a_feature, bool a_pageExit)
+	{
+		auto* live = a_feature.GetLiveSettings();
+		if (!live || !live->QueueEdits(a_pageExit))
+			return;
+		render::PostToFrame([this, feature = &a_feature, live] {
+			const auto pending = live->TakePending();
+			if (!pending)
+				return;
+			std::string error;
+			if (!CommitLiveSettings(*feature, pending->values, settings::Scope::kAll, pending->persist, "DearModdingUI::CommitEdits", error)) {
+				L->warn("{} settings commit failed: {}", feature->GetName(), error);
+				live->Resync();
+			}
+		});
+	}
+
+	bool FeatureManager::SaveFeature(Feature& a_feature)
+	{
+		if (auto* live = a_feature.GetLiveSettings()) {
+			const bool saved = live->Save();
+			return (!a_feature.SupportsEnableToggle() || PersistEnabled(a_feature)) && saved;
+		}
+		return !a_feature.SupportsEnableToggle() || PersistEnabled(a_feature);
 	}
 
 	bool FeatureManager::SaveAllSettings(std::string& a_error)
 	{
 		constexpr std::string_view phase = "SaveAllSettings";
+		if (settings::liveComparisonActive.load(std::memory_order_acquire)) {
+			a_error = settings::kComparisonRefusal;
+			return false;
+		}
 		std::string failed;
 		for (auto* feature : _registeredFeatures) {
 			if (!PrepareMenuCallback(*feature, phase))
 				continue;
 			try {
-				if (feature->Persist())
+				if (SaveFeature(*feature))
 					continue;
 			} catch (const std::exception& error) {
 				L->error("{} {} threw: {}", phase, feature->GetName(), error.what());
@@ -320,6 +392,10 @@ namespace cs
 
 	bool FeatureManager::LoadAllSettings(std::string& a_error)
 	{
+		if (settings::liveComparisonActive.load(std::memory_order_acquire)) {
+			a_error = settings::kComparisonRefusal;
+			return false;
+		}
 		const auto reloaded = feature_config::Reload();
 		if (reloaded.status != feature_config::FileLoadStatus::kParsed &&
 			reloaded.status != feature_config::FileLoadStatus::kMissing) {
@@ -330,14 +406,14 @@ namespace cs
 			L->warn("{}", warning);
 		std::vector<settings::PreparedLiveSettings> prepared;
 		for (auto* feature : GetAll()) {
-			if (!feature->GetLiveSettingsAccess().prepare)
+			if (!feature->SharesLiveSettings())
 				continue;
 			const auto stored = feature_config::GetFeature(feature->GetConfigKey());
 			const auto* enabled = stored ? stored->get("enabled") : nullptr;
 			const auto* overrides = stored ? stored->get_as<toml::table>("settings") : nullptr;
 			std::string error;
 			auto value = PrepareLiveSettingsFromOverrides(
-				*feature, overrides, enabled, "LoadAllSettings::Finalize", error);
+				*feature, overrides, enabled, settings::Persist::kNo, "LoadAllSettings::Finalize", error);
 			if (!value) {
 				a_error = std::format("{}: {}", feature->GetName(), error);
 				return false;
@@ -345,13 +421,20 @@ namespace cs
 			prepared.push_back(std::move(*value));
 		}
 		try {
-			settings::ApplyPreparedLiveSettings(prepared);
+			(void)settings::ApplyPreparedLiveSettings(prepared);
 		} catch (const std::exception& error) {
 			a_error = error.what();
 			return false;
 		} catch (...) {
 			a_error = "non-standard exception";
 			return false;
+		}
+		// Restart-only values become pending, never live.
+		for (auto* feature : GetAll()) {
+			if (auto* live = feature->GetLiveSettings()) {
+				const auto stored = feature_config::GetFeature(feature->GetConfigKey());
+				live->ReloadNext(stored ? &*stored : nullptr);
+			}
 		}
 		if (const auto ownership = feature_config::ParseShaderOwnership(reloaded.root); ownership.valid)
 			ApplyShaderOwnership(ownership.config);
@@ -363,31 +446,33 @@ namespace cs
 	bool FeatureManager::ResetAllSettings(std::string& a_error)
 	{
 		constexpr std::string_view phase = "ResetAllSettings";
+		if (settings::liveComparisonActive.load(std::memory_order_acquire)) {
+			a_error = settings::kComparisonRefusal;
+			return false;
+		}
 		std::string failed;
 		for (auto* feature : GetAll()) {
-			if (!PrepareRuntimeCallback(*feature, phase))
+			if (!feature->HasResettableSettings() || !PrepareRuntimeCallback(*feature, phase))
 				continue;
+			std::string reason;
 			try {
-				if (feature->RestoreDefaults())
+				if (RestoreDefaults(*feature, reason))
 					continue;
 			} catch (const std::exception& error) {
-				a_error = std::format("{}: {}", feature->GetName(), error.what());
-				return false;
+				reason = error.what();
 			} catch (...) {
-				a_error = std::format("{}: non-standard exception", feature->GetName());
-				return false;
+				reason = "non-standard exception";
 			}
-			failed += (failed.empty() ? "" : ", ");
-			failed += feature->GetName();
+			failed += std::format("{}{}: {}", failed.empty() ? "" : "; ", feature->GetName(), reason);
 		}
-		if (!failed.empty())
-			a_error = "failed to save: " + failed;
+		a_error = failed;
 		return failed.empty();
 	}
 
 	bool FeatureManager::ApplyDebugViews(
 		std::span<const FeatureDebugSelection> a_selections)
 	{
+		render::CheckFrameBoundary("FeatureManager::ApplyDebugViews");
 		std::unordered_map<Feature*, std::string_view> selected;
 		Feature* fullscreen = nullptr;
 		auto healthy = GetAll();
@@ -426,8 +511,7 @@ namespace cs
 					changedTargets.push_back(target);
 			}
 		}
-		engine::InvalidateNativeShaderVariantCompilations(changedTargets);
-		engine::PrewarmShaderInjectionVariants(changedTargets);
+		engine::RebuildShaderInjectionVariants(changedTargets);
 		_fullscreenDebugFeature.store(fullscreen, std::memory_order_release);
 		return true;
 	}
@@ -436,6 +520,8 @@ namespace cs
 	{
 		_loadedFeatures.clear();
 		for (auto* feature : _registeredFeatures) {
+			if (!std::ranges::contains(feature_config::kAllFeatureKeys, feature->GetConfigKey()))
+				L->error("Feature {} is missing from kAllFeatureKeys; it registers last", feature->GetName());
 			feature->SetState({});
 			feature->_enabled.store(feature->DefaultEnabled(), std::memory_order_release);
 		}
@@ -453,6 +539,10 @@ namespace cs
 
 		for (auto* feature : _registeredFeatures) {
 			const auto key = feature->GetConfigKey();
+			if (auto* live = feature->GetLiveSettings()) {
+				live->section = { "features", key, "settings" };
+				live->log = feature->Log();
+			}
 			const auto* featureTable = features->get(key)->as_table();
 			const auto activation = feature_config::ParseActivation(*featureTable);
 			if (!activation.valid) {
@@ -471,9 +561,8 @@ namespace cs
 					L->warn("Feature {} configuration enabled key must be a boolean; using the default", key);
 				}
 				feature->_enabled.store(enabled, std::memory_order_release);
-				feature->ComposeEnabledLiveSettings();
 
-				const auto* deactivation = compat::Find(key);
+				const auto* deactivation = compat::Find(*feature);
 				const bool desiredActive = activation.valid && activation.load && !deactivation;
 				feature->SetState({ .desiredActive = desiredActive,
 					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
@@ -587,20 +676,10 @@ namespace cs
 
 	void FeatureManager::OnDataLoadedAll()
 	{
-		static LoadingMenuSink loadingMenuSink;
-		if (auto* ui = RE::UI::GetSingleton())
-			ui->RegisterSink<RE::MenuOpenCloseEvent>(&loadingMenuSink);
-		else
-			L->warn("UI event source unavailable; loading-menu callbacks are disabled.");
+		if (!cs::render::RegisterMenuEvents())
+			L->warn("UI event source unavailable; menu tracking is disabled.");
 		DispatchRuntimeCallbacks(*this, "OnDataLoaded", [](Feature& a_feature) {
 			a_feature.OnDataLoaded();
-		});
-	}
-
-	void FeatureManager::OnLoadingMenuClosedAll()
-	{
-		DispatchRuntimeCallbacks(*this, "OnLoadingMenuClosed", [](Feature& a_feature) {
-			a_feature.OnLoadingMenuClosed();
 		});
 	}
 
@@ -702,6 +781,7 @@ namespace cs
 
 	void FeatureManager::ApplyShaderOwnership(const feature_config::ShaderOwnershipConfig& a_config)
 	{
+		render::CheckFrameBoundary("FeatureManager::ApplyShaderOwnership");
 		engine::ApplyShaderOwnershipConfig(a_config);
 		RefreshShaderOwnership();
 	}

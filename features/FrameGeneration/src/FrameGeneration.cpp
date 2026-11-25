@@ -17,7 +17,6 @@
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -69,9 +68,6 @@ namespace cs::features
 				"input_retirement_gpu_waits",
 				&render::temporal::PresentInputRetirementDiagnostics::gpuWaits },
 			RetirementCounterField{
-				"input_retirement_provider_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::providerDrains },
-			RetirementCounterField{
 				"input_retirement_global_drain_attempts",
 				&render::temporal::PresentInputRetirementDiagnostics::
 					globalDrainAttempts },
@@ -92,20 +88,11 @@ namespace cs::features
 				"input_retirement_violations",
 				&render::temporal::PresentInputRetirementDiagnostics::violations },
 			RetirementCounterField{
-				"input_retirement_startup_global_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::startupDrains },
-			RetirementCounterField{
-				"input_retirement_disable_global_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::disableDrains },
-			RetirementCounterField{
 				"input_retirement_resize_global_drains",
 				&render::temporal::PresentInputRetirementDiagnostics::resizeDrains },
 			RetirementCounterField{
 				"input_retirement_teardown_global_drains",
 				&render::temporal::PresentInputRetirementDiagnostics::teardownDrains },
-			RetirementCounterField{
-				"input_retirement_steady_global_drains",
-				&render::temporal::PresentInputRetirementDiagnostics::steadyDrains },
 			RetirementCounterField{
 				"input_retirement_last_real_frame",
 				&render::temporal::PresentInputRetirementDiagnostics::lastRealFrame },
@@ -194,18 +181,7 @@ namespace cs::features
 	bool FrameGeneration::Configure(const toml::table& a_config,
 		std::string& a_error)
 	{
-		auto candidate = settings;
-		if (!settings::Parse(frame_generation::kSchema, a_config, candidate, a_error)) {
-			return false;
-		}
-		settings = candidate;
-		_liveSettings = cs::settings::BindLiveSettings(frame_generation::kSchema, settings,
-			[this] {
-				render::TemporalPipeline::Get().SetDetailedTracing(settings.detailedDiagnostics);
-				render::TemporalPipeline::Get().SubmitLiveConfiguration();
-			},
-			{ "detailed_diagnostics" });
-		return true;
+		return _live.Configure(a_config, a_error);
 	}
 
 	void FrameGeneration::Load()
@@ -216,22 +192,14 @@ namespace cs::features
 
 	void FrameGeneration::OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept
 	{
-		render::TemporalPipeline::Get().PostFailure(
+		render::TemporalPipeline::Get().Quarantine(
 			render::temporal::FailureDomain::kFrameGeneration,
 			std::string(a_phase) + ": " + std::string(a_reason));
 	}
 
-	bool FrameGeneration::SaveSettings()
+	void FrameGeneration::ApplyConfiguration()
 	{
-		return settings::SaveDelta(frame_generation::kSchema, GetConfigKey(), settings, *L);
-	}
-
-	void FrameGeneration::RestoreDefaultSettings()
-	{
-		settings = Settings{};
-		SaveSettings();
-		render::TemporalPipeline::Get().SetDetailedTracing(
-			settings.detailedDiagnostics);
+		render::TemporalPipeline::Get().SetDetailedTracing(settings.detailedDiagnostics);
 		render::TemporalPipeline::Get().SubmitLiveConfiguration();
 	}
 
@@ -490,8 +458,8 @@ namespace cs::features
 	void FrameGeneration::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(frame_generation::kSchema, settings);
-		const Settings defaults{};
+		const auto field = edit.Bind(_live);
+		const Settings defaults = _live.DefaultSettings();
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto dlssCapabilities =
@@ -522,26 +490,32 @@ namespace cs::features
 			methodOption(2, "dlss"),
 			methodOption(3, "fsr-4")
 		};
-		bool changed = false;
 		if (const ui::Section section{ "frame-generation-method", "Frame Generation" }; section) {
 			dmui::ui::TextDisabled("Requires borderless windowed mode.");
-			changed |= field.Choice(&Settings::frameGenerationMethod, methods, { .label = "Method" });
+			field.Choice(&Settings::frameGenerationMethod, methods, { .label = "Method" });
 
-			if (settings.frameGenerationMethod ==
+			if (_live.Draft().frameGenerationMethod ==
 				static_cast<std::uint32_t>(Method::kDLSSG)) {
 				constexpr std::uint32_t kDynamicChoice = 1;
 				const auto currentGeneration =
-					settings.dlssgMode == 1 ? kDynamicChoice : settings.dlssgFixedMultiplier;
+					_live.Draft().dlssgMode == 1 ? kDynamicChoice : _live.Draft().dlssgFixedMultiplier;
 				std::vector<dmui::ChoiceOption<std::uint32_t>>
 					generationOptions;
 				const bool capabilitiesCurrent =
 					dlssCapabilities.availability ==
 						render::temporal::CapabilityAvailability::kSupported &&
 					dlssCapabilities.IsCurrent();
-				if (capabilitiesCurrent &&
-					dlssCapabilities.maxGeneratedFrames > 0) {
+				// Outside a frame-generation session nothing is probed; the launch validates.
+				constexpr std::uint32_t kUnprobedMaxGenerated = 3;
+				const bool capabilitiesUnprobed =
+					status.session.activeFg != render::temporal::FrameGenerationMethod::kDLSSG &&
+					dlssCapabilities.availability != render::temporal::CapabilityAvailability::kUnsupported &&
+					!dlssCapabilities.configurationQueryFailed;
+				const std::uint32_t knownMaxGenerated = capabilitiesCurrent ? dlssCapabilities.maxGeneratedFrames : capabilitiesUnprobed ? kUnprobedMaxGenerated :
+				                                                                                                                           0u;
+				if (knownMaxGenerated > 0) {
 					const auto maxGeneratedFrames = std::min(
-						dlssCapabilities.maxGeneratedFrames,
+						knownMaxGenerated,
 						std::numeric_limits<std::uint32_t>::max() - 1);
 					generationOptions.reserve(maxGeneratedFrames + 1);
 					for (std::uint32_t generated = 1;
@@ -555,12 +529,10 @@ namespace cs::features
 					}
 				}
 				const bool currentFixedSupported =
-					settings.dlssgMode == 0 &&
-					capabilitiesCurrent &&
-					settings.dlssgFixedMultiplier >= 2 &&
-					settings.dlssgFixedMultiplier - 1 <=
-						dlssCapabilities.maxGeneratedFrames;
-				if (settings.dlssgMode == 0 &&
+					_live.Draft().dlssgMode == 0 &&
+					_live.Draft().dlssgFixedMultiplier >= 2 &&
+					_live.Draft().dlssgFixedMultiplier - 1 <= knownMaxGenerated;
+				if (_live.Draft().dlssgMode == 0 &&
 					!currentFixedSupported) {
 					const auto reason = capabilitiesCurrent                       ? std::format(
 																						"runtime maximum is {}x",
@@ -569,19 +541,19 @@ namespace cs::features
 					                                                                std::string("checking availability");
 					generationOptions.insert(
 						generationOptions.begin(),
-						{ settings.dlssgFixedMultiplier,
+						{ _live.Draft().dlssgFixedMultiplier,
 							std::format(
 								"{}x — {}",
-								settings.dlssgFixedMultiplier,
+								_live.Draft().dlssgFixedMultiplier,
 								reason),
 							std::format(
 								"{}x-current",
-								settings.dlssgFixedMultiplier),
+								_live.Draft().dlssgFixedMultiplier),
 							false });
 				}
 				const bool dynamicSupported =
-					capabilitiesCurrent &&
-					dlssCapabilities.dynamicModeSupported;
+					capabilitiesUnprobed ||
+					(capabilitiesCurrent && dlssCapabilities.dynamicModeSupported);
 				std::string dynamicReason;
 				if (!dynamicSupported) {
 					dynamicReason = dlssCapabilities.configurationQueryFailed ? "runtime capability check failed" : capabilitiesCurrent ? "not supported by this runtime" :
@@ -611,18 +583,17 @@ namespace cs::features
 							{ "dlssg_generation", { .label = "Generation", .help = "Generated frames per real frame, or Dynamic to follow a target frame rate." } },
 							generation, defaultGeneration, std::span<const dmui::ChoiceOption<std::uint32_t>>{ generationOptions }))) {
 						if (generation == kDynamicChoice) {
-							settings.dlssgMode = 1;
+							field.Values().dlssgMode = 1;
 						} else {
-							settings.dlssgMode = 0;
-							settings.dlssgFixedMultiplier = generation;
+							field.Values().dlssgMode = 0;
+							field.Values().dlssgFixedMultiplier = generation;
 						}
-						changed = true;
 					}
 				}
 
-				if (settings.dlssgMode == 1) {
+				if (_live.Draft().dlssgMode == 1) {
 					const std::uint32_t currentTarget =
-						settings.dlssgDynamicTargetFps > 0.0f ? 1u : 0u;
+						_live.Draft().dlssgDynamicTargetFps > 0.0f ? 1u : 0u;
 					static const std::array targets{
 						dmui::ChoiceOption<std::uint32_t>{
 							0, "Display refresh", "display" },
@@ -634,13 +605,12 @@ namespace cs::features
 					if (edit.Apply(ui::EditChoice(
 							{ "dlssg_dynamic_target", { .label = "Dynamic target", .help = "The frame rate Dynamic generation aims for: the display refresh rate or a custom value." } },
 							targetKind, defaultTarget, std::span<const dmui::ChoiceOption<std::uint32_t>>{ targets }))) {
-						settings.dlssgDynamicTargetFps =
+						field.Values().dlssgDynamicTargetFps =
 							targetKind == 0 ? 0.0f : 60.0f;
-						changed = true;
 					}
-					if (settings.dlssgDynamicTargetFps > 0.0f) {
+					if (_live.Draft().dlssgDynamicTargetFps > 0.0f) {
 						float customTarget =
-							settings.dlssgDynamicTargetFps;
+							_live.Draft().dlssgDynamicTargetFps;
 						const auto input = ui::DrawActionField(
 							{ "dlssg_dynamic_target_fps", { .label = "Custom target FPS", .help = "Target frame rate in FPS; VSync overrides custom targets." } },
 							[&](const char* a_label) {
@@ -652,9 +622,8 @@ namespace cs::features
 						if (edit.Apply(input)) {
 							if (std::isfinite(customTarget) &&
 								customTarget > 0.0f) {
-								settings.dlssgDynamicTargetFps =
+								field.Values().dlssgDynamicTargetFps =
 									customTarget;
-								changed = true;
 							} else {
 								Menu::ShowToast(
 									"Custom target must be a finite positive number.",
@@ -671,39 +640,11 @@ namespace cs::features
 				}
 			}
 
-			changed |= field(&Settings::frameGenerationAllowInMenus, { .label = "Allow in menus" });
+			field(&Settings::frameGenerationAllowInMenus, { .label = "Allow in menus" });
 
-			const auto effectiveName =
-				render::temporal::presentation::Name(status.effective.frameGeneration);
-			const auto selectedName = MethodName(settings.frameGenerationMethod);
-			const auto selectedAvailability = availability(settings.frameGenerationMethod);
-			if (status.transitionInFlight) {
-				dmui::ui::TextDisabled(
-					"Switching to %.*s...",
-					static_cast<int>(selectedName.size()),
-					selectedName.data());
-			} else if (selectedAvailability.kind !=
-					   render::temporal::presentation::AvailabilityKind::kAvailable) {
-				dmui::ui::TextWrapped(
-					"%s. %.*s remains active.",
-					selectedAvailability.reason.c_str(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
-			} else if (status.effective.frameGeneration !=
-						   static_cast<render::temporal::FrameGenerationMethod>(
-							   settings.frameGenerationMethod) &&
-					   !status.failure.empty()) {
-				dmui::ui::TextWrapped(
-					"Could not activate %.*s. %.*s remains active; see Debug.",
-					static_cast<int>(selectedName.size()),
-					selectedName.data(),
-					static_cast<int>(effectiveName.size()),
-					effectiveName.data());
+			if (status.pending.required) {
+				dmui::ui::TextWrapped("%s", status.pending.reason.c_str());
 			}
-		}
-
-		if (changed) {
-			pipeline.SubmitLiveConfiguration();
 		}
 	}
 
@@ -716,10 +657,7 @@ namespace cs::features
 			pipeline.GetFrameGenerationCapabilities();
 		const auto diagnostics =
 			pipeline.GetFrameGenerationDiagnostics();
-		if (edit.Bind(frame_generation::kSchema, settings)(&Settings::detailedDiagnostics, { .label = "Detailed diagnostics" })) {
-			pipeline.SetDetailedTracing(
-				settings.detailedDiagnostics);
-		}
+		edit.Bind(_live)(&Settings::detailedDiagnostics, { .label = "Detailed diagnostics" });
 		dmui::ui::TextDisabled(
 			"Ready: %s | active: %s | dispatches: %llu | failures: %llu",
 			diagnostics.ready ? "yes" : "no",

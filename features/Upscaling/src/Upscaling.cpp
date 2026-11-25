@@ -16,7 +16,6 @@
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 
@@ -42,32 +41,11 @@ namespace cs::features
 
 	bool Upscaling::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = settings;
-		if (!settings::Parse(render::temporal::kSchema, a_config, candidate, a_error)) {
-			return false;
-		}
-
-		candidate.enabled =
-			candidate.upscaleMethod !=
-			static_cast<std::uint32_t>(UpscaleMethod::kNone);
-		settings = candidate;
-		_bootSettings = candidate;
-		_liveSettings = cs::settings::BindLiveSettings(render::temporal::kSchema, settings, [this] {
-			settings.enabled = settings.upscaleMethod != static_cast<std::uint32_t>(UpscaleMethod::kNone);
-			render::TemporalPipeline::Get().SubmitLiveConfiguration();
-		});
-		return true;
+		return _live.Configure(a_config, a_error);
 	}
 
-	bool Upscaling::SaveSettings()
+	void Upscaling::SubmitConfiguration()
 	{
-		return settings::SaveDelta(render::temporal::kSchema, GetConfigKey(), settings, *L);
-	}
-
-	void Upscaling::RestoreDefaultSettings()
-	{
-		settings = Settings{};
-		SaveSettings();
 		render::TemporalPipeline::Get().SubmitLiveConfiguration();
 	}
 
@@ -115,20 +93,15 @@ namespace cs::features
 
 	void Upscaling::OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept
 	{
-		render::TemporalPipeline::Get().PostFailure(
+		render::TemporalPipeline::Get().Quarantine(
 			render::temporal::FailureDomain::kSuperResolution,
 			std::string(a_phase) + ": " + std::string(a_reason));
-	}
-
-	std::vector<std::string_view> Upscaling::GetRestartSettings() const
-	{
-		return cs::settings::RestartRequired(render::temporal::kSchema, _bootSettings, settings);
 	}
 
 	void Upscaling::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(render::temporal::kSchema, settings);
+		const auto field = edit.Bind(_live);
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto fidelityFx = pipeline.GetFidelityFXCapabilities();
@@ -156,23 +129,17 @@ namespace cs::features
 			methodOption(3, "dlss"),
 			methodOption(4, "fsr-4")
 		};
-		bool changed = false;
 		if (const ui::Section section{ "upscaling-super-resolution", "Super Resolution" }; section) {
 			dmui::ui::TextDisabled("DLSS and FSR require borderless windowed mode.");
-			if (field.Choice(&Settings::upscaleMethod, methods, { .label = "Method" })) {
-				settings.enabled =
-					settings.upscaleMethod !=
-					static_cast<std::uint32_t>(UpscaleMethod::kNone);
-				changed = true;
-			}
+			field.Choice(&Settings::upscaleMethod, methods, { .label = "Method" });
 
 			const bool externalMethod =
-				render::temporal::IsExternalUpscaler(static_cast<UpscaleMethod>(settings.upscaleMethod));
+				render::temporal::IsExternalUpscaler(static_cast<UpscaleMethod>(_live.Draft().upscaleMethod));
 			if (externalMethod) {
 				const std::array qualityModes{
 					dmui::ChoiceOption<std::uint32_t>{
 						0,
-						settings.upscaleMethod ==
+						_live.Draft().upscaleMethod ==
 								static_cast<std::uint32_t>(
 									UpscaleMethod::kDLSS) ?
 							"DLAA" :
@@ -185,45 +152,45 @@ namespace cs::features
 					dmui::ChoiceOption<std::uint32_t>{
 						4, "Ultra Performance", "ultra-performance" }
 				};
-				changed |= field.Choice(&Settings::qualityMode, qualityModes, { .label = "Quality" });
+				field.Choice(&Settings::qualityMode, qualityModes, { .label = "Quality" });
 
-				if (settings.upscaleMethod ==
+				if (_live.Draft().upscaleMethod ==
 					static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
 					// One slider over the enable flag and strength; zero turns it off.
-					const Settings defaults{};
-					float sharpness = settings.sharpnessEnabledDLSS ? settings.sharpnessDLSS : 0.0f;
+					const Settings defaults = _live.DefaultSettings();
+					float sharpness = _live.Draft().sharpnessEnabledDLSS ? _live.Draft().sharpnessDLSS : 0.0f;
 					const float defaultSharpness = defaults.sharpnessEnabledDLSS ? defaults.sharpnessDLSS : 0.0f;
 					const auto sharpnessRange = render::temporal::kSchema.EditRange(&Settings::sharpnessDLSS);
 					if (edit.Apply(ui::EditSetting(
 							{ "sharpness_dlss", { .label = "Sharpening", .help = "DLSS sharpening strength; 0 turns sharpening off." } },
 							sharpness, defaultSharpness, sharpnessRange))) {
-						settings.sharpnessEnabledDLSS = sharpness > 0.0f;
-						if (settings.sharpnessEnabledDLSS) {
-							settings.sharpnessDLSS = sharpness;
+						auto& draft = field.Values();
+						draft.sharpnessEnabledDLSS = sharpness > 0.0f;
+						if (draft.sharpnessEnabledDLSS) {
+							draft.sharpnessDLSS = sharpness;
 						}
-						changed = true;
 					}
 				} else {
-					changed |= field(&Settings::sharpnessFSR, { .label = "Sharpening" });
+					field(&Settings::sharpnessFSR, { .label = "Sharpening" });
 				}
-				if (settings.upscaleMethod ==
+				if (_live.Draft().upscaleMethod ==
 					static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
 					static const std::array presets{
 						dmui::ChoiceOption<std::uint32_t>{
-							0, "Default", "default" },
+							0, "NVIDIA default", "default" },
 						dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
 						dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
 						dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
 						dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
 					};
-					changed |= field.Choice(&Settings::presetDLSS, presets, { .label = "DLSS preset" });
+					field.Choice(&Settings::presetDLSS, presets, { .label = "DLSS preset" });
 				}
 			}
 
 			const auto effectiveName =
 				render::temporal::presentation::Name(status.effective.superResolution);
-			const auto selectedName = MethodName(settings.upscaleMethod);
-			const auto selectedAvailability = availability(settings.upscaleMethod);
+			const auto selectedName = MethodName(_live.Draft().upscaleMethod);
+			const auto selectedAvailability = availability(_live.Draft().upscaleMethod);
 			if (status.transitionInFlight) {
 				dmui::ui::TextDisabled(
 					"Switching to %.*s...",
@@ -238,7 +205,7 @@ namespace cs::features
 					effectiveName.data());
 			} else if (status.effective.superResolution !=
 						   static_cast<render::temporal::SuperResolutionMethod>(
-							   settings.upscaleMethod) &&
+							   _live.Draft().upscaleMethod) &&
 					   !status.failure.empty()) {
 				dmui::ui::TextWrapped(
 					"Could not activate %.*s. %.*s remains active; see Debug.",
@@ -270,9 +237,6 @@ namespace cs::features
 				break;
 			case LatencyBackend::kNone:
 				switch (latency.unavailableReason) {
-				case LatencyUnavailableReason::kNeedsD3D12Presentation:
-					latencyStatus = "AMD Anti-Lag 2 requires Upscaling or Frame Generation in borderless windowed mode";
-					break;
 				case LatencyUnavailableReason::kPresentationFailed:
 					latencyStatus = "Inactive because Direct3D 12 presentation failed";
 					break;
@@ -280,7 +244,7 @@ namespace cs::features
 					latencyStatus = "The driver is rejecting Anti-Lag 2 updates";
 					break;
 				case LatencyUnavailableReason::kNone:
-					if (settings.latencyReduction == 0) {
+					if (_live.Draft().latencyReduction == 0) {
 						latencyStatus = "Turn Latency Reduction on to detect a supported backend";
 					}
 					break;
@@ -296,18 +260,14 @@ namespace cs::features
 				dmui::ChoiceOption<std::uint32_t>{ 1, "On", "on" },
 				dmui::ChoiceOption<std::uint32_t>{ 2, "On + Boost", "on-boost", reflexActive }
 			};
-			changed |= field.Choice(&Settings::latencyReduction, reductions, { .label = "Latency Reduction" });
-			changed |= field(&Settings::latencyFpsLimitEnabled, { .label = "Frame Rate Limit" });
-			dmui::ui::BeginDisabled(!settings.latencyFpsLimitEnabled);
-			changed |= field(&Settings::latencyFpsLimit, { .label = "Limit", .help = "Frame rate cap in FPS.", .format = "%.0f" });
+			field.Choice(&Settings::latencyReduction, reductions, { .label = "Latency Reduction" });
+			field(&Settings::latencyFpsLimitEnabled, { .label = "Frame Rate Limit" });
+			dmui::ui::BeginDisabled(!_live.Draft().latencyFpsLimitEnabled);
+			field(&Settings::latencyFpsLimit, { .label = "Limit", .help = "Frame rate cap in FPS.", .format = "%.0f" });
 			dmui::ui::EndDisabled();
 			dmui::ui::BeginDisabled(!status.latency.markersAvailable);
-			changed |= field(&Settings::latencyUseMarkers, { .label = "Use Markers To Optimize" });
+			field(&Settings::latencyUseMarkers, { .label = "Use Markers To Optimize" });
 			dmui::ui::EndDisabled();
-		}
-
-		if (changed) {
-			pipeline.SubmitLiveConfiguration();
 		}
 	}
 
@@ -329,7 +289,7 @@ namespace cs::features
 			dmui::ChoiceOption<std::uint32_t>{
 				2, "Verbose", "verbose" }
 		};
-		edit.Bind(render::temporal::kSchema, settings)
+		edit.Bind(_live)
 			.Choice(&Settings::streamlineLogLevel, logLevels, { .label = "Streamline logging" });
 		const auto [scale, ready] = pipeline.Renderer().GetReadiness();
 		dmui::ui::TextDisabled(

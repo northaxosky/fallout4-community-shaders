@@ -8,6 +8,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "Log.h"
@@ -21,6 +22,24 @@ namespace cs::features
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.upscaling.streamline");
+
+		// The evaluate ran and its commands are recorded; only warn.
+		bool EvaluateSucceeded(
+			sl::Result a_result, std::string_view a_feature) noexcept
+		{
+			if (a_result == sl::Result::eOk) {
+				return true;
+			}
+			if (a_result != sl::Result::eWarnOutOfVRAM) {
+				return false;
+			}
+			// Recurs every frame while over budget.
+			CS_LOG_ONCE_BY_KEY(L, spdlog::level::warn, a_feature,
+				"{} is over the video memory budget (eWarnOutOfVRAM); "
+				"expect stutter",
+				a_feature);
+			return true;
+		}
 
 		std::optional<sl::DLSSMode> ToDLSSMode(
 			std::uint32_t a_qualityMode) noexcept
@@ -135,12 +154,14 @@ namespace cs::features
 		bool a_loadDlss,
 		bool a_loadFsr,
 		bool a_loadDlssG,
-		bool a_loadFsrG)
+		bool a_loadFsrG,
+		bool a_loadReflex)
 	{
 		triedInitialization = true;
 		_dlssGFeatureRequested = a_loadDlssG;
 		_fsrFeatureRequested = a_loadFsr;
 		_fsrGFeatureRequested = a_loadFsrG;
+		_reflexFeatureRequested = a_loadReflex;
 
 		const auto interposerPath =
 			std::filesystem::path(Streamline::PluginDir) / L"sl.interposer.dll";
@@ -169,7 +190,10 @@ namespace cs::features
 			featuresToLoad[featureCount++] = sl::kFeatureDLSS_G;
 		}
 		featuresToLoad[featureCount++] = sl::kFeaturePCL;
-		featuresToLoad[featureCount++] = sl::kFeatureReflex;
+		// D3D11 sessions pace through NVAPI on the presenting device instead.
+		if (a_loadReflex) {
+			featuresToLoad[featureCount++] = sl::kFeatureReflex;
+		}
 		if (a_loadFsrG) {
 			featuresToLoad[featureCount++] = sl::kFeatureFSR_G;
 		}
@@ -233,7 +257,7 @@ namespace cs::features
 		}
 
 		if (SL_FAILED(res, slInit(pref, sl::kSDKVersion))) {
-			L->critical("Failed to initialize Streamline: {}", magic_enum::enum_name(res));
+			L->critical("Failed to initialize Streamline: slInit returned {} ({})", magic_enum::enum_name(res), std::to_underlying(res));
 		} else {
 			initialized = true;
 			featureDLSS = false;
@@ -393,7 +417,9 @@ namespace cs::features
 			checkFeatureAvailability(sl::kFeatureFSR, "FSR", featureFSR);
 		}
 		checkFeatureAvailability(sl::kFeaturePCL, "PCL", featurePCL);
-		checkFeatureAvailability(sl::kFeatureReflex, "Reflex", featureReflex);
+		if (_reflexFeatureRequested) {
+			checkFeatureAvailability(sl::kFeatureReflex, "Reflex", featureReflex);
+		}
 		if (_dlssGFeatureRequested) {
 			checkFeatureAvailability(sl::kFeatureDLSS_G, "DLSS-G", featureDLSSG);
 			_dlssGAvailability.store(
@@ -510,6 +536,15 @@ namespace cs::features
 				"slFSRGQuiesce",
 				(void*&)slFSRGQuiesce);
 		}
+		// Missing in older sl.common builds; the host then skips both calls.
+		slGetFeatureFunction(
+			sl::kFeatureCommon,
+			"slCommonFrameEnd",
+			(void*&)slCommonFrameEnd);
+		slGetFeatureFunction(
+			sl::kFeatureCommon,
+			"slCommonResize",
+			(void*&)slCommonResize);
 		if (featurePCL) {
 			slGetFeatureFunction(
 				sl::kFeaturePCL,
@@ -1118,15 +1153,17 @@ namespace cs::features
 
 		const sl::ViewportHandle view(viewport);
 		const sl::BaseStructure* inputs[]{ &view };
-		if (SL_FAILED(result, slEvaluateFeature(
-								  fsr ? sl::kFeatureFSR : sl::kFeatureDLSS,
-								  *frameToken,
-								  inputs,
-								  _countof(inputs),
-								  recording->commandList))) {
+		const sl::Result result = slEvaluateFeature(
+			fsr ? sl::kFeatureFSR : sl::kFeatureDLSS,
+			*frameToken,
+			inputs,
+			_countof(inputs),
+			recording->commandList);
+		const std::string_view provider = fsr ? "FSR" : "DLSS-SR";
+		if (!EvaluateSucceeded(result, provider)) {
 			L->error(
 				"D3D12 {} evaluation failed: {}",
-				fsr ? "FSR" : "DLSS-SR",
+				provider,
 				magic_enum::enum_name(result));
 			return {
 				.code = render::temporal::ProviderResultCode::kFailure,
@@ -1346,13 +1383,14 @@ namespace cs::features
 		if (a_evaluate) {
 			const sl::ViewportHandle view(viewport);
 			const sl::BaseStructure* inputs[]{ &view };
-			if (SL_FAILED(result, slEvaluateFeature(
-									  a_feature,
-									  *frameToken,
-									  inputs,
-									  _countof(inputs),
-									  reinterpret_cast<sl::CommandBuffer*>(
-										  a_request.recording.commandList)))) {
+			const sl::Result result = slEvaluateFeature(
+				a_feature,
+				*frameToken,
+				inputs,
+				_countof(inputs),
+				reinterpret_cast<sl::CommandBuffer*>(
+					a_request.recording.commandList));
+			if (!EvaluateSucceeded(result, "FSR-G")) {
 				L->error(
 					"Could not evaluate FSR-G preparation: {}",
 					magic_enum::enum_name(result));
@@ -1787,22 +1825,23 @@ namespace cs::features
 	bool Streamline::CheckFSRGCompletionCapability(
 		sl::FSRGAlgorithm a_algorithm) noexcept
 	{
-		return PollFSRGState(a_algorithm, false);
+		return PollFSRGState(a_algorithm, false).has_value();
 	}
 
-	bool Streamline::PollFSRGState(
+	std::optional<render::temporal::GpuCompletionDependency>
+	Streamline::PollFSRGInputCompletion(
 		sl::FSRGAlgorithm a_algorithm) noexcept
 	{
 		return PollFSRGState(a_algorithm, true);
 	}
 
-	bool Streamline::PollFSRGState(
+	std::optional<render::temporal::GpuCompletionDependency>
+	Streamline::PollFSRGState(
 		sl::FSRGAlgorithm a_algorithm,
 		bool a_requireSubmittedDependency) noexcept
 	{
-		_fsrGInputCompletionDependency.reset();
 		if (!featureFSRG || !slFSRGGetState) {
-			return false;
+			return std::nullopt;
 		}
 		sl::FSRGState state{};
 		const auto result = slFSRGGetState(viewport, state);
@@ -1810,7 +1849,7 @@ namespace cs::features
 			L->error(
 				"Could not query FSR-G state: {}",
 				magic_enum::enum_name(result));
-			return false;
+			return std::nullopt;
 		}
 		winrt::com_ptr<ID3D12Fence> completionFence;
 		completionFence.attach(
@@ -1825,7 +1864,7 @@ namespace cs::features
 			L->error(
 				"FSR-G does not expose the required host-input completion "
 				"fence");
-			return false;
+			return std::nullopt;
 		}
 		if (validation ==
 			streamline_fidelityfx::FSRGStateValidation::
@@ -1835,7 +1874,7 @@ namespace cs::features
 				static_cast<std::uint32_t>(state.algorithm),
 				static_cast<std::uint32_t>(state.available),
 				static_cast<std::uint32_t>(a_algorithm));
-			return false;
+			return std::nullopt;
 		}
 		if (validation ==
 			streamline_fidelityfx::FSRGStateValidation::
@@ -1843,16 +1882,13 @@ namespace cs::features
 			L->error(
 				"FSR-G did not expose a submitted host-input completion "
 				"value after Present");
-			return false;
+			return std::nullopt;
 		}
-		if (state.completionFenceValue) {
-			_fsrGInputCompletionDependency =
-				render::temporal::GpuCompletionDependency{
-					.fence = std::move(completionFence),
-					.value = state.completionFenceValue
-				};
-		}
-		return true;
+		// Before any Present the capability check sees value 0.
+		return render::temporal::GpuCompletionDependency{
+			.fence = std::move(completionFence),
+			.value = state.completionFenceValue
+		};
 	}
 
 	bool Streamline::ClearCurrentFrameGenerationTags() noexcept
@@ -1874,13 +1910,6 @@ namespace cs::features
 	std::uint32_t Streamline::ConsumeDLSSGGeneratedFrameCount() noexcept
 	{
 		return _dlssGGeneratedFrames.Consume();
-	}
-
-	std::optional<render::temporal::GpuCompletionDependency>
-	Streamline::ConsumeFSRGInputCompletionDependency() noexcept
-	{
-		return std::exchange(
-			_fsrGInputCompletionDependency, std::nullopt);
 	}
 
 	render::temporal::ProviderResult
@@ -1990,7 +2019,6 @@ namespace cs::features
 					render::temporal::FailureDomain::kStreamline
 			};
 		}
-		_fsrGInputCompletionDependency.reset();
 		(void)SetLatencyConstraint(_fsrGForcesLatencyOff, false);
 		_fsrGResourcesConfigured = false;
 		return {

@@ -1,5 +1,6 @@
 #include "ScreenSpaceShadows.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXMath.h>
@@ -26,12 +27,12 @@
 #include "Render/CanonicalDepth.h"
 #include "Render/Engine.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
@@ -124,19 +125,7 @@ namespace cs::features
 
 	bool ScreenSpaceShadows::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(sss_settings::kSchema, a_config, candidate, a_error)) {
-			return false;
-		}
-
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(sss_settings::kSchema, _settings);
-		return true;
-	}
-
-	bool ScreenSpaceShadows::SaveSettings()
-	{
-		return settings::SaveDelta(sss_settings::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void ScreenSpaceShadows::Load()
@@ -166,38 +155,22 @@ namespace cs::features
 		_allocHeight = a_height;
 	}
 
+	void ScreenSpaceShadows::PublishRequiredMaskExtent(render::Extent a_required)
+	{
+		_requiredMaskExtent = a_required;
+		_requiredMaskWidthTelemetry.store(a_required.width, std::memory_order_relaxed);
+		_requiredMaskHeightTelemetry.store(a_required.height, std::memory_order_relaxed);
+	}
+
 	bool ScreenSpaceShadows::TryGetMaskExtents(
 		render::Extent& a_required,
 		render::Extent& a_allocation) const
 	{
-		auto* state = cs::engine::GetGraphicsState();
-		if (!state || state->screenWidth == 0 || state->screenHeight == 0)
+		const auto resolution = render::GetRenderResolution();
+		if (!resolution.render.IsValid())
 			return false;
-		float widthRatio = 1.0f;
-		float heightRatio = 1.0f;
-		if (auto* rtm = cs::engine::GetRenderTargetManager()) {
-			widthRatio = rtm->GetDynamicWidthRatio();
-			heightRatio = rtm->GetDynamicHeightRatio();
-		}
-		if (!std::isfinite(widthRatio) || widthRatio <= 0.0f)
-			widthRatio = 1.0f;
-		if (!std::isfinite(heightRatio) || heightRatio <= 0.0f)
-			heightRatio = 1.0f;
-		const auto requiredWidth = std::ceil(
-			static_cast<double>(state->screenWidth) * static_cast<double>(widthRatio));
-		const auto requiredHeight = std::ceil(
-			static_cast<double>(state->screenHeight) * static_cast<double>(heightRatio));
-		if (requiredWidth < 1.0 || requiredHeight < 1.0 || requiredWidth > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || requiredHeight > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
-			return false;
-		}
-		a_required = {
-			static_cast<std::uint32_t>(requiredWidth),
-			static_cast<std::uint32_t>(requiredHeight)
-		};
-		a_allocation = {
-			std::max(state->screenWidth, a_required.width),
-			std::max(state->screenHeight, a_required.height)
-		};
+		a_required = resolution.render;
+		a_allocation = resolution.output;
 		return true;
 	}
 
@@ -369,39 +342,14 @@ namespace cs::features
 				required,
 				allocation);
 		}
-		_requiredMaskExtent = required;
-		_requiredMaskWidthTelemetry.store(
-			required.width,
-			std::memory_order_relaxed);
-		_requiredMaskHeightTelemetry.store(
-			required.height,
-			std::memory_order_relaxed);
+		PublishRequiredMaskExtent(required);
 		(void)EnsureResources();
 	}
 
 	void ScreenSpaceShadows::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
 	{
-		a_fo4.EnabledScreenSpaceShadows = 1u;
-	}
-
-	bool ScreenSpaceShadows::IsShadowMaskReady()
-	{
-		if (!_registrationsReady.load(std::memory_order_acquire))
-			return false;
-		(void)EnsureResources();
-		render::Extent required;
-		render::Extent allocation;
-		auto* device = cs::util::GetD3DDevice();
-		const bool fallbackReady =
-			device && TryGetMaskExtents(required, allocation) && EnsureWhiteFallback(device, required, allocation);
-		_requiredMaskExtent = required;
-		_requiredMaskWidthTelemetry.store(
-			required.width,
-			std::memory_order_relaxed);
-		_requiredMaskHeightTelemetry.store(
-			required.height,
-			std::memory_order_relaxed);
-		return fallbackReady;
+		// Refreshed after the prepass bind; a stock slot would read stale shadows.
+		a_fo4.EnabledScreenSpaceShadows = _maskBound.load(std::memory_order_relaxed) ? 1u : 0u;
 	}
 
 	bool ScreenSpaceShadows::EnsureResources()
@@ -471,15 +419,12 @@ namespace cs::features
 
 	std::uint32_t ScreenSpaceShadows::GetScaledSampleCount() const
 	{
-		auto* state = cs::engine::GetGraphicsState();
-		auto* rtm = cs::engine::GetRenderTargetManager();
-		if (!state || !rtm) {
+		const auto resolution = render::GetRenderResolution();
+		if (!resolution.render.IsValid()) {
 			return sss_math::kMinSampleCount;
 		}
-
-		const float width = static_cast<float>(state->screenWidth) * rtm->GetDynamicWidthRatio();
-		const float height = static_cast<float>(state->screenHeight) * rtm->GetDynamicHeightRatio();
-		return sss_math::ScaleSampleCount(_settings.SampleCount, width, height);
+		return sss_math::ScaleSampleCount(_settings.SampleCount,
+			static_cast<float>(resolution.render.width), static_cast<float>(resolution.render.height));
 	}
 
 	ID3D11ComputeShader* ScreenSpaceShadows::GetComputeRaymarch()
@@ -512,19 +457,12 @@ namespace cs::features
 		}
 
 		_dispatchedLastFrame.store(0, std::memory_order_relaxed);
-		_maskBoundLastFrame.store(false, std::memory_order_relaxed);
 		render::Extent required;
 		render::Extent allocation;
 		auto* device = cs::util::GetD3DDevice();
 		const bool extentsValid =
 			device && TryGetMaskExtents(required, allocation);
-		_requiredMaskExtent = required;
-		_requiredMaskWidthTelemetry.store(
-			required.width,
-			std::memory_order_relaxed);
-		_requiredMaskHeightTelemetry.store(
-			required.height,
-			std::memory_order_relaxed);
+		PublishRequiredMaskExtent(required);
 		if (extentsValid) {
 			(void)EnsureWhiteFallback(
 				device,
@@ -547,10 +485,6 @@ namespace cs::features
 		}
 
 		const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		auto* state = cs::engine::GetGraphicsState();
-		if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
-			return;
-		}
 		if (allocation.width != _allocWidth || allocation.height != _allocHeight) {
 			try {
 				CreateMaskTexture(
@@ -589,15 +523,11 @@ namespace cs::features
 		if (shader && cs::engine::TryGetSunDirectionWS(sx, sy, sz)) {
 			// FO4: canonical depth puts first-person casters in the world projection.
 			auto* depthSRV = cs::render::GetCanonicalSceneDepthSRV();
-			auto* rtm = cs::engine::GetRenderTargetManager();
-			if (depthSRV && rtm && _raymarchCB && _pointBorderSampler) {
-				const float widthRatio = rtm->GetDynamicWidthRatio();
-				const float heightRatio = rtm->GetDynamicHeightRatio();
-				const float renderWidth = static_cast<float>(state->screenWidth) * widthRatio;
-				const float renderHeight = static_cast<float>(state->screenHeight) * heightRatio;
+			if (depthSRV && _raymarchCB && _pointBorderSampler) {
+				const auto resolution = render::GetRenderResolution();
 				int viewportSize[2] = {
-					static_cast<int>(renderWidth),
-					static_cast<int>(renderHeight)
+					static_cast<int>(resolution.render.width),
+					static_cast<int>(resolution.render.height)
 				};
 
 				if (viewportSize[0] > 0 && viewportSize[1] > 0) {
@@ -605,7 +535,7 @@ namespace cs::features
 						"ScreenSpaceShadows::Raymarch");
 					cs::engine::ComputeOMScope scope(context);
 
-					const auto sceneCamera = cs::engine::GetWorldCameraRecord();
+					const auto sceneCamera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 					if (!sceneCamera) {
 						return;
 					}
@@ -652,8 +582,8 @@ namespace cs::features
 							cb.NearDepthValue = kNearDepthValue;
 							cb.InvDepthTextureSize[0] = 1.0f / static_cast<float>(viewportSize[0]);
 							cb.InvDepthTextureSize[1] = 1.0f / static_cast<float>(viewportSize[1]);
-							cb.DynamicRes[0] = widthRatio;
-							cb.DynamicRes[1] = heightRatio;
+							cb.DynamicRes[0] = resolution.widthRatio;
+							cb.DynamicRes[1] = resolution.heightRatio;
 							cb.settings = _settings;
 							_raymarchCB->Update(cb);
 							context->Dispatch(
@@ -692,17 +622,19 @@ namespace cs::features
 		                         sss_resources::Covers({ _allocWidth, _allocHeight }, _requiredMaskExtent) ?
 		                     _maskTexture->srv.get() :
 		                     fallback;
-		if (!selected)
+		if (!selected) {
+			_maskBound.store(false, std::memory_order_relaxed);
 			return;
+		}
 		const auto bind = [&](ID3D11ShaderResourceView* a_view) {
-			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kMaskPSSlot, 1, &a_view);
+			cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, cs::render::kScreenSpaceShadowsMaskSlot.first, 1, &a_view);
 			winrt::com_ptr<ID3D11ShaderResourceView> actual;
-			a_context->PSGetShaderResources(kMaskPSSlot, 1, actual.put());
+			a_context->PSGetShaderResources(cs::render::kScreenSpaceShadowsMaskSlot.first, 1, actual.put());
 			return actual.get() == a_view;
 		};
-		if (bind(selected) || (selected != fallback && fallback && bind(fallback))) {
-			_maskBoundLastFrame.store(true, std::memory_order_relaxed);
-		}
+		_maskBound.store(
+			bind(selected) || (selected != fallback && fallback && bind(fallback)),
+			std::memory_order_relaxed);
 	}
 
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -730,7 +662,7 @@ namespace cs::features
 					std::memory_order_relaxed) &&
 					!_whiteFallbackReady.load(
 						std::memory_order_acquire))
-			.Field("mask_bound", _maskBoundLastFrame.load(std::memory_order_relaxed))
+			.Field("mask_bound", _maskBound.load(std::memory_order_relaxed))
 			.Field("dispatches", static_cast<std::int64_t>(_dispatchedLastFrame.load(std::memory_order_relaxed)))
 			.Dimensions("mask", _allocWidth, _allocHeight)
 			.Dimensions(
@@ -752,19 +684,13 @@ namespace cs::features
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(sss_settings::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "sss-general", "General" }; section) {
 			field(&Settings::SurfaceThickness, { .label = "Surface thickness" });
 			field(&Settings::BilinearThreshold, { .label = "Bilinear threshold" });
 			field(&Settings::ShadowContrast, { .label = "Shadow contrast" });
 			field(&Settings::SampleCount, { .label = "Sample count multiplier" });
 		}
-	}
-
-	void ScreenSpaceShadows::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

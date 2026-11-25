@@ -9,7 +9,7 @@
 #include "Render/ShaderFamilyDescriptor.h"
 #include "Render/SharedData.h"
 #include "Render/SharedDataLayout.h"
-#include "Settings/SettingsPersistence.h"
+#include "Render/SubstrateSlots.h"
 #include "Telemetry/Telemetry.h"
 
 #include <DearModdingUI/Client.h>
@@ -37,12 +37,7 @@ namespace cs::features
 
 	bool VanillaPBR::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(vanilla_pbr::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(vanilla_pbr::kSchema, _settings);
-		return true;
+		return _live.Configure(a_config, a_error);
 	}
 
 	void VanillaPBR::Load()
@@ -81,13 +76,14 @@ namespace cs::features
 			_blurMatch.Release();
 		// Unbound first: the table is rewritten as a compute output.
 		ID3D11ShaderResourceView* table = nullptr;
-		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, vanilla_pbr::kLiveLODPSSlot, 1, &table);
+		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, cs::render::kVanillaPbrLiveLODSlot, 1, &table);
 		_blurMatchActive = IsEnabled() && _liveEnvironmentEnabled.load() && _liveEnvironmentReady.load() &&
 		                   _blurMatchCreated.load(std::memory_order_acquire);
 		if (!_blurMatchActive)
 			return;
-		table = _blurMatch.Update(context, DynamicCubemaps::GetSingleton()->GetSharpReflectionsSRV());
-		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, vanilla_pbr::kLiveLODPSSlot, 1, &table);
+		table = _blurMatch.Update(context, DynamicCubemaps::GetSingleton()->GetSharpReflectionsSRV(),
+			DynamicCubemaps::GetSingleton()->GetReflectionsGeneration());
+		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, cs::render::kVanillaPbrLiveLODSlot, 1, &table);
 	}
 
 	bool VanillaPBR::ValidateInjectionPrerequisites(std::string& a_error)
@@ -118,22 +114,11 @@ namespace cs::features
 		_liveEnvironmentReady = environmentReady;
 	}
 
-	bool VanillaPBR::SaveSettings()
-	{
-		return settings::SaveDelta(vanilla_pbr::kSchema, GetConfigKey(), _settings, *Log());
-	}
-
-	void VanillaPBR::RestoreDefaultSettings()
-	{
-		_settings = {};
-		SaveSettings();
-	}
-
 	void VanillaPBR::DrawSettings()
 	{
 		using namespace vanilla_pbr;
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "vanilla-pbr-general", "General" }; section) {
 			field(&Settings::EnableGGX, { .help = "Replace direct Phong specular with GGX." });
 			field(&Settings::EnableEyeSpecialHandling);

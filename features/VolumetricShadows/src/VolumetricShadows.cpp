@@ -1,5 +1,6 @@
 #include "VolumetricShadows.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <d3d11.h>
 
@@ -49,6 +50,13 @@ namespace cs::features
 		std::uint32_t DownsampleGroups(std::uint32_t a_sourceSize, std::uint32_t a_mapSize)
 		{
 			return a_sourceSize / 16 / std::max(a_sourceSize / a_mapSize / 16, 1u);
+		}
+
+		// The map's 512 mip reduces 2x to 16x; the 256 mip takes up to 32x.
+		bool FitsMapReduction(const D3D11_TEXTURE2D_DESC& a_source)
+		{
+			return a_source.Width == a_source.Height && a_source.Width >= 2 * VolumetricShadows::kMapSize &&
+			       a_source.Width <= 16 * VolumetricShadows::kMapSize && std::has_single_bit(a_source.Width);
 		}
 
 	}
@@ -142,35 +150,6 @@ namespace cs::features
 		L->info("shadow map: {0}x{0} R16G16_UNORM, {1} mips", kMapSize, kMipCount);
 	}
 
-	bool VolumetricShadows::EnsureSourceView(ID3D11Device* a_device, const cs::engine::SunCascadeSnapshot& a_snapshot)
-	{
-		D3D11_TEXTURE2D_DESC source{};
-		a_snapshot.texture->GetDesc(&source);
-		// The map's 512 mip reduces 2x to 16x; the 256 mip takes up to 32x.
-		if (source.Format != DXGI_FORMAT_R16_TYPELESS || source.ArraySize != a_snapshot.count || source.MipLevels != 1 || source.SampleDesc.Count != 1 ||
-			!(source.BindFlags & D3D11_BIND_SHADER_RESOURCE) || source.Width != source.Height || source.Width < 2 * kMapSize || source.Width > 16 * kMapSize || !std::has_single_bit(source.Width))
-			return false;
-		if (_sourceSRV && _sourceTexture == a_snapshot.texture && _sourceDesc.Width == source.Width && _sourceDesc.ArraySize == source.ArraySize)
-			return true;
-
-		const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{
-			.Format = DXGI_FORMAT_R16_UNORM,
-			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY,
-			.Texture2DArray = { .MostDetailedMip = 0, .MipLevels = 1, .FirstArraySlice = 0, .ArraySize = source.ArraySize }
-		};
-		_sourceSRV = nullptr;
-		_sourceTexture = nullptr;
-		winrt::com_ptr<ID3D11ShaderResourceView> srv;
-		if (FAILED(a_device->CreateShaderResourceView(a_snapshot.texture, &srvDesc, srv.put())))
-			return false;
-		cs::render::annotation::SetName(srv.get(), "VolumetricShadows/SunCascades.SRV");
-		_sourceSRV = std::move(srv);
-		_sourceTexture = a_snapshot.texture;
-		_sourceDesc = source;
-		L->info("sun cascades: {}x{}x{} R16_TYPELESS, SRV R16_UNORM", source.Width, source.Height, source.ArraySize);
-		return true;
-	}
-
 	void VolumetricShadows::ClearToLit(ID3D11DeviceContext* a_context)
 	{
 		if (_mapsLit || !a_context || !_map.texture)
@@ -218,7 +197,10 @@ namespace cs::features
 			_sunStatus = cs::engine::SunCascadeStatus::kInvalid;
 		if (_sunStatus != cs::engine::SunCascadeStatus::kOk)
 			return Skip::kSunCascades;
-		if (!EnsureSourceView(device, snapshot))
+		auto* cascades = cs::engine::GetSunCascadeArraySRV();
+		D3D11_TEXTURE2D_DESC source{};
+		snapshot.texture->GetDesc(&source);
+		if (!cascades || !FitsMapReduction(source))
 			return Skip::kSource;
 		if (!(_downsampleMip0 && _downsampleMip1 && _blurHorizontal && _blurVertical))
 			return Skip::kShaders;
@@ -231,20 +213,20 @@ namespace cs::features
 		// FO4: a single cascade leaves cascade 1 without a slice, so it reads lit.
 		const bool hasCascade1 = snapshot.count > 1;
 		if (hasCascade1) {
-			const std::uint32_t groups = DownsampleGroups(_sourceDesc.Width, kMapSize);
-			Dispatch(a_context, kDownsamplePasses[0], _downsampleMip0.get(), _sourceSRV.get(), _map.mipUAV[0].get(), groups, groups);
+			const std::uint32_t groups = DownsampleGroups(source.Width, kMapSize);
+			Dispatch(a_context, kDownsamplePasses[0], _downsampleMip0.get(), cascades, _map.mipUAV[0].get(), groups, groups);
 		} else
 			a_context->ClearUnorderedAccessViewFloat(_map.mipUAV[0].get(), kLit);
-		const std::uint32_t groups1 = DownsampleGroups(_sourceDesc.Width, kMapSize >> 1);
-		Dispatch(a_context, kDownsamplePasses[1], _downsampleMip1.get(), _sourceSRV.get(), _map.mipUAV[1].get(), groups1, groups1);
+		const std::uint32_t groups1 = DownsampleGroups(source.Width, kMapSize >> 1);
+		Dispatch(a_context, kDownsamplePasses[1], _downsampleMip1.get(), cascades, _map.mipUAV[1].get(), groups1, groups1);
 		if (hasCascade1)
 			Blur(a_context, 0);
 		Blur(a_context, 1);
 
 		_mapsLit = false;
 		_counters.cascadeCount.store(snapshot.count, std::memory_order_relaxed);
-		_counters.sourceWidth.store(_sourceDesc.Width, std::memory_order_relaxed);
-		_counters.sourceHeight.store(_sourceDesc.Height, std::memory_order_relaxed);
+		_counters.sourceWidth.store(source.Width, std::memory_order_relaxed);
+		_counters.sourceHeight.store(source.Height, std::memory_order_relaxed);
 		return Skip::kNone;
 	}
 
@@ -289,8 +271,8 @@ namespace cs::features
 			return;
 		ID3D11ShaderResourceView* const map = _map.srv.get();
 		ID3D11ShaderResourceView* const lights = cs::engine::GetSunShadowLightsSRV<2>();
-		cs::engine::BindInjectionShaderResources(a_context, volumetric_shadows_shader::kSharedShadowMapSlot, 1, &map);
-		cs::engine::BindInjectionShaderResources(a_context, volumetric_shadows_shader::kShadowLightsSlot, 1, &lights);
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kVolumetricShadowsMapSlot, 1, &map);
+		cs::engine::BindInjectionShaderResources(a_context, cs::render::kVolumetricShadowsLightsSlot, 1, &lights);
 		(a_target == cs::engine::ShaderInjectionTarget::kBsWater   ? _counters.waterDraws :
 			a_target == cs::engine::ShaderInjectionTarget::kEffect ? _counters.effectDraws :
 																	 _counters.lightDraws)
@@ -356,7 +338,7 @@ namespace cs::features
 			.Field("dflight_draws_bound", count(_counters.lightDraws))
 			.Field("water_draws_bound", count(_counters.waterDraws))
 			.Field("effect_draws_bound", count(_counters.effectDraws));
-		cs::render::profiling::CollectPassTimings(a_sink, "VolumetricShadows::");
+		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 
 	namespace

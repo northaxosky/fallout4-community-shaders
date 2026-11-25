@@ -56,9 +56,10 @@ namespace FO4EffectLighting
 		float3 worldPosition = FrameBuffer::ViewToWorld(viewPosition);
 
 		float3 color = dLightColor * Color::EffectLightingScale;
+		const float3 sceneAmbientColor = ShadowSampling::GetAmbientLighting(worldPosition);
 		bool suppressExternalEmittance = SharedData::InInterior && (Permutation::ExtraShaderDescriptor & Permutation::ExtraFlags::SuppressExternalEmittance);
 		if (suppressExternalEmittance) {
-			color = ShadowSampling::GetAmbientLighting() + ShadowSampling::GetDirectionalLighting();
+			color = sceneAmbientColor + ShadowSampling::GetDirectionalLighting();
 		}
 
 #		if defined(SKYLIGHTING)
@@ -74,7 +75,7 @@ namespace FO4EffectLighting
 
 		float3 dirColor;
 		float3 ambientColor;
-		ShadowSampling::ExtractLighting(color, dirColor, ambientColor);
+		ShadowSampling::ExtractLightingWithAmbient(color, sceneAmbientColor, dirColor, ambientColor);
 
 		float3 viewDirection = normalize(worldPosition.xyz);
 
@@ -141,7 +142,7 @@ namespace FO4EffectLighting
 
 		// FO4: no shadowVariance output or EXP_HEIGHT_FOG attenuation; neither exists.
 		float3 dirLight = ShadowSampling::GetDirectionalLighting();
-		float3 sceneLight = ShadowSampling::GetSceneLightingColor();
+		float3 sceneLight = ShadowSampling::GetSceneLightingColor(worldPosition);
 		return color * (1.0 - saturate(dirLight * (1.0 - shadow) / max(sceneLight, EPSILON_DIVISION)));
 	}
 #	endif

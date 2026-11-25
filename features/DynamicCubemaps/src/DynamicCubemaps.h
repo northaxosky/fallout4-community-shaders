@@ -5,6 +5,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/RgbaPreview.h"
+#include "Render/SubstrateSlots.h"
 #include "ShaderDefines.h"
 
 #include <DirectXMath.h>
@@ -25,11 +26,6 @@ struct ID3D11SamplerState;
 struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
 struct ID3D11UnorderedAccessView;
-
-namespace cs
-{
-	struct DynamicCubemapsFeatureData;
-}
 
 namespace cs::features
 {
@@ -64,7 +60,6 @@ namespace cs::features
 		void OnEnabledChanged(bool a_enabled) noexcept override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
-		void RestoreDefaultSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -73,7 +68,6 @@ namespace cs::features
 		FullscreenDebugData GetFullscreenDebugData() const noexcept override;
 
 		void WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4) override;
-		std::vector<std::string_view> GetRestartSettings() const override;
 
 		// Null unless enabled, operational and published, so consumers fail neutral.
 		ID3D11ShaderResourceView* GetEnvironmentSRV() const noexcept;
@@ -81,6 +75,8 @@ namespace cs::features
 		ID3D11ShaderResourceView* GetReflectionsSRV() const noexcept;
 		// Null under the engine-cube view, so live envmaps fall back to stock.
 		ID3D11ShaderResourceView* GetSharpReflectionsSRV() const noexcept;
+		// Bumps when a reflections capture that restarted its history is published.
+		std::uint32_t GetReflectionsGeneration() const noexcept { return _reflectionsGeneration.load(std::memory_order_acquire); }
 
 	private:
 		std::string_view GetRegistrationFailureMessage() const override;
@@ -92,12 +88,8 @@ namespace cs::features
 		static constexpr std::uint32_t kBc6hScratchMipLevels = 7;
 		static constexpr std::uint32_t kPreviewWidth = 512;
 		static constexpr std::uint32_t kPreviewHeight = 256;
-		static constexpr std::uint32_t kDynamicCubemapPSSlot = 30;
-		static constexpr std::uint32_t kDynamicCubemapPSSlotCount = 3;
 		// Water's CubeMapTex and the SSLR water march's SkyReflectionTex.
-		static constexpr std::uint32_t kEngineCubePSSlot = kDynamicCubemapPSSlot + 2;
-		static constexpr std::uint32_t kCompositionPSSlot = 39;
-		static constexpr std::uint32_t kCompositionPSSlotCount = 3;
+		static constexpr std::uint32_t kEngineCubePSSlot = cs::render::kDynamicCubemapsSlot.first + 2;
 
 		struct CubeTexture
 		{
@@ -170,8 +162,7 @@ namespace cs::features
 
 		DynamicCubemaps() = default;
 
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(dynamic_cubemaps::kSchema, _settings); }
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		void PublishSettings() noexcept;
 		void PostDeferred();
 		void BindComposition(ID3D11DeviceContext* a_context);
@@ -189,6 +180,7 @@ namespace cs::features
 		FeatureDebugTexture GetCubemapDebugTexture() const;
 		bool CreateResources(ID3D11Device* a_device);
 		void ResetCapture();
+		void ResetReflections();
 
 		CaptureStream& Stream(bool a_reflections);
 		ID3D11ComputeShader* UpdateShader(bool a_reflections) const;
@@ -202,6 +194,7 @@ namespace cs::features
 		std::atomic_bool _queuedReset{ false };
 		std::atomic_bool _activeReflections{ false };
 		std::atomic_bool _fakeReflections{ false };
+		std::atomic_uint32_t _reflectionsGeneration{ 0 };
 		std::atomic_bool _engineReflectionCube{ false };
 		std::atomic_bool _cameraReadyLastFrame{ false };
 		std::array<std::atomic_bool, 2> _cubemapValid{};
@@ -215,8 +208,8 @@ namespace cs::features
 		std::atomic<DebugVisualization> _debugVisualization{
 			DebugVisualization::kOff
 		};
-		Settings _settings;
-		Settings _bootSettings;
+		settings::LiveSettings<dynamic_cubemaps::kSchema> _live{ { .finalize = [this](const Settings&) { PublishSettings(); } } };
+		const Settings& _settings = _live.Get();
 
 		CaptureStream _baseStream;
 		CaptureStream _reflectionsStream;
@@ -269,6 +262,8 @@ namespace cs::features
 			NextTask::kCaptureInferAndIrradianceA
 		};
 		std::array<bool, 2> _resetCapture{ true, true };
+		// The reflections capture in flight consumed a reset; set at capture, spent at publish.
+		bool _reflectionsResetCaptured = false;
 		std::array<DirectX::XMFLOAT3, 2> _cameraPreviousPosAdjust{};
 		std::array<double, 2> _previousCaptureTime{};
 		float _previousHoursPassed = 0.0f;

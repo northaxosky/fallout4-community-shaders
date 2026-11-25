@@ -27,7 +27,6 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 
 #include "RE/B/BSGeometry.h"
@@ -144,17 +143,7 @@ namespace cs::features
 
 	bool TerrainVariation::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(terrain_variation::kSchema, a_config, candidate, a_error))
-			return false;
-		_settings = candidate;
-		_liveSettings = settings::BindLiveSettings(terrain_variation::kSchema, _settings);
-		return true;
-	}
-
-	bool TerrainVariation::SaveSettings()
-	{
-		return settings::SaveDelta(terrain_variation::kSchema, GetConfigKey(), _settings, *L);
+		return _live.Configure(a_config, a_error);
 	}
 
 	void TerrainVariation::Load()
@@ -200,17 +189,11 @@ namespace cs::features
 	void TerrainVariation::DrawSettings()
 	{
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(terrain_variation::kSchema, _settings);
+		const auto field = edit.Bind(_live);
 		if (const ui::Section section{ "terrain-variation-coverage", "Coverage" }; section) {
 			field(&Settings::enableLODTerrainTilingFix);
 			field(&Settings::enableMeshSupport);
 		}
-	}
-
-	void TerrainVariation::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		SaveSettings();
 	}
 
 	namespace

@@ -8,7 +8,10 @@
 
 #include "Log.h"
 #include "Render/EngineCallSite.h"
+#include "Render/FeatureShaderBindings.h"
+#include "Render/FrameState.h"
 #include "Render/LightingRenderPasses.h"
+#include "Render/SharedDataLayout.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -19,7 +22,6 @@ namespace cs::features
 
 		using ShaderFlag = RE::BSShaderProperty::EShaderPropertyFlag;
 
-		std::atomic_bool g_loadingMenuOpen{ false };
 		std::atomic_uint64_t g_corrections{ 0 };
 
 		bool Enabled()
@@ -72,26 +74,6 @@ namespace cs::features
 			}
 		}
 
-		class MenuOpenCloseHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
-		{
-		public:
-			static MenuOpenCloseHandler* GetSingleton()
-			{
-				static MenuOpenCloseHandler instance;
-				return &instance;
-			}
-
-			RE::BSEventNotifyControl ProcessEvent(
-				const RE::MenuOpenCloseEvent& a_event,
-				RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
-			{
-				if (a_event.menuName == RE::LoadingMenu::MENU_NAME) {
-					g_loadingMenuOpen.store(a_event.opening, std::memory_order_relaxed);
-				}
-				return RE::BSEventNotifyControl::kContinue;
-			}
-		};
-
 		struct TESObjectREFR_SetSequencePosition
 		{
 			static void thunk(RE::NiAVObject* a_object, RE::NiUpdateData* a_updateData)
@@ -133,16 +115,15 @@ namespace cs::features
 		{
 			if (!Enabled())
 				return;
-			auto* main = RE::Main::GetSingleton();
-			const bool frozen =
-				main && main->gameActive && (main->inMenuMode || main->freezeTime);
+			const bool frozen = cs::render::GetFrameState().worldFrozen;
+			const bool loading = cs::render::IsAnyMenuOpen({ cs::render::TrackedMenu::kLoading });
 			const bool lod =
 				a_call.property && a_call.property->flags.any(
 									   ShaderFlag::kLODObjects,
 									   ShaderFlag::kLODLandscape,
 									   ShaderFlag::kLODLandBlend,
 									   ShaderFlag::kMultiTextureLandscape);
-			if (a_call.geometry && !g_loadingMenuOpen.load(std::memory_order_relaxed) &&
+			if (a_call.geometry && !loading &&
 				(frozen || lod)) {
 				a_call.geometry->previousWorld = a_call.geometry->world;
 				g_corrections.fetch_add(1, std::memory_order_relaxed);
@@ -179,18 +160,17 @@ namespace cs::features
 			FailLoad("Motion Vector Fixes pass-list hook registration failed.");
 			return;
 		}
+		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
+			FailLoad("Motion Vector Fixes shader contribution registration failed.");
+			return;
+		}
+		_registrationsReady.store(true, std::memory_order_release);
 		L->info("Installed previous-transform corrections");
 	}
 
-	void MotionVectorFixes::OnDataLoaded()
+	void MotionVectorFixes::WriteSharedData(render::SharedFeatureDataCB&, render::FO4SharedDataCB& a_fo4)
 	{
-		auto* ui = RE::UI::GetSingleton();
-		if (!ui) {
-			L->warn("Menu event source is unavailable");
-			return;
-		}
-		ui->RegisterSink<RE::MenuOpenCloseEvent>(MenuOpenCloseHandler::GetSingleton());
-		_menuSinkRegistered = true;
+		a_fo4.EnabledMotionVectorFixes = 1u;
 	}
 
 	void MotionVectorFixes::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -198,8 +178,7 @@ namespace cs::features
 		a_sink
 			.Field("player_update_hook", _playerUpdateHooked)
 			.Field("set_sequence_position_hook", _setSequencePositionHooked)
-			.Field("menu_sink_registered", _menuSinkRegistered)
-			.Field("loading_menu", g_loadingMenuOpen.load(std::memory_order_relaxed))
+			.Field("loading_menu", cs::render::IsAnyMenuOpen({ cs::render::TrackedMenu::kLoading }))
 			.Field("corrections", g_corrections.load(std::memory_order_relaxed));
 	}
 

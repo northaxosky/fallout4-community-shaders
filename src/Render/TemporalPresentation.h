@@ -144,6 +144,7 @@ namespace cs::render::temporal::presentation
 			};
 		}
 		const auto index = static_cast<std::size_t>(a_method);
+		// The method applies at the next launch, so only a known negative disables it.
 		if (index < a_status.session.admittedFg.size() &&
 			a_status.session.admittedFg[index]) {
 			return {};
@@ -159,12 +160,6 @@ namespace cs::render::temporal::presentation
 				return {
 					.kind = AvailabilityKind::kUnavailable,
 					.reason = "The runtime capability check failed."
-				};
-			}
-			if (a_dlss.availability == CapabilityAvailability::kUnknown) {
-				return {
-					.kind = AvailabilityKind::kUnavailable,
-					.reason = "DLSS is unavailable; see the log."
 				};
 			}
 			if (a_dlss.availability == CapabilityAvailability::kUnsupported) {
@@ -184,12 +179,7 @@ namespace cs::render::temporal::presentation
 				};
 			}
 		}
-		return {
-			.kind = AvailabilityKind::kUnavailable,
-			.reason = std::format(
-				"{} is unavailable; see the log.",
-				Name(a_method))
-		};
+		return {};
 	}
 
 	[[nodiscard]] inline std::string OptionLabel(

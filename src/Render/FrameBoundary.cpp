@@ -9,6 +9,7 @@
 #include "Log.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameDispatcher.h"
+#include "Render/FrameThread.h"
 #include "Render/RuntimeCallback.h"
 
 namespace cs::render
@@ -55,9 +56,10 @@ namespace cs::render
 		{
 			static void thunk(RE::Main* a_main)
 			{
+				frameStarted.store(true, std::memory_order_release);
 				RunAll(preSwap, "pre-swap");
 				func(a_main);
-				// Same thread as DearModdingUI page callbacks (they run inside Present).
+				// UI page callbacks run mid-pass and post their mutations here.
 				for (const auto& failure : GetFrameDispatcher().Drain())
 					L->error("Frame task failed: {}", failure);
 				RunAll(postSwap, "post-swap");

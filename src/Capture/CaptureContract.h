@@ -2,6 +2,7 @@
 
 #include "Log.h"
 
+#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -13,6 +14,13 @@
 namespace cs::capture
 {
 	using RequestId = std::uint64_t;
+
+	// One sequence for every capture kind, so completions never share an id.
+	inline RequestId NextRequestId() noexcept
+	{
+		static std::atomic<RequestId> last{ 0 };
+		return last.fetch_add(1, std::memory_order_relaxed) + 1;
+	}
 
 	// Why a request was not queued, and what to try next.
 	struct Refusal

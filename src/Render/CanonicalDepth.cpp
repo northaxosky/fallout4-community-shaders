@@ -65,7 +65,7 @@ namespace cs::render
 		}
 
 		bool Update(Product& a_product, ID3D11DeviceContext* a_context, const engine::WorldCameraRecord& a_camera,
-			const DirectX::XMFLOAT4X4& a_projection)
+			const DirectX::XMFLOAT4X4& a_projection, Extent a_active)
 		{
 			if (a_product.publishedFrame == a_camera.frameCount)
 				return true;
@@ -81,11 +81,7 @@ namespace cs::render
 				return false;
 			D3D11_TEXTURE2D_DESC desc{};
 			texture->GetDesc(&desc);
-			const auto* state = engine::GetGraphicsState();
-			if (desc.SampleDesc.Count != 1 || !state)
-				return false;
-			const auto active = GetActiveExtent(state->screenWidth, state->screenHeight);
-			if (!active.width || !active.height)
+			if (desc.SampleDesc.Count != 1 || !a_active.IsValid())
 				return false;
 			Resize(a_product, desc.Width, desc.Height);
 			CanonicalDepthData data{};
@@ -93,8 +89,8 @@ namespace cs::render
 			DirectX::XMStoreFloat4x4(&data.worldProjection, DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(&a_projection)));
 			data.allocation[0] = desc.Width;
 			data.allocation[1] = desc.Height;
-			data.active[0] = (std::min)(desc.Width, active.width);
-			data.active[1] = (std::min)(desc.Height, active.height);
+			data.active[0] = (std::min)(desc.Width, a_active.width);
+			data.active[1] = (std::min)(desc.Height, a_active.height);
 			constants->Update(data);
 			annotation::ScopedEvent annotationScope(a_product.name);
 			constexpr engine::ShaderStage stages[]{ engine::ShaderStage::kVertex, engine::ShaderStage::kPixel, engine::ShaderStage::kCompute };
@@ -136,13 +132,13 @@ namespace cs::render
 	void UpdateCanonicalDepth(ID3D11DeviceContext* a_context, const engine::WorldCameraRecord& a_camera)
 	{
 		// The jittered world projection rasterizes the g-buffer.
-		Update(scene, a_context, a_camera, a_camera.Projection);
+		Update(scene, a_context, a_camera, a_camera.Projection, GetRenderResolution().render);
 	}
 
 	ID3D11ShaderResourceView* UpdateOutputCanonicalDepth(ID3D11DeviceContext* a_context, const engine::WorldCameraRecord& a_camera)
 	{
-		// Upscaled depth is unjittered.
-		return Update(output, a_context, a_camera, a_camera.ProjectionUnjittered) ? output.depth->srv.get() : nullptr;
+		// Unjittered and live: the resolve resets the ratio, not the latch.
+		return Update(output, a_context, a_camera, a_camera.ProjectionUnjittered, ReadLiveResolution().render) ? output.depth->srv.get() : nullptr;
 	}
 
 	ID3D11ShaderResourceView* GetCanonicalSceneDepthSRV() noexcept

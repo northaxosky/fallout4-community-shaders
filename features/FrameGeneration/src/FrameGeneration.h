@@ -32,18 +32,23 @@ namespace cs::features
 		void DrawSettings() override;
 		bool HasDebugUI() const override { return true; }
 		void DrawDebug() override;
-		void RestoreDefaultSettings() override;
+		settings::LiveSettingsAccess* GetLiveSettings() override { return &_live; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
 		void OnRuntimeQuarantined(std::string_view a_phase, std::string_view a_reason) noexcept override;
 
-		Settings settings;
+	private:
+		settings::LiveSettings<frame_generation::kSchema> _live{ { .finalize = [this](const Settings&) { ApplyConfiguration(); },
+			.notComparable = { "detailed_diagnostics" } } };
+
+	public:
+		// Restart-only fields hold their boot values.
+		const Settings& settings = _live.Get();
 
 	private:
-		bool SaveSettings() override;
-		settings::SettingsBinding GetSettingsBinding() const override { return settings::BindSettings(frame_generation::kSchema, settings); }
+		void ApplyConfiguration();
 		FeatureDebugTexture GetDebugTexture(render::FrameGenerationDebugResource a_view) const;
 	};
 }

@@ -9,6 +9,7 @@
 #include "Menu/SettingsEdit.h"
 #include "Menu/SettingsLayout.h"
 #include "Plugin.h"
+#include "Render/FrameDispatcher.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
@@ -19,6 +20,7 @@
 #include <array>
 #include <exception>
 #include <format>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -30,6 +32,7 @@ namespace cs::host
 	namespace
 	{
 		constexpr std::uint32_t kBindingPollFrames = 120;
+		constexpr std::uint32_t kStartupNoticeMilliseconds = 10000;
 
 		constexpr dmui::ClientOptions kClientOptions{
 			.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT
@@ -45,7 +48,7 @@ namespace cs::host
 				.category = a_feature.GetCategory(),
 				.summary = a_feature.GetFeatureSummary(),
 				.active = a_feature.IsActive(),
-				.installed = a_feature.IsInstalled()
+				.inFeatureList = a_feature.IsInFeatureList()
 			};
 		}
 
@@ -57,14 +60,30 @@ namespace cs::host
 			       feature->get("load")->value_or(false);
 		}
 
+		// Widgets edit the draft; a stale one would post old values back.
+		template <class Draw>
+		void DrawEditing(Feature& a_feature, Draw&& a_draw)
+		{
+			if (auto* live = a_feature.GetLiveSettings())
+				live->BeginDraft();
+			a_draw();
+			FeatureManager::Get().CommitEdits(a_feature, false);
+		}
+
 		void DrawEnabledToggle(Feature& a_feature)
 		{
 			if (!a_feature.SupportsEnableToggle())
 				return;
-			settings::SettingsEdit edit{ a_feature };
 			bool enabled = a_feature.IsSwitchedOn();
-			if (edit.Apply(ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled())))
-				a_feature.SetEnabled(enabled);
+			if (ui::EditSetting({ "enabled", { .label = "Enabled" } }, enabled, a_feature.DefaultEnabled()).changed) {
+				render::PostToFrame([&a_feature, enabled] {
+					std::string error;
+					if (!FeatureManager::Get().CommitLiveSettings(
+							a_feature, toml::table{ { "enabled", enabled } }, settings::Scope::kImmediate,
+							settings::Persist::kNow, "DearModdingUI::Enable", error))
+						L->warn("{} enable switch failed: {}", a_feature.GetName(), error);
+				});
+			}
 		}
 
 		// One collapsed Debug section: views, feature tooling, then profiling.
@@ -202,6 +221,8 @@ namespace cs::host
 			auto page = std::make_unique<Page>();
 			page->feature = descriptor.kind == HostPageKind::kFeature ?
 			                    features[descriptor.featureIndex] :
+			                descriptor.kind == HostPageKind::kProfiling ?
+			                    features::PerformanceOverlay::GetSingleton() :
 			                    nullptr;
 			page->descriptor = std::move(descriptor);
 			const dmui::PageDescriptor pageDescriptor{
@@ -386,7 +407,7 @@ namespace cs::host
 			Menu::Get().DrawAdvanced(_client);
 			break;
 		case HostPageKind::kProfiling:
-			ProfilingRenderer::RenderStatistics();
+			DrawProfilingPage(a_page.feature);
 			break;
 		case HostPageKind::kPresets:
 			Menu::Get().DrawPresets(_client);
@@ -407,6 +428,18 @@ namespace cs::host
 		}
 	}
 
+	// Pass timings, then the Performance Overlay feature page.
+	void HostClient::DrawProfilingPage(Feature* a_overlay)
+	{
+		constexpr ui::Collapsible open{ .expandedByDefault = true, .framed = false };
+		if (const ui::Section section{ "profiling-timings", "Pass Timings", open }; section)
+			ProfilingRenderer::RenderStatistics();
+		if (!a_overlay)
+			return;
+		if (const ui::Section section{ "profiling-overlay", "Performance Overlay", open }; section)
+			DrawFeaturePage(*a_overlay);
+	}
+
 	void HostClient::DrawFeaturePage(Feature& a_feature)
 	{
 		const auto reportCallbackFailure = [&](const char* a_phase,
@@ -425,7 +458,7 @@ namespace cs::host
 		};
 
 		const auto isComparing = [&] {
-			return settings::liveComparisonActive && a_feature.GetLiveSettingsAccess().snapshot;
+			return settings::liveComparisonActive && a_feature.SharesLiveSettings();
 		};
 
 		// Enabled toggle, settings and Debug section, saved once an edit completes.
@@ -437,14 +470,13 @@ namespace cs::host
 			const bool comparing = isComparing();
 			const char* callback = "DearModdingUI::DrawSettings";
 			try {
-				{
+				DrawEditing(a_feature, [&] {
 					const dmui::DisabledScope disabled{ comparing };
 					DrawEnabledToggle(a_feature);
 					a_feature.DrawSettings();
 					callback = "DearModdingUI::DrawDebug";
 					DrawFeatureDebugSection(a_feature);
-				}
-				a_feature.FlushSettings(true);
+				});
 			} catch (const std::exception& error) {
 				FeatureManager::Get().QuarantineRuntimeCallback(
 					a_feature,
@@ -498,21 +530,25 @@ namespace cs::host
 		};
 
 		const auto restoreFeatureDefaults = [&] {
-			try {
-				a_feature.RestoreDefaults();
-			} catch (const std::exception& error) {
-				reportCallbackFailure(
-					"DearModdingUI::RestoreDefaultSettings",
-					"Feature reset callback failed",
-					error.what());
-				throw;
-			} catch (...) {
-				reportCallbackFailure(
-					"DearModdingUI::RestoreDefaultSettings",
-					"Feature reset callback failed",
-					"non-standard exception");
-				throw;
-			}
+			render::PostToFrame([&a_feature, report = reportCallbackFailure] {
+				try {
+					std::string error;
+					if (!FeatureManager::Get().RestoreDefaults(a_feature, error))
+						L->warn("{} restore defaults failed: {}", a_feature.GetName(), error);
+				} catch (const std::exception& error) {
+					report(
+						"DearModdingUI::RestoreDefaultSettings",
+						"Feature reset callback failed",
+						error.what());
+					throw;
+				} catch (...) {
+					report(
+						"DearModdingUI::RestoreDefaultSettings",
+						"Feature reset callback failed",
+						"non-standard exception");
+					throw;
+				}
+			});
 		};
 
 		const bool loadAtBoot = LoadAtBoot(a_feature);
@@ -575,50 +611,6 @@ namespace cs::host
 						return false;
 					}
 				}
-			} else {
-				try {
-					a_feature.DrawUnloadedUI();
-				} catch (const std::exception& error) {
-					reportCallbackFailure(
-						"DearModdingUI::DrawUnloadedUI",
-						"Feature help callback failed",
-						error.what());
-					throw;
-				} catch (...) {
-					reportCallbackFailure(
-						"DearModdingUI::DrawUnloadedUI",
-						"Feature help callback failed",
-						"non-standard exception");
-					throw;
-				}
-				std::optional<std::string> modLink;
-				try {
-					modLink = a_feature.GetFeatureModLink();
-				} catch (const std::exception& error) {
-					reportCallbackFailure(
-						"DearModdingUI::GetFeatureModLink",
-						"Feature link callback failed",
-						error.what());
-					throw;
-				} catch (...) {
-					reportCallbackFailure(
-						"DearModdingUI::GetFeatureModLink",
-						"Feature link callback failed",
-						"non-standard exception");
-					throw;
-				}
-				if (modLink && !modLink->empty()) {
-					const std::array links{
-						dmui::Link{
-							.label = "Open feature mod page",
-							.external = {
-								.targetKind = DMUI_EXTERNAL_TARGET_URI,
-								.target = modLink->c_str() },
-							.action = dmui::LinkAction::kOpenExternal }
-					};
-					if (!_client.DrawLinkRow("feature-mod-link", links))
-						LogFailure("draw feature mod link");
-				}
 			}
 			return true; });
 				}
@@ -628,12 +620,12 @@ namespace cs::host
 			LogFailure("draw feature settings table");
 
 		// Fields cannot nest in a host row, so the failure UI and controls sit outside the table.
-		const auto restartSettings = a_feature.GetRestartSettings();
+		const auto restartSettings = a_feature.RestartPending();
 		const ui::FieldPage page{ restartSettings };
 		if (state.runtimeState == FeatureRuntimeState::kFailed ||
 			state.runtimeState == FeatureRuntimeState::kDegraded) {
 			try {
-				a_feature.DrawFailLoadMessage();
+				DrawEditing(a_feature, [&] { a_feature.DrawFailLoadMessage(); });
 			} catch (const std::exception& error) {
 				reportCallbackFailure(
 					"DearModdingUI::DrawFailLoadMessage",
@@ -702,10 +694,11 @@ namespace cs::host
 		try {
 			const auto state = _client.QueryState();
 			if (state && state->state == DMUI_HOST_STATE_READY &&
-				!_readyLogged.exchange(true)) {
+				!_readySeen.exchange(true)) {
 				L->info(
 					"DearModdingUI forwarding backend is ready; hosted pages, overlays, and "
 					"hotkeys are active");
+				PostStartupNotices();
 			} else if (state && state->state == DMUI_HOST_STATE_UNAVAILABLE &&
 					   !_unavailableLogged.exchange(true)) {
 				L->warn(
@@ -752,6 +745,18 @@ namespace cs::host
 		}
 	}
 
+	void HostClient::PostStartupNotices() noexcept
+	{
+		auto& features = FeatureManager::Get();
+		for (auto* feature : features.GetAll()) {
+			features.RunRuntimeCallback(*feature, "DearModdingUI::StartupNotice", [&] {
+				if (auto notice = feature->GetStartupNotice(); !notice.empty())
+					PostNotification(DMUI_STATUS_SEVERITY_WARNING, std::move(notice),
+						kStartupNoticeMilliseconds, std::string(feature->GetDisplayName()));
+			});
+		}
+	}
+
 	void HostClient::ObservePageActivity(
 		const dmui::PageActivity& a_activity) noexcept
 	{
@@ -770,7 +775,7 @@ namespace cs::host
 			if (!manager.PrepareMenuCallback(feature, phase))
 				return;
 			try {
-				feature.FlushSettings();
+				manager.CommitEdits(feature, true);
 			} catch (const std::exception& error) {
 				manager.QuarantineRuntimeCallback(feature, phase, error.what());
 			} catch (...) {

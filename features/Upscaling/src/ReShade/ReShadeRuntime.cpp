@@ -1,9 +1,12 @@
 #include "ReShadeRuntime.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <mutex>
+#include <vector>
 
 #include "Log.h"
 #include "Render/Annotation.h"
@@ -33,6 +36,65 @@ namespace cs::features
 			if (a_runtime == g_runtime.load(std::memory_order_acquire)) {
 				g_effectsReloaded.store(true, std::memory_order_release);
 			}
+		}
+
+		// Every runtime ReShade has, by window: a chain it hooked gets one of its own.
+		std::mutex g_registryMutex;
+		std::vector<effect_runtime*> g_runtimes;
+		std::atomic<HWND> g_ownedWindow{};
+
+		effect_runtime* FindRuntime(HWND a_window, const effect_runtime* a_except = nullptr)
+		{
+			std::scoped_lock lock(g_registryMutex);
+			for (auto* runtime : g_runtimes) {
+				if (runtime != a_except && runtime->get_hwnd() == a_window) {
+					return runtime;
+				}
+			}
+			return nullptr;
+		}
+
+		void CheckForDuplicateRuntimes()
+		{
+			const auto window = g_ownedWindow.load(std::memory_order_acquire);
+			if (!window) {
+				return;
+			}
+			std::scoped_lock lock(g_registryMutex);
+			const auto count = std::ranges::count_if(g_runtimes, [&](auto* a_runtime) { return a_runtime->get_hwnd() == window; });
+			if (count > 1) {
+				L->error("{} ReShade effect runtimes are active for the Community Shaders window; effects will run twice", count);
+			}
+		}
+
+		void OnInitEffectRuntime(effect_runtime* a_runtime)
+		{
+			{
+				std::scoped_lock lock(g_registryMutex);
+				g_runtimes.push_back(a_runtime);
+			}
+			CheckForDuplicateRuntimes();
+		}
+
+		void OnDestroyEffectRuntime(effect_runtime* a_runtime)
+		{
+			std::scoped_lock lock(g_registryMutex);
+			std::erase(g_runtimes, a_runtime);
+		}
+
+		// Stays registered for the process; runtimes can predate ours.
+		bool EnsureAddon() noexcept
+		{
+			static const bool registered = [] {
+				const auto module = cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnInitEffectRuntime));
+				if (!::reshade::register_addon(module)) {
+					return false;
+				}
+				::reshade::register_event<::reshade::addon_event::init_effect_runtime>(&OnInitEffectRuntime);
+				::reshade::register_event<::reshade::addon_event::destroy_effect_runtime>(&OnDestroyEffectRuntime);
+				return true;
+			}();
+			return registered;
 		}
 
 		template <class T>
@@ -140,17 +202,79 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Texture2D> _buffer;
 			bool _hdr;
 		};
+
+		// How the effect runtime comes to exist, and who presents it.
+		class Attachment
+		{
+		public:
+			virtual ~Attachment() = default;
+			[[nodiscard]] virtual effect_runtime* Runtime() noexcept = 0;
+			// Draws the overlay on the copy; adopt does it at the real Present.
+			[[nodiscard]] virtual bool PresentsOverlay() const noexcept { return false; }
+			virtual void Present(effect_runtime&) noexcept {}
+		};
+
+		// Hosted: ReShade never hooked the chain, so CS makes the runtime.
+		class HostedAttachment final : public Attachment
+		{
+		public:
+			HostedAttachment(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
+				ID3D11Device& a_device, ID3D11Texture2D& a_color, bool a_hdr)
+			{
+				_owner = std::make_unique<BackBufferOwner>(a_host, a_color, a_hdr);
+				_proxy.attach(new render::DXGISwapChainProxy(*_owner, a_inner));
+				// A relative path resolves against ReShade's base path, like its own runtime.
+				if (!::reshade::create_effect_runtime(::reshade::api::device_api::d3d11, &a_device,
+						nullptr, _proxy.get(), "ReShade.ini", &_runtime)) {
+					_runtime = nullptr;
+					DX::ThrowIfFailed(E_FAIL);
+				}
+			}
+			~HostedAttachment() override
+			{
+				if (_runtime) {
+					::reshade::destroy_effect_runtime(_runtime);
+				}
+				if (_proxy) {
+					_proxy->DetachOwner();
+				}
+			}
+			effect_runtime* Runtime() noexcept override { return _runtime; }
+			bool PresentsOverlay() const noexcept override { return true; }
+			void Present(effect_runtime& a_runtime) noexcept override { ::reshade::update_and_present_effect_runtime(&a_runtime); }
+
+		private:
+			std::unique_ptr<BackBufferOwner> _owner;
+			winrt::com_ptr<render::DXGISwapChainProxy> _proxy;
+			effect_runtime* _runtime = nullptr;
+		};
+
+		// Adopt: ReShade made its own runtime; CS only renders effects.
+		class AdoptedAttachment final : public Attachment
+		{
+		public:
+			explicit AdoptedAttachment(IDXGISwapChain4& a_chain)
+			{
+				DX::ThrowIfFailed(a_chain.GetHwnd(&_window));
+				if (!FindRuntime(_window)) {
+					DX::ThrowIfFailed(E_FAIL);
+				}
+			}
+			effect_runtime* Runtime() noexcept override { return FindRuntime(_window); }
+
+		private:
+			HWND _window = nullptr;
+		};
 	}
 
 	struct ReShadeRuntime::Impl
 	{
-		std::unique_ptr<BackBufferOwner> owner;
-		winrt::com_ptr<render::DXGISwapChainProxy> proxy;
+		std::unique_ptr<Attachment> attachment;
 		winrt::com_ptr<ID3D11Texture2D> color;
 		winrt::com_ptr<ID3D11RenderTargetView> rtv;
 		winrt::com_ptr<ID3D11RenderTargetView> rtvSrgb;
 		winrt::com_ptr<ID3DDeviceContextState> contextState;
-		effect_runtime* runtime = nullptr;
+		[[nodiscard]] effect_runtime* Runtime() const noexcept { return attachment ? attachment->Runtime() : nullptr; }
 		ID3D11ShaderResourceView* boundDepth = nullptr;
 		bool addonRegistered = false;
 
@@ -165,21 +289,15 @@ namespace cs::features
 
 		~Impl()
 		{
-			if (runtime) {
-				g_runtime.store(nullptr, std::memory_order_release);
-				::reshade::destroy_effect_runtime(runtime);
-			}
+			g_runtime.store(nullptr, std::memory_order_release);
+			attachment.reset();
 			if (addonRegistered) {
 				::reshade::unregister_event<::reshade::addon_event::reshade_reloaded_effects>(&OnReloadedEffects);
-				::reshade::unregister_addon(cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnReloadedEffects)));
-			}
-			if (proxy) {
-				proxy->DetachOwner();
 			}
 		}
 
 		void Create(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
-			ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer)
+			ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer, Attach a_attach)
 		{
 			hdrContainer = a_hdrContainer;
 			winrt::com_ptr<ID3D11Device> device;
@@ -233,34 +351,28 @@ namespace cs::features
 				0, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), &selected,
 				contextState.put()));
 
-			owner = std::make_unique<BackBufferOwner>(a_host, *color, a_hdrContainer);
-			proxy.attach(new render::DXGISwapChainProxy(*owner, a_inner));
-
 			// Events need an add-on identity; without it, rebind every frame.
-			addonRegistered = ::reshade::register_addon(cs::util::ModuleFromAddress(reinterpret_cast<const void*>(&OnReloadedEffects)));
+			addonRegistered = EnsureAddon();
 			if (addonRegistered) {
 				::reshade::register_event<::reshade::addon_event::reshade_reloaded_effects>(&OnReloadedEffects);
 			}
 			g_effectsReloaded.store(true, std::memory_order_release);
 
-			// A relative path resolves against ReShade's base path, like its own runtime.
-			if (!::reshade::create_effect_runtime(::reshade::api::device_api::d3d11, device.get(),
-					nullptr, proxy.get(), "ReShade.ini", &runtime)) {
-				runtime = nullptr;
-				DX::ThrowIfFailed(E_FAIL);
+			if (a_attach == Attach::kAdopt) {
+				attachment = std::make_unique<AdoptedAttachment>(a_inner);
+			} else {
+				attachment = std::make_unique<HostedAttachment>(a_host, a_inner, *device, *color, a_hdrContainer);
 			}
-			g_runtime.store(runtime, std::memory_order_release);
+			g_runtime.store(Runtime(), std::memory_order_release);
 		}
 
 		// Draws a converted copy of a_source into a_target.
 		void Convert(ID3D11DeviceContext& a_context, ID3D11ShaderResourceView* a_source, ID3D11RenderTargetView* a_target,
 			ID3D11PixelShader* a_shader, float a_whiteNits, UINT a_width, UINT a_height)
 		{
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (FAILED(a_context.Map(convertConstants.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+			const float scale = a_whiteNits / 80.0f;
+			if (FAILED(cs::engine::WriteDiscard(&a_context, convertConstants.get(), scale)))
 				return;
-			*static_cast<float*>(mapped.pData) = a_whiteNits / 80.0f;
-			a_context.Unmap(convertConstants.get(), 0);
 			const render::FullscreenPass::Scope pass(convertPass, &a_context, a_target, a_width, a_height);
 			if (!pass.IsActive())
 				return;
@@ -276,7 +388,7 @@ namespace cs::features
 			if (scRgb == a_scRgb)
 				return;
 			scRgb = a_scRgb;
-			runtime->set_color_space(a_scRgb ? ::reshade::api::color_space::extended_srgb_linear : ::reshade::api::color_space::srgb_nonlinear);
+			Runtime()->set_color_space(a_scRgb ? ::reshade::api::color_space::extended_srgb_linear : ::reshade::api::color_space::srgb_nonlinear);
 			L->info("ReShade color space set to {}", a_scRgb ? "scRGB" : "sRGB");
 		}
 
@@ -289,9 +401,9 @@ namespace cs::features
 			}
 			boundDepth = a_depth;
 			const auto handle = ViewHandle(a_depth);
-			runtime->update_texture_bindings("DEPTH", handle, handle);
+			Runtime()->update_texture_bindings("DEPTH", handle, handle);
 			const bool ready = a_depth != nullptr;
-			runtime->enumerate_uniform_variables(nullptr, [ready](effect_runtime* a_runtime, ::reshade::api::effect_uniform_variable a_variable) {
+			Runtime()->enumerate_uniform_variables(nullptr, [ready](effect_runtime* a_runtime, ::reshade::api::effect_uniform_variable a_variable) {
 				char source[32];
 				if (a_runtime->get_annotation_string_from_uniform_variable(a_variable, "source", source) &&
 					std::strcmp(source, "bufready_depth") == 0) {
@@ -300,6 +412,49 @@ namespace cs::features
 			});
 		}
 	};
+
+	winrt::com_ptr<ID3D11Device> ReShadeRuntime::NativeDevice(ID3D11Device& a_device) noexcept
+	{
+		winrt::com_ptr<ID3D11Device> device;
+		device.copy_from(&a_device);
+		if (!IsInstalled()) {
+			return device;
+		}
+		// A resource reports the device beneath ReShade's proxy.
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = 1;
+		desc.Height = 1;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		winrt::com_ptr<ID3D11Texture2D> probe;
+		if (SUCCEEDED(a_device.CreateTexture2D(&desc, nullptr, probe.put()))) {
+			winrt::com_ptr<ID3D11Device> native;
+			probe->GetDevice(native.put());
+			if (native) {
+				return native;
+			}
+		}
+		return device;
+	}
+
+	void ReShadeRuntime::Arm() noexcept
+	{
+		if (IsInstalled()) {
+			(void)EnsureAddon();
+		}
+	}
+
+	void ReShadeRuntime::GuardWindow(HWND a_window) noexcept
+	{
+		if (IsInstalled() && EnsureAddon()) {
+			g_ownedWindow.store(a_window, std::memory_order_release);
+			CheckForDuplicateRuntimes();
+		}
+	}
 
 	ReShadeRuntime::ReShadeRuntime() noexcept = default;
 
@@ -312,7 +467,7 @@ namespace cs::features
 	}
 
 	bool ReShadeRuntime::Ensure(render::IDXGISwapChainProxyOwner& a_host, IDXGISwapChain4& a_inner,
-		ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer) noexcept
+		ID3D11Device& a_device, UINT a_width, UINT a_height, bool a_hdrContainer, Attach a_attach) noexcept
 	{
 		if (_attempted) {
 			return _impl != nullptr;
@@ -320,7 +475,7 @@ namespace cs::features
 		_attempted = true;
 		try {
 			_impl = std::make_unique<Impl>();
-			_impl->Create(a_host, a_inner, a_device, a_width, a_height, a_hdrContainer);
+			_impl->Create(a_host, a_inner, a_device, a_width, a_height, a_hdrContainer, a_attach);
 			L->info("ReShade effect runtime created at {}x{}{}", a_width, a_height, a_hdrContainer ? " (fp16 HDR container)" : "");
 		} catch (const std::exception& e) {
 			L->warn("ReShade effect runtime unavailable: {}", e.what());
@@ -343,23 +498,17 @@ namespace cs::features
 		_attempted = false;
 	}
 
-	void ReShadeRuntime::ReplaceInner(IDXGISwapChain4* a_inner) noexcept
-	{
-		if (_impl && _impl->proxy) {
-			_impl->proxy->ReplaceInner(a_inner);
-		}
-	}
-
 	bool ReShadeRuntime::EffectsEnabled() const noexcept
 	{
-		return _impl && _impl->runtime && _impl->runtime->get_effects_state();
+		const auto* runtime = _impl ? _impl->Runtime() : nullptr;
+		return runtime && runtime->get_effects_state();
 	}
 
 	template <class F>
 	void ReShadeRuntime::WithColorCopy(ID3D11DeviceContext& a_context, ID3D11Resource& a_color,
 		const ScRgbProxy* a_scRgb, const char* a_event, F&& a_body) noexcept
 	{
-		if (!_impl || !_impl->runtime) {
+		if (!_impl || !_impl->Runtime()) {
 			return;
 		}
 		auto& impl = *_impl;
@@ -391,16 +540,20 @@ namespace cs::features
 				return;
 			}
 			a_impl.BindDepth(a_depth);
-			a_impl.runtime->render_effects(
-				a_impl.runtime->get_command_queue()->get_immediate_command_list(),
+			auto* runtime = a_impl.Runtime();
+			runtime->render_effects(
+				runtime->get_command_queue()->get_immediate_command_list(),
 				ViewHandle(a_impl.rtv.get()), ViewHandle(a_impl.rtvSrgb.get()));
 		});
 	}
 
 	void ReShadeRuntime::Present(ID3D11DeviceContext& a_context, ID3D11Resource& a_color, const ScRgbProxy* a_scRgb) noexcept
 	{
+		if (!_impl || !_impl->attachment || !_impl->attachment->PresentsOverlay()) {
+			return;
+		}
 		WithColorCopy(a_context, a_color, a_scRgb, "Upscaling::ReShade/Present", [](Impl& a_impl) {
-			::reshade::update_and_present_effect_runtime(a_impl.runtime);
+			a_impl.attachment->Present(*a_impl.Runtime());
 		});
 	}
 }

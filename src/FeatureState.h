@@ -81,16 +81,6 @@ namespace cs
 			return runtimeState == FeatureRuntimeState::kActive || runtimeState == FeatureRuntimeState::kDegraded;
 		}
 
-		bool IsDegraded() const noexcept
-		{
-			return runtimeState == FeatureRuntimeState::kDegraded;
-		}
-
-		bool IsHealthy() const noexcept
-		{
-			return runtimeState == FeatureRuntimeState::kActive;
-		}
-
 		void ApplyActivationResult(const ActivationResult& a_result)
 		{
 			switch (a_result.GetOutcome()) {

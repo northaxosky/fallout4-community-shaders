@@ -13,17 +13,21 @@
 #include "FrameGeneration.h"
 #include "HDRDisplay.h"
 #include "Log.h"
+#include "NvapiReflexLatency.h"
 #include "PresentationProviders.h"
 #include "Render/Annotation.h"
-#include "Render/DX12SwapChain.h"
 #include "Render/Engine.h"
 #include "Render/EngineCallSite.h"
 #include "Render/FrameBoundary.h"
 #include "Render/FrameBuffer.h"
+#include "Render/InteropBridge.h"
+#include "Render/PresentationHost.h"
 #include "Render/RendererContext.h"
+#include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
 #include "RenderDoc.h"
 #include "Streamline.h"
+#include "StreamlineInterop.h"
 #include "SuperResolutionProviders.h"
 #include "Upscaling.h"
 
@@ -274,10 +278,12 @@ namespace cs::render
 		FrameGenerationCpuTimingCollector<> frameGenerationCpuTimings;
 		features::Streamline streamline;
 		features::StreamlineLatency streamlineLatency{ streamline };
-		// Declared before swapChain so it outlives every presentation swap chain.
+		// Declared before the host so it outlives every presenter.
+		features::NvapiReflexLatency nvapiReflex;
 		features::AntiLag2Latency antiLag2;
 		temporal::LatencyRouter latencyRouter{
 			{ temporal::LatencyBackend::kReflex, &streamlineLatency },
+			{ temporal::LatencyBackend::kReflex, &nvapiReflex },
 			{ temporal::LatencyBackend::kAntiLag2, &antiLag2 }
 		};
 		features::StreamlineSuperResolution dlssProvider{
@@ -305,7 +311,11 @@ namespace cs::render
 			features::StreamlinePresentation::Method::kFSR4
 		};
 		temporal::IFrameGenerationProvider* activePresentation = nullptr;
-		DX12SwapChain swapChain;
+		std::string frameGenerationFallback;
+		features::StreamlineInterop interop{ streamline };
+		// The host's presenter borrows the bridge, so the host is destroyed first.
+		InteropBridge bridge;
+		PresentationHost host;
 
 		temporal::ISuperResolutionProvider*
 		SuperResolutionProvider(temporal::SuperResolutionMethod a_method) noexcept
@@ -336,6 +346,37 @@ namespace cs::render
 			default:
 				return nullptr;
 			}
+		}
+
+		// The provider whose presenter carries the session, or null with a_reason.
+		temporal::IFrameGenerationProvider*
+		StartupFrameGeneration(const temporal::RequestedTopology& a_request, std::string& a_reason)
+		{
+			if (!a_request.StartsFrameGeneration()) {
+				return nullptr;
+			}
+			const auto method = a_request.frameGeneration;
+			const std::string name{ temporal::presentation::Name(method) };
+			auto* provider = FrameGenerationProvider(method);
+			if (!bridge.IsReady()) {
+				a_reason = "The interop bridge is unavailable, so " + name + " frame generation cannot run.";
+			} else if (!provider) {
+				a_reason = name + " frame generation has no provider.";
+			} else if (method == temporal::FrameGenerationMethod::kDLSSG &&
+					   !latencyHooksInstalled.load(std::memory_order_acquire)) {
+				a_reason = "DLSS frame generation needs the latency hooks, which failed to install.";
+			} else if (!provider->IsAvailable()) {
+				const auto capability = streamline.GetFidelityFXCapabilities().fsr4FrameGeneration;
+				if (method == temporal::FrameGenerationMethod::kFSR4 &&
+					capability.availability != temporal::CapabilityAvailability::kUnknown && !capability.IsAvailable()) {
+					a_reason = "FSR 4 frame generation is unavailable on this GPU: " + temporal::presentation::FidelityFXReason(capability.unavailableReason);
+				} else {
+					a_reason = name + " frame generation is unavailable; see the log.";
+				}
+			} else {
+				return provider;
+			}
+			return nullptr;
 		}
 
 		// Latency hooks can be absent; the engine frame then identifies the frame.
@@ -526,20 +567,17 @@ namespace cs::render
 		}
 		const auto revision =
 			_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel);
+		_impl->bridge.SuperResolutionPolicy().Retry();
+		_impl->host.RetryFrameGeneration();
 		std::scoped_lock lock(_impl->mutex);
 		_impl->requestedRenderSettings = upscaling->settings;
 		const auto superResolution =
 			static_cast<temporal::SuperResolutionMethod>(
 				upscaling->settings.upscaleMethod);
-		const auto frameGenerationMethod =
-			static_cast<temporal::FrameGenerationMethod>(
-				frameGeneration->settings.frameGenerationMethod);
 		_impl->topology.SubmitLive(
 			superResolution != temporal::SuperResolutionMethod::kNone,
 			superResolution,
 			upscaling->settings.qualityMode,
-			frameGenerationMethod != temporal::FrameGenerationMethod::kOff,
-			frameGenerationMethod,
 			revision,
 			ToCoreFrameGenerationConfiguration(
 				frameGeneration->settings));
@@ -586,14 +624,15 @@ namespace cs::render
 			return;
 		}
 
-		const auto targetFrameGenerationMethod =
-			pending->frameGenerationEnabled ? pending->frameGeneration : temporal::FrameGenerationMethod::kOff;
-		auto* targetPresentation =
-			_impl->FrameGenerationProvider(targetFrameGenerationMethod);
-		if (targetPresentation &&
-			pending->frameGenerationEnabled) {
+		// Frame generation is fixed at startup; only its configuration moves live.
+		auto* presentation = _impl->activePresentation;
+		const bool frameGenerationConfigurationChange =
+			pending->frameGenerationConfiguration !=
+			current.frameGenerationConfiguration;
+		if (presentation && pending->frameGenerationEnabled &&
+			frameGenerationConfigurationChange) {
 			const auto validation =
-				targetPresentation->ValidateConfiguration(
+				presentation->ValidateConfiguration(
 					pending->frameGenerationConfiguration);
 			if (validation.code ==
 				temporal::ProviderResultCode::kSkipped) {
@@ -615,34 +654,6 @@ namespace cs::render
 				return;
 			}
 		}
-		const bool presentationChange =
-			targetPresentation != _impl->activePresentation;
-		const bool frameGenerationConfigurationChange =
-			pending->frameGenerationConfiguration !=
-			current.frameGenerationConfiguration;
-		if (presentationChange) {
-			const auto preflight =
-				_impl->swapChain.CanReplacePresentationProvider(
-					targetPresentation);
-			if (preflight.code ==
-				temporal::ProviderResultCode::kSkipped) {
-				std::scoped_lock lock(_impl->mutex);
-				_impl->topology.DeferTransition(pending->revision);
-				return;
-			}
-			if (!preflight.Succeeded()) {
-				std::scoped_lock lock(_impl->mutex);
-				_impl->topology.RejectPendingTransition(
-					pending->revision);
-				_impl->failureDomain =
-					preflight.failureDomain ==
-							temporal::FailureDomain::kNone ?
-						temporal::FailureDomain::kFrameGeneration :
-						preflight.failureDomain;
-				_impl->failure = preflight.message.empty() ? "The requested frame-generation configuration was rejected." : preflight.message;
-				return;
-			}
-		}
 
 		const bool srResourcesChange =
 			pending->superResolution != current.superResolution ||
@@ -660,7 +671,7 @@ namespace cs::render
 			usesLiveD3D12SuperResolution(
 				pending->superResolution)) {
 			temporal::SuperResolutionInitContext init{};
-			init.device = _impl->swapChain.GetD3D12Device();
+			init.device = _impl->bridge.GetD3D12Device();
 			auto* provider =
 				_impl->SuperResolutionProvider(pending->superResolution);
 			auto initialized = provider ? provider->Initialize(init) : temporal::ProviderResult{ .code = temporal::ProviderResultCode::kUnavailable, .message = "The requested super-resolution provider is unavailable." };
@@ -716,104 +727,11 @@ namespace cs::render
 			}
 		}
 
-		temporal::ProviderResult presentationResult{
-			.code = temporal::ProviderResultCode::kSuccess
-		};
-		if (presentationChange) {
-			presentationResult =
-				_impl->swapChain.ReplacePresentationProvider(
-					targetPresentation);
-			if (presentationResult.code ==
-				temporal::ProviderResultCode::kSkipped) {
-				std::scoped_lock lock(_impl->mutex);
-				_impl->topology.DeferTransition(pending->revision);
-				return;
-			}
-			if (!presentationResult.Succeeded()) {
-				const std::string failure =
-					presentationResult.message.empty() ? "The requested frame-generation presentation chain "
-														 "could not be activated." :
-														 presentationResult.message;
-				if (_impl->swapChain.IsReady() &&
-					!_impl->swapChain.GetPresentationProvider()) {
-					bool recovered = false;
-					temporal::UpscalingSettings recoveredSettings;
-					{
-						std::scoped_lock lock(_impl->mutex);
-						recovered =
-							_impl->topology
-								.CommitPendingFrameGenerationFallback(
-									pending->revision, failure);
-						if (recovered) {
-							const bool streamlineSrInvalidated =
-								pending->superResolutionEnabled &&
-								(pending->superResolution ==
-										temporal::SuperResolutionMethod::kDLSS ||
-									pending->superResolution ==
-										temporal::SuperResolutionMethod::kFSR3 ||
-									pending->superResolution ==
-										temporal::SuperResolutionMethod::kFSR4) &&
-								!_impl->streamline.deviceRegistered;
-							if (streamlineSrInvalidated) {
-								_impl->topology
-									.FailSuperResolutionToNative(
-										pending->revision,
-										"Streamline became unavailable while "
-										"recovering plain presentation.");
-							}
-							_impl->activePresentation = nullptr;
-							_impl->effectiveRenderSettings =
-								_impl->requestedRenderSettings;
-							const auto& effective =
-								_impl->topology.Effective();
-							_impl->effectiveRenderSettings.upscaleMethod =
-								static_cast<std::uint32_t>(
-									effective.superResolution);
-							_impl->effectiveRenderSettings.qualityMode =
-								effective.qualityMode;
-							_impl->effectiveRenderSettings.enabled =
-								effective.superResolutionEnabled;
-							_impl->frameGenerationEnabled.store(
-								false, std::memory_order_release);
-							_impl->failureDomain =
-								temporal::FailureDomain::kFrameGeneration;
-							_impl->failure = failure;
-							_impl->resetEpochs.RequestFrameGeneration();
-							if (srResourcesChange) {
-								_impl->resetEpochs
-									.RequestSuperResolution();
-							}
-							recoveredSettings =
-								_impl->effectiveRenderSettings;
-						}
-					}
-					if (recovered) {
-						_impl->renderer.ApplyConfiguration(
-							recoveredSettings,
-							_impl->rendererEligible);
-						RecordFrameGenerationFailure();
-						L->error("{}", failure);
-					}
-					return;
-				}
-				PostFailure(
-					presentationResult.failureDomain ==
-							temporal::FailureDomain::kNone ?
-						temporal::FailureDomain::kPresentation :
-						presentationResult.failureDomain,
-					failure);
-				return;
-			}
-		}
-
 		bool committed = false;
 		{
 			std::scoped_lock lock(_impl->mutex);
-			_impl->activePresentation = targetPresentation;
 			committed =
-				_impl->topology.CommitPendingTransition(
-					pending->revision,
-					targetPresentation ? targetFrameGenerationMethod : temporal::FrameGenerationMethod::kOff);
+				_impl->topology.CommitPendingTransition(pending->revision);
 			if (committed) {
 				const auto& effective = _impl->topology.Effective();
 				_impl->effectiveRenderSettings =
@@ -832,8 +750,7 @@ namespace cs::render
 				if (srResourcesChange) {
 					_impl->resetEpochs.RequestSuperResolution();
 					_impl->resetEpochs.RequestFrameGeneration();
-				} else if (presentationChange ||
-						   frameGenerationConfigurationChange) {
+				} else if (frameGenerationConfigurationChange) {
 					_impl->resetEpochs.RequestFrameGeneration();
 				}
 			}
@@ -1054,13 +971,14 @@ namespace cs::render
 		const bool streamlineRequested =
 			request.upscalingEligible || request.frameGenerationEligible;
 		if (streamlineRequested) {
-			const bool loadDlssFrameGeneration =
-				request.frameGenerationEligible;
+			// sl.dlss_g needs sl.reflex, which only a frame-generation session loads.
+			const bool loadDlssFrameGeneration = request.StartsFrameGeneration();
 			_impl->streamline.LoadInterposer(
 				request.streamlineLogLevel, request.upscalingEligible,
 				request.upscalingEligible,
 				loadDlssFrameGeneration,
-				request.frameGenerationEligible);
+				request.frameGenerationEligible,
+				request.StartsFrameGeneration());
 		}
 	}
 
@@ -1088,11 +1006,17 @@ namespace cs::render
 				"creation request.");
 			return std::nullopt;
 		}
+		// The HDR container needs Windows HDR on at launch.
+		bool hdrOutput = false;
 		if (request.hdrDisplay) {
-			features::HDRDisplay::GetSingleton()->SeedFromDisplay(
-				a_context.swapChainDesc->OutputWindow);
+			auto* hdrDisplay = features::HDRDisplay::GetSingleton();
+			hdrDisplay->SeedFromDisplay(a_context.swapChainDesc->OutputWindow);
+			hdrOutput = hdrDisplay->IsWindowsHdrOn();
 		}
-		// The D3D12 proxy presents black in exclusive fullscreen.
+		if (!request.upscalingEligible && !request.frameGenerationEligible && !hdrOutput) {
+			return std::nullopt;
+		}
+		// The facade does not support exclusive fullscreen.
 		if (!a_context.swapChainDesc->Windowed) {
 			_impl->creationState.store(TemporalCreationState::kNative,
 				std::memory_order_release);
@@ -1123,7 +1047,7 @@ namespace cs::render
 			_impl->creationState.store(TemporalCreationState::kNative,
 				std::memory_order_release);
 			PostFailure(temporal::FailureDomain::kTransport,
-				std::format("Frame-generation proxy device creation failed "
+				std::format("Presentation device creation failed "
 							"({:#010x}); native creation remains safe.",
 					static_cast<std::uint32_t>(deviceResult)));
 			return std::nullopt;
@@ -1131,9 +1055,25 @@ namespace cs::render
 
 		HRESULT proxyResult = E_FAIL;
 		try {
-			proxyResult = _impl->swapChain.Initialize(
-				a_context.adapter, device, immediateContext, *a_context.swapChainDesc,
-				&_impl->streamline,
+			// A failed bridge leaves D3D11 presentation intact.
+			const bool needsBridge = request.upscalingEligible || request.frameGenerationEligible;
+			const HRESULT bridgeResult = !needsBridge ? S_OK : _impl->bridge.Initialize(a_context.adapter, device, immediateContext, _impl->interop, [this] {
+				if (_impl->host.GetPresentationProvider()) {
+					_impl->latencyRouter.QuarantinePresentation();
+				}
+			});
+			if (FAILED(bridgeResult)) {
+				PostFailure(temporal::FailureDomain::kTransport,
+					std::format("The interop bridge could not be created ({:#010x}); "
+								"super resolution is unavailable.",
+						static_cast<std::uint32_t>(bridgeResult)));
+			}
+			std::string refusal;
+			auto* presentation = _impl->StartupFrameGeneration(request, refusal);
+			_impl->frameGenerationFallback = refusal;
+			proxyResult = _impl->host.Initialize(
+				_impl->bridge, device, immediateContext, *a_context.swapChainDesc,
+				presentation,
 				TemporalPresentationCallbacks{
 					.clearCapture =
 						[] {
@@ -1156,7 +1096,7 @@ namespace cs::render
 							const auto realFrame = CurrentRealFrame();
 							temporal::FrameGenerationRequest result;
 							bool frozen = false;
-							const auto slot = _impl->swapChain.GetFrameSlot();
+							const auto slot = _impl->host.GetFrameSlot();
 							{
 								std::scoped_lock lock(_impl->mutex);
 								if (slot < _impl->frozenFrameConstants.size() &&
@@ -1181,9 +1121,7 @@ namespace cs::render
 																	  1000.0f :
 																  0.0f;
 							}
-							result.enabled =
-								frozen && result.camera.valid &&
-								upscaling->ShouldUseFrameGenerationThisFrame();
+							result.enabled = frozen && result.camera.valid;
 							if (!frozen) {
 								result.resetHistory =
 									TemporalPipeline::Get()
@@ -1216,37 +1154,41 @@ namespace cs::render
 						},
 					.unbindPresentation =
 						[this] { _impl->latencyRouter.UnbindPresentation(); },
-					.quarantinePresentation =
-						[this] { _impl->latencyRouter.QuarantinePresentation(); },
 					.gameFramePresented =
 						[] {
 							features::RenderDoc::GetSingleton()
 								->OnGameFramePresented();
 						},
 					.queryHdrOutput =
-						request.hdrDisplay ?
+						hdrOutput ?
 							std::function<hdr::OutputSettings()>{
-								[] { return features::HDRDisplay::GetSingleton()->GetOutputSettings(); } } :
+								[] {
+									auto* hdrDisplay = features::HDRDisplay::GetSingleton();
+									hdrDisplay->RefreshDisplay();
+									return hdrDisplay->GetOutputSettings();
+								} } :
 							std::function<hdr::OutputSettings()>{} });
-			_impl->activePresentation = nullptr;
+			_impl->activePresentation = _impl->host.GetPresentationProvider();
 		} catch (const std::exception& e) {
-			if (FAILED(_impl->swapChain.Rollback())) {
+			if (FAILED(_impl->host.Rollback())) {
 				PostFailure(
 					temporal::FailureDomain::kTransport,
-					"Frame-generation proxy rollback failed after initialization error.");
+					"Presentation host rollback failed after initialization error.");
 			}
 			PostFailure(temporal::FailureDomain::kTransport, e.what());
 		} catch (...) {
-			if (FAILED(_impl->swapChain.Rollback())) {
+			if (FAILED(_impl->host.Rollback())) {
 				PostFailure(
 					temporal::FailureDomain::kTransport,
-					"Frame-generation proxy rollback failed after initialization error.");
+					"Presentation host rollback failed after initialization error.");
 			}
 			PostFailure(
 				temporal::FailureDomain::kTransport,
-				"Frame-generation proxy construction raised a non-standard exception.");
+				"Presentation host construction raised a non-standard exception.");
 		}
-		if (FAILED(proxyResult) || !_impl->swapChain.GetProxy()) {
+		if (FAILED(proxyResult) || !_impl->host.GetProxy()) {
+			// Native presentation: no bridge, no external super resolution.
+			(void)_impl->bridge.Rollback();
 			immediateContext->Release();
 			device->Release();
 			_impl->creationState.store(TemporalCreationState::kNative,
@@ -1255,31 +1197,41 @@ namespace cs::render
 				proxyResult = E_FAIL;
 			}
 			L->error(
-				"Plain D3D12 proxy construction failed ({:#010x}); native creation remains safe",
+				"Presentation host construction failed ({:#010x}); native creation remains safe",
 				static_cast<std::uint32_t>(proxyResult));
 			return std::nullopt;
 		}
 
-		if (_impl->swapChain.IsHdrDegraded()) {
+		if (const auto& fallback = _impl->host.GetPresenterFallback()) {
+			_impl->frameGenerationFallback = fallback->message.empty() ? "The frame-generation presenter could not be created." : fallback->message;
+		}
+		if (!_impl->frameGenerationFallback.empty()) {
+			_impl->frameGenerationFallback += " Presenting through D3D11 without frame generation.";
+			L->warn("{}", _impl->frameGenerationFallback);
+			std::scoped_lock lock(_impl->mutex);
+			_impl->failureDomain = temporal::FailureDomain::kFrameGeneration;
+			_impl->failure = _impl->frameGenerationFallback;
+		}
+		if (_impl->host.IsHdrDegraded()) {
 			FeatureManager::Get().ReportDegraded(
 				*features::HDRDisplay::GetSingleton(),
 				"HDR output shader failed to compile; presenting SDR");
 		}
 		*a_context.device = device;
 		*a_context.immediateContext = immediateContext;
-		*a_context.swapChain = _impl->swapChain.AcquireProxy();
+		*a_context.swapChain = _impl->host.AcquireProxy();
 		if (a_context.featureLevel) {
 			*a_context.featureLevel = featureLevel;
 		}
 		_impl->creationState.store(TemporalCreationState::kProxy,
 			std::memory_order_release);
-		L->info("Temporal pipeline published the plain D3D12 D3D11-facing proxy at {:.2f} Hz",
-			refreshRate);
+		L->info("Temporal pipeline published the D3D11-facing facade on the {} presenter at {:.2f} Hz",
+			_impl->activePresentation ? "D3D12 frame-generation" : "D3D11 flip", refreshRate);
 		return S_OK;
 	}
 
 	void TemporalPipeline::OnPostCreateDeviceAndSwapChain(
-		IDXGIAdapter* a_adapter, ID3D11Device** a_device,
+		IDXGIAdapter*, ID3D11Device** a_device,
 		IDXGISwapChain** a_swapChain)
 	{
 		temporal::RequestedTopology request;
@@ -1300,9 +1252,9 @@ namespace cs::render
 		}
 
 		const bool temporalProxyPath =
-			a_swapChain && _impl->swapChain.Owns(*a_swapChain);
+			a_swapChain && _impl->host.Owns(*a_swapChain);
 		if (temporalProxyPath && a_device) {
-			_impl->swapChain.SetOutwardD3D11Device(*a_device);
+			_impl->host.SetOutwardD3D11Device(*a_device);
 		}
 		auto srAdmission = temporal::InitializeSelectedSuperResolution(
 			request,
@@ -1313,7 +1265,7 @@ namespace cs::render
 				if (a_method == temporal::SuperResolutionMethod::kFSR3 ||
 					a_method == temporal::SuperResolutionMethod::kFSR4 ||
 					a_method == temporal::SuperResolutionMethod::kDLSS) {
-					if (!_impl->swapChain.IsBridgeReady()) {
+					if (!_impl->bridge.IsReady()) {
 						return {
 							.code =
 								temporal::ProviderResultCode::kUnavailable,
@@ -1322,7 +1274,7 @@ namespace cs::render
 								"transport after presentation initialization."
 						};
 					}
-					init.device = _impl->swapChain.GetD3D12Device();
+					init.device = _impl->bridge.GetD3D12Device();
 					return _impl->SuperResolutionProvider(a_method)
 				        ->Initialize(init);
 				}
@@ -1355,7 +1307,6 @@ namespace cs::render
 		temporal::SessionTopology session;
 		session.valid = true;
 		session.proxyInstalled = temporalProxyPath;
-		session.bridgePresent = _impl->swapChain.IsBridgeReady();
 		session.latencyHooksInstalled =
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire);
 		session.admittedSr = srAdmission.methods;
@@ -1363,35 +1314,14 @@ namespace cs::render
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kOff)] = temporalProxyPath;
 		session.hdrDisplay = request.hdrDisplay;
-		const bool fgDisplayEligible = temporalProxyPath;
-		session.admittedFg[static_cast<std::size_t>(
-			temporal::FrameGenerationMethod::kFSR3)] =
-			request.frameGenerationEligible && fgDisplayEligible &&
-			_impl->FrameGenerationProvider(
-					 temporal::FrameGenerationMethod::kFSR3)
-				->IsAvailable();
-		session.admittedFg[static_cast<std::size_t>(
-			temporal::FrameGenerationMethod::kDLSSG)] =
-			request.frameGenerationEligible && fgDisplayEligible &&
-			session.latencyHooksInstalled &&
-			_impl->streamlinePresentation.IsAvailable();
-		session.admittedFg[static_cast<std::size_t>(
-			temporal::FrameGenerationMethod::kFSR4)] =
-			request.frameGenerationEligible && fgDisplayEligible &&
-			_impl->streamlineFsr4Presentation.IsAvailable();
-		if (a_adapter) {
-			DXGI_ADAPTER_DESC desc{};
-			if (SUCCEEDED(a_adapter->GetDesc(&desc))) {
-				session.adapterLuid =
-					(static_cast<std::uint64_t>(
-						 static_cast<std::uint32_t>(desc.AdapterLuid.HighPart))
-						<< 32) |
-					desc.AdapterLuid.LowPart;
-			}
+		// The presenter was chosen at creation; only its method is admitted.
+		if (temporalProxyPath && _impl->activePresentation) {
+			session.admittedFg[static_cast<std::size_t>(request.frameGeneration)] = true;
+			session.activeFg = request.frameGeneration;
 		}
+		session.frameGenerationFallback = _impl->frameGenerationFallback;
 
 		bool admitted = false;
-		bool frameGenerationAdmitted = false;
 		temporal::UpscalingSettings admittedSettings;
 		{
 			std::scoped_lock lock(_impl->mutex);
@@ -1412,8 +1342,6 @@ namespace cs::render
 						!_impl->frameGenerationQuarantined,
 					std::memory_order_release);
 				admittedSettings = _impl->effectiveRenderSettings;
-				frameGenerationAdmitted =
-					effective.frameGeneration != temporal::FrameGenerationMethod::kOff;
 			}
 		}
 		// A wrapping plugin retried creation; the first device keeps the session.
@@ -1429,10 +1357,6 @@ namespace cs::render
 		if (admitted) {
 			_impl->renderer.ApplyConfiguration(
 				admittedSettings, _impl->rendererEligible);
-			// Boot presents plain; saved FG starts as a live transition.
-			if (request.frameGenerationEnabled && frameGenerationAdmitted) {
-				SubmitLiveConfiguration();
-			}
 		}
 	}
 
@@ -1443,7 +1367,6 @@ namespace cs::render
 		bool active = false;
 		{
 			std::scoped_lock lock(_impl->mutex);
-			++_impl->display.deviceGeneration;
 			const auto& request = _impl->topology.Request();
 			active = request &&
 			         (request->upscalingEligible || request->frameGenerationEligible);
@@ -1461,19 +1384,36 @@ namespace cs::render
 	void TemporalPipeline::PostFailure(temporal::FailureDomain a_domain,
 		std::string a_message) noexcept
 	{
+		Report(a_domain, std::move(a_message), false);
+	}
+
+	void TemporalPipeline::Quarantine(temporal::FailureDomain a_domain,
+		std::string a_message) noexcept
+	{
+		Report(a_domain, std::move(a_message), true);
+	}
+
+	void TemporalPipeline::Report(temporal::FailureDomain a_domain,
+		std::string a_message, bool a_quarantine) noexcept
+	{
 		try {
 			std::array<TemporalTraceEntry, Impl::kTraceCapacity> trace;
 			std::size_t traceCount = 0;
 			std::uint64_t traceSequence = 0;
 			{
 				std::scoped_lock lock(_impl->mutex);
+				// A skipped frame repeats its message every frame.
+				if (!a_quarantine && _impl->failureDomain == a_domain &&
+					_impl->failure == a_message) {
+					return;
+				}
 				_impl->failureDomain = a_domain;
 				_impl->failure = a_message;
 				const auto& effective = _impl->topology.Effective();
 				auto impact = temporal::ClassifyFailure(
 					a_domain, effective.superResolution, effective.frameGeneration);
 				const auto& session = _impl->topology.Session();
-				const bool runtimeActive = session && session->valid;
+				const bool runtimeActive = a_quarantine && session && session->valid;
 				if (runtimeActive) {
 					_impl->topology.Quarantine(impact,
 						_impl->configurationRevision.fetch_add(
@@ -1518,12 +1458,13 @@ namespace cs::render
 	void TemporalPipeline::FailSuperResolutionToNative(
 		std::string a_reason) noexcept
 	{
+		PostFailure(temporal::FailureDomain::kSuperResolution, a_reason);
 		try {
 			const auto revision =
 				_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel) +
 				1;
 			std::scoped_lock lock(_impl->mutex);
-			_impl->topology.FailSuperResolutionToNative(revision, std::move(a_reason));
+			_impl->topology.FailSuperResolutionToNative(revision);
 			_impl->effectiveRenderSettings.upscaleMethod =
 				static_cast<std::uint32_t>(
 					features::Upscaling::UpscaleMethod::kTAA);
@@ -1534,26 +1475,27 @@ namespace cs::render
 		}
 	}
 
-	void TemporalPipeline::AdvanceEngineResourceGeneration() noexcept
-	{
-		std::scoped_lock lock(_impl->mutex);
-		++_impl->display.engineResourceGeneration;
-	}
-
-	void TemporalPipeline::AdvanceDisplayGeneration(
+	void TemporalPipeline::OnDisplayResized(
 		std::uint32_t a_width, std::uint32_t a_height) noexcept
 	{
 		std::scoped_lock lock(_impl->mutex);
 		_impl->display.output = { a_width, a_height };
-		++_impl->display.displayGeneration;
 		_impl->resetEpochs.RequestSuperResolution();
 		_impl->resetEpochs.RequestFrameGeneration();
+		_impl->topology.RetrySuperResolution(
+			_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel) + 1);
+		_impl->bridge.SuperResolutionPolicy().Retry();
 	}
 
 	void TemporalPipeline::RequestSuperResolutionReset() noexcept
 	{
 		std::scoped_lock lock(_impl->mutex);
 		_impl->resetEpochs.RequestSuperResolution();
+	}
+
+	temporal::FailurePolicy& TemporalPipeline::SuperResolutionPolicy() noexcept
+	{
+		return _impl->bridge.SuperResolutionPolicy();
 	}
 
 	bool TemporalPipeline::ClaimWorldFrame(std::uint64_t a_engineFrame) noexcept
@@ -1587,7 +1529,7 @@ namespace cs::render
 	{
 		std::scoped_lock lock(_impl->mutex);
 		const bool frameGenerationConsumes =
-			_impl->renderer.ShouldUseFrameGenerationThisFrame();
+			_impl->renderer.GeneratesThisFrame();
 		const auto& effective = _impl->topology.Effective();
 		return _impl->resetEpochs.SuperResolutionPending() ||
 		       (frameGenerationConsumes &&
@@ -1854,35 +1796,34 @@ namespace cs::render
 		       TemporalCreationState::kProxy;
 	}
 
+	bool TemporalPipeline::IsFrameGenerationPresenterActive() const noexcept
+	{
+		return IsFrameGenerationProxyActive() && _impl->host.GetPresentationProvider();
+	}
+
 	bool TemporalPipeline::IsHdrContainerActive() const noexcept
 	{
-		return IsFrameGenerationProxyActive() && _impl->swapChain.IsHdrContainer();
+		return IsFrameGenerationProxyActive() && _impl->host.IsHdrContainer();
 	}
 
 	hdr::SceneTarget TemporalPipeline::GetHdrSceneTarget() const noexcept
 	{
-		return IsHdrContainerActive() ? _impl->swapChain.GetHdrSceneTarget() : hdr::SceneTarget{};
+		return IsHdrContainerActive() ? _impl->host.GetHdrSceneTarget() : hdr::SceneTarget{};
 	}
 
 	bool TemporalPipeline::ComposeToTarget(ID3D11ShaderResourceView& a_scene, ID3D11ShaderResourceView* a_interface,
 		ID3D11UnorderedAccessView& a_output, UINT a_width, UINT a_height, const hdr::OutputSettings& a_settings) noexcept
 	{
 		return IsHdrContainerActive() &&
-		       _impl->swapChain.ComposeToTarget(a_scene, a_interface, a_output, a_width, a_height, a_settings);
+		       _impl->host.ComposeToTarget(a_scene, a_interface, a_output, a_width, a_height, a_settings);
 	}
 
-	bool TemporalPipeline::IsFrameGenerationEnabledForFrame(
-		bool a_inExcludedMenu) const noexcept
+	bool TemporalPipeline::CanGenerateFrame(const FrameState& a_frame) const noexcept
 	{
-		return IsFrameGenerationProxyActive() &&
+		const bool excludedMenu = a_frame.paused || a_frame.mainOrLoading;
+		return IsFrameGenerationPresenterActive() && _impl->host.IsFrameGenerationReady() &&
 		       _impl->frameGenerationEnabled.load(std::memory_order_acquire) &&
-		       (!a_inExcludedMenu ||
-				   _impl->allowFrameGenerationInMenus.load(std::memory_order_acquire));
-	}
-
-	bool TemporalPipeline::AllowFrameGenerationInMenus() const noexcept
-	{
-		return _impl->allowFrameGenerationInMenus.load(std::memory_order_acquire);
+		       (!excludedMenu || _impl->allowFrameGenerationInMenus.load(std::memory_order_acquire));
 	}
 
 	FrameGenerationDiagnostics
@@ -1913,8 +1854,8 @@ namespace cs::render
 			const bool effective =
 				configuration.frameGenerationEnabled &&
 				_impl->frameGenerationEnabled.load(std::memory_order_acquire);
-			ready = _impl->swapChain.IsFrameGenerationReady();
-			retirementDiagnostics = _impl->swapChain.GetInputRetirementDiagnostics();
+			ready = _impl->host.IsFrameGenerationReady();
+			retirementDiagnostics = _impl->host.GetInputRetirementDiagnostics();
 			const auto& frame = _impl->frames[_impl->currentFrameSlot];
 			active = temporal::IsFrameGenerationActive(
 				configured, effective, ready, _impl->latency.Frame(),
@@ -1974,24 +1915,24 @@ namespace cs::render
 									   .uav = a_texture->uav11.get() } :
 			                   FrameGenerationCaptureResources::Texture{};
 		};
-		return { .ready = _impl->swapChain.IsFrameGenerationReady(),
-			.motion = captureTexture(_impl->swapChain.GetMotionTexture()),
-			.depth = captureTexture(_impl->swapChain.GetDepthTexture()),
-			.hudlessColor = captureTexture(_impl->swapChain.GetHudlessTexture()),
-			.hdrContainer = _impl->swapChain.IsHdrContainer(),
-			.width = _impl->swapChain.GetWidth(),
-			.height = _impl->swapChain.GetHeight(),
-			.frameSlot = _impl->swapChain.GetFrameSlot() };
+		return { .ready = _impl->host.IsFrameGenerationReady(),
+			.motion = captureTexture(_impl->host.GetMotionTexture()),
+			.depth = captureTexture(_impl->host.GetDepthTexture()),
+			.hudlessColor = captureTexture(_impl->host.GetHudlessTexture()),
+			.hdrContainer = _impl->host.IsHdrContainer(),
+			.width = _impl->host.GetWidth(),
+			.height = _impl->host.GetHeight(),
+			.frameSlot = _impl->host.GetFrameSlot() };
 	}
 
 	bool TemporalPipeline::AcquireFrameGenerationInputWrite() noexcept
 	{
-		return _impl->swapChain.AcquireFrameGenerationInputWrite();
+		return _impl->host.AcquireFrameGenerationInputWrite();
 	}
 
 	bool TemporalPipeline::ReShadeEffectsEnabled() noexcept
 	{
-		return _impl->swapChain.ReShadeEffectsEnabled();
+		return _impl->host.ReShadeEffectsEnabled();
 	}
 
 	void TemporalPipeline::RenderReShadeEffects(ID3D11DeviceContext& a_context,
@@ -1999,27 +1940,24 @@ namespace cs::render
 	{
 		// At this seam the scene's white is paper white; SDR is not scRGB.
 		const auto* hdrDisplay = features::HDRDisplay::GetSingleton();
-		_impl->swapChain.RenderReShadeEffects(a_context, a_color, a_depth,
+		_impl->host.RenderReShadeEffects(a_context, a_color, a_depth,
 			hdrDisplay->IsHdrActive() ? hdrDisplay->GetOutputSettings().paperWhite : 0.0f);
 	}
 
-	void TemporalPipeline::SetFrameGenerationInputsReady(bool a_ready) noexcept
+	void TemporalPipeline::AbandonFrameGenerationFrames() noexcept
 	{
-		if (!a_ready) {
-			std::scoped_lock lock(_impl->mutex);
-			for (auto& frame : _impl->frames) {
-				frame.Abandon();
-			}
-			for (auto& frozen : _impl->frozenFrameConstants) {
-				frozen.reset();
-			}
+		std::scoped_lock lock(_impl->mutex);
+		for (auto& frame : _impl->frames) {
+			frame.Abandon();
 		}
-		_impl->swapChain.SetFrameGenerationInputsReady(a_ready);
+		for (auto& frozen : _impl->frozenFrameConstants) {
+			frozen.reset();
+		}
 	}
 
 	void TemporalPipeline::FailFrameGenerationFrame(const char* a_reason) noexcept
 	{
-		_impl->swapChain.DisableFrameGeneration(a_reason);
+		_impl->host.FailFrame(a_reason);
 	}
 
 	void TemporalPipeline::ResetFrameGenerationCaptureDiagnostics() noexcept
@@ -2066,7 +2004,7 @@ namespace cs::render
 			return { .code = temporal::ProviderResultCode::kUnavailable,
 				.message = "No external super-resolution provider is active." };
 		}
-		return _impl->swapChain.EvaluateD3D12SuperResolution(
+		return _impl->bridge.EvaluateD3D12SuperResolution(
 			*provider, a_request);
 	}
 
@@ -2119,8 +2057,8 @@ namespace cs::render
 		const D3D11_TEXTURE2D_DESC& a_desc,
 		std::string_view a_name)
 	{
-		if (_impl->swapChain.IsBridgeReady()) {
-			return _impl->swapChain.CreateSharedTexture(a_desc, a_name);
+		if (_impl->bridge.IsReady()) {
+			return _impl->bridge.CreateSharedTexture(a_desc, a_name);
 		}
 		return std::make_unique<cs::buffer::Texture2D>(a_desc);
 	}
@@ -2143,7 +2081,7 @@ namespace cs::render
 					};
 				}
 			}
-			const HRESULT drainResult = _impl->swapChain.Drain();
+			const HRESULT drainResult = _impl->bridge.Drain();
 			if (FAILED(drainResult)) {
 				return {
 					.code = temporal::ProviderResultCode::kFailure,
@@ -2171,24 +2109,24 @@ namespace cs::render
 		const SharedD3D11D3D12Texture* resource = nullptr;
 		switch (a_resource) {
 		case FrameGenerationDebugResource::kHudless:
-			resource = _impl->swapChain.GetHudlessTexture();
+			resource = _impl->host.GetHudlessTexture();
 			break;
 		case FrameGenerationDebugResource::kFinal:
-			resource = _impl->swapChain.GetProxyTexture();
+			resource = _impl->host.GetProxyTexture();
 			break;
 		case FrameGenerationDebugResource::kDepth:
-			resource = _impl->swapChain.GetDepthTexture();
+			resource = _impl->host.GetDepthTexture();
 			break;
 		case FrameGenerationDebugResource::kMotion:
-			resource = _impl->swapChain.GetMotionTexture();
+			resource = _impl->host.GetMotionTexture();
 			break;
 		case FrameGenerationDebugResource::kOff:
 			break;
 		}
 		return resource && resource->srv11 ? FrameGenerationDebugTexture{ .srv = resource->srv11.get(),
-			.width = _impl->swapChain.GetWidth(),
+			.width = _impl->host.GetWidth(),
 			.height =
-				_impl->swapChain.GetHeight() } :
+				_impl->host.GetHeight() } :
 		                                     FrameGenerationDebugTexture{};
 	}
 

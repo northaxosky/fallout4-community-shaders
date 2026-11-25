@@ -1,5 +1,6 @@
 #include "ScreenSpaceGI.h"
 #include "Render/SharedDataLayout.h"
+#include "Render/SubstrateSlots.h"
 
 #include <DearModdingUI/Client.h>
 #include <DirectXTex.h>
@@ -18,11 +19,13 @@
 #include "Render/CanonicalDepth.h"
 #include "Render/ComputePasses.h"
 #include "Render/FeatureShaderBindings.h"
+#include "Render/FrameState.h"
+#include "Render/PrepassVertexAO.h"
+#include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
-#include "Settings/SettingsPersistence.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 
@@ -44,24 +47,25 @@ namespace cs::features
 
 	bool ScreenSpaceGI::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		auto candidate = _settings;
-		if (!settings::Parse(ssgi_settings::kSchema, a_config, candidate, a_error))
+		if (!_live.Configure(a_config, a_error))
 			return false;
-		_settings = candidate;
 		_recompile = true;
-		_liveSettings = settings::BindLiveSettings(ssgi_settings::kSchema, _settings,
-			[this] { _recompile = true; QueueReset("live_settings"); });
 		return true;
 	}
 
-	bool ScreenSpaceGI::SaveSettings()
+	void ScreenSpaceGI::OnSettingsChanged(const Settings& a_previous)
 	{
-		return settings::SaveDelta(ssgi_settings::kSchema, GetConfigKey(), _settings, *L);
+		// Only these fields change the shaders or history.
+		if (a_previous.enableGI == _settings.enableGI && a_previous.enableExperimentalSpecularGI == _settings.enableExperimentalSpecularGI &&
+			a_previous.resolutionMode == _settings.resolutionMode && a_previous.enableTemporalDenoiser == _settings.enableTemporalDenoiser)
+			return;
+		_recompile = true;
+		QueueReset("live_settings");
 	}
 
 	void ScreenSpaceGI::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, cs::engine::AttachPrepassVertexAO)) {
 			FailLoad("SSGI shader contribution registration failed.");
 			return;
 		}
@@ -212,6 +216,7 @@ namespace cs::features
 					a_pair[i] = CreateComputeTexture(width, height, a_format, std::format("{}[{}]", a_name, i));
 			};
 			pair(resources.ao, DXGI_FORMAT_R16_UNORM, "SSGI/AO");
+			resources.aoOutput = CreateComputeTexture(width, height, DXGI_FORMAT_R16_UNORM, "SSGI/AOOutput");
 			pair(resources.accumulation, DXGI_FORMAT_R8_UNORM, "SSGI/Accumulation");
 			pair(resources.luma, DXGI_FORMAT_R16G16B16A16_FLOAT, "SSGI/Luma");
 			pair(resources.chroma, DXGI_FORMAT_R16G16_FLOAT, "SSGI/Chroma");
@@ -228,6 +233,7 @@ namespace cs::features
 				for (auto& texture : *textures)
 					context->ClearUnorderedAccessViewFloat(texture->uav.get(), clear);
 			context->ClearUnorderedAccessViewFloat(_textures.previousGeometry->uav.get(), clear);
+			context->ClearUnorderedAccessViewFloat(_textures.aoOutput->uav.get(), clear);
 			_resourcesReady = true;
 			return true;
 		} catch (const std::exception& e) {
@@ -290,8 +296,8 @@ namespace cs::features
 		_cameraReady = false;
 		_tiledAvailable = false;
 		_motionAvailable = false;
-		if (cs::render::IsHistoryResetFrame())
-			QueueReset("loading_screen_closed");
+		if (const auto resets = cs::render::GetFrameState().resets)
+			QueueReset(cs::render::ResetLabel(resets));
 		if (!IsEnabled())
 			return;
 		if (_recompile && !CompileShaders()) {
@@ -301,10 +307,9 @@ namespace cs::features
 		if (!_prepare || !_noise || !_constants || !EnsureResources() ||
 			std::ranges::any_of(_shaders, [](const auto& a_shader) { return !a_shader; }))
 			return;
-		const auto camera = cs::engine::GetWorldCameraRecord();
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
 		_cameraReady = camera.has_value();
 		const bool tiled = RE::DrawWorld::QTiledLighting();
-		auto* manager = cs::engine::GetRenderTargetManager();
 		auto* depth = cs::render::GetCanonicalSceneDepthSRV();
 		auto* normals = cs::engine::GetRenderTargetSRV(RT::kGBufferNormal);
 		// FO4: GBufferAmbient carries glossiness, specular, backlighting and SSS.
@@ -316,7 +321,7 @@ namespace cs::features
 		auto* motion = cs::engine::GetRenderTargetSRV(RT::kGBufferMotionVectors);
 		_motionAvailable = motion != nullptr;
 		_tiledAvailable = diffuseB != nullptr;
-		if (!camera || !manager || !depth || !normals || !motion ||
+		if (!camera || !depth || !normals || !motion ||
 			(_settings.enableExperimentalSpecularGI && !material) ||
 			(_settings.enableGI && (!albedo || !emissive || !diffuse || (tiled && !diffuseB))) ||
 			!cs::render::IsSharedDataReady()) {
@@ -332,8 +337,9 @@ namespace cs::features
 		_previousOrigin[0] = previous.x;
 		_previousOrigin[1] = previous.y;
 		_previousOrigin[2] = previous.z;
-		const UINT width = static_cast<UINT>(std::floor(_width * manager->GetDynamicWidthRatio()));
-		const UINT height = static_cast<UINT>(std::floor(_height * manager->GetDynamicHeightRatio()));
+		const auto render = cs::render::GetRenderResolution().render;
+		const UINT width = render.width;
+		const UINT height = render.height;
 		const UINT internalWidth = width >> _settings.resolutionMode;
 		const UINT internalHeight = height >> _settings.resolutionMode;
 		if (!internalWidth || !internalHeight)
@@ -362,7 +368,7 @@ namespace cs::features
 			UpdateConsumer(true, tiled);
 			ID3D11SamplerState* samplers[]{ cs::render::GetPointClampSampler(), cs::render::GetLinearClampSampler() };
 			context->CSSetSamplers(0, 2, samplers);
-			ComputePasses pass(context, kConsumerSlot, _consumer->CB());
+			ComputePasses pass(context, cs::render::kSsgiConsumerSlot.first, _consumer->CB());
 			cs::render::annotation::ScopedEvent generation("ScreenSpaceGI::Generate", false);
 			auto& t = _textures;
 			const auto specularSRV = [&](UINT a_index) { return t.specular[a_index] ? t.specular[a_index]->srv.get() : nullptr; };
@@ -379,14 +385,16 @@ namespace cs::features
 				{ t.radianceTemp->uav.get(), t.accumulation[!_lastAccum]->uav.get(), t.ao[!ao]->uav.get(),
 					t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
 				internalWidth, internalHeight, 8, "ScreenSpaceGI::RadianceDisocc");
-			prefilter(2, t.radianceTemp->srv.get(), t.radiance, internalWidth, internalHeight, "ScreenSpaceGI::PrefilterRadiance");
+			// gi.cs reads the radiance mips only under GI.
+			if (_settings.enableGI)
+				prefilter(2, t.radianceTemp->srv.get(), t.radiance, internalWidth, internalHeight, "ScreenSpaceGI::PrefilterRadiance");
 			ao = !ao;
 			gi = !gi;
 			_lastAccum = !_lastAccum;
 			prefilter(3, t.normalGloss->srv.get(), t.normals, internalWidth, internalHeight, "ScreenSpaceGI::PrefilterNormals");
 			pass.Run(_shaders[4].get(), { t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.radiance.texture->srv.get(), _noise.get(), t.accumulation[_lastAccum]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao), t.normals.texture->srv.get(), t.ao[ao]->srv.get() },
 				{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(),
-					specularUAV(!ao), t.previousGeometry->uav.get() },
+					specularUAV(!ao), t.previousGeometry->uav.get(), t.aoOutput->uav.get() },
 				internalWidth, internalHeight, 8, "ScreenSpaceGI::GI");
 			ao = !ao;
 			gi = !gi;
@@ -402,7 +410,7 @@ namespace cs::features
 			}
 			if (_settings.resolutionMode != 0) {
 				pass.Run(_shaders[6].get(), { t.depth.texture->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao) },
-					{ t.ao[!ao]->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
+					{ t.aoOutput->uav.get(), t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
 					width, height, 8, "ScreenSpaceGI::Upsample");
 				ao = !ao;
 				gi = !gi;
@@ -445,20 +453,20 @@ namespace cs::features
 		const bool ready = IsEnabled() && _produced && state && _hasFrame && _lastFrame == state->frameCount;
 		UpdateConsumer(ready, _tiled);
 		auto* cb = _consumer->CB();
-		cs::engine::BindFrameConstantBuffers(a_context, cs::engine::ShaderStage::kPixel, kConsumerSlot, 1, &cb);
-		ID3D11ShaderResourceView* views[kCompositionCount]{};
+		cs::engine::BindFrameConstantBuffers(a_context, cs::engine::ShaderStage::kPixel, cs::render::kSsgiConsumerSlot.first, 1, &cb);
+		ID3D11ShaderResourceView* views[cs::render::kSsgiCompositionSlot.count]{};
 		if (ready) {
 			auto& t = _textures;
 			const bool hq = _settings.enableExperimentalSpecularGI;
-			views[0] = t.ao[_outputAO]->srv.get();
+			views[0] = t.aoOutput->srv.get();
 			// Upstream Deferred.cpp:362-364 binds null diffuse GI in HQ mode.
 			views[1] = hq ? nullptr : t.luma[_outputGI]->srv.get();
 			views[2] = hq ? nullptr : t.chroma[_outputGI]->srv.get();
 			views[3] = t.normalGloss->srv.get();
 		}
-		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kCompositionSlot, kCompositionCount, views);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, cs::render::kSsgiCompositionSlot.first, cs::render::kSsgiCompositionSlot.count, views);
 		auto* specular = ready && _textures.specular[_outputAO] ? _textures.specular[_outputAO]->srv.get() : nullptr;
-		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, kSpecularSlot, 1, &specular);
+		cs::engine::BindFrameShaderResources(a_context, cs::engine::ShaderStage::kPixel, cs::render::kSsgiSpecularSlot.first, 1, &specular);
 		++_binds;
 	}
 
@@ -474,7 +482,7 @@ namespace cs::features
 	{
 		FeatureDebugTexture result{ .unavailableText = "Buffer not allocated." };
 		if (_preview && _resourcesReady) {
-			result.texture = _textures.ao[_outputAO]->srv.get();
+			result.texture = _textures.aoOutput->srv.get();
 			result.width = _width;
 			result.height = _height;
 		}
@@ -490,29 +498,25 @@ namespace cs::features
 	{
 		static bool showAdvanced = false;
 		settings::SettingsEdit edit{ *this };
-		const auto field = edit.Bind(ssgi_settings::kSchema, _settings);
-		const auto compile = [&](bool a_changed) {
-			if (a_changed)
-				_recompile = true;
-		};
+		const auto field = edit.Bind(_live);
 		const auto preset = [&](int a_slices, int a_steps, int a_resolution, bool a_gi) {
-			_settings.numSlices = a_slices;
-			_settings.numSteps = a_steps;
+			auto& draft = field.Values();
+			draft.numSlices = a_slices;
+			draft.numSteps = a_steps;
 			if (a_resolution >= 0)
-				_settings.resolutionMode = a_resolution;
-			_settings.enableBlur = true;
-			_settings.enableGI = a_gi;
-			_recompile = true;
+				draft.resolutionMode = a_resolution;
+			draft.enableBlur = true;
+			draft.enableGI = a_gi;
 			edit.Apply({ true, true });
 		};
 		if (const ui::Section section{ "ssgi-toggles", "Toggles" }; section) {
 			ui::EditSetting({ "ssgi-show-advanced", { .label = "Show Advanced Options" } }, showAdvanced, false);
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
-			compile(field(&Settings::enableGI, { .label = "Indirect Lighting (IL)" }));
+			field(&Settings::enableGI, { .label = "Indirect Lighting (IL)" });
 			dmui::ui::EndDisabled();
 			field(&Settings::enableVanillaSSAO, { .label = "Vanilla SSAO" });
 			if (showAdvanced)
-				compile(field(&Settings::enableExperimentalSpecularGI, { .label = "(Experimental) HQ Specular IL" }));
+				field(&Settings::enableExperimentalSpecularGI, { .label = "(Experimental) HQ Specular IL" });
 		}
 		if (const ui::Section section{ "ssgi-quality", "Quality/Performance" }; section) {
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
@@ -538,9 +542,9 @@ namespace cs::features
 			for (std::uint32_t i = 0; i < presets.size(); ++i) {
 				const auto& p = presets[i];
 				presetOptions.push_back({ i + 1, p.label, p.key });
-				if (!current && _settings.numSlices == p.slices && _settings.numSteps == p.steps &&
-					_settings.enableGI == p.gi && _settings.enableBlur &&
-					(p.resolution < 0 || _settings.resolutionMode == p.resolution))
+				if (!current && _live.Draft().numSlices == p.slices && _live.Draft().numSteps == p.steps &&
+					_live.Draft().enableGI == p.gi && _live.Draft().enableBlur &&
+					(p.resolution < 0 || _live.Draft().resolutionMode == p.resolution))
 					current = i + 1;
 			}
 			const auto chosen = ui::PickChoice<std::uint32_t>(
@@ -559,34 +563,34 @@ namespace cs::features
 				dmui::ChoiceOption<int>{ 1, "Half", "half" },
 				dmui::ChoiceOption<int>{ 2, "Quarter", "quarter" }
 			};
-			compile(field.Choice(&Settings::resolutionMode, resolutions, { .label = "Resolution", .help = "Resolution of the indirect lighting pass; lower is faster." }));
+			field.Choice(&Settings::resolutionMode, resolutions, { .label = "Resolution", .help = "Resolution of the indirect lighting pass; lower is faster." });
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual", "Visual" }; section) {
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
 			field(&Settings::aoPower, { .label = "AO Power", .format = "%.2f" });
-			dmui::ui::BeginDisabled(!_settings.enableGI);
+			dmui::ui::BeginDisabled(!_live.Draft().enableGI);
 			field(&Settings::giStrength, { .label = "IL Source Brightness", .format = "%.2f" });
 			dmui::ui::EndDisabled();
 			field(&Settings::aoRadius, { .label = "AO radius", .format = "%.1f units" });
-			dmui::ui::BeginDisabled(!_settings.enableGI);
+			dmui::ui::BeginDisabled(!_live.Draft().enableGI);
 			field(&Settings::giRadius, { .label = "IL radius", .format = "%.1f units" });
 			dmui::ui::EndDisabled();
 			if (showAdvanced)
 				field(&Settings::minScreenRadius, { .label = "Min Screen Radius", .format = "%.3f" });
 			// One schema array edited as two sliders.
-			const Settings defaults{};
+			const Settings defaults = _live.DefaultSettings();
 			const settings::Range fade{ 10000.0f, 50000.0f };
 			edit.Apply(ui::EditSetting({ "DepthFadeNear", { .label = "Depth Fade Near", .help = "Distance where the effect starts to fade out, in game units.", .format = "%.0f units" } },
-				_settings.depthFadeRange[0], defaults.depthFadeRange[0], fade));
+				field.Values().depthFadeRange[0], defaults.depthFadeRange[0], fade));
 			edit.Apply(ui::EditSetting({ "DepthFadeFar", { .label = "Depth Fade Far", .help = "Distance where the effect has fully faded out, in game units.", .format = "%.0f units" } },
-				_settings.depthFadeRange[1], defaults.depthFadeRange[1], fade));
+				field.Values().depthFadeRange[1], defaults.depthFadeRange[1], fade));
 			if (showAdvanced)
 				field(&Settings::thickness, { .label = "Thickness", .format = "%.1f units" });
 			dmui::ui::EndDisabled();
 		}
 		if (const ui::Section section{ "ssgi-visual-il", "Visual - IL" }; section) {
-			dmui::ui::BeginDisabled(!IsSwitchedOn() || !_settings.enableGI);
+			dmui::ui::BeginDisabled(!IsSwitchedOn() || !_live.Draft().enableGI);
 			if (showAdvanced)
 				field(&Settings::giDistanceCompensation, { .label = "IL Distance Compensation", .format = "%.1f" });
 			field(&Settings::giSaturation, { .label = "IL Saturation", .format = "%.1f%%", .scale = 100.0f });
@@ -594,29 +598,22 @@ namespace cs::features
 		}
 		if (const ui::Section section{ "ssgi-denoising", "Denoising" }; section) {
 			dmui::ui::BeginDisabled(!IsSwitchedOn());
-			compile(field(&Settings::enableTemporalDenoiser, { .label = "Temporal Denoiser" }));
+			field(&Settings::enableTemporalDenoiser, { .label = "Temporal Denoiser" });
 			field(&Settings::enableBlur, { .label = "Blur" });
 			if (showAdvanced) {
-				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser);
+				dmui::ui::BeginDisabled(!_live.Draft().enableTemporalDenoiser);
 				field(&Settings::maxAccumFrames, { .label = "Max Frame Accumulation" });
 				dmui::ui::EndDisabled();
-				dmui::ui::BeginDisabled(!_settings.enableTemporalDenoiser && !_settings.enableGI);
+				dmui::ui::BeginDisabled(!_live.Draft().enableTemporalDenoiser && !_live.Draft().enableGI);
 				field(&Settings::depthDisocclusion, { .label = "Movement Disocclusion", .format = "%.1f%%", .scale = 100.0f });
 				dmui::ui::EndDisabled();
-				dmui::ui::BeginDisabled(!_settings.enableBlur);
+				dmui::ui::BeginDisabled(!_live.Draft().enableBlur);
 				field(&Settings::blurRadius, { .label = "Blur Radius", .format = "%.1f px" });
 				field(&Settings::distanceNormalisation, { .label = "Geometry Weight", .format = "%.2f" });
 				dmui::ui::EndDisabled();
 			}
 			dmui::ui::EndDisabled();
 		}
-	}
-
-	void ScreenSpaceGI::RestoreDefaultSettings()
-	{
-		_settings = Settings{};
-		_recompile = true;
-		SaveSettings();
 	}
 
 	namespace
