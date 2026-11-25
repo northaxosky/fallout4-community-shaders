@@ -15,8 +15,6 @@ function main(target)
             "package/Shaders/Common/SharedData.hlsli",
             "package/Shaders/Common/BRDF.hlsli",
             "package/Shaders/Common/GBuffer.hlsli",
-            "package/Shaders/Common/LightingCommon.hlsli",
-            "package/Shaders/Common/LightingEval.hlsli",
             "package/Shaders/Common/PreExposure.hlsli",
             "package/Shaders/Common/Random.hlsli",
             "package/Shaders/Common/Shading.hlsli",
