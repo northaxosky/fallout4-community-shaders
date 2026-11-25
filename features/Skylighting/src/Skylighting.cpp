@@ -31,6 +31,7 @@
 #include "Render/FrameState.h"
 #include "Render/OccluderBatch.h"
 #include "Render/PrecipitationOcclusion.h"
+#include "Render/PrepassVertexAO.h"
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
@@ -104,6 +105,7 @@ namespace cs::features
 		}
 
 		if (!cs::engine::RegisterFeatureShaderBindings(*this, [this](cs::engine::ShaderReplacementRegistration& registration) {
+				cs::engine::AttachPrepassVertexAO(registration);
 				if (const auto consumer = ConsumerFor(registration.targetId))
 					registration.bind = [this, consumer = *consumer](ID3D11DeviceContext* a_context) { BindConsumer(a_context, consumer); };
 			})) {

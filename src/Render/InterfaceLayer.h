@@ -4,9 +4,8 @@
 #include <winrt/base.h>
 
 #include <atomic>
-#include <mutex>
-#include <unordered_map>
 
+#include "Render/DerivedBlendStates.h"
 #include "Render/Engine.h"
 
 namespace cs::render
@@ -35,21 +34,15 @@ namespace cs::render
 		[[nodiscard]] bool DrawsToProxy(ID3D11DeviceContext& a_context) const noexcept;
 
 	private:
-		struct Translation
-		{
-			winrt::com_ptr<ID3D11BlendState> source;      // Pins the cache key.
-			winrt::com_ptr<ID3D11BlendState> translated;  // Null when the source is already valid.
-		};
+		InterfaceLayer();
 
 		void RestoreFrameTarget(ID3D11DeviceContext& a_context);
-		[[nodiscard]] Translation Build(ID3D11BlendState* a_state);
 
 		engine::RenderTargetSwap _sceneSwap;
 		std::atomic_bool _separated{ false };
 		bool _blendTouched = false;  // Render thread only.
 		std::atomic<ID3D11RenderTargetView*> _proxyTarget{ nullptr };
 
-		std::mutex _translationLock;
-		std::unordered_map<ID3D11BlendState*, Translation> _translations;
+		engine::DerivedBlendStates _translations;
 	};
 }

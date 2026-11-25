@@ -20,6 +20,7 @@
 #include "Render/ComputePasses.h"
 #include "Render/FeatureShaderBindings.h"
 #include "Render/FrameState.h"
+#include "Render/PrepassVertexAO.h"
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
@@ -64,7 +65,7 @@ namespace cs::features
 
 	void ScreenSpaceGI::Load()
 	{
-		if (!cs::engine::RegisterFeatureShaderBindings(*this)) {
+		if (!cs::engine::RegisterFeatureShaderBindings(*this, cs::engine::AttachPrepassVertexAO)) {
 			FailLoad("SSGI shader contribution registration failed.");
 			return;
 		}

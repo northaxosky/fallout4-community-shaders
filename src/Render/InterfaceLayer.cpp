@@ -60,6 +60,16 @@ namespace cs::render
 			}
 		}
 
+		bool TranslateBlendDesc(D3D11_BLEND_DESC& a_desc)
+		{
+			bool changed = false;
+			for (auto& target : a_desc.RenderTarget) {
+				if (!TranslateTarget(target, changed))
+					L->warn("A blend state depends on the destination color and is drawn unchanged on the interface layer.");
+			}
+			return changed;
+		}
+
 		// ShaderFlags::DIRTY_BLEND_STATE, with the engine's last-draw compare defeated.
 		void InvalidateEngineBlendState() noexcept
 		{
@@ -70,6 +80,9 @@ namespace cs::render
 			context->lastDrawCallShadowState.stateUpdateFlags = UINT32_MAX;
 		}
 	}
+
+	InterfaceLayer::InterfaceLayer() :
+		_translations(&TranslateBlendDesc, "InterfaceLayer/Blend") {}
 
 	InterfaceLayer& InterfaceLayer::Get() noexcept
 	{
@@ -174,33 +187,6 @@ namespace cs::render
 
 	ID3D11BlendState* InterfaceLayer::Translate(ID3D11BlendState* a_state)
 	{
-		const std::scoped_lock lock{ _translationLock };
-		auto found = _translations.find(a_state);
-		if (found == _translations.end())
-			found = _translations.emplace(a_state, Build(a_state)).first;
-		auto* translated = found->second.translated.get();
-		return translated ? translated : a_state;
-	}
-
-	InterfaceLayer::Translation InterfaceLayer::Build(ID3D11BlendState* a_state)
-	{
-		Translation result;
-		result.source.copy_from(a_state);
-		D3D11_BLEND_DESC desc{};
-		a_state->GetDesc(&desc);
-		bool changed = false;
-		for (auto& target : desc.RenderTarget) {
-			if (!TranslateTarget(target, changed)) {
-				L->warn("Blend state {} depends on the destination color and is drawn unchanged on the interface layer.",
-					static_cast<const void*>(a_state));
-			}
-		}
-		if (!changed)
-			return result;
-		winrt::com_ptr<ID3D11Device> device;
-		a_state->GetDevice(device.put());
-		if (FAILED(device->CreateBlendState(&desc, result.translated.put())))
-			L->error("Could not create the translated blend state for {}.", static_cast<const void*>(a_state));
-		return result;
+		return _translations.Get(a_state);
 	}
 }

@@ -1513,12 +1513,7 @@ struct PS_OUTPUT
 #		else
 		output.auxA.w = blendAlpha;
 #		endif
-#		if HAIR && defined(FO4_PREPASS_VERTEX_AO)
-		// MRT4 alpha is also its blend factor, so hair writes 0 and keeps the value beneath instead of upstream's coverage-weighted 1 - vertexAO.
-		output.specTint.w = 0.0;
-#		else
 		output.specTint.w = blendAlpha;
-#		endif
 #	else
 #		ifdef FO4_PREPASS_VERTEX_AO
 	// 1 - vertexAO as upstream's Masks2; SSGI composite and Skylighting read it.
