@@ -203,7 +203,7 @@ namespace cs::render
 	{
 		float farWaterDistance, pad[3];
 	};
-	// Shared SharedData.hlsli declares Physical Sky; FO4 has none, so it is zero-filled.
+	// Shared SharedData.hlsli declares Physical Sky; FO4 zero-fills it.
 	struct PhysSkyData
 	{
 		DirectX::XMFLOAT2 texDim, rcpTexDim, frameDim, rcpFrameDim;
@@ -253,7 +253,7 @@ namespace cs::render
 		DirectX::XMFLOAT4 TextureBounds;
 		float TextureRadiusScale[2], pad1[2];
 	};
-	// Shared SharedData.hlsli declares this Physical Sky block; it is always zero-filled.
+	// Shared SharedData.hlsli declares Atmosphere and Fog; always zero-filled.
 	struct ViewAtmosphereSettings
 	{
 		std::uint32_t enabled, nearPixelSize, nearSlices, middlePixelSize, middleSlices;

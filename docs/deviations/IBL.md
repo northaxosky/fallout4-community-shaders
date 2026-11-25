@@ -15,3 +15,4 @@
 | N/A | Water ambient and underwater refraction fog tint | | FO4 water ambient is a sun lobe, not DALC |
 | N/A | `Lighting.hlsl`, `Particle.hlsl`, `RunGrass.hlsl`, `ISSAOComposite.hlsl` consumers | Composite fog families and DFLight ambient cover them | FO4 world and first-person emit no forward BSLighting, and BSParticleShader never draws; secondary-view BSLighting stays stock |
 | Pending | `EFFECTS11` blocks (`GetDiffuseIBL` sky tilt, volumetric rays IBL) | Effects11 integration | |
+| Pending | Reflection cubemap distance fallback (`EnableReflectionFallback`, 1024 units) | Off; consumers pass no position | |
