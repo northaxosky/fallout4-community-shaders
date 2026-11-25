@@ -88,7 +88,8 @@ namespace cs::features
 		{
 			kResetLoad = 1,
 			kResetRebuild = 2,
-			kResetEnable = 4
+			kResetEnable = 4,
+			kResetTeleport = 8
 		};
 		void QueueReset(ResetReason a_reason) noexcept { _queuedReset.fetch_or(a_reason, std::memory_order_acq_rel); }
 
@@ -272,6 +273,7 @@ namespace cs::features
 			std::atomic<std::uint64_t> resetsLoad{ 0 };
 			std::atomic<std::uint64_t> resetsRebuild{ 0 };
 			std::atomic<std::uint64_t> resetsEnable{ 0 };
+			std::atomic<std::uint64_t> resetsTeleport{ 0 };
 			std::atomic<std::uint64_t> debugFrames{ 0 };
 			std::atomic<std::uint64_t> waterDraws{ 0 };
 			std::atomic<std::uint64_t> effectDraws{ 0 };

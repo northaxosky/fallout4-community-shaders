@@ -5,11 +5,33 @@
 
 namespace cs::render
 {
-	// Why feature history must restart; the producer is the load screen.
+	// Why feature history must restart.
 	enum class ResetReason : std::uint8_t
 	{
-		kLoad = 1 << 0
+		kLoad = 1 << 0,        // loading screen closed
+		kTeleport = 1 << 1,    // camera origin jumped within one frame
+		kCameraState = 1 << 2  // discontinuous camera state change
 	};
+
+	using ResetMask = std::uint8_t;
+
+	[[nodiscard]] constexpr ResetMask operator|(ResetReason a_lhs, ResetReason a_rhs) noexcept
+	{
+		return static_cast<ResetMask>(static_cast<ResetMask>(a_lhs) | static_cast<ResetMask>(a_rhs));
+	}
+
+	// Resets that break history anchored to world positions.
+	inline constexpr ResetMask kWorldAnchoredResets = ResetReason::kLoad | ResetReason::kTeleport;
+
+	// Dominant reason in a mask, for logs.
+	[[nodiscard]] constexpr const char* ResetLabel(ResetMask a_resets) noexcept
+	{
+		if (a_resets & static_cast<ResetMask>(ResetReason::kLoad))
+			return "loading_screen_closed";
+		if (a_resets & static_cast<ResetMask>(ResetReason::kTeleport))
+			return "camera_teleport";
+		return "camera_state_change";
+	}
 
 	// One coherent view of the engine frame; read it, never re-query UI state.
 	struct FrameState
@@ -20,9 +42,10 @@ namespace cs::render
 		bool paused = false;  // game paused, or no UI exists
 		bool mainOrLoading = false;
 		bool worldFrozen = false;  // active game in a menu or frozen time
-		std::uint8_t resets = 0;   // ResetReason bits applied to this world frame
+		ResetMask resets = 0;      // ResetReason bits applied to this world frame
 
 		[[nodiscard]] bool HasReset() const noexcept { return resets != 0; }
+		[[nodiscard]] bool HasReset(ResetMask a_mask) const noexcept { return (resets & a_mask) != 0; }
 	};
 
 	// Menus whose open state the engine event stream tracks for us.
@@ -52,6 +75,6 @@ namespace cs::render
 	// Any thread. Applies to the next world frame outside main and loading menus.
 	void RequestReset(ResetReason a_reason) noexcept;
 
-	// Called once per engine frame by the world-camera capture.
+	// Once per engine frame, after the capture queued that frame's resets.
 	void BeginWorldFrame() noexcept;
 }

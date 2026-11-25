@@ -296,8 +296,8 @@ namespace cs::features
 		_cameraReady = false;
 		_tiledAvailable = false;
 		_motionAvailable = false;
-		if (cs::render::GetFrameState().HasReset())
-			QueueReset("loading_screen_closed");
+		if (const auto resets = cs::render::GetFrameState().resets)
+			QueueReset(cs::render::ResetLabel(resets));
 		if (!IsEnabled())
 			return;
 		if (_recompile && !CompileShaders()) {

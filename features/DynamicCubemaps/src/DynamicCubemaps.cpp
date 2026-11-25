@@ -785,7 +785,7 @@ namespace cs::features
 		_lastCallbackFrame = state->frameCount;
 		_lastCallbackFrameValid = true;
 
-		if (_queuedReset.exchange(false, std::memory_order_acq_rel) || cs::render::GetFrameState().HasReset()) {
+		if (_queuedReset.exchange(false, std::memory_order_acq_rel) || cs::render::GetFrameState().HasReset(cs::render::kWorldAnchoredResets)) {
 			ResetCapture();
 		}
 		// Reset capture when game time jumps (wait menu, timescale changes, console commands).

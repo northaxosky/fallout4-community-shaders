@@ -4,6 +4,7 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/CameraCutWatch.h"
 #include "Render/ForwardDraw.h"
 #include "Render/FrameAnnotations.h"
 #include "Render/FrameBoundary.h"
@@ -117,6 +118,8 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	featureManager.ActivateAll();
 	cs::Menu::Get().Load();
 	cs::engine::InstallFrameBuffer();
+	if (!cs::render::RegisterCameraCutWatch())
+		L->error("Camera cut watch registration failed");
 	cs::telemetry::Install();
 	if (!cs::render::profiling::InstallDeferredCompositePass())
 		L->error("DeferredComposite profiler pass registration failed");

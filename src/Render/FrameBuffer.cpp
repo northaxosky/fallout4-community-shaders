@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <mutex>
+#include <utility>
 
 namespace cs::engine
 {
@@ -21,6 +22,16 @@ namespace cs::engine
 		std::optional<std::uint32_t> g_prepassFrame;
 		render::RenderResolution g_resolution;
 		std::optional<DirectX::XMFLOAT2> g_lastRatio;
+
+		// Per-frame origin jump in world units that continuous motion never reaches.
+		constexpr float kTeleportDistance = 2000.0f;
+
+		struct OriginSample
+		{
+			DirectX::XMFLOAT3 origin;
+			std::uint32_t frame;
+		};
+		std::optional<OriginSample> g_lastOrigin;
 
 		render::RenderResolution NativeResolution() noexcept
 		{
@@ -71,18 +82,40 @@ namespace cs::engine
 			return std::nullopt;
 		}
 
+		// The origin sums the recentering offset, so cell-border shifts cancel.
+		bool IsTeleport(const WorldCameraRecord& a_camera, std::uint32_t a_frame) noexcept
+		{
+			const auto origin = CameraWorldOrigin(a_camera);
+			const auto previous = std::exchange(g_lastOrigin, OriginSample{ origin, a_frame });
+			// A frame gap covers loads; frozen frames hold the camera still.
+			if (!previous || a_frame - previous->frame != 1)
+				return false;
+			if (const auto state = render::GetFrameState(); state.paused || state.worldFrozen)
+				return false;
+			const float dx = origin.x - previous->origin.x;
+			const float dy = origin.y - previous->origin.y;
+			const float dz = origin.z - previous->origin.z;
+			return dx * dx + dy * dy + dz * dz > kTeleportDistance * kTeleportDistance;
+		}
+
 		void CaptureWorldCamera() noexcept
 		{
 			std::scoped_lock lock(g_prepassCameraMutex);
 			const auto frame = GetFrameCount();
-			if (g_prepassFrame != frame) {
+			const bool newFrame = g_prepassFrame != frame;
+			if (newFrame)
 				LatchRenderResolution();
-				render::BeginWorldFrame();
-			}
-			if (g_prepassFrame != frame || !g_prepassCamera) {
+			if (newFrame || !g_prepassCamera) {
 				g_prepassCamera = GetWorldCameraRecord();
 				g_prepassFrame = frame;
+				if (g_prepassCamera && IsTeleport(*g_prepassCamera, frame)) {
+					L->debug("Camera teleport at frame {}", frame);
+					render::RequestReset(render::ResetReason::kTeleport);
+				}
 			}
+			// After the teleport check so this frame commits it, record or not.
+			if (newFrame)
+				render::BeginWorldFrame();
 		}
 	}
 

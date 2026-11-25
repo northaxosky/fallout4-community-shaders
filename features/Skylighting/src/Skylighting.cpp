@@ -654,7 +654,7 @@ namespace cs::features
 			"mx_ext_x={:.3f} mx_ext_y={:.3f} mx_depth={:.3f} "
 			"sun_live_frames={} sun_live_skipped_unavailable={} sun_live_skipped_not_full_sky={} sun_live_skipped_no_light={} sun_live_skipped_unsupported_count={} sun_live_skipped_no_target={} sun_live_skipped_invalid={} sun_live_skipped_source={} sun_live_skipped_disabled={} "
 			"cascade_count={} split_end=({:.1f},{:.1f},{:.1f}) "
-			"probe_state={} probe_dispatches={} probe_skipped_not_full_sky={} probe_skipped_no_occlusion={} probe_skipped_no_grid={} resets={} resets_load={} resets_rebuild={} resets_enable={} "
+			"probe_state={} probe_dispatches={} probe_skipped_not_full_sky={} probe_skipped_no_occlusion={} probe_skipped_no_grid={} resets={} resets_load={} resets_rebuild={} resets_enable={} resets_teleport={} "
 			"grid_cell=({},{},{}) array_origin=({},{},{}) valid_margin=({},{},{}) probe_update_gpu_ms={:.3f} water_draws_bound={} effect_draws_bound={} composite_draws_bound={} dflight_draws_bound={} tiled_dispatches_bound={} shadow_vis_draws_bound={}",
 			IsEnabled() ? 1 : 0, stateName, _anchorFrames, frameCount, count(_counters.captures), count(_counters.skippedInterior), count(_counters.skippedDisabled),
 			count(_counters.skippedTargets), count(_counters.failed),
@@ -673,7 +673,7 @@ namespace cs::features
 			statusSkipped(cs::engine::SunCascadeStatus::kUnsupportedCount), statusSkipped(cs::engine::SunCascadeStatus::kNoTarget), statusSkipped(cs::engine::SunCascadeStatus::kInvalid), cascadeSkipped(CascadeSkip::kSource), cascadeSkipped(CascadeSkip::kDisabled),
 			_cascadeCounters.count.load(std::memory_order_relaxed), _cascadeCounters.splitEnd[0].load(std::memory_order_relaxed), _cascadeCounters.splitEnd[1].load(std::memory_order_relaxed), _cascadeCounters.splitEnd[2].load(std::memory_order_relaxed),
 			probeStateNames[static_cast<std::size_t>(_probeState)], count(_probeCounters.dispatches), count(_probeCounters.skippedNotFullSky), count(_probeCounters.skippedNoOcclusion), count(_probeCounters.skippedNoGrid),
-			count(_probeCounters.resets), count(_probeCounters.resetsLoad), count(_probeCounters.resetsRebuild), count(_probeCounters.resetsEnable),
+			count(_probeCounters.resets), count(_probeCounters.resetsLoad), count(_probeCounters.resetsRebuild), count(_probeCounters.resetsEnable), count(_probeCounters.resetsTeleport),
 			grid[0], grid[1], grid[2], grid[3], grid[4], grid[5], grid[6], grid[7], grid[8], _probeCounters.gpuMs.load(std::memory_order_relaxed), count(_probeCounters.waterDraws),
 			count(_probeCounters.effectDraws), count(_probeCounters.compositeDraws), count(_probeCounters.lightDraws), count(_probeCounters.tiledDispatches), count(_probeCounters.shadowVisDraws));
 		_windowCpuMsSum = 0.0;
@@ -763,6 +763,7 @@ namespace cs::features
 			.Field("resets_load", count(_probeCounters.resetsLoad))
 			.Field("resets_rebuild", count(_probeCounters.resetsRebuild))
 			.Field("resets_enable", count(_probeCounters.resetsEnable))
+			.Field("resets_teleport", count(_probeCounters.resetsTeleport))
 			.Field("grid_cell_x", static_cast<std::int64_t>(_probeCounters.grid[0].load(std::memory_order_relaxed)))
 			.Field("grid_cell_y", static_cast<std::int64_t>(_probeCounters.grid[1].load(std::memory_order_relaxed)))
 			.Field("grid_cell_z", static_cast<std::int64_t>(_probeCounters.grid[2].load(std::memory_order_relaxed)))
@@ -864,6 +865,8 @@ namespace cs::features
 				_probeCounters.resetsRebuild.fetch_add(1, std::memory_order_relaxed);
 			if (reasons & kResetEnable)
 				_probeCounters.resetsEnable.fetch_add(1, std::memory_order_relaxed);
+			if (reasons & kResetTeleport)
+				_probeCounters.resetsTeleport.fetch_add(1, std::memory_order_relaxed);
 			// FO4: capture can fail at load; the update waits for a fresh matrix.
 			_hasOcclusion = false;
 			_cadence.Invalidate();
@@ -873,9 +876,9 @@ namespace cs::features
 
 	void Skylighting::Prepass()
 	{
-		// FO4 captures occlusion before the world-frame reset is latched.
-		if (cs::render::GetFrameState().HasReset()) {
-			QueueReset(kResetLoad);
+		// FO4 captures occlusion before the world-frame reset commits at the prepass.
+		if (const auto resets = cs::render::GetFrameState().resets & cs::render::kWorldAnchoredResets) {
+			QueueReset(resets & static_cast<cs::render::ResetMask>(cs::render::ResetReason::kLoad) ? kResetLoad : kResetTeleport);
 			if (CaptureReadiness() == CaptureState::kCaptured)
 				ApplyQueuedReset();
 		}

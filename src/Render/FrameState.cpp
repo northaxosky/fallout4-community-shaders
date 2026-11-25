@@ -129,7 +129,7 @@ namespace cs::render
 			state.worldFrozen = (bits & kWorldFrozen) != 0;
 			state.worldFrame = g_worldFrame.load(std::memory_order_acquire);
 			const auto resets = g_resets.load(std::memory_order_acquire);
-			state.resets = FrameOf(resets) == a_frame ? BitsOf(resets) : std::uint8_t{ 0 };
+			state.resets = FrameOf(resets) == a_frame ? BitsOf(resets) : ResetMask{ 0 };
 			return state;
 		}
 	}
