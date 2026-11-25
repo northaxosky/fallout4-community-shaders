@@ -37,7 +37,7 @@
 - Screen Space GI: ambient occlusion strength no longer varies with Slices.
 - Screen Space GI: HQ Specular IL no longer over-brightens, and nearby geometry now occludes it.
 - Screen Space GI: indirect light and ambient occlusion trail less while turning or moving.
-- Compatibility: Isotope 1.4.0 and later runs alongside HDR Display, Upscaling, Frame Generation and RenderDoc when its Hosted Presentation setting is on; it needs HDR Display enabled.
+- Compatibility: Isotope 1.4.0 and later runs alongside HDR Display, Upscaling, Frame Generation and RenderDoc when its Hosted Presentation setting is on; its HDR follows HDR Display's Enable HDR.
 
 ## 0.5.1
 
