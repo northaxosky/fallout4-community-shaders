@@ -424,7 +424,7 @@ namespace cs::features
 			_captures.QueueComments(BuildAutomaticCaptureComments(_commentsBuf.data()));
 			_commentsBuf[0] = 0;
 		}
-		const auto id = ++_lastRequestId;
+		const auto id = capture::NextRequestId();
 		_active = ActiveCapture{ .id = id, .request = a_request, .binding = std::move(binding) };
 		_annotationForce.emplace();
 		return id;

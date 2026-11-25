@@ -171,7 +171,6 @@ namespace cs::features
 		std::optional<render::frame_annotations::ScopedForce> _annotationForce;
 		std::optional<AwaitedFiles> _awaited;
 		Observers _observers;
-		RequestId _lastRequestId{};
 
 		std::array<char, 1024> _commentsBuf{};
 		int _fileSort = 2;

@@ -113,7 +113,6 @@ namespace cs::features
 		bool _sceneKept = false;
 		std::vector<Readback> _readbacks;
 		std::atomic<RequestId> _requested{ 0 };
-		RequestId _lastRequestId{};
 		std::mutex _completionMutex;
 		std::vector<CaptureCompletion> _completions;
 		Observers _observers;

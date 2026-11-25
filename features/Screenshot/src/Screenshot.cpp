@@ -120,7 +120,7 @@ namespace cs::features
 		auto* controls = RE::MenuControls::GetSingleton();
 		if (!controls || !controls->QueueScreenshot())
 			return std::unexpected(CaptureRefusal{ "A screenshot is already queued", "Retry on the next frame" });
-		const auto id = ++_lastRequestId;
+		const auto id = capture::NextRequestId();
 		_requested.store(id, std::memory_order_release);
 		return id;
 	}
