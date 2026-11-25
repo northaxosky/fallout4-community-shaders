@@ -932,13 +932,10 @@ namespace cs::features
 			cs::engine::RequestTimeJumpTransition();
 		const auto requestedRefresh = cs::engine::GetCompletedCelestialTransitionGeneration();
 		const bool timeJump = requestedRefresh != _handledRefreshGeneration;
-		const auto* sky = RE::Sky::GetSingleton();
-		// FO4: a time-jump refresh waits for the sky to consume the requested hour.
-		const bool celestialReady = !timeJump || (sky && std::abs(sky->currentGameHour - _lastGameHour) < 1e-4f);
 		EnsureLiveResources(context);
 
 		const bool enabled = IsEnabled() && _injectionsOperational.load(std::memory_order_acquire);
-		if (enabled && celestialReady && _mapLoaded.load(std::memory_order_acquire) && _shadowResourcesReady.load(std::memory_order_acquire)) {
+		if (enabled && _mapLoaded.load(std::memory_order_acquire) && _shadowResourcesReady.load(std::memory_order_acquire)) {
 			const bool refresh = _pendingFullRefresh || timeJump;
 			if (UpdateShadow(context, refresh)) {
 				_pendingFullRefresh = false;
