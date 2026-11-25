@@ -53,7 +53,7 @@ float3 FromWorking(float3 pqColor)
 	return TransferFunctions::LinearToSignedGamma22(Color::BT2020ToBT709(DisplayMapping::PQtoLinear(pqColor, 10000.0)));
 }
 
-// History luma is stored as game gamma so the 8-bit target keeps highlights.
+// FO4: history luma is game gamma; HDR Display makes the target fp16.
 float EncodeHistoryLuma(float pqLuma)
 {
 	return TransferFunctions::LinearToSignedGamma22(DisplayMapping::PQtoLinear(pqLuma.xxx, 10000.0).x);

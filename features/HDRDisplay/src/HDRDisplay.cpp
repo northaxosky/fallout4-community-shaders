@@ -36,9 +36,13 @@ namespace cs::features
 		constexpr float kMenuScenePaused = 0.58f;
 		constexpr float kMenuSceneMainOrLoading = 1.0f;
 
-		// The pause freeze-frame stores copy from RT0, so they follow its format.
-		constexpr auto kMenuBackground = RE::BSGraphics::RenderTargetID::kMenuBackground;
-		constexpr auto kPauseFreezeFrame = RE::BSGraphics::RenderTargetID::kPauseFreezeFrame;
+		// Stores copy RT0; HDR gamma luma in TAA history exceeds 1, UNORM8 clamps it.
+		constexpr std::array kPromotedTargets{
+			RE::BSGraphics::RenderTargetID::kMenuBackground,
+			RE::BSGraphics::RenderTargetID::kPauseFreezeFrame,
+			RE::BSGraphics::RenderTargetID::kTemporalAAHistory0,
+			RE::BSGraphics::RenderTargetID::kTemporalAAHistory1,
+		};
 		constexpr auto kHdrSceneFormat = static_cast<RE::BSGraphics::Format>(DXGI_FORMAT_R16G16B16A16_FLOAT);
 
 		struct RenderTargetManager_CreateRenderTarget
@@ -46,7 +50,7 @@ namespace cs::features
 			static void thunk(RE::BSGraphics::RenderTargetManager* a_manager, RE::BSGraphics::RenderTargetID a_id,
 				const RE::BSGraphics::RenderTargetProperties* a_properties, RE::BSGraphics::RenderTargetCreationMode a_mode)
 			{
-				if (a_properties && (a_id == kMenuBackground || a_id == kPauseFreezeFrame) &&
+				if (a_properties && std::ranges::contains(kPromotedTargets, a_id) &&
 					render::TemporalPipeline::Get().IsHdrContainerActive()) {
 					auto promoted = *a_properties;
 					promoted.format = kHdrSceneFormat;
