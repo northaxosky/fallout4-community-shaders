@@ -81,7 +81,8 @@ namespace cs::features
 		                   _blurMatchCreated.load(std::memory_order_acquire);
 		if (!_blurMatchActive)
 			return;
-		table = _blurMatch.Update(context, DynamicCubemaps::GetSingleton()->GetSharpReflectionsSRV());
+		table = _blurMatch.Update(context, DynamicCubemaps::GetSingleton()->GetSharpReflectionsSRV(),
+			DynamicCubemaps::GetSingleton()->GetReflectionsGeneration());
 		engine::BindFrameShaderResources(context, engine::ShaderStage::kPixel, cs::render::kVanillaPbrLiveLODSlot, 1, &table);
 	}
 

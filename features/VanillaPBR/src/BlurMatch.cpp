@@ -159,7 +159,7 @@ namespace cs::features::vanilla_pbr
 		a_context->Dispatch(kBlurMatchGroupsPerSide, kBlurMatchGroupsPerSide, 6 * a_count);
 	}
 
-	ID3D11ShaderResourceView* BlurMatch::Update(ID3D11DeviceContext* a_context, ID3D11ShaderResourceView* a_live) noexcept
+	ID3D11ShaderResourceView* BlurMatch::Update(ID3D11DeviceContext* a_context, ID3D11ShaderResourceView* a_live, std::uint32_t a_generation) noexcept
 	{
 		if (!_created || !a_context)
 			return nullptr;
@@ -174,6 +174,12 @@ namespace cs::features::vanilla_pbr
 					_cursor = 0;
 					_authoredSlots.store(_slotCount, std::memory_order_relaxed);
 					_log->info("Live reflection blur matching profiles {} authored cubes of {} mips.", _slotCount, _authored.mips);
+				}
+			}
+			if (std::exchange(_liveGeneration, a_generation) != a_generation) {
+				for (auto& stream : _live) {
+					stream.profiledMips = 0;
+					stream.nextMip = 0;
 				}
 			}
 			auto* live = a_live ? FindLive(a_live) : nullptr;

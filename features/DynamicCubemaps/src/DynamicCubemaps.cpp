@@ -742,6 +742,14 @@ namespace cs::features
 		_resetCapture = { true, true };
 	}
 
+	void DynamicCubemaps::ResetReflections()
+	{
+		_cubemapValid[1].store(false, std::memory_order_release);
+		_resetCapture[1] = true;
+		// An in-flight capture predates this reset and must not publish as valid.
+		_reflectionsResetCaptured = false;
+	}
+
 	void DynamicCubemaps::ResolveReflectionMode()
 	{
 		const bool engineCube = cs::engine::GetSkyReflectionCubeSRV() != nullptr;
@@ -751,11 +759,10 @@ namespace cs::features
 		const bool fake = active && (!engineCube || cs::engine::IsSkyHidden());
 		_engineReflectionCube.store(engineCube, std::memory_order_relaxed);
 		const bool previousActive = _activeReflections.exchange(active, std::memory_order_acq_rel);
-		if (active && !previousActive) {
-			_cubemapValid[1].store(false, std::memory_order_release);
-			_resetCapture[1] = true;
-		}
-		_fakeReflections.store(fake, std::memory_order_release);
+		// History from the other mode must not blend into the new one.
+		const bool modeChanged = _fakeReflections.exchange(fake, std::memory_order_acq_rel) != fake;
+		if (active && (!previousActive || modeChanged))
+			ResetReflections();
 	}
 
 	void DynamicCubemaps::UpdateCubemap()
@@ -894,6 +901,8 @@ namespace cs::features
 		// FO4 prepared positions are eye-relative, not relative to the engine's position-adjust anchor.
 		constants.CaptureCameraOrigin = { cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, 0.0f };
 		_previousCaptureTime[index] = now;
+		if (a_reflections && _resetCapture[index])
+			_reflectionsResetCaptured = true;
 		_resetCapture[index] = false;
 		_cameraPreviousPosAdjust[index] = cameraOrigin;
 		DX::ThrowIfFailed(engine::WriteDiscard(context, _updateBuffer.get(), constants));
@@ -1118,8 +1127,12 @@ namespace cs::features
 		context->CopyResource(
 			(a_reflections ? _reflectionsSharp : _environmentSharp).texture.get(),
 			_inferred.texture.get());
-		_cubemapValid[a_reflections ? 1 : 0].store(
-			true, std::memory_order_release);
+		if (!a_reflections) {
+			_cubemapValid[0].store(true, std::memory_order_release);
+		} else if (std::exchange(_reflectionsResetCaptured, false)) {
+			_cubemapValid[1].store(true, std::memory_order_release);
+			_reflectionsGeneration.fetch_add(1, std::memory_order_release);
+		}
 	}
 
 	void DynamicCubemaps::RenderCubemapPreview()

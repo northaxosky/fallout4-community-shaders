@@ -75,6 +75,8 @@ namespace cs::features
 		ID3D11ShaderResourceView* GetReflectionsSRV() const noexcept;
 		// Null under the engine-cube view, so live envmaps fall back to stock.
 		ID3D11ShaderResourceView* GetSharpReflectionsSRV() const noexcept;
+		// Bumps when a reflections capture that restarted its history is published.
+		std::uint32_t GetReflectionsGeneration() const noexcept { return _reflectionsGeneration.load(std::memory_order_acquire); }
 
 	private:
 		std::string_view GetRegistrationFailureMessage() const override;
@@ -178,6 +180,7 @@ namespace cs::features
 		FeatureDebugTexture GetCubemapDebugTexture() const;
 		bool CreateResources(ID3D11Device* a_device);
 		void ResetCapture();
+		void ResetReflections();
 
 		CaptureStream& Stream(bool a_reflections);
 		ID3D11ComputeShader* UpdateShader(bool a_reflections) const;
@@ -191,6 +194,7 @@ namespace cs::features
 		std::atomic_bool _queuedReset{ false };
 		std::atomic_bool _activeReflections{ false };
 		std::atomic_bool _fakeReflections{ false };
+		std::atomic_uint32_t _reflectionsGeneration{ 0 };
 		std::atomic_bool _engineReflectionCube{ false };
 		std::atomic_bool _cameraReadyLastFrame{ false };
 		std::array<std::atomic_bool, 2> _cubemapValid{};
@@ -258,6 +262,8 @@ namespace cs::features
 			NextTask::kCaptureInferAndIrradianceA
 		};
 		std::array<bool, 2> _resetCapture{ true, true };
+		// The reflections capture in flight consumed a reset; set at capture, spent at publish.
+		bool _reflectionsResetCaptured = false;
 		std::array<DirectX::XMFLOAT3, 2> _cameraPreviousPosAdjust{};
 		std::array<double, 2> _previousCaptureTime{};
 		float _previousHoursPassed = 0.0f;
