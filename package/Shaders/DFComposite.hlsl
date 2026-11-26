@@ -7,8 +7,8 @@
 #	include "FO4/WaterEffectsConsumer.hlsli"
 #endif
 #include "Common/DeferredContracts.hlsli"
-#include "FO4/SphereMapNormal.hlsli"
 #include "FO4/SkylightingConsumer.hlsli"
+#include "FO4/SphereMapNormal.hlsli"
 #if defined(VANILLA_PBR) || defined(VANILLA_PBR_FULLSCREEN_DEBUG)
 #	include "FO4/VanillaPBR.hlsli"
 #endif
