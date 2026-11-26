@@ -33,24 +33,11 @@ namespace cs::render::forward_draw
 
 		buffer::CachedConstantBuffer<ForwardDrawCB> g_buffer;
 
-		// MainRenderSetup may store 13 on the world accumulators.
-		[[nodiscard]] bool IsWorldAccumulator(const RE::BSShaderAccumulator* a_accumulator) noexcept
-		{
-			using Mode = RE::BSShaderManager::etRenderMode;
-			if (!a_accumulator)
-				return false;
-			const auto mode = a_accumulator->renderMode;
-			if (mode != Mode::kDeferredGBuffer && mode != Mode::kDepthPrepass)
-				return false;
-			const auto* scene = a_accumulator->activeShadowSceneNode;
-			return scene && scene == engine::GetWorldShadowSceneNode();
-		}
-
 		void SetupGeometry(RE::BSShader*, RE::BSRenderPass* a_pass) noexcept
 		{
 			auto* accumulator = RE::BSShaderManager::GetCurrentAccumulator();
 			const auto* geometry = a_pass ? a_pass->geometry : nullptr;
-			t_draw = { a_pass, IsWorldAccumulator(accumulator), geometry ? geometry->worldBound.fRadius : 0.0f };
+			t_draw = { a_pass, engine::IsWorldAccumulator(accumulator), geometry ? geometry->worldBound.fRadius : 0.0f };
 			t_active = true;
 			for (const auto& subscription : g_subscriptions)
 				RunRenderCallback(subscription.owner, subscription.label, [&] { subscription.observer(t_draw); });

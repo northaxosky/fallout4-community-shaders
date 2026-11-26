@@ -1,7 +1,10 @@
 #pragma once
 
+#include "Render/Extent.h"
+
 #include <DirectXMath.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -173,6 +176,54 @@ namespace cs::engine
 		       IsPerspectiveProjection({ vp._14, vp._24, vp._34, vp._44 }) &&
 		       std::isfinite(depth.x) && std::isfinite(depth.y) && depth.y > 0.0f && depth.x > depth.y &&
 		       std::isfinite(previous.x) && std::isfinite(previous.y) && std::isfinite(previous.z);
+	}
+
+	// Conservative pixel rect of a world sphere; nullopt at the near plane.
+	[[nodiscard]] inline std::optional<render::PixelRect> ProjectSphereToPixelRect(
+		const WorldCameraRecord& a_camera, const DirectX::XMFLOAT3& a_center, float a_radius,
+		render::Extent a_extent) noexcept
+	{
+		// FO4: row-vector clip = (world - posAdjust) * ViewProjection.
+		const auto& m = a_camera.ViewProjection;
+		const float x = a_center.x - a_camera.PosAdjust.x;
+		const float y = a_center.y - a_camera.PosAdjust.y;
+		const float z = a_center.z - a_camera.PosAdjust.z;
+		struct Span
+		{
+			float center, reach;
+		};
+		// A unit center move shifts a clip component by at most its column length.
+		const auto span = [&](float a_x, float a_y, float a_z, float a_w) {
+			return Span{ x * a_x + y * a_y + z * a_z + a_w, a_radius * std::sqrt(a_x * a_x + a_y * a_y + a_z * a_z) };
+		};
+		const auto cx = span(m._11, m._21, m._31, m._41);
+		const auto cy = span(m._12, m._22, m._32, m._42);
+		const auto cw = span(m._14, m._24, m._34, m._44);
+		const float wMin = cw.center - cw.reach;
+		if (!std::isfinite(wMin) || !std::isfinite(cx.center) || !std::isfinite(cy.center) || wMin <= GetCameraDepthParameters(a_camera).y)
+			return std::nullopt;
+		const float wMax = cw.center + cw.reach;
+		// The nearer w widens a positive bound, the farther w a negative one.
+		const auto ndc = [&](Span a_span, float& a_lo, float& a_hi) {
+			const float lo = a_span.center - a_span.reach;
+			const float hi = a_span.center + a_span.reach;
+			a_lo = lo / (lo >= 0.0f ? wMax : wMin);
+			a_hi = hi / (hi >= 0.0f ? wMin : wMax);
+		};
+		float xLo, xHi, yLo, yHi;
+		ndc(cx, xLo, xHi);
+		ndc(cy, yLo, yHi);
+		const float width = static_cast<float>(a_extent.width);
+		const float height = static_cast<float>(a_extent.height);
+		const auto pixel = [](float a_value, float a_size) {
+			return std::clamp(a_value, 0.0f, a_size);
+		};
+		const float left = pixel((xLo * 0.5f + 0.5f) * width, width);
+		const float right = pixel((xHi * 0.5f + 0.5f) * width, width);
+		const float top = pixel((0.5f - yHi * 0.5f) * height, height);
+		const float bottom = pixel((0.5f - yLo * 0.5f) * height, height);
+		return render::PixelRect{ static_cast<std::uint32_t>(std::floor(left)), static_cast<std::uint32_t>(std::floor(top)),
+			static_cast<std::uint32_t>(std::ceil(right)), static_cast<std::uint32_t>(std::ceil(bottom)) };
 	}
 
 	// Pre-prepass snapshot; pass the frame when rendering, omit for diagnostics.

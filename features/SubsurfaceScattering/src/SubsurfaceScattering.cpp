@@ -3,7 +3,6 @@
 #include <DearModdingUI/Client.h>
 #include <algorithm>
 #include <cmath>
-#include <format>
 #include <span>
 
 #include "Log.h"
@@ -21,7 +20,6 @@
 #include "Render/RenderExtents.h"
 #include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
-#include "Render/ShaderObservers.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SharedData.h"
 #include "Render/SubstrateSlots.h"
@@ -79,10 +77,8 @@ namespace cs::features
 			FailLoad("Subsurface Scattering render hooks could not register.");
 			return;
 		}
-		try {
-			cs::engine::ObserveShaderTechnique(cs::engine::ShaderInjectionTarget::kDeferredPrepass, { &OnPrepassTechnique });
-		} catch (const std::exception& e) {
-			FailLoad(std::format("Subsurface Scattering skin-draw hook failed: {}", e.what()));
+		if (!cs::engine::RegisterPostLightingRenderPasses(*this, &OnLightingRenderPasses)) {
+			FailLoad("Subsurface Scattering skin bounds hook could not register.");
 			return;
 		}
 		_registrationsReady = true;
@@ -174,7 +170,7 @@ namespace cs::features
 		_kernelsBuilt = true;
 	}
 
-	void SubsurfaceScattering::UpdateConstants(const cs::engine::WorldCameraRecord& a_camera)
+	void SubsurfaceScattering::UpdateConstants(const cs::engine::WorldCameraRecord& a_camera, const cs::render::PixelRect& a_rect)
 	{
 		const auto& s = _settings;
 		UpdateKernels();
@@ -189,6 +185,7 @@ namespace cs::features
 		                        static_cast<std::uint32_t>(sss::kPostScatter);
 		_data.MeanFreePathBase = { s.meanFreePathBase[0], s.meanFreePathBase[1], s.meanFreePathBase[2], s.meanFreePathBase[3] };
 		_data.MeanFreePathHuman = { s.meanFreePathHuman[0], s.meanFreePathHuman[1], s.meanFreePathHuman[2], s.meanFreePathHuman[3] };
+		_data.DispatchOrigin = { a_rect.x0, a_rect.y0 };
 		_constants->Update(_data);
 	}
 
@@ -238,26 +235,61 @@ namespace cs::features
 		_consumerData = data;
 	}
 
-	void SubsurfaceScattering::OnPrepassTechnique(RE::BSShader*, std::uint32_t a_technique) noexcept
+	void SubsurfaceScattering::OnLightingRenderPasses(const cs::engine::LightingRenderPassesCall& a_call, const RE::BSShaderProperty::RenderPassArray* a_passes) noexcept
 	{
 		namespace pt = cs::engine::prepass_technique;
-		if (!(a_technique & (pt::kSkinTint | pt::kFace)))
-			return;
 		auto* self = GetSingleton();
-		const auto frame = cs::engine::GetFrameCount();
-		self->_skinFrame.store(frame, std::memory_order_relaxed);
-		self->_skinBuckets.fetch_add(1, std::memory_order_relaxed);
-		// FO4: Prepare masks out first-person skin, so it never needs a dispatch.
-		if (const auto* accumulator = RE::BSShaderManager::GetCurrentAccumulator(); accumulator && accumulator->firstPerson) {
-			self->_firstPersonSkinBuckets.fetch_add(1, std::memory_order_relaxed);
+		const auto* accumulator = a_call.accumulator;
+		if (!a_passes || !a_call.geometry || !accumulator || accumulator->renderMode != RE::BSShaderManager::etRenderMode::kDeferredGBuffer || !self->CanRun())
 			return;
+		static const auto prepassVtable = REL::Relocation<std::uintptr_t>{ RE::VTABLE::BSDFPrePassShader[0] }.address();
+		// FO4: skin replays from command buffers; bound it from the pass list.
+		bool skin = false;
+		for (const auto* pass = a_passes->passList; pass && !skin; pass = pass->propertyNext)
+			skin = pass->passEnum != UINT32_MAX && (pass->passEnum & (pt::kSkinTint | pt::kFace)) && pass->shader &&
+			       *reinterpret_cast<const std::uintptr_t*>(pass->shader) == prepassVtable;
+		if (!skin)
+			return;
+		self->_skinFrame.store(cs::engine::GetFrameCount(), std::memory_order_relaxed);
+		// FO4: Prepare masks out first-person skin, so it never needs a dispatch.
+		if (accumulator->firstPerson || !cs::engine::IsWorldAccumulator(accumulator))
+			return;
+		const auto index = self->_skinBoundCount.fetch_add(1, std::memory_order_relaxed);
+		if (index < kMaxSkinBounds) {
+			const auto& bound = a_call.geometry->worldBound;
+			self->_skinBounds[index] = { { bound.center.x, bound.center.y, bound.center.z }, bound.fRadius };
 		}
-		self->_worldSkinFrame.store(frame, std::memory_order_relaxed);
+	}
+
+	render::PixelRect SubsurfaceScattering::ResolveSkinRect()
+	{
+		// Overflow keeps counting, so a full buffer widens to the whole frame.
+		const auto count = _skinBoundCount.exchange(0, std::memory_order_relaxed);
+		if (!count)
+			return {};
+		const auto extent = cs::render::GetRenderResolution().render;
+		const auto full = cs::render::PixelRect::Full(extent);
+		const auto camera = cs::engine::GetCapturedWorldCameraRecord(cs::engine::GetFrameCount());
+		if (!camera || !extent.IsValid() || count > kMaxSkinBounds)
+			return full;
+		// Separable taps reach 6 blur radii in world units past the skin.
+		const float reach = _settings.ssMode == sss::kSeparable ? 6.0f * (std::max)(_settings.baseProfileBlurRadius, _settings.humanProfileBlurRadius) : 0.0f;
+		cs::render::PixelRect rect;
+		for (std::uint32_t i = 0; i < count; ++i) {
+			const auto& bound = _skinBounds[i];
+			const auto projected = cs::engine::ProjectSphereToPixelRect(*camera, bound.center, bound.radius + reach, extent);
+			if (!projected)
+				return full;
+			rect.Union(*projected);
+		}
+		return rect;
 	}
 
 	void SubsurfaceScattering::OnPreDeferredComposite()
 	{
 		_produced = false;
+		_skinRect = ResolveSkinRect();
+		_skinRectPixels.store(_skinRect.Width() * _skinRect.Height(), std::memory_order_relaxed);
 		auto* context = cs::engine::GetImmediateContext();
 		if (!context || !_consumer)
 			return;
@@ -274,7 +306,7 @@ namespace cs::features
 			!_prepare || !_extract || !_extractBurley || !_horizontal || !_vertical || !_burley)
 			return;
 		// Upstream dispatches only on frames that drew skin.
-		if (!WorldSkinDrawnThisFrame()) {
+		if (_skinRect.IsEmpty()) {
 			_skippedFrames.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
@@ -294,13 +326,10 @@ namespace cs::features
 			!cs::render::IsSharedDataReady() || !EnsureResources(colorTexture))
 			return;
 		auto& t = _textures;
-		const auto render = cs::render::GetRenderResolution().render;
-		const UINT width = render.width;
-		const UINT height = render.height;
-		if (!width || !height)
-			return;
+		const UINT width = _skinRect.Width();
+		const UINT height = _skinRect.Height();
 		try {
-			UpdateConstants(*camera);
+			UpdateConstants(*camera, _skinRect);
 			// FO4: the main copy is the second composite's t10; blur it in place.
 			cs::engine::ComputeOMScope scope(context, 8, 2, 6, 2);
 			cs::render::ScopedComputeSharedDataBinding substrate(context);
@@ -318,6 +347,12 @@ namespace cs::features
 				pass.Run(a_shader, { a_input, depth, t.mask->srv.get(), scatterAlbedo, t.normal->srv.get() },
 					{ a_output }, width, height, 8, a_name);
 			};
+			// The passes below touch only the rect; the mask must read zero beyond it.
+			constexpr float kClear[4]{};
+			context->ClearUnorderedAccessViewFloat(t.mask->uav.get(), kClear);
+			// Keeps the preview free of stale texels beyond the rect.
+			if (_preview == Preview::kDiffuse)
+				context->ClearUnorderedAccessViewFloat(t.diffuseNoAlbedo->uav.get(), kClear);
 			pass.Run(_prepare.get(), { normals, material, albedo, rawDepth, profile },
 				{ t.mask->uav.get(), t.normal->uav.get(), t.albedo->uav.get() }, width, height, 8, "SubsurfaceScattering::Prepare");
 			pass.Run(separable ? _extract.get() : _extractBurley.get(), { color, nullptr, separable ? nullptr : t.mask->srv.get(), scatterAlbedo },
@@ -375,7 +410,7 @@ namespace cs::features
 
 	void SubsurfaceScattering::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		a_sink.Field("hooks_registered", _registrationsReady.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("skin_drawn", SkinDrawnThisFrame()).Field("world_skin_drawn", WorldSkinDrawnThisFrame()).Field("skin_buckets", static_cast<std::int64_t>(_skinBuckets.load(std::memory_order_relaxed))).Field("first_person_skin_buckets", static_cast<std::int64_t>(_firstPersonSkinBuckets.load(std::memory_order_relaxed))).Field("skipped_frames", static_cast<std::int64_t>(_skippedFrames.load(std::memory_order_relaxed))).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
+		a_sink.Field("hooks_registered", _registrationsReady.load()).Field("resources_ready", _resourcesReady.load()).Field("resource_init_failed", _failed.load()).Field("typed_uav_unsupported", _unsupported.load()).Field("produced", _produced.load()).Field("dispatches", static_cast<std::int64_t>(_dispatches.load())).Field("skin_drawn", SkinDrawnThisFrame()).Field("world_skin_drawn", _skinRectPixels.load(std::memory_order_relaxed) != 0).Field("skin_rect_pixels", static_cast<std::int64_t>(_skinRectPixels.load(std::memory_order_relaxed))).Field("skipped_frames", static_cast<std::int64_t>(_skippedFrames.load(std::memory_order_relaxed))).Field("mode", _lastMode.load() == sss::kSeparable ? "separable" : "burley").Field("native_controls_applied", _nativeApplied.load()).Dimensions("working", _textures.width, _textures.height);
 		cs::render::profiling::CollectPassTimings(a_sink, *this);
 	}
 

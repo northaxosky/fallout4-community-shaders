@@ -3,6 +3,8 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
+#include "Render/Extent.h"
+#include "Render/LightingRenderPasses.h"
 #include "Render/PrepassExtraTargets.h"
 #include "ShaderDefines.h"
 #include "SubsurfaceScatteringConstants.h"
@@ -74,15 +76,15 @@ namespace cs::features
 		bool CompileShaders();
 		bool EnsureResources(ID3D11Texture2D* a_target);
 		void UpdateKernels();
-		void UpdateConstants(const cs::engine::WorldCameraRecord&);
+		void UpdateConstants(const cs::engine::WorldCameraRecord&, const cs::render::PixelRect& a_rect);
+		cs::render::PixelRect ResolveSkinRect();
 		bool CanRun() const noexcept { return _registrationsReady && IsEnabled() && !_unsupported && !_failed; }
 		bool SkinDrawnThisFrame() const noexcept { return _skinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount(); }
-		bool WorldSkinDrawnThisFrame() const noexcept { return _worldSkinFrame.load(std::memory_order_relaxed) == cs::engine::GetFrameCount(); }
 		void ApplyNativeControls();
 		void RestoreNativeControls() noexcept;
 		void OnPreDeferredComposite();
 		void OnPreSecondDeferredComposite();
-		static void OnPrepassTechnique(RE::BSShader*, std::uint32_t a_technique) noexcept;
+		static void OnLightingRenderPasses(const cs::engine::LightingRenderPassesCall&, const RE::BSShaderProperty::RenderPassArray*) noexcept;
 		void UpdateConsumer(bool a_produced);
 		FeatureDebugTexture GetDebugTexture(Preview a_view) const;
 
@@ -90,6 +92,16 @@ namespace cs::features
 		const Settings& _settings = _live.Get();
 		Resources _textures;
 		subsurface_scattering::Constants _data{};
+		// Accumulation threads append world skin bounds; the render thread drains them.
+		struct SkinBound
+		{
+			DirectX::XMFLOAT3 center;
+			float radius;
+		};
+		static constexpr std::uint32_t kMaxSkinBounds = 512;
+		std::array<SkinBound, kMaxSkinBounds> _skinBounds{};
+		std::atomic_uint32_t _skinBoundCount{ 0 };
+		cs::render::PixelRect _skinRect;
 		std::array<float, 12> _kernelKey{};
 		bool _kernelsBuilt = false;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _constants, _consumer;
@@ -101,8 +113,8 @@ namespace cs::features
 		std::atomic_bool _unsupported{ false }, _produced{ false };
 		std::atomic<Preview> _preview{ Preview::kNone };
 		std::atomic_bool _nativeApplied{ false };
-		std::atomic_uint32_t _dispatches{ 0 }, _skinBuckets{ 0 }, _firstPersonSkinBuckets{ 0 }, _skippedFrames{ 0 };
-		std::atomic_uint32_t _skinFrame{ UINT32_MAX }, _worldSkinFrame{ UINT32_MAX };
+		std::atomic_uint32_t _dispatches{ 0 }, _skippedFrames{ 0 };
+		std::atomic_uint32_t _skinFrame{ UINT32_MAX }, _skinRectPixels{ 0 };
 		std::atomic<std::uint8_t> _lastMode{ 0 };
 	};
 }

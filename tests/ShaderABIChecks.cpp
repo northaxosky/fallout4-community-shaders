@@ -383,7 +383,7 @@ namespace
 		const ABIField fields[]{
 			ABI(Constants, Kernels), ABI(Constants, BaseProfile), ABI(Constants, HumanProfile), ABI(Constants, SSSS_FOVY),
 			ABI(Constants, BurleySamples), ABI(Constants, ScatterMode), ABI(Constants, pad),
-			ABI(Constants, MeanFreePathBase), ABI(Constants, MeanFreePathHuman)
+			ABI(Constants, MeanFreePathBase), ABI(Constants, MeanFreePathHuman), ABI(Constants, DispatchOrigin)
 		};
 		std::string error;
 		auto blob = cs::shader_test::CompileToBlob(a_root / "SubsurfaceScattering/SeparableSSSCS.hlsl",

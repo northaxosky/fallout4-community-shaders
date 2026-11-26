@@ -27,6 +27,7 @@ namespace cs::engine
 		};
 
 		std::vector<Entry<PreLightingRenderPassesCallback>> g_pre;
+		std::vector<Entry<PostLightingRenderPassesCallback>> g_post;
 		bool g_installed = false;
 
 		struct BSLightingShaderProperty_GetRenderPasses
@@ -40,7 +41,10 @@ namespace cs::engine
 				const LightingRenderPassesCall call{ a_property, a_geometry, a_renderMode, a_accumulator };
 				for (const auto& entry : g_pre)
 					render::RunRenderCallback(entry.owner, "PreLightingRenderPasses", [&] { entry.callback(call); });
-				return func(a_property, a_geometry, a_renderMode, a_accumulator);
+				auto* passes = func(a_property, a_geometry, a_renderMode, a_accumulator);
+				for (const auto& entry : g_post)
+					render::RunRenderCallback(entry.owner, "PostLightingRenderPasses", [&] { entry.callback(call, passes); });
+				return passes;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -62,21 +66,27 @@ namespace cs::engine
 		}
 	}
 
-	static bool RegisterLightingRenderPasses(PreLightingRenderPassesCallback a_callback, HookPriority a_priority, Feature* a_owner)
+	template <class Callback>
+	static bool RegisterLightingRenderPasses(std::vector<Entry<Callback>>& a_list, const char* a_label, Callback a_callback, HookPriority a_priority, Feature* a_owner)
 	{
-		if (!RenderHookRegistrationAllowed("PreLightingRenderPasses") || !EnsureInstalled())
+		if (!RenderHookRegistrationAllowed(a_label) || !EnsureInstalled())
 			return false;
-		InsertByPriority(g_pre, Entry<PreLightingRenderPassesCallback>{ a_priority, a_callback, a_owner });
+		InsertByPriority(a_list, Entry<Callback>{ a_priority, a_callback, a_owner });
 		return true;
 	}
 
 	bool RegisterPreLightingRenderPasses(PreLightingRenderPassesCallback a_callback, HookPriority a_priority)
 	{
-		return RegisterLightingRenderPasses(a_callback, a_priority, nullptr);
+		return RegisterLightingRenderPasses(g_pre, "PreLightingRenderPasses", a_callback, a_priority, nullptr);
 	}
 
 	bool RegisterPreLightingRenderPasses(Feature& a_owner, PreLightingRenderPassesCallback a_callback, HookPriority a_priority)
 	{
-		return RegisterLightingRenderPasses(a_callback, a_priority, &a_owner);
+		return RegisterLightingRenderPasses(g_pre, "PreLightingRenderPasses", a_callback, a_priority, &a_owner);
+	}
+
+	bool RegisterPostLightingRenderPasses(Feature& a_owner, PostLightingRenderPassesCallback a_callback, HookPriority a_priority)
+	{
+		return RegisterLightingRenderPasses(g_post, "PostLightingRenderPasses", a_callback, a_priority, &a_owner);
 	}
 }

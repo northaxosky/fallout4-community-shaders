@@ -3,6 +3,7 @@
 #include "RE/B/BSGraphics.h"
 #include "RE/B/BSImagespaceShader.h"
 #include "RE/B/BSShader.h"
+#include "RE/B/BSShaderAccumulator.h"
 #include "RE/B/BSShaderManager.h"
 #include "RE/B/BSTriShape.h"
 #include "RE/I/ImageSpaceEffect.h"
@@ -96,6 +97,19 @@ namespace cs::engine
 	{
 		const auto* state = RE::BSShaderManager::State::GetSingleton();
 		return state ? state->GetShadowSceneNode(0) : nullptr;
+	}
+
+	// MainRenderSetup may store 13 on the world accumulators.
+	[[nodiscard]] inline bool IsWorldAccumulator(const RE::BSShaderAccumulator* a_accumulator) noexcept
+	{
+		using Mode = RE::BSShaderManager::etRenderMode;
+		if (!a_accumulator)
+			return false;
+		const auto mode = a_accumulator->renderMode;
+		if (mode != Mode::kDeferredGBuffer && mode != Mode::kDepthPrepass)
+			return false;
+		const auto* scene = a_accumulator->activeShadowSceneNode;
+		return scene && scene == GetWorldShadowSceneNode();
 	}
 
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
