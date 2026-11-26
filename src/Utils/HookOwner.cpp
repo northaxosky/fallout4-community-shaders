@@ -2,6 +2,8 @@
 
 #include "PCH.h"
 
+#include "Log.h"
+
 #include <cstring>
 #include <format>
 
@@ -59,6 +61,13 @@ namespace cs::util
 			}
 			return std::nullopt;
 		}
+
+		std::string DescribeAddress(std::uintptr_t a_address)
+		{
+			if (const auto module = ModuleFromAddress(reinterpret_cast<const void*>(a_address)))
+				return std::format("{}+{:X}", ModuleFileName(module), a_address - reinterpret_cast<std::uintptr_t>(module));
+			return std::format("{:#x}", a_address);
+		}
 	}
 
 	std::string ModuleFileName(HMODULE a_module)
@@ -96,5 +105,14 @@ namespace cs::util
 			destination = next;
 		}
 		return std::format("an unknown owner (code at {:#x})", *destination);
+	}
+
+	bool WarnIfForeignHook(std::string_view a_hook, std::uintptr_t a_code)
+	{
+		const auto owner = ForeignOwner(a_code);
+		if (owner) {
+			cs::log::Get("cs.hooks")->warn("{} target {} is already hooked by {}. Chaining anyway; please tell me you know what you are doing.", a_hook, DescribeAddress(a_code), *owner);
+		}
+		return owner.has_value();
 	}
 }

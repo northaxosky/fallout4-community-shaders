@@ -135,15 +135,36 @@ namespace cs::engine
 				a_anchor.name, RuntimeLabel(), site,
 				bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]));
 		case CallSiteKind::kWrongTarget:
-			{
-				const auto owner = cs::util::ForeignOwner(classification.target);
-				return std::unexpected(std::format(
-					"{}: {} call at {:#x} targets {:#x}, expected {:#x}{}",
-					a_anchor.name, RuntimeLabel(), site, classification.target, expected,
-					owner ? std::format(" (redirected by {})", *owner) : std::string{}));
-			}
+			// A thunk call keeps the old target as its original, so it chains.
+			if (!InsideText(classification.target, 1) &&
+				cs::util::WarnIfForeignHook(a_anchor.name, classification.target))
+				return site;
+			return std::unexpected(std::format(
+				"{}: {} call at {:#x} targets {:#x}, expected {:#x}",
+				a_anchor.name, RuntimeLabel(), site, classification.target, expected));
 		}
 		std::unreachable();
+	}
+
+	std::expected<std::vector<std::uintptr_t>, std::string> ResolveSharedCallSites(
+		std::span<const CallSiteAnchor> a_anchors)
+	{
+		std::vector<std::uintptr_t> sites;
+		for (const auto& anchor : a_anchors) {
+			auto site = ResolveCallSite(anchor);
+			if (!site)
+				return std::unexpected(std::move(site.error()));
+			sites.push_back(*site);
+		}
+		const auto target = &REL::ASM::CALL5::TARGET;
+		for (std::size_t i = 1; i < sites.size(); ++i) {
+			if (target(sites[i]) != target(sites[0])) {
+				return std::unexpected(std::format(
+					"{}: call at {:#x} targets {:#x}, but {} targets {:#x}; one hook cannot chain both",
+					a_anchors[i].name, sites[i], target(sites[i]), a_anchors[0].name, target(sites[0])));
+			}
+		}
+		return sites;
 	}
 
 	std::expected<std::uintptr_t, std::string> ResolveCallSite(

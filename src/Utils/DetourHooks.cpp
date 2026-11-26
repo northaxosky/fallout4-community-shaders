@@ -6,8 +6,6 @@
 #include <detours/detours.h>
 
 #include <cstdint>
-#include <format>
-#include <string>
 #include <string_view>
 
 namespace
@@ -19,22 +17,6 @@ namespace
 		const auto split = a_typeName.find_last_of(": ");
 		return split == std::string_view::npos ? a_typeName : a_typeName.substr(split + 1);
 	}
-
-	std::string DescribeAddress(std::uintptr_t a_address)
-	{
-		if (const auto module = cs::util::ModuleFromAddress(reinterpret_cast<const void*>(a_address)))
-			return std::format("{}+{:X}", cs::util::ModuleFileName(module), a_address - reinterpret_cast<std::uintptr_t>(module));
-		return std::format("{:#x}", a_address);
-	}
-
-	void WarnIfForeignHook(std::uintptr_t a_target, std::string_view a_hookName)
-	{
-		if (const auto owner = cs::util::ForeignOwner(a_target)) {
-			L->warn(
-				"{} target {} is already hooked by {}. Chaining anyway; please tell me you know what you are doing.",
-				a_hookName, DescribeAddress(a_target), *owner);
-		}
-	}
 }
 
 namespace cs::hooks
@@ -42,7 +24,7 @@ namespace cs::hooks
 	LONG Attach(void** a_func, void* a_thunk, const char* a_typeName)
 	{
 		const auto hookName = ShortTypeName(a_typeName);
-		WarnIfForeignHook(reinterpret_cast<std::uintptr_t>(*a_func), hookName);
+		cs::util::WarnIfForeignHook(hookName, reinterpret_cast<std::uintptr_t>(*a_func));
 
 		LONG result = DetourTransactionBegin();
 		if (result == NO_ERROR) {

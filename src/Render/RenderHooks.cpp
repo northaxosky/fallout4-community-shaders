@@ -908,21 +908,22 @@ namespace cs::engine
 				.target = { 0x68 }
 			};
 			// Prove every site before patching any.
-			const auto firstPerson = ResolveCallSite(kFirstPersonDraw);
-			const auto world = ResolveCallSite(kWorldDraw);
+			const auto draws = ResolveSharedCallSites(std::array{ kFirstPersonDraw, kWorldDraw });
+			if (!draws) {
+				L->error("Alpha-test Z-prepass draw hook unavailable: {}", draws.error());
+				return false;
+			}
 			const auto instanced = ResolveCallSite(kInstancedDraw);
-			for (const auto* site : { &firstPerson, &world, &instanced }) {
-				if (!*site) {
-					L->error("Alpha-test Z-prepass draw hook unavailable: {}", site->error());
-					return false;
-				}
+			if (!instanced) {
+				L->error("Alpha-test Z-prepass draw hook unavailable: {}", instanced.error());
+				return false;
 			}
 			if (const auto redirected = RedirectContextCall(*instanced, reinterpret_cast<std::uintptr_t>(&InstancedAlphaTestZPrepassDraw)); !redirected) {
 				L->error("Alpha-test Z-prepass draw hook unavailable: {}", redirected.error());
 				return false;
 			}
-			stl::write_thunk_call<AlphaTestZPrepassDraw_Hook>(*firstPerson);
-			stl::write_thunk_call<AlphaTestZPrepassDraw_Hook>(*world);
+			for (const auto site : *draws)
+				stl::write_thunk_call<AlphaTestZPrepassDraw_Hook>(site);
 			g_alphaZPrepassDrawInstalled = true;
 			L->info("Hooks installed on {}, {} and {}", kFirstPersonDraw.name, kWorldDraw.name, kInstancedDraw.name);
 			return true;

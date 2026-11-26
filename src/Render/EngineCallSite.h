@@ -41,9 +41,12 @@ namespace cs::engine
 	};
 	using ContextIndirectCallSiteAnchor = SiteAnchor<ContextIndirectCall>;
 
-	// Returns the call-site address once it is proven to call the anchor's target.
+	// Returns the site once it calls the anchor's target or a foreign hook.
 	[[nodiscard]] std::expected<std::uintptr_t, std::string> ResolveCallSite(
 		const CallSiteAnchor& a_anchor) noexcept;
+	// Sites of one thunk share its saved original, so they must share a target.
+	[[nodiscard]] std::expected<std::vector<std::uintptr_t>, std::string> ResolveSharedCallSites(
+		std::span<const CallSiteAnchor> a_anchors);
 	[[nodiscard]] std::expected<std::uintptr_t, std::string> ResolveCallSite(
 		const ContextCallSiteAnchor& a_anchor) noexcept;
 	[[nodiscard]] std::expected<std::uintptr_t, std::string> ResolveCallSite(
@@ -54,14 +57,10 @@ namespace cs::engine
 	[[nodiscard]] std::expected<void, std::string> InstallCallSites(
 		std::span<const CallSiteAnchor> a_anchors)
 	{
-		std::vector<std::uintptr_t> sites;
-		for (const auto& anchor : a_anchors) {
-			auto site = ResolveCallSite(anchor);
-			if (!site)
-				return std::unexpected(std::move(site.error()));
-			sites.push_back(*site);
-		}
-		for (const auto site : sites)
+		auto sites = ResolveSharedCallSites(a_anchors);
+		if (!sites)
+			return std::unexpected(std::move(sites.error()));
+		for (const auto site : *sites)
 			stl::write_thunk_call<Hook>(site);
 		return {};
 	}
