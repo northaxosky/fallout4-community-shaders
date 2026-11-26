@@ -310,15 +310,17 @@ namespace cs::features
 			context->CSSetConstantBuffers(cs::render::kSssConstantsSlot.first, 1, &constants);
 			ComputePasses pass(context);
 			cs::render::annotation::ScopedEvent dispatch("SubsurfaceScattering::Dispatch", false);
+			const bool separable = _settings.ssMode == sss::kSeparable;
+			// Separable reads albedo off skin; Prepare writes it only under the mask.
+			auto* scatterAlbedo = separable ? albedo : t.albedo->srv.get();
 			const auto scatter = [&](ID3D11ComputeShader* a_shader, ID3D11ShaderResourceView* a_input,
 									 ID3D11UnorderedAccessView* a_output, const char* a_name) {
-				pass.Run(a_shader, { a_input, depth, t.mask->srv.get(), t.albedo->srv.get(), t.normal->srv.get() },
+				pass.Run(a_shader, { a_input, depth, t.mask->srv.get(), scatterAlbedo, t.normal->srv.get() },
 					{ a_output }, width, height, 8, a_name);
 			};
 			pass.Run(_prepare.get(), { normals, material, albedo, rawDepth, profile },
 				{ t.mask->uav.get(), t.normal->uav.get(), t.albedo->uav.get() }, width, height, 8, "SubsurfaceScattering::Prepare");
-			const bool separable = _settings.ssMode == sss::kSeparable;
-			pass.Run(separable ? _extract.get() : _extractBurley.get(), { color, nullptr, separable ? nullptr : t.mask->srv.get(), t.albedo->srv.get() },
+			pass.Run(separable ? _extract.get() : _extractBurley.get(), { color, nullptr, separable ? nullptr : t.mask->srv.get(), scatterAlbedo },
 				{ t.diffuseNoAlbedo->uav.get() }, width, height, 8, "SubsurfaceScattering::DiffuseExtraction");
 			if (separable) {
 				scatter(_horizontal.get(), t.diffuseNoAlbedo->srv.get(), t.horizontal->uav.get(), "SubsurfaceScattering::HorizontalBlur");

@@ -13,10 +13,13 @@ RWTexture2D<float4> AlbedoOut : register(u2);
 
 [numthreads(8, 8, 1)] void main(uint2 pixel : SV_DispatchThreadID) {
 	// FO4: class 5 outside first person is skin.
-	const bool skinClass = abs(Material[pixel].w * 255.0 - 5.0) < 0.25;
-	const float skin = skinClass && !FO4Depth::IsFirstPerson(SceneDepth[pixel]) ? 1.0 : 0.0;
+	if (abs(Material[pixel].w * 255.0 - 5.0) >= 0.25 || FO4Depth::IsFirstPerson(SceneDepth[pixel])) {
+		// Only Burley reads ViewNormal and AlbedoOut, and only under the mask.
+		Mask[pixel] = 0.0;
+		return;
+	}
 	// FO4: skin alpha is a cutout, so amount is 1; the prepass bakes the profile.
-	Mask[pixel] = float2(skin, skin * Profile[pixel]);
+	Mask[pixel] = float2(1.0, Profile[pixel]);
 	// FO4: spherical native normals become upstream's negated octahedral one.
 	ViewNormal[pixel] = GBuffer::EncodeNormal(FO4GBuffer::DecodeViewNormal(Normal[pixel]));
 	// FO4: native alpha is a material scalar; upstream's is opaque alpha.
