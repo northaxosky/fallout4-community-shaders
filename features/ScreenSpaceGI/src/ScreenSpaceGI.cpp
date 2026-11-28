@@ -381,7 +381,7 @@ namespace cs::features
 			};
 			prefilter(0, depth, t.depth, width, height, "ScreenSpaceGI::PrefilterDepths");
 			UINT ao = _lastAO, gi = _lastGI;
-			pass.Run(_shaders[1].get(), { t.diffuse ? t.diffuse->srv.get() : nullptr, t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.previousGeometry->srv.get(), motion, t.accumulation[_lastAccum]->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao) },
+			pass.Run(_shaders[1].get(), { t.diffuse ? t.diffuse->srv.get() : nullptr, t.depth.texture->srv.get(), t.normalGloss->srv.get(), t.previousGeometry->srv.get(), motion, t.accumulation[_lastAccum]->srv.get(), t.ao[ao]->srv.get(), t.luma[gi]->srv.get(), t.chroma[gi]->srv.get(), specularSRV(ao), depth },
 				{ t.radianceTemp->uav.get(), t.accumulation[!_lastAccum]->uav.get(), t.ao[!ao]->uav.get(),
 					t.luma[!gi]->uav.get(), t.chroma[!gi]->uav.get(), specularUAV(!ao) },
 				internalWidth, internalHeight, 8, "ScreenSpaceGI::RadianceDisocc");
