@@ -45,38 +45,40 @@ namespace cs::render
 	ComputePasses::ComputePasses(ID3D11DeviceContext* a_context) :
 		_context(a_context)
 	{
-		ID3D11ShaderResourceView* tail[2]{};
-		_context->CSGetShaderResources(8, 2, tail);
-		for (UINT i = 0; i < 2; ++i)
-			_tail[i].attach(tail[i]);
-		ID3D11ShaderResourceView* nullSRVs[8]{};
+		ID3D11ShaderResourceView* engine[kPreservedSrvs]{};
+		_context->CSGetShaderResources(kScopeSrvs, kPreservedSrvs, engine);
+		for (UINT i = 0; i < kPreservedSrvs; ++i)
+			_engineSRVs[i].attach(engine[i]);
+		ID3D11ShaderResourceView* nullSRVs[kScopeSrvs]{};
 		ID3D11UnorderedAccessView* nullUAVs[6]{};
-		_context->CSSetShaderResources(0, 8, nullSRVs);
+		_context->CSSetShaderResources(0, kScopeSrvs, nullSRVs);
 		_context->CSSetUnorderedAccessViews(0, 6, nullUAVs, nullptr);
 	}
 
 	ComputePasses::~ComputePasses()
 	{
-		ID3D11ShaderResourceView* tail[]{ _tail[0].get(), _tail[1].get() };
-		_context->CSSetShaderResources(8, 2, tail);
+		ID3D11ShaderResourceView* engine[kPreservedSrvs]{};
+		for (UINT i = 0; i < kPreservedSrvs; ++i)
+			engine[i] = _engineSRVs[i].get();
+		_context->CSSetShaderResources(kScopeSrvs, kPreservedSrvs, engine);
 		if (_bufferSlot == kNoSlot)
 			return;
 		auto* engineBuffer = _engineBuffer.get();
 		_context->CSSetConstantBuffers(_bufferSlot, 1, &engineBuffer);
 	}
 
-	void ComputePasses::Run(ID3D11ComputeShader* a_shader,
-		std::initializer_list<ID3D11ShaderResourceView*> a_srvs,
-		std::initializer_list<ID3D11UnorderedAccessView*> a_uavs,
+	void ComputePasses::Dispatch(ID3D11ComputeShader* a_shader,
+		std::span<ID3D11ShaderResourceView* const> a_srvs,
+		std::span<ID3D11UnorderedAccessView* const> a_uavs,
 		UINT a_width, UINT a_height, UINT a_group, std::string_view a_name)
 	{
 		annotation::ScopedEvent event(a_name);
-		_context->CSSetShaderResources(0, static_cast<UINT>(a_srvs.size()), a_srvs.begin());
-		_context->CSSetUnorderedAccessViews(0, static_cast<UINT>(a_uavs.size()), a_uavs.begin(), nullptr);
+		_context->CSSetShaderResources(0, static_cast<UINT>(a_srvs.size()), a_srvs.data());
+		_context->CSSetUnorderedAccessViews(0, static_cast<UINT>(a_uavs.size()), a_uavs.data(), nullptr);
 		_context->CSSetShader(a_shader, nullptr, 0);
 		_context->Dispatch((a_width + a_group - 1) / a_group, (a_height + a_group - 1) / a_group, 1);
-		ID3D11ShaderResourceView* nullSRVs[10]{};
-		ID3D11UnorderedAccessView* nullUAVs[6]{};
+		static constexpr ID3D11ShaderResourceView* nullSRVs[kSrvSlots]{};
+		static constexpr ID3D11UnorderedAccessView* nullUAVs[kUavSlots]{};
 		_context->CSSetShaderResources(0, static_cast<UINT>(a_srvs.size()), nullSRVs);
 		_context->CSSetUnorderedAccessViews(0, static_cast<UINT>(a_uavs.size()), nullUAVs, nullptr);
 	}
