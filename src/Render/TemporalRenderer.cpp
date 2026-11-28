@@ -208,6 +208,13 @@ namespace cs::render
 		_mipBias.store(mipBias, std::memory_order_relaxed);
 	}
 
+	// The engine bakes the ratio into its dynamic triangle UVs until Render_PreUI.
+	void TemporalRenderer::ReleaseRenderScale()
+	{
+		cs::engine::DropRenderScale();
+		_chainTriangle.Apply();
+	}
+
 	void TemporalRenderer::PublishDynamicResolution()
 	{
 		auto* state = cs::engine::GetGraphicsState();

@@ -286,6 +286,7 @@ namespace cs::render
 			RE::BSGraphics::State* a_state,
 			UpscaleMethod a_method);
 		void PublishDynamicResolution();
+		void ReleaseRenderScale();
 		FeatureDebugTexture GetRenderSubrectDebugTexture() const;
 		FeatureDebugTexture GetProxyDebugTexture() const;
 		FeatureDebugTexture GetMotionVectorsDebugTexture() const;

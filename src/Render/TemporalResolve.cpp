@@ -738,9 +738,7 @@ namespace cs::render
 
 		if (external && upscaled) {
 			// The chain, UI and native TAA now run full-extent without jitter.
-			cs::engine::DropRenderScale();
-			// The engine bakes the render ratio into its dynamic triangle UVs.
-			_chainTriangle.Apply();
+			ReleaseRenderScale();
 			// Only the chain's VATS effect reads logical 15.
 			if (_vatsMaskUpscaled) {
 				_vatsMaskSwap.Apply(kVatsMaskTarget, vatsMaskFull->resource.get(),

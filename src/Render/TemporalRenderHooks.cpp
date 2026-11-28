@@ -85,7 +85,7 @@ namespace cs::render
 		stl::detour_thunk<Renderer_ResetWindow>(RE::ID::BSGraphics::Renderer::ResetWindow);
 		// Resource setup follows creation of the engine render targets.
 		stl::detour_thunk<BSShaderRenderTargets_Create>(RE::ID::BSShaderRenderTargets::Create);
-		// Pip-Boy and companion map render inside Render_UI before the resolve.
+		// Pip-Boy and companion map render inside Render_UI after the resolve.
 		stl::detour_thunk<Interface3D_RenderPrepassesAndMenus>(RE::ID::Interface3D::RenderPrepassesAndMenus);
 		stl::detour_thunk<CompanionLocalMap_SetRenderFunc>(RE::ID::DrawWorld::SetCompanionLocalMapRenderFunc);
 		stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(
@@ -151,6 +151,8 @@ namespace cs::render
 		RE::NiPoint3* a_5)
 	{
 		auto* upscaling = GetSingleton();
+		// The engine re-bakes the dynamic triangle after this publish.
+		upscaling->_chainTriangle.Restore();
 
 		func(a_this, a_2, a_3, a_4, a_5);
 
@@ -271,11 +273,10 @@ namespace cs::render
 			if (!IsDrivingFrameState()) {
 				return;
 			}
-			cs::engine::DropRenderScale();
+			ReleaseRenderScale();
 		});
 
 		_imagespaceScope = false;
-		_chainTriangle.Restore();
 		_vatsMaskSwap.Restore();
 	}
 
